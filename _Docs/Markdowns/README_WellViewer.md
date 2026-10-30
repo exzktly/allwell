@@ -5451,7 +5451,7 @@ use them.
 **Controls**
 
 - **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
-  *Extremes* and *Identity*. Each view shows only the controls it uses.
+  *Extremes*, *Identity* and *Statistics*. Each view shows only the controls it uses.
 - **Metric** — what each dot is: cell count, confluence, **brightness** and **nanowell fluorescence** (both
   explained under *Brightness and nanowell fluorescence* below), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
@@ -5482,6 +5482,17 @@ material is in the nanowell, including when cells clump and the count is unrelia
 Their fold changes divide each timepoint by the baseline. A nanowell fluorescence at or below zero at the baseline
 gives no fold change ("no signal above background at baseline"), since a ratio over nothing has no meaning; a
 brightness fold change needs counted cells at both timepoints.
+
+**Cell Gating applies here too.** A nanowell's cell count, and its brightness, use only the cells the rest of
+Review counts: the size and shape gate, cells excluded by hand, the crop, the scatter gates and the field and focus
+exclusions set on Home ▸ [Cell Gating](#cell-gating). So to drop objects by size from the nanowells, set *min area* /
+*max area* there. Each nanowell's count is the run's count less the cells gated out of it, and brightness is
+averaged over the cells kept; everything computed from the count follows — fold changes, growth rate, occupancy,
+*Starting cells* and the *Subset* conditions. Confluence and nanowell fluorescence are measured from the
+nanowell's pixels rather than from its segmented cells, so a gate cannot change them. While a gate leaves any cell
+out, every figure says how many (*Cell Gating leaves out N of M cells …*), and Batch Export's Nanowells mode exports
+the same numbers with the same sentence. A well whose per-cell table cannot be read keeps the run's own counts, and
+the sentence names it.
 
 - **Channel** — beside Metric, on every view: the fluorescence channel Brightness and Nanowell fluorescence are drawn for,
   in the figures, the site detail and the crop captions. It starts on the channel the Plotting tabs use when the
@@ -5617,6 +5628,31 @@ brightness fold change needs counted cells at both timepoints.
   fewer nanowells than both blocks need splits them between the two and never shows one twice. Click any crop
   to open that nanowell's site detail. The crops are cut from the run's raw images as for the site detail, in
   one pass for the whole montage, so it fills in a moment after the ranking is drawn.
+- **Statistics** — tests whether wells, or groups of wells, differ in the **Metric** at the **Timepoint** (the
+  latest by default), modelled on the Statistics tab. It compares exactly the dots the Distribution view draws
+  *Along x: Wells*: the **Baseline**, **Subset**, **Fixed cohort** and excluded wells all apply, and every nanowell
+  left out is counted under its sample. **Compare** chooses what one value is:
+  - *Wells (nanowells as values)* — each well is a sample and its nanowells are the values. This says whether
+    these wells' distributions differ. It says nothing about the conditions behind them, because the nanowells
+    of one well share its medium and handling and are not independent replicates; the figure says so whenever
+    this is chosen.
+  - *Groups (well medians as values)* — each replicate set from Sample Definitions (or a well standing alone) is
+    a sample and its wells' medians are the values, one per well. This is the comparison of conditions; a group
+    needs two wells with a value to be tested.
+
+  **Test** is a Welch or Student t-test, Mann-Whitney U, Kolmogorov-Smirnov (which compares whole distributions,
+  and the figure then draws each sample's cumulative curve), or Dunnett. **vs** lists the samples: with none
+  chosen every pair is compared; with one, each other sample is compared with it only — fewer comparisons, the
+  family a plate design usually means. Dunnett always needs a control and corrects for its own family
+  (*p_Dunnett*); the other tests print the raw *p* and the Benjamini-Hochberg adjusted *p_BH* when there is more
+  than one comparison, and the stars are of the adjusted p. With three or more samples an omnibus (one-way
+  ANOVA, or Kruskal-Wallis for the rank tests) is stated first. Each sample gets a line with its n, mean, sd,
+  median and interquartile range (and a 95% interval on Groups); each comparison its statistic, p, stars, Hedges'
+  *g* and the difference of means with a bootstrap 95% interval. Above the report a box per sample (the dots
+  over it, the mean as a diamond — with its 95% interval on Groups) shows what was compared, with a bracket and
+  stars over each comparison below 0.05. A comparison that cannot be made says why in its row (fewer than two
+  values, two samples holding the same constant), never a number. More than 15 comparisons are not run: choose
+  a control under **vs** or exclude wells. *Save figure* saves the figure and its report together.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
   a QC picture and a full-resolution montage each did:
   - **Image** — what is drawn under the nanowells: *Off*; *Run montage*, the downsampled stitched phase

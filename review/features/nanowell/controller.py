@@ -19,10 +19,11 @@ if TYPE_CHECKING:
     from review.core.ui_helpers import EmptyReason
 
 from domain.nanowell_roster import mixed_rules_note
+from review.features.nanowell import cell_gate_compute as cg
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
-    METRICS, PER_NANOWELL, TIME, distribution_model, match_channel, metric_column,
+    METRICS, PER_NANOWELL, TIME, WELLS, distribution_model, match_channel, metric_column,
 )
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, one_to_one
@@ -31,6 +32,8 @@ from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
 from review.features.nanowell import subset_compute as ss
+from review.features.nanowell import statistics_compute as sc
+from review.features.nanowell._statistics_render import render_statistics
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
     ArrayDrawn, render_array, render_crop_grid, render_crop_strip, render_distribution, render_extremes, render_message,
@@ -262,14 +265,67 @@ def _call(ctx, name: str) -> None:
         fn()
 
 
-def _metrics_of(data, baseline: str) -> pd.DataFrame | None:
+def _metrics_of(data, baseline: str, gate=None) -> pd.DataFrame | None:
     """The metrics of *data*, ``None`` with no data; with no well read yet (nothing selected) an empty table, so
     the page counts as loaded and says what to select rather than reading on."""
     if data is None:
         return None
     if not len(data.sites):
         return pd.DataFrame(columns=["well", "timepoint", "nw_q", "nw_r", "state"])
-    return site_metrics(data, baseline)
+    return site_metrics(data, baseline, gate)
+
+
+def gate_version(ctx) -> int:
+    """The version of which cells the analysis includes (``StatsCacheState.population_version``): every gating,
+    curation or QC edit moves it."""
+    return int(getattr(ctx.state.stats_cache, "population_version", 0))
+
+
+def _cell_label(ctx, well: str, data) -> str | None:
+    """The row cache's label for the per-cell CSV holding *well*'s cells: the well's own name, else the label
+    registered for the CSV the nanowell tables found its cells in (``NanowellData.cell_tables``)."""
+    paths = ctx.state.dataset.well_paths
+    if well in paths:
+        return well
+    table = (getattr(data, "cell_tables", None) or {}).get(well)
+    if table is None:
+        return None
+    wanted = Path(table).resolve()
+    return next((label for label, path in paths.items() if Path(path).resolve() == wanted), None)
+
+
+def gate_tally(ctx, data) -> cg.GateTally | None:
+    """The cells Home's Cell Gating leaves out of *data*'s wells (``cell_gate_compute``), read from the row
+    cache with the inclusion every other figure uses. Safe on a worker: the row cache is read there by the
+    gating pass too. ``None`` with no data."""
+    from review.data.data_loading import df_included_mask, get_rows
+
+    if data is None or not len(data.sites):
+        return None
+    per_well, unread = [], []
+    for well in data.wells:
+        label = _cell_label(ctx, well, data)
+        if label is None:
+            counted = pd.to_numeric(data.sites.loc[data.sites["well"] == well, "n_cells"], errors="coerce")
+            if counted.gt(0).any():                      # a well with no cell at all has nothing to gate
+                unread.append(well)
+            continue
+        try:
+            frame = get_rows(ctx, label)
+        except Exception as exc:                         # a well that cannot be read keeps the run's counts
+            log.warning("Nanowells: the cells of %s could not be read for Cell Gating (%s); its counts are the "
+                        "run's own", well, exc)
+            unread.append(well)
+            continue
+        if frame is not None and len(frame):
+            per_well.append((well, frame, df_included_mask(frame).to_numpy()))
+    return cg.tally(per_well, unread)
+
+
+def gated_metrics(ctx, data, baseline: str) -> pd.DataFrame | None:
+    """:func:`site_metrics` with the cells Home's Cell Gating leaves out taken out — what the page draws and
+    Batch Export exports, so the two never disagree."""
+    return _metrics_of(data, baseline, gate_tally(ctx, data))
 
 
 def ensure_loaded(ctx, *, force: bool = False) -> None:
@@ -291,9 +347,10 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         st.well_parts, st.parts_for, st.loaded_wells = {}, str(data_dir or ""), frozenset()
     wells = wanted | st.loaded_wells
     key = (str(data_dir or ""), st.baseline)
-    if not force and st.computing and st.pending_for == (key, wells):
+    version = gate_version(ctx)
+    if not force and st.computing and st.pending_for == (key, wells, version):
         return                                           # this very request is already running
-    if not force and st.loaded_for == key and wanted <= st.loaded_wells:
+    if not force and st.loaded_for == key and wanted <= st.loaded_wells and st.gated_for == version:
         if st.computing:
             # The current data is what is wanted again (a baseline changed and changed back): whatever is
             # running is for another key and now stale, so it must not land when it finishes.
@@ -303,25 +360,30 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         return
     st.request += 1
     request, baseline = st.request, st.baseline
-    st.computing, st.pending_for = True, (key, wells)
+    st.computing, st.pending_for = True, (key, wells, version)
     same_wells = wanted <= st.loaded_wells and st.loaded_for is not None and st.loaded_for[0] == key[0]
     previous = st.data if same_wells else None
     parts = dict(st.well_parts)                          # the worker's own copy: it adds the wells it reads
 
     def job():
+        # The cells Home's Cell Gating leaves out are tallied here too, at the version asked for: an edit made
+        # while this runs moves the version, and the next draw asks again (``redraw``).
         if previous is not None:
-            return previous, _metrics_of(previous, baseline), "", parts
+            gate = gate_tally(ctx, previous)
+            return previous, _metrics_of(previous, baseline, gate), "", parts, gate
         try:
             data = load_nanowell_data(Path(data_dir), wells=sorted(wells), parts=parts) if data_dir else None
         except NanowellSchemeError as exc:
-            return None, None, str(exc), parts
-        return data, _metrics_of(data, baseline), "", parts
+            return None, None, str(exc), parts, None
+        gate = gate_tally(ctx, data)
+        return data, _metrics_of(data, baseline, gate), "", parts, gate
 
     def done(result):
         if request != st.request:
             return                                       # a newer request has been made; this one is stale
-        data, metrics, error, read = result
+        data, metrics, error, read, gate = result
         st.data, st.metrics, st.load_error = data, metrics, error
+        st.gate, st.gated_for = gate, version
         st.loaded_for, st.computing = key, False
         if st.parts_for == key[0]:
             st.well_parts, st.loaded_wells = read, wells
@@ -336,6 +398,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
             return
         st.reset_data()
         st.computing, st.load_error, st.loaded_for = False, f"Loading failed: {message}", key
+        st.gated_for = version                           # failed at this version: a redraw must not retry it
         _call(ctx, "_nw_refresh_controls")
         redraw(ctx)
 
@@ -350,9 +413,11 @@ def redraw(ctx) -> None:
     fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")
     if st is None or fig is None or canvas is None:
         return
-    if st.loaded_for is not None and st.loaded_for[1] != st.baseline and not st.computing:
-        # The baseline changed without a load (a reset, a restore): what is on hand was computed for another
-        # one, so fetch the right metrics rather than draw fold changes against the wrong baseline.
+    stale_gate = st.loaded_for is not None and st.gated_for != gate_version(ctx)
+    if st.loaded_for is not None and (st.loaded_for[1] != st.baseline or stale_gate) and not st.computing:
+        # The baseline changed without a load (a reset, a restore), or Cell Gating changed which cells count:
+        # what is on hand was computed for something else, so fetch the right metrics rather than draw fold
+        # changes against the wrong baseline or counts that hold cells the gate has left out.
         ensure_loaded(ctx)
     _call(ctx, "_nw_refresh_controls")
     _call(ctx, "_nw_show_computing")
@@ -368,7 +433,7 @@ def redraw(ctx) -> None:
     if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
         return                                           # the right metrics are on their way
     metric, channel, note = resolve_metric(st.view, st.metric, page_channel_name(ctx), st.data.channels)
-    note = " ".join(filter(None, [note, excluded_note(ctx)]))
+    note = " ".join(filter(None, [note, excluded_note(ctx), cg.note(st.gate)]))
     well = page_well(ctx)
     st.extreme_axes = {}
     if st.view == "identity":
@@ -395,8 +460,10 @@ def redraw(ctx) -> None:
         well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
-        subset=st.subset, **array)
-    if isinstance(model, ArrayDrawn) or st.view == "array":
+        subset=st.subset, stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st), **array)
+    if st.view == "statistics":
+        pass                                             # its result is kept in ``st.stats_cache``; nothing to click
+    elif isinstance(model, ArrayDrawn) or st.view == "array":
         st.drawn = model
         if model is not None and model.rendered is not None:
             _want_tiles(ctx, {(tile, None) for tile in model.rendered.unread} | set(model.rendered.wants))
@@ -527,8 +594,11 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
               note: str = "", tableless=(), selected=(), responding_above: float | None = None, moving: int = 0,
               layers: ArrayLayers | None = None, image=None, image_note: str = "",
-              region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None) -> tuple[object, object]:
-    """Draw *view* (Distribution, Array, Trajectories, Position or Identity) into *fig*: ``(hit map, model)``.
+              region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
+              stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
+              stats_cache: dict | None = None) -> tuple[object, object]:
+    """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
+    model)``.
 
     **The one composition of each view**, called by the page and by Batch Export's Nanowells mode (tracker I4),
     so a saved batch figure is the page's figure for the same choices — the notes, the exclusions and the
@@ -547,6 +617,12 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     (``_identity_controller.draw_identity``), with *identity* the page's inputs to it — its mode, the sidecar and
     montages it holds — or, without them, the distance map from the sidecar on disk; its model is the
     ``_identity_render.IdentityDrawn``. It has no metric, so the metric, Subset and grouping are not used.
+
+    The Statistics view tests the samples the Distribution view draws *Along x: Wells* at *timepoint*
+    (:func:`statistics_result`): the wells' nanowells (*stats_unit* ``nanowells``) or the groups' well medians
+    (``wells``), by *stats_test*, every pair or each against *control*. Its model is the
+    ``statistics_compute.StatisticsResult``; *stats_cache*, a dict the caller keeps, spares re-running the tests
+    when nothing they depend on changed.
     """
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
@@ -595,6 +671,17 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                                 f"{', '.join(missing)}."]))
         render_position(fig, series, label=_label(metric, channel), timepoint=timepoint, note=note)
         return None, None
+    if view == "statistics":
+        model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=WELLS,
+                                   groups=groups, timepoint=timepoint, time_source=data.time_source,
+                                   baseline=baseline, cohort=cohort)
+        result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control,
+                                   cache=stats_cache)
+        if tableless:
+            note = " ".join(filter(None, [f"Selected without a nanowell table, so not compared: "
+                                          f"{', '.join(tableless)}.", note]))
+        render_statistics(fig, result, note=note)
+        return None, result
     model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
@@ -611,6 +698,40 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if note:
         model.notes.insert(0, note)
     return render_distribution(fig, model, selected=selected), model
+
+
+#: The Distribution model's notes the Statistics view carries: what changes which values were compared (the fixed
+#: cohort) and how the times were read. The rest describe the beeswarm (packing, the joined line, the fraction
+#: responding) and say nothing about a test.
+_STATS_NOTES = ("Fixed cohort", "Times are")
+
+
+def statistics_result(model, groups: dict, *, unit: str, test: str, control: str = "",
+                      cache: dict | None = None) -> sc.StatisticsResult:
+    """The Statistics view's result for a Distribution *model* drawn *Along x: Wells*: its samples of *unit*
+    (``statistics_compute.samples_from_model``) compared by *test*.
+
+    *cache*, when given, holds the last result under everything it was computed from — the samples' names and
+    values, the unit, test, control, metric and timepoint — and that result is returned when they all match, so a
+    redraw for a theme or a resize does not run the tests and the bootstrap again. Any change to the values (a
+    Subset, the cohort, the baseline, an excluded well) changes the key."""
+    samples = sc.samples_from_model(model, groups, unit)
+    key = (unit, test, control, model.column, model.timepoint,
+           tuple((s.name, s.wells, s.values.tobytes()) for s in samples))
+    if cache is not None and cache.get("key") == key:
+        return cache["result"]
+    result = sc.compare(samples, test, control=control, unit=unit, label=model.label, timepoint=model.timepoint)
+    result.notes = [n for n in model.notes if n.startswith(_STATS_NOTES)]
+    if cache is not None:
+        cache.clear()
+        cache.update(key=key, result=result)
+    return result
+
+
+def _stats_cache(st) -> dict:
+    if not isinstance(st.stats_cache, dict):
+        st.stats_cache = {}
+    return st.stats_cache
 
 
 def _label(metric: str, channel: str | None) -> str:
@@ -659,7 +780,7 @@ def shown_timepoint(ctx) -> tuple[list, str]:
         tps = list(st.data.timepoints(page_well(ctx)))
         return tps, st.timepoint if st.timepoint in tps else (tps[-1] if tps else "")
     tps = list(st.data.timepoints())
-    if st.view == "distribution" and st.axis == "wells":
+    if (st.view == "distribution" and st.axis == "wells") or st.view == "statistics":
         # The figure draws the drawn wells' timepoints, so the combo offers those and names the one drawn — not
         # the dataset's latest, which the drawn wells may not have (roll-up review X17).
         have = {tp for wells in page_groups(ctx).values() for well in wells for tp in st.data.timepoints(well)}
@@ -1677,6 +1798,18 @@ def set_crop_metrics(ctx, on: bool) -> None:
 def set_extremes_n(ctx, count: int) -> None:
     """How many nanowells each of the Extremes view's two blocks shows."""
     _set(ctx, "extremes_n", ec.clamp_n(count))
+
+
+def set_stats_unit(ctx, unit: str) -> None:
+    """Compare wells (their nanowells the values) or groups (their wells' medians the values) on Statistics."""
+    if unit in sc.UNITS:
+        _set(ctx, "stats_unit", unit)
+
+
+def set_stats_test(ctx, test: str) -> None:
+    """The test the Statistics view runs (``statistics_compute.TESTS``)."""
+    if test in sc.TEST_KEYS:
+        _set(ctx, "stats_test", test)
 
 
 def set_cohort(ctx, on: bool) -> None:

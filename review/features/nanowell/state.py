@@ -12,11 +12,13 @@ from dataclasses import dataclass, field, replace
 
 from review.features.nanowell.moving_compute import clamp_window
 from review.features.nanowell.series_compute import is_baseline
+from review.features.nanowell.statistics_compute import TEST_KEYS as STATS_TESTS
+from review.features.nanowell.statistics_compute import UNITS as STATS_UNITS
 from review.features.nanowell.subset_compute import Subset
 from review.features.nanowell.subset_compute import restore as restore_subset
 
 AXES = ("time", "wells")            # what the Distribution view's x-axis carries
-VIEWS = ("distribution", "trajectories", "array", "position", "extremes", "identity")
+VIEWS = ("distribution", "trajectories", "array", "position", "extremes", "identity", "statistics")
 #: The Identity view's modes (``identity_compute``): the distance map, the two montages blinked in one frame, the two
 #: side by side with a linked cursor, and the registration's correlation surface.
 IDENTITY_MODES = ("distance", "blink", "sides", "diagnostics")
@@ -168,6 +170,11 @@ class NanowellState:
     #: The wells left out of every figure on the page by hand (the band's *Exclude*), sorted; the rest of Review is
     #: untouched. Kept with the page's settings.
     excluded_wells: list = field(default_factory=list)
+    #: The Statistics view's unit (``statistics_compute.UNITS``): ``nanowells`` compares wells with their nanowells as
+    #: the values; ``wells`` compares groups with one median per well as the values.
+    stats_unit: str = "nanowells"
+    #: The Statistics view's test (``statistics_compute.TEST_KEYS``).
+    stats_test: str = "welch"
 
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
@@ -230,6 +237,9 @@ class NanowellState:
     identity_zoom: dict = field(default_factory=dict)
     identity_zoom_for: object = None
     identity_press: object = None
+    #: The Statistics view's last result and what it was computed from (``controller.statistics_result``), so a redraw
+    #: that changes nothing it depends on — a theme flip, a resize — does not re-run the tests and the bootstrap.
+    stats_cache: object = None
 
     def release_tiles(self) -> None:
         """Stop the reads of the tiles held so far and let their pixels go: another well, timepoint or dataset."""
@@ -248,6 +258,7 @@ class NanowellState:
         self.extreme_axes = {}
         self.identity_sidecars, self.identity_frames, self.identity_drawn = {}, {}, None
         self.identity_zoom, self.identity_zoom_for, self.identity_press = {}, None, None
+        self.stats_cache = None
         self.release_tiles()
 
     def to_config(self) -> dict:
@@ -261,6 +272,7 @@ class NanowellState:
                 "subset": self.subset.to_config(), "layers": self.layers.to_config(),
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
                 "excluded_wells": list(self.excluded_wells),
+                "stats_unit": self.stats_unit, "stats_test": self.stats_test,
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -282,6 +294,9 @@ class NanowellState:
         self.identity_mode = mode if mode in IDENTITY_MODES else fresh.identity_mode
         colour = config.get("identity_colour")
         self.identity_colour = colour if colour in IDENTITY_COLOURS else fresh.identity_colour
+        unit, test = config.get("stats_unit"), config.get("stats_test")
+        self.stats_unit = unit if unit in STATS_UNITS else fresh.stats_unit
+        self.stats_test = test if test in STATS_TESTS else fresh.stats_test
         self.subset = _subset_from(config)
         wells = config.get("excluded_wells")
         self.excluded_wells = sorted({w for w in wells if isinstance(w, str) and w}) if isinstance(wells, list) else []

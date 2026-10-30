@@ -213,9 +213,13 @@ def plan_parallelism(args, log: logging.Logger) -> ParallelPlan:
 
 
 def export_gpu_sharers(plan: ParallelPlan, environ=None) -> None:
-    """Tell the workers about to spawn how many share each GPU (``GPU_SHARERS_ENV``), since spawned processes
-    inherit the environment; a plan with no GPU removes any value an earlier run in this process left."""
+    """Tell the workers about to spawn how many share each GPU (``GPU_SHARERS_ENV``) and how many there are in all
+    (``nanowell_parallel.POOL_WORKERS_ENV``, so each plans on its share of the node's memory), since spawned processes
+    inherit the environment; a plan with no GPU removes any GPU count an earlier run in this process left."""
+    from pipeline.nanowell_parallel import POOL_WORKERS_ENV
+
     environ = os.environ if environ is None else environ
+    environ[POOL_WORKERS_ENV] = str(max(1, int(plan.workers)))
     if plan.gpu_sharers:
         environ[GPU_SHARERS_ENV] = str(plan.gpu_sharers)
     else:

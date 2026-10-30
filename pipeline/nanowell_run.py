@@ -1296,8 +1296,8 @@ def _site_row(timepoint, i, address, g, v, c, got, state, owner, detected, fused
 
 def measure_timepoint(located: Located, images: dict, settings: NanowellSettings, array_radius_um: float | None, *,
                       segmenter=None, channels: dict | None = None, earliest_template=None,
-                      roster=None, count_cells: bool = True, on_segmented=None, inspect: dict | None = None
-                      ) -> Measured:
+                      roster=None, count_cells: bool = True, on_segmented=None, inspect: dict | None = None,
+                      prepared: "_Prepared | None" = None) -> Measured:
     """Rows for every roster site of a located timepoint, and the cells inside them.
 
     *array_radius_um* is the well's one shared array-model radius (so every timepoint has the same
@@ -1311,12 +1311,15 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     (:func:`_unaddressed_positions`). *on_segmented*, when given, is ``f(done, total)``: how many of the timepoint's
     imaged nanowells have been segmented, out of all of them (:class:`_SiteCount`, which says when it is called).
     *inspect*, when given, is filled with the crops of a sample of nanowells as the segmenter saw them
-    (``nanowell_inspect.inspection_sites``): what ``nanowells/<well>_segmenter_input.png`` draws.
+    (``nanowell_inspect.inspection_sites``): what ``nanowells/<well>_segmenter_input.png`` draws. *prepared* is this
+    timepoint's :func:`_prepare_timepoint` under the same arguments when it was made already (:func:`run_well` makes
+    the next timepoint's while this one's tiles are on the GPU); its tiles' contents and rows are then all that is left.
     """
-    return _finish_timepoint(_prepare_timepoint(located, images, settings, array_radius_um, segmenter=segmenter,
-                                                channels=channels, earliest_template=earliest_template, roster=roster,
-                                                count_cells=count_cells),
-                             on_segmented=on_segmented, inspect=inspect)
+    if prepared is None:
+        prepared = _prepare_timepoint(located, images, settings, array_radius_um, segmenter=segmenter,
+                                      channels=channels, earliest_template=earliest_template, roster=roster,
+                                      count_cells=count_cells)
+    return _finish_timepoint(prepared, on_segmented=on_segmented, inspect=inspect)
 
 
 @dataclass
@@ -2531,7 +2534,10 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
                 prepared = started.pop(tp).result()
                 start(i + 1, _next_earliest(earliest, prepared.out.template))
                 steps.scale(located)
-                measured = _finish_timepoint(prepared, on_segmented=steps.sites(tp), inspect=steps.inspect(tp))
+                measured = measure_timepoint(located, prepared.images, settings, radius_um, segmenter=segmenter,
+                                             channels=prepared.channels, earliest_template=earliest, roster=roster,
+                                             on_segmented=steps.sites(tp), inspect=steps.inspect(tp),
+                                             prepared=prepared)
                 del prepared
                 if checkpoint is not None:
                     checkpoint.save(tp, keys[tp], measured)

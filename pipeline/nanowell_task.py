@@ -729,22 +729,21 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
 
     def load_phase(tp, tile) -> np.ndarray | None:
         found = index.get((tp, tile))
-        return None if found is None else tiles.phase((tp, tile), found[0], read_native)
+        return None if found is None else tiles.tile((tp, Path(found[0]).name), found[0], read_native)
 
     def channel_loader(position):
         def load(tp, tile) -> np.ndarray | None:
             found = index.get((tp, tile))
             if found is None or position >= len(found[1]):
                 return None
-            return _read_tif(members.open(found[1][position]))
+            return tiles.tile((tp, Path(found[1][position]).name), found[1][position], read_native)
         return load
 
     channels = {t: channel_loader(k) for k, t in enumerate(fluor_tokens)}
     template_path = output_dir / NANOWELL_DIR / f"{well_label}{TEMPLATE_SUFFIX}"
-    # The phase tiles are read once and kept until their timepoint is measured, as far as memory allows; the
-    # fluorescence tiles are read once anyway, when their timepoint is measured (pipeline.nanowell_tiles).
-    tiles = WellTiles(zip_path, well_label, [nuclear for nuclear, _fluors in index.values()])
-    members = tiles.reader
+    # Every tile is read once and kept until its timepoint is measured, as far as memory allows: a phase tile is read
+    # to locate its timepoint and again to measure it, a fluorescence tile for its floor level and its intensities.
+    tiles = WellTiles(zip_path, well_label, [name for nuclear, fluors in index.values() for name in (nuclear, *fluors)])
     try:
         return _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, record, timepoints,
                             digest, prior, todo, run, staging_dir, write_csv, template_path)

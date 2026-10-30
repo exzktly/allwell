@@ -193,12 +193,15 @@ def test_the_plan_counts_the_workers_on_each_gpu(monkeypatch, n_gpu, workers, me
 
 
 def test_what_the_run_exports_is_what_a_worker_reads(monkeypatch):
-    plan = types.SimpleNamespace(gpu_sharers=3)
+    from pipeline import nanowell_parallel as npar
+
+    plan = types.SimpleNamespace(gpu_sharers=3, workers=6)
     monkeypatch.delenv(par.GPU_SHARERS_ENV, raising=False)
+    monkeypatch.delenv(npar.POOL_WORKERS_ENV, raising=False)
     par.export_gpu_sharers(plan)
-    assert cp._gpu_sharers() == 3
-    par.export_gpu_sharers(types.SimpleNamespace(gpu_sharers=0))      # a later run without a GPU clears it
-    assert cp._gpu_sharers() == 1
+    assert cp._gpu_sharers() == 3 and npar.pool_workers() == 6
+    par.export_gpu_sharers(types.SimpleNamespace(gpu_sharers=0, workers=2))   # a later run without a GPU clears it
+    assert cp._gpu_sharers() == 1 and npar.pool_workers() == 2
 
 
 def test_the_run_exports_the_plan_before_it_builds_a_worker_pool():

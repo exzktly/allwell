@@ -1,8 +1,9 @@
-"""A nanowell well's phase tiles, read from its archive once.
+"""A nanowell well's tiles, read from its archive once.
 
 ``pipeline.nanowell_run.run_well`` reads every timepoint's tiles to locate it, and — because every timepoint is
 located before any is measured — reads them all again to measure it: about 30 tiles of 8 MB a timepoint, twice, so
-8 GB a well of 17 timepoints off the cluster's shared filesystem, in bursts of a whole timepoint at a time. That
+8 GB a well of 17 timepoints off the cluster's shared filesystem, in bursts of a whole timepoint at a time. A
+fluorescence tile was read twice too, once for its floor level and once for its nanowells' intensities. That
 filesystem is also where the app's run heartbeat lands (``services/remote_heartbeat.py``), and a run of six workers
 lost its heartbeat to it stalling.
 
@@ -99,7 +100,7 @@ def _phase_bytes(zip_path: Path, names) -> int:
 class WellTiles:
     """One well's archive, opened for its run, and its phase tiles kept between locating and measuring.
 
-    *phase_names* are the members holding the phase tiles (any path whose basename names one). *budget* is the bytes
+    *phase_names* are the members holding the tiles (any path whose basename names one), which size the estimate. *budget* is the bytes
     the cache may hold; ``None`` asks ``nanowell_parallel.worker_memory_budget`` for the worker's share, and a
     machine that cannot say keeps nothing, as before. *local_dir* is where a copy may go (default
     :func:`local_temp_dir`); *workers* is how many workers may be copying at once (default the run's).
@@ -148,9 +149,10 @@ class WellTiles:
         self.copy = target
         self.copy_note = f"copied to {folder} in {time.monotonic() - started:.0f} s"
 
-    def phase(self, key, member, read: Callable) -> np.ndarray:
-        """The float32 tile *key* (``(timepoint, tile)``), from the cache or read from *member* by *read* (``f(file)
-        -> array``, the TIF decoded in its own dtype), and kept when there is room."""
+    def tile(self, key, member, read: Callable) -> np.ndarray:
+        """The float32 tile *key* — ``(timepoint, member)``, so a file read as phase and as a channel is one tile — from
+        the cache or read from *member* by *read* (``f(file) -> array``, the TIF decoded in its own dtype), and kept
+        when there is room."""
         with self._lock:
             native = self._tiles.get(key)
         if native is None:
@@ -169,7 +171,7 @@ class WellTiles:
         return np.array(native, dtype=np.float32)
 
     def release(self, timepoint) -> None:
-        """Forget *timepoint*'s tiles: it has been measured, and nothing reads them again."""
+        """Forget *timepoint*'s tiles, every channel's: it has been measured, and nothing reads them again."""
         with self._lock:
             for key in [k for k in self._tiles if k[0] == timepoint]:
                 self._held -= self._tiles.pop(key).nbytes

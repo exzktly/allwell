@@ -197,7 +197,7 @@ from pipeline.run_report import (
 from pipeline.completeness import record_run_check
 from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
 from pipeline.nanowell_task import (
-    hold_dir_for, nanowell_endgame, prepare_nanowell_run, reanchor_only_run, replaced_wells,
+    hold_dir_for, nanowell_endgame, prepare_nanowell_run, reanchor_only_run, reference_well_first, replaced_wells,
 )
 from pipeline.zip_members import ZipMemberReader
 
@@ -2839,15 +2839,16 @@ def process_well_zips(
             force or _canonical_well_label(well_label) in forced,
         )
 
-    return _run_well_worker_pool(
-        items=well_zips, output_dir=output_dir, workers=workers,
+    # A nanowell run's empty reference well goes first: every other well's confluence is read against it.
+    first, rest = reference_well_first(shared_kwargs_template, well_zips)
+    pool = partial(
+        _run_well_worker_pool, output_dir=output_dir, workers=workers,
         settings_key=settings_key,
         force=force, force_wells=forced, incremental=incremental, force_cpu=force_cpu,
         threads_per_worker=threads_per_worker,
         shared_kwargs_template=shared_kwargs_template, mode_label="Zip",
         # Zip staging (extract + images) lives under the scratch base.
-        stale_sweep=lambda out: sweep_run_scratch(out, settings_key,
-                                                   extra_extract=True),
+        stale_sweep=lambda out: sweep_run_scratch(out, settings_key, extra_extract=True),
         # File existence alone answered "already done" whatever the run was
         # configured to compute, and whether or not the well had finished: a
         # changed segmenter kept the old numbers, a well wound down part way
@@ -2856,6 +2857,7 @@ def process_well_zips(
                                                    records=prior_records),
         submit_task=_submit,
     )
+    return [*pool(items=first), *(pool(items=rest) if rest else [])] if first else pool(items=well_zips)
 
 
 def process_well_folders(

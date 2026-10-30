@@ -136,6 +136,7 @@ UI_LANE_FILES: dict[str, str] = {
 #: and the CI workflow to running this lane.
 NANOWELL_E2E_FILES = {
     "test_nanowell_run.py": "the (well, timepoint) task body on rendered tiles; 475 s",
+    "test_nanowell_confluence_reference_run.py": "confluence read against a named empty well, through the real run",
     "test_nanowell_threads_change_nothing.py": "a rendered well serial against threaded, and through the task",
     "test_nanowell_timepoint_frames.py": "a nanowell keeps its address across timepoints, on rendered tiles; 120 s",
     "test_nanowell_identity.py": "the identity check on rendered montages, each fault injected; 22 s",
@@ -166,6 +167,7 @@ NANOWELL_E2E_FILES = {
 #: above. ``scripts/test.sh --nanowell-features``. The description is each file's
 #: own docstring; membership is by subject, so no further reason is owed.
 NANOWELL_FEATURE_FILES: dict[str, str] = {
+    "test_nanowell_confluence_reference.py": "confluence against the empty reference well, on a painted scene",
     "test_nanowell_parallel.py": "A nanowell worker's threads: results in order, one segmenter call at a time, budgets",
     "test_nanowell_tiles.py": "A nanowell well's tiles read from its archive once, or from a node-local copy",
     "test_nanowell_identity_review.py": "Review honours the identity check's verdicts (NANOWELL_IDENTITY_TRACKER C1-C3)",

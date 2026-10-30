@@ -154,6 +154,11 @@ ROSTER: dict[str, list[tuple]] = {
     "Well %s — %s": [((W, "located 0h"), "I", "note", "")],
     "Well %s — %s.": [((W, "re-analysed because the array radius changed"), "W", "note", "")],
     "Well %s — anchor set by hand at %s.": [((W, "0h"), "I", "note", "")],
+    # the empty reference well every confluence is read against (pipeline/nanowell_reference.py): notes, not states
+    "Well %s — empty reference saved for %d timepoint(s); every other well's confluence is read against it.":
+        [((W, 2), "I", "note", "")],
+    "Well %s is the empty reference well, but it is not empty at %s: no well has a confluence there":
+        [((W, "0h (loaded)"), "W", "note", "")],
     # the identity check (pipeline/nanowell_identity.py): a verdict on whether each address names the same nanowell
     # at every timepoint, kept in nanowells/<well>_identity.json and shown by Review's figures and Identity view. It
     # does not change what the run wrote, so the well's own outcome is its "done." line, as for an unaddressed

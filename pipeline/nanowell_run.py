@@ -121,6 +121,9 @@ class NanowellSettings:
     segment_scope: str = LEGACY_SEGMENT_SCOPE   # how much of each tile it is given (SEGMENT_SCOPES); unnamed, the same
     segment_scale: str = LEGACY_SEGMENT_SCALE   # what its input is scaled by (SEGMENT_SCALES); unnamed, the same
     resize: str = LEGACY_RESIZE                 # whether Cellpose resizes that input first (RESIZE_MODES); the same
+    #: The plate well that holds no cells, which every well's confluence is calibrated against
+    #: (``pipeline.nanowell_reference``); ``None``, none named, and no well has a confluence.
+    empty_well: str | None = None
     #: The nanowell diameter measured on the plate, whatever the geometry (tracker F2): sites are fitted, owned and
     #: measured at it. Set from the well's one diameter by :func:`measure_timepoint` and by :func:`run_well` for its
     #: roster, and by Test detection; never part of the reuse key, which holds the setting (``key``), while the
@@ -182,6 +185,8 @@ class NanowellSettings:
             key["segment_scale"] = self.segment_scale
         if self.resize != LEGACY_RESIZE:                   # and resized to the cell diameter, the same
             key["resize"] = self.resize
+        if self.empty_well:                                # every confluence is read against it
+            key["empty_well"] = self.empty_well
         return key
 
     def segmenter_diameter_px(self, pixel_size_um: float) -> float:
@@ -992,6 +997,10 @@ class Normalisation:
     tile_backgrounds: dict = field(default_factory=dict)  # fluorescence channel -> tile -> that tile's floor level
     block: dict = field(default_factory=dict)            # what the grid record says about it
     notes: list = field(default_factory=list)
+    #: ``(template, levels, threshold)`` confluence is read against (:func:`_confluence_basis`): the empty reference
+    #: well's template at this timepoint, every site brought to its levels, and the threshold measured on it. ``None``
+    #: reads it against the timepoint's own template, levels and threshold, which only the reference well does.
+    confluence: tuple | None = None
 
 
 #: A site's floor-to-surround contrast, which sets its gain, is the median of the contrasts read within this many
@@ -1161,6 +1170,62 @@ def _normalise(located, images, template, by_tile, geoms, channels, pitch_um: fl
     return out
 
 
+def _confluence_basis(located, images, template, reference, norm: Normalisation, by_tile, geoms, pitch_um: float,
+                      out: "Measured") -> tuple:
+    """``(template, levels, threshold)`` a timepoint's confluence is read against: the empty reference well's.
+
+    Confluence is texture against an empty nanowell, so both what "empty" looks like (the template) and how much
+    texture the bare floor shows by itself (the threshold) must come from nanowells that are empty. Taken from the
+    well being measured they are the cells' own texture once every nanowell holds cells, which on a plate loaded
+    before its first image is every well at every timepoint: a nanowell half covered read 1-3 %. So they come from
+    the run's empty reference well at the same timepoint (*reference*, ``pipeline.nanowell_reference.Reference``),
+    and this timepoint's sites are brought to that template's levels (light and exposure differ between wells and
+    timepoints; an empty floor does not) before their texture is read against its threshold.
+
+    The reference well itself (``reference.own``) reads itself: its own template is returned carrying its own
+    threshold and put on ``out.template``, which is what is saved as the reference. ``None`` for *reference* is the
+    same, for a caller measuring one timepoint alone (Test detection). With no reference at this timepoint the
+    threshold is ``None``, so every site's confluence is undefined, and the note says why."""
+    from pipeline import nanowell_measure as nm
+    from pipeline import nanowell_reference as ref
+
+    if reference is None or reference.own:
+        own = replace(template, texture_cut=norm.threshold)
+        out.template["_object"] = own
+        return own, norm.levels, norm.threshold
+    calibration, _why = reference.at(located.timepoint)
+    if calibration is None or calibration.texture_cut is None:
+        out.notes.append(ref.note(reference, located.timepoint) or f"{ref.NOTE_PREFIX}: the reference has no threshold")
+        return template, {}, None
+    tiles = [t for t in by_tile if t is not None]
+    fitted = {t: _local_fit(t, by_tile[t], located, geoms, calibration)[0] for t in tiles}
+    levels = _site_levels(located, images, calibration, fitted, geoms, pitch_um,
+                          nm.offset_identifiable(calibration))[0]
+    return calibration, levels, calibration.texture_cut
+
+
+def _tile_confluence(owner, indices, located, images, geoms, template, norm: Normalisation, fit_sites, rim) -> dict:
+    """Each of *fit_sites*' confluence against ``norm.confluence`` (:func:`_confluence_basis`), reusing *rim* (the
+    tile divided by the timepoint's own template) when the reference is that template under the same levels. A site
+    the reference template does not cover, or that has no level against it, is ``None``."""
+    from pipeline import nanowell_measure as nm
+
+    px = located.pixel_size_um
+    basis = norm.confluence or (template, norm.levels, norm.threshold)
+    reference, levels, threshold = basis
+    out = dict.fromkeys((g.index for g in fit_sites))
+    if reference.array is template.array and levels is norm.levels:
+        out.update(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, threshold)))
+        return out
+    if threshold is None:
+        return out
+    sites = [g for g in _local_fit(owner, indices, located, geoms, reference)[0] if g.index in levels]
+    if sites:
+        rim_ref = nm.rim_suppress(images[owner], px, reference, sites, levels=levels)
+        out.update(zip((g.index for g in sites), nm.site_confluence(rim_ref, px, sites, threshold)))
+    return {i: out.get(i) for i in (g.index for g in fit_sites)}
+
+
 def _tile_contents(owner, indices, located, images, settings, geoms, addresses, template, segment, channels,
                    kind=None, norm: "Normalisation | None" = None, on_segmented=None, keep=None):
     """Counts, confluence, area estimate, fluorescence and focus for the sites one tile owns, and its cell rows.
@@ -1183,8 +1248,8 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
     if not fit_sites:
         return {}, {}, notes
     rim = nm.rim_suppress(images[owner], px, template, fit_sites, levels=norm.levels)
-    # The timepoint's one threshold, from every tile's nanowells (``_normalise``), not this tile's alone.
-    confluence = dict(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, norm.threshold)))
+    # Against the empty reference well's template and threshold at this timepoint (``_confluence_basis``).
+    confluence = _tile_confluence(owner, indices, located, images, geoms, template, norm, fit_sites, rim)
     # Each site as the segmenter receives it, written beside its count so a zero the segmenter could not have
     # avoided (cells a few per cent of the tile's range) is told apart from an empty nanowell.
     # Scaled (and, under the nanowells scale, rims and lattice blanked) as the segmenter is given it.
@@ -1297,8 +1362,12 @@ def _site_row(timepoint, i, address, g, v, c, got, state, owner, detected, fused
 def measure_timepoint(located: Located, images: dict, settings: NanowellSettings, array_radius_um: float | None, *,
                       segmenter=None, channels: dict | None = None, earliest_template=None,
                       roster=None, count_cells: bool = True, on_segmented=None, inspect: dict | None = None,
-                      prepared: "_Prepared | None" = None) -> Measured:
+                      prepared: "_Prepared | None" = None, confluence_reference=None) -> Measured:
     """Rows for every roster site of a located timepoint, and the cells inside them.
+
+    *confluence_reference* is what its confluence is read against (``pipeline.nanowell_reference.Reference``,
+    :func:`_confluence_basis`); ``None`` reads the timepoint against itself, which is right only for the empty
+    reference well.
 
     *array_radius_um* is the well's one shared array-model radius (so every timepoint has the same
     roster); for an inferred array that is not a circle it is ``None`` and *roster* is the well's shared set of
@@ -1318,7 +1387,7 @@ def measure_timepoint(located: Located, images: dict, settings: NanowellSettings
     if prepared is None:
         prepared = _prepare_timepoint(located, images, settings, array_radius_um, segmenter=segmenter,
                                       channels=channels, earliest_template=earliest_template, roster=roster,
-                                      count_cells=count_cells)
+                                      count_cells=count_cells, confluence_reference=confluence_reference)
     return _finish_timepoint(prepared, on_segmented=on_segmented, inspect=inspect)
 
 
@@ -1352,7 +1421,7 @@ class _Prepared:
 
 def _prepare_timepoint(located: Located, images: dict, settings: NanowellSettings, array_radius_um: float | None, *,
                        segmenter=None, channels: dict | None = None, earliest_template=None, roster=None,
-                       count_cells: bool = True) -> _Prepared:
+                       count_cells: bool = True, confluence_reference=None) -> _Prepared:
     """The first half of :func:`measure_timepoint`: everything before any tile's contents are measured."""
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_detect import FITTED, MIN_REFINE_RADIUS_PX
@@ -1401,6 +1470,8 @@ def _prepare_timepoint(located: Located, images: dict, settings: NanowellSetting
     if template is not None:
         norm = _normalise(located, images, template, by_tile, geoms, channels, located.pitch_um or settings.pitch_um)
         out.levels = norm.levels
+        norm.confluence = _confluence_basis(located, images, template, confluence_reference, norm, by_tile, geoms,
+                                            located.pitch_um or settings.pitch_um, out)
         out.template["normalisation"] = norm.block
         out.notes += norm.notes
         for channel, well_level in norm.backgrounds.items():
@@ -1474,6 +1545,8 @@ class WellOutcome:
     located: dict = field(default_factory=dict)          # timepoint -> Located (not written; the end-of-run pass reads it)
     notes: list = field(default_factory=list)
     earliest_template: tuple | None = None               # (timepoint, Template): the first own template in time
+    #: timepoint -> the template measured there (carrying its texture threshold): what the empty reference well saves
+    templates: dict = field(default_factory=dict)
     roster_change: str = ""                              # a kept roster the new evidence changes (X35a-R1): why
     frame_change: str = ""                               # a new timepoint off the kept timepoints' frame: which, how far
     diameter_source: str | None = None                   # where the well's one diameter came from (_settle_diameter)
@@ -2459,7 +2532,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
              reference: dict | None = None, earliest_template=None, spill_dir=None, fixed_roster=None,
              kept_evidence: dict | None = None, stored_placements: dict | None = None,
              manual_anchors: Mapping = MappingProxyType({}), progress=None, site_progress=None,
-             note=None, kept_layouts: dict | None = None, release=None) -> WellOutcome:
+             note=None, kept_layouts: dict | None = None, release=None, confluence_reference=None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -2595,7 +2668,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         images = _images_for(record, well, tp, load_phase)
         loaders = {name: (lambda tile, _f=f, _tp=tp: _f(_tp, tile)) for name, f in (channels or {}).items()}
         return _prepare_timepoint(outcome.located[tp], images, settings, radius_um, segmenter=segmenter,
-                                  channels=loaders, earliest_template=earliest_now, roster=roster)
+                                  channels=loaders, earliest_template=earliest_now, roster=roster,
+                                  confluence_reference=confluence_reference)
 
     # With threads to spare, the next timepoint is prepared (geometry, template, levels: CPU) while this one's tiles
     # are measured (the GPU's part). A timepoint's preparation needs only the earliest template so far, which is
@@ -2667,6 +2741,8 @@ def _record_measured(outcome: WellOutcome, tp, measured, consistency, reference,
     if outcome.earliest_template is None and measured.template.get("_object") is not None \
             and measured.template["source"] != "earliest":
         outcome.earliest_template = (tp, measured.template["_object"])
+    if measured.template.get("_object") is not None:
+        outcome.templates[tp] = measured.template["_object"]
     block = outcome.timepoints[tp]
     agree = consistency.get(tp)
     block.update(consistency=None if agree is None else agree.status,

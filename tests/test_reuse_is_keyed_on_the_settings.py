@@ -112,6 +112,7 @@ OTHER = {
     "nanowell_segment_scope": "tile",
     "nanowell_segment_scale": "tile",
     "nanowell_resize": "none",
+    "nanowell_empty_well": "H12",
     "nanowell_grid": "3x7",
     "nanowell_scan": "bottom-right-column-serpentine",
     "nanowell_overlap_percent": 25.0,

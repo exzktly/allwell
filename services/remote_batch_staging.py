@@ -37,6 +37,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from services.remote_run_id import _parse_argv_flags
+from util.well_token import canonical_well_label
 from util.well_token import background_well_key as _bg_well_key, blank_wells_for_run
 
 
@@ -76,6 +77,20 @@ def prune_staged(cache: Any, remote_dir: str, zips: list[Path], label: str,
         log(f"[remote] {label}: {len(kept)} of {len(set(names))} well-zip(s) "
             f"are already on the remote from an earlier attempt — rsync skips "
             f"any that arrived whole and resumes the rest\n")
+
+
+def nanowell_reference_first(argv, well_zips) -> list:
+    """*well_zips* with a nanowell run's empty reference well (``--nanowell_empty_well``) moved to the front, so it
+    is in the first batch. Every well's confluence is read against it (``pipeline.nanowell_reference``) and the
+    batches run one after another into one output folder whose ``nanowells/`` is never released between them, so
+    the first batch measures it and every later batch reads it there. Left in place, a well in batch 1 sliced before
+    a reference in batch 3 would have no confluence at all."""
+    flags = _parse_argv_flags(argv, multi=set(), single={"--nanowell_empty_well"})
+    wanted = canonical_well_label(flags.get("--nanowell_empty_well") or "")
+    if not wanted:
+        return list(well_zips)
+    first = [z for z in well_zips if canonical_well_label(z.stem) == wanted]
+    return first + [z for z in well_zips if z not in first]
 
 
 def _empty_well_blanks(argv, well_zips) -> tuple[str, ...]:

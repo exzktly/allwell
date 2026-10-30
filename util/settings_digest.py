@@ -130,6 +130,8 @@ KEYED_ON: dict[str, str] = {
                                    "tile), so what contrast every cell had",
     "nanowell_resize":             "whether Cellpose resizes that input to the cell diameter first, so the scale "
                                    "every cell was seen at",
+    "nanowell_empty_well":         "the empty well every confluence is calibrated against, so every "
+                                   "confluence",
     "nanowell_grid":               "the described grid a dataset without an acquisition record is "
                                    "placed from, so where every tile and nanowell sits",
     "nanowell_scan":               "the order the described grid's fields were taken in, the same",

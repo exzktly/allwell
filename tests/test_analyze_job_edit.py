@@ -112,6 +112,7 @@ _OPTS = {
     "nanowell_resize": "none",                  # not the default, so the round trip proves it is restored
     "nanowell_segment_on": "raw",              # not the default, so the round trip proves it is restored
     "nanowell_segment_scope": "tile",          # the same
+    "nanowell_empty_well": "H12",              # the same
     "nanowell_registration_from": "/data/plate6/out",
 }
 

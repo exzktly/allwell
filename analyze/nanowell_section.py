@@ -52,6 +52,10 @@ _FIELDS = (
     ("nanowell_clipped_below", "Clipping threshold", "_nanowell_clipped_edit",
      "A nanowell imaged in less than this share (0 to 1) of its disk, because the edge of the tiles cuts it, is "
      "clipped, and carries its state but no cell count."),
+    ("nanowell_empty_well", "Empty reference well", "_nanowell_empty_well_edit",
+     "A plate well that holds no cells (e.g. H12). Confluence is texture against an empty nanowell, so it is read, "
+     "at every timepoint, against this well's empty nanowells imaged at that timepoint; it is measured before the "
+     "other wells. Blank, or at a timepoint where this well holds cells, no well has a confluence (blank, never 0)."),
 )
 
 

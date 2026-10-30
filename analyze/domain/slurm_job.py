@@ -39,7 +39,7 @@ class SlurmJob:
 
 
 def on_sched(job: SlurmJob, state: str, job_id: str) -> SlurmJob:
-    """Fold one ``sched`` event (``waiting`` / ``queued`` / ``granted``, and for a job queued before staging
+    """Fold one ``sched`` event (``waiting`` / ``queued`` / ``allocated`` / ``granted``, and for a job queued before staging
     ``waiting-early`` / ``handed`` / ``early-ended``).
 
     A request for an allocation starts a new job: whatever the previous one
@@ -50,6 +50,10 @@ def on_sched(job: SlurmJob, state: str, job_id: str) -> SlurmJob:
         return replace(job, state=OPEN, job_id=job_id or job.job_id)
     if state in ("waiting", "waiting-early"):
         return SlurmJob(state=QUEUED)
+    if state == "allocated":
+        # Slurm picked a node that may still have to boot, and can fail to:
+        # still a wait, not an open job.
+        return replace(job, state=QUEUED, job_id=job_id or job.job_id)
     if state == "handed":
         return job              # the job queued before staging took the run: it is the same job
     if state == "early-ended":

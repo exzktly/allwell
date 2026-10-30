@@ -165,3 +165,27 @@ def test_a_stopped_batched_run_resumes_without_sending_the_plate_again(cluster, 
     assert sorted(sent_again) == ["B02.zip", "B03.zip"], (
         f"the resume sent {sorted(sent_again)}; the first attempt had already put A03 and B01 on the remote and "
         f"brought A01 and A02 home\n{second.text[-6000:]}")
+
+
+# ── a node that fails to boot ─────────────────────────────────────────────────────────────────────────────────
+
+def test_a_node_that_fails_to_boot_is_asked_for_again_and_the_run_completes(cluster, tmp_path, stop_fetchers,
+                                                                            monkeypatch):
+    """On a cluster that powers nodes down, Slurm can allocate a node that then fails to boot; the ``srun``
+    wrapper asks for another. A failed boot is part of the wait for a node, so the run must go on waiting and
+    then complete — through the early node request, its hand-over, and the batch driver.
+
+    Written for a report of a run that ended and cleaned up after such a failure. This scenario does not
+    reproduce that ending (it passes on the code the report was made against too), so what it pins is the
+    behaviour the report expected, not the cause of what it saw."""
+    from services import remote_srun_retry
+
+    monkeypatch.setitem(remote_srun_retry.wrap_srun_launch.__kwdefaults__, "boot_retry_pause_s", 1)
+    # The first failure comes while the plate is still being prepared here, so the run is handed to a job whose
+    # node is still booting — the order the report describes, with a boot that took minutes.
+    cluster.boot_failures(2, seconds=3.0)
+    run = _run(cluster, tmp_path, stop_fetchers, limit_s=90.0)
+
+    assert run.text.count("failed to boot — requesting another node") == 2, run.text[-6000:]
+    assert_correct_or_visibly_failed(run, cluster, FIELD_WELLS, expect="done")
+    assert complete_here(run.out, FIELD_WELLS) == set(FIELD_WELLS)

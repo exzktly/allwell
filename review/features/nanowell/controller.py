@@ -259,6 +259,14 @@ def _refresh_empty(ctx) -> None:
         refresh_empty_state_pages(ctx.window)
 
 
+def _page_alive(ctx) -> bool:
+    """Whether the page's canvas still exists as a Qt object — a worker's result can arrive after it is gone."""
+    import shiboken6
+
+    canvas = ctx.widgets.get_or_none("_nw_canvas")
+    return canvas is not None and shiboken6.isValid(canvas)
+
+
 def _call(ctx, name: str) -> None:
     fn = ctx.widgets.get_or_none(name)
     if callable(fn):
@@ -1553,15 +1561,18 @@ def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
     data, holder = st.data, []
 
     def finish(value) -> None:
+        # The bridge has delivered, so it is let go whatever happens to the value.
+        if holder and holder[0] in st.fetch_bridges:
+            st.fetch_bridges.remove(holder[0])
         if st.data is not data:
             return
         st.fetching.discard(tag)
         if image_channel is not None and page_image_channel(st) != image_channel:
-            if holder and holder[0] in st.fetch_bridges:
-                st.fetch_bridges.remove(holder[0])
             return
-        if holder and holder[0] in st.fetch_bridges:
-            st.fetch_bridges.remove(holder[0])
+        if not _page_alive(ctx):
+            # The page was deleted while the read ran (the window closed): there is nothing to redraw, and
+            # redrawing would reach into deleted Qt widgets.
+            return
         if deliver is not None:
             deliver(value)
         else:

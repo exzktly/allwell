@@ -457,12 +457,14 @@ def test_the_tracker_reads_the_whole_scheduler_handshake():
     queued = tracker.parse("srun: job 4812345 queued and waiting for resources\n")
     assert ("sched", ("queued", "4812345", "")) in queued
 
-    for granted_line in (
-        "srun: job 4812345 has been allocated resources\n",
-        "[remote] scheduler: allocation granted — job 4812345 on node gpu-07\n",
-    ):
-        events = tracker.parse(granted_line)
-        assert ("sched", ("granted", "4812345", "")) in events, granted_line
+    # Slurm picking a node is not the job starting: on a cluster that powers
+    # nodes down the node has yet to boot, and can fail to. Only the job's own
+    # line from inside the allocation is the grant
+    # (tests/test_a_node_that_fails_to_boot_is_still_a_wait.py).
+    allocated = tracker.parse("srun: job 4812345 has been allocated resources\n")
+    assert [p for k, p in allocated if k == "sched"] == [("allocated", "4812345", "")]
+    granted = tracker.parse("[remote] scheduler: allocation granted — job 4812345 on node gpu-07\n")
+    assert [p for k, p in granted if k == "sched"] == [("granted", "4812345", "")]
 
 
 def test_ordinary_lines_do_not_look_like_a_scheduler_event():

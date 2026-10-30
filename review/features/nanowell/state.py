@@ -143,6 +143,8 @@ class NanowellState:
     #: The numbers written on each crop of the Extremes montage (its fold change and its metrics line); off leaves the
     #: crops bare, the row labels and the caption still giving the ranking.
     crop_metrics: bool = True
+    #: Whether the pop-out writes each crop's timepoint over it and its caption under the figure.
+    popout_labels: bool = True
     #: The **Display range** of each image channel, ``channel key -> (low, high)`` in the raw image's units
     #: (``controller.display_key``): the window every picture of that channel on the page is drawn with — the crop
     #: strip, the pop-out, the Extremes montage and the Array view's full resolution. The page's own and kept with
@@ -157,6 +159,12 @@ class NanowellState:
     identity_mode: str = "distance"
     #: What the Distance map colours by (:data:`IDENTITY_COLOURS`).
     identity_colour: str = "auto"
+    #: The nanowell the Identity view goes to, as typed in its *Nanowell* box (``identity_focus_compute``); ``""``:
+    #: none. Not kept with the page's settings: an address belongs to the dataset being looked at.
+    identity_focus: str = ""
+    #: The wells left out of every figure on the page by hand (the band's *Exclude*), sorted; the rest of Review is
+    #: untouched. Kept with the page's settings.
+    excluded_wells: list = field(default_factory=list)
 
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
@@ -238,10 +246,11 @@ class NanowellState:
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
                 "extremes_n": self.extremes_n, "extremes_tps": list(self.extremes_tps), "crop_cells": self.crop_cells,
                 "channel": self.channel, "image_channel": self.image_channel,
-                "crop_metrics": self.crop_metrics,
+                "crop_metrics": self.crop_metrics, "popout_labels": self.popout_labels,
                 "display_ranges": {k: [lo, hi] for k, (lo, hi) in self.display_ranges.items()},
                 "subset": self.subset.to_config(), "layers": self.layers.to_config(),
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
+                "excluded_wells": list(self.excluded_wells),
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -263,11 +272,14 @@ class NanowellState:
         colour = config.get("identity_colour")
         self.identity_colour = colour if colour in IDENTITY_COLOURS else fresh.identity_colour
         self.subset = _subset_from(config)
+        wells = config.get("excluded_wells")
+        self.excluded_wells = sorted({w for w in wells if isinstance(w, str) and w}) if isinstance(wells, list) else []
         count = config.get("extremes_n")
         self.extremes_n = (count if isinstance(count, int) and not isinstance(count, bool)
                            and 1 <= count <= EXTREMES_MAX_N else fresh.extremes_n)
         self.crop_cells = config.get("crop_cells") is True
         self.crop_metrics = config.get("crop_metrics") is not False
+        self.popout_labels = config.get("popout_labels") is not False
         self.display_ranges = _display_ranges_from(config.get("display_ranges"))
         tps = config.get("extremes_tps")
         self.extremes_tps = [str(tp) for tp in tps if isinstance(tp, str)] if isinstance(tps, list) else []

@@ -21,6 +21,7 @@ from review.features.nanowell import _identity_render as ir
 from review.features.nanowell import _identity_zoom as izoom
 from review.features.nanowell.image_compute import read_montage, tile_boxes
 from review.features.nanowell import identity_compute as ic
+from review.features.nanowell import identity_focus_compute as fc
 from review.features.nanowell.state import IDENTITY_MODES
 
 log = logging.getLogger("review")
@@ -39,15 +40,31 @@ def _tile_sizes(data, well: str, timepoint: str) -> dict:
 
 
 def draw_identity(fig, data, *, well: str, timepoint: str, mode: str = "distance", payload=READ, images=None,
-                  frames_cache: dict | None = None, note: str = "", colour: str = "auto") -> ir.IdentityDrawn | None:
+                  frames_cache: dict | None = None, note: str = "", colour: str = "auto",
+                  focus: str = "") -> ir.IdentityDrawn | None:
     """**The one composition of the Identity view**: *well*'s *timepoint* against its reference, in *mode*.
 
     *payload* is the well's sidecar (``None``: none current); by default it is read here. *images* is
     ``{"reference": Montage | None, "compared": Montage | None, "why": str}`` — what Blink, Side by side and the
     Diagnostics' crops draw; without them those say what they are waiting for. *frames_cache* keeps the Blink frames
     per ``(well, timepoint, reference)``. *colour* is what the Distance map colours by (``state.IDENTITY_COLOURS``;
-    ``identity_compute.colour_by``). ``None`` when the figure is a message: no sidecar (with the command that makes
-    one), the reference itself, or no reference."""
+    ``identity_compute.colour_by``). *focus* is the address the reader went to (the page's *Nanowell* box, as typed;
+    ``identity_focus_compute``): it is marked and said on the figure, and the drawn view carries where to centre
+    on it. ``None`` when the figure is a message: no sidecar (with the command that makes one), the reference
+    itself, or no reference."""
+    drawn = _draw_mode(fig, data, well=well, timepoint=timepoint, mode=mode, payload=payload, images=images,
+                       frames_cache=frames_cache, note=note, colour=colour)
+    if drawn is not None:
+        ir.attach_hover_labels(drawn)
+    marks = fc.focus_marks(drawn.pair, focus) if drawn is not None else None
+    if marks is not None:
+        ir.draw_focus(fig, drawn, marks, fc.focus_centres(marks, drawn.mode))
+    return drawn
+
+
+def _draw_mode(fig, data, *, well, timepoint, mode, payload, images, frames_cache, note, colour
+               ) -> ir.IdentityDrawn | None:
+    """:func:`draw_identity`'s figure before the nanowell gone to is marked."""
     from pipeline.nanowell_identity import read_sidecar
 
     if not well:
@@ -143,13 +160,13 @@ def _images(ctx, st, well: str, timepoint: str, reference: str | None, fetch) ->
 
 def page_inputs(ctx, st, well: str, timepoint: str, fetch) -> dict:
     """What the page hands :func:`draw_identity`: its mode and colouring, the sidecar it holds, the montages Blink,
-    Side by side and the Diagnostics draw (read only for those modes), and its Blink frames."""
+    Side by side and the Diagnostics draw (read only for those modes), its Blink frames, and the nanowell gone to."""
     payload = page_sidecar(st, well)
     images = None
     if st.identity_mode in ("blink", "sides", "diagnostics") and payload is not None:
         images = _images(ctx, st, well, timepoint, payload.get("reference"), fetch)
     return {"mode": st.identity_mode, "payload": payload, "images": images, "frames_cache": st.identity_frames,
-            "colour": st.identity_colour}
+            "colour": st.identity_colour, "focus": st.identity_focus}
 
 
 def after_draw(ctx, st, drawn) -> None:

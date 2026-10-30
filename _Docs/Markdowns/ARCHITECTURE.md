@@ -11451,7 +11451,7 @@ Every text and line is in the plot's ink and tagged `follows_theme`; the dots ta
 `widgets.plot_card.theme_paired_colours`, the hook `PlotCard.setPlotTheme` uses to repaint a paired data
 palette — so a capture, which flips the theme without a redraw, puts the publication shades on white. `render_site_detail` draws the selected nanowells' series
 against recorded time, a timepoint without a number as a gap and a hatched band, with each timepoint's state
-written above, the rows sharing one time axis labelled under the bottom row. The first selected nanowell's crops (`controller.crops_site`) are drawn on a figure of their own under the detail, `renderer.render_crop_strip` on `_nw_strip_fig`, below a row holding **Pop out** (`_nw_popout_btn`, `tab_view._crops_header`). **Pop out** (`controller.pop_out_crops`) opens a top-level window owned by the app's window (`tab_view._popout_window`, built on first use and kept; `_nw_popout`, `_nw_popout_fig`) and draws the same crops large there (`renderer.render_crop_grid`): one panel per timepoint, all on one brightness scale (the 1st–99th percentile of every crop together) so a change between timepoints reads as a change, with the source and scale in the caption. `redraw_detail` redraws it whenever it is open (`controller.draw_popout`), so it follows the selection, and says a nanowell has to be selected when none is; the page's own figure and every control beside it are untouched by it. The crops arrive by the site detail's own worker fetch. **Cells on the crops.** Every crop carries the cells the run counted inside it (`image_compute.Crop.cells`, ``(column, row)`` pixels, `None` when the well has no cell table so "no table" never reads as "no cell"): `_cut_well` reads the well's cell table once per timepoint (`collect.cell_positions`) and `_cells_in` places each cell from the well frame using the crop's own corner — `_cut_at` returns the tile or montage pixel the crop starts at, clipped at the image's edge, so a crop cut at a tile's border measures from that border — at the tile's or the montage's scale. One switch, `NanowellState.crop_cells` (persisted; `controller.set_crop_cells`), offered as **Cells** beside *Pop out* (`_nw_strip_cells_box`) and on the Extremes view (`_nw_extremes_cells_box`, the two kept on it by `refresh_controls`), has `render_crop_strip`, `render_crop_grid` and `render_extremes` draw them through `renderer._draw_crop_cells` in the Array view's Cells colours, each caption counting the dots and naming crops of a well with no cell table (`_cells_clause`). `tests/test_nanowell_crop_cells.py` pins the pixel placement (a tile crop, one clipped at the tile's edge, a montage crop) and drives both boxes. There is no clear button: a click on empty space clears the selection on every view. The crop panels carry `_aw_image_panel`, so a style pass never puts a typed axis range on a crop.
+written above, the rows sharing one time axis labelled under the bottom row. The first selected nanowell's crops (`controller.crops_site`) are drawn on a figure of their own under the detail, `renderer.render_crop_strip` on `_nw_strip_fig`, below a row holding **Pop out** (`_nw_popout_btn`, `tab_view._crops_header`). **Pop out** (`controller.pop_out_crops`) opens a top-level window owned by the app's window (`tab_view._popout_window`, built on first use and kept; `_nw_popout`, `_nw_popout_fig`) and draws the same crops large there (`renderer.render_crop_grid`): one panel per timepoint, all on one brightness scale (the 1st–99th percentile of every crop together) so a change between timepoints reads as a change, with the source and scale in the caption. `redraw_detail` redraws it whenever it is open (`controller.draw_popout`), so it follows the selection, and says a nanowell has to be selected when none is; the page's own figure and every control beside it are untouched by it. The window carries its own row of controls (`tab_view._popout_controls`): the image channel (`_nw_popout_image_channel_cb`, one of `_IMAGE_CHANNEL_COMBOS`), **Range** (`_nw_popout_range_btn`, one of `DISPLAY_RANGE_BUTTONS`), **Cells** (`_nw_popout_cells_box`), **Metrics** (`_nw_popout_metrics_box`, `crop_metrics`: the measurement lines under each crop), **Labels** (`_nw_popout_labels_box`, `NanowellState.popout_labels`, persisted: `render_crop_grid(labels=)` leaves out each panel's timepoint and the caption, keeping the title) and **Go to nanowell**. Each is the page's one setting; `refresh_controls` runs once when the window is built and keeps every crop checkbox on its state (`_CROP_BOXES`, `_sync_crop_boxes`). The crops arrive by the site detail's own worker fetch. **Cells on the crops.** Every crop carries the cells the run counted inside it (`image_compute.Crop.cells`, ``(column, row)`` pixels, `None` when the well has no cell table so "no table" never reads as "no cell"): `_cut_well` reads the well's cell table once per timepoint (`collect.cell_positions`) and `_cells_in` places each cell from the well frame using the crop's own corner — `_cut_at` returns the tile or montage pixel the crop starts at, clipped at the image's edge, so a crop cut at a tile's border measures from that border — at the tile's or the montage's scale. One switch, `NanowellState.crop_cells` (persisted; `controller.set_crop_cells`), offered as **Cells** beside *Pop out* (`_nw_strip_cells_box`), in the pop-out (`_nw_popout_cells_box`) and on the Extremes view (`_nw_extremes_cells_box`, all kept on it by `refresh_controls`), has `render_crop_strip`, `render_crop_grid` and `render_extremes` draw them through `renderer._draw_crop_cells` in the Array view's Cells colours, each caption counting the dots and naming crops of a well with no cell table (`_cells_clause`). `tests/test_nanowell_crop_cells.py` pins the pixel placement (a tile crop, one clipped at the tile's edge, a montage crop) and drives both boxes. There is no clear button: a click on empty space clears the selection on every view. The crop panels carry `_aw_image_panel`, so a style pass never puts a typed axis range on a crop.
 
 **The Extremes view** (`extremes_compute`, `renderer.render_extremes`, `controller._draw_extremes`) is a montage
 of one well's nanowells with the largest and the smallest fold change of the Metric. `extremes_compute.extremes`
@@ -11515,7 +11515,7 @@ like the others; `_identity_controller.draw_identity` composes it from the sidec
 `identity_compute` holds the Qt-free data (`distance_map`, `blink_frames`, `hover_target`, `diagnostics`,
 `identity_message`, `summary_lines`, `stage_line`, `worst_verdict`, `default_timepoint`), `_identity_render` draws it
 (every text a reader sees carries a `nw-identity-*` gid; the Diagnostics figure is `_identity_diagnostics_render`)
-and `identity_view` builds the *Compare* and *Colour* controls and the Blink timer. Its verdict is the one every other figure reads (`pipeline.nanowell_identity.verdict_in`, stage override
+and `identity_view` builds the *Compare* and *Colour* controls, the *Nanowell* box with **Origin**, and the Blink timer. Its verdict is the one every other figure reads (`pipeline.nanowell_identity.verdict_in`, stage override
 included). Four modes, `NanowellState.identity_mode` (persisted; an unknown one falls back to `distance`):
 *Distance map* — each compared address at its reference's measured position (well frame, µm), coloured by
 `NanowellState.identity_colour` (`IDENTITY_COLOURS`, persisted): `distance` fills it by its distance in pitches
@@ -11548,7 +11548,36 @@ in `zoom_compute` (`wheel_limits`, `pan_limits`, `linked`, `held_factor`), share
 constants live there too. Side by side's two images share one initial extent and move together, as do Diagnostics'
 two crops; the surface zooms alone. The zoom (`NanowellState.identity_zoom`, never persisted) is kept across a redraw
 of the same well, timepoint and mode (montages arriving, a setting changed) and dropped when any of the three
-changes; a Blink frame flip leaves it alone. With no sidecar it
+changes; a Blink frame flip leaves it alone.
+
+The band's *Nanowell* box (`identity_view._focus_box`, registered as `_nw_identity_focus_edit`) goes to one
+nanowell: Enter calls `controller.set_identity_focus`, which keeps the text on `NanowellState.identity_focus` (never
+persisted), forgets the kept zoom and redraws. `identity_focus_compute` reads the text — `q,r` as the addresses are
+drawn, or a ring label through `util.nanowell_address.parse_label` — and `focus_marks` resolves it against the pair:
+the reference's site, the compared timepoint's site of the same name in its own frame and mapped into the reference's
+through the inverse registration, and the reference site's predicted place in the compared frame.
+`_identity_controller.draw_identity` (its `focus` argument; Batch Export never passes one) has
+`_identity_render.draw_focus` ring the reference's site and cross the compared one mapped back on the Distance map and
+Blink — the two marks part exactly when the address names another nanowell — and, on Side by side, ring each side's
+own site and cross the prediction; a sentence top right (`nw-identity-focus`) says how far the address lands, or that
+a timepoint does not hold it, or why the text is not an address. `_identity_zoom.restore` centres each panel on it
+(`focus_centres`, `focus_limits`: `FOCUS_HALF_PITCHES` spacings to the nearer edge, in the full view's proportions,
+widened on Side by side so the moved compared site stays in view) whenever the well, timepoint or mode changes, and
+keeps that as the zoom. Diagnostics draws crops about the square, so the box is greyed there (`FOCUS_MODES`).
+**Origin** beside the box goes to `0,0`. **Go to nanowell** — in the site detail's crop header and in the pop-out
+window's header (`tab_view._go_to_button`) — calls `controller.go_to_site_in_blink`, which takes the crops' nanowell
+(`crops_site`) to the Identity view's Blink in its well, focused on its address.
+
+The pointer's readout names the nanowell under it: `_identity_render.attach_hover_labels` sets
+`axes._aw_hover_label` to an `identity_focus_compute.SiteFinder` (nearest site within half a spacing, written
+`<timepoint> · nanowell q,r · ring R.k`), which `widgets.mpl_toolbar`'s hover chip leads its `x · y` with — a generic
+hook, the widget knowing nothing of nanowells. The Distance map names the reference's addresses, Blink the shown
+frame's own (the compared timepoint's mapped into the reference's frame, so a wrong address reads as its wrong name),
+Side by side each montage's own; Diagnostics none. Blink's address labels are bold, `BLINK_LABEL_PT`, stroked in
+`Colors.surface` (`_halo`) and coloured per frame (`BLINK_LABEL_COLOURS`: success for the reference, warn for the
+compared timepoint), as is each frame's name, so they read on any brightness of montage.
+
+With no sidecar it
 says the check has not been run and names the audit command; at the reference it says so. On this view the Well
 combo reads each well's worst verdict, and the timepoint shown by default is the well's first contradicted, then
 inconclusive or unchecked, then first non-reference timepoint. Montages are read on a worker through the page's
@@ -11556,6 +11585,14 @@ inconclusive or unchecked, then first non-reference timepoint. Montages are read
 shows after the next load. Batch Export does not offer it (the reason is written beside its `VIEWS`: no metric, one
 figure per well and timepoint, two modes that exist only as interaction). Pinned by
 `tests/test_nanowell_identity_view.py`, including one test through the real page builder.
+
+**Excluding a well on the page.** The band's **Exclude** (beside the Well combo) adds the well to
+`NanowellState.excluded_wells` (sorted, persisted with the page's settings); `controller.page_groups` drops those
+wells, so every view, the Well combo and *Save nanowell data* leave them out, while the rest of Review is untouched —
+it is the page's choice of wells, not an inclusion layer. Every figure's note carries `controller.excluded_note`
+("Excluded on this page: …") so a figure short of a selected well says so; the empty state names the case where every
+selected well is excluded. *Excluded (n) ▾* (`exclude_view`), shown only while any is excluded, restores
+one or all (`set_well_excluded`, `restore_every_well`).
 
 **The Array view** is one well at one timepoint, every element of it a layer that is on or off, drawn by one
 renderer whatever is on, so a nanowell reads the same — and is clickable, pannable and zoomable — under every

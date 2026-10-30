@@ -22,7 +22,7 @@ from ui import theme
 
 #: The buttons that open the Display range, one per place the image channel is offered (``tab_view``'s
 #: ``_IMAGE_CHANNEL_COMBOS``): refreshed together by :func:`refresh_display_range_buttons`.
-DISPLAY_RANGE_BUTTONS = ("_nw_strip_range_btn", "_nw_extremes_range_btn", "_nw_array_range_btn")
+DISPLAY_RANGE_BUTTONS = ("_nw_strip_range_btn", "_nw_extremes_range_btn", "_nw_array_range_btn", "_nw_popout_range_btn")
 
 _TIP = ("The brightness window the crops, the pop-out, the Extremes montage and the Array view's full-resolution "
         "image of this channel are drawn with, in the image's own units, kept until you change it. Blank is Auto: "

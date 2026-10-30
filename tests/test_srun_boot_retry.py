@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from services.remote_srun_retry import (
-    SRUN_BOOT_RETRIES,
+    QUEUE_WAIT_EXIT,
     is_srun,
     wrap_srun_launch,
 )
@@ -117,6 +117,7 @@ def _fake_cluster(tmp_path: Path, outcomes: list[tuple[str, str]],
 
 def _run(tmp_path: Path, bindir: Path, launcher: str, **wrap_kwargs):
     pidfile = tmp_path / "run.pid"
+    wrap_kwargs.setdefault("boot_retry_pause_s", 0)
     cmd = wrap_srun_launch(
         launcher, shlex.quote("echo pipeline ran on the node"),
         shlex.quote(str(pidfile)), shlex.quote(str(pidfile) + ".srun-err"),
@@ -151,7 +152,7 @@ def test_a_node_that_fails_to_boot_is_excluded_and_the_run_retried(tmp_path):
     assert _excluded(args[0]) == {"n02", "n04", "n06"}
     # Second: the node that failed to boot is added.
     assert _excluded(args[1]) == {"n01", "n02", "n04", "n06"}
-    assert "node(s) n01 failed to boot — requesting another node (retry 1 of 3)" in out.stdout
+    assert "node(s) n01 failed to boot — requesting another node in 0 s (retry 1; failed to boot so far: n01)" in out.stdout
     # The line the Analyze progress view reads to go back to "waiting".
     assert "[remote] scheduler: requesting allocation via: srun --partition=cpu" in out.stdout
     assert "--partition=cpu" in args[1] and "--time=1:00:00" in args[1]
@@ -164,16 +165,98 @@ def test_srun_s_own_pid_is_what_the_cancel_channel_reads(tmp_path):
         bindir.parent / "state" / "pid1").read_text().strip()
 
 
-def test_retries_stop_after_three_and_name_every_node(tmp_path):
-    outcomes = [("boot_fail", f"n0{i}") for i in (1, 3, 5, 7)]
-    bindir = _fake_cluster(tmp_path, outcomes, _SINFO)
+def test_boot_failures_are_retried_with_no_count_limit(tmp_path):
+    """Nodes that routinely take longer to boot than the cluster allows used to
+    end the run after four attempts. Now only Max queue wait bounds the loop:
+    six failures in a row, and the seventh node runs the job."""
+    nodes = ["n01", "n03", "n05", "n07", "n08", "n09"]
+    outcomes = [("boot_fail", n) for n in nodes] + [("run", "n10")]
+    bindir = _fake_cluster(tmp_path, outcomes, None)
     out, args, _ = _run(tmp_path, bindir, "srun -p cpu")
 
-    assert len(args) == SRUN_BOOT_RETRIES + 1 == 4
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert len(args) == 7
+    assert "pipeline ran on the node" in out.stdout
+    assert "ERROR" not in out.stdout
+    assert _excluded(args[6]) == set(nodes)
+    assert ("node(s) n09 failed to boot — requesting another node in 0 s (retry 6; failed to boot so far: "
+            "n01,n03,n05,n07,n08,n09)") in out.stdout
+
+
+def test_when_every_fitting_node_has_failed_to_boot_they_are_tried_again(tmp_path):
+    """Excluding the failed nodes can leave nothing that fits, and Slurm then
+    refuses the request. That is not a reason to stop: the boot exclusions are
+    dropped — the user's own kept — and the run asks again."""
+    bindir = _fake_cluster(tmp_path, [("boot_fail", "n01"), ("unavailable", ""), ("run", "n01")], None)
+    out, args, _ = _run(tmp_path, bindir, "srun -p gpu --exclude=n09")
+
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert len(args) == 3
+    assert _excluded(args[1]) == {"n01", "n09"}
+    assert _excluded(args[2]) == {"n09"}
+    assert ("every node that can take this request has failed to boot at least once (n01) — "
+            "trying them again in 0 s") in out.stdout
+    assert "Slurm has no node that can take this request" not in out.stdout
+
+
+def test_a_refusal_after_the_boot_exclusions_are_dropped_still_ends_the_run(tmp_path):
+    """The reset happens once per refusal with boot exclusions in force: a
+    request Slurm refuses with none in force is wrong as written and is
+    reported, not retried for ever."""
+    bindir = _fake_cluster(tmp_path, [("boot_fail", "n01"), ("unavailable", ""), ("unavailable", "")], None)
+    out, args, _ = _run(tmp_path, bindir, "srun -p gpu")
     assert out.returncode != 0
-    assert "ERROR nodes failed to boot on all 4 attempts" in out.stdout
-    for node in ("n01", "n03", "n05", "n07"):
-        assert node in out.stdout.splitlines()[-1]
+    assert len(args) == 3
+    assert "Slurm has no node that can take this request" in out.stdout
+
+
+def test_max_queue_wait_bounds_boot_retries_that_each_fail_at_once(tmp_path):
+    """The per-attempt watchdog looks once a second, so attempts that fail
+    instantly never meet it; the check before each attempt is what stops them."""
+    bindir = _fake_cluster(tmp_path, [("boot_fail", f"n{i:02d}") for i in range(1, 30)], None)
+    out, args, _ = _run(tmp_path, bindir, "srun -p cpu", queue_wait_s=2, boot_retry_pause_s=1)
+
+    assert out.returncode == QUEUE_WAIT_EXIT, out.stdout + out.stderr
+    assert 2 <= len(args) <= 5, len(args)
+    assert "ERROR no node was granted within 2 s, this host's Max queue wait (failed to boot: n01" in out.stdout
+
+
+def test_stop_between_two_attempts_ends_the_loop(tmp_path):
+    """While the wrapper pauses before a retry no srun is running, so the
+    cancel channel (`kill -TERM $(cat <pidfile>)`) has to reach the wrapper
+    itself — otherwise Stop finds the previous srun gone and the loop asks
+    for another node."""
+    import time
+
+    bindir = _fake_cluster(tmp_path, [("boot_fail", "n01"), ("run", "n03")], None)
+    pidfile = tmp_path / "run.pid"
+    cmd = wrap_srun_launch("srun -p cpu", shlex.quote("echo pipeline ran on the node"),
+                           shlex.quote(str(pidfile)), shlex.quote(str(pidfile) + ".srun-err"),
+                           boot_retry_pause_s=20)
+    env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp_path)}
+    proc = subprocess.Popen(["sh", "-c", cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, env=env)
+    try:
+        state = bindir.parent / "state"
+        deadline = time.monotonic() + 20
+        srun_pid = ""
+        while time.monotonic() < deadline:
+            if (state / "pid1").exists():
+                srun_pid = (state / "pid1").read_text().strip()
+                held = pidfile.read_text().strip() if pidfile.exists() else ""
+                if held and held != srun_pid:
+                    break
+            time.sleep(0.05)
+        else:
+            pytest.fail("the pidfile never left the first attempt's srun")
+        assert pidfile.read_text().strip() == str(proc.pid)
+        os.kill(int(pidfile.read_text().strip()), 15)
+        proc.wait(timeout=10)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert not (state / "args2").exists(), "a second node was asked for after Stop"
 
 
 def test_the_user_s_own_exclusions_survive(tmp_path):

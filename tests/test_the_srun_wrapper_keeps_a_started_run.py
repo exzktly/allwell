@@ -82,6 +82,7 @@ def _cluster(tmp_path: Path, outcomes) -> Path:
 
 def _wrapped(tmp_path, bindir, launcher="srun -p cpu", **kw):
     pidfile = tmp_path / "run.pid"
+    kw.setdefault("boot_retry_pause_s", 0)
     cmd = wrap_srun_launch(launcher, shlex.quote(_INNER), shlex.quote(str(pidfile)),
                            shlex.quote(str(pidfile) + ".srun-err"), **kw)
     out = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True,
@@ -111,7 +112,7 @@ def test_a_node_that_fails_to_boot_before_the_job_starts_is_still_retried(tmp_pa
     out, calls, _ = _wrapped(tmp_path, bindir)
     assert calls == 2, out.stdout
     assert out.returncode == 0, out.stdout
-    assert "node(s) n01 failed to boot — requesting another node (retry 1 of 3)" in out.stdout
+    assert "node(s) n01 failed to boot — requesting another node in 0 s (retry 1; failed to boot so far: n01)" in out.stdout
 
 
 @pytest.mark.parametrize("compose", ["single", "driver"])

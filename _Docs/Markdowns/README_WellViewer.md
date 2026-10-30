@@ -1575,7 +1575,9 @@ archives and outputs are always written as per-well `.zip` archives. See
     go to the remote at a time, which bounds its disk. It has no effect on
     the GPU.
 - **CPU-only.** Forces TensorFlow (StarDist) to ignore the GPU. It does not
-  affect Cellpose.
+  affect Cellpose. A Cellpose run's `Worker N ready (…)` lines therefore name no
+  device: each worker's Cellpose says where it runs when its model loads
+  (`Cellpose cpsam on GPU cuda:0 (…)`).
 - **Cellpose and the GPU.** Cellpose runs on a GPU whenever the machine it
   runs on has one that its Torch install can use — on a cluster, the compute
   node your launcher's `--gres=gpu…` granted. The run log says so twice: a

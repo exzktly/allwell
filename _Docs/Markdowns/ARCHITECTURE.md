@@ -11832,7 +11832,9 @@ the workers on each GPU are counted for the network batch, `gpu_sharers`, which
 `export_gpu_sharers` hands to the pool in `GPU_SHARERS_ENV`, beside the run's worker count in
 `ALLWELL_POOL_WORKERS` (a worker's memory share, `nanowell_parallel.worker_memory_budget`);
 `--cpu_only` stays StarDist's switch because a remote host's `cpu_only` is
-written from the login node's TensorFlow, which is false on most clusters;
+written from the login node's TensorFlow, which is false on most clusters, and a
+label-free worker's `Worker N ready` line (`process_microscopy._worker_init`)
+names no device for it, since that device note is TensorFlow's;
 `tests/test_cellpose_uses_the_gpu.py`; and `slurm_cpu_shortfall`, a run-log
 warning when a Slurm job was given one or two of a larger node's CPUs — what a
 scheduler command with no `--cpus-per-task` gets — naming the cause and the

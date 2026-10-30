@@ -110,3 +110,59 @@ def test_the_old_crop_view_and_clear_selection_buttons_are_gone(page):  # noqa: 
     from review.features.nanowell.state import NanowellState
 
     assert not hasattr(NanowellState(), "crop_view")
+
+
+def _popout_texts(ctx, gid):
+    fig = ctx.widgets.get("_nw_popout_fig")
+    return [t.get_text() for t in list(fig.texts) + [t for ax in fig.axes for t in ax.texts] if t.get_gid() == gid] + [
+        ax.get_title() for ax in fig.axes if gid == "nw-crop-title" and ax.title.get_gid() == gid and ax.get_title()]
+
+
+def test_the_pop_out_has_its_own_controls_and_each_changes_what_it_draws(page, qtbot, known_crops):  # noqa: F811
+    st = _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    window = _press_pop_out(qtbot, page)
+    qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
+    names = ("_nw_popout_image_channel_cb", "_nw_popout_range_btn", "_nw_popout_cells_box",
+             "_nw_popout_metrics_box", "_nw_popout_labels_box", "_nw_popout_go_to_btn")
+    for name in names:
+        widget = page.widgets.get(name)
+        assert widget.window() is window and widget.isVisible(), name          # in the pop-out, not the page
+    # They start on the page's settings: the same channels as the strip's, the same range, the same boxes.
+    strip_cb, own_cb = page.widgets.get("_nw_strip_image_channel_cb"), page.widgets.get("_nw_popout_image_channel_cb")
+    assert [own_cb.itemText(i) for i in range(own_cb.count())] == [strip_cb.itemText(i) for i in range(strip_cb.count())]
+    assert page.widgets.get("_nw_popout_range_btn").text() == page.widgets.get("_nw_strip_range_btn").text()
+    assert page.widgets.get("_nw_popout_metrics_box").isChecked() and page.widgets.get("_nw_popout_labels_box").isChecked()
+    assert sorted(_popout_texts(page, "nw-crop-title")) == ["t_a", "t_c"]
+    assert len(_popout_texts(page, "nw-crop-grid-caption")) == 1
+    assert _popout_texts(page, "nw-crop-grid-metrics")
+    # Labels off: no timepoint over the crops and no caption; the title stays.
+    page.widgets.get("_nw_popout_labels_box").click()
+    assert st.popout_labels is False
+    assert _popout_texts(page, "nw-crop-title") == [] and _popout_texts(page, "nw-crop-grid-caption") == []
+    assert _popout_title(page) == ["A01 · q 1, r 0 over time · phase image"]
+    # Metrics off: no numbers under the crops — the page's one setting, so the Extremes box follows.
+    page.widgets.get("_nw_popout_metrics_box").click()
+    assert st.crop_metrics is False and not page.widgets.get("_nw_extremes_metrics_box").isChecked()
+    assert _popout_texts(page, "nw-crop-grid-metrics") == []
+    # Cells: the strip's box follows the pop-out's.
+    page.widgets.get("_nw_popout_cells_box").click()
+    assert st.crop_cells is True and page.widgets.get("_nw_strip_cells_box").isChecked()
+    # The display range typed from the pop-out's button reaches its crops and every Range button.
+    nwc.set_display_range(page, 2.0, 50.0)
+    qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
+    assert [im.get_clim() for im in _images(page, "_nw_popout_fig")] == [(2.0, 50.0), (2.0, 50.0)]
+    assert page.widgets.get("_nw_popout_range_btn").text() == "Range: 2–50"
+    page.widgets.get("_nw_popout_labels_box").click()
+    assert st.popout_labels is True and sorted(_popout_texts(page, "nw-crop-title")) == ["t_a", "t_c"]
+    window.hide()
+
+
+def test_the_pop_out_s_labels_setting_is_kept_with_the_page():
+    from review.features.nanowell.state import NanowellState
+
+    st = NanowellState()
+    st.popout_labels = False
+    again = NanowellState()
+    again.apply_config(st.to_config())
+    assert again.popout_labels is False

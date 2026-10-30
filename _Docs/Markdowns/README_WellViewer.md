@@ -5636,7 +5636,10 @@ the crop is cut from the lower-resolution montage instead, and the caption under
 timepoint with no crop says why. **Pop out**, above the strip, opens the crops large in a window of their own —
 one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a change
 between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
-it like any window. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted on every
+it like any window. Its own row of controls sets the crops where you look at them: the image channel, **Range**
+(the display range), **Cells**, **Metrics** (the measurements under each crop), **Labels** (each crop's timepoint
+and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
+Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted on every
 crop — the strip, the pop-out and the Extremes montage — as the Array view's *Cells* layer does on the array (the
 run keeps no cell outlines). It is one setting, also offered on the Extremes view, and kept with the page's
 settings. The caption counts the dots, and a well without a cell table is named there rather than shown as empty.

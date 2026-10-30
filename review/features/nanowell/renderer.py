@@ -648,7 +648,7 @@ def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, ima
 
 
 def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metrics: dict | None = None,
-                     image_channel: str = "", display_range=None) -> None:
+                     image_channel: str = "", display_range=None, labels: bool = True) -> None:
     """The selected nanowell at every timepoint, large: one panel per timepoint, filling the page's figure.
 
     Asked for: a larger view of a selected nanowell over time than the site detail's strip of small crops. Every
@@ -656,7 +656,8 @@ def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metr
     that appears, divides or fades reads as a change between panels, not as each crop stretched to its own range.
     *crops* is ``timepoint -> image_compute.Crop`` as the strip takes it, or ``None`` while they are cut; a
     timepoint without a crop says why in its panel, and the caption says where the crops were cut from. A
-    *display_range* chosen on the page replaces the percentile scale (:func:`crop_scale`)."""
+    *display_range* chosen on the page replaces the percentile scale (:func:`crop_scale`). *labels* off leaves out
+    each panel's timepoint and the caption; the title stays."""
     fig.clear()
     _bg, ink, faint = _inks(fig.add_subplot(111))
     fig.clear()
@@ -690,8 +691,9 @@ def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metr
         else:
             _ink(ax.text(0.5, 0.5, crop.note, ha="center", va="center", wrap=True, fontsize=8,
                          transform=ax.transAxes, color=faint, gid="nw-crop-missing"), muted=True)
-        _ink(ax.set_title(tp + (" (montage)" if mixed and crop.source == "montage" else ""), fontsize=9, color=ink,
-                          gid="nw-crop-title"))
+        if labels:
+            _ink(ax.set_title(tp + (" (montage)" if mixed and crop.source == "montage" else ""), fontsize=9,
+                              color=ink, gid="nw-crop-title"))
         said = (metrics or {}).get(tp, [])
         if said:
             width_pt = ax.get_position().width * fig.get_size_inches()[0] * 72
@@ -706,7 +708,9 @@ def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metr
               "cut from its owner tile, or the montage where marked" if sources else "none could be cut")
     caption = (f"{origin}; every panel on {scale.said()}"
                + "".join(f"; {note}" for note in sorted(notes)) + (f"; {_cells_clause(tally)}" if tally else ""))
-    _ink(fig.text(0.02, 0.015, caption, fontsize=8, color=faint, gid="nw-crop-grid-caption", wrap=True), muted=True)
+    if labels:
+        _ink(fig.text(0.02, 0.015, caption, fontsize=8, color=faint, gid="nw-crop-grid-caption", wrap=True),
+             muted=True)
 
 
 @dataclass(frozen=True)

@@ -1344,8 +1344,8 @@ def draw_popout(ctx) -> None:
             _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site, channel=image_channel),
                    failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
         render_crop_grid(fig, st.crops.get(site), site, cells=st.crop_cells,
-                         metrics=crop_metrics(st, [site], page_channel(ctx)).get(site), image_channel=image_channel,
-                         display_range=display_range(ctx))
+                         metrics=crop_metrics(st, [site], page_channel(ctx)).get(site) if st.crop_metrics else None,
+                         image_channel=image_channel, display_range=display_range(ctx), labels=st.popout_labels)
     canvas.draw_idle()
 
 
@@ -1648,9 +1648,19 @@ def set_image_channel(ctx, channel: str) -> None:
     redraw(ctx)
 
 
+def set_popout_labels(ctx, on: bool) -> None:
+    """Write the pop-out's timepoint over each crop and its caption, or leave the crops bare."""
+    st = _state(ctx)
+    if st is None or st.popout_labels == bool(on):
+        return
+    st.popout_labels = bool(on)
+    _save_soon(ctx)
+    draw_popout(ctx)
+
+
 def set_crop_metrics(ctx, on: bool) -> None:
-    """Write the numbers on the Extremes montage's crops (each one's fold change and metrics line), or leave them
-    bare."""
+    """Write the numbers on the Extremes montage's crops (each one's fold change and metrics line) and under the
+    pop-out's, or leave them bare."""
     st = _state(ctx)
     if st is None or st.crop_metrics == bool(on):
         return

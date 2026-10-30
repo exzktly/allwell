@@ -143,6 +143,8 @@ class NanowellState:
     #: The numbers written on each crop of the Extremes montage (its fold change and its metrics line); off leaves the
     #: crops bare, the row labels and the caption still giving the ranking.
     crop_metrics: bool = True
+    #: Whether the pop-out writes each crop's timepoint over it and its caption under the figure.
+    popout_labels: bool = True
     #: The **Display range** of each image channel, ``channel key -> (low, high)`` in the raw image's units
     #: (``controller.display_key``): the window every picture of that channel on the page is drawn with — the crop
     #: strip, the pop-out, the Extremes montage and the Array view's full resolution. The page's own and kept with
@@ -244,7 +246,7 @@ class NanowellState:
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
                 "extremes_n": self.extremes_n, "extremes_tps": list(self.extremes_tps), "crop_cells": self.crop_cells,
                 "channel": self.channel, "image_channel": self.image_channel,
-                "crop_metrics": self.crop_metrics,
+                "crop_metrics": self.crop_metrics, "popout_labels": self.popout_labels,
                 "display_ranges": {k: [lo, hi] for k, (lo, hi) in self.display_ranges.items()},
                 "subset": self.subset.to_config(), "layers": self.layers.to_config(),
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
@@ -277,6 +279,7 @@ class NanowellState:
                            and 1 <= count <= EXTREMES_MAX_N else fresh.extremes_n)
         self.crop_cells = config.get("crop_cells") is True
         self.crop_metrics = config.get("crop_metrics") is not False
+        self.popout_labels = config.get("popout_labels") is not False
         self.display_ranges = _display_ranges_from(config.get("display_ranges"))
         tps = config.get("extremes_tps")
         self.extremes_tps = [str(tp) for tp in tps if isinstance(tp, str)] if isinstance(tps, list) else []

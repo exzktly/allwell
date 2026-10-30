@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from review.features.nanowell import moving_compute
 from review.features.nanowell.series_compute import exclusion_reason
 from review.features.nanowell.summary_compute import LOG_METRICS, group_summary, well_summary
 
@@ -78,6 +79,9 @@ _REASON_LABELS = {
     "fewer than three timepoints with cells and a time": "< 3 timepoints with cells",
     "no count at baseline": "no count at baseline",
     COHORT_REASON: "outside the fixed cohort",
+    moving_compute.EARLY_REASON: "before the first full moving window",
+    moving_compute.GAP_REASON: "moving window has a gap",
+    moving_compute.IDENTITY_REASON: "moving window not joinable",
 }
 
 
@@ -91,6 +95,12 @@ def reason_label(reason: str) -> str:
     if reason.startswith("baseline "):
         return "baseline " + _REASON_LABELS[reason[len("baseline "):]]
     raise KeyError(reason)
+
+
+def moving_window_for(metric: str, window: int) -> int:
+    """The moving average's window a figure of *metric* uses: *window* clamped (``moving_compute``), and 0 for a
+    per-nanowell metric, which has no values over time to average. Batch Export writes it beside each summary row."""
+    return 0 if metric in PER_NANOWELL else moving_compute.clamp_window(window)
 
 
 def metric_column(metric: str, channel: str | None) -> str:
@@ -230,10 +240,11 @@ def fixed_cohort(frame: pd.DataFrame, column: str, reasons: pd.Series) -> tuple[
 
 
 def wells_summary(metrics: pd.DataFrame, wells, metric: str, *, channels=(), channel: str | None = None,
-                  cohort: bool = False, responding_above: float | None = None) -> pd.DataFrame:
+                  cohort: bool = False, responding_above: float | None = None, moving: int = 0) -> pd.DataFrame:
     """``summary_compute.well_summary`` for *wells*, prepared exactly as the Distribution view prepares it: a
     per-nanowell metric at each well's own first timepoint, labelled :data:`PER_NANOWELL_LABEL`, and the fixed
-    cohort applied when *cohort* (its exclusions then counted under :data:`COHORT_REASON`). Batch Export's
+    cohort applied when *cohort* (its exclusions then counted under :data:`COHORT_REASON`), then the moving average
+    over *moving* timepoints (``moving_compute``; 0 is off). Batch Export's
     Nanowells mode writes this beside each figure (tracker I4), so the CSV's numbers are the figure's.
     *responding_above* is the user's cut for the metric; without one the fraction responding is undefined."""
     column = metric_column(metric, channel)
@@ -242,20 +253,25 @@ def wells_summary(metrics: pd.DataFrame, wells, metric: str, *, channels=(), cha
     if metric in PER_NANOWELL:
         first = frame["tp_order"] == 0
         frame, reasons = frame[first].assign(timepoint=PER_NANOWELL_LABEL), reasons[first]
-    elif cohort:
-        frame, reasons, _kept, _sites = fixed_cohort(frame, column, reasons)
+    else:
+        if cohort:
+            frame, reasons, _kept, _sites = fixed_cohort(frame, column, reasons)
+        frame, reasons = moving_compute.apply(frame, column, reasons, moving)
     return well_summary(frame, column, channels, reasons=reasons, responding_above=responding_above)
 
 
 def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), channel: str | None = None,
                        axis: str = TIME, groups: dict, timepoint: str = "", control: str = "",
                        time_source: str | None = None, baseline: str = "earliest",
-                       cohort: bool = False, responding_above: float | None = None) -> DistributionModel:
+                       cohort: bool = False, responding_above: float | None = None,
+                       moving: int = 0) -> DistributionModel:
     """The Distribution view for *groups* (``name -> wells``, as ``controller.replicate_groups`` gives).
 
     A group of one well is that well; a group of several is a replicate set. Only the wells named in
     *groups* are drawn. *responding_above* is the cut the user set for this metric (tracker I9): the footer
-    states each group's fraction responding at it, or says that no cut is set.
+    states each group's fraction responding at it, or says that no cut is set. *moving* is the moving average's
+    window in timepoints (``moving_compute``; 0 is off), applied after the fixed cohort, which is decided on the
+    measured values; a per-nanowell metric has no values over time and ignores it.
     """
     column = metric_column(metric, channel)
     label = METRICS[metric][0] + (f" · {channel}" if METRICS[metric][1] else "")
@@ -274,6 +290,9 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
         frame, reasons, kept, sites = fixed_cohort(frame, column, reasons)
         model.notes.append(f"Fixed cohort: only the {kept:,} of {sites:,} nanowells with a value at every timepoint "
                            "of their well are used; the rest are counted as outside the fixed cohort.")
+    if moving_compute.is_on(moving) and metric not in PER_NANOWELL:
+        frame, reasons = moving_compute.apply(frame, column, reasons, moving)
+        model.notes.append(moving_compute.describe(moving) + " The rest are counted among the exclusions.")
     if axis == TIME:
         _time_panels(model, frame, column, reasons, groups, channels)
     else:

@@ -95,7 +95,7 @@ def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(pa
     _loaded(qtbot, page)
     seg = page.widgets.get("_nw_view_seg")
     assert [seg.segmentText(i) for i in range(seg.count())] == ["Distribution", "Array", "Trajectories", "Position",
-                                                                    "Extremes", "Identity"]
+                                                                    "Extremes", "Identity", "Statistics"]
     assert _visible_scopes(page) == {"Metric", "Along x", "Baseline"}
     _choose_view(page, "array")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint"}

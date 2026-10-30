@@ -35,13 +35,16 @@ from review.features.nanowell.display_range_view import (
 from review.features.nanowell.series_compute import baseline_at, baseline_timepoint
 from review.features.nanowell.subset_view import build_subset_control
 from review.features.nanowell.state import EXTREMES_MAX_N
+from review.features.nanowell.statistics_view import (
+    build_statistics_controls, fill_control_combo, refresh_statistics_controls,
+)
 from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
 from widgets.owned_action import owned_action
 
 #: The views the page draws, in the order the switch lists them.
 VIEWS = (("distribution", "Distribution"), ("array", "Array"), ("trajectories", "Trajectories"),
-         ("position", "Position"), ("extremes", "Extremes"), ("identity", "Identity"))
+         ("position", "Position"), ("extremes", "Extremes"), ("identity", "Identity"), ("statistics", "Statistics"))
 #: The views that show one well, and so offer the well picker and the timepoint slider.
 ONE_WELL_VIEWS = ("array", "identity")
 #: The views that show one well at one timepoint chosen from a list: the well picker and the timepoint combo.
@@ -82,7 +85,10 @@ _VIEW_TIP = ("Distribution: one dot per nanowell, per well and timepoint.\n"
              "Extremes: one well's nanowells with the largest and the smallest fold change of the Metric at the\n"
              "Timepoint, each a row of its crops over every timepoint. Click a row for its detail.\n"
              "Identity: whether one well's addresses name the same nanowells at the Timepoint as at its reference\n"
-             "timepoint — the identity check's distances, the montages blinked or side by side, and its registration.")
+             "timepoint — the identity check's distances, the montages blinked or side by side, and its registration.\n"
+             "Statistics: test whether wells (their nanowells as values) or groups (their wells' medians) differ at the\n"
+             "Timepoint — t-tests, Mann-Whitney, Kolmogorov-Smirnov or Dunnett, with an omnibus, adjusted p and\n"
+             "effect sizes.")
 _EXTREMES_TIP = ("How many nanowells each block shows: this many with the largest fold change and this many with the "
                  "smallest. A well with fewer shares them between the blocks, never showing one twice.")
 _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their well, so each line over time follows "
@@ -234,6 +240,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
 
     array_controls = _build_array_controls(ctx, band)
     identity = build_identity_controls(ctx, band)
+    statistics = build_statistics_controls(ctx, band)
 
     # The Plotting tabs' timepoint control (Distribution, Heat Map): a LabeledComboBox painting its own
     # "Timepoint:" prefix, the timepoints in time order and named by their hours. One control for every view that
@@ -354,7 +361,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
 
     controls = (metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box,
                 responding_edit, extremes_spin, extremes_cells, extremes_numbers, *identity.signalling, *start.signalling,
-                *array_controls.signalling)
+                *array_controls.signalling, *statistics.signalling)
 
     def refresh_controls() -> None:
         channel = nwc.page_channel(ctx)
@@ -387,13 +394,12 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
                 worst = worst_verdict(st.data, well) if view == "identity" else None
                 well_cb.addItem(f"{well} · {worst.replace('_', ' ')}" if worst else well, well)
             _select(well_cb, nwc.page_well(ctx))
-            control_cb.clear()
-            control_cb.addItem("— none", "")
-            for name in nwc.page_groups(ctx) if st.data else {}:
-                control_cb.addItem(name, name)
-            _select(control_cb, st.control)
+            stats_view = view == "statistics"
+            fill_control_combo(ctx, st, control_cb, on_statistics=stats_view, tip=_CONTROL_TIP)
+            refresh_statistics_controls(st, statistics, stats_view)
             distribution = view == "distribution"
             wells_axis = distribution and (st.axis == "wells" or per_nanowell)
+            compares = wells_axis or stats_view             # the views that compare wells at one timepoint
             array = view == "array"
             # Shown on every view that has a metric at all, and only greyed on the Array view when no layer draws
             # it: hidden, they came and went with the Layers menu and every control after them jumped sideways.
@@ -410,14 +416,14 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
             # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
             # applies to what it draws, so its box stays where it can be turned off.
-            grp_cohort.setVisible((distribution and not per_nanowell) or view == "trajectories")
-            grp_control.setVisible(wells_axis)
+            grp_cohort.setVisible(((distribution or stats_view) and not per_nanowell) or view == "trajectories")
+            grp_control.setVisible(compares)
             column = nwc.drawn_metric_column(ctx)
             cut = st.thresholds.get(column) if column else None
             responding_edit.setText("" if cut is None else format_cut(cut))
             grp_responding.setVisible(distribution)
-            grp_tp.setVisible((wells_axis and not per_nanowell) or view == "position" or view in RANKED_WELL_VIEWS
-                              or view in ONE_WELL_VIEWS)
+            grp_tp.setVisible((compares and not per_nanowell) or view == "position"
+                              or view in RANKED_WELL_VIEWS or view in ONE_WELL_VIEWS)
             grp_well.setVisible(view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS)
             exclusion.refresh(st, well_cb)
             extremes_spin.setValue(st.extremes_n)

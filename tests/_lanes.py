@@ -229,6 +229,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_segment_on.py": "What the nanowell count's segmenter is given: the tile as imaged, or the rim-divided tile …",
     "test_nanowell_segmenter_view.py": "What the segmenter is shown, written beside each nanowell's count",
     "test_nanowell_shows_the_rail_plate.py": "Opening the Nanowells page shows the rail plate",
+    "test_nanowell_statistics.py": "The Nanowells page's Statistics view: wells or groups compared by t-test, Mann-Whitney, KS or Dunnett",
     "test_nanowell_subset.py": "The Nanowells page's *Subset*: any number of conditions — starting cells, a metric at a …",
     "test_nanowell_synth.py": "Ground-truth geometry is checked independently of the fitting code",
     "test_nanowell_timepoint_hours.py": "A nanowell run's per-cell CSV carries ``timepoint_hours``, as the per-field path's does",

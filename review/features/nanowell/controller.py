@@ -22,7 +22,7 @@ from domain.nanowell_roster import mixed_rules_note
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
-    METRICS, PER_NANOWELL, TIME, distribution_model, match_channel, metric_column,
+    METRICS, PER_NANOWELL, TIME, WELLS, distribution_model, match_channel, metric_column,
 )
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, one_to_one
@@ -30,6 +30,8 @@ from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
 from review.features.nanowell import subset_compute as ss
+from review.features.nanowell import statistics_compute as sc
+from review.features.nanowell._statistics_render import render_statistics
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
     ArrayDrawn, render_array, render_crop_grid, render_crop_strip, render_distribution, render_extremes, render_message,
@@ -394,8 +396,10 @@ def redraw(ctx) -> None:
         well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
-        subset=st.subset, **array)
-    if isinstance(model, ArrayDrawn) or st.view == "array":
+        subset=st.subset, stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st), **array)
+    if st.view == "statistics":
+        pass                                             # its result is kept in ``st.stats_cache``; nothing to click
+    elif isinstance(model, ArrayDrawn) or st.view == "array":
         st.drawn = model
         if model is not None and model.rendered is not None:
             _want_tiles(ctx, {(tile, None) for tile in model.rendered.unread} | set(model.rendered.wants))
@@ -526,8 +530,11 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
               note: str = "", tableless=(), selected=(), responding_above: float | None = None,
               layers: ArrayLayers | None = None, image=None, image_note: str = "",
-              region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None) -> tuple[object, object]:
-    """Draw *view* (Distribution, Array, Trajectories, Position or Identity) into *fig*: ``(hit map, model)``.
+              region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
+              stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
+              stats_cache: dict | None = None) -> tuple[object, object]:
+    """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
+    model)``.
 
     **The one composition of each view**, called by the page and by Batch Export's Nanowells mode (tracker I4),
     so a saved batch figure is the page's figure for the same choices — the notes, the exclusions and the
@@ -544,6 +551,12 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     (``_identity_controller.draw_identity``), with *identity* the page's inputs to it — its mode, the sidecar and
     montages it holds — or, without them, the distance map from the sidecar on disk; its model is the
     ``_identity_render.IdentityDrawn``. It has no metric, so the metric, Subset and grouping are not used.
+
+    The Statistics view tests the samples the Distribution view draws *Along x: Wells* at *timepoint*
+    (:func:`statistics_result`): the wells' nanowells (*stats_unit* ``nanowells``) or the groups' well medians
+    (``wells``), by *stats_test*, every pair or each against *control*. Its model is the
+    ``statistics_compute.StatisticsResult``; *stats_cache*, a dict the caller keeps, spares re-running the tests
+    when nothing they depend on changed.
     """
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
@@ -591,6 +604,17 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                                 f"{', '.join(missing)}."]))
         render_position(fig, series, label=_label(metric, channel), timepoint=timepoint, note=note)
         return None, None
+    if view == "statistics":
+        model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=WELLS,
+                                   groups=groups, timepoint=timepoint, time_source=data.time_source,
+                                   baseline=baseline, cohort=cohort)
+        result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control,
+                                   cache=stats_cache)
+        if tableless:
+            note = " ".join(filter(None, [f"Selected without a nanowell table, so not compared: "
+                                          f"{', '.join(tableless)}.", note]))
+        render_statistics(fig, result, note=note)
+        return None, result
     model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above)
@@ -606,6 +630,40 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if note:
         model.notes.insert(0, note)
     return render_distribution(fig, model, selected=selected), model
+
+
+#: The Distribution model's notes the Statistics view carries: what changes which values were compared (the fixed
+#: cohort) and how the times were read. The rest describe the beeswarm (packing, the joined line, the fraction
+#: responding) and say nothing about a test.
+_STATS_NOTES = ("Fixed cohort", "Times are")
+
+
+def statistics_result(model, groups: dict, *, unit: str, test: str, control: str = "",
+                      cache: dict | None = None) -> sc.StatisticsResult:
+    """The Statistics view's result for a Distribution *model* drawn *Along x: Wells*: its samples of *unit*
+    (``statistics_compute.samples_from_model``) compared by *test*.
+
+    *cache*, when given, holds the last result under everything it was computed from — the samples' names and
+    values, the unit, test, control, metric and timepoint — and that result is returned when they all match, so a
+    redraw for a theme or a resize does not run the tests and the bootstrap again. Any change to the values (a
+    Subset, the cohort, the baseline, an excluded well) changes the key."""
+    samples = sc.samples_from_model(model, groups, unit)
+    key = (unit, test, control, model.column, model.timepoint,
+           tuple((s.name, s.wells, s.values.tobytes()) for s in samples))
+    if cache is not None and cache.get("key") == key:
+        return cache["result"]
+    result = sc.compare(samples, test, control=control, unit=unit, label=model.label, timepoint=model.timepoint)
+    result.notes = [n for n in model.notes if n.startswith(_STATS_NOTES)]
+    if cache is not None:
+        cache.clear()
+        cache.update(key=key, result=result)
+    return result
+
+
+def _stats_cache(st) -> dict:
+    if not isinstance(st.stats_cache, dict):
+        st.stats_cache = {}
+    return st.stats_cache
 
 
 def _label(metric: str, channel: str | None) -> str:
@@ -654,7 +712,7 @@ def shown_timepoint(ctx) -> tuple[list, str]:
         tps = list(st.data.timepoints(page_well(ctx)))
         return tps, st.timepoint if st.timepoint in tps else (tps[-1] if tps else "")
     tps = list(st.data.timepoints())
-    if st.view == "distribution" and st.axis == "wells":
+    if (st.view == "distribution" and st.axis == "wells") or st.view == "statistics":
         # The figure draws the drawn wells' timepoints, so the combo offers those and names the one drawn — not
         # the dataset's latest, which the drawn wells may not have (roll-up review X17).
         have = {tp for wells in page_groups(ctx).values() for well in wells for tp in st.data.timepoints(well)}
@@ -1672,6 +1730,18 @@ def set_crop_metrics(ctx, on: bool) -> None:
 def set_extremes_n(ctx, count: int) -> None:
     """How many nanowells each of the Extremes view's two blocks shows."""
     _set(ctx, "extremes_n", ec.clamp_n(count))
+
+
+def set_stats_unit(ctx, unit: str) -> None:
+    """Compare wells (their nanowells the values) or groups (their wells' medians the values) on Statistics."""
+    if unit in sc.UNITS:
+        _set(ctx, "stats_unit", unit)
+
+
+def set_stats_test(ctx, test: str) -> None:
+    """The test the Statistics view runs (``statistics_compute.TESTS``)."""
+    if test in sc.TEST_KEYS:
+        _set(ctx, "stats_test", test)
 
 
 def set_cohort(ctx, on: bool) -> None:

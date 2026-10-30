@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import sys
 import zipfile
+import threading
 from dataclasses import replace
 
 import numpy as np
@@ -55,22 +56,22 @@ def _t1_misses_its_square_and_its_centre_is_a_step_off(monkeypatch):
     """At T1 the run does not accept the square (as under a bubble or a poor focus) and its fitted array centre is
     one ``a1`` step off, so T1 is anchored on the array centre a site away from where T0 put its origin."""
     real_detect, real_locate, real_find = nd.detect_sites, nr.locate_timepoint, nr._find_square
-    current = {"tp": None}
+    current = threading.local()           # per thread: run_well locates timepoints on several at once
 
     def detect(*args, **kwargs):
         fit = real_detect(*args, **kwargs)
-        if current["tp"] == "T1" and fit.ok and fit.boundary_centre_um is not None:
+        if getattr(current, "tp", None) == "T1" and fit.ok and fit.boundary_centre_um is not None:
             fit = replace(fit, boundary_centre_um=tuple(np.asarray(fit.boundary_centre_um) + np.asarray(fit.fit.a1)))
         return fit
 
     def find(montage, detection, *args, **kwargs):
         candidate, fiducial, folded = real_find(montage, detection, *args, **kwargs)
-        if current["tp"] == "T1":
+        if getattr(current, "tp", None) == "T1":
             return None, {**fiducial, "position_um": None, "reason": "refused for the test"}, None
         return candidate, fiducial, folded
 
     def locate(tp, *args, **kwargs):
-        current["tp"] = tp
+        current.tp = tp
         return real_locate(tp, *args, **kwargs)
 
     monkeypatch.setattr(nd, "detect_sites", detect)

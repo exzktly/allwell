@@ -20,6 +20,7 @@ import pytest
 import pipeline.nanowell_lattice as lattice
 import pipeline.suspend as _suspend
 import process_microscopy as pm
+import threading
 from pipeline import nanowell_measure as nm
 from pipeline import nanowell_run as nr
 from tests._nanowell_run_fixture import build_well, threshold_segmenter
@@ -33,14 +34,14 @@ CLICK_ERROR_UM = (8.0, -6.0)
 def _run(monkeypatch, plate, blind=frozenset({("B02", "0h"), ("B02", "24h")})):
     """``main`` on *plate*, with every (well, timepoint) in *blind* given no square and no boundary."""
     real_locate, real_resolve = nr.locate_timepoint, lattice.resolve_origin
-    state = {"blind": False}
+    state = threading.local()             # per thread: run_well locates timepoints on several at once
 
     def locate(tp, record, well, *args, **kwargs):
-        state["blind"] = (well, tp) in blind
+        state.blind = (well, tp) in blind
         return real_locate(tp, record, well, *args, **kwargs)
 
     def resolve(fit, *, fiducial=None, array_centre=None, plate_rigid=None, **rest):
-        if state["blind"]:
+        if getattr(state, "blind", False):
             fiducial = array_centre = None
         return real_resolve(fit, fiducial=fiducial, array_centre=array_centre, plate_rigid=plate_rigid, **rest)
 

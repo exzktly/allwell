@@ -491,7 +491,10 @@ import sys
 
 _FROM = os.environ.get("AW_NODE_SEGMENTER_FROM")
 _BLIND = tuple(os.environ.get("AW_NODE_BLIND", "").split(":")) if os.environ.get("AW_NODE_BLIND") else None
-_STATE = {"blind": False}
+# Per thread: a nanowell worker locates its timepoints on several threads at once, and locate_timepoint and the
+# resolve_origin it calls run on one thread, so a flag shared by the process would blind whichever timepoint
+# resolves next rather than the one asked for.
+_STATE = __import__("threading").local()
 
 
 def _segmenter(module):
@@ -505,7 +508,7 @@ def _locate(module):
     real = module.locate_timepoint
 
     def locate(tp, record, well, *args, **kwargs):
-        _STATE["blind"] = (well, tp) == _BLIND
+        _STATE.blind = (well, tp) == _BLIND
         return real(tp, record, well, *args, **kwargs)
 
     module.locate_timepoint = locate
@@ -515,7 +518,7 @@ def _resolve(module):
     real = module.resolve_origin
 
     def resolve(fit, *, fiducial=None, array_centre=None, plate_rigid=None, **rest):
-        if _STATE["blind"]:
+        if getattr(_STATE, "blind", False):
             fiducial = array_centre = None
         return real(fit, fiducial=fiducial, array_centre=array_centre, plate_rigid=plate_rigid, **rest)
 

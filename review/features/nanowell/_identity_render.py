@@ -63,6 +63,8 @@ class IdentityDrawn:
     zoomable: tuple = ()                              # the names in ``axes`` a reader zooms and pans
     links: tuple = ()                                 # groups of those names that move together
     home: dict = field(default_factory=dict)          # name -> (xlim, ylim) as drawn: the full view
+    focus: object = None                              # identity_focus_compute.FocusMarks: the nanowell gone to
+    focus_centres: dict = field(default_factory=dict)  # name -> (x, y) the zoom centres on (``_identity_zoom``)
 
 
 def title_text(pair) -> str:
@@ -406,6 +408,44 @@ def show_hover(drawn: IdentityDrawn, target) -> bool:
             said += f" · not addressed at {drawn.pair.reference}"
         hover["label"].set_text(said)
     return True
+
+
+# ── going to one nanowell ────────────────────────────────────────────────────
+#: How large the ring around a nanowell gone to is against the pitch: wider than the hover's, so both read at once.
+_FOCUS_RING = 0.6
+
+
+def draw_focus(fig, drawn: IdentityDrawn, marks, centres: dict) -> None:
+    """Mark the nanowell the reader went to (``identity_focus_compute.FocusMarks``) on *drawn* and say what was found
+    at the top right. A ring where each timepoint puts the address on its own frame — the reference's on the Distance
+    map and Blink, each side's own on *Side by side* — and a cross where the other timepoint's address of that name
+    lands: on the Distance map and Blink the compared site mapped into the reference's frame, on *Side by side* the
+    registration's prediction. The two coincide when the address names the same nanowell."""
+    from matplotlib.patches import Circle
+
+    from ui.theme import Colors
+
+    drawn.focus, drawn.focus_centres = marks, dict(centres)
+    _bg, ink, _muted = _inks(SimpleNamespace(figure=fig))
+    said = marks.text if centres or not marks.found else f"{marks.text} Not drawn here: Diagnostics shows the square."
+    _ink(fig.text(0.97, 0.925, said, fontsize=8, ha="right", va="center", color=ink, gid="nw-identity-focus"))
+    radius = _FOCUS_RING * float(marks.pitch or 1.0)
+    if drawn.mode in ("distance", "blink"):
+        rings, crosses = [("map", marks.ref_xy)], [("map", marks.other_in_ref)]
+    elif drawn.mode == "sides":
+        rings, crosses = [("reference", marks.ref_xy), ("compared", marks.other_xy)], [("compared", marks.predicted_xy)]
+    else:
+        return
+    for name, xy in rings:
+        ax = drawn.axes.get(name)
+        if ax is not None and xy is not None:
+            ax.add_patch(Circle(xy, radius, fill=False, edgecolor=Colors.heatmap_selection, linewidth=2.2, zorder=7,
+                                gid="nw-identity-focus-ring"))
+    for name, xy in crosses:
+        ax = drawn.axes.get(name)
+        if ax is not None and xy is not None:
+            ax.plot([xy[0]], [xy[1]], marker="x", markersize=12, mew=2.2, color=Colors.accent, zorder=8,
+                    gid="nw-identity-focus-cross")
 
 
 def render_identity_message(fig, text: str) -> None:

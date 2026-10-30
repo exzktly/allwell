@@ -5766,6 +5766,14 @@ Every Compare mode zooms with the scroll wheel and pans by dragging. Side by sid
 Diagnostics' two images. The zoom stays while the same well, timepoint and mode are shown and resets when any of them
 changes.
 
+To look at one nanowell, type its address in the **Nanowell** box and press Enter — as the addresses are written on
+the images (`q,r`, for example `-2,3`) or as a ring label such as `3.7`. The Distance map, Blink and Side by side zoom
+onto it and stay there as you change the timepoint, the well or the mode, and a sentence at the top right says how
+far its address landed from itself. A ring marks where the reference puts the nanowell; a cross marks where the later
+timepoint's nanowell of the same name lands. On a correct timepoint they sit together; when the addresses name other
+nanowells, the cross sits on a neighbour. Clear the box to go back to the whole view. The box is greyed on
+Diagnostics, which shows the central square rather than the array.
+
 To check a dataset analysed earlier without analysing it again, run
 `python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well): it writes
 `nanowells/<well>_identity.json` beside the tables, prints each well's verdicts, and Review picks them up the next

@@ -894,3 +894,147 @@ def test_the_page_keeps_the_zoom_when_the_montages_arrive_and_starts_another_wel
 
 def dataset_out(ctx):
     return ctx.state.feature_slice("nanowell").data.out_dir
+
+
+# ── going to one nanowell ────────────────────────────────────────────────────
+def test_an_address_is_read_as_the_page_writes_it_and_anything_else_is_refused_with_what_is_accepted():
+    from review.features.nanowell import identity_focus_compute as fc
+
+    for text in ("-2,3", " -2, 3 ", "(-2,3)", "-2 3"):
+        assert fc.parse_address(text) == (-2, 3), text
+    # A ring label, by the run's own numbering: ring 1's first place is east of the centre, the next one on.
+    assert fc.parse_address("0.0") == (0, 0)
+    assert fc.parse_address("1.0") == (1, 0) and fc.parse_address("1.1") == (0, 1)
+    assert fc.parse_address("1.7", "square") == (1, -1)
+    with pytest.raises(ValueError, match="ring 1 has no place 6"):
+        fc.parse_address("1.6")                                            # a hex ring 1 has six places, 0-5
+    with pytest.raises(ValueError, match=r"'B3' is not a nanowell address: type q,r"):
+        fc.parse_address("B3")
+    with pytest.raises(ValueError):
+        fc.parse_address("2,3,4")
+
+
+def test_a_focused_view_keeps_the_full_view_s_shape_and_direction_and_never_widens_past_it():
+    from review.features.nanowell import identity_focus_compute as fc
+
+    # The full view is 100 wide and 80 tall, y down: half 10 makes the shorter side 20, a quarter of it.
+    assert fc.focus_limits((0.0, 100.0), (80.0, 0.0), (50.0, 40.0), 10.0) == ((37.5, 62.5), (50.0, 30.0))
+    assert fc.focus_limits((0.0, 100.0), (80.0, 0.0), (50.0, 40.0), 500.0) == ((0.0, 100.0), (80.0, 0.0))
+
+
+def _centre(ax):
+    (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+    return (x0 + x1) / 2, (y0 + y1) / 2
+
+
+def _focus_draw(dataset, well, text, mode="distance", **kw):
+    from types import SimpleNamespace
+
+    from review.features.nanowell import _identity_zoom as izoom
+    from review.features.nanowell.state import NanowellState
+
+    fig, drawn = _draw(dataset, well, mode=mode, focus=text, **kw)
+    st = NanowellState()
+    izoom.restore(st, drawn)
+    return fig, drawn, st, SimpleNamespace(widgets=_Widgets())
+
+
+@pytest.mark.parametrize("well, lands_on", [("A01", (0, 0)), ("A02", (-1, 0))])
+def test_the_distance_map_goes_to_the_address_and_crosses_where_the_compared_one_of_that_name_lands(
+        dataset, well, lands_on):
+    # A02's compared timepoint calls every nanowell by its neighbour's name (q + 1), so its 0,0 is the reference's
+    # -1,0: the ring (the reference's 0,0) and the cross (the compared 0,0 mapped back) are a spacing apart there.
+    _out, _data, ref, _other = dataset
+    fig, drawn, st, _ctx = _focus_draw(dataset, well, "0,0")
+    ax = drawn.axes["map"]
+    [ring] = _by_gid(ax, "nw-identity-focus-ring")
+    [cross] = _by_gid(ax, "nw-identity-focus-cross")
+    assert ring.center == pytest.approx(ref.sites[(0, 0)])
+    assert (cross.get_xdata()[0], cross.get_ydata()[0]) == pytest.approx(ref.sites[lands_on], abs=0.1 * ref.pitch)
+    # The view is centred on it, about nine nanowells across its shorter side, and that zoom is kept.
+    assert _centre(ax) == pytest.approx(ref.sites[(0, 0)])
+    (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+    assert min(abs(x1 - x0), abs(y1 - y0)) == pytest.approx(8 * ref.pitch)
+    assert st.identity_zoom["map"] == (ax.get_xlim(), ax.get_ylim())
+    [said] = _texts(fig, "nw-identity-focus")
+    distance = next(d for q, r, d in drawn.pair.entry["distances"] if (q, r) == (0, 0))
+    assert said == f"Nanowell 0,0: lands {distance:.2f} spacing from itself at T1."
+
+
+def test_side_by_side_rings_the_address_on_each_montage_and_crosses_the_registration_s_prediction(dataset):
+    _out, _data, ref, other = dataset
+    _fig, drawn, _st, _ctx = _focus_draw(dataset, "A01", "1,0", mode="sides")
+    left, right = drawn.axes["reference"], drawn.axes["compared"]
+    [ring_ref] = _by_gid(left, "nw-identity-focus-ring")
+    [ring_cmp] = _by_gid(right, "nw-identity-focus-ring")
+    [cross] = _by_gid(right, "nw-identity-focus-cross")
+    assert ring_ref.center == pytest.approx(ref.sites[(1, 0)])
+    assert ring_cmp.center == pytest.approx(other.sites[(1, 0)])
+    predicted = drawn.pair.forward([ref.sites[(1, 0)]])[0]
+    assert (cross.get_xdata()[0], cross.get_ydata()[0]) == pytest.approx(tuple(predicted))
+    # Linked: both centre on the reference's site, wide enough to hold the compared one too though the plate moved.
+    assert _centre(left) == _centre(right) == pytest.approx(ref.sites[(1, 0)])
+    gap = float(np.hypot(*np.subtract(other.sites[(1, 0)], ref.sites[(1, 0)])))
+    (x0, x1), (y0, y1) = left.get_xlim(), left.get_ylim()
+    assert min(abs(x1 - x0), abs(y1 - y0)) == pytest.approx(2 * max(4 * ref.pitch, gap + ref.pitch))
+
+
+def test_blink_goes_to_the_address_and_its_marks_stay_through_the_frames(dataset):
+    _out, _data, ref, _other = dataset
+    _fig, drawn, _st, _ctx = _focus_draw(dataset, "A01", "0,1", mode="blink", images=_montages(dataset, "A01"))
+    ax = drawn.axes["map"]
+    assert _centre(ax) == pytest.approx(ref.sites[(0, 1)])
+    [ring] = _by_gid(ax, "nw-identity-focus-ring")
+    ir.show_frame(drawn, 1)
+    assert ring.get_visible() and _centre(ax) == pytest.approx(ref.sites[(0, 1)])
+
+
+def test_an_address_nobody_holds_or_cannot_read_is_said_and_the_view_stays_whole(dataset):
+    for text, said in (("40,40", "Nanowell 40,40 is not addressed at T0 or at T1."),
+                       ("B3", "'B3' is not a nanowell address: type q,r as the addresses are written (for example "
+                              "-2,3), or a ring label such as 3.7.")):
+        fig, drawn, st, _ctx = _focus_draw(dataset, "A01", text)
+        assert _texts(fig, "nw-identity-focus") == [said]
+        assert _by_gid(drawn.axes["map"], "nw-identity-focus-ring") == []
+        assert (drawn.axes["map"].get_xlim(), drawn.axes["map"].get_ylim()) == drawn.home["map"]
+        assert st.identity_zoom == {}
+
+
+def test_without_an_address_nothing_is_marked_and_batch_figures_are_unchanged(dataset):
+    fig, drawn = _draw(dataset, "A01")
+    assert drawn.focus is None and _texts(fig, "nw-identity-focus") == []
+
+
+def test_the_page_s_nanowell_box_goes_to_the_address_keeps_it_across_timepoints_and_clears(page, qtbot):
+    from review.features.nanowell.identity_view import MODES
+    from review.features.nanowell.tab_view import VIEWS
+    from tests.test_nanowell_page import _loaded
+
+    ctx = page
+    st = _loaded(qtbot, ctx)
+    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    edit = ctx.widgets.get("_nw_identity_focus_edit")
+    assert edit.isVisibleTo(ctx.window) and edit.isEnabled()
+    edit.setText("1,0")
+    assert st.identity_focus == ""                                          # typing alone goes nowhere
+    edit.returnPressed.emit()
+    drawn = st.identity_drawn
+    ref_site = drawn.pair.ref.sites[(1, 0)]
+    assert st.identity_focus == "1,0" and _centre(drawn.axes["map"]) == pytest.approx(ref_site)
+    # A redraw keeps it; leaving the timepoint and coming back centres on the address again.
+    nwc.redraw(ctx)
+    assert _centre(st.identity_drawn.axes["map"]) == pytest.approx(ref_site)
+    nwc.set_timepoint(ctx, "T0")                                            # the reference: a message, nothing drawn
+    assert st.identity_drawn is None
+    nwc.set_timepoint(ctx, "T1")
+    assert _centre(st.identity_drawn.axes["map"]) == pytest.approx(ref_site)
+    # Diagnostics has no array to go to: the box is greyed and says why.
+    _choose(ctx, "_nw_identity_mode_seg", "diagnostics", [k for k, _l in MODES])
+    assert not edit.isEnabled() and "not the array" in edit.toolTip()
+    _choose(ctx, "_nw_identity_mode_seg", "distance", [k for k, _l in MODES])
+    assert edit.isEnabled()
+    # Clearing the box goes back to the whole view.
+    edit.clear()
+    drawn = st.identity_drawn
+    assert st.identity_focus == "" and drawn.focus is None
+    assert (drawn.axes["map"].get_xlim(), drawn.axes["map"].get_ylim()) == drawn.home["map"]

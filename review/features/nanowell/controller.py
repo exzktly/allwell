@@ -955,6 +955,19 @@ def set_identity_colour(ctx, colour: str) -> None:
     redraw(ctx)
 
 
+def set_identity_focus(ctx, text: str) -> None:
+    """Go to the nanowell *text* names on the Identity view (``q,r`` or a ring label; ``""``: none,
+    ``identity_focus_compute``): forget the kept zoom so the redraw centres on it, and mark it on every mode."""
+    st = _state(ctx)
+    text = (text or "").strip()
+    if st is None or (text == st.identity_focus and not text):
+        return
+    st.identity_focus = text
+    st.identity_zoom, st.identity_zoom_for = {}, None
+    _call(ctx, "_nw_refresh_controls")
+    redraw(ctx)
+
+
 def set_identity_mode(ctx, mode: str) -> None:
     """Choose what the Identity view shows (``state.IDENTITY_MODES``); kept with the page's settings."""
     st = _state(ctx)

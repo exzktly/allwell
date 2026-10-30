@@ -11548,7 +11548,24 @@ in `zoom_compute` (`wheel_limits`, `pan_limits`, `linked`, `held_factor`), share
 constants live there too. Side by side's two images share one initial extent and move together, as do Diagnostics'
 two crops; the surface zooms alone. The zoom (`NanowellState.identity_zoom`, never persisted) is kept across a redraw
 of the same well, timepoint and mode (montages arriving, a setting changed) and dropped when any of the three
-changes; a Blink frame flip leaves it alone. With no sidecar it
+changes; a Blink frame flip leaves it alone.
+
+The band's *Nanowell* box (`identity_view._focus_box`, registered as `_nw_identity_focus_edit`) goes to one
+nanowell: Enter calls `controller.set_identity_focus`, which keeps the text on `NanowellState.identity_focus` (never
+persisted), forgets the kept zoom and redraws. `identity_focus_compute` reads the text — `q,r` as the addresses are
+drawn, or a ring label through `util.nanowell_address.parse_label` — and `focus_marks` resolves it against the pair:
+the reference's site, the compared timepoint's site of the same name in its own frame and mapped into the reference's
+through the inverse registration, and the reference site's predicted place in the compared frame.
+`_identity_controller.draw_identity` (its `focus` argument; Batch Export never passes one) has
+`_identity_render.draw_focus` ring the reference's site and cross the compared one mapped back on the Distance map and
+Blink — the two marks part exactly when the address names another nanowell — and, on Side by side, ring each side's
+own site and cross the prediction; a sentence top right (`nw-identity-focus`) says how far the address lands, or that
+a timepoint does not hold it, or why the text is not an address. `_identity_zoom.restore` centres each panel on it
+(`focus_centres`, `focus_limits`: `FOCUS_HALF_PITCHES` spacings to the nearer edge, in the full view's proportions,
+widened on Side by side so the moved compared site stays in view) whenever the well, timepoint or mode changes, and
+keeps that as the zoom. Diagnostics draws crops about the square, so the box is greyed there (`FOCUS_MODES`).
+
+With no sidecar it
 says the check has not been run and names the audit command; at the reference it says so. On this view the Well
 combo reads each well's worst verdict, and the timepoint shown by default is the well's first contradicted, then
 inconclusive or unchecked, then first non-reference timepoint. Montages are read on a worker through the page's

@@ -157,6 +157,9 @@ class NanowellState:
     identity_mode: str = "distance"
     #: What the Distance map colours by (:data:`IDENTITY_COLOURS`).
     identity_colour: str = "auto"
+    #: The nanowell the Identity view goes to, as typed in its *Nanowell* box (``identity_focus_compute``); ``""``:
+    #: none. Not kept with the page's settings: an address belongs to the dataset being looked at.
+    identity_focus: str = ""
 
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells

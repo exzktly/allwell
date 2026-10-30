@@ -1,16 +1,16 @@
-"""Confluence is calibrated against an empty start (``nanowell_measure`` MEASURE_VERSION 7).
+"""Confluence is read against a named empty reference well (``nanowell_measure`` MEASURE_VERSION 7).
 
 Reported: a well whose nanowells held 47-58 cells each read 0-3 % confluent at every timepoint. Confluence is texture
 against an empty nanowell: a template of what one looks like, and a threshold for how much texture the bare floor
-shows by itself. Both were taken from the timepoint being measured, with no nanowell assumed empty — and on a plate
-whose cells were loaded before its first image, every nanowell holds cells, so the template and the threshold are
-the cells' own texture and almost nothing departs from them. Painted at 52 % true coverage, that read 1-2 %.
+shows by itself. Both were taken from the well being measured, with no nanowell assumed empty, and on a plate whose
+cells were loaded before its first image every nanowell holds cells, so the template and the threshold are the
+cells' own texture and almost nothing departs from them. Painted at 52 % true coverage, that read 1-2 %.
 
-The fix: every timepoint is read against the well's earliest template and the threshold measured where it was built
-(``nanowell_run._confluence_basis``), and the whole well's confluence is undefined unless that timepoint's counts
-show its nanowells empty (``nanowell_run.require_empty_start``). These tests drive the run's own normalisation and
-tile measurement over a painted brightfield scene: bright floor, dark rim and lattice, and cells whose interior is
-about the floor's level with a thin dark edge, as the reported images show them.
+The fix: every well is read against the template and threshold of a well the run is told is empty, at the same
+timepoint (``nanowell_run._confluence_basis``, ``pipeline.nanowell_reference``). These tests drive the run's own
+normalisation and tile measurement over a painted brightfield scene: bright floor, dark rim and lattice, and cells
+whose interior is about the floor's level with a thin dark edge, as the reported images show them. The empty well
+and the loaded one are painted separately, at different exposures, as two plate wells are imaged.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ import numpy as np
 import pytest
 
 from pipeline import nanowell_measure as nm
+from pipeline import nanowell_reference as nref
 from pipeline import nanowell_run as nr
 from pipeline.nanowell_detect import FITTED, SiteGeometry
 
@@ -31,7 +32,7 @@ CENTRES = [(70 + PITCH * c, 70 + PITCH * r) for r in range(N) for c in range(N)]
 SIZE = int(140 + PITCH * (N - 1))
 GEOMS = {i: SiteGeometry(i, c, R, FITTED, 0.2, 64) for i, c in enumerate(CENTRES)}
 TILE = "t0"
-LOCATED = SimpleNamespace(pixel_size_um=PX, positions={TILE: (0.0, 0.0)})
+LOCATED = SimpleNamespace(pixel_size_um=PX, positions={TILE: (0.0, 0.0)}, timepoint="0h")
 BY_TILE = {TILE: list(GEOMS)}
 
 
@@ -67,15 +68,15 @@ def _template(image) -> nm.Template:
     return nm.build_template(nm.level_crops(crops, half), interior_radius_px=nm.SUPPRESSION_RADIUS * R / PX)
 
 
-def _confluence(image, earliest):
-    """The run's own path for one timepoint: its own template and levels, the confluence basis against *earliest*
-    (``None``: this timepoint is the reference), and each site's confluence as the tile measurement computes it.
+def _confluence(image, reference):
+    """The run's own path for one timepoint: its own template and levels, the confluence basis against *reference*
+    (a ``nanowell_reference.Reference``), and each site's confluence as the tile measurement computes it.
     Returns ``(confluence per site, the Measured the basis was recorded on)``."""
     images = {TILE: image}
     template = _template(image)
     norm = nr._normalise(LOCATED, images, template, BY_TILE, GEOMS, None, PITCH)
     out = nr.Measured("tp", template={"source": template.source, "_object": template})
-    norm.confluence = nr._confluence_basis(LOCATED, images, template, earliest, norm, BY_TILE, GEOMS, PITCH, out)
+    norm.confluence = nr._confluence_basis(LOCATED, images, template, reference, norm, BY_TILE, GEOMS, PITCH, out)
     fit = [g for g in nr._local_fit(TILE, BY_TILE[TILE], LOCATED, GEOMS, template)[0] if g.index in norm.levels]
     rim = nm.rim_suppress(image, PX, template, fit, levels=norm.levels)
     got = nr._tile_confluence(TILE, BY_TILE[TILE], LOCATED, images, GEOMS, template, norm, fit, rim)
@@ -84,108 +85,115 @@ def _confluence(image, earliest):
 
 @pytest.fixture(scope="module")
 def reference():
-    """The empty start: the template this timepoint builds, carrying the threshold measured on it."""
+    """The empty reference well, read against itself: its template, carrying the threshold measured on it."""
     empty, _ = _paint(0)
-    conf, out = _confluence(empty, None)
+    conf, out = _confluence(empty, nref.OWN)
     return conf, out.template["_object"]
 
 
-def test_the_empty_start_reads_empty_and_carries_its_threshold(reference):
+def _against(template) -> nref.Reference:
+    return nref.Reference(templates={"0h": template}, default="no such timepoint")
+
+
+def test_the_reference_well_reads_empty_and_carries_its_threshold(reference):
     conf, template = reference
     assert np.all(conf <= 0.02)
     assert template.texture_cut is not None and template.texture_cut > 0
 
 
-def test_a_loaded_timepoint_read_against_the_empty_start_reads_its_coverage(reference):
-    """Every nanowell about half covered, at a different exposure from the empty start. Against itself (the code
-    before the fix) it read 1-2 %; against the empty start it reads within the optical halo of the truth."""
+def test_a_loaded_well_read_against_the_empty_well_reads_its_coverage(reference):
+    """Every nanowell about half covered, at a different exposure from the empty well. Against itself (the code
+    before the fix) it read 1-2 %; against the empty well it reads within the optical halo of the truth."""
     _, template = reference
     loaded, truth = _paint(60, seed=4, gain=1.3, offset=0.05)
-    conf, _ = _confluence(loaded, template)
+    conf, _ = _confluence(loaded, _against(template))
     assert truth.mean() > 0.45
     assert np.all(np.isfinite(conf))
     assert np.all(conf >= 0.8 * truth) and np.all(conf <= np.minimum(1.0, 1.6 * truth))
-    self_read, _ = _confluence(loaded, None)
+    self_read, _ = _confluence(loaded, nref.OWN)
     assert self_read.mean() < 0.1                 # the defect, measured: calibrated on itself it reads near zero
 
 
 def test_coverage_that_grows_reads_as_growing(reference):
     _, template = reference
-    means = [_confluence(_paint(n, seed=7 + n)[0], template)[0].mean() for n in (10, 30, 60)]
+    means = [_confluence(_paint(n, seed=7 + n)[0], _against(template))[0].mean() for n in (10, 30, 60)]
     assert means[0] < means[1] < means[2]
 
 
 def test_a_reference_with_no_threshold_gives_no_confluence(reference):
     _, template = reference
     loaded, _ = _paint(30, seed=2)
-    conf, out = _confluence(loaded, replace(template, texture_cut=None))
+    conf, out = _confluence(loaded, _against(replace(template, texture_cut=None)))
     assert np.all(np.isnan(conf))
-    assert any("no texture threshold" in n for n in out.notes)
+    assert any(n.startswith(nref.NOTE_PREFIX) for n in out.notes)
 
 
-# ── require_empty_start ─────────────────────────────────────────────────────
-def _rows(per_tp: dict) -> list:
-    """Site rows: *per_tp* maps a timepoint to a list of n_cells (``None``: not counted)."""
-    return [{"timepoint": tp, "state": nm.MEASURED if n else nm.EMPTY, "n_cells": n, "confluence": 0.25}
-            for tp, counts in per_tp.items() for n in counts]
+def test_a_timepoint_the_reference_lacks_has_no_confluence():
+    loaded, _ = _paint(30, seed=2)
+    conf, out = _confluence(loaded, nref.Reference(reasons={"0h": "it was not empty"}))
+    assert np.all(np.isnan(conf))                         # undefined, never 0
+    assert out.notes == [f"{nref.NOTE_PREFIX}: it was not empty"]
 
 
-def _blocks(*tps):
-    return {tp: {"status": nr.OK, "notes": []} for tp in tps}
+def test_with_no_reference_named_there_is_no_confluence():
+    loaded, _ = _paint(30, seed=2)
+    conf, out = _confluence(loaded, nref.none_named())
+    assert np.all(np.isnan(conf)) and "no empty reference well was named" in out.notes[0]
 
 
-def test_a_loaded_start_makes_the_whole_well_s_confluence_undefined():
-    """The reported well: 58 cells at its first timepoint."""
-    sites = _rows({"0h": [58, 55, 47, 0], "12h": [60, 58, 50, 3]})
-    blocks = _blocks("0h", "12h")
-    verdict = nr.require_empty_start(sites, blocks, "0h")
-    assert verdict["status"] == "loaded" and verdict["loaded_share"] == 0.75
-    assert [r["confluence"] for r in sites] == [None] * 8              # undefined, never 0
-    for block in blocks.values():
-        assert block["confluence_reference"]["status"] == "loaded"
-        assert sum("Confluence is undefined" in n and "75%" in n for n in block["notes"]) == 1
+# ── the stored reference ────────────────────────────────────────────────────
+def _rows(counts) -> list:
+    return [{"timepoint": "0h", "state": nm.MEASURED if n else nm.EMPTY, "n_cells": n, "confluence": 0.0}
+            for n in counts]
 
 
-def test_an_empty_start_keeps_the_confluence():
-    counts = [0] * 39 + [1]                                             # one nanowell of 40 with debris: 2.5 %
-    sites = _rows({"0h": counts, "12h": [5] * 40})
-    blocks = _blocks("0h", "12h")
-    verdict = nr.require_empty_start(sites, blocks, "0h")
-    assert verdict["status"] == "empty"
-    assert all(r["confluence"] == 0.25 for r in sites)
-    assert all(not b["notes"] for b in blocks.values())
+def test_the_verdict_counts_loaded_nanowells():
+    assert nref.verdict(_rows([0] * 39 + [1]))["status"] == nref.EMPTY        # 2.5 %: debris
+    assert nref.verdict(_rows([0] * 18 + [1, 1]))["status"] == nref.LOADED    # 10 %
+    found = nref.verdict(_rows([58, 55, 47, 0]))                                # the reported well
+    assert found["status"] == nref.LOADED and found["loaded_share"] == 0.75
+    assert nref.verdict(_rows([None, None]))["status"] == nref.UNVERIFIED
+    assert nref.verdict([])["status"] == nref.UNVERIFIED
 
 
-def test_just_over_the_limit_is_loaded():
-    sites = _rows({"0h": [0] * 18 + [1, 1]})                           # 10 %
-    assert nr.require_empty_start(sites, _blocks("0h"), "0h")["status"] == "loaded"
+def _settings(**kw):
+    return nr.NanowellSettings("100um", **kw)
 
 
-def test_an_uncounted_start_cannot_be_shown_empty():
-    sites = _rows({"0h": [None] * 4, "12h": [3] * 4})
-    blocks = _blocks("0h", "12h")
-    assert nr.require_empty_start(sites, blocks, "0h")["status"] == "unverified"
-    assert all(r["confluence"] is None for r in sites)
+def test_a_saved_reference_is_read_back_only_under_the_same_settings(tmp_path, reference):
+    _, template = reference
+    settings = _settings(empty_well="H12")
+    nref.save(tmp_path, "H12", settings, {"0h": (template, nref.verdict(_rows([0] * 10))),
+                                          "12h": (template, nref.verdict(_rows([3] * 10)))})
+    back = nref.load(tmp_path, settings)
+    got, why = back.at("0h")
+    assert why == "" and got.texture_cut == template.texture_cut
+    np.testing.assert_array_equal(got.array, template.array)
+    assert back.at("12h")[0] is None and "not empty" in back.at("12h")[1]
+    assert back.at("24h")[0] is None and "no such timepoint" in back.at("24h")[1]
+    other = nref.load(tmp_path, _settings(empty_well="H12", cell_diameter_um=9.0))
+    assert other.at("0h")[0] is None and "other settings" in other.at("0h")[1]
+    assert "has not been measured" in nref.load(tmp_path, _settings(empty_well="G12")).at("0h")[1]
+    assert "no empty reference well was named" in nref.load(tmp_path, _settings()).at("0h")[1]
 
 
-def test_no_reference_is_no_confluence():
-    sites = _rows({"12h": [3] * 4})
-    assert nr.require_empty_start(sites, _blocks("12h"), None)["status"] == "none"
-    assert all(r["confluence"] is None for r in sites)
+def test_the_reference_well_is_named_in_the_reuse_key():
+    assert _settings(empty_well="H12").key() != _settings(empty_well="G12").key()
+    assert "empty_well" not in _settings().key()
 
 
-def test_the_verdict_is_judged_on_the_reference_not_on_the_first_row():
-    """The reference is the timepoint the template came from; an earlier timepoint with no template (none of its
-    nanowells visible) has no say."""
-    sites = _rows({"0h": [9, 9], "6h": [0, 0, 0, 0]})
-    assert nr.require_empty_start(sites, _blocks("0h", "6h"), "6h")["status"] == "empty"
+def test_the_reference_well_goes_first():
+    items = [("A01", "a"), ("B02", "b"), ("H12", "h")]
+    assert nref.reference_well_first(_settings(empty_well="h12"), items) == ([("H12", "h")], items[:2])
+    assert nref.reference_well_first(_settings(), items) == ([], items)
 
 
-def test_running_it_again_changes_nothing():
-    """An incremental run passes the kept rows and blocks through it again."""
-    sites = _rows({"0h": [5, 5], "12h": [6, 6]})
-    blocks = _blocks("0h", "12h")
-    first = nr.require_empty_start(sites, blocks, "0h")
-    notes = [list(b["notes"]) for b in blocks.values()]
-    assert nr.require_empty_start(sites, blocks, "0h") == first
-    assert [b["notes"] for b in blocks.values()] == notes
+def test_the_reference_well_s_own_loaded_timepoints_lose_their_confluence():
+    sites = _rows([4, 4]) + [dict(r, timepoint="12h") for r in _rows([0, 0])]
+    blocks = {"0h": {"notes": []}, "12h": {"notes": []}}
+    verdicts = {"0h": nref.verdict(sites[:2]), "12h": nref.verdict(sites[2:])}
+    for _ in range(2):                                    # idempotent: kept rows pass through it again
+        nref.apply(sites, blocks, "H12", verdicts)
+    assert [r["confluence"] for r in sites] == [None, None, 0.0, 0.0]
+    assert len(blocks["0h"]["notes"]) == 1 and blocks["12h"]["notes"] == []
+    assert blocks["0h"]["confluence_reference"]["status"] == nref.LOADED

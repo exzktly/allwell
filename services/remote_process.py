@@ -72,7 +72,7 @@ from services.remote_run_id import (
     remote_run_dir,
     remote_run_paths,
 )
-from services.remote_batch_staging import prune_staged, _empty_well_blanks
+from services.remote_batch_staging import prune_staged, _empty_well_blanks, nanowell_reference_first
 from services.remote_srun_retry import queue_wait_seconds
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
@@ -1036,7 +1036,8 @@ class _BatchedRemoteProcess:
             # `--background_dir`. A blank is a full well of uncompressed frames,
             # the same size as any other, so uploading it per batch is not an
             # option: it crosses the wire exactly once.
-            sliceable = [z for z in all_zips if z.stem not in self._blank_stems]
+            sliceable = nanowell_reference_first(
+                self._pipeline_argv, [z for z in all_zips if z.stem not in self._blank_stems])
             # Holding the blank out only makes sense when there is something
             # else to run. With nothing but blanks left — every sample well
             # complete locally — an empty batch would be uploaded to a directory

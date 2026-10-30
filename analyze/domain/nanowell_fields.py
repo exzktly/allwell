@@ -14,6 +14,8 @@ import math
 import re
 from pathlib import Path
 
+from util.well_token import canonical_well_label
+
 #: The plate formats the pipeline knows (``pipeline.nanowell_run.PLATE_FORMATS``), as (option value, label), and
 #: the custom one whose diameter and pitch the form gives (``CUSTOM_FORMAT``, tracker A7). Restated here, with a
 #: test holding the two together, so the form does not import the pipeline's scipy stack.
@@ -71,6 +73,7 @@ DEFAULTS = {
     "nanowell_grid": "",
     "nanowell_overlap_percent": "",
     "nanowell_pixel_size_um": "",
+    "nanowell_empty_well": "",
 }
 
 #: Key -> (label, minimum, maximum, minimum is allowed). Mirrors ``pipeline.cli_args.nanowell_options_from_args``.
@@ -198,6 +201,9 @@ def nanowell_option_errors(opts: dict, *, need_phase: bool = False) -> list[str]
     model = str(opts.get("nanowell_cellpose_model") or CELLPOSE_MODEL_CHOICES[0][0]).strip()
     if model not in {value for value, _label in CELLPOSE_MODEL_CHOICES}:
         errors.append(f"Nanowell Cellpose model {model!r} is not one this version knows.")
+    empty_well = str(opts.get("nanowell_empty_well") or "").strip()
+    if empty_well and canonical_well_label(empty_well) is None:
+        errors.append(f"Empty reference well {empty_well!r} is not a plate well (e.g. H12).")
     source = registration_from_error(str(opts.get(REGISTRATION_FROM_KEY) or ""))
     if source:
         errors.append(source)

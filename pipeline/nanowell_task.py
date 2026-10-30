@@ -25,6 +25,7 @@ from types import MappingProxyType
 import numpy as np
 
 from pipeline import nanowell_measure as nm
+from pipeline import nanowell_reference as nref
 from pipeline import nanowell_run as nr
 from pipeline.run_report import withdraw_seal
 from pipeline.nanowell_tiles import WellTiles, read_native
@@ -54,6 +55,15 @@ class NanowellInputError(RuntimeError):
     """The inputs cannot be run in nanowell mode (no acquisition record, no tiles): named, never silent."""
 
 
+def reference_well_first(shared_kwargs_template: dict, items) -> tuple[list, list]:
+    """``(the empty reference well's item, the rest)`` of a run's ``(well, archive)`` *items*, for the reference to
+    be measured before the wells read against it (``pipeline.nanowell_reference``); ``([], items)`` outside
+    nanowell mode, with none named, or with it not among *items*."""
+    if not shared_kwargs_template.get("_nanowell"):
+        return [], list(items)
+    return nref.reference_well_first(settings_from_kwargs(shared_kwargs_template), list(items))
+
+
 def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:
     spec = kwargs["_nanowell"]
     custom = (float(spec["pitch_um"]), float(spec["diameter_um"])) if spec["plate_format"] == nr.CUSTOM_FORMAT \
@@ -66,7 +76,7 @@ def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:
                                spec.get("segment_on") or nr.LEGACY_SEGMENT_ON,
                                spec.get("segment_scope") or nr.LEGACY_SEGMENT_SCOPE,
                                spec.get("segment_scale") or nr.LEGACY_SEGMENT_SCALE,
-                               spec.get("resize") or nr.LEGACY_RESIZE)
+                               spec.get("resize") or nr.LEGACY_RESIZE, spec.get("empty_well") or None)
 
 
 def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:
@@ -96,8 +106,17 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
                           expected_shape=expected_shape, stored_placements=stored_placements,
                           manual_anchors=manual_anchors, progress=lambda done, total: _log_steps(well_label, done, total),
                           site_progress=lambda tp, done, total: _log_sites(well_label, tp, done, total),
-                          note=lambda text: log.info("Well %s — %s", well_label, text), release=release)
+                          note=lambda text: log.info("Well %s — %s", well_label, text), release=release,
+                          confluence_reference=_confluence_reference_for(well_label, settings, template_path))
     return outcome, fixed, fixed_roster, saved
+
+
+def _confluence_reference_for(well_label, settings, template_path):
+    """What *well_label*'s confluence is read against: itself when it is the empty reference well, else the
+    reference saved in this output folder (``pipeline.nanowell_reference.load``), else nothing, with the reason."""
+    if nref.same_well(well_label, nref.reference_well(settings)):
+        return nref.OWN
+    return nref.load(Path(template_path).parent.parent, settings)
 
 
 def _log_steps(well_label: str, done: int, total: int) -> None:
@@ -756,6 +775,26 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         tiles.close()
 
 
+def _save_confluence_reference(output_dir, well_label, settings, outcome, sites, timepoints) -> None:
+    """The empty reference well's part, once its counts are known: judge each timepoint empty or not by them, record
+    the verdict on its blocks (and blank its own confluence where it was not empty), and save its templates for the
+    wells measured after it (``pipeline.nanowell_reference``). A kept timepoint of an incremental run brings no
+    template of its own, so the one saved before is carried over."""
+    templates = {**nref.kept_templates(output_dir, well_label), **outcome.templates}
+    rows: dict = {}
+    for row in sites:
+        rows.setdefault(row["timepoint"], []).append(row)
+    verdicts = {tp: nref.verdict(rows[tp]) for tp in timepoints if tp in rows}
+    nref.apply(sites, outcome.timepoints, well_label, verdicts)
+    nref.save(output_dir, well_label, settings, {tp: (templates.get(tp), v) for tp, v in verdicts.items()})
+    refused = {tp: v["status"] for tp, v in verdicts.items() if v["status"] != nref.EMPTY}
+    if refused:
+        log.warning("Well %s is the empty reference well, but it is not empty at %s: no well has a confluence there",
+                    well_label, ", ".join(f"{tp} ({status})" for tp, status in refused.items()))
+    log.info("Well %s — empty reference saved for %d timepoint(s); every other well's confluence is read against it.",
+             well_label, len(verdicts) - len(refused))
+
+
 def _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, record, timepoints, digest,
                  prior, todo, run, staging_dir, write_csv, template_path):
     """:func:`process_well_zip`'s run and its writing, while the well's archive is open to read tiles from."""
@@ -785,17 +824,8 @@ def _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, rec
         nr.flag_template_drift(outcome.timepoints, timepoints)
     rank = {tp: k for k, tp in enumerate(timepoints)}
     all_sites = sorted((prior["sites"] if prior else []) + outcome.sites, key=lambda r: rank[r["timepoint"]])
-    # Confluence is calibrated against the well's earliest template and is undefined unless it was imaged empty.
-    # The reference is what run_well measured against: an earlier run's saved template when there is one (it was
-    # handed in as the earliest), else the first own template this run built.
-    candidates = [tp for tp in (None if saved is None else saved[1],
-                                None if outcome.earliest_template is None else outcome.earliest_template[0])
-                  if tp is not None]
-    reference_tp = min(candidates, key=lambda tp: rank.get(tp, len(rank))) if candidates else None
-    verdict = nr.require_empty_start(all_sites, outcome.timepoints, reference_tp)
-    if verdict["status"] != "empty":
-        log.warning("Well %s — confluence undefined (%s reference at %s): it is calibrated against an empty start",
-                    well_label, verdict["status"], verdict["timepoint"])
+    if nref.same_well(well_label, nref.reference_well(settings)):
+        _save_confluence_reference(output_dir, well_label, settings, outcome, all_sites, timepoints)
     all_cells = sorted((prior["cells"] if prior else []) + records, key=lambda r: rank[r["timepoint"]])
     withdraw_seal(output_dir, well_label)         # the tables and archive are rewritten from here
     if all_cells:

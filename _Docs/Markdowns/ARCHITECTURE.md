@@ -10425,21 +10425,32 @@ past about 60 % the cells reach down into the floor's values and the threshold i
 `site_confluence` is the share of a site's interior above the threshold. It is `None`, not zero, with no site to
 calibrate against or with under half the interior on the image (a quadrant is not a site); 0.0 is a measurement.
 That threshold, and the template, are only an empty nanowell's when the nanowells they were read from were empty,
-and on a plate loaded before its first image no timepoint has an empty nanowell: both are then the cells' own
-texture, and a nanowell half covered reads 1-2 % (painted, 52 % true coverage). So confluence is **calibrated
-against an empty start**. The well's earliest own template is its reference, carrying the threshold measured at its
-timepoint (`Template.texture_cut`, saved with the template and in the checkpoint); every timepoint's confluence is
-read against it (`nanowell_run._confluence_basis`): its sites are brought to the reference template's levels
-(`_site_levels` against it, so exposure and light changing between timepoints cancel) and divided by it on a second
-rim-suppressed tile when the timepoint's own template differs (`_tile_confluence`), and the reference threshold is
-the cut. Counting, levels for the count, and fluorescence still use the timepoint's own template. Whether the
-reference timepoint was empty is decided after the well is measured, over every row including kept ones
-(`nanowell_run.require_empty_start`, called by `nanowell_task._finish_well`): `empty` when at most
-`EMPTY_START_MAX_LOADED` (5 %) of its counted nanowells hold a cell, `loaded` above that, `unverified` when nothing
-there was counted, `none` with no reference. Anything but `empty` sets the whole well's confluence to `None` and
-writes a note on every timepoint; the verdict is each grid block's `confluence_reference`. The default-baseline
-confluence fold change is then undefined by construction (an empty baseline is 0); a named-timepoint baseline gives
-one. Test detection measures a single timepoint, which is its own reference and is not judged.
+and a plate is loaded before it is first imaged, so no well has an empty nanowell at any timepoint: both are then the
+cells' own texture, and a nanowell half covered reads 1-2 % (painted, 52 % true coverage). So confluence is
+**calibrated against a named empty well** (`pipeline/nanowell_reference.py`, `--nanowell_empty_well`,
+`NanowellSettings.empty_well`, which joins `key()` and the settings digest). The reference well is measured first:
+`process_microscopy.process_well_zips` runs its worker pool twice, the reference alone and then the rest
+(`nanowell_task.reference_well_first`), and a batched remote run puts it in batch 1
+(`remote_batch_staging.nanowell_reference_first`); the batches run in sequence into one output folder whose
+`nanowells/` is never released between them. The reference well reads itself (`nanowell_reference.OWN`): each
+timepoint's own template carries the threshold measured on it (`Template.texture_cut`, set by
+`nanowell_run._confluence_basis` on `out.template["_object"]`, collected in `WellOutcome.templates`). Once its counts
+are known, `nanowell_task._save_confluence_reference` judges each timepoint by them (`nanowell_reference.verdict`:
+`empty` when at most `MAX_LOADED_SHARE`, 5 %, of its counted nanowells hold a cell; `loaded` above; `unverified` with
+nothing counted), records the verdict on the reference's grid blocks (`confluence_reference`), blanks its own
+confluence where it was not empty, and saves `nanowells/_confluence_reference/` (`reference.json`: the well, the
+measurement version, the settings key and each verdict; one template `.npz` per empty timepoint). A kept timepoint of
+an incremental run of the reference carries its saved template over (`kept_templates`). Every other well loads it
+(`nanowell_reference.load`, refused under another measurement version or settings key) and reads each timepoint
+against the reference's template **at the same timepoint**: `_confluence_basis` brings its sites to that template's
+levels (`_site_levels` against it, so exposure and light differing between wells and timepoints cancel), and
+`_tile_confluence` divides the tile by it on a second rim-suppressed image and cuts at its threshold. Counting, the
+count's levels and fluorescence still use the well's own template. With no reference named, none measured in the
+output folder, none at that timepoint, or one that was not empty there, every site's confluence is `None` — never
+0 — and the timepoint's notes say which (`nanowell_reference.NOTE_PREFIX`). `measure_timepoint` with no reference
+(Test detection) reads a timepoint against itself, which is right only for the empty well. Two limits: the reference
+folder is not fetched back from a remote run, and a remote re-run that skips the reference well as complete locally
+does not upload it, so the other wells' confluence comes out undefined, with the reason, rather than wrong.
 Because "departs from the floor" includes the optical halo of a cell, it reads high: on the synthetic scene it lies
 between the painted coverage and the coverage of a disk 3 px larger in radius, which makes it a monotone measure of
 loading rather than an area.

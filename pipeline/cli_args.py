@@ -586,6 +586,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "each tile as it was imaged, which is what Cellpose's models were trained on; a cell on a "
                          "nanowell's rim is still not counted, since only a cell whose centre lies inside a "
                          "nanowell's interior is. Confluence uses the rim-divided image either way."))
+    p.add_argument("--nanowell_empty_well", default=None, metavar="WELL",
+                   help=("A plate well that holds no cells, e.g. H12. It is measured first, and every well's "
+                         "confluence at a timepoint is read against its empty nanowells at that timepoint. Without "
+                         "one, or at a timepoint where it holds cells, no well has a confluence (blank, never 0)."))
     p.add_argument("--nanowell_segment_scope", choices=("nanowells", "tile"), default="nanowells",
                    help=("How much of each tile the cell count's segmenter is given. nanowells (the default): a crop "
                          "around each nanowell, scaled as the whole tile is, so the lattice between them costs "
@@ -663,6 +667,13 @@ def nanowell_options_from_args(args, error) -> dict | None:
         options["segment_scale"] = args.nanowell_segment_scale
     if args.nanowell_resize not in (None, "cell"):            # and resized to the cell diameter
         options["resize"] = args.nanowell_resize
+    if args.nanowell_empty_well:
+        from util.well_token import canonical_well_label
+
+        well = canonical_well_label(args.nanowell_empty_well)
+        if well is None:
+            error(f"--nanowell_empty_well {args.nanowell_empty_well!r} is not a plate well (e.g. H12).")
+        options["empty_well"] = well
     pattern = _grid_pattern(args, error)
     if pattern:
         options["pattern"] = pattern

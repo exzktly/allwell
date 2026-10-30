@@ -13350,8 +13350,15 @@ The same method turns an ssh exit of 255 into "Connection to <host> lost
 (<ssh's own reason>)", with what the job probe found (still running, no longer
 running, or — with the host unreachable — may still be running) and that Resume
 downloads the wells it finished; ssh's reason lines (`Timeout, server … not
-responding`, `Connection … closed`, `Broken pipe`, …) are classed ERROR by
-`classify_log_line` via `run_evidence.is_ssh_reason`.
+responding`, `Connection to … closed by remote host`, `Broken pipe`, …) are
+classed ERROR by `classify_log_line` via `run_evidence.is_ssh_reason`. ssh's
+bare sign-off, `Connection to <host> closed.`, is deliberately not among them:
+ssh prints it whenever a session holding a PTY ends, and the run's output
+stream always holds one (`-tt`), so every clean run's stream ends with it —
+just before `Fetcher.flush_and_join` logs `draining fetcher: N well(s)` and
+fetches the remaining wells over connections of their own. Matched as a reason,
+it painted every clean run's sign-off red, and the prefix match cut ssh's
+`closed by remote host` short in the headline of a real break.
 
 **A Stop is confirmed on the host too.** The kill and the `scancel` behind Stop
 are ssh round trips on the cancel thread, and with the network down they fail

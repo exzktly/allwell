@@ -195,7 +195,7 @@ def test_the_page_lays_diagnostics_out_again_when_its_canvas_settles_at_a_new_si
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     _choose(ctx, "_nw_identity_mode_seg", "diagnostics", [k for k, _l in MODES])
     qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.crops is not None
                     and st.identity_drawn.crops.looked is not None, timeout=20000)

@@ -8653,8 +8653,14 @@ archive-coverage mismatches using the dataset's schema.
 
 `services/acquisition_transport` carries the record through staged inputs,
 scoped well selections and batched uploads, filtering it to actual uploaded
-identities. Full and batch transfers include a temporary `acquisition.json`,
-removed when the transfer ends. Upload and re-attach identity include record
+identities. Full and batch transfers include a temporary `acquisition.json`
+(and `nanowell_anchors.json` when the plate has anchors), written to a
+`.allwell-transit` folder beside the archives (`remote_scratch._new_transit_dir`)
+and removed when the transfer ends. Never to the OS temp folder: a remote run has
+no other reason to write to the local system drive, and while these files went
+there a full system drive failed every batch's upload with `[Errno 28]` although
+the input, output and scratch volumes had room. Nothing is created when a plate
+has neither file. Upload and re-attach identity include record
 content, so metadata-only changes invalidate reuse. `pipeline.sidecar` reads and
 validates the input record before local or remote pipeline image work. Legacy
 inputs without a record retain their existing behavior.

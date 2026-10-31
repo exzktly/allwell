@@ -224,6 +224,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_ownership.py": "Ownership checks calculate seam geometry without using the implementation",
     "test_nanowell_page.py": "The Nanowells page driven through its real builder, worker and canvas, in a minimal shell …",
     "test_nanowell_counts_follow_cell_gating.py": "The Nanowells page counts only the cells Home's Cell Gating includes …",
+    "test_nanowell_array_key.py": "The Array view keys its nanowell outlines: a ring swatch per state in view, with counts",
     "test_nanowell_page_array_layers.py": "The Array view's elements are each turned on and off, and the three views it replaced are …",
     "test_nanowell_page_compute.py": "The Nanowells page's pure layer: the beeswarm geometry and the Distribution model (tracker …",
     "test_nanowell_page_extremes.py": "The Nanowells page's Extremes view: one well's nanowells with the largest and the smallest …",

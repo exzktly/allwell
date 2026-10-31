@@ -1947,9 +1947,13 @@ def export_page_csv(ctx) -> None:
     if st is None or st.metrics is None:
         ctx.notify.set_status("There are no nanowell tables loaded to save.")
         return
-    if st.computing or st.loaded_for is None or st.loaded_for[1] != st.baseline:
-        # The metrics on hand were computed for another baseline; written now, the file would label them with
-        # the new one (roll-up review X12).
+    stale_gate = st.gated_for != gate_version(ctx)
+    if st.computing or st.loaded_for is None or st.loaded_for[1] != st.baseline or stale_gate:
+        # The metrics on hand were computed for another baseline (roll-up review X12), or before a gating, curation
+        # or QC edit moved which cells count (cell population audit P9): written now, the file would carry counts
+        # the page no longer draws, under the current settings' labels. Start the recompute and say so.
+        if stale_gate and not st.computing:
+            ensure_loaded(ctx)
         ctx.notify.set_status(f"The nanowell metrics for baseline {st.baseline!r} are still being computed; "
                               "save again once the page has drawn them.")
         return

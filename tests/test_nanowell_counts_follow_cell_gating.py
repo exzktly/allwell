@@ -215,3 +215,29 @@ def test_the_nanowell_csv_says_its_counts_are_gated_and_by_how_much(qtbot, tmp_p
     assert set(table["cell_gating"]) == {
         "Cell Gating leaves out 1 of 7 cells in these wells' nanowells: counts and brightness exclude them; "
         "confluence and nanowell fluorescence are measured from pixels and do not."}
+
+
+def test_saving_right_after_a_gating_edit_waits_for_the_new_counts(qtbot, tmp_path, monkeypatch):
+    """``export_page_csv`` refused only while computing or after a baseline change; ``redraw`` also treats a moved
+    gating version as stale, the export did not, so a save made after a QC edit and before the page recomputed
+    wrote the previous gate's counts under the new gate's sentence (cell population audit P9)."""
+    from dataclasses import replace
+
+    from review.core import csv_export
+    from review.features.nanowell import controller as nwc
+    from review.features.qc.controller import get_qc_params, recompute_qc_all
+    from tests.test_nanowell_page import _loaded, _page
+
+    ctx = _page(qtbot, _dataset_with_areas(tmp_path))
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    path = tmp_path / "nanowells.csv"
+    monkeypatch.setattr(csv_export, "ask_save_csv", lambda *_a, **_k: str(path))
+    said: list[str] = []
+    monkeypatch.setattr(ctx.notify, "set_status", said.append)
+    ctx.state.qc.params = replace(get_qc_params(ctx), enabled=True, min_area=30.0)
+    recompute_qc_all(ctx)                                         # the gate moves; the page has not recomputed
+    assert st.gated_for != nwc.gate_version(ctx)
+    nwc.export_page_csv(ctx)
+    assert not path.exists()
+    assert any("still being computed" in line for line in said)

@@ -12121,7 +12121,7 @@ it is the page's choice of wells, not an inclusion layer. Every figure's note ca
 selected well is excluded. *Excluded (n) ▾* (`exclude_view`), shown only while any is excluded, restores
 one or all (`set_well_excluded`, `restore_every_well`).
 
-**Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a *% of sharp* spin box, 30–95) is a mirror of
+**Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a bare percentage spin box, 30–95, with no suffix (Qt refuses typing with the cursor inside one)) is a mirror of
 the Cell Gating panel's *Exclude out-of-focus nanowells*, never a setting of its own. `controller.set_rim_focus`
 refuses a fraction outside `nanowell_rim_focus.MIN_FRACTION`–`MAX_FRACTION` by name, and otherwise changes the QC
 parameters through the registry's `qc.set_params_with_progress` service — the one route a QC edit takes, so every

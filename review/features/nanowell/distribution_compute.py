@@ -82,6 +82,10 @@ _REASON_LABELS = {
     moving_compute.EARLY_REASON: "before the first full moving window",
     moving_compute.GAP_REASON: "moving window has a gap",
     moving_compute.IDENTITY_REASON: "moving window not joinable",
+    moving_compute.BASELINE_REASON: "moving window reaches the baseline",
+    moving_compute.BASE_EARLY_REASON: "baseline window before the first timepoint",
+    moving_compute.BASE_GAP_REASON: "baseline window has a gap",
+    moving_compute.BASE_IDENTITY_REASON: "baseline window not joinable",
 }
 
 
@@ -240,11 +244,13 @@ def fixed_cohort(frame: pd.DataFrame, column: str, reasons: pd.Series) -> tuple[
 
 
 def wells_summary(metrics: pd.DataFrame, wells, metric: str, *, channels=(), channel: str | None = None,
-                  cohort: bool = False, responding_above: float | None = None, moving: int = 0) -> pd.DataFrame:
+                  cohort: bool = False, responding_above: float | None = None, moving: int = 0,
+                  baseline_moving: int = 0) -> pd.DataFrame:
     """``summary_compute.well_summary`` for *wells*, prepared exactly as the Distribution view prepares it: a
-    per-nanowell metric at each well's own first timepoint, labelled :data:`PER_NANOWELL_LABEL`, and the fixed
-    cohort applied when *cohort* (its exclusions then counted under :data:`COHORT_REASON`), then the moving average
-    over *moving* timepoints (``moving_compute``; 0 is off). Batch Export's
+    per-nanowell metric at each well's own first timepoint, labelled :data:`PER_NANOWELL_LABEL`; for the others the
+    baseline's own window (*baseline_moving*, ``moving_compute.rebase``), the fixed cohort when *cohort* (its
+    exclusions then counted under :data:`COHORT_REASON`), then the moving average over *moving* timepoints
+    (``moving_compute``; 0 is off). Batch Export's
     Nanowells mode writes this beside each figure (tracker I4), so the CSV's numbers are the figure's.
     *responding_above* is the user's cut for the metric; without one the fraction responding is undefined."""
     column = metric_column(metric, channel)
@@ -254,24 +260,36 @@ def wells_summary(metrics: pd.DataFrame, wells, metric: str, *, channels=(), cha
         first = frame["tp_order"] == 0
         frame, reasons = frame[first].assign(timepoint=PER_NANOWELL_LABEL), reasons[first]
     else:
+        frame, reasons = _rebased(frame, column, reasons, moving, baseline_moving)
         if cohort:
             frame, reasons, _kept, _sites = fixed_cohort(frame, column, reasons)
         frame, reasons = moving_compute.apply(frame, column, reasons, moving)
     return well_summary(frame, column, channels, reasons=reasons, responding_above=responding_above)
 
 
+def _rebased(frame: pd.DataFrame, column: str, reasons: pd.Series, moving: int, baseline_moving: int):
+    """The baseline's own window applied (``moving_compute.rebase``) — only while the endpoint's moving average is
+    on, since the baseline's window refines it. *baseline_moving* is already what
+    ``moving_compute.baseline_window_for`` allows for the figure's baseline."""
+    if not moving_compute.is_on(moving):
+        return frame, reasons
+    return moving_compute.rebase(frame, column, reasons, baseline_moving)
+
+
 def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), channel: str | None = None,
                        axis: str = TIME, groups: dict, timepoint: str = "", control: str = "",
                        time_source: str | None = None, baseline: str = "earliest",
                        cohort: bool = False, responding_above: float | None = None,
-                       moving: int = 0) -> DistributionModel:
+                       moving: int = 0, baseline_moving: int = 0) -> DistributionModel:
     """The Distribution view for *groups* (``name -> wells``, as ``controller.replicate_groups`` gives).
 
     A group of one well is that well; a group of several is a replicate set. Only the wells named in
     *groups* are drawn. *responding_above* is the cut the user set for this metric (tracker I9): the footer
     states each group's fraction responding at it, or says that no cut is set. *moving* is the moving average's
-    window in timepoints (``moving_compute``; 0 is off), applied after the fixed cohort, which is decided on the
-    measured values; a per-nanowell metric has no values over time and ignores it.
+    window in timepoints (``moving_compute``; 0 is off), applied after the fixed cohort; a per-nanowell metric has
+    no values over time and ignores it. *baseline_moving* gives a fold change's baseline a window of its own
+    (``moving_compute.rebase``, as ``moving_compute.baseline_window_for`` allows it), applied first, so the cohort
+    is decided on the fold changes from that baseline and the endpoint's average is taken over them.
     """
     column = metric_column(metric, channel)
     label = METRICS[metric][0] + (f" · {channel}" if METRICS[metric][1] else "")
@@ -286,13 +304,16 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
         frame, reasons = frame[first].assign(timepoint=PER_NANOWELL_LABEL), reasons[first]
     model = DistributionModel(metric, column, label, axis, metric in INTEGER_METRICS, [], control=control,
                               baseline=baseline, responding_above=responding_above)
+    if metric not in PER_NANOWELL:
+        frame, reasons = _rebased(frame, column, reasons, moving, baseline_moving)
     if cohort and metric not in PER_NANOWELL:
         frame, reasons, kept, sites = fixed_cohort(frame, column, reasons)
         model.notes.append(f"Fixed cohort: only the {kept:,} of {sites:,} nanowells with a value at every timepoint "
                            "of their well are used; the rest are counted as outside the fixed cohort.")
     if moving_compute.is_on(moving) and metric not in PER_NANOWELL:
         frame, reasons = moving_compute.apply(frame, column, reasons, moving)
-        model.notes.append(moving_compute.describe(moving) + " The rest are counted among the exclusions.")
+        model.notes.append(moving_compute.describe(moving, column, baseline_moving)
+                           + " The rest are counted among the exclusions.")
     if axis == TIME:
         _time_panels(model, frame, column, reasons, groups, channels)
     else:

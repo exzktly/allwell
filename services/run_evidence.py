@@ -102,8 +102,19 @@ def is_ssh_reason(line: str) -> bool:
     return bool(_RE_SSH_REASON.search(line))
 
 
+#: The line ``services.remote_reservation`` logs once the run is handed to the job it asked for early. From then on
+#: that job is the run's own, and what it said about how it ended is the run's evidence.
+EARLY_JOB_HANDED_OVER = "[remote] scheduler: the run is handed to the node asked for early."
+
+
 class RunEvidence:
-    """What one run's stream said about how it ended. One per run."""
+    """What one run's stream said about how it ended. One per run.
+
+    A run may queue a scheduler job before it is staged (``services.remote_reservation``), and that job can end, be
+    refused or lose its connection before the run is handed to it; the run then asks for another. What that early
+    job said about its own end is not the run's, so a line read with ``early=True`` keeps its cancellation, its
+    refusal and its ssh break aside, and they become the run's only at the hand-over (:data:`EARLY_JOB_HANDED_OVER`).
+    Before it, a slurmstepd TIME LIMIT on the early job headlined a run whose own job went on to finish."""
 
     def __init__(self) -> None:
         self.suspend_seen = False
@@ -116,31 +127,57 @@ class RunEvidence:
         self.no_node_fits = False
         #: True between a request for a node and its grant: nothing has run.
         self.waiting_for_node = False
+        #: What the early job said about its own end, held until the run is handed to it (see the class docstring).
+        self._early = {"cancelled": None, "ssh_reason": "", "no_node_fits": False}
+        self._early_handed_over = False
 
-    def note(self, line: str) -> None:
-        """Read one line of the run's output."""
+    def note(self, line: str, *, early: bool = False) -> None:
+        """Read one line of the run's output; *early* when it is the early scheduler job's, before the hand-over."""
+        if early and not self._early_handed_over:
+            if EARLY_JOB_HANDED_OVER in line:
+                self._adopt_early()
+            else:
+                self._note_end(line, self._early)
+        else:
+            facts = {"cancelled": self.cancelled, "ssh_reason": self.ssh_reason, "no_node_fits": self.no_node_fits}
+            self._note_end(line, facts)
+            self.cancelled, self.ssh_reason, self.no_node_fits = (
+                facts["cancelled"], facts["ssh_reason"], facts["no_node_fits"])
         if not self.suspend_seen and SUSPEND_MARKER in line:
             self.suspend_seen = True
-        found = _RE_SLURM_CANCELLED.search(line)
-        if found and self.cancelled is None:
-            self.cancelled = found
         if not self.budget_line and _RE_TIME_BUDGET.search(line):
             self.budget_line = line.strip()
-        reason = _RE_SSH_REASON.search(line)
-        if reason and not self.ssh_reason:
-            # The first one: it is the break itself; what follows is fallout —
-            # including the app's own later probes of a host that is gone.
-            self.ssh_reason = reason.group(0).strip().rstrip(".")
         job = _RE_JOB_ID.search(line)
         if job:
             self.job_id = job.group(1) or job.group(2)
-        if _RE_NO_NODE_FITS.search(line):
-            self.no_node_fits = True
         if _RE_NODE_GRANTED.search(line):
             self.waiting_for_node = False
-            self.no_node_fits = False
         elif _RE_NODE_REQUESTED.search(line):
             self.waiting_for_node = True
+
+    @staticmethod
+    def _note_end(line: str, facts: dict) -> None:
+        """What *line* says about how a job ended, into *facts* (the run's own, or the early job's)."""
+        found = _RE_SLURM_CANCELLED.search(line)
+        if found and facts["cancelled"] is None:
+            facts["cancelled"] = found
+        reason = _RE_SSH_REASON.search(line)
+        if reason and not facts["ssh_reason"]:
+            # The first one: it is the break itself; what follows is fallout —
+            # including the app's own later probes of a host that is gone.
+            facts["ssh_reason"] = reason.group(0).strip().rstrip(".")
+        if _RE_NO_NODE_FITS.search(line):
+            facts["no_node_fits"] = True
+        if _RE_NODE_GRANTED.search(line):
+            facts["no_node_fits"] = False
+
+    def _adopt_early(self) -> None:
+        """The run has been handed to the early job: what that job said about its end is now the run's."""
+        self._early_handed_over = True
+        early = self._early
+        self.cancelled = self.cancelled or early["cancelled"]
+        self.ssh_reason = self.ssh_reason or early["ssh_reason"]
+        self.no_node_fits = self.no_node_fits or early["no_node_fits"]
 
     def termination(self, where: str = "Remote pipeline") -> str | None:
         """The failure text for a run something other than the user ended, or

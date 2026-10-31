@@ -318,6 +318,51 @@ def test_a_job_slurm_refused_says_why_when_the_run_is_ready(plate, host, remote,
             f"{refusal}; asking for one now") in text, text
 
 
+_TIME_LIMIT = "slurmstepd: error: *** STEP {job}.0 ON node1 CANCELLED AT 2026-10-30T10:00:00 DUE TO TIME LIMIT ***"
+
+
+def _ends_at_its_time_limit(job: int) -> subprocess.Popen:
+    proc = FakeRemote._REAL_POPEN(["sh", "-c", f"echo '{_TIME_LIMIT.format(job=job)}'; exit 1"],
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    proc.wait()
+    return proc
+
+
+def test_an_early_job_cut_off_during_staging_is_not_the_run_s_ending(plate, host, remote, stop_fetchers, monkeypatch):
+    """Tracker H5. The early job's output fed the run's evidence, and the first slurmstepd CANCELLED line was kept as
+    the run's ending: an early job ended at its time limit while the plate was staged was replaced by a job that ran,
+    and the run still said "the scheduler ended job 4242.0 at its time limit". The replacement's own ending decides."""
+    jobs = remote.jobs
+
+    def early_cut_off(argv):
+        if not jobs.procs:
+            jobs.procs.append(_ends_at_its_time_limit(4242))
+            return jobs.procs[-1]
+        return jobs(argv)
+
+    remote.install(monkeypatch, host, on_launch=early_cut_off)
+
+    _r, text = _run(plate, host, stop_fetchers)
+
+    assert "the node asked for early cannot take the run" in text, text
+    assert "was terminated" not in text and "4242" not in text.split("cannot take the run")[-1], text
+
+
+def test_the_replacement_job_cut_off_is_still_the_run_s_ending(plate, host, remote, stop_fetchers, monkeypatch):
+    """The other half: the job the run actually ran on ending at its time limit still says so, naming that job."""
+    jobs = remote.jobs
+
+    def both_cut_off(argv):
+        jobs.procs.append(_ends_at_its_time_limit(4242 + len(jobs.procs)))
+        return jobs.procs[-1]
+
+    remote.install(monkeypatch, host, on_launch=both_cut_off)
+
+    _r, text = _run(plate, host, stop_fetchers)
+
+    assert "Remote pipeline was terminated: the scheduler ended job 4243.0 at its time limit" in text, text
+
+
 def test_a_run_that_stops_before_it_needs_a_node_gives_the_node_back(plate, host, remote, stop_fetchers):
     """Stopped while the plate is still being staged: the job is cancelled and its directory removed."""
     from services.remote_runner import RemoteRunner

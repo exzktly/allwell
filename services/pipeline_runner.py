@@ -1139,9 +1139,11 @@ class PipelineRunner:
     #: Suspend exits 0 on purpose, and it is neither a completion nor a failure.
     _CONTROL_KINDS = frozenset({"done", "suspended", "error", "finished"})
 
-    def _enqueue(self, event: tuple[str, object], *, activity: bool = True) -> None:
+    def _enqueue(self, event: tuple[str, object], *, activity: bool = True, early: bool = False) -> None:
         """Non-blocking enqueue for a log line; drops it on overflow rather
         than blocking the reader thread — unless the run's state depends on it.
+        *early* marks a line from the scheduler job asked for before staging
+        (``_EarlyAllocation``), read as that job's evidence (``RunEvidence``).
 
         Two things are never dropped; they block until the reader (draining
         in bounded slices in ``_poll_log``) makes room:
@@ -1174,7 +1176,7 @@ class PipelineRunner:
             # Every line the run says, from whichever thread: the stream, and
             # the spawn's own lines before there is one (the allocation request).
             # Not the runner's own report of a probe, which quotes ssh too.
-            self._evidence.note(str(event[1]))
+            self._evidence.note(str(event[1]), early=early)
         must_keep = event[0] in self._CONTROL_KINDS or (
             event[0] == "line" and carries_state(str(event[1])))
         if must_keep:
@@ -2520,8 +2522,11 @@ class PipelineRunner:
         batch_size = _remote_batch_size(opts)
         # The scheduler job, queued as soon as staging knows how many wells the run can hold — before it plans or
         # rewrites a single archive — so the queue wait overlaps staging (services.remote_reservation).
+        # Its lines are read as the early job's: what it says about its own end is the run's only once the run is
+        # handed to it (`RunEvidence`), since a job that ends during staging is replaced by another.
         early = _EarlyAllocation(self._remote_runner, batch_size=batch_size, nanowell="--nanowell_format" in args,
-                                 log_fn=lambda m: self._enqueue(("line", m)), stop_event=self._stop_requested)
+                                 log_fn=lambda m: self._enqueue(("line", m), early=True),
+                                 stop_event=self._stop_requested)
         # This machine drives the run for its whole length; one that sleeps
         # stops it on the cluster (services.sleep_guard). Released in `finally`.
         awake = SleepGuard(log_fn=lambda m: self._enqueue(("line", m)))

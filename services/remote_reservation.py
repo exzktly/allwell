@@ -57,6 +57,7 @@ from services.remote_heartbeat import _UploadHeartbeat
 from services.remote_srun_retry import queue_wait_seconds
 from services.remote_transport import _remote_quote
 from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
+from services.run_evidence import EARLY_JOB_HANDED_OVER
 from services.subprocess_kill import own_process_group_kwargs, signal_subprocess
 from services.subprocess_text import TEXT_UTF8
 from util.aw_safe import swallow
@@ -361,7 +362,7 @@ class Reservation:
             self._taken = True
         if self._heartbeat is not None:
             self._heartbeat.stop()
-        self._log("[remote] scheduler: the run is handed to the node asked for early.\n")
+        self._log(EARLY_JOB_HANDED_OVER + "\n")
         assert self._popen is not None and self._pump is not None
         return ReservedPopen(self._popen, self._lines, self._pump)
 

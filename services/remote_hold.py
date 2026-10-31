@@ -464,6 +464,10 @@ class GrantedNode:
         self._heartbeat: _UploadHeartbeat | None = None
         self._cancelled = threading.Event()
         self._lock = threading.Lock()
+        #: Whether this handle asked for the node (:meth:`request`) rather than found one already granted
+        #: (:meth:`attach`). Quitting releases the first; it only stops beating for the second, which another window
+        #: may still be using — the node's own script ends it two minutes after the last beat.
+        self.owned = False
 
     # ── talking to the host ──────────────────────────────────────────────────────────────────────────────────────
     def _script(self, script: str, *, check: bool = False):
@@ -510,6 +514,7 @@ class GrantedNode:
             raise HoldError(f"a node is already {existing.phase} for this host (job {existing.job_id}); release it "
                             "before requesting another.")
         self._cancelled.clear()
+        self.owned = True
         launcher = self.host.launch_command
         options, user_excluded, partition = sbatch_options(launcher)
         cap = self._partition_cap(partition)
@@ -577,14 +582,18 @@ class GrantedNode:
             self._nap(HOLD_POLL_S)
 
     # ── release ──────────────────────────────────────────────────────────────────────────────────────────────────
-    def release(self, reason: str) -> None:
-        """Give the node back: stop beating, ask the script to end, cancel the job. Idempotent. A request being
-        waited on in another thread is told to stop."""
-        self._cancelled.set()
+    def stop_beating(self) -> None:
+        """Stop this process's heartbeat for the node and leave the node alone."""
         with self._lock:
             heartbeat, self._heartbeat = self._heartbeat, None
         if heartbeat is not None:
             heartbeat.stop()
+
+    def release(self, reason: str) -> None:
+        """Give the node back: stop beating, ask the script to end, cancel the job. Idempotent. A request being
+        waited on in another thread is told to stop."""
+        self._cancelled.set()
+        self.stop_beating()
         try:
             result = self._script(cancel_script(self.paths))
         except Exception as exc:
@@ -828,3 +837,24 @@ class GrantedRun:
         self._runner.step_target = None
         if lease is not None:
             lease.release()
+
+
+def release_all(reason: str, *, timeout_s: float = 10.0) -> bool:
+    """What quitting does about granted nodes: release the ones this process asked for, all at once, and stop beating
+    for the ones it only found (another window may be using those; the node's script ends them two minutes after the
+    last beat). Waits at most *timeout_s* in all; whether everything finished in time. A release that does not finish
+    is not a leak: the node ends itself two minutes after the app's heartbeat stops."""
+    def one(node: GrantedNode) -> None:
+        if node.owned:
+            node.release(reason)
+        else:
+            node.stop_beating()
+
+    threads = [threading.Thread(target=one, args=(n,), daemon=True, name="aw-release-granted-node")
+               for n in live_nodes()]
+    for t in threads:
+        t.start()
+    deadline = time.monotonic() + timeout_s
+    for t in threads:
+        t.join(max(0.0, deadline - time.monotonic()))
+    return not any(t.is_alive() for t in threads)

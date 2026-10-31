@@ -173,7 +173,7 @@ def test_rail_denominators_are_per_stage_not_one_shared_total(qtbot):
         dash.set_well_stage(well, "download")
 
     def counts():
-        return {k: dash._rail[k][3].text() for k in
+        return {k: dash._rail[k].count.text() for k in
                 ("group", "upload", "process", "threshold", "download")}
 
     assert counts()["group"] == "40/6"        # the reported state

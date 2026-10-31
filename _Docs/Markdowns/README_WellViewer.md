@@ -2000,6 +2000,9 @@ reading it. The log names any it kept over budget for that reason.
   with a `!` (partial or unfinished). They are chosen to stay distinguishable
   with red/green colour blindness: complete and failed differ in lightness as
   well as hue, so they never read as the same colour.
+- The **Stages** list beside the plate shows each stage's progress as a bar and
+  a count (`12/40`), with the running stage in bold. It has no coloured dots, so
+  the only coloured things on the progress view are the wells and their legend.
   A well that has started is drawn as a dial rather than a flat circle: the
   darker part of it is the work already done, the lighter part what is left,
   filling clockwise from twelve o'clock. So you can see at a glance whether a

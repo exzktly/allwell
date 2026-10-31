@@ -52,6 +52,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from review.features.nanowell.collect import FIELD_EXCLUDED
+
 SITE_KEY = ["well", "timepoint", "nw_q", "nw_r"]
 #: The well-frame position columns a left-out cell is matched on (:func:`hidden_cells`).
 POSITION = ["well_x_um", "well_y_um"]
@@ -157,8 +159,6 @@ def exclude_fields(frame: pd.DataFrame, gate: GateTally | None) -> None:
     :data:`collect.FIELD_EXCLUDED`, in place, before anything is read from its values."""
     if gate is None or not gate.fields or not len(frame) or "owner" not in frame.columns:
         return
-    from review.features.nanowell.collect import FIELD_EXCLUDED
-
     keys = pd.MultiIndex.from_arrays([frame["well"].astype(str), frame["owner"].astype(str),
                                       frame["timepoint"].astype(str)])
     hit = pd.Series(keys.isin(list(gate.fields)), index=frame.index) & frame["owner"].notna()

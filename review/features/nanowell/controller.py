@@ -26,7 +26,7 @@ from review.features.nanowell.distribution_compute import (
     METRICS, PER_NANOWELL, TIME, WELLS, distribution_model, match_channel, metric_column,
 )
 from review.features.nanowell import full_montage_compute as fmc
-from review.features.nanowell.array_compute import array_scene, one_to_one
+from review.features.nanowell.array_compute import array_scene, field_sites, one_to_one
 from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell import _anchor_queue as aq
@@ -1566,7 +1566,6 @@ def gated_crops(st, site, crops):
     when cut, so crops cut before a gating edit follow it. A crop without its cells' rows is drawn as it is."""
     if not crops or st.gate is None or st.metrics is None:
         return crops
-    from review.features.nanowell.array_compute import field_sites
 
     well = str(site[0])
     metrics = st.metrics[st.metrics["well"] == well]

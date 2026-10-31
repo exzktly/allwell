@@ -416,7 +416,9 @@ def _rewrite_well(plan: WellPlan, grid: dict, grid_path: Path, sites_path: Path,
             f"Addresses relabelled by ({int(shift[0])}, {int(shift[1])}) lattice steps onto {plan.reference}'s by "
             f"{RELABELLED_BY} on {stamp}: its own origin ({origin_phrase(block.get('origin_method'))}) had landed "
             f"a site off. {tail}")
-    _part(grid_path).write_text(json.dumps(grid, indent=2), encoding="utf-8")
+    from util.json_write import write_json_atomic
+
+    write_json_atomic(_part(grid_path), grid, indent=2)       # staged like the tables; relabel_well renames it
 
 
 def relabel_dataset(out_dir, plans: dict, csv_prefixes, progress: Callable[[str], None] | None = None) -> list[str]:

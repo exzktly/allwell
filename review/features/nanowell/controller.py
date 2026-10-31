@@ -1130,7 +1130,8 @@ def focus_nanowell_at(ctx, event) -> None:
 
 def on_canvas_resized(ctx) -> None:
     """The page's canvas settled at a new size: redraw the Array view if its axes no longer have the size its region
-    was fitted to. Without it the view kept the old fit — a resize squashed every nanowell into an oval, and a draw
+    was fitted to, and the Identity view's Diagnostics if its figure is no longer the size it was laid out for
+    (``_identity_controller.needs_relayout``). Without it the view kept the old fit — a resize squashed every nanowell into an oval, and a draw
     made while the canvas was still being laid out (a few pixels tall) showed one flattened row of the array.
 
     A canvas no longer on screen is left alone. The re-fit fires a moment after the resize, and by then the page may
@@ -1138,11 +1139,15 @@ def on_canvas_resized(ctx) -> None:
     (``RuntimeError: Internal C++ object (FigureCanvasQTAgg) already deleted``). A hidden canvas has nothing to re-fit
     for; showing it again resizes it, which re-fits it then."""
     st = _state(ctx)
-    drawn = st.drawn if st is not None else None
-    if st is None or st.view != "array" or drawn is None or drawn.ax is None or drawn.ax.figure is None:
-        return
     canvas = ctx.widgets.get_or_none("_nw_canvas")
-    if canvas is None or not canvas.isVisible():
+    if st is None or canvas is None or not canvas.isVisible():
+        return
+    if st.view == "identity":                          # Diagnostics is laid out for the figure's size: lay it out again
+        if idc.needs_relayout(st.identity_drawn, ctx.widgets.get_or_none("_nw_fig")):
+            redraw(ctx)
+        return
+    drawn = st.drawn
+    if st.view != "array" or drawn is None or drawn.ax is None or drawn.ax.figure is None:
         return
     box = drawn.ax.get_window_extent()
     if (max(int(round(box.width)), 1), max(int(round(box.height)), 1)) != tuple(drawn.size_px):

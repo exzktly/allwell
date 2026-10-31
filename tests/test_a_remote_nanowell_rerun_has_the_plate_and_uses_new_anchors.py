@@ -116,8 +116,8 @@ def test_a_local_plain_re_run_forces_the_wells_with_a_new_anchor(tmp_path):
 ARGV = ["/usr/bin/python", "/local/process_microscopy.py", "--input_dir", "/local/in", "--output_dir", "/local/out"]
 
 
-def _spawn(host, tmp_path, monkeypatch, stop_fetchers, argv):
-    """``RemoteRunner.spawn`` of B02 alone into *tmp_path*/out, the harness of ``test_remote_runner``; returns
+def _spawn(host, tmp_path, monkeypatch, stop_fetchers, argv, well="B02"):
+    """``RemoteRunner.spawn`` of *well* alone into *tmp_path*/out, the harness of ``test_remote_runner``; returns
     ``(rsync commands sent through the transport, whether each came before the pipeline was launched, log)``."""
     from services import remote_transport
     from services.remote_run_state import OutputFilter
@@ -125,7 +125,7 @@ def _spawn(host, tmp_path, monkeypatch, stop_fetchers, argv):
     from tests.test_remote_runner import _make_spawn_test_runner, _make_well_zip
 
     zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP,
-                         well_zips=(_make_well_zip(tmp_path, "B02.zip", ["x.tif"]),))
+                         well_zips=(_make_well_zip(tmp_path, f"{well}.zip", ["x.tif"]),))
     runner, captured = _make_spawn_test_runner(host, tmp_path, monkeypatch, stop_fetchers, completed_remote_wells=set())
     sent = []
 
@@ -192,5 +192,72 @@ def test_both_remote_run_paths_send_the_grid_records():
                 and any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == name for n in ast.walk(f))}
 
     assert "_run_prepared" in callers("services/remote_process.py", "seed_plate_grids")
+    # The confluence reference: on both paths when staging left its well out, and on the batched path also when
+    # the local-completion filter or the remote adoption drops it after the run was prepared (tracker H2).
+    assert {"_run_prepared", "_run_batches"} <= callers("services/remote_process.py", "seed_confluence_reference")
     assert "_prepare_run" in callers("services/remote_runner.py", "_run_prepared")
     assert "__init__" in callers("services/remote_process.py", "_run_prepared")
+
+
+# ── the remote run is given the plate's empty confluence reference (tracker H2) ──
+
+def _reference(out: Path, well: str) -> Path:
+    """A saved confluence reference measured on *well*, as ``pipeline.nanowell_reference.save`` lays it out."""
+    from pipeline import nanowell_reference as nref
+
+    folder = nref.directory(out)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "reference.json").write_text(json.dumps({"well": well, "timepoints": {"0h": {"status": "empty",
+                                                                                           "template": "tp0000.npz"}}}))
+    (folder / "tp0000.npz").write_bytes(b"template")
+    return folder
+
+
+def _reference_sends(sent, folder):
+    return [(cmd, before) for cmd, before in sent if str(folder) in cmd]
+
+
+def test_a_remote_run_without_the_reference_well_is_sent_the_reference_before_it_starts(
+        host, tmp_path, monkeypatch, stop_fetchers):
+    """Reported by review: a remote re-run of a few wells found no reference on a cleaned host, and every well came
+    back with no confluence, written over the values this computer had."""
+    folder = _reference(tmp_path / "out", "H12")
+    argv = [*ARGV, "--nanowell_format", "100um", "--nanowell_empty_well", "H12"]
+    sent, run, log = _spawn(host, tmp_path, monkeypatch, stop_fetchers, argv)
+    sends = _reference_sends(sent, folder)
+    assert len(sends) == 1
+    cmd, before_launch = sends[0]
+    assert before_launch and "--update" in cmd and "-a" in cmd
+    assert cmd[-2:] == [str(folder), f"{host.ssh_alias}:{run.remote_output_dir}/nanowells/"]
+    assert "sent the plate's empty confluence reference" in log
+
+
+def test_a_remote_run_that_measures_the_reference_well_is_not_sent_the_old_one(
+        host, tmp_path, monkeypatch, stop_fetchers):
+    folder = _reference(tmp_path / "out", "H12")
+    argv = [*ARGV, "--nanowell_format", "100um", "--nanowell_empty_well", "h12"]
+    sent, _run, log = _spawn(host, tmp_path, monkeypatch, stop_fetchers, argv, well="H12")
+    assert _reference_sends(sent, folder) == []
+    assert "confluence reference" not in log
+
+
+def test_the_reference_folder_named_here_is_the_pipeline_s():
+    from pipeline import nanowell_reference as nref
+    from services import remote_plate_grids as rpg
+
+    assert rpg.REFERENCE_DIR == nref.DIR_NAME
+    assert nref.directory(Path("o")) == Path("o") / rpg.NANOWELL_DIR / rpg.REFERENCE_DIR
+
+
+def test_a_reference_copy_that_fails_is_said_and_the_run_goes_on(tmp_path):
+    from types import SimpleNamespace
+
+    from services import remote_plate_grids as rpg
+
+    _reference(tmp_path / "out", "H12")
+    cache = SimpleNamespace(host=SimpleNamespace(ssh_alias="gpu"), _ssh_run=MagicMock(side_effect=OSError("down")))
+    run = SimpleNamespace(nanowell=True, local_output_dir=tmp_path / "out", remote_output_dir="/r/out")
+    log: list[str] = []
+    assert rpg.seed_confluence_reference(cache, run, ["B02"], log.append) is False
+    assert log == ["[remote] nanowell: the plate's empty confluence reference could not be sent; the wells of this "
+                   "run will come back with no confluence\n"]

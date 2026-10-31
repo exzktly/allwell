@@ -191,6 +191,59 @@ def test_a_handoff_naming_no_subset_clears_a_stale_one(analyze, tmp_path):
     assert "--only_wells" not in _argv(analyze, tmp_path)
 
 
+def _scope(tab) -> dict:
+    """What the form hands the run about which wells to touch and how."""
+    opts = tab._collect_run_options()
+    return {k: opts[k] for k in ("incremental", "force", "only_wells", "skip_wells", "force_wells")}
+
+
+def test_complete_this_run_clears_a_stale_skip_list(analyze, tmp_path):
+    """Tracker M15. *Skip these wells* left from earlier took D03 off a run handed over to finish C08 and D03: the
+    handoff wrote *Only these wells* and left the skip list, so the run quietly did half its job (and, skipping
+    every named well, would have had nothing to run at all)."""
+    from allwell import AllWellApp
+
+    _plate_needing_work(tmp_path)
+    info = json.loads((tmp_path / "out" / "pipeline_info.json").read_text())
+    analyze._skip_wells_edit.setText("D03")
+    AllWellApp._open_dataset_in_analyze(
+        _shell_with(analyze), tmp_path, info, incremental=True, force_wells=["C08"], only_wells=["C08", "D03"])
+    assert analyze._skip_wells_edit.text() == ""
+    assert _scope(analyze) == {"incremental": True, "force": False, "only_wells": ["C08", "D03"], "skip_wells": [],
+                               "force_wells": ["C08"]}
+
+
+def test_a_handoff_naming_no_forced_wells_forces_none_whatever_the_sidecar_or_the_form_held(analyze, tmp_path):
+    """The dataset's own sidecar is applied first, and it records the wells its run was told to force: Finish this
+    run on a plate that needs no forcing re-segmented them from scratch, over output that was whole."""
+    from allwell import AllWellApp
+
+    _plate_needing_work(tmp_path)
+    info = json.loads((tmp_path / "out" / "pipeline_info.json").read_text())
+    info.setdefault("execution_options", {})["force_wells"] = ["B02", "D03"]
+    AllWellApp._open_dataset_in_analyze(
+        _shell_with(analyze), tmp_path, info, incremental=True, only_wells=["D03"])
+    assert analyze._force_wells_edit.text() == ""
+    assert _scope(analyze)["force_wells"] == []
+    assert "--force_wells" not in _argv(analyze, tmp_path)
+
+
+def test_a_handoff_that_is_not_incremental_does_not_take_the_sidecars_incremental(analyze, tmp_path):
+    """QC triage's *Re-run wells* hands over with Incremental off (a remote nanowell run refuses it, and every well
+    it names is forced anyway); a sidecar written by a completion run records ``incremental`` and put it back."""
+    from allwell import AllWellApp
+
+    _plate_needing_work(tmp_path)
+    info = json.loads((tmp_path / "out" / "pipeline_info.json").read_text())
+    info.setdefault("execution_options", {}).update(incremental=True, force=False)
+    AllWellApp._open_dataset_in_analyze(
+        _shell_with(analyze), tmp_path, info, incremental=False, force_wells=["C08"], only_wells=["C08"])
+    assert analyze._existing_output_cb.value() == "skip"
+    assert _scope(analyze) == {"incremental": False, "force": False, "only_wells": ["C08"], "skip_wells": [],
+                               "force_wells": ["C08"]}
+    assert "--incremental" not in _argv(analyze, tmp_path)
+
+
 def test_the_typed_list_reaches_argv_canonical_and_sorted(analyze, tmp_path):
     """The remote run address hashes the argv: two spellings of one subset
     must be one argv, or the same run would never find its own directory."""

@@ -214,6 +214,28 @@ def _public_key_material(pub_path: Path) -> str | None:
     return material
 
 
+#: Shell text that ends ``authorized_keys`` with a newline when it holds text that does not: a file whose last line
+#: was written without one (by hand, or by an editor that drops it) would otherwise have the key glued onto that
+#: line, where sshd reads it as part of the previous key's comment and never offers it. ``tail -c1 | wc -l`` counts
+#: 0 exactly when the last byte is not a newline; ``[ -s ]`` skips an empty file. It is written without ``$`` and
+#: without a double quote because the whole remote command sits inside one double-quoted argument that PowerShell
+#: and the local POSIX shell would otherwise expand or end (see :func:`build_copy_command`).
+_END_LAST_LINE = (
+    "[ -s ~/.ssh/authorized_keys ] && tail -c1 ~/.ssh/authorized_keys | wc -l | grep -q 0 "
+    "&& echo >> ~/.ssh/authorized_keys"
+)
+
+
+def _key_entry_pattern(material: str) -> str:
+    """An extended regex matching *material* only where it starts a field — at the start of a line or after a space
+    (a line with options, ``command="…" ssh-ed25519 …``) — never inside another field.
+
+    A plain substring check also matched a key glued onto the end of the previous line's comment, so a re-run found
+    the broken entry, appended nothing, and left the key unusable. *material* is made only of
+    ``[A-Za-z0-9+/= -]`` (:func:`_public_key_material`), of which only ``+`` is special in an extended regex."""
+    return "(^| )" + material.replace("+", "[+]")
+
+
 def build_copy_command(ssh_alias: str, key_path: Path) -> str:
     """Return the exact shell command the user should run to install
     the public key on the remote.
@@ -229,8 +251,11 @@ def build_copy_command(ssh_alias: str, key_path: Path) -> str:
     pipe form is kept only as a last resort, when the ``.pub`` file cannot
     be read here.
 
-    The remote half appends the key only when it is not already present, so
-    running the command twice leaves one entry, as ``ssh-copy-id`` would.
+    The remote half appends the key only when it is not already present as an
+    entry of its own (:func:`_key_entry_pattern`), so running the command twice
+    leaves one entry, as ``ssh-copy-id`` would; and it first ends a last line
+    that has no newline (:data:`_END_LAST_LINE`), as ``ssh-copy-id`` also does,
+    so the key starts a line of its own.
     We never execute the command ourselves, so the user's password stays out
     of AllWell's process.
     """
@@ -245,8 +270,8 @@ def build_copy_command(ssh_alias: str, key_path: Path) -> str:
     if material is not None:
         return (
             f'ssh {alias} "{prepare} && '
-            f"(grep -qF '{material}' ~/.ssh/authorized_keys || "
-            f"echo '{material}' >> ~/.ssh/authorized_keys) && "
+            f"(grep -qE '{_key_entry_pattern(material)}' ~/.ssh/authorized_keys || "
+            f"({_END_LAST_LINE}; echo '{material}' >> ~/.ssh/authorized_keys)) && "
             f'{finish}"'
         )
     return (

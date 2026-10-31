@@ -24,7 +24,7 @@ import threading
 import zipfile
 from datasets.core.dataset_paths import dataset_wells
 from datasets.core.nanowell_tables import carry_nanowell_tables
-from datasets.concatenate.nanowell_link import MONTAGE_SUFFIX, carry_linked_tables
+from datasets.concatenate.nanowell_link import MONTAGE_SUFFIX, carry_linked_tables, counted_cells
 from datasets.core.containers import container_dest, publish_container
 from util.json_write import write_json_atomic
 from collections.abc import Callable
@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from util.timepoint import parse_hours
+from util.well_token import canonical_well_label
 from util.aw_safe import swallow
 from domain.tp_match import tp_close
 from datasets.core.concurrency import pick_workers
@@ -478,6 +479,15 @@ def _merge_cell_overrides(plan: MergePlan, emit: Callable[[str], None]) -> None:
 
 
 # ── verification (runs before the sidecar is written) ────────────────────────
+def _nanowell_cells(plan: MergePlan) -> dict[str, int]:
+    """``canonical well -> cells`` its nanowell sites tables count at the timepoints the merge keeps (wells with no
+    sites table are absent): dataset 1's, and dataset 2's that are joined rather than set aside."""
+    def relabel(token: str) -> str:
+        return remap_timepoint_label(token, plan.offset_hours, plan.tp_format)
+
+    return counted_cells(plan.ds1.out_dir, None if plan.ds2_raw else plan.ds2.out_dir, plan.nanowell_link, relabel)
+
+
 def _verify(
     plan: MergePlan, well_stats: dict[str, WellCsvStats],
     dropped_members: dict[str, frozenset[str]] | None = None,
@@ -507,14 +517,22 @@ def _verify(
 
     total_rows = sum(s.rows_ds1 + s.rows_ds2 for s in well_stats.values())
     # A nanowell well none of whose nanowells holds a cell writes its per-cell CSV with a header and no rows — a
-    # measurement, whose rows are in its sites table — so no cell rows is not, there, a merge that matched nothing.
-    if well_stats and total_rows == 0 and plan.nanowell_link is None:
+    # measurement, whose rows are in its sites table — so no cell rows is not, for that well, a merge that matched
+    # nothing. Decided well by well, from the sites tables at the timepoints the merge keeps: any other well, and a
+    # nanowell well whose sites count cells, has lost its cell table.
+    counted = _nanowell_cells(plan) if well_stats and total_rows == 0 else {}
+    found = {w: counted.get(canonical_well_label(w) or w) for w in sorted(well_stats)}
+    unexplained = [w for w, cells in found.items() if cells != 0]
+    if well_stats and total_rows == 0 and unexplained:
+        lost = [(w, found[w]) for w in unexplained if found[w] is not None]
         raise ConcatError(
             "Verification failed: the merge wrote zero measurement rows "
             f"across {len(well_stats)} well(s) — no measurements_<WELL>.csv "
             "was matched for any well in either dataset (images were still "
             "copied). Check that each dataset's out/ folder actually "
             "contains its measurements CSVs, not just the QC image zips."
+            + (f" {lost[0][0]}'s nanowell sites tables count {lost[0][1]} cell(s) that no per-cell table holds."
+               if lost else "")
         )
 
     tp_mismatches = [m for s in well_stats.values() for m in s.tp_mismatches]

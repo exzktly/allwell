@@ -563,3 +563,19 @@ def _drive(tmp_path, wells, *, complete=(), argv=None, batch_size=1):
         if item:
             lines.append(item)
     return uploads, drivers, p, lines
+
+
+# ── the nanowell confluence reference goes in the first batch ────────────────
+
+
+@pytest.mark.parametrize("spelled", ["H12", "h12"])
+def test_the_empty_reference_well_is_uploaded_in_the_first_batch(tmp_path, spelled):
+    """Review tracker M8. Every nanowell well's confluence is read against the empty reference well, which the
+    batches find in the output folder's ``nanowells/`` only once a batch has measured it
+    (``remote_batch_staging.nanowell_reference_first``). The reference sorts last here, so left in place it is in the
+    third batch and the first two batches' wells have no confluence at all. Driven through the real
+    ``_run_batches``, with the remote stubbed, in batches of one; the flag spelled as a user may type it."""
+    argv = ["--nanowell_format", "100um", "--nanowell_empty_well", spelled]
+    uploads, _drivers, _p, _lines = _drive(tmp_path, ["A01", "A02", "H12"], argv=argv)
+    batches = [stems for dest, stems in uploads if dest.startswith("b")]
+    assert batches == [("H12",), ("A01",), ("A02",)]

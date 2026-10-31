@@ -144,6 +144,10 @@ def test_the_reporting_cluster_s_profiles_get_their_cores(tmp_path):
     (["--cpus-per-task=8"], ["--cpus-per-task=8"]),
     (["-p", "x"], ["-p", "x"]),
     (["--ntasks=lots", "--mem=4G"], ["--mem=4G"]),
+    # Tracker L25: GPUs asked per task are as many tasks' worth once the tasks are one.
+    (["--ntasks=4", "--gpus-per-task=1"], ["--cpus-per-task=4", "--gpus-per-task=4"]),
+    (["--ntasks=2", "--cpus-per-task=8", "--gpus-per-task=l4:1"], ["--cpus-per-task=16", "--gpus-per-task=l4:2"]),
+    (["--gpus-per-task=1"], ["--gpus-per-task=1"]),
 ])
 def test_a_task_count_becomes_the_one_task_s_cpus(flags, expected):
     assert single_task(flags) == expected

@@ -65,6 +65,7 @@ from services import run_journal, run_provenance
 from services.remote_finished_wells import argv_forcing, drop_finished, nanowell_forced
 from services.remote_process import run_local_auto_threshold
 from services.remote_recover import recover_finished_outputs
+from services.remote_reservation import EARLY_JOB_ENDED
 from services.remote_run_state import refuse_remote_nanowell_incremental
 from services.sleep_guard import SleepGuard
 from services.subprocess_kill import signal_subprocess
@@ -371,9 +372,11 @@ _RE_SCHED_REQUEST = re.compile(
     r"\[remote\] scheduler: (?:batch \d+: |(?P<early>early: ))?requesting allocation via: (?P<launcher>.+)")
 # A job queued before staging (``services.remote_reservation``) is asked for with ``early:`` on its request line,
 # because the run goes on preparing while it waits: the pane counts the wait without calling the run queued. These
-# are its two ends: the run handed to it, or it given back unused.
+# are its two ends: the run handed to it, or it given back unused or ended on its own while the run is prepared
+# (``remote_reservation.EARLY_JOB_ENDED``, said as it ends, so the wait stops being counted then, not at the hand-over).
 _RE_SCHED_HANDED = re.compile(r"\[remote\] scheduler: the run is handed to the node asked for early")
-_RE_SCHED_EARLY_ENDED = re.compile(r"\[remote\] scheduler: giving back the node asked for early")
+_RE_SCHED_EARLY_ENDED = re.compile(
+    r"\[remote\] scheduler: giving back the node asked for early|" + re.escape(EARLY_JOB_ENDED))
 _RE_SCHED_GRANTED = re.compile(
     r"\[remote\] scheduler: allocation granted — job (\S+)")
 _RE_SCHED_QUEUED = re.compile(
@@ -1139,9 +1142,11 @@ class PipelineRunner:
     #: Suspend exits 0 on purpose, and it is neither a completion nor a failure.
     _CONTROL_KINDS = frozenset({"done", "suspended", "error", "finished"})
 
-    def _enqueue(self, event: tuple[str, object], *, activity: bool = True) -> None:
+    def _enqueue(self, event: tuple[str, object], *, activity: bool = True, early: bool = False) -> None:
         """Non-blocking enqueue for a log line; drops it on overflow rather
         than blocking the reader thread — unless the run's state depends on it.
+        *early* marks a line from the scheduler job asked for before staging
+        (``_EarlyAllocation``), read as that job's evidence (``RunEvidence``).
 
         Two things are never dropped; they block until the reader (draining
         in bounded slices in ``_poll_log``) makes room:
@@ -1174,7 +1179,7 @@ class PipelineRunner:
             # Every line the run says, from whichever thread: the stream, and
             # the spawn's own lines before there is one (the allocation request).
             # Not the runner's own report of a probe, which quotes ssh too.
-            self._evidence.note(str(event[1]))
+            self._evidence.note(str(event[1]), early=early)
         must_keep = event[0] in self._CONTROL_KINDS or (
             event[0] == "line" and carries_state(str(event[1])))
         if must_keep:
@@ -2520,8 +2525,11 @@ class PipelineRunner:
         batch_size = _remote_batch_size(opts)
         # The scheduler job, queued as soon as staging knows how many wells the run can hold — before it plans or
         # rewrites a single archive — so the queue wait overlaps staging (services.remote_reservation).
+        # Its lines are read as the early job's: what it says about its own end is the run's only once the run is
+        # handed to it (`RunEvidence`), since a job that ends during staging is replaced by another.
         early = _EarlyAllocation(self._remote_runner, batch_size=batch_size, nanowell="--nanowell_format" in args,
-                                 log_fn=lambda m: self._enqueue(("line", m)), stop_event=self._stop_requested)
+                                 log_fn=lambda m: self._enqueue(("line", m), early=True),
+                                 stop_event=self._stop_requested)
         # This machine drives the run for its whole length; one that sleeps
         # stops it on the cluster (services.sleep_guard). Released in `finally`.
         awake = SleepGuard(log_fn=lambda m: self._enqueue(("line", m)))

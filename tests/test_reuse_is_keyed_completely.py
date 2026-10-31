@@ -271,7 +271,22 @@ REUSE_CONTRACTS = {
         "nanowell_coverage": "a nanowell well's grid record holds a verdict for every timepoint its archive holds",
         "nanowell_anchors": "a nanowell well made under other anchors than the ones set now — an anchor set, moved or "
                             "cleared since — is to be run again: the anchors are not among the settings",
+        "nanowell_confluence_reference": "a nanowell well whose confluence was read against another empty reference "
+                                         "than the one saved here now (one measured, re-exported or put right since) "
+                                         "is to be run again: the settings name the reference well, not what it holds",
+        "nanowell_reference_sent": "when the reference well is itself sent, the host measures it before every other "
+                                   "well, so no well read against the reference as it is here can be left out",
         "blank": "an empty-well blank is the correction's input, never a well left out",
+    },
+    "nanowell_task.confluence_reference_current": {
+        "template": "the reference's template at the timepoint, by content: a re-exported reference gives another "
+                    "template and every well read against the old one must be read again. By content rather than by "
+                    "file, because each save of the reference rewrites its .npz files with a new timestamp; the "
+                    "incremental path (`nanowell_task._prior_state`) takes the same key per timepoint",
+        "measured": "whether the reference was measured in this folder at all: a well read before it was (a missing or "
+                    "failed reference) has no confluence and must be read again once it is",
+        "verdict": "the reference's verdict at the timepoint: one judged loaded gives no template, so every well's "
+                   "confluence there is blank; judged empty since, they must be read again",
     },
     "remote_batch_resume.take_from_remote": {
         "argv_digest": "an earlier attempt is taken from only when it was configured the same way",
@@ -373,7 +388,7 @@ def out_dir(tmp_path, monkeypatch):
 REUSE_PRIMITIVES = frozenset({
     "stored_remote_address", "stored_remote_addresses", "recorded_remote_attempts",
     "finished_wells", "finished_on_remote", "finished_on_this_host", "finished_here",
-    "_pipeline_launch_is_pointless", "well_settings_allow_reuse",
+    "_pipeline_launch_is_pointless", "well_settings_allow_reuse", "confluence_reference_current",
 })
 
 #: Every site the scan finds in the run's code (``services/``, ``pipeline/``, ``process_microscopy.py``), and the
@@ -385,6 +400,8 @@ DECISION_SITES = {
     "process_microscopy.py::process_well_zip_task": "settings_record.well_settings_allow_reuse",
     "process_microscopy.py::process_well_folder_task": "settings_record.well_settings_allow_reuse",
     "pipeline/well_skip.py::finished_output": "well_skip.finished_output",
+    "process_microscopy.py::process_well_zips": "nanowell_task.confluence_reference_current",
+    "services/remote_finished_wells.py::_read_against_the_reference": "remote_finished_wells.finished_here",
     "pipeline/run_report.py::finished_on_this_host": "well_skip.finished_output",
     "services/remote_finished_wells.py::finished_here": "remote_finished_wells.finished_here",
     "services/pipeline_runner.py::PipelineRunner._finished_here": "remote_finished_wells.finished_here",
@@ -1315,9 +1332,13 @@ def _finished_here_case(tmp_path, key: str) -> tuple[list, list]:
     from services.remote_finished_wells import argv_forcing, finished_here
 
     nanowell = key.startswith("nanowell_")
+    referenced = key in ("nanowell_confluence_reference", "nanowell_reference_sent")
     opts = _opts(**({"nanowell_format": "100um", "phase_token": "DAPI",
-                     "segmentation_method": "cellpose_labelfree"} if nanowell else {}))
+                     "segmentation_method": "cellpose_labelfree"} if nanowell else {}),
+                 **({"nanowell_empty_well": "H12"} if referenced else {}))
     inp, out, argv = _field_plate(tmp_path, opts)
+    if referenced:                       # A01 read while the reference was not measured here, and said so
+        _stamp_reference_key(out, "none:unmeasured")
     baseline = finished_here(out, argv, ["A01"])
     keep: tuple = ()
     if key == "settings":
@@ -1345,6 +1366,10 @@ def _finished_here_case(tmp_path, key: str) -> tuple[list, list]:
         from util.nanowell_anchors import Anchor, anchors_path, write_anchors
 
         write_anchors(anchors_path(inp), {("A01", "T01"): Anchor("A01", "T01", 10.0, 20.0)})
+    elif key == "nanowell_confluence_reference":
+        _save_reference(out, _reference_template())                 # measured since A01 was read without one
+    elif key == "nanowell_reference_sent":
+        return baseline, finished_here(out, argv, ["A01", "H12"])  # H12 has no output here: it is sent
     elif key == "blank":
         keep = ("A01",)
     else:
@@ -1513,6 +1538,66 @@ def _nothing_left_case(tmp_path, key: str):
     raise AssertionError(f"no mutation written for {key!r}: add one beside its reason in REUSE_CONTRACTS")
 
 
+_REFERENCE_SPEC = {"plate_format": "100um", "empty_well": "H12"}
+
+
+def _reference_template(texture_cut: float = 0.1, level: float = 1.0):
+    import numpy as np
+
+    from pipeline import nanowell_measure as nm
+
+    return nm.Template(np.full((5, 5), level), 2, "own", 10, 12, texture_cut, (0, 1))
+
+
+def _save_reference(out, template, status: str = "empty"):
+    """Save H12 as the empty reference in *out*, its 0h and T01 judged *status*, the way the reference well's run
+    does (``nanowell_reference.save``)."""
+    from pipeline import nanowell_reference as nref
+    from pipeline.nanowell_task import settings_from_kwargs
+
+    verdict = {"status": status, "loaded_share": 0.0, "nanowells_counted": 50, "max_loaded_share": 0.05}
+    nref.save(out, "H12", settings_from_kwargs({"_nanowell": _REFERENCE_SPEC}),
+              {tp: (template, verdict) for tp in ("0h", "T01")})
+
+
+def _stamp_reference_key(out, key: str, timepoint: str = "T01") -> None:
+    from pipeline import nanowell_reference as nref
+
+    path = out / "nanowells" / "A01_grid.json"
+    path.parent.mkdir(exist_ok=True)
+    grid = _json.loads(path.read_text()) if path.is_file() else {"timepoints": {}}
+    grid["timepoints"].setdefault(timepoint, {"status": "ok"})[nref.KEY_FIELD] = key
+    path.write_text(_json.dumps(grid))
+
+
+def _reference_current_case(tmp_path, key: str):
+    """``(baseline, mutated)`` of ``confluence_reference_current`` for A01, read at 0h against the saved H12."""
+    from pipeline import nanowell_reference as nref
+    from pipeline.nanowell_task import confluence_reference_current
+
+    out = tmp_path / "out"
+    out.mkdir()
+    template = {"_nanowell": _REFERENCE_SPEC}
+    if key == "measured":
+        _stamp_reference_key(out, "none:unmeasured", "0h")
+        baseline = confluence_reference_current(out, "A01", template)
+        _save_reference(out, _reference_template())
+        return baseline, confluence_reference_current(out, "A01", template)
+    if key == "verdict":
+        _save_reference(out, _reference_template(), status="loaded")
+        _stamp_reference_key(out, "none:loaded", "0h")
+        baseline = confluence_reference_current(out, "A01", template)
+        _save_reference(out, _reference_template())
+        return baseline, confluence_reference_current(out, "A01", template)
+    if key == "template":
+        _save_reference(out, _reference_template())
+        _stamp_reference_key(out, nref.template_key(_reference_template()), "0h")
+        baseline = confluence_reference_current(out, "A01", template)
+        _save_reference(out, _reference_template(level=1.01))     # re-exported: another template
+        return baseline, confluence_reference_current(out, "A01", template)
+    raise AssertionError(f"no mutation written for {key!r}: add one beside its reason in REUSE_CONTRACTS")
+
+
 def _finished_output_case(tmp_path, key: str):
     """``(baseline, mutated)`` of the host's own skip for a well its run sealed."""
     from pipeline.run_report import seal_well_complete, withdraw_seal, write_well_report
@@ -1552,6 +1637,7 @@ _REMOTE_DECISIONS = {
     "pipeline_runner.PipelineRunner._nothing_left_to_upload": lambda tmp_path, mp, key: _nothing_left_case(tmp_path,
                                                                                                            key),
     "well_skip.finished_output": lambda tmp_path, mp, key: _finished_output_case(tmp_path, key),
+    "nanowell_task.confluence_reference_current": lambda tmp_path, mp, key: _reference_current_case(tmp_path, key),
 }
 
 

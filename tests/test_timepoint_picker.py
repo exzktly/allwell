@@ -243,3 +243,135 @@ def test_the_ome_picker_reaches_the_params_and_the_readout(qapp, tmp_path):
     finally:
         ctrl.shutdown()
         page.deleteLater()
+
+
+# ── a restored timepoint the source lacks, on each page (tracker L27) ────────
+#
+# A page listed the source's tokens only once a plan was made, and the plan is refused for exactly this selection,
+# so the picker never learnt the source's tokens and the marker could not appear on any of the three pages.
+
+def _reopen_as_a_job_naming_t9(make, prepare):
+    """A converter's settings queued as a job, its selection naming ``t1`` and ``t9``, opened again through the
+    controller's ``show_job`` — the restore path, which sets the source and the selection together, before the
+    page's scan has listed any token. Returns ``(controller, picker)``; the caller shuts the controller down."""
+    first = make()
+    try:
+        prepare(first.page)
+        spec = first.collect_spec()
+    finally:
+        first.shutdown()
+        first.page.deleteLater()
+    spec["params"]["timepoint_subset"] = ["t1", "t9"]
+    ctrl = make()
+    ctrl.show_job(spec)
+    if hasattr(ctrl.page, "is_scanning"):
+        _settle(ctrl.page)
+    QApplication.processEvents()
+    return ctrl, ctrl.page._timepoint_pick
+
+
+def _expect_t9_marked(ctrl, picker):
+    try:
+        assert picker._labels == ["t0", "t1", "t2", "t9 (not in this source)"]
+        assert picker.checkedData() == ["t1", "t9"]
+        assert "t9" in ctrl.page._verdict.text()
+    finally:
+        ctrl.shutdown()
+        ctrl.page.deleteLater()
+
+
+def test_the_nd2_page_marks_a_restored_timepoint_its_file_lacks(qapp, tmp_path):
+    pytest.importorskip("nd2")
+    from datasets.nd2_import.controller import Nd2ImportController
+    from tests._nd2_fixture import write_nd2
+
+    src = write_nd2(tmp_path / "Plate7.nd2", n_pos=2, n_t=3, n_c=1, well_names=["C07", "A02"],
+                    channel_names=["DAPI"])
+
+    def prepare(page):
+        page.set_source_path(str(src))
+        page.set_destination_path(str(tmp_path / "dest"))
+        _settle(page)
+
+    def make():
+        return Nd2ImportController(on_open_in_analyze=lambda *_a: None, on_add_to_queue=lambda *_a: None)
+
+    _expect_t9_marked(*_reopen_as_a_job_naming_t9(make, prepare))
+
+
+def test_the_czi_page_marks_a_restored_timepoint_its_file_lacks(qapp, tmp_path):
+    from datasets.czi_import.controller import CziImportController
+    from tests._czi_fixture import plate_metadata_xml, plate_tiles, write_czi
+
+    src = write_czi(tmp_path / "Plate7.czi", plate_tiles(wells=2, fovs=1, timepoints=3, channels=1),
+                    xml=plate_metadata_xml(scene_wells={0: "C07", 1: "A02"}, channels=["DAPI"]))
+
+    def prepare(page):
+        page.set_source_path(str(src))
+        page.set_destination_path(str(tmp_path / "dest"))
+        _settle(page)
+
+    def make():
+        return CziImportController(on_open_in_analyze=lambda *_a: None, on_add_to_queue=lambda *_a: None)
+
+    _expect_t9_marked(*_reopen_as_a_job_naming_t9(make, prepare))
+
+
+def test_the_ome_page_marks_a_restored_timepoint_its_file_lacks(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    path = tmp_path / "plate.ome.tif"
+    with tifffile.TiffWriter(str(path), ome=True) as tw:
+        for _pos in range(2):
+            tw.write(np.zeros((3, 1, 6, 6), np.uint16), photometric="minisblack",
+                     metadata={"axes": "TCYX", "Channel": {"Name": ["DAPI"]}})
+
+    def prepare(page):
+        page._src_field.set_path(str(path))
+        page._on_source_changed()
+        page._rows_edit.setText("1")
+        page._cols_edit.setText("2")
+        page.refresh_readout()
+        assert page._timepoint_pick.source_tokens() == ["t0", "t1", "t2"]
+
+    def make():
+        return OmeImportController(on_open_in_analyze=lambda *_a: None)
+
+    _expect_t9_marked(*_reopen_as_a_job_naming_t9(make, prepare))
+
+
+def test_a_new_source_without_a_ticked_timepoint_lists_its_own_and_marks_the_one_it_lacks(qapp, tmp_path):
+    """t1 and t9 ticked on a ten-timepoint file, then a three-timepoint one chosen: the plan for the new file is
+    refused, and the picker went on listing the old file's ten timepoints, t9 among them and unmarked."""
+    from datasets.ome_import.controller import OmeImportController
+
+    def write(name, n_t):
+        path = tmp_path / name
+        with tifffile.TiffWriter(str(path), ome=True) as tw:
+            for _pos in range(2):
+                tw.write(np.zeros((n_t, 1, 6, 6), np.uint16), photometric="minisblack",
+                         metadata={"axes": "TCYX", "Channel": {"Name": ["DAPI"]}})
+        return path
+
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
+    page = ctrl.page
+    try:
+        page._src_field.set_path(str(write("long.ome.tif", 10)))
+        page._on_source_changed()
+        page._rows_edit.setText("1")
+        page._cols_edit.setText("2")
+        page.refresh_readout()
+        picker = page._timepoint_pick
+        for token in ("t0", "t2", "t3", "t4", "t5", "t6", "t7", "t8"):
+            _untick(picker, token)
+        assert page.params().timepoint_subset == ("t1", "t9")
+
+        page._src_field.set_path(str(write("short.ome.tif", 3)))
+        page._on_source_changed()
+        page.refresh_readout()
+        assert picker._labels == ["t0", "t1", "t2", "t9 (not in this source)"]
+        assert picker.checkedData() == ["t1", "t9"]
+        assert "t9" in page._verdict.text()
+    finally:
+        ctrl.shutdown()
+        page.deleteLater()

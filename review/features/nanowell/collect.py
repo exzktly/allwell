@@ -51,6 +51,10 @@ UNADDRESSED, NOT_LOCATED = "unaddressed", "not_located"
 #: A timepoint whose addresses the identity check found naming other nanowells than the well's reference timepoint
 #: does (``pipeline.nanowell_identity``): its rows are kept out of every join over time, with the check's reason.
 IDENTITY_CONTRADICTED = "identity_contradicted"
+#: A timepoint of a tile the analysis leaves out as a whole field — the run's field-quality flag, a field excluded
+#: by hand in QC triage, or a field not among the FOVs chosen on Cell Gating (``cell_gate_compute.FIELD_LAYERS``):
+#: every nanowell that tile owns there is left out, an empty one as much as a loaded one, with no value at all.
+FIELD_EXCLUDED = "field_excluded"
 #: A measurable timepoint at which the nanowell's own rim was out of focus against its well's sharp rims
 #: (``rim_focus_compute``): Review's verdict, not the run's, so it changes with the page's rule and no re-run.
 OUT_OF_FOCUS = "out_of_focus"
@@ -498,11 +502,14 @@ def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, availabl
 
 #: The columns of a nanowell run's cell table the Cells layer reads.
 CELL_POSITION_COLUMNS = ("well", "timepoint", "nw_q", "nw_r", "well_x_um", "well_y_um")
+#: Read too when the table has it: the tile each cell was counted in, which a field exclusion is stated in
+#: (``cell_gate_compute.hidden_cells``).
+CELL_FOV_COLUMN = "fov"
 
 
 def cell_positions(data: NanowellData, well: str, timepoint: str) -> pd.DataFrame | None:
-    """Every counted cell of *well* at *timepoint*: its nanowell's address and its centre in the well frame (µm),
-    from the run's cell table. ``None`` when the well has no cell table (a run that counted no cell, or one that
+    """Every counted cell of *well* at *timepoint*: its nanowell's address, its centre in the well frame (µm) and,
+    when the table has it, its tile (``fov``), from the run's cell table. ``None`` when the well has no cell table (a run that counted no cell, or one that
     could not count). The table is read whole once per file and kept while it is unchanged on disk, so stepping
     through a well's timepoints reads it once."""
     path = data.cell_tables.get(well)
@@ -522,9 +529,16 @@ def cell_positions(data: NanowellData, well: str, timepoint: str) -> pd.DataFram
 def _read_cell_positions(path: str, _mtime_ns: int, _size: int) -> pd.DataFrame | None:
     """One cell table's positions; the modification time and size are the cache key, so an edited file is read
     again."""
+    wanted = {*CELL_POSITION_COLUMNS, CELL_FOV_COLUMN}
     try:
-        frame = pd.read_csv(path, usecols=list(CELL_POSITION_COLUMNS), dtype={"timepoint": str, "well": str})
+        frame = pd.read_csv(path, usecols=lambda c: c in wanted,
+                            dtype={"timepoint": str, "well": str, CELL_FOV_COLUMN: str})
     except (OSError, ValueError, pd.errors.ParserError) as exc:
         log.warning("Nanowells: the cell table %s cannot be read for the Cells layer (%s)", path, exc)
+        return None
+    missing = [c for c in CELL_POSITION_COLUMNS if c not in frame.columns]
+    if missing:
+        log.warning("Nanowells: the cell table %s cannot be read for the Cells layer (no %s column)", path,
+                    ", ".join(missing))
         return None
     return frame.dropna(subset=["well_x_um", "well_y_um"])

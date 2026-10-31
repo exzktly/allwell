@@ -670,6 +670,11 @@ class RunDashboard(PlateProgress):
             self._repaint(w)
         self._refresh_rail()
 
+    def setRailBeside(self, beside: bool) -> None:
+        for _dot, _nm, bar, _cnt in getattr(self, "_rail", {}).values():
+            bar.setVisible(not beside)
+        super().setRailBeside(beside)
+
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
         self._rail = {}
@@ -691,6 +696,9 @@ class RunDashboard(PlateProgress):
             bar = QProgressBar(row_w)
             bar.setRange(0, max(1, self._total)); bar.setValue(0)
             bar.setTextVisible(False); bar.setFixedSize(scaled_px(_BAR_W), _BAR_H)
+            # Beside the plate (phone layout sideways) the bar goes: the dot's
+            # colour and the count say the same, and the plate needs the width.
+            bar.setVisible(not self.isRailBeside())
             row.addWidget(bar)
             cnt = QLabel("0/0", row_w); cnt.setFixedWidth(scaled_px(_CNT_W))
             cnt.setStyleSheet(f"color:{theme.Colors.text_muted};")

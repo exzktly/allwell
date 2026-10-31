@@ -311,7 +311,9 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         assert dash.isStacked() and dash._status.isHidden()
         # Sideways (this offscreen screen is square, so the shape is forced):
         # the page menu and Controls join the bar, and Analyze becomes two
-        # columns with the plate capped to the screen's height.
+        # columns, the stage rail beside the plate so the plate keeps height
+        # (its size is fitted by analyze/phone_view, pinned in
+        # tests/test_analyze_phone_view.py).
         monkeypatch.setattr(shell, "is_landscape", lambda: True)
         shell._apply_sizes()
         _pump(qapp)
@@ -321,13 +323,16 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         for b in (shell.page_button, shell.controls_button):
             assert bar_lay.itemAt(bar_lay.indexOf(b)).alignment() == Qt.AlignVCenter
         assert shell._h.analyze_body.direction() == QBoxLayout.LeftToRight
-        assert dash.maximumWidth() == round(300 * u)
-        assert dash._plate.maximumHeight() == round(160 * u)
+        assert dash.maximumWidth() == round(440 * u)
+        assert dash.isRailBeside()
+        assert shell._h.analyze_body.stretch(shell._h.analyze_body.indexOf(dash)) == 1
         monkeypatch.setattr(shell, "is_landscape", lambda: False)
         shell._apply_sizes()
         _pump(qapp)
         assert shell.page_button.parentWidget() is shell._strip
         assert shell._h.analyze_body.direction() == QBoxLayout.TopToBottom
+        assert not dash.isRailBeside()
+        assert shell._h.analyze_body.stretch(shell._h.analyze_body.indexOf(dash)) == 0
     finally:
         shell.set_on(False)
         _pump(qapp)

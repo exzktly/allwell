@@ -1171,3 +1171,77 @@ def test_the_excluded_wells_are_kept_with_the_page_s_settings_and_junk_is_droppe
     assert st.excluded_wells == ["A01", "B02"]
     st.apply_config({"excluded_wells": "A01"})
     assert st.excluded_wells == []
+
+
+# ── a timepoint contradicted as a whole (tracker L20) ────────────────────────
+#: What ``nanowell_identity.compare`` says when every address lands on itself but the square it registered on is not
+#: the reference's: the whole timepoint is contradicted though no distance fails.
+SQUARE_ELSEWHERE = ("the square the run accepted at this timepoint is 1.20 pitch from where the reference's square "
+                    "correlates: the run took something else for the square")
+
+
+def _wholly_contradicted(dataset, well="A01"):
+    out, _data, _ref, _other = dataset
+    payload = ni.read_sidecar(out, well)
+    payload["timepoints"]["T1"].update(verdict=ni.CONTRADICTED, reason=SQUARE_ELSEWHERE)
+    return payload
+
+
+def test_a_wholly_contradicted_timepoint_paints_no_nanowell_as_landing_on_itself(dataset):
+    """Every nanowell of a contradicted timepoint is left out of every figure, so none is "Lands on itself" (the
+    green of a nanowell that is used): those that do land on themselves are their own class, and the wrong names,
+    misregistered tiles and the not compared keep theirs."""
+    _out, data, ref, other = dataset
+    confirmed = ic.status_map(_pair(dataset, "A01"))
+    kept = confirmed.members("kept")
+    assert kept and confirmed.members("timepoint_out") == set()
+    status = ic.status_map(ic.identity_pair(data, "A01", "T1", _wholly_contradicted(dataset)))
+    assert status.members("kept") == set() == status.members("imprecise")
+    assert status.members("timepoint_out") == kept
+    assert status.members("not_compared") == confirmed.members("not_compared")
+    # The stage cross-check overriding a partial verdict contradicts the whole timepoint too.
+    out = dataset[0]
+    payload = ni.read_sidecar(out, "A04")
+    payload["stage"] = {"timepoints": {"T1": {"ok": False, "reason": "the stage moved"}}}
+    partial = ic.status_map(_pair(dataset, "A04"))
+    staged = ic.status_map(ic.identity_pair(data, "A04", "T1", payload))
+    assert staged.members("kept") == set() and staged.members("timepoint_out") == partial.members("kept")
+    assert staged.members("misregistered") == partial.members("misregistered")
+
+
+def test_the_page_draws_a_wholly_contradicted_timepoint_crossed_out_and_says_every_nanowell_is_left_out(
+        qtbot, dataset, tmp_path):
+    import shutil
+
+    from matplotlib.colors import to_rgba
+
+    from review.features.nanowell.tab_view import VIEWS
+    from tests.test_nanowell_page import _loaded, _page
+    from ui.theme import Colors
+
+    pytest.importorskip("PySide6")
+    root = tmp_path / "ds"
+    shutil.copytree(dataset[0].parent, root)
+    out = root / "out"
+    payload = _wholly_contradicted(dataset)
+    ni.sidecar_path(out, "A01").write_text(json.dumps(payload), encoding="utf-8")
+    assert ni.read_sidecar(out, "A01") is not None                        # still current: only the verdict moved
+    ctx = _page(qtbot, out)
+    ctx.state.selection.selected_wells = {"A01"}
+    _loaded(qtbot, ctx)
+    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    assert _page_texts(ctx, "nw-identity-title") == ["A01 · T1 vs T0 · contradicted"]
+    ax = ctx.widgets.get("_nw_fig").axes
+    status = ctx.state.feature_slice("nanowell").identity_drawn.status
+    assert status is not None and status.members("kept") == set()
+    collections = [c for a in ax for c in a.collections]
+    assert not [c for c in collections if c.get_gid() == "nw-identity-status-kept"]
+    (crossed,) = [c for c in collections if c.get_gid() == "nw-identity-status-timepoint_out"]
+    assert len(crossed.get_offsets()) == len(status.members("timepoint_out")) > 0
+    assert crossed.get_hatch() == "xx" and tuple(crossed.get_facecolor()[0]) == pytest.approx(to_rgba(Colors.danger))
+    legend = [t.get_text() for a in ax if a.get_legend() for t in a.get_legend().get_texts()]
+    assert "Lands on itself (0)" in legend
+    assert f"Lands on itself, timepoint left out ({len(status.members('timepoint_out'))})" in legend
+    footer = " ".join(_page_texts(ctx, "nw-identity-footer"))
+    assert ("T1 is contradicted as a whole, so every one of its nanowells is left out of every figure, those that "
+            "land on themselves included (cross-hatched).") in footer, footer

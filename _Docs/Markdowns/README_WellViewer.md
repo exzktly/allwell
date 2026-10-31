@@ -5888,7 +5888,8 @@ chooses what it draws:
 - **Distance map** — every nanowell at its place. *Colour* chooses how it is filled: **Status** sorts the
   nanowells into lands on itself (green), imprecise (amber), wrong name (red), in a misregistered tile (red,
   hatched) and not compared (grey), with a count of each in the legend, so the few that fail stand out among many
-  that pass; **Distance** fills each by how far its address landed from itself in nanowell spacings (the
+  that pass. In a timepoint contradicted as a whole every nanowell is left out of the figures, so none is green:
+  those that land on themselves are drawn red and cross-hatched as *Lands on itself, timepoint left out*; **Distance** fills each by how far its address landed from itself in nanowell spacings (the
   quarter-spacing limit is marked on the colour bar); **Auto** shows Status unless the timepoint is confirmed.
   Failing nanowells are outlined in red. An imaging tile a whole spacing off is drawn in red labelled with how far
   it moved; one placed slightly differently, in amber, with how far off it is.

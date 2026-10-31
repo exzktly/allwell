@@ -11709,7 +11709,10 @@ included). Four modes, `NanowellState.identity_mode` (persisted; an unknown one 
 imprecise (`warn`), wrong name (`danger`, which folds in `neighbour_of_wrong`), in a misregistered tile (`danger`,
 hatched) or not compared (muted), the legend counting each — and `auto` is `status` unless the timepoint is
 confirmed. Classes come from the sidecar's `excluded` list, or for a sidecar without one from `tiles.moved` and tile
-ownership. Failing addresses are outlined in `Colors.danger` (the sidecar's list plus every address beyond the
+ownership. In a timepoint whose verdict is `contradicted` (its own, or the stage cross-check's override) every row
+is left out of every figure, so a nanowell that lands on itself, or nearest itself, is `timepoint_out` instead
+(`danger`, cross-hatched `xx` as the Array view draws `identity_contradicted`, keyed only when present) and the
+footer says the whole timepoint is left out: a wholly contradicted timepoint never paints green. Failing addresses are outlined in `Colors.danger` (the sidecar's list plus every address beyond the
 tolerance, since the list is capped at `MAX_LISTED`), and the compared timepoint's tiles are mapped into the
 reference frame through the inverse registration, moved ones in red labelled "moved N µm", imprecise ones in amber
 labelled "N µm off"; *Blink* — the compared montage resampled onto the reference's pixel grid

@@ -18,6 +18,14 @@
 #   scripts/test.sh -k threshold         # a subset of it
 #   scripts/test.sh tests/test_app_smoke.py -m ""   # one full-app file
 #
+# The fast lane (the default, and --no-ui) runs only what the change can reach,
+# as scripts/change_scope.py classifies it against origin/main:
+#   version-only  nothing runs (exit 0): only the __version__ line moved
+#   docs-only     the docs lane: just the test files that read the documents
+#   code          the whole lane
+# ALLWELL_FULL_LANE=1 runs the whole lane whatever changed; CI sets it on pushes
+# to main. Naming test files, or choosing another lane, is never narrowed.
+#
 # NOT covered here: the `slow` full-app tests. Each builds a real ReviewApp
 # whose Qt objects are never reclaimed in-process (~40 MB/test), so a bulk run
 # hangs or gets OOM-killed. Run those a file or two at a time, as the last
@@ -94,6 +102,32 @@ case "${1:-}" in
             fi
         done ;;
 esac
+
+# Narrow the fast lane to what the change can reach (scripts/change_scope.py). Only the default lane
+# and --no-ui are narrowed, and only when no test files were named: a run that names its files, or
+# asks for another lane, gets exactly what it asked for.
+if [[ -z "${ALLWELL_FULL_LANE:-}" && ( "$MARK" == "$FAST" || "$MARK" == "$FAST and not ui_lane" ) ]]; then
+    SCOPE=$(python scripts/change_scope.py) || SCOPE=code   # a classifier that fails runs everything
+    case "$SCOPE" in
+        version-only)
+            echo "scripts/test.sh: only the version number changed — no tests to run" \
+                 "(ALLWELL_FULL_LANE=1 runs the fast lane anyway)" >&2
+            exit 0 ;;
+        docs-only)
+            DOCS_TESTS=()   # read line by line, not with mapfile: macOS still ships bash 3.2
+            while IFS= read -r f; do [[ -n "$f" ]] && DOCS_TESTS+=("$f"); done \
+                < <(python scripts/change_scope.py --docs-tests)
+            echo "scripts/test.sh: documentation-only change — running the docs lane" \
+                 "(${#DOCS_TESTS[@]} files; ALLWELL_FULL_LANE=1 runs the whole fast lane)" >&2
+            # The docs lane crosses rosters (a gated or UI file that reads a document runs here too), so
+            # its marker keeps only the slow exclusion — and CI's --no-ui exclusion when it was asked for.
+            # An empty docs lane (nothing reads the documents) leaves the whole lane to run.
+            if (( ${#DOCS_TESTS[@]} > 0 )); then
+                if [[ "$MARK" == "$FAST" ]]; then MARK="not slow"; else MARK="not slow and not ui_lane"; fi
+                set -- "${DOCS_TESTS[@]}" "$@"
+            fi ;;
+    esac
+fi
 
 XDIST=()
 workers="${ALLWELL_TEST_WORKERS:-auto}"

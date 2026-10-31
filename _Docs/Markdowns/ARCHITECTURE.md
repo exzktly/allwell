@@ -20121,6 +20121,42 @@ you're in before you type the command.
   one roster, the hook to marking each with its own mark, `scripts/test.sh` to
   keeping each out of the fast lane, CI and preflight to running each lane behind
   its gate, and each gate to seeing both its patterns and its tests' imports.
+- **Change scope** (`scripts/change_scope.py`). Before the fast lane runs, the
+  change is classified against its base (`origin/main`, or
+  `$ALLWELL_SCOPE_BASE`; committed, uncommitted and untracked paths, through
+  `lane_needed.changed_paths`) into one of three scopes, and the fast lane and
+  lint follow it:
+  - **version-only**: every changed path is `version.py`, and every changed
+    line in it is the `__version__ = "..."` assignment. No test runs and lint is
+    skipped. CI's `version bump` job still runs, since it is the check that
+    reads that line and fails unless it is exactly one well-formed increment.
+  - **docs-only**: every other changed path matches
+    `tests/_lanes.py::DOCS_ONLY_PATTERNS` (`_Docs/Markdowns/*.md`, `CLAUDE.md`,
+    `tests/FAST_LANE.md`). Lint is skipped and the fast lane narrows to the
+    **docs lane**: the test files that, outside their docstrings, name a docs
+    file (its basename, `Markdowns` or `_Docs`) in a string constant, or import
+    directly a first-party module that does. That second rule is how
+    `test_help_topics.py` joins through `ui/help_topics.py`, the one app module
+    that reads the manual. The lane is computed on every run, about twenty-five
+    files, and crosses rosters: a UI or gated file that reads a document runs
+    in it (CI still leaves the UI ones out).
+  - **code**: anything else, and every case the script cannot decide (no git,
+    an unknown base, an empty diff). An unanswerable question runs everything.
+
+  `scripts/test.sh` narrows itself for the default lane and `--no-ui` when no
+  test files are named; `--ui`, the gated lanes and a run that names its files
+  are never narrowed, and `ALLWELL_FULL_LANE=1` turns narrowing off.
+  `scripts/preflight.sh` prints the scope first, then skips lint and tests or
+  runs the docs lane accordingly; its working-tree and version checks always
+  run. In CI, the `ruff` and `pytest (fast lane)` jobs ask the script on a pull
+  request (`fetch-depth: 0`, for the diff) and skip their steps, so the job still
+  reports green; a push to `main` always lints and runs the whole lane with
+  `ALLWELL_FULL_LANE=1`. That push is where a test that reaches a document two
+  imports away, which the docs lane cannot see, gets caught, the same backstop
+  the gated lanes rely on. `tests/test_change_scope.py` pins each scope and
+  drives the real `scripts/test.sh` in a scratch repository: nothing runs for a
+  version bump, only the docs lane runs for an edited manual, and a failing test
+  outside that lane runs again once the change is code.
 - **UI tests** (`tests/_lanes.py::UI_LANE_FILES`, ~620 tests in seventy files),
   which run in the local fast lane and are left out of CI's. They are the tests
   whose subject is how the GUI looks and lays out: widget geometry, wrapping and

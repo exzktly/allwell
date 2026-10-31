@@ -21,10 +21,14 @@ from review.features.nanowell import image_compute as ic
 
 
 def _with_cells(data, tmp_path, cells):
-    """*data* with a cell table for A01 holding *cells* (``(well_x_um, well_y_um)`` at timepoint t0)."""
+    """*data* with a cell table for A01 holding *cells* at timepoint t0: ``(well_x_um, well_y_um)``, counted in the
+    nanowell (0, 0), or ``(well_x_um, well_y_um, nw_q, nw_r)`` naming the nanowell (``None`` for no nanowell)."""
     path = tmp_path / "cells_A01.csv"
-    pd.DataFrame([{"well": "A01", "timepoint": "t0", "nw_q": 0, "nw_r": 0, "well_x_um": x, "well_y_um": y}
-                  for x, y in cells]).to_csv(path, index=False)
+    rows = []
+    for cell in cells:
+        x, y, q, r = (*cell, 0, 0) if len(cell) == 2 else cell
+        rows.append({"well": "A01", "timepoint": "t0", "nw_q": q, "nw_r": r, "well_x_um": x, "well_y_um": y})
+    pd.DataFrame(rows).to_csv(path, index=False)
     data.cell_tables = {"A01": path}
     return data
 
@@ -63,6 +67,24 @@ def test_a_montage_crop_places_its_cells_at_the_montage_s_scale(tmp_path):
     crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
     # 2 µm/px from (0, 0); the nanowell's ±4.2 µm puts the crop's corner at montage pixel (47, 17).
     assert crop.source == "montage" and crop.cells.tolist() == [[3.0, 3.0], [3.5, 4.0]]
+
+
+def test_a_tile_crop_draws_only_its_own_nanowell_s_cells_not_a_neighbour_s_in_its_margin(tmp_path):
+    # All three cells are inside the crop's pixels; only the first was counted in the nanowell (0, 0). The second was
+    # counted in the neighbour (1, 0) and the third in no nanowell — both would be dots on the selected nanowell's
+    # crop if the crop took every cell its rectangle covers.
+    data, metrics = _tile_data(tmp_path, [(100.0, 40.0, 0, 0), (98.0, 41.0, 1, 0), (101.0, 39.0, None, None)])
+    crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
+    assert crop.source == "tile" and crop.cells.tolist() == [[9.0, 9.0]]
+
+
+def test_a_montage_crop_draws_only_its_own_nanowell_s_cells(tmp_path):
+    from tests.test_nanowell_page_views import _crop_data
+
+    data, metrics = _crop_data(tmp_path)
+    data = _with_cells(data, tmp_path, [(100.0, 40.0, 0, -1), (101.0, 42.0, 0, 0)])
+    crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
+    assert crop.source == "montage" and crop.cells.tolist() == [[3.5, 4.0]]
 
 
 def test_a_well_without_a_cell_table_says_none_could_be_read_not_that_it_has_none(tmp_path):
@@ -122,7 +144,7 @@ def test_the_cells_box_draws_each_timepoint_s_cells_on_the_strip_and_the_pop_out
     assert page.state.feature_slice("nanowell").crop_cells is True
     assert _dots(page, "_nw_strip_fig") == [CELLS["t_c"], CELLS["t_a"]]
     caption = [t.get_text() for t in page.widgets.get("_nw_strip_fig").texts if t.get_gid() == "nw-crop-caption"]
-    assert caption[0].endswith("; dots: the 4 cells the run counted in view")
+    assert caption[0].endswith("; dots: the 4 cells the run counted in this nanowell")
     _press(qtbot, page, "_nw_popout_btn")
     qtbot.addWidget(page.widgets.get("_nw_popout"))
     assert _dots(page, "_nw_popout_fig") == [CELLS["t_c"], CELLS["t_a"]]

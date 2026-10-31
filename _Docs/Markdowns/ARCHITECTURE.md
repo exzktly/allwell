@@ -4317,9 +4317,12 @@ its lattice map — `ArrayLayers.preset("map")`, no image, since the image layer
 a montage or the raw tiles per acquisition) and
 one CSV of `distribution_compute.wells_summary`, the per-well summary prepared as
 the Distribution view prepares it (per-nanowell metrics at each well's first
-timepoint, the fixed cohort when ticked, then the moving average when set), with the exclusions spelled
+timepoint; for the others the baseline's own window, the fixed cohort when ticked, then the moving average when
+set), with the exclusions spelled
 out by reason, the window each row used in its `moving_average` column (empty when off or for a per-nanowell
-metric, `distribution_compute.moving_window_for`), and a row naming each of the group's wells with no nanowell
+metric, `distribution_compute.moving_window_for`), the baseline's own window in `baseline_moving_average` (empty
+unless a fold change was drawn with the moving average on and a baseline other than *Earliest*,
+`moving_compute.baseline_window_for`), and a row naming each of the group's wells with no nanowell
 table. A
 group's replicate sets stay sets and its solo wells stand alone, as the page
 groups a selection (`_figure_groups`); a group with no nanowell table at all is
@@ -10505,15 +10508,28 @@ timepoint's own template carries the threshold measured on it (`Template.texture
 `nanowell_run._confluence_basis` on `out.template["_object"]`, collected in `WellOutcome.templates`). Once its counts
 are known, `nanowell_task._save_confluence_reference` judges each timepoint by them (`nanowell_reference.verdict`:
 `empty` when at most `MAX_LOADED_SHARE`, 5 %, of its counted nanowells hold a cell; `loaded` above; `unverified` with
-nothing counted), records the verdict on the reference's grid blocks (`confluence_reference`), blanks its own
+nothing counted; `false_cells_per_nanowell`, the cells counted per counted nanowell, `None` with nothing counted, is
+the segmenter's false-count baseline under that timepoint's imaging and settings), records the verdict on the reference's grid blocks (`confluence_reference`), blanks its own
 confluence where it was not empty, and saves `nanowells/_confluence_reference/` (`reference.json`: the well, the
 measurement version, the settings key and each verdict; one template `.npz` per empty timepoint). A kept timepoint of
 an incremental run of the reference carries its saved template over (`kept_templates`). Every other well loads it
 (`nanowell_reference.load`, refused under another measurement version or settings key) and reads each timepoint
 against the reference's template **at the same timepoint**: `_confluence_basis` brings its sites to that template's
 levels (`_site_levels` against it, so exposure and light differing between wells and timepoints cancel), and
-`_tile_confluence` divides the tile by it on a second rim-suppressed image and cuts at its threshold. Counting, the
-count's levels and fluorescence still use the well's own template. With no reference named, none measured in the
+`_reference_rim` divides the tile by it on a second rim-suppressed image, which `_tile_confluence` cuts at its
+threshold. The same image is the count's **rim-removed input** (`_segmenter_rim`, `segment_on == "rim"`): the well's
+own template is built from nanowells that all hold cells, so dividing by it takes part of the cells away with the rim
+(on the painted scene of `tests/test_nanowell_segmenter_reference.py`, the cells' edges stand 2.90 floor-noise
+sigma clear of the floor on the own-divided image and 6.78 on the reference-divided one at 60 cells a nanowell; alike
+at 10). A tile keeps its own template for the count when the reference has no template at that timepoint, or has no
+level for one of the tile's nanowells — that nanowell would be flat in the reference image and counted as holding
+nothing — and the second case is a note naming the tile. Each timepoint's template block says which divided the count
+(`segmenter_template`: `source` `reference`, `own` or `mixed`, with the nanowells on each) and carries the reference's
+`reference_false_cells_per_nanowell` there (`Reference.false_cells`, from `reference.json`). The raw input divides by
+nothing, and the count's levels and fluorescence use the well's own template either way. Test detection
+(`pipeline/nanowell_preview.py`) has no reference — it reads the input archives, not an output folder — so it divides
+by the well's own template and, when a reference well is named and the input is rim-removed, says its crops can
+differ from what the run counts (`reference_input_note`). With no reference named, none measured in the
 output folder, none at that timepoint, or one that was not empty there, every site's confluence is `None` — never
 0 — and the timepoint's notes say which (`nanowell_reference.NOTE_PREFIX`). `measure_timepoint` with no reference
 (Test detection) reads a timepoint against itself, which is right only for the empty well. Two limits: the reference
@@ -11477,6 +11493,38 @@ first timepoint and the cohort would be empty. `distribution_model(moving=…)`,
 numbers, and both figures' footers state the window (`moving_compute.describe`). Per-nanowell metrics have no
 values over time and ignore it; Array, Position, Extremes and Identity draw one timepoint and do not use it.
 
+*A fold change and its baseline.* `site_metrics` divides each timepoint's measured value by the single measured
+value at the nanowell's baseline row, so the moving average is taken over fold changes and, by default, only the
+endpoint side is smoothed — the figure says "the baseline is its one measured value, not averaged". Two rules sit
+on top of that, both in `moving_compute`:
+
+- **A fold change's window starts after its baseline** (`moving_mean(after=…)`, the bound being
+  `baseline_order`, the `tp_order` of each nanowell's `_base_tp_<value>` row). A window that reaches the baseline
+  would average in its fold change of exactly 1, a value with no noise that damps the first windows after it towards
+  1; one that reaches before it would average values measured before the reference point. Either is left out with
+  "the window does not start after the baseline", which wins over every other reason, the early one included. The
+  bound is per nanowell, so under *First measurable* each nanowell's windows start after its own baseline. Measured
+  values (`n`, `c`, brightness, fluorescence) have no baseline and no bound (`base_value` returns `None`).
+- **The baseline's own window** (`NanowellState.baseline_moving`, the *Baseline average* spin box beside *Moving
+  average*; `moving_compute.rebase`). With a window of *M* the baseline becomes the trailing mean of the measured
+  value — the count, confluence, brightness or fluorescence, never a fold change — over the baseline timepoint and
+  the *M − 1* before it, never after it (a later timepoint may already carry the treatment). The fold change is then
+  recomputed against that mean with `site_metrics`' own rules (a row's own value missing or not joinable, a ratio
+  over a mean at or below zero). It follows the endpoint's rule: complete and joinable or undefined, its shortfalls
+  counted as "baseline average: before the well's first timepoint / a gap / not joinable"; a baseline row that is
+  itself unusable keeps the single baseline's reason, and a mean of zero is "seeded later" / "empty at baseline" as
+  before. `moving_compute.baseline_window_for` is the one place that decides whether it applies: only while the
+  endpoint's moving average is on (it refines it) and never with the *Earliest* baseline, which has nothing before
+  it. `draw_view` asks it, so the page and Batch Export cannot differ, and the page greys the spin box exactly where
+  it would not act (`tab_view.baseline_moving_greyed`, its tooltip naming the reason), so a value left in a greyed
+  control never changes a figure. The rebase runs before the fixed cohort, so the cohort is chosen on the fold
+  changes from the averaged baseline; `distribution_model`, `wells_summary` and `trajectory_panels` all take
+  `baseline_moving=…`.
+
+A ratio over a baseline that is constant per nanowell averages the same whichever is divided first.
+`log2_count_fc` is averaged as logs — the mean of log₂((n + 1) / (n₀ + 1)), a geometric mean of the ratios, not
+the log of their mean — and the footer says so.
+
 **The subset** (`subset_compute`, `NanowellState.subset`, the *Subset* control and its editor in `subset_view`). A
 `Subset` is a tuple of `Condition`s and a *match* (`all` or `any`); no conditions is every nanowell. A condition
 names a field (`field_choices`): `n0` — *Starting cells*, the count at the baseline, the number the occupancy colours
@@ -11601,7 +11649,7 @@ Every text and line is in the plot's ink and tagged `follows_theme`; the dots ta
 `widgets.plot_card.theme_paired_colours`, the hook `PlotCard.setPlotTheme` uses to repaint a paired data
 palette — so a capture, which flips the theme without a redraw, puts the publication shades on white. `render_site_detail` draws the selected nanowells' series
 against recorded time, a timepoint without a number as a gap and a hatched band, with each timepoint's state
-written above, the rows sharing one time axis labelled under the bottom row. The first selected nanowell's crops (`controller.crops_site`) are drawn on a figure of their own under the detail, `renderer.render_crop_strip` on `_nw_strip_fig`, below a row holding **Pop out** (`_nw_popout_btn`, `tab_view._crops_header`). **Pop out** (`controller.pop_out_crops`) opens a top-level window owned by the app's window (`tab_view._popout_window`, built on first use and kept; `_nw_popout`, `_nw_popout_fig`) and draws the same crops large there (`renderer.render_crop_grid`): one panel per timepoint, all on one brightness scale (the 1st–99th percentile of every crop together) so a change between timepoints reads as a change, with the source and scale in the caption. `redraw_detail` redraws it whenever it is open (`controller.draw_popout`), so it follows the selection, and says a nanowell has to be selected when none is; the page's own figure and every control beside it are untouched by it. The window carries its own row of controls (`tab_view._popout_controls`): the image channel (`_nw_popout_image_channel_cb`, one of `_IMAGE_CHANNEL_COMBOS`), **Range** (`_nw_popout_range_btn`, one of `DISPLAY_RANGE_BUTTONS`), **Cells** (`_nw_popout_cells_box`), **Metrics** (`_nw_popout_metrics_box`, `crop_metrics`: the measurement lines under each crop), **Labels** (`_nw_popout_labels_box`, `NanowellState.popout_labels`, persisted: `render_crop_grid(labels=)` leaves out each panel's timepoint and the caption, keeping the title) and **Go to nanowell**. Each is the page's one setting; `refresh_controls` runs once when the window is built and keeps every crop checkbox on its state (`_CROP_BOXES`, `_sync_crop_boxes`). The crops arrive by the site detail's own worker fetch. **Cells on the crops.** Every crop carries the cells the run counted inside it (`image_compute.Crop.cells`, ``(column, row)`` pixels, `None` when the well has no cell table so "no table" never reads as "no cell"): `_cut_well` reads the well's cell table once per timepoint (`collect.cell_positions`) and `_cells_in` places each cell from the well frame using the crop's own corner — `_cut_at` returns the tile or montage pixel the crop starts at, clipped at the image's edge, so a crop cut at a tile's border measures from that border — at the tile's or the montage's scale. One switch, `NanowellState.crop_cells` (persisted; `controller.set_crop_cells`), offered as **Cells** beside *Pop out* (`_nw_strip_cells_box`), in the pop-out (`_nw_popout_cells_box`) and on the Extremes view (`_nw_extremes_cells_box`, all kept on it by `refresh_controls`), has `render_crop_strip`, `render_crop_grid` and `render_extremes` draw them through `renderer._draw_crop_cells` in the Array view's Cells colours, each caption counting the dots and naming crops of a well with no cell table (`_cells_clause`). `tests/test_nanowell_crop_cells.py` pins the pixel placement (a tile crop, one clipped at the tile's edge, a montage crop) and drives both boxes. There is no clear button: a click on empty space clears the selection on every view. The crop panels carry `_aw_image_panel`, so a style pass never puts a typed axis range on a crop.
+written above, the rows sharing one time axis labelled under the bottom row. The first selected nanowell's crops (`controller.crops_site`) are drawn on a figure of their own under the detail, `renderer.render_crop_strip` on `_nw_strip_fig`, below a row holding **Pop out** (`_nw_popout_btn`, `tab_view._crops_header`). **Pop out** (`controller.pop_out_crops`) opens a top-level window owned by the app's window (`tab_view._popout_window`, built on first use and kept; `_nw_popout`, `_nw_popout_fig`) and draws the same crops large there (`renderer.render_crop_grid`): one panel per timepoint, all on one brightness scale (the 1st–99th percentile of every crop together) so a change between timepoints reads as a change, with the source and scale in the caption. `redraw_detail` redraws it whenever it is open (`controller.draw_popout`), so it follows the selection, and says a nanowell has to be selected when none is; the page's own figure and every control beside it are untouched by it. The window carries its own row of controls (`tab_view._popout_controls`): the image channel (`_nw_popout_image_channel_cb`, one of `_IMAGE_CHANNEL_COMBOS`), **Range** (`_nw_popout_range_btn`, one of `DISPLAY_RANGE_BUTTONS`), **Cells** (`_nw_popout_cells_box`), **Metrics** (`_nw_popout_metrics_box`, `crop_metrics`: the measurement lines under each crop), **Labels** (`_nw_popout_labels_box`, `NanowellState.popout_labels`, persisted: `render_crop_grid(labels=)` leaves out each panel's timepoint and the caption, keeping the title) and **Go to nanowell**. Each is the page's one setting; `refresh_controls` runs once when the window is built and keeps every crop checkbox on its state (`_CROP_BOXES`, `_sync_crop_boxes`). The crops arrive by the site detail's own worker fetch. **Cells on the crops.** Every crop carries the cells the run counted in its own nanowell (`image_compute.Crop.cells`, ``(column, row)`` pixels, `None` when the well has no cell table so "no table" never reads as "no cell"): `_cut_well` reads the well's cell table once per timepoint (`collect.cell_positions`) and `_cells_in` keeps only the cells whose `nw_q` / `nw_r` is the crop's nanowell — the crop is cut `pad` times the nanowell's radius, so its margin takes in parts of the neighbours, and their cells are left out so every dot is one the selected nanowell's count is made of — and places each cell from the well frame using the crop's own corner — `_cut_at` returns the tile or montage pixel the crop starts at, clipped at the image's edge, so a crop cut at a tile's border measures from that border — at the tile's or the montage's scale. One switch, `NanowellState.crop_cells` (persisted; `controller.set_crop_cells`), offered as **Cells** beside *Pop out* (`_nw_strip_cells_box`), in the pop-out (`_nw_popout_cells_box`) and on the Extremes view (`_nw_extremes_cells_box`, all kept on it by `refresh_controls`), has `render_crop_strip`, `render_crop_grid` and `render_extremes` draw them through `renderer._draw_crop_cells` in the Array view's Cells colours, each caption counting the dots and naming crops of a well with no cell table (`_cells_clause`). `tests/test_nanowell_crop_cells.py` pins the pixel placement (a tile crop, one clipped at the tile's edge, a montage crop), that a neighbour's or an unassigned cell inside the crop's rectangle is left out, and drives both boxes. There is no clear button: a click on empty space clears the selection on every view. The crop panels carry `_aw_image_panel`, so a style pass never puts a typed axis range on a crop.
 
 **The Extremes view** (`extremes_compute`, `renderer.render_extremes`, `controller._draw_extremes`) is a montage
 of one well's nanowells with the largest and the smallest fold change of the Metric. `extremes_compute.extremes`

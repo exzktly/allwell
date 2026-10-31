@@ -38,6 +38,7 @@ from review.features.nanowell.display_range_view import (
 )
 from review.features.nanowell.series_compute import baseline_at, baseline_timepoint
 from review.features.nanowell.subset_view import build_subset_control
+from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell.moving_compute import MAX_WINDOW
 from review.features.nanowell.state import EXTREMES_MAX_N
 from review.features.nanowell.statistics_view import (
@@ -103,7 +104,21 @@ _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their 
 _MOVING_TIP = ("Moving average: each nanowell's value at a timepoint becomes the mean of its values at that timepoint "
                "and the ones before it, this many in all (timepoints, not hours). A value is averaged only when the "
                "nanowell has a value at every timepoint of its window, so the first timepoints and any window with "
-               "a gap have none; they are counted among the exclusions. Off draws each timepoint as measured.")
+               "a gap have none; they are counted among the exclusions. For a fold change the window starts after "
+               "the baseline, so the baseline's own value of 1 is never averaged in. Off draws each timepoint as "
+               "measured.")
+_BASELINE_MOVING_TIP = (
+    "Baseline average: a fold change's baseline becomes the mean of the nanowell's measured values at the baseline "
+    "timepoint and the ones before it, this many in all — never after it, which may already carry the treatment. "
+    "Off, the baseline is its one measured value and only the endpoint is averaged. Like the endpoint's window it is "
+    "used only when every timepoint of it has a value; the others are counted among the exclusions.")
+#: Why the baseline's window is greyed, when it is.
+_BASELINE_MOVING_OFF = {
+    "moving": "Turn on the Moving average first: the baseline's window refines it.",
+    "metric": "Only a fold change has a baseline to average.",
+    "earliest": "The Earliest baseline has no timepoint before it to average. Choose First measurable or a "
+                "timepoint.",
+}
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
 _GO_TO_TIP = ("Show this nanowell on Identity ▸ Blink: its well's two montages alternating, zoomed onto it, with its "
               "address ringed — to see whether its address names the same nanowell over time.")
@@ -138,9 +153,10 @@ _POPOUT_METRICS_TIP = ("Write each crop's measurements under it — the same set
 _POPOUT_LABELS_TIP = ("Write each crop's timepoint over it and the line under the figure saying where the crops were "
                       "cut from and on what brightness scale. Off leaves the crops bare; the title still names the "
                       "nanowell and channel.")
-_CROP_CELLS_TIP = ("Draw a dot at the centre of each cell the run counted on every crop — the strip, the pop-out and "
-                   "the Extremes montage — as the Array view's Cells layer does. The run keeps no cell outlines, so "
-                   "a dot is all there is to draw.")
+_CROP_CELLS_TIP = ("Draw a dot at the centre of each cell the run counted in the crop's own nanowell on every crop "
+                   "— the strip, the pop-out and the Extremes montage. Cells of the neighbouring nanowells that the "
+                   "crop's margin takes in are not drawn. The run keeps no cell outlines, so a dot is all there is "
+                   "to draw.")
 _TP_TIP = ("The timepoint drawn on Along x: Wells and Position (the latest by default), the one Extremes ranks the "
            "nanowells at (the well's latest by default), and the one the Array view shows (the well's first by "
            "default).")
@@ -163,6 +179,28 @@ _ZOOM_TIP = ("How far the view is zoomed against Fit. The wheel zooms about the 
 _ANCHOR_TIP = ("On: click the central square to anchor this well at this timepoint. Drag still pans. Offered where "
                "an anchor can change the result: a timepoint addressed or left unaddressed.")
 _CONTROL_TIP = "Compare each group's centre with this group's, computed the same way (× ratio, or a difference on log₂)."
+
+
+def baseline_moving_greyed(st, column: str | None) -> str | None:
+    """Why the Baseline average control is greyed (a key of ``_BASELINE_MOVING_OFF``), or ``None`` when it reaches
+    the figure: the moving average on, a fold change drawn, and a baseline with timepoints before it — exactly
+    where ``moving_compute.baseline_window_for`` lets the window act, so a greyed control never changes a figure."""
+    if not mvc.is_on(st.moving):
+        return "moving"
+    if not column or mvc.base_value(column) is None:
+        return "metric"
+    if mvc.baseline_window_for(st.moving, MAX_WINDOW, st.baseline) == 0:
+        return "earliest"
+    return None
+
+
+def _refresh_baseline_moving(spin, st, column: str | None) -> None:
+    """The Baseline average spin box: the state's window, enabled only where it reaches the figure, and its tooltip
+    naming the reason when it does not."""
+    spin.setValue(max(st.baseline_moving, 1))
+    greyed = baseline_moving_greyed(st, column)
+    spin.setEnabled(greyed is None)
+    spin.setToolTip(_BASELINE_MOVING_TIP + (f"\n\n({_BASELINE_MOVING_OFF[greyed]})" if greyed else ""))
 
 
 def _combo(items, tip: str) -> QComboBox:
@@ -247,6 +285,15 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     moving_spin.valueChanged.connect(lambda value: nwc.set_moving(ctx, value))
     reg.register("_nw_moving_spin", moving_spin)
     grp_moving = band.add_scope("Moving average", moving_spin)
+
+    baseline_moving_spin = QSpinBox()
+    baseline_moving_spin.setRange(1, MAX_WINDOW)     # 1 is off, as on the endpoint's window
+    baseline_moving_spin.setSpecialValueText("Off")
+    baseline_moving_spin.setSuffix(" timepoints")
+    baseline_moving_spin.setToolTip(_BASELINE_MOVING_TIP)
+    baseline_moving_spin.valueChanged.connect(lambda value: nwc.set_baseline_moving(ctx, value))
+    reg.register("_nw_baseline_moving_spin", baseline_moving_spin)
+    grp_baseline_moving = band.add_scope("Baseline average", baseline_moving_spin)
 
     well_cb = QComboBox()
     well_cb.setToolTip(_WELL_TIP)
@@ -338,6 +385,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     computing.setObjectName("NanowellComputing")
     computing.setAlignment(Qt.AlignCenter)
     computing.hide()
+    # It covers the whole card as a scrim, so it follows the card's size while it shows, not only when shown.
+    card.canvas.mpl_connect("resize_event", lambda _event: computing.resize(card.size()))
     reg.register("_nw_computing_label", computing)
 
     detail = QWidget(splitter)
@@ -378,6 +427,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
     controls = (metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, moving_spin,
+                baseline_moving_spin,
                 responding_edit, extremes_spin, extremes_cells, extremes_numbers, *identity.signalling, *start.signalling,
                 *array_controls.signalling, *statistics.signalling)
 
@@ -440,6 +490,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_cohort.setVisible(over_time or (stats_view and not per_nanowell))
             moving_spin.setValue(max(st.moving, 1))
             grp_moving.setVisible(over_time)
+            _refresh_baseline_moving(baseline_moving_spin, st, nwc.drawn_metric_column(ctx))
+            grp_baseline_moving.setVisible(over_time)
             grp_control.setVisible(compares)
             column = nwc.drawn_metric_column(ctx)
             cut = st.thresholds.get(column) if column else None

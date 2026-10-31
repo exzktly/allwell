@@ -241,9 +241,13 @@ it, and in full precision (float32, with the GPU's faster TF32 maths) elsewhere;
 cells, so compare them on one well with **Test detection** before a plate-wide run: its crops show the outlines the
 run itself would count, cut from the whole tile segmented as the run segments it.
 
-**Segment on** chooses the image the model counts cells in. *Rim-removed* (the default) is each nanowell divided by the
-well's picture of an empty nanowell, which takes the bright rim away, so the model is not drawn to it; it is a ratio
-image no model was trained on. *Raw image* is each tile as it was imaged — what Cellpose's models, Cellpose-SAM among
+**Segment on** chooses the image the model counts cells in. *Rim-removed* (the default) is each nanowell divided by a
+picture of an empty nanowell, which takes the bright rim away, so the model is not drawn to it; it is a ratio image no
+model was trained on. With an **Empty reference well** named, that picture is the reference well's at the same
+timepoint: a loaded well's own picture is made from nanowells that all hold cells, so dividing by it fades the cells
+along with the rim, most of all in crowded nanowells. Without one, or on a tile the reference does not fully cover, it
+is the well's own picture, and the timepoint's `template` → `segmenter_template` entry in `<well>_grid.json` says which
+was used. *Raw image* is each tile as it was imaged — what Cellpose's models, Cellpose-SAM among
 them, were trained on — with the nanowell's bright rim in it. Either way a cell is counted
 in a nanowell only when its centre lies inside the nanowell's interior, so a cell found on a rim is not counted, and
 confluence is measured on the rim-removed image. Test detection's crops show the image the model was given (their
@@ -461,8 +465,12 @@ wells, and at every timepoint each well's confluence is read against that well's
 timepoint, which also corrects for exposure or medium changing over the time course. Without one — none named, or a
 timepoint where more than 5 % of its nanowells hold a counted cell, or a timepoint it does not have — **no well has a
 confluence** there (blank, never 0); the timepoint's notes in `<well>_grid.json` and the run log say why, and the
-reference well's grid record holds its verdict (`confluence_reference`). Cell counts and fluorescence do not depend
-on it. Results measured this way carry a measurement version: adding timepoints to a dataset
+reference well's grid record holds its verdict (`confluence_reference`). The reference well also measures how many
+cells the model finds where there are none: its cells counted per nanowell are saved with its verdict
+(`false_cells_per_nanowell`) and written on every other well's timepoint (`template` →
+`reference_false_cells_per_nanowell`), the baseline that well's counts sit on. Counts on the rim-removed image use the
+reference too (see **Segment on**); counts on the raw image, and fluorescence, do not depend on it. **Test detection**
+divides by the well's own picture, because it has no reference to read, and says so when one is named. Results measured this way carry a measurement version: adding timepoints to a dataset
 measured by an earlier version analyses the well again in full, and Merge Plates refuses to combine two datasets
 measured by different versions. The nanowells of a circular array are the
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image
@@ -5596,6 +5604,22 @@ the sentence names it.
   nanowell identity is not confirmed, have no value; they are counted among the exclusions with that reason
   rather than averaged over fewer timepoints. With *Fixed cohort* ticked too, the cohort is chosen from the
   measured values and then averaged. The footer states the window.
+
+  For a **fold change**, each window starts *after* the baseline timepoint: a window that included the baseline
+  would average in its fold change of exactly 1 and pull the first values after it towards 1, and one that
+  reached before it would mix in values from before the reference point. Those timepoints are counted as
+  "moving window reaches the baseline". By default the baseline itself is the single value measured at the
+  baseline timepoint — only the endpoint is averaged — and the footer says so. log₂ count fold changes are
+  averaged as logs, which is a geometric mean of the ratios.
+- **Baseline average** (beside *Moving average*, for a fold change) — *Off*, or 2 to 9 timepoints: the baseline
+  becomes the mean of the nanowell's measured values (its count, confluence, brightness or fluorescence) at the
+  baseline timepoint and the ones before it, that many in all — never after it, since a later timepoint may
+  already show the treatment. Like the moving average it is used only when every timepoint of its window has a
+  value; a nanowell whose baseline window is incomplete has no fold change, counted as "baseline window before
+  the first timepoint", "baseline window has a gap" or "baseline window not joinable". It is greyed, with the
+  reason in its tooltip, while the *Moving average* is off, for a metric that is not a fold change, and with the
+  *Earliest* baseline, which has nothing before it — choose *First measurable* or a timepoint. The footer states
+  the baseline's window.
 - **Responding above** (on *Distribution*) — the number a nanowell's value must be above to count as
   responding, for the metric shown. Set one for each metric you use (a fold change, a count, a confluence, an
   intensity); each is remembered separately, and a channel's brightness separately from another's. The figure
@@ -5776,9 +5800,10 @@ between panels. The window follows the selection while it is open and leaves the
 it like any window. Its own row of controls sets the crops where you look at them: the image channel, **Range**
 (the display range), **Cells**, **Metrics** (the measurements under each crop), **Labels** (each crop's timepoint
 and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
-Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted on every
-crop — the strip, the pop-out and the Extremes montage — as the Array view's *Cells* layer does on the array (the
-run keeps no cell outlines). It is one setting, also offered on the Extremes view, and kept with the page's
+Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted in the
+crop's own nanowell, on every crop — the strip, the pop-out and the Extremes montage (the run keeps no cell
+outlines). A crop is cut a little wider than its nanowell, so its edges show parts of the neighbours; their cells are
+not dotted, so every dot is a cell the selected nanowell's count is made of. It is one setting, also offered on the Extremes view, and kept with the page's
 settings. The caption counts the dots, and a well without a cell table is named there rather than shown as empty.
 The box beside **Cells** chooses what the crops are an image of: *Phase* (the image the run segmented), or any
 fluorescence channel the run read — EGFP, say — cut from that channel's image of the same tile, at the same place.
@@ -5801,8 +5826,8 @@ Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
-is selected and kept, so selecting it again is instant. While a newly selected well is read the page shows
-*Computing…*.
+is selected and kept, so selecting it again is instant. While a newly selected well is read, or the figures are
+recomputed, the page dims the figure and shows *Computing…* across it.
 
 **Excluding a well.** On the views that show a **Well** box (Array, Identity, Extremes), **Exclude** beside it
 leaves that well out of every figure on the Nanowells page and out of *Save nanowell data*; each figure then says
@@ -6745,8 +6770,10 @@ figure and an empty file.
 (Distribution, Array map, Trajectories or Position), tick the **Metrics**, and
 set **Along x**, **Baseline** (Earliest, First measurable or one of the dataset's
 timepoints), **Timepoint** (Latest, Earliest or one of the
-dataset's), **Fixed cohort** and **Moving average** as on the page — each greyed where it does not
-reach the view; the summary CSV's `moving_average` column gives the window each row used. **Responding above** asks for a number for each ticked metric,
+dataset's), **Fixed cohort**, **Moving average** and **Baseline average** as on the page — each greyed where
+it does not reach the view; the summary CSV's `moving_average` column gives the window each row used, and its
+`baseline_moving_average` column the baseline's window (empty where none was used: the moving average off, a
+metric that is not a fold change, or the *Earliest* baseline). **Responding above** asks for a number for each ticked metric,
 filled in from the page's where you set one there, and the run will not start
 while any is empty. **Subset** — *Use the page's subset*, ticked by default, draws
 with the Nanowells page's Subset, named beside the box each time the panel opens (build or

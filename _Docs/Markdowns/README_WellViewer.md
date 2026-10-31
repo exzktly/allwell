@@ -5901,11 +5901,15 @@ chooses what it draws:
   labels stay still; when they are wrong, the labels jump a nanowell or turn.
 - **Side by side** — the two images next to each other; point at a nanowell on either and it lights on both, with a
   cross where the registration says it should be.
-- **Diagnostics** — how the central square was found, in three pictures: the reference image around its square
-  (what was looked for), the later image turned into the reference's orientation with the match outlined (where it
-  was found), and the match score across the search area with the best and next-best places marked (how clearly).
-  Below them, one line per check with a ✓, ✗ or ! — the verdict and why, the square, how the plate moved, the
-  array's outline, the tiles and the addresses — and a check that could not run says why.
+- **Diagnostics** — how the central square was found. The verdict comes first, in the largest type, with its ✓, ✗
+  or ! and why. Then three pictures: the reference image around its square, outlined dashed (what was looked for);
+  the later image turned into the reference's orientation, with the match outlined and the square the run itself
+  picked circled round it (where it was found); and the match score across the search area, with a cross where the
+  square was, a circle on the best match and a diamond on the next-best place (how clearly). Each picture names its
+  marks in a small key under it, with the scores. Below the pictures, one line per check with a ✓, ✗ or ! — the
+  square, how the plate moved, the array's outline, the tiles and the addresses — and a check that could not run says
+  why. The page arranges all of this for the size of the plot: on a short, wide window the checks move beside the
+  pictures, and resizing the window or opening the site detail lays it out again.
 
 Every Compare mode zooms with the scroll wheel and pans by dragging. Side by side's two images move together, as do
 Diagnostics' two images. The zoom stays while the same well, timepoint and mode are shown and resets when any of them

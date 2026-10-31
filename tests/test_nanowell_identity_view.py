@@ -475,10 +475,12 @@ def test_the_crops_show_the_square_looked_for_and_the_match_turned_into_the_refe
     unmapped = other_m.image[oy - n // 2:oy - n // 2 + n, ox - n // 2:ox - n // 2 + n].astype(float)
     assert agreement(crops.looked, crops.found) > 0.8 > 0.5 > agreement(crops.looked, unmapped)
     assert crops.found_at == pytest.approx(tuple(payload["timepoints"]["T1"]["square"]["found_um"]), abs=1e-6)
+    # The ring is a circle in the picture's own µm (it scales with the zoom, and circles the match's outline); the
+    # key names each mark beside a drawing of it, so its words carry no glyph of their own.
     (ring,) = _by_gid(drawn.axes["found"], "nw-identity-accepted")
-    assert math.hypot(*_xy(ring)) / ref.pitch < 0.05                       # the run's own square agrees with it
-    assert _texts(fig, "nw-identity-crop-key") == ["▢ dashed: the central square", "▢ the match",
-                                                   "○ the square the run picked at T1"]
+    assert math.hypot(*ring.center) / ref.pitch < 0.05                     # the run's own square agrees with it
+    assert _texts(fig, "nw-identity-crop-key") == ["the central square", "the match",
+                                                   "the square the run picked at T1"]
     assert _texts(fig, "nw-identity-panel-note-found") == ["T1, turned +2.0° into T0's orientation"]
 
 

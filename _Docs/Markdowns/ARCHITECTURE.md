@@ -11695,7 +11695,8 @@ against the well's reference. It is drawn through `controller.draw_view(view="id
 like the others; `_identity_controller.draw_identity` composes it from the sidecar (read itself when not handed one),
 `identity_compute` holds the Qt-free data (`distance_map`, `blink_frames`, `hover_target`, `diagnostics`,
 `identity_message`, `summary_lines`, `stage_line`, `worst_verdict`, `default_timepoint`), `_identity_render` draws it
-(every text a reader sees carries a `nw-identity-*` gid; the Diagnostics figure is `_identity_diagnostics_render`)
+(every text a reader sees carries a `nw-identity-*` gid; the Diagnostics figure is `_identity_diagnostics_render`,
+placed by `_identity_diagnostics_layout`)
 and `identity_view` builds the *Compare* and *Colour* controls, the *Nanowell* box with **Origin**, and the Blink timer. Its verdict is the one every other figure reads (`pipeline.nanowell_identity.verdict_in`, stage override
 included). Four modes, `NanowellState.identity_mode` (persisted; an unknown one falls back to `distance`):
 *Distance map* — each compared address at its reference's measured position (well frame, µm), coloured by
@@ -11713,15 +11714,42 @@ once and alternated by a 500 ms `QTimer` parented to the band that starts only w
 the first tick after the page, view, mode or figure changes; labels on the addresses whose q and r are multiples of
 three, each frame placing its own addresses, so wrong addresses visibly jump; *Side by side* — each montage in its own
 frame, and the pointer (`controller.on_motion`) lights the address under it on both, with a cross where the
-registration predicts the reference site lands (`hover_target`); *Diagnostics* — three panels and a verdict block:
-what was looked for (the reference montage around its square, `PATCH_PITCHES` each side, the square outlined at a
-nominal `SQUARE_OUTLINE_PITCHES`, since the sidecar records where the square is but not its size), where it was found
-(the compared montage read through the registration into the reference's orientation, the match outlined and the
-square the run accepted ringed), and how clearly (the match-score surface over `surface_box_um` in µm from the
-reference square, with a labelled colour bar and the best and next-best places marked with their scores). The
-verdict block below gives one line per check — verdict and reason, the square, plate movement and refit, square
-agreement, array outline, tiles, addresses — each with a glyph and a theme colour (`STATE_GLYPHS`, `state_colour`),
-and a check that did not run says why. While the montages load, the two crops say so and the rest is drawn.
+registration predicts the reference site lands (`hover_target`); *Diagnostics* — the verdict, three pictures and
+the checks, read top to bottom. Under the title, the verdict line (`identity_compute.checks`' first) is the largest
+text on the figure: its ✓ / ✗ / ! glyph, `Verdict: <verdict> —` in `HEADLINE_PT`, and the reason running on after it
+a size smaller. Then the pictures, each a square image as large as the figure allows: what was looked for (the
+reference montage around its square, `PATCH_PITCHES` each side, the square outlined dashed in the accent at a nominal
+`SQUARE_OUTLINE_PITCHES`, since the sidecar records where the square is but not its size), where it was found (the
+compared montage read through the registration into the reference's orientation, the match outlined solid in the
+success colour, or danger when not accepted, and the square the run accepted ringed in `accent2` by a circle of
+`ACCEPTED_RING_PITCHES` in the picture's own µm — wider than the outline's corners, so an agreeing ring circles the
+match rather than sitting inside it; its y ticks are left to the first crop, which shares its grid), and how clearly
+(the match-score surface over `surface_box_um` in µm from the reference square, with a colour bar, and three marks of
+three shapes, haloed so they read on any score: a cross in the accent where the square was, a circle on the best
+match, a diamond on the next-best place). Each panel names its marks in a key under it — a drawing of the mark, then
+the words in the ink with the scores (`nw-identity-crop-key`, `nw-identity-mark-label`) — instead of labels written
+over the picture. Under the pictures, one compact entry per remaining check — square, plate movement and refit,
+square agreement, array outline, tiles, addresses, stage — each with its glyph in a theme colour (`STATE_GLYPHS`,
+`state_colour`); a check that did not run says why. The footer says the checks measure in spacings and the axes in
+µm, and what the score is. While the montages load, the two crops say so and the rest is drawn.
+
+Nothing in Diagnostics sits at a fixed figure fraction: the plot card has no fixed size (8 × 6.4 in by default,
+narrower with the site detail open, short and wide in a low window, a phone's width), so `_identity_diagnostics_layout`
+works every place out in points from the figure's size. Its `Typesetter` measures each text with matplotlib's Agg
+renderer in the font it will be drawn in and breaks it at the words to the room it has; `layout` stacks the title, the
+verdict and the footer, then tries each arrangement — the panels in a row or the two crops over the surface; the
+checks under the pictures (two columns when each is at least `MIN_CHECK_COLUMN`) or in a column beside them on a short
+wide figure; each panel's key under it, or all three in one block when a key would take more than two rows at its
+panel's width; the panels' notes kept, or left out when no arrangement with them reaches `MIN_SIDE` — and keeps the
+one that draws the pictures largest. Room the pictures cannot use goes between them and the checks (up to
+`MAX_EXTRA_GAP`) and the rest above the footer. Each panel and its colour bar carry `_aw_type_scale`, so the
+Properties pass that ends every redraw sizes their ticks and labels at `TICK_PT` / `BAR_PT` rather than its 18 pt
+default, and the tick locators thin with the panel's edge. The drawing records the size it was laid out for
+(`IdentityDrawn.laid_out`); `controller.on_canvas_resized` asks `_identity_controller.needs_relayout` and redraws
+Diagnostics once the canvas settles at another size (the zoom is kept, as on any redraw of the same well, timepoint
+and mode). `tests/test_nanowell_identity_diagnostics_layout.py` reads every drawn text's window extent back, after
+the Properties pass, at five card sizes and on the real page after a resize: inside the figure, overlapping no other
+text, and off every picture it does not belong to.
 
 Every mode zooms and pans: the scroll wheel zooms about the pointer and a drag pans, through the canvas wiring the
 Array view uses (`controller.on_scroll` routes Identity events to `_identity_zoom`). The limit arithmetic is Qt-free
@@ -11744,7 +11772,8 @@ own site and cross the prediction; a sentence top right (`nw-identity-focus`) sa
 a timepoint does not hold it, or why the text is not an address. `_identity_zoom.restore` centres each panel on it
 (`focus_centres`, `focus_limits`: `FOCUS_HALF_PITCHES` spacings to the nearer edge, in the full view's proportions,
 widened on Side by side so the moved compared site stays in view) whenever the well, timepoint or mode changes, and
-keeps that as the zoom. Diagnostics draws crops about the square, so the box is greyed there (`FOCUS_MODES`).
+keeps that as the zoom. Diagnostics draws crops about the square, so the box is greyed there (`FOCUS_MODES`) and
+`draw_focus` writes no sentence on its figure, whose places are all laid out from its size.
 **Origin** beside the box goes to `0,0`. **Go to nanowell** — in the site detail's crop header and in the pop-out
 window's header (`tab_view._go_to_button`) — calls `controller.go_to_site_in_blink`, which takes the crops' nanowell
 (`crops_site`) to the Identity view's Blink in its well, focused on its address.
@@ -11825,7 +11854,8 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   renderer draws it, `renderer.render_array`: the region is widened to the axes' shape (`fit_region`), so pixels
   stay square — and since that holds only at the size it was fitted for, the canvas's `resize_event` re-fits it:
   `tab_view` restarts a `_REFIT_MS` single-shot timer on each resize, and `controller.on_canvas_resized` redraws the
-  Array view when its axes no longer have the size its region was fitted to (without it a resize squashed every
+  Array view when its axes no longer have the size its region was fitted to (and the Identity view's Diagnostics when
+  its figure is no longer the size it was laid out for) (without it a resize squashed every
   nanowell into an oval, and a draw made while the canvas was still being laid out showed one flattened row). It leaves a canvas that is no longer visible alone: the timer can fire after the page closes, and a redraw then queues matplotlib's deferred draw onto a canvas about to be deleted; the image is drawn for exactly that region and those pixels; the nanowells are filled by the
   metric (`MAP_CMAP`, with a colour bar; a nanowell without a value is a grey outline styled by its state,
   `_STATE_STYLE`, never a colour of the scale) or outlined in `ui/nanowell_sites.state_colour`, a fused one

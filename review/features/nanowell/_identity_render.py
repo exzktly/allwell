@@ -66,6 +66,7 @@ class IdentityDrawn:
     home: dict = field(default_factory=dict)          # name -> (xlim, ylim) as drawn: the full view
     focus: object = None                              # identity_focus_compute.FocusMarks: the nanowell gone to
     focus_centres: dict = field(default_factory=dict)  # name -> (x, y) the zoom centres on (``_identity_zoom``)
+    laid_out: tuple = ()                              # Diagnostics: the figure size (in) its layout was worked for
 
 
 def title_text(pair) -> str:
@@ -452,9 +453,13 @@ def draw_focus(fig, drawn: IdentityDrawn, marks, centres: dict) -> None:
     from ui.theme import Colors
 
     drawn.focus, drawn.focus_centres = marks, dict(centres)
+    if drawn.mode not in fc.FOCUS_MODES:
+        # Diagnostics draws the central square, not the array, and lays its whole figure out from its size: a
+        # sentence pinned at the top right would sit on its title and verdict. The page greys the box there and
+        # says why on it.
+        return
     _bg, ink, _muted = _inks(SimpleNamespace(figure=fig))
-    said = marks.text if centres or not marks.found else f"{marks.text} Not drawn here: Diagnostics shows the square."
-    _ink(fig.text(0.97, 0.925, said, fontsize=8, ha="right", va="center", color=ink, gid="nw-identity-focus"))
+    _ink(fig.text(0.97, 0.925, marks.text, fontsize=8, ha="right", va="center", color=ink, gid="nw-identity-focus"))
     radius = _FOCUS_RING * float(marks.pitch or 1.0)
     if drawn.mode in ("distance", "blink"):
         rings, crosses = [("map", marks.ref_xy)], [("map", marks.other_in_ref)]

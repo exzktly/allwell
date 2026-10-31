@@ -3706,9 +3706,9 @@ offered yet.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ All-Well                       ↻  ⛶  ⌂  i                       │  ← title bar
+│ All-Well v…               ◫  ↻  ⛶  ⌂  ⛁  ▯  i                   │  ← title bar
 ├──────────────┬──────────────────────────────────────────────────┤
-│ Review Analyze Datasets │ Bar Plots  Line Graphs  Scatter  …  ⊟ │  ← one band
+│ Review Analyze Datasets │ Bar Plots  Line Graphs  Scatter  …    │  ← one band
 ├──────────────┼──────────────────────────────────────────────────┤
 │ 📁 my_run  ▾ │  Channel [GFP ▾] Property [Mean ▾]  Display ▾ ⚙  │  ← controls
 │  ⊙ Plotting  │  ┌────────────────────────────────────────────┐  │

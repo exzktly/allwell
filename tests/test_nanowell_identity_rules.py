@@ -132,6 +132,39 @@ def test_a_timepoint_is_not_contradicted_on_fewer_addresses_than_the_check_needs
         assert result["reason"] == f"only {2 * kept} address(es) in common with the reference, {ni.MIN_COMPARED} needed"
 
 
+# ── a timepoint anchored by hand is a reference ──────────────────────────────
+def _hand_anchored_block(t: ni.Timepoint, click) -> dict:
+    """The grid block the run writes for a timepoint addressed from an anchor set by hand at *click* (well frame),
+    the automatic square search having failed: the scores it records are the failure that made the anchor needed."""
+    return {"status": "ok", "lattice_kind": t.kind, "pitch_um": t.pitch, "angle_deg": t.angle_deg, "mirrored": False,
+            "montage_um_per_px": t.um_per_px, "montage_origin_um": list(t.origin_um), "origin_method": "manual",
+            "manual_anchor_um": list(click),
+            "fiducial": {"position_um": [3 * P, 0.0], "best": 0.31, "runner_up": 0.29, "margin": 0.15, "ratio": 3.0,
+                         "reason": ""},
+            "array_boundary": {"centre_um": [0.0, 0.0]}, "tiles": []}
+
+
+def test_a_well_anchored_by_hand_has_a_reference(registered):
+    """A well whose every timepoint was addressed from an anchor set by hand, because the automatic search found no
+    central square in any of them. The anchor is the square — the person put it there and the run addressed the
+    timepoint from it — so the first timepoint is the reference and the second is checked against it. Read as the
+    search's scores alone, no timepoint had a square, and every one was ``inconclusive`` "against no reference",
+    with the reason that no addressed timepoint has a central square the run accepted.
+
+    The clicks are a fifth of a pitch off the nanowell the run snapped them to, and the search's best outline three
+    pitches away, so the reference square must be the snapped site: neither the click nor the search's position."""
+    timepoints = {"T0": _small("T0", SMALL), "T1": _small("T1", SMALL)}
+    grid = {"timepoints": {name: _hand_anchored_block(t, (P / 5, 0.0)) for name, t in timepoints.items()}}
+    rows = [{"timepoint": t.name, "nw_q": a[0], "nw_r": a[1], "well_x_um": p[0], "well_y_um": p[1], "owner": "F0"}
+            for t in timepoints.values() for a, p in t.sites.items()]
+    montages = {name: np.zeros((4, 4), np.uint8) for name in timepoints}
+    result = ni.check_well(grid, rows, montages, ["T0", "T1"])
+    assert (result["reference"], result["reference_reason"]) == ("T0", "")
+    assert result["timepoints"]["T0"]["verdict"] == ni.REFERENCE
+    assert result["timepoints"]["T0"]["square_um"] == [0.0, 0.0]
+    assert result["timepoints"]["T1"]["verdict"] == ni.CONFIRMED
+
+
 # ── M6: the audit of one well keeps the plate's stage verdict ────────────────
 PITCH_UM = 172.0
 SIX_WELLS = {"A01": (0.0, 0.0), "A02": (9000.0, 0.0), "B01": (0.0, 9000.0), "B02": (9000.0, 9000.0),
@@ -250,7 +283,7 @@ NOT_RULES = frozenset({
 #: the change can alter any verdict, reason or exclusion a sidecar records, raise ``IDENTITY_VERSION`` and pin the
 #: new digest under the new number, so every sidecar the old rules wrote reads not checked; if it truly cannot (a
 #: rename, a refactor shown to change no output), re-pin under the current number and say why in the commit.
-RULES = {2: "ae668fd907ba71362d0bbd5ca698a7ad"}
+RULES = {3: "3762a80e2ba65c67079660b33326062a"}
 
 
 def _rules_digest() -> str:

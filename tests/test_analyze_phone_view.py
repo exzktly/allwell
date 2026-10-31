@@ -279,7 +279,7 @@ def test_sideways_the_stage_rail_sits_beside_the_plate_without_its_bars(qtbot):
     dash.resize(440, 300)
     dash.show()
     dash.setStacked(True)
-    bars = [bar for _dot, _nm, bar, _cnt in dash._rail.values()]
+    bars = [row.bar for row in dash._rail.values()]
     assert bars and all(b.isVisibleTo(dash) for b in bars)
     assert dash._body_lay.direction() == QBoxLayout.TopToBottom
     upright_room = dash.plate_room_width()

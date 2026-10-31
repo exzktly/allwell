@@ -1290,14 +1290,16 @@ def set_anchor_mode(ctx, on: bool) -> None:
         _call(ctx, "_nw_refresh_controls")
 
 
-def open_for_anchor(ctx, well: str, timepoint: str) -> bool:
+def open_for_anchor(ctx, well: str, timepoint: str, *, zoom: float | None = None) -> bool:
     """The ``nanowell.open_anchor`` service: show *well* at *timepoint* on the Array view, ready for *Set anchor*.
 
     QC Triage and Home's health card offer it for a timepoint the run left unaddressed. The well is added to the
     plate selection (never replacing it) so the page draws it; the view, well and timepoint are chosen; the anchor
     layer is turned on in the well frame with the overlays shown, since an anchor is set only there; and the page
     is brought forward. *Set anchor* itself waits for the well's tables (:func:`_apply_pending_anchor`), because
-    whether the timepoint can take an anchor is read from its grid record. Returns whether the page was shown."""
+    whether the timepoint can take an anchor is read from its grid record. With *zoom* the view opens that many
+    times *Fit* about the centre of the whole-well montage (``full_montage_compute.CentreZoom``) rather than
+    fitted: the anchor queue's way in. Returns whether the page was shown."""
     st = _state(ctx)
     notebook = getattr(ctx.window, "_notebook", None)
     if st is None or notebook is None or not well:
@@ -1312,9 +1314,10 @@ def open_for_anchor(ctx, well: str, timepoint: str) -> bool:
                             st.layers.positions)
     st.overlays_hidden, st.region, st.array_message = False, None, ""
     st.anchor_pending = (well, timepoint or "")
+    st.anchor_zoom = float(zoom) if zoom else None
     _save_soon(ctx)
     if not notebook.setCurrentByName("Nanowells"):
-        st.anchor_pending = None
+        st.anchor_pending = st.anchor_zoom = None
         return False
     if ctx.widgets.get_or_none("_nw_canvas") is not None:
         ensure_loaded(ctx)
@@ -1333,11 +1336,15 @@ def _apply_pending_anchor(ctx) -> None:
     if st is None or st.anchor_pending is None or st.data is None or st.computing:
         return
     well, timepoint = st.anchor_pending
-    st.anchor_pending = None
+    zoom, st.anchor_pending, st.anchor_zoom = st.anchor_zoom, None, None
     if page_well(ctx) != well:
         st.array_message = (f"{well} is not among the wells this page draws (a hidden set or a group-by variable "
                             "may leave it out), so its anchor cannot be set here.")
         return
+    if zoom:
+        # Set only now that the page draws this well: a draw before its tables landed showed another well, and the
+        # change of well refits the view. ``region_for`` is stamped so the next draw keeps it.
+        st.region, st.region_for = fmc.CentreZoom(zoom), (well, st.layers.positions)
     if anchor_controls(ctx)[0]:
         st.anchor_mode = True
         return

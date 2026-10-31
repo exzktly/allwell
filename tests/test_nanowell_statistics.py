@@ -195,7 +195,7 @@ def _open_statistics(qtbot, ctx):
     from review.features.nanowell.tab_view import VIEWS
 
     st = _loaded(qtbot, ctx)
-    ctx.widgets.get("_nw_view_seg").setCurrentIndex([k for k, _l in VIEWS].index("statistics"))
+    ctx.widgets.get("_nw_view_bar").setCurrentIndex([k for k, _l in VIEWS].index("statistics"))
     return st
 
 
@@ -206,8 +206,8 @@ def _report(ctx, gid):
 def test_the_statistics_view_tests_the_wells_drawn_and_names_what_it_compared(page, qtbot):
     state = _open_statistics(qtbot, page)
     assert state.view == "statistics"
-    seg = page.widgets.get("_nw_view_seg")
-    assert seg.segmentText(seg.count() - 1) == "Statistics"
+    seg = page.widgets.get("_nw_view_bar")
+    assert seg.tabText(seg.count() - 1) == "Statistics"
     header = " ".join(_report(page, sc.GID_HEADER))
     assert header.startswith("t-test (Welch, unequal var) · Cell count · at t_a")
     assert "This compares these wells, not the conditions behind them" in header

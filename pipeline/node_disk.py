@@ -10,7 +10,8 @@ heartbeat also go through. A run's scratch traffic there stalled the heartbeat's
 :func:`node_local_scratch` is the answer for a run inside a Slurm job that was given no scratch folder. It tries
 ``/scratch`` first — where AWS ParallelCluster mounts a node's local NVMe drive by default — then ``$SLURM_TMPDIR``
 on the sites that set it (job-private there), and takes the first that is a directory, writable, on neither a network
-nor an in-memory filesystem, and has :data:`LOCAL_SCRATCH_MIN_FREE` free. ``$TMPDIR`` is not a candidate: a login
+nor an in-memory filesystem, and has :data:`LOCAL_SCRATCH_MIN_FREE` free. ``/scratch`` must also be a disk of its own
+(:func:`on_root_filesystem`): where the cluster mounts nothing there it is a plain folder on the boot disk. ``$TMPDIR`` is not a candidate: a login
 environment often sets it to ``/tmp``. It never takes the system temporary directory: on a node shared with other jobs (a launcher without ``--exclusive``) that is
 the node's boot disk, and filling it can take the node out of service for everyone on it. When none qualifies the
 run keeps the shared default, and the reason says what each candidate lacked.
@@ -79,8 +80,18 @@ NODE_SCRATCH_MOUNT = "/scratch"
 LOCAL_SCRATCH_MIN_FREE = 20 * 2 ** 30
 
 
-def _local(folder: Path) -> str:
-    """``""`` when *folder* can hold a run's scratch, otherwise what it lacks."""
+def on_root_filesystem(folder: Path | str) -> bool:
+    """Whether *folder* is on the same filesystem as ``/`` — on a compute node, its boot disk.
+
+    Compared by device number (``st_dev``) rather than read from the mount table, so a bind mount of a folder from
+    the root filesystem — which ``/proc/mounts`` lists as a mount point of its own, with the root's type — still
+    counts as the root filesystem."""
+    return os.stat(folder).st_dev == os.stat(os.sep).st_dev
+
+
+def _local(folder: Path, *, own_disk: bool = False) -> str:
+    """``""`` when *folder* can hold a run's scratch, otherwise what it lacks. *own_disk* also requires it to be off
+    the root filesystem (:func:`on_root_filesystem`)."""
     if not folder.is_dir():
         return "does not exist"
     if not os.access(folder, os.W_OK):
@@ -90,6 +101,13 @@ def _local(folder: Path) -> str:
         return f"is on a network filesystem ({kind})"
     if kind in MEMORY_FILESYSTEMS:
         return f"is held in memory ({kind})"
+    if own_disk:
+        try:
+            rooted = on_root_filesystem(folder)
+        except OSError as exc:
+            return f"could not be told apart from the root filesystem ({exc})"
+        if rooted:
+            return "is a folder on the node's root filesystem, not a disk of its own"
     return ""
 
 
@@ -111,17 +129,20 @@ def node_local_scratch(environ=None, *, min_free: int = LOCAL_SCRATCH_MIN_FREE,
     environ = os.environ if environ is None else environ
     if not str(environ.get("SLURM_JOB_ID", "")).strip():
         return None, ""
-    candidates = [NODE_SCRATCH_MOUNT, environ.get("SLURM_TMPDIR")]
+    # ``/scratch`` must be a disk of its own: it is a folder anybody can make, and where ParallelCluster's local
+    # storage is not configured (or a site made the folder by hand) it is a plain directory on the boot disk.
+    # ``$SLURM_TMPDIR`` is a folder the site's Slurm made for this job, so where it lives is the site's choice.
+    candidates = [(NODE_SCRATCH_MOUNT, True), (environ.get("SLURM_TMPDIR"), False)]
     lacked: list[str] = []
     seen: set[Path] = set()
-    for raw in candidates:
+    for raw, own_disk in candidates:
         if not raw or not str(raw).strip():
             continue
         folder = Path(str(raw).strip())
         if folder in seen:
             continue
         seen.add(folder)
-        why = _local(folder)
+        why = _local(folder, own_disk=own_disk)
         if not why:
             free = free_bytes(folder)
             if free < min_free:

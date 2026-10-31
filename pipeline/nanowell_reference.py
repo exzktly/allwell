@@ -21,6 +21,14 @@ Stored under ``<output>/nanowells/_confluence_reference/``: ``reference.json`` (
 the settings key and each timepoint's verdict) and one ``<timepoint>.npz`` per empty timepoint
 (``nanowell_measure.save_template``). ``nanowells/`` is kept on the remote between batches, so a batch after the
 one that measured the reference reads it there. Qt-free, like every ``pipeline`` module.
+
+**What a well's confluence was read against is part of what makes it reusable.** The settings key names the
+reference *well* only, so a well measured while the reference was missing, failed or loaded, or before the reference
+was re-exported, would otherwise be kept as up to date beside a reference that now says something else (review
+tracker M7). Each measured timepoint records :meth:`Reference.key_at` in its grid block (:data:`KEY_FIELD`): a digest
+of the template's *content* where there was one, never of the ``.npz`` file (whose zip entries carry the time it was
+written, and an incremental run of the reference rewrites every kept template), else why there was none, as a code.
+A run keeps that timepoint, or skips the well, only when the key is the one the reference saved now gives.
 """
 
 from __future__ import annotations
@@ -36,6 +44,9 @@ MAX_LOADED_SHARE = 0.05
 DIR_NAME = "_confluence_reference"
 EMPTY, LOADED, UNVERIFIED = "empty", "loaded", "unverified"
 NOTE_PREFIX = "No confluence at this timepoint"
+#: The grid block field a measured timepoint records :meth:`Reference.key_at` in.
+KEY_FIELD = "confluence_reference_key"
+OWN_KEY = "own"
 
 
 @dataclass(frozen=True)
@@ -44,11 +55,14 @@ class Reference:
 
     ``own``: this well is the reference and reads itself. Otherwise ``templates`` maps each timepoint at which the
     reference was empty to its template (carrying its threshold), and ``reasons`` says why any other timepoint has
-    none; ``default`` is the reason for a timepoint the reference does not have."""
+    none; ``default`` is the reason for a timepoint the reference does not have. ``codes`` and ``default_code`` say
+    the same as short words, for :meth:`key_at`."""
     own: bool = False
     templates: dict = field(default_factory=dict)
     reasons: dict = field(default_factory=dict)
     default: str = ""
+    codes: dict = field(default_factory=dict)
+    default_code: str = "absent"
     #: timepoint -> cells the segmenter counted per nanowell in the reference well there (:func:`verdict`): its rate
     #: of counting a cell where there is none, under the same imaging and settings as every other well.
     false_cells: dict = field(default_factory=dict)
@@ -60,13 +74,41 @@ class Reference:
             return template, ""
         return None, self.reasons.get(timepoint, self.default)
 
+    def key_at(self, timepoint) -> str:
+        """What a well's confluence at *timepoint* is read against, as a short string a later run compares with the
+        one the well recorded: :data:`OWN_KEY` for the reference itself, the template's content digest
+        (:func:`template_key`), or ``none:<why>`` when there is no template there (``unnamed``, ``unmeasured``,
+        ``other_settings``, ``absent``, or the timepoint's verdict). Codes rather than the reasons' sentences, so
+        rewording a reason re-runs nothing."""
+        if self.own:
+            return OWN_KEY
+        template = self.templates.get(timepoint)
+        if template is not None:
+            return template_key(template)
+        return f"none:{self.codes.get(timepoint, self.default_code)}"
+
+
+def template_key(template) -> str:
+    """A digest of what a template *is* — its pixels, its threshold and how it was taken — so the same template read
+    back from a file written at another time, or by another run, gives the same key."""
+    import hashlib
+
+    import numpy as np
+
+    h = hashlib.blake2b(digest_size=8)
+    h.update(np.ascontiguousarray(template.array, dtype=np.float64).tobytes())
+    h.update(repr((int(template.half), str(template.source), int(template.n_sites), int(template.candidates),
+                   None if template.texture_cut is None else float(template.texture_cut),
+                   tuple(int(v) for v in template.used))).encode())
+    return f"template:{h.hexdigest()}"
+
 
 OWN = Reference(own=True)
 
 
 def none_named() -> Reference:
     return Reference(default="no empty reference well was named (--nanowell_empty_well), and confluence is "
-                             "calibrated against one")
+                             "calibrated against one", default_code="unnamed")
 
 
 def reference_well(settings) -> str | None:
@@ -91,15 +133,29 @@ def reference_well_first(settings, items: list) -> tuple[list, list]:
     return first, [item for item in items if item not in first]
 
 
+def _cell_count(value) -> float | None:
+    """A site row's ``n_cells`` as a number, or ``None`` when it was not counted. A row the run just made holds an
+    int or ``None``; a kept row read back from ``nanowells/<well>.csv`` holds text, where not counted is ``''``."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        count = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if count != count else count          # NaN: not counted
+
+
 def verdict(rows: list) -> dict:
-    """Whether the reference well was empty at one timepoint, from its *rows* there (``nanowells/<well>.csv``)."""
-    counted = [r for r in rows if r.get("state") in ("empty", "measured") and r.get("n_cells") is not None]
-    loaded = sum(1 for r in counted if r["n_cells"] > 0) / len(counted) if counted else None
+    """Whether the reference well was empty at one timepoint, from its *rows* there (``nanowells/<well>.csv``).
+    The rows may be the run's own or kept ones read back from the CSV, so each count is read as a number."""
+    counts = [_cell_count(r.get("n_cells")) for r in rows if r.get("state") in ("empty", "measured")]
+    counted = [n for n in counts if n is not None]
+    loaded = sum(1 for n in counted if n > 0) / len(counted) if counted else None
     status = UNVERIFIED if loaded is None else LOADED if loaded > MAX_LOADED_SHARE else EMPTY
     # Every cell counted in a well that holds none was invented by the segmenter (or is debris it took for a cell):
     # per nanowell, that is the false-count baseline every other well's counts carry at this timepoint. Undefined
     # (None, not 0) when nothing was counted.
-    false_cells = sum(r["n_cells"] for r in counted) / len(counted) if counted else None
+    false_cells = sum(counted) / len(counted) if counted else None
     return {"status": status, "loaded_share": loaded, "nanowells_counted": len(counted),
             "max_loaded_share": MAX_LOADED_SHARE, "false_cells_per_nanowell": false_cells}
 
@@ -171,12 +227,13 @@ def load(output_dir, settings) -> Reference:
         return none_named()
     index = read_index(output_dir)
     if index is None or not same_well(index.get("well"), well):
-        return Reference(default=f"the empty reference well {well} has not been measured in this output folder")
+        return Reference(default=f"the empty reference well {well} has not been measured in this output folder",
+                         default_code="unmeasured")
     if index.get("measure_version") != nm.MEASURE_VERSION or index.get("settings") != json.loads(
             json.dumps(settings.key(), default=str)):
         return Reference(default=f"the empty reference well {well} was measured under other settings; run it "
-                                 "again with these")
-    templates, reasons, false_cells = {}, {}, {}
+                                 "again with these", default_code="other_settings")
+    templates, reasons, codes, false_cells = {}, {}, {}, {}
     for tp, found in index.get("timepoints", {}).items():
         loaded = nm.load_template(directory(output_dir) / found["template"]) if found.get("template") else None
         if loaded is not None and found["status"] == EMPTY:
@@ -185,7 +242,8 @@ def load(output_dir, settings) -> Reference:
                 false_cells[tp] = float(found["false_cells_per_nanowell"])
         else:
             reasons[tp] = reason(well, tp, found)
-    return Reference(templates=templates, reasons=reasons, false_cells=false_cells,
+            codes[tp] = found["status"] if found.get("status") != EMPTY else "untemplated"
+    return Reference(templates=templates, reasons=reasons, codes=codes, false_cells=false_cells,
                      default=f"the empty reference well {well} has no such timepoint")
 
 

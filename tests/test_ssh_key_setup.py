@@ -187,8 +187,10 @@ def test_build_copy_command_falls_back_when_ssh_copy_id_missing(
     assert cmd == (
         'ssh bigbox "mkdir -p ~/.ssh && chmod 700 ~/.ssh && '
         "touch ~/.ssh/authorized_keys && "
-        f"(grep -qF '{_PUB}' ~/.ssh/authorized_keys || "
-        f"echo '{_PUB}' >> ~/.ssh/authorized_keys) && "
+        f"(grep -qE '(^| ){_PUB.replace('+', '[+]')}' ~/.ssh/authorized_keys || "
+        "([ -s ~/.ssh/authorized_keys ] && tail -c1 ~/.ssh/authorized_keys | wc -l | grep -q 0 "
+        "&& echo >> ~/.ssh/authorized_keys; "
+        f"echo '{_PUB}' >> ~/.ssh/authorized_keys)) && "
         'chmod 600 ~/.ssh/authorized_keys"'
     )
 
@@ -214,9 +216,10 @@ def test_fallback_survives_cmd_exe_which_ignores_single_quotes(
     assert "$" not in cmd and "zak@" not in cmd
 
 
-def test_fallback_remote_half_installs_the_key_once(tmp_path, monkeypatch):
-    """Run the remote command the way sshd does (``sh -c <arg>``) against a
-    scratch HOME, twice: one entry, owner-only permissions."""
+def _run_remote_half(tmp_path, monkeypatch, existing=None, times=1):
+    """Run the fallback's remote command the way sshd does (``sh -c <arg>``)
+    against a scratch HOME whose ``authorized_keys`` holds *existing* (none
+    when ``None``), *times* times; the file's text afterwards."""
     import os
     import shlex
 
@@ -225,15 +228,48 @@ def test_fallback_remote_half_installs_the_key_once(tmp_path, monkeypatch):
     assert argv[:2] == ["ssh", "bigbox"] and len(argv) == 3
     home = tmp_path / "home"
     home.mkdir()
-    for _ in range(2):
+    auth = home / ".ssh" / "authorized_keys"
+    if existing is not None:
+        auth.parent.mkdir()
+        auth.write_text(existing, newline="")
+    for _ in range(times):
         result = subprocess.run(
             ["sh", "-c", argv[2]], env={**os.environ, "HOME": str(home)},
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0, result.stderr
-    auth = home / ".ssh" / "authorized_keys"
-    assert auth.read_text() == f"{_PUB}\n"
     assert auth.stat().st_mode & 0o777 == 0o600
+    return auth.read_text()
+
+
+def test_fallback_remote_half_installs_the_key_once(tmp_path, monkeypatch):
+    """Twice into no file at all: one entry, owner-only permissions, no blank
+    line ahead of it."""
+    assert _run_remote_half(tmp_path, monkeypatch, times=2) == f"{_PUB}\n"
+
+
+def test_fallback_starts_the_key_on_a_line_of_its_own(tmp_path, monkeypatch):
+    """An ``authorized_keys`` whose last line has no newline: the key used to be
+    glued onto it (``...admin@xssh-ed25519 ...``), where sshd reads it as the
+    previous key's comment and the new key never works. Run twice: still one
+    entry."""
+    old = "ssh-rsa AAAAOLDKEY admin@x"
+    assert _run_remote_half(tmp_path, monkeypatch, old, times=2) == f"{old}\n{_PUB}\n"
+
+
+def test_fallback_repairs_a_key_an_earlier_run_glued_onto_the_line_before(tmp_path, monkeypatch):
+    """A file the old command already broke: the key's text is in it, but only
+    inside the previous line's comment. A substring check found it there and
+    appended nothing, so re-running never repaired it."""
+    glued = f"ssh-rsa AAAAOLDKEY admin@x{_PUB}\n"
+    assert _run_remote_half(tmp_path, monkeypatch, glued) == f"{glued}{_PUB}\n"
+
+
+def test_fallback_finds_the_key_behind_an_options_field(tmp_path, monkeypatch):
+    """An entry with options ahead of the key type is the key already
+    installed: nothing is appended."""
+    with_options = f'no-pty,command="true" {_PUB} zak@pc\n'
+    assert _run_remote_half(tmp_path, monkeypatch, with_options, times=2) == with_options
 
 
 def test_fallback_without_a_readable_pub_still_double_quotes(tmp_path, monkeypatch):

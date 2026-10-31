@@ -196,3 +196,39 @@ def test_the_model_is_built_on_that_device_and_the_worker_says_where(
     assert getattr(built.get("device"), "spec", None) == "cuda:0", built
     assert any("Cellpose cyto3 on GPU cuda:0 (NVIDIA A100 #0)" in r.getMessage()
                for r in caplog.records)
+
+
+@pytest.mark.parametrize("planned, torch_cuda", [(True, False), (False, True)])
+def test_a_nanowell_worker_s_threads_follow_the_device_cellpose_loaded_on(monkeypatch, planned, torch_cuda):
+    """Review tracker L10: a nanowell worker spreads its work over threads only when its Cellpose is on a GPU
+    (``nanowell_parallel.gpu_in_use``), and that answered from the main process's plan — whether it found a GPU —
+    while the device is the worker's Torch's to choose. A node whose GPU this Torch cannot use (a CPU-only build) was
+    planned as a GPU node and ran threads beside a Cellpose using every core; the reverse ran one thread beside an
+    idle GPU. Once the worker's model has loaded, the answer is the device it loaded on."""
+    import pipeline.nanowell_parallel as npar
+
+    monkeypatch.setattr(cp, "_CELLPOSE_MODELS", {})            # nothing loaded in this process yet
+    if planned:
+        monkeypatch.setenv(par.GPU_SHARERS_ENV, "2")
+    else:
+        monkeypatch.delenv(par.GPU_SHARERS_ENV, raising=False)
+    assert npar.gpu_in_use() is planned                       # before the model loads, the plan is all there is
+
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda=torch_cuda))
+    _ordinal(monkeypatch, 1)
+
+    class _Model:
+        def __init__(self, **kw):
+            pass
+
+        def eval(self, x, **kw):
+            return np.zeros(np.asarray(x).shape[:2], dtype=int), None, None
+
+    fake_models = types.SimpleNamespace(CellposeModel=_Model)
+    fake_cellpose = types.ModuleType("cellpose")
+    fake_cellpose.models = fake_models  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "cellpose", fake_cellpose)
+    monkeypatch.setitem(sys.modules, "cellpose.models", fake_models)
+    cp._segment_cellpose(np.zeros((8, 8), np.float32), model_type="cyto3")
+
+    assert npar.gpu_in_use() is torch_cuda

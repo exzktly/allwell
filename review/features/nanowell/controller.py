@@ -27,7 +27,7 @@ from review.features.nanowell.distribution_compute import (
     METRICS, PER_NANOWELL, TIME, WELLS, distribution_model, match_channel, metric_column,
 )
 from review.features.nanowell import full_montage_compute as fmc
-from review.features.nanowell.array_compute import array_scene, one_to_one
+from review.features.nanowell.array_compute import array_scene, field_sites, one_to_one
 from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell import _anchor_queue as aq
@@ -112,6 +112,11 @@ def export_long_csv(state, path, wells=None) -> int:
     *wells*, only theirs: the page reads only the wells it draws, so what else is loaded is whichever wells
     happened to be selected before.
 
+    ``n_cells`` and ``brightness_<channel>`` are the page's, after Home's Cell Gating (``cell_gate_compute``), so the
+    file records the gate beside them: ``n_cells_run`` is the run's own count, ``cells_left_out`` how many cells the
+    gate took out of it, and ``cell_gating`` the figure's sentence about the gate (``""`` when it left nothing out),
+    as Batch Export's summary carries it in its ``note``.
+
     Written to a temporary name and moved into place, so a failed write never leaves half a table under the
     name a person will open.
     """
@@ -119,6 +124,12 @@ def export_long_csv(state, path, wells=None) -> int:
         raise ValueError("There are no nanowell tables loaded to export.")
     metrics = state.metrics if wells is None else state.metrics[state.metrics["well"].isin(list(wells))]
     table = long_format(metrics, state.data.channels)
+    gate = getattr(state, "gate", None)
+    at = table.columns.get_loc("n_cells") + 1
+    run = metrics["n_cells"] if "n_cells" in metrics.columns else pd.Series(np.nan, index=metrics.index)
+    table.insert(at, "n_cells_run", pd.to_numeric(run, errors="coerce").to_numpy())
+    table.insert(at + 1, "cells_left_out", cg.left_out_counts(metrics, gate).astype("Int64").to_numpy())
+    table["cell_gating"] = cg.note(gate)
     table.insert(table.columns.get_loc("time_h") + 1, "time_source", state.data.time_source or "")
     table.insert(table.columns.get_loc("baseline_timepoint"), "baseline", state.baseline)
     # Every row is kept, and flagged: a file filtered to the page's Subset would lose rows a reader may want back,
@@ -289,7 +300,10 @@ def _metrics_of(data, baseline: str, gate=None, focus=None) -> pd.DataFrame | No
 
 def gate_version(ctx) -> int:
     """The version of which cells the analysis includes (``StatsCacheState.population_version``): every gating,
-    curation or QC edit moves it."""
+    curation or QC edit moves it. So do group and well-label edits, which go through the same
+    ``invalidate_stats_cache``; that costs the page one re-tally from the row cache, no table read (measured, tracker
+    L14). Kept rather than narrowed: telling the edits apart means classifying every caller of that shared
+    invalidation, and one gating edit misfiled would leave the page's counts stale and drawn as current."""
     return int(getattr(ctx.state.stats_cache, "population_version", 0))
 
 
@@ -314,6 +328,7 @@ def gate_tally(ctx, data) -> cg.GateTally | None:
 
     if data is None or not len(data.sites):
         return None
+    fields = _excluded_fields(ctx, data)
     per_well, unread = [], []
     for well in data.wells:
         label = _cell_label(ctx, well, data)
@@ -330,19 +345,25 @@ def gate_tally(ctx, data) -> cg.GateTally | None:
             unread.append(well)
             continue
         if frame is not None and len(frame):
-            # Every inclusion layer but the nanowell focus one: the cells it leaves out are those of a
-            # nanowell-timepoint this page already draws as an ``out_of_focus`` gap, so counting them again here
-            # would only make the note say Cell Gating left them out, which it did not.
-            kept = df_included_mask(frame, except_layer=rfc.NW_FOCUS_PASS_COLUMN)
-            per_well.append((well, frame, kept.to_numpy()))
-    return cg.tally(per_well, unread)
+            # The field layers are applied by field (`cell_gate_compute.exclude_fields`), never to the counts. The
+            # nanowell focus layer is left out too: the cells it leaves out are those of a nanowell-timepoint this
+            # page already draws as an ``out_of_focus`` gap, so counting them again here would only make the note
+            # say Cell Gating left them out, which it did not.
+            skipped = (*cg.FIELD_LAYERS, rfc.NW_FOCUS_PASS_COLUMN)
+            per_well.append((well, frame, df_included_mask(frame, except_layers=skipped).to_numpy()))
+    return cg.tally(per_well, unread, fields)
 
 
-def gated_metrics(ctx, data, baseline: str, focus=None) -> pd.DataFrame | None:
-    """:func:`site_metrics` with the cells Home's Cell Gating leaves out taken out and the nanowells whose rim was
-    out of focus under *focus* (``review.domain.nanowell_rim_focus.RimFocusRule``) left out — what the page draws and Batch Export
-    exports, so the two never disagree."""
-    return _metrics_of(data, baseline, gate_tally(ctx, data), focus)
+def _excluded_fields(ctx, data) -> frozenset:
+    """The tiles the field layers leave out of *data*'s wells (``cell_gate_compute.excluded_fields``), read from
+    the same state those layers project from: QC triage's exclusions, the run's flagged fields while their
+    exclusion is on, and the FOVs chosen on Cell Gating; never in a well whose FOV labels are untrusted."""
+    from review.data import field_exclusions, field_quality_cache, fov_selection
+
+    flagged = field_quality_cache.flagged_fields(ctx)[0] if field_quality_cache.exclusion_is_on(ctx) else ()
+    return cg.excluded_fields(data.sites, excluded=field_exclusions.excluded_fields(ctx), flagged=flagged,
+                              chosen_fovs=fov_selection.selected_fovs(ctx),
+                              untrusted=field_quality_cache.untrusted_wells(ctx))
 
 
 def ensure_loaded(ctx, *, force: bool = False) -> None:
@@ -485,7 +506,8 @@ def redraw(ctx) -> None:
         well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
-        subset=st.subset, stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st), **array)
+        subset=st.subset, stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
+        gate=st.gate, **array)
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
@@ -621,7 +643,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               baseline_moving: int = 0, layers: ArrayLayers | None = None, image=None, image_note: str = "",
               region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
-              stats_cache: dict | None = None) -> tuple[object, object]:
+              stats_cache: dict | None = None, gate=None) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -635,9 +657,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     (tracker I9), which the Distribution view states the fraction responding at. *subset* is the page's
     *Subset* (``subset_compute``): every view but the Array draws only the nanowells inside it, saying how many it
     left out; the Array view draws them all and dims the rest. *moving* is the moving average's window in
-    timepoints (``moving_compute``; 0 is off), which Distribution and Trajectories apply and the other views,
-    each of one timepoint or one value per nanowell, do not. *baseline_moving* is the baseline's own window for a
-    fold change, used only with *moving* on and never with the Earliest baseline
+    timepoints (``moving_compute``; 0 is off), which Distribution, Trajectories and Statistics apply and the other
+    views, each of one timepoint or one value per nanowell, do not. *baseline_moving* is the baseline's own window
+    for a fold change, used only with *moving* on and never with the Earliest baseline
     (``moving_compute.baseline_window_for`` decides, here, so the page and Batch Export cannot differ).
 
     The Identity view draws *well* at *well_timepoint* against the well's reference timepoint
@@ -650,6 +672,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     (``wells``), by *stats_test*, every pair or each against *control*. Its model is the
     ``statistics_compute.StatisticsResult``; *stats_cache*, a dict the caller keeps, spares re-running the tests
     when nothing they depend on changed.
+
+    *gate* (``cell_gate_compute.GateTally``, the one *metrics* were computed with) keeps the Array view's Cells
+    layer to the cells the counts hold.
     """
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
@@ -677,7 +702,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                           "dimmed.", note]))
         drawn = draw_array(fig, all_metrics, data, well=well, timepoint=well_timepoint, metric=metric,
                            channel=channel, layers=layers, image=image, image_note=image_note, region=region,
-                           selected=selected, note=note, dimmed=dimmed)
+                           selected=selected, note=note, dimmed=dimmed, gate=gate)
         return (drawn.hits if drawn is not None else None), drawn
     if filtered is not None:
         note = " ".join(filter(None, [ss.note(filtered), note]))
@@ -701,9 +726,11 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         render_position(fig, series, label=_label(metric, channel), timepoint=timepoint, note=note)
         return None, None
     if view == "statistics":
+        # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).
         model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=WELLS,
                                    groups=groups, timepoint=timepoint, time_source=data.time_source,
-                                   baseline=baseline, cohort=cohort)
+                                   baseline=baseline, cohort=cohort, moving=moving,
+                                   baseline_moving=baseline_moving)
         result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control,
                                    cache=stats_cache)
         if tableless:
@@ -730,9 +757,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
 
 
 #: The Distribution model's notes the Statistics view carries: what changes which values were compared (the fixed
-#: cohort) and how the times were read. The rest describe the beeswarm (packing, the joined line, the fraction
-#: responding) and say nothing about a test.
-_STATS_NOTES = ("Fixed cohort", "Times are")
+#: cohort, the moving average) and how the times were read. The rest describe the beeswarm (packing, the joined
+#: line, the fraction responding) and say nothing about a test.
+_STATS_NOTES = ("Fixed cohort", "Moving average", "Times are")
 
 
 def statistics_result(model, groups: dict, *, unit: str, test: str, control: str = "",
@@ -740,17 +767,21 @@ def statistics_result(model, groups: dict, *, unit: str, test: str, control: str
     """The Statistics view's result for a Distribution *model* drawn *Along x: Wells*: its samples of *unit*
     (``statistics_compute.samples_from_model``) compared by *test*.
 
-    *cache*, when given, holds the last result under everything it was computed from — the samples' names and
-    values, the unit, test, control, metric and timepoint — and that result is returned when they all match, so a
-    redraw for a theme or a resize does not run the tests and the bootstrap again. Any change to the values (a
-    Subset, the cohort, the baseline, an excluded well) changes the key."""
+    *cache*, when given, holds the last result under everything it was computed from and everything it reports —
+    each sample's name, wells, values, roster and exclusions by reason, the notes it carries, the unit, test,
+    control, metric, label and timepoint — and that result is returned when they all match, so a redraw for a theme
+    or a resize does not run the tests and the bootstrap again. Any change to what the report says (a Subset, the
+    cohort, the moving average, the baseline, an excluded well) changes the key, including one that leaves every
+    value as it was: ticking the cohort over nanowells that all have a value changes the report's note only."""
     samples = sc.samples_from_model(model, groups, unit)
-    key = (unit, test, control, model.column, model.timepoint,
-           tuple((s.name, s.wells, s.values.tobytes()) for s in samples))
+    notes = [n for n in model.notes if n.startswith(_STATS_NOTES)]
+    key = (unit, test, control, model.column, model.label, model.timepoint, tuple(notes),
+           tuple((s.name, s.wells, s.values.tobytes(), s.n_roster, tuple(sorted(s.excluded.items())),
+                  s.without_value) for s in samples))
     if cache is not None and cache.get("key") == key:
         return cache["result"]
     result = sc.compare(samples, test, control=control, unit=unit, label=model.label, timepoint=model.timepoint)
-    result.notes = [n for n in model.notes if n.startswith(_STATS_NOTES)]
+    result.notes = notes
     if cache is not None:
         cache.clear()
         cache.update(key=key, result=result)
@@ -826,7 +857,7 @@ def batch_array_layers() -> ArrayLayers:
 
 def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, channel: str | None,
                layers: ArrayLayers | None = None, image=None, image_note: str = "", region=None, selected=(),
-               note: str = "", dimmed=frozenset()) -> ArrayDrawn | None:
+               note: str = "", dimmed=frozenset(), gate=None) -> ArrayDrawn | None:
     """**The one composition of the Array view**, for the page and for Batch Export (through :func:`draw_view`).
 
     *layers* says what is drawn (the lattice map when none are given); *image* is the run montage or the tile
@@ -838,7 +869,7 @@ def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, ch
         render_message(fig, "Select a well with a nanowell table.", gid="nw-array-missing")
         return None
     scene = array_scene(metrics, data, well, timepoint, metric_column(metric, channel), positions=layers.positions,
-                        anchors=layers.anchor, cells=layers.cells)
+                        anchors=layers.anchor, cells=layers.cells, gate=gate)
     if scene.frame == "well" and image is not None and hasattr(image, "source"):
         # A plate placed from a scan pattern records no tile size; the tile store read it from the first image.
         width, height = image.source.tile_size_um
@@ -1416,7 +1447,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
                failed=lambda message: {site: {"": Crop(None, "", f"The crops could not be cut: {message}")}
                                        for site in missing},
                deliver=deliver)
-    st.extreme_axes = render_extremes(fig, model, {site: st.crops[site] for site in model.sites()
+    st.extreme_axes = render_extremes(fig, model, {site: gated_crops(st, site, st.crops[site]) for site in model.sites()
                                                    if site in st.crops},
                                       label=_label(metric, channel), note=note, cells=st.crop_cells,
                                       image_channel=image_channel, numbers=st.crop_metrics,
@@ -1512,7 +1543,7 @@ def draw_popout(ctx) -> None:
             data, metrics = st.data, st.metrics
             _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site, channel=image_channel),
                    failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
-        render_crop_grid(fig, st.crops.get(site), site, cells=st.crop_cells,
+        render_crop_grid(fig, gated_crops(st, site, st.crops.get(site)), site, cells=st.crop_cells,
                          metrics=crop_metrics(st, [site], page_channel(ctx)).get(site) if st.crop_metrics else None,
                          image_channel=image_channel, display_range=display_range(ctx), labels=st.popout_labels)
     canvas.draw_idle()
@@ -1540,7 +1571,7 @@ def redraw_detail(ctx) -> None:
     channel = page_channel(ctx)
     image_channel = page_image_channel(st)
     first = tuple(series[0][0])
-    crops = st.crops.get(first)
+    crops = gated_crops(st, first, st.crops.get(first))
     if crops is None:
         data, metrics = st.data, st.metrics
         _fetch(ctx, "crops", first, lambda: site_crops(data, metrics, first, channel=image_channel),
@@ -1553,6 +1584,29 @@ def redraw_detail(ctx) -> None:
         render_crop_strip(strip_fig, crops, first, cells=st.crop_cells, image_channel=image_channel,
                           display_range=display_range(ctx))
         strip_canvas.draw_idle()
+
+
+def gated_crops(st, site, crops):
+    """*site*'s crops (``timepoint -> Crop``) with the dots the counts do not hold left out: the cells Cell Gating
+    leaves out and those of a field the field layers exclude (``cell_gate_compute.hidden_cells``, the rule the
+    Array view's Cells layer follows), each crop counting what it left out for the caption. Applied when drawn, not
+    when cut, so crops cut before a gating edit follow it. A crop without its cells' rows is drawn as it is."""
+    if not crops or st.gate is None or st.metrics is None:
+        return crops
+
+    well = str(site[0])
+    metrics = st.metrics[st.metrics["well"] == well]
+    out = {}
+    for tp, crop in crops.items():
+        rows = getattr(crop, "cell_rows", None)
+        if crop is None or crop.cells is None or rows is None or not len(rows):
+            out[tp] = crop
+            continue
+        hide, gated, in_fields = cg.hidden_cells(rows, st.gate, well, tp,
+                                                 field_sites(metrics[metrics["timepoint"] == tp]))
+        out[tp] = replace(crop, cells=crop.cells[~hide], cell_rows=rows[~hide].reset_index(drop=True), gated=gated,
+                          in_fields=in_fields) if hide.any() else crop
+    return out
 
 
 def _outside_badges(st, sites) -> dict:

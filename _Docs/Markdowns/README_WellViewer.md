@@ -460,7 +460,10 @@ timepoint.
 
 **Confluence needs an empty reference well.** Confluence is read as texture against an empty nanowell, and a loaded
 well has none: calibrated on its own cells, a nanowell half covered read 1-3 %. So name a plate well that holds no
-cells in **Empty reference well** (on the command line `--nanowell_empty_well H12`). It is analysed before the other
+cells in **Empty reference well** (on the command line `--nanowell_empty_well H12`); left blank, the field reads
+*none: no confluence*. A named well that is not among the run's wells and was not measured in the output folder
+before — a well this plate does not have, or a typo — is warned about in the run log before any well runs. It is
+analysed before the other
 wells, and at every timepoint each well's confluence is read against that well's empty nanowells imaged at the same
 timepoint, which also corrects for exposure or medium changing over the time course. Without one — none named, or a
 timepoint where more than 5 % of its nanowells hold a counted cell, or a timepoint it does not have — **no well has a
@@ -470,7 +473,9 @@ cells the model finds where there are none: its cells counted per nanowell are s
 (`false_cells_per_nanowell`) and written on every other well's timepoint (`template` →
 `reference_false_cells_per_nanowell`), the baseline that well's counts sit on. Counts on the rim-removed image use the
 reference too (see **Segment on**); counts on the raw image, and fluorescence, do not depend on it. **Test detection**
-divides by the well's own picture, because it has no reference to read, and says so when one is named. Results measured this way carry a measurement version: adding timepoints to a dataset
+divides by the well's own picture, because it has no reference to read, and says so when one is named. A remote run
+that does not include the reference well — re-running a few wells, or resuming a plate whose reference finished
+earlier — is sent the reference this computer already holds, so its wells keep their confluence. A well is kept as up to date only beside the reference it was read against: when the reference well is analysed for the first time after them, analysed again on other images (re-exported, forced), or judged empty at a timepoint where it was not before, every well read against it before is analysed again, locally or sent again to a remote, and the run log says which and why. Running the reference again on the same images changes nothing and re-runs no other well. Results measured this way carry a measurement version: adding timepoints to a dataset
 measured by an earlier version analyses the well again in full, and Merge Plates refuses to combine two datasets
 measured by different versions. The nanowells of a circular array are the
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image
@@ -579,8 +584,10 @@ The new images need an acquisition record of their own when the analysed dataset
 the CZI, ND2 or OME import); without it the merge is refused, because the merged dataset would have no record
 to add the new timepoint from. *Concatenate* also joins two datasets that were each analysed in nanowell mode:
 nanowells are matched by address, so dataset 2's timepoints land on dataset 1's nanowells. Where the two analyses
-disagree about a well — they found different nanowells in it, a timepoint of dataset 2 sits a lattice step off, or
-it was measured on dataset 2's own fallback template — those timepoints of dataset 2 are left out, and the log
+disagree about a well — they found different nanowells in it, a timepoint of dataset 2 may sit a lattice step off
+(dataset 2's own analysis flagged it, or one side of its rim is empty as a step leaves it — a bubble or glare over
+that side looks the same, and then the timepoint is simply measured again), or it was measured on dataset 2's own
+fallback template — those timepoints of dataset 2 are left out, and the log
 names each one and why; run Analyze with Run scope set to *Fill in what's missing* to measure them onto dataset 1's
 nanowells. Each half keeps the nanowell diameter its own analysis measured. Two analyses under different nanowell
 settings are refused, as is a pair where only one dataset holds nanowell results or only one has an acquisition
@@ -1798,17 +1805,22 @@ and the run is a single process that spreads its own workers over the CPUs it is
 given. A task count can come from the cluster's environment as well as from the
 command, so this is added whatever the command says. A `-n` / `--ntasks` you
 wrote is read as a request for cores and becomes `--cpus-per-task` (`-n 4 -c 2`
-gives the run 8 CPUs), and `-N` / `--nodes` is dropped. If a scheduler still
+gives the run 8 CPUs), a `--gpus-per-task` beside it is multiplied the same way
+(`-n 4 --gpus-per-task=1` gives the run 4 GPUs), and `-N` / `--nodes` is dropped. If a scheduler still
 starts more than one copy, the run log says how many, and only the first runs.
 
 **Max queue wait** is how long a run waits for the scheduler to give it a node
 — queued, or granted a node that is still starting up — before it gives up. The
 time counts from the moment the run asks for the node, which on a scheduled host
 is before the plate is even planned, so the queue wait, the preparation and the
-upload run side by side: on a cluster that queues the run for longer than the setting, the run
-fails even while the plate is still uploading (a batched run stops its upload; a
-single run finishes sending first), and what reached the cluster is kept for the
-next attempt. When it runs out the job is cancelled and the run stops with
+upload run side by side, and the setting bounds all of it: on a cluster that
+queues the run for longer than the setting, the run fails. If the wait runs out
+while the plate is still being prepared on this computer, the log says so at
+once, the status line stops counting, and the run stops as soon as preparation
+is done, before anything is uploaded — it does not ask for another node and
+start the wait over. If it runs out during the upload, a batched run stops its
+upload and a single run finishes sending first; what reached the cluster is kept
+for the next attempt. When it runs out the job is cancelled and the run stops with
 `no node was granted within 30 min, this host's Max queue wait — cancelled job
 …`; raise the setting for a busy cluster, or set it to **Wait indefinitely**
 (0), which never gives up. A run that has started on its node is never cut
@@ -1855,15 +1867,22 @@ setting on a cluster. It is where the pipeline keeps its per-well working files
 many wells as run at once. Left empty on a host that runs jobs through Slurm, the
 run uses the compute node's own disk: `/scratch` (where AWS ParallelCluster mounts
 the node's NVMe drive), else `$SLURM_TMPDIR`, as long as it is a local disk with at
-least 20 GB free; each batch's log says which disk and how much was free, or why
-none qualified. That keeps the run's heavy temporary files off the cluster's shared
+least 20 GB free; `/scratch` counts only when it is a disk of its own, not a plain
+folder on the node's system disk. Each batch's log says which disk and how much was
+free, or why none qualified. When the disk check then finds that the node's disk
+cannot hold the run's own estimate but the run's folder in the staging directory can,
+the run uses that folder instead and its log says so (`Scratch moves off the node's
+own disk …`). When a remote run is refused for scratch space, the message names this
+field — the Analyze form's own *Scratch folder* is not sent to a host. That keeps the run's heavy temporary files off the cluster's shared
 home folder, which on ParallelCluster is served by the same head node your
 connection and the run's heartbeat go through — a run writing its scratch there
 can stall the heartbeat ("did not answer within 75s"). It never uses the node's
 `/tmp`, which other people's jobs on the same node share. The trade-off: a node's
 own disk is erased when the node shuts down, so a well that a stopped or suspended
 run left part-way starts that well's fields again next time (finished wells are
-kept, and nothing is lost between the batches of one run). With no such disk, or
+kept, and nothing is lost between the batches of one run). A part-done well left
+on a node's own disk by another run is cleared from it after a week untouched, so
+it does not hold space other jobs on that node need. With no such disk, or
 on a host without Slurm, it uses the run's own folder in the host's staging
 directory (`~/.allwell-staging/runs/…/out`). A folder set here always comes first,
 whether or not the host uses Slurm. Set it to your site's real scratch: `$TMPDIR`,
@@ -2127,9 +2146,12 @@ reading it. The log names any it kept over budget for that reason.
   from the node (*allocation granted*) ends the wait. A batched run holds
   one node for every batch, so it queues once. A run that turns out to need no
   node — everything already finished on the host, nothing left to send, a
-  refusal, or a Stop — gives the queued job back at once; a job that ended
-  before the run was ready (the cluster cancelled it, the connection dropped) is
-  reported in the log and the run asks for a new one. The time a granted node
+  refusal, or a Stop — gives the queued job back at once; a job that ends
+  before the run is ready (the cluster cancelled it, the connection dropped) is
+  reported in the log as it ends, the status line stops counting its wait, and
+  the run asks for a new one once it is ready — except when what ended it was
+  Max queue wait, which stops the run instead, since asking again would start
+  that wait over. The time a granted node
   spends waiting for the run counts against its time limit, as the wait for an
   upload already did; a batched run asks for enough time for every batch the
   plate could hold. **Max queue wait** in the remote host dialog is how
@@ -5573,9 +5595,11 @@ gives no fold change ("no signal above background at baseline"), since a ratio o
 brightness fold change needs counted cells at both timepoints.
 
 **Cell Gating applies here too.** A nanowell's cell count, and its brightness, use only the cells the rest of
-Review counts: the size and shape gate, cells excluded by hand, the crop, the scatter gates and the field and focus
-exclusions set on Home ▸ [Cell Gating](#cell-gating). So to drop objects by size from the nanowells, set *min area* /
-*max area* there. Each nanowell's count is the run's count less the cells gated out of it, and brightness is
+Review counts: the size and shape gate, cells excluded by hand and the scatter gates set on Home ▸
+[Cell Gating](#cell-gating). So to drop objects by size from the nanowells, set *min area* / *max area* there. A
+field left out as a whole — excluded in QC triage, flagged by the run while *exclude flagged fields* is on, or not
+among the FOVs chosen on Cell Gating — is a tile at one timepoint here, and every nanowell it holds is left out with
+the reason *field excluded*, empty ones included, rather than counted as emptied. Each nanowell's count is the run's count less the cells gated out of it, and brightness is
 averaged over the cells kept; everything computed from the count follows — fold changes, growth rate, occupancy,
 *Starting cells* and the *Subset* conditions. Confluence and nanowell fluorescence are measured from the
 nanowell's pixels rather than from its segmented cells, so a gate cannot change them. While a gate leaves any cell
@@ -5626,11 +5650,11 @@ the sentence names it.
   *Earliest* baseline: a count taken later — at a first measurable or a named timepoint — may follow a division,
   and the figure counts those nanowells.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
-- **Fixed cohort** (on *Distribution* and *Trajectories*) — use only the nanowells with a value at every
+- **Fixed cohort** (on *Distribution*, *Trajectories* and *Statistics*) — use only the nanowells with a value at every
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
   measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
   the footer gives the cohort's size.
-- **Moving average** (on *Distribution* and *Trajectories*) — *Off*, or 2 to 9 timepoints: each nanowell's
+- **Moving average** (on *Distribution*, *Trajectories* and *Statistics*) — *Off*, or 2 to 9 timepoints: each nanowell's
   value at a timepoint becomes the mean of its values at that timepoint and the ones before it, that many in
   all. The window counts timepoints, not hours, so with unevenly spaced acquisitions it covers a different
   stretch of time at each step. A value is averaged only when the nanowell has a value at every timepoint of
@@ -5750,7 +5774,8 @@ the sentence names it.
   one pass for the whole montage, so it fills in a moment after the ranking is drawn.
 - **Statistics** — tests whether wells, or groups of wells, differ in the **Metric** at the **Timepoint** (the
   latest by default), modelled on the Statistics tab. It compares exactly the dots the Distribution view draws
-  *Along x: Wells*: the **Baseline**, **Subset**, **Fixed cohort** and excluded wells all apply, and every nanowell
+  *Along x: Wells*: the **Baseline**, **Subset**, **Fixed cohort**, **Moving average** and excluded wells all apply
+  (the report states the cohort and the window when they are on), and every nanowell
   left out is counted under its sample. **Compare** chooses what one value is:
   - *Wells (nanowells as values)* — each well is a sample and its nanowells are the values. This says whether
     these wells' distributions differ. It says nothing about the conditions behind them, because the nanowells
@@ -5764,8 +5789,10 @@ the sentence names it.
   and the figure then draws each sample's cumulative curve), or Dunnett. **vs** lists the samples: with none
   chosen every pair is compared; with one, each other sample is compared with it only — fewer comparisons, the
   family a plate design usually means. Dunnett always needs a control and corrects for its own family
-  (*p_Dunnett*); the other tests print the raw *p* and the Benjamini-Hochberg adjusted *p_BH* when there is more
-  than one comparison, and the stars are of the adjusted p. With three or more samples an omnibus (one-way
+  (*p_Dunnett*); the other tests print the raw *p* and the Benjamini-Hochberg adjusted *p_BH* when more than one
+  comparison has a p, and the stars are of the adjusted p. A family of one — or one in which only one comparison
+  could be computed — prints that p as plain *p*, and the line under the comparisons counts how many were made, how
+  many were computed, and whether anything was corrected. With three or more samples an omnibus (one-way
   ANOVA, or Kruskal-Wallis for the rank tests) is stated first. Each sample gets a line with its n, mean, sd,
   median and interquartile range (and a 95% interval on Groups); each comparison its statistic, p, stars, Hedges'
   *g* and the difference of means with a bootstrap 95% interval. Above the report a box per sample (the dots
@@ -5797,8 +5824,11 @@ the sentence names it.
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the
     `q,r` when both are on). A nanowell without a value has no number written, never a 0. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
     from the run's cell table, so you can see where cells were found and where none were; the run does not
-    keep cell outlines, so the dot is the cell's centre, not its shape. On *Lattice* positions each dot keeps
-    its place inside its nanowell, and **Overlays** hides the dots with the other coloured layers. Datasets
+    keep cell outlines, so the dot is the cell's centre, not its shape. The dots are the cells the counts hold:
+    a cell Home's Cell Gating leaves out, or one in a field excluded in QC triage, by the field-quality flag or by
+    the FOVs chosen on Cell Gating, is not drawn, and the footer counts how many were left out for each. On
+    *Lattice* positions each dot keeps its place inside its nanowell, and **Overlays** hides the dots with the
+    other coloured layers. Datasets
     analysed before this setting existed show their cells too: nothing needs re-running. *Tiles* outlines each tile, coloured by how it was placed (green on the lattice, blue by
     overlap, amber where the acquisition record put it), with its registration residual; a tile whose size the
     record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
@@ -5853,7 +5883,8 @@ Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centr
 crop's own nanowell, on every crop — the strip, the pop-out and the Extremes montage (the run keeps no cell
 outlines). A crop is cut a little wider than its nanowell, so its edges show parts of the neighbours; their cells are
 not dotted, so every dot is a cell the selected nanowell's count is made of. It is one setting, also offered on the Extremes view, and kept with the page's
-settings. The caption counts the dots, and a well without a cell table is named there rather than shown as empty.
+settings. As on the Array view, a cell Cell Gating leaves out, or one in an excluded field, is not drawn. The caption
+counts the dots and those left out, and a well without a cell table is named there rather than shown as empty.
 The box beside **Cells** chooses what the crops are an image of: *Phase* (the image the run segmented), or any
 fluorescence channel the run read — EGFP, say — cut from that channel's image of the same tile, at the same place.
 It is one setting for every picture on the page: the strip, the pop-out, the Extremes montage and the Array view's
@@ -5884,7 +5915,10 @@ which wells are left out. It applies only to this page — the well stays in the
 the page's settings. **Excluded (n) ▾** on the band brings back one well or all of them.
 
 **Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the wells the page
-draws as one long CSV, with the baseline and where the times came from; with a Subset set, every
+draws as one long CSV, with the baseline and where the times came from. Its `n_cells` and brightness are the
+page's, so they leave out the cells Home's Cell Gating leaves out; beside them `n_cells_run` is the run's own
+count, `cells_left_out` how many cells the gating took from it, and `cell_gating` says what the gating left out
+(empty when nothing). With a Subset set, every
 row is still written, flagged in `in_subset` with the subset (`subset`) and its baseline (`subset_baseline`) beside it. Right after you change the baseline it waits:
 until the page has drawn the new baseline's numbers, saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
 drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
@@ -5905,7 +5939,8 @@ each well's array moved with the plate. Each timepoint gets one of:
 - **partial** — the timepoint registered cleanly and most of its nanowells land on themselves, but some do not:
   those whose address landed on a neighbour, and every nanowell of an imaging tile that was placed a whole nanowell
   spacing off in the montage. Only those nanowells are left out of comparisons over time; the rest of the timepoint
-  is used. The line plots hatch it (`\\`) and the Identity view's *Status* colouring shows which were left out;
+  is used. The line plots hatch it (`\\`), the Identity view's *Status* colouring shows which were left out, and
+  the analysis log names the timepoint and how many nanowells it leaves out;
 - **contradicted** — the registration itself, or every address at once, is wrong (all one step off, turned, a decoy
   taken for the square). Its values are still drawn — a count at that timepoint is a count of some nanowell — over a
   cross-hatched (xx) background, but as points joined to nothing: no fold change, growth rate or trajectory line
@@ -5919,7 +5954,8 @@ each well's array moved with the plate. Each timepoint gets one of:
   labelled *inconclusive* at its place on the time axis, and every line into or out of it is dashed. Look at them
   in the Identity view before relying on them;
 - **not checked** — the tables were analysed before this check existed, or changed after it ran (a Validate
-  relabel, a concatenation). The footer says so, and these timepoints are used as they are. When only some of a
+  relabel, a concatenation), or the check that ran on them was an earlier version whose rules have changed since
+  (run it again, below). The footer says so, and these timepoints are used as they are. When only some of a
   well's timepoints are unchecked (a timepoint added later), the line plots dot-hatch those (..).
 
 When two timepoints disagree and nothing tells which is right, both are **contradicted**; when the earliest
@@ -5966,7 +6002,8 @@ chooses what it draws:
 - **Distance map** — every nanowell at its place. *Colour* chooses how it is filled: **Status** sorts the
   nanowells into lands on itself (green), imprecise (amber), wrong name (red), in a misregistered tile (red,
   hatched) and not compared (grey), with a count of each in the legend, so the few that fail stand out among many
-  that pass; **Distance** fills each by how far its address landed from itself in nanowell spacings (the
+  that pass. In a timepoint contradicted as a whole every nanowell is left out of the figures, so none is green:
+  those that land on themselves are drawn red and cross-hatched as *Lands on itself, timepoint left out*; **Distance** fills each by how far its address landed from itself in nanowell spacings (the
   quarter-spacing limit is marked on the colour bar); **Auto** shows Status unless the timepoint is confirmed.
   Failing nanowells are outlined in red. An imaging tile a whole spacing off is drawn in red labelled with how far
   it moved; one placed slightly differently, in amber, with how far off it is.
@@ -6002,14 +6039,23 @@ Blink's labels are bold with a dark outline, green on the reference and amber on
 selected nanowell on Identity ▸ Blink, in its well and zoomed onto it.
 
 To check a dataset analysed earlier without analysing it again, run
-`python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well): it writes
+`python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well; the check of
+stage positions still compares that well with the whole plate): it writes
 `nanowells/<well>_identity.json` beside the tables, prints each well's verdicts, and Review picks them up the next
-time the dataset is opened. It exits 1 when any timepoint is contradicted and 2 when any is inconclusive. Add
+time the dataset is opened. It exits 1 when any timepoint is contradicted (by the images or by the stage
+positions), 2 when any is inconclusive, and 3 when any is partial (some of its nanowells left out); 0 means every
+timepoint is confirmed. The summary lists every timepoint that is not confirmed, partial ones included. Add
 `--numbers` to print, in place of the summary, one CSV row per well and timepoint with the measurements each verdict
 was decided from (how clearly the square was found, how far the addresses landed, how far the array's outline, the
 tiles and the stage disagreed) and a short code for why a timepoint is not confirmed — numbers only, no images or
 paths, so they can be shared to check the thresholds against real plates:
 `python -m pipeline.nanowell_identity <output folder> --numbers > identity_numbers.csv`.
+In the packaged app there is no `python` to run this with: run the app's own executable from a terminal with
+`--run-identity` as its first argument, followed by the same arguments — on a Mac,
+`<where the app is>/AllWell-<version>.app/Contents/MacOS/AllWell --run-identity <output folder>`. The Identity view's message for a
+well that has not been checked gives the exact line for the copy of All-Well you are running, ready to paste. A dataset
+made by Subset, Concatenate, Merge Plates or a Validate relabel always starts out not checked, since its tables are new;
+run the check on its output folder.
 
 ### Image Browser
 
@@ -6831,8 +6877,9 @@ the fraction responding above that metric's number (and the number itself),
 the fraction occupied, the nanowells used, and those excluded by reason. A metric
 drawn as Cell count because the channel has no site intensities carries no
 fraction responding, since its number was set for the other metric. A group's replicate sets are drawn as sets and its single wells on their
-own, as on the page. A well of the group with no nanowell table is named on the
-figure and gets its own row in the CSV; a group with none at all is skipped and
+own, as on the page. A well excluded on the Nanowells page with **Exclude** is still drawn when its group holds
+it: that exclusion is the page's own, so take the well out of the group to leave it out of the export. A well of
+the group with no nanowell table is named on the figure and gets its own row in the CSV; a group with none at all is skipped and
 the run says so. Saved Plots records made by this mode restore the Nanowells page
 to the figure's view and metric.
 
@@ -8460,7 +8507,16 @@ say — the raw log says so and the findings are unaffected.
    left alone. In one, two timepoints anchored equally well disagree, and
    nothing in the tables says which is right: set an anchor by hand on the
    central square at one of them, then re-run the well. In the other, no
-   small step explains the disagreement: re-run the well.
+   small step explains the disagreement: re-run the well. A relabelled well
+   can still hold such a timepoint; Validate names it, and the repair leaves
+   it flagged, so Review keeps warning about it and the next run of the well
+   still re-analyses it. Only a timepoint the original run itself flagged is
+   ever relabelled. A bubble or glare over one side of the array's rim leaves
+   the tables looking just as a step off would, so when a timepoint the run
+   found consistent has one side of its rim empty, Validate notes it (an
+   information line, "the rim of timepoint(s) … is empty on one side") and
+   changes nothing; look at that timepoint in the Array view, and re-run the
+   well if its addresses really are a nanowell off.
 3. If a well is genuinely missing FOV/timepoint work, **Complete this run in
    Analyze** opens the dataset there set up to finish it: the Analyze form is
    filled in from the dataset's own recorded settings (schema, separator,
@@ -8473,7 +8529,11 @@ say — the raw log says so and the findings are unaffected.
    incremental run would skip forever, so they are re-segmented in full.
    **Only these wells** is filled with the wells that need work — the partial
    ones and the forced ones — so the run touches nothing that is already
-   whole. Press Run and only the missing `(FOV, timepoint)` pairs are
+   whole. **Skip these wells** is emptied, and **Force these wells** holds only
+   the wells this handoff names, whatever was typed there before or recorded
+   by the dataset's earlier run; the same is true of every button that opens a
+   dataset in Analyze (Review's *Finish this run* and *Re-run wells*, the
+   import pages' *Open in Analyze*). Press Run and only the missing `(FOV, timepoint)` pairs are
    processed, merged into the existing per-well CSVs and `<WELL>_out.zip`
    archives; wells that are already complete are left untouched. Without that
    tick a plain re-run would skip every well that already has any output at

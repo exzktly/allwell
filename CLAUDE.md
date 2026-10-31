@@ -597,8 +597,12 @@ than one, or none at all. None is the failure that actually ships. Two PRs open
 at once each bump to the same next number; the first merges, the second's bump
 now matches `main`, the merge is clean, and the second PR lands with no
 increment of its own — six consecutive releases each name two
-PRs that way. So when `main` moves under an open PR, merge it in and re-bump
-before the push, not after the merge.
+PRs that way, and seven of the 34 PRs merged between 2026-10-28 and 2026-10-31.
+So when `main` moves under an open PR, merge it in and re-bump
+before the push, not after the merge. CI's `version` job
+(`scripts/version_bump_ci.sh`) makes the same check against the base as it stands
+when the job runs, so a PR whose sibling took its number first goes red — but only
+if its job runs after that merge; it cannot replace re-checking before you merge.
 
 Bumping means **one line** — `version.py::__version__`, which the title-bar pill
 and the PyInstaller spec read. The docs state no version at all; they write

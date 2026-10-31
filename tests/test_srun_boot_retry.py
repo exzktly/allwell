@@ -212,13 +212,19 @@ def test_a_refusal_after_the_boot_exclusions_are_dropped_still_ends_the_run(tmp_
 
 def test_max_queue_wait_bounds_boot_retries_that_each_fail_at_once(tmp_path):
     """The per-attempt watchdog looks once a second, so attempts that fail
-    instantly never meet it; the check before each attempt is what stops them."""
+    instantly never meet it; the check before each attempt is what stops them.
+
+    The wrapper reads elapsed time as a difference of ``date +%s`` whole seconds, so a reading can run up to one
+    second ahead of the real time. With a 2 s budget and a 1 s pause, an attempt starting at x.99 s and checked
+    after its pause at x+2.00 s read as 2 s elapsed after 1.01 s, and the second attempt was skipped (about one run
+    in ten, on main as well). A 3 s budget reads at most 2 after one pause, so the second attempt always runs, and
+    the bound still holds: no reading below 3 lasts past 4 s of real time, which is at most five attempts of 29."""
     bindir = _fake_cluster(tmp_path, [("boot_fail", f"n{i:02d}") for i in range(1, 30)], None)
-    out, args, _ = _run(tmp_path, bindir, "srun -p cpu", queue_wait_s=2, boot_retry_pause_s=1)
+    out, args, _ = _run(tmp_path, bindir, "srun -p cpu", queue_wait_s=3, boot_retry_pause_s=1)
 
     assert out.returncode == QUEUE_WAIT_EXIT, out.stdout + out.stderr
     assert 2 <= len(args) <= 5, len(args)
-    assert "ERROR no node was granted within 2 s, this host's Max queue wait (failed to boot: n01" in out.stdout
+    assert "ERROR no node was granted within 3 s, this host's Max queue wait (failed to boot: n01" in out.stdout
 
 
 def test_stop_between_two_attempts_ends_the_loop(tmp_path):
@@ -606,3 +612,49 @@ def test_a_refusal_the_fallback_then_gets_past_says_nothing_of_the_sort(tmp_path
     out, _args, _ = _run(tmp_path, bindir, "srun -p gpu --gres=gpu:1")
     assert out.returncode == 0, out.stdout
     assert NO_NODE_FITS not in out.stdout
+
+
+def _headline(stdout: str) -> tuple[bool, str | None]:
+    """What the run's evidence makes of the wrapper's whole output: ``(no_node_fits, termination headline)``."""
+    from services.run_evidence import RunEvidence
+
+    ev = RunEvidence()
+    for line in stdout.splitlines():
+        ev.note(line + "\n")
+    return ev.no_node_fits, ev.termination()
+
+
+def test_a_refusal_the_boot_retry_got_past_does_not_headline_a_later_queue_wait(tmp_path):
+    """Tracker M1. Every node failed to boot, Slurm then refused the request with all of them excluded (3c′), the
+    wrapper forgot them and asked again, and the job sat queued until Max queue wait. srun's refusal is in the
+    stream, but the wrapper got past it: the run ended on the queue wait, and its headline must not tell the user
+    to change a scheduler command that Slurm accepted."""
+    bindir = _fake_cluster(tmp_path, [("boot_fail", "n01"), ("boot_fail", "n02"), ("unavailable", ""),
+                                      ("pending", "")], None)
+    out, _args, _ = _run(tmp_path, bindir, "srun -p cpu", queue_wait_s=2)
+    assert out.returncode == QUEUE_WAIT_EXIT, out.stdout + out.stderr
+    assert "Requested node configuration is not available" in out.stdout
+    assert _headline(out.stdout) == (False, None)
+
+
+def test_a_refusal_of_the_powered_on_preference_does_not_headline_a_later_queue_wait(tmp_path):
+    """Tracker M1, branch 3a: the powered-on nodes cannot take the request, the wrapper drops the preference and
+    asks again, and that request queues until Max queue wait. Not a request no node can take."""
+    bindir = _fake_cluster(tmp_path, [("unavailable", ""), ("pending", "")], _SINFO)
+    out, _args, _ = _run(tmp_path, bindir, "srun -p gpu --gres=gpu:1", queue_wait_s=2)
+    assert out.returncode == QUEUE_WAIT_EXIT, out.stdout + out.stderr
+    assert "no powered-on node can take this request — letting Slurm boot one" in out.stdout
+    assert _headline(out.stdout) == (False, None)
+
+
+def test_a_refusal_no_retry_gets_past_still_headlines_the_run(tmp_path):
+    """The other half of M1: a refusal the wrapper reports as final (3d, after the boot exclusions were already
+    dropped once) is still the run's headline."""
+    bindir = _fake_cluster(tmp_path, [("boot_fail", "n01"), ("unavailable", ""), ("unavailable", "")], None)
+    out, _args, _ = _run(tmp_path, bindir, "srun -p gpu")
+    fits, said = _headline(out.stdout)
+    assert fits is True
+    assert said == ("Remote pipeline could not start: Slurm has no node that matches the scheduler command "
+                    "(Requested node configuration is not available). The log shows what the command asked "
+                    "for beside what the partition's nodes have; change the scheduler command in the Remotes "
+                    "dialog, or pick another profile, so that it fits one of them.\n")

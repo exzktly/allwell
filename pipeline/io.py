@@ -31,6 +31,7 @@ import os
 import shutil
 import time
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 from util.well_token import safe_well
@@ -139,15 +140,24 @@ def publish_scratch_args(scratch_dir: Path | None, fallback_dir: Path | None) ->
 
 
 _NODE_LOCAL_DECIDED = False
+#: The node-local folder this process chose (:func:`_node_local_scratch_once`), so the scratch preflight can tell it
+#: from a folder the run was given; ``None`` in a worker, which inherits the choice rather than making it.
+_NODE_LOCAL_FOLDER: Path | None = None
+
+#: Set by the process that decided a Slurm job's scratch stays off the node's own disk. The workers it spawns
+#: inherit the environment but not this module's state, so without it each would decide again, against a disk whose
+#: free space has changed since, and the run's scratch would be split between the parent's folder and theirs.
+NODE_SCRATCH_DECLINED_ENV = "ALLWELL_NODE_SCRATCH_DECLINED"
 
 
 def _node_local_scratch_once() -> Path | None:
-    """The node-local scratch for this Slurm job, decided and logged once per process; ``None`` when there is none.
+    """The node-local scratch for this Slurm job, decided and logged once per run; ``None`` when there is none.
 
     A folder found is written to ``$ALLWELL_SCRATCH_DIR``, which every later :func:`scratch_base_for` reads first
-    and every worker process inherits, so a run never splits its scratch across two disks."""
-    global _NODE_LOCAL_DECIDED
-    if _NODE_LOCAL_DECIDED:
+    and every worker process inherits; no folder is written to :data:`NODE_SCRATCH_DECLINED_ENV`, which the workers
+    inherit just the same. Either way a run never splits its scratch across two disks."""
+    global _NODE_LOCAL_DECIDED, _NODE_LOCAL_FOLDER
+    if _NODE_LOCAL_DECIDED or os.environ.get(NODE_SCRATCH_DECLINED_ENV, "").strip():
         return None
     _NODE_LOCAL_DECIDED = True
     from pipeline.node_disk import node_local_scratch
@@ -155,10 +165,12 @@ def _node_local_scratch_once() -> Path | None:
     folder, reason = node_local_scratch()
     if folder is not None:
         os.environ[SCRATCH_DIR_ENV] = str(folder)
+        _NODE_LOCAL_FOLDER = folder
         log.info("Scratch on %s — a Slurm job with no scratch folder set; set the host's scratch folder in "
                  "Remotes to choose another", reason)
         return folder
     if reason:
+        os.environ[NODE_SCRATCH_DECLINED_ENV] = "1"
         log.info("Scratch stays on the shared default: %s", reason)
     return None
 
@@ -173,7 +185,8 @@ def scratch_base_for(output_dir: Path) -> Path:
     2. Inside a Slurm job, the node's own disk (:func:`pipeline.node_disk.node_local_scratch`: ``/scratch``, where
        AWS ParallelCluster mounts the node's NVMe drive, then ``$SLURM_TMPDIR``). Chosen once per process and
        written to ``$ALLWELL_SCRATCH_DIR``, so every later call — and every worker the run starts — takes the same
-       folder even as the disk fills. On a cluster the next rule's home folder is a network filesystem shared by
+       folder even as the disk fills; a run that finds none writes :data:`NODE_SCRATCH_DECLINED_ENV`, so its workers
+       do not find one either when the disk frees up later. On a cluster the next rule's home folder is a network filesystem shared by
        every node; scratch traffic there stalled the app's run heartbeat (``services/remote_heartbeat.py``).
     3. ``$ALLWELL_SCRATCH_FALLBACK_DIR`` (``--scratch_fallback_dir``) — what the remote runner passes: the run's
        own output folder in the host's staging area, so a remote run without a node-local disk keeps the scratch
@@ -213,6 +226,12 @@ def scratch_base_for(output_dir: Path) -> Path:
     local = _node_local_scratch_once()
     if local is not None:
         return local
+    return _shared_scratch_base(output_dir)
+
+
+def _shared_scratch_base(output_dir: Path) -> Path:
+    """:func:`scratch_base_for`'s rules 3 to 5: where the scratch goes when no folder is set and no node-local disk
+    is taken."""
     fallback = os.environ.get(SCRATCH_FALLBACK_ENV, "").strip()
     if fallback:
         try:
@@ -235,6 +254,39 @@ def scratch_base_for(output_dir: Path) -> Path:
         "Default" if on_the_desktop() else "Home", default_scratch_label(), output_dir,
     )
     return output_dir
+
+
+def _node_local_alternative(output_dir: Path) -> tuple[Path, Callable[[], None]] | None:
+    """``(base, move)`` when this run's scratch is the node-local disk this process chose: where the scratch would
+    go without it, and a callable that moves it there for this process and every worker it starts. ``None`` when
+    the scratch is a folder the run was given, or anything else this process did not choose.
+
+    The node-local choice is made against a fixed floor at the first :func:`scratch_base_for`, before the run's own
+    estimate exists; the scratch preflight, which has the estimate and runs before any well writes to the scratch,
+    uses this to leave a disk too small for the run (``pipeline.capacity._leave_a_disk_too_small``)."""
+    chosen = _NODE_LOCAL_FOLDER
+    if chosen is None or os.environ.get(SCRATCH_DIR_ENV, "").strip() != str(chosen):
+        return None
+
+    def _move() -> None:
+        global _NODE_LOCAL_FOLDER
+        os.environ.pop(SCRATCH_DIR_ENV, None)
+        os.environ[NODE_SCRATCH_DECLINED_ENV] = "1"
+        _NODE_LOCAL_FOLDER = None
+
+    return _shared_scratch_base(output_dir), _move
+
+
+def preflight_run_scratch(output_dir: Path, input_dir: Path, **kwargs) -> None:
+    """:func:`pipeline.capacity.preflight_scratch_for_run` on this run's scratch base, told the two things only this
+    module knows: whether that base is a node-local disk this process chose and may give up
+    (:func:`_node_local_alternative`), and whether the run was sent from the app to a host — the one caller of
+    ``--scratch_fallback_dir`` (:data:`SCRATCH_FALLBACK_ENV`) is the remote runner — whose scratch is set in Remotes,
+    not in the Analyze tab."""
+    preflight_scratch_for_run(
+        scratch_base_for(output_dir), input_dir, output_dir=output_dir,
+        alternative=lambda: _node_local_alternative(output_dir),
+        sent_to_a_host=bool(os.environ.get(SCRATCH_FALLBACK_ENV, "").strip()), **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +413,14 @@ def _commit_staging_dir(tmp_images: Path, final_out: Path) -> None:
 #: silence is an abandoned run, never a slow one.
 FOREIGN_SCRATCH_IDLE_S = 24 * 3600
 
+#: How long another run's FOV checkpoints may sit untouched on a node-local disk this run chose for itself
+#: (:func:`_node_local_scratch_once`) before its sweep removes them. Elsewhere checkpoints are kept whoever owns
+#: them, for a resume. On a node's own disk that resume only ever happens on the same node — the next run may be
+#: placed on another, and the folder is gone with the node — while the disk is shared with other people's jobs,
+#: so a stopped well's staging (up to the whole well's intermediates) would otherwise stay there for as long as the
+#: node does. A week keeps a resume after a weekend; this plate's own checkpoints are never removed by age.
+NODE_CHECKPOINT_IDLE_S = 7 * 24 * 3600
+
 
 def _idle_seconds(path: Path, now: float) -> float:
     """Seconds since anything in *path* last changed: the newest mtime of the
@@ -378,7 +438,8 @@ def _idle_seconds(path: Path, now: float) -> float:
 
 
 def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool,
-                              own_stamp: str = "", now: float | None = None) -> None:
+                              own_stamp: str = "", now: float | None = None,
+                              checkpoint_idle_s: float | None = None) -> None:
     """Remove stale ``_tmp_*`` working folders under *root*.
 
     A folder named for this plate (``_tmp_extract_<own_stamp>_*`` /
@@ -391,7 +452,9 @@ def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool,
     staging mid-well. A ``_tmp_images_*`` folder holding ``.fov_*.done``
     checkpoint markers is kept whoever owns it, so a stopped well resumes from
     them (:func:`pipeline.fov_checkpoint.prune_superseded_staging` removes this
-    plate's own superseded ones). *extra_extract* also sweeps the zip-mode
+    plate's own superseded ones) — unless *checkpoint_idle_s* is given, when
+    another plate's checkpoint folder untouched for that long goes too
+    (:data:`NODE_CHECKPOINT_IDLE_S`). *extra_extract* also sweeps the zip-mode
     ``_tmp_extract_*`` folders.
     """
     now = time.time() if now is None else now
@@ -416,10 +479,17 @@ def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool,
             continue
         if any(_stale.glob(".fov_*.done")):
             n_done = sum(1 for _ in _stale.glob(".fov_*.done"))
-            log.info(
-                "Keeping checkpoint dir %s (%d FOV(s) already done)",
-                _stale.name, n_done,
-            )
+            own = bool(own_stamp) and _stale.name.startswith(f"_tmp_images_{own_stamp}_")
+            idle = None if own or checkpoint_idle_s is None else _idle_seconds(_stale, now)
+            if idle is None or idle < checkpoint_idle_s:
+                log.info(
+                    "Keeping checkpoint dir %s (%d FOV(s) already done)",
+                    _stale.name, n_done,
+                )
+                continue
+            log.warning("Removing another run's checkpoint dir %s (%d FOV(s) done), untouched for %d days on this "
+                        "node's own disk, which other jobs share", _stale.name, n_done, idle // 86400)
+            remove_directory(_stale)
             continue
         if not _removable(_stale, "images"):
             kept_live += 1
@@ -443,7 +513,9 @@ def _sweep_stale_scratch_dirs_all(output_dir: Path, *, extra_extract: bool,
     this plate's folders (:func:`_sweep_stale_scratch_dirs`).
     """
     base = scratch_base_for(output_dir)
-    _sweep_stale_scratch_dirs(base, extra_extract=extra_extract, own_stamp=own_stamp)
+    node_local = _NODE_LOCAL_FOLDER is not None and base == _NODE_LOCAL_FOLDER
+    _sweep_stale_scratch_dirs(base, extra_extract=extra_extract, own_stamp=own_stamp,
+                              checkpoint_idle_s=NODE_CHECKPOINT_IDLE_S if node_local else None)
     if base.resolve() != output_dir.resolve():
         _sweep_stale_scratch_dirs(output_dir, extra_extract=extra_extract,
                                   own_stamp=own_stamp)

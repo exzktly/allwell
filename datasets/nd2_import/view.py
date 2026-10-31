@@ -771,6 +771,8 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         try:
             plan = plan_conversion(layout, self.params())
         except Nd2ImportError as exc:
+            if exc.source_timepoint_tokens:          # a ticked timepoint the source lacks is then marked missing
+                self._timepoint_pick.set_source_tokens(exc.source_timepoint_tokens)
             self._set_verdict(str(exc), "error")
             self._dashboard.set_wells([])
             self._update_run_gate(False)

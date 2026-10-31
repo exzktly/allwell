@@ -20,8 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from analyze.domain.nanowell_fields import (
-    CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, PREFILLED, GEOMETRY_CHOICES, LEGACY_CELLPOSE_MODEL, PLATE_FORMAT_CHOICES,
-    LEGACY_SEGMENT_ON, LEGACY_SEGMENT_SCOPE, REGISTRATION_FROM_KEY, RESIZE_CHOICES, SEGMENT_ON_CHOICES,
+    CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, PLACEHOLDERS, PREFILLED, GEOMETRY_CHOICES, LEGACY_CELLPOSE_MODEL,
+    PLATE_FORMAT_CHOICES, LEGACY_SEGMENT_ON, LEGACY_SEGMENT_SCOPE, REGISTRATION_FROM_KEY, RESIZE_CHOICES, SEGMENT_ON_CHOICES,
     SEGMENT_SCOPE_CHOICES, SCAN_CHOICES,
     nanowell_enabled, nanowell_option_errors,
 )
@@ -356,7 +356,7 @@ class AnalyzeNanowellSectionMixin:
     def _nanowell_edit_row(self, sec, key, label, attr, tip):
         r = self._row(sec, label, tooltip=tip)
         edit = self._entry(r, PREFILLED.get(key, ""), width=70)
-        edit.setPlaceholderText(DEFAULTS[key] or "default")
+        edit.setPlaceholderText(PLACEHOLDERS.get(key) or DEFAULTS[key] or "default")
         setattr(self, attr, edit)
         r.layout().addStretch(1)
         return r.parentWidget()

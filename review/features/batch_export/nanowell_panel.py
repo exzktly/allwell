@@ -439,7 +439,9 @@ class NanowellBatchExportPanel(BatchExportPanel):
 
     def _figure_groups(self, grp: BarGroup, have: set) -> dict:
         """``group -> wells`` for the figure: the export group's replicate sets and solo wells, as the page draws
-        a selection, kept to the wells with a nanowell table."""
+        a selection, kept to the wells with a nanowell table. The page's *Exclude* list is not applied: it is the
+        page's own choice of wells and leaves the well in the rest of Review (the manual says so), and a batch group
+        is the wells the user put in it (tracker L16, declined)."""
         out = {}
         for rset in grp.members:
             members = [w for w in rset.wells if w in have]

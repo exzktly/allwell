@@ -379,3 +379,39 @@ def test_the_crop_strip_draws_only_the_cells_the_counts_hold(qtbot, tmp_path, mo
     assert dots == [[[8.0, 9.0]]], dots                                  # the 10 px object's dot is gone
     assert caption[0].endswith("; dots: the 1 cells the run counted in view; 1 more Cell Gating leaves out, not "
                                "drawn"), caption
+
+
+def test_save_nanowell_data_records_the_gate_beside_the_gated_counts(qtbot, tmp_path, monkeypatch):
+    """Tracker M10: *Save nanowell data…* writes the page's gated count under the pipeline's own ``n_cells`` name, so
+    the file must say so — the run's own count beside it, how many cells the gate left out of each nanowell, and the
+    figure's sentence about the gate on every row, as Batch Export's summary carries it. Through the real Save menu
+    action, with the real QC size gate dropping (0,0)'s 10 px object at t_c."""
+    from dataclasses import replace
+    from pathlib import Path
+
+    from PySide6.QtGui import QAction
+
+    import review.core.csv_export as csv_export
+    from review.features.qc.controller import get_qc_params, recompute_qc_all
+    from tests.test_nanowell_page import _loaded, _page
+
+    ctx = _page(qtbot, _dataset_with_areas(tmp_path))
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    ctx.state.qc.params = replace(get_qc_params(ctx), enabled=True, min_area=30.0)
+    recompute_qc_all(ctx)
+    _reloaded(qtbot, ctx, st)
+    out = str(Path(ctx.state.dataset.data_dir) / "nanowell_metrics.csv")
+    monkeypatch.setattr(csv_export, "ask_save_csv", lambda *_a, **_k: out)
+    (action,) = [a for a in ctx.window.findChildren(QAction) if a.text() == "Save nanowell data…"]
+    action.trigger()
+    written = pd.read_csv(out, dtype={"timepoint": str})
+    assert {"n_cells_run", "cells_left_out", "cell_gating"} <= set(written.columns), list(written.columns)
+    by = {(r.timepoint, int(r.nw_q)): r for r in written.itertuples()}
+    assert (by["t_c", 0].n_cells, by["t_c", 0].n_cells_run, by["t_c", 0].cells_left_out) == (1.0, 2.0, 1)
+    assert (by["t_c", 1].n_cells, by["t_c", 1].n_cells_run, by["t_c", 1].cells_left_out) == (1.0, 1.0, 0)
+    assert (by["t_a", 0].n_cells, by["t_a", 0].n_cells_run, by["t_a", 0].cells_left_out) == (2.0, 2.0, 0)
+    assert set(written["cell_gating"]) == {
+        "Cell Gating leaves out 1 of 7 cells in these wells' nanowells: counts and brightness exclude them; "
+        "confluence and nanowell fluorescence are measured from pixels and do not."}
+    assert list(written.columns).index("n_cells_run") == list(written.columns).index("n_cells") + 1

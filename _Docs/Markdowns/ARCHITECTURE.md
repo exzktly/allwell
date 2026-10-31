@@ -11551,7 +11551,11 @@ in a `responding_above` column. When a ticked metric is drawn as another (a chan
 cut is not applied to the substitute, whose rows then carry no fraction.
 
 **Export** (`controller.export_long_csv`) writes `series_compute.long_format` plus the time source and the
-baseline, one row per nanowell and timepoint, through a temporary file.
+baseline, one row per nanowell and timepoint, through a temporary file. Its `n_cells` and `brightness_<ch>` are the
+page's, after Cell Gating, so the file records the gate beside them: `n_cells_run` (the run's own count),
+`cells_left_out` (`cell_gate_compute.left_out_counts`: what the gate took from that count, empty where there is no
+count) and `cell_gating` (`cell_gate_compute.note`, the figure's sentence, as Batch Export's summary `note` carries
+it).
 
 **Persistence** (`review/persistence/nanowell.py`). The page's choices (`state.NanowellState.to_config`) are
 the `nanowell` section of `persistence.json`; a dataset without one lands on the defaults, and

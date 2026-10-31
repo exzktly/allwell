@@ -267,6 +267,19 @@ def apply(frame: pd.DataFrame, gate: GateTally | None, channels) -> None:
             frame.loc[hit, column] = values[hit]
 
 
+def left_out_counts(frame: pd.DataFrame, gate: GateTally | None) -> pd.Series:
+    """How many cells *gate* took out of each row's count of *frame* (the site metrics, aligned to its index): 0 where
+    it took none, and NaN for a row with no count, from which nothing was taken (an occluded nanowell, one of an
+    excluded field). *Save nanowell data…* writes it beside the gated ``n_cells``."""
+    taken = pd.Series(0.0, index=frame.index)
+    if gate is not None and len(gate.sites) and len(frame):
+        merged = _keyed(frame).merge(gate.sites[[*SITE_KEY, "excluded"]], on=SITE_KEY, how="left")
+        taken = pd.Series(merged["excluded"].fillna(0).to_numpy(dtype=float), index=frame.index)
+    counted = pd.to_numeric(frame["n"], errors="coerce") if "n" in frame.columns else pd.Series(np.nan,
+                                                                                                index=frame.index)
+    return taken.where(counted.notna())
+
+
 def note(gate: GateTally | None) -> str:
     """The figure's sentence about the gate: ``""`` when it left nothing out."""
     if gate is None or not (gate.excluded or gate.fields):

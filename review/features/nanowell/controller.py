@@ -109,6 +109,11 @@ def export_long_csv(state, path, wells=None) -> int:
     *wells*, only theirs: the page reads only the wells it draws, so what else is loaded is whichever wells
     happened to be selected before.
 
+    ``n_cells`` and ``brightness_<channel>`` are the page's, after Home's Cell Gating (``cell_gate_compute``), so the
+    file records the gate beside them: ``n_cells_run`` is the run's own count, ``cells_left_out`` how many cells the
+    gate took out of it, and ``cell_gating`` the figure's sentence about the gate (``""`` when it left nothing out),
+    as Batch Export's summary carries it in its ``note``.
+
     Written to a temporary name and moved into place, so a failed write never leaves half a table under the
     name a person will open.
     """
@@ -116,6 +121,12 @@ def export_long_csv(state, path, wells=None) -> int:
         raise ValueError("There are no nanowell tables loaded to export.")
     metrics = state.metrics if wells is None else state.metrics[state.metrics["well"].isin(list(wells))]
     table = long_format(metrics, state.data.channels)
+    gate = getattr(state, "gate", None)
+    at = table.columns.get_loc("n_cells") + 1
+    run = metrics["n_cells"] if "n_cells" in metrics.columns else pd.Series(np.nan, index=metrics.index)
+    table.insert(at, "n_cells_run", pd.to_numeric(run, errors="coerce").to_numpy())
+    table.insert(at + 1, "cells_left_out", cg.left_out_counts(metrics, gate).astype("Int64").to_numpy())
+    table["cell_gating"] = cg.note(gate)
     table.insert(table.columns.get_loc("time_h") + 1, "time_source", state.data.time_source or "")
     table.insert(table.columns.get_loc("baseline_timepoint"), "baseline", state.baseline)
     # Every row is kept, and flagged: a file filtered to the page's Subset would lose rows a reader may want back,

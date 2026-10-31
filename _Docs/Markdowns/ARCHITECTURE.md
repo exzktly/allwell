@@ -10648,12 +10648,15 @@ C10). `count_cells` keeps a label only when its centroid lies in the interior of
 a site the tile **owns** (`owned_indices(report.owners, tile)` from the `ownership_report` of
 6.2f). A fused site is given an owner first, by `nanowell_run._with_seam_tiles` and
 `pipeline/nanowell_seams.py`: an edge site the tile that holds it whole (nearest centre, ties to the lexically first
-id); a blend site a **seam tile**. The blend sites are binned into squares of `BIN_PITCHES` (6) lattice pitches, and
-each bin becomes one image blended from every registered tile that covers it (`tile_register.fused_crop`, weighted by
-distance from each tile's edge, pixels no tile covers set to the crop's median), reaching the template's suppression
-radius plus half a pitch past its outermost site so the rim template and the levelling see a surround. Binning rather
-than one crop per site keeps a seam's sites together on one tile, because a site's contrast is the median over its
-same-tile neighbours. A seam tile is added to the timepoint's positions and images under a `seam:<n>` id and measured
+id); a blend site a **seam tile**. The blend sites are binned so that each bin's sites, with their radius and a
+surround of the template's suppression radius plus half a pitch, fit inside one tile's extent; each bin becomes one
+image **the size of a real tile** (the median tile's, in the same number of pixels), centred on the bin's sites and
+blended from every registered tile that covers it (`tile_register.fused_crop`, weighted by distance from each tile's
+edge, pixels no tile covers set to the image's median). The size is what keeps tracker L3 true for seam tiles: the
+segmenter is only ever given whole tiles, because Cellpose scales each image by its own percentiles and a crop of a
+few nanowells is not segmented as a tile of a hundred is (`test_nanowell_preview.py::
+test_the_crops_are_cut_from_the_tile_segmented_whole_as_the_run_segments_it`). Binning also keeps a seam's sites
+together on one tile, because a site's contrast is the median over its same-tile neighbours. A seam tile is added to the timepoint's positions and images under a `seam:<n>` id and measured
 by `_tile_contents` exactly as a tile is; its fluorescence channels are blended on the same pixels on demand
 (`SeamTiles.channels`), and a bin one of whose covering tiles has no image is left unowned (its sites keep an
 undefined count). Seam tiles are left out of the pooled template, which is built from the real tiles' sites alone.

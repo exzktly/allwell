@@ -44,7 +44,8 @@ def test_a_seam_site_gets_a_blended_tile_and_names_the_tile_covering_most_of_it(
     assert ns.is_seam_tile(tile) and seams.owners == (tile,) and seams.reported == {0: "R"}
     image, (left, top) = seams.images[tile], seams.positions[tile]
     assert np.isfinite(image).all()
-    assert image.shape[0] >= DIAMETER + 2 * 4.0
+    # The size of a real tile: the segmenter is only ever given whole tiles (tracker L3).
+    assert image.shape == _images()["L"].shape
     # Pure L left of the seam band, pure R right of it, a blend between: sampled at the site's row.
     row = image[int(30.0 - top)]
     x = left + (np.arange(len(row)) + 0.5) * PX
@@ -53,10 +54,17 @@ def test_a_seam_site_gets_a_blended_tile_and_names_the_tile_covering_most_of_it(
     assert between.size and (between > 1.0).all() and (between < 3.0).all()
 
 
-def test_seam_sites_near_one_another_share_one_seam_tile():
-    centres = np.array([[55.0, 15.0], [55.0, 35.0], [55.0, 300.0]])
+def test_seam_sites_that_fit_one_tile_share_a_seam_tile_and_others_do_not():
+    # A bin is a tile's extent less each site's disk and surround: 60 - 2 * (10 + 4) = 32 µm.
+    centres = np.array([[55.0, 10.0], [55.0, 25.0], [55.0, 45.0]])
     seams = ns.seam_tiles(_report([None] * 3, blend=[0, 1, 2]), centres, RECTS, _images(), DIAMETER, 30.0, 4.0, PX)
-    assert seams.owners[0] == seams.owners[1] != seams.owners[2]
+    assert seams.owners[0] == seams.owners[1] != seams.owners[2] and all(map(ns.is_seam_tile, seams.owners))
+    for i, owner in enumerate(seams.owners):           # every site lies inside its seam tile with its disk
+        left, top = seams.positions[owner]
+        h, w = seams.images[owner].shape
+        x, y = centres[i]
+        assert left <= x - DIAMETER / 2 and x + DIAMETER / 2 <= left + w * PX
+        assert top <= y - DIAMETER / 2 and y + DIAMETER / 2 <= top + h * PX
 
 
 def test_a_seam_tile_s_channel_is_blended_on_the_same_pixels_and_an_ordinary_tile_passes_through():

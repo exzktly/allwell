@@ -12092,7 +12092,12 @@ combo reads each well's worst verdict, and the timepoint shown by default is the
 inconclusive or unchecked, then first non-reference timepoint. Montages are read on a worker through the page's
 `_fetch` store. A `_fetch` read lets go of its worker bridge as soon as it delivers, and redraws nothing when the
 page's canvas no longer exists as a Qt object (`_page_alive`) — a read can outlive the window that asked for it, and
-redrawing then reached into deleted widgets. The sidecar is read once per well until the dataset reloads, so an audit run while the page is open
+redrawing then reached into deleted widgets. Every other worker result the page receives — a recompute, a tile read,
+the QC layer's update — goes through the controller's `_call` (the one way it reaches a view callback such as
+`_nw_refresh_controls`) and `redraw` / `redraw_detail`, which all do nothing once the page has been built and deleted
+(`_page_deleted`); the result itself still lands in the page's state. A recompute that finished after its window
+closed otherwise raised `Internal C++ object … already deleted` from `tab_view.refresh_controls`
+(`tests/test_nanowell_page.py::test_a_recompute_that_finishes_after_the_page_is_deleted_touches_no_widget`). The sidecar is read once per well until the dataset reloads, so an audit run while the page is open
 shows after the next load. Batch Export does not offer it (the reason is written beside its `VIEWS`: no metric, one
 figure per well and timepoint, two modes that exist only as interaction). Pinned by
 `tests/test_nanowell_identity_view.py`, including one test through the real page builder.

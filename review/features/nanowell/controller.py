@@ -289,9 +289,23 @@ def _page_alive(ctx) -> bool:
     return canvas is not None and shiboken6.isValid(canvas)
 
 
+def _page_deleted(ctx) -> bool:
+    """Whether the page was built and has since been deleted (the window closed, or a test's widgets reaped).
+
+    A worker's result — a recompute, a tile read, the QC layer's update — can arrive after that, and refreshing the
+    band or redrawing then reaches into deleted Qt widgets and raises. Unlike :func:`_page_alive` this is ``False``
+    for a page that was never built (no canvas registered), so a caller with no page still runs the rest of its work.
+    """
+    import shiboken6
+
+    canvas = ctx.widgets.get_or_none("_nw_canvas")
+    return canvas is not None and not shiboken6.isValid(canvas)
+
+
 def _call(ctx, name: str) -> None:
+    """Call the page's view callback *name*, if the page registered one and still exists."""
     fn = ctx.widgets.get_or_none(name)
-    if callable(fn):
+    if callable(fn) and not _page_deleted(ctx):
         fn()
 
 
@@ -458,7 +472,7 @@ def redraw(ctx) -> None:
     """Draw the current view from the computed metrics; never computes."""
     st = _state(ctx)
     fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")
-    if st is None or fig is None or canvas is None:
+    if st is None or fig is None or canvas is None or _page_deleted(ctx):
         return
     sync_focus_rule(ctx, st)
     stale_gate = st.loaded_for is not None and st.gated_for != gate_version(ctx)
@@ -1567,7 +1581,7 @@ def redraw_detail(ctx) -> None:
     st = _state(ctx)
     fig, canvas = ctx.widgets.get_or_none("_nw_detail_fig"), ctx.widgets.get_or_none("_nw_detail_canvas")
     show = ctx.widgets.get_or_none("_nw_show_detail")
-    if st is None or fig is None or canvas is None:
+    if st is None or fig is None or canvas is None or _page_deleted(ctx):
         return
     series = []
     if st.metrics is not None:

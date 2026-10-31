@@ -74,9 +74,10 @@ SIDECAR_SUFFIX = "_identity.json"
 #: The sidecar's format and the rules its verdicts were decided by; :func:`read_sidecar` treats another as not
 #: checked. Raised whenever a change can alter a verdict, reason or exclusion a sidecar records, or the old rules'
 #: sidecars are read as the new rules' verdict on unchanged tables (review tracker M4). 2: the rules of the identity
-#: tracker's U5/U6 rows and the review's M3, M6, L17 and L18 fixes. ``tests/test_nanowell_identity_rules.py`` pins
+#: tracker's U5/U6 rows and the review's M3, M6, L17 and L18 fixes. 3: a timepoint anchored by hand counts as having
+#: its central square, so it can be the reference. ``tests/test_nanowell_identity_rules.py`` pins
 #: a digest of the rules to this number.
-IDENTITY_VERSION = 2
+IDENTITY_VERSION = 3
 
 CONFIRMED = "confirmed"
 CONTRADICTED = "contradicted"
@@ -245,7 +246,15 @@ def square_accepted(block: dict) -> tuple[tuple[float, float] | None, str]:
 
     Accepted means the run's own rule (``nanowell_lattice.fiducial_accepted``): the best squareness leads the
     runner-up by the block's ``margin`` and is at least ``ratio`` times it. A timepoint anchored on the square
-    (``origin_method == "fiducial"``) is accepted whatever the numbers say, since the run used it."""
+    (``origin_method == "fiducial"``) is accepted whatever the numbers say, since the run used it. So is one
+    anchored by hand (``origin_method == "manual"``): the person put the anchor on the central square and the run
+    addressed the timepoint from it, so the anchor is the square, wherever the automatic search's scores fell — the
+    search usually failed on such a timepoint, which is why the anchor was set. The position is the anchor as set;
+    :func:`timepoints_of` moves it onto the site the run snapped it to."""
+    if isinstance(block, dict) and block.get("origin_method") == "manual":
+        anchor = _pair(block.get("manual_anchor_um"))
+        if anchor is not None:
+            return anchor, ""
     fid = block.get("fiducial") if isinstance(block, dict) else None
     if not isinstance(fid, dict) or not fid.get("position_um"):
         return None, (fid or {}).get("reason") or "the run found no central square"
@@ -302,6 +311,11 @@ def timepoints_of(grid: dict, site_rows, montages: dict) -> dict[str, Timepoint]
         except (KeyError, TypeError, ValueError):
             continue
         t.owners[a] = str(row.get("owner") or "")
+    for name, t in out.items():
+        # A hand anchor is snapped to the nearest nanowell and that nanowell named (0, 0) (nanowell_lattice's
+        # resolve_origin), so the square is that site's centre, not the click a fraction of a pitch off it.
+        if (grid["timepoints"][name] or {}).get("origin_method") == "manual" and (0, 0) in t.sites:
+            t.square_um = t.sites[(0, 0)]
     return out
 
 

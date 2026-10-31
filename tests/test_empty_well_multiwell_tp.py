@@ -5,10 +5,13 @@ estimate and (b) build a field PER TIMEPOINT, since background drifts over a
 timecourse. A timepoint the blank wells lack falls back to the global pooled
 median. Single-well / single-timepoint datasets stay byte-compatible.
 
-Pipeline-side only (synthetic loose TIFFs); needs the pipeline's own deps.
+Pipeline-side only (synthetic per-well zips — the pipeline's one input layout);
+needs the pipeline's own deps.
 """
 from __future__ import annotations
 
+import io
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -34,16 +37,19 @@ SCHEMA = ["experiment", "channel", "well", "fov", "timepoint"]
 SEP = "_"
 
 
-def _write(path: Path, level: float, *, size=32):
-    tifffile.imwrite(str(path), np.full((size, size), level, np.float32))
+def _write(archive: Path, name: str, level: float, *, size=32):
+    buf = io.BytesIO()
+    tifffile.imwrite(buf, np.full((size, size), level, np.float32))
+    with zipfile.ZipFile(archive, "a") as zf:
+        zf.writestr(name, buf.getvalue())
 
 
 def _make_plate(tmp_path: Path, *, wells, fovs, tps_levels):
-    """Loose TIFFs ``exp_GFP_<well>_<fov>_<tp>.tif`` at the per-(well,tp) level."""
+    """``<well>.zip`` archives of ``exp_GFP_<well>_<fov>_<tp>.tif`` at the per-(well,tp) level."""
     for well in wells:
         for fov in fovs:
             for tp, level in tps_levels.items():
-                _write(tmp_path / f"exp_GFP_{well}_{fov}_{tp}.tif", level)
+                _write(tmp_path / f"{well}.zip", f"exp_GFP_{well}_{fov}_{tp}.tif", level)
 
 
 # ── CSV / tp-key helpers ─────────────────────────────────────────────────────

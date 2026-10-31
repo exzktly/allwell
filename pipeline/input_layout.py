@@ -1,29 +1,30 @@
-"""Which of the three input layouts a plate is in, and what that costs.
+"""The pipeline's one input layout — per-well ``<WELL>.zip`` archives — and the
+refusal of every other.
 
-A run's input directory arrives in one of three shapes — per-well ``<WELL>.zip``
-archives, per-well ``<WELL>/`` folders, or loose images at the top level. These
-three functions decide which, and they moved out of ``process_microscopy``
-together because they are one cluster with one subject, and because that module
-carries a line budget whose point is that a cohesive cluster leaves rather than
-the file growing again.
+A run reads one archive per well, named by its plate position (``A01.zip``).
+Loose images and per-well folders are not input: **Datasets → Zip loose folder**
+converts them, and both the Analyze pane and remote staging refuse them before
+the pipeline starts. This module is the pipeline's own copy of that refusal, for
+the CLI and for any caller that reaches the pipeline without either.
 
-The rule they share, and the reason they belong together: **the layouts are not
-exclusive, and whatever picks one has to say what it is doing with the others.**
-A plate can hold zips and folders at once — a resumed run leaves the folder
-beside the archive it produced — and it can hold loose images that
-``process_microscopy.organize_loose_tifs_into_well_folders`` has just moved into
-folders. Folder mode is used only when there are no zips at all, so on a mixed
-plate the folders are ignored. That is right for the redundant twin and it is
-data loss for images the user has just added, and
-:func:`refuse_images_only_in_ignored_folders` is what separates the two.
+The rule the refusal holds: **a file the run would silently skip stops the run.**
+Ignoring a layout is not the same as not supporting it — a loose image beside
+the archives, or a folder for a well that has no archive, would be left out of
+the results while the run reported success, and the output would be
+indistinguishable from a whole plate's. So each is named, by file and by well,
+with the remedy.
 
-Every file question here goes through ``util.image_exts.is_run_input_member``
-rather than a suffix test of its own: a plate carries AppleDouble sidecars,
+A per-well folder *beside its own well's archive* is the one non-zip entry that
+does not stop the run. Earlier versions left such folders behind on purpose
+(their archiver keeps a ``.jpg``, a zero-byte frame or scratch it declined to
+pack), and refusing them would refuse every plate those versions produced. The
+archive is what the run reads; a folder image the archive does not carry is
+logged as not analysed.
+
+Every file question goes through ``util.image_exts.is_run_input_member`` rather
+than a suffix test of its own: a plate carries AppleDouble sidecars,
 ``__MACOSX/`` members and dotfiles that have an image suffix and are not the
-user's data, and these functions count and refuse on the answer.
-
-``organize_loose_tifs_into_well_folders`` stays in ``process_microscopy``: it
-needs ``parse_filename``, and importing that here would close a cycle.
+user's data.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from __future__ import annotations
 import logging
 import zipfile
 from pathlib import Path
+from typing import NamedTuple
 
 from util.aw_safe import swallow
 from util.dir_scan import files_in, subdirs_in
@@ -40,10 +42,21 @@ from util.well_token import canonical_well_label as _canonical_well_label, is_we
 log = logging.getLogger(__name__)
 
 __all__ = [
-    "find_well_folders",
+    "ZIP_LOOSE_FOLDER_REMEDY",
+    "NonZipInput",
     "find_well_zips",
-    "refuse_images_only_in_ignored_folders",
+    "non_zip_input",
+    "refuse_non_zip_input",
 ]
+
+#: The remedy every refusal of non-zip input names. One sentence, shared by the
+#: pipeline, the Analyze pane and remote staging, so the three cannot send the
+#: user to different places.
+ZIP_LOOSE_FOLDER_REMEDY = (
+    "Analysis reads one <WELL>.zip archive per well. Convert loose images and "
+    "per-well folders first with Datasets → Zip loose folder, then run on the "
+    "folder it produces."
+)
 
 
 def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
@@ -59,7 +72,7 @@ def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
 
     # An archive is a file: a *directory* named ``A01.zip`` matched the glob this
     # replaced, and was then handed on as a well whose every image group failed
-    # to open. The Analyze planner's ``has_well_zip`` already says such a thing is
+    # to open. The Analyze planner already says such a thing is
     # not a well archive, and the two have to agree — the planner is what decides
     # whether a run may start at all. One enumeration, no stat per entry.
     for p in files_in(input_dir):
@@ -87,18 +100,10 @@ def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
     return found
 
 
-def find_well_folders(input_dir: Path) -> list[tuple[str, Path]]:
-    """
-    Scan *input_dir* (non-recursively) for subdirectories whose name matches
-    a 96-well plate position (e.g. A01/, B12/).
-
-    Returns a list of (well_label, folder_path) sorted by well_label.
-    """
+def _well_folders(input_dir: Path) -> list[tuple[str, Path]]:
+    """The well-named subdirectories of *input_dir*, as ``(well, path)``."""
     found: list[tuple[str, Path]] = []
     try:
-        # From the listing's entry type. Asked per entry, this cost one stat per
-        # *loose image* on a FLAT plate — the layout it is called for — which on
-        # Windows is a file handle opened and closed over the wire apiece.
         entries = subdirs_in(input_dir)
     except OSError:
         return found
@@ -108,97 +113,119 @@ def find_well_folders(input_dir: Path) -> list[tuple[str, Path]]:
         well = _canonical_well_label(p.name)
         if well is not None:
             found.append((well, p))
-    log.info("Found %d well folder(s) in %s", len(found), input_dir)
     return sorted(found, key=lambda x: x[0])
 
 
-def refuse_images_only_in_ignored_folders(input_dir: Path, well_zips) -> None:
-    """Stop rather than silently analyse a fraction of the plate.
+def _images_in(folder: Path) -> list[str]:
+    """The run-input image names directly inside *folder*, sorted."""
+    try:
+        return sorted(p.name for p in files_in(folder) if is_run_input_member(p.name))
+    except OSError:
+        return []
 
-    `well_folders` is read only when there are no zips at all, so a plate that
-    holds both processes the zips and ignores every folder. That is quiet in
-    the ordinary resumed case — the folder is the redundant twin of a finished
-    archive — and it is data loss in the case just above it:
-    `organize_loose_tifs_into_well_folders` has already *moved* the user's
-    loose images into `in/<WELL>/`, and if any zip exists those images are now
-    somewhere the run will never look. The run then reports success having
-    analysed everything except what the user just added.
 
-    Refused only when a folder holds an input image the sibling archive does
-    not already carry, so a resumed plate whose folders are genuinely redundant
-    still runs. Named by well and by file, because the remedy — fold them in,
-    or move the archives aside — depends on which files they are.
+def _note_folder_beside_archive(well: str, folder: Path, archive: Path, images: list[str]) -> None:
+    """Log the images in *folder* that *archive* — what the run reads — lacks."""
+    held: set[str] = set()
+    readable = False
+    with swallow(f"reading {archive.name} to compare with {folder.name}"):
+        with zipfile.ZipFile(archive) as zf:
+            # Case-folded: on a case-insensitive volume the archive can hold
+            # `IMG.TIF` where the folder holds `img.tif`, and they are the same file.
+            held = {Path(n).name.lower() for n in zf.namelist()}
+        readable = True
+    if not readable:
+        # An unreadable archive is a corrupt archive, not a stranded folder;
+        # the well's own task reports it when it fails to open.
+        log.warning("Input warning: %s could not be read, so %s's folder could "
+                    "not be compared against it.", archive.name, well)
+        return
+    missing = [n for n in images if n.lower() not in held]
+    if missing:
+        log.warning(
+            "Input note: %s holds %d file(s) its archive does not carry (%s). "
+            "They stay on disk and are not analysed; %s.zip is what this run reads.",
+            folder.name, len(missing), ", ".join(missing[:4]), well)
+
+
+def _names(items: list[str]) -> str:
+    return ", ".join(items[:4]) + ("…" if len(items) > 4 else "")
+
+
+class NonZipInput(NamedTuple):
+    """What a folder holds that a zips-only run would not read.
+
+    *loose* is the input images directly inside it; *stranded* is its
+    well-named folders that hold images and have no ``<WELL>.zip`` beside them,
+    each as ``(folder_name, image_count)``; *twins* is the well-named folders
+    that sit beside their own well's archive, as ``(well, folder, archive)``.
     """
-    zip_by_well = {str(w): Path(p) for w, p in dict(well_zips or {}).items()} \
-        if isinstance(well_zips, dict) else {str(w): Path(p) for w, p in well_zips}
-    stranded: dict[str, list[str]] = {}
-    for well, folder in find_well_folders(input_dir):
-        images = sorted(
-            q.name for q in folder.iterdir()
-            if q.is_file() and is_run_input_member(q.name)
-        )
+
+    loose: list[str]
+    stranded: list[tuple[str, int]]
+    twins: list[tuple[str, Path, Path]]
+
+    @property
+    def refused(self) -> bool:
+        return bool(self.loose or self.stranded)
+
+    def problems(self) -> list[str]:
+        """One line per refused kind, naming the files."""
+        out = []
+        if self.loose:
+            out.append(f"{len(self.loose)} loose image(s) at the top level: {_names(self.loose)}")
+        if self.stranded:
+            folders = [f"{name}/ ({n} image(s))" for name, n in self.stranded]
+            out.append(f"{len(self.stranded)} well folder(s) with no <WELL>.zip: {_names(folders)}")
+        return out
+
+
+def non_zip_input(input_dir: Path, well_zips) -> NonZipInput:
+    """Classify what *input_dir* holds besides its well archives.
+
+    Pure: reads the folder, changes nothing. The pipeline refuses on the answer
+    (:func:`refuse_non_zip_input`) and the Analyze pane's planner shows the same
+    answer under the input field before Run, so the two cannot disagree about
+    which plate is runnable.
+    """
+    zip_by_well = {str(w): Path(p) for w, p in well_zips}
+    try:
+        loose = sorted(p.name for p in files_in(input_dir) if is_run_input_member(p.name))
+    except OSError:
+        loose = []
+    stranded: list[tuple[str, int]] = []
+    twins: list[tuple[str, Path, Path]] = []
+    for well, folder in _well_folders(input_dir):
+        images = _images_in(folder)
         if not images:
             continue
-        archive = zip_by_well.get(str(well))
-        if archive is None or not archive.exists():
-            # **The only case worth refusing.** This well has no archive, so
-            # folder mode would have been its only route into the run — and
-            # folder mode is off because some *other* well has a zip. Its
-            # images are invisible to the run, and `organize_loose_tifs_into_
-            # well_folders` may already have moved them here from the plate
-            # root, so nothing else holds them.
-            stranded[str(well)] = images
-            continue
-        # From here the well *will* be processed, from its archive. A file the
-        # archive does not carry is not analysed, and it is also not deleted —
-        # it is still in the folder, where `replace_folder_with_archive` left
-        # it precisely because the archive did not take it. That is a warning,
-        # never a refusal: refusing here bricked every plate the pipeline
-        # itself had produced, because its own archiver deliberately skips
-        # `.jpg`, zero-byte files and `__aw_tmp_` scratch, and the remedy the
-        # refusal offered ("fold them into the archive") was the thing the
-        # pipeline had just declined to do.
-        held: set[str] = set()
-        readable = False
-        with swallow(f"reading {archive.name} to compare with {folder.name}"):
-            with zipfile.ZipFile(archive) as zf:
-                # Case-folded: on a case-insensitive volume the archive can
-                # hold `IMG.TIF` where the folder holds `img.tif`, and they are
-                # the same file. Comparing them raw refused a plate for a
-                # difference the filesystem does not make.
-                held = {Path(n).name.lower() for n in zf.namelist()}
-            readable = True
-        if not readable:
-            # An unreadable archive is a corrupt archive, not a stranded
-            # folder. Saying "these images are not in the zip" when the zip
-            # could not be opened blames the wrong artefact and offers a
-            # remedy that cannot work.
-            log.warning(
-                "Input warning: %s could not be read, so %s's folder could "
-                "not be compared against it; the run continues and folder "
-                "mode is not used because a zip is present.",
-                archive.name, well)
-            continue
-        missing = [n for n in images if n.lower() not in held]
-        if missing:
-            log.warning(
-                "Input note: %s holds %d file(s) its archive does not carry "
-                "(%s). They stay on disk and are not analysed; %s.zip is what "
-                "this run reads.",
-                folder.name, len(missing), ", ".join(missing[:4]), well)
+        archive = zip_by_well.get(well)
+        if archive is None:
+            stranded.append((folder.name, len(images)))
+        else:
+            twins.append((well, folder, archive))
+    return NonZipInput(loose, stranded, twins)
 
-    if not stranded:
+
+def refuse_non_zip_input(input_dir: Path, well_zips) -> None:
+    """Stop a run whose input holds images it would not read.
+
+    Refuses, naming each: loose images at the top level of *input_dir*; a
+    well-named folder holding images for a well with no archive; and an input
+    with no well archive at all. A folder beside its own well's archive is only
+    logged — see the module docstring for why.
+    """
+    found = non_zip_input(input_dir, well_zips)
+    for well, folder, archive in found.twins:
+        _note_folder_beside_archive(well, folder, archive, _images_in(folder))
+    problems = found.problems()
+    if not problems and not well_zips:
+        problems.append("no per-well <WELL>.zip archives")
+    if not problems:
         return
-    detail = "; ".join(
-        f"{w}: {', '.join(names[:4])}{'…' if len(names) > 4 else ''}"
-        for w, names in sorted(stranded.items())
-    )
     raise SystemExit(
-        f"Input error: {len(stranded)} well folder(s) under {input_dir} hold "
-        f"image(s) that are not in the matching <WELL>.zip, and folder mode is "
-        f"not used when any zip is present — so these images would be silently "
-        f"left out of the run:\n  {detail}\n\n"
-        f"Fold them into the matching archive, or move the archives aside so "
-        f"the run uses folder mode for the whole plate. Refusing rather than "
-        f"analysing part of the plate and reporting success."
+        f"Input error: {input_dir} holds input this run would not read —\n  "
+        + "\n  ".join(problems)
+        + f"\n\n{ZIP_LOOSE_FOLDER_REMEDY} Refusing rather than analysing part "
+        "of the plate and reporting success."
     )

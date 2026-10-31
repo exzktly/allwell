@@ -108,7 +108,7 @@ def test_the_run_summary_names_the_extra_scope(tmp_path, monkeypatch):
     subprocess, so this exercises ``convert_in_place``'s own bookkeeping.
     """
     import datasets.import_loose.apply as apply_mod
-    import services.input_resolution_service as irs
+    import datasets.import_loose.zipper as irs
 
     src = _folder_with_loose_tifs_and_pre_existing_wells(tmp_path / "plate")
 

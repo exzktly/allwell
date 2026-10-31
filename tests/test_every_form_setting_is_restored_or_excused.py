@@ -53,7 +53,6 @@ NOT_RESTORED_BY_PINFO = {
     # Not settings at all: hardcoded True at the collect site.
     "compress_input_well_folders": "always-on; the form has no control for it",
     "compress_output_well_folders": "always-on; the form has no control for it",
-    "move_source_tifs": "always-on; the form has no control for it",
 }
 
 

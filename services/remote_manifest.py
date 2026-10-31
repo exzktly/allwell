@@ -209,11 +209,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # Per-FOV resume checkpoints, keyed on the output directory and the run's
     # settings so one plate cannot resume another's intermediates.
     "pipeline/fov_checkpoint.py",
-    # Which of the three input layouts a plate is in; process_microscopy
+    # The zips-only input check (and its refusal); process_microscopy
     # imports it at module scope.
     "pipeline/input_layout.py",
-    # The mixed-``in/`` consolidation ``main`` runs before it reads the layout.
-    "pipeline/mixed_input.py",
     "pipeline/incremental_keys.py",
     "pipeline/well_skip.py",
     # The per-worker process settings ``_worker_init`` makes (the open-file limit).

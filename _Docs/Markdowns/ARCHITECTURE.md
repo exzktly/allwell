@@ -820,7 +820,10 @@ allwell/
 │   ├── concatenate/            ← Concatenate datasets (compute/apply/in_place/worker/view/controller/dashboard)
 │   ├── merge_plates/           ← Merge two plates into one, remapping wells
 │   ├── subset/                 ← Subset / Split a dataset by well, FOV or timepoint
-│   ├── import_loose/           ← Zip a loose image folder into per-well archives
+│   ├── import_loose/           ← Zip a loose image folder into per-well archives — the
+│   │                              one conversion step to the input layout Analyze reads;
+│   │                              zipper.py spawns pipeline/well_plate_zipper.py for the
+│   │                              in-place mode
 │   ├── validate/               ← Validate & Repair an existing dataset
 │   ├── job_queue/              ← the queue the eight tools (and Analyze) submit runs to,
 │   │                              and projection.py: what a queued job will write, for
@@ -834,11 +837,11 @@ allwell/
 │                                  names, grid as fallback). Always one file — Nikon
 │                                  has no split export — so there is no set to find
 ├── pipeline/                    ← Qt-free analysis-pipeline modules (imported by pm)
-│   ├── well_plate_zipper.py    ← the loose-TIF grouping pre-pass that produces the
-│   │                              per-well input layout the rest of the pipeline reads.
-│   │                              Spawned as a subprocess by Analyze, the remote runner
-│   │                              and Datasets → Zip loose folder; never imported by
-│   │                              them. Puts the repository root on sys.path itself,
+│   ├── well_plate_zipper.py    ← the loose-TIF grouper behind Datasets → Zip loose
+│   │                              folder's in-place mode, which spawns it as a subprocess
+│   │                              (datasets/import_loose/zipper.py) and never imports it;
+│   │                              Analyze and the remote runner read per-well zips and
+│   │                              never group anything. Puts the repository root on sys.path itself,
 │   │                              because being run by path seeds sys.path[0] with
 │   │                              `pipeline/` and `util.*` would not resolve. Despite
 │   │                              the name it writes no archives — it copies each image
@@ -2840,8 +2843,9 @@ claims **stops the run**, before an image is read: pooling the unmapped wells
 corrects them with other treatments' autofluorescence, and leaving them
 uncorrected puts two differently processed populations in one CSV. Both are
 invisible in the output, so neither is a default. That refusal and the
-ignored-folder one both sit ahead of the model precompute, because each is
-decided from the plate's own well list alone and a run that cannot say what
+non-zip input refusal (`pipeline.input_layout.refuse_non_zip_input`, which
+`main` asks straight after `find_well_zips`) both sit ahead of the model
+precompute, because each is decided from the plate's own input listing alone and a run that cannot say what
 corrects one of its wells should not first spend a model build per blank.
 
 Two things the plan has to get right that read as edge cases and are not.
@@ -2856,7 +2860,15 @@ is estimated from the plate's own images and takes no blank, so it is one field
 for the whole plate however the run is paired. Grouping it instead built the
 identical field once per blank and then left every well the map does not name
 with no flat-field at all — silently, because the coverage refusal is not in
-force when neither correction reads a blank.
+force when neither correction reads a blank. That field is sampled from every
+well's `<WELL>.zip` members (`empty_well._basic_flatfield_models`), the same
+archives the run segments from, and `require_grouped_models` refuses a `basic`
+run that built no field for any channel (`_require_basic_models`): with no
+field every frame passes through uncorrected and the output looks exactly like
+a corrected run's, which is what sampling files on disk with `rglob` did to
+every zipped plate. Blank frames for `empty_well` are read from each blank's
+`<WELL>.zip` too (`sample_empty_well_images`); the well comes from the archive,
+so a member's own name need not carry the well token.
 
 `--background_well` and the map must also not become two answers to "which wells
 are blanks": a blank named beside a map that does not use it is refused, because
@@ -2877,14 +2889,13 @@ canonicalised in a first pass, since one entry's block can contain a later
 entry's blank.
 
 "Which wells are blanks?" is `util.well_token.blank_wells_for_run`, and it is one
-function because five places ask it and they had already drifted: the remote
+function because several places ask it and they had already drifted: the remote
 runner grew a local whitespace-splitting regex that read `"H12 G12"` as two wells
 where the pipeline's own parser reads it as one, and every batch of that run died
-on the guard. Two more copies of that regex were still in
-`input_resolution_service`'s two incremental-scope readers and are gone;
-`_blank_well_tokens` is the seam, and the union it returns is deliberately a
-superset — staging a well whole that turns out not to be a blank costs an upload,
-while missing one starves a whole block of its correction.
+on the guard. It returns the union of the plain blank list and every blank the
+pairing map names, and that union is deliberately a superset — staging a well
+whole that turns out not to be a blank costs an upload, while missing one starves
+a whole block of its correction.
 
 **The map is written on a plate, not in a text box.** `analyze/bg_map.py` holds
 the editor — a non-modal window off the Image correction section, built once and
@@ -3001,10 +3012,10 @@ exists for the same reason, cutting the plate into exactly as many blocks as
 there are blanks, which is what the common two-blank case actually wants.
 
 The editor offers the plate's real wells through
-`input_resolution_service.iter_all_well_tokens`, which is the union
-`count_expected_wells` already computed privately, lifted out so both can use
-it; `iter_well_tokens` alone reads the grouped layouts only and answers empty
-for a plate that is still loose TIFs. It reads the **resolved** input directory
+`input_resolution_service.iter_all_well_tokens`, the same listing
+`count_expected_wells` counts: the `<WELL>.zip` archives in the folder
+`plan_input_layout` resolves the selection to, and nothing for a folder Analyze
+would refuse to run. It reads the **resolved** input directory
 (`_preflight_input`), because on the common `<dataset>/in` layout the path field
 names the parent, whose own listing holds no wells at all.
 
@@ -7068,9 +7079,9 @@ the whole staging, upload and launch, and `_spawn_tracked` runs it holding
 the upload froze the window until the upload ended — and, since `spawn` was not
 given the stop event it accepts, the upload ran to the end and the pipeline was
 launched only to be killed. `spawn` now gets `stop_event=_stop_requested`, which
-`stop` sets first; while `_spawning` is true `stop` signals only the grouping
-subprocess and returns, and `_spawn_tracked` signals whatever the spawn launched
-if a Stop landed meanwhile. The interrupted upload's rsync failure is reported
+`stop` sets first; while `_spawning` is true `stop` signals nothing and
+returns, and `_spawn_tracked` signals whatever the spawn launched if a Stop
+landed meanwhile. The interrupted upload's rsync failure is reported
 through `_enqueue_stopped`, not as a failure. The host-side kill
 (`RemoteRunner.cancel` — an ssh `kill`, then `scancel`) runs on a daemon thread
 (`_signal_run`, held as `_cancel_thread`) rather than in the button's slot.
@@ -7108,19 +7119,18 @@ so it ends either by signal or — when the wind-down beats the SIGKILL five
 seconds later — with exit 0. Both arrive as an `error` event: the runner reads
 an exit of 0 with `_stop_requested` set as a stop (`_enqueue_stopped`), never as
 `done` — and so is a batched remote run's exit of 130, which `_BatchedRemoteProcess`
-sets only for a Stop — so no success hook, "Processing Complete" or Review hand-off follows a
+sets only for a Stop — so no "Processing Complete" or Review hand-off follows a
 Stop, and a remote one keeps its remote output. A Suspend that winds down
 cleanly exits 0 and is reported as its own `suspended` event (below); a remote
 one keeps the configured cleanup, which fires only after the fetch is verified,
 because the resume uploads only the missing groups and never re-attaches —
 it reads the previous directory only for wells that were never downloaded,
 and a verified fetch leaves none. While one
-that dies by signal arrives as an `error` like a Stop. A Stop, Suspend or queue
-Pause that lands while the input is still being grouped ends the grouping
-subprocess, and the resolver (`AnalyzeInputMixin._input_failure_text`) words
-the resulting failure as the stop it was — "Run suspended while the input was
-being grouped", with the grouping step's own message kept in brackets — rather
-than as "Input error". Either cancel takes the amber `set_cancelled` and neither opens a
+that dies by signal arrives as an `error` like a Stop. A Stop that lands while
+the input folder is still being resolved — before the pipeline is spawned —
+ends the run with "[stopped] Cancelled before pipeline launch." and nothing
+else; resolving reads the folder and converts nothing, so there is no
+subprocess to end and no half-written input to report. Either cancel takes the amber `set_cancelled` and neither opens a
 pane the user had closed. For the `error` case, which of the three it was is
 read from `PipelineRunner.cancel_state_at_failure`, a snapshot taken when the
 failure is *queued*, not from the live `was_stopped` / `was_suspended`. The GUI
@@ -7236,16 +7246,17 @@ whole however few of its FOV-groups landed, which is why a crashed run cannot be
 completed by pressing Run again — it is the run mode Validate & Repair's
 completion handoff chooses on the way in. **Redo it** carries `--force`; the
 form cannot send both, and the pipeline ignored `--incremental` under `--force`
-anyway. `select_incremental_scope` may still switch a run to
-a full `--force` reprocess during input resolution (loose images landing under a
-cross-well flat-field/background model), but it never clears a `True` the form
-set: with nothing appended it returns before touching the key.
+anyway. Input resolution never changes either flag: it reads the folder and
+returns the pair of directories, and the run mode is exactly what the form sent.
 
 Rendering the run's progress is a third mixin, `analyze.progress.AnalyzeProgressMixin`:
 `_apply_progress_event` turns each `ProgressTracker` event into dashboard state
 (headline, overall bar, per-well plate colour, per-well FOV and transfer dials),
-`_apply_grouping_event` does the same for the grouping phase's own four events
-(`zipper_start` / `zipper_well` / `zipper_done` / `stage_total`), and the ETA cluster (`_update_eta` / `_render_eta` / `_stop_eta_timer`) projects a
+`_apply_grouping_event` does the same for the Ready stage's four events
+(`zipper_start` / `zipper_well` / `zipper_done` / `stage_total`) — which, since
+nothing is grouped at Run, announce the wells the input resolved to, from
+`_resolve_run_dirs_for_runner` locally and after staging on a remote run —
+and the ETA cluster (`_update_eta` / `_render_eta` / `_stop_eta_timer`) projects a
 deadline from the cumulative per-well rate and ticks it down at 1 Hz between
 events. It answers to one rule: **what it draws must never overstate what the run
 achieved.** A run that finishes with fewer wells than it announced gets a headline
@@ -7256,10 +7267,12 @@ announces completion twice is reported rather than folded into the count.
 Picking an input folder through the browse dialog also **auto-fills the schema
 and channel fields** from what the folder's filenames look like:
 `_browse_input` → `analyze.domain.input.AnalyzeInputMixin._autofill_from_input_scan`
-briefly samples the names via `util.schema_infer.infer_from_dir`, which reads all
-three grouped layouts — loose TIFs, the members of per-well zips, and the files
-inside per-well `<WELL>/` folders — looking in both the selected folder and its
-`in/`; it guesses the separator, slot layout, channel tokens and their roles (roles
+briefly samples the names via `util.schema_infer.infer_from_dir`, which reads
+loose TIFs, the members of per-well zips, and the files inside per-well
+`<WELL>/` folders, looking in both the selected folder and its `in/` — the same
+sampler Datasets → Zip loose folder uses on its loose-image input. So on the
+Analyze side a folder of loose images still gets its schema guessed while the
+layout readout beside it refuses the folder. It guesses the separator, slot layout, channel tokens and their roles (roles
 via `util.channel_roles`, the same heuristic the OME converter uses), and applies
 the guess through the existing `_apply_pipeline_info` path. It is best-effort and
 editable — a folder whose names don't parse leaves the form as the user set it —
@@ -7416,13 +7429,12 @@ valid 96-well position, distinct, and present in the input folder — by
 background-well check does. Under Otsu it does not read the fields at all.
 
 Both presence checks go through `input_resolution_service.well_present_in_input`,
-which accepts any of the pipeline's input layouts (per-well `<WELL>.zip`,
-per-well `<WELL>/` folder, or loose TIFs parsed via the schema's `well` field).
-The form validates the *selected* folder, but a folder holding an `in/`
-subfolder — the ordinary `<dataset>/in` + `<dataset>/out` layout — feeds the
-pipeline from that `in/`, not the parent (see `resolve_input_output`). The
-grouped-layout lookup therefore searches both the selected dir and its `in/`, so
-a well packaged as `in/<WELL>.zip` / `in/<WELL>/` is not reported missing when it
+which asks the one input layout the pipeline reads: is there a `<WELL>.zip`
+*file* for that well. The form validates the *selected* folder, but a folder
+holding an `in/` subfolder — the ordinary `<dataset>/in` + `<dataset>/out`
+layout — feeds the pipeline from that `in/`, not the parent (see
+`resolve_input_output`). The lookup therefore searches both the selected dir and
+its `in/`, so a well packaged as `in/<WELL>.zip` is not reported missing when it
 lives one level down.
 
 **One layout decision, rendered twice.** Analyze asks "what will this folder do?"
@@ -7436,44 +7448,38 @@ which `tests/test_layout_readout_single_source.py` enforces by requiring the
 readout label to be written from a value rather than from a hand-composed
 sentence.
 
-**One decision is not enough if the numbers in it come from somewhere else.**
-The fold-loose message names a count, and that count used to be a glob over TIF
-suffixes while the *act* goes through `plan_loose_append`, which rejects a name
-whose well token will not parse and a file already present in its target
-archive. On a folder holding one new image, one duplicate and one calibration
-frame the readout said "Will fold 3 loose TIF(s)" and the run folded one. Given
-the form's `filename_schema` / `filename_sep`, `plan_input_layout` asks that same
-planner, so preview and run cannot disagree; without them it falls back to the
-file count and says nothing it cannot support. `resolve_input_output` passes
-them too — it holds both in its own signature, and omitting them made the *run*
-recompute a schema-less plan and log the glob count, which reproduced the
-original defect on the log line instead of the readout. A folder whose loose files are
-*all* duplicates is reported as `grouped` with the reason, rather than as a fold
-of nothing.
+**One decision is not enough if the rule inside it is stated somewhere else.**
+What a plan refuses is `pipeline.input_layout.non_zip_input`'s verdict — the
+same function `refuse_non_zip_input` stops the pipeline on and
+`services.remote_staging._refuse_non_zip_input` stops a remote run on — so a
+folder the readout calls runnable is one neither the local nor the remote run
+will refuse, and the readout, the run-time error (`_layout_error`) and the two
+refusals all name the same remedy sentence, `ZIP_LOOSE_FOLDER_REMEDY`
+(Datasets → Zip loose folder). The verdict has three parts (`NonZipInput`):
+*loose* input images at the top level of the folder, *stranded* well-named
+folders that hold images and have no `<WELL>.zip` beside them, and *twins*,
+well folders that sit beside their own well's archive. The first two are
+refused (`NEEDS_ZIPPING`), at the selected root as well as inside `in/`,
+because a run would silently skip either and report a partial plate as a whole
+one. A twin is not refused: earlier versions of the app left a well folder
+beside its archive on purpose (their archiver kept a `.jpg`, a zero-byte frame
+or scratch it declined to pack), so refusing twins would refuse every plate
+those versions produced. The archive is what the run reads, and the pipeline
+logs any image in a twin folder that the archive does not carry as not
+analysed. Well-named folders at the selected root are judged only when there is
+no `in/` beside them, because with an `in/` the run never looks at the root's
+folders; loose images at the selected root are refused either way.
 
-`tif_files_in` is the other half of that, and it asks `is_run_input_member`
-rather than matching a suffix, because a suffix is not a decision about whether
-a file is one of the run's images. The glob it was built on matched
-`._<name>.tif`, the
-AppleDouble fork macOS writes beside every file copied to a non-HFS volume — so
-a real plate arrived with exactly twice as many "TIFs" as images — and it read
-`.tif`/`.tiff` only, so a PNG plate looked like a folder holding nothing, and it
-did not ask `is_file()`, so a dangling symlink counted as an image the zipper
-would then skip as unreadable while the deletion pass unlinked it. That count
-feeds the readout, the `tifs > 3` threshold selecting `zip_root`,
-`count_expected_wells`' fallback, and the `source_tifs` tuples the post-run
-deletion closures are built from: a predicate applied to files it is not
-entitled to judge, in the place that decides what gets deleted.
+Which top-level files count as loose images is `util.image_exts.is_run_input_member`'s
+answer rather than a suffix match, because a suffix is not a decision about
+whether a file is one of the run's images. A glob over `*.tif` matches
+`._<name>.tif`, the AppleDouble fork macOS writes beside every file copied to a
+non-HFS volume, so a plate of archives carrying sidecars would be refused for
+images that are not there; it reads `.tif`/`.tiff` only, so a folder of loose
+PNGs would pass as runnable and be silently skipped; and without an `is_file()`
+answer a dangling symlink would count as an image.
 
-The `tifs > 3` threshold moves in both directions as a result, and neither is
-hypothetical. A folder of three real images beside their three sidecars used to
-count six and clear it and now counts three and does not, so a very small plate
-copied to a non-HFS volume reports "No TIF files or in/ folder found" where it
-previously ran; a folder of PNGs used to count zero and now counts them all, so
-a plate that could not be grouped at all now can. The `> 3` cliff itself
-predates both.
-
-**The decision costs one directory listing, not one metadata call per file.**
+**The decision costs a few directory listings, not one metadata call per file.**
 Picking a folder answers three questions of it — is this a packed OME-TIFF,
 what layout is it, and what filename schema do its names follow — and the
 obvious spelling of each, a listing plus `Path.is_file()` per entry, is also one
@@ -7492,45 +7498,36 @@ traffic — the shape of a freeze in which nothing is computing anything.
 improvement rather than a trade: `os.scandir` carries the entry type with the
 listing, so `DirEntry.is_file()` answers from data the enumeration already paid
 for. Everything that classifies the entries of an input folder goes through it —
-`tif_files_in`, `has_well_zip`, `has_well_content`, `iter_well_tokens`, the
-zipper's consolidation passes, and `util.schema_infer`'s sampling of the three
-grouped layouts. The symlink semantics are `pathlib`'s, deliberately: a link to
-a file is a file, and a dangling link is neither, which is the rule `tif_files_in`
-depends on. What it gives up is that the answer describes the directory as it
+`iter_well_tokens`, `well_present_in_input`, `non_zip_input`'s
+listing of the folder and of each well-named subfolder, `find_well_zips`, and
+`util.schema_infer`'s sampling. The symlink semantics are `pathlib`'s,
+deliberately: a link to a file is a file, and a dangling link is neither, which
+is the rule the loose-image check depends on. What it gives up is that the answer describes the directory as it
 was listed rather than as it is now, so a file deleted in between is still
 reported; closing that window means spending the stat the module exists to
 avoid, and every call site already copes with a path that has gone by the time
 it is opened.
 
 Reducing the per-file cost to nothing leaves the number of *listings* as the
-thing worth counting, and there was one per question. `_plan_grouped_root` reads
-the folder once and answers four from that listing: the loose-image count
-(`input_images_among`), whether any well archives are present
-(`_well_zip_among`), whether any well *folders* are (`_has_well_content_in`),
-and the fold plan, which takes the listing as `plan_loose_append`'s optional
-`loose_files`. Every layout the pane meets — loose images, zip-grouped,
-folder-grouped — therefore lists the input folder exactly once. Stating each
-rule once is what makes that safe: two listings of one directory can disagree
-about a file written between them, and two spellings of one predicate always
-eventually do.
+thing worth counting, and it is bounded by the plate's top level, never by the
+number of images in it: `_plan_grouped_root` lists the folder for its well
+archives, `non_zip_input` lists it for loose images and lists each well-named
+subfolder for the images inside it, and none of those listings stats an entry.
+The images inside the archives are never enumerated at all.
 
-`dir_has_entries` is the deliberate exception and keeps its own listing. It asks
-whether the folder holds an entry of *any* kind, which includes the ones a
-file/folder split drops because they are neither — a dangling symlink, a socket
-— so answering it from that split would turn a folder holding only such an entry
-from usable-but-unrecognised into empty. It short-circuits on the first entry,
-and it is reached only when the folder has no images, no archives and no well
-folders in it.
+`dir_has_entries` keeps its own listing. It asks whether the folder holds an
+entry of *any* kind, which includes the ones a file/folder split drops because
+they are neither — a dangling symlink, a socket — and it tells an `in/` that
+holds something none of which is a well archive (`UNRECOGNISED`) apart from one
+that is genuinely empty (`EMPTY_IN`). It short-circuits on the first entry, and
+it is reached only when the folder has no archives and nothing refused in it.
 
-**A well archive is a file.** `has_well_zip`, `has_well_content` and
-`_well_in_grouped_root` all say so, through `_well_zip_among`. A directory called
-`A01.zip` — what an expander names an archive it has unpacked in place — used to
-answer yes to all three, and each had its own consequence: the fold-loose path,
-where opening it as an archive fails, the failure reads as "the archive holds
-nothing", and every loose image beside it is reported as new; a `GROUPED` verdict
-on a folder holding nothing the pipeline can read; and, worst, a pass from the
+**A well archive is a file.** `well_present_in_input`, `find_well_zips` and
+`_plan_grouped_root` all say so, each by listing files only. A directory called `A01.zip` — what an expander names an
+archive it has unpacked in place — answering yes would be a `GROUPED` verdict on
+a folder holding nothing the pipeline can read, and, worse, a pass from the
 pre-run guard that exists to refuse a run whose named background well is not in
-the input, so the run started and the correction was never built.
+the input, so the run would start and the correction would never be built.
 
 **A folder that cannot be listed is its own answer.** `Path.glob` returns an
 empty list for a directory it may traverse but not read — a share whose ACL
@@ -7543,23 +7540,18 @@ in `RUNNABLE_ACTIONS`, and `_layout_error` gives the long form. Letting the
 computed from a `textChanged` slot, where an exception leaves the path field
 showing the new folder and every label beside it describing the previous one.
 
-The Analyze pane spends that listing once per pick rather than twice.
-`AnalyzeTab._browse_input` changes two things the readout depends on — the path,
-which `textChanged` reports, and the filename schema
-`_autofill_from_input_scan` infers from the folder — so the readout was computed
-first against the new path and the *previous* folder's schema, and then again
-once the inferred schema was applied. `_suspend_output_refresh` holds the
-intermediate one and a single recomputation runs at the end, from the path and
-the schema together. Releasing it in a `finally` is load-bearing: a folder whose
+The Analyze pane spends those listings once per pick rather than twice.
+`AnalyzeTab._browse_input` sets the path, which `textChanged` reports, and then
+applies what `_autofill_from_input_scan` infers from the folder, which refreshes
+the readout again; `_suspend_output_refresh` holds the intermediate refresh and a
+single recomputation runs at the end, once both have changed. Releasing it in a
+`finally` is load-bearing: a folder whose
 names do not parse leaves `_autofill_from_input_scan` early, and without the
 release the readout would go on describing the folder picked before it.
 `tests/test_input_scan_costs_no_stat_per_file.py` pins all of this by counting —
 the same folder holding four times as many images must cost the same number of
-metadata calls, and the layout plan must be computed exactly once, with the
-schema the scan inferred. Its plate is written in a layout that is deliberately
-*not* the form's default, because a fixture in the default layout makes the
-second half of that true of a scan which applied nothing; and it proves its own
-counter live first, since a test that patched the wrong function would report
+metadata calls, and the layout plan must be computed exactly once per pick. It
+proves its own counter live first, since a test that patched the wrong function would report
 zero against zero and pass. `tests/test_dir_scan.py` counts the other end: one
 listing and *zero* stats for a folder of files and sub-folders, which is the
 assertion an implementation that enumerated once and then stat-ed each entry
@@ -7580,50 +7572,42 @@ its default schema, which a plate in any other layout then carried into a run
 the user was never prompted to correct.
 
 The same rule reaches the remote runner, because the same plate does.
-`_detect_local_input_mode` runs at the start of every remote run and *before*
-the mode is known, so on a FLAT plate — a folder of loose images — it looks at
-the whole plate; `_unconsumed_loose_tifs` and `_stage_mixed_mode` walk it again
-straight after, and `stage_local_zips` walks it twice more, once to find the
-well folders it will zip and once for the folders the zipper has left behind.
-Every one of them takes the entry type from the listing, so the cost of starting
-a run stops growing with the number of images in the plate.
+`services.remote_staging.stage_local_zips` looks at the input folder before it
+does anything else — `_well_zips_in` for the archives, then
+`_refuse_non_zip_input`, which asks `non_zip_input` the same question the
+planner asks — and on a plate of loose images, which it refuses, that first look
+sees every image. Every listing takes the entry type from the enumeration, so
+the cost of refusing a plate does not grow with the number of images in it.
+`tests/test_remote_input_scan_cost.py` counts it the same way the Analyze test
+does (40 against 400 loose images, a slope of at most four `os.stat` calls), and
+pairs the count with the check that a *directory* named `A01.zip` is not a well
+archive to `plan_input_layout`, `_well_zips_in` or `find_well_zips` — the planner and
+the runner have to answer that the same way, or the planner refuses a layout the
+runner then stages and skips.
 
-The staging pair is the one this branch first missed, and the shape of the miss
-is worth keeping: `folders_after_zipper` was spelled identically to the
-`_stage_mixed_mode` site three lines above it and was left asking `p.is_dir()`
-per entry — which on a copy-mode run, the default, means one stat per loose TIF
-still sitting in the input folder. Measured at 45 stats for 40 images and 180
-for 160, i.e. the linear growth this whole section exists to remove, inside a
-function nothing counted. `tests/test_remote_input_scan_cost.py` now counts
-`stage_local_zips` as well as the detector, because a sweep is only as complete
-as the sites something measures; it counts the same way the Analyze test does,
-and pairs each count with a test that every layout is still *detected* and
-still *staged* — a mode detector that answered FLAT unconditionally would
-satisfy the count alone.
-
-The actions are the layouts. A folder **named** `in` is the input directly
+The actions are the verdicts. A folder **named** `in` is the input directly
 (output `../out`); a folder that **contains** `in/` feeds the pipeline from that
 subfolder (output `<selected>/out`). Either way the same classification runs on
-the grouped folder: loose TIFs beside well zips are folded into those zips
-(`fold_loose`), loose TIFs on their own are grouped into per-well folders in
-place (`group_loose`), per-well zips or per-well folders are used as they stand
-(`grouped`), and a folder holding something else entirely is still handed to the
-pipeline (`unrecognised`) with the readout saying what was not recognised —
-`in/Plate1_A1.zip`, or a timepoint level between `in/` and the wells, is input
-this module cannot name wells for but the pipeline is what reads it. More than
-three loose TIFs at the *selected* root outrank an `in/` with nothing usable in
-it (`zip_root`), because that is a fresh drop beside a folder an interrupted run
-left behind, and it still has to reach `well_plate_zipper`. What remains is
-unrunnable and says which: an `in/` that exists and is empty (`empty_in`), a
-packed OME-TIFF (`packed_ome`, redirected to the Datasets converter), a path
-that is not a directory, or nothing usable at all.
+that folder: per-well `<WELL>.zip` archives with nothing refused beside them are
+used as they stand (`GROUPED`, the one member of `RUNNABLE_ACTIONS`); loose
+images or stranded well folders are refused with the remedy (`NEEDS_ZIPPING`);
+an `in/` that holds something, none of it a well archive — `in/Plate1_A1.zip`,
+or a timepoint level between `in/` and the wells — is refused as holding no
+per-well zips (`UNRECOGNISED`); and an `in/` that exists and is empty is
+`EMPTY_IN`. Before any of that, a packed acquisition file is redirected to the
+Datasets converter for it (`PACKED_OME` / `PACKED_CZI` / `PACKED_ND2`); and what
+remains is a path that is not a directory (`NOT_A_DIR`), a folder that could not
+be listed (`UNREADABLE`), or a selection with no `in/` and nothing refused at
+its root (`NO_INPUT`). Nothing in the module converts, moves or deletes a file:
+Datasets → Zip loose folder is where loose images and per-well folders become
+archives.
 
 Both selections reaching the same verdict is the point of classifying them
-together. `count_expected_wells` takes its grouped root from the same plan, so
-the dashboard's denominator counts the folder the run will actually read; it
-stays best-effort by design, falling back to the loose-TIF count and then to 1,
-because a progress denominator cannot be zero — saying there is no input is
-`resolve_input_output`'s job, not the dial's.
+together. `count_expected_wells` takes its input folder from the same plan, so
+the dashboard's denominator counts the archives the run will actually read; it
+stays best-effort by design, answering 1 when there are none or the folder
+cannot be listed, because a progress denominator cannot be zero — saying there
+is no input is `resolve_input_output`'s job, not the dial's.
 
 **And because that plan names the output directory without writing anything,
 everything an earlier run left there can be reported before this one starts.**
@@ -7631,12 +7615,8 @@ everything an earlier run left there can be reported before this one starts.**
 reason `analyze.suspend` and `analyze.progress` are, since `analyze/tab.py` sits
 against its line budget. `_refresh_output` hands it the `InputPlan`, and it
 reports in two tiers split by what each costs. Tier one is the run journal
-(§6.5) — one small JSON read — plus the scope line's `iterdir` of the input
-directory and, when loose images are sitting in it, a central-directory read of
-every well archive they belong to — the duplicate rule needs to know what each
-already holds — with a second pass over those archives when a background or
-flat-field method is set to `empty_well`: bounded by the plate's top level rather than a walk
-of it, which is what lets it run inline once the field settles. It
+(§6.5) — one small JSON read, bounded by the plate's own record rather than a
+walk of it, which is what lets it run inline once the field settles. It
 says what the last run against this folder did, and whether it *finished* — a
 journal still open is a run the app was killed during, which nothing else on
 disk records. Tier two runs `completeness.scan_run` on a
@@ -7662,16 +7642,12 @@ previous run's subset — is the most expensive kind of surprise.
 (`analyze/pinfo.py`), and does not clear the field: loading settings leaves the
 scope fields as the user had them. **And it
 reports; it does not decide.** Every *claim* in the readout comes back verbatim
-from whatever owns it — `ScopePlan.preview` for what the run will do about
-images added since last time, `completeness`'s own counts for coverage, the
-journal's recorded per-well states for what happened last time — and the pane
-supplies only the connective prose between them. That is deliberately weaker
-than `test_layout_readout_single_source.py`'s rule over the layout line beside
-it, which requires the label to *be* a quoted planner value: that suits a
-one-sentence readout, not a paragraph drawn from four sources.
-`test_analyze_preflight.py::test_the_scope_line_is_the_planners_own_sentence`
-guards the piece that could drift, the scope line, by pinning it to the
-planner's own words. A coverage comparison that comes back incoherent (more
+from whatever owns it — `completeness`'s own counts for coverage, the journal's
+recorded per-well states for what happened last time — and the pane supplies
+only the connective prose between them. That is deliberately weaker than
+`test_layout_readout_single_source.py`'s rule over the layout line beside it,
+which requires the label to *be* a quoted planner value: that suits a
+one-sentence readout, not a paragraph drawn from several sources. A coverage comparison that comes back incoherent (more
 field groups covered than the input was measured to hold, which means the
 filename schema is not parsing both sides the same way) is reported as such
 rather than printed as a ratio over 1.
@@ -7696,14 +7672,14 @@ one above the other. While the offer is up for *this* folder
 (`_resume_card_covers`, keyed on the folder rather than on the card merely
 being visible, since with no folder on the form the offer falls back to the
 newest unfinished run on any plate) the report drops its own account of the run
-and keeps what only it knows: the coverage line and the scope line. The
+and keeps what only it knows: the coverage and field-quality lines. The
 decision is made at paint time from the offer's live state and the unsuppressed
 sentence is what is stored, because the card can come down with the folder
 unchanged — a Discard, a Resume — and the report is then the only surface left
 that can say what the last run did; `analyze.suspend._note_resume_card` calls
 `resume_card_changed` so that repaint happens, and that repaint is skipped
-unless the answer has actually flipped, since it runs `_scope_line` and that
-reads the input directory. A report left with its sentence suppressed and no
+unless the answer has actually flipped, and before the folder has been read at
+all, which the settle is about to do anyway. A report left with its sentence suppressed and no
 coverage line yet is *hidden* rather than shown as a bordered strip holding two
 buttons and no words; it comes up when the scan lands.
 `tests/test_the_two_cards_do_not_say_the_same_thing.py` holds both halves.
@@ -7716,13 +7692,6 @@ sidebar would go on describing the run *before* the one that just ended: on a
 failure, reporting the previous run as completed. Its coverage line and any
 dismissal are dropped at the same moment, since both described the folder as it
 stood before this run rewrote it.
-
-That scope sentence is possible because `select_incremental_scope` is now
-plan-then-act like the rest of this module: `plan_loose_append` decides which
-loose images would be folded in and `plan_incremental_scope` reaches the verdict,
-both reading only; `select_incremental_scope` performs the append and asks the
-same `_scope_verdict` for its answer. One rule, two callers, so the preview
-cannot describe a decision the run does not make.
 
 The Run path:
 
@@ -7820,10 +7789,10 @@ schema picker, whose values are about to be replaced, and
 would lock the input field the option exists to let the user fill. The
 Segmentation channel stays live: which channel to segment is a choice, not a
 fact the filenames carry, and detection honours it when the input carries it.
-The readout under the input field counts loose files by suffix rather than
-under the form's schema (`_refresh_output` passes none), the pre-run report's
-scope sentence is left out, and its coverage scan resolves the detected layout
-on its worker thread before reading the output folder.
+The readout under the input field needs no schema at all — it judges archives
+and loose files, never filenames — and the pre-run report's coverage scan
+resolves the detected layout on its worker thread before reading the output
+folder.
 
 `start_run` resolves it, so every entry point — Run, the queue, the resume
 banner — answers the same way: after the busy refusal and before
@@ -7940,7 +7909,7 @@ completion signal: `_poll_log`'s `"done"` branch sets a per-run `_run_ok`
 latch, `"error"` records the first message seen, and the `"finished"` branch
 emits based on that latch — never on "no error was seen", since several of
 `PipelineRunner._run_pipeline_thread`'s early-return paths (stopped before
-launch, a cancelled zipper spawn) reach `"finished"` having emitted neither
+launch, a pipeline spawn a Stop pre-empted) reach `"finished"` having emitted neither
 `"done"` nor `"error"`. The emit is the **last statement** of that branch,
 because a job-queue-driven slot connected to it may start the next run
 synchronously, re-entering `_set_running_ui_state()` — anything after the
@@ -7986,8 +7955,8 @@ OME-XML for dimension order and channel names, **max-projects Z**, maps each
 stage position to a 96-well label via `util.plate_grid`, and writes the planes
 named
 `<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif` **directly into per-well
-`<destination>/in/<WELL>.zip` archives** — the exact layout `resolve_input_output`
-accepts as ready input, so Analyze uses it with **no** `well_plate_zipper` pass.
+`<destination>/in/<WELL>.zip` archives** — the one layout `resolve_input_output`
+accepts, so Analyze runs on it as it stands.
 Wells are converted **in parallel** across a `ThreadPoolExecutor` (`workers`,
 0 = auto), each worker owning a disjoint set of wells and its own read handle and
 writing that well's archive alone (via `util.zip_write.atomic_zip`, so no locking
@@ -12780,10 +12749,10 @@ guard in `tests/test_remote_incremental.py` pins.
 Inputs / outputs / contract:
 
 ```
-Input dir (one of; grouped per 96-well position upstream)
-├── A01.zip / A02.zip / … H12.zip          ← per-well zip mode (preferred)
-└── A01/ / A02/ / … H12/                    ← per-well folder mode
-                                              (compressed to <well>.zip during the run)
+Input dir (the one layout; Datasets → Zip loose folder converts anything else)
+└── A01.zip / A02.zip / … H12.zip          ← one archive per 96-well position;
+                                              loose images or a well folder with no
+                                              archive stop the run (input_layout)
 
 Output dir
 ├── <well>_out.zip                          ← masks + tophat + overlays per well
@@ -13346,7 +13315,7 @@ parent process supervises the per-well worker pool:
   complete-looking per-well outputs. Point `$ALLWELL_SCRATCH_DIR` (or the
   Analyze tab's *Scratch folder* field) at a roomier volume when the home volume
   is tight.
-- **A zip-mode well's inputs are never unpacked.** `process_well_zip_task`
+- **A well's inputs are never unpacked.** `process_well_zip_task`
   reads the archive's directory (`find_image_groups_in_zip`) and hands
   `_process_groups_in_worker` a `pipeline.zip_members.ZipMemberReader`; each
   field reads its own members' bytes from the archive when it runs, and
@@ -13472,7 +13441,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_run_id.py` | Where a remote run lives, and whether an earlier one's work may be reused — two questions sharing a module because they are keyed on the same facts, and every reuse defect here came from one being keyed on less than the other. `_compute_run_id` and `pipeline_argv_digest` decide the address; `_choose_remote_output_dir` decides whether a recorded one may be used instead; `remote_run_dir` / `remote_run_paths` are its single spelling. Pure — no ssh, no filesystem — which is what lets the highest-stakes predicate in the remote path be tested directly rather than through a harness. |
 | `remote_commands.py` | The shell a remote run sends, as strings: `_compose_remote_cmd` (the single-launch line — record the pidfile, optionally exec the scheduler launcher, activate conda, wait for the upload, exec the pipeline), `_compose_driver_cmd` and `_batch_driver_snippet` (the batched driver that holds one allocation and runs a pipeline per batch, stopping early when the run's suspend request appears), `_remote_scratch_export`, the batch handshake names (`BATCH_READY`, `BATCH_DONE`, `BATCH_DONE_MARKER`, `BATCH_STAGED`), the driver being safe to replay — a batch whose `done` file exists is not run again (its marker is re-emitted), and `in/` is emptied only for a batch whose staged `b<i>` is there to replace it, while `BATCH_STAGED` (written after the move) lets a replayed pass find a batch's input already in place instead of deleting it; `_start_driver` clears every one of these files before it launches, which is what makes one found by the driver its own launch's, and `pack_for_login_shell` / `unpack_login_shell_command`. Both launch paths send their command through `pack_for_login_shell` — gzip + base64 into one short line of plain characters that the login shell unpacks and `eval`s, so `$$` and `exec` still act on the login shell and the pidfile and cancel channel are unchanged. The scripts are thousands of characters across seventeen lines with hundreds of quotes, and on a Windows client the one `ssh` argument they travel in is rebuilt by `list2cmdline` and parsed again by Git for Windows' `ssh.exe`; a batched launch past 8,191 characters failed there with `bash: -c: line 17: syntax error: unexpected end of file`. A remote without `base64` or `gzip` fails with exit `UNPACK_FAILED_EXIT` and a line saying so, never with an empty `eval` that would exit 0. Tests read a spawned command through `unpack_login_shell_command`. No ssh and no I/O, so a quoting decision is tested by reading the string and the driver by running it in `bash`. Re-exported by `remote_runner`; imports the transport's quoting and the conda / wait snippets, never the runner. |
 | `remote_suspend.py` | Asking a running remote pipeline to suspend: `request_suspend` (touch the run's request file over ssh, bounded by `SUSPEND_REQUEST_TIMEOUT_S`, telling a batched run's local loop first), and `_AnySet`, the Event-shaped view a batch upload watches so either a Stop or a suspend ends it. `RemoteRunner.request_suspend` is a one-line delegate; `remote_runner` binds `request_suspend` for that and nothing else from here. |
-| `remote_recover.py` | Before any unforced single-shot remote run stages its upload, `recover_finished_outputs` downloads what the previous run of the plate finished on the host and never brought home: it finds that run's directory through the journal's recorded address (`stored_remote_address`, the three re-attach keys) and runs `FetchedOutputVerifier.verify` against it — only when that directory holds a *finished* well (archive and seal, `remote_finished_wells.list_remote_outputs`) the local folder lacks; a well left part way there is named in the log and sent again. Matches on the current argv digest, then on `legacy_argv_digests` so plates recorded by an earlier build are found. Returns a `Recovery`; `pulled` makes `PipelineRunner` stage incrementally, `ok=False` means listed wells could not be pulled and the run is ended rather than re-uploading them. Declines for a forced run.  A batched run skips it (`PipelineRunner._recover_remote_outputs`): `remote_batch_resume` adopts the same wells and the Fetcher downloads them while the batches upload and compute, where this would pull every one of them, serially, before anything is staged or a node requested — and before the wells already local are painted, since staging's `up to date` markers come after it. The end-of-run retry reports a rescued well's zip half from `remote_fetch_place.local_output_mb`, which counts a FOLDER-mode extraction and a CSV-only well as downloaded; reporting only a local `<well>_out.zip` left those uncoloured. |
+| `remote_recover.py` | Before any unforced single-shot remote run stages its upload, `recover_finished_outputs` downloads what the previous run of the plate finished on the host and never brought home: it finds that run's directory through the journal's recorded address (`stored_remote_address`, the three re-attach keys) and runs `FetchedOutputVerifier.verify` against it — only when that directory holds a *finished* well (archive and seal, `remote_finished_wells.list_remote_outputs`) the local folder lacks; a well left part way there is named in the log and sent again. Matches on the current argv digest, then on `legacy_argv_digests` so plates recorded by an earlier build are found. Returns a `Recovery`; `pulled` makes `PipelineRunner` stage incrementally, `ok=False` means listed wells could not be pulled and the run is ended rather than re-uploading them. Declines for a forced run.  A batched run skips it (`PipelineRunner._recover_remote_outputs`): `remote_batch_resume` adopts the same wells and the Fetcher downloads them while the batches upload and compute, where this would pull every one of them, serially, before anything is staged or a node requested — and before the wells already local are painted, since staging's `up to date` markers come after it. The end-of-run retry reports a rescued well's zip half from `remote_fetch_place.local_output_mb`, which counts a `<well>_out/` extraction as well as the zip, and a CSV-only well, as downloaded; reporting only a local `<well>_out.zip` left those uncoloured. |
 | `remote_scratch.py` | The leaves of the remote staging work, stdlib + `util` only: where transient bytes go while a transfer is in flight (`_scratch_dir`, `_transit_dir`, `TRANSIT_SUBDIR`), how a stale one is swept (`sweep_stale_scratch`), whether an archive arrived whole (`_zip_is_complete`), and what the user's own input archives hash to (`fingerprint_archives`, `source_fingerprint` — the discriminator the remote re-attach is keyed on). Nine functions whose only tie to `remote_runner` was one constant; every caller, the runner's own `source_fingerprint` read included, imports them from here. |
 | `remote_upload.py` | Getting a run's input onto the remote host, once. `DatasetCache` keys each upload by a content fingerprint of the staged archives (member names, sizes and CRCs), so re-running the same input is a metadata round trip rather than a re-upload; streams rsync's output well by well (`_run_rsync_streaming`, `_UploadWellProgress`) so the Upload rail and each well's dial fill as its archive lands — the last well's dial closes at full only when rsync exits 0, so a failed or stopped transfer leaves it part-filled; and keeps the remote cache inside the host's budget (`remote_cache_gc`). The upload rsync (`_upload_rsync_cmd`) carries an I/O-idle `--timeout=UPLOAD_IDLE_TIMEOUT_S` (120 s, as the fetch has) and the fixed keepalive, and its streaming retry applies `rsync_failure_is_transient` to the lines rsync printed (`_run_rsync_streaming(diagnostics=…)`), logs ssh's own failure lines, and ends on Stop from a `StopWatcher`. `DatasetCache._ssh_run` / `_ssh_script` go through `remote_transport.ssh_control`, bounded by `SSH_CONTROL_TIMEOUT_S` (120 s) and `SSH_SCRIPT_TIMEOUT_S` (300 s) with the 124 convention; the post-upload count's own failure is reported as a failed listing, never as "rsync reported success but some files did not reach the remote". `ensure_uploaded` stamps its dataset in use (`remote_cache_gc.in_use_stamp`). Line-budgeted (`REMOTE_UPLOAD_BUDGET`). |
 | `remote_cache_gc.py` | Which cached datasets (`<staging>/datasets/<key>/`) `DatasetCache.gc` may evict when `auto_gc` is on and the cache is over `cache_budget_gb`. Least recently *used* first — "used" being the stamp `datasets/.aw_last_used/<key>` that `ensure_uploaded` touches as each run starts — and never a dataset stamped within `IN_USE_WINDOW_S` (seven days, longer than any walltime a scheduler grants), since another window's or another person's run may be reading it. The stamp sits beside the datasets, not inside one, so a pipeline listing its input never sees it. One listing script, timed by the remote's own clock; a listing that fails evicts nothing; a dataset kept over budget is named in the log. `plan_eviction` is the pure decision. |
@@ -13481,7 +13450,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_sweep.py` | What the next run of the same plate does about an exit the app did not survive: `sweep_orphaned_allocation` reads the job id a crashed run left in `<pidfile>.slurm` and cancels it when nobody owns it any more, and returns its verdict (`swept`, `owned`, `notmine`, `unknown`, `none`) because the caller acts on it. **A job is somebody's only while `squeue` still lists it alive**: one that has ended (purged, or in a terminal state) is `none` and its sidecar is removed, however fresh the heartbeat or sidecar beside it — a two-minute-old heartbeat alone used to refuse the Resume pressed right after Stop. A `squeue` that fails for any other reason is `unknown`, and a host without `squeue` falls back to the file ages alone. Of the live ones, a fresh heartbeat or a fresh sidecar is `owned`; otherwise the job is `scancel`led and the sweep waits up to `CANCEL_SETTLE_S` for the scheduler to stop listing it (a cancelled pipeline winds down for up to Slurm's `KillWait`), then removes its sidecar and heartbeat — still listed at the deadline is `owned`. `sweep_allocations` does the same for several run directories in one ssh. **Before a run empties, borrows or writes a directory, `claim_run_dirs` sweeps its own run directory and every earlier attempt's** (`earlier_attempt_dirs`: each attempt the journal recorded under the same settings, source images and host — the recorded `run_id`'s directory and the one holding its output) and returns the sentence refusing the run when any is `owned`, `notmine`, `unknown` or still shutting down after its cancel; an earlier attempt's job no app feeds any more is the same user's abandoned attempt, and is cancelled. A resume never shares its run directory with the attempt it resumes, but writes into that attempt's output, so the own-directory sweep alone let two pipelines write one output. `RemoteRunner._claim_run_dirs` is the entry point: the single-shot path calls it in `_prepare_run` before the re-attach and the incremental `rm -rf` (and raises the sentence), the batched path in `_start_driver` before anything is cleared (and logs it as the run's ERROR). A no-op on a host with no `compute_launcher`. `RemoteRunner._sweep_orphaned_allocation` delegates here. |
 | `sleep_guard.py` | Keeping the Mac awake for the length of a remote run: `SleepGuard` holds `caffeinate -i -s -w <app pid>` from the start of `PipelineRunner._run_pipeline_remote` to the end of its `finally`, so a sleeping client cannot stop the heartbeat, the batch hand-offs and the downloads the run depends on (the cluster reads that silence as a dead app). `-w` ends the assertion if the app dies without releasing it. A no-op off macOS; on a Mac without `caffeinate` the run log says the Mac may sleep. Qt-free. |
 | `remote_process.py` | The run as the GUI sees it: `_RemoteProcess` wraps the single ssh that runs the pipeline and `_BatchedRemoteProcess` the driver that holds one allocation and runs the plate batch by batch. Both present the `subprocess.Popen` surface `PipelineRunner` reads and tee every line to the `Fetcher`, so per-well downloads start the moment a well is announced done; `wait` flushes the `Fetcher` and `terminate`/`kill` cancel it, and every exit path ends the run heartbeat (`_UploadHeartbeat`, `remote_heartbeat.py`) exactly once. A batch whose driver vanished marks the run failed (1) without touching the caller's Stop; a stopped one reports 130. `tests/test_remote_process.py` drives the single-launch wrapper against a real child process. Line-budgeted (`REMOTE_PROCESS_BUDGET`). |
-| `remote_staging.py` | Turning the user's input into the per-well archives a remote run uploads: `stage_local_zips` detects the layout (one zip per well, well folders, loose TIFs, or a mix left by an interrupted zip-up), zips folders and loose images **into the input directory itself** so the next run finds zips and skips the zip-up (a folder's archived images are removed the moment its own zip is published, so that archive — which holds every image the folder had — is the user's copy of the well from then on), and returns a `ZippedInput`. The channel filter and an incremental run's split are both planned from each archive's member list before any image data is read, in every layout, and only archives that change are written — to a staging directory beside the input, never over the user's archives, including the ones the zip-up has just written. The success hook deletes a loose top-level image only once its name, size and CRC-32 match a member of a well archive, and never touches a well folder; a folder with no images, and a loose image in no well, are left where they are and named in the log as not uploaded. `ZippedInput.cleanup` removes every staging directory a run made (the filter's and the split's, joined), a failure part way through removes its own before the error propagates, and a filter that matches no image in any well is refused before anything moves, on both the ZIP and the MIXED path. Its `on_well_count` hook is told once, in every layout, the most well archives the run can hold, before anything is planned — what `remote_reservation.py` queues the run's node on. Line-budgeted (`REMOTE_STAGING_BUDGET`); `tests/test_remote_staging.py` pins the cleanup contract. |
+| `remote_staging.py` | Turning the user's per-well archives into what a remote run uploads: `stage_local_zips` takes one `<WELL>.zip` per well and nothing else — `_refuse_non_zip_input` raises `RuntimeError` naming any loose images at the top level, any well-named folder holding images with no archive beside it, or the absence of any archive, with the same `non_zip_input` verdict and `ZIP_LOOSE_FOLDER_REMEDY` sentence as the pipeline and the Analyze planner, before anything is planned or uploaded — and returns a `ZippedInput`. The user's archives are read-only here. The channel filter and an incremental run's split are both planned from each archive's member list before any image data is read, and only archives that change are written — to a staging directory beside the input, never over the user's archives; with neither, the `ZippedInput` points straight at the user's folder. `ZippedInput.cleanup` removes every staging directory a run made (the filter's and the split's, joined), a failure part way through removes its own before the error propagates, and a filter that matches no image in any well is refused before anything moves. Its `on_well_count` hook is told once the most well archives the run can hold, before anything is planned — what `remote_reservation.py` queues the run's node on. Line-budgeted (`REMOTE_STAGING_BUDGET`); `tests/test_remote_staging.py` pins the cleanup contract. |
 | `remote_reservation.py` | Asking the scheduler for the node before the plate is staged. Staging calls its `on_well_count` hook once it knows how many wells the run can hold — before it plans, filters or rewrites an archive — and `PipelineRunner._run_pipeline_remote` answers it with `RemoteRunner.reserve_allocation`, which queues a job (`remote_commands._compose_reservation_cmd`) in a directory of its own, `{remote_staging_dir}/reservations/<token>/`. The job records its pidfile and `$SLURM_JOB_ID` sidecar there, prints the `allocation granted` line, and waits for `command.sh` under the same heartbeat and deadline rules as the upload wait (`remote_wait_snippets._wait_for_handover_snippet`). When the run is decided, `Reservation.hand_over` links the run directory's `run.pid`, `.slurm` and `.srun-err` to the reservation's, writes the command file by a rename (`_handover_job_body` for a single-shot run, `_handover_driver_body` for the batch driver), and links the reservation's heartbeat to the run's — so Stop's `kill`, the `scancel` backstop, another session's claim on the run directory and the orphan sweep all find the job where they always have, and the stale-reservation sweep a later request runs (`STALE_RESERVATION_MIN`, read through that link with `find -L`) never removes the files of a run still going. `ReservedPopen` is the reservation's ssh as the run's `Popen`: the reservation reads its output from the start, into the run log until the hand-over and onto the run's reader after it. A run that needs no node (a cache hit, nothing to send, a refusal, a Stop) releases it: `srun` killed, the job `scancel`led by its own id, the directory removed. A Stop releases it from its own watcher (`_watch_stop`), so the hand-over can find it gone; the launch that would then ask for a fresh node checks the stop event first (`remote_runner._refuse_after_stop` before the single-shot request, `_start_driver` before `_launch_driver`) and the run ends as stopped, with nothing queued after the Stop. A job that ends before the run is ready is said as it ends (`EARLY_JOB_ENDED`, logged by the reader once the job's stream closes), and once the run is ready `Reservation.usable` says why it cannot take it and the run launches the ordinary way — unless the job exited `QUEUE_WAIT_EXIT`: the host's Max queue wait, timed from the early request, ran out, and asking again would start it over, so `usable` (and so `hand_over`) raises `QueueWaitSpent` with the wrapper's own words. The single-shot spawn lets it end the run ("Failed to run pipeline remotely: …"); `_BatchedRemoteProcess._start_driver` turns it into the run's failure line and exit `QUEUE_WAIT_EXIT`, before anything is uploaded. The walltime is fixed at the request, so a batched job asks for `batches_upper_bound` batches — every well the plate holds — since planning only removes wells. Its log lines (`early: requesting allocation via:`, `the run is handed to the node asked for early`, `giving back the node asked for early`, `EARLY_JOB_ENDED`) are what `ProgressTracker` turns into the `waiting-early` / `handed` / `early-ended` events. `tests/test_a_node_is_asked_for_before_staging.py` runs the job's shell for real against `tests/_fake_remote.py`; `tests/test_a_remote_run_on_a_standin_cluster.py` checks that the batch driver is handed to it on a stand-in Slurm. |
 | `remote_heartbeat.py` | `_UploadHeartbeat`: the daemon thread that touches a remote run's heartbeat file every `UPLOAD_HEARTBEAT_S` for as long as this app owns the run — for the whole run, not only its upload, because the orphan sweep and the batch driver both read it. The shell on the remote that judges it is `remote_wait_snippets.py`. Each beat's code is read: the second miss in a row (`WARN_AFTER_FAILURES`) is a WARNING and the third (`ERROR_AFTER_FAILURES`) an ERROR naming the wall-clock time the host will give the node back (`UPLOAD_HEARTBEAT_STALE_S` after the last beat that landed) and, for a batched run, suspend the batch in flight (`MID_BATCH_HEARTBEAT_STALE_S`); a recovery says so. Both lines name ssh's exit code and the last line it printed (for a timeout, `ssh_control`'s "the remote did not answer within 75s: touch …"), so a timeout and a refused or reset connection read differently. A beat may take `BEAT_TIMEOUT_S` (75 s) to land rather than the 30 s beat interval: on a busy shared filesystem a `touch` can stall for longer than that while ssh answers at once, and the beats run one at a time, so the allowance cannot queue them — it only has to keep `UPLOAD_HEARTBEAT_S + BEAT_TIMEOUT_S` under `UPLOAD_HEARTBEAT_STALE_S`. Any beat that took `SLOW_BEAT_S` (10 s) or longer is logged with its duration, landed or failed, so a run on a stalling filesystem records how long the stalls were. The run's heartbeat is `<run_dir>/.aw_beat/alive` (`remote_run_id.UPLOAD_HEARTBEAT`, in the folder `HEARTBEAT_DIR`), not a file in the run directory itself, where batches are staged, renamed and deleted while the pipeline runs; the first beat creates the folder, and the remote's probe file for "now" lands beside the heartbeat in it. The readers that decide whether a run directory still has an owner — `remote_sweep._target_script` and `remote_reuse._REMOVE_IF_IDLE` — also read `LEGACY_UPLOAD_HEARTBEAT` (`<run_dir>/.aw_upload_alive`, where an older app beats), so a session still on an older app is never taken for abandoned. A job launched by an older app and re-attached by this one reads only the old file, so it sees silence. `tests/test_a_slow_heartbeat_is_measured_and_tolerated.py`. Re-exported from `remote_process.py`. |
 | `remote_handoff.py` | Handing a batch to the batch driver and proving it arrived: `raise_flag` (a `touch` whose code is read, with 124 / 255 treated as unknown and settled by the driver's own word), `hand_off_and_wait`, and `chase_handoff` for a waiting driver that never started its batch. `HandoffWatch` follows the driver's `waiting for` / `starting` lines. |
@@ -13494,7 +13463,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_listing.py` | Asking the host what files it holds, with three answers rather than two: a list of paths, an empty list, or `None` when the listing itself failed (ssh exited non-zero, timed out, or could not start). `list_remote_glob` (the Fetcher's `_list_remote_glob`, the retry's `remote_csv.list_remote_csvs`) and `list_completed_wells` (the verifier's `_list_completed_wells_in`) expand the glob in remote bash and test each match with `[ -e ]`, so a genuinely empty directory exits 0 and the exit status carries only the transport's verdict. Every caller treats `None` as "keep everything and fail visibly" (see *A failed listing is unknown, never empty*). |
 | `remote_fetch_verify.py` | The per-well question verification and the end-of-run retry both ask (`well_shortfall`), the pre-run fingerprint it compares against (`snapshot_local_artifacts`, `artifact_changed`, re-exported by `remote_fetch`), which wells a run undertook to rewrite (`wells_to_replace`) and which of them the completeness record calls partial (`partial_wells`). |
 | `remote_fetch_place.py` | The Fetcher's second thread. For an incremental run, a downloaded well's merge into the local output — partial CSV into the `.csv.gz`, partial `<well>_out.zip` into the local one — and everything after it (marking the well fetched, deleting its remote copy) run on `Placer`, not on the transfer thread, so one large well's merge does not hold every later download and remote copy behind it. The queue is bounded (`MAX_PENDING`), since each waiting well holds its download in the local transit directory; a remote copy is still deleted only after its well is in place. `Fetcher.flush_and_join` drains it before the run is reported done. A well with no local CSV or `<well>_out.zip` — one new to this run — has nothing to merge with, so its download is moved into place unchanged (`place_whole`, and `pipeline.io._place_fetched_csv` for the CSV) rather than parsed and rewritten. **A Stop part-way through a download leaves nothing that reads as finished.** The end-of-run retry pulls into the output folder with `--partial-dir=.allwell-partial`, so a cut-off transfer is never under the real name; and a truncated file an earlier build left there (it used `--partial`) is treated as absent wherever it is read: the retry re-pulls a zip that fails `_zip_is_complete` and a CSV that fails `util.csv_gz.csv_is_whole`, `_materialize_incremental` sets an unreadable local zip aside as `.<name>.unreadable` (kept, never deleted), records the loss in `errors/<WELL>_local_zip_unreadable.txt` with the `--force` remedy and in `_RemoteRun.fetch_shortfalls`, so verification fails the run, and then places the download — the earlier fields' images are not in it, and the well's CSV still lists them as done — `merge_images_into_zip` writes a whole archive rather than re-reading a corrupt one, and `merge_fetched_csvs` sets an unreadable local `.csv.gz` aside as `.<name>.truncated` (kept, never deleted) and rebuilds the well's CSV from its readable rows plus the download (`_merge_onto_cut_csv`) — a gzip error being the one failure that means a cut-off copy, where an `OSError` still leaves the local file untouched. The readable rows matter because an incremental download holds only the new field groups: placing it alone dropped every earlier group's rows, and the well's done-set, which also reads its `<well>_out.zip`, never computed them again. Only whole groups are kept (`_salvage_cut_csv`): the group the cut fell in is dropped rather than kept short, and unless the download carries that group the loss is written to `errors/<WELL>_local_csv_cut_short.txt` beside the run's own failure records, with an `Exception type:` header and the `--force` remedy, as well as logged. **A merge that fails keeps the well.** `merge_fetched_csvs` reports every partial it could not merge or place (its `failed` list), `merge_fetched_csv_dir` then keeps the transit directory holding the fetched rows, and `Fetcher._place` neither merges the zip (its images beside a CSV without their rows would read as done), nor marks the well fetched, nor deletes its remote copy; the shortfall fails verification, and the end-of-run retry does not try to repair an incremental well, since pulling its partials over the merged local copy would discard every earlier field. `tests/test_a_slow_merge_does_not_hold_the_next_download.py` drives the real worker loop with a merge that blocks. |
-| `remote_run_state.py` | `_RemoteRun`, the record one remote run carries from staging through fetch, and the two enums in it the user chooses — `LocalInputMode` and `OutputFilter`. Shared by the runner, the process wrappers and the `Fetcher`, so it lives in none of them and none has to import another to reach it. `owns_remote_job` is set only once the run has launched the ssh that asks for its own allocation (`RemoteRunner._start_ssh`'s callers, `_BatchedRemoteProcess._start_driver`); until then `<pidfile>` and `<pidfile>.slurm` hold whatever the last run of the plate wrote — another session's, when `run_id` collides — so `close_remote_job` and `RemoteRunner.cancel` do nothing for a run that never launched. |
+| `remote_run_state.py` | `_RemoteRun`, the record one remote run carries from staging through fetch, and the two enums in it — `LocalInputMode`, whose one member is `ZIP` (the only input layout; kept as a type because a run's record names its layout, and never persisted, so there is no earlier value to read back), and `OutputFilter`, which the user chooses. Shared by the runner, the process wrappers and the `Fetcher`, so it lives in none of them and none has to import another to reach it. `owns_remote_job` is set only once the run has launched the ssh that asks for its own allocation (`RemoteRunner._start_ssh`'s callers, `_BatchedRemoteProcess._start_driver`); until then `<pidfile>` and `<pidfile>.slurm` hold whatever the last run of the plate wrote — another session's, when `run_id` collides — so `close_remote_job` and `RemoteRunner.cancel` do nothing for a run that never launched. |
 | `remote_batch_staging.py` | Keeping a retry's staged batch directories clean (what it reuses from the remote is `remote_batch_resume.py`). `prune_staged` empties a kept `b<i>` / `bg/` of every entry not in the batch about to be uploaded and logs how many of the batch's wells were already there, falling back to `rm -rf` of the directory on any answer but a clean listing. The reuse is safe because the run directory is keyed on the staged archives' fingerprint; the *Batched mode* paragraph in the `remote_runner.py` row says why. |
 | `remote_batch_resume.py` | What a batched run takes from the remote **before** it uploads or computes anything — a restart never sends what the host already holds. After the local-completion filter, `take_from_remote` lists this run's own directory and every earlier attempt's that the run journal recorded under the same settings, source images and host (`run_journal.stored_remote_addresses`; an earlier attempt matters because every resume is incremental, so its staged archives — and so its run id and directory — differ from the attempt it resumes). A well finished there only when one of those output directories holds its `<well>_out.zip` **and** its completion seal `<out>/.aw_complete/<WELL>.json` (`pipeline.run_report.seal_well_complete`): the archive alone proves nothing, because a well that was suspended part way — by the user, or by the mid-batch watchdog after the app died — or that failed some of its groups writes its CSV and out.zip from the groups it finished and prints `— done.` like a whole one. An unsealed archive is listed as `part_way`, logged by name, and the well is uploaded and run again; in a re-attached output directory the checkpoints its suspended attempt kept carry its finished groups over, and its new output replaces the partial one. An output directory written before seals existed reads the same way, which costs recomputed wells, never stale ones (`tests/test_a_batched_restart_reuses_the_remote.py::test_a_well_the_remote_left_part_way_is_run_again_not_adopted`). A sealed well is, unless the run is forced, not uploaded or run: `adopt_finished` hard-links (or copies) its output files and its seal into this run's output directory and `announce_adopted` gives the progress count its completion line at once, so the plate shows its state before anything else happens, and `download_adopted` hands it to the Fetcher only once batch 1 is handed to the job (or as the run winds down, when it launched nothing): the scheduler gets its node request and first batch before the earlier attempt's output is drained, which then fills the queue wait and the compute. It downloads and is deleted from the remote like any other well. An archive `stage_leftovers` places logs its own `↑ <well>.zip already on the remote` line, which paints it uploaded. Every other `<well>.zip` under `in/`, a `b<i>/`, `bg/` or an earlier input directory is put into the directory this run uploads it to by `stage_leftovers` — its batch's `b<i>`, or `bg/` for an empty-well blank, which a resume in a new run directory otherwise sent again whole — moved within this run's directory, linked out of an earlier one, which is never emptied — before `_start_driver` clears `in/`, and rsync's quick check then sends only what differs. Before any of that, `reattach_output_dir` (called in `_BatchedRemoteProcess.__init__`) picks the output directory: the newest journal address under the same settings — current or earlier-build argv digest — images and host that the remote still has, unless the run is forced. The pipeline keys a well's part-way checkpoints on its output directory, so only there does a well the earlier attempt left half-finished continue rather than start again; the run is then `reattached`, its own run directory removed at cleanup and the borrowed one left, as on the single-shot path, and the borrowed run directory's archives are moved rather than linked. **The blank's path moves with the run directory, and it is part of the settings digest** (`background_dir` is in `KEYED_ON`), so a resume's digest differed from the attempt it resumed and the pipeline's `prune_superseded_staging` deleted that attempt's checkpoints as another configuration's. `background_aliases` therefore passes `--background_dir_alias=<root>/bg` for every earlier attempt's run directory — from `run_journal.recorded_remote_attempts`, which, unlike `stored_remote_addresses`, keeps apart two attempts that wrote into one output directory, since each kept its blank in its own run directory — and for the re-attached output directory's root. `util.settings_digest.legacy_settings_digests` adds the digest computed with each alias in place of `background_dir`, so the prune keeps those directories, `_staging_dir_for` takes them over and the checkpoints inside are accepted; nothing else is widened. `_blank_argv` gives the pre-run checkpoint report the same arguments. That report (`report_resumable_checkpoints`, for a re-attached run) lists the checkpoint folders in the scratch the journal recorded, else the host's scratch folder, else the re-attached output folder itself, which is the pipeline's `--scratch_fallback_dir` when no scratch folder is set; a Slurm job that took its node's own disk kept them there, out of the login node's sight, and the line says so when it finds none. `tests/test_a_resume_keeps_checkpoints_when_the_blank_moves.py`. The decisions come from the listing, which is the only thing that knows a file is still there; the previous attempt's per-well journal states (`run_journal.previous_well_states`) are read beside it to name, in the log, each well the journal recorded as finished, uploaded or downloaded that is nonetheless being redone, and why. Best-effort throughout: a listing or link that fails costs an upload, never a result. `tests/test_a_batched_restart_reuses_the_remote.py` drives the batch loop against a local directory standing in for the host. |
 | `slurm_batch_script.py` | Turning a JupyterHub profile into an `srun` launcher the way the cluster does: `launcher_from_batch_script` renders the spawner's job template (Jinja-style `{{ var }}` / `{% if var %}` or `{var}`, each `req_<name>` as `<name>`) and keeps the `#SBATCH` resource options only — partition, CPUs, memory, time, GPUs, constraint and their kin — because `--output`, `--export`, `--chdir` and `--ntasks` describe JupyterHub's batch job and would break a step the app runs. `directive_flags` sorts one directive's words into flags and stray words. `single_task` folds a task count into the CPU count: a template that asks for cores the batch way (`#SBATCH -n {nprocs}`) gives a batch job that many CPUs, while `-n` on the app's `srun` would start the pipeline that many times, so the step asks for one task with *tasks × cpus-per-task* CPUs — dropping it left the step one CPU and the pipeline one worker — and *tasks × gpus-per-task* GPUs (`remote_srun_retry.gpus_for_tasks`). A resource option whose whole value is a variable the profile leaves unset is skipped quietly (the profile asks for no such resource); one with more around the variable is reported. A stray word, or a resource line that needs a value the profile does not set, is reported in `ScriptLauncher.dropped`; nothing is appended to a launcher where `srun` would take it for the program. |
@@ -13506,7 +13475,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `remote_wire.py` | The remote client's line vocabulary: `TRANSIENT_PREFIX` / `WELL_XFER_PREFIX` (live-state lines `ProgressTracker` routes to the status line and never logs), the transfer cadences, the exhausted-retry advice, and the `Well X — done.` / mode-banner patterns the `Fetcher` triggers on. Stdlib-only and importing nothing else of the remote client's, so every stage reads it without a cycle. |
 | `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` (in `remote_fetch.py`) pulls each well's `<well>_out.zip` + CSVs back. The runner orchestrates; turning the user's input into the archives it uploads is `remote_staging.py`, getting them onto the host once is `remote_upload.py`, the run as a process the GUI reads and stops is `remote_process.py`, bringing output home and proving it arrived is `remote_fetch.py`, the scheduler jobs a run holds — closing one, and sweeping one a crashed run left — are `remote_jobs.py`, the record a run carries is `remote_run_state.py`, and the lines its stages print and parse are `remote_wire.py`. **It pulls `pipeline_info.json` too, as early as the remote has one**, so the plate can be opened in Review while the run is still going: per-well CSVs arrive as each well finishes, and without the sidecar there is nothing to interpret them with — no filename schema, no channel tokens, no `available_timepoints` / `available_fovs`, so the viewer falls back to guessing channels from CSV column names. Nothing on stdout announces that file, so `Fetcher._sidecar_loop` polls for it on its own thread every `SIDECAR_POLL_S` rather than waiting on a marker; the first attempt waits out an interval, because the thread starts in the same breath as the ssh that launches the pipeline and at that instant the remote cannot have written it. The window is hours (`SIDECAR_POLL_MAX_S`) since what it waits out is the scheduler queue, not the pipeline's start-up. Two rules keep it from fighting the other writers of that path. It **never overwrites**: a sidecar already present locally belongs to a previous run of this dataset and carries cell-gating thresholds, sample definitions, ratios, notes and the `run_report`, none of which the remote's copy has. And what it installs is **stamped `provisional`**, because a sidecar written by a job still running describes only the input that job was handed — one batch's split, in batched mode — so its `available_*` are short of the plate and there is no `run_report` at all; `verify_and_cleanup` replaces the file wholesale at the end and the mark goes with it, while a run that never got there leaves the mark in place, which is the honest outcome. The poll is off by default (`poll_sidecar`) so a `Fetcher` built to exercise one method in a test never reaches the network on a timer; both production call sites enable it and `tests/test_remote_midrun_sidecar.py` fails if a third one forgets. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/11/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive; 11 is *error in file I/O*, what a fault on the local end of a transfer looks like). Every write the client itself makes on a user volume — staging copies off the input dir, `Fetcher._materialize`, the `pipeline_info.json` rewrite — goes through `util.retry_io.retry_io` for the same reason (§6.5). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Which conda env the pipeline runs in** is `_conda_env_selector`'s answer, resolved once per runner from the host's `remote_python` and used by both the argv builder and the shell composer so they cannot disagree: left at its default the field is a *placeholder* and the env is resolved by name (`conda run -n allwell`), which is what makes a host with a pre-existing system conda work at all; set by the user to an `<env>/bin/python` it selects that prefix (`conda run -p <env>`). `_conda_env_guard` then verifies the env exists on the remote — inside the scheduler allocation when there is one, since the compute node is where it has to exist — and aborts with a `[remote]`-prefixed message naming the host, conda's base, the envs it can see, and the fix. Without it the run reached `conda run` and died on conda's bare `EnvironmentLocationNotFound`, which in a scrolling log is indistinguishable from an error the pipeline raised. A cache hit execs `true` and skips the check. **"Does the env exist" is conda's own question** — a prefix is an environment iff it holds `conda-meta/history` — and the shell that answers it, `CONDA_ENV_SHELL_HELPERS`, is shared with `services/remote_bootstrap.py` so the runner's check and the bootstrap's create-or-skip decision cannot disagree. See §6.6 for why that mattered. **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. **An `srun` launcher is wrapped** by `services/remote_srun_retry.wrap_srun_launch`, from `remote_commands._launch`, which both composers end in. On a cluster that powers idle nodes down, Slurm can grant a sleeping node and boot it; `srun` waits only as long as the cluster's `ResumeTimeout`, then prints `Something is wrong with the boot of the nodes`, gives the allocation back and exits (`NODE_FAIL`), and nothing in Slurm retries an `srun` step. The wrapper, a POSIX `sh` loop on the login node, asks `sinfo` before each attempt and passes `--exclude` for every node of the launcher's partition that is not powered on (`AWAKE_STATES`: `idle`, `mix`, `alloc`, `comp`), when at least one is. Before launching with that exclusion it asks Slurm, with `srun --test-only` (which queues nothing), whether the request could run on those nodes at all; when it could not — the awake nodes are the wrong instance type for a `--constraint`, say — it drops the exclusion and prints `no powered-on node matches this request — Slurm will start one`, rather than letting the first real `srun` fail with `Requested node configuration is not available`. A request the test passes but the real launch still finds unsatisfiable (a node's state changed in between) is retried once without the exclusion. A refusal with no exclusion left to drop is Slurm saying that no node it could ever give matches the scheduler command — a profile asking for more CPUs, memory, GPUs or a node type than the partition has — and is not retried, since the same words would be refused again: the wrapper prints `NO_NODE_FITS` with the command as sent, then the partition's node shapes as `sinfo -N -o '%c %m %f %G' | sort | uniq -c` (count, CPUs, memory, features, GPUs), so the value that does not fit can be read off the log, and `services.run_evidence.RunEvidence` turns the refusal into the run's failure headline (`could not start: Slurm has no node that matches the scheduler command`) unless a later grant shows a retry got past it. A job queued before staging that Slurm refused says the scheduler's line when the run is handed over (`Reservation.usable`), and the run then asks once more the ordinary way, in case only the early request's longer `--time` was the problem. **Awake is not free, though.** The preference holds only while some awake node is `idle` (`FREE_STATES`); otherwise the exclusion is dropped and the log says what will happen, by what the listing shows: `no free powered-on node in <partition> — Slurm will boot one` when some node is powered down (a `~`, `#`, `%` or `!` state suffix), and `every powered-on node in <partition> is busy and none is powered down to boot — the job waits in the queue for one to free` on a cluster without power saving, where nothing will boot. Without that, a partition whose awake nodes were all running other jobs kept the request queued behind them — for as long as they ran — with every powered-down node, hundreds on an autoscaling cluster, ruled out though one boots in minutes. `mix` does not count as free: it says some of a node's CPUs are allocated and nothing about its memory or GPUs. A second app instance asking for the node shape the first had just been given found that node `mix` with no room left, excluded every powered-down node on the strength of it, and waited for the first run to end. **An awake node that fits may only fit later**, so the same `--test-only` call is read for the start it reports (run under `SLURM_TIME_FORMAT=standard`, converted with GNU `date -d`): further away than `START_SLACK_S` (120 s), the awake nodes that fit are busy, the exclusion is dropped, and the log says `the powered-on nodes that fit this request are busy until about <time> — letting Slurm boot one instead`. A login node whose `date` cannot read the time keeps the preference. **The backstop is a pending watchdog.** While the exclusion is in force, a background subshell beside `srun` waits `PENDING_FALLBACK_S` (180 s); if `srun` has printed `queued and waiting` and not `has been allocated`, and `squeue` still lists that job pending, it `scancel`s the job (or `kill -TERM`s srun where there is no `scancel`), and the loop asks once more without the exclusion, printing `still queued for a powered-on node after 180 s — cancelled it and asking again without excluding the powered-down ones` and a `requesting allocation via:` line. A job cancelled while pending has written no `.slurm` sidecar, which is written from inside the allocation. The watchdog and the start-time read cost about 1,100 characters of the packed launch command, which `tests/test_the_launch_command_survives_the_command_line.py` measures at 6,294 for the whole Windows command line against the 8,191 limit. On a boot failure the wrapper adds the node `srun` named to the exclusion and launches again, up to `SRUN_BOOT_RETRIES` (3) times, then names every failed node. Each retry prints a `[remote] scheduler: requesting allocation via:` line, which `ProgressTracker` already reads as "waiting", so the progress view returns to its queue clock. The user's own `--exclude` / `-x` is merged in rather than passed twice, because Slurm keeps only the last. The loop cannot `exec` srun, so each attempt records srun's own PID through `sh -c 'echo $$ > pidfile; exec …'`, keeping the `kill -TERM $(cat pidfile)` cancel channel pointed at srun. The launch's output is copied to `<pidfile>.srun-err` with `tee` and only lines beginning `srun:` are searched. It is `tee` and not an `awk` filter because `mawk`, the default `awk` on Debian and Ubuntu login nodes, fills its whole input buffer before handling a line: a filter held the job's first lines back until more output arrived, and a run that had just been allocated a node sat silent (`test_the_job_s_first_line_arrives_before_the_job_ends` measures the delay). **A launcher with a loose word is refused**: `srun` stops reading options at the first word that is not one, so a word such as an instance type left after `--mem=60G` becomes the program, and the job fails with `execve(): <word>: No such file or directory` only once a node starts. `stray_launcher_words` finds a non-option word that follows an option written with `=` or another such word (a word after a bare option may be its value and is left alone); the Remotes dialog refuses to save such a launcher, and `remote_commands._launch` refuses to launch one, since a saved host is never re-checked by the dialog. Any other launcher is exec'd unwrapped as before. `tests/test_srun_boot_retry.py` runs the wrapper under the system `sh` with stand-in `srun` and `sinfo`, and checks that the composed job script reaches `srun` byte for byte as it reaches an unwrapped launcher. Empty `compute_launcher` = direct-on-host execution (the default). **A queue wait is announced, timed, and named**, because it is otherwise indistinguishable from a hang: the upload finishes and the log stops. `_scheduler_handoff_lines` writes the hand-off and is called from **every** launch path — the batched one composed the same launcher but announced nothing, so a batched run fell silent at the exact moment it began waiting. `ProgressTracker` turns those lines, plus the scheduler's own `srun: job N queued and waiting for resources` / `has been allocated resources`, into a `sched` event, and `AnalyzeProgressMixin._on_scheduler` runs a 1-Hz clock reading *Waiting for the scheduler — 4m12s (job 4812345)* with a log breadcrumb every two minutes repeating the elapsed time, the job id and the **request** (an unsatisfiable one — a partition that does not exist, a `--gres` the cluster cannot honour — is the usual cause of an indefinite queue). The job id comes from the scheduler's stderr rather than the `.slurm` sidecar because the sidecar is written from *inside* the allocation and so does not exist while the job is pending; a site whose scheduler words those lines differently still gets the wait announced and timed off the app's own lines, and loses only the id. The wait is what finally retracts the plate-wide `Transferring… N%` label: `set_transfer(None)` otherwise fires only on a *compute* event, which by definition has not happened while the job is queued, which is why the status sat on `Transferring… 100%` for the whole wait. **A remote run does not write to the client's home volume.** Every downloaded `<well>_out.zip` used to be staged through `~/.allwell/scratch` and then materialised into the output directory, so each byte of a plate's results crossed two filesystems and the first of them was one the run had no reason to touch — a full home volume stopped runs whose own input and output volumes had room, which is the `ENOSPC` users hit. `_transit_dir` puts a file in transit beside the volume it is going to (or, for the upload-side archive rewrites, the one it came from): a dot-prefixed `.allwell-transit`, so every dataset scan in the app skips it, removed as soon as the file it held is in place, and swept by `sweep_stale_scratch(also=…)` when a hard quit leaks one. This does not re-create what `pipeline.io.scratch_base_for` warns about — that warning is about the *pipeline's* per-FOV working set, tens of thousands of create/fsync/rename operations from every worker, where this is one file per well written once and moved once, onto a volume that already receives exactly those bytes by copy. What changes is that the move becomes a same-volume rename and the home volume is off the path. A volume that refuses the directory falls back to the scratch base and **says so**, once per volume; falling back silently would be the original failure with the explanation removed. **The pipeline's scratch on the remote is a per-host setting**, `remote_scratch_dir`, exported as `ALLWELL_SCRATCH_DIR` inside both composed commands (single-shot and batch driver) because that is what `pipeline.io.scratch_base_for` reads; `services/pipeline_runner` sets the same variable in the GUI's own environment, which reaches a local subprocess and nothing else. Empty leaves the remote on its `~/.allwell/scratch`, which on a cluster is the home quota — the worst available volume for a working set of several uncompressed images per field. It is the one path in the file deliberately **not** run through `_remote_quote`: the values that matter (`$TMPDIR`, `$SLURM_TMPDIR`, `/scratch/$USER`) need remote-side expansion, so it is emitted in double quotes with a leading `~` rewritten to `$HOME` first, and a value carrying shell syntax is refused rather than composed into a command that would fail on the remote naming nothing. The `remotes.toml` schema is the live contract in `services/remote_config.py`. **The end-of-run completeness check runs client-side, once, after the fetch.** `_build_remote_argv` appends `--no_run_check` to every remote launch and `verify_and_cleanup` calls `run_client_side_completeness_check` instead, immediately after `refresh_pipeline_info_available_from_outputs` (which rewrites the very `available_*` fields a check would otherwise read stale) and before the `ok` gate, since a run that came back short is exactly the one whose record is worth having. Three reasons it cannot run remotely, and they compound: an incremental run's remote output dir holds only the uploaded split, so a record written there inventories the wrong tree; the fetched sidecar overwrites the local one, so the record would be destroyed on arrival; and a batched run is N separate pipeline launches, each of which would describe its own slice as if it were the plate. Running on the client also answers a strictly better question — *did it get here*, rather than *did the remote produce it*. Whatever `run_check` the fetch brought back is **dropped before the local check runs**: the remote's suppression writes the same "turned off" stub a user's own `--no_run_check` would, and that stub surviving would tell a user they had turned the check off when they had not. The two outcomes are therefore an honest record or none at all, and none reads as "not checked", which is what happened. **Empty-well correction reaches every batch from one upload.** The pipeline builds its `empty_well` background and flat-field fields from whatever blank wells are in the directory it is pointed at, at the moment it starts — and batched mode stages one batch at a time, so a blank left in the ordinary slicing corrected the batch it landed in and nothing else. Wells sort alphabetically and blanks are conventionally H12/G12, so in practice it was the last batch, and every earlier one produced numbers with the background left in whole. Nothing marked them: `_empty_well_field` returns `None` for a channel with no model and the frame passes through untouched, so the output is bit-for-bit the raw input and indistinguishable from a corrected well. A blank is a full well of uncompressed frames — the same size as any other — so it cannot be copied into each batch. `_empty_well_blanks` reads the run's own argv for `--background_well` plus an `empty_well` mode, holds those archives out of the batch slicing, and uploads them **once** to `runs/<run_id>/bg/`, outside the staging the driver's `rm -rf in && mv b<i> in` replaces — after the driver is launched (`_upload_blanks`, the last step of `_start_driver`), so the node request is not held behind a whole well's transfer; the driver reads `bg/` only once batch 1 is handed over. The pipeline's `--background_dir` names that directory, so every batch builds the same reference; the driver hard-links each blank that still needs processing into the final batch (`ln`, one filesystem, no bytes) so it is run once for its own output — named one by one rather than globbing `bg/`, since on a re-run some blanks are references only and linking those back in would reprocess a well the user's own re-run declined. **The staging filters do not touch a blank at all**: `stage_local_zips` takes the background wells and `_plan_staging` stages them whole, the way a `--force_wells` well bypasses the incremental diff. Without that, an incremental re-run finds every one of the blank's FOVs already processed, drops it, and starves the whole plate of the correction — and a blank with *some* new fields would be thinned to those, so the field would be estimated from a fraction of the reference while the log reported it built. When the only wells left to run are blanks, they are treated as ordinary wells instead: an empty batch would be uploaded to a directory the driver cannot then `mv`. **And a correction that cannot be built stops the run.** `_require_empty_well_models` raises when `empty_well` was requested with named wells and no model came back, naming the wells and the directory searched — an `INFO` line reading `(none found)` was the only previous signal, for a run that had explicitly asked for the correction. **Rewriting a well archive is a cost decision, and it says why.** The upload planner (`_plan_staging`) reads each archive's central directory — member names *and* compressed sizes, one read — and rewrites an archive only when the channel filter (or an incremental run's already-done FOV-groups) drops members worth at least `remote_config.REWRITE_MIN_SAVING` of its bytes. Rewriting costs a full local read and write before a byte is uploaded and buys only a smaller transfer, so shedding two small frames from a multi-gigabyte well is a bad trade — the remote ignores channels it was not asked for anyway, so sending them costs bandwidth and nothing else. Either way the plan line names the count, the fraction and **the reason**: the channel token parsed out of the dropped members' own names (or the bare filename, when the name does not decompose under the run's schema, since a guessed token is worse than none), or the FOV-group count for an incremental drop. Previously the log said only *that* it was rewriting, which left "every channel is selected, so why is it copying my plate?" answerable from no line the run emits. An archive from which nothing is dropped is passed through untouched and logs nothing — `keep is None` holds exactly when nothing was dropped, which is the invariant every diagnosis of this path rests on. **What counts as an image is one question with one answer**, `util/image_exts.GROUP_IMAGE_EXTS`, read by both `process_microscopy`'s scanners and this planner: they had drifted to `.tif`/`.tiff` here against `.tif`/`.tiff`/`.png`/`.jpg`/`.jpeg` there, so a `.png` member was invisible to the planner and was silently dropped from any archive rewritten for another reason — input the remote would have processed. **Batched mode** (`remote_batch_size > 0` → `_BatchedRemoteProcess`) uploads and runs the plate in slices so peak remote disk is one batch of input plus about one well of output. **One allocation serves every batch.** Each batch used to compose its own `srun`, so a scheduler-backed host queued once per batch and handed the node back in between — an allocation is the expensive thing to obtain and the cheap thing to keep. `_batch_driver_snippet` builds a loop that stays inside one job: it waits for each batch's `BATCH_READY` file, swaps that batch's staged directory into place, runs the pipeline, writes the exit code into `BATCH_DONE` and prints `BATCH_DONE_MARKER`, which the local reader thread consumes (it never reaches the log — `ProgressTracker` has no reason to see the handshake). **The swap is the barrier.** Batched input now lives in the run directory rather than the shared dataset cache, batch *i* is uploaded to `b<i>` beside it, and the driver does `rm -rf in && mv b<i> in` — atomic within one filesystem, so a batch's pipeline sees exactly its own zips. The old shared directory relied on the Fetcher having deleted the previous batch's input in time and nothing waited for it, which is what `ProgressTracker.well_repeats` counts. **A retry keeps what an earlier attempt staged.** The driver is launched before batch 1 is uploaded, so a node that then fails to boot (`srun: error: Nodes … are still not ready` / `Something is wrong with the boot of the nodes`) leaves batch 1's wells sitting in `b1` untouched. `_start_driver` clears only `in/` — a batch the driver had already swapped in and may have half-processed — and keeps every `b<i>` and `bg/`. That is safe because `run_id` is keyed on the name, size and mtime of every staged archive (`fingerprint_archives`), so a file of a given name in the run directory is a whole or partial copy of the archive this run would send under that name: rsync's quick check skips the whole ones and `--partial` resumes the rest. What a kept directory can still hold is a well that belongs to a different batch now, because the local-completion filter can shift the slicing between attempts; `services/remote_batch_staging.prune_staged` runs `find … ! -name <each kept zip> -exec rm -rf {} + -o -print` immediately before each upload, so the driver's `mv` still hands the pipeline exactly one batch, logs how many of the batch's wells were already there, and falls back to `rm -rf` of the whole directory on any answer other than a clean listing — a re-send costs time, a stray well in a batch costs a duplicate result. `tests/test_a_retry_keeps_the_staged_batches.py` drives attempt, dead driver, attempt against a local directory standing in for the remote, running the remote commands under `bash`. **A failed batch keeps the node**: the loop carries on, the run's own code carries the first failure, and an end-of-run tally names which batches failed. **The stream ending is the only signal that the run is over.** Stop reaches the batched wrapper through `signal_subprocess`, which reads `proc.pid`; with one driver held for the whole run that is always a real pid, so the process group is killed and `terminate()` — the method that sets the stop flag and cancels the Fetcher — never runs. The reader thread therefore treats EOF with batches still unreported as the run being over: it sets the flag and cancels the Fetcher itself, which is what gets the worker out of the rsync it is sitting in (`upload_subset` watches that flag). A walltime expiry or a node failure arrives the same way and is reported differently, since one is the user's doing and the other is not. Two things do end it, both meaning the app is gone rather than slow — a heartbeat that stopped advancing and a batch that never arrived — and each batch is additionally wrapped in `timeout` at the budget the operator's original `--time` set for one batch, so one wedged well cannot burn the whole run's walltime. That `--time` is scaled by the batch count *plus one* (`remote_config.scale_launcher_time`, clamped at `MAX_HELD_ALLOCATION_S`) because it sized a single launch and now has to cover the plate: the node is also held through every upload after the first, since the driver waits for each batch inside the allocation, so budgeting only the compute puts the expiry somewhere in the last batch of any run whose transfers are not free. The extra batch's budget is a guess and the log line says so. A launcher that sets no `--time` is left alone, since inventing a number is worse than inheriting the cluster's. Each batch is still its own pipeline invocation and so emits its own "N well(s) to process" banner for its own slice; `_run_batches` therefore injects one synthetic `Zip mode: <N> wells — batched` line ahead of batch 1, and `ProgressTracker` locks the run's denominator onto the first banner it sees. That `<N>` is the whole **staged** plate, including the wells the batched path skips because their per-well CSV is already complete locally — each skipped well gets its own `SKIP well …` marker on the same stream, so it is counted and painted on the plate map instead of leaving the run reporting 100% against a denominator smaller than the plate the user staged. **The allocation is asked for before the plate is uploaded.** A queue wait and a transfer are independent waits, and spending them end to end adds the whole queue to every run; requested first, they overlap. The job `srun` places starts the moment a node is granted, which may be long before the last byte lands, so the composed command blocks on an `UPLOAD_SENTINEL` file written into the run directory once rsync returns — announcing both edges of that wait, because a granted node waiting on bytes looks exactly like a hung one. `UPLOAD_WAIT_TIMEOUT_S` bounds it, since the node is idle and billed throughout; a failed upload cancels the allocation immediately rather than leaving it to time out. That deadline is for an uploader that is alive but wedged — the case that actually happens is the app being *killed*, and for that the uploader beats `UPLOAD_HEARTBEAT` every `UPLOAD_HEARTBEAT_S` (a daemon thread, not a per-file hook: rsync can spend minutes inside one large archive). A beat that stops advancing frees the node within `UPLOAD_HEARTBEAT_STALE_S` however long the upload legitimately needed. The file is touched over ssh, so the mtime the job compares against its own `date` is the remote clock and no skew between two machines is being measured. **Crash recovery closes the other half.** `close_remote_job` covers every exit the app survives — clean quit, finished run, Stop — because it reads the job id from memory; a SIGKILL, segfault or power cut runs none of it. The id is on the shared filesystem the whole time and `run_id` is deterministic in (input, arguments), so `remote_jobs.sweep_orphaned_allocation` lets the *next* run of the same plate find and cancel exactly the job the crashed one left. That determinism cuts both ways — two sessions on the same plate compute the same `run_id` — so the sweep refuses to touch a job whose heartbeat is fresh or whose sidecar was written moments ago, and returns which of the four verdicts it reached (`swept`, `owned`, `notmine`, `unknown`) rather than only logging it: the batched path is about to clear that same run directory's `in/` and prune its staged batches, and on `owned` it stops the run instead, since both sessions would otherwise stage batches into one directory. **Nothing it cannot measure is treated as dead.** The ages come from `stat -c %Y` *or* BSD's `stat -f %m`, and a host that answers neither gets `unknown` and keeps its job — the earlier code gave the two files opposite defaults for the same failure (epoch 0 for the heartbeat, *now* for the sidecar), so such a host silently never swept anything. The beat itself runs for the **whole** run rather than just the upload, on both paths, because it is what the sweep reads: stopping it when the transfer ended made an hour-long compute look abandoned to the next session on the same plate. **Neither cancel path will touch a job that is not the caller's**: both ask `squeue` who owns the id and stop if the answer is not `id -un`, and both pass `-u` to `scancel` as well, so a job that changed hands between the question and the answer still cannot be cancelled. Slurm would refuse a non-owner anyway — but that is the scheduler's policy rather than this app's promise, and it does not hold for an operator account. The overlap is taken **only** where there is something to queue for: a host with no launcher runs on the login node as soon as ssh connects, and a cache hit runs `true`, so both keep the old upload-first order — starting either early would run the pipeline against an input directory that is still filling. The run directory can be known in advance because `cache_key` is a local computation over the input archives; `spawn` checks the upload landed under that same key, since a divergence means the bytes went somewhere the waiting job will never look.  **`spawn` reads as its phases**: `_prepare_run` addresses the run (cache key, run id, the re-attach decision) and records it in the journal, `_preflight_cache_hit` decides whether the pipeline needs to run at all, `_compose_launch` builds the argv and the remote command and returns whether the allocation overlaps the upload, and `_start_ssh` / `_upload_input` do the two outbound steps. The overlapped launch's ordering and its failure handling — sweep, heartbeat, allocate, upload, sentinel, and handing the node back if either of the last two fails — stay in `spawn` itself, because that ordering is the behaviour `tests/test_remote_allocation_overlap.py` pins and a helper would hide it. What `spawn` leaves behind for the rest of the run (the suspend request armed only when a pipeline was launched, and the `Fetcher` that `cancel` stops) is pinned by `tests/test_remote_spawn_phases.py`. The module carries a line budget (`test_monolith_budgets.py::test_remote_runner_line_budget`), and each owner module beside it has its own, because the complexity ratchet cannot supply one — the functions here are long rather than branchy, so length is the dimension that needs the limit. Every recurring fault in this file has been a half-finished sweep of a fact derived in N places, and a module keeps acquiring those for as long as adding one more costs nothing. **Its supported import surface is its `__all__`** — `RemoteRunner`, `OutputFilter`, `LocalInputMode`, `ZippedInput`, `stage_local_zips`, `input_well_containers`, `repo_root`, `TRANSIENT_PREFIX`, `WELL_XFER_PREFIX` and the packaging contract `_REQUIRED_REMOTE_FILES`. No file reaches any other name through `services.remote_runner` — not by `from … import`, by `rr.X`, by a named `setattr`/`patch.object`, or by a `"services.remote_runner.X"` patch string, including a deeper one such as `"services.remote_runner.subprocess.run"`, which patches the shared `subprocess` module and is written `"subprocess.run"` — and the runner re-exports nothing outside `__all__`. Every caller imports from, and every test patches, the module that owns the name; a test that steers code the runner calls patches the module where that code lives. `tests/test_remote_runner_facade.py` enforces both directions; the scan behind it is `tests/_facade_scan.py`, and `tests/test_guards_bite.py` shows it seeing each access form. |
 | `remote_config.py` | Per-host remote definitions loaded from `remotes.toml` in the app's folder (or `$ALLWELL_REMOTES`; a copy left in `%APPDATA%\allwell` or `~/.config/allwell` is moved over on first use — §5's local-files section). `services.remote_bootstrap.default_config_path` delegates here, so the bootstrap writes the file the app reads. Each `[remote.<name>]` entry is an SSH alias + `remote_python` / staging dirs / cache budget, plus the optional **`compute_launcher`** (the `srun …` scheduler line consumed by `remote_runner`) and **`jupyterhub_config_path`** (where to find `jupyterhub_config.py` on the remote). Hosts are picked + edited in `analyze/remote_dialog.py`, which can **Fetch** the cluster's discrete compute options by reading the remote's `jupyterhub_config.py` spawner `profile_list` over SSH (no JupyterHub webpage needed) — picking a profile fills in the whole scheduler command. The snippet that runs on the remote also returns the spawner-wide `batch_script` and `req_*` defaults; `profile_launcher` renders that template with the profile's values (see `slurm_batch_script.py`) and falls back to mapping the `req_*` fields by name only when the config sets no template. `parse_jupyterhub_profiles_json` returns what any profile had to leave out as its detail, which the dialog shows beside the ✓. **One known-hosts file on Windows:** `known_hosts_options()` is `-o UserKnownHostsFile=<profile>/.ssh/known_hosts` (forward slashes, double-quoted when the path holds a space) on Windows and `[]` on POSIX, and every ssh the app builds passes it — `RemoteHost.ssh_argv`, `remote_transport._rsync_ssh_transport`, `ssh_key_setup.probe_ssh_connection`, and `remote_bootstrap`'s `_ssh_run` and bandwidth probe. Windows runs two `ssh.exe` (`resolve_ssh_binary`'s Git for Windows one and `resolve_ssh_for_rsync`'s, from rsync's own MSYS2 / Cygwin runtime), each with its own home; unnamed, a changed host key fixed for one (the connection test accepts a new key into Git's) stayed stale for every transfer. `tests/test_one_known_hosts_file_on_windows.py` holds each builder to it. **Every ssh is unattended and notices a dead link.** `unattended_options()` (`BatchMode=yes`, `StrictHostKeyChecking=accept-new`, `ConnectTimeout=15`) and `keepalive_options()` (`ServerAliveInterval=30`, `ServerAliveCountMax=4`, about two minutes) go on `RemoteHost.ssh_argv`, `_rsync_ssh_transport`, `ssh_key_setup.probe_ssh_connection` and the bootstrap's ssh and bandwidth probe. **A run's output stream has a connection of its own.** On POSIX `RemoteHost.ssh_argv` joins the shared master (`control_master_options`: `ControlMaster=auto`, `ControlPersist=60s`), which the heartbeat, the batch hand-off, `scancel` and every other control command use; the single-shot pipeline's ssh (`RemoteRunner`) and the batch driver's (`_BatchedRemoteProcess._start_driver`) pass `share_connection=False`, which writes `own_connection_options()` (`ControlMaster=no`, `ControlPath=none` — explicit, so a `ControlMaster` in the user's `~/.ssh/config` cannot multiplex it either). Everything multiplexed through a master ends with it, so a master that stops answering, or the `ssh -O exit` `recover_dead_master` sends to close one, would otherwise end the stream and, through its PTY's SIGHUP, the batch running on the node. `tests/test_a_run_stream_has_its_own_connection.py` holds both launch sites to it through the real builders. The keepalive is fixed: sshd answers keepalives while a command is merely quiet, so it bounds only how long a dead connection goes unnoticed — `queue_wait_timeout_min` is the queue-wait bound and is not an ssh option. The connection-sharing master's `ControlPath` is `allwell-cm-%C` (`_controlpath_template`: a fixed 40-character hash, under the first of `$XDG_RUNTIME_DIR`, `~/.ssh`, `/tmp/allwell-cm-<uid>` in which it fits the 104-byte socket limit; `%r@%h:%p` overran it). `write_remote`, `delete_remote` and `update_bandwidth` replace `remotes.toml` atomically (`util.json_write.write_text_atomic`). `tests/test_the_remote_link_fails_fast.py` drives the ssh and rsync rows above through stand-in binaries. **A scheduled run asks for its node to itself.** `RemoteHost.exclusive_node` (default false, so a `remotes.toml` that does not name it gets none; written to the file only as `exclusive_node = true`), when set, makes `RemoteHost.launch_command` — `compute_launcher` plus `remote_srun_retry.with_exclusive` — the command every launch site sends: the single launch (`remote_runner._compose_launch` and its hand-off log line), the batched driver (`remote_process`, before `scale_launcher_time`) and the Remotes dialog's scheduler test (`scheduler_probe.ProbeRun`). `compute_launcher` itself stays what the user wrote; the dialog's *Reserve the whole node (--exclusive)* checkbox sets the field. Without it Slurm places a second job on a node that looks to have room by the resources asked for, and a cluster that does not count memory (AWS ParallelCluster's default) fits two whole-node-sized runs by CPU count alone — two app instances running at once is the ordinary way there. It is off by default because reserving the whole node means a run can never share a node that is already up: on a cluster that powers idle nodes down every launch boots a fresh node, and when that instance type cannot boot every run fails to start — the boot retry's `--exclude` only moves to the next node of the same type. `tests/test_a_run_reserves_its_node.py` and `test_remote_allocation_overlap.py::test_a_scheduled_run_asks_for_the_node_to_itself` drive each site. |
-| `input_resolution_service.py` | `plan_input_layout` is the one answer to "what will this folder do?" — pure, returning an `InputPlan` that Analyze's readout displays and `resolve_input_output` executes (§6.1). Around it, the module validates the input folder shape (zip set vs flat) and drives the loose-TIF **grouping (zipper) phase** — `run_zipper` shells out to `pipeline/well_plate_zipper.py`, which discovers every TIF with one `os.walk` and copies (or, with `--move-source-tifs`, moves) each into its per-well subfolder. `group_by_well` filters discovered entries through `os.path.isfile` (which follows symlinks) so a **broken symlink** — a link whose target is on an unmounted/moved volume, still listed by `os.walk` among `files` because it is a non-directory entry — is skipped at discovery with a per-file warning rather than being handed to `folder_well`'s symlink-following `shutil.copy2`, where opening the missing target raised a bare `FileNotFoundError` that crashed the subprocess and failed the whole plate. This matches the rest of the pipeline's discovery, which already treats a broken link as absent (`process_microscopy.organize_loose_tifs_into_well_folders` and `find_image_groups` both gate on `Path.is_file()` / an existence check). `folder_well` places each discovered file into its per-well subfolder **first-write-wins**, the rule the zip writers already apply to a duplicate member name. `copy2`/`move` onto an existing name simply overwrite it, and under `--recursive` two subfolders can hold one basename: the first file's bytes were replaced by the second's, and with `--move-source-tifs` the loser's original was gone as well — one image destroyed with no copy anywhere — while the per-well progress line printed the *source* count, so the pipeline read one image fewer than the log claimed. The loser is left untouched where it is, the collision is named on stderr with both paths (`run_zipper` merges stderr into the Analyze log), and the count printed is what actually landed. `_same_file` makes a file already sitting in its own well folder a no-op that still counts as placed — the state a recursive re-run over `--output-dir == --search-dir` produces, which previously raised `shutil.SameFileError` — and treats a path it cannot compare as a different file, so the caller warns and leaves both alone rather than overwriting on a guess. The app never passes `-r` (`services.input_resolution_service.build_zipper_cmd` has no `--recursive`), so the collision is reachable only from the CLI today; it is still a documented, supported entry point. `well_plate_zipper.main` first calls `util.frozen_io.ensure_std_streams` — in a frozen windowed (`console=False`) build the bootloader leaves this subprocess's `sys.stdout` / `sys.stderr` set to `None` even though the parent piped fd 1 / fd 2, so without the rebind every per-well progress line and every skip warning is a silent no-op and the grouping phase looks frozen; the same shim backs `process_microscopy._ensure_pipeline_io_ready`, so both subprocess entry points share one implementation. |
+| `input_resolution_service.py` | `plan_input_layout` is the one answer to "what will this folder do?" — pure, returning an `InputPlan` that Analyze's readout displays and `resolve_input_output` executes (§6.1). The plan accepts one layout, per-well `<WELL>.zip` archives, and refuses loose images and per-well folders by name through `pipeline.input_layout.non_zip_input` (`NEEDS_ZIPPING`), with the remedy `ZIP_LOOSE_FOLDER_REMEDY`; nothing in the module converts, moves or deletes a file. Around it sit the zips-only well listings the form and the runner read — `well_present_in_input`, `iter_well_tokens`, `iter_all_well_tokens`, `count_expected_wells` — and `detect_packed_input`. **The grouper is Datasets'**: `datasets/import_loose/zipper.py` holds `ZIPPER_SCRIPT`, `find_zipper_script`, `build_zipper_cmd` and `run_zipper`, which Datasets → Zip loose folder's in-place mode uses to shell out to `pipeline/well_plate_zipper.py`; it discovers every image with one `os.walk` and copies (or, with `--move-source-tifs`, moves) each into its per-well subfolder, which the tool then zips. `group_by_well` filters discovered entries through `os.path.isfile` (which follows symlinks) so a **broken symlink** — a link whose target is on an unmounted/moved volume, still listed by `os.walk` among `files` because it is a non-directory entry — is skipped at discovery with a per-file warning rather than being handed to `folder_well`'s symlink-following `shutil.copy2`, where opening the missing target raised a bare `FileNotFoundError` that crashed the subprocess and failed the whole plate. This is `pathlib`'s rule — `Path.is_file()` follows the link and treats a broken one as absent — which `os.path.isfile` matches. `folder_well` places each discovered file into its per-well subfolder **first-write-wins**, the rule the zip writers already apply to a duplicate member name. `copy2`/`move` onto an existing name simply overwrite it, and under `--recursive` two subfolders can hold one basename: the first file's bytes were replaced by the second's, and with `--move-source-tifs` the loser's original was gone as well — one image destroyed with no copy anywhere — while the per-well progress line printed the *source* count, so the pipeline read one image fewer than the log claimed. The loser is left untouched where it is, the collision is named on stderr with both paths (`run_zipper` merges stderr into the tool's log), and the count printed is what actually landed. `_same_file` makes a file already sitting in its own well folder a no-op that still counts as placed — the state a recursive re-run over `--output-dir == --search-dir` produces, which previously raised `shutil.SameFileError` — and treats a path it cannot compare as a different file, so the caller warns and leaves both alone rather than overwriting on a guess. The app never passes `-r` (`datasets.import_loose.zipper.build_zipper_cmd` has no `--recursive`), so the collision is reachable only from the CLI today; it is still a documented, supported entry point. `well_plate_zipper.main` first calls `util.frozen_io.ensure_std_streams` — in a frozen windowed (`console=False`) build the bootloader leaves this subprocess's `sys.stdout` / `sys.stderr` set to `None` even though the parent piped fd 1 / fd 2, so without the rebind every per-well progress line and every skip warning is a silent no-op and the grouping looks frozen; the same shim backs `process_microscopy._ensure_pipeline_io_ready`, so both subprocess entry points share one implementation. |
 | `env.py` | `validate_env` — a pure startup check of the `ALLWELL_*` overrides (`ALLWELL_SCRATCH_DIR` / `ALLWELL_REMOTES` / `ALLWELL_SEG_DEBUG`), returning warnings for any that are set but unusable so a mistyped path is not a silent fallback. |
 | `ssh_key_setup.py` | Ed25519 keypair generation at `~/.ssh/allwell_<alias>` + the copy command behind the remote-host wizard: `ssh-copy-id` when it is installed, otherwise one `ssh` call carrying the public key's type and base64 (never its free-text comment) inside a single double-quoted remote command, because cmd.exe does not honour POSIX single quotes and splits an unquoted line at `&&`. That remote half appends the key only when no line already holds it as a field of its own (`_key_entry_pattern`: at the start of a line or after a space, so an entry with options counts and a key glued onto the previous line's comment does not), and first ends a last line that has no newline (`_END_LAST_LINE`), so the key always starts a line of its own; both are written without `$` or `"`, which PowerShell and the local shell would act on inside the double quotes. `tests/test_ssh_key_setup.py` runs it under `sh -c` against a scratch home. Its passphrase check rests on every ssh the app starts running with `BatchMode=yes` (`remote_config.unattended_options`). |
 | `subprocess_kill.py` | Kills a spawned pipeline's whole process group / session (what Stop uses): `os.killpg` on POSIX, `CTRL_BREAK_EVENT` on Windows. **A child it signals must be started in a group of its own**, and `own_process_group_kwargs()` is the one place that spells both halves — `start_new_session` on POSIX, `CREATE_NEW_PROCESS_GROUP` on Windows — for `Popen` to spread. On Windows the Ctrl-Break goes to a console process group, and a child that leads none passes it to every process on the console, the app included, which Windows then ends with `STATUS_CONTROL_C_EXIT`: no traceback and nothing in the boot log. Both remote `ssh` spawns asked only for the POSIX half, so Stop on a remote run closed the app when it had been launched from a terminal. `tests/test_spawned_processes_lead_their_own_group.py` fails on any function that asks for a POSIX session without the Windows group, and pins the two `ssh` spawns to the helper. |
@@ -13524,7 +13493,7 @@ itself uses — keeping them potentially reusable for a CLI driver.
 A run touches two classes of storage, and keeping them apart is what makes it
 survive an unreliable output volume.
 
-**Remote staging moves only what it uploads.** A remote run in zip mode with a
+**Remote staging moves only what it uploads.** A remote run with a
 channel filter or `--incremental` cannot use the user's archives directly — both
 paths rewrite the zip (dropping unused channels / already-done FOV-groups), and
 rewriting in place would corrupt the user's dataset. So it stages. The staging is
@@ -13570,22 +13539,10 @@ into the OS temp dir to get there. It also makes the upload cache work as
 designed, since `RemoteRunner.cache_key` hashes each archive's name, size,
 whole-second mtime and member list (`remote_scratch.fingerprint_archives`), and
 passing the source through keeps all four as they are.
-**MIXED mode** — some wells zipped, others still folders, the signature of a
-run that died mid-compression — stages through the same two passes; it is the
-mode most likely to arise on a slow share, so a full copy there was the worst
-place to keep one. Its leftover folders are still zipped into the *input* dir
-(persisted deliberately, so the next run sees plain ZIP mode and re-zips
-nothing), and with no channel filter it uploads from the input dir with no
-staging at all. **FOLDER and FLAT** take the same two passes over the archives
-their zip-up has just written into the input dir. Those archives are not
-scratch: each folder's images are deleted the moment its archive is published,
-so the archive is the only copy of the well on disk, and the filter writes its
-trimmed copy into the transit directory like any other. (Rewriting them in place
-— which an earlier shape did, on the theory that the loose sources were still
-intact — deleted every unselected channel from the user's only copy before a
-byte was uploaded; `tests/test_staging_keeps_every_image.py` holds every layout,
-copy and move mode, to "every image still exists under the input, byte for
-byte, after staging, after a failed run and after a successful one".)
+Staging never writes into the input directory and never deletes from it: the
+user's archives are its only input and are read-only, and loose images or
+per-well folders never reach staging, because `_refuse_non_zip_input` stops the
+run first (see the `remote_staging.py` row in §6.4).
 
 **An archive that *is* rewritten keys the same on every attempt.** A channel
 filter that clears `REWRITE_MIN_SAVING`, and every incremental split, write a
@@ -14212,9 +14169,7 @@ Leaving through the normal end-of-well path means the pipeline's exit code is th
 same as a finished plate's, so `PipelineRunner` asks `_suspend_requested` before
 reading an exit of 0 as a completion: a suspended run queues
 `("suspended", …)` through `_enqueue_suspended` (one of `_CONTROL_KINDS`, so it
-is never dropped on overflow) instead of `("done", …)`, and the success hooks —
-the source-image cleanup `resolve_input_output` hands back, and on the remote
-path `zipped.on_pipeline_success` — do not run. `AnalyzeTab._poll_log` routes the
+is never dropped on overflow) instead of `("done", …)`. `AnalyzeTab._poll_log` routes the
 event to `AnalyzeSuspendMixin._on_run_suspended`, which writes a `[Suspended]`
 line with the well tally and puts the dashboard in its amber state, and leaves
 `_run_ok` false. Everything downstream keys on that: `_on_pipeline_complete`
@@ -14542,42 +14497,31 @@ forces incremental when the input has an unfinished run behind it: a suspend
 record naming it, or an unfinished entry in the run journal's index. A journal
 is matched on the folder the user picked, which its spec records as `opts.raw`,
 as well as on the directory the run was resolved to (`<plate>/in` for a plate
-folder or a drop of loose TIFs) — `_journal_names_input` asks both, because the
+folder) — `_journal_names_input` asks both, because the
 journal's `input_dir` is the resolved one and the form holds the picked one. A
 queue job's restart is covered by the journal, since the queue writes no suspend
 record.
 
-**Grouping consumes each well folder as it goes, but deletes only what it
-archived.** The FOLDER / FLAT staging path (and the MIXED leftover zip-up) turns
-every `<well>/` into `<well>.zip` and drops that folder's images the moment its
-own archive is published rather than at the end of the run. `_zip_well_folder`
-writes through `util.zip_write.atomic_zip`, which renames a verified archive into
-place or leaves nothing at all, so nothing is dropped until a complete archive
-sits beside it. Deferring the deletion to the post-success hook meant the input
-dir carried both `<well>/` and `<well>.zip` for every well for the whole run: two
-full copies of the plate on the user's own volume at peak, on exactly the runs
-where the input is largest.
+**Zipping a well folder deletes only what it archived.** Turning a `<well>/`
+into `<well>.zip` is Datasets → Zip loose folder's job (`apply._zip_well_folders`,
+§6b); no run path converts its input. It writes through
+`util.zip_write.atomic_zip`, which renames a verified archive into place or
+leaves nothing at all, so nothing is dropped until a complete archive sits
+beside it.
 
-**The folder is not the unit of deletion; the archived files are.** Every one of
-these paths packs a *filtered* subset — remote staging's `_zip_well_folder`
-takes the run-input images (`util.image_exts.is_run_input_member`: PNG and JPEG
-included, AppleDouble `._*` sidecars and other dotfiles not), other folder
-zippers `.tif`/`.tiff` only, and `compress_images_to_zip` adds `.png` — so
-removing the folder destroyed everything the filter skipped: OME companion XML, acquisition
+**The folder is not the unit of deletion; the archived files are.** A folder
+zipper packs a *filtered* subset — the Datasets tool's `.tif`/`.tiff` only, and
+`compress_images_to_zip` adds `.png` — so removing the folder would destroy
+everything the filter skipped: OME companion XML, acquisition
 logs, mask subdirectories, and on macOS the `.DS_Store` in every folder a user
 has opened in Finder, with no copy anywhere.
 `util.zip_write.replace_folder_with_archive` is the one answer: it deletes
 exactly the files that went into the archive and removes the directory only when
 nothing is left in it. A folder still holding something survives carrying just
 that remainder, and the caller's log line names what it kept rather than
-reporting the folder gone. Four paths route through it —
-`remote_staging._zip_well_folder`'s two callers (the post-success hook touches
-no folder at all: whatever is left in one is by definition in no archive, and a
-folder with no images is never packed, never removed, and named in the log as a
-well not uploaded),
-`pipeline.mixed_input.consolidate_mixed_to_zips`, the Datasets pane's
-`_zip_well_folders`, and
-`process_microscopy.compress_folder_images_to_zip_and_remove`. The extension
+reporting the folder gone. Two paths route through it — the Datasets pane's
+`_zip_well_folders` and `process_microscopy.compress_folder_images_to_zip_and_remove`
+(which no run path calls, since the pipeline reads archives only). The extension
 filter stays with each caller: `util/image_exts.py` records why the folder
 zipper's set is a different question from what the pipeline will group as input.
 
@@ -14637,9 +14581,11 @@ was not written by this run and nothing here verified it covers the folder).
 There is no rollback of the archives written in the pass: unlinking them on a
 later well's failure would now delete the only remaining copy of every well that
 had already succeeded, and a part-zipped plate is the correct resume state
-anyway — the finished wells read as ZIP mode on the next run. A stripped folder
-does not change that reading: `_detect_local_input_mode` reports MIXED only for a
-well folder with **no** matching zip, and a stripped one always has one.
+anyway — running the tool again counts the archives already written as zipped.
+A stripped folder left beside its archive does not stop an analysis run either:
+`pipeline.input_layout.non_zip_input` classes a well folder that has its own
+well's archive as a *twin*, which is logged and never refused; only a well folder
+with **no** matching zip is.
 
 The remote client resolves its own scratch base — the staging rewrites, transit
 output zips, and incremental merge temps — through `remote_scratch._scratch_dir`,
@@ -14721,13 +14667,9 @@ cluster and the pipeline runs against cluster-local storage. (NFS would give
 subdirectory, never `~` itself, because `_sweep_stale_scratch_dirs` *deletes*
 what its `_tmp_*` glob finds.
 
-Both modes honour it. Folder mode used to pin its staging to `output_dir` so the
-closing commit could be a same-filesystem `rename`; `pipeline.io._commit_staging_dir`
-now falls back to a copy on `EXDEV`, so the staging dir is free to live anywhere.
-Once the move is complete it drops the well's per-FOV checkpoints (`.fov_*`)
-from the committed folder: the CSV was written before the commit, so they are
-spent, and left behind they were all `out/<WELL>/` held once its images had
-been archived.
+A well's output is published by packing the staging directory into
+`<WELL>_out.zip` in `output_dir`, never by renaming the directory there, so the
+staging dir is free to live on any volume.
 `_sweep_stale_scratch_dirs_all` sweeps the scratch base *and* `output_dir` (when
 they differ) so staging left by pre-change runs is still reclaimed.
 
@@ -14798,8 +14740,6 @@ shield covers each of those crossings:
 | Where | What it protects |
 |---|---|
 | `remote_staging._materialize_staging` | Rewriting each `<WELL>.zip` the upload plan trims, reading it off the input volume into the upload staging dir — possibly a whole plate, back to back, and an unguarded fault here failed the run before a byte was uploaded. An archive that needs no rewrite is uploaded from where it is and never copied. |
-| `remote_staging._zip_well_folder` | Packing a leftover well folder read off the input volume. |
-| `input_resolution_service` | The mixed-input consolidation and the loose-image append, both of which rewrite archives *on* the input volume. |
 | `Fetcher._materialize` | Publishing `<well>_out.zip` into the output dir — the remote run's equivalent of the pipeline's out-zip write. |
 | `refresh_pipeline_info_available_from_outputs` | The `pipeline_info.json` rewrite, so one blip can't cost Review its timepoint/FOV lists. |
 
@@ -14816,8 +14756,8 @@ same line, which sent every diagnosis at the wrong machine — and `listed` is
 the `in/<WELL>.zip` inputs and the `out/<well>_out.zip` outputs — is built
 through `util.zip_write.atomic_zip`, the single writer shared by
 `process_microscopy.compress_images_to_zip`, `pipeline.io.merge_images_into_zip`,
-`input_resolution_service` (the mixed-input consolidation and the loose-image
-append) and `remote_runner` (upload staging and the two upload-filter rewrites).
+the Datasets tools (Zip loose folder's `_zip_well_folders` among them) and
+`remote_runner` (upload staging and the two upload-filter rewrites).
 It stages at `__aw_tmp_<name>.pid<N>`, fsyncs, re-reads the staged file's central
 directory to confirm it holds exactly the members that were written, and —
 when `verify` is on, which it is whenever `durable` is — decompresses every
@@ -14833,7 +14773,7 @@ open these archives by hand as often as All-Well opens them:
   refuses to expand it ("*it is in an unsupported format*") and the pipeline
   reads it as a well whose images vanished. `atomic_zip` raises `ZipWriteError`
   rather than publish one, so callers with nothing to pack must not create the
-  file: a well folder with no TIFs is left alone by the consolidation step, and
+  file: a well folder with no TIFs is left alone by Zip loose folder, and
   a well that produced no output images gets no `<well>_out.zip`.
 - *A published archive's members decompress.* The member-list check answers "is
   the index complete?", which is a different question: a truncated tail loses
@@ -15102,7 +15042,7 @@ deletable:
 
 | Module | What it holds |
 |---|---|
-| `datasets/core/dataset_paths.py` | `DatasetPaths`, `resolve_dataset` (which also refuses a dataset whose `in/` holds an unfinished in-place append's journals, `refuse_unfinished_append`), `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `out_folders`, `dataset_wells`), the folder's own answer to how many files claim one well (`well_spelling_collisions`, `describe_well_collisions`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. That scan is two halves: `collect_input_image_stems(in_dir, known_zip_members=…)` walks the input folder (loose images, one level of well subfolders, well zips' image members) through `util.image_exts.is_run_input_member`, as the pipeline's own `_collect_image_stems` does — a bare suffix test read every AppleDouble twin (`__MACOSX/._E_GFP_A01_f0_0h.tif`) as an image, whose stem put `f0` in a raw plate's timepoint slot — taking already-listed member names for any zip the caller has read itself rather than opening it again; `schema_values_from_stems` extracts one field's distinct values out of stems already in hand. `collect_available_schema_values` is the two composed, and remains the entry point for a caller asking about a single field from a cold start (Apply repairs). A caller asking about two fields, or one that has just read every archive for its own reasons (Validate does both), goes through the halves and walks once. `out_folders` is `out_zips`'s folder-mode twin (`out/<WELL>/`, written when `compressed_output=False`) — a dataset is written either zipped or folder-mode, never both, but a caller checking for "done" image evidence regardless of which mode produced it (Validate) should check both maps rather than assuming one. `dataset_wells` unions all four well-enumeration maps, including `out_folders`, matching its own docstring ("every 96-well position present in a dataset's `in` or `out`") — every current caller (Concatenate, Merge Plates, Subset) already refuses folder-mode input before calling it, so this only matters for a future caller that doesn't. `preview_wells(root)` is a best-effort, exception-safe `dataset_wells` a page calls on every keystroke while the user is still typing a path — it returns `[]` for anything that isn't (yet) a real dataset folder instead of raising `DatasetPathsError` the way `resolve_dataset` would, since "not a valid path yet" is the normal, expected state through most of a field edit, not an error to report. `shorten_headline(text, *full_paths)` replaces every occurrence of each of *full_paths* inside *text* with its own basename — a run's success summary is built by formatting a full destination (or source) path into a sentence, right for the log line but unreadable as a dashboard headline; the caller keeps the original *text* for the log and passes it again as the headline's own tooltip, so the full path is never actually lost, only the on-screen headline is shortened. It skips any path that is empty (Import Loose's in-place mode, whose `dest_root` is `""`) — `"".replace` would otherwise insert the basename between every character of *text*. **The four well maps hold one path per canonical well, so they cannot represent two spellings of one position** — `in/A1.zip` beside `in/A01.zip`, the state a plate exported by a scope that does not zero-pad and later topped up by a run that does is left in. Nothing about the surviving map says the other archive exists, and every copy tool reads the map rather than the folder, so the loser's images were absent from the copy while the run reported success with a well count that never mentioned them. Two things answer it, and neither is inside the maps. The survivor is deterministic — a sorted glob, and the spelling that already equals the canonical label wins — rather than whatever the filesystem yielded first. And `well_spelling_collisions(paths)` asks the folder directly, returning `{well: [every path claiming it]}`; `describe_well_collisions` renders the refusal sentence, one line per well naming every file, so the user can see which two spellings to reconcile without going to look. Only genuine same-role duplicates count: two raw-input zips, two raw-input folders, two `<WELL>_out.zip` archives, two `out/<WELL>/` folders, or two measurements CSVs for one well **under the same `--csv_prefix`**. A zip beside a same-well folder is not a collision — `process_microscopy` ignores well folders whenever any zip is present, a settled precedence `in_containers` follows — and two CSVs under *different* prefixes is the mixed-prefix state `out_csvs`' own docstring documents and Validate reports with a cause of its own; refusing either here would reject a layout the pipeline reads correctly. |
+| `datasets/core/dataset_paths.py` | `DatasetPaths`, `resolve_dataset` (which also refuses a dataset whose `in/` holds an unfinished in-place append's journals, `refuse_unfinished_append`), `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `out_folders`, `dataset_wells`), the folder's own answer to how many files claim one well (`well_spelling_collisions`, `describe_well_collisions`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. That scan is two halves: `collect_input_image_stems(in_dir, known_zip_members=…)` walks the input folder (loose images, one level of well subfolders, well zips' image members) through `util.image_exts.is_run_input_member`, the predicate the pipeline's own `_collect_image_stems` applies to its well archives' members — a bare suffix test read every AppleDouble twin (`__MACOSX/._E_GFP_A01_f0_0h.tif`) as an image, whose stem put `f0` in a raw plate's timepoint slot — taking already-listed member names for any zip the caller has read itself rather than opening it again; `schema_values_from_stems` extracts one field's distinct values out of stems already in hand. `collect_available_schema_values` is the two composed, and remains the entry point for a caller asking about a single field from a cold start (Apply repairs). A caller asking about two fields, or one that has just read every archive for its own reasons (Validate does both), goes through the halves and walks once. `out_folders` is `out_zips`'s folder-mode twin (`out/<WELL>/`, written when `compressed_output=False`) — a dataset is written either zipped or folder-mode, never both, but a caller checking for "done" image evidence regardless of which mode produced it (Validate) should check both maps rather than assuming one. `dataset_wells` unions all four well-enumeration maps, including `out_folders`, matching its own docstring ("every 96-well position present in a dataset's `in` or `out`") — every current caller (Concatenate, Merge Plates, Subset) already refuses folder-mode input before calling it, so this only matters for a future caller that doesn't. `preview_wells(root)` is a best-effort, exception-safe `dataset_wells` a page calls on every keystroke while the user is still typing a path — it returns `[]` for anything that isn't (yet) a real dataset folder instead of raising `DatasetPathsError` the way `resolve_dataset` would, since "not a valid path yet" is the normal, expected state through most of a field edit, not an error to report. `shorten_headline(text, *full_paths)` replaces every occurrence of each of *full_paths* inside *text* with its own basename — a run's success summary is built by formatting a full destination (or source) path into a sentence, right for the log line but unreadable as a dashboard headline; the caller keeps the original *text* for the log and passes it again as the headline's own tooltip, so the full path is never actually lost, only the on-screen headline is shortened. It skips any path that is empty (Import Loose's in-place mode, whose `dest_root` is `""`) — `"".replace` would otherwise insert the basename between every character of *text*. **The four well maps hold one path per canonical well, so they cannot represent two spellings of one position** — `in/A1.zip` beside `in/A01.zip`, the state a plate exported by a scope that does not zero-pad and later topped up by a run that does is left in. Nothing about the surviving map says the other archive exists, and every copy tool reads the map rather than the folder, so the loser's images were absent from the copy while the run reported success with a well count that never mentioned them. Two things answer it, and neither is inside the maps. The survivor is deterministic — a sorted glob, and the spelling that already equals the canonical label wins — rather than whatever the filesystem yielded first. And `well_spelling_collisions(paths)` asks the folder directly, returning `{well: [every path claiming it]}`; `describe_well_collisions` renders the refusal sentence, one line per well naming every file, so the user can see which two spellings to reconcile without going to look. Only genuine same-role duplicates count: two raw-input zips, two raw-input folders, two `<WELL>_out.zip` archives, two `out/<WELL>/` folders, or two measurements CSVs for one well **under the same `--csv_prefix`**. A zip beside a same-well folder is not a collision — the run reads the archive and only logs the folder beside it (`pipeline.input_layout`'s *twin*), a precedence `in_containers` follows — and two CSVs under *different* prefixes is the mixed-prefix state `out_csvs`' own docstring documents and Validate reports with a cause of its own; refusing either here would reject a layout the pipeline reads correctly. |
 | `datasets/core/provenance.py` | `record_derivation(dest, tool=…, sources=…, **detail)` — the `derived_from` line Subset, Merge Plates and Concatenate append to the dataset they wrote (§5.7), naming the source dataset roots plus what the tool's summary states (`wells` kept, the `well_map`, the `offset_hours`). Called after verification and after the destination's `pipeline_info.json` is written, so a derivation that raised part-way records nothing. The importers are deliberately not covered — they write raw input with no sidecar, so no directory holds the dataset's history until its first Analyze run, which the runner records. Validate & Repair appends `repaired` from `datasets/validate/apply.apply_repairs` when it changed something, and nothing for its idempotent no-op. |
 | `datasets/core/containers.py` | `copy_container_members` — the one path every Datasets tool moves image bytes through — plus `container_dest` (where a container belongs in a destination directory: `<WELL>.zip` for a zipped well, `<WELL>/` for a folder-mode one, always named for the **well token** rather than for the source file, because a source plate written with unpadded tokens otherwise produced `in/A1.zip` beside an `out/A01_out.zip` from the same run and nothing downstream matched the two up), `read_members` / `write_zip` (collision-safe, first-write-wins), `clear_destination`, `restamp_overrides` / `unstamped_note` (below), and the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. **It moves bytes rather than reconstructing them.** No Datasets tool alters image data: Subset filters, Concatenate offsets a name's timepoint field, Merge plates rewrites a name's well token, and in every case the member's compressed payload is identical on both sides — a name lives in a member's headers, not in its data. So the helper publishes one destination archive from one or more source containers, taking a `rename(container, member_name)` callback that returns the destination name or `None` to leave the member out, in three tiers. **Whole-file copy:** a single zip source with every member kept under its own name is copied byte-for-byte and never opened for reading — staged beside the destination and renamed into place, like the other two tiers, so an interrupted copy leaves no partial `<WELL>.zip` behind. That is a wells-only Subset, and it is the case a user would otherwise do by hand in Finder, so it has to cost what Finder costs. **Raw member passthrough:** otherwise each kept member's already-compressed bytes are streamed across by `datasets/core/zip_passthrough.py` — no inflate, no deflate, no CRC recomputation — and a dropped member is never read at all, so a filter that keeps a quarter of an archive costs about a quarter of it. **Fallback:** a folder source, or a member the passthrough declines (a directory entry, an encrypted member), goes through `read_members`/`write_zip`'s ordinary decompress-and-recompress, one member at a time. The tier is chosen from member *lists* only — for a zip that is the central directory, a footer, so planning costs a couple of seeks however large the archive is and however slow the volume holding it — and peak memory is one chunk or one member rather than a whole uncompressed archive per thread. **Tiers 2 and 3 publish through `util/zip_write.atomic_zip`**, the same staged-then-verified-then-renamed writer the pipeline's own archives use (with `durable=False`, and therefore without the CRC read-back, because the source dataset is still on disk beside the destination): a plain `with ZipFile(dest, "w")` writes a central directory for whatever landed before an exception, so a member failing part-way through a well left a structurally valid archive holding fewer images than it was asked for with nothing on it saying so. The tools do write an in-progress marker and clear the destination on the next attempt, but nothing stops a user opening that half-written folder in Review first. **Two consequences of moving bytes rather than rebuilding them are worth knowing.** A whole-file copy reproduces the source exactly, so it keeps directory entries that a re-pack drops — inert either way, since `find_image_groups_in_zip`, `data/zip_members.py`, Validate and `incremental_keys` all filter by basename/extension or on a trailing slash. And a copied member keeps its source's compression method, so a subset or merge of a dataset whose `in/` archives were written `ZIP_STORED` (what `pipeline/ome_explode.py` writes) stays stored rather than being deflated on the way out; the destination can be larger on disk than the old re-packing path produced, which is the cost of not spending CPU to reproduce bytes that already exist. Returns `(written, dropped)`: *written* is what actually landed, so a caller can verify a CSV row's `filename` is really there; *dropped* is only the names lost to a **collision**, which is real data loss, never a member the `rename` callback declined. Nothing is created when nothing is kept — a zero-member zip is structurally valid but macOS Archive Utility refuses to expand it and All-Well reads it as a well whose images have vanished, the same rule `util/zip_write.atomic_zip` enforces for the pipeline's own archives. `read_members` / `write_zip` remain the tier-3 primitives and the shape a caller reaches for when it genuinely needs a member's decoded bytes in hand; both take an optional `progress(done, total)` keyword, called once per member against a total they know up front. `WellFraction` fuses per-pass counts into one dial: copying a well is several passes (the source container, then the QC `<WELL>_out.zip`), so the passes are declared up front as equal-weight *slices*, each pass reports into the slice `slice_progress()` hands it, and a pass with no work closes its slice with `skip()`. `copy_container_members` consumes exactly one slice whichever tier serves it, reporting a whole-file copy or an empty filter as a single closing step. Feeding each pass's own `(done, total)` straight to a dashboard instead would fill the same well's dial from empty once per pass, which reads as the well restarting; leaving a no-work slice unclaimed would strand a finished well short of full. `finish()` closes out whatever remains once the well's non-container work (its CSV) is done. The scale is a fixed 100 steps, deduplicated to whole steps, so a well holding thousands of files emits a bounded number of updates rather than one queued signal and one plate repaint per file. **`restamp_overrides` is the one carry-over rule for `cell_overrides.json`.** Every tool that copies that file has to re-fingerprint it — a repack changes the destination archive's mtime although the segmentation is untouched, and the fingerprint exists to catch a real re-segmentation — so it stamps each entry's `seg_fp` from the destination `<WELL>_out.zip`'s mtime and **returns how many it could not stamp**. A fingerprint that could not be computed is not a fingerprint, so the key is removed rather than left holding the source dataset's value: an entry with no `seg_fp` is the legacy unfingerprinted shape both readers already understand and keep (`review/persistence/cell_overrides.py`, `datasets/validate/apply._prune_stale_overrides`), whereas the source's stamp compared against the destination archive differs, and Validate then pruned the entry — the user's manual cell exclusions vanishing with every step reporting success. The count is returned rather than logged inside the helper so each tool states it in its own cell-override log line through `unstamped_note`: an override carried without a fingerprint survives, but it will no longer be dropped when that well really is re-segmented, and that is a fact about the artifact the run just produced. Subset, Merge Plates and Concatenate all call it, which is what stops the three copies drifting apart again. |
 | `datasets/core/inclusion_carry.py` | `carry_inclusion` — the one carry-over rule for Review's inclusion settings in `persistence.json`: `qc_params` (the QC size and shape gate, flagged fields, soft cells), `crop_region` and `field_exclusions`. Curation travels in `cell_overrides.json` (above); these three decide the rest of which cells count, so a tool that dropped them handed back a dataset in which the debris, the cropped-out cells and the hand-excluded fields all counted again with nothing saying so. Each tool passes one `InclusionSource` per source dataset with the same well and timepoint renaming it gives everything else (Subset drops what it does not keep, Merge Plates applies its well remap, Concatenate shifts dataset 2's timepoints through `_shifted_or_none`). The QC limits and the crop are one setting per dataset, so the destination takes the first source's and the run log names any source whose value differed; field exclusions are per field and are all kept, renamed, with the ones whose well or timepoint the tool left behind counted in the log. Other sections of an existing destination file are kept, and sections no source holds are left untouched, which is what an in-place Concatenate needs. An unreadable source file is said in the log, as is an unreadable `cell_overrides.json` in each tool's override carry and Concatenate's dataset-2 overrides whose timepoint cannot be read. `tests/test_dataset_tools_carry_inclusion.py` drives all three executors. |
@@ -15478,8 +15418,8 @@ it is a note in the log, not a failed run.
 *Recovery* (`zip_append.recover`) runs where the app opens a dataset to read
 or change it in place: the Concatenate worker (both datasets, raw or analysed);
 `PipelineRunner._run_pipeline_thread`, on the form's input path **before**
-`resolve_dirs` — whose loose-image fold rewrites `in/<WELL>.zip` whole — and
-again on the resolved folder (`zip_append.recover_paths`, lines prefixed
+`resolve_dirs`, so the resolver judges each archive as it was before the
+append began, and again on the resolved folder (`zip_append.recover_paths`, lines prefixed
 `[recover]`; a blocked or refused recovery fails the run); and Review's
 `load_controller.load_path` (logged at WARNING; a failure is logged and the
 load continues). Review's undo stays on the GUI thread on purpose: the load
@@ -16098,21 +16038,21 @@ run reattaches to its own directory. A run started with a subset says so in the
 log and on the dashboard (`only_wells_note`), since it otherwise looks exactly
 like a whole-plate run with most wells not moving. The processing denominator
 needs no change — the pipeline's own `Zip mode: N well zip(s)` banner is logged
-after the subset is applied — while the Group stage keeps counting the whole
-plate, which is what the local zipper groups.
+after the subset is applied — while the Ready stage keeps counting the whole
+plate, which is what `_resolve_run_dirs_for_runner` announces (`iter_well_tokens`
+over the resolved input).
 
 Remotely, `services.pipeline_runner.scope_staged_to_only_wells` narrows whatever
 `stage_local_zips` returns — applied once to its result rather than inside it,
 because it returns from several branches. Staging is also told the subset
-(`stage_local_zips(only_wells=…)`), and every layout that plans its archives
-(a channel filter, an incremental split) plans only the named wells and the
+(`stage_local_zips(only_wells=…)`), and whenever it plans the archives (a
+channel filter, an incremental split) it plans only the named wells and the
 blanks, so a subset on a finished plate reads and rewrites the transit copies
 of those wells alone rather than of the whole plate; the scope afterwards is
-still what decides the upload, for the layouts that return every archive
-unplanned. A FOLDER or FLAT plate's whole-well zip-up still covers the plate,
-since those archives become the user's copy of each well. The wells left
+still what decides the upload when staging returns every archive unplanned
+(no filter and no split). The wells left
 unplanned are listed on the result (`ZippedInput.outside_subset_wells`) so the
-remote Group stage still counts the whole plate. Pinned by
+remote Ready stage still counts the whole plate. Pinned by
 `tests/test_only_wells_remote.py::test_a_forced_subset_rewrites_only_its_own_archives`.
 The empty-well blanks are uploaded
 whatever the subset says (the host builds its correction from them); the journal
@@ -16246,7 +16186,7 @@ with no prior tick creates nothing, since a well whose size probe failed never
 had a dial at all.
 
 **Rail denominators are per stage.** A remote run's stages do not count the
-same population: every well on the plate is grouped locally, while only the
+same population: Group counts every well on the plate, while only the
 subset the incremental split sends is uploaded, processed and thresholded, and
 Download ends up covering the whole plate again (a well that was already current
 locally is, by the end, fetched locally). `RunDashboard` carried one shared
@@ -16254,7 +16194,7 @@ locally is, by the end, fetched locally). `RunDashboard` carried one shared
 which is how the rail came to read `Group 40/6` and `Download 34/6`, numerators
 counting the plate against a denominator counting the run, with Download ahead
 of an Upload that had not started. `set_stage_total(stage, total)` overrides one
-row's divisor; `services.pipeline_runner` announces the grouped population for
+row's divisor; `services.pipeline_runner` announces the whole plate for
 `group` and `download`, and the uploaded population for `upload` (a
 `stage_total` event, rendered by `analyze.progress._apply_grouping_event`),
 leaving `process` and `threshold` on the run's own well count. Upload is
@@ -16406,18 +16346,15 @@ exists live is not a diagnostic.
 in `_plan_staging` to reach a real run; fixing that one alone looks right and
 does nothing.
 
-**Every input layout takes the split.** `stage_local_zips` routes the archives
-of all four layouts through one closure, `_planned` — the ZIP layout's own
-archives directly, and a MIXED, FOLDER or FLAT plate's once grouping and zip-up
-have produced them (`_then_split`), with the zip-up's cleanup and
-post-success hook carried across. The split is what sets
-`ZippedInput.incremental`, and the rest of the remote path keys on that flag:
-no re-attach and an emptied output directory, the merging fetch, and batched
-mode's local-completion filter turned off. A resumed plate that was split only when it
-was already one zip per well came back from the other layouts with the flag
-unset, so it could re-attach to the suspended run's directory and find its
-partial wells complete there, and batched mode skipped every well with a local
-CSV, the partial ones included.
+**An incremental run always takes the split.** `stage_local_zips` routes every
+incremental run's archives through one closure, `_planned`, whether or not a
+channel filter is also set. The split is what sets `ZippedInput.incremental`,
+and the rest of the remote path keys on that flag: no re-attach and an emptied
+output directory, the merging fetch, and batched mode's local-completion filter
+turned off. A resumed plate whose staging skipped the split would come back with
+the flag unset, so it could re-attach to the suspended run's directory and find
+its partial wells complete there, and batched mode would skip every well with a
+local CSV, the partial ones included.
 
 The sidecar and the incremental flag both matter, and each was missing on its
 own account. Without the sidecar the Analyze form keeps whatever was already in
@@ -16750,7 +16687,10 @@ empty checkbox row doesn't read as broken before there's a source to derive
 it from.
 
 **Zip Loose Folder** (`datasets/import_loose/`) groups a folder of loose,
-ungrouped TIFs into per-well `in/<WELL>.zip` archives with a live preview —
+ungrouped TIFs into per-well `in/<WELL>.zip` archives, and it is the one place
+that conversion happens: Analyze, the pipeline and remote staging read per-well
+zips only and refuse loose images and per-well folders by name, sending the user
+here (`pipeline.input_layout.ZIP_LOOSE_FOLDER_REMEDY`). It shows a live preview —
 wells × FOVs × timepoints × channels, plus unparsed and unreadable-symlink
 counts — that updates on every schema/separator keystroke, so a mismatch is
 caught before conversion rather than mid-run. One `scan_folder` per change feeds
@@ -16784,9 +16724,6 @@ re-scanning a folder whose loose images are now archives (it would report that
 nothing matches, directly above that run's own success headline) and disarms
 Run, which otherwise stayed live and traded the result for a failure.
 
-It does **not** modify
-`pipeline/well_plate_zipper.py` or `services.input_resolution_service.resolve_input_output`
-— Analyze's own loose-TIF handling keeps working exactly as it does today.
 Conversion progress is a per-well plate map
 (`dashboard.py::ImportLooseDashboard`, a `PlateProgress` subclass — see the
 `PlateProgress` row above) in the same Analyze-style graphical shape
@@ -16814,7 +16751,7 @@ lookup, `canonical_well_label`, and `os.path.isfile` to drop dangling
 symlinks the way `os.walk` lists them — rather than calling
 `well_plate_zipper.group_by_well` directly, which `print()`s unconditionally (a
 scan banner, a per-5000-files progress line, a completion line) for the
-Analyze log and would otherwise pollute this app's own captured output.
+command line and would otherwise pollute this app's own captured output.
 `scan_folder` and the executor's `group_files_by_well` share one `_walk`
 helper, so the preview and what actually gets grouped out of the loose TIFs
 can't disagree. Both walk loose files only; the well folders an in-place run
@@ -16843,20 +16780,24 @@ Two conversion modes, one code path each, both in `apply.py`:
   (`_dest_field.setEnabled(not checked)`, not `setVisible`) — the field
   disappearing outright used to be the only signal this destructive mode had
   just been armed, easy to miss since a layout jump is the only thing that
-  changes. Behaviourally it shells out through the existing
-  `services.input_resolution_service.run_zipper` (which invokes
-  `pipeline/well_plate_zipper.py` as a subprocess) rather than reimplementing the same
-  grouping a second time; `run_zipper` produces per-well *folders* only
-  (`pipeline/well_plate_zipper.py` never zips anything itself), so `apply.py`'s own
-  `_zip_well_folders` then converts every one of them into `<well>.zip`,
-  removing the folder once packed, so the result lands in the same
-  ready-to-run layout the new-destination mode writes. This is deliberately
-  **not** `pipeline.mixed_input.consolidate_mixed_to_zips` —
-  that helper only tops up a *mixed* zips+folders state (Analyze's own
-  loose-TIF handling, which is happy to read pure per-well folders directly)
-  and is a documented no-op when zero zips exist yet, which is exactly the
-  state a fresh `run_zipper` call produces; calling it here left every well
-  as a bare folder forever, with the run still reporting success.
+  changes. Behaviourally it shells out through
+  `datasets.import_loose.zipper.run_zipper` (which invokes
+  `pipeline/well_plate_zipper.py` as a subprocess); `run_zipper` produces
+  per-well *folders* only (`pipeline/well_plate_zipper.py` never zips anything
+  itself), so `apply.py`'s own `_zip_well_folders` then converts every one of
+  them into `<well>.zip`, removing the folder once packed, and
+  `_move_archives_into_in` moves the archives into `<source>/in/` — a no-op
+  when the source is itself named `in`. That is the layout Analyze reads (a
+  folder named `in`, or one that contains `in/`), so the result lands in the
+  same ready-to-run layout the new-destination mode writes and "Open in
+  Analyze" opens a folder Analyze will run; archives left beside the source
+  would be a folder Analyze refuses. An archive name already taken in `in/` is
+  never overwritten — overwriting would replace one plate's well with
+  another's — so the rest are moved and the run fails with a `ValueError`
+  naming the taken names, leaving those new archives where they were written.
+  `_zip_well_folders` counts the archives already in `in/` as zipped, so
+  re-running over a folder an earlier run converted does not zip those wells
+  again and then refuse to move them.
   `move_source_tifs` is threaded through unconditionally from the
   in-place checkbox (`ImportLooseController._launch`) so the "delete loose
   TIFs on success" promise in the checkbox label and confirm dialog is
@@ -16922,13 +16863,13 @@ they queued it.
 **Stop is worker-tracked, not just interruption-flagged, for in-place mode.**
 `convert_to_new_destination`'s `ThreadPoolExecutor` loop polls
 `isInterruptionRequested` cooperatively between wells, but `convert_in_place`
-blocks inside `services.input_resolution_service.run_zipper`'s subprocess
+blocks inside `datasets.import_loose.zipper.run_zipper`'s subprocess
 stdout-read loop, which never polls anything — `QThread.requestInterruption()`
 alone was a no-op there. `ImportLooseWorker.request_stop()` also signals the
 tracked `pipeline/well_plate_zipper.py` subprocess directly (`_track_proc`, wired through
 `convert_in_place`'s existing `proc_hook` parameter, via
 `services.subprocess_kill.signal_subprocess` — the same cross-platform
-pgid-aware kill `PipelineRunner.stop()` uses for its own zipper subprocess).
+pgid-aware kill `PipelineRunner.stop()` uses for the pipeline subprocess).
 `ImportLooseController.stop()`/`shutdown()` call `request_stop()`, not
 `requestInterruption()` alone. The resulting nonzero-exit `RuntimeError` is
 rewritten to the "Cancelled" convention every other Datasets worker's
@@ -19911,7 +19852,7 @@ findings, evidence and repair on top, while `scan_run` walks a directory the run
 has just written. The shared predicate takes data the caller already holds and
 opens exactly one thing between its functions — the well's output container —
 which is what lets Validate delegate without changing its per-well read count,
-a number `tests/test_validate_compute.py` pins exactly. The fifth state is `csv_only` — measurements whole, output archive gone — added because `health` accepted `has_out_zip` and never read it, so a well whose archive had been deleted answered `complete` on the strength of its CSV alone. `pipeline/input_layout.py` holds the three questions about which layout a plate's input is in, including the refusal that stops a run whose loose images were moved into a folder no zip-mode run will read; `pipeline/cli_args.py` holds `build_parser`. Both left `process_microscopy` under its line budget and are in the remote manifest. `pipeline/mixed_input.py` holds `consolidate_mixed_to_zips`, which zips each bare well folder in an `in/` that already has well archives: a folder-mode run archives each well it finishes, so a suspended or interrupted one leaves exactly that, and `main` runs it before reading the layout so that `--incremental` from the command line — the pipeline's own resume advice — works as it does from the Analyze pane, whose resolver calls the same function (`services.input_resolution_service` re-exports it under its old private name). With it in front, the refusal above is reached only if a folder is left unarchived for another reason.
+a number `tests/test_validate_compute.py` pins exactly. The fifth state is `csv_only` — measurements whole, output archive gone — added because `health` accepted `has_out_zip` and never read it, so a well whose archive had been deleted answered `complete` on the strength of its CSV alone. `pipeline/input_layout.py` holds the pipeline's one input layout and the refusal of every other: `find_well_zips`, the pure `non_zip_input` (loose images, stranded well folders and twins, as a `NonZipInput`), `refuse_non_zip_input`, which `main` calls straight after `find_well_zips` and before any nanowell preparation or model build, and `ZIP_LOOSE_FOLDER_REMEDY`, the remedy sentence the pipeline, the Analyze planner and remote staging all print; `pipeline/cli_args.py` holds `build_parser`. Both left `process_microscopy` under its line budget and are in the remote manifest.
 
 The check runs after the auto-threshold pass and before the exit-code decision,
 and records a `run_check` block per well: how many `(fov, timepoint)` groups the
@@ -19959,8 +19900,9 @@ since (§6b).
 ### 9.7 Adding new timepoints / FOVs to an existing dataset (incremental)
 
 The common workflow "analyze the first half of a movie, then the rest" (or
-"add a few more FOVs"): drop the **new** image files into the already-grouped
-input and re-run. Only the genuinely-new FOV-groups are processed; their
+"add a few more FOVs"): put the **new** images into the plate's per-well
+archives and re-run with Run scope's **Fill in what's missing**
+(`--incremental`). Only the genuinely-new FOV-groups are processed; their
 results are **merged** into the existing per-well CSV and `<well>_out.zip` —
 nothing already done is re-segmented. Per-FOV quantification is independent
 (no cross-FOV/cross-timepoint state), so this is exact, not an approximation.
@@ -19979,29 +19921,23 @@ ninety-six.
 
 **Local, step by step:**
 
-1. **Drop the files.** Put the new TIFs alongside the existing per-well zips in
-   `in/` (e.g. the second half's timepoints, or a new well's images). Run.
-2. **Append** — `input_resolution_service.append_loose_images_to_zips` folds
-   each loose TIF into its matching `<WELL>.zip` (creating `<WELL>.zip` for a
-   brand-new well), then deletes the loose source. Duplicate member names keep
-   the existing member (the loose copy is skipped, not overwritten).
-3. **Scope decision** — `select_incremental_scope` sets `opts["incremental"]`
-   when anything was appended, *unless* adding the new data would invalidate a
-   model for already-processed work, in which case it falls back to a full
-   `--force` reprocess:
-   - a `basic` flat-field/background is sampled across **all** images, so adding
-     any data changes it for every well → always force;
-   - an `empty_well` model is per-(channel, timepoint). Adding a blank for a
-     **new** timepoint leaves every existing timepoint's correction (and its
-     already-processed FOVs) unchanged → stays incremental. But adding a blank
-     at a timepoint the background well **already had a blank for** changes that
-     timepoint's field, so the already-processed wells at it would be stale →
-     force. The decision is self-contained in the input: it compares the
-     appended blanks' timepoints against the background well's existing zip
-     timepoints (`_loose_timepoints_for_wells` / `_zip_timepoints`).
-4. **Args** — `build_pipeline_args` emits `--incremental` and
+1. **Add the images to the archives.** The new images go into the per-well
+   `in/<WELL>.zip` archives, not beside them: Analyze reads archives only and
+   refuses a loose image in the input (`NEEDS_ZIPPING`, §6.1) rather than
+   folding it in. Datasets → Concatenate's in-place append adds a second
+   acquisition to the existing archives; Datasets → Zip loose folder converts a
+   folder of new loose images into archives first.
+2. **Choose the scope.** Run scope's **Fill in what's missing** sends
+   `--incremental`; nothing decides it for the user, and input resolution never
+   changes it. That choice is the user's to get right when a correction model
+   spans the new data: a `basic` flat-field/background is sampled across **all**
+   images, so new data changes it for every well, and an `empty_well` model is
+   per-(channel, timepoint), so a new blank at a timepoint the background well
+   already had changes that timepoint's field for wells already processed —
+   both cases call for **Redo it** (`--force`) rather than an incremental run.
+3. **Args** — `build_pipeline_args` emits `--incremental` and
    `--incremental_prior_dir <output_dir>` (where the prior per-well CSVs live).
-5. **Diff + process** — for each well, `process_well_zip_task` builds the
+4. **Diff + process** — for each well, `process_well_zip_task` builds the
    done-set (`pipeline.io.incremental_done_fov_keys`): the `(fov, timepoint)`
    pairs from the prior per-well CSV, **unioned** with those recovered from the
    processed-output artefacts — `<well>_out.zip` members and the uncompressed
@@ -20023,14 +19959,14 @@ ninety-six.
      (every reader here — `gzip`, `util.csv_gz`, pandas — reads a multi-member
      stream as one file); a new column rewrites it, streamed into gzip;
    - a brand-new well (no prior CSV) → processes in full.
-6. **Globals refreshed** — `write_pipeline_info` rewrites `pipeline_info.json`
+5. **Globals refreshed** — `write_pipeline_info` rewrites `pipeline_info.json`
    with the refreshed `available_timepoints` / `available_fovs` scan while
    preserving curation (`cell_gating`, `sample_definitions`, `ratios`,
    `notes`); the auto-threshold pass re-runs but never overwrites an existing
    `cell_gating.thresh_frac_on` (so established thresholds are stable), and
    carries `cell_gating.thresh_count_on` through untouched — it rebuilds the
    block from named keys, so a cutoff it did not read would be dropped on write.
-7. **Review** — stats/plots are recomputed live from the per-well CSVs on
+6. **Review** — stats/plots are recomputed live from the per-well CSVs on
    reload, so the new timepoints/FOVs appear with no extra step.
 
 **Remote** keeps the client smart and the remote a dumb compute engine, so only
@@ -20670,7 +20606,7 @@ One test per segmentation method the Analyze dropdown offers — `stardist_nucle
 plate of schema-named TIFFs is written to a tmp dir, the form is filled the way
 an operator would fill it, `_run()` is called, and the Qt event loop is pumped
 until the `process_microscopy.py` subprocess the tab spawned exits. Nothing is
-mocked, so one test covers the grouping (zipper) phase, the subprocess launch,
+mocked, so one test covers input resolution, the subprocess launch,
 the log/progress plumbing, segmentation, quantification, per-well CSV assembly
 and output zipping. The assertions are on the artefacts that land in
 `raw/out/` (per-well CSV rows, `pipeline_info.json`, `_labels.tif` inside
@@ -20679,8 +20615,7 @@ banner and the `on_pipeline_complete` callback).
 
 Complementary to, not a replacement for, `test_segmentation_methods.py` /
 `test_labelfree_phase.py` (form state + CLI arg mapping, no run) and
-`test_pipeline_e2e.py` (`process_image_group` / `process_well_folder_task`
-directly, no GUI).
+`test_pipeline_e2e.py` (`process_image_group` directly, no GUI).
 
 Test images come from `tests/fixtures/synthetic_pipeline.write_synthetic_channels`,
 the multi-channel generalisation of `write_synthetic_fov`: every channel draws the
@@ -21364,7 +21299,7 @@ The map (each rule links to the test that holds it):
 | The repository root holds only entry points, repository configuration and packages (§3) — every root `.py` is in a roster with a written reason, and no roster entry names a file that has gone. A loose module imports exactly as well as a packaged one, so the entire cost of misplacement falls on whoever next goes looking for it, and nothing else would report it. The same test holds `_Docs/_Installation/build_all_well.sh`'s `REQUIRED` preflight roster against the tree — it required `analyze_tab.py` long after the Analyze pane became `analyze/tab.py`, and since the script exits 1 on the first missing entry, no release could be cut from it | `tests/test_root_holds_only_entry_points.py` |
 | The PyInstaller spec's own **imports** resolve, not just the rosters it bundles. PyInstaller executes the spec as Python, and it imports first-party code at module scope — `scripts.profile_build`, `services.remote_runner`, `ui.theme` to validate a baked `ALLWELL_THEME`. A stale one is not a missing file in the bundle, it is a build that will not start, and the `ALLWELL_THEME` import sits inside a conditional so only a themed build reaches it: the default build stays green while the themed one is broken. Nothing in the suite executes the spec, so the first symptom is otherwise a release that cannot be built | `tests/test_spec_ships_every_first_party_module.py::test_the_spec_imports_only_modules_that_exist` |
 | Every `--run-*` branch of `all_well_launcher._dispatch` imports a module that exists **and** calls that module's own `main()`. Both halves are needed: importing the zipper and then calling the pipeline's `main()` satisfies the import check while a frozen grouping run silently performs a pipeline run instead. Checked against the syntax tree, because `all_well_launcher` is the one module no test may import | `tests/test_zipper_frozen_dispatch.py` |
-| `services.input_resolution_service.ZIPPER_SCRIPT` resolves to the `pipeline.well_plate_zipper` module itself. The grouping pre-pass is reached by **path** rather than by import, so nothing in Python notices when the path stops describing the tree: `find_zipper_script()` answers `None` and `run_zipper` raises only at the moment a user starts a run on a folder of loose TIFs. Identity rather than existence, because a constant pointing at `pipeline/__init__.py` would satisfy an `.exists()` check while spawning a subprocess that does nothing. The other rosters naming this file (`services.remote_manifest`, the build script's `REQUIRED` array, the spec's package walk) each read their own list against the tree and none of them reads this constant | `tests/test_zipper_script_path_resolves.py` |
+| `datasets.import_loose.zipper.ZIPPER_SCRIPT` resolves to the `pipeline.well_plate_zipper` module itself. The loose-image grouper is reached by **path** rather than by import, so nothing in Python notices when the path stops describing the tree: `find_zipper_script()` answers `None` and `run_zipper` raises only at the moment a user starts an in-place Zip loose folder run. Identity rather than existence, because a constant pointing at `pipeline/__init__.py` would satisfy an `.exists()` check while spawning a subprocess that does nothing. The other rosters naming this file (`services.remote_manifest`, the build script's `REQUIRED` array, the spec's package walk) each read their own list against the tree and none of them reads this constant | `tests/test_zipper_script_path_resolves.py` |
 | `core/` never imports a pane. The dependency runs one way — a pane reaches into this package, never the reverse — and a module here that needs `review/`, `analyze/` or `datasets/` is a pane's module that happens to sit in `core/`, which re-creates the tangle the package exists to remove (`analyze` importing `core` importing `review`) | `test_architecture_contracts.py::test_core_does_not_import_a_pane` |
 | `core.profile._repo_root` and `startup.app_fonts.fonts_dir` resolve the repository root by counting parents from their own `__file__`, so each count is that module's address rather than a constant. A wrong count raises nothing: no profile resolves and every build falls back silently to the full application, or no bundled face registers and the application draws in a system font. Both are held against the repository root rather than re-derived from the module's own location, because a test that computes the answer the same way the module does accepts whatever the module says | `tests/test_profile_repo_root.py`, `tests/test_app_fonts_dir.py` |
 | Controllers reach the app via the `app` arg, not by importing `ReviewApp` (§9) | `test_architecture_contracts.py::test_nothing_imports_reviewapp_at_runtime` |

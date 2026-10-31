@@ -27,36 +27,16 @@ class OutputFilter(str, Enum):
 
 
 class LocalInputMode(str, Enum):
-    """How the user's input would have been processed locally.
-
-    Recorded up-front so the Fetcher can reconstruct an output tree that's
-    indistinguishable from a local run.
+    """The layout of the user's input. There is one: the pipeline reads one
+    ``{well}.zip`` per well, and staging refuses anything else before a run
+    starts (``services.remote_staging``). Kept as a type on :class:`_RemoteRun`
+    and ``ZippedInput`` rather than removed, because a run's record names its
+    layout; it is never persisted, so no earlier value needs reading back.
     """
 
     ZIP = "zip"
-    """Input was already ``{well}.zip`` files. Local zip-mode run would
-    produce ``{well}_out.zip`` files in ``output_dir`` — Fetcher drops
-    them in unchanged."""
-
-    FOLDER = "folder"
-    """Input was ``{well}/`` subfolders. Local run extracts the work into
-    loose files in ``output_dir`` — Fetcher unzips each remote
-    ``{well}_out.zip`` after fetch."""
-
-    FLAT = "flat"
-    """Input was loose TIFs in the root. Local run would compress them
-    into per-well zips first (since ``compress_input_well_folders``
-    defaults to True), then proceed identically to zip mode. Treated
-    like ZIP from the Fetcher's perspective."""
-
-    MIXED = "mixed"
-    """Input has BOTH ``{well}.zip`` files AND ``{well}/`` folders for
-    different wells — the signature of a previous run that died
-    partway through ``compress_input_well_folders`` (or a manual
-    half-conversion). v5.2.21: instead of silently picking ZIP mode
-    and ignoring the remaining folders, treat the input as a resume
-    point: trust the existing zips, and zip the leftover folders
-    into the staging dir so the run includes every well."""
+    """Input is ``{well}.zip`` files; the run produces ``{well}_out.zip``
+    files in ``output_dir`` and the Fetcher drops them in unchanged."""
 
 
 def _canonical_well_from_path(stem: str) -> str | None:

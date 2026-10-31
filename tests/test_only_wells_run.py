@@ -30,7 +30,7 @@ import process_microscopy as pm
 from pipeline.field_quality import FIELD_QUALITY_BLOCK
 from pipeline.field_quality_record import finalize_field_quality
 from pipeline.run_report import finalize_run_report, write_well_report
-from pipeline.well_skip import scope_to_only_wells, select_only_wells
+from pipeline.well_skip import select_only_wells
 from pipeline import well_skip
 import pipeline.suspend as _suspend
 
@@ -205,21 +205,6 @@ def test_selection_matches_well_labels_canonically():
     assert [w for w, _p in kept] == ["A01", "C08"]
     assert missing == ["B05"]
     assert select_only_wells(items, None) == (items, [])
-
-
-def test_folder_mode_is_narrowed_and_refused_the_same_way():
-    folders = [("A01", Path("A01")), ("B02", Path("B02"))]
-    refusals: list[str] = []
-
-    class _Log:
-        def info(self, *a):
-            pass
-
-    zips, kept = scope_to_only_wells([], folders, ["B2"], refuse=refusals.append,
-                                     log=_Log())
-    assert (zips, kept, refusals) == ([], [("B02", Path("B02"))], [])
-    scope_to_only_wells([], folders, ["B2", "D04"], refuse=refusals.append, log=_Log())
-    assert refusals and "D04" in refusals[0]
 
 
 # ── the records carried across the sidecar rewrite ───────────────────────────

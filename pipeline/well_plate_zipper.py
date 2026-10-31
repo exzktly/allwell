@@ -1,9 +1,9 @@
 """Group a folder of loose TIFs into the per-well layout the pipeline reads.
 
-Run as a **subprocess**, never imported by the code that uses it: the Analyze
-pane's grouping phase (`services.input_resolution_service.run_zipper`), the
-remote runner's staging pass, and the Datasets *Zip loose folder* tool all spawn
-it and read its stdout. It is also usable directly from a shell.
+Run as a **subprocess**, never imported by the code that uses it: the Datasets
+*Zip loose folder* tool's in-place mode spawns it
+(`datasets.import_loose.zipper.run_zipper`) and reads its stdout. It is also
+usable directly from a shell.
 
 Being spawned by path is why the `sys.path` repair below exists. The parent
 passes `[sys.executable, "<this file>", ...]` with no `cwd`, so Python seeds
@@ -157,13 +157,11 @@ def group_by_well(
             if examined % 5000 == 0:
                 print(f"…discovery: examined {examined} files "
                       f"({matched} image(s) matched a well so far)", flush=True)
-            # The same predicate the caller deletes on. `tif_files_in` in
-            # services/input_resolution_service.py collects what this run will
-            # consume and then unlinks it once the run succeeds, so a file it
-            # counts and this loop skips is a file destroyed with no copy
-            # anywhere: measured, a two-channel plate whose fluorescent channel
-            # was PNG lost that channel entirely on its first successful run.
-            # The two sides of one operation have to ask one question.
+            # The repo's one answer to "is this an input image": a file one
+            # side counts and this loop skips is a file the other side can
+            # destroy with no copy anywhere — measured once, a two-channel
+            # plate whose fluorescent channel was PNG lost that channel
+            # entirely on its first successful run.
             if not is_run_input_member(fname):
                 continue
             extracted = _extract_well_from_filename(fname, schema, sep)
@@ -176,11 +174,8 @@ def group_by_well(
             # symlinks, so grouping such an entry made ``shutil.copy2`` open a
             # target that isn't there and raise a bare ``FileNotFoundError``,
             # which crashed the whole zipper subprocess and failed the entire
-            # plate. The rest of the pipeline never sees these files: its own
-            # discovery (``process_microscopy.organize_loose_tifs_into_well_folders``,
-            # ``find_image_groups``) filters on ``Path.is_file()`` / an existence
-            # check, both of which follow the link and treat a broken one as
-            # absent. Match that rule here (``os.path.isfile`` also follows) so a
+            # plate. ``Path.is_file()`` follows the link and treats a broken
+            # one as absent; match that rule here (``os.path.isfile`` also follows) so a
             # broken symlink is skipped — loudly, so the operator can repair it —
             # instead of aborting grouping for every other well.
             if not os.path.isfile(full):

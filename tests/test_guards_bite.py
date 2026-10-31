@@ -2233,7 +2233,7 @@ _IMAGE_EXT_VIOLATIONS = {
 def test_image_ext_guard_catches_a_second_spelling(tmp_path, monkeypatch, shape):
     """Every spelling that has actually appeared in this repo.
 
-    `glob_patterns` is `services/input_resolution_service.TIF_GLOB`,
+    `glob_patterns` is `datasets/import_loose/zipper.TIF_GLOB`,
     `no_leading_dot` is `pipeline/auto_threshold`'s, and `mixed_case` is the
     one nobody wrote yet — included because a guard that reads the suffix
     without lowering it is a guard one `.TIF` away from blind.

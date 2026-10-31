@@ -418,7 +418,6 @@ REUSE_PRIMITIVES = frozenset({
 DECISION_SITES = {
     "pipeline/nanowell_task.py::_prior_state": "settings_record.well_settings_allow_reuse",
     "process_microscopy.py::process_well_zip_task": "settings_record.well_settings_allow_reuse",
-    "process_microscopy.py::process_well_folder_task": "settings_record.well_settings_allow_reuse",
     "pipeline/well_skip.py::finished_output": "well_skip.finished_output",
     "process_microscopy.py::process_well_zips": "nanowell_task.confluence_reference_current",
     "services/remote_finished_wells.py::_read_against_the_reference": "remote_finished_wells.finished_here",

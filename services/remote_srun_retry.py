@@ -147,6 +147,11 @@ _BOOT_FAILURE_RE = "Something is wrong with the boot of the nodes|Node failure o
 #: output the run has started: a failure after it is not a boot failure, and
 #: the queue wait is over.
 ALLOCATION_GRANTED = "[remote] scheduler: allocation granted"
+#: What the early job (``services.remote_reservation``) says on its node while it waits for the app to hand it the
+#: run, and once it has the run and starts it (``services.remote_wait_snippets._wait_for_handover_snippet`` prints
+#: them). A node that fails between the two had nothing running on it (branch 3b below).
+HANDOVER_WAIT_LINE = "[remote] scheduler: node granted; waiting for the app to finish preparing the run…"
+HANDOVER_TAKEN_LINE = "[remote] scheduler: the run is ready — starting it on this node"
 #: What the wrapper says when Slurm refuses the request outright ("Requested node configuration is not
 #: available"): no node it could give matches the scheduler command. ``services.run_evidence`` reads it.
 NO_NODE_FITS = "[remote] scheduler: ERROR Slurm has no node that can take this request"
@@ -428,6 +433,7 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
     where = partition or "the default partitions"
     merge = "tr , '\\n' | grep -v '^$' | sort -u | paste -sd, -"
     granted = shlex.quote(ALLOCATION_GRANTED)
+    waiting, taken = shlex.quote(HANDOVER_WAIT_LINE), shlex.quote(HANDOVER_TAKEN_LINE)
     return "".join((
         f"_aw_pid={remote_pidfile_q}; _aw_err={err_file_q}; _aw_rcf={err_file_q}.rc; _aw_pend={err_file_q}.pend; ",
         f"_aw_qto={err_file_q}.qto; ",
@@ -523,9 +529,15 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         # would run the job from its beginning, the batch driver from batch 1 and a single run from its top.
         f"if [ \"$_aw_rc\" != 0 ] && [ \"$_aw_go\" = 1 ] && grep -qE '^srun: .*({_BOOT_FAILURE_RE})' \"$_aw_err\"; "
         "then _aw_bad=$(sed -nE 's/^srun: .*Node failure on ([^ ]+).*/\\1/p' \"$_aw_err\" | head -n1); ",
-        'echo "[remote] scheduler: ERROR node ${_aw_bad:-?} failed while the run was going on it — not retried, '
+        # The job asked for before staging (`services.remote_reservation`) prints its first line and then waits on
+        # its node to be handed the run: a node that failed in that wait had nothing running on it, and the app
+        # asks for another node once the run is ready, so there is nothing to resume.
+        f'if grep -qF {waiting} "$_aw_err" && ! grep -qF {taken} "$_aw_err"; then ',
+        'echo "[remote] scheduler: ERROR node ${_aw_bad:-?} failed while it waited for the run to be prepared — '
+        'nothing had started on it; another node is asked for once the run is ready"; ',
+        'else echo "[remote] scheduler: ERROR node ${_aw_bad:-?} failed while the run was going on it — not retried, '
         'because asking again would start the run from its beginning; resume the run to continue from where it '
-        'stopped"; ',
+        'stopped"; fi; ',
         # 3c. The node did not boot: exclude it and ask again.
         f"elif [ \"$_aw_rc\" != 0 ] && grep -qE '^srun: .*({_BOOT_FAILURE_RE})' \"$_aw_err\"; then ",
         "_aw_bad=$(sed -nE 's/^srun: .*Nodes ([^ ]+) are still not ready.*/\\1/p; "

@@ -824,8 +824,7 @@ class ProgressTracker:
         if self.well_total:
             # Count a well as "done" when the pipeline emits its
             # dedicated marker line. The marker fires *before* the
-            # finally-block cleanup (``remove_directory`` for zip mode
-            # / staging-dir cleanup for folder mode) so the GUI's ETA
+            # finally-block cleanup (``remove_directory``) so the GUI's ETA
             # keeps ticking even when storage is slow (NAS / network
             # mounts can stall directory deletion for minutes).
             #

@@ -326,7 +326,7 @@ def test_the_predicate_the_worker_pool_installs_consults_the_settings():
 
     import process_microscopy as pm
 
-    for fn in (pm.process_well_zips, pm.process_well_folders):
+    for fn in (pm.process_well_zips,):
         src = inspect.getsource(fn)
         tree = ast.parse(inspect.cleandoc(src))
         installed = [
@@ -356,7 +356,7 @@ def test_the_incremental_path_consults_the_settings_too():
 
     import process_microscopy as pm
 
-    for fn in (pm.process_well_zip_task, pm.process_well_folder_task):
+    for fn in (pm.process_well_zip_task,):
         src = inspect.getsource(fn)
         assert "well_settings_allow_reuse" in src, (
             f"{fn.__name__}'s incremental branch does not consult the "
@@ -384,7 +384,7 @@ def test_a_short_circuited_well_is_not_stamped_with_this_runs_settings():
 
     import process_microscopy as pm
 
-    for fn in (pm.process_well_zip_task, pm.process_well_folder_task):
+    for fn in (pm.process_well_zip_task,):
         src = inspect.getsource(fn)
         assert "record_well_settings(output_dir, well_label, settings_key)" in src, (
             f"{fn.__name__} does not record the settings its own output was "

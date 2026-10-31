@@ -331,52 +331,73 @@ def test_a_container_that_vanished_entirely_is_not_read_as_complete(tmp_path):
     assert resolve_input_container(gone) is None
 
 
-# ── P5: images moved into folders the run then ignores ──────────────────────
+# ── P5: images the run would not read stop it ──────────────────────────────
 
-def test_images_stranded_in_an_ignored_folder_stop_the_run(tmp_path):
-    """`well_folders` is read only when there are no zips at all.
-
-    `organize_loose_tifs_into_well_folders` has already *moved* the user's
-    loose images into `in/<WELL>/` by then, so on a plate that also holds a
-    zip those images are somewhere the run will never look — and the run
-    reports success having analysed everything except what the user just
-    added.
-    """
-    from pipeline.input_layout import (
-        find_well_zips, refuse_images_only_in_ignored_folders)
-
+def _plate_with_one_archive(tmp_path):
     d = tmp_path / "in"
     d.mkdir()
     with zipfile.ZipFile(d / "A01.zip", "w") as zf:
         zf.writestr("P_DAPI_A01_F1_T1.tif", b"x")
+    return d
+
+
+def test_images_stranded_in_an_ignored_folder_stop_the_run(tmp_path):
+    """A folder for a well with no archive is never read by a zips-only run.
+
+    Running anyway would report success having analysed everything except
+    those images. The refusal names the folder, because the remedy depends
+    on which it is.
+    """
+    from pipeline.input_layout import find_well_zips, refuse_non_zip_input
+
+    d = _plate_with_one_archive(tmp_path)
     (d / "B02").mkdir()
     (d / "B02" / "P_DAPI_B02_F1_T1.tif").write_bytes(b"x")
 
     with pytest.raises(SystemExit) as caught:
-        refuse_images_only_in_ignored_folders(d, find_well_zips(d))
+        refuse_non_zip_input(d, find_well_zips(d))
 
-    assert "B02" in str(caught.value) and "P_DAPI_B02_F1_T1.tif" in str(caught.value), (
-        "the refusal must name the wells and files, because the remedy "
-        "depends on which they are")
+    said = str(caught.value)
+    assert "well folder(s) with no <WELL>.zip: B02/ (1 image(s))" in said, said
+    assert "Datasets → Zip loose folder" in said, said
 
 
-def test_a_redundant_folder_beside_its_archive_still_runs(tmp_path):
-    """A resumed plate's leftover folder is the archive's twin, not new input.
+def test_loose_images_beside_the_archives_stop_the_run(tmp_path):
+    """Loose images used to be folded into the archives at Run; nothing does
+    that now, so a run that went ahead would silently skip them."""
+    from pipeline.input_layout import find_well_zips, refuse_non_zip_input
 
-    Refusing there would break every resume, which is why the check is "holds
-    an image the archive does not" rather than "holds an image".
-    """
-    from pipeline.input_layout import (
-        find_well_zips, refuse_images_only_in_ignored_folders)
+    d = _plate_with_one_archive(tmp_path)
+    (d / "P_DAPI_A01_F2_T1.tif").write_bytes(b"x")
+    (d / ".DS_Store").write_bytes(b"x")              # not the user's data
+
+    with pytest.raises(SystemExit) as caught:
+        refuse_non_zip_input(d, find_well_zips(d))
+
+    said = str(caught.value)
+    assert "1 loose image(s) at the top level: P_DAPI_A01_F2_T1.tif" in said, said
+
+
+def test_an_input_with_no_archive_stops_the_run(tmp_path):
+    from pipeline.input_layout import refuse_non_zip_input
 
     d = tmp_path / "in"
     d.mkdir()
-    with zipfile.ZipFile(d / "A01.zip", "w") as zf:
-        zf.writestr("P_DAPI_A01_F1_T1.tif", b"x")
+    with pytest.raises(SystemExit, match="no per-well <WELL>.zip archives"):
+        refuse_non_zip_input(d, [])
+
+
+def test_a_redundant_folder_beside_its_archive_still_runs(tmp_path):
+    """A folder an earlier version left beside its own well's archive is the
+    archive's twin, not new input. Refusing it would refuse every plate those
+    versions produced, so it is logged, not refused."""
+    from pipeline.input_layout import find_well_zips, refuse_non_zip_input
+
+    d = _plate_with_one_archive(tmp_path)
     (d / "A01").mkdir()
     (d / "A01" / "P_DAPI_A01_F1_T1.tif").write_bytes(b"x")
 
-    refuse_images_only_in_ignored_folders(d, find_well_zips(d))
+    refuse_non_zip_input(d, find_well_zips(d))
 
 
 # ── the zipper is reaped whatever ends the read of its output ───────────────

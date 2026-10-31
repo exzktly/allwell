@@ -68,7 +68,6 @@ _SCRATCH_DIR_ALLOWLIST = frozenset({
     # hold only what the run just wrote into them; the user's inputs are the
     # archive it read from, which it never removes.
     ("process_microscopy.py", "process_well_zip_task"),
-    ("process_microscopy.py", "process_well_folder_task"),
     # The nanowell well task, called from ``process_well_zip_task`` with that task's own scratch and staging
     # directories (which it removes), and from the end-of-run pass without them, when it makes both itself
     # and removes only those: the plate-keyed ``_tmp_extract_<plate>_<well>`` and the settings-keyed staging directory, which hold

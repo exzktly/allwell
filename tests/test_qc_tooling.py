@@ -181,7 +181,6 @@ def test_qc_bounds_still_reach_the_sidecar():
 # ── per-channel model precompute (basic / empty_well) ────────────────────────
 
 def _write_tif(path, arr):
-    import tifffile
     tifffile.imwrite(str(path), arr.astype(np.float32))
 
 
@@ -190,11 +189,16 @@ def test_build_flatfield_models(tmp_path):
     H = W = 48
     shade = np.tile(np.linspace(0.5, 1.5, W).astype(np.float32), (H, 1))
     rng = np.random.default_rng(1)
-    # two wells, one channel (GFP)
+    # two wells, one channel (GFP), each in its <WELL>.zip — the pipeline's one
+    # input layout. `basic` scanned loose TIFFs on disk only, so on this plate
+    # it found no frame, built no field and corrected nothing, silently.
     for well in ("A01", "A02"):
-        for fov in ("F001", "F002", "F003"):
-            img = rng.uniform(90, 110, (H, W)).astype(np.float32) * shade
-            _write_tif(tmp_path / f"exp_GFP_{well}_{fov}_24h.tif", img)
+        with zipfile.ZipFile(tmp_path / f"{well}.zip", "w") as zf:
+            for fov in ("F001", "F002", "F003"):
+                img = rng.uniform(90, 110, (H, W)).astype(np.float32) * shade
+                b = io.BytesIO()
+                tifffile.imwrite(b, img)
+                zf.writestr(f"exp_GFP_{well}_{fov}_24h.tif", b.getvalue())
 
     # basic: builds a field for gfp across all wells (time-collapsed → pooled key)
     models = build_flatfield_models(tmp_path, tokens=["GFP"], schema=schema,
@@ -215,6 +219,17 @@ def test_build_flatfield_models(tmp_path):
     # none/gaussian never precompute
     assert build_flatfield_models(tmp_path, tokens=["GFP"], schema=schema,
                                   sep="_", mode="gaussian") == {}
+
+
+def test_a_basic_run_with_no_usable_frame_is_refused(tmp_path):
+    """No field means no correction, and an uncorrected run looks corrected."""
+    from pipeline.empty_well import BlankGroups, require_grouped_models
+
+    groups = BlankGroups("", "", corrections=("basic", "none")).for_mode("basic")
+    with pytest.raises(SystemExit, match="basic was requested"):
+        require_grouped_models("Flat-field", "basic", {"": {}}, groups, tmp_path)
+    require_grouped_models("Flat-field", "basic", {"": {"gfp": {_POOLED_TP: np.ones((4, 4))}}},
+                           groups, tmp_path)
 
 
 def _zip_well(zip_path: Path, well: str, tokens, n=3, level=60.0):

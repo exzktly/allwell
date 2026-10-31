@@ -3,7 +3,7 @@
 Qt-free. Two kinds of finding, kept apart because they are answered differently: a **problem** stops the run
 (no acquisition record, no well archives, a tile the record names that the archive does not hold, a grid that
 cannot be placed), a **warning** is said and the run goes on (an overlap smaller than a nanowell, which fuses
-the nanowells on the seams: they are measured from a blended crop, with an undefined count, not skipped).
+the nanowells on the seams: they are counted from a crop blended from the tiles covering them, and flagged).
 """
 
 from __future__ import annotations
@@ -248,6 +248,6 @@ def _overlap_warnings(record, opts, place_from_record, tiles_from_record, ok) ->
         seams, total = seam_site_estimate(plan, plate_format, margin, opts=opts)
         out.append(f"{well} at {tp}: the tiles overlap by {min(short):.0f} µm, less than the {needed:.0f} µm a "
                    f"{diameter:.0f} µm nanowell needs to lie inside one tile with its margin: an array filling the tiles "
-                   f"would have about {seams} of its {total} nanowells on a seam, each measured from a blended crop "
-                   f"with no cell count (fewer if the array is smaller than the tiles).")
+                   f"would have about {seams} of its {total} nanowells on a seam, each counted from a crop blended from "
+                   f"the tiles covering it and flagged as fused (fewer if the array is smaller than the tiles).")
     return _listed("Overlap", out) if out else []

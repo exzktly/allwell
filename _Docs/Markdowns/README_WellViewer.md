@@ -365,7 +365,10 @@ in the wrong places, and the montage shows it. The record, archive and grid chec
 channels at run time** is on, or for a queued job whose input folder does not exist yet; the pipeline itself
 still refuses such a well, naming the reason. An overlap shorter
 than a nanowell needs is logged once as a warning with the expected number of nanowells on a seam, and the
-run goes on.
+run goes on. Those nanowells are still counted: each is measured from an image blended from the tiles that cover
+it, and its row is flagged `fused` so you can keep or leave out the seam nanowells in Review (the **Subset**
+condition *On a tile seam*). A nanowell near the scan's outer edge, inside one tile but short of the margin, is
+counted on that tile and flagged the same way.
 
 **Reuse registration** (a folder and a **Browse…** button) is for analysing a plate a second time with other
 segmentation or measurement settings — another cell diameter, margin, or occlusion or clipping threshold — without
@@ -5576,7 +5579,12 @@ the sentence names it.
     value at each of its well's timepoints);
   - **position** — the *ring* (lattice steps from the central nanowell), the *distance from the centre* in µm (on
     the well's lattice at its measured pitch), or the address *q* / *r*;
-  - **imaging field** — the tile the nanowell was cut from, *is one of* or *is not one of* the tiles you tick.
+  - **imaging field** — the tile the nanowell was cut from, *is one of* or *is not one of* the tiles you tick;
+  - **on a tile seam** — *yes* or *no*: whether no one tile held the nanowell with margin, so it was counted from
+    an image blended from the tiles covering it (a nanowell near the scan's outer edge counts too). Read at a
+    timepoint like a metric: *no* *at every timepoint* leaves out every nanowell that was ever on a seam; *yes*
+    *at any timepoint* keeps only those. Datasets analysed before seam nanowells were counted have them with no
+    count.
 
   A number is compared with ≥, ≤, =, *between* or *not between* (both ends included). Every change is applied as
   you make it; a range typed upside down is said under the conditions and changes nothing until it is fixed.

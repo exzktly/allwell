@@ -45,7 +45,9 @@ _EDIT_TIP = "Show the subset's conditions: add, change or remove any of them."
 _MATCH_TIP = ("All: a nanowell is used only when it meets every condition.\n"
               "Any: a nanowell is used when it meets at least one.")
 _FIELD_TIP = ("What the condition tests: the cells at the start (the count at the Baseline), a metric, where the "
-              "nanowell sits in its array, or the imaging field it was cut from.")
+              "nanowell sits in its array, the imaging field it was cut from, or whether it lay on a tile seam "
+              "(measured from a crop blended from the tiles that cover it). On a tile seam: no at every timepoint "
+              "leaves the seam nanowells out; yes at any timepoint keeps only them.")
 _AT_TIP = ("The timepoint the value is read at: the baseline (the count's), the well's earliest or latest, a named "
            "timepoint, or at any / every timepoint of the well (every: the nanowell needs a passing value at each).")
 _OP_TIP = "How the value is compared. Both bounds of a range are included."
@@ -176,7 +178,7 @@ class _ConditionRow(QWidget):
         category = ss.is_category(name)
         ranged = self.op_cb.currentData() in ("between", "outside")
         self.at_cb.setVisible(ss.per_timepoint(name))
-        self.a_spin.setVisible(not category)
+        self.a_spin.setVisible(not category and not ss.is_flag(name))
         self.and_label.setVisible(not category and ranged)
         self.b_spin.setVisible(not category and ranged)
         self.tiles_btn.setVisible(category)

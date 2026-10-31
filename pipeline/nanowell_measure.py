@@ -161,8 +161,9 @@ def template_half(site_radius_px: float) -> int:
 def owned_indices(owners, tile: str) -> set[int]:
     """The site indices *tile* owns, from ``OwnershipReport.owners`` (one tile name, or None for fused/unimaged, per site).
 
-    Sites with owner None are in nobody's set: nothing counts them here (fused sites are segmented on
-    a blended crop, tracker C14), so their count is absent, which :func:`site_state` reads as undefined.
+    Sites with owner None are in nobody's set and nothing counts them, so their count is absent, which
+    :func:`site_state` reads as undefined. A fused site is given an owner before this is asked
+    (``pipeline.nanowell_seams``): its holding tile, or a seam tile blended from the tiles that cover it.
     The indices are positions in the list the report was made from, so the geometries passed to
     :func:`count_cells` must carry the same indices (all sites of the well, not a per-tile renumbering).
     """

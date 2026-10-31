@@ -9952,7 +9952,9 @@ at least `diameter + 2m`, which is the number reported, and not `diameter + m`.
 `assign_owners`' fused class holds two different things, and the report splits
 them: `blend_indices` straddle a seam and need a crop blended from several tiles,
 `edge_indices` lie wholly inside one tile but within the margin of the union's
-outer edge and are measured from that one tile with a thinner margin. Ownership
+outer edge and are measured from that one tile with a thinner margin. Both are
+counted: `pipeline/nanowell_seams.py` gives each an owner before the tiles are
+measured (below, under `count_cells`). Ownership
 takes the registered positions (`Registration.positions()`) when given, and the
 overlap guarantee is then measured from them too; the recorded ones are right
 for a preview and wrong for a run.
@@ -10644,8 +10646,21 @@ sends the form's choice (sent only when not cyto3, a form's cyto3 would have run
 restores a sidecar that names none as cyto3. Which model counts these plates best has not been measured (tracker
 C10). `count_cells` keeps a label only when its centroid lies in the interior of
 a site the tile **owns** (`owned_indices(report.owners, tile)` from the `ownership_report` of
-6.2f; fused sites have no owner and are counted by no tile until they are segmented on a blended
-crop, tracker C14, so `site_state` sees an undefined count for them); a cell in the overlap of two tiles
+6.2f). A fused site is given an owner first, by `nanowell_run._with_seam_tiles` and
+`pipeline/nanowell_seams.py`: an edge site the tile that holds it whole (nearest centre, ties to the lexically first
+id); a blend site a **seam tile**. The blend sites are binned into squares of `BIN_PITCHES` (6) lattice pitches, and
+each bin becomes one image blended from every registered tile that covers it (`tile_register.fused_crop`, weighted by
+distance from each tile's edge, pixels no tile covers set to the crop's median), reaching the template's suppression
+radius plus half a pitch past its outermost site so the rim template and the levelling see a surround. Binning rather
+than one crop per site keeps a seam's sites together on one tile, because a site's contrast is the median over its
+same-tile neighbours. A seam tile is added to the timepoint's positions and images under a `seam:<n>` id and measured
+by `_tile_contents` exactly as a tile is; its fluorescence channels are blended on the same pixels on demand
+(`SeamTiles.channels`), and a bin one of whose covering tiles has no image is left unowned (its sites keep an
+undefined count). Seam tiles are left out of the pooled template, which is built from the real tiles' sites alone.
+The row keeps `fused` set either way, so a nanowell counted from a blended crop is told apart from one counted on one
+tile, and its `owner` (and its cells' `fov`) names a real tile — the one covering most of its disk
+(`SeamTiles.reported`). A site with no owner at all is counted by no tile, so `site_state` sees an undefined count
+for it. A cell in the overlap of two tiles
 is therefore counted by the one tile that owns the site, and a cell on a rim or between
 sites belongs to none. Beside each count the row records what the segmenter was given: `level_offset` and
 `level_gain`, the site's `(offset, gain)` from `_normalise`, and `segmenter_floor` / `segmenter_contrast` from
@@ -11438,8 +11453,9 @@ row (the state at the timepoint, the value missing there, the baseline's state o
 `seeded later` when cells arrive later, `empty at baseline` when not). The nanowell fluorescence (`signal_<channel>`) is
 background-subtracted, so a ratio over a baseline at or below zero is undefined. The baseline is the well's
 earliest timepoint; or, per measurement, each nanowell's first timepoint in a measurable state at which that
-measurement exists (the pipeline records `measured` with no count where no template could be built, and a
-fused nanowell has a confluence but no count); or one named timepoint for every nanowell, spelled
+measurement exists (the pipeline records `measured` with no count where no template could be built, and in a
+dataset from before fused nanowells were counted, or where a seam tile could not be blended, a fused nanowell has a
+confluence but no count); or one named timepoint for every nanowell, spelled
 `"tp:<timepoint>"` (`baseline_at`, read back by `baseline_timepoint`, validated by `is_baseline`; the prefix keeps a
 timepoint called `earliest` from reading as the rule). A well with no timepoint by that name has no baseline row, so
 its fold changes and occupancy class are NaN with the baseline state `NO_BASELINE_TIMEPOINT` — never a baseline
@@ -11531,11 +11547,14 @@ names a field (`field_choices`): `n0` — *Starting cells*, the count at the bas
 are drawn from, so the condition and the key always agree; any metric column but the occupancy class (`n`, `c`,
 `brightness_<ch>`, `signal_<ch>`, the fold changes, `growth_rate`); the nanowell's place — `ring` (`views_compute.
 lattice_ring`) and `distance_um` (the hypotenuse of `lattice_xy` at the well's measured pitch, `well_pitch`), each on
-the well's own lattice kind from its grid record (`geometry_of`), and `nw_q` / `nw_r`; and `owner`, the imaging
-field (tile) the run cut the nanowell from. A numeric field is compared by `ge` / `le` / `eq` / `between` /
+the well's own lattice kind from its grid record (`geometry_of`), and `nw_q` / `nw_r`; `owner`, the imaging
+field (tile) the run cut the nanowell from; and `fused` — *On a tile seam* — the site table's flag for a nanowell no
+one tile held with margin, counted from a blended crop (a seam site, or one within the margin of the scan's outer
+edge), so the seam nanowells can be kept alone or left out. A numeric field is compared by `ge` / `le` / `eq` / `between` /
 `outside` (bounds inclusive; a `between` of one value is stored as `eq`, so two spellings of one subset compare
-equal); `owner` by `in` / `not_in` a set of tiles. A per-timepoint field (a metric with a value per timepoint, and
-`owner`) is read *at* a timepoint: `baseline` (the row at the count's `baseline_timepoint`), `earliest` / `latest`
+equal); `owner` by `in` / `not_in` a set of tiles; `fused` by `yes` / `no` (`FLAG_OPS`, no bound; a cell read as a
+bool or its text, `_flag_value`, and missing is no value). A per-timepoint field (a metric with a value per
+timepoint, `owner` and `fused`) is read *at* a timepoint: `baseline` (the row at the count's `baseline_timepoint`), `earliest` / `latest`
 (the well's), `tp:<label>`, `any` or `every`; a per-nanowell field carries no `at`. `Condition.validated` is the one
 canonical form and the one place a condition is refused (an unknown field, an op the field cannot take, a range
 upside down, a fractional bound on a whole-number field, a tile condition with no tile).

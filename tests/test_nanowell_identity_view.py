@@ -527,7 +527,10 @@ def _offsets(collection) -> set:
 def test_a_partial_well_s_status_puts_exactly_the_stepped_tile_s_nanowells_in_the_misregistered_class(dataset):
     _out, _data, ref, other = dataset
     broken = _tile_off(other)
+    # The tile's addresses at either timepoint, as the check leaves them out (review tracker M3): which of the two
+    # placed it a step off cannot be told, and the plate moved against the tiles, so the two own different edges.
     in_tile = {a for a, owner in broken.owners.items() if owner == TILE}
+    in_tile |= {a for a, owner in ref.owners.items() if owner == TILE and a in broken.sites}
     status = ic.status_map(_pair(dataset, "A04"))
     assert status.members("misregistered") == in_tile
     assert status.members("kept") == (set(ref.sites) & set(broken.sites)) - in_tile

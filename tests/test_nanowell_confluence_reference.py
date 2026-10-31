@@ -79,7 +79,8 @@ def _confluence(image, reference):
     norm.confluence = nr._confluence_basis(LOCATED, images, template, reference, norm, BY_TILE, GEOMS, PITCH, out)
     fit = [g for g in nr._local_fit(TILE, BY_TILE[TILE], LOCATED, GEOMS, template)[0] if g.index in norm.levels]
     rim = nm.rim_suppress(image, PX, template, fit, levels=norm.levels)
-    got = nr._tile_confluence(TILE, BY_TILE[TILE], LOCATED, images, GEOMS, template, norm, fit, rim)
+    reference_rim = nr._reference_rim(TILE, BY_TILE[TILE], LOCATED, images, GEOMS, template, norm)
+    got = nr._tile_confluence(fit, PX, template, norm, rim, reference_rim)
     return np.array([np.nan if got.get(i) is None else got[i] for i in GEOMS]), out
 
 

@@ -138,9 +138,10 @@ _POPOUT_METRICS_TIP = ("Write each crop's measurements under it — the same set
 _POPOUT_LABELS_TIP = ("Write each crop's timepoint over it and the line under the figure saying where the crops were "
                       "cut from and on what brightness scale. Off leaves the crops bare; the title still names the "
                       "nanowell and channel.")
-_CROP_CELLS_TIP = ("Draw a dot at the centre of each cell the run counted on every crop — the strip, the pop-out and "
-                   "the Extremes montage — as the Array view's Cells layer does. The run keeps no cell outlines, so "
-                   "a dot is all there is to draw.")
+_CROP_CELLS_TIP = ("Draw a dot at the centre of each cell the run counted in the crop's own nanowell on every crop "
+                   "— the strip, the pop-out and the Extremes montage. Cells of the neighbouring nanowells that the "
+                   "crop's margin takes in are not drawn. The run keeps no cell outlines, so a dot is all there is "
+                   "to draw.")
 _TP_TIP = ("The timepoint drawn on Along x: Wells and Position (the latest by default), the one Extremes ranks the "
            "nanowells at (the well's latest by default), and the one the Array view shows (the well's first by "
            "default).")

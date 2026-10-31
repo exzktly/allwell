@@ -6,7 +6,7 @@
 # main it landed on. scripts/preflight.sh checks the same thing against the author's origin/main, which is stale
 # exactly when it matters: two pull requests open at once each bump to the same next number, each passes, and the
 # second merges with no increment of its own. Seven of the 34 pull requests merged between 2026-10-28 and
-# 2026-10-31 did (tracker P1 in _Docs/Markdowns/REVIEW_1088_1123_TRACKER.md, while it exists).
+# 2026-10-31 did.
 #
 # The pull-request half catches a collision whenever the job runs after the sibling merged; the push half makes a
 # collision that slipped past it a red main rather than a silent one. Requiring branches to be up to date before

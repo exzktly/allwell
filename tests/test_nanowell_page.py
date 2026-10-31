@@ -448,3 +448,9 @@ def test_the_rim_focus_control_on_the_band_changes_the_qc_layer_s_rule_and_the_m
     qtbot.waitUntil(lambda: st.focus_for == (True, 0.6) and not st.computing, timeout=20000)
     assert page.state.qc.params.nanowell_focus_fraction == 0.6 and page.state.qc.params.exclude_soft_nanowells
     assert not any("focus" in key for key in st.to_config())        # the QC layer's setting, not the page's
+    # The recompute ends in a redraw that matplotlib queues on the canvas; ending the test inside that window leaves
+    # the draw to fire on a canvas the widget reaper has deleted ("Internal C++ object (FigureCanvasQTAgg) already
+    # deleted" at teardown, seen in CI). Wait it out, as test_nanowell_page_starting_cells._settled does.
+    timer, canvas = page.widgets.get("_nw_refit_timer"), page.widgets.get("_nw_canvas")
+    qtbot.waitUntil(lambda: not (timer is not None and timer.isActive())
+                    and not getattr(canvas, "_draw_pending", False), timeout=5000)

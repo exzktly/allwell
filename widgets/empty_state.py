@@ -98,6 +98,8 @@ class EmptyState(QWidget):
         self._action_slot = None
         # Whether a hint may stand beside an action; see ``setAction``.
         self._keep_hint = False
+        # Whether the placeholder is reporting work in progress; see ``setBusy``.
+        self._busy = False
         outer.addSpacing(theme.Spacing.md)
         outer.addWidget(self._action, 0, Qt.AlignHCenter)
         # A column of secondary links under the action, empty and hidden until a
@@ -179,8 +181,7 @@ class EmptyState(QWidget):
             self._action.clicked.connect(_slot)
             self._action_slot = _slot
         self._keep_hint = bool(keep_hint)
-        self._action.setVisible(bool(label))
-        self._sync_hint_visibility()
+        self._sync_controls_visibility()
 
     def setEntries(self, entries) -> None:
         """Show a column of secondary links below the action, replacing any set before.
@@ -209,7 +210,7 @@ class EmptyState(QWidget):
             self._entries_layout.addWidget(
                 self._make_entry(label, sublabel, on_click, enabled, tooltip,
                                  on_remove))
-        self._entries.setVisible(bool(rows))
+        self._sync_controls_visibility()
 
     def entryAt(self, index: int):
         """The clickable row at *index*, whichever shape :meth:`setEntries` gave it.
@@ -250,7 +251,7 @@ class EmptyState(QWidget):
                 # reaches — measured at +60 live widgets over 20 refreshes,
                 # against +0 without it.
                 widget.setParent(None)
-        self._entries.setVisible(False)
+        self._sync_controls_visibility()
 
     def _make_entry(self, label: str, sublabel: str, on_click,
                     enabled: bool, tooltip: str, on_remove=None) -> QWidget:
@@ -291,11 +292,34 @@ class EmptyState(QWidget):
             self._action.clicked.disconnect(self._action_slot)
             self._action_slot = None
         self._action.setText("")
-        self._action.setVisible(False)
+        self._sync_controls_visibility()
         # Back to the default: a placeholder with no action has no reason to
         # carry the exception ``setAction(keep_hint=True)`` granted it, and a
         # flag left set is a rule that outlives what it was for.
         self._keep_hint = False
+        self._sync_hint_visibility()
+
+    def setBusy(self, busy: bool) -> None:
+        """Say the page is waiting on work in progress, not on the user.
+
+        While busy the action button and the entries column are hidden and the
+        hint is shown in their place, whatever was configured: a placeholder
+        reading "Opening …" over an "Open a dataset" button and a list of recent
+        folders invites the reader to start the thing that is already happening.
+        Neither is cleared — ``setBusy(False)`` brings back exactly what the
+        site had set, including entries replaced while busy.
+        """
+        self._busy = bool(busy)
+        self._sync_controls_visibility()
+
+    def isBusy(self) -> bool:
+        return self._busy
+
+    def _sync_controls_visibility(self) -> None:
+        """Show the action and the entries when each is set and the page is not busy."""
+        self._action.setVisible(bool(self._action.text()) and not self._busy)
+        self._entries.setVisible(
+            self._entries_layout.count() > 0 and not self._busy)
         self._sync_hint_visibility()
 
     def _sync_hint_visibility(self) -> None:
@@ -315,7 +339,7 @@ class EmptyState(QWidget):
         """
         self._hint.setVisible(
             bool(self._hint.text())
-            and (self._keep_hint or not self._action.text()))
+            and (self._keep_hint or self._busy or not self._action.text()))
 
     # ── internals ────────────────────────────────────────────────────────
     def _icon_px(self) -> int:

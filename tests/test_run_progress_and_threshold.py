@@ -54,14 +54,14 @@ def test_grouped_well_is_pending_not_processing(qapp):
 
     # a grouped (queued) well shows the pending colour, NOT the processing amber
     d.set_well_stage("A01", "group")
-    assert d._well_color("A01") == Colors.text_muted
+    assert d._well_color("A01") == Colors.run_pending
     assert "pending" in d._well_tooltip("A01") or "grouped" in d._well_tooltip("A01")
 
     # once it starts processing it flips to amber, then blue when processed
     d.set_well_stage("A01", "active")
-    assert d._well_color("A01") == Colors.warn
+    assert d._well_color("A01") == Colors.run_processing
     d.set_well_stage("A01", "process")
-    assert d._well_color("A01") == Colors.accent
+    assert d._well_color("A01") == Colors.run_on_server
 
     # an untouched well stays uncoloured (truly empty, distinct from pending)
     assert d._well_color("H12") is None
@@ -73,14 +73,14 @@ def test_grouped_well_is_pending_remote(qapp):
     d = RunDashboard()
     d.reset(remote=True, total=2)
     d.set_well_stage("A01", "group")
-    assert d._well_color("A01") == Colors.text_muted   # queued, not yet uploaded
+    assert d._well_color("A01") == Colors.run_pending   # queued, not yet uploaded
     d.set_well_stage("A01", "upload")
     # On the remote, waiting its turn — its own colour. This used to be ``warn``,
     # shared with a well actually being computed, so a plate mid-run was one
     # block of amber that said nothing about which wells were being worked on.
-    assert d._well_color("A01") == Colors.accent2
+    assert d._well_color("A01") == Colors.run_uploaded
     d.set_well_stage("A01", "active")
-    assert d._well_color("A01") == Colors.warn          # now actually computing
+    assert d._well_color("A01") == Colors.run_processing          # now actually computing
 
 
 # ── 3) Auto-threshold rounds to the nearest integer before saving ────────────

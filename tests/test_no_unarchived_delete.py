@@ -17,12 +17,11 @@ and then removes a directory must go through
 :func:`util.zip_write.replace_folder_with_archive`, which deletes the archived
 files and removes the directory only when nothing is left in it.
 
-**Archive-writing is followed through calls**, because two of the four sites
-did not name ``atomic_zip`` themselves — ``stage_local_zips`` zips through
-``_zip_well_folder`` and ``compress_folder_images_to_zip_and_remove`` through
-``compress_images_to_zip``. A guard that only looked for a literal
-``atomic_zip`` call in the same function found two of the four and would have
-called the sweep done.
+**Archive-writing is followed through calls**, because sites have zipped
+through a helper rather than naming ``atomic_zip`` themselves — the pipeline's
+well task through ``compress_images_to_zip``. A guard that only looked for a
+literal ``atomic_zip`` call in the same function missed half the sites it was
+written for and would have called the sweep done.
 
 **And it is followed across a first-party import**, which the first version of
 this guard did not do. ``compress_images_to_zip`` moved from

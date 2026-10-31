@@ -7240,7 +7240,7 @@ returns the pair of directories, and the run mode is exactly what the form sent.
 Rendering the run's progress is a third mixin, `analyze.progress.AnalyzeProgressMixin`:
 `_apply_progress_event` turns each `ProgressTracker` event into dashboard state
 (headline, overall bar, per-well plate colour, per-well FOV and transfer dials),
-`_apply_grouping_event` does the same for the Group stage's four events
+`_apply_grouping_event` does the same for the Ready stage's four events
 (`zipper_start` / `zipper_well` / `zipper_done` / `stage_total`) — which, since
 nothing is grouped at Run, announce the wells the input resolved to, from
 `_resolve_run_dirs_for_runner` locally and after staging on a remote run —
@@ -15977,7 +15977,7 @@ run reattaches to its own directory. A run started with a subset says so in the
 log and on the dashboard (`only_wells_note`), since it otherwise looks exactly
 like a whole-plate run with most wells not moving. The processing denominator
 needs no change — the pipeline's own `Zip mode: N well zip(s)` banner is logged
-after the subset is applied — while the Group stage keeps counting the whole
+after the subset is applied — while the Ready stage keeps counting the whole
 plate, which is what `_resolve_run_dirs_for_runner` announces (`iter_well_tokens`
 over the resolved input).
 
@@ -15991,7 +15991,7 @@ of those wells alone rather than of the whole plate; the scope afterwards is
 still what decides the upload when staging returns every archive unplanned
 (no filter and no split). The wells left
 unplanned are listed on the result (`ZippedInput.outside_subset_wells`) so the
-remote Group stage still counts the whole plate. Pinned by
+remote Ready stage still counts the whole plate. Pinned by
 `tests/test_only_wells_remote.py::test_a_forced_subset_rewrites_only_its_own_archives`.
 The empty-well blanks are uploaded
 whatever the subset says (the host builds its correction from them); the journal

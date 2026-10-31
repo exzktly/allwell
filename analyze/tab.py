@@ -335,12 +335,10 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
         )
         if not d:
             return
-        # The readout depends on both things about to change — the path, which
-        # `textChanged` reports, and the schema the folder scan infers from it —
-        # so it is held and computed once at the end, from the two together,
-        # instead of once against the previous folder's schema and once again
-        # after. That is one walk of the selected folder per click rather than
-        # two (ARCHITECTURE, the input-layout section).
+        # The readout is held while the path is set and the folder scan fills
+        # the form, and computed once at the end: one walk of the selected
+        # folder per click rather than two (ARCHITECTURE, the input-layout
+        # section).
         #
         # Both the release and the recomputation are in the `finally`:
         # `_autofill_from_input_scan` returns early on names that do not parse

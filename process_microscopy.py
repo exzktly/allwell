@@ -4,13 +4,12 @@ process_microscopy.py
 Production-ready pipeline to segment nuclei with StarDist and quantify
 GFP intensities per nucleus from paired fluorescence microscopy images.
 
-Input modes (per-well, grouped upstream)
-----------------------------------------
---input_dir must hold input grouped by 96-well plate position, in one of
-two layouts:
-  • Zip mode (preferred): per-well archives A01.zip … H12.zip.
-  • Folder mode: per-well subfolders A01/ … H12/ (compressed to
-    <well>.zip during the run).
+Input (per-well archives, grouped upstream)
+-------------------------------------------
+--input_dir must hold one archive per 96-well plate position, A01.zip …
+H12.zip. Loose images and per-well folders are refused by name before any
+work starts (pipeline.input_layout.refuse_non_zip_input); the Datasets pane's
+Zip loose folder tool converts them.
 
 For each well the script will:
   1. Validate the name against the 96-well plate pattern (A-H, 01-12).
@@ -22,10 +21,8 @@ For each well the script will:
   5. Delete the temporary directories (extracted input + staged images).
   6. Per-well CSVs are written to <output_dir> as usual (not zipped).
 
-Loose TIFs dropped directly in an input directory named "in" are grouped
-into per-well folders first (see organize_loose_tifs_into_well_folders).
-The GUI Analyze tab and the remote runner always group input into one of
-the above layouts before invoking this script.
+The GUI Analyze tab and the remote runner refuse the same non-zip input
+before invoking this script.
 
 Usage
 -----
@@ -81,7 +78,6 @@ from util.schema import (
     parse_schema,
     validate_schema,
 )
-from util.zip_write import replace_folder_with_archive
 from util.zip_append import refuse_if_pending as _refuse_if_appending
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
@@ -152,7 +148,6 @@ _LABELFREE_METHODS = LABELFREE_METHODS              # one definition: util.chann
 # remote worker) are unchanged. See that module for the implementations + the
 # tmp -> fsync -> rename rationale.
 from pipeline.io import (
-    _compress_images_to_zip,
     compress_images_to_zip,
     _safe_atomic_text_write,
     _safe_well,
@@ -337,34 +332,6 @@ log = logging.getLogger(__name__)
 # which are the same job, and are re-exported at the top of this file. A
 # zip-mode well's inputs are not unpacked at all: ``pipeline.zip_members``.
 # ---------------------------------------------------------------------------
-
-
-def compress_folder_images_to_zip_and_remove(folder: Path, out_zip: Path) -> int:
-    """
-    Compress image files in *folder* to *out_zip*, then delete the files the
-    archive took.
-
-    Returns the number of image files added to the archive. If no image files
-    are found, the source folder is left untouched.
-
-    *folder* itself is removed only when the archive covers everything in it.
-    The archive holds TIF/TIFF/PNG, so a folder carrying a companion XML, an
-    acquisition log or a mask subdirectory keeps those and survives — removing
-    it as a unit destroyed them with no copy anywhere. The same rule holds for
-    the files :func:`_verify_files_complete` drops: a zero-byte image is
-    reported and excluded, and it must not then be deleted along with the
-    directory it sits in.
-    """
-    packed = _compress_images_to_zip(folder, out_zip)
-    if not packed:
-        return 0
-    outcome = replace_folder_with_archive(folder, packed, remove_dir=remove_directory)
-    if not outcome.folder_removed:
-        log.info(
-            "Kept %s: %d file(s) the archive does not carry (%s)",
-            folder.name, len(outcome.kept), ", ".join(outcome.kept),
-        )
-    return len(packed)
 
 
 # ---------------------------------------------------------------------------

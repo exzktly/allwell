@@ -7,9 +7,9 @@ log-line parsing so the tab module is a pure view + form.
 Event protocol (queue payloads are ``(kind, payload)`` tuples):
     line          str        Raw stdout line.
     workers       int        Worker count parsed from a TF banner line.
-    zipper_start  int        Begin grouping phase, expected well count.
-    zipper_well   str|None   One well finished grouping.
-    zipper_done   None       Grouping phase finished.
+    zipper_start  int        Begin the Ready stage, expected well count.
+    zipper_well   str|None   One well's archive found (ready to run).
+    zipper_done   None       Ready stage finished.
     remote_xfer   tuple      ("up"|"down", fraction in [0, 1]): the plate-wide
                              upload's progress, or the share of the run's
                              wells fetched back (``TransferProgress``).
@@ -119,8 +119,7 @@ def classify_log_line(line: str) -> str:
     """Return the severity tag for a single pipeline stdout line.
 
     Trust the line's own ``levelname`` when it has one. The heuristics below are
-    for the lines that don't: bare subprocess stderr, Python tracebacks, and the
-    zipper's ``[zipper]`` output.
+    for the lines that don't: bare subprocess stderr and Python tracebacks.
 
     Inferring severity from keywords is unreliable in the other direction too —
     the end-of-run summary is logged at INFO and reads "wells failed (no output)
@@ -712,8 +711,6 @@ class ProgressTracker:
         and free of any dependency on the queue object.
         """
         events: list[tuple[str, object]] = []
-        if line.startswith("[zipper]"):
-            return events
         # The "Zip mode detected" warning is emitted up-front in
         # _run_pipeline_thread (before the pipeline launches) so it
         # arrives even on early failures. No second emission needed

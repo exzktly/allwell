@@ -2075,7 +2075,7 @@ reading it. The log names any it kept over budget for that reason.
   beside the ✕ would suggest it was still going.
 - **The headline says what the run is doing now.** It follows the run from step
   to step rather than holding the last thing that had something to say —
-  *Grouped — preparing the upload…*, *Uploading 6
+  *Ready — preparing the upload…*, *Uploading 6
   / 40 wells*, *Queued on the scheduler — waiting for a node…*, *Processing 18 /
   40 wells*, and *Processed 40 well(s) — finalizing…* while the auto-threshold
   pass, the last downloads and the remote cleanup finish. Results are fetched in the background

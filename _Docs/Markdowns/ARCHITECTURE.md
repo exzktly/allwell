@@ -19822,6 +19822,20 @@ comparison against `origin/main` counts the bump of the branch below as well and
 reports more than one; that is the comparison's limit, and the stacked number is
 left as it is (CLAUDE.md §6).
 
+**CI makes the same check against the base as it stands** (`ci.yml`'s `version`
+job, `scripts/version_bump_ci.sh`): `version.py` at `HEAD` against its first
+parent, which on a pull request is GitHub's merge ref — the base branch at the
+moment the job runs, so a stacked PR is measured against its own base — and on a
+push to `main` is the main the merge landed on. Preflight reads the author's
+`origin/main`, which is stale exactly when two pull requests are open at once and
+each bumps to the same next number; both pass, and the second merges with no
+increment of its own. The pull-request half fails such a PR whenever its job runs
+after the sibling merged; the push half turns one that slipped past into a red
+`main` rather than a silent one. Requiring branches to be up to date before
+merging, a repository setting, closes the window between them by re-running the
+job after the merge-in. `tests/test_version_delta.py` replays the collision in a
+throwaway repository.
+
 **No test may reach a modal dialog.** An `autouse` fixture in `conftest.py`
 replaces every `QMessageBox` / `QInputDialog` / `QFileDialog` / `QColorDialog` /
 `QFontDialog` opener and `QDialog.exec` with one that raises. Offscreen, a modal

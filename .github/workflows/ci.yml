@@ -51,6 +51,21 @@ jobs:
       - name: ruff check
         run: ruff check .
 
+  # Every pull request bumps version.py exactly once (CLAUDE.md §6), measured against the base as it stands now:
+  # see scripts/version_bump_ci.sh for why the author's own preflight check is not enough.
+  version:
+    name: version bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: One increment against the base
+        run: scripts/version_bump_ci.sh
+
   test:
     name: pytest (fast lane)
     runs-on: ubuntu-latest

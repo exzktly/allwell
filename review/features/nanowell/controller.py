@@ -735,17 +735,21 @@ def statistics_result(model, groups: dict, *, unit: str, test: str, control: str
     """The Statistics view's result for a Distribution *model* drawn *Along x: Wells*: its samples of *unit*
     (``statistics_compute.samples_from_model``) compared by *test*.
 
-    *cache*, when given, holds the last result under everything it was computed from — the samples' names and
-    values, the unit, test, control, metric and timepoint — and that result is returned when they all match, so a
-    redraw for a theme or a resize does not run the tests and the bootstrap again. Any change to the values (a
-    Subset, the cohort, the baseline, an excluded well) changes the key."""
+    *cache*, when given, holds the last result under everything it was computed from and everything it reports —
+    each sample's name, wells, values, roster and exclusions by reason, the notes it carries, the unit, test,
+    control, metric, label and timepoint — and that result is returned when they all match, so a redraw for a theme
+    or a resize does not run the tests and the bootstrap again. Any change to what the report says (a Subset, the
+    cohort, the moving average, the baseline, an excluded well) changes the key, including one that leaves every
+    value as it was: ticking the cohort over nanowells that all have a value changes the report's note only."""
     samples = sc.samples_from_model(model, groups, unit)
-    key = (unit, test, control, model.column, model.timepoint,
-           tuple((s.name, s.wells, s.values.tobytes()) for s in samples))
+    notes = [n for n in model.notes if n.startswith(_STATS_NOTES)]
+    key = (unit, test, control, model.column, model.label, model.timepoint, tuple(notes),
+           tuple((s.name, s.wells, s.values.tobytes(), s.n_roster, tuple(sorted(s.excluded.items())),
+                  s.without_value) for s in samples))
     if cache is not None and cache.get("key") == key:
         return cache["result"]
     result = sc.compare(samples, test, control=control, unit=unit, label=model.label, timepoint=model.timepoint)
-    result.notes = [n for n in model.notes if n.startswith(_STATS_NOTES)]
+    result.notes = notes
     if cache is not None:
         cache.clear()
         cache.update(key=key, result=result)

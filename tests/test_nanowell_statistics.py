@@ -301,3 +301,21 @@ def test_the_moving_average_distribution_draws_is_the_one_statistics_tests(page,
     assert pair.startswith(f"A01 vs B01   t = {expected.statistic:.4g}   ")
     notes = _report(page, sc.GID_NOTE)
     assert any(n.startswith("Moving average over 2 timepoints") for n in notes), notes
+
+
+def test_ticking_the_cohort_on_statistics_states_it_even_when_no_value_moves(page, qtbot):
+    """Tracker L12: the cached result is keyed on everything it reports, not only the values. A02 is measured at
+    every timepoint and B01's only gap is occluded at t_a already, so the Fixed cohort changes no value tested
+    here — but it does change the report, which must say the cohort is in use rather than show the cached result
+    computed without it."""
+    page.state.selection.selected_wells = {"A02", "B01"}
+    state = _open_statistics(qtbot, page)
+    _choose(page, "_nw_tp_cb", "t_a")
+    assert not any(n.startswith("Fixed cohort") for n in _report(page, sc.GID_NOTE))
+    page.widgets.get("_nw_cohort_box").setChecked(True)
+    assert state.cohort is True
+    notes = _report(page, sc.GID_NOTE)
+    assert ("Fixed cohort: only the 7 of 8 nanowells with a value at every timepoint of their well are used; the "
+            "rest are counted as outside the fixed cohort.") in notes, notes
+    page.widgets.get("_nw_cohort_box").setChecked(False)
+    assert not any(n.startswith("Fixed cohort") for n in _report(page, sc.GID_NOTE))

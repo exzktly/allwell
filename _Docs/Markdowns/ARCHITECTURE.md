@@ -11659,8 +11659,10 @@ comparisons are refused with a sentence naming how to narrow them. Every compari
 two values, two samples constant at one value, a test scipy refuses — carries its reason in `Comparison.undefined`
 and is printed as that reason. The effect-size bootstrap is scaled down for samples of hundreds of nanowells
 (`BOOTSTRAP_BUDGET`, never below `MIN_RESAMPLES`), deterministic in the sample sizes, and the result is cached on
-`NanowellState.stats_cache` under the samples' bytes, unit, test, control, column and timepoint, so a redraw that
-changes none of them — a theme flip, a resize — does not rerun the tests. `statistics_compute.report_lines` writes
+`NanowellState.stats_cache` under everything the result is computed from or reports — each sample's values, roster
+and exclusions by reason, the notes it carries, the unit, test, control, column, label and timepoint — so a redraw
+that changes none of them — a theme flip, a resize — does not rerun the tests, and a change that moves only what
+the report says (the cohort ticked over nanowells that all have a value) is not answered from the cache. `statistics_compute.report_lines` writes
 the report as `(gid, text)` lines (`nw-stats-header`, `-omnibus`, `-sample`, `-pair`, `-note`); the renderer wraps
 them to the figure's width, shrinks the type to at least `REPORT_MIN_PT` before leaving a line out (and counts any
 left out), and draws above them a box and dots per sample with its mean (with its 95% interval on groups), or each

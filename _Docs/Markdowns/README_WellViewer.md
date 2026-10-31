@@ -428,13 +428,29 @@ the image* does on the form; without it (`hex_circle`) the array is a hexagonal 
 Cellpose 3 install), as **Cellpose model** does on the form. `--nanowell_registration_from <folder>` reuses an earlier run's tile registration, as **Reuse
 registration** does on the form. Wells must be zips.
 
-Besides the usual per-cell CSV (one row per cell, with the owner tile as `fov`, the timepoint both as its label
-and in hours as `timepoint_hours`, and the nanowell's address
-`nw_q`, `nw_r`, `nw_ring`, `nw_label` and its position `well_x_um`, `well_y_um`), the run writes
-`nanowells/<well>.csv`, one row per nanowell and timepoint (its address, position, state, imaged and visible
-fractions, cell count, confluence, and fluorescence over the nanowell floor's background), and
-`nanowells/<well>_grid.json`, the registration, lattice and status of every timepoint. A nanowell no tile could
-see, or that was hidden, has a row with its state and **no number**, never a zero. The per-cell Scatter selects cells by `timepoint_hours`, so a nanowell plate
+The output folder holds the same files a standard run writes, `pipeline_info.json` and, per well,
+`<prefix>_<well>.csv.gz` and `<well>_out.zip`, with a `nanowells/` folder beside them for what only a nanowell run
+produces. Each cell row names the nanowell it sits in, so the two can be put back together. Three things about the
+familiar files differ from a standard run:
+
+- **The per-cell CSV holds only cells counted inside a nanowell.** A cell on the lattice between nanowells, or
+  outside the array, has no row.
+- **Its columns are a fixed, shorter set:** `well`, `fov` (the tile that owns the cell's nanowell), `timepoint`,
+  `timepoint_hours`, `nucleus_id`, `area_px`, a `<channel>_mean_intensity` per channel, the nanowell's address
+  `nw_q`, `nw_r`, `nw_ring`, `nw_label`, and the cell's position in the well, `well_x_um`, `well_y_um`. There are no
+  shape features. `nw_label` is written as `q_r` (for example `-1_0`), not as the ring label (`1.3`, ring 1, position 3);
+  use `nw_q` and `nw_r` to match a cell to its nanowell.
+- **`<well>_out.zip` holds one stitched montage per timepoint**, not per-field masks and overlays.
+
+In `nanowells/`, per well:
+
+- `<well>.csv`: one row per nanowell and timepoint (its address, position, state, imaged and visible fractions,
+  cell count, confluence, and fluorescence over the nanowell floor's background). A nanowell no tile could see, or
+  that was hidden, has a row with its state and **no number**, never a zero.
+- `<well>_grid.json`: the registration, lattice and status of every timepoint.
+- `<well>_identity.json`: whether each timepoint's addresses stayed on the same physical nanowells. It is
+  missing when the check could not run; `python -m pipeline.nanowell_identity <output_dir>` runs it again.
+- `<well>_template.npz`: the picture of an empty nanowell, kept so a later incremental run can reuse it. The per-cell Scatter selects cells by `timepoint_hours`, so a nanowell plate
 analysed before the per-cell CSV carried that column shows no points there (the line and bar plots are
 unaffected); re-analyse it with **Redo it** (`--force`) to rewrite its tables.
 

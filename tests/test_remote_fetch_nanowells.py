@@ -214,3 +214,80 @@ def test_a_nanowell_well_s_completion_line_is_the_one_the_fetcher_and_the_progre
     # completion line, a remote run would fetch the well before it had finished.
     steps = [m for m in messages if " step " in m]
     assert steps and not any(_RE_WELL_DONE.search(m) or _RE_WELL_DONE_ID.search(m) for m in steps)
+
+
+# ── the empty reference that comes back (review tracker L7) ──────────────────
+def _reference_settings():
+    from pipeline import nanowell_run as nr
+
+    return nr.NanowellSettings("100um", empty_well="H12")
+
+
+def _save_reference(out, level, timepoints=("0h", "24h")):
+    """H12 saved as the empty reference in *out*, its templates of *level*."""
+    import numpy as np
+
+    from pipeline import nanowell_measure as nm
+    from pipeline import nanowell_reference as nref
+
+    template = nm.Template(np.full((5, 5), float(level)), 2, nm.SOURCE_OWN, 30, 30, 0.05, ())
+    verdict = {"status": nref.EMPTY, "loaded_share": 0.0, "nanowells_counted": 30, "max_loaded_share": 0.05}
+    nref.save(out, "H12", _reference_settings(), {tp: (template, verdict) for tp in timepoints})
+
+
+def _levels(out):
+    from pipeline import nanowell_reference as nref
+
+    reference = nref.load(out, _reference_settings())
+    return {tp: float(reference.at(tp)[0].array[0, 0]) if reference.at(tp)[0] is not None else None
+            for tp in ("0h", "24h")}
+
+
+class _CopyingVerifier(_Verifier):
+    """Its rsync copies the remote ``nanowells/`` over the local one: whole, or — *partial* — the index alone, as a
+    transfer cut off after its first file (rsync sends ``reference.json`` before ``tp0000.npz``) leaves it."""
+
+    def __init__(self, local, remote, *, partial=False, fetched=("A01", "B02", "C03")):
+        super().__init__(local)
+        self._run.fetched_wells = set(fetched)
+        self.remote, self.partial = remote, partial
+
+    def _rsync_optional(self, src, dest, *, log_fn, absent_note=""):
+        import shutil
+
+        self.pulled.append((src, str(dest)))
+        if not src.endswith("/nanowells/"):
+            return True
+        for path in sorted((self.remote / "nanowells").rglob("*")):
+            target = dest / path.relative_to(self.remote / "nanowells")
+            if path.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+            elif not self.partial or path.name == "reference.json":
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, target)
+        return not self.partial
+
+
+@pytest.mark.parametrize("case", ["cut_off", "not_measured_by_this_run"])
+def test_a_reference_the_run_did_not_bring_back_whole_and_its_own_leaves_the_one_here(tmp_path, case):
+    """The local output folder holds H12's reference over 0h and 24h. Verification pulls the remote ``nanowells/``
+    over it. A transfer cut off after the index paired the remote's index with the local templates of the same names;
+    a remote reference this run did not measure (a copy an earlier attempt left there, the run's own seeding having
+    failed) replaced the local one with an older one. Either way the reference here must be the one it was."""
+    local, remote = tmp_path / "local", tmp_path / "remote"
+    _save_reference(local, 1.0)
+    _save_reference(remote, 2.0, timepoints=("0h",))
+    fetched = ("A01", "B02", "C03") if case == "not_measured_by_this_run" else ("A01", "H12")
+    verifier, lines = _CopyingVerifier(local, remote, partial=case == "cut_off", fetched=fetched), []
+    pull_nanowell_results(verifier, log=lines.append)
+    assert _levels(local) == {"0h": 1.0, "24h": 1.0}
+    assert any("the empty reference" in line and "kept" in line for line in lines)
+
+
+def test_the_reference_this_run_measured_replaces_the_one_here(tmp_path):
+    """The run measured H12 (it fetched it), so the reference it brings back whole is the plate's now."""
+    local, remote = tmp_path / "local", tmp_path / "remote"
+    _save_reference(local, 1.0)
+    _save_reference(remote, 2.0, timepoints=("0h",))
+    pull_nanowell_results(_CopyingVerifier(local, remote, fetched=("A01", "H12")), log=lambda line: None)
+    assert _levels(local) == {"0h": 2.0, "24h": None}

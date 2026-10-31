@@ -82,6 +82,20 @@ def default_exclude_border_cells(info: dict[str, Any] | None) -> bool:
     return is_partly_ordinary(info["nanowell"])
 
 
+def default_exclude_soft_nanowells(info: dict[str, Any] | None) -> bool:
+    """The nanowell focus switch's default for a dataset: on for a nanowell run, off for any other (where there is
+    no nanowell for it to judge, so it would do nothing while reading as a filter in force)."""
+    return is_nanowell_run(info)
+
+
+def _fraction(value: Any) -> float:
+    """*value* as a nanowell focus fraction, or the default when it is not one the rule accepts."""
+    from review.domain.nanowell_rim_focus import DEFAULT_FRACTION, clamp_fraction
+
+    accepted = clamp_fraction(value)
+    return DEFAULT_FRACTION if accepted is None else accepted
+
+
 @dataclass(frozen=True)
 class QCParams:
     """Editable debris-gating thresholds. ``enabled`` mirrors the Analyze
@@ -130,6 +144,18 @@ class QCParams:
     #: Independent of ``enabled``: it is not a debris bound and writes its own
     #: ``Border_Pass`` column, so it needs no debris bound set to take effect.
     exclude_border_cells: bool = False
+    #: Whether the cells of a nanowell whose rim was out of focus at a timepoint are excluded there
+    #: (:mod:`review.domain.nanowell_rim_focus`, written as ``NW_Focus_Pass`` by
+    #: :mod:`review.data.nanowell_focus_gate`).
+    #:
+    #: **On by default for a nanowell run, and meaningless for any other** — the dataclass default is ``False``
+    #: and :meth:`from_pipeline_info` decides (:func:`default_exclude_soft_nanowells`). Unlike the per-cell cut it
+    #: needs no number from the user: the rule is relative to the well's own sharp rims at that timepoint, so it
+    #: can be on from the first open, and every surface it changes says what it left out.
+    exclude_soft_nanowells: bool = False
+    #: The fraction of its well's sharp rims (their 90th percentile at that timepoint) a nanowell's rim must reach
+    #: to count as in focus (``nanowell_rim_focus.DEFAULT_FRACTION``, between ``MIN_FRACTION`` and ``MAX_FRACTION``).
+    nanowell_focus_fraction: float = 0.75
     #: The per-cell focus value below which a cell counts as out of focus.
     #:
     #: **Absolute, never relative to the frame.** A score relative to its own
@@ -160,6 +186,8 @@ class QCParams:
             "exclude_flagged_fields": bool(self.exclude_flagged_fields),
             "exclude_soft_cells": bool(self.exclude_soft_cells),
             "exclude_border_cells": bool(self.exclude_border_cells),
+            "exclude_soft_nanowells": bool(self.exclude_soft_nanowells),
+            "nanowell_focus_fraction": float(self.nanowell_focus_fraction),
             "focus_min": self.focus_min,
             "min_area": self.min_area,
             "max_area": self.max_area,
@@ -177,6 +205,8 @@ class QCParams:
             exclude_flagged_fields=bool(d.get("exclude_flagged_fields", False)),
             exclude_soft_cells=bool(d.get("exclude_soft_cells", False)),
             exclude_border_cells=bool(d.get("exclude_border_cells", False)),
+            exclude_soft_nanowells=bool(d.get("exclude_soft_nanowells", False)),
+            nanowell_focus_fraction=_fraction(d.get("nanowell_focus_fraction")),
             focus_min=_pos(d.get("focus_min")),
             min_area=_pos(d.get("min_area")),
             max_area=_pos(d.get("max_area")),
@@ -212,6 +242,7 @@ class QCParams:
             # plot without telling me".
             focus_min=_pos(qc.get("focus_min")),
             exclude_border_cells=default_exclude_border_cells(info),
+            exclude_soft_nanowells=default_exclude_soft_nanowells(info),
             min_area=min_area,
             max_area=_pos(qc.get("max_area")),
             min_solidity=_pos(qc.get("min_solidity")),
@@ -228,7 +259,15 @@ class QCParams:
                 changes[k] = _pos(changes[k])
         if "enabled" in changes:
             changes["enabled"] = bool(changes["enabled"])
+        if "nanowell_focus_fraction" in changes:
+            changes["nanowell_focus_fraction"] = _fraction(changes["nanowell_focus_fraction"])
         return replace(self, **changes)
+
+    def nanowell_focus_rule(self):
+        """The :class:`~review.domain.nanowell_rim_focus.RimFocusRule` these parameters put in force."""
+        from review.domain.nanowell_rim_focus import RimFocusRule
+
+        return RimFocusRule(bool(self.exclude_soft_nanowells), float(self.nanowell_focus_fraction))
 
     @property
     def focus_gate_is_active(self) -> bool:

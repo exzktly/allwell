@@ -54,7 +54,14 @@ _MAPPING_FIELDS = ("well_source", "grid_rows", "grid_cols", "origin",
 
 
 class Nd2ImportError(Exception):
-    """A user-facing reason the ND2 can't be converted with these settings."""
+    """A user-facing reason the ND2 can't be converted with these settings.
+
+    A refusal of the timepoint selection carries the source's own tokens, so the page can list them and mark a
+    ticked one the source lacks: no plan is made for that selection, which is where the page reads them otherwise."""
+
+    def __init__(self, message: str, *, source_timepoint_tokens=()) -> None:
+        super().__init__(message)
+        self.source_timepoint_tokens = tuple(source_timepoint_tokens)
 
 
 @dataclass(frozen=True)
@@ -395,7 +402,7 @@ def plan_conversion(source: Nd2Layout, params: ConversionParams) -> ConversionPl
         kept = timepoint_plan(tokens, params.timepoint_stride,
                               params.timepoint_subset)
     except ValueError as exc:
-        raise Nd2ImportError(str(exc)) from exc
+        raise Nd2ImportError(str(exc), source_timepoint_tokens=tokens) from exc
     return ConversionPlan(
         n_positions=source.n_positions,
         n_timepoints=len(kept),

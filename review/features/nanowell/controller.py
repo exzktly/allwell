@@ -20,13 +20,14 @@ if TYPE_CHECKING:
 
 from domain.nanowell_roster import mixed_rules_note
 from review.features.nanowell import cell_gate_compute as cg
+from review.domain import nanowell_rim_focus as rfc
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
     METRICS, PER_NANOWELL, TIME, WELLS, distribution_model, match_channel, metric_column,
 )
 from review.features.nanowell import full_montage_compute as fmc
-from review.features.nanowell.array_compute import array_scene, one_to_one
+from review.features.nanowell.array_compute import array_scene, field_sites, one_to_one
 from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell import _anchor_queue as aq
@@ -56,6 +57,12 @@ def load_into(state, data_dir) -> None:
 
     A dataset with no ``nanowells/`` leaves ``state.data`` as ``None``; a scheme this version does not read
     leaves it ``None`` with the reason in ``state.load_error``.
+
+    The counts are the **run's own**: there is no ``ctx`` here, so Cell Gating cannot be read and is not applied,
+    and ``state.gate`` stays ``None`` — so the long-format export's ``cell_gating`` is empty and its ``n_cells``
+    equals ``n_cells_run``.
+    The page never loads through this (``ensure_loaded`` does, with the gate); it is a seam for tests that
+    need the tables without a window. A caller that draws or exports for a person goes through ``ensure_loaded``.
     """
     state.reset_data()
     if not data_dir:
@@ -70,18 +77,21 @@ def load_into(state, data_dir) -> None:
     for problem in data.problems:
         log.warning("Nanowells: %s", problem)
     state.data = data
-    state.metrics = site_metrics(data, state.baseline)
+    state.metrics = site_metrics(data, state.baseline, focus=state.rim_focus_rule())
     state.loaded_for = (str(data_dir), state.baseline)     # what the page's own load records (roll-up review X16)
+    state.focus_for = state.rim_focus_rule().key()
     state.loaded_wells, state.parts_for = frozenset(data.available), str(data_dir)   # every well was read
 
 
 def set_baseline(state, baseline: str) -> None:
-    """Change the baseline and recompute every metric that depends on it."""
+    """Change the baseline and recompute every metric that depends on it — ungated, like :func:`load_into`, whose
+    test seam this is; the page changes its baseline through ``set_page_baseline`` and ``ensure_loaded``."""
     state.baseline = baseline
     if state.data is not None:
-        state.metrics = site_metrics(state.data, baseline)
+        state.metrics = site_metrics(state.data, baseline, focus=state.rim_focus_rule())
         if state.loaded_for is not None:
             state.loaded_for = (state.loaded_for[0], baseline)
+            state.focus_for = state.rim_focus_rule().key()
 
 
 def replicate_groups(ctx, wells) -> dict:
@@ -109,6 +119,11 @@ def export_long_csv(state, path, wells=None) -> int:
     *wells*, only theirs: the page reads only the wells it draws, so what else is loaded is whichever wells
     happened to be selected before.
 
+    ``n_cells`` and ``brightness_<channel>`` are the page's, after Home's Cell Gating (``cell_gate_compute``), so the
+    file records the gate beside them: ``n_cells_run`` is the run's own count, ``cells_left_out`` how many cells the
+    gate took out of it, and ``cell_gating`` the figure's sentence about the gate (``""`` when it left nothing out),
+    as Batch Export's summary carries it in its ``note``.
+
     Written to a temporary name and moved into place, so a failed write never leaves half a table under the
     name a person will open.
     """
@@ -116,6 +131,12 @@ def export_long_csv(state, path, wells=None) -> int:
         raise ValueError("There are no nanowell tables loaded to export.")
     metrics = state.metrics if wells is None else state.metrics[state.metrics["well"].isin(list(wells))]
     table = long_format(metrics, state.data.channels)
+    gate = getattr(state, "gate", None)
+    at = table.columns.get_loc("n_cells") + 1
+    run = metrics["n_cells"] if "n_cells" in metrics.columns else pd.Series(np.nan, index=metrics.index)
+    table.insert(at, "n_cells_run", pd.to_numeric(run, errors="coerce").to_numpy())
+    table.insert(at + 1, "cells_left_out", cg.left_out_counts(metrics, gate).astype("Int64").to_numpy())
+    table["cell_gating"] = cg.note(gate)
     table.insert(table.columns.get_loc("time_h") + 1, "time_source", state.data.time_source or "")
     table.insert(table.columns.get_loc("baseline_timepoint"), "baseline", state.baseline)
     # Every row is kept, and flagged: a file filtered to the page's Subset would lose rows a reader may want back,
@@ -274,19 +295,22 @@ def _call(ctx, name: str) -> None:
         fn()
 
 
-def _metrics_of(data, baseline: str, gate=None) -> pd.DataFrame | None:
+def _metrics_of(data, baseline: str, gate=None, focus=None) -> pd.DataFrame | None:
     """The metrics of *data*, ``None`` with no data; with no well read yet (nothing selected) an empty table, so
     the page counts as loaded and says what to select rather than reading on."""
     if data is None:
         return None
     if not len(data.sites):
         return pd.DataFrame(columns=["well", "timepoint", "nw_q", "nw_r", "state"])
-    return site_metrics(data, baseline, gate)
+    return site_metrics(data, baseline, gate, focus)
 
 
 def gate_version(ctx) -> int:
     """The version of which cells the analysis includes (``StatsCacheState.population_version``): every gating,
-    curation or QC edit moves it."""
+    curation or QC edit moves it. So do group and well-label edits, which go through the same
+    ``invalidate_stats_cache``; that costs the page one re-tally from the row cache, no table read (measured, tracker
+    L14). Kept rather than narrowed: telling the edits apart means classifying every caller of that shared
+    invalidation, and one gating edit misfiled would leave the page's counts stale and drawn as current."""
     return int(getattr(ctx.state.stats_cache, "population_version", 0))
 
 
@@ -311,6 +335,7 @@ def gate_tally(ctx, data) -> cg.GateTally | None:
 
     if data is None or not len(data.sites):
         return None
+    fields = _excluded_fields(ctx, data)
     per_well, unread = [], []
     for well in data.wells:
         label = _cell_label(ctx, well, data)
@@ -327,14 +352,25 @@ def gate_tally(ctx, data) -> cg.GateTally | None:
             unread.append(well)
             continue
         if frame is not None and len(frame):
-            per_well.append((well, frame, df_included_mask(frame).to_numpy()))
-    return cg.tally(per_well, unread)
+            # The field layers are applied by field (`cell_gate_compute.exclude_fields`), never to the counts. The
+            # nanowell focus layer is left out too: the cells it leaves out are those of a nanowell-timepoint this
+            # page already draws as an ``out_of_focus`` gap, so counting them again here would only make the note
+            # say Cell Gating left them out, which it did not.
+            skipped = (*cg.FIELD_LAYERS, rfc.NW_FOCUS_PASS_COLUMN)
+            per_well.append((well, frame, df_included_mask(frame, except_layers=skipped).to_numpy()))
+    return cg.tally(per_well, unread, fields)
 
 
-def gated_metrics(ctx, data, baseline: str) -> pd.DataFrame | None:
-    """:func:`site_metrics` with the cells Home's Cell Gating leaves out taken out — what the page draws and
-    Batch Export exports, so the two never disagree."""
-    return _metrics_of(data, baseline, gate_tally(ctx, data))
+def _excluded_fields(ctx, data) -> frozenset:
+    """The tiles the field layers leave out of *data*'s wells (``cell_gate_compute.excluded_fields``), read from
+    the same state those layers project from: QC triage's exclusions, the run's flagged fields while their
+    exclusion is on, and the FOVs chosen on Cell Gating; never in a well whose FOV labels are untrusted."""
+    from review.data import field_exclusions, field_quality_cache, fov_selection
+
+    flagged = field_quality_cache.flagged_fields(ctx)[0] if field_quality_cache.exclusion_is_on(ctx) else ()
+    return cg.excluded_fields(data.sites, excluded=field_exclusions.excluded_fields(ctx), flagged=flagged,
+                              chosen_fovs=fov_selection.selected_fovs(ctx),
+                              untrusted=field_quality_cache.untrusted_wells(ctx))
 
 
 def ensure_loaded(ctx, *, force: bool = False) -> None:
@@ -348,6 +384,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
     st = _state(ctx)
     if st is None:
         return
+    sync_focus_rule(ctx, st)
     data_dir = ctx.state.dataset.data_dir
     # Only the wells the page draws are read: a plate's other tables wait until they are selected, and a well
     # read once is kept (``st.well_parts``), so selecting it again reads nothing.
@@ -356,10 +393,11 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         st.well_parts, st.parts_for, st.loaded_wells = {}, str(data_dir or ""), frozenset()
     wells = wanted | st.loaded_wells
     key = (str(data_dir or ""), st.baseline)
-    version = gate_version(ctx)
+    version = (gate_version(ctx), st.rim_focus_rule().key())
     if not force and st.computing and st.pending_for == (key, wells, version):
         return                                           # this very request is already running
-    if not force and st.loaded_for == key and wanted <= st.loaded_wells and st.gated_for == version:
+    if (not force and st.loaded_for == key and wanted <= st.loaded_wells
+            and (st.gated_for, st.focus_for) == version):
         if st.computing:
             # The current data is what is wanted again (a baseline changed and changed back): whatever is
             # running is for another key and now stale, so it must not land when it finishes.
@@ -368,7 +406,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
             _call(ctx, "_nw_show_computing")
         return
     st.request += 1
-    request, baseline = st.request, st.baseline
+    request, baseline, focus = st.request, st.baseline, st.rim_focus_rule()
     st.computing, st.pending_for = True, (key, wells, version)
     same_wells = wanted <= st.loaded_wells and st.loaded_for is not None and st.loaded_for[0] == key[0]
     previous = st.data if same_wells else None
@@ -379,20 +417,20 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         # while this runs moves the version, and the next draw asks again (``redraw``).
         if previous is not None:
             gate = gate_tally(ctx, previous)
-            return previous, _metrics_of(previous, baseline, gate), "", parts, gate
+            return previous, _metrics_of(previous, baseline, gate, focus), "", parts, gate
         try:
             data = load_nanowell_data(Path(data_dir), wells=sorted(wells), parts=parts) if data_dir else None
         except NanowellSchemeError as exc:
             return None, None, str(exc), parts, None
         gate = gate_tally(ctx, data)
-        return data, _metrics_of(data, baseline, gate), "", parts, gate
+        return data, _metrics_of(data, baseline, gate, focus), "", parts, gate
 
     def done(result):
         if request != st.request:
             return                                       # a newer request has been made; this one is stale
         data, metrics, error, read, gate = result
         st.data, st.metrics, st.load_error = data, metrics, error
-        st.gate, st.gated_for = gate, version
+        st.gate, (st.gated_for, st.focus_for) = gate, version
         st.loaded_for, st.computing = key, False
         if st.parts_for == key[0]:
             st.well_parts, st.loaded_wells = read, wells
@@ -407,7 +445,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
             return
         st.reset_data()
         st.computing, st.load_error, st.loaded_for = False, f"Loading failed: {message}", key
-        st.gated_for = version                           # failed at this version: a redraw must not retry it
+        st.gated_for, st.focus_for = version             # failed at this version: a redraw must not retry it
         _call(ctx, "_nw_refresh_controls")
         redraw(ctx)
 
@@ -422,11 +460,15 @@ def redraw(ctx) -> None:
     fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")
     if st is None or fig is None or canvas is None:
         return
+    sync_focus_rule(ctx, st)
     stale_gate = st.loaded_for is not None and st.gated_for != gate_version(ctx)
-    if st.loaded_for is not None and (st.loaded_for[1] != st.baseline or stale_gate) and not st.computing:
-        # The baseline changed without a load (a reset, a restore), or Cell Gating changed which cells count:
-        # what is on hand was computed for something else, so fetch the right metrics rather than draw fold
-        # changes against the wrong baseline or counts that hold cells the gate has left out.
+    stale_focus = st.loaded_for is not None and st.focus_for != st.rim_focus_rule().key()
+    if st.loaded_for is not None and (st.loaded_for[1] != st.baseline or stale_gate or stale_focus) \
+            and not st.computing:
+        # The baseline or the rim focus rule changed without a load (a reset, a restore), or Cell Gating changed
+        # which cells count: what is on hand was computed for something else, so fetch the right metrics rather
+        # than draw fold changes against the wrong baseline, counts that hold cells the gate has left out, or
+        # counts from nanowells the rule now leaves out.
         ensure_loaded(ctx)
     _call(ctx, "_nw_refresh_controls")
     _call(ctx, "_nw_show_computing")
@@ -439,10 +481,11 @@ def redraw(ctx) -> None:
     from review.core.plot_style import set_pref_scope
 
     set_pref_scope(ctx, fig, "" if st.view == "distribution" else st.view)
-    if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
+    if st.loaded_for is not None and (st.loaded_for[1] != st.baseline or stale_focus):
         return                                           # the right metrics are on their way
     metric, channel, note = resolve_metric(st.view, st.metric, page_channel_name(ctx), st.data.channels)
-    note = " ".join(filter(None, [note, excluded_note(ctx), cg.note(st.gate)]))
+    note = " ".join(filter(None, [note, excluded_note(ctx), cg.note(st.gate),
+                                  rfc.note(st.metrics, st.rim_focus_rule(), page_wells(ctx))]))
     well = page_well(ctx)
     st.extreme_axes = {}
     if st.view == "identity":
@@ -470,7 +513,8 @@ def redraw(ctx) -> None:
         well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
-        subset=st.subset, stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st), **array)
+        subset=st.subset, stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
+        gate=st.gate, **array)
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
@@ -606,7 +650,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               baseline_moving: int = 0, layers: ArrayLayers | None = None, image=None, image_note: str = "",
               region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
-              stats_cache: dict | None = None) -> tuple[object, object]:
+              stats_cache: dict | None = None, gate=None) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -620,9 +664,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     (tracker I9), which the Distribution view states the fraction responding at. *subset* is the page's
     *Subset* (``subset_compute``): every view but the Array draws only the nanowells inside it, saying how many it
     left out; the Array view draws them all and dims the rest. *moving* is the moving average's window in
-    timepoints (``moving_compute``; 0 is off), which Distribution and Trajectories apply and the other views,
-    each of one timepoint or one value per nanowell, do not. *baseline_moving* is the baseline's own window for a
-    fold change, used only with *moving* on and never with the Earliest baseline
+    timepoints (``moving_compute``; 0 is off), which Distribution, Trajectories and Statistics apply and the other
+    views, each of one timepoint or one value per nanowell, do not. *baseline_moving* is the baseline's own window
+    for a fold change, used only with *moving* on and never with the Earliest baseline
     (``moving_compute.baseline_window_for`` decides, here, so the page and Batch Export cannot differ).
 
     The Identity view draws *well* at *well_timepoint* against the well's reference timepoint
@@ -635,6 +679,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     (``wells``), by *stats_test*, every pair or each against *control*. Its model is the
     ``statistics_compute.StatisticsResult``; *stats_cache*, a dict the caller keeps, spares re-running the tests
     when nothing they depend on changed.
+
+    *gate* (``cell_gate_compute.GateTally``, the one *metrics* were computed with) keeps the Array view's Cells
+    layer to the cells the counts hold.
     """
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
@@ -662,7 +709,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                           "dimmed.", note]))
         drawn = draw_array(fig, all_metrics, data, well=well, timepoint=well_timepoint, metric=metric,
                            channel=channel, layers=layers, image=image, image_note=image_note, region=region,
-                           selected=selected, note=note, dimmed=dimmed)
+                           selected=selected, note=note, dimmed=dimmed, gate=gate)
         return (drawn.hits if drawn is not None else None), drawn
     if filtered is not None:
         note = " ".join(filter(None, [ss.note(filtered), note]))
@@ -686,9 +733,11 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         render_position(fig, series, label=_label(metric, channel), timepoint=timepoint, note=note)
         return None, None
     if view == "statistics":
+        # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).
         model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=WELLS,
                                    groups=groups, timepoint=timepoint, time_source=data.time_source,
-                                   baseline=baseline, cohort=cohort)
+                                   baseline=baseline, cohort=cohort, moving=moving,
+                                   baseline_moving=baseline_moving)
         result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control,
                                    cache=stats_cache)
         if tableless:
@@ -715,9 +764,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
 
 
 #: The Distribution model's notes the Statistics view carries: what changes which values were compared (the fixed
-#: cohort) and how the times were read. The rest describe the beeswarm (packing, the joined line, the fraction
-#: responding) and say nothing about a test.
-_STATS_NOTES = ("Fixed cohort", "Times are")
+#: cohort, the moving average) and how the times were read. The rest describe the beeswarm (packing, the joined
+#: line, the fraction responding) and say nothing about a test.
+_STATS_NOTES = ("Fixed cohort", "Moving average", "Times are")
 
 
 def statistics_result(model, groups: dict, *, unit: str, test: str, control: str = "",
@@ -725,17 +774,21 @@ def statistics_result(model, groups: dict, *, unit: str, test: str, control: str
     """The Statistics view's result for a Distribution *model* drawn *Along x: Wells*: its samples of *unit*
     (``statistics_compute.samples_from_model``) compared by *test*.
 
-    *cache*, when given, holds the last result under everything it was computed from — the samples' names and
-    values, the unit, test, control, metric and timepoint — and that result is returned when they all match, so a
-    redraw for a theme or a resize does not run the tests and the bootstrap again. Any change to the values (a
-    Subset, the cohort, the baseline, an excluded well) changes the key."""
+    *cache*, when given, holds the last result under everything it was computed from and everything it reports —
+    each sample's name, wells, values, roster and exclusions by reason, the notes it carries, the unit, test,
+    control, metric, label and timepoint — and that result is returned when they all match, so a redraw for a theme
+    or a resize does not run the tests and the bootstrap again. Any change to what the report says (a Subset, the
+    cohort, the moving average, the baseline, an excluded well) changes the key, including one that leaves every
+    value as it was: ticking the cohort over nanowells that all have a value changes the report's note only."""
     samples = sc.samples_from_model(model, groups, unit)
-    key = (unit, test, control, model.column, model.timepoint,
-           tuple((s.name, s.wells, s.values.tobytes()) for s in samples))
+    notes = [n for n in model.notes if n.startswith(_STATS_NOTES)]
+    key = (unit, test, control, model.column, model.label, model.timepoint, tuple(notes),
+           tuple((s.name, s.wells, s.values.tobytes(), s.n_roster, tuple(sorted(s.excluded.items())),
+                  s.without_value) for s in samples))
     if cache is not None and cache.get("key") == key:
         return cache["result"]
     result = sc.compare(samples, test, control=control, unit=unit, label=model.label, timepoint=model.timepoint)
-    result.notes = [n for n in model.notes if n.startswith(_STATS_NOTES)]
+    result.notes = notes
     if cache is not None:
         cache.clear()
         cache.update(key=key, result=result)
@@ -811,7 +864,7 @@ def batch_array_layers() -> ArrayLayers:
 
 def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, channel: str | None,
                layers: ArrayLayers | None = None, image=None, image_note: str = "", region=None, selected=(),
-               note: str = "", dimmed=frozenset()) -> ArrayDrawn | None:
+               note: str = "", dimmed=frozenset(), gate=None) -> ArrayDrawn | None:
     """**The one composition of the Array view**, for the page and for Batch Export (through :func:`draw_view`).
 
     *layers* says what is drawn (the lattice map when none are given); *image* is the run montage or the tile
@@ -823,7 +876,7 @@ def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, ch
         render_message(fig, "Select a well with a nanowell table.", gid="nw-array-missing")
         return None
     scene = array_scene(metrics, data, well, timepoint, metric_column(metric, channel), positions=layers.positions,
-                        anchors=layers.anchor, cells=layers.cells)
+                        anchors=layers.anchor, cells=layers.cells, gate=gate)
     if scene.frame == "well" and image is not None and hasattr(image, "source"):
         # A plate placed from a scan pattern records no tile size; the tile store read it from the first image.
         width, height = image.source.tile_size_um
@@ -1090,7 +1143,8 @@ def focus_nanowell_at(ctx, event) -> None:
 
 def on_canvas_resized(ctx) -> None:
     """The page's canvas settled at a new size: redraw the Array view if its axes no longer have the size its region
-    was fitted to. Without it the view kept the old fit — a resize squashed every nanowell into an oval, and a draw
+    was fitted to, and the Identity view's Diagnostics if its figure is no longer the size it was laid out for
+    (``_identity_controller.needs_relayout``). Without it the view kept the old fit — a resize squashed every nanowell into an oval, and a draw
     made while the canvas was still being laid out (a few pixels tall) showed one flattened row of the array.
 
     A canvas no longer on screen is left alone. The re-fit fires a moment after the resize, and by then the page may
@@ -1098,11 +1152,15 @@ def on_canvas_resized(ctx) -> None:
     (``RuntimeError: Internal C++ object (FigureCanvasQTAgg) already deleted``). A hidden canvas has nothing to re-fit
     for; showing it again resizes it, which re-fits it then."""
     st = _state(ctx)
-    drawn = st.drawn if st is not None else None
-    if st is None or st.view != "array" or drawn is None or drawn.ax is None or drawn.ax.figure is None:
-        return
     canvas = ctx.widgets.get_or_none("_nw_canvas")
-    if canvas is None or not canvas.isVisible():
+    if st is None or canvas is None or not canvas.isVisible():
+        return
+    if st.view == "identity":                          # Diagnostics is laid out for the figure's size: lay it out again
+        if idc.needs_relayout(st.identity_drawn, ctx.widgets.get_or_none("_nw_fig")):
+            redraw(ctx)
+        return
+    drawn = st.drawn
+    if st.view != "array" or drawn is None or drawn.ax is None or drawn.ax.figure is None:
         return
     box = drawn.ax.get_window_extent()
     if (max(int(round(box.width)), 1), max(int(round(box.height)), 1)) != tuple(drawn.size_px):
@@ -1250,14 +1308,16 @@ def set_anchor_mode(ctx, on: bool) -> None:
         _call(ctx, "_nw_refresh_controls")
 
 
-def open_for_anchor(ctx, well: str, timepoint: str) -> bool:
+def open_for_anchor(ctx, well: str, timepoint: str, *, zoom: float | None = None) -> bool:
     """The ``nanowell.open_anchor`` service: show *well* at *timepoint* on the Array view, ready for *Set anchor*.
 
     QC Triage and Home's health card offer it for a timepoint the run left unaddressed. The well is added to the
     plate selection (never replacing it) so the page draws it; the view, well and timepoint are chosen; the anchor
     layer is turned on in the well frame with the overlays shown, since an anchor is set only there; and the page
     is brought forward. *Set anchor* itself waits for the well's tables (:func:`_apply_pending_anchor`), because
-    whether the timepoint can take an anchor is read from its grid record. Returns whether the page was shown."""
+    whether the timepoint can take an anchor is read from its grid record. With *zoom* the view opens that many
+    times *Fit* about the centre of the whole-well montage (``full_montage_compute.CentreZoom``) rather than
+    fitted: the anchor queue's way in. Returns whether the page was shown."""
     st = _state(ctx)
     notebook = getattr(ctx.window, "_notebook", None)
     if st is None or notebook is None or not well:
@@ -1272,9 +1332,10 @@ def open_for_anchor(ctx, well: str, timepoint: str) -> bool:
                             st.layers.positions)
     st.overlays_hidden, st.region, st.array_message = False, None, ""
     st.anchor_pending = (well, timepoint or "")
+    st.anchor_zoom = float(zoom) if zoom else None
     _save_soon(ctx)
     if not notebook.setCurrentByName("Nanowells"):
-        st.anchor_pending = None
+        st.anchor_pending = st.anchor_zoom = None
         return False
     if ctx.widgets.get_or_none("_nw_canvas") is not None:
         ensure_loaded(ctx)
@@ -1293,11 +1354,15 @@ def _apply_pending_anchor(ctx) -> None:
     if st is None or st.anchor_pending is None or st.data is None or st.computing:
         return
     well, timepoint = st.anchor_pending
-    st.anchor_pending = None
+    zoom, st.anchor_pending, st.anchor_zoom = st.anchor_zoom, None, None
     if page_well(ctx) != well:
         st.array_message = (f"{well} is not among the wells this page draws (a hidden set or a group-by variable "
                             "may leave it out), so its anchor cannot be set here.")
         return
+    if zoom:
+        # Set only now that the page draws this well: a draw before its tables landed showed another well, and the
+        # change of well refits the view. ``region_for`` is stamped so the next draw keeps it.
+        st.region, st.region_for = fmc.CentreZoom(zoom), (well, st.layers.positions)
     if anchor_controls(ctx)[0]:
         st.anchor_mode = True
         return
@@ -1394,7 +1459,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
                failed=lambda message: {site: {"": Crop(None, "", f"The crops could not be cut: {message}")}
                                        for site in missing},
                deliver=deliver)
-    st.extreme_axes = render_extremes(fig, model, {site: st.crops[site] for site in model.sites()
+    st.extreme_axes = render_extremes(fig, model, {site: gated_crops(st, site, st.crops[site]) for site in model.sites()
                                                    if site in st.crops},
                                       label=_label(metric, channel), note=note, cells=st.crop_cells,
                                       image_channel=image_channel, numbers=st.crop_metrics,
@@ -1490,7 +1555,7 @@ def draw_popout(ctx) -> None:
             data, metrics = st.data, st.metrics
             _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site, channel=image_channel),
                    failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
-        render_crop_grid(fig, st.crops.get(site), site, cells=st.crop_cells,
+        render_crop_grid(fig, gated_crops(st, site, st.crops.get(site)), site, cells=st.crop_cells,
                          metrics=crop_metrics(st, [site], page_channel(ctx)).get(site) if st.crop_metrics else None,
                          image_channel=image_channel, display_range=display_range(ctx), labels=st.popout_labels)
     canvas.draw_idle()
@@ -1518,7 +1583,7 @@ def redraw_detail(ctx) -> None:
     channel = page_channel(ctx)
     image_channel = page_image_channel(st)
     first = tuple(series[0][0])
-    crops = st.crops.get(first)
+    crops = gated_crops(st, first, st.crops.get(first))
     if crops is None:
         data, metrics = st.data, st.metrics
         _fetch(ctx, "crops", first, lambda: site_crops(data, metrics, first, channel=image_channel),
@@ -1531,6 +1596,29 @@ def redraw_detail(ctx) -> None:
         render_crop_strip(strip_fig, crops, first, cells=st.crop_cells, image_channel=image_channel,
                           display_range=display_range(ctx))
         strip_canvas.draw_idle()
+
+
+def gated_crops(st, site, crops):
+    """*site*'s crops (``timepoint -> Crop``) with the dots the counts do not hold left out: the cells Cell Gating
+    leaves out and those of a field the field layers exclude (``cell_gate_compute.hidden_cells``, the rule the
+    Array view's Cells layer follows), each crop counting what it left out for the caption. Applied when drawn, not
+    when cut, so crops cut before a gating edit follow it. A crop without its cells' rows is drawn as it is."""
+    if not crops or st.gate is None or st.metrics is None:
+        return crops
+
+    well = str(site[0])
+    metrics = st.metrics[st.metrics["well"] == well]
+    out = {}
+    for tp, crop in crops.items():
+        rows = getattr(crop, "cell_rows", None)
+        if crop is None or crop.cells is None or rows is None or not len(rows):
+            out[tp] = crop
+            continue
+        hide, gated, in_fields = cg.hidden_cells(rows, st.gate, well, tp,
+                                                 field_sites(metrics[metrics["timepoint"] == tp]))
+        out[tp] = replace(crop, cells=crop.cells[~hide], cell_rows=rows[~hide].reset_index(drop=True), gated=gated,
+                          in_fields=in_fields) if hide.any() else crop
+    return out
 
 
 def _outside_badges(st, sites) -> dict:
@@ -1920,6 +2008,62 @@ def set_page_baseline(ctx, baseline: str) -> None:
     redraw(ctx)
 
 
+def _qc_params(ctx):
+    """The dataset's QC parameters (``QCParams``), through the QC layer's own accessor so they are seeded from
+    the run on first read; ``None`` in a build without the QC layer."""
+    return ctx.features.query("qc.get_params", ctx, default=None)
+
+
+def focus_rule(ctx) -> rfc.RimFocusRule:
+    """The rim focus rule in force: the QC layer's (``QCParams.nanowell_focus_rule``), so the page leaves out
+    exactly the nanowell-timepoints whose cells the ``NW_Focus_Pass`` layer leaves out of every other tab."""
+    params = _qc_params(ctx)
+    return params.nanowell_focus_rule() if params is not None else rfc.RimFocusRule()
+
+
+def sync_focus_rule(ctx, st) -> None:
+    """Copy the rule in force onto the page's state, where the metrics and their staleness check read it."""
+    st.focus_rule = focus_rule(ctx)
+
+
+def set_rim_focus(ctx, *, on: bool | None = None, fraction: float | None = None) -> None:
+    """Turn the nanowell focus rule on or off, or change its fraction — the band's mirror of the Cell Gating
+    panel's switch. It changes the QC parameters through the one route a QC edit takes (every verdict layer
+    re-projected behind a progress popup, then the save and the redraw), so the cells of an out-of-focus
+    nanowell leave every tab when its nanowell leaves this page. A fraction out of range
+    (``review.domain.nanowell_rim_focus.clamp_fraction``) is refused with the range named, and nothing changes."""
+    st = _state(ctx)
+    params = _qc_params(ctx)
+    if st is None or params is None:
+        return
+    if fraction is not None:
+        accepted = rfc.clamp_fraction(fraction)
+        if accepted is None:
+            ctx.notify.set_status(f"Rim focus: give a fraction from {rfc.MIN_FRACTION:g} to {rfc.MAX_FRACTION:g}.")
+            _call(ctx, "_nw_refresh_controls")
+            return
+        fraction = accepted
+    changes = {}
+    if on is not None and bool(on) != params.exclude_soft_nanowells:
+        changes["exclude_soft_nanowells"] = bool(on)
+    if fraction is not None and fraction != params.nanowell_focus_fraction:
+        changes["nanowell_focus_fraction"] = fraction
+    if not changes:
+        return
+
+    def done(_counts) -> None:
+        from core.safe import swallow
+
+        with swallow("Nanowells: repaint the Cell Gating panel after a focus change"):
+            ctx.features.call("qc.refresh_gate_widgets", ctx.window)
+        ensure_loaded(ctx)
+        redraw(ctx)
+
+    ctx.features.call("qc.set_params_with_progress", ctx, params.with_updates(**changes), on_done=done)
+    sync_focus_rule(ctx, st)
+    _call(ctx, "_nw_refresh_controls")
+
+
 def _set(ctx, name: str, value) -> None:
     st = _state(ctx)
     if st is None or getattr(st, name) == value:
@@ -1939,9 +2083,15 @@ def export_page_csv(ctx) -> None:
     if st is None or st.metrics is None:
         ctx.notify.set_status("There are no nanowell tables loaded to save.")
         return
-    if st.computing or st.loaded_for is None or st.loaded_for[1] != st.baseline:
-        # The metrics on hand were computed for another baseline; written now, the file would label them with
-        # the new one (roll-up review X12).
+    stale_gate = st.gated_for != gate_version(ctx)
+    if (st.computing or st.loaded_for is None or st.loaded_for[1] != st.baseline
+            or st.focus_for != focus_rule(ctx).key() or stale_gate):
+        # The metrics on hand were computed for another baseline or rim focus rule (roll-up review X12), or before a
+        # gating, curation or QC edit moved which cells count (cell population audit P9): written now, the file
+        # would carry counts the page no longer draws, under the current settings' labels. A stale gate also starts
+        # the recompute.
+        if stale_gate and not st.computing:
+            ensure_loaded(ctx)
         ctx.notify.set_status(f"The nanowell metrics for baseline {st.baseline!r} are still being computed; "
                               "save again once the page has drawn them.")
         return

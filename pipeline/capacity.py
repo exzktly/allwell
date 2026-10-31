@@ -198,6 +198,63 @@ def estimate_well_output_bytes(
 
 # ── Up-front preflight ──────────────────────────────────────────────────────
 
+#: How to move the scratch, by who is reading. A run on this computer (the
+#: desktop app, or a command line) is moved by ``ALLWELL_SCRATCH_DIR`` or the
+#: Analyze tab's field. A run the app sent to a host never receives that field
+#: (``RemoteRunner._build_remote_argv`` drops ``--scratch_dir``); its scratch is
+#: the host's *Remote scratch dir*, exported as ``ALLWELL_SCRATCH_DIR``.
+_MOVE_IT = {
+    False: ("Scratch is not the dataset volume: set ALLWELL_SCRATCH_DIR (or the "
+            "Analyze tab's Scratch folder, under Advanced) to move it."),
+    True: ("Scratch is not the dataset volume: set the host's Remote scratch dir "
+           "(Remotes, under Advanced (remote paths)) to move it — the Analyze "
+           "tab's Scratch folder is for runs on this computer and is not sent "
+           "to a host."),
+}
+
+
+def _scratch_needs(sample_image_bytes: int, n_channels: int, groups_per_well: int,
+                   concurrent_wells: int) -> tuple[int, int, int]:
+    """``(per FOV-group, per well, the whole run at once)`` bytes of transient scratch."""
+    per_group = estimate_group_scratch_bytes(sample_image_bytes, n_channels)
+    per_well = per_group * max(1, int(groups_per_well))
+    return per_group, per_well, per_well * max(1, int(concurrent_wells))
+
+
+def _room(base: Path, per_well: int, need: int) -> int:
+    """How much of the run *base* holds: 0 not one well (the refusal), 1 one well but not every well at once (the
+    warning), or nothing known; 2 all of it."""
+    free = free_bytes(Path(base) / "probe")
+    if free is None:
+        return 1
+    return 0 if free < per_well else 1 if free < need else 2
+
+
+def _leave_a_disk_too_small(scratch_base: Path, alternative, *, per_well: int, need: int,
+                            concurrent: int, groups: int, log) -> Path:
+    """The scratch base the run checks: *scratch_base*, or the one *alternative* offers when that holds more of the
+    run's estimated working set (:func:`_room`).
+
+    *alternative* is ``None`` or a callable giving ``None`` or ``(base, move)``: where the scratch would go instead,
+    and a callable that moves it there. ``pipeline.io`` offers one only for a node-local disk the run chose for
+    itself against a fixed floor (:data:`pipeline.node_disk.LOCAL_SCRATCH_MIN_FREE`), before this estimate existed —
+    never for a folder the run was given. A disk that cleared the floor but cannot hold the run would otherwise
+    refuse, or warn about, a run the shared default had room for. When neither holds more, the node's disk stays:
+    it is off the shared filesystem the run's heartbeat goes through."""
+    offer = alternative() if alternative is not None else None
+    if offer is None:
+        return scratch_base
+    other, move = offer
+    if _room(other, per_well, need) <= _room(scratch_base, per_well, need):
+        return scratch_base
+    move()
+    here = free_bytes(Path(scratch_base) / "probe")
+    log.info("Scratch moves off the node's own disk %s (%s free) to %s: the run needs about %s of scratch "
+             "(%d well(s) at once, %d FOV-group(s) each)", scratch_base,
+             "unknown" if here is None else _gib(here), other, _gib(need), concurrent, groups)
+    return other
+
+
 def preflight_scratch_space(
     scratch_base: Path,
     *,
@@ -207,6 +264,7 @@ def preflight_scratch_space(
     concurrent_wells: int,
     output_dir: Path | None = None,
     n_wells: int = 0,
+    sent_to_a_host: bool = False,
 ) -> tuple[bool, str]:
     """Is there room for this run? ``(ok, message)``.
 
@@ -221,17 +279,17 @@ def preflight_scratch_space(
     volume — the default configuration, where the default scratch and an
     output directory under the home volume compete for the same bytes, and
     checking either alone says the run fits when it does not.
+
+    *sent_to_a_host* names the setting that moves the scratch of a run the app
+    sent to a remote host — the host's scratch folder in Remotes — rather than
+    the Analyze tab's, which is never sent there (:data:`_MOVE_IT`).
     """
     free = free_bytes(scratch_base / "probe")
     if free is None:
         return True, ""
-    per_group = estimate_group_scratch_bytes(sample_image_bytes, n_channels)
-    per_well = per_group * max(1, int(groups_per_well))
-    scratch_need = per_well * max(1, int(concurrent_wells))
-    move_it = (
-        "Scratch is not the dataset volume: set ALLWELL_SCRATCH_DIR (or the "
-        "Analyze tab's Scratch folder, under Advanced) to move it."
-    )
+    per_group, per_well, scratch_need = _scratch_needs(
+        sample_image_bytes, n_channels, groups_per_well, concurrent_wells)
+    move_it = _MOVE_IT[bool(sent_to_a_host)]
     where = (
         f"{_gib(free)} free on {scratch_base} — the run needs about "
         f"{_gib(scratch_need)} there ({concurrent_wells} well(s) at once, "
@@ -306,6 +364,8 @@ def preflight_scratch_for_run(
     log,
     output_dir: Path | None = None,
     allow_low_disk: bool = False,
+    alternative=None,
+    sent_to_a_host: bool = False,
 ) -> None:
     """Warn — or refuse to start — when the run cannot fit on its volumes.
 
@@ -325,6 +385,10 @@ def preflight_scratch_for_run(
     refuse a
     run that would have finished, and no heuristic should be able to lock
     someone out of their own data with no way past it.
+
+    *alternative* lets the check move the run off a node-local disk it chose
+    for itself (:func:`_leave_a_disk_too_small`); *sent_to_a_host* is
+    :func:`preflight_scratch_space`'s.
     """
     log.info("Scratch  : %s", scratch_base)
     if n_wells <= 0:
@@ -336,14 +400,19 @@ def preflight_scratch_for_run(
         groups_per_well = int(count_groups())
     except Exception:
         groups_per_well = 1
+    groups, concurrent = max(1, groups_per_well), max(1, min(workers, n_wells))
+    _per_group, per_well, need = _scratch_needs(sample, n_channels, groups, concurrent)
+    scratch_base = _leave_a_disk_too_small(scratch_base, alternative, per_well=per_well, need=need,
+                                           concurrent=concurrent, groups=groups, log=log)
     ok, message = preflight_scratch_space(
         scratch_base,
         sample_image_bytes=sample,
         n_channels=n_channels,
-        groups_per_well=max(1, groups_per_well),
-        concurrent_wells=max(1, min(workers, n_wells)),
+        groups_per_well=groups,
+        concurrent_wells=concurrent,
         output_dir=output_dir,
         n_wells=n_wells,
+        sent_to_a_host=sent_to_a_host,
     )
     if not ok and allow_low_disk:
         log.warning("%s Continuing anyway (--allow_low_disk).", message)

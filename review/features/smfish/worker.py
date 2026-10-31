@@ -41,7 +41,12 @@ def _process_well(
     classifier,
     fov_tp_extractor,
 ) -> dict[tuple[str, str, str, str], int]:
-    """Compute per-cell smFISH spot counts for one well."""
+    """Compute per-cell smFISH spot counts for one well: an entry for **every** nucleus label of every frame that
+    was counted, ``0`` for a nucleus with no pixel above *threshold*.
+
+    A cell with no entry was never counted — its frame has no smFISH or no mask member in the archive, or one of
+    them could not be read — and :func:`_write_counts_to_csvs` leaves it blank rather than writing ``0``, so a
+    measured zero and a measurement that was never made cannot be confused in the CSV."""
     smfish, mask = scan_well_zip(
         zip_path=zip_path,
         channel=channel,
@@ -61,8 +66,9 @@ def _process_well(
         log_img = imread(io.BytesIO(sm_raw)).astype(np.float32)
         labels = imread(io.BytesIO(mk_raw))
         hits = labels[(labels > 0) & (log_img > threshold)].astype(np.int64, copy=False)
-        if hits.size:
-            hit_counts = np.bincount(hits)
+        present = np.unique(labels[labels > 0]).astype(np.int64, copy=False)
+        if present.size:
+            hit_counts = np.bincount(hits, minlength=int(present.max()) + 1)
             # Build the counts dict's keys via CellKey so the producer
             # side matches the consumer side (CSV lookup) byte-for-byte:
             # same well/fov/tp/nid normalisation, no possibility of drift.
@@ -72,7 +78,7 @@ def _process_well(
             # go through identical normalisation, no possibility of drift.
             fov_n = normalize_fov(key[0])
             tp_n = normalize_tp(key[1])
-            for nid in np.nonzero(hit_counts)[0]:
+            for nid in present:
                 k = CellKey(
                     well=normalize_well(well),
                     fov=fov_n,
@@ -136,6 +142,7 @@ def _write_counts_to_csvs(
     should_abort: Callable[[], bool] | None = None,
     progress_cb: Callable[[int, int], None] | None = None,
     failed_wells: set[str] | None = None,
+    tally: dict | None = None,
 ) -> int:
     """Write the counts column into each well's CSV.
 
@@ -151,6 +158,10 @@ def _write_counts_to_csvs(
     well that genuinely has no spots above threshold. Skipping leaves the
     well's previous counts in place and drops it out of ``written``, so the
     caller's shortfall arithmetic reports it like any other unwritten well.
+
+    A row whose cell has no entry in ``counts`` was never counted (:func:`_process_well` gives every counted
+    nucleus an entry, ``0`` included) and is written **blank**, not ``0``. *tally*, when given, gains
+    ``"uncounted"``: the rows written blank, for the run's closing message.
 
     ``progress_cb`` receives ``(wells_visited, total_wells)`` after each
     iteration so the caller can drive a determinate progress bar. It counts
@@ -194,7 +205,17 @@ def _write_counts_to_csvs(
             # lookup keys are constructed by the same code path.
             cell_keys = cell_keys_for_dataframe(df, default_well=well)
             keys = [ck.as_tuple() for ck in cell_keys]
-            df[column] = [str(counts.get(k, 0)) for k in keys]
+            values = [counts.get(k) for k in keys]
+            df[column] = ["" if v is None else str(v) for v in values]
+            uncounted = sum(1 for v in values if v is None)
+            if uncounted:
+                logger.warning(
+                    "smFISH apply-global: %s — %d of %d cell(s) were never counted (their field had no smFISH or "
+                    "mask image in the archive, or it could not be read); written blank, not 0.",
+                    csv_path.name, uncounted, len(values),
+                )
+                if tally is not None:
+                    tally["uncounted"] = tally.get("uncounted", 0) + uncounted
 
             # Diagnostic: when every lookup misses we'd otherwise silently
             # write a column of zeros and only the file mtime would change.
@@ -371,12 +392,18 @@ def apply_global_threshold_async(
 
         total = len(well_to_zip)
         status_cb(f"Writing counts into {total} well CSV(s)...")
+        tally: dict = {}
         written = _write_counts_to_csvs(
             out_dir, well_to_zip, counts, column, well_to_csv,
             should_abort=_abort_write,
             progress_cb=progress_cb,
             failed_wells=failed_wells,
+            tally=tally,
         )
+        uncounted = tally.get("uncounted", 0)
+        blank = (f" {uncounted:,} cell(s) were never counted (no smFISH or mask image for their field, or one "
+                 "that could not be read) and are left blank, not 0 — see the log for which wells."
+                 if uncounted else "")
         # Reported on the *count*, not on whether the abort predicate is still
         # true. ``written`` counts wells actually written, and the loop has two
         # ways to fall short: it breaks on an abort, and it skips a well whose
@@ -396,10 +423,10 @@ def apply_global_threshold_async(
             done_cb(
                 f"Apply to All wrote {written} of {total} well(s). The other "
                 f"{shortfall} still hold their previous counts — see the log "
-                "for which and why; re-run to finish them."
+                "for which and why; re-run to finish them." + blank
             )
             return
-        done_cb("Apply to All complete. Line/Bar plots refreshed.")
+        done_cb("Apply to All complete. Line/Bar plots refreshed." + blank)
 
     def _run_guarded() -> None:
         # A raise anywhere in _run (e.g. a pd.read_csv ParserError in

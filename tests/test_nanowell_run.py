@@ -1,6 +1,7 @@
 """The (well, timepoint) task body on rendered tiles, against the array that was drawn."""
 
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -119,15 +120,30 @@ def test_a_cell_in_the_overlap_of_two_tiles_is_counted_by_one_row_only():
     assert total == 1 and len(measured.cells["label"]) == 1
 
 
-def test_a_fused_site_has_an_undefined_count_not_zero():
-    # 3 % overlap (90 um) is less than a nanowell (100 um) + margin: sites on the seam cannot be owned.
+def test_a_nanowell_on_a_seam_is_counted_from_a_blended_crop():
+    """A nanowell no single tile holds is counted, not left without a count (it used to be ``n_cells=None``).
+
+    3 % overlap (90 um) is less than a nanowell (100 um) + margin, so the sites on the seam between F0 and F1 cannot
+    be owned by either tile. One of them is given a cell: it must be counted once, from a blended crop, with the row
+    still flagged ``fused`` and naming a real tile, and every other fused site seen whole must be counted (zero)."""
     rendered, record = build_well(overlap=0.03)
+    seam_x = rendered.true_left_top_um["F1"][0] + 0.5 * 0.03 * rendered.plan.extent_um[0]
+    sites = np.asarray(rendered.sites_um)
+    pick = int(np.argmin(np.abs(sites[:, 0] - seam_x) + 0.2 * np.abs(sites[:, 1] - rendered.plan.extent_um[1] / 2)))
+    paint_cell(rendered, sites[pick])
     located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
     measured = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
                                     segmenter=threshold_segmenter())
     fused = [r for r in measured.sites if r["fused"]]
-    assert fused and all(r["n_cells"] is None and r["state"] == "measured" for r in fused)
-    assert all(r["owner"] is None for r in fused)
+    assert fused
+    painted = min(fused, key=lambda r: math.hypot(r["well_x_um"] - sites[pick][0], r["well_y_um"] - sites[pick][1]))
+    assert math.hypot(painted["well_x_um"] - sites[pick][0], painted["well_y_um"] - sites[pick][1]) < 30
+    assert painted["n_cells"] == 1 and painted["state"] == "measured"
+    assert all(r["owner"] in {"F0", "F1", "F2", "F3"} for r in fused)
+    whole = [r for r in fused if r is not painted and r["visible_fraction"] >= 0.99 and r["imaged_fraction"] >= 0.99]
+    assert whole and all(r["n_cells"] == 0 and r["state"] == "empty" for r in whole)
+    assert sum(r["n_cells"] for r in measured.sites if r["n_cells"]) == 1
+    assert len(measured.cells["label"]) == 1 and measured.cells["fov"][0] in {"F0", "F1", "F2", "F3"}
 
 
 def _loader(rendered):

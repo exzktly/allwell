@@ -896,6 +896,8 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
                 tone = "Muted"
                 can = bool(self._dest_field.path()) and not dest_problem
             except OmeImportError as exc:
+                if exc.source_timepoint_tokens:      # a ticked timepoint the source lacks is then marked missing
+                    self._timepoint_pick.set_source_tokens(exc.source_timepoint_tokens)
                 verdict, tone = f"⚠ {exc}", "Danger"
         self._order_label.setVisible(single)
         self._frame_order_cb.setVisible(single)

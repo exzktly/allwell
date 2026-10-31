@@ -28,6 +28,7 @@ from util.well_token import canonical_well_label
 from datasets.core.concurrency import pick_workers
 from datasets.core.provenance import record_derivation
 from datasets.core.dataset_paths import dataset_wells, split_stem_well
+from datasets.core.inclusion_carry import InclusionSource, carry_inclusion
 from datasets.core.nanowell_anchors_carry import AnchorSource, carry_anchors
 from datasets.core.nanowell_tables import carry_nanowell_tables
 from util.csv_gz import csv_stem, is_gz_csv_name, open_csv_text
@@ -344,6 +345,8 @@ def _merge_cell_overrides(plan: PlateMergePlan, emit: Callable[[str], None]) -> 
         with swallow(f"read {src}"):
             data = json.loads(src.read_text())
         if not isinstance(data, dict):
+            emit(f"Warning: {src} could not be read; its cell overrides (cells excluded by hand) are not carried, "
+                 "so those cells count again in the new dataset.")
             continue
         for entry in data.get("overrides") or []:
             if not isinstance(entry, dict):
@@ -502,6 +505,9 @@ def execute_plan(
     _verify(plan, row_counts, mismatches)
 
     _merge_cell_overrides(plan, emit)
+    carry_inclusion([InclusionSource(plan.ds1.out_dir, "dataset 1"),
+                     InclusionSource(plan.ds2.out_dir, "dataset 2", well=lambda w: plan.well_map.get(w, w))],
+                    plan.dest.out_dir, emit)
     # Each plate's wells are tagged with their plate, so the end-of-run re-anchoring fits each plate on its own.
     nanowell_rows = carry_nanowell_tables(plan.ds1.out_dir, plan.dest.out_dir,
                                           {well: well for well in dataset_wells(plan.ds1)},

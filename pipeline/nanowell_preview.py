@@ -50,7 +50,7 @@ class PreviewResult:
         out: dict[str, int] = {}
         for site in self.sites:
             # Without counting, a seen site says so rather than adding to the sites "measured" with cells counted.
-            # Only then: a fused site is measured with no count in an ordinary preview too, and stays "measured".
+            # Only then: a fused site is counted from a blended crop in an ordinary preview, as on a tile.
             state = "not counted" if not self.counted and site["state"] == "measured" else site["state"]
             out[state] = out.get(state, 0) + 1
             if site["fused"]:

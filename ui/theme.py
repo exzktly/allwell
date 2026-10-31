@@ -167,6 +167,10 @@ class Colors:
     # leaves out (FOV_Pass). Yellow, not green, for the reason above; measured
     # ΔE ≥ 33 (CIE76) to the overlay's other eight inks.
     exclusion_fov     = "#FDE047"
+    # Segmentation overlay: a cell of a nanowell whose rim was out of focus at its timepoint (NW_Focus_Pass).
+    # Pink, the most separated hue left: measured ΔE ≥ 34 (CIE76) to the overlay's other nine inks, relative
+    # luminance 0.35.
+    exclusion_nanowell_focus = "#F472B6"
     spatial_observed  = "#4AA3FF"   # observed curve on the Spatial tab
     spatial_reference = "#FF9C4A"   # its random-reference curve
     gate_curve_a      = "#4FC3F7"   # Cell Gating optimizer, control well A

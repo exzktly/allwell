@@ -282,6 +282,19 @@ def test_the_moving_average_reaches_the_figure_and_the_csv_says_which_window_eac
         (t, int(u), "2") for t, u in zip(expected["timepoint"], expected["n_used"])]
 
 
+def test_a_well_excluded_on_the_page_is_still_drawn_by_its_batch_group(panel, tmp_path, monkeypatch):
+    """Tracker L16, declined: the page's *Exclude* applies to the page only — "the well stays in the rest of
+    Review" — and a batch group draws the wells the user put in it. Pinned so that changing it is a decision, not
+    a drift: with A01 excluded on the page, the group's figures and its CSV still hold A01."""
+    p, ctx = panel
+    ctx.state.feature_slice("nanowell").excluded_wells = ["A01"]
+    calls = _drawn(monkeypatch)
+    p._run_batch()
+    assert [c["groups"] for c in calls] == [{"A01": ["A01"]}] * 2
+    rows = list(csv.DictReader((tmp_path / "export" / "nanowell_Drug_A_summary.csv").open()))
+    assert {r["metric"] for r in rows if r["well"] == "A01"} == {"n", "c"}
+
+
 def test_the_baseline_s_window_reaches_the_figure_and_the_csv_says_which_window_each_row_used(panel, tmp_path,
                                                                                              monkeypatch):
     """The panel's baseline window goes to the page's composition and into the summary, which is the page's
@@ -322,3 +335,29 @@ def test_the_baseline_s_window_reaches_the_figure_and_the_csv_says_which_window_
     assert list(expected["excluded"]) != list(single["excluded"])       # the fixture can tell the two apart
     said = ["; ".join(f"{k}: {v}" for k, v in sorted(d.items())) for d in expected["excluded"]]
     assert [r["excluded"] for r in fold] == said
+
+
+def test_a_batch_run_leaves_out_nanowells_under_the_qc_layer_s_rim_focus_rule(panel, monkeypatch):
+    """An export must never count a nanowell the page shows as out of focus: the run computes the metrics with the
+    QC layer's rim focus rule — the one switch the page and every other tab follow — whatever it is set to."""
+    from review.features.batch_export import nanowell_panel
+    from review.domain import nanowell_rim_focus as rfc
+
+    p, ctx = panel
+    from review.features.qc.controller import get_qc_params
+
+    base = get_qc_params(ctx)
+    ctx.state.qc.params = base.with_updates(exclude_soft_nanowells=True, nanowell_focus_fraction=0.6)
+    seen = []
+    real = nanowell_panel._site_metrics
+
+    def spy(data, baseline, gate=None, focus=None):
+        seen.append(focus)
+        return real(data, baseline, gate, focus)
+
+    monkeypatch.setattr(nanowell_panel, "_site_metrics", spy)
+    assert p._load("earliest", ["A01"]) is not None
+    assert seen == [rfc.RimFocusRule(True, 0.6)]
+    ctx.state.qc.params = base.with_updates(exclude_soft_nanowells=False, nanowell_focus_fraction=0.6)
+    p._load("earliest", ["A01"])
+    assert seen[-1] == rfc.RimFocusRule(False, 0.6) and not seen[-1].active()

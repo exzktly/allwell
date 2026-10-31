@@ -23,7 +23,13 @@ whether the job still has an owner gets the run's answer.
 
 Nothing is lost when the reservation cannot be used. A host with no launcher
 never makes one; a reservation the scheduler or the network ended before the
-run was ready is reported and the run asks for a node the ordinary way; a run
+run was ready is reported as it ends (:data:`EARLY_JOB_ENDED`, which also ends
+the wait the Analyze pane counts) and the run asks for a node the ordinary way
+once it is ready — except when what ended it was the host's Max queue wait
+(:data:`~services.remote_srun_retry.QUEUE_WAIT_EXIT`). That setting is how long
+a run waits for a node, and its clock started with the early request; asking
+again would start it over, so a run whose limit is thirty minutes could wait an
+hour. The run stops instead (:class:`QueueWaitSpent`). A run
 that turns out to need no node (a cache hit, nothing left to upload, a refusal,
 a Stop) releases it. The cost of asking early is that, on those runs, a job was
 queued and then cancelled.
@@ -54,9 +60,10 @@ from typing import Any
 from services.remote_commands import _compose_reservation_cmd, pack_for_login_shell
 from services.remote_config import RemoteHost, scale_launcher_time
 from services.remote_heartbeat import _UploadHeartbeat
-from services.remote_srun_retry import queue_wait_seconds
+from services.remote_srun_retry import QUEUE_WAIT_EXIT, queue_wait_seconds
 from services.remote_transport import _remote_quote
 from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
+from services.run_evidence import EARLY_JOB_HANDED_OVER
 from services.subprocess_kill import own_process_group_kwargs, signal_subprocess
 from services.subprocess_text import TEXT_UTF8
 from util.aw_safe import swallow
@@ -70,6 +77,14 @@ COMMAND_FILE = "command.sh"
 STALE_RESERVATION_MIN = 2 * 24 * 60
 #: The sidecars of a run's pidfile that the reservation writes and the run directory links to.
 PIDFILE_SIDECARS = ("", ".slurm", ".srun-err")
+#: What the reservation logs the moment its job ends before the run is handed to it. ``services.pipeline_runner``
+#: reads it as the end of the early wait, so the status line stops counting a wait for a job that no longer exists.
+EARLY_JOB_ENDED = "[remote] scheduler: the node asked for early has ended"
+
+
+class QueueWaitSpent(RuntimeError):
+    """The early job waited out the host's Max queue wait before the run was ready: the run stops rather than ask
+    for another node and start the wait again. Raised by :meth:`Reservation.usable` (and so by ``hand_over``)."""
 
 
 @dataclass(frozen=True)
@@ -302,6 +317,22 @@ class Reservation:
             self._log(f"[remote] scheduler: stopped reading the early allocation request ({exc})\n")
         finally:
             self._lines.put(None)
+            self._say_ended()
+
+    def _say_ended(self) -> None:
+        """Log, once its stream has closed, that the job ended with no run handed to it (:data:`EARLY_JOB_ENDED`).
+        Silent for a job that was handed the run, or given back: those ends are already said."""
+        with self._lock:
+            if self._taken or self._released:
+                return
+        rc = None
+        with swallow("reading the early allocation request's exit code"):
+            rc = self._popen.wait(timeout=5) if self._popen is not None else None
+        if rc == QUEUE_WAIT_EXIT:
+            then = "this host's Max queue wait has run out, so the run stops once it is prepared"
+        else:
+            then = "another is asked for once the run is ready"
+        self._log(f"{EARLY_JOB_ENDED} (exit {rc}) while the run is prepared here — {then}.\n")
 
     def _watch_stop(self) -> None:
         """Release the reservation when the run is stopped before it took it."""
@@ -325,12 +356,21 @@ class Reservation:
                 and self._popen.poll() is None)
 
     def usable(self) -> bool:
-        """Whether the job can still take the run; when it cannot, says why and gives it back."""
+        """Whether the job can still take the run; when it cannot, says why and gives it back.
+
+        Raises :class:`QueueWaitSpent` when the job ended because the host's Max queue wait ran out: that wait
+        started with this request, and the run asking for another node would start it over."""
         if self.alive():
             return True
         if self._taken:
             return False
         rc = self._popen.poll() if self._popen is not None else None
+        if rc == QUEUE_WAIT_EXIT and not self._released:
+            said = self._last_error.removeprefix("[remote] scheduler: ERROR ").strip() or f"exit {rc}"
+            self.release("it waited out this host's Max queue wait")
+            raise QueueWaitSpent(
+                "the node asked for early was not granted within this host's Max queue wait, so no other is "
+                f"asked for (it would start the wait again): {said}")
         why = "it was given back" if self._released else f"it ended before the run was ready (exit {rc})"
         if self._last_error and not self._released:
             why += f": {self._last_error}"
@@ -361,7 +401,7 @@ class Reservation:
             self._taken = True
         if self._heartbeat is not None:
             self._heartbeat.stop()
-        self._log("[remote] scheduler: the run is handed to the node asked for early.\n")
+        self._log(EARLY_JOB_HANDED_OVER + "\n")
         assert self._popen is not None and self._pump is not None
         return ReservedPopen(self._popen, self._lines, self._pump)
 

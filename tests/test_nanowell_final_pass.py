@@ -60,9 +60,9 @@ def test_a_well_anchored_throughout_does_not_wait():
 KWARGS = {"_nanowell": {"plate_format": "100um"}}
 
 
-def _plate(tmp_path, grids):
+def _plate(tmp_path, grids, kwargs=KWARGS):
     out, src = tmp_path / "out", tmp_path / "in"
-    here = nt.settings_from_kwargs(KWARGS).key()
+    here = nt.settings_from_kwargs(kwargs).key()
     (out / nt.NANOWELL_DIR).mkdir(parents=True)
     src.mkdir()
     zips = []
@@ -157,6 +157,33 @@ def test_reanchor_plate_runs_its_wells_through_the_pool(tmp_path, monkeypatch):
     assert used == [True]
     assert sorted(w for w, _t in ran) == ["B03", "C05"]
     assert all(name.startswith("reanchor") for _w, name in ran)
+
+
+def test_the_empty_reference_well_is_re_anchored_before_the_wells_read_against_it(tmp_path, monkeypatch):
+    """Review tracker L8: every well's confluence is read against the empty reference well's saved templates, and
+    the re-anchoring pass ran the reference in the same pool as the wells that read it, so a well could read the
+    reference while it was being rewritten — the old one or a half-saved one. The reference now runs first, alone,
+    and only then the rest, in the pool."""
+    kwargs = {"_nanowell": {"plate_format": "100um", "empty_well": "C05"}}
+    wells = {w: {"T01": ANCHORED, "T05": WAITING} for w in ("B03", "C05", "D07")}
+    out, zips = _plate(tmp_path, wells, kwargs)
+    monkeypatch.setattr(nt, "plan_reanchor", lambda members: ({w: {"T05": 1} for w in wells}, {}))
+    events: list = []
+    lock = threading.Lock()
+
+    def rerun(well, *a, **k):
+        with lock:
+            events.append(("start", well))
+        if well == "C05":
+            threading.Event().wait(0.3)          # long enough for a pool to have started the others beside it
+        with lock:
+            events.append(("end", well))
+
+    monkeypatch.setattr(nt, "run_zip_task", rerun)
+    nt.reanchor_plate(out, zips, kwargs, "P", [], "m", ["experiment"], "_", "k", grouper=None, parse=None,
+                      pool=lambda: ThreadPoolExecutor(max_workers=3, thread_name_prefix="reanchor"))
+    assert events[:2] == [("start", "C05"), ("end", "C05")]
+    assert sorted(w for kind, w in events[2:] if kind == "start") == ["B03", "D07"]
 
 
 # ── the driver runs the final pass (F4) ──────────────────────────────────────

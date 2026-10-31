@@ -11,6 +11,7 @@ import math
 from dataclasses import dataclass, field, replace
 
 from review.features.nanowell.moving_compute import clamp_window
+from review.domain.nanowell_rim_focus import RimFocusRule
 from review.features.nanowell.series_compute import is_baseline
 from review.features.nanowell.statistics_compute import TEST_KEYS as STATS_TESTS
 from review.features.nanowell.statistics_compute import UNITS as STATS_UNITS
@@ -178,12 +179,19 @@ class NanowellState:
     stats_unit: str = "nanowells"
     #: The Statistics view's test (``statistics_compute.TEST_KEYS``).
     stats_test: str = "welch"
-
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
-    metrics: object = None                  # series_compute.site_metrics(data, baseline)
+    metrics: object = None                  # series_compute.site_metrics(data, baseline, focus=rim_focus_rule())
+    #: The rim focus rule in force (``review.domain.nanowell_rim_focus.RimFocusRule``), copied from the dataset's QC
+    #: parameters (``QCParams.nanowell_focus_rule``) by ``controller.sync_focus_rule``: the switch is app-wide —
+    #: the same rule leaves the same cells out of every tab — so it is the QC layer's, never this page's, and is
+    #: not kept with the page's settings. ``None`` until synced reads as the default rule.
+    focus_rule: object = None
     load_error: str = ""
     loaded_for: object = None               # (data_dir, baseline) the data and metrics were computed for
+    #: The rim focus rule's key (``RimFocusRule.key``) the metrics were computed with: a change of the rule moves it
+    #: and the page recomputes (``controller.ensure_loaded``), as ``gated_for`` does for Cell Gating.
+    focus_for: object = None
     #: The cells Home's Cell Gating leaves out of the metrics (``cell_gate_compute.GateTally``), and the
     #: ``stats_cache.population_version`` they were tallied at: a gating edit moves the version and the page
     #: recomputes (``controller.ensure_loaded``).
@@ -218,6 +226,9 @@ class NanowellState:
     #: ``(well, timepoint)`` another page asked to set an anchor on (``controller.open_for_anchor``): *Set anchor* is
     #: turned on there once the well's tables are loaded, since it can only be turned on with the grid status read.
     anchor_pending: object = None
+    #: The zoom :func:`controller.open_for_anchor` was asked to open at (times *Fit*, on the montage's centre), set
+    #: with *anchor_pending* and applied with it once the well is drawn. Never persisted.
+    anchor_zoom: float | None = None
     #: The *Anchor queue* being walked (``anchor_queue_compute.AnchorQueue``), or ``None``. Never persisted.
     anchor_queue: object = None
     #: *One per well*: the queue walks each well's first waiting timepoint only. For the session, never persisted.
@@ -257,7 +268,7 @@ class NanowellState:
 
     def reset_data(self) -> None:
         self.data, self.metrics, self.load_error, self.loaded_for = None, None, "", None
-        self.gate, self.gated_for = None, None
+        self.gate, self.gated_for, self.focus_for = None, None, None
         self.loaded_wells, self.well_parts, self.parts_for = frozenset(), {}, None
         self.crops, self.montages, self.fetching, self.fetch_bridges = {}, {}, set(), []
         self.region = self.region_for = self.press = self.drawn = None
@@ -267,6 +278,10 @@ class NanowellState:
         self.identity_zoom, self.identity_zoom_for, self.identity_press = {}, None, None
         self.stats_cache = None
         self.release_tiles()
+
+    def rim_focus_rule(self) -> RimFocusRule:
+        """The rim focus rule the metrics are computed with (:attr:`focus_rule`, or the default before a sync)."""
+        return self.focus_rule if isinstance(self.focus_rule, RimFocusRule) else RimFocusRule()
 
     def to_config(self) -> dict:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,

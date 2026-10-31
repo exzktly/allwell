@@ -227,11 +227,12 @@ def test_cellpose_that_cannot_be_loaded_for_any_reason_is_the_same_case(plate, t
     assert result.notes[0].startswith(f"Cells were not counted: Cellpose could not be loaded ({cause})")
 
 
-def test_a_counted_preview_keeps_its_fused_sites_measured(plate, tmp_path):
-    """A fused site has no count in an ordinary preview too; it stays "measured", not "not counted"."""
+def test_a_counted_preview_counts_its_fused_sites(plate, tmp_path):
+    """A fused site (on a tile seam) is counted in a preview as on a tile — from a blended crop — and keeps its flag."""
     result = _preview(plate, tmp_path)
     assert result.counted is True and "not counted" not in result.counts()
-    assert any(s["fused"] and s["state"] == "measured" and s["n_cells"] is None for s in result.sites)
+    fused = [s for s in result.sites if s["fused"] and s["state"] in ("measured", "empty")]
+    assert fused and all(s["n_cells"] is not None for s in fused)
 
 
 # ── in a child process (tracker F23) ────────────────────────────────────────

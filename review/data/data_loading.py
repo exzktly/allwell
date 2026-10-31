@@ -559,12 +559,12 @@ def _warn_no_area_column(where: str) -> None:
 #: ``Included`` is not in it: it is the only one whose absence means all-pass
 #: for a different reason (no curation has happened) and whose blanks mean
 #: dropped rather than kept.
-VERDICT_LAYERS = ("QC_Pass", "Crop_Pass", "Gate_Pass", "Field_Pass", "Focus_Pass",
+VERDICT_LAYERS = ("QC_Pass", "Crop_Pass", "Gate_Pass", "Field_Pass", "Focus_Pass", "NW_Focus_Pass",
                   "Border_Pass", "Excluded_Field_Pass", "FOV_Pass")
 
 
 def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
-                     except_layer: str | None = None) -> pd.Series:
+                     except_layer: str | None = None, except_layers: tuple[str, ...] = ()) -> pd.Series:
     """Rows that count toward analysis: ``Included == 1`` composed with the QC,
     crop, scatter-gate and field-quality layers.
 
@@ -585,6 +585,10 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
       cut on the per-cell focus column — see :mod:`review.data.focus_gate`.
       It is the one layer here that can remove *part* of a field, which is
       what a focus gradient or a coverslip tilt actually looks like.
+    * ``NW_Focus_Pass`` (1 = this cell's nanowell rim was in focus at its
+      timepoint) is the nanowell rim rule — see
+      :mod:`review.data.nanowell_focus_gate`. Its own column rather than
+      ``Focus_Pass``, so every surface can name which rule left a cell out.
     * ``Border_Pass`` (1 = the image border does not cut this cell) is the
       ``imclearborder`` rule on the pipeline's ``qc_touches_border`` flag —
       see :mod:`review.data.border_gate`.
@@ -601,7 +605,7 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
     relative to its own frame, which is why the per-cell one is absolute.
 
     Every verdict column — ``QC_Pass`` / ``Crop_Pass`` / ``Gate_Pass`` /
-    ``Field_Pass`` / ``Focus_Pass`` / ``Border_Pass`` / ``Excluded_Field_Pass``
+    ``Field_Pass`` / ``Focus_Pass`` / ``NW_Focus_Pass`` / ``Border_Pass`` / ``Excluded_Field_Pass``
     / ``FOV_Pass`` — is optional:
     when absent (no such layer / older data / the exclusion switched off /
     nothing excluded in that well) each is treated as all-pass.
@@ -616,6 +620,10 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
     panel counting how many cells a cut would remove has to count over the
     cells that would otherwise be in the analysis — neither over the debris the
     QC gate already dropped, nor over the ones its own cut is about to.
+    ``except_layers`` drops several, for a surface that applies those layers
+    another way: the Nanowells page leaves a whole field's nanowells out rather
+    than subtracting the field's cells from their counts
+    (``features/nanowell/cell_gate_compute.FIELD_LAYERS``).
     """
     if "Included" not in df.columns:
         mask = pd.Series(True, index=df.index)
@@ -623,7 +631,7 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
         incl = pd.to_numeric(df["Included"], errors="coerce").fillna(0)
         mask = incl.eq(1)
     for column in VERDICT_LAYERS:
-        if column == except_layer:
+        if column == except_layer or column in except_layers:
             continue
         if column == "Gate_Pass" and not include_gate:
             continue

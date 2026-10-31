@@ -226,6 +226,36 @@ def test_a_well_never_checked_says_so_and_names_the_audit_command(dataset):
     assert f"python -m pipeline.nanowell_identity {out}" in said
 
 
+def test_the_packaged_app_names_an_audit_it_can_run(monkeypatch):
+    """Review tracker M5: in the packaged app ``python -m pipeline.nanowell_identity`` cannot run — there is no
+    interpreter with the app's modules on its path — so the remedy the view named was unreachable there. Frozen, it
+    names the app's own executable with the launcher's sentinel, quoted for a shell."""
+    import sys
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", "/Applications/All Well.app/Contents/MacOS/AllWell")
+    monkeypatch.setattr("os.name", "posix")
+    assert ni.audit_argv("/data/run 1") == [
+        "/Applications/All Well.app/Contents/MacOS/AllWell", "--run-identity", "/data/run 1"]
+    assert ic.audit_command("/data/run 1") == (
+        "'/Applications/All Well.app/Contents/MacOS/AllWell' --run-identity '/data/run 1'")
+    monkeypatch.setattr(sys, "frozen", False)
+    assert ic.audit_command(None) == "python -m pipeline.nanowell_identity <output folder>"
+
+
+def test_the_launcher_dispatches_the_identity_sentinel_to_the_audit():
+    """The sentinel the frozen command names is the one ``all_well_launcher`` routes to the audit's ``main``, before
+    the GUI starts. The launcher is never imported in a test (its own docstring says why), so this reads its source,
+    as ``test_nanowell_preview_job.py`` does for the preview's sentinel."""
+    from tests._repo_scan import REPO_ROOT
+
+    source = (REPO_ROOT / "all_well_launcher.py").read_text(encoding="utf-8")
+    assert f'sys.argv[1] == "{ni.FROZEN_SENTINEL}"' in source
+    assert "from pipeline.nanowell_identity import main as identity_main" in source
+    assert "sys.exit(identity_main(sys.argv[2:]))" in source
+    assert source.index(ni.FROZEN_SENTINEL) < source.index("from allwell import main")
+
+
 def test_the_reference_timepoint_says_it_is_the_reference(dataset):
     fig, drawn = _draw(dataset, "A01", tp="T0")
     assert drawn is None
@@ -475,10 +505,12 @@ def test_the_crops_show_the_square_looked_for_and_the_match_turned_into_the_refe
     unmapped = other_m.image[oy - n // 2:oy - n // 2 + n, ox - n // 2:ox - n // 2 + n].astype(float)
     assert agreement(crops.looked, crops.found) > 0.8 > 0.5 > agreement(crops.looked, unmapped)
     assert crops.found_at == pytest.approx(tuple(payload["timepoints"]["T1"]["square"]["found_um"]), abs=1e-6)
+    # The ring is a circle in the picture's own µm (it scales with the zoom, and circles the match's outline); the
+    # key names each mark beside a drawing of it, so its words carry no glyph of their own.
     (ring,) = _by_gid(drawn.axes["found"], "nw-identity-accepted")
-    assert math.hypot(*_xy(ring)) / ref.pitch < 0.05                       # the run's own square agrees with it
-    assert _texts(fig, "nw-identity-crop-key") == ["▢ dashed: the central square", "▢ the match",
-                                                   "○ the square the run picked at T1"]
+    assert math.hypot(*ring.center) / ref.pitch < 0.05                     # the run's own square agrees with it
+    assert _texts(fig, "nw-identity-crop-key") == ["the central square", "the match",
+                                                   "the square the run picked at T1"]
     assert _texts(fig, "nw-identity-panel-note-found") == ["T1, turned +2.0° into T0's orientation"]
 
 
@@ -497,7 +529,10 @@ def _offsets(collection) -> set:
 def test_a_partial_well_s_status_puts_exactly_the_stepped_tile_s_nanowells_in_the_misregistered_class(dataset):
     _out, _data, ref, other = dataset
     broken = _tile_off(other)
+    # The tile's addresses at either timepoint, as the check leaves them out (review tracker M3): which of the two
+    # placed it a step off cannot be told, and the plate moved against the tiles, so the two own different edges.
     in_tile = {a for a, owner in broken.owners.items() if owner == TILE}
+    in_tile |= {a for a, owner in ref.owners.items() if owner == TILE and a in broken.sites}
     status = ic.status_map(_pair(dataset, "A04"))
     assert status.members("misregistered") == in_tile
     assert status.members("kept") == (set(ref.sites) & set(broken.sites)) - in_tile
@@ -699,7 +734,7 @@ def test_the_page_s_identity_view_is_chosen_on_its_switch_and_draws_the_chosen_w
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     assert st.view == "identity"
     well_cb = ctx.widgets.get("_nw_well_cb")
     assert [well_cb.itemText(i) for i in range(well_cb.count())] == ["A01 · confirmed", "A02 · contradicted"]
@@ -718,7 +753,7 @@ def test_the_page_s_identity_view_is_chosen_on_its_switch_and_draws_the_chosen_w
     idc.blink_tick(ctx)
     assert st.identity_drawn.frame == 1
     assert idc.step_blink(ctx, 0) == 0
-    _choose(ctx, "_nw_view_seg", "distribution", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "distribution", [k for k, _l in VIEWS])
     assert not timer.isActive() and st.identity_drawn is None
     assert st.to_config()["identity_mode"] == "blink"
 
@@ -730,7 +765,7 @@ def test_a_hidden_page_stops_the_blink_on_its_next_tick(page, qtbot):
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     _choose(ctx, "_nw_identity_mode_seg", "blink", [k for k, _l in MODES])
     qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.mode == "blink", timeout=20000)
     timer = ctx.widgets.get("_nw_blink_timer")
@@ -749,7 +784,7 @@ def test_the_pointer_on_the_page_s_side_by_side_lights_the_address(page, qtbot):
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     _choose(ctx, "_nw_identity_mode_seg", "sides", [k for k, _l in MODES])
     qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.mode == "sides"
                     and len(st.identity_drawn.axes["reference"].images) == 1, timeout=20000)
@@ -791,7 +826,7 @@ def test_the_page_zooms_side_by_side_and_blink_through_its_canvas(page, qtbot):
     ctx = page
     st = _loaded(qtbot, ctx)
     canvas = ctx.widgets.get("_nw_canvas")
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     _choose(ctx, "_nw_identity_mode_seg", "sides", [k for k, _l in MODES])
     qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.mode == "sides"
                     and len(st.identity_drawn.axes["reference"].images) == 1, timeout=20000)
@@ -860,7 +895,7 @@ def test_the_page_keeps_the_zoom_when_the_montages_arrive_and_starts_another_wel
     ctx = page
     st = _loaded(qtbot, ctx)
     canvas = ctx.widgets.get("_nw_canvas")
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     assert ctx.widgets.get("_nw_identity_colour_seg").isVisibleTo(ctx.window)          # on the Distance map
     _choose(ctx, "_nw_identity_mode_seg", "diagnostics", [k for k, _l in MODES])
     assert not ctx.widgets.get("_nw_identity_colour_seg").isVisibleTo(ctx.window)
@@ -1012,7 +1047,7 @@ def test_the_page_s_nanowell_box_goes_to_the_address_keeps_it_across_timepoints_
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     edit = ctx.widgets.get("_nw_identity_focus_edit")
     assert edit.isVisibleTo(ctx.window) and edit.isEnabled()
     edit.setText("1,0")
@@ -1092,7 +1127,7 @@ def test_origin_goes_to_nanowell_0_0(page, qtbot):
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     ctx.widgets.get("_nw_identity_origin_btn").click()
     assert st.identity_focus == "0,0" and ctx.widgets.get("_nw_identity_focus_edit").text() == "0,0"
     drawn = st.identity_drawn
@@ -1106,12 +1141,12 @@ def test_go_to_nanowell_shows_the_crops_nanowell_on_blink_zoomed_onto_it(page, q
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "distribution", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "distribution", [k for k, _l in VIEWS])
     st.selected_sites = [("A02", 1, -1)]
     nwc.pop_out_crops(ctx)                                                  # builds the pop-out and its button
     ctx.widgets.get(button).click()
     assert (st.view, st.well, st.identity_mode, st.identity_focus) == ("identity", "A02", "blink", "1,-1")
-    assert ctx.widgets.get("_nw_view_seg").currentData() == "identity"
+    assert (lambda b: b.tabData(b.currentIndex()))(ctx.widgets.get("_nw_view_bar")) == "identity"
     qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.mode == "blink", timeout=20000)
     drawn = st.identity_drawn
     assert drawn.pair.well == "A02"
@@ -1136,7 +1171,7 @@ def test_a_well_excluded_on_the_band_leaves_every_figure_and_comes_back(page, qt
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     well_cb = ctx.widgets.get("_nw_well_cb")
     well_cb.setCurrentIndex(well_cb.findData("A02"))
     excluded_btn = ctx.widgets.get("_nw_excluded_wells_btn")
@@ -1171,3 +1206,77 @@ def test_the_excluded_wells_are_kept_with_the_page_s_settings_and_junk_is_droppe
     assert st.excluded_wells == ["A01", "B02"]
     st.apply_config({"excluded_wells": "A01"})
     assert st.excluded_wells == []
+
+
+# ── a timepoint contradicted as a whole (tracker L20) ────────────────────────
+#: What ``nanowell_identity.compare`` says when every address lands on itself but the square it registered on is not
+#: the reference's: the whole timepoint is contradicted though no distance fails.
+SQUARE_ELSEWHERE = ("the square the run accepted at this timepoint is 1.20 pitch from where the reference's square "
+                    "correlates: the run took something else for the square")
+
+
+def _wholly_contradicted(dataset, well="A01"):
+    out, _data, _ref, _other = dataset
+    payload = ni.read_sidecar(out, well)
+    payload["timepoints"]["T1"].update(verdict=ni.CONTRADICTED, reason=SQUARE_ELSEWHERE)
+    return payload
+
+
+def test_a_wholly_contradicted_timepoint_paints_no_nanowell_as_landing_on_itself(dataset):
+    """Every nanowell of a contradicted timepoint is left out of every figure, so none is "Lands on itself" (the
+    green of a nanowell that is used): those that do land on themselves are their own class, and the wrong names,
+    misregistered tiles and the not compared keep theirs."""
+    _out, data, ref, other = dataset
+    confirmed = ic.status_map(_pair(dataset, "A01"))
+    kept = confirmed.members("kept")
+    assert kept and confirmed.members("timepoint_out") == set()
+    status = ic.status_map(ic.identity_pair(data, "A01", "T1", _wholly_contradicted(dataset)))
+    assert status.members("kept") == set() == status.members("imprecise")
+    assert status.members("timepoint_out") == kept
+    assert status.members("not_compared") == confirmed.members("not_compared")
+    # The stage cross-check overriding a partial verdict contradicts the whole timepoint too.
+    out = dataset[0]
+    payload = ni.read_sidecar(out, "A04")
+    payload["stage"] = {"timepoints": {"T1": {"ok": False, "reason": "the stage moved"}}}
+    partial = ic.status_map(_pair(dataset, "A04"))
+    staged = ic.status_map(ic.identity_pair(data, "A04", "T1", payload))
+    assert staged.members("kept") == set() and staged.members("timepoint_out") == partial.members("kept")
+    assert staged.members("misregistered") == partial.members("misregistered")
+
+
+def test_the_page_draws_a_wholly_contradicted_timepoint_crossed_out_and_says_every_nanowell_is_left_out(
+        qtbot, dataset, tmp_path):
+    import shutil
+
+    from matplotlib.colors import to_rgba
+
+    from review.features.nanowell.tab_view import VIEWS
+    from tests.test_nanowell_page import _loaded, _page
+    from ui.theme import Colors
+
+    pytest.importorskip("PySide6")
+    root = tmp_path / "ds"
+    shutil.copytree(dataset[0].parent, root)
+    out = root / "out"
+    payload = _wholly_contradicted(dataset)
+    ni.sidecar_path(out, "A01").write_text(json.dumps(payload), encoding="utf-8")
+    assert ni.read_sidecar(out, "A01") is not None                        # still current: only the verdict moved
+    ctx = _page(qtbot, out)
+    ctx.state.selection.selected_wells = {"A01"}
+    _loaded(qtbot, ctx)
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
+    assert _page_texts(ctx, "nw-identity-title") == ["A01 · T1 vs T0 · contradicted"]
+    ax = ctx.widgets.get("_nw_fig").axes
+    status = ctx.state.feature_slice("nanowell").identity_drawn.status
+    assert status is not None and status.members("kept") == set()
+    collections = [c for a in ax for c in a.collections]
+    assert not [c for c in collections if c.get_gid() == "nw-identity-status-kept"]
+    (crossed,) = [c for c in collections if c.get_gid() == "nw-identity-status-timepoint_out"]
+    assert len(crossed.get_offsets()) == len(status.members("timepoint_out")) > 0
+    assert crossed.get_hatch() == "xx" and tuple(crossed.get_facecolor()[0]) == pytest.approx(to_rgba(Colors.danger))
+    legend = [t.get_text() for a in ax if a.get_legend() for t in a.get_legend().get_texts()]
+    assert "Lands on itself (0)" in legend
+    assert f"Lands on itself, timepoint left out ({len(status.members('timepoint_out'))})" in legend
+    footer = " ".join(_page_texts(ctx, "nw-identity-footer"))
+    assert ("T1 is contradicted as a whole, so every one of its nanowells is left out of every figure, those that "
+            "land on themselves included (cross-hatched).") in footer, footer

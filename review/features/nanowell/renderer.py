@@ -31,7 +31,7 @@ from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
 from review.features.nanowell.extremes_compute import caption, format_value
 from review.features.nanowell.starting_cells_compute import occupancy_in_filter
-from review.features.nanowell.full_montage_compute import fit_region
+from review.features.nanowell.full_montage_compute import CentreZoom, fit_region
 from review.features.nanowell._identity_marks import mark_timepoints, split_segments
 from review.features.nanowell.identity_compute import marks_legend
 from review.features.nanowell.series_compute import baseline_text
@@ -578,6 +578,9 @@ def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None) -> None:
         tally["no_table"] = tally.get("no_table", 0) + 1
         return
     tally["drawn"] = tally.get("drawn", 0) + len(crop.cells)
+    for key in ("gated", "in_fields"):
+        if getattr(crop, key, 0):
+            tally[key] = tally.get(key, 0) + getattr(crop, key)
     if len(crop.cells):
         ax.scatter(crop.cells[:, 0], crop.cells[:, 1], s=size or CELL_DOT_PT2, c=CELL_COLOUR,
                    edgecolors=CELL_EDGE_COLOUR, linewidths=0.4, zorder=5, gid="nw-crop-cells")
@@ -587,11 +590,16 @@ def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None) -> None:
 
 
 def _cells_clause(tally: dict) -> str:
-    """What the cell dots on a set of crops are, for its caption: how many were drawn, and that a crop without a
-    cell table has none drawn because none could be read — never that it holds no cells."""
+    """What the cell dots on a set of crops are, for its caption: how many were drawn, how many the page left out
+    (Cell Gating's, and an excluded field's), and that a crop without a cell table has none drawn because none could
+    be read — never that it holds no cells."""
     if not tally:
         return ""
     said = [f"dots: the {tally.get('drawn', 0):,} cells the run counted in this nanowell"] if "drawn" in tally else []
+    if tally.get("gated"):
+        said.append(f"{tally['gated']:,} more Cell Gating leaves out, not drawn")
+    if tally.get("in_fields"):
+        said.append(f"{tally['in_fields']:,} more in an excluded field, not drawn")
     if tally.get("no_table"):
         said.append(f"{tally['no_table']} crop(s) of a well without a cell table, so no cells drawn there")
     return "; ".join(said)
@@ -1024,6 +1032,8 @@ def _band(x) -> float:
 def _state_text(row: dict) -> str:
     flags = [name for name in ("fused", "partially_visible") if row.get(name) is True]
     state = str(row.get("state", ""))
+    if state == "out_of_focus":
+        state = "rim out of focus"
     return state + (f" ({', '.join(f.replace('_', ' ') for f in flags)})" if flags else "")
 
 
@@ -1033,7 +1043,8 @@ MAP_CMAP = "viridis"
 #: How a nanowell without a value is outlined, by its state (fill colouring by the metric).
 _STATE_STYLE = {"occluded": ("////", "solid"), "clipped": ("", "dashed"), "absent": ("", "dotted"),
                 "not_located": ("", "dotted"), "unaddressed": ("", "dotted"),
-                "identity_contradicted": ("xx", "solid")}
+                "identity_contradicted": ("xx", "solid"), "field_excluded": ("++", "solid"),
+                "out_of_focus": ("....", "solid")}
 #: How each tile was placed (``pipeline/tile_register.py``), as the ``Colors`` token it is drawn in: on the lattice
 #: phase, by overlap correlation, or where the acquisition record put it when neither could be measured.
 _SOURCE_TOKENS = {"lattice": "success", "overlap": "accent", "recorded": "warn"}
@@ -1065,6 +1076,10 @@ def _image_extent(image) -> tuple[float, float, float, float]:
         return image.source.extent_um()
     left, right, bottom, top = image.extent()
     return left, top, right, bottom
+
+
+def _centre(box) -> tuple[float, float]:
+    return (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
 
 
 def _union(a, b):
@@ -1175,7 +1190,13 @@ def _array_axes(fig, scene, image, region, *, right: float, bottom: float) -> Ar
     box = ax.get_window_extent()
     w_px, h_px = max(int(round(box.width)), 1), max(int(round(box.height)), 1)
     fit = fit_region(whole, w_px, h_px, margin=0.0)
-    x0, y0, x1, y1 = fit if region is None else fit_region(region, w_px, h_px, margin=0.0)
+    if isinstance(region, CentreZoom):
+        # Centred on the whole-well montage itself, not on the padded union with the nanowells drawn around it.
+        cx, cy = _centre(_image_extent(image) if image is not None else fit)
+        half_w, half_h = (fit[2] - fit[0]) / (2 * region.factor), (fit[3] - fit[1]) / (2 * region.factor)
+        x0, y0, x1, y1 = cx - half_w, cy - half_h, cx + half_w, cy + half_h
+    else:
+        x0, y0, x1, y1 = fit if region is None else fit_region(region, w_px, h_px, margin=0.0)
     ax.set_xlim(x0, x1)
     ax.set_ylim(y1, y0)                                                 # y down
     return ArrayDrawn(HitMap(), ax, (x0, y0, x1, y1), (w_px, h_px), scene.frame, fit=fit)

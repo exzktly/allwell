@@ -19,7 +19,7 @@ import json
 import logging
 from pathlib import Path
 
-from review.domain.qc_params import QCParams, default_exclude_border_cells
+from review.domain.qc_params import QCParams, default_exclude_border_cells, default_exclude_soft_nanowells
 from review.persistence import _doc
 
 _logger = logging.getLogger("review")
@@ -99,6 +99,10 @@ def load_from_data_dir(ctx) -> None:
         # the absent key as off, which would silently keep this dataset out of
         # the default every freshly-opened dataset gets (on, except nanowell).
         params = params.with_updates(exclude_border_cells=default_exclude_border_cells(
+            ctx.state.dataset.pipeline_info))
+    if "exclude_soft_nanowells" not in data:
+        # A section saved before the nanowell focus switch existed: the same reasoning as the border switch above.
+        params = params.with_updates(exclude_soft_nanowells=default_exclude_soft_nanowells(
             ctx.state.dataset.pipeline_info))
     app._app_state.qc.params = params
 

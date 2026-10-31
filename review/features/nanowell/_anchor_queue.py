@@ -5,7 +5,8 @@ the first exactly as QC Triage's *Set anchor…* does (``controller.open_for_anc
 and timepoint, the anchor layer on in the well frame, *Set anchor* on once the well's tables are loaded. A click on
 the central square writes the anchor as it always does (``controller.set_anchor_at``), which tells the queue
 (:func:`anchor_set`); after a short pause — long enough to see where the anchor landed — the next timepoint is
-shown. *One per well* limits the walk to each well's first waiting timepoint. *Skip* moves on without an anchor, *Back* returns to the previous one (a click there replaces its anchor),
+shown. Each timepoint opens at :data:`OPEN_ZOOM` times *Fit* on the centre of the whole-well montage, where the
+central square usually is. *One per well* limits the walk to each well's first waiting timepoint. *Skip* moves on without an anchor, *Back* returns to the previous one (a click there replaces its anchor),
 and *Stop* ends the walk. The walk ends by itself after the last item, saying on the figure how many were anchored
 and pointing at *Re-run anchored wells…*, which is what puts the anchors to use.
 
@@ -27,6 +28,10 @@ from util.nanowell_anchors import AnchorsFileError, read_anchors
 
 #: How long the anchor just set stays on screen before the next timepoint replaces it.
 ADVANCE_DELAY_MS = 400
+
+#: Each timepoint opens this many times *Fit*, on the centre of the whole-well montage: the central square an anchor
+#: marks is usually there, so the click needs no zooming first. *Fit* shows the whole well.
+OPEN_ZOOM = 10.0
 
 
 def _state(ctx):
@@ -66,7 +71,12 @@ def build_queue(ctx) -> tuple[aqc.AnchorQueue | None, str]:
     if not queue.items:
         why = "No nanowell timepoint is waiting for an anchor"
         if items:
-            why += f" (One per well is on: {len(items)} more wait in wells that already have one)"
+            # One per well left nothing: every well with a waiting timepoint already has an anchor for a re-run,
+            # which is the remedy the message names. Its toggle sits in the group shown only during a walk, so it is
+            # turned off here, or nothing on the page could ever walk the rest.
+            st.anchor_queue_per_well = False
+            why += (f" with One per well: {len(items)} more wait in wells that already have one. One per well is now "
+                    "off, so Anchor queue walks them all")
         why += "."
         if pending:
             why += (f" {len(pending)} timepoint(s) have an anchor that no run has used yet: Re-run anchored wells… "
@@ -100,12 +110,15 @@ def _open_current(ctx, queue) -> bool:
     wanted = set(queue.selection_before) | {item.well}
     if set(ctx.state.selection.selected_wells) != wanted:
         set_selected_wells(ctx, wanted)
-    shown = nwc.open_for_anchor(ctx, item.well, item.timepoint)
-    if shown and item.refused:
-        st = _state(ctx)
-        if st is not None and not st.array_message:
+    shown = nwc.open_for_anchor(ctx, item.well, item.timepoint, zoom=OPEN_ZOOM)
+    st = _state(ctx)
+    if shown and st is not None:
+        if item.refused and not st.array_message:
             st.array_message = ("The last run could not address this timepoint from the anchor set here: click the "
                                 "central square again.")
+        elif st.array_message and not st.anchor_mode:
+            # Set anchor could not be turned on here (the figure says why): say how the walk goes on.
+            st.array_message += " Skip (→) goes on to the next one."
     nwc._call(ctx, "_nw_refresh_controls")
     return shown
 

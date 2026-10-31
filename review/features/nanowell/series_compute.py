@@ -7,8 +7,11 @@ array, not to the image, so the join holds even when the plate moved between acq
 number is a row with the state that explains why — ``occluded`` or ``clipped`` as recorded, ``unaddressed``
 (the timepoint was located but given no origin, so no row can be joined to an address), ``not_located``
 (the timepoint failed before any site was found), ``absent`` (addressed, but this site is not in its
-roster) or ``identity_contradicted`` (the identity check, ``pipeline.nanowell_identity``, found the timepoint's
-addresses naming other nanowells than the well's reference timepoint, so its rows are joined to nothing). A gap therefore reads as "not seen", never as zero, and never as a shorter series.
+roster), ``identity_contradicted`` (the identity check, ``pipeline.nanowell_identity``, found the timepoint's
+addresses naming other nanowells than the well's reference timepoint, so its rows are joined to nothing) or
+``out_of_focus`` (the nanowell's own rim was soft against its well's sharp rims at that timepoint,
+``review.domain.nanowell_rim_focus``; the state the run recorded is kept in ``recorded_state``). A gap therefore reads as "not
+seen", never as zero, and never as a shorter series.
 
 **Undefined is NaN, never zero, and each metric's undefined cases are listed** (§3.10.1):
 
@@ -54,6 +57,7 @@ import numpy as np
 import pandas as pd
 
 from pipeline.nanowell_identity import CONTRADICTED, NOT_CHECKED
+from review.domain import nanowell_rim_focus
 from review.features.nanowell import cell_gate_compute
 from review.features.nanowell.collect import (
     IDENTITY_CONTRADICTED, MEASURABLE, NOT_LOCATED, UNADDRESSED, NanowellData,
@@ -219,7 +223,7 @@ def _growth(frame: pd.DataFrame) -> pd.Series:
     return ((k * sxy - sx * sy) / denominator.where(ok)).where(ok)
 
 
-def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None) -> pd.DataFrame:
+def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=None) -> pd.DataFrame:
     """One row per (well, nanowell, timepoint) with the measured values and every §3.10.1 metric.
 
     Columns, beyond the site table's own: ``state`` (with Review's ``unaddressed`` / ``not_located`` /
@@ -228,11 +232,17 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None) -> pd.
     docstring.
 
     *gate* (``cell_gate_compute.GateTally``) is the cells Home's Cell Gating leaves out: they are taken out of
-    ``n`` and ``brightness_<ch>`` before anything is computed from them. ``None`` keeps the run's own counts.
+    ``n`` and ``brightness_<ch>`` before anything is computed from them, and the nanowells of a field it leaves
+    out take the state ``field_excluded``. ``None`` keeps the run's own counts.
+
+    *focus* (``review.domain.nanowell_rim_focus.RimFocusRule``) turns each measurable row whose rim was out of focus into an
+    ``out_of_focus`` gap before anything is computed (``review.domain.nanowell_rim_focus.flag``); ``None`` flags nothing.
     """
     if not is_baseline(baseline):
         raise ValueError(f"baseline must be one of {BASELINES} or a timepoint, not {baseline!r}")
     frame = _addressed_grid(data)
+    cell_gate_compute.exclude_fields(frame, gate)          # a whole field out: its nanowells have no value at all
+    nanowell_rim_focus.flag(frame, focus)                  # then a rim out of focus, of what is still measurable
     measurable = frame["state"].isin(MEASURABLE)
     frame["n"] = pd.to_numeric(frame.get("n_cells"), errors="coerce").where(measurable)
     frame["c"] = pd.to_numeric(frame.get("confluence"), errors="coerce").where(measurable)
@@ -308,7 +318,7 @@ def crop_metric_lines(row, channel: str | None = None) -> list[str]:
     if channel:
         b, sig = value(f"brightness_{channel}"), value(f"signal_{channel}")
         if sig is not None:
-            items.append(f"signal {compact_number(sig)}")
+            items.append(f"fluor. {compact_number(sig)}")       # Nanowell fluorescence, as the metric is named
         if b is not None:
             items.append(f"bright {compact_number(b)}")
     return items
@@ -405,8 +415,8 @@ def exclusion_reason(metrics: pd.DataFrame, metric: str, channels=()) -> pd.Seri
 
 def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
     """The export table (tracker D8): one row per site and timepoint, every value and metric, in a fixed order."""
-    columns = (["well", "nw_q", "nw_r", "nw_ring", "timepoint", "time_h", "state", "reason", "identity",
-                "identity_ok", "fused",
+    columns = (["well", "nw_q", "nw_r", "nw_ring", "timepoint", "time_h", "state", "recorded_state", "reason",
+                "identity", "identity_ok", "focus", "rim_focus_ref", "rim_focus_ok", "fused",
                 "partially_visible", "imaged_fraction", "visible_fraction", "n_cells", "confluence",
                 "area_est_cells", "count_disagreement"]
                + [c for ch in channels for c in (f"brightness_{ch}", f"signal_{ch}")]

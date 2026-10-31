@@ -66,6 +66,7 @@ class IdentityDrawn:
     home: dict = field(default_factory=dict)          # name -> (xlim, ylim) as drawn: the full view
     focus: object = None                              # identity_focus_compute.FocusMarks: the nanowell gone to
     focus_centres: dict = field(default_factory=dict)  # name -> (x, y) the zoom centres on (``_identity_zoom``)
+    laid_out: tuple = ()                              # Diagnostics: the figure size (in) its layout was worked for
 
 
 def title_text(pair) -> str:
@@ -136,21 +137,28 @@ def _discs(ax, x, y, radius: float, **kw):
 
 # ── the Distance map ─────────────────────────────────────────────────────────
 def _status_colours() -> dict:
-    """Each status class's colour, from the theme: kept success, imprecise warn, a wrong name or a misregistered tile
-    danger (the tile's hatched), not compared the undefined ink."""
+    """Each status class's colour, from the theme: kept success, imprecise warn, a wrong name, a misregistered tile or
+    a nanowell of a timepoint contradicted as a whole danger (the last two hatched), not compared the undefined
+    ink."""
     from ui.theme import Colors
 
     return {"kept": Colors.success, "imprecise": Colors.warn, "wrong_name": Colors.danger,
-            "misregistered": Colors.danger, "not_compared": Colors.plot_undefined_ink}
+            "misregistered": Colors.danger, "timepoint_out": Colors.danger, "not_compared": Colors.plot_undefined_ink}
 
 
 #: The hatching of the nanowells in a misregistered tile, which share the wrong names' colour.
 STATUS_HATCH = "////"
+#: Each hatched class's hatching: a misregistered tile's, and the cross a contradicted timepoint is drawn with
+#: wherever the page draws one (the Array view's ``identity_contradicted``).
+_STATUS_HATCHES = {"misregistered": STATUS_HATCH, "timepoint_out": "xx"}
+#: The classes the legend names only when some nanowell has them: every other is keyed with its count, 0 included.
+_KEYED_WHEN_PRESENT = frozenset({"timepoint_out"})
 
 
 #: The legend's short words for each status class; the footer says what each means in full.
 STATUS_KEY_WORDS = {"kept": "Lands on itself", "imprecise": "Imprecise", "wrong_name": "Wrong name",
-                    "misregistered": "In a misregistered tile", "not_compared": "Not compared"}
+                    "misregistered": "In a misregistered tile", "timepoint_out": "Lands on itself, timepoint left out",
+                    "not_compared": "Not compared"}
 
 
 def _draw_status(fig, ax, status) -> None:
@@ -162,7 +170,9 @@ def _draw_status(fig, ax, status) -> None:
     handles = []
     for cls, _label in STATUS_CLASSES:
         keep = np.array([s == cls for s in status.status], dtype=bool)
-        hatch = STATUS_HATCH if cls == "misregistered" else None
+        if cls in _KEYED_WHEN_PRESENT and not keep.any():
+            continue
+        hatch = _STATUS_HATCHES.get(cls)
         if keep.any():
             coll = _discs(ax, status.x[keep], status.y[keep], status.radius_um, facecolors=colours[cls],
                           edgecolors=ink if hatch else "none", linewidths=0.0, zorder=3)
@@ -180,7 +190,7 @@ def _draw_status(fig, ax, status) -> None:
 
 
 def _status_lines(pair, tolerance: float) -> list[str]:
-    from pipeline.nanowell_identity import PARTIAL
+    from pipeline.nanowell_identity import CONTRADICTED, PARTIAL
 
     out = [f"Each nanowell at its position at {pair.reference} (µm, the reference's frame), coloured by what the check "
            f"found at {pair.timepoint}: lands on itself (within {tolerance:g} spacing of where the registration puts "
@@ -189,6 +199,9 @@ def _status_lines(pair, tolerance: float) -> list[str]:
     if pair.verdict == PARTIAL:
         out.append("The wrong names and the misregistered tiles' nanowells are left out of every figure at "
                    f"{pair.timepoint}; the rest are used.")
+    elif pair.verdict == CONTRADICTED:
+        out.append(f"{pair.timepoint} is contradicted as a whole, so every one of its nanowells is left out of every "
+                   "figure, those that land on themselves included (cross-hatched).")
     return out
 
 
@@ -452,9 +465,13 @@ def draw_focus(fig, drawn: IdentityDrawn, marks, centres: dict) -> None:
     from ui.theme import Colors
 
     drawn.focus, drawn.focus_centres = marks, dict(centres)
+    if drawn.mode not in fc.FOCUS_MODES:
+        # Diagnostics draws the central square, not the array, and lays its whole figure out from its size: a
+        # sentence pinned at the top right would sit on its title and verdict. The page greys the box there and
+        # says why on it.
+        return
     _bg, ink, _muted = _inks(SimpleNamespace(figure=fig))
-    said = marks.text if centres or not marks.found else f"{marks.text} Not drawn here: Diagnostics shows the square."
-    _ink(fig.text(0.97, 0.925, said, fontsize=8, ha="right", va="center", color=ink, gid="nw-identity-focus"))
+    _ink(fig.text(0.97, 0.925, marks.text, fontsize=8, ha="right", va="center", color=ink, gid="nw-identity-focus"))
     radius = _FOCUS_RING * float(marks.pitch or 1.0)
     if drawn.mode in ("distance", "blink"):
         rings, crosses = [("map", marks.ref_xy)], [("map", marks.other_in_ref)]

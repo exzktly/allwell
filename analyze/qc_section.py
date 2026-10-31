@@ -248,7 +248,13 @@ class AnalyzeQCSectionMixin:
             summary=lambda: self._changed_summary("Measurements & filters"),
             info="Per-cell shape metrics, a size / solidity filter for debris "
                  "(editable later in Review's Segmentation tab), and the "
-                 "per-cell focus measurement.",
+                 "per-cell focus measurement.\n\n"
+                 "The per-cell focus measurement and its Out of focus cut "
+                 "apply to the standard per-cell pipeline only. A nanowell "
+                 "run ignores both: it always measures each nanowell's rim "
+                 "sharpness instead, and Review's Nanowells page leaves out a "
+                 "nanowell at any timepoint its rim was out of focus "
+                 "(Rim focus, on the page's band).",
         )
         self._build_shape_metrics_row(sec)
         self._qc_remove_debris_cb = WrapCheckBox(
@@ -345,7 +351,9 @@ class AnalyzeQCSectionMixin:
             "in pixels, so it compares across cells, fields and plates and can "
             "flag a soft part of a field. Costs a few percent of the run; off, "
             "the dataset carries no focus evidence and asking later needs a "
-            "re-run.")
+            "re-run.\n\nStandard pipeline only: a nanowell run does not read "
+            "this box. It measures every nanowell's rim focus regardless, and "
+            "Review's Nanowells page judges focus from that.")
         sec.layout().addWidget(self._focus_metric_cb)
 
         rf = self._row(sec, "Out of focus below")
@@ -357,7 +365,10 @@ class AnalyzeQCSectionMixin:
             "cells and can undo it. Leave blank unless you have measured one — "
             "it depends mostly on the microscope, though clipping is the "
             "exception (a saturated nucleus reads sharper), and Review ▸ Cell "
-            "Gating shows where to cut.")
+            "Gating shows where to cut.\n\nStandard pipeline only: a nanowell "
+            "run does not use this number. Its nanowells are judged by their "
+            "rim focus against their own well's sharp rims, on Review's "
+            "Nanowells page (Rim focus).")
         rf.layout().addStretch(1)
 
         focus_hint = QLabel(

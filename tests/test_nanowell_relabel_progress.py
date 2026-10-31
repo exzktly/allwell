@@ -32,8 +32,10 @@ def test_a_cell_table_is_relabelled_row_by_row_and_says_how_far_it_has_got(tmp_p
                   ("A01", "F1", "T2", 3, 2, 0, 2, "2_0"), ("A01", "F1", "T2", 4, "", "", "", ""),
                   ("A01", "F2", "T2", 5, -1, 1, 1, "-1_1")])
     said = []
-    unplaced, n = rl._relabel_cells_file(path, {"T2": (1, 0)}, {(0, 0), (1, 0), (0, 1), (-1, 1), (1, -1)},
-                                         {"T2": "hex"}, said.append)
+    unplaced, n, rewritten = rl._relabel_cells_file(path, {"T2": (1, 0)}, {(0, 0), (1, 0), (0, 1), (-1, 1), (1, -1)},
+                                                    {"T2": "hex"}, said.append)
+    assert rewritten == path.with_name(path.name + ".part")            # put in place by relabel_well, with the rest
+    rewritten.replace(path)
     rows = _read(path)
     assert n == 5 and unplaced == {"T2": 1}
     assert [(r["timepoint"], r["nw_q"], r["nw_r"], r["nw_label"]) for r in rows] == [

@@ -269,7 +269,7 @@ def retire_superseded(output_dir: Path | str, well_label: str, *, rewritten: boo
     for rec in standing_records(output_dir):
         if rec.well != well or rec.run == run or (rec.needs_force and not rewritten):
             continue
-        with swallow(f"Well {well_label}: could not archive the superseded failure record {rec.path.name}",
+        with swallow(f"could not archive {rec.path.name}, a superseded failure record of well {well_label}",
                      level=logging.WARNING):
             archive.mkdir(parents=True, exist_ok=True)
             target = _archive_path(archive, rec.path.name)

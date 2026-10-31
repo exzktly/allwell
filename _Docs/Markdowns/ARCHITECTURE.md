@@ -17882,7 +17882,9 @@ queued before staging (`services/remote_reservation.py`): its `waiting-early`
 request, and anything the scheduler says about it until the run is `handed` to
 it, runs the wait's clock on the status line without moving the phase, because
 this machine is still preparing the plate; `handed` then moves the run to
-`queued`, or `launch` if the node was already granted, and `early-ended` (the
+`queued` (its status line still *Node allocated, waiting for it to boot* when
+Slurm had picked a node and was booting it), or `launch` if the node was already
+granted, and `early-ended` (the
 job given back unused, or ended on its own while the plate is prepared, said as
 it ends) ends the clock — and any compute
 event means `process` — or `finalize`, once every announced well is in, since

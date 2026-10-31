@@ -168,7 +168,12 @@ def _remote_run_scratch(tmp_path, monkeypatch, *, host_scratch: str = "", slurm:
 @pytest.fixture
 def remote_env(disks, fresh_decision, monkeypatch):
     folders, _kinds, free = disks
-    monkeypatch.delenv(pio.SCRATCH_FALLBACK_ENV, raising=False)
+    # ``publish_scratch_args`` writes both variables into ``os.environ`` directly. A bare ``delenv`` of an unset
+    # variable records no undo, so the run's fallback outlived the test and became the next test's scratch
+    # (``test_scratch_base`` read ``staging/runs/run-1/out``). Setting each first makes monkeypatch restore it.
+    for name in (pio.SCRATCH_FALLBACK_ENV, pio.SCRATCH_DIR_ENV):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
     monkeypatch.setattr(nd.shutil, "disk_usage", lambda p: type("U", (), {"free": free[Path(p)]})())
     return disks
 

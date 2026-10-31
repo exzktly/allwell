@@ -5,8 +5,8 @@ belong in the tab's run/log core:
 
 * ``_resolve_run_dirs_for_runner`` — the adapter handed to
   :class:`services.pipeline_runner.PipelineRunner`, which resolves the selected
-  folder into ``(input_dir, output_dir, on_success)`` and streams grouping
-  progress. Analyze only ever processes **folders**: a packed acquisition file
+  folder into ``(input_dir, output_dir)`` — refusing loose images and per-well
+  folders — and announces the resolved wells. Analyze only ever processes **folders**: a packed acquisition file
   is converted to a dataset folder first, in the Datasets → *Convert OME-TIFF*,
   *Convert CZI* or *Convert ND2* page, so no de-interleave happens here.
 * ``_packed_input_hint`` — a guard that spots a raw ``.ome.tif``, ``.czi`` or
@@ -30,9 +30,9 @@ from pathlib import Path
 
 from services.input_resolution_service import (
     detect_packed_input,
+    iter_well_tokens,
     plan_input_layout,
     resolve_input_output,
-    select_incremental_scope,
 )
 from services.run_detect import scan_pipeline_info
 from util.schema_infer import infer_from_dir
@@ -79,68 +79,25 @@ class AnalyzeInputMixin:
                     "started.")
         return detected.message if detected is not None else None
 
-    def _resolve_run_dirs_for_runner(self, opts: dict, log_q: queue.Queue,
-                                     *, proc_hook=None) -> tuple | None:
+    def _resolve_run_dirs_for_runner(self, opts: dict, log_q: queue.Queue) -> tuple | None:
         """Adapter passed to ``PipelineRunner.start``.
 
-        Resolves ``opts['raw']`` into ``(input_dir, output_dir, on_success)`` via
-        :func:`resolve_input_output`, folding loose images into well zips and
-        picking the run scope. Expected-well-count + grouping progress are
-        UI-side helpers that depend on Analyze form state; ``proc_hook`` is
-        forwarded so the grouping subprocess can be tracked and reached by Stop.
+        Resolves ``opts['raw']`` into ``(input_dir, output_dir)`` via
+        :func:`resolve_input_output`, which refuses loose images and per-well
+        folders by name.
         """
         try:
             log_q.put(("zipper_start", self._expected_well_count(opts)))
-
-            emitted: set[str] = set()
-
-            def _on_group(tok: str) -> None:
-                emitted.add(tok)
-                log_q.put(("zipper_well", tok))
-
-            input_dir, output_dir, on_success = resolve_input_output(
-                opts["raw"],
-                log_fn=lambda msg: log_q.put(("line", msg)),
-                progress_fn=_on_group,
-                filename_schema=opts["filename_schema"],
-                filename_sep=opts["filename_sep"],
-                proc_hook=proc_hook,
-                move_source_tifs=bool(opts.get("move_source_tifs", False)),
-            )
-            # Fold loose images into well zips, then pick run scope (mutates opts).
-            select_incremental_scope(opts, input_dir,
-                                     log_fn=lambda m: log_q.put(("line", m)))
-            # Surface every resolved well in the Group stage (pre-grouped wells
-            # emit no zipper progress) so none are missing from the plate/rail.
-            from services.input_resolution_service import iter_well_tokens
+            input_dir, output_dir = resolve_input_output(opts["raw"])
+            # Every resolved well, so none is missing from the plate/rail
+            # before the pipeline reports on it.
             for tok in iter_well_tokens(input_dir):
-                if tok not in emitted:
-                    log_q.put(("zipper_well", tok))
+                log_q.put(("zipper_well", tok))
             log_q.put(("zipper_done", None))
-            # Forward the optional success callback as a 3-tuple. PipelineRunner
-            # unpacks it and runs it after a clean pipeline completion so loose
-            # TIFs at raw/ get cleaned up once raw/in/ has the zipped equivalents.
-            return input_dir, output_dir, on_success
+            return input_dir, output_dir
         except (ValueError, RuntimeError) as exc:
-            log_q.put(("error", self._input_failure_text(exc)))
+            log_q.put(("error", f"Input error: {exc}\n"))
             return None
-
-    def _input_failure_text(self, exc: Exception) -> str:
-        """What a failed resolution says — unless the run was told to stop.
-
-        Stop, Suspend and the job queue's Pause all end the grouping subprocess
-        (Stop reaches it through ``proc_hook``), and its failure then arrived as
-        "Input error: …" at ERROR level: a red line naming the user's input for
-        the pause they asked for. It stays an ``error`` event — that is what
-        latches the run as a cancel and tells the queue it did not finish — and
-        keeps the underlying message, in case the input really was at fault too.
-        """
-        runner = getattr(self, "_runner", None)
-        if runner is None or not runner.was_stopped:
-            return f"Input error: {exc}\n"
-        verb = "suspended" if runner.was_suspended else "stopped"
-        return (f"Run {verb} while the input was being grouped — nothing was "
-                f"processed yet. (The grouping step reported: {exc})\n")
 
     def _set_fluor_rows(self, tokens, *, smfish, phase) -> None:
         """Repopulate the fluor-channel rows to *tokens*, restoring smFISH/Phase flags.
@@ -330,15 +287,7 @@ class AnalyzeInputMixin:
             self._output_row.setVisible(False)
             self._refresh_folder_banners(None, immediate=immediate)
             return
-        # The form's schema goes with it, so the fold-loose readout counts the
-        # files the run would actually fold rather than everything with a TIF
-        # suffix — the two disagree on a duplicate, a calibration frame, and
-        # anything whose well token will not parse.
-        plan = plan_input_layout(
-            Path(raw_str),
-            filename_schema="" if self._auto_detect_on() else self._build_schema_arg(),
-            filename_sep=self._filename_sep(),
-        )
+        plan = plan_input_layout(Path(raw_str))
         self._output_lbl.setText(
             str(plan.output_dir) if plan.output_dir is not None else "—")
         self._output_row.setVisible(plan.output_dir is not None)

@@ -70,15 +70,15 @@ _XFER_DOWN = "down"
 # run the auto-threshold pass runs on the server *before* the local download, so
 # "threshold" must not imply "download" (that made the Download count hit N/N
 # before any file was fetched).
-_LABELS = {"group": "grouped", "upload": "uploaded", "active": "processing",
+_LABELS = {"group": "ready", "upload": "uploaded", "active": "processing",
            "process": "processed", "download": "fetched locally",
            "threshold": "thresholded", "error": "failed"}
 _STAGE_KEYS = ("group", "upload", "active", "process", "threshold", "download")
 
 # Rail rows in the order they actually happen. Remote: the server thresholds
 # before the client downloads, so Download is the LAST (terminal, local) step.
-_RAIL_LOCAL = [("group", "Group"), ("process", "Process"), ("threshold", "Threshold")]
-_RAIL_REMOTE = [("group", "Group"), ("upload", "Upload"), ("process", "Process"),
+_RAIL_LOCAL = [("group", "Ready"), ("process", "Process"), ("threshold", "Threshold")]
+_RAIL_REMOTE = [("group", "Ready"), ("upload", "Upload"), ("process", "Process"),
                 ("threshold", "Threshold"), ("download", "Download")]
 
 # Reaching one of these means the well's FOV-groups are all measured, so as far

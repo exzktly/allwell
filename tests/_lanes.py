@@ -337,7 +337,6 @@ REMOTE_FILES: dict[str, str] = {
     "test_srun_boot_retry.py": "The ``srun`` wrapper prefers awake nodes and retries a node that fails to boot",
     "test_ssh_key_setup.py": "Tests for services.ssh_key_setup (v5.2.1)",
     "test_staged_archives_key_the_same.py": "A retry of an unchanged plate keys its staged upload the same; a changed image or channel list keys it anew",
-    "test_staging_keeps_every_image.py": "Remote staging never deletes an image the user had; the channel filter changes only the upload",
     "test_staging_rewrite_reasons.py": "Why an upload rewrites a well archive, and when it should not bother",
     "test_stop_never_waits_on_a_remote_upload.py": "Stop, pressed while a remote run is still uploading, answers at once",
     "test_stream_rsync_retry.py": "Audit A11 — the shared streaming-rsync retry loop",

@@ -315,18 +315,17 @@ def test_the_unknown_line_is_the_runner_s_own():
 
 def test_a_local_run_terminated_from_outside_is_not_reported_complete(monkeypatch, tmp_path):
     """The local sibling of D1: a SIGTERM this app did not send (a shutdown, a kill from a terminal) makes the
-    pipeline wind down and exit 0, which read as "Pipeline completed successfully" — success hooks and all."""
+    pipeline wind down and exit 0, which read as "Pipeline completed successfully"."""
     import services.pipeline_runner as pr
 
     monkeypatch.setattr(pr, "spawn_pipeline", lambda args: _Proc([DONE, SUSPEND], 0))
-    hooks = []
     r = pr.PipelineRunner()
-    r._run_pipeline_subprocess(["x"], on_success=lambda: hooks.append("cleanup"))
+    r._run_pipeline_subprocess(["x"])
     events = []
     while not r.log_q.empty():
         events.append(r.log_q.get_nowait())
     kinds = [k for k, _p in events]
-    assert "done" not in kinds and hooks == [], "a terminated run is not a finished one"
+    assert "done" not in kinds, "a terminated run is not a finished one"
     errors = [p for k, p in events if k == "error"]
     assert errors and errors[0].startswith("Pipeline was terminated by a signal this app did not send")
 

@@ -20,20 +20,22 @@ import numpy as np
 import pytest
 
 
-# ── 1) iter_well_tokens: recover wells when grouping is skipped ───────────────
+# ── 1) iter_well_tokens: the wells a resolved input holds ────────────────────
 
-def test_iter_well_tokens_from_zips_and_folders(tmp_path):
+def test_iter_well_tokens_from_zips(tmp_path):
     from services.input_resolution_service import iter_well_tokens
 
-    # per-well zips + a per-well folder + a non-well zip (ignored)
+    # per-well zips; a well folder, a non-well zip and a directory named like
+    # an archive are none of them a well the pipeline reads
     (tmp_path / "H12.zip").write_bytes(b"")
     (tmp_path / "A1.zip").write_bytes(b"")          # short form → canonicalises to A01
-    (tmp_path / "B02").mkdir()
+    (tmp_path / "B02").mkdir()                      # a folder — not read
+    (tmp_path / "C03.zip").mkdir()                  # a directory — not an archive
     (tmp_path / "archive.zip").write_bytes(b"")     # not a well — skipped
     (tmp_path / "notes").mkdir()                    # not a well — skipped
 
     toks = iter_well_tokens(tmp_path)
-    assert toks == ["A01", "B02", "H12"]            # canonical + sorted + deduped
+    assert toks == ["A01", "H12"]                   # canonical + sorted + deduped
     assert iter_well_tokens(tmp_path / "does_not_exist") == []
 
 

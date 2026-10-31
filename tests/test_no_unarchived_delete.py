@@ -17,12 +17,11 @@ and then removes a directory must go through
 :func:`util.zip_write.replace_folder_with_archive`, which deletes the archived
 files and removes the directory only when nothing is left in it.
 
-**Archive-writing is followed through calls**, because two of the four sites
-did not name ``atomic_zip`` themselves — ``stage_local_zips`` zips through
-``_zip_well_folder`` and ``compress_folder_images_to_zip_and_remove`` through
-``compress_images_to_zip``. A guard that only looked for a literal
-``atomic_zip`` call in the same function found two of the four and would have
-called the sweep done.
+**Archive-writing is followed through calls**, because sites have zipped
+through a helper rather than naming ``atomic_zip`` themselves — the pipeline's
+well task through ``compress_images_to_zip``. A guard that only looked for a
+literal ``atomic_zip`` call in the same function missed half the sites it was
+written for and would have called the sweep done.
 
 **And it is followed across a first-party import**, which the first version of
 this guard did not do. ``compress_images_to_zip`` moved from
@@ -68,7 +67,6 @@ _SCRATCH_DIR_ALLOWLIST = frozenset({
     # hold only what the run just wrote into them; the user's inputs are the
     # archive it read from, which it never removes.
     ("process_microscopy.py", "process_well_zip_task"),
-    ("process_microscopy.py", "process_well_folder_task"),
     # The nanowell well task, called from ``process_well_zip_task`` with that task's own scratch and staging
     # directories (which it removes), and from the end-of-run pass without them, when it makes both itself
     # and removes only those: the plate-keyed ``_tmp_extract_<plate>_<well>`` and the settings-keyed staging directory, which hold

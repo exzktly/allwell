@@ -235,15 +235,15 @@ def test_a_checkpoint_written_for_an_unaddressed_timepoint_is_not_resumed_as_add
     assert store.load("0h", {"radius_um": 1.0, "record_digest": "d", "located": ["ok", "plate_rigid"]}) is None
 
 
-# 11 ── a refused folder-mode run leaves no nanowell block in the sidecar ─────
-def test_a_folder_mode_plate_is_refused_before_the_sidecar_claims_nanowell_mode(tmp_path, monkeypatch, capsys):
+# 11 ── a refused well-folder plate leaves no nanowell block in the sidecar ───
+def test_a_folder_mode_plate_is_refused_before_the_sidecar_claims_nanowell_mode(tmp_path, monkeypatch):
     plate = tmp_path / "plate"
     (plate / "in" / WELL).mkdir(parents=True)
     imwrite(str(plate / "in" / WELL / f"exp_PHASE_{WELL}_F0_0h.tif"), np.zeros((8, 8), np.float32))
     imwrite(str(plate / "in" / WELL / f"exp_GFP_{WELL}_F0_0h.tif"), np.zeros((8, 8), np.float32))
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as refused:
         _run_main(monkeypatch, plate, "--nanowell_format", "100um")
-    assert "needs the wells as zips" in capsys.readouterr().err
+    assert f"well folder(s) with no <WELL>.zip: {WELL}/" in str(refused.value)
     info = json.loads((plate / "out" / "pipeline_info.json").read_text())
     assert "nanowell" not in info
 

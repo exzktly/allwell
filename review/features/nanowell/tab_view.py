@@ -20,12 +20,16 @@ from PySide6.QtWidgets import (
 )
 
 from review.features.export.service import export_cell_data_from
+from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import controller as nwc
 from review.features.nanowell.cell_scope_compute import cell_scope
 from review.features.nanowell.distribution_compute import (
     BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut,
 )
 from review.features.nanowell.identity_compute import worst_verdict
+from review.features.nanowell.anchor_queue_view import (
+    QUEUE_TIP as _QUEUE_TIP, build_queue_controls, refresh_queue_controls,
+)
 from review.features.nanowell.exclude_view import build_exclude_controls
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
 from review.features.nanowell.display_range_view import (
@@ -833,6 +837,7 @@ def _refresh_array_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
     c.anchor_btn.setChecked(st.anchor_mode and can_set)
     c.clear_anchor_btn.setEnabled(can_clear)
     c.rerun_btn.setEnabled(can_rerun)
+    refresh_queue_controls(ctx, st, on_view, c)
     canvas = ctx.widgets.get_or_none("_nw_canvas")
     if canvas is not None:
         canvas.setCursor(Qt.CrossCursor if on_view and st.anchor_mode and can_set else Qt.ArrowCursor)
@@ -900,10 +905,14 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
     reg.register("_nw_anchor_btn", anchor_btn)
     reg.register("_nw_clear_anchor_btn", clear_anchor_btn)
     reg.register("_nw_rerun_btn", rerun_btn)
-    grp_anchor = band.add_scope("Anchor", anchor_btn, clear_anchor_btn, rerun_btn)
+    queue_btn = _button("Anchor queue", _QUEUE_TIP, lambda: aq.start(ctx))
+    reg.register("_nw_queue_btn", queue_btn)
+    grp_anchor = band.add_scope("Anchor", anchor_btn, clear_anchor_btn, rerun_btn, queue_btn)
+    queue = build_queue_controls(ctx, band)
     return SimpleNamespace(
         image_cb=image_cb, positions_seg=positions_seg, layer_actions=layer_actions, colour_actions=colour_actions,
         groups=(grp_image, grp_positions, grp_layers, grp_zoom), grp_anchor=grp_anchor, one_btn=one_btn,
         anchor_btn=anchor_btn, clear_anchor_btn=clear_anchor_btn, rerun_btn=rerun_btn, overlays_btn=overlays_btn,
+        queue_btn=queue_btn, queue=queue,
         signalling=(image_cb, positions_seg, anchor_btn, overlays_btn, *layer_actions.values(),
                     *colour_actions.values()))

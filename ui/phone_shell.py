@@ -767,13 +767,11 @@ LANDSCAPE_SHEET_PT = phone_layout.PHONE_REFERENCE_WIDTH_PT
 #: The Controls sheet's share of an upright screen: the plot above it stays in
 #: view and redraws as its controls change.
 SHEET_HEIGHT_SHARE = 0.6
-#: Analyze's summary column, sideways, and the run plate's height in it.
-#: Sideways the screen is always 390 pt tall (the unit is its short side), so
-#: the plate's share is fixed: 390 less the 44 pt bar, less about 165 pt for
-#: the ETA, headline, progress bar, three stage rows and the tapped-well line
-#: at the largest text size. 200 pt measured row H cut off at text size M.
-LANDSCAPE_SUMMARY_PT = 300
-LANDSCAPE_PLATE_PT = 160
+#: Analyze's summary column, sideways: wide enough for the stage rail and the
+#: run plate side by side, the plate's size fitted to the column's height by
+#: ``analyze/phone_view.AnalyzePhoneView._fit_progress``. The log takes the
+#: rest of the width.
+LANDSCAPE_SUMMARY_PT = 440
 #: How often the side rail's status line follows the status bar while out.
 _RAIL_STATUS_MS = 400
 #: The least height a plot gets per row of axes in phone layout.
@@ -1512,12 +1510,15 @@ class PhoneShell(QObject):
             self._h.analyze_rule.setVisible(not two)
         for d in self._h.dashboards():
             d.setMaximumWidth(self.pt(LANDSCAPE_SUMMARY_PT) if two else _QWIDGETSIZE_MAX)
-            plate = getattr(d, "_plate", None)
-            if plate is not None and phone_layout.is_on():
-                # Sideways the column is short: the plate is as tall as leaves
-                # room for the summary above it and the tapped well's line.
-                plate.setMaximumHeight(self.pt(LANDSCAPE_PLATE_PT) if two
-                                       else _QWIDGETSIZE_MAX)
+            # Sideways the column is short, so the stage rail sits beside the
+            # plate; the plate's size is then fitted to what the column leaves
+            # (analyze/phone_view.py), by width and height together.
+            if hasattr(d, "setRailBeside"):
+                d.setRailBeside(two)
+            # Its width is then a share of the row, up to the cap, rather than
+            # its size hint, which follows the fitted plate and would only
+            # ever shrink it. Upright it takes its hint, the log the rest.
+            body.setStretchFactor(d, 1 if two else 0)
 
     # ── window ────────────────────────────────────────────────────────────
     def _avail(self) -> QRect:

@@ -48,6 +48,7 @@ _boot_diag.boot("PySide6 imported OK")
 
 from ui import help_topics
 from ui import theme as theme_v2
+from core.log_view import append_entry, entries_text, log_formatter
 from core.panes import pane_index, pane_mode
 from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
@@ -1698,7 +1699,7 @@ class AllWellApp(QMainWindow):
             self._attach_log_ring_buffer()
         # Re-fill from ring buffer each open in case the drawer was rebuilt.
         try:
-            self._log_view.setPlainText("\n".join(self._log_ring[-500:]))
+            self._log_view.setPlainText(entries_text(self._log_ring[-500:]))
         except Exception:
             swallowed()  # was: pass (silent except)
         if self._log_drawer.isVisible():
@@ -1726,7 +1727,7 @@ class AllWellApp(QMainWindow):
                 return
             view = getattr(self, "_log_view", None)
             if view is not None:
-                view.append(text)
+                append_entry(view, text)
         except Exception:
             swallowed()
 
@@ -1775,8 +1776,7 @@ class AllWellApp(QMainWindow):
                     swallowed()  # was: pass (silent except)
 
         h = _RingHandler()
-        h.setFormatter(_logging.Formatter("%(asctime)s  %(levelname)-7s  %(name)s  %(message)s",
-                                          datefmt="%H:%M:%S"))
+        h.setFormatter(log_formatter("%(asctime)s  %(levelname)-7s  %(name)s  %(message)s"))
         # Default level is WARNING — that hides every ``logger.info`` call
         # (progress streams, status updates, …). Lower the handler and each
         # target logger to INFO so the user sees what the app is doing.

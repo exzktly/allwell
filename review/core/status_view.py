@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from html import escape
 
 from ui import theme
 
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 from widgets.separator import build_hline_separator
+from core.log_view import append_entry, log_formatter
 from core.worker_bridge import GuiLogRelay
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -66,7 +68,10 @@ class _GUILogHandler(logging.Handler):
                 "DEBUG":   theme.Colors.text_muted,
             }
             color = color_map.get(level, theme.Colors.text_secondary)
-            html = f'<span style="color:{color};">{msg}</span>'
+            # Escaped, so a message holding ``<`` (a path, a repr, ``<well>``) is shown rather than parsed, and
+            # ``pre-wrap``, so an entry keeps its line breaks and spacing: as plain HTML a traceback collapsed onto
+            # one line and the columns after the timestamp ran together.
+            html = f'<span style="color:{color}; white-space:pre-wrap;">{escape(msg)}</span>'
             # Marshal to the Qt main thread. Never a QTimer: see GuiLogRelay.
             self._relay.post(html)
         except Exception:
@@ -74,7 +79,7 @@ class _GUILogHandler(logging.Handler):
 
     def _append(self, html: str) -> None:
         try:
-            self._w.append(html)
+            append_entry(self._w, html)
         except RuntimeError:
             # The QTextEdit's C++ half is gone. This handler can never work
             # again, so drop it from every logger holding it — otherwise each
@@ -184,8 +189,7 @@ def build_bottom(win) -> None:
     win._log_visible = False
 
     handler = _GUILogHandler(win._log_text)
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s  %(levelname)-7s  %(message)s", datefmt="%H:%M:%S"))
+    handler.setFormatter(log_formatter("%(asctime)s  %(levelname)-7s  %(message)s"))
     handler.setLevel(logging.DEBUG)
     rt._logger.addHandler(handler)
     rt._logger.setLevel(logging.DEBUG)

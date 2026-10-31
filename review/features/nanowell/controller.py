@@ -29,6 +29,7 @@ from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, one_to_one
 from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
+from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
 from review.features.nanowell import subset_compute as ss
@@ -1300,21 +1301,26 @@ def _apply_pending_anchor(ctx) -> None:
                         "cannot change that, so Set anchor is off.")
 
 
-def _anchor_change(ctx, change, failure: str) -> None:
+def _anchor_change(ctx, change, failure: str) -> tuple[str, str] | None:
+    """Apply *change* to the shown well and timepoint's anchor; the ``(well, timepoint)`` changed, or ``None`` when
+    nothing was (no anchors file, or it could not be written — said on the figure)."""
     from util.nanowell_anchors import AnchorsFileError
 
     st = _state(ctx)
     path = fmc.anchors_file(st.data) if st is not None and st.data is not None else None
     if path is None:
-        return
+        return None
     well = page_well(ctx)
+    timepoint = page_timepoint(ctx, well)
+    changed = None
     try:
-        change(path, well, page_timepoint(ctx, well))
-        st.array_message = ""
+        change(path, well, timepoint)
+        st.array_message, changed = "", (well, timepoint)
     except (AnchorsFileError, OSError) as exc:
         st.array_message = f"{failure}: {exc}"
     _call(ctx, "_nw_refresh_controls")
     redraw(ctx)
+    return changed
 
 
 def set_anchor_at(ctx, x_um: float, y_um: float) -> None:
@@ -1322,8 +1328,10 @@ def set_anchor_at(ctx, x_um: float, y_um: float) -> None:
     the run snaps it to the nearest nanowell, so it need only land on the central square."""
     from util.nanowell_anchors import set_anchor
 
-    _anchor_change(ctx, lambda path, well, tp: set_anchor(path, well, tp, (float(x_um), float(y_um))),
-                   "The anchor could not be saved")
+    changed = _anchor_change(ctx, lambda path, well, tp: set_anchor(path, well, tp, (float(x_um), float(y_um))),
+                             "The anchor could not be saved")
+    if changed is not None:
+        aq.anchor_set(ctx, *changed)                 # the Anchor queue, when walking, moves on to the next
 
 
 def clear_anchor(ctx) -> None:

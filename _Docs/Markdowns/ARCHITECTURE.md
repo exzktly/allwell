@@ -105,7 +105,16 @@ they're shell-wide:
   fills the ring and hands the formatted line to a
   `core.worker_bridge.GuiLogRelay`; it reads no widget state at all, because it
   runs on whichever thread logged the record. Whether the drawer is open is
-  decided on the other side of that relay, in `_append_log_line`.
+  decided on the other side of that relay, in `_append_log_line`. Every entry
+  starts with the time it was logged and is separated from the next by a blank
+  line, so a multi-line record (a traceback) reads as one entry: both this
+  drawer and Review's own status log take their formatter from
+  `core/log_view.log_formatter`, which refuses a format not starting with
+  `%(asctime)s`, and add entries through `append_entry` (live) or
+  `entries_text` (the drawer refilled from its ring on open). Review's status
+  log writes each entry as HTML, escaped and `white-space: pre-wrap`, so a
+  message holding `<` is shown rather than parsed and a traceback keeps its
+  line breaks.
 - **Status bar** (bottom of the window) with a status-message label and
   key-hint chips.
 - **App icon, window geometry persistence.**
@@ -505,11 +514,14 @@ Controls sheet and restyles at the new unit.
 sheet is a 390 pt right-hand panel; plots get at least 220 pt per row of axes
 (`size_canvas`, upright too) and the page scrolls rather than squashing a
 three-panel figure into the screen's height. Analyze turns two-column
-(`_apply_analyze_columns`): the run summary and plate on the left, 300 pt wide,
-the log on the right. The plate is capped at 160 pt tall there: sideways the
-screen is always 390 pt tall, so the plate's share is fixed — the bar and the
-summary rows above it take the rest at the largest text size, and 200 pt cut off
-row H.
+(`_apply_analyze_columns`): the run summary and plate on the left, an equal
+share of the row up to 440 pt, the log on the right. In that column the stage
+rail sits beside the plate rather than above it (`PlateProgress.setRailBeside`,
+which also pins the rail at its minimum width; `RunDashboard` drops the per-stage
+mini-bars there, since the dot and the count carry the same), because with the
+rail above it the headline, bar and three stage rows left the plate under a
+hundred points of a ~264 pt page. The plate's size is then fitted to what the
+column leaves, as upright (below).
 
 **Startup and persistence.** The choice (`ui/phone_layout`) and the text size
 (`ui/phone_text_size`: `S`, `M` or `L`, Medium when unset or unreadable) live in
@@ -539,13 +551,27 @@ button lists two views (`PhoneHandles.page_views` / `page_view` /
 `show_page_view`; ☰ is hidden in Analyze): **Settings** shows the form under the
 dashboard reduced to its headline and overall bar (`PlateProgress.setCompact`,
 the log and last-run card hidden, the run side capped at its own height);
-**Progress** hides the form and shows the full dashboard and the log inside a
-scroll area (`AnalyzePhoneView._scroll`, `QScrollArea#PhoneRunScroll`, mounted by
-`_mount` for Progress only — Settings keeps the column straight in the splitter,
-where its height is the strip's). At full phone width the stacked plate alone is
-~540 px tall, so on a short screen the column needs more than the page; unscrolled
-it was squeezed below its minimum and the log was drawn over the lower half of the
-plate. Scrolled, the dashboard keeps its height and the log follows it. The Stop
+**Progress** hides the form and shows the full dashboard and the log, fitted to
+the page: nothing on it scrolls but the log inside its own box. At full phone
+width the stacked plate alone is ~540 px tall, and the plate holds its
+aspect-locked height as a floor (`WellPlateSelector.resizeEvent`), so on a short
+screen it is not shared out — everything below the plate is pushed off the page.
+So `AnalyzePhoneView._fit_progress` caps the plate instead, by width and height at
+the same aspect (a height cap alone at full width squeezes the wells and runs the
+labels together): the budget is the plate's present floor plus whatever the run
+column has beyond its own minimum height, with the log's minimum set to
+`LOG_MIN_LINES` (3) lines of its font while Progress shows, and the plate's width
+is the widest whose height fits it, down to wells of `PLATE_MIN_CELL_LINES` (0.4)
+of a label line. The width it may take comes from
+`PlateProgress.plate_room_width`, not from the plate's own column, which a cap has
+already narrowed. A `_RefitOnLayout` filter on the run column refits (coalesced to
+the next event-loop pass) on every resize or re-layout, so a rotation, a run
+starting or the log being toggled refits too. Leaving phone layout hands the log
+its minimum and the plate its desk caps back (`_release_fit`). It is deliberately
+not a scroll area: a page that scrolls as a whole puts its scroll bar beside the
+log's, where it reads as part of the log box, and the foot of the log sits under
+the run bar until the page is scrolled to its end. The Stop
+The Stop
 button turning enabled — the one signal every way of starting a run shares — shows
 Progress. Leaving phone layout puts back the orientation, sizes, form width and
 the run row's place in the form. Because the form is the page, it carries the
@@ -980,6 +1006,8 @@ allwell/
 │   │                              which puts a worker's log lines on the GUI thread
 │   ├── log_mirror.py           ← mirror_line(): copies the warnings and errors the Analyze
 │   │                              and Datasets panes show in their own logs into the app log
+│   ├── log_view.py             ← how both log views lay out an entry: the time at its
+│   │                              head (log_formatter), a blank line between entries
 │   ├── panes.py                ← PANE_MODES and the index/name lookups either way —
 │   │                              the roster of the application's three panes
 │   ├── process.py              ← owner.pid and pid_alive(): whether the process that
@@ -11851,6 +11879,27 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   Incremental, and forcing makes it moot), through `review/core/analyze_handoff.open_in_analyze` — Review's one
   door into Analyze, shared by Home's *Finish this run*, QC triage and this view. A file that cannot be written
   is said on the figure (`state.array_message`).
+- **The anchor queue.** *Anchor queue* (the Anchor group's fourth button) walks every timepoint on the plate that
+  is waiting for an anchor, one montage after another. `anchor_queue_compute` (Qt-free) decides what waits: it
+  reads every grid record under `nanowells/` — not `state.data.grids`, which holds only the wells the page has
+  loaded — and takes each `unaddressed` timepoint with no anchor set, or with the very anchor the last run tried
+  and refused (the block's `manual_anchor_um` equals the file's). An anchor set and not yet used by a run is not
+  waiting (its remedy is a re-run), and is kept (`AnchorQueue.pending_rerun`) so the empty-queue message can say
+  so. Order is plate order, then each well's timepoints in the page's time order (`NanowellData.order`), never the
+  record's or the labels'. *One per well* (`AnchorQueue.set_per_well`, `one_per_well`) narrows the walk to each
+  well's first waiting timepoint and drops every well that already has an anchor waiting for a re-run, since the
+  end of a run addresses a well's other timepoints from one anchor through the rest of the plate. It is kept for
+  the session on `state.anchor_queue_per_well`; switching mid-walk keeps the shown item when the new list holds it
+  and otherwise goes on at the first item after it, never back over wells already passed.
+  `_anchor_queue` walks it: each step sets the selection to the one the queue started with plus the step's well
+  (so the wells walked past do not accumulate on every other tab) and calls `open_for_anchor`, the same service
+  QC Triage and Home use. `set_anchor_at` tells the queue when an anchor is saved (`_anchor_change` returns the
+  `(well, timepoint)` it changed); when it is the current item, the queue records it and moves on after
+  `ADVANCE_DELAY_MS`, dropping the move if Back, Skip or Stop changed the position meanwhile. While it runs a
+  *Queue* group (`anchor_queue_view`) shows `3 of 17 · B04 at 24h`, *Back*, *Skip*, *One per well* and *Stop*. Stop, or stepping
+  past the last item, restores the starting selection and writes the summary (anchored, skipped, and the pointer
+  to *Re-run anchored wells…*) to `state.array_message`. `state.anchor_queue` is never persisted, and a queue
+  built for another dataset is dropped by `active_queue`.
 
 `tests/test_nanowell_page_array_layers.py` turns each layer off and on through the real controls and reads the
 figure, checks the colourings, the presets and the saved-settings migration;

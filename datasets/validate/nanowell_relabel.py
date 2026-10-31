@@ -99,16 +99,22 @@ def _read_rows(path: Path) -> tuple[list[str], list[dict]]:
         return list(reader.fieldnames or []), list(reader)
 
 
-def _write_rows(path: Path, columns: list[str], rows: list[dict]) -> None:
-    """Write *rows* to *path* atomically, gzipped when *path* is."""
-    tmp = path.with_name(path.name + ".part")
+def _part(path: Path) -> Path:
+    """Where a table's rewrite is written before it replaces the table (:func:`relabel_well` commits them together)."""
+    return path.with_name(path.name + ".part")
+
+
+def _write_rows(path: Path, columns: list[str], rows: list[dict]) -> Path:
+    """Write *rows* beside *path* (``<name>.part``), gzipped when *path* is; return that file. The caller replaces
+    *path* with it."""
+    tmp = _part(path)
     opener = gzip.open(tmp, "wt", newline="", encoding="utf-8") if path.suffix == ".gz" else \
         tmp.open("w", newline="", encoding="utf-8")
     with opener as fh:
         writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
-    tmp.replace(path)
+    return tmp
 
 
 def _is_circular(grid: dict) -> bool:
@@ -266,12 +272,13 @@ PROGRESS_EVERY_ROWS = 250_000
 
 
 def _relabel_cells_file(path: Path, shifts: dict, roster: set, kinds: dict,
-                        progress: Callable[[str], None] | None = None) -> tuple[dict, int]:
+                        progress: Callable[[str], None] | None = None) -> tuple[dict, int, Path]:
     """Rewrite one cell table with each shifted timepoint's nanowell addresses renamed, streaming row by row (a
     plate's table can hold millions of cells, so it is never held whole). A cell whose nanowell left the roster keeps
-    its row with the address blank. Returns per timepoint how many were unplaced, and the rows read."""
+    its row with the address blank. Returns per timepoint how many were unplaced, the rows read, and the rewrite
+    (``<name>.part``), which the caller puts in the table's place."""
     unplaced: dict = {}
-    tmp = path.with_name(path.name + ".part")
+    tmp = _part(path)
     gz = path.suffix == ".gz"
     source = gzip.open(path, "rt", newline="", encoding="utf-8") if gz else path.open(newline="", encoding="utf-8")
     target = gzip.open(tmp, "wt", newline="", encoding="utf-8") if gz else tmp.open("w", newline="", encoding="utf-8")
@@ -295,8 +302,7 @@ def _relabel_cells_file(path: Path, shifts: dict, roster: set, kinds: dict,
             writer.writerow(row)
             if progress is not None and n % PROGRESS_EVERY_ROWS == 0:
                 progress(f"    {path.name}: {n:,} cells so far…")
-    tmp.replace(path)
-    return unplaced, n
+    return unplaced, n, tmp
 
 
 def _moved_origin(block: dict, rows, tp: str, shift) -> list | None:
@@ -320,10 +326,13 @@ def _moved_origin(block: dict, rows, tp: str, shift) -> list | None:
 def relabel_well(out_dir, plan: WellPlan, csv_prefixes, backup_root: Path,
                  progress: Callable[[str], None] | None = None) -> str:
     """Apply *plan* to one well's grid record, sites table and cell tables; return one line saying what changed.
-    The originals are copied under *backup_root* first. *progress*, when given, is told each step as it ends."""
-    say = progress or (lambda _text: None)
-    from util.nanowell_anchors import origin_phrase
+    The originals are copied under *backup_root* first. *progress*, when given, is told each step as it ends.
 
+    All or nothing: every table is rewritten beside itself (``<name>.part``) and the rewrites replace the tables
+    only once all of them are written, so a failure part way (a full disk is the likely one) leaves the well as it
+    was. The plan is made from the sites table and the grid record, so a well whose cells had been moved and whose
+    sites had not would be planned again unchanged, and Apply again would move its cells a second lattice step."""
+    say = progress or (lambda _text: None)
     out_dir = Path(out_dir)
     folder = out_dir / NANOWELL_DIRNAME
     grid_path, sites_path = folder / f"{plan.well}_grid.json", folder / f"{plan.well}.csv"
@@ -341,9 +350,29 @@ def relabel_well(out_dir, plan: WellPlan, csv_prefixes, backup_root: Path,
     roster = {(int(a[0]) - dq0, int(a[1]) - dr0) for a in grid["array_radius"]["roster"]}
     origins = {tp: _moved_origin(blocks[tp], rows, tp, shift) for tp, shift in plan.shifts.items()}
     rows, counts = _relabel_sites(rows, plan.moves, roster, kinds, columns)
+    targets = [*cells_paths, sites_path, grid_path]
+    try:
+        _rewrite_well(plan, grid, grid_path, sites_path, cells_paths, columns, rows, counts, roster, kinds, origins,
+                      progress, say)
+    except BaseException:
+        for path in targets:                   # nothing has replaced a table yet: the well is as it was
+            _part(path).unlink(missing_ok=True)
+        raise
+    for path in targets:                       # every rewrite is on disk; renames on one volume need no space
+        _part(path).replace(path)
+    moved = ", ".join(f"{tp} by {shift}" for tp, shift in plan.shifts.items())
+    return f"{plan.well}: relabelled {moved} onto {plan.reference}'s nanowells"
+
+
+def _rewrite_well(plan: WellPlan, grid: dict, grid_path: Path, sites_path: Path, cells_paths, columns, rows, counts,
+                  roster: set, kinds: dict, origins: dict, progress, say) -> None:
+    """:func:`relabel_well`'s rewrites, each written beside its table as ``<name>.part`` and none put in place."""
+    from util.nanowell_anchors import origin_phrase
+
+    blocks = grid["timepoints"]
     unplaced: dict = {}
     for path in cells_paths:
-        these, n_cells = _relabel_cells_file(path, plan.moves, roster, kinds, progress)
+        these, n_cells, _part_path = _relabel_cells_file(path, plan.moves, roster, kinds, progress)
         for tp, n in these.items():
             unplaced[tp] = unplaced.get(tp, 0) + n
         say(f"    {path.name}: {n_cells:,} cell(s) read, {sum(these.values()):,} left without a nanowell address")
@@ -377,11 +406,7 @@ def relabel_well(out_dir, plan: WellPlan, csv_prefixes, backup_root: Path,
             f"Addresses relabelled by ({int(shift[0])}, {int(shift[1])}) lattice steps onto {plan.reference}'s by "
             f"{RELABELLED_BY} on {stamp}: its own origin ({origin_phrase(block.get('origin_method'))}) had landed "
             f"a site off. {tail}")
-    tmp = grid_path.with_name(grid_path.name + ".part")
-    tmp.write_text(json.dumps(grid, indent=2), encoding="utf-8")
-    tmp.replace(grid_path)
-    moved = ", ".join(f"{tp} by {shift}" for tp, shift in plan.shifts.items())
-    return f"{plan.well}: relabelled {moved} onto {plan.reference}'s nanowells"
+    _part(grid_path).write_text(json.dumps(grid, indent=2), encoding="utf-8")
 
 
 def relabel_dataset(out_dir, plans: dict, csv_prefixes, progress: Callable[[str], None] | None = None) -> list[str]:

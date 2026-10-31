@@ -15443,6 +15443,11 @@ and `relabel_dataset` reports to the Validate log as it goes (`progress`, the wo
 tables to `out/nanowells/relabel_backup/<time>/`, then renames addresses
 `(q, r) -> (q + dq, r + dr)` (cell tables streamed row by row, never held whole) with `nw_ring`/`nw_label` recomputed. Measured
 values and `well_x_um`/`well_y_um` (physical positions) are kept as they are.
+A well is relabelled all or nothing: `relabel_well` writes every rewrite beside
+its table (`<name>.part`) and renames them into place only once all are
+written, deleting them if anything fails. The plan is made from the sites table
+and grid record, so a well whose cells had been moved and whose sites had not
+would be planned again unchanged and moved a second step by the next Apply.
 When the winning frame is not the one the roster was decided in, the roster
 moves too (`roster_offset`). A row that lands outside the roster is dropped. A
 roster nanowell the timepoint never measured gets a `clipped` row with every

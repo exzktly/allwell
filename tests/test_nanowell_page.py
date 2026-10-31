@@ -454,3 +454,19 @@ def test_the_rim_focus_control_on_the_band_changes_the_qc_layer_s_rule_and_the_m
     timer, canvas = page.widgets.get("_nw_refit_timer"), page.widgets.get("_nw_canvas")
     qtbot.waitUntil(lambda: not (timer is not None and timer.isActive())
                     and not getattr(canvas, "_draw_pending", False), timeout=5000)
+
+
+def test_a_recompute_that_finishes_after_the_page_is_deleted_touches_no_widget(qtbot, page):
+    """A recompute runs off the UI thread, and its result can arrive after the page is gone (the window closed, or a
+    test's widgets reaped). It used to refresh the band's controls and redraw regardless, and raised
+    ``Internal C++ object (PySide6.QtWidgets.QTabBar) already deleted`` from ``tab_view.refresh_controls`` — seen as a
+    teardown error in CI. The result still lands in the page's state; only the widgets are left alone."""
+    import shiboken6
+
+    st = _loaded(qtbot, page)
+    box = page.widgets.get("_nw_rim_focus_box")
+    box.setChecked(False)                                           # the QC layer's update, then a recompute
+    qtbot.waitUntil(lambda: st.computing, timeout=20000)            # off the UI thread
+    shiboken6.delete(page.window.centralWidget())                   # the page goes while it runs
+    qtbot.waitUntil(lambda: not st.computing, timeout=20000)        # its result arrives with no page to show it
+    assert st.focus_for == (False,) and st.metrics is not None

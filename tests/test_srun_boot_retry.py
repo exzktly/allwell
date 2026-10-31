@@ -212,13 +212,19 @@ def test_a_refusal_after_the_boot_exclusions_are_dropped_still_ends_the_run(tmp_
 
 def test_max_queue_wait_bounds_boot_retries_that_each_fail_at_once(tmp_path):
     """The per-attempt watchdog looks once a second, so attempts that fail
-    instantly never meet it; the check before each attempt is what stops them."""
+    instantly never meet it; the check before each attempt is what stops them.
+
+    The wrapper reads elapsed time as a difference of ``date +%s`` whole seconds, so a reading can run up to one
+    second ahead of the real time. With a 2 s budget and a 1 s pause, an attempt starting at x.99 s and checked
+    after its pause at x+2.00 s read as 2 s elapsed after 1.01 s, and the second attempt was skipped (about one run
+    in ten, on main as well). A 3 s budget reads at most 2 after one pause, so the second attempt always runs, and
+    the bound still holds: no reading below 3 lasts past 4 s of real time, which is at most five attempts of 29."""
     bindir = _fake_cluster(tmp_path, [("boot_fail", f"n{i:02d}") for i in range(1, 30)], None)
-    out, args, _ = _run(tmp_path, bindir, "srun -p cpu", queue_wait_s=2, boot_retry_pause_s=1)
+    out, args, _ = _run(tmp_path, bindir, "srun -p cpu", queue_wait_s=3, boot_retry_pause_s=1)
 
     assert out.returncode == QUEUE_WAIT_EXIT, out.stdout + out.stderr
     assert 2 <= len(args) <= 5, len(args)
-    assert "ERROR no node was granted within 2 s, this host's Max queue wait (failed to boot: n01" in out.stdout
+    assert "ERROR no node was granted within 3 s, this host's Max queue wait (failed to boot: n01" in out.stdout
 
 
 def test_stop_between_two_attempts_ends_the_loop(tmp_path):

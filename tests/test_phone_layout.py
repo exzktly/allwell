@@ -348,7 +348,7 @@ def test_run_dashboard_stage_columns_follow_the_scale(qapp):
     d = RunDashboard()
     theme.apply_ui_scale(2.0)
     d._aw_rescale()
-    names = [row[1] for row in d._rail.values()]
+    names = [row.name for row in d._rail.values()]
     assert names and all(n.maximumWidth() == 2 * _NM_W for n in names)
 
 

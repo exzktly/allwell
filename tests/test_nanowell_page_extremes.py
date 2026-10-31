@@ -148,7 +148,7 @@ def _choose_extremes(qtbot, ctx):
     from review.features.nanowell.tab_view import VIEWS
 
     _loaded(qtbot, ctx)
-    seg = ctx.widgets.get("_nw_view_seg")
+    seg = ctx.widgets.get("_nw_view_bar")
     seg.setCurrentIndex([k for k, _l in VIEWS].index("extremes"))   # emits currentChanged, as a click does
     qtbot.waitUntil(lambda: bool(_images(ctx)) and not any(t == "Cutting…" for t in _texts(ctx, "nw-extremes-missing")),
                     timeout=10000)

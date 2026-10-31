@@ -287,8 +287,8 @@ def build_page_tabs_host(win, parent):
     belong beside it on one row, sharing its bottom edge.
 
     A ``QStackedWidget`` keyed by top-level page name. Page 0 is blank and is
-    what the six pages with no sub-tabs (Statistics, Spatial, smFISH, Review
-    CSV, Batch Export, Saved Plots) show; the band keeps its height there rather
+    what the pages with no sub-tabs (Statistics, Multivariate, Spatial, smFISH,
+    Review CSV, Saved Plots) show; the band keeps its height there rather
     than collapsing, so switching pages never shifts the content below it.
     """
     from PySide6.QtWidgets import QStackedWidget
@@ -375,8 +375,8 @@ def lend_page_tab_bar(win, name: str) -> QWidget | None:
     their own signal connections — so it is moved, not duplicated, and
     :func:`return_page_tab_bar` puts it back.
 
-    Returns the bar, or ``None`` when the page has no sub-tabs (six of the ten
-    top-level pages do not) or has not built its body yet.
+    Returns the bar, or ``None`` when the page has no sub-tabs or has not built
+    its body yet.
     """
     bar = (getattr(win, "_page_tabs_bar_by_name", None) or {}).get(name)
     if bar is None:

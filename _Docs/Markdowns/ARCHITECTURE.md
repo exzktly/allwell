@@ -2069,8 +2069,8 @@ bottom edge, level with the active mode segment beside it, at any font size or
 band height.
 
 `build_page_tabs_host` is the slot — a `QStackedWidget` keyed by top-level page
-name, whose page 0 is blank and is what the six pages with no sub-tabs
-(Statistics, Spatial, smFISH, Review CSV, Batch Export, Saved Plots) show, and
+name, whose page 0 is blank and is what the pages with no sub-tabs
+(Statistics, Multivariate, Spatial, smFISH, Review CSV, Saved Plots) show, and
 what **Analyze and Datasets** show: the strip names Review's pages, and left
 carrying whatever Review was on it offered Bar Plots / Line Graphs / Heat Map
 beside the Analyze form. `show_page_tabs` gates on the current mode for that. The
@@ -2081,7 +2081,14 @@ register *after* its page is current, so registering also shows it.
 
 Plotting's bar is a standalone `QTabBar` and simply moves; so is Batch Export's
 Line / Bar / Scatter (cells) / Scatter (aggregate) selector, which is a page
-selector like any other and reaches the band the same way. The other two — Image
+selector like any other and reaches the band the same way, and so is the
+Nanowells page's view switch (`nanowell/tab_view.build_view_bar`: Distribution,
+Array, Trajectories, Position, Extremes, Identity, Statistics). Those views stay
+one page with one state rather than becoming sub-leaves — they share one figure,
+one control band and one controller, and a tab click only writes
+`NanowellState.view` — but they are a page selector, so they are drawn as one.
+All three standalone bars carry the `PlottingSubTabs` object name, so theme.qss
+styles them with the one nested-sub-tab rule. The other two — Image
 Browser's and Home's — are `QTabWidget`s whose own API
 (`tabText` / `currentIndex` / `count` / `addTab` / `currentChanged`) is read by
 controllers, persistence and eight test modules, so `mirror_tab_widget` hides
@@ -12014,8 +12021,9 @@ result goes on the state and the figure is redrawn; a failure stores a value say
 and the read is not relaunched on every redraw; a result for a dataset loaded since is dropped without touching
 the new dataset's bookkeeping; each worker bridge is kept on the state until it delivers, then released.
 
-**The page** (`tab_view.build_nanowell_tab`, `controller`). The control band holds the view switch (the five
-views; U3 planned the first four), Metric, Along x, Baseline, *Subset* (`subset_view.build_subset_control`: a
+**The page** (`tab_view.build_nanowell_tab`, `controller`). The view switch — the seven views, as a tab strip
+(`build_view_bar`) in the shell's mode band where every page's sub-tabs sit (§6a), each tab carrying its view's
+tooltip — is not on the page's own band. The control band holds Metric, Along x, Baseline, *Subset* (`subset_view.build_subset_control`: a
 combo of the Starting cells presets — All nanowells, ≥1, 1, 1–2, ≥2 — and *Custom subset…*, with an **Edit…** button,
 on every view, the combo outlined in the accent through the `filterActive` QSS property while a subset is set; the
 editor, `SubsetEditor`, is a panel the page places under the band — never a dialog — with one `_ConditionRow` per

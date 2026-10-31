@@ -98,7 +98,7 @@ from services.remote_suspend import request_suspend as _request_suspend
 from services.remote_code_sync import sync_pipeline_code
 from services.remote_commands import _compose_remote_cmd, _handover_job_body, pack_for_login_shell
 from services.remote_reservation import Reservation
-from services.remote_hold import StepTarget, step_launcher
+from services.remote_hold import NodeLease, StepTarget, claim_node, step_launcher
 from services.remote_srun_retry import queue_wait_seconds
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
@@ -237,6 +237,15 @@ class RemoteRunner:
         """The scheduler command this run launches with: a step on the granted node when there is one, else the host's.
         Every launch site asks here, so none can forget the node."""
         return step_launcher(self.step_target) if self.step_target is not None else self.host.launch_command
+
+    def claim_granted_node(self, *, log_fn: Callable[[str], None], stop_event: threading.Event | None = None,
+                           **timing) -> NodeLease | None:
+        """Take this host's granted node for the run about to start, and make :meth:`launcher` a step of it; ``None``
+        (and the host's own command) when there is none. The facade ``PipelineRunner`` calls, beside
+        :meth:`reserve_allocation`. *timing* is ``sleep`` / ``clock``, for tests."""
+        lease = claim_node(self.host, self._cache, log_fn=log_fn, stop_event=stop_event, **timing)
+        self.step_target = lease.target if lease is not None else None
+        return lease
 
     @property
     def run(self) -> _RemoteRun | None:

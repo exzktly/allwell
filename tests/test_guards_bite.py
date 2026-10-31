@@ -5638,8 +5638,8 @@ def test_cancel_guard_clears_prose_and_the_sanctioned_helper(tmp_path, monkeypat
 
 # ── the launcher seam (tracker H3) ──────────────────────────────────────────
 
-_SEAM_GUARD = "tests.test_every_launch_goes_through_the_launcher_seam"
-_SEAM_TEST = "test_every_read_of_the_hosts_launch_command_says_why_it_may_bypass_the_seam"
+_LAUNCHER_SEAM_GUARD = "tests.test_every_launch_goes_through_the_launcher_seam"
+_LAUNCHER_SEAM_TEST = "test_every_read_of_the_hosts_launch_command_says_why_it_may_bypass_the_seam"
 
 
 @pytest.mark.parametrize("shape", [
@@ -5650,7 +5650,7 @@ _SEAM_TEST = "test_every_read_of_the_hosts_launch_command_says_why_it_may_bypass
 ])
 def test_seam_guard_catches_a_direct_read_of_the_hosts_command(tmp_path, monkeypatch, shape):
     bad = _write(tmp_path, "services/bad_launch.py", shape)
-    exc = _run_scan(monkeypatch, _SEAM_GUARD, _SEAM_TEST, [bad])
+    exc = _run_scan(monkeypatch, _LAUNCHER_SEAM_GUARD, _LAUNCHER_SEAM_TEST, [bad])
     assert exc is not None, "a direct read of launch_command went uncaught"
     assert "bad_launch.py" in str(exc)
 
@@ -5659,4 +5659,4 @@ def test_seam_guard_clears_the_seam_and_the_definition(tmp_path, monkeypatch):
     good = _write(tmp_path, "services/good_launch.py",
                   "class Runner:\n    def go(self):\n        return self.launcher()\n\n\n"
                   "class Host:\n    @property\n    def launch_command(self):\n        return self.compute_launcher\n")
-    assert _run_scan(monkeypatch, _SEAM_GUARD, _SEAM_TEST, [good]) is None
+    assert _run_scan(monkeypatch, _LAUNCHER_SEAM_GUARD, _LAUNCHER_SEAM_TEST, [good]) is None

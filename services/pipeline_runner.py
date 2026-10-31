@@ -54,6 +54,7 @@ from pipeline.well_skip import _canonical_force_wells, skip_wells_scope
 from services.input_resolution_service import has_well_zip, iter_all_well_tokens
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
 from services.remote_config import RemoteHost
+from services.remote_hold import GrantedRun
 from services.remote_runner import (
     OutputFilter,
     RemoteRunner,
@@ -530,8 +531,9 @@ class _EarlyAllocation:
     """
 
     def __init__(self, remote_runner, *, batch_size: int, nanowell: bool,
-                 log_fn: Callable[[str], None], stop_event: threading.Event) -> None:
+                 log_fn: Callable[[str], None], stop_event: threading.Event, granted=None) -> None:
         self._runner = remote_runner
+        self._granted = granted
         self._batch_size = batch_size
         self._nanowell = nanowell
         self._log = log_fn
@@ -543,6 +545,11 @@ class _EarlyAllocation:
         if self._asked:
             return
         self._asked = True
+        if self._granted is not None and self._granted.active:
+            # The host has a granted node and this run is on it: no node of its own is asked for beside it, and the
+            # well count is what tells whether the run fits in the node's time left (services.remote_hold).
+            self._granted.check_fit(n_wells)
+            return
         self.reservation = self._runner.reserve_allocation(
             n_wells=n_wells, batch_size=self._batch_size, nanowell=self._nanowell,
             log_fn=self._log, stop_event=self._stop)
@@ -2527,15 +2534,19 @@ class PipelineRunner:
         # rewrites a single archive — so the queue wait overlaps staging (services.remote_reservation).
         # Its lines are read as the early job's: what it says about its own end is the run's only once the run is
         # handed to it (`RunEvidence`), since a job that ends during staging is replaced by another.
+        # A node the host keeps granted (Manage Remotes) is used instead, and the early job below is not asked for.
+        granted = GrantedRun(self._remote_runner, batch_size=batch_size, nanowell="--nanowell_format" in args,
+                             log_fn=lambda m: self._enqueue(("line", m)), stop_event=self._stop_requested)
         early = _EarlyAllocation(self._remote_runner, batch_size=batch_size, nanowell="--nanowell_format" in args,
                                  log_fn=lambda m: self._enqueue(("line", m), early=True),
-                                 stop_event=self._stop_requested)
+                                 stop_event=self._stop_requested, granted=granted)
         # This machine drives the run for its whole length; one that sleeps
         # stops it on the cluster (services.sleep_guard). Released in `finally`.
         awake = SleepGuard(log_fn=lambda m: self._enqueue(("line", m)))
         awake.start()
         try:
             self._enqueue(("line", f"[remote] target: {self._remote.name}\n"))
+            granted.claim()      # before anything is staged: preparing a plate must not run the node's idle clock
             incremental = self._recover_remote_outputs(output_dir, args, opts)
             if incremental is None:
                 return
@@ -2719,6 +2730,7 @@ class PipelineRunner:
             # The reader has usually done it already; this covers a run that
             # failed before it had a stream. No-op on direct-execution hosts.
             self._settle_remote_job()
+            granted.release()      # the run's step is closed first; only then is the node told it is free
             # A job queued before staging that no launch took — the run refused, found nothing to send, failed or
             # was stopped first — is given back. A no-op once the run took it.
             early.release("the run ended before it needed a node")

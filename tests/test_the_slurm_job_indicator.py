@@ -149,6 +149,7 @@ def _run_remote(monkeypatch, tmp_path, *, launcher: str):
             return 0
 
     remote = types.SimpleNamespace(
+        claim_granted_node=lambda **k: None,  # no granted node on this host
         host=types.SimpleNamespace(compute_launcher=launcher),
         estimate=lambda z: types.SimpleNamespace(format=lambda: "est"),
         spawn=lambda *a, **k: _Proc(), verify_and_cleanup=lambda ok, **k: True,

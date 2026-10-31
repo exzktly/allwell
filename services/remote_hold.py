@@ -315,6 +315,9 @@ def state_script(paths: HoldPaths) -> str:
             f'echo "##granted"; cat {q["granted"]} 2>/dev/null\n'
             f'echo "##status"; cat {q["status"]} 2>/dev/null\n'
             f'echo "##ended"; cat {q["ended"]} 2>/dev/null\n'
+            # The node's own clock: `granted_at` was written by the node, so the time left is read on the node's
+            # clock too and no two machines' clocks are compared.
+            'echo "##now"; date +%s\n'
             "exit 0\n")      # a missing file is an answer, not a failure: only ssh itself failing may exit non-zero
 
 
@@ -349,17 +352,26 @@ class HoldState:
     #: The job's GRES as ``--gres`` takes it (``gpu:1``), from ``scontrol``; a step asks for it explicitly, because
     #: whether a step inherits the job's GRES varies with the Slurm version.
     gres: str = ""
+    #: The node's clock when the state was read (epoch seconds), for :attr:`time_left_s`.
+    now_s: int = 0
 
     @property
     def live(self) -> bool:
         return self.phase in ("queued", "starting", "granted", "busy")
+
+    @property
+    def time_left_s(self) -> int | None:
+        """Seconds until Slurm ends the node at its time limit, ``None`` when that is not known."""
+        if not (self.granted_at and self.limit_s and self.now_s):
+            return None
+        return max(0, self.limit_s - (self.now_s - self.granted_at))
 
 
 def _sections(text: str) -> dict[str, str]:
     out: dict[str, str] = {}
     current = None
     for line in text.splitlines():
-        if line.startswith("##") and line[2:] in ("job", "scontrol", "granted", "status", "ended"):
+        if line.startswith("##") and line[2:] in ("job", "scontrol", "granted", "status", "ended", "now"):
             current = line[2:]
             out[current] = ""
         elif current is not None:
@@ -405,7 +417,7 @@ def parse_state(text: str) -> HoldState:
                   gpus=granted.get("gpus", ""), cpus=granted.get("cpus", ""),
                   granted_at=_int(granted.get("granted_at", "")), limit_s=_int(granted.get("limit_s", "")),
                   idle_s=_int(status.get("idle_s", "")), slurm_state=slurm_state,
-                  slurm_reason=sc.get("Reason", ""), gres=_job_gres(sc))
+                  slurm_reason=sc.get("Reason", ""), gres=_job_gres(sc), now_s=_int(s.get("now", "")))
     ended = s.get("ended", "")
     if ended:
         return HoldState(phase="ended", ended_reason=ended, **common)
@@ -466,6 +478,21 @@ class GrantedNode:
             raise HoldError(f"could not read the granted node's state (ssh exit {result.returncode}): "
                             f"{said[-1] if said else 'no output'}")
         return parse_state(result.stdout or "")
+
+    def attach(self) -> HoldState:
+        """The hold's state, and a heartbeat for it if it is live and this process is not yet beating for it.
+
+        A node granted from another window, or by an earlier run of this app that crashed inside the two-minute
+        window, is found here and kept: without a heartbeat the node's own script would release it two minutes
+        later, out from under a user who is about to use it."""
+        state = self.state()
+        if state.live:
+            with self._lock:
+                if self._heartbeat is None:
+                    self._heartbeat = _UploadHeartbeat(self._cache, self.paths.heartbeat, log_fn=self._log)
+                    self._heartbeat.beat()
+                    self._heartbeat.start()
+        return state
 
     def _partition_cap(self, partition: str) -> int | None:
         result = self._script(partition_limit_script(partition))
@@ -605,3 +632,199 @@ def step_launcher(target: StepTarget) -> str:
     if target.gres:
         parts.append(f"--gres={target.gres}")
     return " ".join(parts)
+
+
+# ── the handle on a host's granted node, shared by Manage Remotes and every run ─────────────────────────────────────
+
+_NODES: dict[str, GrantedNode] = {}
+_NODES_LOCK = threading.Lock()
+
+
+def node_for(host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str], None],
+             sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic) -> GrantedNode:
+    """The one :class:`GrantedNode` for *host* in this process, made on first use. A handle made earlier keeps its own
+    cache, log and clock; the arguments are used only when there is none yet."""
+    with _NODES_LOCK:
+        node = _NODES.get(host.name)
+        if node is None or node.host.ssh_alias != host.ssh_alias:
+            node = _NODES[host.name] = GrantedNode(host, cache, log_fn=log_fn, sleep=sleep, clock=clock)
+        return node
+
+
+def live_nodes() -> list[GrantedNode]:
+    """Every handle this process has made; the app releases them when it quits."""
+    with _NODES_LOCK:
+        return list(_NODES.values())
+
+
+# ── a run's claim on the node ───────────────────────────────────────────────────────────────────────────────────────
+
+def claim_script(paths: HoldPaths, *, stale_s: int = MID_BATCH_HEARTBEAT_STALE_S) -> str:
+    """Shell that takes the node for one run: creates the ``busy`` marker, atomically (``set -C`` makes the create fail
+    if it exists, so two windows cannot both win). A marker older than *stale_s* is a run whose app died and is
+    removed first — the hold script reads it as not busy by the same rule. Prints ``AW_LEASED`` or ``AW_BUSY``."""
+    b = _remote_quote(paths.busy)
+    return (f'[ -d {_remote_quote(paths.dir)} ] || {{ echo AW_NOHOLD; exit 0; }}\n'
+            f'if [ -e {b} ] && [ -n "$(find {b} -mmin +{max(1, stale_s // 60)} 2>/dev/null)" ]; then rm -f {b}; fi\n'
+            f'if ( set -C; : > {b} ) 2>/dev/null; then echo AW_LEASED; else echo AW_BUSY; fi\n'
+            "exit 0\n")
+
+
+def run_estimate_s(host: RemoteHost, n_wells: int, batch_size: int, nanowell: bool) -> int:
+    """How long the run will want the node, from the scheduler command's own ``--time`` (one batch's budget, as
+    :func:`~services.remote_config.scale_launcher_time` reads it) times the batches, plus the one batch's allowance
+    for transfers it adds. ``0`` when the command sets no ``--time``: nothing to compare."""
+    from services.remote_config import launcher_time_seconds
+    from services.remote_reservation import batches_upper_bound
+
+    per = launcher_time_seconds(host.compute_launcher)
+    batches = batches_upper_bound(n_wells, batch_size, nanowell=nanowell)
+    return per * (batches + 1) if per and batches else per
+
+
+class NodeLease:
+    """One run's claim on the granted node: the ``busy`` marker, kept fresh by a heartbeat for as long as the run lives.
+
+    The marker is what stops the node's idle clock and its two-minute app-gone rule while this run uses the node, and
+    what makes a second run wait. It is taken before the run stages anything, because preparing and uploading a large
+    plate can take longer than the idle limit."""
+
+    def __init__(self, node: GrantedNode, state: HoldState, *, log_fn: Callable[[str], None]) -> None:
+        self.node = node
+        self.state = state
+        self._log = log_fn
+        self._beater: _UploadHeartbeat | None = _UploadHeartbeat(node._cache, node.paths.busy, log_fn=log_fn)
+        self._beater.beat()
+        self._beater.start()
+
+    @property
+    def target(self) -> StepTarget:
+        return StepTarget.from_state(self.state)
+
+    def fits(self, needed_s: int) -> bool:
+        """Whether a run wanting *needed_s* seconds finishes before Slurm ends the node. Unknown counts as fitting."""
+        left = self.state.time_left_s
+        return needed_s <= 0 or left is None or needed_s <= left
+
+    def release(self) -> None:
+        """Give the node back to the idle clock. Idempotent. A failure to remove the marker is said, because the
+        node then reads as busy until the marker goes stale."""
+        beater, self._beater = self._beater, None
+        if beater is None:
+            return
+        beater.stop()
+        try:
+            result = self.node._script(f"rm -f {_remote_quote(self.node.paths.busy)}\n")
+            failed = result.returncode != 0
+        except Exception as exc:
+            failed, result = True, exc
+        if failed:
+            self._log("[remote] WARN granted node: could not tell the node this run is over; it counts the node as "
+                      f"busy for up to {MID_BATCH_HEARTBEAT_STALE_S // 60} min ({getattr(result, 'stderr', result)}).\n")
+
+
+def claim_node(host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str], None],
+               stop_event: threading.Event | None = None, sleep: Callable[[float], None] = time.sleep,
+               clock: Callable[[], float] = time.monotonic) -> NodeLease | None:
+    """Take the host's granted node for a run, or ``None`` when the run should ask for a node of its own (no scheduler,
+    no granted node, one that has been released, or a host that cannot be reached — the run's own ssh then says why).
+
+    A node that is still being granted, or is in use by another run, is waited for: never a second node beside it.
+    The wait is bounded by the host's Max queue wait (``0`` = no bound) and ends at once on Stop."""
+    if not host.compute_launcher.strip():
+        return None
+    node = node_for(host, cache, log_fn=log_fn, sleep=sleep, clock=clock)
+    try:
+        state = node.attach()
+    except HoldError:
+        # Not the error itself: the run's own ssh will report the host, and quoting its text here made the run's
+        # headline read a connection failure it had not had. What matters is that a granted node, if there is one,
+        # is not being used.
+        log_fn("[remote] WARN granted node: could not tell whether this host has a granted node, so this run asks "
+               "for a node of its own.\n")
+        return None
+    wait_s, began, said = queue_wait_seconds(host), clock(), False
+    while True:
+        if state.phase in ("none", "ended"):
+            if state.phase == "ended":
+                log_fn(f"[remote] granted node {state.node or '?'} (job {state.job_id}) was released: "
+                       f"{state.ended_reason}; this run asks for a node of its own.\n")
+            return None
+        if state.phase in ("granted", "busy"):
+            answer = (node._script(claim_script(node.paths)).stdout or "").strip()
+            if answer == "AW_LEASED":
+                log_fn(f"[remote] granted node: using {state.node}{' (' + state.gpus + ')' if state.gpus else ''}, "
+                       f"job {state.job_id}.\n")
+                return NodeLease(node, state, log_fn=log_fn)
+            why = "busy with another run" if answer == "AW_BUSY" else "not claimable"
+        else:
+            why = "still being granted"
+        if not said:
+            log_fn(f"[remote] scheduler: the granted node is {why}; waiting for it.\n")
+            said = True
+        if stop_event is not None and stop_event.is_set():
+            raise HoldError("the run was stopped while it waited for the granted node.")
+        if wait_s and clock() - began > wait_s:
+            raise HoldQueueWaitSpent(f"the granted node stayed {why} for {wait_s // 60} min, this host's Max queue "
+                                     "wait; no node of its own is asked for beside it.")
+        sleep(HOLD_POLL_S)
+        state = node.state()
+
+
+class GrantedRun:
+    """What one remote run does about a granted node: claim it as the run starts, check the run fits in the time
+    left once the plate is staged, and give the claim back however the run ends. ``PipelineRunner`` holds one per run.
+
+    While a node is claimed, :attr:`active` is true, the run's ``RemoteRunner.step_target`` names it, and the early
+    request for a node of the run's own is not made."""
+
+    def __init__(self, runner, *, batch_size: int, nanowell: bool, log_fn: Callable[[str], None],
+                 stop_event: threading.Event, sleep: Callable[[float], None] = time.sleep,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self._runner = runner
+        self._batch_size = batch_size
+        self._nanowell = nanowell
+        self._log = log_fn
+        self._stop = stop_event
+        self._sleep = sleep
+        self._clock = clock
+        self.lease: NodeLease | None = None
+
+    @property
+    def active(self) -> bool:
+        return self.lease is not None
+
+    def claim(self) -> None:
+        self.lease = self._runner.claim_granted_node(log_fn=self._log, stop_event=self._stop, sleep=self._sleep,
+                                                     clock=self._clock)
+
+    def check_fit(self, n_wells: int) -> None:
+        """Once the well count is known: a run that would outlast the node's time limit gets a fresh node, with a fresh
+        limit, rather than being killed by Slurm part-way."""
+        lease = self.lease
+        needed = run_estimate_s(self._runner.host, n_wells, self._batch_size, self._nanowell)
+        if lease is None or lease.fits(needed):
+            return
+        left = lease.state.time_left_s or 0
+        self._log(f"[remote] scheduler: this run needs about {_duration(needed)} and the granted node has "
+                  f"{_duration(left)} left; releasing it and requesting a fresh one.\n")
+        node = lease.node
+        lease.release()
+        node.release("the run would not fit in its time left")
+        self._wait_until_ended(node)
+        node.request()
+        self.claim()
+
+    def _wait_until_ended(self, node: GrantedNode, timeout_s: float = 120.0) -> None:
+        began = self._clock()
+        while node.state().live:
+            if self._clock() - began > timeout_s:
+                raise HoldError("the granted node was asked to release and is still listed after "
+                                f"{int(timeout_s)} s; a fresh one was not requested.")
+            self._sleep(2)
+
+    def release(self) -> None:
+        lease, self.lease = self.lease, None
+        self._runner.step_target = None
+        if lease is not None:
+            lease.release()

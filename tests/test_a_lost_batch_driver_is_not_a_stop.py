@@ -70,6 +70,7 @@ def _run(tmp_path, monkeypatch, *, driver_lines, wells=("A01", "A02", "A03"), st
 
     r._remote = types.SimpleNamespace(name="h")
     r._remote_runner = types.SimpleNamespace(
+        claim_granted_node=lambda **k: None,  # no granted node on this host
         estimate=lambda z: types.SimpleNamespace(format=lambda: "est"),
         spawn=spawn,
         verify_and_cleanup=lambda ok, cleanup_mode, **k: ok,

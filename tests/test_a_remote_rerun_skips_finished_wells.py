@@ -89,6 +89,7 @@ def _run(inp: Path, out: Path, opts: dict, *, host_extras=(), argv_sent: list | 
     r = pr.PipelineRunner()
     r._remote = types.SimpleNamespace(name="cluster")
     r._remote_runner = types.SimpleNamespace(
+        claim_granted_node=lambda **k: None,  # no granted node on this host
         estimate=lambda z: types.SimpleNamespace(format=lambda: "est"),
         spawn=spawn, verify_and_cleanup=lambda ok, **k: True,
         close_remote_job=lambda **k: None, cancel=lambda proc: None,

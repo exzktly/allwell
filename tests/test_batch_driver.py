@@ -576,7 +576,7 @@ def _stub_runner(p, proc, ordering):
             remote_staging_dir="/r", compute_launcher="srun --time=1:00:00", launch_command="srun --time=1:00:00",
             remote_scratch_dir="", ssh_argv=lambda **kw: ["ssh", "h"]),
         env_selector=("name", "allwell"),
-        launcher=lambda: "srun --time=1:00:00",       # RemoteRunner.launcher(): the host's command, no node granted
+        launcher=lambda: p._runner.host.launch_command,       # RemoteRunner.launcher(): the host's command, no node granted
         _build_remote_argv=lambda *a, **k: ["python", "pm.py"],
         _sweep_orphaned_allocation=lambda *a, **k: None,
         _claim_run_dirs=lambda *a, **k: "",

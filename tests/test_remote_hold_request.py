@@ -13,10 +13,7 @@ run out; forgetting to cancel the job when the request is abandoned.
 
 from __future__ import annotations
 
-import os
 import shutil
-import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -33,86 +30,10 @@ from services.remote_hold import (
     sbatch_options,
 )
 from services.remote_srun_retry import BOOT_RETRY_PAUSE_S
-from services.remote_transport import _remote_join
+
+from tests._hold_cluster import HOST, Cluster as _Cluster, Script as _Script, granted_files as _gf
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
-
-_SBATCH = r'''#!/bin/bash
-n=$(ls "$FAKE/sbatch."*.args 2>/dev/null | wc -l)
-if [ -e "$FAKE/sbatch.refuse" ]; then
-    echo "sbatch: error: Batch job submission failed: Requested node configuration is not available" >&2
-    exit 1
-fi
-printf '%s\n' "$@" > "$FAKE/sbatch.$((n+1)).args"
-id=$((4000 + n + 1))
-mkdir -p "$FAKE/jobs"; echo "PENDING|None|" > "$FAKE/jobs/$id"
-echo "$id"
-'''
-_SCONTROL = r'''#!/bin/bash
-# scontrol show job -o ID
-id="$4"
-[ -e "$FAKE/jobs/$id" ] || exit 1
-IFS='|' read -r state reason node < "$FAKE/jobs/$id"
-echo "JobId=$id JobName=allwell-hold UserId=me(1) JobState=$state Reason=$reason NodeList=${node:-(null)}"
-'''
-_SCANCEL = r'''#!/bin/bash
-echo "$@" >> "$FAKE/scancel.log"
-for a in "$@"; do case "$a" in [0-9]*) echo "CANCELLED|None|" > "$FAKE/jobs/$a";; esac; done
-'''
-_SINFO = r'''#!/bin/bash
-[ -e "$FAKE/sinfo.out" ] && cat "$FAKE/sinfo.out"
-exit 0
-'''
-_SQUEUE = r'''#!/bin/bash
-cat "$FAKE/squeue.owner" 2>/dev/null || id -un
-'''
-
-
-class _Cluster:
-    """The stand-in host: a bin directory, a state directory and a home directory, and a fake ``DatasetCache``."""
-
-    def __init__(self, root: Path):
-        self.root = root
-        self.fake = root / "fake"
-        self.home = root / "home"
-        self.bin = root / "bin"
-        for d in (self.fake, self.home, self.bin):
-            d.mkdir()
-        for name, text in (("sbatch", _SBATCH), ("scontrol", _SCONTROL), ("scancel", _SCANCEL),
-                           ("sinfo", _SINFO), ("squeue", _SQUEUE)):
-            (self.bin / name).write_text(text, encoding="utf-8")
-            (self.bin / name).chmod(0o755)
-        self.env = {**os.environ, "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "HOME": str(self.home),
-                    "FAKE": str(self.fake)}
-
-    # the DatasetCache surface GrantedNode and _UploadHeartbeat use
-    def _ssh_script(self, script: str, *, check: bool, timeout_s: float = 60):
-        return subprocess.run(["bash", "-s"], input=script, capture_output=True, text=True, env=self.env,
-                              timeout=timeout_s, check=check)
-
-    def _ssh_run(self, remote_argv, *, check: bool, timeout_s: float = 60):
-        return subprocess.run(["bash", "-c", _remote_join(remote_argv)], capture_output=True, text=True,
-                              env=self.env, timeout=timeout_s, check=check)
-
-    # test controls
-    def set_job(self, job: int, state: str, reason: str = "None", node: str = "") -> None:
-        (self.fake / "jobs").mkdir(exist_ok=True)
-        (self.fake / "jobs" / str(job)).write_text(f"{state}|{reason}|{node}\n", encoding="utf-8")
-
-    def sbatch_calls(self) -> list[list[str]]:
-        return [p.read_text(encoding="utf-8").splitlines() for p in sorted(self.fake.glob("sbatch.*.args"))]
-
-    def scancels(self) -> list[str]:
-        log = self.fake / "scancel.log"
-        return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
-
-    def hold_dir(self, host: RemoteHost) -> Path:
-        return Path(str(self.home / hold_paths(host).dir.removeprefix("~/")))
-
-
-HOST = dict(name="gpu", ssh_alias="login", remote_staging_dir="~/stage",
-            compute_launcher="srun --partition=gpu --gres=gpu:1 --cpus-per-task=8 --time=4:00:00")
-
 
 @pytest.fixture
 def cluster(tmp_path):
@@ -135,32 +56,8 @@ def _node(cluster, nodes, sleep, **host_kw) -> tuple[GrantedNode, RemoteHost, li
     return node, host, lines
 
 
-class _Script:
-    """A ``sleep`` that advances a fake clock and plays a list of job states, one per nap."""
-
-    def __init__(self, cluster, host_for_files, steps, job=4001):
-        self.cluster, self.steps, self.job, self.now, self.naps = cluster, list(steps), job, 0.0, []
-        self.host = host_for_files
-
-    def clock(self) -> float:
-        return self.now
-
-    def __call__(self, seconds: float) -> None:
-        self.now += seconds
-        self.naps.append(seconds)
-        assert len(self.naps) < 80, "the request kept waiting; it should have given up or been granted"
-        if self.steps:
-            step = self.steps.pop(0)
-            if callable(step):
-                step()
-            else:
-                self.cluster.set_job(self.job, *step)
-
-
 def _granted_files(cluster, host, node="gpu-node-1", gpus="NVIDIA A10G") -> None:
-    d = cluster.hold_dir(host)
-    (d / "granted").write_text(f"node={node}\ngpus={gpus}\ncpus=8\ngranted_at=1000\nlimit_s=86400\njob=4001\n",
-                               encoding="utf-8")
+    _gf(cluster, host, node, gpus)
 
 
 def _opt(args: list[str], prefix: str) -> list[str]:
@@ -171,7 +68,7 @@ def _opt(args: list[str], prefix: str) -> list[str]:
 
 def test_a_request_sends_sbatch_with_the_hosts_options_and_the_holds_own_time_limit(cluster, nodes):
     host = RemoteHost(**{**HOST, "granted_time_limit_h": 48})
-    sleep = _Script(cluster, host, [
+    sleep = _Script(cluster, [
         ("PENDING", "Resources", ""),
         ("RUNNING", "None", "gpu-node-1"),
     ])
@@ -202,7 +99,8 @@ def test_the_partition_limit_lowers_the_time_limit_and_infinite_does_not(cluster
         (cluster.fake / "sinfo.out").write_text(cap, encoding="utf-8")
         for p in cluster.fake.glob("sbatch.*.args"):
             p.unlink()
-        sleep = _Script(cluster, host, [("RUNNING", "None", "n1")])
+        (cluster.fake / "next_id").unlink(missing_ok=True)       # a fresh cluster each time round
+        sleep = _Script(cluster, [("RUNNING", "None", "n1")])
         sleep.steps.insert(0, lambda: _granted_files(cluster, host))
         node, _, lines = _node(cluster, nodes, sleep)
         node.request()
@@ -216,7 +114,7 @@ def test_the_partition_limit_lowers_the_time_limit_and_infinite_does_not(cluster
 def test_the_default_partition_is_asked_about_when_the_command_names_none(cluster, nodes):
     (cluster.fake / "sinfo.out").write_text("gpu* 6:00:00\n", encoding="utf-8")
     host = RemoteHost(**{**HOST, "compute_launcher": "srun --gres=gpu:1"})
-    sleep = _Script(cluster, host, [lambda: _granted_files(cluster, host), ("RUNNING", "None", "n1")])
+    sleep = _Script(cluster, [lambda: _granted_files(cluster, host), ("RUNNING", "None", "n1")])
     node, _, _ = _node(cluster, nodes, sleep, compute_launcher="srun --gres=gpu:1")
     node.request()
     assert _opt(cluster.sbatch_calls()[0], "--time") == ["--time=06:00:00"]
@@ -225,7 +123,7 @@ def test_the_default_partition_is_asked_about_when_the_command_names_none(cluste
 def test_a_node_that_waits_past_the_max_queue_wait_is_cancelled_and_reported(cluster, nodes):
     """Wrong implementation: waiting for ever (the stand-in sleep fails the test after 80 naps)."""
     host = RemoteHost(**{**HOST, "queue_wait_timeout_min": 1})
-    sleep = _Script(cluster, host, [])
+    sleep = _Script(cluster, [])
     node, _, _ = _node(cluster, nodes, sleep, queue_wait_timeout_min=1)
     with pytest.raises(HoldQueueWaitSpent) as exc:
         node.request()
@@ -238,7 +136,7 @@ def test_a_node_that_waits_past_the_max_queue_wait_is_cancelled_and_reported(clu
 def test_a_node_that_fails_to_boot_is_not_asked_for_again(cluster, nodes):
     """Wrong implementation: resubmitting the same request, which Slurm may well give the same dead node."""
     host = RemoteHost(**{**HOST, "compute_launcher": HOST["compute_launcher"] + " --exclude=slow1"})
-    sleep = _Script(cluster, host, [])
+    sleep = _Script(cluster, [])
 
     def second_job_runs():
         cluster.set_job(4002, "RUNNING", "None", "gpu-node-2")
@@ -259,7 +157,7 @@ def test_a_node_that_fails_to_boot_is_not_asked_for_again(cluster, nodes):
 
 def test_an_option_the_scheduler_refuses_is_shown_in_the_schedulers_words(cluster, nodes):
     (cluster.fake / "sbatch.refuse").touch()
-    node, host, _ = _node(cluster, nodes, _Script(cluster, None, []))
+    node, host, _ = _node(cluster, nodes, _Script(cluster, []))
     with pytest.raises(HoldError, match="Requested node configuration is not available"):
         node.request()
 
@@ -268,7 +166,7 @@ def test_a_request_abandoned_while_queued_cancels_the_job_and_leaves_the_release
     """Wrong implementation: leaving the queued job to be granted a node nobody wants."""
     host = RemoteHost(**HOST)
     holder: dict = {}
-    sleep = _Script(cluster, host, [lambda: None, lambda: holder["node"].release("the user pressed Release")])
+    sleep = _Script(cluster, [lambda: None, lambda: holder["node"].release("the user pressed Release")])
     node, _, _ = _node(cluster, nodes, sleep)
     holder["node"] = node
     with pytest.raises(HoldError, match="cancelled"):
@@ -279,10 +177,10 @@ def test_a_request_abandoned_while_queued_cancels_the_job_and_leaves_the_release
 
 def test_a_second_request_is_refused_while_a_node_is_live(cluster, nodes):
     host = RemoteHost(**HOST)
-    sleep = _Script(cluster, host, [lambda: _granted_files(cluster, host), ("RUNNING", "None", "n1")])
+    sleep = _Script(cluster, [lambda: _granted_files(cluster, host), ("RUNNING", "None", "n1")])
     first, _, _ = _node(cluster, nodes, sleep)
     first.request()
-    second, _, _ = _node(cluster, nodes, _Script(cluster, host, []))
+    second, _, _ = _node(cluster, nodes, _Script(cluster, []))
     with pytest.raises(HoldError, match="already"):
         second.request()
     assert len(cluster.sbatch_calls()) == 1
@@ -294,7 +192,7 @@ def test_a_stale_hold_directory_is_cleared_before_a_new_request(cluster, nodes):
     d.mkdir(parents=True)
     for name in ("ended", "granted", "release", "busy", "status"):
         (d / name).write_text("old\n", encoding="utf-8")
-    sleep = _Script(cluster, host, [lambda: _granted_files(cluster, host), ("RUNNING", "None", "n1")])
+    sleep = _Script(cluster, [lambda: _granted_files(cluster, host), ("RUNNING", "None", "n1")])
     node, _, _ = _node(cluster, nodes, sleep)
     state = node.request()
     assert state.phase in ("granted", "busy")
@@ -308,7 +206,7 @@ def test_release_asks_the_script_to_end_and_cancels_only_this_users_job(cluster,
     d = cluster.hold_dir(host)
     d.mkdir(parents=True)
     (d / "job").write_text("4001", encoding="utf-8")
-    node, _, lines = _node(cluster, nodes, _Script(cluster, host, []))
+    node, _, lines = _node(cluster, nodes, _Script(cluster, []))
     node.release("test")
     assert (d / "release").exists()
     assert any("-u" in line and "4001" in line for line in cluster.scancels())
@@ -321,7 +219,7 @@ def test_release_leaves_a_job_that_belongs_to_someone_else(cluster, nodes):
     d.mkdir(parents=True)
     (d / "job").write_text("4001", encoding="utf-8")
     (cluster.fake / "squeue.owner").write_text("somebody-else\n", encoding="utf-8")
-    node, _, lines = _node(cluster, nodes, _Script(cluster, host, []))
+    node, _, lines = _node(cluster, nodes, _Script(cluster, []))
     node.release("test")
     assert cluster.scancels() == []
     assert any("belongs to another user" in line for line in lines)

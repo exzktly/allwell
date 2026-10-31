@@ -195,6 +195,7 @@ PAGE_TAB_OWNERS = (
     "review/features/image_browser/tab_view.py",        # Image Browser
     "review/features/home/tab_view.py",                 # Home
     "review/features/batch_export/tab_view.py",          # Batch Export
+    "review/features/nanowell/tab_view.py",             # Nanowells
 )
 
 _HOIST_CALLS = ("register_page_tabs", "mirror_tab_widget")

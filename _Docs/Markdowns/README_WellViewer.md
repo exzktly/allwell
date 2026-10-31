@@ -2008,6 +2008,9 @@ reading it. The log names any it kept over budget for that reason.
   with a `!` (partial or unfinished). They are chosen to stay distinguishable
   with red/green colour blindness: complete and failed differ in lightness as
   well as hue, so they never read as the same colour.
+- The **Stages** list beside the plate shows each stage's progress as a bar and
+  a count (`12/40`), with the running stage in bold. It has no coloured dots, so
+  the only coloured things on the progress view are the wells and their legend.
   A well that has started is drawn as a dial rather than a flat circle: the
   darker part of it is the work already done, the lighter part what is left,
   filling clockwise from twelve o'clock. So you can see at a glance whether a
@@ -5513,8 +5516,9 @@ use them.
 
 **Controls**
 
-- **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
-  *Extremes*, *Identity* and *Statistics*. Each view shows only the controls it uses.
+- **Views** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
+  *Extremes*, *Identity* and *Statistics*, chosen from the tabs in the top bar, where the Plotting and Home
+  pages show their sub-tabs. Hover a tab for what it shows. Each view shows only the controls it uses.
 - **Metric** — what each dot is: cell count, confluence, **brightness** and **nanowell fluorescence** (both
   explained under *Brightness and nanowell fluorescence* below), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of

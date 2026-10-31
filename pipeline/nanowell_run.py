@@ -1482,8 +1482,10 @@ class _Prepared:
 
 def _prepare_timepoint(located: Located, images: dict, settings: NanowellSettings, array_radius_um: float | None, *,
                        segmenter=None, channels: dict | None = None, earliest_template=None, roster=None,
-                       count_cells: bool = True, confluence_reference=None) -> _Prepared:
-    """The first half of :func:`measure_timepoint`: everything before any tile's contents are measured."""
+                       count_cells: bool = True, confluence_reference=None, mask_store=None) -> _Prepared:
+    """The first half of :func:`measure_timepoint`: everything before any tile's contents are measured. With
+    *mask_store* (``pipeline.nanowell_masks.MaskStore``) the segmenter answers from the masks an earlier run made of
+    exactly the same input, and segments only what it has not seen."""
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_detect import FITTED, MIN_REFINE_RADIUS_PX
     from pipeline.nanowell_sites import check_format
@@ -1534,6 +1536,8 @@ def _prepare_timepoint(located: Located, images: dict, settings: NanowellSetting
             out.template["floor_ratio"] = nm.floor_ratio(template)
     segment = (segmenter or nm.cellpose_segmenter(settings.segmenter_diameter_px(px), model_type=settings.cellpose_model)
                ) if count_cells else None
+    if segment is not None and mask_store is not None:
+        segment = mask_store.wrap(segment, located.timepoint)
     norm = None
     if template is not None:
         norm = _normalise(located, images, template, by_tile, geoms, channels, located.pitch_um or settings.pitch_um)
@@ -2642,7 +2646,8 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
              reference: dict | None = None, earliest_template=None, spill_dir=None, fixed_roster=None,
              kept_evidence: dict | None = None, stored_placements: dict | None = None,
              manual_anchors: Mapping = MappingProxyType({}), progress=None, site_progress=None,
-             note=None, kept_layouts: dict | None = None, release=None, confluence_reference=None) -> WellOutcome:
+             note=None, kept_layouts: dict | None = None, release=None, confluence_reference=None,
+             mask_store=None) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -2675,7 +2680,9 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     given, is ``f(timepoint, done, total)``, the nanowells of the timepoint being measured that are segmented so far;
     *note*, when given, is ``f(text)``, told the scale Cellpose sees each timepoint at before it is measured (only when
     the count is Cellpose's, *segmenter* ``None``). *release*, when given, is ``f(timepoint)``, called once nothing
-    will read that timepoint's tiles again (``pipeline.nanowell_tiles.WellTiles.release``).
+    will read that timepoint's tiles again (``pipeline.nanowell_tiles.WellTiles.release``). *mask_store*, when
+    given, is the well's ``pipeline.nanowell_masks.MaskStore``: a crop segmented before, from exactly these pixels by
+    exactly this segmenter, is answered from it rather than segmented again.
     """
     from pipeline.nanowell_parallel import ahead as nanowell_ahead
     from pipeline.nanowell_parallel import gpu_in_use, ordered_results, thread_budget
@@ -2779,7 +2786,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
         loaders = {name: (lambda tile, _f=f, _tp=tp: _f(_tp, tile)) for name, f in (channels or {}).items()}
         return _prepare_timepoint(outcome.located[tp], images, settings, radius_um, segmenter=segmenter,
                                   channels=loaders, earliest_template=earliest_now, roster=roster,
-                                  confluence_reference=confluence_reference)
+                                  confluence_reference=confluence_reference, mask_store=mask_store)
 
     # With threads to spare, the next timepoint is prepared (geometry, template, levels: CPU) while this one's tiles
     # are measured (the GPU's part). A timepoint's preparation needs only the earliest template so far, which is

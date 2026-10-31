@@ -126,6 +126,10 @@ def test_with_no_reference_template_the_well_s_own_divides_it_and_says_so(loaded
     block = nr._segmenter_template_block(got)
     assert block == {"source": nr.SEGMENT_TEMPLATE_OWN, "nanowells_on_reference": 0,
                      "nanowells_on_own": len(T.GEOMS)}
+    assert nr._segmenter_template_block({})["source"] is None                    # nothing counted: neither
+    mixed = {0: {"seg_template": nr.SEGMENT_TEMPLATE_REFERENCE}, 1: {"seg_template": nr.SEGMENT_TEMPLATE_OWN}}
+    assert nr._segmenter_template_block(mixed) == {"source": "mixed", "nanowells_on_reference": 1,
+                                                   "nanowells_on_own": 1}
 
 
 def test_a_tile_the_reference_does_not_fully_cover_keeps_its_own_template_and_notes_why(reference, loaded):

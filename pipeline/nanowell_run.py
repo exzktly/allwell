@@ -1602,8 +1602,9 @@ def _segmenter_template_block(contents: dict) -> dict:
     nanowell."""
     used = [got.get("seg_template") for got in contents.values() if got.get("seg_template")]
     reference = sum(1 for u in used if u == SEGMENT_TEMPLATE_REFERENCE)
-    return {"source": (SEGMENT_TEMPLATE_REFERENCE if used and reference == len(used)
-                       else SEGMENT_TEMPLATE_OWN if reference == 0 else "mixed"),
+    source = (None if not used else SEGMENT_TEMPLATE_REFERENCE if reference == len(used)
+              else SEGMENT_TEMPLATE_OWN if reference == 0 else "mixed")      # None: no nanowell was counted
+    return {"source": source,
             "nanowells_on_reference": reference, "nanowells_on_own": len(used) - reference}
 
 

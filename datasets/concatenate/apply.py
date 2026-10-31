@@ -36,6 +36,7 @@ from util.timepoint import parse_hours
 from util.aw_safe import swallow
 from domain.tp_match import tp_close
 from datasets.core.concurrency import pick_workers
+from datasets.core.inclusion_carry import InclusionSource, carry_inclusion
 from datasets.core.nanowell_anchors_carry import AnchorSource, carry_anchors
 from datasets.core.provenance import record_derivation
 from util.csv_gz import open_csv_text
@@ -427,6 +428,15 @@ def merge_measurements(
 
 
 # ── cell overrides carry-over ─────────────────────────────────────────────────
+def _shifted_or_none(plan: MergePlan, tp: str) -> str | None:
+    """Dataset 2's timepoint label *tp* shifted into the merged dataset's, or ``None`` when it cannot be read as a
+    time — the caller then counts the record it belongs to as left behind rather than carrying a wrong label."""
+    try:
+        return remap_timepoint_label(tp, plan.offset_hours, plan.tp_format)
+    except ConcatError:
+        return None
+
+
 def _merge_cell_overrides(plan: MergePlan, emit: Callable[[str], None]) -> None:
     """Carry ``cell_overrides.json`` (Segmentation-tab include/exclude
     patches) from both source datasets into the merged destination.
@@ -441,6 +451,7 @@ def _merge_cell_overrides(plan: MergePlan, emit: Callable[[str], None]) -> None:
     workaround.
     """
     entries: list[dict] = []
+    dropped = 0
     for paths, offset_side in ((plan.ds1, False), (plan.ds2, True)):
         src = paths.out_dir / _OVERRIDES_FILENAME
         if not src.exists():
@@ -449,21 +460,24 @@ def _merge_cell_overrides(plan: MergePlan, emit: Callable[[str], None]) -> None:
         with swallow(f"read {src}"):
             data = json.loads(src.read_text())
         if not isinstance(data, dict):
+            emit(f"Warning: {src} could not be read; its cell overrides (cells excluded by hand) are not carried, "
+                 "so those cells count again in the new dataset.")
             continue
         for entry in data.get("overrides") or []:
             if not isinstance(entry, dict):
                 continue
             entry = dict(entry)
             if offset_side:
-                tp = str(entry.get("tp", "")).strip()
-                if not tp:
+                shifted = _shifted_or_none(plan, str(entry.get("tp", "")).strip())
+                if shifted is None:
+                    dropped += 1
                     continue
-                try:
-                    entry["tp"] = remap_timepoint_label(tp, plan.offset_hours, plan.tp_format)
-                except ConcatError:
-                    continue
+                entry["tp"] = shifted
             entries.append(entry)
 
+    if dropped:
+        emit(f"Warning: {dropped} of dataset 2's cell override(s) have a timepoint that cannot be read as a time, "
+             "and were not carried; those cells count again in the new dataset.")
     if not entries:
         return
 
@@ -945,6 +959,9 @@ def execute_plan(
     _merge_acquisition_records(plan, emit)
 
     _merge_cell_overrides(plan, emit)
+    carry_inclusion([InclusionSource(plan.ds1.out_dir, "dataset 1"),
+                     InclusionSource(plan.ds2.out_dir, "dataset 2", timepoint=lambda tp: _shifted_or_none(plan, tp))],
+                    plan.dest.out_dir, emit)
     _carry_nanowell_results(plan, emit)
 
     write_json_atomic(plan.dest.out_dir / "pipeline_info.json", plan.merged_info)

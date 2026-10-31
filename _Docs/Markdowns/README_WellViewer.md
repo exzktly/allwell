@@ -7163,6 +7163,16 @@ Switch to **Datasets** with the title-bar segmented control (the third segment,
 beside Review and Analyze). Unlike Review there is no plate/well picker — the left
 sidebar is just a list of dataset-level tools.
 
+**Your exclusions travel with the data.** Subset, Merge Plates and Concatenate
+carry what decides which cells count: cells you excluded by hand, your QC limits
+(Home ▸ Cell Gating), the crop region, and fields you excluded during QC triage —
+renamed along with the wells and timepoints they belong to. A merged plate can
+hold only one set of QC limits and one crop, so it takes the first dataset's,
+and the run log says by name when the second dataset's were different, so you
+can check them before comparing the plates. Anything that could not be carried
+(an unreadable settings file, an exclusion of a well or timepoint the tool did
+not keep) is counted in the log.
+
 ### Convert OME-TIFF
 
 Turns a single packed OME-TIFF (one file holding every well, channel, Z-plane and

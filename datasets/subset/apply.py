@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from util.aw_safe import swallow
+from datasets.core.inclusion_carry import InclusionSource, carry_inclusion
 from domain.image_identity import normalize_fov, normalize_tp
 from datasets.core.concurrency import pick_workers
 from datasets.core.provenance import record_derivation
@@ -111,6 +112,8 @@ def _copy_filtered_overrides(plan: SubsetPlan, kept_keys: dict[str, set[tuple[st
     with swallow(f"read {src_path}"):
         data = json.loads(src_path.read_text())
     if not isinstance(data, dict):
+        emit(f"Warning: {src_path} could not be read; its cell overrides (cells excluded by hand) are not carried, "
+             "so those cells count again in the new dataset.")
         return 0
     kept_entries = []
     for entry in data.get("overrides") or []:
@@ -338,6 +341,11 @@ def execute_plan(
 
     _verify(plan, well_row_counts, kept_members_by_well, unjudgeable_by_well)
     _copy_filtered_overrides(plan, kept_keys_by_well, emit)
+    kept_labels = {canonical_well_label(w) or w for w in plan.wells_kept}
+    carry_inclusion([InclusionSource(
+        plan.src.out_dir, "the source dataset",
+        well=lambda w: w if (canonical_well_label(w) or w) in kept_labels else None,
+        timepoint=lambda tp: tp if timepoint_kept(tp, plan.filt) else None)], plan.dest.out_dir, emit)
     nanowell_rows = carry_nanowell_tables(
         plan.src.out_dir, plan.dest.out_dir, {well: well for well in plan.wells_kept},
         keep_timepoint=None if plan.filt.timepoint_hours is None else (lambda tp: timepoint_kept(tp, plan.filt)))

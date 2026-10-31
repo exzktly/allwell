@@ -11819,6 +11819,22 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   Incremental, and forcing makes it moot), through `review/core/analyze_handoff.open_in_analyze` — Review's one
   door into Analyze, shared by Home's *Finish this run*, QC triage and this view. A file that cannot be written
   is said on the figure (`state.array_message`).
+- **The anchor queue.** *Anchor queue* (the Anchor group's fourth button) walks every timepoint on the plate that
+  is waiting for an anchor, one montage after another. `anchor_queue_compute` (Qt-free) decides what waits: it
+  reads every grid record under `nanowells/` — not `state.data.grids`, which holds only the wells the page has
+  loaded — and takes each `unaddressed` timepoint with no anchor set, or with the very anchor the last run tried
+  and refused (the block's `manual_anchor_um` equals the file's). An anchor set and not yet used by a run is not
+  waiting (its remedy is a re-run), and is counted so the empty-queue message can say so. Order is plate order,
+  then each well's timepoints in the page's time order (`NanowellData.order`), never the record's or the labels'.
+  `_anchor_queue` walks it: each step sets the selection to the one the queue started with plus the step's well
+  (so the wells walked past do not accumulate on every other tab) and calls `open_for_anchor`, the same service
+  QC Triage and Home use. `set_anchor_at` tells the queue when an anchor is saved (`_anchor_change` returns the
+  `(well, timepoint)` it changed); when it is the current item, the queue records it and moves on after
+  `ADVANCE_DELAY_MS`, dropping the move if Back, Skip or Stop changed the position meanwhile. While it runs a
+  *Queue* group (`anchor_queue_view`) shows `3 of 17 · B04 at 24h`, *Back*, *Skip* and *Stop*. Stop, or stepping
+  past the last item, restores the starting selection and writes the summary (anchored, skipped, and the pointer
+  to *Re-run anchored wells…*) to `state.array_message`. `state.anchor_queue` is never persisted, and a queue
+  built for another dataset is dropped by `active_queue`.
 
 `tests/test_nanowell_page_array_layers.py` turns each layer off and on through the real controls and reads the
 figure, checks the colourings, the presets and the saved-settings migration;

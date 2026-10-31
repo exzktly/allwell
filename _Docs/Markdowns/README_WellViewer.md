@@ -505,6 +505,14 @@ Review, open the Nanowells page, choose the *Array* view, pick the well and time
 *Full resolution* (or choose *Layers → Show as → Full montage*). Zoom to the square, turn on **Set anchor**, and
 click it. The click is saved in `in/nanowell_anchors.json`
 beside the acquisition record; the run snaps it to the nearest nanowell, so it only has to land on the square.
+When several wells and timepoints need an anchor — the usual state after a run — press **Anchor queue**
+instead of picking each one: it shows the first timepoint on the plate left unaddressed, with **Set anchor**
+already on, and each click on a central square saves the anchor and, after a moment, opens the next. A *Queue*
+group beside it says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous timepoint; a
+click there replaces its anchor), **Skip** and **Stop**. The queue holds every unaddressed timepoint without an
+anchor, plate order then time order, and also any timepoint whose anchor the last run could not use; an anchor
+you set that no run has used yet is not asked for again. When it ends it says how many it anchored and how many
+were skipped, and puts your plate selection back as it was.
 Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
 run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
 addressed from it at the end of the run, through the plate's other wells. A timepoint that still cannot be
@@ -5703,7 +5711,8 @@ the sentence names it.
     overlap, amber where the acquisition record put it), with its registration residual; a tile whose size the
     record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
     hand and says how the timepoint was addressed (and, where it was not, how to anchor it), and offers **Set
-    anchor**, **Clear anchor** and **Re-run anchored wells…** (see *Setting the anchor by hand* above). *Run
+    anchor**, **Clear anchor**, **Re-run anchored wells…** and **Anchor queue** (see *Setting the anchor by
+    hand* above). *Run
     record* lists beside the figure the grid record of this timepoint (status, how the origin was found,
     pitch, angle, overlap, nanowells detected of the roster), the empty-nanowell template the counts were
     divided by, and the status of every other timepoint; a template the run found far from the well's

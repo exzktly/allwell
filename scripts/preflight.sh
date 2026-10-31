@@ -12,6 +12,11 @@
 #   scripts/preflight.sh          # lint + fast lane (+ nanowell / remote lanes when reachable) + tree check
 #   scripts/preflight.sh --quick  # skip the fast lane (lint + tree only, ~2s)
 #
+# What runs follows the change's scope (scripts/change_scope.py, the same
+# classifier CI and scripts/test.sh read): a version-only change runs no lint and
+# no tests; a docs-only change skips lint and runs the docs lane; anything else
+# runs everything above. The working-tree and version-bump checks always run.
+#
 # Exit status: 0 only when every check passes.
 set -uo pipefail
 
@@ -24,8 +29,17 @@ failed=0
 step() { printf '\n\033[1m── %s\033[0m\n' "$1"; }
 fail() { printf '\033[31m   FAILED: %s\033[0m\n' "$1" >&2; failed=$(( failed + 1 )); }
 
+step "change scope"
+# stdout is the scope, stderr the reason; a classifier that fails runs everything.
+scope_out=$(python scripts/change_scope.py 2>&1) || scope_out="code"
+SCOPE=$(printf '%s\n' "$scope_out" | head -1)
+[[ "$SCOPE" == version-only || "$SCOPE" == docs-only ]] || SCOPE=code
+printf '%s\n' "$scope_out" | sed 's/^/   /' 
+
 step "ruff"
-if ruff check .; then
+if [[ "$SCOPE" != code ]]; then
+    echo "   skipped ($SCOPE: no Python changed beyond the version number)"
+elif ruff check .; then
     echo "   clean"
 else
     fail "lint errors above"
@@ -69,9 +83,17 @@ PY
     esac
 }
 
-if (( QUICK == 0 )); then
-    step "fast lane (scripts/test.sh, UI tests included)"
-    run_lane "fast lane"
+if (( QUICK == 0 )) && [[ "$SCOPE" == version-only ]]; then
+    step "tests"
+    echo "   skipped (version-only: nothing a test reads changed)"
+elif (( QUICK == 0 )); then
+    if [[ "$SCOPE" == docs-only ]]; then
+        step "docs lane (scripts/test.sh narrows itself to the tests that read the documents)"
+        run_lane "docs lane"
+    else
+        step "fast lane (scripts/test.sh, UI tests included)"
+        run_lane "fast lane"
+    fi
 
     # The gated lanes (tests/_lanes.py): the nanowell end-to-end and feature tests, and the remote /
     # HPC tests. Each runs only when scripts/lane_needed.py says this branch can reach it — the same

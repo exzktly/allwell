@@ -32,15 +32,15 @@ sys.path.insert(0, str(REPO / "tests"))
 from _lanes import GATES  # noqa: E402
 
 
-def _module_file(name: str) -> str | None:
-    """The repository-relative file a dotted first-party module name resolves to."""
+def _module_file(name: str, root: Path = REPO) -> str | None:
+    """The *root*-relative file a dotted first-party module name resolves to."""
     parts = name.split(".")
     for i in range(len(parts), 0, -1):
-        base = REPO.joinpath(*parts[:i])
+        base = root.joinpath(*parts[:i])
         if base.with_suffix(".py").is_file():
-            return base.with_suffix(".py").relative_to(REPO).as_posix()
+            return base.with_suffix(".py").relative_to(root).as_posix()
         if (base / "__init__.py").is_file():
-            return (base / "__init__.py").relative_to(REPO).as_posix()
+            return (base / "__init__.py").relative_to(root).as_posix()
     return None
 
 
@@ -84,17 +84,17 @@ def surface_reason(gate: str, path: str, imports: set[str]) -> str:
     return ""
 
 
-def changed_paths(base: str) -> list[str] | None:
+def changed_paths(base: str, root: Path = REPO) -> list[str] | None:
     """Paths changed on this branch against *base*, plus the working tree; None if git cannot say."""
     try:
         committed = subprocess.run(
-            ["git", "diff", "--name-only", f"{base}...HEAD"], cwd=REPO,
+            ["git", "diff", "--name-only", f"{base}...HEAD"], cwd=root,
             capture_output=True, text=True, encoding="utf-8", check=True).stdout.split()
         working = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD"], cwd=REPO,
+            ["git", "diff", "--name-only", "HEAD"], cwd=root,
             capture_output=True, text=True, encoding="utf-8", check=True).stdout.split()
         untracked = subprocess.run(
-            ["git", "ls-files", "--others", "--exclude-standard"], cwd=REPO,
+            ["git", "ls-files", "--others", "--exclude-standard"], cwd=root,
             capture_output=True, text=True, encoding="utf-8", check=True).stdout.split()
     except (OSError, subprocess.CalledProcessError):
         return None

@@ -5800,9 +5800,10 @@ between panels. The window follows the selection while it is open and leaves the
 it like any window. Its own row of controls sets the crops where you look at them: the image channel, **Range**
 (the display range), **Cells**, **Metrics** (the measurements under each crop), **Labels** (each crop's timepoint
 and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
-Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted on every
-crop — the strip, the pop-out and the Extremes montage — as the Array view's *Cells* layer does on the array (the
-run keeps no cell outlines). It is one setting, also offered on the Extremes view, and kept with the page's
+Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted in the
+crop's own nanowell, on every crop — the strip, the pop-out and the Extremes montage (the run keeps no cell
+outlines). A crop is cut a little wider than its nanowell, so its edges show parts of the neighbours; their cells are
+not dotted, so every dot is a cell the selected nanowell's count is made of. It is one setting, also offered on the Extremes view, and kept with the page's
 settings. The caption counts the dots, and a well without a cell table is named there rather than shown as empty.
 The box beside **Cells** chooses what the crops are an image of: *Phase* (the image the run segmented), or any
 fluorescence channel the run read — EGFP, say — cut from that channel's image of the same tile, at the same place.

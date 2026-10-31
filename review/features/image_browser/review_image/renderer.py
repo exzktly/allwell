@@ -1145,6 +1145,10 @@ def toggle_review_image_binary_mask(ctx) -> None:
 #: and it was chosen the same way: of every theme token not already used and
 #: not reserved, it is the only one whose ΔE to all six others clears the 31
 #: floor (35.1; the next best, ``accent_fg``, is 30.1). Its luminance is 1.0.
+#:
+#: The tenth, a cell of a nanowell whose rim was out of focus, is
+#: ``exclusion_nanowell_focus`` (pink): of the candidates measured, the one
+#: furthest from all nine others (ΔE 34.2), at luminance 0.35.
 def _layer_inks():
     from ui import theme
     return {
@@ -1154,6 +1158,7 @@ def _layer_inks():
         "outside the scatter gates": theme.Colors.accent,
         "field flagged by the run": theme.Colors.text_secondary,
         "out of focus": theme.Colors.heatmap_selection,
+        "nanowell rim out of focus": theme.Colors.exclusion_nanowell_focus,
         "touches the image border": theme.Colors.exclusion_border,
         "field excluded in QC triage": theme.Colors.ink_light,
         "field not in the FOV selection": theme.Colors.exclusion_fov,

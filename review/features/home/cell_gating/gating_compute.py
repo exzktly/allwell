@@ -91,6 +91,7 @@ _FUNNEL_LAYERS: tuple[tuple[str, str], ...] = (
     ("QC debris gate", "QC_Pass"),
     ("Crop region", "Crop_Pass"),
     ("Scatter gates", "Gate_Pass"),
+    ("Nanowell out of focus", "NW_Focus_Pass"),
     ("Touching image border", "Border_Pass"),
     ("FOV selection", "FOV_Pass"),
 )

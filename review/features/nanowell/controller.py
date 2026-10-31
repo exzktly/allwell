@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 from domain.nanowell_roster import mixed_rules_note
 from review.features.nanowell import cell_gate_compute as cg
-from review.features.nanowell import rim_focus_compute as rfc
+from review.domain import nanowell_rim_focus as rfc
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
@@ -330,13 +330,17 @@ def gate_tally(ctx, data) -> cg.GateTally | None:
             unread.append(well)
             continue
         if frame is not None and len(frame):
-            per_well.append((well, frame, df_included_mask(frame).to_numpy()))
+            # Every inclusion layer but the nanowell focus one: the cells it leaves out are those of a
+            # nanowell-timepoint this page already draws as an ``out_of_focus`` gap, so counting them again here
+            # would only make the note say Cell Gating left them out, which it did not.
+            kept = df_included_mask(frame, except_layer=rfc.NW_FOCUS_PASS_COLUMN)
+            per_well.append((well, frame, kept.to_numpy()))
     return cg.tally(per_well, unread)
 
 
 def gated_metrics(ctx, data, baseline: str, focus=None) -> pd.DataFrame | None:
     """:func:`site_metrics` with the cells Home's Cell Gating leaves out taken out and the nanowells whose rim was
-    out of focus under *focus* (``rim_focus_compute.RimFocusRule``) left out — what the page draws and Batch Export
+    out of focus under *focus* (``review.domain.nanowell_rim_focus.RimFocusRule``) left out — what the page draws and Batch Export
     exports, so the two never disagree."""
     return _metrics_of(data, baseline, gate_tally(ctx, data), focus)
 
@@ -352,6 +356,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
     st = _state(ctx)
     if st is None:
         return
+    sync_focus_rule(ctx, st)
     data_dir = ctx.state.dataset.data_dir
     # Only the wells the page draws are read: a plate's other tables wait until they are selected, and a well
     # read once is kept (``st.well_parts``), so selecting it again reads nothing.
@@ -427,6 +432,7 @@ def redraw(ctx) -> None:
     fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")
     if st is None or fig is None or canvas is None:
         return
+    sync_focus_rule(ctx, st)
     stale_gate = st.loaded_for is not None and st.gated_for != gate_version(ctx)
     stale_focus = st.loaded_for is not None and st.focus_for != st.rim_focus_rule().key()
     if st.loaded_for is not None and (st.loaded_for[1] != st.baseline or stale_gate or stale_focus) \
@@ -1929,11 +1935,33 @@ def set_page_baseline(ctx, baseline: str) -> None:
     redraw(ctx)
 
 
+def _qc_params(ctx):
+    """The dataset's QC parameters (``QCParams``), through the QC layer's own accessor so they are seeded from
+    the run on first read; ``None`` in a build without the QC layer."""
+    return ctx.features.query("qc.get_params", ctx, default=None)
+
+
+def focus_rule(ctx) -> rfc.RimFocusRule:
+    """The rim focus rule in force: the QC layer's (``QCParams.nanowell_focus_rule``), so the page leaves out
+    exactly the nanowell-timepoints whose cells the ``NW_Focus_Pass`` layer leaves out of every other tab."""
+    params = _qc_params(ctx)
+    return params.nanowell_focus_rule() if params is not None else rfc.RimFocusRule()
+
+
+def sync_focus_rule(ctx, st) -> None:
+    """Copy the rule in force onto the page's state, where the metrics and their staleness check read it."""
+    st.focus_rule = focus_rule(ctx)
+
+
 def set_rim_focus(ctx, *, on: bool | None = None, fraction: float | None = None) -> None:
-    """Turn the rim focus rule on or off, or change its fraction, and recompute the metrics with it. A fraction
-    out of range (``rim_focus_compute.clamp_fraction``) is refused with the range named, and nothing changes."""
+    """Turn the nanowell focus rule on or off, or change its fraction — the band's mirror of the Cell Gating
+    panel's switch. It changes the QC parameters through the one route a QC edit takes (every verdict layer
+    re-projected behind a progress popup, then the save and the redraw), so the cells of an out-of-focus
+    nanowell leave every tab when its nanowell leaves this page. A fraction out of range
+    (``review.domain.nanowell_rim_focus.clamp_fraction``) is refused with the range named, and nothing changes."""
     st = _state(ctx)
-    if st is None:
+    params = _qc_params(ctx)
+    if st is None or params is None:
         return
     if fraction is not None:
         accepted = rfc.clamp_fraction(fraction)
@@ -1942,14 +1970,25 @@ def set_rim_focus(ctx, *, on: bool | None = None, fraction: float | None = None)
             _call(ctx, "_nw_refresh_controls")
             return
         fraction = accepted
-    new_on = st.rim_focus_on if on is None else bool(on)
-    new_fraction = st.rim_focus_fraction if fraction is None else fraction
-    if (new_on, new_fraction) == (st.rim_focus_on, st.rim_focus_fraction):
+    changes = {}
+    if on is not None and bool(on) != params.exclude_soft_nanowells:
+        changes["exclude_soft_nanowells"] = bool(on)
+    if fraction is not None and fraction != params.nanowell_focus_fraction:
+        changes["nanowell_focus_fraction"] = fraction
+    if not changes:
         return
-    st.rim_focus_on, st.rim_focus_fraction = new_on, new_fraction
-    _save_soon(ctx)
-    ensure_loaded(ctx)
-    redraw(ctx)
+
+    def done(_counts) -> None:
+        from core.safe import swallow
+
+        with swallow("Nanowells: repaint the Cell Gating panel after a focus change"):
+            ctx.features.call("qc.refresh_gate_widgets", ctx.window)
+        ensure_loaded(ctx)
+        redraw(ctx)
+
+    ctx.features.call("qc.set_params_with_progress", ctx, params.with_updates(**changes), on_done=done)
+    sync_focus_rule(ctx, st)
+    _call(ctx, "_nw_refresh_controls")
 
 
 def _set(ctx, name: str, value) -> None:
@@ -1972,7 +2011,7 @@ def export_page_csv(ctx) -> None:
         ctx.notify.set_status("There are no nanowell tables loaded to save.")
         return
     if (st.computing or st.loaded_for is None or st.loaded_for[1] != st.baseline
-            or st.focus_for != st.rim_focus_rule().key()):
+            or st.focus_for != focus_rule(ctx).key()):
         # The metrics on hand were computed for another baseline or rim focus rule; written now, the file would label them with
         # the new one (roll-up review X12).
         ctx.notify.set_status(f"The nanowell metrics for baseline {st.baseline!r} are still being computed; "

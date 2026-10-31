@@ -482,7 +482,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_baseline.setVisible(True)
             grp_axis.setVisible(distribution)
             cohort_box.setChecked(st.cohort)
-            rim_focus.refresh(st)
+            rim_focus.refresh(ctx)
             start.refresh(st)
             _refresh_array_controls(ctx, st, array, array_controls)
             refresh_identity_controls(st, identity, view == "identity")

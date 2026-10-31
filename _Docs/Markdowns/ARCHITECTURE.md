@@ -5074,7 +5074,36 @@ with a marked plate stays marked.
 `persistence/qc_params.load_from_data_dir` applies the same default when a
 saved `qc_params` section has no `exclude_border_cells` key, so a dataset whose
 panel was saved before the switch existed is not silently held at off, while
-`QCParams.from_dict` alone still reads an absent key as off. The overlay inks it `Colors.exclusion_border` (magenta — a hue
+`QCParams.from_dict` alone still reads an absent key as off.
+
+**The nanowell focus layer.** `review/data/nanowell_focus_gate.py` writes `NW_Focus_Pass`, the per-cell form of
+the Nanowells page's rim focus verdict: each cell inherits its nanowell-timepoint's verdict through its own
+`nw_q`, `nw_r` and `timepoint` (`nanowell_rim_focus.cell_pass`), judged by `flag_sites` on the well's site
+table — its addressed rows only, the set `series_compute` joins, so the page and the layer reach one verdict on
+the same rows. It is a column of its own rather than a second rule inside `Focus_Pass`: that one is each
+nucleus's outline against an absolute cut, this one the cell's nanowell rim against its well, and the
+Segmentation overlay (*nanowell rim out of focus*, `Colors.exclusion_nanowell_focus`, pink, ΔE ≥ 34 to the
+other nine inks) and the inclusion funnel (*Nanowell out of focus*) each name the rule that left a cell out. The
+rule and its domain constants live in `review/domain/` because the layer is registered unconditionally, like
+every inclusion layer: a build without the Nanowells page must still leave out the same cells, and
+`review/data` may not import a feature. The site table is read through `nanowell_focus_gate.site_table` —
+only `SITE_COLUMNS`, memoised on the file's path, modification time and size, with the rule applied after the
+lookup — and `nanowell_dir` there is the one answer to where a dataset's nanowell tables are (the Nanowells
+feature's `collect` imports it). The switch is `QCParams.exclude_soft_nanowells`, with
+`nanowell_focus_fraction`; `from_pipeline_info` seeds it on for a nanowell run
+(`default_exclude_soft_nanowells`), because the rule is relative and needs no number from the user, and
+`load_from_data_dir` applies that default to a section saved before the key existed, as it does for the border
+switch. A cell with no address, no timepoint, or a well with no site table passes; switched off, the column is
+dropped. The Cell Gating panel's row (`review/features/qc/nanowell_focus_view.py`) is shown only on a dataset
+with nanowell tables, where the per-cell focus row is hidden unless the plate also holds ordinary wells
+(`mixed_with_ordinary_plate`): a nanowell run records no per-cell focus, so that row could only have sent the
+user to re-run for a measurement a nanowell run never makes. Its sentence (`nanowell_focus_status`) counts from
+the site tables — what the rule would do before it is ticked — and the cells it is excluding, plate-wide
+(`plate_scan.every_well`), and names what it kept unchecked. The panel builds its parameters from the ones in
+force (`get_qc_params(ctx).with_updates(...)`) rather than from the constructor, so a field it holds no box for
+survives an edit of one it does.
+
+The border layer's overlay ink is `Colors.exclusion_border` (magenta — a hue
 at ΔE ≥ 42 (CIE76) from each of the overlay's other eight inks that is not the
 app's "good" green), and the funnel carries it as *Touching image border*. The row's
 sentence (`border_status`) counts over the cells the analysis keeps without
@@ -11413,9 +11442,10 @@ every timepoint of its well. A timepoint where it has no row still has one, with
 `unaddressed` (the timepoint was located but given no origin), `not_located` (the grid record names the
 timepoint and the table has no row for it) or `absent` (addressed, not in that roster), plus the grid's
 reason, or its status, or a sentence saying the grid lists the timepoint and the table has no rows.
-**Rim focus** (`rim_focus_compute`, run by `site_metrics` before anything is computed, with the
-`RimFocusRule` the page holds — `NanowellState.rim_focus_on` / `rim_focus_fraction`, on and 0.75 by default
-and for settings saved before the rule): a measurable row whose `focus` (the pipeline's `rim_focus`) is below
+**Rim focus** (`review/domain/nanowell_rim_focus.py`, run by `site_metrics` before anything is computed, with
+the QC layer's `RimFocusRule` — `QCParams.exclude_soft_nanowells` / `nanowell_focus_fraction`, copied onto
+`NanowellState.focus_rule` by `controller.sync_focus_rule` and never kept with the page's settings): a measurable
+row whose `focus` (the pipeline's `rim_focus`) is below
 the rule's fraction of its well's 90th-percentile rim focus at that timepoint becomes `out_of_focus`, with
 the state the run recorded in `recorded_state`, the reference in `rim_focus_ref`, `rim_focus_ok` False and
 the two numbers in its reason. The verdict is Review's, never the pipeline's, so changing the rule recomputes
@@ -11426,10 +11456,14 @@ a flag, it reaches everything a state does: no `n` / `c` / brightness / signal, 
 rate, occupancy class, moving average or cohort membership through it, the Array view's dotted hatch
 (`renderer._STATE_STYLE`), the detail's state line and the distribution's exclusion reasons (`rim out of
 focus`). A row with no rim focus (predicted geometry, off the image, or a run without the column) and a well
-with fewer than `MIN_SITES` rims at a timepoint are never flagged; `rim_focus_compute.note` puts both counts
-and the number left out in every figure's footer on the page, and Batch Export computes with the page's rule
-and carries the same sentence. The page's metrics are stamped with the rule's key (`NanowellState.focus_for`,
-beside `gated_for`), so a changed rule recomputes as a Cell Gating edit does. Every row
+with fewer than `MIN_SITES` rims at a timepoint are never flagged; `nanowell_rim_focus.note` puts both counts
+and the number left out in every figure's footer on the page, and Batch Export computes with the same rule
+(`controller.focus_rule`) and carries the same sentence. The page's metrics are stamped with the rule's key
+(`NanowellState.focus_for`, beside `gated_for`), so a changed rule recomputes as a Cell Gating edit does. The
+same verdict reaches every other tab as the `NW_Focus_Pass` inclusion layer (*The nanowell focus layer*, under
+the Cell Gating tab), and `gate_tally` reads the chokepoint with `except_layer="NW_Focus_Pass"`: the cells it
+leaves out belong to nanowell-timepoints this page already draws as gaps, and counting them as Cell Gating's
+would make the page's note blame the wrong layer. Every row
 carries its timepoint's identity verdict (`identity`, `identity_reason`; `NanowellData.identity`, read per well by
 `read_well_part` through `pipeline.nanowell_identity.verdicts`) and `identity_ok`, False on every row of a
 `contradicted` timepoint and on each nanowell a `partial` one leaves out (`NanowellData.identity_excluded`, through
@@ -11842,9 +11876,12 @@ it is the page's choice of wells, not an inclusion layer. Every figure's note ca
 selected well is excluded. *Excluded (n) ▾* (`exclude_view`), shown only while any is excluded, restores
 one or all (`set_well_excluded`, `restore_every_well`).
 
-**Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a *% of sharp* spin box, 30–95) writes through
-`controller.set_rim_focus`, which refuses a fraction outside `rim_focus_compute.MIN_FRACTION`–`MAX_FRACTION` by name,
-saves the page's settings and recomputes the metrics with the new rule (see *Joining* above for what the rule does).
+**Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a *% of sharp* spin box, 30–95) is a mirror of
+the Cell Gating panel's *Exclude out-of-focus nanowells*, never a setting of its own. `controller.set_rim_focus`
+refuses a fraction outside `nanowell_rim_focus.MIN_FRACTION`–`MAX_FRACTION` by name, and otherwise changes the QC
+parameters through the registry's `qc.set_params_with_progress` service — the one route a QC edit takes, so every
+verdict layer is re-projected, the panel repainted (`qc.refresh_gate_widgets`) and the page recomputed (see
+*Joining* above for what the rule does).
 
 **The Array view** is one well at one timepoint, every element of it a layer that is on or off, drawn by one
 renderer whatever is on, so a nanowell reads the same — and is clickable, pannable and zoomable — under every
@@ -17466,8 +17503,8 @@ the slot to stderr and leaving the button looking dead.
 
 ### 6.6b Why a cell is gone: the Segmentation overlay
 
-Inclusion is the AND of nine verdict layers (`Included`, `QC_Pass`, `Crop_Pass`,
-`Gate_Pass`, `Field_Pass`, `Focus_Pass`, `Border_Pass`, `Excluded_Field_Pass`,
+Inclusion is the AND of ten verdict layers (`Included`, `QC_Pass`, `Crop_Pass`,
+`Gate_Pass`, `Field_Pass`, `Focus_Pass`, `NW_Focus_Pass`, `Border_Pass`, `Excluded_Field_Pass`,
 `FOV_Pass`), and the picture that shows a user
 their cells is the one place that AND is invisible by construction: an excluded
 cell simply has no outline. The **Why removed** toggle

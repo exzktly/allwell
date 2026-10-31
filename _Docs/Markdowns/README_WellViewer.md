@@ -1346,9 +1346,9 @@ than a re-run. Leave the box blank unless you have measured a value; see
 [Cell Gating](#cell-gating) for where that number comes from.
 
 Both apply to the standard per-cell pipeline only. A nanowell run reads
-neither: it always measures each nanowell's **rim** sharpness, and the
-Nanowells page's **Rim focus** control decides from that which nanowells were
-out of focus.
+neither: it always measures each nanowell's **rim** sharpness, and Review's
+**Exclude out-of-focus nanowells** (Cell Gating, mirrored as **Rim focus** on
+the Nanowells page) decides from that which nanowells were out of focus.
 
 ### 7. Auto-threshold — picking each channel's "on" cut
 
@@ -2990,6 +2990,25 @@ choice applies once, when the menu closes.
   the panel, and a Gating reset returns it to that default. The
   line beneath it says how many of the cells being analysed touch the border,
   across the whole plate, and whether they are currently kept or excluded.
+
+  **Exclude out-of-focus nanowells … rim below 75 % of the well's sharpest
+  rims** appears in place of the per-cell focus switch on a dataset analysed in
+  nanowell mode (a nanowell run measures no per-cell focus, so that switch
+  would have nothing to judge; a plate merged from a nanowell and an ordinary
+  dataset shows both). Every nanowell run measures each nanowell's rim
+  sharpness at every timepoint, and a nanowell whose rim is less sharp than this
+  percentage of the sharpest tenth of its well's rims at that timepoint is out
+  of focus there: its cells at that timepoint leave every tab — Plotting,
+  Scatter, histograms, exports — and the Nanowells page draws that
+  nanowell-timepoint as a gap. It needs no number from you and no re-run, so it
+  is **on by default** for a nanowell dataset. The line beneath it says, across
+  the whole plate, how many nanowell-timepoints were out of focus, how many
+  cells that excludes, and how many nanowells it could not check (a rim that
+  could not be fitted, or a well with too few rims at that timepoint). The
+  Segmentation overlay's **Why removed** outlines those cells in pink as
+  *nanowell rim out of focus*, and the inclusion funnel lists them as
+  *Nanowell out of focus*. The same switch is mirrored as **Rim focus** on the
+  Nanowells page.
 
   The analysis records border contact for every cell as it segments
   (`qc_touches_border` in the per-cell CSV: 1 = touches, 0 = whole). A dataset
@@ -5635,9 +5654,11 @@ the sentence names it.
   footer counts the nanowells left out. Two things it cannot see, and the footer counts both: a timepoint
   blurred evenly across the whole well (there is nothing sharp to compare with), and a nanowell whose rim could
   not be fitted (it has no rim focus, so it is kept unchecked). A well with fewer than ten rims at a timepoint
-  is not judged. Turning it on changes the numbers a figure draws, so a figure saved before it existed redraws
-  with it applied; untick it to see the run's own counts. Batch Export's Nanowells mode uses the page's
-  setting. This is separate from the per-cell focus cut on the QC tab, which is measured on nuclei.
+  is not judged. It is the same switch as **Exclude out-of-focus nanowells** on the Cell Gating tab — ticking
+  either ticks both — so the cells of an out-of-focus nanowell also leave Plotting, Scatter, histograms and
+  exports, not only this page. Turning it on changes the numbers a figure draws, so a figure saved before it
+  existed redraws with it applied; untick it to see the run's own counts. Batch Export's Nanowells mode uses the
+  same setting.
 - **Responding above** (on *Distribution*) — the number a nanowell's value must be above to count as
   responding, for the metric shown. Set one for each metric you use (a fold change, a count, a confluence, an
   intensity); each is remembered separately, and a channel's brightness separately from another's. The figure

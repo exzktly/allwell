@@ -22,9 +22,14 @@ more blurred than the well's sharp tiles.
 against and flags nothing; and a nanowell whose rim could not be fitted (``predicted``, often the most blurred ones)
 or ran off the image has no focus and is never flagged — undefined is not soft. :func:`note` counts both.
 
-A flagged row's state becomes :data:`~review.features.nanowell.collect.OUT_OF_FOCUS`, its recorded state kept in
-``recorded_state``, so every figure on the page treats it as it treats an occluded nanowell: no count, confluence,
-brightness or fluorescence there, no fold change from or to it, no growth rate through it, and the reason named.
+A flagged row's state becomes :data:`OUT_OF_FOCUS`, its recorded state kept in ``recorded_state``, so every figure
+on the Nanowells page treats it as it treats an occluded nanowell: no count, confluence, brightness or fluorescence
+there, no fold change from or to it, no growth rate through it, and the reason named. Every other surface reaches
+the same verdict per cell through :func:`cell_pass` (``review.data.nanowell_focus_gate`` writes it as the
+``NW_Focus_Pass`` inclusion layer), so a cell of a flagged nanowell-timepoint is left out of every tab.
+
+Here rather than in the Nanowells feature because the inclusion layer is unconditional — a build without the
+Nanowells page must still leave out the same cells — and ``review/data`` may not import a feature.
 
 Qt-free.
 """
@@ -37,7 +42,12 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from review.features.nanowell.collect import MEASURABLE, OUT_OF_FOCUS
+#: The states a nanowell can be measured in (the pipeline's ``nanowell_measure``): only these have cells or a count
+#: to leave out, so only these are judged.
+MEASURABLE = frozenset({"measured", "empty"})
+#: A measurable timepoint at which the nanowell's own rim was out of focus against its well's sharp rims: Review's
+#: verdict, not the run's, so it changes with the rule and needs no re-run.
+OUT_OF_FOCUS = "out_of_focus"
 
 #: The default fraction of the well's sharp rims a nanowell's rim must reach (module docstring for the measurement).
 DEFAULT_FRACTION = 0.75
@@ -157,3 +167,55 @@ def note(metrics: pd.DataFrame | None, rule: RimFocusRule | None, wells=None) ->
         parts.append(f"{t.unreferenced:,} in a well with under {MIN_SITES} rims at that timepoint were kept "
                      "unchecked.")
     return " ".join(parts)
+
+
+#: The per-cell verdict column the inclusion layer writes (``review.data.nanowell_focus_gate``), named like its
+#: siblings (``Focus_Pass``, ``Border_Pass``) and kept apart from ``Focus_Pass``: that one is each nucleus's own
+#: outline against an absolute cut, this one is the cell's nanowell rim against its well, and an export or a
+#: methods section must be able to say which rule left a cell out.
+NW_FOCUS_PASS_COLUMN = "NW_Focus_Pass"
+#: The site-table columns the rule reads, so a reader can take only these.
+SITE_COLUMNS = ("timepoint", "nw_q", "nw_r", "state", "focus")
+#: The per-cell columns a cell is joined to its nanowell-timepoint by.
+CELL_KEY = ("timepoint", "nw_q", "nw_r")
+
+
+def flag_sites(table: pd.DataFrame, well: str, rule: RimFocusRule | None) -> pd.DataFrame:
+    """One well's site table (``nanowells/<well>.csv``, at least :data:`SITE_COLUMNS`) judged by *rule*: its
+    addressed rows, with :func:`flag`'s columns.
+
+    Only addressed rows are judged, which is exactly the set the Nanowells page judges (``series_compute``'s
+    joined grid adds rows only where there is no measurement, so no rim focus): the well's reference at a timepoint
+    is therefore the same number on the page and here, and the two can never disagree about a nanowell."""
+    rows = table[pd.to_numeric(table["nw_q"], errors="coerce").notna()
+                 & pd.to_numeric(table["nw_r"], errors="coerce").notna()].copy()
+    rows["well"] = well
+    rows["timepoint"] = rows["timepoint"].astype(str)
+    if "reason" not in rows:
+        rows["reason"] = ""
+    flag(rows, rule)
+    return rows
+
+
+def cell_pass(cells: pd.DataFrame, flagged: pd.DataFrame) -> pd.Series:
+    """``1`` for each per-cell row whose nanowell was in focus at its timepoint, ``0`` where :func:`flag_sites`
+    left that nanowell-timepoint out.
+
+    *flagged* is one or more wells' :func:`flag_sites` frames; *cells* carries :data:`CELL_KEY` and a ``well``
+    column. A cell with no address, no timepoint, or a nanowell-timepoint the table does not hold passes: a cell
+    nobody judged is not a cell judged and found wanting."""
+    passed = pd.Series(1, index=cells.index, dtype=int)
+    if flagged is None or not len(flagged) or not len(cells) or any(c not in cells for c in CELL_KEY + ("well",)):
+        return passed
+    soft = flagged.loc[flagged["rim_focus_ok"].eq(False), ["well", "timepoint", "nw_q", "nw_r"]]
+    if not len(soft):
+        return passed
+
+    def keys(frame):
+        q = pd.to_numeric(frame["nw_q"], errors="coerce")
+        r = pd.to_numeric(frame["nw_r"], errors="coerce")
+        return pd.MultiIndex.from_arrays([frame["well"].astype(str), frame["timepoint"].astype(str),
+                                          q.round().astype("Int64"), r.round().astype("Int64")])
+
+    hit = keys(cells).isin(keys(soft))
+    return passed.where(~hit, 0)

@@ -37,10 +37,14 @@ import numpy as np
 import pandas as pd
 
 from domain.nanowell_roster import roster_rule
+# A measurable timepoint at which the nanowell's own rim was out of focus: named by the rule's module, because the
+# app-wide inclusion layer reaches the same verdict and may not import this feature.
+from review.domain.nanowell_rim_focus import OUT_OF_FOCUS  # noqa: F401 — re-exported for the page's modules
+# Where a dataset's nanowell tables are: one answer, shared with the app-wide focus layer that reads them too.
+from review.data.nanowell_focus_gate import NANOWELL_DIR, nanowell_dir  # noqa: F401
 
 log = logging.getLogger("review")
 
-NANOWELL_DIR = "nanowells"
 #: Scheme versions this reader understands (the pipeline's ``nanowell_task.SCHEME_VERSION`` when it was written).
 SUPPORTED_SCHEMES = frozenset({1})
 
@@ -51,9 +55,6 @@ UNADDRESSED, NOT_LOCATED = "unaddressed", "not_located"
 #: A timepoint whose addresses the identity check found naming other nanowells than the well's reference timepoint
 #: does (``pipeline.nanowell_identity``): its rows are kept out of every join over time, with the check's reason.
 IDENTITY_CONTRADICTED = "identity_contradicted"
-#: A measurable timepoint at which the nanowell's own rim was out of focus against its well's sharp rims
-#: (``rim_focus_compute``): Review's verdict, not the run's, so it changes with the page's rule and no re-run.
-OUT_OF_FOCUS = "out_of_focus"
 #: States whose contents metrics are defined (tracker §3.5).
 MEASURABLE = frozenset({MEASURED, EMPTY})
 
@@ -134,15 +135,6 @@ class NanowellData:
     def order(self, timepoints) -> list[str]:
         """*timepoints* in time order: by ``time_h``, timepoints without a time last, ties by label."""
         return sorted(timepoints, key=lambda tp: (tp not in self.times_h, self.times_h.get(tp, 0.0), tp))
-
-
-def nanowell_dir(data_dir) -> Path | None:
-    """The ``nanowells/`` folder for a loaded data dir (the ``out/`` folder or its parent), or ``None``."""
-    data_dir = Path(data_dir)
-    for candidate in (data_dir / NANOWELL_DIR, data_dir / "out" / NANOWELL_DIR):
-        if candidate.is_dir():
-            return candidate
-    return None
 
 
 def _sidecar(data_dir: Path) -> dict:

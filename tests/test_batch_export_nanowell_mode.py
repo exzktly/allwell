@@ -324,15 +324,17 @@ def test_the_baseline_s_window_reaches_the_figure_and_the_csv_says_which_window_
     assert [r["excluded"] for r in fold] == said
 
 
-def test_a_batch_run_leaves_out_nanowells_under_the_page_s_own_rim_focus_rule(panel, monkeypatch):
+def test_a_batch_run_leaves_out_nanowells_under_the_qc_layer_s_rim_focus_rule(panel, monkeypatch):
     """An export must never count a nanowell the page shows as out of focus: the run computes the metrics with the
-    page's rim focus rule, whatever it is set to, and its note carries the rule's sentence."""
+    QC layer's rim focus rule — the one switch the page and every other tab follow — whatever it is set to."""
     from review.features.batch_export import nanowell_panel
-    from review.features.nanowell import rim_focus_compute as rfc
+    from review.domain import nanowell_rim_focus as rfc
 
     p, ctx = panel
-    st = ctx.state.feature_slice("nanowell")
-    st.rim_focus_on, st.rim_focus_fraction = True, 0.6
+    from review.features.qc.controller import get_qc_params
+
+    base = get_qc_params(ctx)
+    ctx.state.qc.params = base.with_updates(exclude_soft_nanowells=True, nanowell_focus_fraction=0.6)
     seen = []
     real = nanowell_panel._site_metrics
 
@@ -343,6 +345,6 @@ def test_a_batch_run_leaves_out_nanowells_under_the_page_s_own_rim_focus_rule(pa
     monkeypatch.setattr(nanowell_panel, "_site_metrics", spy)
     assert p._load("earliest", ["A01"]) is not None
     assert seen == [rfc.RimFocusRule(True, 0.6)]
-    st.rim_focus_on = False
+    ctx.state.qc.params = base.with_updates(exclude_soft_nanowells=False, nanowell_focus_fraction=0.6)
     p._load("earliest", ["A01"])
     assert seen[-1] == rfc.RimFocusRule(False, 0.6) and not seen[-1].active()

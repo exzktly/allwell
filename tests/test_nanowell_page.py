@@ -430,10 +430,11 @@ def test_along_wells_the_timepoint_named_is_the_one_drawn(qtbot, tmp_path):
         ("t_a", "t_a", "t_a")
 
 
-def test_the_rim_focus_control_on_the_band_changes_the_rule_and_the_metrics_follow(qtbot, page):
-    """The band's *Rim focus* box and percentage are what change the rule, and the page recomputes with it: the
-    metrics on hand are stamped with the rule they were computed for (``focus_for``)."""
-    from review.features.nanowell import rim_focus_compute as rfc
+def test_the_rim_focus_control_on_the_band_changes_the_qc_layer_s_rule_and_the_metrics_follow(qtbot, page):
+    """The band's *Rim focus* box and percentage are a mirror of the QC layer's switch: they change the dataset's
+    QC parameters, and the page recomputes with the rule: the metrics on hand are stamped with the rule they were
+    computed for (``focus_for``)."""
+    from review.domain import nanowell_rim_focus as rfc
 
     st = _loaded(qtbot, page)
     assert st.focus_for == rfc.RimFocusRule().key()
@@ -441,9 +442,9 @@ def test_the_rim_focus_control_on_the_band_changes_the_rule_and_the_metrics_foll
     assert box.isChecked() and spin.value() == 75
     box.setChecked(False)
     qtbot.waitUntil(lambda: st.focus_for == (False,) and not st.computing, timeout=20000)
-    assert not st.rim_focus_on and not spin.isEnabled()
+    assert not page.state.qc.params.exclude_soft_nanowells and not spin.isEnabled()
     box.setChecked(True)
     spin.setValue(60)
     qtbot.waitUntil(lambda: st.focus_for == (True, 0.6) and not st.computing, timeout=20000)
-    assert st.rim_focus_fraction == 0.6
-    assert "rim_focus_fraction" in st.to_config() and st.to_config()["rim_focus_on"] is True
+    assert page.state.qc.params.nanowell_focus_fraction == 0.6 and page.state.qc.params.exclude_soft_nanowells
+    assert not any("focus" in key for key in st.to_config())        # the QC layer's setting, not the page's

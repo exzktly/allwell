@@ -11998,12 +11998,25 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   end of a run addresses a well's other timepoints from one anchor through the rest of the plate. It is kept for
   the session on `state.anchor_queue_per_well`; switching mid-walk keeps the shown item when the new list holds it
   and otherwise goes on at the first item after it, never back over wells already passed.
+  When *One per well* leaves nothing to walk, `build_queue` refuses (the remedy is a re-run, which the message
+  names) and turns `anchor_queue_per_well` off, because its toggle sits in the group shown only during a walk and
+  nothing else could ever reach it; the next press walks every waiting timepoint.
   `_anchor_queue` walks it: each step sets the selection to the one the queue started with plus the step's well
   (so the wells walked past do not accumulate on every other tab) and calls `open_for_anchor`, the same service
-  QC Triage and Home use. `set_anchor_at` tells the queue when an anchor is saved (`_anchor_change` returns the
+  QC Triage and Home use, with `zoom=OPEN_ZOOM` (10): the view opens at that many times *Fit* on the centre of the
+  whole-well montage, where the central square usually is. The region is a `full_montage_compute.CentreZoom`,
+  which `renderer._array_axes` resolves at draw time against the image layer's extent (everything drawn, without
+  an image); it is held on `state.anchor_zoom` and applied by `_apply_pending_anchor` once the well's tables have
+  landed and the page draws that well, because a draw before then shows another well and the change of well
+  refits. A pan or zoom replaces it with the tuple it lands on; the next step opens at 10× again. When *Set anchor*
+  cannot be turned on for a step, the figure's reason is followed by a pointer to Skip. `set_anchor_at` tells the queue when an anchor is saved (`_anchor_change` returns the
   `(well, timepoint)` it changed); when it is the current item, the queue records it and moves on after
   `ADVANCE_DELAY_MS`, dropping the move if Back, Skip or Stop changed the position meanwhile. While it runs a
-  *Queue* group (`anchor_queue_view`) shows `3 of 17 · B04 at 24h`, *Back*, *Skip*, *One per well* and *Stop*. Stop, or stepping
+  *Queue* group (`anchor_queue_view`) shows `3 of 17 · B04 at 24h`, *Back*, *Skip*, *One per well* and *Stop*,
+  with keys for three of them (`anchor_queue_view.KEYS`: ← Back, → Skip, Esc Stop) as `QShortcut`s parented on the
+  group with a window context, so they act only while the group is shown. The page's checkable buttons (*Set
+  anchor*, *Overlays*, *One per well*) take the theme's `toggle` variant: `secondary` overrides the `:checked`
+  fill, so on and off painted the same. Stop, or stepping
   past the last item, restores the starting selection and writes the summary (anchored, skipped, and the pointer
   to *Re-run anchored wells…*) to `state.array_message`. `state.anchor_queue` is never persisted, and a queue
   built for another dataset is dropped by `active_queue`.

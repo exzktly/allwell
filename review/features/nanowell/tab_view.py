@@ -955,6 +955,7 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
     layers_btn, layer_actions, colour_actions = _layers_button(ctx, band)
     overlays_btn = _button("Overlays", _OVERLAYS_TIP, None)
     overlays_btn.setCheckable(True)
+    overlays_btn.setProperty("variant", "toggle")         # "secondary" paints checked and unchecked the same
     overlays_btn.setChecked(True)
     overlays_btn.toggled.connect(lambda on: nwc.set_overlays(ctx, on))
     reg.register("_nw_overlays_btn", overlays_btn)
@@ -986,6 +987,7 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
 
     anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
     anchor_btn.setCheckable(True)
+    anchor_btn.setProperty("variant", "toggle")         # "secondary" paints checked and unchecked the same
     anchor_btn.toggled.connect(lambda on: nwc.set_anchor_mode(ctx, on))
     clear_anchor_btn = _button("Clear anchor", "Remove this well's anchor at this timepoint.",
                                lambda: nwc.clear_anchor(ctx))

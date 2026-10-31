@@ -168,7 +168,9 @@ class ProbeRun:
     """One test launch. :meth:`run` blocks (call it off the GUI thread);
     :meth:`cancel` may be called from any thread."""
 
-    def __init__(self, host: RemoteHost) -> None:
+    def __init__(self, host: RemoteHost, *, launcher: str | None = None) -> None:
+        """*launcher* replaces the host's scheduler command for the probe: Manage Remotes passes a step of the
+        granted node (``services.remote_hold.step_launcher``) to see what a run on that node would get."""
         self.host = host
         selector, self.env_warning = _conda_env_selector(host.remote_python)
         argv = [*_conda_run_prefix_for(selector), "python", "-c", PROBE_SCRIPT]
@@ -179,7 +181,7 @@ class ProbeRun:
         # Raises ValueError for a launcher with a loose word, or a scratch
         # directory carrying shell syntax, as a run does — so it is composed
         # with the run's scratch directory too.
-        script = _compose_remote_cmd(host.launch_command, pidfile, argv,
+        script = _compose_remote_cmd(host.launch_command if launcher is None else launcher, pidfile, argv,
                                      cache_hit=False, env_selector=selector,
                                      scratch_dir=host.remote_scratch_dir)
         self.argv = host.ssh_argv(allocate_tty=True) + [pack_for_login_shell(script)]

@@ -26,6 +26,7 @@ from services.remote_srun_retry import (
     wrap_srun_launch,
 )
 from services.remote_transport import _remote_join, _remote_quote
+from services.slurm_ids import is_step_launcher, sidecar_id_shell
 from services.remote_wait_snippets import (
     _UPLOAD_WAIT_EXIT,
     BATCH_BUDGET_GRACE_S,
@@ -394,14 +395,15 @@ def _compose_driver_cmd(
             f"{driver_script}"
         )
     slurm_sidecar_q = _remote_quote(f"{remote_pidfile}.slurm")
+    on_granted = "a step on the granted node, " if is_step_launcher(launcher) else ""
     inner = (
         f"{_CONDA_ACTIVATE_SNIPPET}; "
         f"{guard}"
         f"{scratch}"
-        f'echo "${{SLURM_JOB_ID:-}}" > {slurm_sidecar_q} 2>/dev/null || true; '
+        f'echo "{sidecar_id_shell(launcher)}" > {slurm_sidecar_q} 2>/dev/null || true; '
         f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
         f'on ${{SLURMD_NODENAME:-$(hostname)}} '
-        f'(partition ${{SLURM_JOB_PARTITION:-?}}) — held for every batch"; '
+        f'(partition ${{SLURM_JOB_PARTITION:-?}}) — {on_granted}held for every batch"; '
         f"{driver_script}"
     )
     return _launch(launcher, inner, remote_pidfile, queue_wait_s=queue_wait_s)
@@ -482,14 +484,15 @@ def _compose_remote_cmd(
     # the point of requesting it early.
     wait_snippet = (_wait_for_upload_snippet(upload_sentinel, upload_heartbeat)
                     if upload_sentinel else "")
+    on_granted_note = " — a step on the granted node" if is_step_launcher(launcher) else ""
     inner = (
         f"{_CONDA_ACTIVATE_SNIPPET}; "
         f"{guard}"
         f"{scratch}"
-        f'echo "${{SLURM_JOB_ID:-}}" > {slurm_sidecar_q} 2>/dev/null || true; '
+        f'echo "{sidecar_id_shell(launcher)}" > {slurm_sidecar_q} 2>/dev/null || true; '
         f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
         f'on ${{SLURMD_NODENAME:-$(hostname)}} '
-        f'(partition ${{SLURM_JOB_PARTITION:-?}})"; '
+        f'(partition ${{SLURM_JOB_PARTITION:-?}}){on_granted_note}"; '
         f"{wait_snippet}"
         f"exec {_remote_join(remote_argv)}"
     )
@@ -604,7 +607,7 @@ def _launch(launcher: str, inner: str, remote_pidfile: str, *, queue_wait_s: int
     *inner* runs behind :data:`_FIRST_TASK_ONLY`, whatever the launcher.
     """
     inner = _FIRST_TASK_ONLY + inner
-    if is_srun(launcher):
+    if is_srun(launcher) and not is_step_launcher(launcher):
         stray = stray_words_message(launcher)
         if stray:
             # Refused here rather than sent: the job would queue, wait for a

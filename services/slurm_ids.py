@@ -21,6 +21,8 @@ Qt-free, and imports nothing from ``services.remote_hold``, which imports it.
 
 from __future__ import annotations
 
+import shlex
+
 from services.remote_transport import _remote_quote
 
 #: Where holds live, under the host's staging directory (``services.remote_hold`` owns the contents).
@@ -35,6 +37,38 @@ def is_step(job_id: str) -> bool:
 def job_of(job_id: str) -> str:
     """The job part of *job_id*: ``4001`` for ``4001.3`` and for ``4001``."""
     return job_id.split(".", 1)[0]
+
+
+def is_step_launcher(launcher: str) -> bool:
+    """Whether *launcher* starts a step inside an allocation that already exists (``srun --jobid=<id> …``), which is
+    how a run is started on a granted node (:func:`services.remote_hold.step_launcher`)."""
+    try:
+        tokens = shlex.split(launcher or "")
+    except ValueError:
+        return False
+    return any(tok == "--jobid" or tok.startswith("--jobid=") for tok in tokens)
+
+
+def launcher_job_id(launcher: str) -> str:
+    """The job id a step launcher names, ``""`` when it names none."""
+    try:
+        tokens = shlex.split(launcher or "")
+    except ValueError:
+        return ""
+    for i, tok in enumerate(tokens):
+        if tok.startswith("--jobid="):
+            return tok.split("=", 1)[1]
+        if tok == "--jobid" and i + 1 < len(tokens):
+            return tokens[i + 1]
+    return ""
+
+
+def sidecar_id_shell(launcher: str) -> str:
+    """The shell expression a job writes to ``<pidfile>.slurm`` from inside its allocation: the job id, or for a
+    step launcher ``<job>.<step>``, so everything that cancels or asks about "the run's job" acts on the step.
+    Chosen by the launcher, not by whether ``SLURM_STEP_ID`` happens to be set: an ordinary ``srun`` sets it too, and
+    its sidecar must not change."""
+    return "${SLURM_JOB_ID:-}.${SLURM_STEP_ID:-}" if is_step_launcher(launcher) else "${SLURM_JOB_ID:-}"
 
 
 def squeue_listing(jid_var: str, fmt: str = "%T") -> str:

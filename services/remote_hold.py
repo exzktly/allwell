@@ -346,6 +346,9 @@ class HoldState:
     ended_reason: str = ""
     slurm_state: str = ""
     slurm_reason: str = ""
+    #: The job's GRES as ``--gres`` takes it (``gpu:1``), from ``scontrol``; a step asks for it explicitly, because
+    #: whether a step inherits the job's GRES varies with the Slurm version.
+    gres: str = ""
 
     @property
     def live(self) -> bool:
@@ -380,6 +383,14 @@ def _int(value: str) -> int:
         return 0
 
 
+def _job_gres(scontrol: dict[str, str]) -> str:
+    """``gpu:1`` from a job's ``TresPerNode=gres/gpu:1`` (Slurm 21.08+) or ``Gres=gpu:1`` (older); ``""`` for none."""
+    raw = scontrol.get("TresPerNode") or scontrol.get("Gres") or ""
+    if raw in ("", "(null)", "N/A"):
+        return ""
+    return ",".join(item for item in (re.sub(r"^gres[/:]", "", part) for part in raw.split(",")) if item)
+
+
 def parse_state(text: str) -> HoldState:
     """:class:`HoldState` from :func:`state_script`'s output."""
     s = _sections(text)
@@ -394,7 +405,7 @@ def parse_state(text: str) -> HoldState:
                   gpus=granted.get("gpus", ""), cpus=granted.get("cpus", ""),
                   granted_at=_int(granted.get("granted_at", "")), limit_s=_int(granted.get("limit_s", "")),
                   idle_s=_int(status.get("idle_s", "")), slurm_state=slurm_state,
-                  slurm_reason=sc.get("Reason", ""))
+                  slurm_reason=sc.get("Reason", ""), gres=_job_gres(sc))
     ended = s.get("ended", "")
     if ended:
         return HoldState(phase="ended", ended_reason=ended, **common)
@@ -561,3 +572,36 @@ class GrantedNode:
         elif result.returncode != 0:
             self._log(f"[remote] granted node: WARN could not release it (ssh exit {result.returncode}); it "
                       "releases itself within two minutes of the app's last heartbeat.\n")
+
+
+# ── running on the granted node ──────────────────────────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class StepTarget:
+    """Where a run goes while a node is granted: the hold job, and what its steps ask for."""
+
+    job_id: str
+    node: str = ""
+    cpus: int = 0
+    gres: str = ""
+
+    @classmethod
+    def from_state(cls, state: HoldState) -> StepTarget:
+        return cls(job_id=state.job_id, node=state.node, cpus=_int(state.cpus), gres=state.gres)
+
+
+def step_launcher(target: StepTarget) -> str:
+    """The scheduler command a run uses on a granted node, in place of the host's ``srun …`` line: a step of the hold
+    job, one task on its node.
+
+    ``--overlap`` because the hold's batch script holds the job's CPUs while it waits (it only sleeps), and the
+    step shares them. The job's CPU count and GRES are asked for explicitly: what a step inherits has varied with
+    the Slurm version (``--exact`` and ``--whole`` changed the defaults), and asking for exactly what the job has is
+    valid on all of them. A host's own ``--time`` is not here: the job's time limit governs a step.
+    """
+    parts = ["srun", f"--jobid={target.job_id}", "--overlap", "--nodes=1", "--ntasks=1"]
+    if target.cpus:
+        parts.append(f"--cpus-per-task={target.cpus}")
+    if target.gres:
+        parts.append(f"--gres={target.gres}")
+    return " ".join(parts)

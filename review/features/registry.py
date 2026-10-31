@@ -1372,6 +1372,13 @@ _SUPPORT_SERVICES = {
         "review.features.qc.controller", "reproject_verdicts"),
     "qc.finish_recompute": lambda: _import_attr(
         "review.features.qc.controller", "finish_qc_recompute"),
+    # The QC parameters, read and changed from a page that is not the Cell Gating panel: the Nanowells page's
+    # mirror of the nanowell focus switch, which is the QC layer's, so it goes through the one route a QC edit
+    # takes (the re-projection of every verdict layer behind a progress popup, then the save and the redraw).
+    "qc.get_params": lambda: _import_attr(
+        "review.features.qc.controller", "get_qc_params"),
+    "qc.set_params_with_progress": lambda: _import_attr(
+        "review.features.qc.controller", "set_qc_params_with_progress"),
     "qc.refresh_gate_widgets": lambda: _import_attr(
         "review.features.qc.tab_view", "qc_gate_refresh_widgets"),
     "crop.project_cache": lambda: _import_attr(
@@ -1502,6 +1509,12 @@ def _register_cache_projectors() -> None:
     register_cache_projector(_lazy_projector(
         "review.data.focus_gate", "apply_focus_gate_to_cache"),
         columns=_lazy_projector("review.data.focus_gate", "focus_input_columns"))
+    # The cells of a nanowell whose rim was out of focus at their timepoint. Its own column rather than a second
+    # rule inside ``Focus_Pass``, so every surface names the rule that left a cell out; unconditional like the
+    # rest, so a build without the Nanowells page still leaves out the same cells.
+    register_cache_projector(_lazy_projector(
+        "review.data.nanowell_focus_gate", "apply_nanowell_focus_to_cache"),
+        columns=_lazy_projector("review.data.nanowell_focus_gate", "nanowell_focus_input_columns"))
     # Cells the image border cuts (imclearborder). Its own column rather than a
     # debris bound, so every surface that explains an exclusion names it right.
     register_cache_projector(_lazy_projector(

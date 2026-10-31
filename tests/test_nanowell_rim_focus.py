@@ -1,4 +1,4 @@
-"""Review leaves out a nanowell at a timepoint where its own rim was out of focus (``rim_focus_compute``).
+"""Review leaves out a nanowell at a timepoint where its own rim was out of focus (``review.domain.nanowell_rim_focus``).
 
 The rule is relative: a rim softer than a fraction of its well's sharp rims (the 90th percentile at that
 timepoint) is out of focus. The flagged row becomes an ``out_of_focus`` gap — no count, confluence or fluorescence,
@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 
 from review.features.nanowell import distribution_compute as dc
-from review.features.nanowell import rim_focus_compute as rfc
+from review.domain import nanowell_rim_focus as rfc
 from review.features.nanowell.collect import OUT_OF_FOCUS, load_nanowell_data
 from review.features.nanowell.series_compute import exclusion_reason, long_format, site_metrics
 from review.features.nanowell.state import NanowellState
@@ -137,16 +137,41 @@ def test_the_reference_is_the_sharp_rims_so_a_mostly_soft_well_still_finds_its_s
     assert frame["rim_focus_ref"].iloc[0] == pytest.approx(np.percentile(focus, rfc.REFERENCE_PERCENTILE))
 
 
-def test_the_page_keeps_its_rule_and_a_setting_saved_before_it_existed_restores_it_on():
+def test_the_rule_is_the_qc_layer_s_on_by_default_for_a_nanowell_run_and_never_kept_with_the_page():
+    from review.domain.qc_params import QCParams
+
+    nanowell = QCParams.from_pipeline_info({"nanowell": {"scheme_version": 1}})
+    assert nanowell.nanowell_focus_rule() == rfc.RimFocusRule(True, rfc.DEFAULT_FRACTION)
+    assert not QCParams.from_pipeline_info({}).exclude_soft_nanowells          # an ordinary run: nothing to judge
+    edited = nanowell.with_updates(exclude_soft_nanowells=False, nanowell_focus_fraction=0.6)
+    assert QCParams.from_dict(edited.to_dict()) == edited
+    assert nanowell.with_updates(nanowell_focus_fraction=1.5).nanowell_focus_fraction == rfc.DEFAULT_FRACTION
+    # The page holds the rule only as a copy of the QC layer's, and never saves it with its own settings.
     st = NanowellState()
-    assert st.rim_focus_rule() == rfc.RimFocusRule(True, rfc.DEFAULT_FRACTION)
-    st.rim_focus_on, st.rim_focus_fraction = False, 0.6
-    restored = NanowellState()
-    restored.apply_config(st.to_config())
-    assert (restored.rim_focus_on, restored.rim_focus_fraction) == (False, 0.6)
-    old = NanowellState()
-    old.apply_config({"view": "distribution"})
-    assert (old.rim_focus_on, old.rim_focus_fraction) == (True, rfc.DEFAULT_FRACTION)
-    out_of_range = NanowellState()
-    out_of_range.apply_config({"rim_focus_fraction": 1.5})
-    assert out_of_range.rim_focus_fraction == rfc.DEFAULT_FRACTION
+    assert st.rim_focus_rule() == rfc.RimFocusRule()
+    assert not any("focus" in key for key in st.to_config())
+
+
+def test_the_per_cell_layer_judges_exactly_the_nanowell_timepoints_the_page_does(tmp_path):
+    """``flag_sites`` (what ``NW_Focus_Pass`` reads) and ``site_metrics`` (what the page draws) must reach one
+    verdict. The table carries unaddressed rows with very sharp rims, which the page never joins: counted into the
+    reference, they would raise it and flag nanowells the page keeps."""
+    import pandas as pd
+
+    rows = _rows()
+    for k in range(6):
+        extra = _row("t3", None, None, n=1, c=0.1)
+        extra["focus"] = 0.5
+        rows.append(extra)
+    out = _dataset(tmp_path, {"A01": rows}, starts=STARTS)
+    metrics = site_metrics(load_nanowell_data(out), "earliest", focus=rfc.RimFocusRule())
+    page = {(tp, int(q), int(r)) for tp, q, r in
+            metrics.loc[metrics["state"].eq(OUT_OF_FOCUS), ["timepoint", "nw_q", "nw_r"]].itertuples(index=False)}
+    table = pd.read_csv(out / "nanowells" / "A01.csv", dtype={"timepoint": str})
+    flagged = rfc.flag_sites(table, "A01", rfc.RimFocusRule())
+    layer = {(tp, int(q), int(r)) for tp, q, r in
+             flagged.loc[flagged["rim_focus_ok"].eq(False), ["timepoint", "nw_q", "nw_r"]].itertuples(index=False)}
+    assert page == layer == {("t3", 0, 0)}
+    cells = pd.DataFrame({"well": ["A01", "A01", "A01", "B01"], "timepoint": ["t3", "t2", "t3", "t3"],
+                          "nw_q": [0, 0, None, 0], "nw_r": [0, 0, None, 0]})
+    assert rfc.cell_pass(cells, flagged).tolist() == [0, 1, 1, 1]   # its other timepoint, unaddressed, other well

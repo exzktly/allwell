@@ -35,6 +35,7 @@ from review.data.focus_gate import (
 from review.data.border_gate import border_status
 from review.data.data_loading import held_wells_note
 
+from . import nanowell_focus_view
 from .controller import get_qc_params, qc_excluded_count, set_qc_params_with_progress
 from .params import QCParams
 from review.domain.qc_params import _pos
@@ -352,6 +353,15 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         _lbl.setIndent(_FQ_TEXT_INDENT)
     outer.addWidget(foc)
 
+    # ── the same question for a nanowell run: which NANOWELL-TIMEPOINTS were soft ──
+    #
+    # Its own switch and its own verdict column (``NW_Focus_Pass``), judged from each nanowell's rim against its
+    # well's sharp rims: a nanowell run records no per-cell focus, and its rim is measured for every fitted
+    # nanowell. Shown only on a dataset with nanowell tables, where the per-cell row above is hidden unless the
+    # plate also holds ordinary wells (``nanowell_focus_view.refresh``).
+    nw_row, nw_widgets = nanowell_focus_view.build_row(row, params, _FQ_TEXT_INDENT, _FQ_TEXT_W)
+    outer.addWidget(nw_row)
+
     # ── cells the image border cuts (imclearborder) ──────────────────────────
     #
     # A fourth switch, and its own verdict column (``Border_Pass``) rather than
@@ -388,6 +398,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         "exclude_soft_cells": foc_cb, "focus_min": foc_edit,
         "focus_status": foc_status, "focus_effect": foc_effect,
         "exclude_border_cells": brd_cb, "border_status": brd_status,
+        "focus_row": foc, **nw_widgets,
     })
 
     def _fields_params() -> QCParams:
@@ -405,12 +416,15 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         constructor, which left a typed ``0`` in ``max_area`` intact and blanked
         every plot.
         """
-        return QCParams(
+        # From the parameters in force rather than from the constructor's defaults: a field this panel's boxes do
+        # not hold must survive an edit of one they do.
+        return get_qc_params(ctx).with_updates(
             enabled=enable_cb.isChecked(),
             exclude_flagged_fields=fq_cb.isChecked(),
             exclude_soft_cells=foc_cb.isChecked(),
             exclude_border_cells=brd_cb.isChecked(),
-        ).with_updates(
+            exclude_soft_nanowells=nw_widgets["exclude_soft_nanowells"].isChecked(),
+            nanowell_focus_fraction=nw_widgets["nanowell_focus_fraction"].value() / 100.0,
             focus_min=foc_edit.text(),
             min_area=min_area_edit.text(),
             max_area=max_area_edit.text(),
@@ -444,6 +458,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
             ctx, {"focus_status": foc_status, "focus_effect": foc_effect,
                   "exclude_soft_cells": foc_cb})
         _refresh_border_status(ctx, {"border_status": brd_status})
+        nanowell_focus_view.refresh(ctx, {"focus_row": foc, **nw_widgets})
 
     def _apply() -> None:
         _sync_enabled()
@@ -494,6 +509,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     fq_cb.toggled.connect(lambda _=None: _apply())
     foc_cb.toggled.connect(lambda _=None: _apply())
     brd_cb.toggled.connect(lambda _=None: _apply())
+    nw_widgets["exclude_soft_nanowells"].toggled.connect(lambda _=None: _apply())
+    nw_widgets["nanowell_focus_fraction"].valueChanged.connect(lambda _=None: _apply())
     # The cut applies on ``editingFinished`` like the debris bounds.
     def _finish_cut() -> None:
         """Apply, then make the box show the number that is actually in force.
@@ -762,7 +779,7 @@ def qc_gate_refresh_widgets(win) -> None:
                  "min_circularity", "max_circularity")
     fields = [w["enable"], w["exclude_flagged_fields"],
               w["exclude_soft_cells"], w["exclude_border_cells"],
-              w["focus_min"]] + [
+              w["focus_min"], w["exclude_soft_nanowells"], w["nanowell_focus_fraction"]] + [
         w[k] for k in edit_keys]
     blocked = [f.blockSignals(True) for f in fields]
     try:
@@ -770,6 +787,8 @@ def qc_gate_refresh_widgets(win) -> None:
         w["exclude_flagged_fields"].setChecked(bool(p.exclude_flagged_fields))
         w["exclude_soft_cells"].setChecked(bool(p.exclude_soft_cells))
         w["exclude_border_cells"].setChecked(bool(p.exclude_border_cells))
+        w["exclude_soft_nanowells"].setChecked(bool(p.exclude_soft_nanowells))
+        w["nanowell_focus_fraction"].setValue(int(round(100 * p.nanowell_focus_fraction)))
         w["focus_min"].setText(_fmt(p.focus_min))
         w["min_area"].setText(_fmt(p.min_area))
         w["max_area"].setText(_fmt(p.max_area))
@@ -794,3 +813,4 @@ def qc_gate_refresh_widgets(win) -> None:
     # And the focus row, which is a fact about the dataset in the same way.
     _refresh_focus_status(win._ctx, w)
     _refresh_border_status(win._ctx, w)
+    nanowell_focus_view.refresh(win._ctx, w)

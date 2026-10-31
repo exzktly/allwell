@@ -116,9 +116,6 @@ def test_the_coverage_line_counts_the_whole_plate():
         def _start_coverage_scan(self):
             pass
 
-        def _scope_line(self):
-            return ""
-
     recs = {f"A{i:02d}": {"health": "complete", "intent": 4,
                           "covered_any": 4, "covered_csv": 4}
             for i in range(1, 95)}
@@ -167,9 +164,6 @@ def test_a_scan_where_every_well_failed_is_not_silent():
 
         def _start_coverage_scan(self):
             pass
-
-        def _scope_line(self):
-            return ""
 
     _Pane()._on_coverage_scanned("/out", build_block({}, partial_scan=True,
                                                      unreadable=96))

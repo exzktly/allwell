@@ -77,8 +77,7 @@ def split_background_wells(value) -> list[str]:
     side has always used, so ``:`` means one thing wherever a set of wells is
     written. Expanded here, in the one function every reader of the field goes
     through, so a range means the same thing to the model build, the remote
-    staging planner, the batched hold-out, both incremental-scope readers, the
-    pairing editor's list, the Review preview and the run receipt. Nothing that
+    staging planner, the batched hold-out, the pairing editor's list, the Review preview and the run receipt. Nothing that
     parsed before parses differently: a token containing ``:`` was not a well,
     so a run naming one refused to start.
     """
@@ -300,15 +299,13 @@ def blank_wells_for_run(background_well="", background_well_map="") -> list[str]
 
     The union of ``--background_well`` and the keys of ``--background_well_map``,
     canonical and order-preserving. One function because "which wells are
-    blanks?" is asked in five places that must agree — the model build, the
+    blanks?" is asked in several places that must agree — the model build, the
     remote staging planner (a blank is uploaded whole and never incrementally
-    diffed), the batched hold-out that keeps the blank out of the slicing, and
-    the two incremental-scope readers — and they have already drifted once:
-    ``remote_runner`` grew a local whitespace-splitting regex that read
-    ``"H12 G12"`` as two wells where :func:`split_background_wells` reads it as
-    one, and every batch of that run died on the guard. Two more copies of that
-    regex are still in ``services.input_resolution_service``; this is what
-    replaces them.
+    diffed) and the batched hold-out that keeps the blank out of the slicing —
+    and they have already drifted once: ``remote_runner`` grew a local
+    whitespace-splitting regex that read ``"H12 G12"`` as two wells where
+    :func:`split_background_wells` reads it as one, and every batch of that run
+    died on the guard.
 
     A superset is the safe direction for every caller: staging a well whole that
     turns out not to be a blank costs an upload, while missing one starves the

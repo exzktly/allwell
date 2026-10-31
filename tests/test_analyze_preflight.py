@@ -465,28 +465,6 @@ def test_typing_a_path_touches_no_files_until_it_settles(tab, plate, tmp_path):
         Path.open = real
 
 
-# ── the scope line comes from the planner, not from here ────────────────────
-
-def test_the_scope_line_is_the_planners_own_sentence(tab, plate):
-    """``tests/test_layout_readout_single_source`` holds this over the layout
-    line beside it, for the same reason: the preview and the run must not be
-    able to disagree about what the run will do."""
-    from services.input_resolution_service import plan_incremental_scope
-    (plate / "in" / "Exp_A01_F003_T01_DAPI.tif").write_bytes(b"x")
-    _journal(plate / "out", plate / "in")
-    _point_at(tab, plate)
-    tab._apply_pipeline_info({"execution_options": {
-        "filename_schema": SCHEMA, "filename_sep": SEP}})
-    expected = plan_incremental_scope(tab._collect_run_options(), plate / "in")
-    assert expected.preview, "the fixture should have loose images to fold in"
-    assert tab._scope_line() == expected.preview
-    assert "Appended" not in tab._scope_line(), (
-        "the readout prints the log's past-tense sentence, claiming work it "
-        "has not done")
-    assert expected.reason.startswith("Appended"), (
-        "the run log keeps its past tense — it prints after the fold")
-
-
 # ── after a run ends ────────────────────────────────────────────────────────
 
 def _finish(tab, outcome, out_dir, in_dir, wells=()):

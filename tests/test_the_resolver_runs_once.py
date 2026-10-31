@@ -44,13 +44,13 @@ def test_a_typeerror_from_inside_the_resolver_is_not_a_retry():
         f"sees a directory the first had already begun rewriting")
 
 
-def test_the_one_call_forwards_proc_hook():
-    """Without it the grouping subprocess is untracked and Stop cannot
-    reach it — which is what the fallback call silently gave up."""
-    calls: list[dict] = []
+def test_the_resolver_is_called_with_the_options_and_the_queue():
+    """``resolve_dirs(opts, log_q)``: resolution starts no subprocess, so there
+    is nothing for Stop to track while it runs."""
+    calls: list[tuple] = []
 
-    def _resolver(_opts, _log_q, **kw):
-        calls.append(kw)
+    def _resolver(*args, **kw):
+        calls.append((args, kw))
         return None
 
     runner = PipelineRunner()
@@ -58,7 +58,7 @@ def test_the_one_call_forwards_proc_hook():
     if runner._thread is not None:
         runner._thread.join(timeout=5)
 
-    assert calls and "proc_hook" in calls[0], calls
+    assert len(calls) == 1 and len(calls[0][0]) == 2 and calls[0][1] == {}, calls
 
 
 def test_no_typeerror_fallback_remains_around_the_resolver():

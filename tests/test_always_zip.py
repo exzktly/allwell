@@ -1,8 +1,8 @@
-"""Always-zip / always-move behavior + skipped-well dashboard counting.
+"""Always-zip behavior + skipped-well dashboard counting.
 
-Covers the simplification that removed the three Output-Options checkboxes
-(compress input, compress output, move source TIFs): inputs/outputs are always
-zipped and loose TIFs are always moved into wells — and the regression where
+Covers the simplification that removed the Output-Options checkboxes (compress
+input, compress output, move source TIFs): inputs/outputs are always zipped,
+and Analyze no longer handles loose images at all — and the regression where
 already-complete (skipped) wells weren't counted as done on the dashboard.
 """
 from __future__ import annotations
@@ -31,14 +31,14 @@ def test_output_option_checkboxes_removed(qapp):
     assert not hasattr(tab, "_move_source_tifs_cb")
 
 
-def test_opts_always_zip_and_move(qapp, tmp_path):
+def test_opts_always_zip(qapp, tmp_path):
     from analyze.tab import AnalyzeTab
     tab = AnalyzeTab()
     tab._input_edit.setText(str(tmp_path))
     opts = tab._collect_run_options()
     assert opts["compress_input_well_folders"] is True
     assert opts["compress_output_well_folders"] is True
-    assert opts["move_source_tifs"] is True
+    assert "move_source_tifs" not in opts
 
 
 def test_build_pipeline_args_never_disables_compression(qapp, tmp_path):

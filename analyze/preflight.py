@@ -13,13 +13,9 @@ This module is the answer to that. It reports in two tiers, split by what each
 costs:
 
 **Tier one is cheap enough to run inline** — the journal is one small JSON
-read, and the scope line adds one ``iterdir`` of the input directory plus, when
-loose images are sitting in it, a central-directory read of every well archive
-they belong to — that is how the duplicate rule knows what each archive already
-holds. A background or flat-field method set to ``empty_well`` adds a second
-pass over the same archives. Not free, and not a directory *walk*: bounded by the plate's own
-top level, which is why it can hang off the existing ``_refresh_output`` once
-the field has settled. It says what the last run against this folder did, and
+read, bounded by the plate's own record rather than a directory *walk*, which
+is why it can hang off the existing ``_refresh_output`` once the field has
+settled. It says what the last run against this folder did, and
 above all whether it *finished*: a journal still open is a run the app was
 killed during, which nothing else on disk records.
 
@@ -41,16 +37,13 @@ silently re-forcing a plate because the previous run was forced would be the
 most expensive kind of surprise.
 
 **It reports; it does not decide.** Every *claim* comes back verbatim from the
-function that owns it — ``ScopePlan.preview`` for what the run will do about new
-images, ``completeness``'s own counts for coverage, the journal's recorded
-states for what happened — and this module supplies only the connective prose
-between them, so the preview and the run cannot disagree about a value. That is
-deliberately weaker than ``tests/test_layout_readout_single_source.py``'s rule
-over the layout line beside it, which requires the label to *be* a quoted
-planner value; that shape suits a one-sentence readout, not a paragraph drawn
-from four sources. The piece that could drift is the scope line, and
-``tests/test_analyze_preflight.py::test_the_scope_line_is_the_planners_own_sentence``
-pins it to the planner's own words.
+function that owns it — ``completeness``'s own counts for coverage, the
+journal's recorded states for what happened — and this module supplies only the
+connective prose between them, so the preview and the run cannot disagree about
+a value. That is deliberately weaker than
+``tests/test_layout_readout_single_source.py``'s rule over the layout line
+beside it, which requires the label to *be* a quoted planner value; that shape
+suits a one-sentence readout, not a paragraph drawn from several sources.
 
 Held as a mixin rather than folded into ``analyze/tab.py`` for the reason
 ``analyze.suspend`` and ``analyze.progress`` were — that file sits against its
@@ -70,7 +63,6 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from services import run_journal
-from services.input_resolution_service import plan_incremental_scope
 from services.run_detect import DetectionError, resolve_detection
 from pipeline import completeness
 from core.safe import swallow, swallowed
@@ -229,7 +221,7 @@ class AnalyzePreflightMixin:
         already hold — so they move together, and **neither touches the disk
         from here**. This runs on `textChanged`, which fires once per keystroke,
         and every read behind these banners is per-folder: the journal, the
-        resume index, the loose-file plan. Doing them inline cost 9.6 ms and 140
+        resume index. Doing them inline cost 9.6 ms and 140
         file opens for a single character typed into the path field, on a
         machine with a dozen plates on record.
 
@@ -398,13 +390,9 @@ class AnalyzePreflightMixin:
         a folder settling, Discard, Resume, a run starting or ending — comes
         back through here rather than each having to remember.
 
-        Two early returns, and both are about cost rather than tidiness.
-        Repainting runs :meth:`_scope_line`, which reads the input directory
-        and the central directory of every archive a loose image belongs to,
-        and this is reached once per settle — so it repaints only when the
-        answer it depends on has actually flipped, and never before the folder
-        has been read at all, which is the settle's own job and is about to
-        happen anyway.
+        Two early returns: it repaints only when the answer it depends on has
+        actually flipped, and never before the folder has been read at all,
+        which is the settle's own job and is about to happen anyway.
         """
         if not getattr(self, "_preflight_headline_text", ""):
             return
@@ -442,49 +430,13 @@ class AnalyzePreflightMixin:
         self._preflight_suppressed = self._resume_card_covers(self._preflight_dir)
         head = "" if self._preflight_suppressed else headline
         text = " ".join(p for p in (head, self._preflight_coverage,
-                                    self._preflight_field_quality,
-                                    self._scope_line()) if p)
+                                    self._preflight_field_quality) if p)
         self._preflight_label.setText(text)
         # An empty report is not a report. With its account of the run
         # suppressed and no coverage line arrived yet, there is nothing in the
         # card but its buttons, and a bordered strip holding two buttons and no
         # sentence reads as a rendering fault. It comes up when the scan lands.
         banner.setVisible(bool(text) and self._preflight_is_wanted())
-
-    def _scope_line(self) -> str:
-        """What this run will do about images added since the last one.
-
-        The sentence is ``ScopePlan.preview`` verbatim: the same verdict and
-        the same justification the run log prints, in the tense that is true
-        before the fold happens. Rendering the log's own past-tense ``reason``
-        here had the readout announce "Appended 3 loose image(s)" while nothing
-        had been written — a claim about work not yet done, which is the one
-        thing a preview must never make.
-        """
-        # The planner's *resolved* input directory, never the raw text the user
-        # typed. Loose images sit beside the well archives inside ``in/``, so a
-        # planner pointed at the folder that merely *contains* ``in/`` finds no
-        # archives, reports nothing to fold in, and the readout goes silent on
-        # a run that is about to fold in a dozen files. The coverage scan had
-        # the same bug; fixing one and not the other is how a sweep half-lands.
-        in_dir = getattr(self, "_preflight_input", "")
-        if not in_dir:
-            return ""
-        if self._auto_detect_on():
-            # The sentence counts new images with the form's schema, which
-            # run-time detection is about to replace, and this runs on the GUI
-            # thread, where the detection scan does not belong. Saying nothing
-            # beats a count made under a layout that will not run.
-            return ""
-        try:
-            opts = self._collect_run_options()
-        except Exception:
-            swallowed("collecting run options for the pre-run readout")
-            return ""
-        with swallow("planning the run scope for the pre-run readout"):
-            plan = plan_incremental_scope(opts, Path(in_dir))
-            return plan.preview
-        return ""
 
     # ── tier two: real coverage, off the GUI thread ──────────────────────
     def _start_coverage_scan(self) -> None:

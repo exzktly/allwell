@@ -169,16 +169,14 @@ def test_a_seal_that_cannot_be_withdrawn_stops_the_rewrite(tmp_path, monkeypatch
 @pytest.mark.parametrize("fn_name, writers", [
     ("process_microscopy.process_well_zip_task",
      ("merge_well_records(", "write_well_csv(", "merge_images_into_zip(", "compress_images_to_zip(")),
-    ("process_microscopy.process_well_folder_task",
-     ("merge_well_records(", "write_well_csv(", "merge_images_into_zip(", "compress_images_to_zip(")),
     # The nanowell well's writes live in ``_finish_well``, which ``process_well_zip`` runs while the well's
     # archive is open to read tiles from.
     ("pipeline.nanowell_task._finish_well",
      ("write_csv(", "write_empty_cells_csv(", "write_sites_csv(", "write_grid_json(", "update_montage_archive(")),
 ])
 def test_every_well_path_withdraws_the_seal_before_its_first_write(fn_name, writers):
-    """The driven test above covers the zip path; the folder and nanowell paths write the same two artefacts, so
-    each must withdraw the seal before the first of its writes, not after them (``write_well_report`` withdraws it
+    """The driven test above covers the zip path; the nanowell path writes the same two artefacts, so it
+    must withdraw the seal before the first of its writes, not after them (``write_well_report`` withdraws it
     too, but only once the CSV has already been rewritten). Read off the source, as
     ``test_reuse_is_keyed_on_the_settings`` reads the settings stamp's position."""
     import importlib

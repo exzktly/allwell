@@ -261,7 +261,7 @@ def test_group_in_place_through_the_page_zips_and_deletes_sources(qapp, tmp_path
     _run_worker_to_completion(ctrl)
 
     for well in ("A01", "B02"):
-        zip_path = src / f"{well}.zip"
+        zip_path = src / "in" / f"{well}.zip"
         assert zip_path.exists(), f"{well}: expected a zip, found none"
         with zipfile.ZipFile(zip_path) as zf:
             assert set(zf.namelist()) == {f"exp_GFP_{well}_F001_0h.tif", f"exp_GFP_{well}_F001_24h.tif"}

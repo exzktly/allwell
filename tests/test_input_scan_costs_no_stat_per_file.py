@@ -170,36 +170,32 @@ def test_picking_a_folder_does_not_stat_every_file_in_it(qapp, tmp_path, monkeyp
     assert tab_large._nuclear_token_edit.text() == "DAPI"
 
 
-def test_the_readout_is_computed_once_per_pick_and_with_the_inferred_schema(
-        qapp, tmp_path, monkeypatch):
-    """One layout plan per click, and it knows the schema the scan just found.
+def test_the_readout_is_computed_once_per_pick(qapp, tmp_path, monkeypatch):
+    """One layout plan per click.
 
     The old flow computed it twice: ``textChanged`` fired as soon as the path
-    was set, walking the new folder against the *previous* folder's schema, and
-    the folder scan then applied the inferred schema and walked it again. The
-    first of those is both wasted and wrong, and the count is what says so —
-    asserting only the final schema would pass against the two-walk version.
+    was set, and the folder scan then walked it again once it had applied the
+    inferred schema. The count is what says so.
     """
     # The readout lives in AnalyzeInputMixin, beside the folder scan.
     import analyze.domain.input as tab_mod
     from analyze.tab import AnalyzeTab
 
     folder = _plate(tmp_path / "ds", 24)
-    calls: list[tuple[str, str]] = []
+    calls: list[Path] = []
     real = tab_mod.plan_input_layout
 
-    def spy(raw, *, filename_schema="", filename_sep="_"):
-        calls.append((filename_schema, filename_sep))
-        return real(raw, filename_schema=filename_schema, filename_sep=filename_sep)
+    def spy(raw):
+        calls.append(Path(raw))
+        return real(raw)
 
     monkeypatch.setattr(tab_mod, "plan_input_layout", spy)
 
     tab = AnalyzeTab()
     _browse(tab, folder, monkeypatch)
 
-    assert calls == [(SCHEMA, SEP)], (
-        "the layout plan should be computed exactly once per pick, from the "
-        f"schema the folder scan inferred; got {calls}"
+    assert calls == [folder], (
+        f"the layout plan should be computed exactly once per pick; got {calls}"
     )
 
 
@@ -230,7 +226,8 @@ def test_a_folder_the_scan_cannot_read_still_updates_the_readout(
         "the readout still describes the previously picked folder: "
         f"{tab._layout_lbl.text()!r}"
     )
-    assert str(tmp_path / "second" / "out") == tab._output_lbl.text()
+    # Loose images are refused, so there is no output folder to name.
+    assert tab._output_lbl.text() == "—"
 
 
 def test_a_scan_that_raises_still_leaves_the_readout_describing_this_folder(

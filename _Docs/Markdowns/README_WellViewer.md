@@ -8379,7 +8379,13 @@ say — the raw log says so and the findings are unaffected.
    small step explains the disagreement: re-run the well. A relabelled well
    can still hold such a timepoint; Validate names it, and the repair leaves
    it flagged, so Review keeps warning about it and the next run of the well
-   still re-analyses it.
+   still re-analyses it. Only a timepoint the original run itself flagged is
+   ever relabelled. A bubble or glare over one side of the array's rim leaves
+   the tables looking just as a step off would, so when a timepoint the run
+   found consistent has one side of its rim empty, Validate notes it (an
+   information line, "the rim of timepoint(s) … is empty on one side") and
+   changes nothing; look at that timepoint in the Array view, and re-run the
+   well if its addresses really are a nanowell off.
 3. If a well is genuinely missing FOV/timepoint work, **Complete this run in
    Analyze** opens the dataset there set up to finish it: the Analyze form is
    filled in from the dataset's own recorded settings (schema, separator,

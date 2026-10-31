@@ -15437,6 +15437,22 @@ show a step in the tables; the rim can, because a timepoint anchored a site
 off measured the roster disk while its array sat a step away, leaving a
 crescent of imaged, empty roster sites on one side. A step counts only when it
 beats `(0, 0)` by `MIN_CRESCENT` sites and by half the crescent it predicts.
+**Only a timepoint the run flagged `roster_mismatch` is moved by what its rim
+reads**; the others sit at `(0, 0)`. A bubble or glare over one side of the rim
+leaves the same crescent, written the same way — the rendered run writes the
+crescent of a timepoint a step off `occluded` with `visible_fraction` 0, as it
+writes a bubble — so the tables cannot tell the two apart. The run could: it
+compared every nanowell each timepoint detected, beyond the roster too
+(`nanowell_run.misanchored`), and flags a timepoint whose nanowells sit a step
+from the others'. Taken from the rim alone, glare at a consistent timepoint
+would rename every nanowell in it, or join a step-off timepoint's frame and
+outvote the right one (`tests/test_nanowell_relabel_judgement.py`). A
+consistent timepoint whose rim reads a step is still reported, never moved, in
+`WellPlan.rim_only`: on its own it is an info finding,
+`nanowell_rim_unconfirmed` (verdict `RIM_ONLY`, not repairable), and beside
+another verdict a sentence of that well's finding. That covers a dataset whose
+run kept a roster without flagging steps, which nothing in the tables rules
+out.
 The steps then go through `pipeline/nanowell_frames.choose_frame` — the run's
 own ranking (hand-set anchor, central square, array centre, plate-rigid; then
 most timepoints; then earliest), shared with `nanowell_run._settle_steps` so

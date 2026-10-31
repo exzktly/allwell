@@ -109,3 +109,52 @@ def test_a_repaired_well_with_nothing_else_flagged_says_nothing_more(tmp_path):
     rl.relabel_dataset(out, {"A01": plan}, ["m"])
     assert _consistency(out)[0] == {"0h": "consistent", "48h": "consistent"}
     assert rl.plan_dataset(out) == {}
+
+
+#: The +q side of the rim: the sites a step of (1, 0) leaves without a nanowell, and the ones glare over that side of
+#: the well hides.
+PLUS_Q_RIM = {a for a in ROSTER if (a[0] + 1, a[1]) not in R}
+
+
+def test_glare_over_one_side_of_the_rim_at_a_timepoint_the_run_left_consistent_is_not_a_step(tmp_path):
+    """Tracker M13. 48h's addresses are right and its run left it consistent, but glare hid the whole +q side of its
+    rim: the same crescent a step of (1, 0) leaves, written the same way. Validate read it as a step and renamed every
+    nanowell of 48h. Nothing is flagged, so nothing is moved; what the rim reads is reported, as information."""
+    from datasets.validate import nanowell_relabel as rl
+
+    out = _dataset(tmp_path, {
+        "0h": ("fiducial", "consistent", _rows("0h")),
+        "24h": ("fiducial", "consistent", _rows("24h")),
+        "48h": ("array_centre", "consistent", _rows("48h", hidden=PLUS_Q_RIM))})
+    assert rl._step_against_roster(_rows("48h", hidden=PLUS_Q_RIM), R) == (1, 0)     # the rim alone says a step
+    before = {p.name: p.read_bytes() for p in (out / "nanowells").iterdir()}
+    plans = rl.plan_dataset(out)
+    assert {w: (p.verdict, p.moves, p.rim_only, p.repairable) for w, p in plans.items()} == {
+        "A01": (rl.RIM_ONLY, {}, {"48h": (1, 0)}, False)}
+    assert rl.finding_of(plans["A01"]) == (
+        "info", "nanowell_rim_unconfirmed",
+        "A01: the rim of timepoint(s) 48h (as (1, 0) would) is empty on one side as a lattice step would leave it, "
+        "but the run found their nanowells in the other timepoints' frame (they are not flagged roster_mismatch), so "
+        "they are left as they are: a bubble or glare over that side of the rim reads the same way in the tables. If "
+        "the Array view shows their addresses a nanowell off, re-run the well")
+    assert rl.relabel_dataset(out, plans, ["m"]) == []
+    assert {p.name: p.read_bytes() for p in (out / "nanowells").iterdir()} == before
+
+
+def test_a_step_off_timepoint_is_relabelled_alone_beside_a_glared_one_the_run_left_consistent(tmp_path):
+    """48h is a step off and flagged; 24h, square-anchored and consistent, has glare over the same side of its rim.
+    Read from the rim alone, 24h joined 48h's frame, the two outvoted 0h, and 0h was the one renamed."""
+    from datasets.validate import nanowell_relabel as rl
+
+    out = _dataset(tmp_path, {
+        "0h": ("fiducial", "consistent", _rows("0h")),
+        "24h": ("fiducial", "consistent", _rows("24h", hidden=PLUS_Q_RIM)),
+        "48h": ("array_centre", "roster_mismatch", _rows("48h", step=(1, 0), consistency="roster_mismatch"))})
+    plan = rl.plan_dataset(out)["A01"]
+    assert (plan.reference, plan.shifts, plan.roster_offset, plan.unexplained) == ("0h", {"48h": (1, 0)}, (0, 0), ())
+    assert plan.rim_only == {"24h": (1, 0)}
+    assert ". Also, the rim of timepoint(s) 24h (as (1, 0) would) is empty on one side" in rl.finding_of(plan)[2]
+    rl.relabel_dataset(out, {"A01": plan}, ["m"])
+    rows = list(csv.DictReader((out / "nanowells" / "A01.csv").open()))
+    assert {(r["nw_q"], r["nw_r"]) for r in rows if r["timepoint"] == "24h" and r["detected"] == "False"} == {
+        (str(q), str(r)) for q, r in PLUS_Q_RIM}                                    # 24h's addresses untouched

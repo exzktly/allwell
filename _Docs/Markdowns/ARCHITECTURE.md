@@ -10508,15 +10508,28 @@ timepoint's own template carries the threshold measured on it (`Template.texture
 `nanowell_run._confluence_basis` on `out.template["_object"]`, collected in `WellOutcome.templates`). Once its counts
 are known, `nanowell_task._save_confluence_reference` judges each timepoint by them (`nanowell_reference.verdict`:
 `empty` when at most `MAX_LOADED_SHARE`, 5 %, of its counted nanowells hold a cell; `loaded` above; `unverified` with
-nothing counted), records the verdict on the reference's grid blocks (`confluence_reference`), blanks its own
+nothing counted; `false_cells_per_nanowell`, the cells counted per counted nanowell, `None` with nothing counted, is
+the segmenter's false-count baseline under that timepoint's imaging and settings), records the verdict on the reference's grid blocks (`confluence_reference`), blanks its own
 confluence where it was not empty, and saves `nanowells/_confluence_reference/` (`reference.json`: the well, the
 measurement version, the settings key and each verdict; one template `.npz` per empty timepoint). A kept timepoint of
 an incremental run of the reference carries its saved template over (`kept_templates`). Every other well loads it
 (`nanowell_reference.load`, refused under another measurement version or settings key) and reads each timepoint
 against the reference's template **at the same timepoint**: `_confluence_basis` brings its sites to that template's
 levels (`_site_levels` against it, so exposure and light differing between wells and timepoints cancel), and
-`_tile_confluence` divides the tile by it on a second rim-suppressed image and cuts at its threshold. Counting, the
-count's levels and fluorescence still use the well's own template. With no reference named, none measured in the
+`_reference_rim` divides the tile by it on a second rim-suppressed image, which `_tile_confluence` cuts at its
+threshold. The same image is the count's **rim-removed input** (`_segmenter_rim`, `segment_on == "rim"`): the well's
+own template is built from nanowells that all hold cells, so dividing by it takes part of the cells away with the rim
+(on the painted scene of `tests/test_nanowell_segmenter_reference.py`, the cells' edges stand 2.90 floor-noise
+sigma clear of the floor on the own-divided image and 6.78 on the reference-divided one at 60 cells a nanowell; alike
+at 10). A tile keeps its own template for the count when the reference has no template at that timepoint, or has no
+level for one of the tile's nanowells — that nanowell would be flat in the reference image and counted as holding
+nothing — and the second case is a note naming the tile. Each timepoint's template block says which divided the count
+(`segmenter_template`: `source` `reference`, `own` or `mixed`, with the nanowells on each) and carries the reference's
+`reference_false_cells_per_nanowell` there (`Reference.false_cells`, from `reference.json`). The raw input divides by
+nothing, and the count's levels and fluorescence use the well's own template either way. Test detection
+(`pipeline/nanowell_preview.py`) has no reference — it reads the input archives, not an output folder — so it divides
+by the well's own template and, when a reference well is named and the input is rim-removed, says its crops can
+differ from what the run counts (`reference_input_note`). With no reference named, none measured in the
 output folder, none at that timepoint, or one that was not empty there, every site's confluence is `None` — never
 0 — and the timepoint's notes say which (`nanowell_reference.NOTE_PREFIX`). `measure_timepoint` with no reference
 (Test detection) reads a timepoint against itself, which is right only for the empty well. Two limits: the reference

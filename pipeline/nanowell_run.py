@@ -1185,7 +1185,9 @@ def _confluence_basis(located, images, template, reference, norm: Normalisation,
     The reference well itself (``reference.own``) reads itself: its own template is returned carrying its own
     threshold and put on ``out.template``, which is what is saved as the reference. ``None`` for *reference* is the
     same, for a caller measuring one timepoint alone (Test detection). With no reference at this timepoint the
-    threshold is ``None``, so every site's confluence is undefined, and the note says why."""
+    threshold is ``None``, so every site's confluence is undefined, and the note says why. The same calibration
+    divides the rim-removed segmenter input (:func:`_segmenter_rim`), and the reference's false-count baseline at
+    this timepoint (``Reference.false_cells``) is put on ``out.template``, so the grid record carries it."""
     from pipeline import nanowell_measure as nm
     from pipeline import nanowell_reference as ref
 
@@ -1197,6 +1199,11 @@ def _confluence_basis(located, images, template, reference, norm: Normalisation,
     if calibration is None or calibration.texture_cut is None:
         out.notes.append(ref.note(reference, located.timepoint) or f"{ref.NOTE_PREFIX}: the reference has no threshold")
         return template, {}, None
+    # The cells the segmenter counted per nanowell in the empty well at this timepoint: the false-count baseline this
+    # timepoint's counts carry, recorded beside them (absent when the reference was measured before it was kept).
+    false_cells = reference.false_cells.get(located.timepoint)
+    if false_cells is not None:
+        out.template["reference_false_cells_per_nanowell"] = false_cells
     tiles = [t for t in by_tile if t is not None]
     fitted = {t: _local_fit(t, by_tile[t], located, geoms, calibration)[0] for t in tiles}
     levels = _site_levels(located, images, calibration, fitted, geoms, pitch_um,
@@ -1204,26 +1211,72 @@ def _confluence_basis(located, images, template, reference, norm: Normalisation,
     return calibration, levels, calibration.texture_cut
 
 
-def _tile_confluence(owner, indices, located, images, geoms, template, norm: Normalisation, fit_sites, rim) -> dict:
-    """Each of *fit_sites*' confluence against ``norm.confluence`` (:func:`_confluence_basis`), reusing *rim* (the
-    tile divided by the timepoint's own template) when the reference is that template under the same levels. A site
-    the reference template does not cover, or that has no level against it, is ``None``."""
+def _reference_rim(owner, indices, located, images, geoms, template, norm: Normalisation) -> tuple | None:
+    """``(the tile divided by the empty reference well's template, the sites in it)``, or ``None``.
+
+    ``None`` when the timepoint reads against its own template (the reference well itself, or a caller measuring one
+    timepoint alone) or when the reference has no template at this timepoint (``_confluence_basis`` left its
+    threshold ``None``). Each site is brought to the reference template's levels (``norm.confluence``) before the
+    division; a site the reference template does not cover, or that has no level against it, is not among the sites,
+    and its pixels are flat in the image, as every pixel outside a site is (``nanowell_measure.rim_suppress``)."""
     from pipeline import nanowell_measure as nm
 
-    px = located.pixel_size_um
-    basis = norm.confluence or (template, norm.levels, norm.threshold)
-    reference, levels, threshold = basis
+    if norm.confluence is None:
+        return None
+    reference, levels, threshold = norm.confluence
+    if (reference.array is template.array and levels is norm.levels) or threshold is None:
+        return None
+    sites = [g for g in _local_fit(owner, indices, located, geoms, reference)[0] if g.index in levels]
+    if not sites:
+        return np.ones(np.shape(images[owner])), []
+    return nm.rim_suppress(images[owner], located.pixel_size_um, reference, sites, levels=levels), sites
+
+
+def _tile_confluence(fit_sites, px: float, template, norm: Normalisation, rim, reference_rim) -> dict:
+    """Each of *fit_sites*' confluence against ``norm.confluence`` (:func:`_confluence_basis`): on *reference_rim*
+    (:func:`_reference_rim`) when the reference is another well's template, else on *rim* (the tile divided by the
+    timepoint's own template, which is then the reference). A site the reference template does not cover, or that
+    has no level against it, is ``None``; so is every site when the reference has no threshold here."""
+    from pipeline import nanowell_measure as nm
+
+    reference, levels, threshold = norm.confluence or (template, norm.levels, norm.threshold)
     out = dict.fromkeys((g.index for g in fit_sites))
     if reference.array is template.array and levels is norm.levels:
         out.update(zip((g.index for g in fit_sites), nm.site_confluence(rim, px, fit_sites, threshold)))
         return out
-    if threshold is None:
+    if threshold is None or reference_rim is None:
         return out
-    sites = [g for g in _local_fit(owner, indices, located, geoms, reference)[0] if g.index in levels]
+    image, sites = reference_rim
     if sites:
-        rim_ref = nm.rim_suppress(images[owner], px, reference, sites, levels=levels)
-        out.update(zip((g.index for g in sites), nm.site_confluence(rim_ref, px, sites, threshold)))
+        out.update(zip((g.index for g in sites), nm.site_confluence(image, px, sites, threshold)))
     return {i: out.get(i) for i in (g.index for g in fit_sites)}
+
+
+#: Which template the rim-removed segmenter input of a tile was divided by (``_segmenter_rim``): the empty reference
+#: well's at this timepoint, or the well's own, which on a loaded plate is a template of nanowells holding cells.
+SEGMENT_TEMPLATE_REFERENCE = "reference"
+SEGMENT_TEMPLATE_OWN = "own"
+
+
+def _segmenter_rim(settings: NanowellSettings, fit_sites, rim, reference_rim) -> tuple:
+    """``(the rim-removed image the segmenter is given, which template divided it, why not the reference)``.
+
+    Rim removal divides each nanowell by a picture of an empty one. The well's own template is built from its own
+    nanowells, which on a loaded plate all hold cells, so it carries their texture and dividing by it takes part of
+    the cells away with the rim. When the empty reference well has a template at this timepoint, the tile is divided
+    by that one instead — the same image confluence is read on. It must cover every site the tile counts: a site it
+    leaves out is flat in that image and would be counted as holding no cell, so such a tile keeps its own template
+    and says why. Only ``segment_on == "rim"`` asks; the raw input divides by nothing."""
+    if settings.segment_on != "rim":
+        return rim, None, ""
+    if reference_rim is None:
+        return rim, SEGMENT_TEMPLATE_OWN, "no empty reference template at this timepoint"
+    image, sites = reference_rim
+    missing = {g.index for g in fit_sites} - {g.index for g in sites}
+    if missing:
+        return rim, SEGMENT_TEMPLATE_OWN, (f"the empty reference template has no level for {len(missing)} of the "
+                                           "tile's nanowells")
+    return image, SEGMENT_TEMPLATE_REFERENCE, ""
 
 
 def _tile_contents(owner, indices, located, images, settings, geoms, addresses, template, segment, channels,
@@ -1249,11 +1302,16 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
         return {}, {}, notes
     rim = nm.rim_suppress(images[owner], px, template, fit_sites, levels=norm.levels)
     # Against the empty reference well's template and threshold at this timepoint (``_confluence_basis``).
-    confluence = _tile_confluence(owner, indices, located, images, geoms, template, norm, fit_sites, rim)
+    reference_rim = _reference_rim(owner, indices, located, images, geoms, template, norm)
+    confluence = _tile_confluence(fit_sites, px, template, norm, rim, reference_rim)
+    # The rim-removed input is divided by the reference's empty nanowell too, where it has one for every site.
+    seg_rim, seg_template, own_why = _segmenter_rim(settings, fit_sites, rim, reference_rim)
+    if own_why and reference_rim is not None:
+        notes.append(f"Tile {owner}'s rim-removed segmenter input is divided by the well's own template: {own_why}")
     # Each site as the segmenter receives it, written beside its count so a zero the segmenter could not have
     # avoided (cells a few per cent of the tile's range) is told apart from an empty nanowell.
     # Scaled (and, under the nanowells scale, rims and lattice blanked) as the segmenter is given it.
-    seen, lowhigh = nm.segmenter_scale(nm.segmenter_input(images[owner], rim, settings.segment_on), px, fit_sites,
+    seen, lowhigh = nm.segmenter_scale(nm.segmenter_input(images[owner], seg_rim, settings.segment_on), px, fit_sites,
                                        settings.segment_scale)
     view = nm.segmenter_view(seen, px, fit_sites, lowhigh=lowhigh)
     channel_images = {c: img for c, f in (channels or {}).items() if (img := f(owner)) is not None}
@@ -1281,7 +1339,8 @@ def _tile_contents(owner, indices, located, images, settings, geoms, addresses, 
                           "area": None if area is None else area[g.index],
                           "fluor": {c: f[g.index] for c, f in fluorescence.items()},
                           "focus": rim_focus(images[owner], px, g),
-                          "level": norm.levels.get(g.index), "view": view[g.index]} for g in fit_sites}
+                          "level": norm.levels.get(g.index), "view": view[g.index],
+                          "seg_template": seg_template if segment is not None else None} for g in fit_sites}
     return contents, table, notes
 
 
@@ -1520,6 +1579,8 @@ def _finish_timepoint(prep: _Prepared, *, on_segmented=None, inspect: dict | Non
         if own_keep is not None:
             keep[1].update(own_keep[1])
     sites.close()
+    if segment is not None and settings.segment_on == "rim":
+        out.template["segmenter_template"] = _segmenter_template_block(contents)
     for i, address in enumerate(addresses):
         got = contents.get(i)
         state = nm.site_state(visible_fraction=visibility[i].visible_fraction,
@@ -1532,6 +1593,19 @@ def _finish_timepoint(prep: _Prepared, *, on_segmented=None, inspect: dict | Non
         out.sites.append(_site_row(located.timepoint, i, address, geoms[i], visibility[i], coverage[i], got, state,
                                    report.owners[i], detected[i], i in fused, channels, kind))
     return out
+
+
+def _segmenter_template_block(contents: dict) -> dict:
+    """What the grid record says about the template the rim-removed segmenter input was divided by: how many
+    counted nanowells were divided by the empty reference well's, and how many by the well's own (``_segmenter_rim``),
+    so a timepoint counted against a loaded well's own template is never mistaken for one counted against an empty
+    nanowell."""
+    used = [got.get("seg_template") for got in contents.values() if got.get("seg_template")]
+    reference = sum(1 for u in used if u == SEGMENT_TEMPLATE_REFERENCE)
+    source = (None if not used else SEGMENT_TEMPLATE_REFERENCE if reference == len(used)
+              else SEGMENT_TEMPLATE_OWN if reference == 0 else "mixed")      # None: no nanowell was counted
+    return {"source": source,
+            "nanowells_on_reference": reference, "nanowells_on_own": len(used) - reference}
 
 
 # ── a whole well: every timepoint ────────────────────────────────────────────

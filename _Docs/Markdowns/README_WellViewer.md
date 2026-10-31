@@ -241,9 +241,13 @@ it, and in full precision (float32, with the GPU's faster TF32 maths) elsewhere;
 cells, so compare them on one well with **Test detection** before a plate-wide run: its crops show the outlines the
 run itself would count, cut from the whole tile segmented as the run segments it.
 
-**Segment on** chooses the image the model counts cells in. *Rim-removed* (the default) is each nanowell divided by the
-well's picture of an empty nanowell, which takes the bright rim away, so the model is not drawn to it; it is a ratio
-image no model was trained on. *Raw image* is each tile as it was imaged — what Cellpose's models, Cellpose-SAM among
+**Segment on** chooses the image the model counts cells in. *Rim-removed* (the default) is each nanowell divided by a
+picture of an empty nanowell, which takes the bright rim away, so the model is not drawn to it; it is a ratio image no
+model was trained on. With an **Empty reference well** named, that picture is the reference well's at the same
+timepoint: a loaded well's own picture is made from nanowells that all hold cells, so dividing by it fades the cells
+along with the rim, most of all in crowded nanowells. Without one, or on a tile the reference does not fully cover, it
+is the well's own picture, and the timepoint's `template` → `segmenter_template` entry in `<well>_grid.json` says which
+was used. *Raw image* is each tile as it was imaged — what Cellpose's models, Cellpose-SAM among
 them, were trained on — with the nanowell's bright rim in it. Either way a cell is counted
 in a nanowell only when its centre lies inside the nanowell's interior, so a cell found on a rim is not counted, and
 confluence is measured on the rim-removed image. Test detection's crops show the image the model was given (their
@@ -461,8 +465,12 @@ wells, and at every timepoint each well's confluence is read against that well's
 timepoint, which also corrects for exposure or medium changing over the time course. Without one — none named, or a
 timepoint where more than 5 % of its nanowells hold a counted cell, or a timepoint it does not have — **no well has a
 confluence** there (blank, never 0); the timepoint's notes in `<well>_grid.json` and the run log say why, and the
-reference well's grid record holds its verdict (`confluence_reference`). Cell counts and fluorescence do not depend
-on it. Results measured this way carry a measurement version: adding timepoints to a dataset
+reference well's grid record holds its verdict (`confluence_reference`). The reference well also measures how many
+cells the model finds where there are none: its cells counted per nanowell are saved with its verdict
+(`false_cells_per_nanowell`) and written on every other well's timepoint (`template` →
+`reference_false_cells_per_nanowell`), the baseline that well's counts sit on. Counts on the rim-removed image use the
+reference too (see **Segment on**); counts on the raw image, and fluorescence, do not depend on it. **Test detection**
+divides by the well's own picture, because it has no reference to read, and says so when one is named. Results measured this way carry a measurement version: adding timepoints to a dataset
 measured by an earlier version analyses the well again in full, and Merge Plates refuses to combine two datasets
 measured by different versions. The nanowells of a circular array are the
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image

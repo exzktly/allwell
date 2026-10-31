@@ -104,7 +104,11 @@ MIN_LEVEL_CONTRAST = 0.05
 #: timepoint (``pipeline.nanowell_reference``), and is undefined where there is none or it was not empty. Calibrated
 #: from the well itself, a template and a threshold taken from nanowells that all hold cells are the cells' own
 #: texture, and a nanowell half covered read as 1-3 % confluent.
-MEASURE_VERSION = 7
+#: 8: the rim-removed segmenter input is divided by the empty reference well's template at the same timepoint, where
+#: it covers every nanowell of the tile, instead of the well's own (``nanowell_run._segmenter_rim``): on a loaded plate
+#: the own template is built from nanowells that all hold cells, so dividing by it takes part of the cells away. Counts
+#: on that input move; the reference's saved verdict also carries its false-count baseline.
+MEASURE_VERSION = 8
 #: Below this a departure from the template is division noise, not texture (a flat noise-free tile has a spread of 0).
 MIN_TEXTURE_THRESHOLD = 0.02
 #: A timepoint's template whose floor-to-surround ratio (:func:`floor_ratio`) has moved by more than a factor of two

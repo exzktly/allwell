@@ -10497,7 +10497,12 @@ count's levels and fluorescence still use the well's own template. With no refer
 output folder, none at that timepoint, or one that was not empty there, every site's confluence is `None` — never
 0 — and the timepoint's notes say which (`nanowell_reference.NOTE_PREFIX`). `measure_timepoint` with no reference
 (Test detection) reads a timepoint against itself, which is right only for the empty well. The reference folder lies
-under `nanowells/`, so a remote run's fetch of that directory brings it back with the rest; a remote run that does
+under `nanowells/`, so verification's pull of that directory brings it back with the rest — but only as a whole and
+only as this run's: `remote_fetch_nanowells.pull_nanowell_results` sets the local one aside first and
+`_settle_reference` keeps the pulled one only when the well its index names is one this run fetched and every
+template the index names arrived, else puts the local one back and logs why (an index and its templates make
+sense only together: a transfer cut off after `reference.json` paired a new index with old `tpNNNN.npz` of the
+same names, and a copy an earlier attempt left on the host replaced the plate's); a remote run that does
 not measure the reference well itself — a re-run of a few wells, or a resume whose reference finished earlier — is
 sent the local one before its pipeline starts (`services/remote_plate_grids.seed_confluence_reference`, see *The host
 is given the rest of the plate*).

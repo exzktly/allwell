@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tempfile
-from collections.abc import Callable
+import shutil
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from functools import wraps
 from pathlib import Path
 
 from services.remote_run_state import LocalInputMode
-from services.remote_scratch import fingerprint_archives
+from services.remote_scratch import _new_transit_dir, fingerprint_archives
 from util.acquisition_record import (
     RECORD_FILENAME, read_record_file, write_record_file, filter_record_to_paths,
 )
@@ -132,11 +133,32 @@ def _beside_the_archives(zipped, paths, folder: Path) -> tuple[Path, ...]:
     return tuple(files)
 
 
+@contextmanager
+def _carried_files(zipped, paths, log_fn: Callable[[str], None] | None = None) -> Iterator[tuple[Path, ...]]:
+    """The record and anchors for *paths*, written to a transit folder beside the archives and removed afterwards.
+
+    Beside the archives, not in the OS temp folder: a remote run has no other reason to write to the local system
+    drive, and these few kilobytes used to be the one write that did — so a full system drive (macOS keeps its swap
+    there) failed every batch's upload with ``[Errno 28] No space left on device`` while the input, output and
+    scratch volumes all had room. ``_new_transit_dir`` falls back to the scratch folder, and says so, when the
+    archives' volume will not take a directory. Nothing is created when there is nothing to carry.
+    """
+    if _payload(zipped, paths) is None and getattr(zipped, 'nanowell_anchors', None) is None:
+        yield ()
+        return
+    folder = _new_transit_dir(Path(paths[0]).parent, 'allwell-acquisition-', log_fn=log_fn)
+    try:
+        yield _beside_the_archives(zipped, paths, folder)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def carry_upload_record(function):
     @wraps(function)
     def wrapped(cache, zipped, **options):
-        with tempfile.TemporaryDirectory(prefix='allwell-acquisition-') as folder:
-            files = _beside_the_archives(zipped, zipped.well_zips, Path(folder))
+        if not zipped.well_zips:
+            return function(cache, zipped, **options)
+        with _carried_files(zipped, zipped.well_zips, options.get('log_fn')) as files:
             if not files:
                 return function(cache, zipped, **options)
             return function(cache, replace(zipped, extra_upload_files=files), **options)
@@ -146,10 +168,9 @@ def carry_upload_record(function):
 def carry_subset_record(function):
     @wraps(function)
     def wrapped(cache, paths, remote_path, *, acquisition_input=None, **options):
-        if acquisition_input is None:
+        if acquisition_input is None or not paths:
             return function(cache, paths, remote_path, **options)
-        with tempfile.TemporaryDirectory(prefix='allwell-acquisition-') as folder:
-            files = _beside_the_archives(acquisition_input, paths, Path(folder))
+        with _carried_files(acquisition_input, paths, options.get('log_fn')) as files:
             if not files:
                 return function(cache, paths, remote_path, **options)
             return function(cache, paths, remote_path, extra_sources=files, **options)

@@ -172,6 +172,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_tiles.py": "A nanowell well's tiles read from its archive once, or from a node-local copy",
     "test_nanowell_identity_review.py": "Review honours the identity check's verdicts (NANOWELL_IDENTITY_TRACKER C1-C3)",
     "test_nanowell_identity_view.py": "The Nanowells page's Identity view: distances, blink, side by side, diagnostics (tracker D1-D5)",
+    "test_nanowell_identity_rules.py": "The identity check's verdict rules on hand-built tables (review tracker M3, M4, M6, L17-L19)",
     "test_nanowell_relabel_progress.py": "Validate's nanowell relabel says how far it has got, and streams a cell table",
     "test_a_nanowell_release_keeps_what_it_cannot_see.py": "A nanowell batch releases a well from the remote only on answers the host actually gave (row A4)",
     "test_nanowell_anchor_queue.py": "The Array view's Anchor queue: every timepoint the run left unaddressed, shown one montage …",

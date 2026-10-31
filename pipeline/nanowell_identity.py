@@ -849,7 +849,7 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
                      "reference's square correlates: the run took something else for the square")
     if layout["split"]:
         whole.append(layout["reason"])
-    excluded = _excluded(test, layout, other)
+    excluded = _excluded(test, layout, ref, other)
     if not whole and excluded and len(excluded) > PARTIAL_MAX_SHARE * max(test.compared, 1):
         whole.append(f"{len(excluded)} of {test.compared} nanowells are shown wrong, more than half: "
                      f"{diagnosis['detail'] or layout['reason']}")
@@ -884,10 +884,16 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
     return result
 
 
-def _excluded(test: AddressTest, layout: dict, other: Timepoint) -> dict:
+def _excluded(test: AddressTest, layout: dict, ref: Timepoint, other: Timepoint) -> dict:
     """``address -> why`` for the other timepoint's nanowells shown wrong: an address whose mapped reference site
     landed on another's (``wrong_name``), the address it landed on (``neighbour_of_wrong``: that row is another
-    nanowell's), and every nanowell of a tile placed a lattice step off (``misregistered_tile``)."""
+    nanowell's), and every nanowell of a tile placed a lattice step off (``misregistered_tile``).
+
+    A moved tile is wrong in one of the two timepoints and the layout cannot say which, so the addresses it owns at
+    *either* are left out. Its addresses differ between the two at its edge: when the reference's tile is the one a
+    step off, the addresses it owns there are another tile's at the other timepoint, and leaving out only the other
+    timepoint's owners joined each of them to a different physical nanowell (review tracker M3). Only addresses the
+    other timepoint holds are listed: one it does not hold joins nothing already."""
     out: dict = {}
     for q, r, _d, lq, lr, _tile in test.failing:
         if (lq, lr) != (q, r):
@@ -896,6 +902,9 @@ def _excluded(test: AddressTest, layout: dict, other: Timepoint) -> dict:
     moved = {t for t, _d in layout.get("moved") or ()}
     for address, owner in other.owners.items():
         if owner in moved:
+            out[address] = "misregistered_tile"
+    for address, owner in ref.owners.items():
+        if owner in moved and address in other.sites:
             out[address] = "misregistered_tile"
     return out
 

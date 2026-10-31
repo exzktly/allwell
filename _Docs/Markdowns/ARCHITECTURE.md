@@ -10993,7 +10993,9 @@ hidden, and the correlation following a decoy — contradicts correct addresses;
 and nothing in one timepoint's image tells the two apart.
 **Verdicts**: `confirmed`; `partial` — the registration is trusted and most nanowells land on themselves, but some
 are shown wrong, and only those are listed in `excluded` (`_excluded`: an address whose mapped site landed on
-another's, the address it landed on, every nanowell of a moved tile); `contradicted` — the registration or every
+another's, the address it landed on, and every address a moved tile owns at *either* timepoint — the
+layout cannot say which of the two placed it a step off, and at the tile's edge the two own different addresses,
+so leaving out only the compared timepoint's joined the reference's edge rows to other nanowells); `contradicted` — the registration or every
 address at once is wrong (a constant step or a lattice symmetry, a rim centre 1.5 pitches off, a square the run
 took elsewhere, a split tile layout, a mirror or another lattice kind, or more than `PARTIAL_MAX_SHARE` (half) of the
 nanowells shown wrong); `inconclusive` (no reference square, no montage, a margin too low, an unaddressed timepoint,

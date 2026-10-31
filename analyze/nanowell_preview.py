@@ -79,8 +79,8 @@ def summary_text(result) -> str:
     overlap = [f"{o:.0f}" if o is not None else "-" for o in result.overlap_um]
     short = any(o is not None and o < result.overlap_needed_um for o in result.overlap_um)
     lines.append(f"Overlap between tiles {overlap[0]} × {overlap[1]} µm against the {result.overlap_needed_um:.0f} µm a "
-                 f"nanowell needs" + (": too short, so nanowells on the seams are fused (measured from a blended "
-                                       "crop, with no cell count)." if short else "."))
+                 f"nanowell needs" + (": too short, so nanowells on the seams are fused (counted from a crop "
+                                       "blended from the tiles covering them)." if short else "."))
     counts = result.counts()
     lines.append("Sites: " + ", ".join(f"{n} {k}" for k, n in sorted(counts.items())) + ".")
     lines += result.notes

@@ -14,10 +14,13 @@ condition here, and its presets are still one click away (:meth:`Subset.starting
   earliest or latest, a named one, or at *any* or *every* timepoint of the well;
 * the nanowell's place in its array: ``ring`` (lattice steps from the central nanowell), ``distance_um`` (µm from
   the central nanowell on the ideal lattice of the well's measured pitch), ``nw_q`` and ``nw_r`` (its address);
-* ``owner`` — the imaging field (tile) the run cut the nanowell from, at a timepoint as a metric is.
+* ``owner`` — the imaging field (tile) the run cut the nanowell from, at a timepoint as a metric is;
+* ``fused`` — whether the nanowell lay on a tile seam at a timepoint (no one tile held it with margin, so it was
+  measured from a crop blended from the tiles covering it, ``pipeline.nanowell_seams``), so the nanowells on the
+  seams can be kept alone or left out.
 
 A numeric field is compared with ``≥``, ``≤``, ``=``, *between* two values or *not between* them (both bounds
-inclusive); the imaging field *is one of* or *is not one of* a set of tiles.
+inclusive); the imaging field *is one of* or *is not one of* a set of tiles; *on a tile seam* is *yes* or *no*.
 
 **Every nanowell is in, out, or undecided.** Each condition answers yes, no, or "no value" for a nanowell (a count
 that was occluded at the baseline, a tile with no recorded pitch, a timepoint the nanowell was not seen at). A
@@ -57,6 +60,8 @@ POSITION_FIELDS = {"ring": "Ring (steps from the centre)", "distance_um": "Dista
                    "nw_q": "Lattice q", "nw_r": "Lattice r"}
 #: The imaging field (tile) a nanowell was cut from at a timepoint.
 TILE = "owner"
+#: Whether the nanowell lay on a tile seam at a timepoint: the site table's ``fused`` flag.
+SEAM = "fused"
 #: The fields whose values are whole numbers: their bounds are typed without decimals.
 INTEGER_FIELDS = frozenset({START, "n", "ring", "nw_q", "nw_r"})
 #: Fold changes are measured from the baseline, so a condition on one depends on the Baseline control.
@@ -65,6 +70,7 @@ _FOLD_CHANGES = ("count_fc", "log2_count_fc", "confluence_fc", "brightness_fc", 
 #: How a numeric field is compared, and how the imaging field is: op -> what the editor and the figure write.
 NUMERIC_OPS = {"ge": "≥", "le": "≤", "eq": "=", "between": "between", "outside": "not between"}
 CATEGORY_OPS = {"in": "is one of", "not_in": "is not one of"}
+FLAG_OPS = {"yes": "yes", "no": "no"}
 #: Which timepoint a per-timepoint field is read at; a named timepoint is ``tp:<label>``.
 ATS = {"baseline": "at baseline", "earliest": "at the earliest timepoint", "latest": "at the latest timepoint",
        "any": "at any timepoint", "every": "at every timepoint"}
@@ -87,12 +93,13 @@ def metric_of(column: str) -> tuple[str, str | None] | None:
 
 
 def is_known_field(name) -> bool:
-    return isinstance(name, str) and (name in (START, TILE) or name in POSITION_FIELDS or metric_of(name) is not None)
+    return isinstance(name, str) and (name in (START, TILE, SEAM) or name in POSITION_FIELDS
+                                      or metric_of(name) is not None)
 
 
 def per_timepoint(name: str) -> bool:
     """Whether *name* has a value per timepoint, and so is tested *at* one."""
-    if name == TILE:
+    if name in (TILE, SEAM):
         return True
     metric = metric_of(name)
     return metric is not None and metric[0] not in PER_NANOWELL
@@ -102,11 +109,18 @@ def is_category(name: str) -> bool:
     return name == TILE
 
 
+def is_flag(name: str) -> bool:
+    """Whether *name* is a yes/no field, tested with *yes* or *no* and no bound."""
+    return name == SEAM
+
+
 def field_label(name: str) -> str:
     if name == START:
         return "Starting cells"
     if name == TILE:
         return "Imaging field"
+    if name == SEAM:
+        return "On a tile seam"
     if name in POSITION_FIELDS:
         return POSITION_FIELDS[name]
     metric = metric_of(name)
@@ -127,11 +141,12 @@ def field_choices(channels=()) -> list[tuple[str, str, str]]:
             out.append((column, field_label(column), "Metric"))
     out += [(name, label, "Position") for name, label in POSITION_FIELDS.items()]
     out.append((TILE, field_label(TILE), "Imaging"))
+    out.append((SEAM, field_label(SEAM), "Imaging"))
     return out
 
 
 def ops_for(name: str) -> dict:
-    return CATEGORY_OPS if is_category(name) else NUMERIC_OPS
+    return CATEGORY_OPS if is_category(name) else FLAG_OPS if is_flag(name) else NUMERIC_OPS
 
 
 def _uses_baseline(name: str, at: str) -> bool:
@@ -183,6 +198,8 @@ class Condition:
             if not values:
                 raise ValueError(f"choose at least one {field_label(self.field).lower()}")
             return Condition(self.field, self.op, None, None, at, tuple(sorted(values)))
+        if is_flag(self.field):
+            return Condition(self.field, self.op, None, None, at, ())
         whole = self.field in INTEGER_FIELDS
         a = _number(self.a, whole)
         b = _number(self.b, whole) if self.op in ("between", "outside") else None
@@ -208,6 +225,8 @@ class Condition:
         label = field_label(self.field) + where
         if is_category(self.field):
             return f"{label} {CATEGORY_OPS[self.op]} {', '.join(self.values)}"
+        if is_flag(self.field):
+            return f"{label}: {FLAG_OPS[self.op]}"
         if self.field == START and self.op != "outside":
             return f"{label} {sc.bounds_text(*self.bounds())}"
         a, b = _fmt(self.a), _fmt(self.b) if self.b is not None else ""
@@ -218,7 +237,7 @@ class Condition:
         out = {"field": self.field, "op": self.op}
         if is_category(self.field):
             out["values"] = list(self.values)
-        else:
+        elif not is_flag(self.field):
             out["a"] = self.a
             if self.b is not None:
                 out["b"] = self.b
@@ -336,6 +355,8 @@ def _compare(values: np.ndarray, c: Condition) -> np.ndarray:
         passed = hit if c.op == "in" else ~hit
         return np.where(known, passed.astype(float), np.nan)
     v = np.asarray(values, dtype=float)
+    if is_flag(c.field):
+        return np.where(np.isnan(v), np.nan, (v == (1.0 if c.op == "yes" else 0.0)).astype(float))
     if c.op == "outside":
         passed = (v < c.a) | (v > c.b)
     else:
@@ -383,6 +404,8 @@ def _row_values(metrics: pd.DataFrame, name: str) -> np.ndarray:
         return np.full(len(metrics), np.nan, dtype=object if is_category(name) else float)
     if is_category(name):
         return metrics[name].astype(object).where(metrics[name].notna(), None).to_numpy()
+    if is_flag(name):
+        return metrics[name].map(_flag_value).to_numpy(dtype=float)
     return pd.to_numeric(metrics[name], errors="coerce").to_numpy(dtype=float)
 
 
@@ -400,6 +423,14 @@ def _per_timepoint(metrics: pd.DataFrame, codes: np.ndarray, n_sites: int, c: Co
         return out.astype(float)
     rows = frame[_timepoint_rows(metrics, c.at)]
     return rows.groupby("site")["v"].max().reindex(range(n_sites)).to_numpy(dtype=float)
+
+
+def _flag_value(value) -> float:
+    """1 / 0 for a yes/no cell as the site table reads it (a bool, or its text), NaN when there is none."""
+    if isinstance(value, (bool, np.bool_)):
+        return float(value)
+    text = str(value).strip().lower() if isinstance(value, str) else None
+    return 1.0 if text == "true" else 0.0 if text == "false" else float("nan")
 
 
 def _site_answers(metrics: pd.DataFrame, subset: Subset, data=None) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:

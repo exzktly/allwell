@@ -63,6 +63,8 @@ _metric_column = _lazy("review.features.nanowell.distribution_compute", "metric_
 _match_channel = _lazy("review.features.nanowell.distribution_compute", "match_channel")
 _moving_window_for = _lazy("review.features.nanowell.distribution_compute", "moving_window_for")
 _moving_max = _lazy("review.features.nanowell.moving_compute", "max_window")
+_baseline_window_for = _lazy("review.features.nanowell.moving_compute", "baseline_window_for")
+_base_value = _lazy("review.features.nanowell.moving_compute", "base_value")
 _format_cut = _lazy("review.features.nanowell.distribution_compute", "format_cut")
 _parse_threshold = _lazy("review.features.nanowell.controller", "parse_threshold")
 _load_nanowell_data = _lazy("review.features.nanowell.collect", "load_nanowell_data")
@@ -153,6 +155,17 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                      "many timepoints ending at it, as the page's Moving average control. The "
                                      "summary CSV's moving_average column says the window each row used.")
         row.addWidget(self._moving_spin)
+        self._baseline_moving_spin = QSpinBox()
+        self._baseline_moving_spin.setRange(1, _moving_max())
+        self._baseline_moving_spin.setSpecialValueText("Baseline average: off")
+        self._baseline_moving_spin.setPrefix("Baseline average: ")
+        self._baseline_moving_spin.setSuffix(" timepoints")
+        self._baseline_moving_spin.setToolTip(
+            "With the moving average on, a fold change's baseline as the mean over this many timepoints ending at "
+            "the baseline timepoint, as the page's Baseline average control. Not used with the Earliest baseline, "
+            "which has nothing before it. The summary CSV's baseline_moving_average column says the window each "
+            "row used.")
+        row.addWidget(self._baseline_moving_spin)
         row.addStretch(1)
         layout.addLayout(row)
 
@@ -269,6 +282,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         self._axis_cb.setEnabled(view == "distribution")
         self._cohort_box.setEnabled(view in ("distribution", "trajectories"))
         self._moving_spin.setEnabled(view in ("distribution", "trajectories"))
+        self._baseline_moving_spin.setEnabled(view in ("distribution", "trajectories"))
         self._tp_cb.setEnabled(view in ("distribution", "array", "position"))
 
     def _refresh_timepoints(self) -> None:
@@ -335,6 +349,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
                 "baseline": self._baseline_cb.currentData(), "timepoint": self._tp_cb.currentData(),
                 "cohort": self._cohort_box.isChecked(), "metrics": self._selected_metrics(),
                 "moving": self._moving_spin.value() if self._moving_spin.value() >= 2 else 0,
+                "baseline_moving": (self._baseline_moving_spin.value()
+                                    if self._baseline_moving_spin.value() >= 2 else 0),
                 "fmt": self._fmt_cb.currentText(), "channel": self._ctx.state.channel.active_channel,
                 "thresholds": self._thresholds()[0], "subset": self._subset()}
 
@@ -461,12 +477,14 @@ class NanowellBatchExportPanel(BatchExportPanel):
                         _draw_view(fig, view, metrics, data, groups=groups, metric=drawn, channel=channel,
                                    axis=settings["axis"], timepoint=self._timepoint_for(data, wells, settings),
                                    control="", baseline=settings["baseline"], cohort=settings["cohort"],
-                                   moving=settings["moving"], well=well or "", well_timepoint=shown if well else "",
+                                   moving=settings["moving"], baseline_moving=settings["baseline_moving"],
+                                   well=well or "", well_timepoint=shown if well else "",
                                    note=note, tableless=tableless, responding_above=cut,
                                    subset=settings["subset"])
                     self._figure_view = {"view": view, "metric": drawn, "axis": settings["axis"],
                                          "baseline": settings["baseline"], "cohort": settings["cohort"],
                                          "moving": settings["moving"],
+                                         "baseline_moving": settings["baseline_moving"],
                                          "well": well or "", "timepoint": shown,
                                          "subset": settings["subset"]}
                     if view == "array":                  # a gallery record restores the layers it was drawn with
@@ -480,13 +498,18 @@ class NanowellBatchExportPanel(BatchExportPanel):
             said = " ".join(filter(None, [_subset_note(filtered) if filtered is not None else "", note]))
             over_time = view in ("distribution", "trajectories")
             moving = _moving_window_for(drawn, settings["moving"]) if over_time else 0
+            column = _metric_column(drawn, channel)
+            base_moving = (_baseline_window_for(moving, settings["baseline_moving"], settings["baseline"])
+                           if _base_value(column) is not None else 0)
             table = (_wells_summary(kept, wells, drawn, channels=data.channels, channel=channel,
-                                    cohort=settings["cohort"] and over_time, responding_above=cut, moving=moving)
+                                    cohort=settings["cohort"] and over_time, responding_above=cut, moving=moving,
+                                    baseline_moving=base_moving)
                      if filtered is None or filtered.kept else None)
             if table is not None:
                 tables.append(table.assign(metric=drawn, channel=channel or "", requested_metric=metric,
                                            group=grp.name, note=said, responding_above=cut,
-                                           moving_average=moving or None))
+                                           moving_average=moving or None,
+                                           baseline_moving_average=base_moving or None))
         try:
             self._write_summary(self._out_path(write_dir, f"{safe}_summary.csv"), tables, grp, tableless,
                                 settings)
@@ -547,7 +570,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
         rows = [frame] + [pd.DataFrame([{"group": grp.name, "well": w, "note": "no nanowell table"}])
                           for w in tableless]
         out = pd.concat(rows, ignore_index=True)
-        for column in ("n_sites", "n_used", "tp_order", "moving_average"):   # counts stay counts
+        for column in ("n_sites", "n_used", "tp_order", "moving_average",
+                       "baseline_moving_average"):                                # counts stay counts
             if column in out.columns:
                 out[column] = out[column].astype("Int64")
         lead = ["group", "metric", "channel", "well", "timepoint", "time_h", "baseline"]

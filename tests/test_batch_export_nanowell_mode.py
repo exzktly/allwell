@@ -293,3 +293,45 @@ def test_a_well_excluded_on_the_page_is_still_drawn_by_its_batch_group(panel, tm
     assert [c["groups"] for c in calls] == [{"A01": ["A01"]}] * 2
     rows = list(csv.DictReader((tmp_path / "export" / "nanowell_Drug_A_summary.csv").open()))
     assert {r["metric"] for r in rows if r["well"] == "A01"} == {"n", "c"}
+
+
+def test_the_baseline_s_window_reaches_the_figure_and_the_csv_says_which_window_each_row_used(panel, tmp_path,
+                                                                                             monkeypatch):
+    """The panel's baseline window goes to the page's composition and into the summary, which is the page's
+    summary at that window. Under First measurable it is used; the CSV's column names it per row, and a metric
+    that is not a fold change says none."""
+    from review.features.nanowell.collect import load_nanowell_data
+    from review.features.nanowell.distribution_compute import wells_summary
+    from PySide6.QtCore import Qt
+
+    from review.features.batch_export import nanowell_panel
+    from review.features.nanowell.series_compute import site_metrics
+
+    p, ctx = panel
+    calls = []
+    from review.features.nanowell import controller
+    real = controller.draw_view
+    monkeypatch.setattr(nanowell_panel, "_draw_view", lambda fig, view, *a, **kw: (
+        calls.append(kw["baseline_moving"]), real(fig, view, *a, **kw))[1])
+    for i in range(p._metric_list.count()):
+        item = p._metric_list.item(i)
+        item.setCheckState(Qt.Checked if item.data(Qt.UserRole) in ("n", "count_fc") else Qt.Unchecked)
+    p._threshold_edits["count_fc"].setText("1")
+    p._baseline_cb.setCurrentIndex(p._baseline_cb.findData("first_measurable"))
+    p._moving_spin.setValue(2)
+    p._baseline_moving_spin.setValue(2)
+    assert p._run_settings()["baseline_moving"] == 2
+    p._run_batch()
+    assert calls == [2, 2]
+    rows = list(csv.DictReader((tmp_path / "export" / "nanowell_Drug_A_summary.csv").open()))
+    fold = [r for r in rows if r["metric"] == "count_fc" and r["well"] == "A01"]
+    counts = [r for r in rows if r["metric"] == "n" and r["well"] == "A01"]
+    assert fold and {r["baseline_moving_average"] for r in fold} == {"2"}
+    assert counts and {r["baseline_moving_average"] for r in counts} == {""}
+    data = load_nanowell_data(ctx.state.dataset.data_dir)
+    metrics = site_metrics(data, "first_measurable")
+    expected = wells_summary(metrics, ["A01"], "count_fc", channels=data.channels, moving=2, baseline_moving=2)
+    single = wells_summary(metrics, ["A01"], "count_fc", channels=data.channels, moving=2)
+    assert list(expected["excluded"]) != list(single["excluded"])       # the fixture can tell the two apart
+    said = ["; ".join(f"{k}: {v}" for k, v in sorted(d.items())) for d in expected["excluded"]]
+    assert [r["excluded"] for r in fold] == said

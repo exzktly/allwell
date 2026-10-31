@@ -567,8 +567,8 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
 
 
 def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None) -> None:
-    """The counted cells inside *crop*, as the Array view's Cells layer draws them: a light dot with a dark rim at
-    each centre (the run keeps no outlines). *tally* adds up what was drawn and which crops had no cell table, for
+    """The counted cells of *crop*'s own nanowell, as the Array view's Cells layer draws them: a light dot with a dark
+    rim at each centre (the run keeps no outlines); a neighbour's cells in the crop's margin are not drawn. *tally* adds up what was drawn and which crops had no cell table, for
     the caption."""
     from ui.nanowell_sites import CELL_COLOUR, CELL_EDGE_COLOUR
 
@@ -595,7 +595,7 @@ def _cells_clause(tally: dict) -> str:
     be read — never that it holds no cells."""
     if not tally:
         return ""
-    said = [f"dots: the {tally.get('drawn', 0):,} cells the run counted in view"] if "drawn" in tally else []
+    said = [f"dots: the {tally.get('drawn', 0):,} cells the run counted in this nanowell"] if "drawn" in tally else []
     if tally.get("gated"):
         said.append(f"{tally['gated']:,} more Cell Gating leaves out, not drawn")
     if tally.get("in_fields"):

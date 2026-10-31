@@ -63,6 +63,9 @@ class Reference:
     default: str = ""
     codes: dict = field(default_factory=dict)
     default_code: str = "absent"
+    #: timepoint -> cells the segmenter counted per nanowell in the reference well there (:func:`verdict`): its rate
+    #: of counting a cell where there is none, under the same imaging and settings as every other well.
+    false_cells: dict = field(default_factory=dict)
 
     def at(self, timepoint) -> tuple:
         """``(template or None, why there is none)`` at *timepoint*."""
@@ -149,8 +152,12 @@ def verdict(rows: list) -> dict:
     counted = [n for n in counts if n is not None]
     loaded = sum(1 for n in counted if n > 0) / len(counted) if counted else None
     status = UNVERIFIED if loaded is None else LOADED if loaded > MAX_LOADED_SHARE else EMPTY
+    # Every cell counted in a well that holds none was invented by the segmenter (or is debris it took for a cell):
+    # per nanowell, that is the false-count baseline every other well's counts carry at this timepoint. Undefined
+    # (None, not 0) when nothing was counted.
+    false_cells = sum(counted) / len(counted) if counted else None
     return {"status": status, "loaded_share": loaded, "nanowells_counted": len(counted),
-            "max_loaded_share": MAX_LOADED_SHARE}
+            "max_loaded_share": MAX_LOADED_SHARE, "false_cells_per_nanowell": false_cells}
 
 
 def reason(well: str, timepoint, found: dict | None) -> str:
@@ -226,15 +233,17 @@ def load(output_dir, settings) -> Reference:
             json.dumps(settings.key(), default=str)):
         return Reference(default=f"the empty reference well {well} was measured under other settings; run it "
                                  "again with these", default_code="other_settings")
-    templates, reasons, codes = {}, {}, {}
+    templates, reasons, codes, false_cells = {}, {}, {}, {}
     for tp, found in index.get("timepoints", {}).items():
         loaded = nm.load_template(directory(output_dir) / found["template"]) if found.get("template") else None
         if loaded is not None and found["status"] == EMPTY:
             templates[tp] = loaded[0]
+            if found.get("false_cells_per_nanowell") is not None:
+                false_cells[tp] = float(found["false_cells_per_nanowell"])
         else:
             reasons[tp] = reason(well, tp, found)
             codes[tp] = found["status"] if found.get("status") != EMPTY else "untemplated"
-    return Reference(templates=templates, reasons=reasons, codes=codes,
+    return Reference(templates=templates, reasons=reasons, codes=codes, false_cells=false_cells,
                      default=f"the empty reference well {well} has no such timepoint")
 
 

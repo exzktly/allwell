@@ -5725,7 +5725,10 @@ the sentence names it.
     `q,r` when both are on). A nanowell without a value has no number written, never a 0. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
     from the run's cell table, so you can see where cells were found and where none were; the run does not
     keep cell outlines, so the dot is the cell's centre, not its shape. On *Lattice* positions each dot keeps
-    its place inside its nanowell, and **Overlays** hides the dots with the other coloured layers. Datasets
+    its place inside its nanowell, and **Overlays** hides the dots with the other coloured layers. A cell that
+    Cell Gating leaves out — below or above your QC area limits, deleted by hand, outside a gate — is drawn as a
+    hollow ring instead of a filled dot, so the filled dots in a nanowell are exactly the cells its count (and
+    every plot) counts, and the footer says how many of each there are. Datasets
     analysed before this setting existed show their cells too: nothing needs re-running. *Tiles* outlines each tile, coloured by how it was placed (green on the lattice, blue by
     overlap, amber where the acquisition record put it), with its registration residual; a tile whose size the
     record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
@@ -5778,8 +5781,11 @@ it like any window. Its own row of controls sets the crops where you look at the
 and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
 Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted on every
 crop — the strip, the pop-out and the Extremes montage — as the Array view's *Cells* layer does on the array (the
-run keeps no cell outlines). It is one setting, also offered on the Extremes view, and kept with the page's
-settings. The caption counts the dots, and a well without a cell table is named there rather than shown as empty.
+run keeps no cell outlines). Only the cells counted in that nanowell are drawn, not a neighbour's that the
+square crop happens to reach, and a cell Cell Gating leaves out is a hollow ring, so the filled dots match the
+cell count written under the crop. It is one setting, also offered on the Extremes view, and kept with the page's
+settings. The caption counts the filled and hollow dots, and a well without a cell table is named there rather than
+shown as empty.
 The box beside **Cells** chooses what the crops are an image of: *Phase* (the image the run segmented), or any
 fluorescence channel the run read — EGFP, say — cut from that channel's image of the same tile, at the same place.
 It is one setting for every picture on the page: the strip, the pop-out, the Extremes montage and the Array view's

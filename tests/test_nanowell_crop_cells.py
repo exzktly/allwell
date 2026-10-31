@@ -122,7 +122,7 @@ def test_the_cells_box_draws_each_timepoint_s_cells_on_the_strip_and_the_pop_out
     assert page.state.feature_slice("nanowell").crop_cells is True
     assert _dots(page, "_nw_strip_fig") == [CELLS["t_c"], CELLS["t_a"]]
     caption = [t.get_text() for t in page.widgets.get("_nw_strip_fig").texts if t.get_gid() == "nw-crop-caption"]
-    assert caption[0].endswith("; dots: the 4 cells the run counted in view")
+    assert caption[0].endswith("; dots: the 4 cells counted in the nanowell")
     _press(qtbot, page, "_nw_popout_btn")
     qtbot.addWidget(page.widgets.get("_nw_popout"))
     assert _dots(page, "_nw_popout_fig") == [CELLS["t_c"], CELLS["t_a"]]

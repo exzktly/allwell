@@ -116,7 +116,9 @@ class MaskStore:
     """One well's masks: those an earlier run left (read from *source*, if any) and those this run makes.
 
     :meth:`wrap` gives a segmenter that answers from the store where it can; :meth:`save` writes the store to
-    *target*. :attr:`hits` and :attr:`misses` count the segmenter calls answered and made, for the run log."""
+    *target*. :attr:`hits` counts the segmenter calls answered from an earlier run's masks, :attr:`repeats` those
+    answered from this run's own (the same input asked for twice, as a well analysed again from the start asks),
+    and :attr:`misses` the calls made, for the run log."""
 
     def __init__(self, source: Path | None, target: Path):
         self.target = Path(target)
@@ -124,7 +126,7 @@ class MaskStore:
         self._prior: dict[str, tuple[str, tuple]] = {}        # key -> (timepoint, packed)
         self._used: dict[str, tuple[str, tuple]] = {}
         self._touched: set[str] = set()
-        self.hits = self.misses = 0
+        self.hits = self.repeats = self.misses = 0
         if source is not None and Path(source).is_file():
             self._prior = self._read(Path(source))
 
@@ -151,11 +153,15 @@ class MaskStore:
 
     def _get(self, key: str, timepoint: str) -> np.ndarray | None:
         with self._lock:
-            found = self._used.get(key) or self._prior.get(key)
-            if found is None:
-                self.misses += 1
-                return None
-            self.hits += 1
+            found = self._used.get(key)
+            if found is not None:
+                self.repeats += 1
+            else:
+                found = self._prior.get(key)
+                if found is None:
+                    self.misses += 1
+                    return None
+                self.hits += 1
             self._used[key] = (timepoint, found[1])
         return _unpack(found[1])
 
@@ -231,8 +237,8 @@ class MaskStore:
 
     def summary(self) -> str:
         """One line for the run log: how many segmenter calls the store answered."""
-        total = self.hits + self.misses
+        total = self.hits + self.repeats + self.misses
         if not total:
             return "no cell masks were needed"
-        return (f"{self.hits} of {total} segmenter input(s) had their cell masks from an earlier run; "
-                f"{self.misses} segmented")
+        text = f"{self.hits} of {total} segmenter input(s) had their cell masks from an earlier run, {self.misses} segmented"
+        return text + (f", {self.repeats} repeated within this run" if self.repeats else "")

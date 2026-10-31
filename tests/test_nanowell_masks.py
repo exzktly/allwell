@@ -55,6 +55,10 @@ def test_a_second_run_over_the_same_pixels_segments_nothing(tmp_path):
     assert len(calls) == 1, "the same input was segmented again"
     assert (second.hits, second.misses) == (1, 0)
     np.testing.assert_array_equal(again, got)
+    second.wrap(segment, "0h")(_image(), lowhigh=(0.1, 0.9), max_size_fraction=1.0)
+    assert (second.hits, second.repeats, len(calls)) == (1, 1, 1)
+    assert second.summary() == ("1 of 2 segmenter input(s) had their cell masks from an earlier run, 0 segmented, "
+                                "1 repeated within this run")
     assert again.dtype == np.int64                   # as segment_sites takes it
 
 

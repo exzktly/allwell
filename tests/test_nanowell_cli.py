@@ -222,6 +222,26 @@ def test_an_incremental_run_adds_only_the_new_timepoint_onto_the_same_roster(tmp
     assert located_calls["locate"] == [] and located_calls["measure"] == []                 # up to date
 
 
+def test_an_incremental_run_of_the_empty_reference_well_saves_the_new_timepoint(tmp_path, monkeypatch):
+    """Adding a timepoint to a plate whose empty reference well was measured before (tracker H1). The kept
+    timepoint's site rows come back from ``nanowells/<well>.csv`` as text, and the reference's verdict was taken over
+    them beside the new timepoint's numbers: ``'0' > 0`` raised, the well failed, and every other well then read the
+    new timepoint with no confluence. Both timepoints must be judged, from the counts, and saved."""
+    from pipeline import nanowell_reference as nref
+
+    plate, _record, _ = _two_timepoint_plate(tmp_path, with_second=False)
+    out = _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--nanowell_empty_well", WELL)
+    assert set(nref.read_index(out)["timepoints"]) == {"0h"}
+
+    plate2, record2, _ = _two_timepoint_plate(tmp_path / "second")
+    (plate / "in" / f"{WELL}.zip").write_bytes((plate2 / "in" / f"{WELL}.zip").read_bytes())
+    write_record_file(plate / "in" / "acquisition.json", record2)
+    _run_main(monkeypatch, plate, "--nanowell_format", "100um", "--incremental", "--nanowell_empty_well", WELL)
+    saved = nref.read_index(out)["timepoints"]
+    assert {tp: v["status"] for tp, v in saved.items()} == {"0h": nref.EMPTY, "24h": nref.EMPTY}
+    assert saved["0h"]["nanowells_counted"] > 100 and saved["0h"]["loaded_share"] == 0.0
+
+
 def test_an_incremental_run_over_a_csv_without_timepoint_hours_writes_it_for_every_row(tmp_path, monkeypatch):
     """A CSV from a run before the per-cell table carried ``timepoint_hours``: the kept timepoint's rows are read
     back without it and written ahead of the new timepoint's, in one table whose header comes from its first row."""

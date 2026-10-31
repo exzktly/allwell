@@ -6,7 +6,7 @@ of the 34 pull requests merged to `main` between 2026-10-28 and 2026-10-31 (#108
 finding, updated in the same commit as its fix, closed only with evidence (a test watched failing without the fix),
 and deleted by the pull request that closes its last row.
 
-**Status, derived from the rows below:** 51 rows — 51 `todo`, 0 `done`, 0 `declined`.
+**Status, derived from the rows below:** 51 rows — 50 `todo`, 1 `done`, 0 `declined`.
 Recount with `grep -c '| \`todo\` |'` and so on; never edit this line by hand alone.
 
 Each finding was a hypothesis about the tree at `9d322ae`. "Established" means the reviewer ran a script or a
@@ -18,7 +18,7 @@ of `9d322ae` and will drift.
 
 | # | PR | Finding | Where | Basis | State | Evidence |
 |---|---|---|---|---|---|---|
-| H1 | #1119 | An incremental run of the empty reference well raises `TypeError`: `verdict` compares `n_cells > 0` on site rows read back from CSV as strings. `reference.json` is not written for the new timepoint and every other well finishes it with blank confluence, sealed complete | `pipeline/nanowell_reference.py:93-94`, fed by `pipeline/nanowell_task.py:826-828` (`_prior_state` → `_read_rows`) | Established | `todo` | |
+| H1 | #1119 | An incremental run of the empty reference well raises `TypeError`: `verdict` compares `n_cells > 0` on site rows read back from CSV as strings. `reference.json` is not written for the new timepoint and every other well finishes it with blank confluence, sealed complete | `pipeline/nanowell_reference.py:93-94`, fed by `pipeline/nanowell_task.py:826-828` (`_prior_state` → `_read_rows`) | Established | `done` | `verdict` reads each count as a number (`_cell_count`: text, `''`, NaN and `None` handled). `tests/test_nanowell_cli.py::test_an_incremental_run_of_the_empty_reference_well_saves_the_new_timepoint` runs the plate, adds a timepoint and runs it incrementally through `process_microscopy.main`; on the old code it raised `TypeError: '>' not supported between instances of 'str' and 'int'` at `nanowell_reference.py:94` |
 | H2 | #1119 | A remote re-run without the reference well is not sent `nanowells/_confluence_reference/`, so the re-run wells come back with confluence `None` and the fetch overwrites good local values. A batched resume drops the locally complete reference before `nanowell_reference_first`, with the same effect | `services/remote_plate_grids.py:40-50`, `services/remote_process.py:985-993` | Established | `todo` | |
 | H3 | #1116 | Cell Gating subtracts every cell `df_included_mask` leaves out, including location layers (Crop, Field, Excluded_Field, FOV, Focus). A nanowell whose cells are all removed for where they are becomes `measured` with `n = 0` and `count_fc = 0` instead of being excluded with a reason | `review/features/nanowell/cell_gate_compute.py:123`, `series_compute.py:242` | Established | `todo` | |
 | H4 | #1093/#1096 | A relabel that fails after rewriting the cell tables but before the sites table and grid is replanned identically on retry, so the cells move a second lattice step and the new backup saves already-moved cells | `datasets/validate/nanowell_relabel.py:343-350`, `datasets/validate/apply.py:162-166` | Established | `todo` | |

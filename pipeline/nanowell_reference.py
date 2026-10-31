@@ -88,10 +88,24 @@ def reference_well_first(settings, items: list) -> tuple[list, list]:
     return first, [item for item in items if item not in first]
 
 
+def _cell_count(value) -> float | None:
+    """A site row's ``n_cells`` as a number, or ``None`` when it was not counted. A row the run just made holds an
+    int or ``None``; a kept row read back from ``nanowells/<well>.csv`` holds text, where not counted is ``''``."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        count = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if count != count else count          # NaN: not counted
+
+
 def verdict(rows: list) -> dict:
-    """Whether the reference well was empty at one timepoint, from its *rows* there (``nanowells/<well>.csv``)."""
-    counted = [r for r in rows if r.get("state") in ("empty", "measured") and r.get("n_cells") is not None]
-    loaded = sum(1 for r in counted if r["n_cells"] > 0) / len(counted) if counted else None
+    """Whether the reference well was empty at one timepoint, from its *rows* there (``nanowells/<well>.csv``).
+    The rows may be the run's own or kept ones read back from the CSV, so each count is read as a number."""
+    counts = [_cell_count(r.get("n_cells")) for r in rows if r.get("state") in ("empty", "measured")]
+    counted = [n for n in counts if n is not None]
+    loaded = sum(1 for n in counted if n > 0) / len(counted) if counted else None
     status = UNVERIFIED if loaded is None else LOADED if loaded > MAX_LOADED_SHARE else EMPTY
     return {"status": status, "loaded_share": loaded, "nanowells_counted": len(counted),
             "max_loaded_share": MAX_LOADED_SHARE}

@@ -13741,7 +13741,17 @@ judged by the clock that stamped the heartbeat: the file is touched from the log
 node and read on a compute node, so "now" is the mtime of a probe file the check
 touches beside it (the same file server stamps both), with `date` only as the
 fallback where the job cannot write there; comparing the server's mtime with the
-compute node's `date` read clock skew as a dead app. A batch with a time budget
+compute node's `date` read clock skew as a dead app. The check never reads the age
+as more than it is, because the margin it rests on is narrow — the app's beats land
+at most `UPLOAD_HEARTBEAT_S` + `BEAT_TIMEOUT_S` (105 s) apart, against
+`UPLOAD_HEARTBEAT_STALE_S` (120 s). So the probe is touched *before* the heartbeat
+is read (on a filesystem slow enough to stall the beats, the probe's own touch
+stalls too, and taken afterwards it added that delay to the age and missed a beat
+that landed meanwhile), and the heartbeat is opened just before its `stat`, so an
+NFS client with close-to-open consistency (the default) fetches the file's
+attributes from the server rather than answering from its attribute cache, which
+can be up to `acregmax` (60 s by default) old. `tests/test_a_slow_heartbeat_is_measured_and_tolerated.py`
+runs the check under `bash`. A batch with a time budget
 (the launcher's `--time`, as it sized one batch) runs under `timeout -k
 BATCH_BUDGET_GRACE_S N`, in the background so the driver holds `timeout`'s pid —
 which is also the batch's process group, since `timeout` makes one. The pipeline

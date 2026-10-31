@@ -297,7 +297,10 @@ def _metrics_of(data, baseline: str, gate=None) -> pd.DataFrame | None:
 
 def gate_version(ctx) -> int:
     """The version of which cells the analysis includes (``StatsCacheState.population_version``): every gating,
-    curation or QC edit moves it."""
+    curation or QC edit moves it. So do group and well-label edits, which go through the same
+    ``invalidate_stats_cache``; that costs the page one re-tally from the row cache, no table read (measured, tracker
+    L14). Kept rather than narrowed: telling the edits apart means classifying every caller of that shared
+    invalidation, and one gating edit misfiled would leave the page's counts stale and drawn as current."""
     return int(getattr(ctx.state.stats_cache, "population_version", 0))
 
 

@@ -377,7 +377,7 @@ def test_the_crop_strip_draws_only_the_cells_the_counts_hold(qtbot, tmp_path, mo
     fig, caption = strip("nw-crop-caption")
     dots = [c.get_offsets().tolist() for ax in fig.axes for c in ax.collections if c.get_gid() == "nw-crop-cells"]
     assert dots == [[[8.0, 9.0]]], dots                                  # the 10 px object's dot is gone
-    assert caption[0].endswith("; dots: the 1 cells the run counted in view; 1 more Cell Gating leaves out, not "
+    assert caption[0].endswith("; dots: the 1 cells the run counted in this nanowell; 1 more Cell Gating leaves out, not "
                                "drawn"), caption
 
 

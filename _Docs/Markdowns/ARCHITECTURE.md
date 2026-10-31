@@ -4317,9 +4317,12 @@ its lattice map — `ArrayLayers.preset("map")`, no image, since the image layer
 a montage or the raw tiles per acquisition) and
 one CSV of `distribution_compute.wells_summary`, the per-well summary prepared as
 the Distribution view prepares it (per-nanowell metrics at each well's first
-timepoint, the fixed cohort when ticked, then the moving average when set), with the exclusions spelled
+timepoint; for the others the baseline's own window, the fixed cohort when ticked, then the moving average when
+set), with the exclusions spelled
 out by reason, the window each row used in its `moving_average` column (empty when off or for a per-nanowell
-metric, `distribution_compute.moving_window_for`), and a row naming each of the group's wells with no nanowell
+metric, `distribution_compute.moving_window_for`), the baseline's own window in `baseline_moving_average` (empty
+unless a fold change was drawn with the moving average on and a baseline other than *Earliest*,
+`moving_compute.baseline_window_for`), and a row naming each of the group's wells with no nanowell
 table. A
 group's replicate sets stay sets and its solo wells stand alone, as the page
 groups a selection (`_figure_groups`); a group with no nanowell table at all is
@@ -11476,6 +11479,38 @@ first timepoint and the cohort would be empty. `distribution_model(moving=…)`,
 `trajectory_panels(moving=…)` apply it, so the beeswarm, the summary CSV and the trajectory lines use the same
 numbers, and both figures' footers state the window (`moving_compute.describe`). Per-nanowell metrics have no
 values over time and ignore it; Array, Position, Extremes and Identity draw one timepoint and do not use it.
+
+*A fold change and its baseline.* `site_metrics` divides each timepoint's measured value by the single measured
+value at the nanowell's baseline row, so the moving average is taken over fold changes and, by default, only the
+endpoint side is smoothed — the figure says "the baseline is its one measured value, not averaged". Two rules sit
+on top of that, both in `moving_compute`:
+
+- **A fold change's window starts after its baseline** (`moving_mean(after=…)`, the bound being
+  `baseline_order`, the `tp_order` of each nanowell's `_base_tp_<value>` row). A window that reaches the baseline
+  would average in its fold change of exactly 1, a value with no noise that damps the first windows after it towards
+  1; one that reaches before it would average values measured before the reference point. Either is left out with
+  "the window does not start after the baseline", which wins over every other reason, the early one included. The
+  bound is per nanowell, so under *First measurable* each nanowell's windows start after its own baseline. Measured
+  values (`n`, `c`, brightness, fluorescence) have no baseline and no bound (`base_value` returns `None`).
+- **The baseline's own window** (`NanowellState.baseline_moving`, the *Baseline average* spin box beside *Moving
+  average*; `moving_compute.rebase`). With a window of *M* the baseline becomes the trailing mean of the measured
+  value — the count, confluence, brightness or fluorescence, never a fold change — over the baseline timepoint and
+  the *M − 1* before it, never after it (a later timepoint may already carry the treatment). The fold change is then
+  recomputed against that mean with `site_metrics`' own rules (a row's own value missing or not joinable, a ratio
+  over a mean at or below zero). It follows the endpoint's rule: complete and joinable or undefined, its shortfalls
+  counted as "baseline average: before the well's first timepoint / a gap / not joinable"; a baseline row that is
+  itself unusable keeps the single baseline's reason, and a mean of zero is "seeded later" / "empty at baseline" as
+  before. `moving_compute.baseline_window_for` is the one place that decides whether it applies: only while the
+  endpoint's moving average is on (it refines it) and never with the *Earliest* baseline, which has nothing before
+  it. `draw_view` asks it, so the page and Batch Export cannot differ, and the page greys the spin box exactly where
+  it would not act (`tab_view.baseline_moving_greyed`, its tooltip naming the reason), so a value left in a greyed
+  control never changes a figure. The rebase runs before the fixed cohort, so the cohort is chosen on the fold
+  changes from the averaged baseline; `distribution_model`, `wells_summary` and `trajectory_panels` all take
+  `baseline_moving=…`.
+
+A ratio over a baseline that is constant per nanowell averages the same whichever is divided first.
+`log2_count_fc` is averaged as logs — the mean of log₂((n + 1) / (n₀ + 1)), a geometric mean of the ratios, not
+the log of their mean — and the footer says so.
 
 **The subset** (`subset_compute`, `NanowellState.subset`, the *Subset* control and its editor in `subset_view`). A
 `Subset` is a tuple of `Condition`s and a *match* (`all` or `any`); no conditions is every nanowell. A condition

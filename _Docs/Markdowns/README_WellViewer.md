@@ -5590,6 +5590,22 @@ the sentence names it.
   nanowell identity is not confirmed, have no value; they are counted among the exclusions with that reason
   rather than averaged over fewer timepoints. With *Fixed cohort* ticked too, the cohort is chosen from the
   measured values and then averaged. The footer states the window.
+
+  For a **fold change**, each window starts *after* the baseline timepoint: a window that included the baseline
+  would average in its fold change of exactly 1 and pull the first values after it towards 1, and one that
+  reached before it would mix in values from before the reference point. Those timepoints are counted as
+  "moving window reaches the baseline". By default the baseline itself is the single value measured at the
+  baseline timepoint — only the endpoint is averaged — and the footer says so. log₂ count fold changes are
+  averaged as logs, which is a geometric mean of the ratios.
+- **Baseline average** (beside *Moving average*, for a fold change) — *Off*, or 2 to 9 timepoints: the baseline
+  becomes the mean of the nanowell's measured values (its count, confluence, brightness or fluorescence) at the
+  baseline timepoint and the ones before it, that many in all — never after it, since a later timepoint may
+  already show the treatment. Like the moving average it is used only when every timepoint of its window has a
+  value; a nanowell whose baseline window is incomplete has no fold change, counted as "baseline window before
+  the first timepoint", "baseline window has a gap" or "baseline window not joinable". It is greyed, with the
+  reason in its tooltip, while the *Moving average* is off, for a metric that is not a fold change, and with the
+  *Earliest* baseline, which has nothing before it — choose *First measurable* or a timepoint. The footer states
+  the baseline's window.
 - **Responding above** (on *Distribution*) — the number a nanowell's value must be above to count as
   responding, for the metric shown. Set one for each metric you use (a fold change, a count, a confluence, an
   intensity); each is remembered separately, and a channel's brightness separately from another's. The figure
@@ -6735,8 +6751,10 @@ figure and an empty file.
 (Distribution, Array map, Trajectories or Position), tick the **Metrics**, and
 set **Along x**, **Baseline** (Earliest, First measurable or one of the dataset's
 timepoints), **Timepoint** (Latest, Earliest or one of the
-dataset's), **Fixed cohort** and **Moving average** as on the page — each greyed where it does not
-reach the view; the summary CSV's `moving_average` column gives the window each row used. **Responding above** asks for a number for each ticked metric,
+dataset's), **Fixed cohort**, **Moving average** and **Baseline average** as on the page — each greyed where
+it does not reach the view; the summary CSV's `moving_average` column gives the window each row used, and its
+`baseline_moving_average` column the baseline's window (empty where none was used: the moving average off, a
+metric that is not a fold change, or the *Earliest* baseline). **Responding above** asks for a number for each ticked metric,
 filled in from the page's where you set one there, and the run will not start
 while any is empty. **Subset** — *Use the page's subset*, ticked by default, draws
 with the Nanowells page's Subset, named beside the box each time the panel opens (build or

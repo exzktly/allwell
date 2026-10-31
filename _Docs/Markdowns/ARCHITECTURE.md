@@ -505,11 +505,14 @@ Controls sheet and restyles at the new unit.
 sheet is a 390 pt right-hand panel; plots get at least 220 pt per row of axes
 (`size_canvas`, upright too) and the page scrolls rather than squashing a
 three-panel figure into the screen's height. Analyze turns two-column
-(`_apply_analyze_columns`): the run summary and plate on the left, 300 pt wide,
-the log on the right. The plate is capped at 160 pt tall there: sideways the
-screen is always 390 pt tall, so the plate's share is fixed — the bar and the
-summary rows above it take the rest at the largest text size, and 200 pt cut off
-row H.
+(`_apply_analyze_columns`): the run summary and plate on the left, an equal
+share of the row up to 440 pt, the log on the right. In that column the stage
+rail sits beside the plate rather than above it (`PlateProgress.setRailBeside`,
+which also pins the rail at its minimum width; `RunDashboard` drops the per-stage
+mini-bars there, since the dot and the count carry the same), because with the
+rail above it the headline, bar and three stage rows left the plate under a
+hundred points of a ~264 pt page. The plate's size is then fitted to what the
+column leaves, as upright (below).
 
 **Startup and persistence.** The choice (`ui/phone_layout`) and the text size
 (`ui/phone_text_size`: `S`, `M` or `L`, Medium when unset or unreadable) live in
@@ -539,13 +542,27 @@ button lists two views (`PhoneHandles.page_views` / `page_view` /
 `show_page_view`; ☰ is hidden in Analyze): **Settings** shows the form under the
 dashboard reduced to its headline and overall bar (`PlateProgress.setCompact`,
 the log and last-run card hidden, the run side capped at its own height);
-**Progress** hides the form and shows the full dashboard and the log inside a
-scroll area (`AnalyzePhoneView._scroll`, `QScrollArea#PhoneRunScroll`, mounted by
-`_mount` for Progress only — Settings keeps the column straight in the splitter,
-where its height is the strip's). At full phone width the stacked plate alone is
-~540 px tall, so on a short screen the column needs more than the page; unscrolled
-it was squeezed below its minimum and the log was drawn over the lower half of the
-plate. Scrolled, the dashboard keeps its height and the log follows it. The Stop
+**Progress** hides the form and shows the full dashboard and the log, fitted to
+the page: nothing on it scrolls but the log inside its own box. At full phone
+width the stacked plate alone is ~540 px tall, and the plate holds its
+aspect-locked height as a floor (`WellPlateSelector.resizeEvent`), so on a short
+screen it is not shared out — everything below the plate is pushed off the page.
+So `AnalyzePhoneView._fit_progress` caps the plate instead, by width and height at
+the same aspect (a height cap alone at full width squeezes the wells and runs the
+labels together): the budget is the plate's present floor plus whatever the run
+column has beyond its own minimum height, with the log's minimum set to
+`LOG_MIN_LINES` (3) lines of its font while Progress shows, and the plate's width
+is the widest whose height fits it, down to wells of `PLATE_MIN_CELL_LINES` (0.4)
+of a label line. The width it may take comes from
+`PlateProgress.plate_room_width`, not from the plate's own column, which a cap has
+already narrowed. A `_RefitOnLayout` filter on the run column refits (coalesced to
+the next event-loop pass) on every resize or re-layout, so a rotation, a run
+starting or the log being toggled refits too. Leaving phone layout hands the log
+its minimum and the plate its desk caps back (`_release_fit`). It is deliberately
+not a scroll area: a page that scrolls as a whole puts its scroll bar beside the
+log's, where it reads as part of the log box, and the foot of the log sits under
+the run bar until the page is scrolled to its end. The Stop
+The Stop
 button turning enabled — the one signal every way of starting a run shares — shows
 Progress. Leaving phone layout puts back the orientation, sizes, form width and
 the run row's place in the form. Because the form is the page, it carries the

@@ -5,7 +5,8 @@ the first exactly as QC Triage's *Set anchor…* does (``controller.open_for_anc
 and timepoint, the anchor layer on in the well frame, *Set anchor* on once the well's tables are loaded. A click on
 the central square writes the anchor as it always does (``controller.set_anchor_at``), which tells the queue
 (:func:`anchor_set`); after a short pause — long enough to see where the anchor landed — the next timepoint is
-shown. *One per well* limits the walk to each well's first waiting timepoint. *Skip* moves on without an anchor, *Back* returns to the previous one (a click there replaces its anchor),
+shown. Each timepoint opens at :data:`OPEN_ZOOM` times *Fit* on the centre of the whole-well montage, where the
+central square usually is. *One per well* limits the walk to each well's first waiting timepoint. *Skip* moves on without an anchor, *Back* returns to the previous one (a click there replaces its anchor),
 and *Stop* ends the walk. The walk ends by itself after the last item, saying on the figure how many were anchored
 and pointing at *Re-run anchored wells…*, which is what puts the anchors to use.
 
@@ -27,6 +28,10 @@ from util.nanowell_anchors import AnchorsFileError, read_anchors
 
 #: How long the anchor just set stays on screen before the next timepoint replaces it.
 ADVANCE_DELAY_MS = 400
+
+#: Each timepoint opens this many times *Fit*, on the centre of the whole-well montage: the central square an anchor
+#: marks is usually there, so the click needs no zooming first. *Fit* shows the whole well.
+OPEN_ZOOM = 10.0
 
 
 def _state(ctx):
@@ -100,7 +105,7 @@ def _open_current(ctx, queue) -> bool:
     wanted = set(queue.selection_before) | {item.well}
     if set(ctx.state.selection.selected_wells) != wanted:
         set_selected_wells(ctx, wanted)
-    shown = nwc.open_for_anchor(ctx, item.well, item.timepoint)
+    shown = nwc.open_for_anchor(ctx, item.well, item.timepoint, zoom=OPEN_ZOOM)
     if shown and item.refused:
         st = _state(ctx)
         if st is not None and not st.array_message:

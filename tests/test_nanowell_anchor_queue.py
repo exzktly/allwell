@@ -109,6 +109,12 @@ def test_one_per_well_keeps_each_well_s_first_timepoint_and_never_walks_back():
 
 pytest.importorskip("PySide6")
 
+#: The centre of the four placed tiles (``test_nanowell_full_montage.LEFT_TOP``: 128 µm tiles at 0 and 120 µm), which
+#: is where each queue step opens.
+MONTAGE_CENTRE = (124.0, 124.0)
+#: Where the tests click to set an anchor: near the centre, inside the 10x view each step opens at.
+AT = (121.0, 127.0)
+
 
 def _tiles_for(in_dir, well):
     """``in/<well>.zip`` holding the four tiles ``test_nanowell_full_montage`` places, named for *well*."""
@@ -146,6 +152,17 @@ def _dataset_with_unaddressed(tmp_path):
     return out
 
 
+def _assert_opened_zoomed_on_the_montage_centre(st):
+    """Requested: "by default zoom to the center of the registered whole-well montage at 10x bc the anchor will
+    likely be visible there". The readout's own factor, and the centre of what the axes show."""
+    from review.features.nanowell import _anchor_queue as aq
+    from review.features.nanowell import controller as nwc
+
+    left, top, right, bottom = st.drawn.region
+    assert nwc.array_zoom_factor(st.drawn) == pytest.approx(aq.OPEN_ZOOM)
+    assert ((left + right) / 2, (top + bottom) / 2) == pytest.approx(MONTAGE_CENTRE, abs=0.5)
+
+
 def test_the_queue_walks_every_unaddressed_montage_and_a_click_moves_it_on(qtbot, tmp_path):
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
@@ -170,13 +187,14 @@ def test_the_queue_walks_every_unaddressed_montage_and_a_click_moves_it_on(qtbot
         return nwc.page_well(ctx), nwc.page_timepoint(ctx, nwc.page_well(ctx))
 
     def click():
-        canvas, at = _widget_point(ctx, st, 30.0, 40.0)
+        canvas, at = _widget_point(ctx, st, *AT)
         QTest.mouseClick(canvas, Qt.LeftButton, Qt.NoModifier, at)
 
     queue_btn = ctx.widgets.get("_nw_queue_btn")
     assert queue_btn.isEnabled()
     queue_btn.click()
     assert shown() == ("A01", "t_a")
+    _assert_opened_zoomed_on_the_montage_centre(st)
     assert set(ctx.state.selection.selected_wells) == {"A02", "A01"}
     assert ctx.widgets.get("_nw_queue_lbl").text() == "1 of 3 · A01 at t_a"
     assert not ctx.widgets.get("_nw_queue_back_btn").isEnabled()
@@ -187,8 +205,11 @@ def test_the_queue_walks_every_unaddressed_montage_and_a_click_moves_it_on(qtbot
     assert set(ctx.state.selection.selected_wells) == {"A02", "B01"}  # A01 walked past, not left selected
     assert ctx.widgets.get("_nw_queue_lbl").text() == "2 of 3 · B01 at t_c"
 
+    st.region = None                                                 # Fit, as the band's button does
+    nwc.redraw(ctx)
     ctx.widgets.get("_nw_queue_skip_btn").click()
     assert shown() == ("B01", "t_a")
+    _assert_opened_zoomed_on_the_montage_centre(st)                  # every step opens zoomed, not as left
     ctx.widgets.get("_nw_queue_back_btn").click()
     assert shown() == ("B01", "t_c")
     click()
@@ -202,7 +223,7 @@ def test_the_queue_walks_every_unaddressed_montage_and_a_click_moves_it_on(qtbot
                                 "Re-run anchored wells… to address them from the anchors.")
     anchors = read_anchors(anchors_path(out.parent / "in"))
     assert sorted(anchors) == [("A01", "t_a"), ("B01", "t_c")]
-    assert anchors[("B01", "t_c")].position() == pytest.approx((30.0, 40.0), abs=1.0)
+    assert anchors[("B01", "t_c")].position() == pytest.approx(AT, abs=1.0)
 
 
 def test_with_nothing_waiting_the_queue_says_so_and_changes_nothing(qtbot, tmp_path):
@@ -247,7 +268,7 @@ def test_one_per_well_walks_each_well_s_first_timepoint_and_ends_by_itself(qtbot
         return nwc.page_well(ctx), nwc.page_timepoint(ctx, nwc.page_well(ctx))
 
     def click():
-        canvas, at = _widget_point(ctx, st, 30.0, 40.0)
+        canvas, at = _widget_point(ctx, st, *AT)
         QTest.mouseClick(canvas, Qt.LeftButton, Qt.NoModifier, at)
 
     ctx.widgets.get("_nw_queue_btn").click()

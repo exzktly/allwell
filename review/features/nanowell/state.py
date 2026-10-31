@@ -218,6 +218,9 @@ class NanowellState:
     #: ``(well, timepoint)`` another page asked to set an anchor on (``controller.open_for_anchor``): *Set anchor* is
     #: turned on there once the well's tables are loaded, since it can only be turned on with the grid status read.
     anchor_pending: object = None
+    #: The zoom :func:`controller.open_for_anchor` was asked to open at (times *Fit*, on the montage's centre), set
+    #: with *anchor_pending* and applied with it once the well is drawn. Never persisted.
+    anchor_zoom: float | None = None
     #: The *Anchor queue* being walked (``anchor_queue_compute.AnchorQueue``), or ``None``. Never persisted.
     anchor_queue: object = None
     #: *One per well*: the queue walks each well's first waiting timepoint only. For the session, never persisted.

@@ -69,6 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "Keep this on fast LOCAL storage — pointing it at a "
                         "network mount puts the run's bulk I/O on a volume whose "
                         "dropped sessions surface as 'Bad file descriptor'.")
+    p.add_argument("--scratch_fallback_dir", type=Path, default=None,
+                   help="Where per-well working files go when neither --scratch_dir nor "
+                        "$ALLWELL_SCRATCH_DIR names a folder and, inside a Slurm job, no "
+                        "node-local disk qualifies — in place of the app folder's "
+                        "scratch. The remote runner passes the run's own output folder, "
+                        "so a host's scratch folder and the node's own disk both come first.")
 
     p.add_argument("--suspend_file", type=Path, default=None,
                    help="A file whose appearance asks this run to suspend: stop "

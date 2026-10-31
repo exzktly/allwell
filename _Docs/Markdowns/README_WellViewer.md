@@ -1834,9 +1834,9 @@ can stall the heartbeat ("did not answer within 75s"). It never uses the node's
 own disk is erased when the node shuts down, so a well that a stopped or suspended
 run left part-way starts that well's fields again next time (finished wells are
 kept, and nothing is lost between the batches of one run). With no such disk, or
-on a host without Slurm, it uses the remote's home directory, which on an HPC
-system is exactly the volume with the small quota, and a run that overflows it
-fails partway through with a message about space. Set it to your site's real scratch: `$TMPDIR`,
+on a host without Slurm, it uses the run's own folder in the host's staging
+directory (`~/.allwell-staging/runs/…/out`). A folder set here always comes first,
+whether or not the host uses Slurm. Set it to your site's real scratch: `$TMPDIR`,
 `$SLURM_TMPDIR` and `/scratch/$USER` all work as written — the value is expanded
 on the remote, not here. A per-job folder (`$TMPDIR` or `$SLURM_TMPDIR` on most
 clusters) is emptied when the job ends, which costs the resume of a well a

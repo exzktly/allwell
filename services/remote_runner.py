@@ -962,14 +962,15 @@ class RemoteRunner:
                 i += 2
             elif arg == "--output_dir":
                 out.extend([arg, remote_output])
-                # Pin the remote scratch to the remote output dir. The pipeline's
-                # default moved to ``~/.allwell/scratch`` to keep a local run's
-                # bulk I/O off a network-mounted output volume; on a cluster that
-                # default would be wrong — the login/compute home is typically a
-                # small-quota NFS share, while ``remote_output`` already lives in
-                # the host's configured staging area. Passing it explicitly keeps
-                # remote runs byte-identical to their previous behaviour.
-                out.append(f"--scratch_dir={remote_output}")
+                # The remote output dir is the scratch's *fallback*, not its
+                # choice. The home folder (the pipeline's own default) is a
+                # small-quota NFS share on a cluster, while ``remote_output`` is in
+                # the host's staging area — but passing it as ``--scratch_dir``
+                # outranked both the host's scratch folder (exported as
+                # ``ALLWELL_SCRATCH_DIR`` before the command, then overwritten by
+                # the flag) and, inside a Slurm job, the node's own disk
+                # (``pipeline.node_disk``), so neither ever took effect remotely.
+                out.append(f"--scratch_fallback_dir={remote_output}")
                 i += 2
             elif arg.startswith("--scratch_dir"):
                 # Never forward a local scratch path to the remote host.

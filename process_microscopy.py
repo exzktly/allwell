@@ -170,6 +170,7 @@ from pipeline.io import (
     merge_images_into_zip,
     merge_well_records,
     remove_directory,
+    publish_scratch_args,
     scratch_base_for,
 )
 from pipeline.fov_checkpoint import (
@@ -3142,8 +3143,7 @@ def main() -> None:
     # Publish --scratch_dir through the env so the spawn-pool workers (which
     # inherit os.environ but not argv) resolve the same scratch base. Must
     # happen before the first scratch_base_for call.
-    if args.scratch_dir is not None:
-        os.environ["ALLWELL_SCRATCH_DIR"] = str(args.scratch_dir)
+    publish_scratch_args(args.scratch_dir, args.scratch_fallback_dir)
 
     if not input_dir.is_dir():
         parser.error(f"--input_dir does not exist or is not a directory: {input_dir}")

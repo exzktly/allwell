@@ -154,6 +154,7 @@ NOT_KEYED_ON: dict[str, str] = {
     "input_dir":             "where the images came from",
     "output_dir":            "where the results go",
     "scratch_dir":           "where intermediates are staged",
+    "scratch_fallback_dir":  "where intermediates are staged when nothing else is chosen",
     "csv_prefix":            "renames the CSV, so a change already misses the "
                              "existing-output check by filename",
     # Re-processing knobs. Keying on these is what would stop a forced re-run

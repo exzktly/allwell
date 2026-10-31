@@ -81,13 +81,27 @@ def test_a_field_that_failed_and_was_recovered_leaves_no_standing_traceback(tmp_
     assert not complete_seal_path(out, "C01").exists(), "the fixture's first run must leave the well partial"
     assert [r.well for r in er.current_records(out)] == ["C01"], "the partial well's failure must still stand"
 
+    note = "C01_local_zip_unreadable.txt"
+    er.write_note(out, "C01", note, "a download dropped images; re-run with --force")
+
     _run_main(monkeypatch, plate, incremental=True)
     assert complete_seal_path(out, "C01").is_file(), "the recovered well was not sealed"
-    assert _standing(out) == [], (
+    assert _standing(out) == [note], (
         "the well is whole, and the traceback of the field the re-run recovered still stands in errors/ — "
-        "QC triage and Validate report a whole well as failed")
+        "QC triage and Validate report a whole well as failed — or the incremental run retired a note only "
+        "a forced re-run resolves")
     assert _archived(out) == [trace], "the superseded traceback was deleted rather than archived"
-    assert er.current_records(out) == []
+    assert [r.path.name for r in er.current_records(out)] == [note]
+
+
+@pytest.mark.usefixtures("stubbed_segmenter")
+def test_a_run_that_rewrites_the_well_retires_a_forced_run_s_note(tmp_path, monkeypatch):
+    plate = _plate(tmp_path)
+    out = plate / "out"
+    er.write_note(out, "C01", "C01_local_csv_cut_short.txt", "a group was dropped; re-run with --force")
+    _run_main(monkeypatch, plate, incremental=False)
+    assert complete_seal_path(out, "C01").is_file()
+    assert _standing(out) == [], "a run that rebuilt the well from scratch left the note it resolved standing"
 
 
 @pytest.mark.usefixtures("stubbed_segmenter")
@@ -201,10 +215,13 @@ def test_a_validate_scan_does_not_count_a_superseded_traceback(tmp_path):
     from datasets.validate.validate_compute import _scan_error_files
 
     out = tmp_path / "out"
-    _record(out, "A01_pid1.txt", well="A01", run="earlier")
-    _record(out, "A02_pid1.txt", well="A02", run="earlier")
-    _whole(out, "A01")
-    assert _scan_error_files(SimpleNamespace(out_dir=out)) == {"A02": ("A02_pid1.txt",)}
+    seal = complete_seal_path(out, "A01")             # sealed by a build from before records were archived
+    seal.parent.mkdir(parents=True)
+    seal.write_text("{}")
+    _record(out, "A01_pid1.txt", well="A01", age=3600)
+    _record(out, "A02_pid1.txt", well="A02", age=3600)
+    assert _scan_error_files(SimpleNamespace(out_dir=out)) == {"A02": ("A02_pid1.txt",)}, (
+        "Validate counted a traceback older than its well's completion seal as evidence against the well")
 
 
 # ── QC triage ───────────────────────────────────────────────────────────────

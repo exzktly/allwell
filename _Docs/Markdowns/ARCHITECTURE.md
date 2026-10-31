@@ -11819,7 +11819,15 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   plate's every cell is never held at once. `array_compute.cells_into` puts them in the scene: where measured in
   the well frame; on the lattice at the nanowell's lattice place plus the cell's offset from that nanowell's
   measured centre, so a dot stays in the same spot of the same nanowell, and a cell whose nanowell has no address
-  or measured centre is counted in the footer, not drawn. The renderer draws them as one `scatter` of fixed
+  or measured centre is counted in the footer, not drawn. **The dots follow the counts' inclusion**
+  (`cell_gate_compute.hidden_cells`, from `array_scene(gate=…)`, which `draw_view(gate=st.gate)` passes): a cell
+  the gate leaves out is matched by its well-frame position against `GateTally.left_out` (the left-out cells'
+  positions, rounded to `POSITION_DECIMALS` µm so the row cache's and the cell table's parses agree, one dot per
+  left-out cell) and a cell of an excluded field by its `fov` (read when the table has one) against
+  `GateTally.fields`, or by its nanowell's `field_excluded` state; neither is drawn, and the footer counts each.
+  The crops follow the same rule: `image_compute` keeps each crop's cells' rows (`Crop.cell_rows`) and
+  `controller.gated_crops` drops the hidden dots when the strip, the pop-out or the Extremes montage is drawn
+  (not when cut, so a gating edit reaches crops already cut), the caption counting them. The renderer draws them as one `scatter` of fixed
   screen size (`CELL_DOT_PT2`), light with a dark rim (`ui/nanowell_sites.CELL_COLOUR`, `CELL_EDGE_COLOUR`) so
   they read over the image and over any fill, above the nanowells and under the addresses. The footer says how
   many were drawn, that the run counted no cell in the well at that timepoint, that the well has no cell table,

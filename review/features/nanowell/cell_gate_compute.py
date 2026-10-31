@@ -31,6 +31,13 @@ whose FOV labels are untrusted is not filtered, the refusal those layers make ev
 border layers need per-cell centroid, focus and border columns that a nanowell cell table does not have, so they
 pass every nanowell cell, as they pass any cell they cannot place.
 
+**The cell dots follow the same rule** (:func:`hidden_cells`). The Array view's *Cells* layer and the dots on every
+crop are read from the run's cell table, which holds every cell the run counted. A dot the gate leaves out is not
+drawn — matched by its position in the well frame against the left-out cells' (:attr:`GateTally.left_out`, rounded
+to :data:`POSITION_DECIMALS` µm, so a value parsed by two readers is still one cell) — and neither is a cell of a
+field the field layers exclude (by its ``fov`` when the table has one, else by its nanowell's state), so a nanowell
+captioned "0 cells" never sits under drawn cells. Each surface counts what it did not draw.
+
 **A well whose cells cannot be read keeps the run's counts**, and is named in the note, so a figure mixing gated
 and ungated wells never reads as gated throughout.
 
@@ -39,12 +46,18 @@ Qt-free.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
 
 SITE_KEY = ["well", "timepoint", "nw_q", "nw_r"]
+#: The well-frame position columns a left-out cell is matched on (:func:`hidden_cells`).
+POSITION = ["well_x_um", "well_y_um"]
+#: The µm decimals positions are compared at: far below a pixel (0.1 µm and more), far above the few units in the
+#: last place by which two CSV readers can parse one decimal differently.
+POSITION_DECIMALS = 3
 #: The inclusion layers that decide whole fields, applied here by field (:func:`exclude_fields`) and never per cell.
 FIELD_LAYERS = ("Field_Pass", "Excluded_Field_Pass", "FOV_Pass")
 #: The suffix of a per-cell intensity column (``<token>_mean_intensity``), the one brightness is the mean of.
@@ -60,12 +73,15 @@ class GateTally:
     left out) and, per intensity token in lower case, ``kept_<token>`` (the kept cells' mean, NaN with none
     kept). *cells* and *excluded* count every addressed cell of those wells; *unread* names the wells whose
     rows could not be read, whose counts are the run's own. *fields* holds the ``(well, tile, timepoint)`` the
-    field layers leave out (:func:`excluded_fields`), whose nanowells are excluded whole."""
+    field layers leave out (:func:`excluded_fields`), whose nanowells are excluded whole. *left_out* has a row per
+    left-out cell with a well-frame position — ``well``, ``timepoint`` and :data:`POSITION` — so the cell dots can
+    leave them out too (:func:`hidden_cells`)."""
     sites: pd.DataFrame
     cells: int = 0
     excluded: int = 0
     unread: tuple = field(default_factory=tuple)
     fields: frozenset = frozenset()
+    left_out: pd.DataFrame | None = None
 
 
 def _empty_sites() -> pd.DataFrame:
@@ -149,18 +165,83 @@ def exclude_fields(frame: pd.DataFrame, gate: GateTally | None) -> None:
     frame.loc[hit, "state"] = FIELD_EXCLUDED
 
 
+def left_out_positions(well: str, cells: pd.DataFrame, included) -> pd.DataFrame:
+    """The well-frame positions of *well*'s cells that *included* leaves out — addressed or not, since a dot is drawn
+    for either — as ``well``, ``timepoint`` and :data:`POSITION`; empty when the table has no positions."""
+    columns = ["well", "timepoint", *POSITION]
+    if cells is None or not len(cells) or not {"timepoint", *POSITION} <= set(cells.columns):
+        return pd.DataFrame(columns=columns)
+    out = ~np.asarray(included, dtype=bool)
+    if "well" in cells.columns:
+        out &= cells["well"].astype(str).to_numpy() == str(well)
+    if not out.any():
+        return pd.DataFrame(columns=columns)
+    picked = cells.loc[out, ["timepoint", *POSITION]]
+    frame = pd.DataFrame({"well": str(well), "timepoint": picked["timepoint"].astype(str).to_numpy()})
+    for column in POSITION:
+        frame[column] = pd.to_numeric(picked[column], errors="coerce").to_numpy(dtype=float)
+    return frame.dropna(subset=POSITION).reset_index(drop=True)
+
+
 def tally(per_well, unread=(), fields=frozenset()) -> GateTally:
     """One :class:`GateTally` from *per_well*, an iterable of ``(well, cells, included)``, where *included* leaves
     out :data:`FIELD_LAYERS`; *fields* is :func:`excluded_fields`'s answer."""
-    found, cells, excluded = [], 0, 0
+    found, positions, cells, excluded = [], [], 0, 0
     for well, frame, included in per_well:
         sites, n, out = well_left_out(well, frame, included)
         cells, excluded = cells + n, excluded + out
         if len(sites):
             found.append(sites)
+        where = left_out_positions(well, frame, included)
+        if len(where):
+            positions.append(where)
     sites = pd.concat(found, ignore_index=True) if found else _empty_sites()
+    left_out = pd.concat(positions, ignore_index=True) if positions else None
     return GateTally(sites=sites, cells=cells, excluded=excluded, unread=tuple(sorted(unread)),
-                     fields=frozenset(fields))
+                     fields=frozenset(fields), left_out=left_out)
+
+
+def hidden_cells(cells: pd.DataFrame | None, gate: GateTally | None, well: str, timepoint: str,
+                 field_sites=frozenset()) -> tuple[np.ndarray, int, int]:
+    """``(hide, gated, in_fields)`` for the cell dots *cells* of *well* at *timepoint* — rows of the run's cell
+    table with :data:`POSITION`, and ``fov`` and the address when it has them: which not to draw, and how many of
+    those *gate* leaves out and how many are in a field the field layers exclude.
+
+    A cell is in an excluded field when its ``fov`` tile is one of ``gate.fields`` at *timepoint*, or its nanowell
+    is one of *field_sites* (the addresses whose state there is ``field_excluded``). Any other is left out when a
+    left-out cell of the same well and timepoint sits at its position; each left-out cell hides one dot, so two
+    cells at one position are told apart by count."""
+    n = 0 if cells is None else len(cells)
+    hide = np.zeros(n, dtype=bool)
+    if not n or gate is None:
+        return hide, 0, 0
+    if gate.fields and "fov" in cells.columns:
+        hide |= np.array([(str(well), str(f), str(timepoint)) in gate.fields for f in cells["fov"]], dtype=bool)
+    if field_sites and {"nw_q", "nw_r"} <= set(cells.columns):
+        q = pd.to_numeric(cells["nw_q"], errors="coerce").to_numpy(dtype=float)
+        r = pd.to_numeric(cells["nw_r"], errors="coerce").to_numpy(dtype=float)
+        sites = {(int(a), int(b)) for a, b in field_sites}
+        hide |= np.array([np.isfinite(a) and np.isfinite(b) and (int(a), int(b)) in sites for a, b in zip(q, r)],
+                         dtype=bool)
+    in_fields = int(hide.sum())
+    left = gate.left_out
+    if left is None or not len(left) or not set(POSITION) <= set(cells.columns):
+        return hide, 0, in_fields
+    here = left[(left["well"] == str(well)) & (left["timepoint"] == str(timepoint))]
+    if not len(here):
+        return hide, 0, in_fields
+    owed = Counter(zip(np.round(here[POSITION[0]].to_numpy(dtype=float), POSITION_DECIMALS),
+                       np.round(here[POSITION[1]].to_numpy(dtype=float), POSITION_DECIMALS)))
+    xs = np.round(pd.to_numeric(cells[POSITION[0]], errors="coerce").to_numpy(dtype=float), POSITION_DECIMALS)
+    ys = np.round(pd.to_numeric(cells[POSITION[1]], errors="coerce").to_numpy(dtype=float), POSITION_DECIMALS)
+    gated = 0
+    for k, key in enumerate(zip(xs, ys)):
+        if owed.get(key, 0) > 0:
+            owed[key] -= 1
+            if not hide[k]:
+                hide[k] = True
+                gated += 1
+    return hide, gated, in_fields
 
 
 def apply(frame: pd.DataFrame, gate: GateTally | None, channels) -> None:

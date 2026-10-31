@@ -60,7 +60,7 @@ def test_the_queue_holds_every_unaddressed_timepoint_without_an_anchor_in_plate_
     items, pending = aqc.waiting_items(grids, anchors, order=_by_time)
     assert [(i.well, i.timepoint, i.refused) for i in items] == [
         ("A01", "t_a", False), ("B01", "t_c", False), ("B01", "t_a", False), ("C03", "t_c", True)]
-    assert pending == 1
+    assert pending == {("A02", "t_c")}
     assert items[0].reason == REASON + "."
 
 
@@ -68,7 +68,7 @@ def test_an_anchor_moved_since_the_run_refused_it_is_not_asked_for_again(tmp_pat
     grids = aqc.grid_statuses(_plate(tmp_path))
     items, pending = aqc.waiting_items(grids, {("C03", "t_c"): Anchor("C03", "t_c", 40.0, 34.0)}, order=_by_time)
     assert ("C03", "t_c") not in [(i.well, i.timepoint) for i in items]
-    assert pending == 1
+    assert pending == {("C03", "t_c")}
 
 
 def test_the_queue_says_where_it_is_and_what_it_did():
@@ -85,6 +85,24 @@ def test_the_queue_says_where_it_is_and_what_it_did():
                                "Re-run anchored wells… to address them from the anchors.")
     assert aqc.AnchorQueue(items[:1], index=1).summary() == ("Anchor queue finished: 0 of 1 timepoint(s) anchored, "
                                                             "1 skipped.")
+
+
+def test_one_per_well_keeps_each_well_s_first_timepoint_and_never_walks_back():
+    items = [aqc.QueueItem("A01", "t_a"), aqc.QueueItem("B01", "t_c"), aqc.QueueItem("B01", "t_a"),
+             aqc.QueueItem("C03", "t_c")]
+    queue = aqc.AnchorQueue(list(items), index=2)                   # on B01 at t_a, the well's second timepoint
+    queue.set_per_well(True)
+    assert [(i.well, i.timepoint) for i in queue.items] == [("A01", "t_a"), ("B01", "t_c"), ("C03", "t_c")]
+    assert queue.current == items[3]                                # B01 at t_a is gone: on to C03, not back to B01
+    queue.set_per_well(False)
+    assert queue.items == items and queue.current == items[3]       # the item shown stays shown
+    queue.index = 1
+    queue.set_per_well(True)
+    assert queue.index == 1 and queue.current == items[1]
+    # A well with an anchor already waiting for a re-run needs no click of its own.
+    waiting = aqc.AnchorQueue(list(items), pending_rerun=frozenset({("B01", "t_x")}))
+    waiting.set_per_well(True)
+    assert [(i.well, i.timepoint) for i in waiting.items] == [("A01", "t_a"), ("C03", "t_c")]
 
 
 # ── the real page ────────────────────────────────────────────────────────────
@@ -203,3 +221,53 @@ def test_with_nothing_waiting_the_queue_says_so_and_changes_nothing(qtbot, tmp_p
     assert st.anchor_queue is None
     assert st.array_message == "No nanowell timepoint is waiting for an anchor."
     assert set(ctx.state.selection.selected_wells) == {"A02"}
+
+
+def test_one_per_well_walks_each_well_s_first_timepoint_and_ends_by_itself(qtbot, tmp_path):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from review.features.nanowell import controller as nwc
+    from tests.test_an_unaddressed_nanowell_timepoint_offers_its_anchor import _Rail
+    from tests.test_nanowell_full_montage import _widget_point
+    from tests.test_nanowell_page import _page
+    from util.nanowell_anchors import anchors_path, read_anchors
+
+    out = _dataset_with_unaddressed(tmp_path)
+    ctx = _page(qtbot, out)
+    ctx.window._notebook = _Rail(ctx)
+    ctx.state.selection.selected_wells = {"A02"}
+    st = ctx.state.feature_slice("nanowell")
+    nwc.nw_on_activate(ctx)
+    qtbot.waitUntil(lambda: st.metrics is not None and not st.computing, timeout=20000)
+
+    def shown():
+        qtbot.waitUntil(lambda: st.anchor_pending is None and not st.computing and st.drawn is not None
+                        and st.anchor_mode, timeout=20000)
+        return nwc.page_well(ctx), nwc.page_timepoint(ctx, nwc.page_well(ctx))
+
+    def click():
+        canvas, at = _widget_point(ctx, st, 30.0, 40.0)
+        QTest.mouseClick(canvas, Qt.LeftButton, Qt.NoModifier, at)
+
+    ctx.widgets.get("_nw_queue_btn").click()
+    assert shown() == ("A01", "t_a")
+    per_well = ctx.widgets.get("_nw_queue_per_well_btn")
+    assert not per_well.isChecked()
+    per_well.click()
+    assert st.anchor_queue_per_well and st.anchor_queue.per_well
+    assert ctx.widgets.get("_nw_queue_lbl").text() == "1 of 2 · A01 at t_a"
+    click()
+    qtbot.waitUntil(lambda: st.anchor_queue.index == 1, timeout=5000)
+    assert shown() == ("B01", "t_c")                                 # B01's first timepoint in time, not t_a
+    click()
+    qtbot.waitUntil(lambda: st.anchor_queue is None, timeout=5000)   # past the last well, the walk ends itself
+    assert set(ctx.state.selection.selected_wells) == {"A02"}
+    assert st.array_message == ("Anchor queue finished: 2 of 2 timepoint(s) anchored. "
+                                "Re-run anchored wells… to address them from the anchors.")
+    assert sorted(read_anchors(anchors_path(out.parent / "in"))) == [("A01", "t_a"), ("B01", "t_c")]
+
+    ctx.widgets.get("_nw_queue_btn").click()                         # the next walk starts one per well too
+    assert st.anchor_queue is None and st.array_message == (
+        "No nanowell timepoint is waiting for an anchor (One per well is on: 1 more wait in wells that already have "
+        "one). 2 timepoint(s) have an anchor that no run has used yet: Re-run anchored wells… addresses them.")

@@ -509,9 +509,12 @@ When several wells and timepoints need an anchor — the usual state after a run
 instead of picking each one: it shows the first timepoint on the plate left unaddressed, with **Set anchor**
 already on, and each click on a central square saves the anchor and, after a moment, opens the next. A *Queue*
 group beside it says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous timepoint; a
-click there replaces its anchor), **Skip** and **Stop**. The queue holds every unaddressed timepoint without an
-anchor, plate order then time order, and also any timepoint whose anchor the last run could not use; an anchor
-you set that no run has used yet is not asked for again. When it ends it says how many it anchored and how many
+click there replaces its anchor), **Skip**, **One per well** and **Stop**. The queue holds every unaddressed
+timepoint without an anchor, plate order then time order, and also any timepoint whose anchor the last run could
+not use; an anchor you set that no run has used yet is not asked for again. Turn on **One per well** to be shown
+only each well's first such timepoint, and no well that already has an anchor waiting for a re-run: one click per
+well is usually enough (see above), and any timepoint the re-run still cannot address shows up in the next
+queue. The choice is remembered until you close the app. When it ends it says how many it anchored and how many
 were skipped, and puts your plate selection back as it was.
 Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
 run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are

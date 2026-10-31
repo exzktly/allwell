@@ -217,6 +217,8 @@ class NanowellState:
     anchor_pending: object = None
     #: The *Anchor queue* being walked (``anchor_queue_compute.AnchorQueue``), or ``None``. Never persisted.
     anchor_queue: object = None
+    #: *One per well*: the queue walks each well's first waiting timepoint only. For the session, never persisted.
+    anchor_queue_per_well: bool = False
     #: The *Overlays* button: the coloured layers hidden for a look at the image beneath, without touching which
     #: layers are on. Not persisted — a page reopened with its overlays silently missing would look broken.
     overlays_hidden: bool = False

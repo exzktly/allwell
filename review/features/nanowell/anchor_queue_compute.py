@@ -46,9 +46,29 @@ class AnchorQueue:
     #: walking thirty wells does not leave thirty wells selected on every other tab.
     selection_before: frozenset = frozenset()
     anchored: set = field(default_factory=set)      # (well, timepoint) anchored while the queue ran
-    #: Timepoints left out because an anchor is set and waits for a re-run (counted, so the summary can say so).
-    pending_rerun: int = 0
+    #: Timepoints left out because an anchor is set and waits for a re-run, ``(well, timepoint)``: counted, so the
+    #: messages can say so, and their wells need no click of their own with :attr:`per_well` on.
+    pending_rerun: frozenset = frozenset()
     data_dir: str = ""                              # the dataset it was built for; another one drops it
+    #: Every waiting timepoint. :attr:`items` is this, or with :attr:`per_well` only each well's first.
+    all_items: list = field(default_factory=list)
+    per_well: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.all_items:
+            self.all_items = list(self.items)
+
+    def set_per_well(self, on: bool) -> None:
+        """Walk every waiting timepoint, or only each well's first (:func:`one_per_well`). The item shown stays shown
+        when the new list holds it; otherwise the walk goes on at the first item after it, so switching never sends
+        the walk back over wells already passed."""
+        current = self.current
+        at = self.all_items.index(current) if current in self.all_items else len(self.all_items)
+        self.per_well = bool(on)
+        done = {well for well, _tp in self.pending_rerun}
+        self.items = one_per_well(self.all_items, done) if self.per_well else list(self.all_items)
+        self.index = next((i for i, item in enumerate(self.items) if self.all_items.index(item) >= at),
+                          len(self.items))
 
     @property
     def current(self) -> QueueItem | None:
@@ -110,15 +130,15 @@ def grid_statuses(nanowell_dir: Path | None) -> dict[str, dict[str, dict]]:
     return out
 
 
-def waiting_items(grids: dict, anchors: dict, order=None) -> tuple[list[QueueItem], int]:
+def waiting_items(grids: dict, anchors: dict, order=None) -> tuple[list[QueueItem], frozenset]:
     """The timepoints waiting for an anchor, in plate order (row by row, then column) and each well's timepoints in
-    *order* (a callable sorting labels; the record's own order when ``None``), and how many unaddressed timepoints
-    were left out because an anchor is set and waits for a re-run.
+    *order* (a callable sorting labels; the record's own order when ``None``), and the ``(well, timepoint)`` of each
+    unaddressed timepoint left out because an anchor is set and waits for a re-run.
 
     *grids* is :func:`grid_statuses`; *anchors* is ``util.nanowell_anchors.read_anchors``'s
     ``(well, timepoint) -> Anchor``."""
     items: list[QueueItem] = []
-    pending = 0
+    pending = set()
     for well in sorted(grids):
         blocks = grids[well]
         tps = [tp for tp in blocks if blocks[tp].get("status") == WAITING_STATUS]
@@ -128,7 +148,22 @@ def waiting_items(grids: dict, anchors: dict, order=None) -> tuple[list[QueueIte
             tried = block.get("manual_anchor_um")
             refused = anchor is not None and tried is not None and _same(anchor.position(), tried)
             if anchor is not None and not refused:
-                pending += 1
+                pending.add((well, tp))
                 continue
             items.append(QueueItem(well, tp, str(block.get("reason") or "").strip(), refused))
-    return items, pending
+    return items, frozenset(pending)
+
+
+def one_per_well(items: list, done=()) -> list:
+    """Each well's first waiting timepoint (in the queue's order), the rest left out, and nothing of a well in
+    *done* (one with an anchor already set and waiting for a re-run). The manual's rule: one anchor per well is
+    enough when the rest of the plate is anchored, because the end of the run addresses the well's other timepoints
+    from it through the plate's other wells; a timepoint it still cannot address says so and takes a click of its
+    own on the next walk."""
+    seen: set = set(done)
+    out = []
+    for item in items:
+        if item.well not in seen:
+            seen.add(item.well)
+            out.append(item)
+    return out

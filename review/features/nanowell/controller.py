@@ -29,6 +29,7 @@ from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, one_to_one
 from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
+from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
 from review.features.nanowell import subset_compute as ss
@@ -1325,7 +1326,6 @@ def _anchor_change(ctx, change, failure: str) -> tuple[str, str] | None:
 def set_anchor_at(ctx, x_um: float, y_um: float) -> None:
     """Anchor the shown well at the shown timepoint at the well-frame point clicked (``in/nanowell_anchors.json``):
     the run snaps it to the nearest nanowell, so it need only land on the central square."""
-    from review.features.nanowell import _anchor_queue as aq
     from util.nanowell_anchors import set_anchor
 
     changed = _anchor_change(ctx, lambda path, well, tp: set_anchor(path, well, tp, (float(x_um), float(y_um))),

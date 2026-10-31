@@ -124,7 +124,7 @@ def _choose(ctx, key):
 def _view(ctx, key):
     from review.features.nanowell.tab_view import VIEWS
 
-    ctx.widgets.get("_nw_view_seg").setCurrentIndex([k for k, _l in VIEWS].index(key))
+    ctx.widgets.get("_nw_view_bar").setCurrentIndex([k for k, _l in VIEWS].index(key))
 
 
 def _dots(ctx):

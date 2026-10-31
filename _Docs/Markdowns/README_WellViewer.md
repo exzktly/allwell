@@ -5505,8 +5505,9 @@ use them.
 
 **Controls**
 
-- **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
-  *Extremes*, *Identity* and *Statistics*. Each view shows only the controls it uses.
+- **Views** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
+  *Extremes*, *Identity* and *Statistics*, chosen from the tabs in the top bar, where the Plotting and Home
+  pages show their sub-tabs. Hover a tab for what it shows. Each view shows only the controls it uses.
 - **Metric** — what each dot is: cell count, confluence, **brightness** and **nanowell fluorescence** (both
   explained under *Brightness and nanowell fluorescence* below), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of

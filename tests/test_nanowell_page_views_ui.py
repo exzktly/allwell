@@ -77,7 +77,7 @@ def _choose_view(ctx, key, preset=None):
     """Choose *key* on the view switch, as a click does; on the Array view, then the Layers menu's *preset*."""
     from review.features.nanowell.tab_view import VIEWS
 
-    seg = ctx.widgets.get("_nw_view_seg")
+    seg = ctx.widgets.get("_nw_view_bar")
     seg.setCurrentIndex([k for k, _l in VIEWS].index(key))          # emits currentChanged, as a click does
     if preset:
         ctx.widgets.get(f"_nw_preset_{preset}").trigger()
@@ -93,8 +93,8 @@ def _visible_scopes(ctx):
 # ── the view switch and the controls each view shows ─────────────────────────
 def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(page, qtbot):
     _loaded(qtbot, page)
-    seg = page.widgets.get("_nw_view_seg")
-    assert [seg.segmentText(i) for i in range(seg.count())] == ["Distribution", "Array", "Trajectories", "Position",
+    seg = page.widgets.get("_nw_view_bar")
+    assert [seg.tabText(i) for i in range(seg.count())] == ["Distribution", "Array", "Trajectories", "Position",
                                                                     "Extremes", "Identity", "Statistics"]
     assert _visible_scopes(page) == {"Metric", "Along x", "Baseline"}
     _choose_view(page, "array")
@@ -355,3 +355,40 @@ def test_a_read_that_finishes_after_the_page_is_gone_draws_nothing_and_lets_its_
     release.set()
     qtbot.waitUntil(lambda: not st.fetching, timeout=10000)
     assert st.fetch_bridges == [], "the worker's bridge was kept after it delivered"
+
+
+# ── the view switch is a page tab strip in the shell band ────────────────────
+def test_the_views_are_a_tab_strip_in_the_shell_band_and_a_click_chooses_the_view(qtbot, tmp_path):
+    """The views sit where every other page's sub-tabs sit, styled by the same rule, and drive the page.
+
+    Built through the real builder with a shell band present, so the bar is mounted the way the app mounts it:
+    a bar built but never handed to the band, or handed over and connected to nothing, fails here.
+    """
+    from PySide6.QtWidgets import QHBoxLayout, QTabBar, QWidget
+
+    from review.core.app_shell_view import build_page_tabs_host
+    from review.features.nanowell.tab_view import VIEWS, build_nanowell_tab
+    from tests._minimal_shell import load_dataset, minimal_shell
+    from tests.test_nanowell_page import _write_nanowell_dataset
+
+    ctx, window = minimal_shell(qtbot)
+    window._ctx, window._app_state, window._features = ctx, ctx.state, ctx.features
+    load_dataset(ctx, _write_nanowell_dataset(tmp_path))
+    build_page_tabs_host(window, window)
+    frame = QWidget()
+    QHBoxLayout(frame)
+    window.setCentralWidget(frame)
+    build_nanowell_tab(ctx, frame)
+
+    bar = ctx.widgets.get("_nw_view_bar")
+    assert isinstance(bar, QTabBar)
+    assert window._page_tabs_bar_by_name["Nanowells"] is bar
+    assert bar.objectName() == "PlottingSubTabs"
+    assert not frame.isAncestorOf(bar)
+    assert [bar.tabText(i) for i in range(bar.count())] == [label for _k, label in VIEWS]
+
+    st = ctx.state.feature_slice("nanowell")
+    bar.setCurrentIndex([k for k, _l in VIEWS].index("position"))     # emits currentChanged, as a click does
+    assert st.view == "position"
+    nwc.set_view(ctx, "statistics")                                  # the state moves; the strip follows it
+    assert bar.tabData(bar.currentIndex()) == "statistics"

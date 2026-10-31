@@ -1734,6 +1734,15 @@ def _select(ctx, site, adding: bool) -> None:
     selection_changed(ctx)
 
 
+def clear_selection(ctx) -> None:
+    """Clear the nanowells selected for the site detail, which closes the pane — the site detail's ✕ button."""
+    st = _state(ctx)
+    if st is None or not st.selected_sites:
+        return
+    st.selected_sites = []
+    selection_changed(ctx)
+
+
 def _adding(event) -> bool:
     """Whether the click adds to the selection: Shift, or ⌘ / Ctrl, held. Matplotlib reports the held keys as
     ``event.modifiers`` (3.7 and later) and sometimes as ``event.key``; either is enough."""

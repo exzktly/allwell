@@ -432,10 +432,11 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     detail_card = PlotCard(detail, figsize=(_DETAIL_W, _DETAIL_H), constrained=False, header=False)
     detail_card.setFigureTitle("")
     detail_card.setToolTip("The selected nanowells over time. Click a dot to select one, Shift-click to add one, "
-                           "and click empty space on the plot to clear the selection.")
+                           "and click empty space on the plot or ✕ above to clear the selection.")
     reg.register("_nw_detail_card", detail_card)
     reg.register("_nw_detail_fig", detail_card.figure)
     reg.register("_nw_detail_canvas", detail_card.canvas)
+    detail_layout.addLayout(_detail_header(ctx, detail))
     detail_layout.addWidget(detail_card, 3)
     detail_layout.addLayout(_crops_header(ctx, detail))
     strip_card = PlotCard(detail, figsize=(_DETAIL_W, _STRIP_H), constrained=False, header=False)
@@ -741,6 +742,28 @@ def _cells_box(ctx, name: str) -> QCheckBox:
     box.toggled.connect(lambda on: nwc.set_crop_cells(ctx, on))
     ctx.widgets.register(name, box)
     return box
+
+
+def _detail_header(ctx, parent) -> QHBoxLayout:
+    """The site detail's title row, with a close button (✕) that clears the nanowell selection — which is what hides
+    the pane (``controller.redraw_detail`` shows it only while a selected nanowell has a series). Without it the only
+    way to dismiss the pane was a click on empty space in the plot, which nothing on screen says."""
+    from ui import theme
+
+    row = QHBoxLayout()
+    row.setContentsMargins(0, 0, 0, 0)
+    title = QLabel("Selected nanowells", parent)
+    title.setObjectName("Caption")
+    close = QPushButton("✕", parent)
+    close.setObjectName("Ghost")
+    close.setFixedWidth(theme.Metrics.icon_btn_w)
+    close.setToolTip("Close the site detail and clear the nanowell selection")
+    close.clicked.connect(lambda _=False: nwc.clear_selection(ctx))
+    ctx.widgets.register("_nw_detail_close_btn", close)
+    row.addWidget(title)
+    row.addStretch(1)
+    row.addWidget(close)
+    return row
 
 
 def _crops_header(ctx, parent) -> QHBoxLayout:

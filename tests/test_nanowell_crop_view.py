@@ -178,3 +178,16 @@ def test_the_crop_numbers_name_nanowell_fluorescence_as_the_metric_is_named(page
     numbers = " · ".join(_popout_texts(page, "nw-crop-grid-metrics"))
     assert "fluor. " in numbers and "bright " in numbers, numbers
     assert "signal" not in numbers, numbers
+
+
+def test_the_site_detail_s_close_button_clears_the_selection_and_hides_the_pane(page, qtbot, known_crops):  # noqa: F811
+    """Reported: there was no way to close the site detail that a click on a dot opens, short of clicking empty
+    space on the plot, which nothing on screen says. Its header carries a ✕ that clears the selection."""
+    _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    pane = page.widgets.get("_nw_detail_pane")
+    button = page.widgets.get("_nw_detail_close_btn")
+    qtbot.waitUntil(lambda: pane.isVisible() and button.isVisible() and button.width() > 0, timeout=5000)
+    qtbot.mouseClick(button, Qt.LeftButton)
+    assert page.state.feature_slice("nanowell").selected_sites == []
+    assert not pane.isVisible()

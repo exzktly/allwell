@@ -9049,7 +9049,7 @@ architecture-specific and can't produce a universal binary.
 | `⌘←` / `Ctrl+←` | Back through tab history |
 | `⌘→` / `Ctrl+→` | Forward through tab history |
 | `⌘/` / `Ctrl+/` | Open the help drawer |
-| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception. While the drawer is shut, a "!" badge on the status bar's log button says new lines have arrived — blue for routine messages, amber once a warning has come in, red once an error has — and it clears when you open the drawer |
+| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception. Each entry starts with the time it was logged (hours, minutes, seconds), and a blank line separates one entry from the next, so a multi-line entry such as a traceback reads as one. While the drawer is shut, a "!" badge on the status bar's log button says new lines have arrived — blue for routine messages, amber once a warning has come in, red once an error has — and it clears when you open the drawer |
 | `⌘B` / `Ctrl+B` | Collapse / expand the left sidebar (same as the top-bar panel button) |
 | `⌘W` / `Ctrl+W` | Close window |
 

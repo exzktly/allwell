@@ -413,6 +413,14 @@ def _commit_staging_dir(tmp_images: Path, final_out: Path) -> None:
 #: silence is an abandoned run, never a slow one.
 FOREIGN_SCRATCH_IDLE_S = 24 * 3600
 
+#: How long another run's FOV checkpoints may sit untouched on a node-local disk this run chose for itself
+#: (:func:`_node_local_scratch_once`) before its sweep removes them. Elsewhere checkpoints are kept whoever owns
+#: them, for a resume. On a node's own disk that resume only ever happens on the same node — the next run may be
+#: placed on another, and the folder is gone with the node — while the disk is shared with other people's jobs,
+#: so a stopped well's staging (up to the whole well's intermediates) would otherwise stay there for as long as the
+#: node does. A week keeps a resume after a weekend; this plate's own checkpoints are never removed by age.
+NODE_CHECKPOINT_IDLE_S = 7 * 24 * 3600
+
 
 def _idle_seconds(path: Path, now: float) -> float:
     """Seconds since anything in *path* last changed: the newest mtime of the
@@ -430,7 +438,8 @@ def _idle_seconds(path: Path, now: float) -> float:
 
 
 def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool,
-                              own_stamp: str = "", now: float | None = None) -> None:
+                              own_stamp: str = "", now: float | None = None,
+                              checkpoint_idle_s: float | None = None) -> None:
     """Remove stale ``_tmp_*`` working folders under *root*.
 
     A folder named for this plate (``_tmp_extract_<own_stamp>_*`` /
@@ -443,7 +452,9 @@ def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool,
     staging mid-well. A ``_tmp_images_*`` folder holding ``.fov_*.done``
     checkpoint markers is kept whoever owns it, so a stopped well resumes from
     them (:func:`pipeline.fov_checkpoint.prune_superseded_staging` removes this
-    plate's own superseded ones). *extra_extract* also sweeps the zip-mode
+    plate's own superseded ones) — unless *checkpoint_idle_s* is given, when
+    another plate's checkpoint folder untouched for that long goes too
+    (:data:`NODE_CHECKPOINT_IDLE_S`). *extra_extract* also sweeps the zip-mode
     ``_tmp_extract_*`` folders.
     """
     now = time.time() if now is None else now
@@ -468,10 +479,17 @@ def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool,
             continue
         if any(_stale.glob(".fov_*.done")):
             n_done = sum(1 for _ in _stale.glob(".fov_*.done"))
-            log.info(
-                "Keeping checkpoint dir %s (%d FOV(s) already done)",
-                _stale.name, n_done,
-            )
+            own = bool(own_stamp) and _stale.name.startswith(f"_tmp_images_{own_stamp}_")
+            idle = None if own or checkpoint_idle_s is None else _idle_seconds(_stale, now)
+            if idle is None or idle < checkpoint_idle_s:
+                log.info(
+                    "Keeping checkpoint dir %s (%d FOV(s) already done)",
+                    _stale.name, n_done,
+                )
+                continue
+            log.warning("Removing another run's checkpoint dir %s (%d FOV(s) done), untouched for %d days on this "
+                        "node's own disk, which other jobs share", _stale.name, n_done, idle // 86400)
+            remove_directory(_stale)
             continue
         if not _removable(_stale, "images"):
             kept_live += 1
@@ -495,7 +513,9 @@ def _sweep_stale_scratch_dirs_all(output_dir: Path, *, extra_extract: bool,
     this plate's folders (:func:`_sweep_stale_scratch_dirs`).
     """
     base = scratch_base_for(output_dir)
-    _sweep_stale_scratch_dirs(base, extra_extract=extra_extract, own_stamp=own_stamp)
+    node_local = _NODE_LOCAL_FOLDER is not None and base == _NODE_LOCAL_FOLDER
+    _sweep_stale_scratch_dirs(base, extra_extract=extra_extract, own_stamp=own_stamp,
+                              checkpoint_idle_s=NODE_CHECKPOINT_IDLE_S if node_local else None)
     if base.resolve() != output_dir.resolve():
         _sweep_stale_scratch_dirs(output_dir, extra_extract=extra_extract,
                                   own_stamp=own_stamp)

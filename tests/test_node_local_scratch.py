@@ -376,3 +376,67 @@ def test_a_scratch_folder_the_host_names_is_never_moved(remote_env, monkeypatch,
     _scratch, out, code = _preflight_remote_run(tmp_path, monkeypatch, caplog, free=free, host_scratch=str(chosen))
     assert code == 2
     assert pio.scratch_base_for(out) == chosen
+
+
+# ── checkpoints left on the node's own disk ───────────────────────────────────────────────────────────────────────
+
+DAY = 24 * 3600
+
+
+def _checkpointed_staging(out: Path, well: str, settings: str, *, days_idle: float) -> Path:
+    """A stopped well's staging folder in *out*'s scratch: one field done, nothing changed for *days_idle* days."""
+    import os
+    import time
+
+    from pipeline.fov_checkpoint import _staging_dir_for
+
+    staging = _staging_dir_for(out, well, settings)
+    staging.mkdir(parents=True)
+    (staging / "partial.tif").write_bytes(b"pixels")
+    (staging / f".fov_exp_DAPI_{well}_F001_0h.done").touch()
+    then = time.time() - days_idle * DAY
+    for path in [staging, *staging.rglob("*")]:
+        os.utime(path, (then, then))
+    return staging
+
+
+def test_another_run_s_checkpoints_on_the_node_s_disk_go_after_a_week(disks, fresh_decision, monkeypatch, tmp_path):
+    """Checkpoints are kept whoever owns them, so a stopped well resumes. On a node's own disk that resume can only
+    happen on the same node, and the disk is shared with other people's jobs: a stopped well's staging stayed there
+    for as long as the node did. Another run's go once a week untouched; this plate's own are never removed by age."""
+    from pipeline.fov_checkpoint import sweep_run_scratch
+
+    folders, _kinds, free = disks
+    monkeypatch.setenv("SLURM_JOB_ID", "4812345")
+    monkeypatch.setattr(nd.shutil, "disk_usage", lambda p: type("U", (), {"free": free[Path(p)]})())
+    plate_a, plate_b = tmp_path / "plate_a", tmp_path / "plate_b"
+    plate_a.mkdir()
+    plate_b.mkdir()
+    node = folders["scratch"] / f"allwell-{nd._user()}"
+    assert pio.scratch_base_for(plate_b) == node
+    abandoned = _checkpointed_staging(plate_a, "A01", "settings-a", days_idle=8)
+    recent = _checkpointed_staging(plate_a, "A02", "settings-a", days_idle=6)
+    own = _checkpointed_staging(plate_b, "B01", "settings-b", days_idle=30)
+    assert abandoned.parent == recent.parent == own.parent == node
+
+    sweep_run_scratch(plate_b, "settings-b", extra_extract=True)
+
+    assert sorted(p.name for p in node.iterdir()) == sorted([recent.name, own.name])
+
+
+def test_a_scratch_folder_the_user_set_keeps_every_checkpoint(disks, fresh_decision, monkeypatch, tmp_path):
+    """``/scratch/$USER`` named as the host's scratch folder is the user's choice and keeps its resume."""
+    from pipeline.fov_checkpoint import sweep_run_scratch
+
+    chosen = tmp_path / "chosen"
+    monkeypatch.setenv("SLURM_JOB_ID", "4812345")
+    monkeypatch.setenv(pio.SCRATCH_DIR_ENV, str(chosen))
+    plate_a, plate_b = tmp_path / "plate_a", tmp_path / "plate_b"
+    plate_a.mkdir()
+    plate_b.mkdir()
+    abandoned = _checkpointed_staging(plate_a, "A01", "settings-a", days_idle=30)
+    assert abandoned.parent == chosen
+
+    sweep_run_scratch(plate_b, "settings-b", extra_extract=True)
+
+    assert abandoned.exists()

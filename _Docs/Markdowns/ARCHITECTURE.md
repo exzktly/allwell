@@ -14302,7 +14302,14 @@ carried a stamp — only once nothing anywhere in it has changed for
 `FOREIGN_SCRATCH_IDLE_S` (24 h), measured as the newest mtime under it, with an
 unreadable folder counting as in use. A live well writes into its folders every
 few seconds, so that limit can only catch an abandoned run. Folders holding
-`.fov_*.done` checkpoints are kept whoever owns them, as before. Sweeping every
+`.fov_*.done` checkpoints are kept whoever owns them, so a stopped well resumes —
+except on a node-local disk the run chose for itself (`_NODE_LOCAL_FOLDER`),
+where another plate's go once untouched for `NODE_CHECKPOINT_IDLE_S` (7 days):
+there a resume can only happen on the same node, while the disk is shared with
+other people's jobs and outlives the run on a node that stays up, so a stopped
+well's staging would otherwise stay for as long as the node does. This plate's
+own checkpoints are never removed by age, and a scratch folder the run was given
+(the host's `/scratch/$USER`, say) keeps every checkpoint. Sweeping every
 folder at each batch start deleted a second run's unpacked images and in-flight
 staging mid-well; `tests/test_two_runs_share_one_scratch.py` drives both
 collisions.

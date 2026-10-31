@@ -1850,7 +1850,9 @@ can stall the heartbeat ("did not answer within 75s"). It never uses the node's
 `/tmp`, which other people's jobs on the same node share. The trade-off: a node's
 own disk is erased when the node shuts down, so a well that a stopped or suspended
 run left part-way starts that well's fields again next time (finished wells are
-kept, and nothing is lost between the batches of one run). With no such disk, or
+kept, and nothing is lost between the batches of one run). A part-done well left
+on a node's own disk by another run is cleared from it after a week untouched, so
+it does not hold space other jobs on that node need. With no such disk, or
 on a host without Slurm, it uses the run's own folder in the host's staging
 directory (`~/.allwell-staging/runs/…/out`). A folder set here always comes first,
 whether or not the host uses Slurm. Set it to your site's real scratch: `$TMPDIR`,

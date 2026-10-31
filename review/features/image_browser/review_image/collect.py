@@ -385,6 +385,10 @@ def review_build_exclusion_reasons(
     undo something that would not bring it back.
     """
     center = _np.asarray(mask_arr)
+    # Every label starts as kept and only a row can exclude it, so a label with no CSV row would be outlined as
+    # kept. The pipeline cannot produce one: the label image it saves is the one it quantifies, and it writes a row
+    # for every label in it (``process_microscopy._quantify_image_group``). Recorded as declined in the cell
+    # population audit (U2) rather than changed, so a reader does not take the absence of a guard as an oversight.
     reasons: dict[int, tuple[str, ...]] = {
         int(nid): () for nid in _np.unique(center) if int(nid) > 0
     }

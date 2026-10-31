@@ -56,6 +56,11 @@ def load_into(state, data_dir) -> None:
 
     A dataset with no ``nanowells/`` leaves ``state.data`` as ``None``; a scheme this version does not read
     leaves it ``None`` with the reason in ``state.load_error``.
+
+    The counts are the **run's own**: there is no ``ctx`` here, so Cell Gating cannot be read and is not applied,
+    and ``state.gate`` stays ``None`` — which the long-format export then states (``cell_gating``: "not applied").
+    The page never loads through this (``ensure_loaded`` → ``gated_metrics`` does); it is a seam for tests that
+    need the tables without a window. A caller that draws or exports for a person goes through ``ensure_loaded``.
     """
     state.reset_data()
     if not data_dir:
@@ -76,7 +81,8 @@ def load_into(state, data_dir) -> None:
 
 
 def set_baseline(state, baseline: str) -> None:
-    """Change the baseline and recompute every metric that depends on it."""
+    """Change the baseline and recompute every metric that depends on it — ungated, like :func:`load_into`, whose
+    test seam this is; the page changes its baseline through ``set_page_baseline`` and ``ensure_loaded``."""
     state.baseline = baseline
     if state.data is not None:
         state.metrics = site_metrics(state.data, baseline)

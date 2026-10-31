@@ -240,3 +240,31 @@ def test_the_exported_group_and_well_columns_are_plain_object():
 def test_identity_columns_are_constant_per_well(column):
     out = _chunk(_frame(), _scope())
     assert out[column].nunique() == 1
+
+
+def test_the_stated_inclusion_rule_is_the_applied_one():
+    """The scope block said ``Included AND QC_Pass AND Crop_Pass [AND Gate_Pass]`` while the rows were filtered by
+    every layer ``df_included_mask`` applies — the field, focus, border, excluded-field and FOV passes too — so a
+    reader rebuilding the population from the header got a different n (cell population audit P7). The rule is now
+    read from the mask's own roster; this checks it against the mask's behaviour, layer by layer."""
+    from review.data.data_loading import VERDICT_LAYERS, df_included_mask
+
+    rule = csc.inclusion_rule(True)
+    for layer in VERDICT_LAYERS:
+        frame = pd.DataFrame({"Included": [1, 1], layer: [1, 0]})
+        drops = df_included_mask(frame).tolist() == [True, False]
+        assert drops and layer in rule, layer                   # every layer the mask applies is named
+    assert "Gate_Pass not applied" in csc.inclusion_rule(False)
+    assert "AND Gate_Pass" not in csc.inclusion_rule(False)
+
+
+def test_a_scope_s_own_drawn_condition_is_not_given_a_second_equals_one():
+    assert csc.drawn_subset_text("plot_in_population") == "plot_in_population=1"
+    assert csc.drawn_subset_text("plot_in_matrix=1") == "plot_in_matrix=1"
+
+
+def test_an_optional_layer_is_named_only_when_some_wells_carry_it():
+    core = list(csc.VERDICT_COLUMNS)
+    assert csc.missing_verdict_layers([core, core]) == []                       # every optional layer off
+    assert csc.missing_verdict_layers([core + ["Focus_Pass"], core]) == ["Focus_Pass"]
+    assert csc.missing_verdict_layers([core + ["Focus_Pass"]] * 2) == []

@@ -3832,7 +3832,9 @@ row, holding five actions:
   the cells a cutoff excluded are the denominator a fraction was computed
   against, so a file without them could not reproduce the number on the figure.
   A `#` comment block above the table records the value column, timepoints,
-  threshold, gate layers and wells that produced it, and names the line the
+  threshold, the full inclusion rule the rows were filtered by (every layer:
+  curation, QC, crop, gates, and the field, focus, border and FOV exclusions),
+  and the wells that produced it, and names the line the
   table starts on. Read it with
   `pandas.read_csv(path, comment="#", float_precision="round_trip")` — the
   values are written at full precision, and pandas' default reader does not

@@ -1371,7 +1371,7 @@ which is what lets a reader reproduce a fraction: they are its denominator.
 Bar's three collectors (`barplot/collect.py`) disagree about whether a missing
 gate-channel column drops a well or skips that gate; under this rule the
 disagreement needs no resolution, showing up as `plot_in_population = 0` with
-the reason in the file's scope block.
+the reason in the file's scope block. The block's `# inclusion:` line is built from `data_loading.VERDICT_LAYERS`, the roster `df_included_mask` applies (`cell_scope_compute.inclusion_rule`), so the rule a file states cannot fall behind the rule its rows were filtered by; a core layer a well lacks is written as 1 and named, and an optional one (field, focus, border, excluded-field, FOV) present in some wells only is named on its own line, since it is written blank where it was not applied.
 
 Each feature contributes a `CellScope` from its own `cell_scope_compute.py`,
 and where a tab differs it says so rather than being normalised: Scatter keeps

@@ -15443,7 +15443,12 @@ most timepoints; then earliest), shared with `nanowell_run._settle_steps` so
 the run and the repair cannot disagree. A plan is `shift` (repairable:
 `nanowell_misaddressed`), `tie` (`nanowell_frames_ambiguous`: set an anchor by
 hand and re-run), or `unexplained` (a `roster_mismatch` no step within reach
-explains, or a disk-rule well with no kept roster: re-run). `build_report`
+explains, or a disk-rule well with no kept roster: re-run). A `shift` plan
+also carries in `unexplained` every flagged timepoint it neither moves nor
+re-rosters; its finding names them, and the repair leaves them flagged — only
+the timepoints in `moves` have their grid block and site rows set
+`consistent` — so Review goes on warning about them and the next run still
+re-analyses the well (`nanowell_task._has_a_step_off_timepoint`). `build_report`
 lists each as a warning and puts the repairable wells in
 `DatasetReport.misaddressed_nanowell_wells`, which makes the report
 `repairable`. `apply_repairs` plans again from disk, so a repeat is a no-op,

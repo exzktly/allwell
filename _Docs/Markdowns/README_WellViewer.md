@@ -5709,7 +5709,7 @@ the sentence names it.
   reason in its tooltip, while the *Moving average* is off, for a metric that is not a fold change, and with the
   *Earliest* baseline, which has nothing before it — choose *First measurable* or a timepoint. The footer states
   the baseline's window.
-- **Rim focus** (on by default) and **% of sharp** — leave out a nanowell at any timepoint where its own rim
+- **Rim focus** (on by default) and its percentage box beside it — leave out a nanowell at any timepoint where its own rim
   was out of focus. Every nanowell run measures each nanowell's rim sharpness (the `focus` column of
   `nanowells/<well>.csv`), so this works on datasets you already have, with no re-run. A nanowell is out of
   focus at a timepoint when its rim is less sharp than this percentage (75 % by default) of the sharpest tenth

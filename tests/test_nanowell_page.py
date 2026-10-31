@@ -430,6 +430,33 @@ def test_along_wells_the_timepoint_named_is_the_one_drawn(qtbot, tmp_path):
         ("t_a", "t_a", "t_a")
 
 
+def test_a_percentage_typed_into_the_rim_focus_box_is_taken(qtbot, page):
+    """Typing a percentage into the band's rim focus box sets it, with the cursor where a click leaves it. The box once
+    carried a " % of sharp" suffix, and Qt's spin box refuses typing and Backspace with the cursor inside a suffix,
+    so a click on most of the field ignored the value typed (the reported bug)."""
+    from PySide6.QtCore import Qt
+
+    _loaded(qtbot, page)
+    spin = page.widgets.get("_nw_rim_focus_spin")
+    seen = []
+    spin.valueChanged.connect(seen.append)
+    edit = spin.lineEdit()
+    assert edit.text() == "75"                       # the number alone: nothing in the field refuses the cursor
+    edit.setFocus()
+    edit.setCursorPosition(len(edit.text()))         # where a click to the right of the number puts it
+    qtbot.keyClick(edit, Qt.Key_Backspace)
+    qtbot.keyClick(edit, Qt.Key_Backspace)
+    qtbot.keyClicks(edit, "60")
+    qtbot.keyClick(edit, Qt.Key_Return)
+    assert (edit.text(), spin.value(), seen) == ("60", 60, [60])
+    assert page.state.qc.params.nanowell_focus_fraction == 0.6
+    st = page.state.feature_slice("nanowell")
+    qtbot.waitUntil(lambda: st.focus_for == (True, 0.6) and not st.computing, timeout=20000)
+    timer, canvas = page.widgets.get("_nw_refit_timer"), page.widgets.get("_nw_canvas")
+    qtbot.waitUntil(lambda: not (timer is not None and timer.isActive())
+                    and not getattr(canvas, "_draw_pending", False), timeout=5000)
+
+
 def test_the_rim_focus_control_on_the_band_changes_the_qc_layer_s_rule_and_the_metrics_follow(qtbot, page):
     """The band's *Rim focus* box and percentage are a mirror of the QC layer's switch: they change the dataset's
     QC parameters, and the page recomputes with the rule: the metrics on hand are stamped with the rule they were

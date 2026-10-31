@@ -57,6 +57,12 @@ def load_into(state, data_dir) -> None:
 
     A dataset with no ``nanowells/`` leaves ``state.data`` as ``None``; a scheme this version does not read
     leaves it ``None`` with the reason in ``state.load_error``.
+
+    The counts are the **run's own**: there is no ``ctx`` here, so Cell Gating cannot be read and is not applied,
+    and ``state.gate`` stays ``None`` — so the long-format export's ``cell_gating`` is empty and its ``n_cells``
+    equals ``n_cells_run``.
+    The page never loads through this (``ensure_loaded`` does, with the gate); it is a seam for tests that
+    need the tables without a window. A caller that draws or exports for a person goes through ``ensure_loaded``.
     """
     state.reset_data()
     if not data_dir:
@@ -78,7 +84,8 @@ def load_into(state, data_dir) -> None:
 
 
 def set_baseline(state, baseline: str) -> None:
-    """Change the baseline and recompute every metric that depends on it."""
+    """Change the baseline and recompute every metric that depends on it — ungated, like :func:`load_into`, whose
+    test seam this is; the page changes its baseline through ``set_page_baseline`` and ``ensure_loaded``."""
     state.baseline = baseline
     if state.data is not None:
         state.metrics = site_metrics(state.data, baseline, focus=state.rim_focus_rule())
@@ -2037,10 +2044,15 @@ def export_page_csv(ctx) -> None:
     if st is None or st.metrics is None:
         ctx.notify.set_status("There are no nanowell tables loaded to save.")
         return
+    stale_gate = st.gated_for != gate_version(ctx)
     if (st.computing or st.loaded_for is None or st.loaded_for[1] != st.baseline
-            or st.focus_for != st.rim_focus_rule().key()):
-        # The metrics on hand were computed for another baseline or rim focus rule; written now, the file would label them with
-        # the new one (roll-up review X12).
+            or st.focus_for != st.rim_focus_rule().key() or stale_gate):
+        # The metrics on hand were computed for another baseline or rim focus rule (roll-up review X12), or before a
+        # gating, curation or QC edit moved which cells count (cell population audit P9): written now, the file
+        # would carry counts the page no longer draws, under the current settings' labels. A stale gate also starts
+        # the recompute.
+        if stale_gate and not st.computing:
+            ensure_loaded(ctx)
         ctx.notify.set_status(f"The nanowell metrics for baseline {st.baseline!r} are still being computed; "
                               "save again once the page has drawn them.")
         return

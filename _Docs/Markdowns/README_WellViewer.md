@@ -3871,7 +3871,9 @@ row, holding five actions:
   the cells a cutoff excluded are the denominator a fraction was computed
   against, so a file without them could not reproduce the number on the figure.
   A `#` comment block above the table records the value column, timepoints,
-  threshold, gate layers and wells that produced it, and names the line the
+  threshold, the full inclusion rule the rows were filtered by (every layer:
+  curation, QC, crop, gates, and the field, focus, border and FOV exclusions),
+  and the wells that produced it, and names the line the
   table starts on. Read it with
   `pandas.read_csv(path, comment="#", float_precision="round_trip")` — the
   values are written at full precision, and pandas' default reader does not
@@ -5907,8 +5909,10 @@ page's, so they leave out the cells Home's Cell Gating leaves out; beside them `
 count, `cells_left_out` how many cells the gating took from it, and `cell_gating` says what the gating left out
 (empty when nothing). With a Subset set, every
 row is still written, flagged in `in_subset` with the subset (`subset`) and its baseline (`subset_baseline`) beside it. Right after you change the baseline it waits:
-until the page has drawn the new baseline's numbers, saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
-drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
+until the page has drawn the new baseline's numbers — or, after you change which cells count (QC limits, curation,
+gates), the new counts — saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
+drawn wells that carry a nanowell address — the cells the page's counts count, so a cell Cell Gating leaves out
+(QC limits, curation, a scatter gate) is not in the file. The page's choices are kept with the dataset and restored when it
 is opened again.
 
 **Is each nanowell the same nanowell at every timepoint?** Every comparison over time — fold changes,
@@ -6637,6 +6641,11 @@ Operates on **one well at a time** (spot detection is per-frame).
   when the run finishes, is cancelled, or fails. The app stays usable while it
   runs; switching datasets mid-run cancels it rather than writing counts into
   the wrong folder.
+- **Cells that could not be counted are left blank, never 0.** A cell whose
+  field has no spot image or no mask in the well's archive, or one that could
+  not be read, gets an empty count rather than a zero, so it drops out of the
+  fraction above threshold instead of counting as negative. The closing message
+  says how many cells were left blank, and the log names the wells.
 - **Optimal use** — sweep the threshold on one representative well, confirm the
   spot overlay, then Apply to All.
 
@@ -7243,6 +7252,16 @@ Every copy is recorded in the dataset's history (`provenance.jsonl`).
 Switch to **Datasets** with the title-bar segmented control (the third segment,
 beside Review and Analyze). Unlike Review there is no plate/well picker — the left
 sidebar is just a list of dataset-level tools.
+
+**Your exclusions travel with the data.** Subset, Merge Plates and Concatenate
+carry what decides which cells count: cells you excluded by hand, your QC limits
+(Home ▸ Cell Gating), the crop region, and fields you excluded during QC triage —
+renamed along with the wells and timepoints they belong to. A merged plate can
+hold only one set of QC limits and one crop, so it takes the first dataset's,
+and the run log says by name when the second dataset's were different, so you
+can check them before comparing the plates. Anything that could not be carried
+(an unreadable settings file, an exclusion of a well or timepoint the tool did
+not keep) is counted in the log.
 
 ### Convert OME-TIFF
 

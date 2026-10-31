@@ -164,6 +164,28 @@ def test_batch_export_takes_the_same_cells_out_as_the_page(qtbot, tmp_path):
     assert said.startswith("Cell Gating leaves out 1 of 7 cells")
 
 
+def test_save_cell_data_exports_exactly_the_cells_the_page_s_counts_count(qtbot, tmp_path):
+    """The page's *Save cell data…* scope used ``include_gate=False``, so a cell a scatter gate leaves out was in
+    the exported rows while ``gate_tally`` took it out of its nanowell's count (cell population audit P2). Through
+    the real page and the row cache both read: one cell fails a scatter gate, and the file holds every other cell."""
+    from review.data.data_loading import get_rows
+    from review.features.export import cell_scope_compute as csc
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell.cell_scope_compute import cell_scope
+    from tests.test_nanowell_page import _loaded, _page
+
+    ctx = _page(qtbot, _dataset_with_areas(tmp_path))
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    frame = get_rows(ctx, "A01")
+    frame["Gate_Pass"] = 1
+    frame.loc[frame.index[0], "Gate_Pass"] = 0                  # one cell outside the scatter gates
+    gate = nwc.gate_tally(ctx, st.data)
+    assert (gate.cells, gate.excluded) == (7, 1)
+    exported = csc.population_mask(get_rows(ctx, "A01"), cell_scope(ctx))
+    assert int(exported.sum()) == gate.cells - gate.excluded == 6
+
+
 # ── a whole field left out leaves its nanowells out (tracker H3) ─────────────
 
 def _dataset_with_two_tiles(tmp_path):
@@ -415,3 +437,33 @@ def test_save_nanowell_data_records_the_gate_beside_the_gated_counts(qtbot, tmp_
         "Cell Gating leaves out 1 of 7 cells in these wells' nanowells: counts and brightness exclude them; "
         "confluence and nanowell fluorescence are measured from pixels and do not."}
     assert list(written.columns).index("n_cells_run") == list(written.columns).index("n_cells") + 1
+
+
+def test_saving_right_after_a_gating_edit_waits_for_the_new_counts(qtbot, tmp_path, monkeypatch):
+    """``export_page_csv`` refused only while computing or after a baseline change; ``redraw`` also treats a moved
+    gating version as stale, the export did not, so a save made after a QC edit and before the page recomputed
+    wrote the previous gate's counts under the new gate's sentence (cell population audit P9)."""
+    from dataclasses import replace
+
+    from review.core import csv_export
+    from review.features.nanowell import controller as nwc
+    from review.features.qc.controller import get_qc_params, recompute_qc_all
+    from tests.test_nanowell_page import _loaded, _page
+
+    ctx = _page(qtbot, _dataset_with_areas(tmp_path))
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    path = tmp_path / "nanowells.csv"
+    monkeypatch.setattr(csv_export, "ask_save_csv", lambda *_a, **_k: str(path))
+    said: list[str] = []
+    monkeypatch.setattr(ctx.notify, "set_status", said.append)
+    ctx.state.qc.params = replace(get_qc_params(ctx), enabled=True, min_area=30.0)
+    recompute_qc_all(ctx)                                         # the gate moves; the page has not recomputed
+    assert st.gated_for != nwc.gate_version(ctx)
+    nwc.export_page_csv(ctx)
+    assert not path.exists()
+    assert any("still being computed" in line for line in said)
+    # The refusal also started the recompute; once it lands, the same save writes the new counts.
+    qtbot.waitUntil(lambda: not st.computing and st.gated_for == nwc.gate_version(ctx), timeout=20000)
+    nwc.export_page_csv(ctx)
+    assert pd.read_csv(path).set_index(["timepoint", "nw_q"]).loc[("t_c", 0), "n_cells"] == 1.0

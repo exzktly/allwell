@@ -1,0 +1,59 @@
+"""The Nanowells page's rim focus control on its band: **Rim focus** (on / off) and the fraction of the well's sharp
+rims a nanowell must reach, as a percentage.
+
+Every control writes through the controller (``set_rim_focus``), which keeps the rule on ``NanowellState`` and
+recomputes the metrics with it; ``rim_focus_compute`` decides which nanowells are out of focus.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from PySide6.QtWidgets import QCheckBox, QSpinBox
+
+from review.features.nanowell import controller as nwc
+from review.features.nanowell import rim_focus_compute as rfc
+
+RIM_FOCUS_TIP = (
+    "Leave out a nanowell at any timepoint where its own rim was out of focus — its tile was soft while others in "
+    "the well were sharp. Each nanowell's rim sharpness is measured by every nanowell run (the focus column of "
+    "nanowells/<well>.csv), so this needs no re-run.\n\n"
+    "A nanowell is out of focus when its rim is less sharp than this percentage of the sharpest tenth of its "
+    "well's rims at that timepoint. There it has no count, confluence or fluorescence, no fold change from or to "
+    "it and no growth rate through it; the Array view hatches it with dots, the nanowell's detail names it, and the "
+    "figure's note counts what was left out.\n\n"
+    "Not seen: a timepoint blurred evenly everywhere (nothing sharp to compare with), and a nanowell whose rim "
+    "could not be fitted (no rim focus; kept, and counted in the note).\n\n"
+    "This is not the QC tab's per-cell focus cut, which is measured on nuclei in the standard pipeline.")
+
+
+@dataclass
+class RimFocusControls:
+    box: object
+    spin: object
+
+    @property
+    def signalling(self) -> tuple:
+        return (self.box, self.spin)
+
+    def refresh(self, st) -> None:
+        self.box.setChecked(bool(st.rim_focus_on))
+        self.spin.setValue(int(round(100 * st.rim_focus_fraction)))
+        self.spin.setEnabled(bool(st.rim_focus_on))
+
+
+def build_rim_focus_controls(ctx) -> RimFocusControls:
+    """**Rim focus** and its percentage; the page places both on its band."""
+    box = QCheckBox("Rim focus")
+    box.setToolTip(RIM_FOCUS_TIP)
+    spin = QSpinBox()
+    spin.setRange(int(round(100 * rfc.MIN_FRACTION)), int(round(100 * rfc.MAX_FRACTION)))
+    spin.setSuffix(" % of sharp")
+    spin.setToolTip(RIM_FOCUS_TIP)
+    spin.setKeyboardTracking(False)          # recompute once on Enter or focus-out, not on every digit typed
+    box.toggled.connect(lambda on: nwc.set_rim_focus(ctx, on=on))
+    spin.valueChanged.connect(lambda value: nwc.set_rim_focus(ctx, fraction=value / 100.0))
+    reg = ctx.widgets
+    reg.register("_nw_rim_focus_box", box)
+    reg.register("_nw_rim_focus_spin", spin)
+    return RimFocusControls(box, spin)

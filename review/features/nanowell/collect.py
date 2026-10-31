@@ -55,6 +55,9 @@ IDENTITY_CONTRADICTED = "identity_contradicted"
 #: by hand in QC triage, or a field not among the FOVs chosen on Cell Gating (``cell_gate_compute.FIELD_LAYERS``):
 #: every nanowell that tile owns there is left out, an empty one as much as a loaded one, with no value at all.
 FIELD_EXCLUDED = "field_excluded"
+#: A measurable timepoint at which the nanowell's own rim was out of focus against its well's sharp rims
+#: (``rim_focus_compute``): Review's verdict, not the run's, so it changes with the page's rule and no re-run.
+OUT_OF_FOCUS = "out_of_focus"
 #: States whose contents metrics are defined (tracker §3.5).
 MEASURABLE = frozenset({MEASURED, EMPTY})
 

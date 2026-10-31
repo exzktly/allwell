@@ -335,3 +335,27 @@ def test_the_baseline_s_window_reaches_the_figure_and_the_csv_says_which_window_
     assert list(expected["excluded"]) != list(single["excluded"])       # the fixture can tell the two apart
     said = ["; ".join(f"{k}: {v}" for k, v in sorted(d.items())) for d in expected["excluded"]]
     assert [r["excluded"] for r in fold] == said
+
+
+def test_a_batch_run_leaves_out_nanowells_under_the_page_s_own_rim_focus_rule(panel, monkeypatch):
+    """An export must never count a nanowell the page shows as out of focus: the run computes the metrics with the
+    page's rim focus rule, whatever it is set to, and its note carries the rule's sentence."""
+    from review.features.batch_export import nanowell_panel
+    from review.features.nanowell import rim_focus_compute as rfc
+
+    p, ctx = panel
+    st = ctx.state.feature_slice("nanowell")
+    st.rim_focus_on, st.rim_focus_fraction = True, 0.6
+    seen = []
+    real = nanowell_panel._site_metrics
+
+    def spy(data, baseline, gate=None, focus=None):
+        seen.append(focus)
+        return real(data, baseline, gate, focus)
+
+    monkeypatch.setattr(nanowell_panel, "_site_metrics", spy)
+    assert p._load("earliest", ["A01"]) is not None
+    assert seen == [rfc.RimFocusRule(True, 0.6)]
+    st.rim_focus_on = False
+    p._load("earliest", ["A01"])
+    assert seen[-1] == rfc.RimFocusRule(False, 0.6) and not seen[-1].active()

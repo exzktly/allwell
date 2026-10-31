@@ -1032,6 +1032,8 @@ def _band(x) -> float:
 def _state_text(row: dict) -> str:
     flags = [name for name in ("fused", "partially_visible") if row.get(name) is True]
     state = str(row.get("state", ""))
+    if state == "out_of_focus":
+        state = "rim out of focus"
     return state + (f" ({', '.join(f.replace('_', ' ') for f in flags)})" if flags else "")
 
 
@@ -1041,7 +1043,8 @@ MAP_CMAP = "viridis"
 #: How a nanowell without a value is outlined, by its state (fill colouring by the metric).
 _STATE_STYLE = {"occluded": ("////", "solid"), "clipped": ("", "dashed"), "absent": ("", "dotted"),
                 "not_located": ("", "dotted"), "unaddressed": ("", "dotted"),
-                "identity_contradicted": ("xx", "solid"), "field_excluded": ("..", "solid")}
+                "identity_contradicted": ("xx", "solid"), "field_excluded": ("++", "solid"),
+                "out_of_focus": ("....", "solid")}
 #: How each tile was placed (``pipeline/tile_register.py``), as the ``Colors`` token it is drawn in: on the lattice
 #: phase, by overlap correlation, or where the acquisition record put it when neither could be measured.
 _SOURCE_TOKENS = {"lattice": "success", "overlap": "accent", "recorded": "warn"}

@@ -309,6 +309,9 @@ def legacy_settings_digests(opts) -> tuple[str, ...]:
     found = []
     for variant in variants:
         digests = [] if variant is opts else [settings_digest(variant)]
+        # The current definition with each well option as typed: what the build that introduced them recorded.
+        digests.append(_digest(variant, KEYED_ON, skip_nanowell_outside_mode=True, skip_cellpose_outside_method=True,
+                               as_spelled=True))
         digests += [_digest(definition["as_recorded"](variant), KEYED_ON.keys() - definition["without"],
                             skip_nanowell_outside_mode=definition["skip_nanowell_outside_mode"],
                             skip_cellpose_outside_method=definition["skip_cellpose_outside_method"])
@@ -350,7 +353,24 @@ def settings_key_aliases(key: str) -> tuple[str, ...]:
     return tuple(part for part in str(key or "").split(KEY_ALIAS_SEP) if part)
 
 
-def _digest(opts, keys, *, skip_nanowell_outside_mode: bool, skip_cellpose_outside_method: bool = False) -> str:
+def _canonical_well(value):
+    """A well named in an option, as the pipeline acts on it: ``h12`` and ``H12`` are one well
+    (``util.well_token.canonical_well_label``); a value that names no well is kept as given (the pipeline refuses it)."""
+    from util.well_token import canonical_well_label
+
+    return canonical_well_label(str(value)) or value
+
+
+#: Options whose value is a spelling of something the pipeline canonicalises before acting on it, with the function
+#: that does: digested raw, two spellings of the same well gave two settings keys and re-ran the plate (review
+#: tracker L6).
+_CANONICAL = {"nanowell_empty_well": _canonical_well}
+
+
+def _digest(opts, keys, *, skip_nanowell_outside_mode: bool, skip_cellpose_outside_method: bool = False,
+            as_spelled: bool = False) -> str:
+    """The digest of *keys* in *opts*; with *as_spelled*, the :data:`_CANONICAL` options as typed, which is how the
+    build that introduced them recorded them (:func:`legacy_settings_digests` accepts that digest too)."""
     payload = {}
     try:
         nanowell = bool(opts["nanowell_format"])
@@ -374,6 +394,8 @@ def _digest(opts, keys, *, skip_nanowell_outside_mode: bool, skip_cellpose_outsi
             continue
         if value is None:
             continue
+        if key in _CANONICAL and not as_spelled:
+            value = _CANONICAL[key](value)
         try:
             payload[key] = json.dumps(value, sort_keys=True, default=str)
         except (TypeError, ValueError):

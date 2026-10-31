@@ -433,3 +433,30 @@ def test_a_remote_run_brings_the_settings_marker_back_with_the_well():
 
     pull = inspect.getsource(Fetcher._pull_settings_marker)
     assert SETTINGS_DIRNAME in pull and "pull_small_file" in pull, pull
+
+
+@pytest.mark.parametrize("spelled", ["h12", " H12 "])
+def test_two_spellings_of_the_empty_reference_well_are_one_settings_key(spelled):
+    """Review tracker L6: the pipeline acts on the canonical well (``cli_args.nanowell_options_from_args``), but the
+    settings key digested ``--nanowell_empty_well`` as typed, so ``h12`` after ``H12`` read as other settings and
+    re-ran every well of the plate. The key a run records is now the same for both, through the function the app
+    and the remote runner derive it with; and a well an earlier build recorded under the spelling as typed is still
+    this run's, so the fix itself re-runs nothing."""
+    from pipeline.cli_args import settings_key_from_argv
+    from util.settings_digest import KEYED_ON, _digest, primary_settings_key, settings_match
+
+    base = ["--input_dir", "/x", "--output_dir", "/y", "--nanowell_format", "100um", "--phase_token", "PHASE"]
+    canonical = settings_key_from_argv([*base, "--nanowell_empty_well", "H12"])
+    typed = settings_key_from_argv([*base, "--nanowell_empty_well", spelled])
+    assert primary_settings_key(typed) == primary_settings_key(canonical)
+
+    from pipeline.cli_args import apply_labelfree_preset, build_parser, nanowell_options_from_args
+
+    args = build_parser().parse_known_args([*base, "--nanowell_empty_well", spelled])[0]
+    apply_labelfree_preset(args)                        # the normalisation settings_key_from_argv applies
+    nanowell_options_from_args(args, pytest.fail)
+    opts = vars(args)
+    recorded_as_typed = _digest(opts, KEYED_ON, skip_nanowell_outside_mode=True, skip_cellpose_outside_method=True,
+                                as_spelled=True)
+    assert recorded_as_typed != primary_settings_key(canonical)
+    assert settings_match(recorded_as_typed, typed)

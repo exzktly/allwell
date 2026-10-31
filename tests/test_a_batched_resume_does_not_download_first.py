@@ -52,7 +52,7 @@ def test_a_rescued_well_reports_its_download_in_every_output_mode(tmp_path):
     (tmp_path / "A02_out").mkdir()
     (tmp_path / "A02_out" / "img.tif").write_bytes(b"x" * 4096)
     assert local_output_mb(run, "A01") == 2048 / (1024 * 1024)
-    assert local_output_mb(run, "A02") == 4096 / (1024 * 1024), "FOLDER mode: the extracted output is the output"
+    assert local_output_mb(run, "A02") == 4096 / (1024 * 1024), "an earlier version's extracted output is the output"
     assert local_output_mb(run, "A03") is None, "nothing local is not a download"
     csv_only = SimpleNamespace(local_output_dir=tmp_path, output_filter=OutputFilter.CSV_ONLY)
     assert local_output_mb(csv_only, "A03") == 0.0, "CSV-only keeps no zip, and is still downloaded"

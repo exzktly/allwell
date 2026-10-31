@@ -106,8 +106,8 @@ def select_only_wells(items, only_wells):
     return kept, sorted(wanted - present)
 
 
-def scope_to_only_wells(well_zips, well_folders, only_wells, *, refuse, log, absent_ok: bool = False):
-    """Narrow a run's ``(well_zips, well_folders)`` to its ``--only_wells``.
+def scope_to_only_wells(well_zips, only_wells, *, refuse, log, absent_ok: bool = False):
+    """Narrow a run's ``well_zips`` to its ``--only_wells``.
 
     Called once the plate's own well list has served everything that needs the
     whole plate (the blank pairing, the uncovered-well refusal); the flat-field
@@ -121,19 +121,17 @@ def scope_to_only_wells(well_zips, well_folders, only_wells, *, refuse, log, abs
     are then logged as belonging to another batch.
     """
     if only_wells is None:
-        return well_zips, well_folders
-    zips, missing_z = select_only_wells(well_zips, only_wells)
-    folders, missing_f = select_only_wells(well_folders, only_wells)
-    missing = missing_z if well_zips else missing_f
+        return well_zips
+    zips, missing = select_only_wells(well_zips, only_wells)
     if missing and absent_ok:
         log.info("Only wells: %s not in this input (another batch's); this batch runs the named wells it holds.",
                  ", ".join(missing))
     elif missing:
         refuse(f"--only_wells names well(s) not in the input: {', '.join(missing)}")
     log.info("Only wells: %d of %d well(s) — %s. Every other well's output and "
-             "records are left as they are.", len(zips or folders),
-             len(well_zips or well_folders), ", ".join(w for w, _p in zips or folders))
-    return zips, folders
+             "records are left as they are.", len(zips), len(well_zips),
+             ", ".join(w for w, _p in zips))
+    return zips
 
 
 def incremental_for_well(incremental: bool, well_label: str, forced) -> bool:

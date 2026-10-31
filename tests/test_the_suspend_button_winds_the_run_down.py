@@ -155,7 +155,7 @@ def _start(tab, *, resolve_delay: float = 0.0):
 
     def _resolve(opts, log_q, **kw):
         time.sleep(resolve_delay)
-        return (tab.plate / "in", tab.plate / "out", None)
+        return (tab.plate / "in", tab.plate / "out")
 
     tab._resolve_run_dirs_for_runner = _resolve
     spec = RunSpec.from_json({"opts": {

@@ -124,3 +124,72 @@ def test_with_no_node_local_disk_the_shared_default_stays(disks, fresh_decision,
     assert pio.scratch_base_for(tmp_path / "out") == home
     import os
     assert pio.SCRATCH_DIR_ENV not in os.environ
+
+
+# ── through the remote command the app actually sends ─────────────────────────────────────────────────────────────
+
+def _remote_run_scratch(tmp_path, monkeypatch, *, host_scratch: str = "", slurm: bool = True) -> tuple[Path, Path]:
+    """The scratch a remote run's pipeline ends up with, through the app's own path: the argv
+    ``RemoteRunner._build_remote_argv`` builds, the host's scratch folder exported as the composed command exports it
+    (``remote_commands._remote_scratch_export``), the pipeline's real parser, ``publish_scratch_args`` as
+    ``process_microscopy.main`` calls it, then ``scratch_base_for``.
+
+    Testing ``node_local_scratch`` alone passed while no remote run could reach it: the remote argv always carried
+    ``--scratch_dir=<run output>``, which outranked the node's disk and overwrote the host's exported folder."""
+    import re
+    import shlex
+
+    from pipeline.cli_args import build_parser
+    from services.remote_commands import _remote_scratch_export
+    from services.remote_config import RemoteHost
+    from services.remote_runner import RemoteRunner
+    from services.remote_run_state import LocalInputMode, OutputFilter
+
+    host = RemoteHost(name="aws", ssh_alias="aws", remote_project_dir="~/allwell",
+                      remote_staging_dir="~/.allwell-staging", compute_launcher="srun -p gpu-large-queue",
+                      remote_scratch_dir=host_scratch)
+    remote_out = tmp_path / "staging" / "runs" / "run-1" / "out"
+    local = ["/usr/bin/python", "/local/process_microscopy.py", "--input_dir", "/x", "--output_dir", "/y"]
+    argv = RemoteRunner(host)._build_remote_argv(local, "/r/in", str(remote_out), OutputFilter.FULL,
+                                                 LocalInputMode.ZIP)
+    export = _remote_scratch_export(host.remote_scratch_dir)
+    if export:
+        monkeypatch.setenv(pio.SCRATCH_DIR_ENV, re.search(r'ALLWELL_SCRATCH_DIR="([^"]*)"', export).group(1))
+    if slurm:
+        monkeypatch.setenv("SLURM_JOB_ID", "4812345")
+    else:
+        monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+    pipeline_args = argv[argv.index("python") + 2:]           # after `… python <remote>/process_microscopy.py`
+    args = build_parser().parse_args(shlex.split(shlex.join(pipeline_args)))
+    pio.publish_scratch_args(args.scratch_dir, args.scratch_fallback_dir)
+    return pio.scratch_base_for(Path(args.output_dir)), remote_out
+
+
+@pytest.fixture
+def remote_env(disks, fresh_decision, monkeypatch):
+    folders, _kinds, free = disks
+    monkeypatch.delenv(pio.SCRATCH_FALLBACK_ENV, raising=False)
+    monkeypatch.setattr(nd.shutil, "disk_usage", lambda p: type("U", (), {"free": free[Path(p)]})())
+    return disks
+
+
+def test_a_remote_slurm_run_with_no_scratch_folder_set_uses_the_node_s_disk(remote_env, monkeypatch, tmp_path):
+    folders, _kinds, _free = remote_env
+    scratch, _out = _remote_run_scratch(tmp_path, monkeypatch)
+    assert scratch == folders["scratch"] / f"allwell-{nd._user()}"
+
+
+def test_a_remote_run_s_host_scratch_folder_is_used(remote_env, monkeypatch, tmp_path):
+    chosen = tmp_path / "chosen-scratch"
+    scratch, _out = _remote_run_scratch(tmp_path, monkeypatch, host_scratch=str(chosen))
+    assert scratch == chosen
+
+
+def test_a_remote_run_with_no_node_disk_keeps_its_scratch_in_the_run_s_output_folder(remote_env, monkeypatch,
+                                                                                       tmp_path):
+    folders, kinds, _free = remote_env
+    kinds[folders["scratch"]] = "nfs4"
+    scratch, out = _remote_run_scratch(tmp_path, monkeypatch)
+    assert scratch == out, "without a node disk the scratch left the staging area for the home folder's quota"
+    scratch_off_slurm, out = _remote_run_scratch(tmp_path, monkeypatch, slurm=False)
+    assert scratch_off_slurm == out

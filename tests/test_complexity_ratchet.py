@@ -33,7 +33,7 @@ THRESHOLD = 40
 # to pipeline.parallelism.plan_parallelism.
 # 759 -> 697: remote_staging.stage_local_zips left the allowlist; its FOLDER /
 # FLAT zip-up is _zip_up_in_place.
-TOTAL_ALLOWLISTED_CC_BUDGET = 697
+TOTAL_ALLOWLISTED_CC_BUDGET = 696
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,

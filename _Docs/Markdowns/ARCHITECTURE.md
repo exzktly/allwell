@@ -14122,9 +14122,24 @@ host's scratch folder) → **inside a Slurm job, the node's own disk**
 (`pipeline/node_disk.node_local_scratch`: `/scratch`, where AWS ParallelCluster
 mounts a node's NVMe drive, then `$SLURM_TMPDIR`; the first that is local — not a
 network or in-memory filesystem — writable, and has `LOCAL_SCRATCH_MIN_FREE`
-(20 GB) free, as `<disk>/allwell-<user>`) → **`scratch/` in the app's folder**
-(the default elsewhere: `~/.allwell/scratch`, or `%LOCALAPPDATA%\allwell\scratch`
-on Windows — §5's local-files section) → `output_dir` (last resort, warned).
+(20 GB) free, as `<disk>/allwell-<user>`) → `$ALLWELL_SCRATCH_FALLBACK_DIR`
+(`--scratch_fallback_dir`) → **`scratch/` in the app's folder** (the default
+elsewhere: `~/.allwell/scratch`, or `%LOCALAPPDATA%\allwell\scratch` on Windows —
+§5's local-files section) → `output_dir` (last resort, warned).
+`process_microscopy.main` hands both flags to the environment through
+`pipeline.io.publish_scratch_args` before the first call, so the spawned workers
+resolve the same folder.
+
+A remote run's argv (`RemoteRunner._build_remote_argv`) carries
+`--scratch_fallback_dir=<the run's output folder>`: on a cluster the home folder
+is a small-quota network share, and the run's output folder in the host's staging
+area is where a remote run's scratch has always lived when nothing better is
+available. It is a fallback, not `--scratch_dir`, because the host's scratch
+folder arrives as an exported `ALLWELL_SCRATCH_DIR` (`remote_commands.
+_remote_scratch_export`) and the node's own disk is decided inside the job; a
+`--scratch_dir` would outrank both. `tests/test_node_local_scratch.py` drives that
+sequence — the real remote argv, the export, the pipeline's parser,
+`publish_scratch_args`, `scratch_base_for` — for each of the three outcomes.
 
 The node-local step exists because on a cluster the home folder is a network
 filesystem shared by every node — on ParallelCluster served by the head node that

@@ -92,6 +92,10 @@ SCRATCH_SUBDIR = "scratch"
 #: The environment variable that overrides the scratch default — the Analyze
 #: form's "Scratch disk" field and ``--scratch_dir`` both set it.
 SCRATCH_DIR_ENV = "ALLWELL_SCRATCH_DIR"
+#: Where the scratch goes when nothing above it in ``pipeline.io.scratch_base_for`` names a folder, in place of the
+#: app folder's scratch. Set from ``--scratch_fallback_dir``, which the remote runner passes as the run's output
+#: folder; an environment variable so the spawned workers inherit it.
+SCRATCH_FALLBACK_ENV = "ALLWELL_SCRATCH_FALLBACK_DIR"
 #: The pipeline's CZI header cache (``pipeline.scan_cache``), its override
 #: variable, and the override values that switch it off.
 SCAN_CACHE_SUBDIR = "czi-scans"

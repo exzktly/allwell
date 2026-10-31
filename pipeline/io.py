@@ -43,7 +43,7 @@ from skimage.segmentation import find_boundaries
 from util.aw_safe import swallow, swallowed
 from util.retry_io import retry_io
 from util.state_dir import (
-    SCRATCH_DIR_ENV, default_scratch_dir, default_scratch_label, on_the_desktop,
+    SCRATCH_DIR_ENV, SCRATCH_FALLBACK_ENV, default_scratch_dir, default_scratch_label, on_the_desktop,
 )
 from util.image_exts import GROUP_IMAGE_EXTS
 from util.zip_write import atomic_zip, fsync_path, staging_path
@@ -129,6 +129,15 @@ def default_scratch_base() -> Path | None:
     return default_scratch_dir()
 
 
+def publish_scratch_args(scratch_dir: Path | None, fallback_dir: Path | None) -> None:
+    """Put ``--scratch_dir`` / ``--scratch_fallback_dir`` where :func:`scratch_base_for` and the spawned workers
+    (which inherit the environment, not argv) read them. Called before the first :func:`scratch_base_for`."""
+    if scratch_dir is not None:
+        os.environ[SCRATCH_DIR_ENV] = str(scratch_dir)
+    if fallback_dir is not None:
+        os.environ[SCRATCH_FALLBACK_ENV] = str(fallback_dir)
+
+
 _NODE_LOCAL_DECIDED = False
 
 
@@ -166,10 +175,13 @@ def scratch_base_for(output_dir: Path) -> Path:
        written to ``$ALLWELL_SCRATCH_DIR``, so every later call — and every worker the run starts — takes the same
        folder even as the disk fills. On a cluster the next rule's home folder is a network filesystem shared by
        every node; scratch traffic there stalled the app's run heartbeat (``services/remote_heartbeat.py``).
-    3. ``scratch`` in the app's folder — ``%LOCALAPPDATA%\\allwell\\scratch``
+    3. ``$ALLWELL_SCRATCH_FALLBACK_DIR`` (``--scratch_fallback_dir``) — what the remote runner passes: the run's
+       own output folder in the host's staging area, so a remote run without a node-local disk keeps the scratch
+       it always had rather than moving to the home folder's small quota.
+    4. ``scratch`` in the app's folder — ``%LOCALAPPDATA%\\allwell\\scratch``
        on Windows, ``~/.allwell/scratch`` on macOS and Linux
        (:func:`default_scratch_base`).
-    4. *output_dir* — last-resort fallback when none of the above can be
+    5. *output_dir* — last-resort fallback when none of the above can be
        created, so an unwritable home never fails the run outright.
 
     **Why local per-user storage is the default.** This scratch carries the whole
@@ -201,6 +213,14 @@ def scratch_base_for(output_dir: Path) -> Path:
     local = _node_local_scratch_once()
     if local is not None:
         return local
+    fallback = os.environ.get(SCRATCH_FALLBACK_ENV, "").strip()
+    if fallback:
+        try:
+            p = Path(fallback).expanduser()
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+        except OSError as exc:
+            log.warning("Scratch fallback dir %s unusable (%s); falling back.", fallback, exc)
     home = default_scratch_base()
     if home is not None:
         return home

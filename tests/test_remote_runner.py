@@ -1058,12 +1058,13 @@ def test_remote_argv_swaps_input_output(host):
     assert "--no_save_tophat" not in remote
 
 
-def test_remote_argv_pins_scratch_to_the_remote_output_dir(host):
-    """The pipeline default moved to ``~/.allwell/scratch`` to keep a local
-    run's bulk I/O off a network-mounted output volume. On a cluster that
-    default is wrong — home is typically a small-quota NFS share — so the
-    remote argv pins scratch to the remote output dir, which is where it lived
-    before the default changed."""
+def test_remote_argv_makes_the_remote_output_dir_the_scratch_fallback_not_its_choice(host):
+    """On a cluster the pipeline's own default (``~/.allwell/scratch``) is a
+    small-quota NFS share, so the remote output dir stands in for it — as the
+    *fallback*. It used to be passed as ``--scratch_dir``, which outranked the
+    host's scratch folder and, inside a Slurm job, the node's own disk, so
+    neither ever took effect on a remote run
+    (tests/test_node_local_scratch.py drives the whole sequence)."""
     runner = RemoteRunner(host)
     local = [
         "/usr/bin/python", "/local/pm.py",
@@ -1072,7 +1073,8 @@ def test_remote_argv_pins_scratch_to_the_remote_output_dir(host):
     remote = runner._build_remote_argv(
         local, "/r/in", "/r/out", OutputFilter.FULL, LocalInputMode.ZIP,
     )
-    assert "--scratch_dir=/r/out" in remote
+    assert "--scratch_fallback_dir=/r/out" in remote
+    assert not any(a.startswith("--scratch_dir") for a in remote)
 
 
 def test_remote_argv_drops_a_local_scratch_dir(host):
@@ -1089,7 +1091,8 @@ def test_remote_argv_drops_a_local_scratch_dir(host):
             local, "/r/in", "/r/out", OutputFilter.FULL, LocalInputMode.ZIP,
         )
         assert not any("LocalSSD" in a for a in remote)
-        assert remote.count("--scratch_dir=/r/out") == 1
+        assert not any(a.startswith("--scratch_dir") for a in remote)
+        assert remote.count("--scratch_fallback_dir=/r/out") == 1
 
 
 def test_remote_argv_csv_only_appends_no_save_tophat(host):

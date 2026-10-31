@@ -525,7 +525,9 @@ def install_split_view(ctx) -> None:
         combo.currentIndexChanged.connect(lambda i: on_split_pane_combo_changed(ctx, i))
         ctx.runtime.split.toggle_btn = btn
         ctx.runtime.split.pane_combo = combo
-        # Sit at the right end of the top bar (after the stretch + Open).
+        # Built into the top bar; the window shell (allwell.py
+        # ``_mount_review_actions``) then moves both onto its header row,
+        # beside the wordmark, so they take no width from the page tabs.
         top_layout.addWidget(btn)
         top_layout.addWidget(combo)
         # Review-only, from the moment the app opens — install runs once,

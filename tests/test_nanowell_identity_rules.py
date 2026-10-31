@@ -173,3 +173,51 @@ def test_auditing_named_wells_keeps_the_plate_s_stage_verdict(tmp_path, named, c
     assert verdict == ni.CONTRADICTED and "rigid motion" in reason
     assert code == (1 if "B02" in named else 2)
     assert {w: (tmp_path / "nanowells" / f"{w}_identity.json").read_bytes() for w in untouched} == untouched
+
+
+# ── L19: a partial timepoint is said, not passed ─────────────────────────────
+def _write_well(out, well, timepoints: dict):
+    """The tables the run writes for *timepoints* (``name -> Timepoint``), its square accepted at the origin."""
+    folder = out / "nanowells"
+    folder.mkdir(parents=True, exist_ok=True)
+    blocks = {t.name: {"status": "ok", "lattice_kind": t.kind, "pitch_um": t.pitch, "angle_deg": t.angle_deg,
+                       "mirrored": False, "montage_um_per_px": t.um_per_px, "montage_origin_um": list(t.origin_um),
+                       "origin_method": "fiducial", "fiducial": {"position_um": list(t.square_um)},
+                       "array_boundary": {"centre_um": list(t.centre_um)},
+                       "tiles": [{"tile": k, "left_um": v[0], "top_um": v[1]} for k, v in t.tiles.items()]}
+              for t in timepoints.values()}
+    (folder / f"{well}_grid.json").write_text(json.dumps({"well": well, "timepoints": blocks}))
+    lines = ["timepoint,nw_q,nw_r,well_x_um,well_y_um,owner"]
+    lines += [f"{t.name},{a[0]},{a[1]},{p[0]},{p[1]},{t.owners[a]}" for t in timepoints.values()
+              for a, p in t.sites.items()]
+    (folder / f"{well}.csv").write_text("\n".join(lines) + "\n")
+
+
+@pytest.fixture
+def partial_well(tmp_path, registered, monkeypatch):
+    """A01, whose T1 is ``partial``: the reference's tile F1 a lattice step off (the M3 tables). Montages are read
+    as blank images; the registration they would give is the one ``registered`` takes as found."""
+    monkeypatch.setattr(ni, "montage_loaders",
+                        lambda out_dir, well, names: {n: (lambda: np.zeros((4, 4), np.uint8)) for n in names})
+    _write_well(tmp_path, "A01", {"T0": _two_tiles("T0", -P)[0], "T1": _two_tiles("T1", 0.0)[0]})
+    return tmp_path
+
+
+def test_a_partial_timepoint_is_logged_by_the_run(partial_well, caplog):
+    """L19: the run logged a warning for every contradicted or inconclusive timepoint and nothing for a partial one,
+    though ARCHITECTURE says it logs each timepoint that is not good, and partial is not good."""
+    with caplog.at_level("WARNING", logger="allwell.nanowell"):
+        payload = ni.check_after_run(partial_well, "A01")
+    count = len(payload["timepoints"]["T1"]["excluded"])
+    assert payload["timepoints"]["T1"]["verdict"] == ni.PARTIAL and count == 34
+    assert [r.getMessage()[:90] for r in caplog.records if r.levelname == "WARNING"] == [
+        f"Well A01 timepoint T1: nanowell identity partial against T0 ({count} of 154 nanowells left out (misreg"[:90]]
+
+
+def test_the_audit_says_a_partial_timepoint_and_exits_3(partial_well, capsys):
+    """L19: the audit's summary listed only contradicted and inconclusive timepoints, and its exit status was 0 — the
+    one that means every timepoint is good — for a well whose timepoint leaves 34 nanowells out."""
+    assert ni.main([str(partial_well)]) == 3
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "A01: 1 reference, 1 partial (reference T0)"
+    assert lines[1].startswith("  T1: partial — 34 of 154 nanowells left out (misregistered_tile: tile(s) F1 ")

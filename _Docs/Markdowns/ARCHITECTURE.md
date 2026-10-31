@@ -11037,7 +11037,8 @@ written (a well whose archive this run did not write is not checked), and `stage
 `nanowell_endgame`; each logs a warning per timepoint that is not good, and a check that cannot run is logged
 and leaves no sidecar. The remote fetch (`remote_fetch_nanowells`) and batch resume (`remote_batch_resume`) carry
 the sidecar by exact name. `python -m pipeline.nanowell_identity <output_dir> [--well W]` audits an analysed
-dataset (exit 1 when any timepoint is contradicted, 2 when any is inconclusive, each read as Review reads it —
+dataset (exit 1 when any timepoint is contradicted, 2 when any is inconclusive, 3 when any is partial — `NOT_GOOD`,
+the verdicts the run log and the summary also report — each read as Review reads it —
 `verdict_in`, the stage flag overruling the image verdict — in the summary and the exit status alike). `--well`
 re-checks and rewrites only the named wells' sidecars, but `stage_check(out_dir, wells)` still fits the whole
 plate: *wells* limits what is written, never what is fitted, because a fit over the named wells alone was refused

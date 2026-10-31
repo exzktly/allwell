@@ -89,6 +89,9 @@ GOOD = (CONFIRMED, REFERENCE)
 #: shown to: confirmed, the reference, and a partial timepoint outside its exclusions.
 AGREES = (CONFIRMED, REFERENCE, PARTIAL)
 VERDICTS = (CONFIRMED, REFERENCE, PARTIAL, INCONCLUSIVE, CONTRADICTED, NOT_CHECKED)
+#: The verdicts the run log, the audit's summary and its exit status report: every one that is not good. A partial
+#: timepoint leaves nanowells out of every join, so it is said as loudly as the others (review tracker L19).
+NOT_GOOD = (CONTRADICTED, INCONCLUSIVE, PARTIAL)
 
 #: How far, in pitches, a mapped address may land from the same address at the other timepoint. A lattice step
 #: error moves it a whole pitch; registration and site-fit noise on rendered plates are a few hundredths. Assumed,
@@ -1106,10 +1109,10 @@ def check_after_run(out_dir, well: str, order=None) -> dict | None:
         payload = check_well_dir(out_dir, well, order)
     if payload is None:
         return None
-    for tp, entry in payload["timepoints"].items():
-        if entry.get("verdict") in (CONTRADICTED, INCONCLUSIVE):
-            log.warning("Well %s timepoint %s: nanowell identity %s against %s (%s)", well, tp, entry["verdict"],
-                        payload.get("reference") or "no reference", entry.get("reason", ""))
+    for tp, (verdict, reason) in _effective(payload).items():
+        if verdict in NOT_GOOD:
+            log.warning("Well %s timepoint %s: nanowell identity %s against %s (%s)", well, tp, verdict,
+                        payload.get("reference") or "no reference", reason)
     return payload
 
 
@@ -1289,7 +1292,7 @@ def summary_lines(results: dict) -> list[str]:
                      + (f" (reference {payload['reference']})" if payload.get("reference") else
                         f" ({payload.get('reference_reason')})"))
         for tp, (verdict, reason) in found.items():
-            if verdict in (CONTRADICTED, INCONCLUSIVE):
+            if verdict in NOT_GOOD:
                 lines.append(f"  {tp}: {verdict} — {reason}")
     return lines
 
@@ -1377,8 +1380,9 @@ def number_rows(payloads: dict) -> list[dict]:
 
 def main(argv=None) -> int:
     """``python -m pipeline.nanowell_identity <output_dir> [--well A01 ...] [--numbers]``: audit a dataset; exit 1
-    when any timepoint is contradicted, 2 when none is but any is inconclusive, 0 when every timepoint is good.
-    ``--numbers`` prints :func:`number_rows` as CSV in place of the summary."""
+    when any timepoint is contradicted, 2 when none is but any is inconclusive, 3 when neither but any is partial
+    (some of its nanowells left out), 0 when every timepoint is good. ``--numbers`` prints :func:`number_rows` as CSV
+    in place of the summary."""
     import argparse
     import sys
 
@@ -1402,7 +1406,7 @@ def main(argv=None) -> int:
         for line in summary_lines(results):
             print(line)
     verdict_set = {verdict for p in results.values() if p for verdict, _why in _effective(p).values()}
-    return 1 if CONTRADICTED in verdict_set else 2 if INCONCLUSIVE in verdict_set else 0
+    return 1 if CONTRADICTED in verdict_set else 2 if INCONCLUSIVE in verdict_set else 3 if PARTIAL in verdict_set else 0
 
 
 if __name__ == "__main__":                                        # pragma: no cover - the command line

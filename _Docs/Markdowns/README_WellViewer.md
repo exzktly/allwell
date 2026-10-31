@@ -5824,7 +5824,8 @@ each well's array moved with the plate. Each timepoint gets one of:
 - **partial** — the timepoint registered cleanly and most of its nanowells land on themselves, but some do not:
   those whose address landed on a neighbour, and every nanowell of an imaging tile that was placed a whole nanowell
   spacing off in the montage. Only those nanowells are left out of comparisons over time; the rest of the timepoint
-  is used. The line plots hatch it (`\\`) and the Identity view's *Status* colouring shows which were left out;
+  is used. The line plots hatch it (`\\`), the Identity view's *Status* colouring shows which were left out, and
+  the analysis log names the timepoint and how many nanowells it leaves out;
 - **contradicted** — the registration itself, or every address at once, is wrong (all one step off, turned, a decoy
   taken for the square). Its values are still drawn — a count at that timepoint is a count of some nanowell — over a
   cross-hatched (xx) background, but as points joined to nothing: no fold change, growth rate or trajectory line
@@ -5925,7 +5926,8 @@ To check a dataset analysed earlier without analysing it again, run
 stage positions still compares that well with the whole plate): it writes
 `nanowells/<well>_identity.json` beside the tables, prints each well's verdicts, and Review picks them up the next
 time the dataset is opened. It exits 1 when any timepoint is contradicted (by the images or by the stage
-positions) and 2 when any is inconclusive. Add
+positions), 2 when any is inconclusive, and 3 when any is partial (some of its nanowells left out); 0 means every
+timepoint is confirmed. The summary lists every timepoint that is not confirmed, partial ones included. Add
 `--numbers` to print, in place of the summary, one CSV row per well and timepoint with the measurements each verdict
 was decided from (how clearly the square was found, how far the addresses landed, how far the array's outline, the
 tiles and the stage disagreed) and a short code for why a timepoint is not confirmed — numbers only, no images or

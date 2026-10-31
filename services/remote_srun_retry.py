@@ -344,6 +344,19 @@ def _split_launcher(tokens: list[str]) -> tuple[list[str], list[str], str]:
 #: into ``--cpus-per-task`` (:func:`one_task`); the others are dropped.
 _TASK_COUNT_OPTS = (("-n", "--ntasks"), ("-N", "--nodes"), ("", "--ntasks-per-node"))
 _CPUS_OPTS = ("-c", "--cpus-per-task")
+#: GPUs asked for per task: folded with the tasks, like the CPUs (:func:`gpus_for_tasks`).
+_GPUS_PER_TASK = "--gpus-per-task"
+
+
+def gpus_for_tasks(per_task: str, tasks: str) -> str:
+    """The ``--gpus-per-task`` value for one task that stands in for *tasks* tasks: ``1`` for 4 tasks is ``4``,
+    ``a100:2`` for 3 is ``a100:6``. Folding the tasks and keeping the value as written gave the run one task's GPUs.
+    A value or count that is not a plain number (a list of types, say) is returned as written rather than guessed
+    at. Used by :func:`one_task` and :func:`services.slurm_batch_script.single_task`."""
+    kind, sep, count = per_task.rpartition(":")
+    if "," in per_task or not (tasks.isdigit() and count.isdigit()):
+        return per_task
+    return f"{kind}{sep}{int(tasks) * int(count)}"
 
 
 def _take_option(tokens: list[str], short: str, long: str) -> tuple[list[str], list[str]]:
@@ -384,6 +397,8 @@ def one_task(tokens: list[str]) -> list[str]:
     A ``--ntasks`` written into the launcher is how a job template asks for cores, so it is folded into
     ``--cpus-per-task`` as :func:`services.slurm_batch_script.single_task` does for a JupyterHub profile: ``-n 4
     -c 2`` becomes ``--cpus-per-task=8``. A count that is not a whole number is dropped rather than guessed at.
+    ``--gpus-per-task`` is folded the same way (:func:`gpus_for_tasks`): ``-n 4 --gpus-per-task=1`` asks for four
+    GPUs, and is ``--gpus-per-task=4`` on the one task.
     """
     out = list(tokens)
     tasks: list[str] = []
@@ -398,6 +413,9 @@ def one_task(tokens: list[str]) -> list[str]:
             out.append(f"--cpus-per-task={int(n) * int(per)}")
         elif cpus:
             out.append(f"--cpus-per-task={per}")
+        out, gpus = _take_option(out, "", _GPUS_PER_TASK)
+        if gpus:
+            out.append(f"{_GPUS_PER_TASK}={gpus_for_tasks(gpus[-1], n)}")
     return [*out, "--nodes=1", "--ntasks=1"]
 
 

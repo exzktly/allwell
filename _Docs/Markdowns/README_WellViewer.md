@@ -1780,7 +1780,8 @@ and the run is a single process that spreads its own workers over the CPUs it is
 given. A task count can come from the cluster's environment as well as from the
 command, so this is added whatever the command says. A `-n` / `--ntasks` you
 wrote is read as a request for cores and becomes `--cpus-per-task` (`-n 4 -c 2`
-gives the run 8 CPUs), and `-N` / `--nodes` is dropped. If a scheduler still
+gives the run 8 CPUs), a `--gpus-per-task` beside it is multiplied the same way
+(`-n 4 --gpus-per-task=1` gives the run 4 GPUs), and `-N` / `--nodes` is dropped. If a scheduler still
 starts more than one copy, the run log says how many, and only the first runs.
 
 **Max queue wait** is how long a run waits for the scheduler to give it a node

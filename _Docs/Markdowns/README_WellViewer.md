@@ -8398,7 +8398,11 @@ say — the raw log says so and the findings are unaffected.
    incremental run would skip forever, so they are re-segmented in full.
    **Only these wells** is filled with the wells that need work — the partial
    ones and the forced ones — so the run touches nothing that is already
-   whole. Press Run and only the missing `(FOV, timepoint)` pairs are
+   whole. **Skip these wells** is emptied, and **Force these wells** holds only
+   the wells this handoff names, whatever was typed there before or recorded
+   by the dataset's earlier run; the same is true of every button that opens a
+   dataset in Analyze (Review's *Finish this run* and *Re-run wells*, the
+   import pages' *Open in Analyze*). Press Run and only the missing `(FOV, timepoint)` pairs are
    processed, merged into the existing per-well CSVs and `<WELL>_out.zip`
    archives; wells that are already complete are left untouched. Without that
    tick a plain re-run would skip every well that already has any output at

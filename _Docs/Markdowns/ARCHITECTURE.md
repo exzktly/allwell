@@ -15522,6 +15522,21 @@ field and a zip stem. The Analyze form carries it as a visible **Force these
 wells** field rather than hidden run state: it re-segments and overwrites, so it
 must be something the user can see and clear.
 
+**A handoff into Analyze owns Run scope whole.** `AllWellApp._open_dataset_in_analyze`
+is the one door for this button, the import pages' *Open in Analyze*, and
+Review's *Finish this run*, *Re-run wells* and *Re-run anchored wells*
+(`review/core/analyze_handoff.py`). It writes all four Run-scope controls
+whether or not its caller names a value: *If a well already has output* to Fill
+in what's missing when the caller asks for an incremental run and to Skip it
+otherwise, *Only these wells* and *Force these wells* to the caller's lists
+(blank when it names none), and *Skip these wells* to blank. The sidecar it
+applies first restores what its own run was told (`force`, `incremental`,
+`force_wells`), and whatever was typed on the form earlier is still there;
+either, left alone, would narrow, unforce, re-force or refuse the run being
+handed over — a remote nanowell *Re-run wells*, handed over with Incremental
+off because such a run refuses it, would get it back from a completion run's
+sidecar (`tests/test_only_wells_handoff.py`).
+
 **A remote run needs telling twice.** The flag on the remote command line is not
 enough on its own, because the client decides what to upload before the remote
 sees anything. `remote_staging._plan_staging` computes its own done-set — the

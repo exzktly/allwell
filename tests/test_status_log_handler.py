@@ -42,6 +42,11 @@ class _DeadWidget:
     def append(self, _html):
         raise RuntimeError("Internal C++ object (QTextEdit) already deleted.")
 
+    def document(self):
+        # A deleted widget's wrapper raises on every call, not only ``append``; the handler reaches the document
+        # first (``core.log_view.append_entry`` asks whether the view is empty).
+        raise RuntimeError("Internal C++ object (QTextEdit) already deleted.")
+
 
 class _CountingHandler(logging.Handler):
     """Counts records reaching the logger, so re-entrant logging is visible."""

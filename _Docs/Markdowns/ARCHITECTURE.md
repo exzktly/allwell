@@ -10971,6 +10971,46 @@ records the plate fit read — every well in the output folder, which in a batch
 every earlier batch's, though only this run's wells can be re-run) and an `acquisition` block (pixel and tile
 size per timepoint). A re-run by the re-anchoring logs `Well X — re-anchored.`, not a second `— done.`.
 
+#### How a nanowell dataset is laid out
+
+A nanowell output folder is an ordinary output folder with a second layer beside it. The **base layer** is what
+every run writes, standard or nanowell: `pipeline_info.json` for the plate, and per well `<prefix>_<well>.csv.gz`
+(one row per cell, keyed by `(well, fov, timepoint, nucleus_id)`, `pipeline/io._MERGE_KEY_FIELDS`) and
+`<well>_out.zip`. Review's well loader reads that layer the same way in both modes. The **nanowell layer** is what
+only a nanowell run adds, all of it under `nanowells/` so the loader's top-level `*.csv` scan never mistakes it for
+cells:
+
+| Level | Base layer (every run) | Nanowell layer (nanowell runs only) | Link between them |
+|---|---|---|---|
+| Plate | `pipeline_info.json` | its `nanowell` and `acquisition` blocks | same file |
+| Well | `<prefix>_<well>.csv.gz`, `<well>_out.zip` | `nanowells/<well>.csv`, `_grid.json`, `_identity.json`, `_template.npz` | the well, from the file name |
+| Image / timepoint | standard: one field at one timepoint, the unit of work; images in `<well>_out.zip` | one `_grid.json` entry and one `_identity.json` verdict per timepoint | `(well, timepoint)` |
+| Nanowell | — | one row of `nanowells/<well>.csv` per nanowell and timepoint, keyed by `(timepoint, nw_q, nw_r)` | — |
+| Cell | one row of `<prefix>_<well>.csv.gz` | — (holds no cells) | the cell row's `nw_q`, `nw_r` name its nanowell |
+
+The nanowell layer does not contain the cells; it sits beside them, and each cell row points up to its nanowell.
+Review makes the join (§6.2j): cell rows grouped on `(well, timepoint, nw_q, nw_r)` give a nanowell's
+`brightness_<channel>` and the Cell Gating tally subtracted from `n_cells`.
+
+A nanowell run changes the base layer in four ways, each easy to miss because the file names are unchanged:
+
+- **The unit of work is the whole well at one timepoint**, its tiles stitched into one montage, not one field.
+  `fov` survives only as the tile that owns each nanowell, and `<well>_out.zip` holds one `<well>_<tp>_montage.png`
+  per located timepoint instead of masks, top-hat images and overlays.
+- **Only cells counted in a nanowell are written.** `nanowell_measure.cell_table` keeps the labels
+  `count_cells` assigned to a site the owner tile measured (`label in site_of`). A cell on the lattice between
+  nanowells or outside the array has no row, and a nanowell left without a count (a seam bin one of whose
+  covering tiles has no image, above) contributes none. A fused nanowell is counted on its seam tile, and its
+  cells' `fov` names the real tile covering most of its disk. A standard run writes every segmented cell.
+- **The cell row has a fixed, narrower set of columns**: `well, fov, timepoint, timepoint_hours, nucleus_id,
+  area_px, <token>_mean_intensity, nw_q, nw_r, nw_ring, nw_label, well_x_um, well_y_um`
+  (`nanowell_task.cell_columns`). There are no `shape_*` columns, so Review's shape-feature channels and
+  anything selecting cells by `shape_centroid_*` find nothing in a nanowell plate's cell tables.
+- **`nw_label` is `"<q>_<r>"`**, written by `nanowell_run._cell_rows` and by the relabel tool
+  (`datasets/validate/nanowell_relabel.py`), not the canonical `k.i` ring label of §6.2e. Join on `nw_q` / `nw_r`,
+  as Review does; `nw_label` is for reading only. At an unaddressed timepoint all four address columns are blank,
+  so such a row exists but cannot be followed over time.
+
 **Incremental, resume, completeness.** A timepoint is reused only when it was measured under the same
 `measure_version` (the grid record's top level, and the `nanowell` block of `pipeline_info.json`); resume
 checkpoints carry it in their key, and Merge Plates refuses two datasets measured under different ones

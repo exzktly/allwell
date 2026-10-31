@@ -29,6 +29,7 @@ from __future__ import annotations
 import re
 
 from pipeline.suspend import LOG_MARKER as SUSPEND_MARKER
+from services.remote_srun_retry import REFUSAL_RETRIED_BOOT_EXCLUSIONS, REFUSAL_RETRIED_POWERED_ON
 
 # slurmstepd, when the scheduler ends a job or a step:
 #   slurmstepd: error: *** JOB 4242 ON gpu07 CANCELLED AT 2026-10-28T10:00:00 DUE TO TIME LIMIT ***
@@ -38,8 +39,13 @@ _RE_SLURM_CANCELLED = re.compile(
     r"\*\*\* (?:JOB|STEP) (?P<job>[\w.]+) ON (?P<node>\S+) CANCELLED AT (?P<at>\S+)"
     r"(?: DUE TO (?P<cause>[A-Z][A-Z _]*[A-Z]))?[^*]*\*\*\*")
 # Slurm refusing a request outright: its own line, and the srun wrapper's explanation beside it
-# (``remote_srun_retry.NO_NODE_FITS``). Cleared by a later grant: a retry that was granted is not a failure.
+# (``remote_srun_retry.NO_NODE_FITS``). Cleared by a later grant — a retry that was granted is not a failure — and
+# by the srun wrapper saying it asks again past the refusal: Slurm refused the wrapper's own narrowing of the
+# request (the powered-on preference, or the nodes that failed to boot), not the scheduler command, so a run that
+# then waits out Max queue wait or loses its connection did not end because no node fits.
 _RE_NO_NODE_FITS = re.compile(r"Requested node configuration is not available")
+_RE_REFUSAL_RETRIED = re.compile(
+    "|".join(re.escape(said) for said in (REFUSAL_RETRIED_POWERED_ON, REFUSAL_RETRIED_BOOT_EXCLUSIONS)))
 # The batch driver's own per-batch budget (``remote_commands``): a batch whose
 # pipeline outlived it is reported with its number.
 _RE_TIME_BUDGET = re.compile(r"batch (?P<batch>\d+)(?:/\d+)? exceeded its time budget")
@@ -122,8 +128,8 @@ class RunEvidence:
         self.budget_line = ""
         self.ssh_reason = ""
         self.job_id = ""
-        #: Slurm refused the scheduler command ("Requested node configuration is not available") and no grant
-        #: has followed: no node the cluster can give matches it.
+        #: Slurm refused the scheduler command ("Requested node configuration is not available") and neither a
+        #: grant nor the srun wrapper's retry past the refusal has followed: no node the cluster can give matches it.
         self.no_node_fits = False
         #: True between a request for a node and its grant: nothing has run.
         self.waiting_for_node = False
@@ -168,7 +174,7 @@ class RunEvidence:
             facts["ssh_reason"] = reason.group(0).strip().rstrip(".")
         if _RE_NO_NODE_FITS.search(line):
             facts["no_node_fits"] = True
-        if _RE_NODE_GRANTED.search(line):
+        if _RE_NODE_GRANTED.search(line) or _RE_REFUSAL_RETRIED.search(line):
             facts["no_node_fits"] = False
 
     def _adopt_early(self) -> None:

@@ -150,6 +150,11 @@ ALLOCATION_GRANTED = "[remote] scheduler: allocation granted"
 #: What the wrapper says when Slurm refuses the request outright ("Requested node configuration is not
 #: available"): no node it could give matches the scheduler command. ``services.run_evidence`` reads it.
 NO_NODE_FITS = "[remote] scheduler: ERROR Slurm has no node that can take this request"
+#: What the wrapper says when Slurm refused a request the wrapper itself had narrowed — to the powered-on nodes
+#: (branch 3a) or by excluding the nodes that failed to boot (3c′) — and it asks again without that narrowing. srun's
+#: refusal is in the stream before each, and is not the run's failure: ``services.run_evidence`` forgets it here.
+REFUSAL_RETRIED_POWERED_ON = "[remote] scheduler: no powered-on node can take this request — letting Slurm boot one"
+REFUSAL_RETRIED_BOOT_EXCLUSIONS = "[remote] scheduler: every node that can take this request has failed to boot"
 
 #: What the wrapper exits with when :func:`queue_wait_seconds` passed without a
 #: node being granted — distinct from ``srun``'s own codes, so the run reports
@@ -512,7 +517,7 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         'if [ "$_aw_rc" != 0 ] && [ "$_aw_go" = 0 ] && [ -n "$_aw_asleep" ] '
         "&& grep -q '^srun: .*Requested node configuration is not available' \"$_aw_err\"; then ",
         "_aw_awake=0; ",
-        'echo "[remote] scheduler: no powered-on node can take this request — letting Slurm boot one"; ',
+        f'echo "{REFUSAL_RETRIED_POWERED_ON}"; ',
         "continue; fi; ",
         # 3b. The node failed after the job started on it: not a boot failure, and not retried — asking again
         # would run the job from its beginning, the batch driver from batch 1 and a single run from its top.
@@ -540,7 +545,7 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         'if [ "$_aw_rc" != 0 ] && [ "$_aw_go" = 0 ] && [ "$_aw_x" != "$_aw_ux" ] '
         "&& grep -q '^srun: .*Requested node configuration is not available' \"$_aw_err\"; then ",
         '_aw_x=$_aw_ux; ',
-        'echo "[remote] scheduler: every node that can take this request has failed to boot at least once '
+        f'echo "{REFUSAL_RETRIED_BOOT_EXCLUSIONS} at least once '
         f'($_aw_failed) — trying them again in {int(boot_retry_pause_s)} s"; ',
         'echo $$ > "$_aw_pid"; ' f'sleep {int(boot_retry_pause_s)}; ',
         f'echo "[remote] scheduler: requesting allocation via: {launcher_str}${{_aw_x:+ --exclude=$_aw_x}}"; ',

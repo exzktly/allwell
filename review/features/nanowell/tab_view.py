@@ -31,6 +31,7 @@ from review.features.nanowell.anchor_queue_view import (
     QUEUE_TIP as _QUEUE_TIP, build_queue_controls, refresh_queue_controls,
 )
 from review.features.nanowell.exclude_view import build_exclude_controls
+from review.features.nanowell.rim_focus_view import build_rim_focus_controls
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
 from review.features.nanowell.display_range_view import (
     build_display_range_button,
@@ -239,6 +240,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_cohort_box", cohort_box)
     grp_cohort = band.add_scope("", cohort_box)
 
+    rim_focus = build_rim_focus_controls(ctx)
+    band.add_scope("", rim_focus.box, rim_focus.spin)
+
     moving_spin = QSpinBox()
     moving_spin.setRange(1, MAX_WINDOW)          # 1 is off, shown as "Off"; a window of one timepoint averages nothing
     moving_spin.setSpecialValueText("Off")
@@ -379,7 +383,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
 
     controls = (metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, moving_spin,
                 responding_edit, extremes_spin, extremes_cells, extremes_numbers, *identity.signalling, *start.signalling,
-                *array_controls.signalling, *statistics.signalling)
+                *array_controls.signalling, *statistics.signalling, *rim_focus.signalling)
 
     def refresh_controls() -> None:
         channel = nwc.page_channel(ctx)
@@ -428,6 +432,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_baseline.setVisible(True)
             grp_axis.setVisible(distribution)
             cohort_box.setChecked(st.cohort)
+            rim_focus.refresh(st)
             start.refresh(st)
             _refresh_array_controls(ctx, st, array, array_controls)
             refresh_identity_controls(st, identity, view == "identity")

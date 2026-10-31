@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 from review.features.nanowell import moving_compute
-from review.features.nanowell.collect import MEASURABLE
+from review.features.nanowell.collect import MEASURABLE, OUT_OF_FOCUS
 
 _SQRT3_2 = math.sqrt(3.0) / 2.0
 
@@ -99,7 +99,7 @@ def map_model(metrics: pd.DataFrame, data, well: str, timepoint: str, column: st
     values = numeric_values(rows, column).to_numpy(dtype=float)
     states = list(rows["state"].astype(str))
     reason = ""
-    if all(s not in MEASURABLE and s not in ("occluded", "clipped") for s in states):
+    if all(s not in MEASURABLE and s not in ("occluded", "clipped", OUT_OF_FOCUS) for s in states):
         reason = next((r for r in rows["reason"] if r), "this timepoint has no addressed nanowells")
     counts: dict[str, int] = {}
     for s in states:

@@ -20,6 +20,7 @@ from services.remote_config import RemoteHost
 from services.remote_run_id import UPLOAD_HEARTBEAT
 from services.remote_run_state import _RemoteRun
 from services.remote_transport import _remote_quote
+from services.slurm_ids import closed_words, hold_check_shell
 from services.subprocess_text import TEXT_UTF8
 
 
@@ -40,7 +41,7 @@ def _only_my_job(jid_var: str, marker: str) -> str:
     """
     return (
         f'_aw_me=$(id -un 2>/dev/null || echo "$USER"); '
-        f'_aw_owner=$(squeue -h -j "${jid_var}" -o %u 2>/dev/null | head -n1); '
+        f'_aw_owner=$(squeue -h -j "${{{jid_var}%%.*}}" -o %u 2>/dev/null | head -n1); '
         f'if [ -n "$_aw_owner" ] && [ "$_aw_owner" != "$_aw_me" ]; then '
         f'echo "{marker} ${jid_var} $_aw_owner"; exit 0; fi; '
     )
@@ -107,8 +108,9 @@ def close_remote_job(
     # sidecar stays: the next run's sweep asks squeue whether the job is gone.
     heartbeat_q = _remote_quote(f"{posixpath.dirname(run.remote_pidfile)}/{UPLOAD_HEARTBEAT}")
     cmd = (
-        f"_jid=$(cat {slurm_sidecar_q} 2>/dev/null); "
-        '[ -z "$_jid" ] && exit 0; '
+        f"{hold_check_shell(host.remote_staging_dir)}"
+        f'_jid=$(cat {slurm_sidecar_q} 2>/dev/null); [ -z "$_jid" ] && exit 0; '
+        f'if _aw_is_hold "$_jid"; then rm -f {heartbeat_q}; echo "AW_HOLD $_jid"; exit 0; fi; '
         + _only_my_job("_jid", "AW_NOTMINE") +
         'command -v scancel >/dev/null 2>&1 '
         '&& scancel -u "$_aw_me" "$_jid" 2>/dev/null '
@@ -129,12 +131,9 @@ def close_remote_job(
     if result.returncode == 255:      # ssh's own failure: nothing ran, so nothing is known
         log("[remote] WARN scheduler: could not reach the host to cancel the job (ssh exit 255).\n")
         return
-    if "AW_SCANCELLED" in out:
-        jid = out.split("AW_SCANCELLED", 1)[1].strip().split()[0:1]
-        log(
-            f"[remote] scheduler: cancelled lingering job "
-            f"{jid[0] if jid else ''}.\n"
-        )
+    marker = next((m for m in ("AW_HOLD", "AW_SCANCELLED") if m in out), "")
+    if marker:
+        log(closed_words(marker, (out.split(marker, 1)[1].split() or [""])[0]))
     elif "AW_NOTMINE" in out:
         # Not "already finished": it is running, and it is somebody else's.
         # Reporting it as a clean teardown would say the opposite of what

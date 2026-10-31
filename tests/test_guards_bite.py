@@ -5597,3 +5597,40 @@ def test_unbounded_guard_clears_a_bounded_subprocess(tmp_path, monkeypatch):
     path = _write(tmp_path, "services/mod.py",
                   'import subprocess\ndef f(a):\n    subprocess.run(a, check=True, timeout=30)\n')
     assert _run_scan(monkeypatch, _RC, "test_every_services_subprocess_is_bounded", [path]) is None
+
+
+# ── job cancels and job questions (tracker H5) ──────────────────────────────
+
+_CANCEL_GUARD = "tests.test_every_job_cancel_names_how_it_handles_a_step"
+_CANCEL_TEST = "test_every_scancel_and_job_question_has_a_reason_for_how_it_treats_a_step"
+
+
+@pytest.mark.parametrize("shape", [
+    # A bare scancel of whatever a sidecar names: releases a granted node when the sidecar names its job.
+    'def teardown():\n    return \'_jid=$(cat x); scancel -u "$USER" "$_jid"\'\n',
+    # The same in an f-string, where the command is a literal part of a JoinedStr.
+    'def teardown(sidecar):\n    return f\'_jid=$(cat {sidecar}); scancel "$_jid"\'\n',
+    # A job question that reads a step id as finished (`squeue -j 4001.3` is "Invalid job id").
+    'def alive():\n    return \'squeue -h -j "$_jid" -o %T\'\n',
+    # In a module constant, which has no enclosing function.
+    '_CLEAN = \'_o=$(squeue -h -j "$_jid" -o %i)\'\n',
+])
+def test_cancel_guard_catches_an_unrostered_site(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "services/bad_cancel.py", shape)
+    exc = _run_scan(monkeypatch, _CANCEL_GUARD, _CANCEL_TEST, [bad])
+    assert exc is not None, "a scancel / squeue -j site went uncaught"
+    assert "bad_cancel.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", [
+    # Docstrings are prose, not commands.
+    'def f():\n    """Cancels the job with scancel; asks squeue -j about it."""\n    return 1\n',
+    '"""scancel and squeue -j are mentioned in this module\'s docstring."""\n',
+    # The sanctioned question: no literal `squeue -j` at the site.
+    'from services.slurm_ids import squeue_listing\n\n\ndef q():\n    return squeue_listing("_jid")\n',
+    # Other commands.
+    'def f():\n    return "squeue -u me"\n',
+])
+def test_cancel_guard_clears_prose_and_the_sanctioned_helper(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "services/good_cancel.py", shape)
+    assert _run_scan(monkeypatch, _CANCEL_GUARD, _CANCEL_TEST, [good]) is None

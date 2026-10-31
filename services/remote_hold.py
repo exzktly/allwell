@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 from services.remote_config import RemoteHost, parse_slurm_time, render_slurm_time
 from services.remote_heartbeat import _UploadHeartbeat
 from services.remote_jobs import _only_my_job
+from services.slurm_ids import HOLDS_DIRNAME
 from services.remote_srun_retry import (
     ALLOCATION_GRANTED,
     BOOT_RETRY_PAUSE_S,
@@ -51,8 +52,6 @@ from services.remote_wait_snippets import (
     _heartbeat_stale_snippet,
 )
 
-#: Where holds live, under the host's staging directory.
-HOLDS_DIRNAME = "holds"
 #: How often the hold script looks at its files, in seconds.
 HOLD_POLL_S = 15
 if TYPE_CHECKING:

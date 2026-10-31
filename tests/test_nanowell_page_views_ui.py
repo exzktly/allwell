@@ -9,6 +9,8 @@ Numbers are read back from the figures' text artists.
 
 from __future__ import annotations
 
+import re
+
 import io
 import json
 import zipfile
@@ -130,7 +132,10 @@ def test_the_map_draws_the_chosen_well_and_the_timepoint_control_steps_its_timep
     assert "A01 · t_c" in title                                       # the first well, at its first timepoint
     footer = _fig_texts(page, "nw-array-footer")
     # The fixture's dataset carries no identity check, and the figure must say its addresses are unverified.
-    assert footer[0].startswith("Nanowell identity — A01 not checked")
+    # Its wells hold fewer nanowells than rim focus needs to judge one, and the footer says so before the rest.
+    unjudged = re.match(r"\d+ in a well with under 10 rims at that timepoint were kept unchecked\. ", footer[0])
+    assert unjudged
+    assert footer[0][unjudged.end():].startswith("Nanowell identity — A01 not checked")
     assert footer[1] == "4 nanowells in the roster · with a value 3 · measured 2 · empty 1 · occluded 1"
     tp_cb = page.widgets.get("_nw_tp_cb")
     # The Plotting tabs' control: the timepoints in time order, named by their hours, the first one shown.

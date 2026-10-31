@@ -7,8 +7,11 @@ array, not to the image, so the join holds even when the plate moved between acq
 number is a row with the state that explains why — ``occluded`` or ``clipped`` as recorded, ``unaddressed``
 (the timepoint was located but given no origin, so no row can be joined to an address), ``not_located``
 (the timepoint failed before any site was found), ``absent`` (addressed, but this site is not in its
-roster) or ``identity_contradicted`` (the identity check, ``pipeline.nanowell_identity``, found the timepoint's
-addresses naming other nanowells than the well's reference timepoint, so its rows are joined to nothing). A gap therefore reads as "not seen", never as zero, and never as a shorter series.
+roster), ``identity_contradicted`` (the identity check, ``pipeline.nanowell_identity``, found the timepoint's
+addresses naming other nanowells than the well's reference timepoint, so its rows are joined to nothing) or
+``out_of_focus`` (the nanowell's own rim was soft against its well's sharp rims at that timepoint,
+``rim_focus_compute``; the state the run recorded is kept in ``recorded_state``). A gap therefore reads as "not
+seen", never as zero, and never as a shorter series.
 
 **Undefined is NaN, never zero, and each metric's undefined cases are listed** (§3.10.1):
 
@@ -54,7 +57,7 @@ import numpy as np
 import pandas as pd
 
 from pipeline.nanowell_identity import CONTRADICTED, NOT_CHECKED
-from review.features.nanowell import cell_gate_compute
+from review.features.nanowell import cell_gate_compute, rim_focus_compute
 from review.features.nanowell.collect import (
     IDENTITY_CONTRADICTED, MEASURABLE, NOT_LOCATED, UNADDRESSED, NanowellData,
 )
@@ -219,7 +222,7 @@ def _growth(frame: pd.DataFrame) -> pd.Series:
     return ((k * sxy - sx * sy) / denominator.where(ok)).where(ok)
 
 
-def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None) -> pd.DataFrame:
+def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=None) -> pd.DataFrame:
     """One row per (well, nanowell, timepoint) with the measured values and every §3.10.1 metric.
 
     Columns, beyond the site table's own: ``state`` (with Review's ``unaddressed`` / ``not_located`` /
@@ -229,10 +232,14 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None) -> pd.
 
     *gate* (``cell_gate_compute.GateTally``) is the cells Home's Cell Gating leaves out: they are taken out of
     ``n`` and ``brightness_<ch>`` before anything is computed from them. ``None`` keeps the run's own counts.
+
+    *focus* (``rim_focus_compute.RimFocusRule``) turns each measurable row whose rim was out of focus into an
+    ``out_of_focus`` gap before anything is computed (``rim_focus_compute.flag``); ``None`` flags nothing.
     """
     if not is_baseline(baseline):
         raise ValueError(f"baseline must be one of {BASELINES} or a timepoint, not {baseline!r}")
     frame = _addressed_grid(data)
+    rim_focus_compute.flag(frame, focus)
     measurable = frame["state"].isin(MEASURABLE)
     frame["n"] = pd.to_numeric(frame.get("n_cells"), errors="coerce").where(measurable)
     frame["c"] = pd.to_numeric(frame.get("confluence"), errors="coerce").where(measurable)
@@ -410,9 +417,10 @@ def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
     (``cell_gate_compute``). Beside it, ``n_cells_run`` is the run's own count and ``cells_left_out`` the difference,
     so a reader can tell a gated count from the run's and see by how much; the run's ``area_est_cells`` and
     ``count_disagreement``, which compare an area estimate against the run's count, follow ``n_cells_run``. All three
-    are empty where the nanowell has no count (occluded, clipped, not seen), never 0."""
-    columns = (["well", "nw_q", "nw_r", "nw_ring", "timepoint", "time_h", "state", "reason", "identity",
-                "identity_ok", "fused",
+    are empty where the nanowell has no count (occluded, clipped, not seen, left out by the rim focus rule), never
+    0."""
+    columns = (["well", "nw_q", "nw_r", "nw_ring", "timepoint", "time_h", "state", "recorded_state", "reason",
+                "identity", "identity_ok", "focus", "rim_focus_ref", "rim_focus_ok", "fused",
                 "partially_visible", "imaged_fraction", "visible_fraction", "n_cells", "n_cells_run",
                 "cells_left_out", "area_est_cells", "count_disagreement", "confluence"]
                + [c for ch in channels for c in (f"brightness_{ch}", f"signal_{ch}")]

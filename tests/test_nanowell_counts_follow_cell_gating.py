@@ -241,3 +241,7 @@ def test_saving_right_after_a_gating_edit_waits_for_the_new_counts(qtbot, tmp_pa
     nwc.export_page_csv(ctx)
     assert not path.exists()
     assert any("still being computed" in line for line in said)
+    # The refusal also started the recompute; once it lands, the same save writes the new counts.
+    qtbot.waitUntil(lambda: not st.computing and st.gated_for == nwc.gate_version(ctx), timeout=20000)
+    nwc.export_page_csv(ctx)
+    assert pd.read_csv(path).set_index(["timepoint", "nw_q"]).loc[("t_c", 0), "n_cells"] == 1.0

@@ -101,6 +101,18 @@ def _loaded_segmenter_on_gpu() -> bool | None:
     return any(found) if found else None
 
 
+def release_cellpose_gpu_cache() -> None:
+    """At the end of a well, hand back the GPU memory this worker's Cellpose keeps cached
+    (``pipeline.cellpose.release_cached_gpu_memory``), so a worker still waiting for room to load its model gets it.
+    Nothing unless a Cellpose model of this process is on a GPU: a StarDist worker never imports Cellpose or Torch,
+    and must not start to here."""
+    if not _loaded_segmenter_on_gpu():
+        return
+    import sys
+
+    sys.modules["pipeline.cellpose"].release_cached_gpu_memory()
+
+
 def gpu_in_use(environ=None) -> bool:
     """Whether this worker's Cellpose is on a GPU. Without one, Cellpose runs on the CPU on Torch's own threads, and
     threads of ours beside it would only compete with them for the same cores.

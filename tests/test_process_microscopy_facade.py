@@ -55,6 +55,8 @@ BINDING_SEAMS = {
                                "(test_phase_passthrough, test_only_wells_run, "
                                "test_field_quality_is_wired_into_a_run, "
                                "test_a_resumed_run_keeps_its_field_quality)",
+    "release_cellpose_gpu_cache": "tests/test_cellpose_load_oom.py checks both well tasks hand back the "
+                                  "worker's cached GPU memory at the end of a well, failed or not",
     "nanowell_endgame": "tests/test_nanowell_final_pass.py records how main() calls the end-of-run "
                         "re-anchoring in each batch mode (held, or run here on the pool)",
     "finalize_run_report": "tests/test_nanowell_final_pass.py records which wells main() says it ran, "

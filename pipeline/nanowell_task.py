@@ -27,6 +27,7 @@ import numpy as np
 from pipeline import nanowell_measure as nm
 from pipeline import nanowell_reference as nref
 from pipeline import nanowell_run as nr
+from pipeline.nanowell_parallel import release_cellpose_gpu_cache
 from pipeline.run_report import withdraw_seal
 from pipeline.nanowell_tiles import WellTiles, read_native
 from util.csv_gz import existing_csv
@@ -1339,6 +1340,8 @@ def _reanchor_well(job, *, output_dir, shared_kwargs_template, nuclear_token, fl
         log.error("Well %s — re-anchoring failed (%s: %s); its timepoints stay unaddressed.", well,
                   type(exc).__name__, exc, exc_info=True)
         return well, by_tp, f"{type(exc).__name__}: {exc}"
+    finally:
+        release_cellpose_gpu_cache()           # room for a worker of this pool still waiting to load its model
     return well, by_tp, ""
 
 

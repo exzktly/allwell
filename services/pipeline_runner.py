@@ -51,7 +51,7 @@ from collections.abc import Callable
 
 from util.well_token import blank_wells_for_run, canonical_well_label
 from pipeline.well_skip import _canonical_force_wells, skip_wells_scope
-from services.input_resolution_service import has_well_zip, iter_all_well_tokens
+from services.input_resolution_service import has_well_zip, iter_well_tokens
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
 from services.remote_config import RemoteHost
 from services.remote_runner import (
@@ -1025,12 +1025,8 @@ class PipelineRunner:
         )
         self.log_q._on_error = self._latch_error_state
         self._proc: subprocess.Popen | None = None
-        # The grouping-phase subprocess (well_plate_zipper). Tracked
-        # separately so a Stop click during grouping cancels it instead
-        # of waiting for it to finish before reaching the pipeline.
-        self._zipper_proc: subprocess.Popen | None = None
-        # Guards ``_proc``/``_zipper_proc`` across the worker thread (which
-        # assigns them at launch) and the GUI thread (which reads them in
+        # Guards ``_proc`` across the worker thread (which
+        # assigns it at launch) and the GUI thread (which reads them in
         # stop()). Without it a Stop click racing a subprocess launch could
         # read _proc as None *after* the worker already passed its stop check,
         # orphaning the subprocess (audit E21). The launch path checks
@@ -1299,14 +1295,9 @@ class PipelineRunner:
     ) -> None:
         """Spawn the worker thread that runs the pipeline subprocess.
 
-        ``resolve_dirs`` is called with ``(opts, log_q, proc_hook=…)`` where
-        ``proc_hook`` is the runner's zipper-tracking callback (forwarded to the
-        grouping subprocess so Stop can reach it). It is **required**: the
-        ``except TypeError`` that used to accept a resolver without it was
-        removed, because it could not be entered by a caller with the wrong
-        signature — only by a ``TypeError`` raised *inside* resolution, which it
-        answered by re-running a function that groups images and deletes their
-        sources.
+        ``resolve_dirs`` is called with ``(opts, log_q)`` and returns
+        ``(input_dir, output_dir)``, or ``None`` when it has reported why the
+        run cannot start.
 
         ``journal_spec`` is the ``RunSpec.to_json()`` payload behind this run,
         recorded into the output directory's run journal. It arrives here
@@ -1381,12 +1372,6 @@ class PipelineRunner:
             daemon=True,
         )
         self._thread.start()
-
-    def _track_zipper_proc(self, proc: subprocess.Popen | None) -> None:
-        """Register / clear the grouping subprocess so ``stop()`` can
-        signal it. Passed to ``resolve_input_output`` as ``proc_hook``."""
-        with self._proc_lock:
-            self._zipper_proc = proc
 
     def _spawn_tracked(self, spawn_fn: Callable[[], subprocess.Popen]) -> subprocess.Popen | None:
         """Launch the pipeline subprocess and record it in ``_proc`` under the
@@ -1792,8 +1777,7 @@ class PipelineRunner:
         skip = list(opts.get("skip_wells") or ())
         if not skip:
             return opts
-        plate = iter_all_well_tokens(input_dir, filename_schema=opts["filename_schema"],
-                                     filename_sep=opts["filename_sep"])
+        plate = iter_well_tokens(input_dir)
         if not plate and not opts.get("only_wells"):
             self._enqueue_error(f"Skip these wells needs the input's well list, and no well could be read from "
                                 f"{input_dir}. Check the input folder and the filename schema.\n")
@@ -1870,15 +1854,12 @@ class PipelineRunner:
         # set above is the one the upload watches, and `_spawn_tracked` signals
         # whatever the spawn launched once it returns.
         if self._spawning:
-            self._signal_subprocess(self._zipper_proc, escalate=escalate)
             return
         with self._proc_lock:
-            zipper_proc, proc = self._zipper_proc, self._proc
+            proc = self._proc
 
-        # Reach both the grouping subprocess (if active) and the pipeline
-        # subprocess. Signal each one's whole process group so any
+        # Signal the pipeline subprocess's whole process group so any
         # multiprocessing workers it spawned get torn down too.
-        self._signal_subprocess(zipper_proc, escalate=escalate)
         self._signal_run(proc, escalate=escalate)
 
     def _signal_run(self, proc, *, escalate: bool) -> None:
@@ -1969,44 +1950,20 @@ class PipelineRunner:
         else:
             os.environ.pop("ALLWELL_SCRATCH_DIR", None)
         try:
-            # No compatibility fallback. The only production caller,
-            # `analyze.domain.input._resolve_run_dirs_for_runner`, takes `proc_hook`,
-            # and the `except TypeError` that used to sit here could therefore
-            # not be entered by a caller with the wrong signature — only by a
-            # `TypeError` raised from *inside* the resolver, which it then
-            # answered by running the whole resolver a second time. That
-            # resolver groups loose images into archives and deletes their
-            # sources; running it twice on a partially-completed first pass is
-            # not a fallback, it is a second pass over a directory the first
-            # one had already changed. Without `proc_hook` the grouping
-            # subprocess is also untracked, so Stop cannot reach it.
             # An in-place append (Concatenate's "add to dataset 1") that a crash
-            # left unfinished is undone *before* the resolver runs: the resolver
-            # folds loose images into ``in/<WELL>.zip`` by rewriting it whole,
-            # after which the journalled tail no longer describes the file.
+            # left unfinished is undone *before* the resolver runs, so the
+            # resolver judges the archive as it was before the append began.
             if not self._recover_appends(opts.get("raw")):
                 return
-            resolved = resolve_dirs(
-                opts, self.log_q, proc_hook=self._track_zipper_proc)
-            # Stop button may have fired during the (potentially long)
-            # grouping / resolution phase. Bail before launching the
-            # pipeline in that case.
+            resolved = resolve_dirs(opts, self.log_q)
+            # Stop button may have fired during resolution. Bail before
+            # launching the pipeline in that case.
             if self._stop_requested.is_set():
                 self._enqueue(("line", "[stopped] Cancelled before pipeline launch.\n"))
                 return
             if resolved is None:
                 return
-            # v5.x.x: ``resolve_dirs`` now returns ``(input_dir,
-            # output_dir, on_success)`` where ``on_success`` is a
-            # callback that cleans up source artifacts (loose TIFs in
-            # ``raw/`` for the zipper-fired path) after a clean
-            # pipeline completion. Older 2-tuple callers keep working
-            # via the unpack fallback below.
-            on_success: Callable[[], None] | None = None
-            if len(resolved) == 3:
-                input_dir, output_dir, on_success = resolved  # type: ignore[misc]
-            else:
-                input_dir, output_dir = resolved  # type: ignore[misc]
+            input_dir, output_dir = resolved
             # The resolved folder may differ from the one named in the form.
             if not self._recover_appends(input_dir):
                 return
@@ -2056,12 +2013,9 @@ class PipelineRunner:
                 f"Target : {target}\n\n",
             ))
             if self._remote is not None and self._remote_runner is not None:
-                self._run_pipeline_remote(
-                    input_dir, output_dir, args, opts,
-                    on_success=on_success,
-                )
+                self._run_pipeline_remote(input_dir, output_dir, args, opts)
             else:
-                self._run_pipeline_subprocess(args, on_success=on_success)
+                self._run_pipeline_subprocess(args)
         except Exception as exc:
             # A setup-phase failure (grouping/zipper RuntimeError, a bad
             # build_pipeline_args value, etc.) must surface as an ``error`` so
@@ -2176,12 +2130,7 @@ class PipelineRunner:
         except OSError:
             swallowed(f"could not close the run journal in {output_dir}")
 
-    def _run_pipeline_subprocess(
-        self,
-        args: list[str],
-        *,
-        on_success: Callable[[], None] | None = None,
-    ) -> None:
+    def _run_pipeline_subprocess(self, args: list[str]) -> None:
         try:
             proc = self._spawn_tracked(lambda: spawn_pipeline(args))
             if proc is None:
@@ -2223,18 +2172,6 @@ class PipelineRunner:
             elif external is not None:
                 self._enqueue_error(external)
             elif rc == 0:
-                # v5.x.x: zipper-fired-this-run source cleanup. Only
-                # runs on a clean exit (rc == 0); any failure leaves
-                # the loose TIFs intact so the user can re-run.
-                if on_success is not None:
-                    try:
-                        on_success()
-                    except OSError as exc:
-                        self._enqueue((
-                            "line",
-                            f"[warn] post-success cleanup of source "
-                            f"files failed: {exc}\n",
-                        ))
                 self._enqueue(("done", "Pipeline completed successfully.\n"))
             else:
                 self._enqueue_error(exit_message(rc, tail))
@@ -2506,8 +2443,6 @@ class PipelineRunner:
         output_dir: Path,
         args: list[str],
         opts: dict,
-        *,
-        on_success: Callable[[], None] | None = None,
     ) -> None:
         """Stage inputs, launch the pipeline on the remote, stream output.
 
@@ -2549,7 +2484,6 @@ class PipelineRunner:
                 fluor_tokens=opts["fluor_tokens"] if self._selective_channels else None,
                 nuclear_token=opts["nuclear_token"] if self._selective_channels else None,
                 log_fn=lambda m: self._enqueue(("line", m)),
-                move_source_tifs=bool(opts.get("move_source_tifs", False)),
                 # Never under --force: an incremental staging drops every well
                 # that is complete locally before it is uploaded, and the
                 # pipeline's own --force cannot reprocess what never arrived.
@@ -2653,40 +2587,6 @@ class PipelineRunner:
                 self._enqueue_error(external)
             elif rc == 0 and ok:
                 self._regate(output_dir, regate_argv)
-                # v5.x.x: clean run-to-completion. Fire both success
-                # hooks:
-                # 1. ``zipped.on_pipeline_success`` — deletes the
-                #    source loose TIFs / well folders that
-                #    ``_stage_input_zips`` converted to zips inside
-                #    the runner's input_dir (i.e., raw/in/ when the
-                #    Analyze tab ran the zipper into raw/in/, OR the
-                #    user's selected dir when it was already a folder
-                #    of mixed-mode TIFs).
-                # 2. ``on_success`` — the outer resolve_input_output
-                #    callback, which deletes the loose TIFs at the
-                #    user's top-level ``raw/`` for the
-                #    "raw/ → raw/in/{well}.zip" flow.
-                # After this the user's input layout is pure-ZIP and
-                # the next run against the same folder skips both
-                # the zipper and the staging step.
-                if zipped is not None and zipped.on_pipeline_success is not None:
-                    try:
-                        zipped.on_pipeline_success()
-                    except OSError as exc:
-                        self._enqueue((
-                            "line",
-                            f"[warn] post-success cleanup of source files "
-                            f"failed: {exc}\n",
-                        ))
-                if on_success is not None:
-                    try:
-                        on_success()
-                    except OSError as exc:
-                        self._enqueue((
-                            "line",
-                            f"[warn] post-success cleanup of raw TIFs "
-                            f"failed: {exc}\n",
-                        ))
                 self._enqueue(("done", "Remote pipeline completed successfully.\n"))
             elif rc != 0:
                 # A batched run's own reasons — a lost driver, a hand-off it could not make, which batches failed and

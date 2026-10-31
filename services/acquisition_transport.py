@@ -31,15 +31,6 @@ class ZippedInput:
     """Optional callback that removes any temporary staging directory the
     zipper created. ``None`` when the input was already in zip form."""
 
-    on_pipeline_success: Callable[[], None] | None = None
-    """Optional callback fired ONLY after a clean pipeline run-to-
-    completion. Used to delete source loose TIFs / well folders that
-    were zipped into ``input_dir`` in-place, so a successful run
-    converts the user's input folder from loose-TIF mode to zip mode
-    (next run sees only zips, skips the zipper entirely). Never
-    fires on failure / cancel / partial completion — loose sources
-    stay intact so the user can re-run from scratch."""
-
     incremental: bool = False
     """True when this is an incremental remote run: the staged zips carry only
     the new-FOV members (client-side split), so the Fetcher must MERGE the

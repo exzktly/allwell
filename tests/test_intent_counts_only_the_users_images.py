@@ -177,19 +177,6 @@ def test_a_png_plate_reports_its_timepoints(tmp_path):
                      "Plate_DAPI_B02_F1_T1"}, sorted(stems)
 
 
-def test_a_well_folder_layout_is_read_too(tmp_path):
-    """The second of the three loops. Converting one and not the others is the
-    half-sweep this whole group is about."""
-    from process_microscopy import _collect_image_stems
-
-    d = tmp_path / "in"
-    (d / "A01").mkdir(parents=True)
-    (d / "A01" / "Plate_DAPI_A01_F1_T1.jpg").write_bytes(b"x")
-    (d / "A01" / "._Plate_DAPI_A01_F1_T1.jpg").write_bytes(b"junk")
-
-    assert _collect_image_stems(d) == {"Plate_DAPI_A01_F1_T1"}
-
-
 # ── P9: numbers whole, images gone, reported complete ───────────────────────
 
 def test_a_well_whose_output_archive_is_gone_is_not_complete():
@@ -293,35 +280,7 @@ def test_both_kinds_of_shortfall_are_reported_together():
     assert "A01" in line and "B02" in line
 
 
-# ── P4: folder mode audited a container the run had deleted ─────────────────
-
-def test_folder_mode_reads_the_container_the_run_left_behind(tmp_path):
-    """`record_run_check` was handed the pre-run folder paths.
-
-    Folder mode's worker compresses `<WELL>/` into `<WELL>.zip` and removes the
-    folder, so every path the check was given is gone by the time it runs.
-    `_member_names` answered None for all of them, intent was 0 for all of
-    them, nothing could ever be missing, and a folder run reported 96 of 96
-    whatever it had produced — structurally incapable of reporting a partial
-    well, rather than a threshold set too loose.
-    """
-    import shutil
-
-    from pipeline.completeness import _member_names, resolve_input_container
-
-    folder = tmp_path / "in" / "A01"
-    folder.mkdir(parents=True)
-    (folder / "P_DAPI_A01_F1_T1.tif").write_bytes(b"x")
-    with zipfile.ZipFile(tmp_path / "in" / "A01.zip", "w") as zf:
-        zf.writestr("P_DAPI_A01_F1_T1.tif", b"x")
-    shutil.rmtree(folder)                       # what the worker does
-
-    resolved = resolve_input_container(folder)
-    assert resolved is not None and resolved.name == "A01.zip", (
-        "the check still looks for the folder the run deleted, so it compares "
-        "the output against nothing")
-    assert _member_names(resolved) == {"P_DAPI_A01_F1_T1.tif"}
-
+# ── P4: a container that is gone is not read as complete ────────────────────
 
 def test_a_container_that_vanished_entirely_is_not_read_as_complete(tmp_path):
     """The other half: unreadable must not mean "nothing was asked for"."""
@@ -413,7 +372,7 @@ def test_the_zipper_stream_replaces_undecodable_bytes(tmp_path, monkeypatch):
     """
     import subprocess
 
-    from services import input_resolution_service
+    from datasets.import_loose import zipper
 
     seen: dict = {}
 
@@ -433,7 +392,7 @@ def test_the_zipper_stream_replaces_undecodable_bytes(tmp_path, monkeypatch):
         return _FakeProc()
 
     monkeypatch.setattr(subprocess, "Popen", _fake_popen)
-    input_resolution_service.run_zipper(
+    zipper.run_zipper(
         tmp_path / "tifs", tmp_path / "in",
         filename_schema="well:field:z:c", filename_sep="_",
     )
@@ -456,9 +415,9 @@ def test_the_zipper_is_reaped_even_when_the_read_stops_early():
     import inspect
     import textwrap
 
-    from services import input_resolution_service
+    from datasets.import_loose import zipper
 
-    src = textwrap.dedent(inspect.getsource(input_resolution_service.run_zipper))
+    src = textwrap.dedent(inspect.getsource(zipper.run_zipper))
     tree = ast.parse(src)
 
     for node in ast.walk(tree):
@@ -478,21 +437,17 @@ def test_the_zipper_is_reaped_even_when_the_read_stops_early():
         raise AssertionError("no try wraps the zipper's read loop")
 
 
-# ── the two halves of one operation must ask one question ───────────────────
+# ── Analyze touches no loose image; the grouper and the refusal agree ──────
 
-def test_a_png_channel_survives_the_run_that_consumes_it(tmp_path):
-    """The delete side and the group side are one operation.
+def test_analyze_refuses_a_loose_plate_and_touches_none_of_it(tmp_path):
+    """Analyze used to group loose images at Run and delete them after a clean
+    run; a PNG channel the deleter counted and the grouper skipped was lost
+    that way. Analyze now refuses loose images outright, so the property worth
+    pinning is the stronger one: the refusal names the files and every one of
+    them — PNG included — is still where it was, ungrouped and undeleted.
 
-    `tif_files_in` collects what a run will consume and its `_on_success`
-    unlinks it; `well_plate_zipper.group_by_well` decides what is actually
-    grouped. Widening the first to `.png`/`.jpg` without widening the second
-    meant a two-channel plate whose fluorescent channel was PNG had that
-    channel counted, deleted, and never grouped — gone from disk with no copy
-    anywhere, on the first successful run.
-
-    Asserted on the files, not on the predicates: two functions can agree in a
-    unit test and still disagree about a real directory, and it is the
-    directory the user loses.
+    Asserted on the files, not on the predicates: it is the directory the user
+    loses.
     """
     from services.input_resolution_service import resolve_input_output
 
@@ -501,38 +456,26 @@ def test_a_png_channel_survives_the_run_that_consumes_it(tmp_path):
     for well in ("A01", "A02"):
         (root / f"Exp_NIR_{well}_F001_00d00h.tif").write_bytes(b"nuclear")
         (root / f"Exp_GFP_{well}_F001_00d00h.png").write_bytes(b"fluor")
+    before = sorted(p.name for p in root.iterdir())
 
-    _grouped, _out, on_success = resolve_input_output(
-        root, log_fn=lambda _m: None, filename_schema=SCHEMA, filename_sep="_",
-        move_source_tifs=False)
-    if on_success is not None:
-        on_success()
+    with pytest.raises(ValueError) as refused:
+        resolve_input_output(root)
 
-    survivors = set()
-    for entry in (root / "in").iterdir():
-        if entry.is_dir():
-            survivors |= {q.name for q in entry.iterdir()}
-        elif entry.suffix == ".zip":
-            with zipfile.ZipFile(entry) as zf:
-                survivors |= {n.rsplit("/", 1)[-1] for n in zf.namelist()}
-    survivors |= {q.name for q in root.iterdir() if q.is_file()}
-
-    for well in ("A01", "A02"):
-        assert f"Exp_GFP_{well}_F001_00d00h.png" in survivors, (
-            f"{well}'s PNG channel was deleted as consumed and never grouped; "
-            f"what is left is {sorted(survivors)}")
-        assert f"Exp_NIR_{well}_F001_00d00h.tif" in survivors
+    assert "4 loose image(s)" in str(refused.value), str(refused.value)
+    assert "Datasets → Zip loose folder" in str(refused.value)
+    assert sorted(p.name for p in root.iterdir()) == before, "Analyze moved or deleted input"
 
 
-def test_the_grouper_and_the_deleter_read_the_same_predicate():
-    """The structural half, so the two cannot drift apart again silently."""
+def test_the_grouper_and_the_refusal_read_the_same_predicate():
+    """The grouper and the refusal that sends the user to it must agree on
+    what an input image is, so the refusal never names a file the grouper
+    then skips."""
     import inspect
 
-    from pipeline import well_plate_zipper
-    from services import input_resolution_service
+    from pipeline import input_layout, well_plate_zipper
 
-    for mod in (well_plate_zipper, input_resolution_service):
+    for mod in (well_plate_zipper, input_layout):
         src = inspect.getsource(mod)
         assert "is_run_input_member" in src, (
             f"{mod.__name__} does not use the shared input predicate, so the "
-            f"side that deletes and the side that groups can disagree")
+            f"side that refuses and the side that groups can disagree")

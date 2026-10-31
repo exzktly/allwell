@@ -11,21 +11,14 @@ Two modes, one code path each:
   handle and no shared state, the same disjoint-ownership shape
   `pipeline.ome_explode.explode_ome_tiff` uses for its own per-well thread
   pool.
-* **In-place** (opt-in, destructive) — shells out through the existing
-  ``services.input_resolution_service.run_zipper`` (which invokes
-  ``pipeline/well_plate_zipper.py`` as a subprocess) so this destructive path stays the
-  exact one Analyze already exercises when it finds loose TIFs, rather than
-  a second reimplementation of the same grouping. ``run_zipper`` produces
+* **In-place** (opt-in, destructive) — shells out through
+  :func:`datasets.import_loose.zipper.run_zipper` (which invokes
+  ``pipeline/well_plate_zipper.py`` as a subprocess). ``run_zipper`` produces
   per-well *folders* (`pipeline/well_plate_zipper.py` never zips anything itself); this
   module's own :func:`_zip_well_folders` then converts every one of them to
-  ``<well>.zip`` so the folder ends up in the same ready-to-run layout as the
-  new-destination mode. **Deliberately not**
-  ``services.input_resolution_service._consolidate_mixed_to_zips`` — that
-  helper only tops up a *mixed* zips+folders state (Analyze's own loose-TIF
-  handling, which is happy to read pure per-well folders directly) and is a
-  documented no-op when zero zips exist yet, which is exactly what a fresh
-  ``run_zipper`` call produces. Calling it here previously left every well as
-  a bare folder, never a zip, with no error — the run reported success.
+  ``<well>.zip``, and :func:`_move_archives_into_in` moves the archives into
+  ``in/`` so the folder ends up in the same ready-to-run layout as the
+  new-destination mode — the layout Analyze reads.
 
   Its scope is therefore **every** well folder under the source, not only the
   wells grouped out of the loose TIFs: a folder a user (or an earlier tool)
@@ -47,6 +40,7 @@ off one signal regardless of which mode is running.
 
 from __future__ import annotations
 
+import os
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -200,10 +194,7 @@ def _zip_well_folders(
     """Convert every ``<well>/`` subfolder of *folder* into ``<well>.zip``,
     removing the folder once packed. Returns the count zipped.
 
-    Unlike ``services.input_resolution_service._consolidate_mixed_to_zips``,
-    this always converts every well folder it finds — it doesn't bail out
-    just because zero zips exist yet (see this module's docstring for why
-    that distinction matters). A well that already has a matching zip is
+    It always converts every well folder it finds. A well that already has a matching zip is
     left alone (idempotent re-run); a well folder with no TIFs in it is
     skipped rather than publishing a member-less archive. ``progress``, when
     given, fires ``(well, "done")`` once that well's zip lands on disk —
@@ -222,9 +213,15 @@ def _zip_well_folders(
         entries = list(folder.iterdir())
     except OSError:
         return 0
+    # Archives an earlier run already moved into ``in/`` count as zipped too
+    # (see `_move_archives_into_in`), or a re-run would zip those wells again
+    # and then refuse to overwrite them.
+    archived = list(entries)
+    if folder.name.lower() != "in" and (folder / "in").is_dir():
+        archived += list((folder / "in").iterdir())
     zipped_wells = {
         canonical_well_label(p.stem)
-        for p in entries
+        for p in archived
         if p.is_file() and p.suffix.lower() == ".zip" and canonical_well_label(p.stem)
     }
     zipped = 0
@@ -275,6 +272,39 @@ def _zip_well_folders(
     return zipped
 
 
+def _move_archives_into_in(folder: Path, *, log_fn: Callable[[str], None]) -> Path:
+    """Move every ``<well>.zip`` at *folder*'s top level into ``folder/in/``.
+
+    Returns the folder the archives are now in. A no-op when *folder* is itself
+    named ``in``. An archive whose name is already taken in ``in/`` stays where
+    it is and the call raises ``ValueError`` naming it, after moving the rest:
+    overwriting would replace one plate's well with another's.
+    """
+    if folder.name.lower() == "in":
+        return folder
+    target = folder / "in"
+    archives = sorted(p for p in folder.iterdir()
+                      if p.is_file() and p.suffix.lower() == ".zip"
+                      and canonical_well_label(p.stem))
+    if not archives:
+        return target
+    target.mkdir(exist_ok=True)
+    taken: list[str] = []
+    for archive in archives:
+        dest = target / archive.name
+        if dest.exists():
+            taken.append(archive.name)
+            continue
+        os.replace(archive, dest)
+    log_fn(f"  Moved {len(archives) - len(taken)} archive(s) into {target}\n")
+    if taken:
+        raise ValueError(
+            f"{target} already holds {', '.join(taken)}; the new archive(s) with "
+            f"those names were left in {folder} rather than overwrite them. Move "
+            f"one set aside and run again.")
+    return target
+
+
 def convert_in_place(
     search_dir: Path | str,
     *,
@@ -286,9 +316,15 @@ def convert_in_place(
     sub_progress: Callable[[str, int, int], None] | None = None,
     proc_hook=None,
 ) -> str:
-    """Group loose TIFs directly under *search_dir* into ``<well>.zip``,
-    deleting (or moving) the sources — the same destructive path Analyze
-    takes when it finds loose TIFs, exposed here as a standalone step.
+    """Group loose TIFs directly under *search_dir* into ``<well>.zip``
+    archives in ``<search_dir>/in/``, deleting (or moving) the sources.
+
+    The archives land in ``in/`` — or in *search_dir* itself when it is
+    already named ``in`` — because that is the layout Analyze reads: a folder
+    named ``in``, or one that contains ``in/``. Left beside the source, they
+    made a folder Analyze refused, under an "Open in Analyze" button. An
+    archive already in ``in/`` under the same name is never overwritten; the
+    run fails naming it and leaves the new archive where it was written.
 
     *progress*, when given, reports the same ``(well, "writing"|"done")``
     stages :func:`convert_to_new_destination` does, so one dashboard callback
@@ -306,7 +342,7 @@ def convert_in_place(
     grouping half at all. A well therefore sits at an empty dial while it is
     being grouped, then fills as it is zipped.
     """
-    from services.input_resolution_service import run_zipper
+    from datasets.import_loose.zipper import run_zipper
     from util.zip_append import pending_journals
 
     emit = log or _null_log
@@ -344,7 +380,8 @@ def convert_in_place(
     zipped = _zip_well_folders(
         Path(search_dir), log_fn=emit, progress=report, sub_progress=sub_progress,
     )
-    summary = f"Grouped loose TIFs in {search_dir} into {zipped} per-well zip(s)."
+    target = _move_archives_into_in(Path(search_dir), log_fn=emit)
+    summary = f"Grouped loose TIFs in {search_dir} into {zipped} per-well zip(s) in {target}."
     if pre_existing:
         # Folded into the summary, not left as a log line: the raw log is hidden
         # by default, so a run that also emptied folders the user never asked

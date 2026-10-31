@@ -197,7 +197,7 @@ def _run(tmp_path, rc, opts):
     out_dir = tmp_path / "out"
 
     def _resolve(opts, log_q, **kw):
-        return (in_dir, out_dir, None)
+        return (in_dir, out_dir)
 
     def _build(pipeline, i, o, opts):
         return [sys.executable, str(script), str(out_dir), str(rc)]

@@ -522,10 +522,10 @@ def test_a_new_dataset_run_with_no_destination_is_refused_not_written_to_the_cwd
 
 
 # ── review findings (tracker M14-R*) ─────────────────────────────────────────
-def test_analyze_through_the_real_resolver_undoes_the_crash_before_folding_loose_images(pair):
-    """M14-R1. The resolver Analyze really runs folds a loose image into ``A01.zip`` by
-    rewriting it whole. Undoing a crashed append *after* that wrote the old directory
-    into the rewritten file; it has to happen before, and the loose image must survive."""
+def test_analyze_through_the_real_resolver_undoes_a_crashed_append(pair):
+    """M14-R1. A run started through the resolver Analyze really uses undoes a crashed
+    in-place append before the pipeline reads the archive, leaving every original member
+    readable and the half-written one gone."""
     from analyze.domain.input import AnalyzeInputMixin
     from services.pipeline_runner import PipelineRunner
 
@@ -538,8 +538,6 @@ def test_analyze_through_the_real_resolver_undoes_the_crash_before_folding_loose
     with zipfile.ZipFile(archive) as reader:
         original = {n: reader.read(n) for n in reader.namelist() if not n.endswith("/")}
     _crash_mid_append(archive)
-    loose = in_dir / "E_GFP_A01_f5_0h.tif"
-    loose.write_bytes(b"a loose image dropped in by the user" * 30)
 
     runner = PipelineRunner()
     runner.start(Path("pm.py"), {"raw": pair / "d1", "filename_schema":
@@ -554,8 +552,6 @@ def test_analyze_through_the_real_resolver_undoes_the_crash_before_folding_loose
     with zipfile.ZipFile(archive) as reader:
         for name, data in original.items():
             assert reader.read(name) == data                    # every original member reads back
-        assert loose.name in reader.namelist(), text
-        assert reader.read(loose.name) == b"a loose image dropped in by the user" * 30
         assert "E_GFP_A01_f0_48h.tif" not in reader.namelist()  # the crashed append is gone
 
 

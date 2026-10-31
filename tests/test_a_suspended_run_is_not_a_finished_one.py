@@ -100,15 +100,13 @@ def test_the_runner_reports_a_suspend_that_exits_zero_as_suspended(
 
     in_dir, out_dir = tmp_path / "in", tmp_path / "out"
     in_dir.mkdir()
-    cleaned: list[bool] = []
 
     runner = PipelineRunner()
     runner.start(
         fake_pipeline,
         {"filename_schema": "experiment:channel:well:fov:timepoint",
          "filename_sep": "_"},
-        resolve_dirs=lambda opts, log_q, **kw: (
-            in_dir, out_dir, lambda: cleaned.append(True)),
+        resolve_dirs=lambda opts, log_q, **kw: (in_dir, out_dir),
         journal_spec={"opts": {}},
     )
     seen: list[str] = []
@@ -121,7 +119,6 @@ def test_the_runner_reports_a_suspend_that_exits_zero_as_suspended(
         "a suspended run was reported as a completed plate, which is what sent "
         "the half-written folder to Review and marked the queue job finished")
     assert "error" not in seen
-    assert not cleaned, "the success hook ran for a run that did not finish"
 
 
 def test_a_run_that_finishes_is_still_done(tmp_path, fake_pipeline, monkeypatch):
@@ -132,19 +129,16 @@ def test_a_run_that_finishes_is_still_done(tmp_path, fake_pipeline, monkeypatch)
 
     in_dir, out_dir = tmp_path / "in", tmp_path / "out"
     in_dir.mkdir()
-    cleaned: list[bool] = []
     runner = PipelineRunner()
     runner.start(
         fake_pipeline,
         {"filename_schema": "experiment:channel:well:fov:timepoint",
          "filename_sep": "_"},
-        resolve_dirs=lambda opts, log_q, **kw: (
-            in_dir, out_dir, lambda: cleaned.append(True)),
+        resolve_dirs=lambda opts, log_q, **kw: (in_dir, out_dir),
         journal_spec={"opts": {}},
     )
     seen = _drain(runner, "finished")
     assert "done" in seen and "suspended" not in seen, seen
-    assert cleaned == [True]
 
 
 @pytest.fixture
@@ -176,7 +170,7 @@ def test_pressing_suspend_does_not_hand_a_half_finished_plate_to_review(
     tab.jobFinished.connect(lambda *a: finished.append(a))
 
     def _resolve(opts, log_q, **kw):
-        return (plate / "in", out_dir, None)
+        return (plate / "in", out_dir)
 
     tab._resolve_run_dirs_for_runner = _resolve
     spec = RunSpec.from_json({"opts": {
@@ -236,14 +230,12 @@ def test_a_stop_that_winds_down_cleanly_is_not_reported_done(tmp_path, fake_pipe
 
     in_dir, out_dir = tmp_path / "in", tmp_path / "out"
     in_dir.mkdir()
-    cleaned: list[bool] = []
     runner = PipelineRunner()
     runner.start(
         fake_pipeline,
         {"filename_schema": "experiment:channel:well:fov:timepoint",
          "filename_sep": "_"},
-        resolve_dirs=lambda opts, log_q, **kw: (
-            in_dir, out_dir, lambda: cleaned.append(True)),
+        resolve_dirs=lambda opts, log_q, **kw: (in_dir, out_dir),
         journal_spec={"opts": {}},
     )
     seen: list[str] = []
@@ -255,7 +247,6 @@ def test_a_stop_that_winds_down_cleanly_is_not_reported_done(tmp_path, fake_pipe
     assert "suspended" not in seen
     assert "error" in seen, seen
     assert runner.cancel_state_at_failure == (True, False)
-    assert not cleaned, "the success hook ran for a stopped run"
 
 
 def test_the_suspend_record_describes_the_run_not_the_form(
@@ -276,7 +267,7 @@ def test_the_suspend_record_describes_the_run_not_the_form(
     out_dir.mkdir()
     finished: list[tuple] = []
     tab.jobFinished.connect(lambda *a: finished.append(a))
-    tab._resolve_run_dirs_for_runner = lambda opts, log_q, **kw: (plate / "in", out_dir, None)
+    tab._resolve_run_dirs_for_runner = lambda opts, log_q, **kw: (plate / "in", out_dir)
     spec = RunSpec.from_json({"opts": {
         "raw": str(plate), "csv_prefix": "measurements",
         "filename_schema": "experiment:channel:well:fov:timepoint",

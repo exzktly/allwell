@@ -179,7 +179,7 @@ def test_an_unfinished_run_is_found_when_the_input_was_resolved_to_in(
     runner = PipelineRunner()
     runner.start(script, {"filename_schema": "experiment:channel:well:fov:timepoint",
                           "filename_sep": "_"},
-                 resolve_dirs=lambda opts, log_q, **kw: (plate / "in", plate / "out", None),
+                 resolve_dirs=lambda opts, log_q, **kw: (plate / "in", plate / "out"),
                  journal_spec={"opts": {"raw": str(plate)}})
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:

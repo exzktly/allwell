@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import zipfile
 from pathlib import Path
+from typing import NamedTuple
 
 from util.aw_safe import swallow
 from util.dir_scan import files_in, subdirs_in
@@ -42,7 +43,9 @@ log = logging.getLogger(__name__)
 
 __all__ = [
     "ZIP_LOOSE_FOLDER_REMEDY",
+    "NonZipInput",
     "find_well_zips",
+    "non_zip_input",
     "refuse_non_zip_input",
 ]
 
@@ -149,6 +152,61 @@ def _names(items: list[str]) -> str:
     return ", ".join(items[:4]) + ("…" if len(items) > 4 else "")
 
 
+class NonZipInput(NamedTuple):
+    """What a folder holds that a zips-only run would not read.
+
+    *loose* is the input images directly inside it; *stranded* is its
+    well-named folders that hold images and have no ``<WELL>.zip`` beside them,
+    each as ``(folder_name, image_count)``; *twins* is the well-named folders
+    that sit beside their own well's archive, as ``(well, folder, archive)``.
+    """
+
+    loose: list[str]
+    stranded: list[tuple[str, int]]
+    twins: list[tuple[str, Path, Path]]
+
+    @property
+    def refused(self) -> bool:
+        return bool(self.loose or self.stranded)
+
+    def problems(self) -> list[str]:
+        """One line per refused kind, naming the files."""
+        out = []
+        if self.loose:
+            out.append(f"{len(self.loose)} loose image(s) at the top level: {_names(self.loose)}")
+        if self.stranded:
+            folders = [f"{name}/ ({n} image(s))" for name, n in self.stranded]
+            out.append(f"{len(self.stranded)} well folder(s) with no <WELL>.zip: {_names(folders)}")
+        return out
+
+
+def non_zip_input(input_dir: Path, well_zips) -> NonZipInput:
+    """Classify what *input_dir* holds besides its well archives.
+
+    Pure: reads the folder, changes nothing. The pipeline refuses on the answer
+    (:func:`refuse_non_zip_input`) and the Analyze pane's planner shows the same
+    answer under the input field before Run, so the two cannot disagree about
+    which plate is runnable.
+    """
+    zip_by_well = {str(w): Path(p) for w, p in well_zips}
+    try:
+        loose = sorted(p.name for p in files_in(input_dir) if is_run_input_member(p.name))
+    except OSError:
+        loose = []
+    stranded: list[tuple[str, int]] = []
+    twins: list[tuple[str, Path, Path]] = []
+    for well, folder in _well_folders(input_dir):
+        images = _images_in(folder)
+        if not images:
+            continue
+        archive = zip_by_well.get(well)
+        if archive is None:
+            stranded.append((folder.name, len(images)))
+        else:
+            twins.append((well, folder, archive))
+    return NonZipInput(loose, stranded, twins)
+
+
 def refuse_non_zip_input(input_dir: Path, well_zips) -> None:
     """Stop a run whose input holds images it would not read.
 
@@ -157,26 +215,10 @@ def refuse_non_zip_input(input_dir: Path, well_zips) -> None:
     with no well archive at all. A folder beside its own well's archive is only
     logged — see the module docstring for why.
     """
-    zip_by_well = {str(w): Path(p) for w, p in well_zips}
-    problems: list[str] = []
-    try:
-        loose = sorted(p.name for p in files_in(input_dir) if is_run_input_member(p.name))
-    except OSError:
-        loose = []
-    if loose:
-        problems.append(f"{len(loose)} loose image(s) at the top level: {_names(loose)}")
-    stranded: list[str] = []
-    for well, folder in _well_folders(input_dir):
-        images = _images_in(folder)
-        if not images:
-            continue
-        archive = zip_by_well.get(well)
-        if archive is None:
-            stranded.append(f"{folder.name}/ ({len(images)} image(s))")
-        else:
-            _note_folder_beside_archive(well, folder, archive, images)
-    if stranded:
-        problems.append(f"{len(stranded)} well folder(s) with no <WELL>.zip: {_names(stranded)}")
+    found = non_zip_input(input_dir, well_zips)
+    for well, folder, archive in found.twins:
+        _note_folder_beside_archive(well, folder, archive, _images_in(folder))
+    problems = found.problems()
     if not problems and not well_zips:
         problems.append("no per-well <WELL>.zip archives")
     if not problems:

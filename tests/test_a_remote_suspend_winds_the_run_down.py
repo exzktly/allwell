@@ -530,8 +530,7 @@ def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag, stop_flag=F
     r._suspend_asked = bool(suspend_flag or asked)
     opts = {"filename_schema": "a:b", "filename_sep": "_", "fluor_tokens": ["GFP"],
             "nuclear_token": "DAPI"}
-    r._run_pipeline_remote(tmp_path / "in", tmp_path / "out", [], opts,
-                           on_success=lambda: hooks.append("on_success"))
+    r._run_pipeline_remote(tmp_path / "in", tmp_path / "out", [], opts)
     kinds = []
     while not r.log_q.empty():
         kinds.append(r.log_q.get_nowait()[0])
@@ -566,7 +565,7 @@ def test_a_run_that_never_saw_one_still_finishes(monkeypatch, tmp_path):
         lines=["Well A01 F001 starting\n", "Well A01 F001 done.\n"])
     assert "done" in kinds and "suspended" not in kinds, kinds
     assert verified == ["all"]
-    assert sorted(hooks) == ["on_success", "zipped"]
+    assert hooks == ["zipped"]
 
 
 def test_a_well_that_starts_after_the_request_leaves_nothing(tmp_path):

@@ -73,7 +73,8 @@ from pipeline.cli_args import (
 from pipeline.input_layout import find_well_zips, refuse_non_zip_input
 from util.image_exts import GROUP_IMAGE_EXTS, is_run_input_member
 from util.timepoint import parse_hours as _tp_parse_hours, sort_key as _tp_sort_key
-from util.well_token import canonical_well_label as _canonical_well_label
+from util.well_token import canonical_well_label as _canonical_well_label, is_well_archive
+from util.dir_scan import files_in
 from util.schema import (
     DEFAULT_SCHEMA,
     DEFAULT_SEP,
@@ -2479,11 +2480,11 @@ def _pipeline_info_jsonable(value):
 def _collect_image_stems(input_dir: Path) -> set[str]:
     """Every input image's stem, for the sidecar's timepoint and FOV lists.
 
-    Reads `util.image_exts` rather than a fourth spelling of the extension set.
-    The three loops here took `.tif`/`.tiff` only, while the pipeline groups
-    `.png`, `.jpg` and `.jpeg` too — so a PNG plate published an empty
-    `available_timepoints` and an empty `available_fovs`, which Review then
-    reads as a plate with no timepoints at all.
+    Read from the well archives — the run's one input layout. Reads
+    `util.image_exts` rather than a fourth spelling of the extension set: a
+    `.tif`-only test made a PNG plate publish an empty `available_timepoints`
+    and an empty `available_fovs`, which Review then reads as a plate with no
+    timepoints at all.
 
     `is_run_input_member` rather than a bare suffix test, for the same reason
     the disk pre-flight needs it: an AppleDouble twin has an image suffix, and
@@ -2491,24 +2492,11 @@ def _collect_image_stems(input_dir: Path) -> set[str]:
     file it shadows.
     """
     stems: set[str] = set()
-
-    def _add_from(folder: Path) -> None:
-        try:
-            entries = list(folder.iterdir())
-        except OSError:
-            return
-        for q in entries:
-            if q.is_file() and is_run_input_member(q.name):
-                stems.add(q.stem)
-
-    _add_from(input_dir)
     try:
-        well_dirs = [p for p in input_dir.iterdir() if p.is_dir()]
+        archives = [p for p in files_in(input_dir) if is_well_archive(p)]
     except OSError:
-        well_dirs = []
-    for well_dir in well_dirs:
-        _add_from(well_dir)
-    for z in input_dir.glob("*.zip"):
+        archives = []
+    for z in archives:
         try:
             with zipfile.ZipFile(z, "r") as zf:
                 for member in zf.namelist():

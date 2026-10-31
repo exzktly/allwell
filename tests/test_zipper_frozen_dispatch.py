@@ -15,7 +15,7 @@ import ast
 import sys
 from pathlib import Path
 
-from services.input_resolution_service import build_zipper_cmd
+from datasets.import_loose.zipper import build_zipper_cmd
 from tests._repo_scan import REPO_ROOT, parse_source
 
 _ZIP = Path("/bundle/pipeline/well_plate_zipper.py")

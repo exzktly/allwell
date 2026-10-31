@@ -53,15 +53,15 @@ _IMAGE_SUFFIXES = frozenset({
 _GOVERNED = (
     "pipeline/", "util/", "process_microscopy.py",
     "services/input_resolution_service.py",
-    # well_plate_zipper is the *other half* of the input-resolution operation:
-    # `tif_files_in` collects what a run will consume and deletes it on
-    # success, and this script decides what actually gets grouped. Leaving it
-    # outside meant the guard could not see a disagreement between the two —
-    # and one shipped: the delete side was widened to PNG and JPEG, this side
-    # was not, and a two-channel plate lost its fluorescent channel with no
-    # copy anywhere. A guard that cannot see both sides of the predicate it
-    # governs is a guard for one of them.
+    # well_plate_zipper and its spawner are the *other half* of the input
+    # decision: Analyze refuses loose images by `is_run_input_member`, and the
+    # zipper decides what Datasets → Zip loose folder actually groups. A
+    # disagreement between the two sides once shipped — one side widened to
+    # PNG and JPEG, the other not, and a two-channel plate lost its
+    # fluorescent channel with no copy anywhere. A guard that cannot see both
+    # sides of the predicate it governs is a guard for one of them.
     "pipeline/well_plate_zipper.py",
+    "datasets/import_loose/zipper.py",
 )
 
 #: A site is exempt only when its own line carries this marker with a reason.

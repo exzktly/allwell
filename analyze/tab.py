@@ -392,11 +392,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
     def _expected_well_count(self, opts: dict) -> int:
         # Same layout detection as resolve_input_output (no GUI/service drift).
         from services.input_resolution_service import count_expected_wells
-        return count_expected_wells(
-            opts["raw"],
-            filename_schema=opts["filename_schema"],
-            filename_sep=opts["filename_sep"],
-        )
+        return count_expected_wells(opts["raw"])
 
     # ------------------------------------------------------------------
     # Log helpers

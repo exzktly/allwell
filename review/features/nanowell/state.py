@@ -215,6 +215,10 @@ class NanowellState:
     #: ``(well, timepoint)`` another page asked to set an anchor on (``controller.open_for_anchor``): *Set anchor* is
     #: turned on there once the well's tables are loaded, since it can only be turned on with the grid status read.
     anchor_pending: object = None
+    #: The *Anchor queue* being walked (``anchor_queue_compute.AnchorQueue``), or ``None``. Never persisted.
+    anchor_queue: object = None
+    #: *One per well*: the queue walks each well's first waiting timepoint only. For the session, never persisted.
+    anchor_queue_per_well: bool = False
     #: The *Overlays* button: the coloured layers hidden for a look at the image beneath, without touching which
     #: layers are on. Not persisted — a page reopened with its overlays silently missing would look broken.
     overlays_hidden: bool = False

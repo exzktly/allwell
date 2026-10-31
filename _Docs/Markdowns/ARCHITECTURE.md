@@ -105,7 +105,16 @@ they're shell-wide:
   fills the ring and hands the formatted line to a
   `core.worker_bridge.GuiLogRelay`; it reads no widget state at all, because it
   runs on whichever thread logged the record. Whether the drawer is open is
-  decided on the other side of that relay, in `_append_log_line`.
+  decided on the other side of that relay, in `_append_log_line`. Every entry
+  starts with the time it was logged and is separated from the next by a blank
+  line, so a multi-line record (a traceback) reads as one entry: both this
+  drawer and Review's own status log take their formatter from
+  `core/log_view.log_formatter`, which refuses a format not starting with
+  `%(asctime)s`, and add entries through `append_entry` (live) or
+  `entries_text` (the drawer refilled from its ring on open). Review's status
+  log writes each entry as HTML, escaped and `white-space: pre-wrap`, so a
+  message holding `<` is shown rather than parsed and a traceback keeps its
+  line breaks.
 - **Status bar** (bottom of the window) with a status-message label and
   key-hint chips.
 - **App icon, window geometry persistence.**
@@ -997,6 +1006,8 @@ allwell/
 │   │                              which puts a worker's log lines on the GUI thread
 │   ├── log_mirror.py           ← mirror_line(): copies the warnings and errors the Analyze
 │   │                              and Datasets panes show in their own logs into the app log
+│   ├── log_view.py             ← how both log views lay out an entry: the time at its
+│   │                              head (log_formatter), a blank line between entries
 │   ├── panes.py                ← PANE_MODES and the index/name lookups either way —
 │   │                              the roster of the application's three panes
 │   ├── process.py              ← owner.pid and pid_alive(): whether the process that
@@ -11865,6 +11876,27 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   Incremental, and forcing makes it moot), through `review/core/analyze_handoff.open_in_analyze` — Review's one
   door into Analyze, shared by Home's *Finish this run*, QC triage and this view. A file that cannot be written
   is said on the figure (`state.array_message`).
+- **The anchor queue.** *Anchor queue* (the Anchor group's fourth button) walks every timepoint on the plate that
+  is waiting for an anchor, one montage after another. `anchor_queue_compute` (Qt-free) decides what waits: it
+  reads every grid record under `nanowells/` — not `state.data.grids`, which holds only the wells the page has
+  loaded — and takes each `unaddressed` timepoint with no anchor set, or with the very anchor the last run tried
+  and refused (the block's `manual_anchor_um` equals the file's). An anchor set and not yet used by a run is not
+  waiting (its remedy is a re-run), and is kept (`AnchorQueue.pending_rerun`) so the empty-queue message can say
+  so. Order is plate order, then each well's timepoints in the page's time order (`NanowellData.order`), never the
+  record's or the labels'. *One per well* (`AnchorQueue.set_per_well`, `one_per_well`) narrows the walk to each
+  well's first waiting timepoint and drops every well that already has an anchor waiting for a re-run, since the
+  end of a run addresses a well's other timepoints from one anchor through the rest of the plate. It is kept for
+  the session on `state.anchor_queue_per_well`; switching mid-walk keeps the shown item when the new list holds it
+  and otherwise goes on at the first item after it, never back over wells already passed.
+  `_anchor_queue` walks it: each step sets the selection to the one the queue started with plus the step's well
+  (so the wells walked past do not accumulate on every other tab) and calls `open_for_anchor`, the same service
+  QC Triage and Home use. `set_anchor_at` tells the queue when an anchor is saved (`_anchor_change` returns the
+  `(well, timepoint)` it changed); when it is the current item, the queue records it and moves on after
+  `ADVANCE_DELAY_MS`, dropping the move if Back, Skip or Stop changed the position meanwhile. While it runs a
+  *Queue* group (`anchor_queue_view`) shows `3 of 17 · B04 at 24h`, *Back*, *Skip*, *One per well* and *Stop*. Stop, or stepping
+  past the last item, restores the starting selection and writes the summary (anchored, skipped, and the pointer
+  to *Re-run anchored wells…*) to `state.array_message`. `state.anchor_queue` is never persisted, and a queue
+  built for another dataset is dropped by `active_queue`.
 
 `tests/test_nanowell_page_array_layers.py` turns each layer off and on through the real controls and reads the
 figure, checks the colourings, the presets and the saved-settings migration;

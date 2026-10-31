@@ -505,6 +505,17 @@ Review, open the Nanowells page, choose the *Array* view, pick the well and time
 *Full resolution* (or choose *Layers → Show as → Full montage*). Zoom to the square, turn on **Set anchor**, and
 click it. The click is saved in `in/nanowell_anchors.json`
 beside the acquisition record; the run snaps it to the nearest nanowell, so it only has to land on the square.
+When several wells and timepoints need an anchor — the usual state after a run — press **Anchor queue**
+instead of picking each one: it shows the first timepoint on the plate left unaddressed, with **Set anchor**
+already on, and each click on a central square saves the anchor and, after a moment, opens the next. A *Queue*
+group beside it says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous timepoint; a
+click there replaces its anchor), **Skip**, **One per well** and **Stop**. The queue holds every unaddressed
+timepoint without an anchor, plate order then time order, and also any timepoint whose anchor the last run could
+not use; an anchor you set that no run has used yet is not asked for again. Turn on **One per well** to be shown
+only each well's first such timepoint, and no well that already has an anchor waiting for a re-run: one click per
+well is usually enough (see above), and any timepoint the re-run still cannot address shows up in the next
+queue. The choice is remembered until you close the app. When it ends it says how many it anchored and how many
+were skipped, and puts your plate selection back as it was.
 Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
 run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
 addressed from it at the end of the run, through the plate's other wells. A timepoint that still cannot be
@@ -5709,7 +5720,8 @@ the sentence names it.
     overlap, amber where the acquisition record put it), with its registration residual; a tile whose size the
     record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
     hand and says how the timepoint was addressed (and, where it was not, how to anchor it), and offers **Set
-    anchor**, **Clear anchor** and **Re-run anchored wells…** (see *Setting the anchor by hand* above). *Run
+    anchor**, **Clear anchor**, **Re-run anchored wells…** and **Anchor queue** (see *Setting the anchor by
+    hand* above). *Run
     record* lists beside the figure the grid record of this timepoint (status, how the origin was found,
     pitch, angle, overlap, nanowells detected of the roster), the empty-nanowell template the counts were
     divided by, and the status of every other timepoint; a template the run found far from the well's
@@ -9045,7 +9057,7 @@ architecture-specific and can't produce a universal binary.
 | `⌘←` / `Ctrl+←` | Back through tab history |
 | `⌘→` / `Ctrl+→` | Forward through tab history |
 | `⌘/` / `Ctrl+/` | Open the help drawer |
-| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception. While the drawer is shut, a "!" badge on the status bar's log button says new lines have arrived — blue for routine messages, amber once a warning has come in, red once an error has — and it clears when you open the drawer |
+| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception. Each entry starts with the time it was logged (hours, minutes, seconds), and a blank line separates one entry from the next, so a multi-line entry such as a traceback reads as one. While the drawer is shut, a "!" badge on the status bar's log button says new lines have arrived — blue for routine messages, amber once a warning has come in, red once an error has — and it clears when you open the drawer |
 | `⌘B` / `Ctrl+B` | Collapse / expand the left sidebar (same as the top-bar panel button) |
 | `⌘W` / `Ctrl+W` | Close window |
 

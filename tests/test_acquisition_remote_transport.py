@@ -148,3 +148,58 @@ def test_the_nanowell_anchors_reach_the_upload_and_every_batch_and_an_anchor_set
     again = replace(again, well_zips=zipped.well_zips)
     assert cache.cache_key(again) != before
     assert source_fingerprint(root / 'in') != fingerprint
+
+
+def test_the_record_and_anchors_are_written_beside_the_archives_never_to_the_os_temp_folder(tmp_path, monkeypatch):
+    """A remote run's only local write used to be these few kilobytes, into ``tempfile.TemporaryDirectory()``: the
+    system drive, which on macOS also holds swap. A full system drive then failed every batch's upload with
+    ``[Errno 28] No space left on device`` while the input, output and scratch volumes had room. The OS temp folder
+    is made unusable here (a *file* where the folder should be, so creating anything in it raises, as ENOSPC would),
+    and both uploads must still send both files — from the transit folder beside the archives, removed afterwards."""
+    import tempfile
+
+    from services.remote_scratch import TRANSIT_SUBDIR
+    from util.nanowell_anchors import anchors_path, set_anchor
+
+    root = tmp_path / 'dataset'
+    _dataset(root)
+    set_anchor(anchors_path(root / 'in'), 'A01', '0h', (10.0, 20.0))
+    zipped = stage_local_zips(root / 'in', filename_schema='experiment:channel:well:fov:timepoint',
+                              filename_sep='_')
+    zipped = replace(zipped, well_zips=(zipped.well_zips[0],))
+    full = tmp_path / 'system-temp'
+    full.write_text('not a folder')
+    monkeypatch.setattr(tempfile, 'tempdir', str(full))
+    cache = DatasetCache(RemoteHost(name='test', ssh_alias='test-host'))
+    monkeypatch.setattr(cache, '_ssh_run', lambda *a, **k: SimpleNamespace(returncode=0, stdout=''))
+    monkeypatch.setattr(cache, '_ssh_script', lambda *a, **k: SimpleNamespace(returncode=0, stdout='1'))
+    sent = []
+
+    def transfer(command, **options):
+        carried = [Path(part) for part in command
+                   if Path(str(part)).name in ('acquisition.json', 'nanowell_anchors.json')]
+        sent.append(sorted((f.name, f.parent.parent) for f in carried if f.is_file()))
+        return 0, 0.0, 0, 1
+
+    monkeypatch.setattr(remote_upload, '_stream_rsync_with_retry', transfer)
+    cache.ensure_uploaded(zipped)
+    assert cache.upload_subset(list(zipped.well_zips), '/remote/b1', acquisition_input=zipped)[2] == 0
+    transit = zipped.well_zips[0].parent / TRANSIT_SUBDIR
+    expected = [('acquisition.json', transit), ('nanowell_anchors.json', transit)]
+    assert sent == [expected, expected]
+    assert list(transit.iterdir()) == [], 'the carried files outlived the upload'
+
+
+def test_nothing_to_carry_creates_no_folder(tmp_path, monkeypatch):
+    """A plate with no record and no anchors uploads its archives alone and leaves no transit folder behind."""
+    archive = tmp_path / 'A01.zip'
+    archive.write_bytes(b'x')
+    plain = SimpleNamespace(acquisition_record=None, nanowell_anchors=None)
+    cache = DatasetCache(RemoteHost(name='test', ssh_alias='test-host'))
+    monkeypatch.setattr(cache, '_ssh_run', lambda *a, **k: SimpleNamespace(returncode=0, stdout=''))
+    sent = []
+    monkeypatch.setattr(remote_upload, '_stream_rsync_with_retry',
+                        lambda command, **o: sent.append([Path(str(c)).name for c in command]) or (0, 0.0, 0, 1))
+    cache.upload_subset([archive], '/remote/b1', acquisition_input=plain)
+    assert sent and sent[0][-2:] == ['A01.zip', 'b1']
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['A01.zip']

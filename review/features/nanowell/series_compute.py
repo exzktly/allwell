@@ -310,7 +310,7 @@ def crop_metric_lines(row, channel: str | None = None) -> list[str]:
     if channel:
         b, sig = value(f"brightness_{channel}"), value(f"signal_{channel}")
         if sig is not None:
-            items.append(f"signal {compact_number(sig)}")
+            items.append(f"fluor. {compact_number(sig)}")       # Nanowell fluorescence, as the metric is named
         if b is not None:
             items.append(f"bright {compact_number(b)}")
     return items

@@ -11622,8 +11622,8 @@ shared with the enlarged crops), the ranking timepoint's column outlined, each r
 value, and **every word a crop carries is written inside it**, on a translucent band of the ground: the fold change
 at its timepoint in its top-left corner (`format_value`: `2.31×`, or a signed difference on log₂), and along its
 foot one line of the nanowell's metrics there (`series_compute.crop_metric_lines`: count, confluence as a
-percentage, the shared channel's nanowell fluorescence and brightness, in that order of importance, `compact_number` for
-thousands; a state without numbers by name; a missing measurement left out, never zero) — as many as fit the
+percentage, the shared channel's nanowell fluorescence and brightness as `fluor.` and `bright`, in that order of
+importance, `compact_number` for thousands; a state without numbers by name; a missing measurement left out, never zero) — as many as fit the
 crop's width (`renderer._one_line`), the caption saying when some were left for the pop-out, which writes each
 panel's full metrics under it (`render_crop_grid(…, metrics=…)`, `controller.crop_metrics`). Text under or beside
 each crop took more of the figure than the crops did, and three lines over a crop covered the lower third of the

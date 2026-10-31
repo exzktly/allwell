@@ -189,7 +189,7 @@ def test_the_saved_false_count_reaches_every_other_well_s_record(tmp_path, refer
     assert loaded_ref.false_cells == {"0h": pytest.approx(1 / 25)}
     image, _edge = _paint(10, seed=5)
     _images, _template, _norm_, out = _norm(image, loaded_ref)
-    assert out.template["reference_false_cells_per_nanowell"] == pytest.approx(1 / 25)
+    assert out.template.get("reference_false_cells_per_nanowell") == pytest.approx(1 / 25)
 
 
 def test_test_detection_says_its_crops_are_not_divided_by_the_reference():

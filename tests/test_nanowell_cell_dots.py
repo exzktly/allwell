@@ -186,9 +186,10 @@ def test_crop_dots_are_the_nanowell_s_own_cells_with_the_left_out_ones_hollow(tm
     cells = cell_positions(st.data, "A01", "t_c")
     # A 1 µm-per-pixel crop centred on nanowell 0, wide enough to reach nanowell 2's cell at (520, 120).
     box = dict(left_um=100.0 - 450, top_um=100.0 - 450, um_per_px=1.0, shape=(901, 901))
-    reached, _keys = _cells_in(cells, **box)
-    own, keys = _cells_in(cells, **box, site=(0, 0))
-    assert len(reached) == 3 and len(own) == 2                             # the neighbour's cell is not its own
+    in_box = ((cells["well_x_um"] - box["left_um"]).between(-0.5, 900.5)
+              & (cells["well_y_um"] - box["top_um"]).between(-0.5, 900.5))
+    own, keys = _cells_in(cells, **box, address=(0, 0))
+    assert int(in_box.sum()) == 3 and len(own) == 2                        # the neighbour's cell is not its own
     assert sorted(map(tuple, own)) == sorted((450.0 + dx, 450.0 + dy) for tp, q, (dx, dy) in CELLS
                                              if tp == "t_c" and q == 0)
 
@@ -202,7 +203,7 @@ def test_crop_dots_are_the_nanowell_s_own_cells_with_the_left_out_ones_hollow(tm
     hollow = [tuple(xy) for c in ax.collections if c.get_gid() == "nw-crop-cells-out" for xy in c.get_offsets()]
     assert filled == [(450.0 + 5.0, 450.0 - 3.0)] and hollow == [(450.0 - 12.0, 450.0 + 8.0)]
     caption = " ".join(t.get_text() for t in fig.texts if t.get_gid() == "nw-crop-grid-caption")
-    assert "dots: the 1 cells counted in the nanowell" in caption
+    assert "dots: the 1 cells the run counted in this nanowell that the analysis keeps" in caption
     assert "hollow: 1 more the run counted that Cell Gating leaves out" in caption
 
 

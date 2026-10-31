@@ -113,10 +113,10 @@ class Crop:
     image: np.ndarray | None
     source: str                            # "tile" (full resolution) or "montage"
     note: str                              # why there is no image, or what the image is
-    #: The cells the run counted in the cropped nanowell, as ``(column, row)`` pixel positions in the crop (N × 2),
-    #: from the well's cell table; ``None`` when the well has no cell table, so "no table" never reads as "no cell".
-    #: Only the nanowell's own cells — those carrying its address — so the dots are the cells its count counts, not
-    #: a neighbour's that the square crop happens to reach.
+    #: The cells the run counted in the crop's own nanowell, as ``(column, row)`` pixel positions in the crop
+    #: (N × 2), from the well's cell table; ``None`` when the well has no cell table, so "no table" never reads as
+    #: "no cell". A neighbour's cells that the crop's margin takes in are left out (:func:`_cells_in`).
+    #: Each comes with its identity in :attr:`keys`, so a cell Cell Gating leaves out can be drawn apart.
     cells: np.ndarray | None = None
     #: The fluorescence channel the image is of; ``""`` for the phase image.
     channel: str = ""
@@ -202,22 +202,25 @@ def _cut_at(image: np.ndarray, cx: float, cy: float, half: float) -> tuple[np.nd
 
 
 def _cells_in(cells, left_um: float, top_um: float, um_per_px: float, shape,
-              site=None) -> tuple[np.ndarray | None, tuple | None]:
-    """``(positions, keys)``: the counted cells (*cells*, a frame of ``well_x_um`` / ``well_y_um`` and, from
-    :func:`collect.cell_positions`, ``nw_q`` / ``nw_r`` / ``key``) that fall inside a crop whose top-left pixel is at
-    ``(left_um, top_um)`` in the well frame, as pixel positions in the crop, and their identities. With *site*
-    ``(q, r)`` only the cells counted in that nanowell: the crop is a square reaching past the nanowell's rim, so
-    without it a neighbour's cells in the corners would be drawn beside a count that does not include them.
-    ``(None, None)`` without a table; keys ``None`` for a table without nucleus ids."""
+              address) -> tuple[np.ndarray | None, tuple | None]:
+    """``(positions, keys)``: the counted cells of the nanowell at *address* ``(q, r)`` (*cells*, a frame of
+    ``nw_q`` / ``nw_r`` / ``well_x_um`` / ``well_y_um`` and, from :func:`collect.cell_positions`, ``key``) that fall
+    inside a crop whose top-left pixel is at ``(left_um, top_um)`` in the well frame, as pixel positions in the crop,
+    and their identities (``cell_gate_compute.CELL_KEY``). ``(None, None)`` without a table; keys ``None`` for a
+    table without nucleus ids.
+
+    Only the crop's own nanowell's cells: the crop is cut wider than the nanowell (``pad``), so its margin takes in
+    parts of the neighbours, and a dot on a neighbour's cell read as a cell of the selected nanowell. The cell
+    table's ``nw_q`` / ``nw_r`` is the nanowell the run counted the cell in, so the dots are exactly the cells that
+    nanowell's count is made of."""
     if cells is None:
         return None, None
     h, w = shape[:2]
     x = (cells["well_x_um"].to_numpy(dtype=float) - left_um) / um_per_px
     y = (cells["well_y_um"].to_numpy(dtype=float) - top_um) / um_per_px
-    inside = (x >= -0.5) & (x <= w - 0.5) & (y >= -0.5) & (y <= h - 0.5)
-    if site is not None and {"nw_q", "nw_r"} <= set(cells.columns):
-        inside &= ((pd.to_numeric(cells["nw_q"], errors="coerce").to_numpy(dtype=float) == float(site[0]))
-                   & (pd.to_numeric(cells["nw_r"], errors="coerce").to_numpy(dtype=float) == float(site[1])))
+    own = ((pd.to_numeric(cells["nw_q"], errors="coerce").to_numpy(dtype=float) == float(address[0]))
+           & (pd.to_numeric(cells["nw_r"], errors="coerce").to_numpy(dtype=float) == float(address[1])))
+    inside = own & (x >= -0.5) & (x <= w - 0.5) & (y >= -0.5) & (y <= h - 0.5)
     keys = None
     if "key" in cells.columns:
         picked = cells["key"].to_numpy(dtype=object)[inside]

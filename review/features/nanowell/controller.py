@@ -466,7 +466,8 @@ def redraw(ctx) -> None:
     st.hits, model = draw_view(
         fig, st.view, st.metrics, st.data, groups=page_groups(ctx), metric=metric, channel=channel,
         axis=st.axis, timepoint=shown_timepoint(ctx)[1] if st.view == "position" else st.timepoint,
-        control=st.control, baseline=st.baseline, cohort=st.cohort, moving=st.moving, well=well,
+        control=st.control, baseline=st.baseline, cohort=st.cohort, moving=st.moving,
+        baseline_moving=st.baseline_moving, well=well,
         well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
@@ -603,7 +604,7 @@ def set_display_range(ctx, low, high) -> None:
 def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
               note: str = "", tableless=(), selected=(), responding_above: float | None = None, moving: int = 0,
-              layers: ArrayLayers | None = None, image=None, image_note: str = "",
+              baseline_moving: int = 0, layers: ArrayLayers | None = None, image=None, image_note: str = "",
               region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
               stats_cache: dict | None = None, left_out=frozenset()) -> tuple[object, object]:
@@ -621,7 +622,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     *Subset* (``subset_compute``): every view but the Array draws only the nanowells inside it, saying how many it
     left out; the Array view draws them all and dims the rest. *moving* is the moving average's window in
     timepoints (``moving_compute``; 0 is off), which Distribution and Trajectories apply and the other views,
-    each of one timepoint or one value per nanowell, do not.
+    each of one timepoint or one value per nanowell, do not. *baseline_moving* is the baseline's own window for a
+    fold change, used only with *moving* on and never with the Earliest baseline
+    (``moving_compute.baseline_window_for`` decides, here, so the page and Batch Export cannot differ).
 
     The Identity view draws *well* at *well_timepoint* against the well's reference timepoint
     (``_identity_controller.draw_identity``), with *identity* the page's inputs to it — its mode, the sidecar and
@@ -664,12 +667,14 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         return (drawn.hits if drawn is not None else None), drawn
     if filtered is not None:
         note = " ".join(filter(None, [ss.note(filtered), note]))
+    baseline_moving = mvc.baseline_window_for(moving, baseline_moving, baseline)
     if view == "trajectories":
         marks = {w: timepoint_marks(data, w) for w in wells}
-        render_trajectories(fig, vc.trajectory_panels(metrics, wells, metric_column(metric, channel), cohort=cohort,
-                                                      marks=marks, moving=moving),
+        column = metric_column(metric, channel)
+        render_trajectories(fig, vc.trajectory_panels(metrics, wells, column, cohort=cohort, marks=marks,
+                                                      moving=moving, baseline_moving=baseline_moving),
                             cohort=cohort, label=_label(metric, channel), time_source=data.time_source,
-                            note=" ".join(filter(None, [mvc.describe(moving), note])))
+                            note=" ".join(filter(None, [mvc.describe(moving, column, baseline_moving), note])))
         return None, None
     if view == "position":
         series, missing = vc.position_series(metrics, wells, timepoint, metric_column(metric, channel),
@@ -695,7 +700,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
-                               moving=moving)
+                               moving=moving, baseline_moving=baseline_moving)
     model.starting = subset.start_bounds()
     if model.axis == TIME:
         model.identity_marks = {(w, tp): v for w in wells for tp, v in timepoint_marks(data, w).items()}
@@ -1842,6 +1847,12 @@ def set_cohort(ctx, on: bool) -> None:
 def set_moving(ctx, window: int) -> None:
     """The moving average's window in timepoints; 0 (or 1) turns it off."""
     _set(ctx, "moving", mvc.clamp_window(window))
+
+
+def set_baseline_moving(ctx, window: int) -> None:
+    """The baseline's own window for a fold change, in timepoints; 0 (or 1) keeps the baseline one measured value.
+    Used only while the moving average is on (``moving_compute.baseline_window_for``)."""
+    _set(ctx, "baseline_moving", mvc.clamp_window(window))
 
 
 def set_metric(ctx, metric: str) -> None:

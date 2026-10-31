@@ -278,6 +278,13 @@ class Colors:
     inner_line_dk   = "rgba(0, 0, 0, 0.40)"        # --sh-1 hairline drop
     success_glow    = "rgba(74, 222, 128, 0.12)"   # halo around the "saved" dot
     notice_wash     = "rgba(245, 158, 11, 0.10)"   # Notice panel fill (--warn at 10%)
+    # Laid over a figure that is being recomputed, under a "Computing…" message.
+    # A figure can be the dark plot theme or publication white, and a busy one
+    # (the nanowell array is hundreds of coloured marks); text drawn straight on
+    # it was lost on both, and invisible on white. The scrim dims whatever is
+    # beneath to one dark, even ground, which makes the message legible on
+    # either and also says the figure under it is about to change.
+    busy_scrim      = "rgba(10, 12, 16, 0.72)"
 
 
 class CPub:
@@ -916,6 +923,15 @@ QLabel#PlotCardTitle {{
     font-size: {t.h3_size}px;
     font-weight: {t.semibold};
     color: {c.text_primary};
+}}
+/* The Nanowells page's "Computing…" overlay, sized to the whole plot card
+   while the page's figure is recomputed. A scrim, not bare text: the figure
+   beneath may be dark or publication white and is dense with marks. */
+QLabel#NanowellComputing {{
+    background-color: {c.busy_scrim};
+    color: {c.text_primary};
+    font-size: {t.h2_size}px;
+    font-weight: {t.semibold};
 }}
 /* ── The Home page (features/home/) ──────────────────────────────────────
    Home is a page of cards read at a glance rather than a form operated

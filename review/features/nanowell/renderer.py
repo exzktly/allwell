@@ -602,7 +602,8 @@ def _cells_clause(tally: dict) -> str:
     cell table has none drawn because none could be read — never that it holds no cells."""
     if not tally:
         return ""
-    said = [f"dots: the {tally.get('drawn', 0):,} cells counted in the nanowell"] if "drawn" in tally else []
+    said = ([f"dots: the {tally.get('drawn', 0):,} cells the run counted in this nanowell"
+              + (" that the analysis keeps" if tally.get("left_out") else "")] if "drawn" in tally else [])
     if tally.get("left_out"):
         said.append(f"hollow: {tally['left_out']:,} more the run counted that Cell Gating leaves out (the QC size and "
                     "shape gate, curation, the gates), which the counts do not count")

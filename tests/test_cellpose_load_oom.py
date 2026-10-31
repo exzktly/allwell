@@ -193,14 +193,6 @@ def test_the_zip_well_task_releases_even_when_the_well_fails(released, monkeypat
     assert released == [1]
 
 
-def test_the_folder_well_task_releases_even_when_the_well_fails(released, monkeypatch, tmp_path):
-    monkeypatch.setattr(pm, "find_image_groups", _boom)
-    (tmp_path / "A01").mkdir()
-    with pytest.raises(RuntimeError, match="this well failed"):
-        pm.process_well_folder_task("A01", tmp_path / "A01", tmp_path / "out", {}, "DAPI", [], "cells")
-    assert released == [1]
-
-
 def test_the_reanchoring_pass_releases_after_each_well(released, monkeypatch, tmp_path):
     monkeypatch.setattr(nt, "run_zip_task", lambda *a, **k: None)
     kw = dict(output_dir=tmp_path, shared_kwargs_template={}, nuclear_token="DAPI", fluor_tokens=[],

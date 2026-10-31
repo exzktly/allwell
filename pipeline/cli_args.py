@@ -334,10 +334,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "stays float32); 'float32' keeps the fractional values. "
                         "Measurements are computed before saving and do not "
                         "change. _smfish and _cytoplasm_tophat are always float32.")
-    # Input/output well compression is mandatory: folder-mode runs always
-    # compress <input_dir>/<well>/ → <input_dir>/<well>.zip and each output well
-    # folder → <output_dir>/<well>_out.zip. The pipeline only ever emits per-well
-    # .zip files, so there is no flag to disable this.
+    # Output well compression is mandatory: each well's output images go to
+    # <output_dir>/<well>_out.zip. The pipeline only ever emits per-well .zip
+    # files, so there is no flag to disable this.
 
     p.add_argument("--tf_threads", type=int, default=0,
                    help=(

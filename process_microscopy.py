@@ -4,13 +4,12 @@ process_microscopy.py
 Production-ready pipeline to segment nuclei with StarDist and quantify
 GFP intensities per nucleus from paired fluorescence microscopy images.
 
-Input modes (per-well, grouped upstream)
-----------------------------------------
---input_dir must hold input grouped by 96-well plate position, in one of
-two layouts:
-  • Zip mode (preferred): per-well archives A01.zip … H12.zip.
-  • Folder mode: per-well subfolders A01/ … H12/ (compressed to
-    <well>.zip during the run).
+Input (per-well archives, grouped upstream)
+-------------------------------------------
+--input_dir must hold one archive per 96-well plate position, A01.zip …
+H12.zip. Loose images and per-well folders are refused by name before any
+work starts (pipeline.input_layout.refuse_non_zip_input); the Datasets pane's
+Zip loose folder tool converts them.
 
 For each well the script will:
   1. Validate the name against the 96-well plate pattern (A-H, 01-12).
@@ -22,10 +21,8 @@ For each well the script will:
   5. Delete the temporary directories (extracted input + staged images).
   6. Per-well CSVs are written to <output_dir> as usual (not zipped).
 
-Loose TIFs dropped directly in an input directory named "in" are grouped
-into per-well folders first (see organize_loose_tifs_into_well_folders).
-The GUI Analyze tab and the remote runner always group input into one of
-the above layouts before invoking this script.
+The GUI Analyze tab and the remote runner refuse the same non-zip input
+before invoking this script.
 
 Usage
 -----
@@ -51,11 +48,9 @@ from __future__ import annotations
 import importlib.util
 import logging
 import os
-import shutil
 import time
 import zipfile
 from util.json_write import write_json_atomic
-from collections import defaultdict
 from functools import partial
 from pathlib import Path
 import multiprocessing as mp
@@ -72,21 +67,17 @@ from pipeline.cli_args import (
     DEFAULT_SEGMENTATION_METHOD,
     apply_labelfree_preset, build_parser, nanowell_options_from_args, qc_options_from_args,
 )
-from pipeline.input_layout import (
-    find_well_folders,
-    find_well_zips,
-    refuse_images_only_in_ignored_folders,
-)
+from pipeline.input_layout import find_well_zips, refuse_non_zip_input
 from util.image_exts import GROUP_IMAGE_EXTS, is_run_input_member
 from util.timepoint import parse_hours as _tp_parse_hours, sort_key as _tp_sort_key
-from util.well_token import canonical_well_label as _canonical_well_label
+from util.well_token import canonical_well_label as _canonical_well_label, is_well_archive
+from util.dir_scan import files_in
 from util.schema import (
     DEFAULT_SCHEMA,
     DEFAULT_SEP,
     parse_schema,
     validate_schema,
 )
-from util.zip_write import replace_folder_with_archive
 from util.zip_append import refuse_if_pending as _refuse_if_appending
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
@@ -108,11 +99,10 @@ from util.zip_append import refuse_if_pending as _refuse_if_appending
 # below calls them.
 import pipeline.field_quality as _field_quality
 from pipeline.field_quality import FOCUS_COLUMN
-from pipeline.shape_features import BORDER_COLUMN, labels_touching_border
 from pipeline.nanowell_parallel import release_cellpose_gpu_cache
+from pipeline.shape_features import BORDER_COLUMN, labels_touching_border
 import pipeline.stardist as _stardist
 import pipeline.suspend as _suspend
-from pipeline.mixed_input import consolidate_mixed_to_zips
 from pipeline.parallelism import export_gpu_sharers, plan_parallelism
 from pipeline.stardist import (
     _segment_stardist_nuclei,
@@ -159,8 +149,6 @@ _LABELFREE_METHODS = LABELFREE_METHODS              # one definition: util.chann
 # remote worker) are unchanged. See that module for the implementations + the
 # tmp -> fsync -> rename rationale.
 from pipeline.io import (
-    _commit_staging_dir,
-    _compress_images_to_zip,
     compress_images_to_zip,
     _safe_atomic_text_write,
     _safe_well,
@@ -337,74 +325,6 @@ log = logging.getLogger(__name__)
 
 
 
-def organize_loose_tifs_into_well_folders(
-    input_dir: Path,
-    *,
-    schema: list[str],
-    sep: str,
-) -> None:
-    """
-    Move loose top-level TIF/TIFF images in *input_dir* into per-well folders.
-
-    If destination files already exist, files are skipped (no overwrite).
-    """
-    loose_images = [
-        p for p in input_dir.iterdir()
-        if p.is_file() and is_run_input_member(p.name)
-    ]
-    if not loose_images:
-        return
-
-    files_by_well: dict[str, list[Path]] = defaultdict(list)
-    unparsable = 0
-    for img in loose_images:
-        try:
-            parsed = parse_filename(img, schema=schema, sep=sep)
-        except Exception:
-            unparsable += 1
-            continue
-        well = _canonical_well_label(parsed.get("well", ""))
-        if well is None:
-            unparsable += 1
-            continue
-        files_by_well[well].append(img)
-
-    if not files_by_well:
-        if unparsable:
-            log.info(
-                "Found %d loose TIF/TIFF file(s) in %s, but none had a valid 96-well token.",
-                len(loose_images),
-                input_dir,
-            )
-        return
-
-    moved = 0
-    skipped_existing = 0
-    for well, files in sorted(files_by_well.items()):
-        well_dir = input_dir / well
-        well_dir.mkdir(parents=True, exist_ok=True)
-        for src in files:
-            dst = well_dir / src.name
-            if dst.exists():
-                skipped_existing += 1
-                log.warning(
-                    "Loose image not moved (destination exists, no overwrite): %s",
-                    dst,
-                )
-                continue
-            shutil.move(str(src), str(dst))
-            moved += 1
-
-    log.info(
-        "Organized loose images in %s: moved %d file(s) into %d well folder(s), "
-        "skipped %d existing destination(s), ignored %d unparsable file(s).",
-        input_dir,
-        moved,
-        len(files_by_well),
-        skipped_existing,
-        unparsable,
-    )
-
 # ---------------------------------------------------------------------------
 # Zip extraction / compression helpers
 #
@@ -413,34 +333,6 @@ def organize_loose_tifs_into_well_folders(
 # which are the same job, and are re-exported at the top of this file. A
 # zip-mode well's inputs are not unpacked at all: ``pipeline.zip_members``.
 # ---------------------------------------------------------------------------
-
-
-def compress_folder_images_to_zip_and_remove(folder: Path, out_zip: Path) -> int:
-    """
-    Compress image files in *folder* to *out_zip*, then delete the files the
-    archive took.
-
-    Returns the number of image files added to the archive. If no image files
-    are found, the source folder is left untouched.
-
-    *folder* itself is removed only when the archive covers everything in it.
-    The archive holds TIF/TIFF/PNG, so a folder carrying a companion XML, an
-    acquisition log or a mask subdirectory keeps those and survives — removing
-    it as a unit destroyed them with no copy anywhere. The same rule holds for
-    the files :func:`_verify_files_complete` drops: a zero-byte image is
-    reported and excluded, and it must not then be deleted along with the
-    directory it sits in.
-    """
-    packed = _compress_images_to_zip(folder, out_zip)
-    if not packed:
-        return 0
-    outcome = replace_folder_with_archive(folder, packed, remove_dir=remove_directory)
-    if not outcome.folder_removed:
-        log.info(
-            "Kept %s: %d file(s) the archive does not carry (%s)",
-            folder.name, len(outcome.kept), ", ".join(outcome.kept),
-        )
-    return len(packed)
 
 
 # ---------------------------------------------------------------------------
@@ -1539,65 +1431,6 @@ def find_image_groups_in_zip(
     return groups, needed_members
 
 
-def find_image_groups(
-    input_dir: Path,
-    nuclear_token: str,
-    fluor_tokens: list[str],
-    schema: list[str] | None = None,
-    sep: str = DEFAULT_SEP,
-) -> list[tuple[Path, list[Path]]]:
-    """
-    Recursively scan *input_dir* for nuclear-channel files and locate all
-    fluorescent-channel counterparts for each.
-
-    Returns a list of (nuclear_path, [fluor_path, ...]) tuples where the
-    nuclear file and every fluorescent file exist on disk.  Groups where any
-    fluorescent channel is missing are skipped with a warning.
-
-    Channel identification uses the schema's "channel" slot for position-aware
-    matching.  Falls back to substring replacement when no "channel" slot exists.
-    """
-    if schema is None:
-        schema = parse_schema(DEFAULT_SCHEMA)
-    channel_idx = _grouping_channel_idx(schema)
-
-    all_images = [
-        p for p in sorted(input_dir.rglob("*"))
-        if p.is_file()
-        and not p.name.startswith(".")
-        and not any(part.startswith(".") for part in p.parts)
-        and p.suffix.lower() in _GROUP_IMAGE_EXTS
-    ]
-    all_set = set(all_images)
-
-    grp, incomplete = _collect_image_groups(
-        [(p.name, p) for p in all_images],
-        nuclear_token=nuclear_token, fluor_tokens=fluor_tokens,
-        channel_idx=channel_idx, sep=sep,
-        exists=lambda ctx, fn: (ctx.parent / fn) in all_set,
-        on_missing_fluor=lambda fn: log.warning("  missing fluor file: %s", fn),
-    )
-
-    groups: list[tuple[Path, list[Path]]] = [
-        (ctx, [ctx.parent / fn for fn in fluor_names])
-        for _name, ctx, fluor_names in grp
-    ]
-
-    if incomplete:
-        log.warning(
-            "%d nuclear file(s) skipped due to missing fluorescent channel(s):",
-            len(incomplete),
-        )
-        for _name, ctx in incomplete:
-            log.warning("  %s", ctx.name)
-
-    log.info(
-        "Found %d image group(s) in %s  (%d fluor channel(s): %s)",
-        len(groups), input_dir, len(fluor_tokens), ", ".join(fluor_tokens),
-    )
-    return groups
-
-
 # Backward-compatible alias kept for any external callers.
 # ---------------------------------------------------------------------------
 # CSV writer
@@ -2331,230 +2164,6 @@ def process_well_zip_task(
         release_cellpose_gpu_cache()
 
 
-def process_well_folder_task(
-    well_label: str,
-    well_folder: Path,
-    output_dir: Path,
-    shared_kwargs_template: dict,
-    nuclear_token: str,
-    fluor_tokens: list[str],
-    csv_prefix: str,
-    schema: list[str] | None = None,
-    sep: str = DEFAULT_SEP,
-    incremental: bool = False,
-    incremental_prior_dir: Path | None = None,
-    settings_key: str = "",
-    force: bool = False,
-) -> tuple[list[dict], list[str]]:
-    """
-    Top-level picklable task: full lifecycle for one uncompressed well folder.
-
-    Runs inside a worker process (StarDist already loaded by _worker_init).
-    1. Discover image groups directly from *well_folder*.
-    2. Process groups, writing QC images to a temporary staging directory.
-    3. Write per-well CSV to <output_dir>/<csv_prefix>_<well>.csv.
-    4. Rename staging directory to <output_dir>/<well_label>/.
-    5. Compress input/output well folders to per-well zip files (always on;
-       the pipeline only ever emits <well>.zip / <well>_out.zip).
-
-    When *incremental* is set and a prior per-well CSV exists, only the new
-    FOV-groups are processed and merged into the existing CSV and output folder /
-    ``<well>_out.zip`` (see :func:`process_well_zip_task` for the contract).
-
-    Returns (records, failed_names).
-    """
-    if schema is None:
-        schema = parse_schema(DEFAULT_SCHEMA)
-    if _well_not_started_for_suspend(well_label):
-        return [], []
-    log.info("Well %s — starting (folder mode, pid %d)", well_label, os.getpid())
-
-    # Folder-mode staging used to be pinned to ``output_dir`` (so the closing
-    # commit could be a same-filesystem rename), which meant every intermediate
-    # image landed on the output volume no matter what the user set the scratch
-    # disk to — the single biggest source of I/O on a network-mounted output
-    # dir. It now honours the scratch base like zip mode does;
-    # ``_commit_staging_dir`` handles the cross-filesystem case.
-    tmp_images = _staging_dir_for(output_dir, well_label, settings_key)
-    if force:
-        # `--force` means recompute this well, and that has to include the
-        # per-FOV checkpoints: the task took no `force` parameter at all, so
-        # ticking Force re-ran the well and still resumed the old records —
-        # change a threshold, tick Force, get byte-identical numbers.
-        remove_directory(tmp_images)
-    # v5.2.0: preserve per-FOV checkpoints if any .fov_*.done markers
-    # exist; otherwise wipe stale state. Same semantics as zip-mode.
-    if tmp_images.exists():
-        has_checkpoint = any(tmp_images.glob(".fov_*.done"))
-        if has_checkpoint:
-            log.info(
-                "Well %s: resuming from %d FOV checkpoint(s) in %s",
-                well_label,
-                sum(1 for _ in tmp_images.glob(".fov_*.done")),
-                tmp_images.name,
-            )
-        else:
-            log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_images.name)
-            remove_directory(tmp_images)
-
-    _committed = False
-    try:
-        try:
-            tmp_images.mkdir(parents=True, exist_ok=True)
-
-            groups = find_image_groups(
-                well_folder, nuclear_token, fluor_tokens, schema=schema, sep=sep
-            )
-            if not groups:
-                log.warning("Well %s: no image groups found in %s.", well_label, well_folder)
-                record_well_completeness(output_dir, well_label, 0, None, [])
-                return [], []
-
-            # See the zip-mode task: the well's full input group count, captured
-            # before the incremental filter narrows ``groups``.
-            groups_in_input = len(groups)
-            safe_well = _safe_well(well_label)
-            csv_path  = output_dir / f"{csv_prefix}_{safe_well}.csv"
-            out_zip   = output_dir / f"{well_label}_out.zip"
-            final_out = output_dir / well_label
-
-            if incremental:
-                prior = incremental_prior_dir or output_dir
-                # The same settings check the zip task's incremental branch
-                # makes. Half-sweeping this left folder mode holding the old
-                # rule, which is worse than not sweeping at all: one module,
-                # two definitions of "already done", and neither looks wrong.
-                if not well_settings_allow_reuse(prior, well_label, settings_key):
-                    log.info(
-                        "Well %s — the recorded settings differ from this "
-                        "run's; recomputing every FOV-group.", well_label)
-                    prior = None
-                # CSV is primary; recover done FOV-groups from the processed
-                # outputs (zip or folder) so a missing CSV never re-segments.
-                done, csv_done = ((set(), False) if prior is None else
-                                  incremental_done_fov_keys(
-                                      prior, well_label, csv_prefix=csv_prefix,
-                                      safe_well=safe_well, schema=schema,
-                                      sep=sep))
-                if done and not csv_done:
-                    log.info("Well %s — no prior CSV; recovered %d done FOV-group(s) "
-                             "from processed outputs.", well_label, len(done))
-                if done:
-                    new_groups = []
-                    for nuc, fl in groups:
-                        meta = parse_filename(nuc, schema=schema, sep=sep)
-                        if (meta["fov"], meta["timepoint"]) not in done:
-                            new_groups.append((nuc, fl))
-                    if not new_groups:
-                        log.info("Well %s — up to date (no new FOVs).", well_label)
-                        return [], []
-                    log.info("Well %s — merging %d new FOV(s).", well_label, len(new_groups))
-                    groups = new_groups
-                # else: no prior CSV or outputs → new well → process all (full).
-
-            kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
-            records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
-                groups, kwargs, well_label, errors_dir=output_dir,
-                settings_key=settings_key,
-                measured_of=groups_in_input if incremental else None)
-            if _suspended_before_any_group(well_label, records, failed):
-                return [], []
-            withdraw_seal(output_dir, well_label)    # before the CSV / out.zip rewrite; raises if it cannot
-
-            if incremental:
-                # Merge new rows / images into the existing well outputs.
-                if records:
-                    added = merge_well_records(csv_path, records)
-                    log.info("Well %-12s -> %s  (+%d row(s), merged)",
-                             well_label, csv_path.name, added)
-                else:
-                    log.warning("Well %s: no records produced; CSV not updated.", well_label)
-                record_well_completeness(
-                    output_dir, well_label, groups_in_input, csv_path, failed,
-                    aborted_reason=aborted_reason,
-                    not_attempted=not_attempted)
-                n_out = merge_images_into_zip(out_zip, tmp_images)
-                log.info("Well %s: merged %d new image(s) -> %s",
-                         well_label, n_out, out_zip.name)
-                # Incremental consumed only the new images; drop the staging dir
-                # (the non-incremental path consumes it via rename/compress).
-                remove_directory(tmp_images)
-            else:
-                if records:
-                    write_well_csv(records, csv_path)
-                    log.info("Well %-12s -> %s  (%d rows)", well_label, csv_path.name, len(records))
-                else:
-                    log.warning("Well %s: no records produced; CSV not written.", well_label)
-                record_well_completeness(
-                    output_dir, well_label, groups_in_input, csv_path, failed,
-                    aborted_reason=aborted_reason,
-                    not_attempted=not_attempted)
-
-                # Atomically rename staging dir to final output folder.
-                if final_out.exists():
-                    remove_directory(final_out)
-                _commit_staging_dir(tmp_images, final_out)
-                log.info("Well %s: output folder -> %s", well_label, final_out.name)
-
-                n_out = compress_folder_images_to_zip_and_remove(final_out, out_zip)
-                if n_out > 0:
-                    log.info(
-                        "Well %s: compressed output folder -> %s (%d image(s))",
-                        well_label,
-                        out_zip.name,
-                        n_out,
-                    )
-
-            in_zip = well_folder.parent / f"{well_label}.zip"
-            n_in = compress_folder_images_to_zip_and_remove(well_folder, in_zip)
-            if n_in > 0:
-                log.info(
-                    "Well %s: compressed input folder -> %s (%d image(s))",
-                    well_label,
-                    in_zip.name,
-                    n_in,
-                )
-            _committed = True
-
-            # Mark the well as done before the (potential) staging-dir
-            # cleanup in the finally block — same reasoning as the zip
-            # task: cleanup can hang on NAS storage and we don't want
-            # that to defer the GUI's well_done event.
-            # Here, and not in the parent's result loop: see
-            # `record_well_settings` on why the caller has to be past every
-            # short circuit and after both artefacts are written.
-            record_well_settings(output_dir, well_label, settings_key)
-            seal_well_complete(output_dir, well_label, rewritten=not incremental)
-            log.info("Well %s — done.", well_label)
-            return records, failed
-        except BaseException as exc:
-            # Capture the worker-side traceback to disk before propagating.
-            # ProcessPoolExecutor pickles the exception back to the parent,
-            # but generic OSError("Bad file descriptor") re-raises at
-            # future.result() with little context if the worker's stderr is
-            # broken. The persisted trace gives the user the original site.
-            trace_path = _dump_well_failure_trace(output_dir, well_label, exc)
-            if trace_path is not None:
-                log.error(
-                    "Well %s failed (%s: %s); worker trace written to %s",
-                    well_label, type(exc).__name__, exc, trace_path,
-                    exc_info=True,
-                )
-            else:
-                log.error(
-                    "Well %s failed (%s: %s); could not write worker trace file",
-                    well_label, type(exc).__name__, exc,
-                    exc_info=True,
-                )
-            raise
-
-    finally:
-        if not _committed and tmp_images.exists():
-            remove_directory(tmp_images)
-            log.info("Well %s — staging directory removed.", well_label)
-        release_cellpose_gpu_cache()
-
-
 # ---------------------------------------------------------------------------
 # Skip-detection helpers
 # ---------------------------------------------------------------------------
@@ -2794,70 +2403,6 @@ def process_well_zips(
     return [*pool(items=first), *(pool(items=rest) if rest else [])] if first else pool(items=well_zips)
 
 
-def process_well_folders(
-    input_dir: Path,
-    output_dir: Path,
-    well_folders: list[tuple[str, Path]],
-    shared_kwargs_template: dict,
-    nuclear_token: str,
-    fluor_tokens: list[str],
-    workers: int,
-    csv_prefix: str,
-    force: bool = False,
-    force_wells: set[str] | None = None,
-    incremental: bool = False,
-    incremental_prior_dir: Path | None = None,
-    force_cpu: bool = False,
-    threads_per_worker: int = 0,
-    schema: list[str] | None = None,
-    sep: str = DEFAULT_SEP,
-    settings_key: str = "",
-    prior_records: dict | None = None,
-) -> list[str]:
-    """
-    Dispatch one worker process per well folder (uncompressed input).
-
-    Each worker: discovers image groups in its well subfolder, processes them,
-    writes the CSV, and saves output images to <output_dir>/<well>/.
-    Up to *workers* wells are processed in parallel.
-
-    With *incremental* (and not *force*), wells with existing output are routed
-    to the task to merge only their new FOV-groups (see
-    :func:`process_well_zips`).
-    """
-    if schema is None:
-        schema = parse_schema(DEFAULT_SCHEMA)
-    forced = _canonical_force_wells(force_wells)
-
-    def _submit(executor, well_label, folder_path):
-        return executor.submit(
-            process_well_folder_task,
-            well_label, folder_path, output_dir,
-            shared_kwargs_for_well(shared_kwargs_template, well_label),
-            nuclear_token, fluor_tokens, csv_prefix,
-            schema, sep,
-            _incremental_for_well(incremental, well_label, forced),
-            incremental_prior_dir,
-            settings_key,
-            force or _canonical_well_label(well_label) in forced,
-        )
-
-    return _run_well_worker_pool(
-        items=well_folders, output_dir=output_dir, workers=workers,
-        settings_key=settings_key,
-        force=force, force_wells=forced, incremental=incremental, force_cpu=force_cpu,
-        threads_per_worker=threads_per_worker,
-        shared_kwargs_template=shared_kwargs_template, mode_label="Folder",
-        # Folder-mode staging (_tmp_images_*) lives under the scratch base, same
-        # as zip mode; there is no zip-extract scratch to sweep. Legacy runs left
-        # their staging under output_dir, so sweep both when they differ.
-        stale_sweep=lambda out: sweep_run_scratch(out, settings_key,
-                                                   extra_extract=False),
-        output_exists=lambda well: finished_output(output_dir, well, csv_prefix, settings_key, folder=True,
-                                                   records=prior_records),
-        submit_task=_submit,
-    )
-
 # ---------------------------------------------------------------------------
 # pipeline_info.json sidecar
 #
@@ -2890,11 +2435,11 @@ def _pipeline_info_jsonable(value):
 def _collect_image_stems(input_dir: Path) -> set[str]:
     """Every input image's stem, for the sidecar's timepoint and FOV lists.
 
-    Reads `util.image_exts` rather than a fourth spelling of the extension set.
-    The three loops here took `.tif`/`.tiff` only, while the pipeline groups
-    `.png`, `.jpg` and `.jpeg` too — so a PNG plate published an empty
-    `available_timepoints` and an empty `available_fovs`, which Review then
-    reads as a plate with no timepoints at all.
+    Read from the well archives — the run's one input layout. Reads
+    `util.image_exts` rather than a fourth spelling of the extension set: a
+    `.tif`-only test made a PNG plate publish an empty `available_timepoints`
+    and an empty `available_fovs`, which Review then reads as a plate with no
+    timepoints at all.
 
     `is_run_input_member` rather than a bare suffix test, for the same reason
     the disk pre-flight needs it: an AppleDouble twin has an image suffix, and
@@ -2902,24 +2447,11 @@ def _collect_image_stems(input_dir: Path) -> set[str]:
     file it shadows.
     """
     stems: set[str] = set()
-
-    def _add_from(folder: Path) -> None:
-        try:
-            entries = list(folder.iterdir())
-        except OSError:
-            return
-        for q in entries:
-            if q.is_file() and is_run_input_member(q.name):
-                stems.add(q.stem)
-
-    _add_from(input_dir)
     try:
-        well_dirs = [p for p in input_dir.iterdir() if p.is_dir()]
+        archives = [p for p in files_in(input_dir) if is_well_archive(p)]
     except OSError:
-        well_dirs = []
-    for well_dir in well_dirs:
-        _add_from(well_dir)
-    for z in input_dir.glob("*.zip"):
+        archives = []
+    for z in archives:
         try:
             with zipfile.ZipFile(z, "r") as zf:
                 for member in zf.namelist():
@@ -3283,32 +2815,22 @@ def main() -> None:
         ),
     )
 
-    # If the selected input is an "in" directory, normalise any loose TIF/TIFF
-    # files into per-well folders before selecting processing mode.
-    if input_dir.name.lower() == "in":
-        organize_loose_tifs_into_well_folders(input_dir, schema=schema, sep=sep)
-
-    # Which blank corrects which well, after the organize so the files exist.
+    # Which blank corrects which well.
     blank_groups, bg_src = plan_blank_groups(args, input_dir)
 
-    # ── Decide mode: zip, folder, or flat ───────────────────────────────────
-    # Ahead of the model precompute below, because both refusals here are
+    # ── The plate's wells: one <WELL>.zip each, and nothing else ────────────
+    # Ahead of the model precompute below, because every refusal here is
     # decided from the plate's own well list alone. A run that cannot say what
     # corrects one of its wells should not first spend a model build per blank.
-    # A folder-mode run archives each well it finishes, so resuming one meets
-    # zips and bare folders together; fold the folders in, as the Analyze pane does.
-    consolidate_mixed_to_zips(input_dir, log_fn=lambda m: log.info("%s", m.rstrip()))
-    well_zips    = find_well_zips(input_dir)
-    well_folders = find_well_folders(input_dir) if not well_zips else []
+    well_zips = find_well_zips(input_dir)
+    refuse_non_zip_input(input_dir, well_zips)
     prepare_nanowell_run(nanowell, args, well_zips, parser.error, input_dir,
                          output_dir / PIPELINE_INFO_FILENAME)
-    if well_zips:
-        refuse_images_only_in_ignored_folders(input_dir, well_zips)
-    refuse_uncovered_wells(blank_groups, well_zips, well_folders)
-    plate_containers = dict(well_zips or well_folders or [])  # run_check's, below
-    well_zips, well_folders = scope_to_only_wells(well_zips, well_folders, args.only_wells, refuse=parser.error,
-                                                  log=log, absent_ok=args.only_wells_absent_ok)
-    ran_wells = replaced_wells(nanowell, args, [w for w, _p in well_zips or well_folders or []])
+    refuse_uncovered_wells(blank_groups, well_zips)
+    plate_containers = dict(well_zips)  # run_check's, below
+    well_zips = scope_to_only_wells(well_zips, args.only_wells, refuse=parser.error,
+                                    log=log, absent_ok=args.only_wells_absent_ok)
+    ran_wells = replaced_wells(nanowell, args, [w for w, _p in well_zips])
 
     # Precompute per-channel flat-field models once (basic / empty_well). The
     # gaussian mode needs no precompute (estimated per image in the worker), and
@@ -3341,7 +2863,7 @@ def main() -> None:
     # writes its transient working set to.
     preflight_run_scratch(
         output_dir, input_dir,
-        n_wells=len(well_zips) + len(well_folders),
+        n_wells=len(well_zips),
         # ``fluor_tokens_for_quant`` already leads with the segmentation
         # channel (see ``quantified_channel_tokens``), so adding one for it
         # counted that channel twice and inflated every per-group estimate by
@@ -3383,77 +2905,36 @@ def main() -> None:
     settings_key = settings_key_for(vars(args))
 
     failed_wells: list[str] = []
-    if well_zips:
-        log.info("Zip mode: %d well zip(s) detected.", len(well_zips))
-        failed_wells = process_well_zips(
-            input_dir=input_dir,
-            output_dir=output_dir,
-            well_zips=well_zips,
-            shared_kwargs_template=shared_kwargs,
-            nuclear_token=args.nuclear_token,
-            fluor_tokens=fluor_tokens_for_quant,
-            workers=workers,
-            csv_prefix=args.csv_prefix,
-            force=args.force,
-            force_wells=args.force_wells,
-            incremental=args.incremental,
-            incremental_prior_dir=(
-                Path(args.incremental_prior_dir)
-                if args.incremental_prior_dir else None
-            ),
-            force_cpu=args.cpu_only,
-            threads_per_worker=threads_per_worker,
-            schema=schema,
-            sep=sep,
-            settings_key=settings_key,
-            reanchor_only=reanchor_only_run(nanowell, args),     # a batched run's final pass processes no well
-            prior_records=prior_records,
-        )
-        nanowell_endgame(nanowell, output_dir, well_zips, shared_kwargs, args.nuclear_token,
-                         fluor_tokens_for_quant, args.csv_prefix, schema, sep, settings_key,
-                         grouper=find_image_groups_in_zip, parse=parse_filename,
-                         hold_dir=hold_dir_for(nanowell, args),
-                         pool=partial(_well_pool, workers, args.cpu_only, threads_per_worker, shared_kwargs))
-    elif well_folders:
-        log.info("Folder mode: %d well folder(s) detected.", len(well_folders))
-        failed_wells = process_well_folders(
-            input_dir=input_dir,
-            output_dir=output_dir,
-            well_folders=well_folders,
-            shared_kwargs_template=shared_kwargs,
-            nuclear_token=args.nuclear_token,
-            fluor_tokens=fluor_tokens_for_quant,
-            workers=workers,
-            csv_prefix=args.csv_prefix,
-            force=args.force,
-            force_wells=args.force_wells,
-            incremental=args.incremental,
-            incremental_prior_dir=(
-                Path(args.incremental_prior_dir)
-                if args.incremental_prior_dir else None
-            ),
-            force_cpu=args.cpu_only,
-            threads_per_worker=threads_per_worker,
-            schema=schema,
-            sep=sep,
-            settings_key=settings_key,
-            prior_records=prior_records,
-        )
-    else:
-        # No grouped input found. Every real entry point (the Analyze tab, the
-        # remote runner, and the "in"-directory loose-TIF organizer above)
-        # groups images into per-well zips or folders before invoking this
-        # script, so reaching here means the input was never grouped. Fail
-        # loudly and non-zero rather than silently processing nothing.
-        import sys as _sys
-        log.error(
-            "No per-well zips (<WELL>.zip) or folders (<WELL>/) found in %s. "
-            "Group the input first — run through the Analyze tab, or name the "
-            "input directory 'in' so loose TIFs are grouped automatically. "
-            "Exiting.",
-            input_dir,
-        )
-        _sys.exit(1)
+    log.info("Zip mode: %d well zip(s) detected.", len(well_zips))
+    failed_wells = process_well_zips(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        well_zips=well_zips,
+        shared_kwargs_template=shared_kwargs,
+        nuclear_token=args.nuclear_token,
+        fluor_tokens=fluor_tokens_for_quant,
+        workers=workers,
+        csv_prefix=args.csv_prefix,
+        force=args.force,
+        force_wells=args.force_wells,
+        incremental=args.incremental,
+        incremental_prior_dir=(
+            Path(args.incremental_prior_dir)
+            if args.incremental_prior_dir else None
+        ),
+        force_cpu=args.cpu_only,
+        threads_per_worker=threads_per_worker,
+        schema=schema,
+        sep=sep,
+        settings_key=settings_key,
+        reanchor_only=reanchor_only_run(nanowell, args),     # a batched run's final pass processes no well
+        prior_records=prior_records,
+    )
+    nanowell_endgame(nanowell, output_dir, well_zips, shared_kwargs, args.nuclear_token,
+                     fluor_tokens_for_quant, args.csv_prefix, schema, sep, settings_key,
+                     grouper=find_image_groups_in_zip, parse=parse_filename,
+                     hold_dir=hold_dir_for(nanowell, args),
+                     pool=partial(_well_pool, workers, args.cpu_only, threads_per_worker, shared_kwargs))
 
     # Fold each well's coverage into pipeline_info.json. Without this record a
     # partly-failed well is indistinguishable from a whole one — see

@@ -12,7 +12,6 @@ run in the fast lane. The call-site tests that need ``pipeline.io`` /
 """
 from __future__ import annotations
 
-import zipfile
 from pathlib import Path
 
 import pytest
@@ -116,62 +115,6 @@ def test_staging_name_is_the_prefix_the_pipeline_skips(tmp_path):
 
 
 # ── call sites ──────────────────────────────────────────────────────────────
-
-
-def test_consolidate_mixed_keeps_a_tif_less_well_folder(tmp_path):
-    """A leftover well folder with no TIFs must not become an empty zip.
-
-    Writing one would publish an ``in/<WELL>.zip`` that Finder refuses to
-    expand, and ``shutil.rmtree`` would take the folder's other content with it.
-    """
-    from services.input_resolution_service import _consolidate_mixed_to_zips
-
-    # Mixed input: one well already zipped, one bare folder with TIFs, one bare
-    # folder holding no images at all.
-    with zipfile.ZipFile(tmp_path / "A01.zip", "w") as zf:
-        zf.writestr("A01_DAPI.tif", b"x")
-    (tmp_path / "B02").mkdir()
-    _tif(tmp_path / "B02" / "B02_DAPI.tif")
-    (tmp_path / "C02").mkdir()
-    (tmp_path / "C02" / "notes.txt").write_text("no images here")
-
-    logs: list[str] = []
-    assert _consolidate_mixed_to_zips(tmp_path, log_fn=logs.append) is True
-
-    assert zip_members(tmp_path / "B02.zip") == ["B02_DAPI.tif"]
-    assert not (tmp_path / "B02").exists()
-    assert not (tmp_path / "C02.zip").exists()
-    assert (tmp_path / "C02" / "notes.txt").read_text() == "no images here"
-    assert any("no TIFs" in line for line in logs)
-
-
-def test_consolidate_mixed_reports_nothing_zipped(tmp_path):
-    from services.input_resolution_service import _consolidate_mixed_to_zips
-
-    with zipfile.ZipFile(tmp_path / "A01.zip", "w") as zf:
-        zf.writestr("A01_DAPI.tif", b"x")
-    (tmp_path / "C02").mkdir()
-
-    assert _consolidate_mixed_to_zips(tmp_path, log_fn=None) is False
-
-
-def test_append_loose_publishes_a_readable_zip(tmp_path):
-    from services.input_resolution_service import append_loose_images_to_zips
-
-    with zipfile.ZipFile(tmp_path / "A01.zip", "w") as zf:
-        zf.writestr("exp_A01_DAPI_f1_t1.tif", b"x")
-    _tif(tmp_path / "exp_A01_GFP_f1_t1.tif")
-
-    appended, wells = append_loose_images_to_zips(
-        tmp_path, filename_schema="experiment:well:channel:fov:timepoint",
-        filename_sep="_", log_fn=None,
-    )
-
-    assert (appended, wells) == (1, {"A01"})
-    assert zip_members(tmp_path / "A01.zip") == [
-        "exp_A01_DAPI_f1_t1.tif", "exp_A01_GFP_f1_t1.tif",
-    ]
-    assert _staging_leftovers(tmp_path) == []
 
 
 def test_merge_images_into_zip_writes_nothing_when_there_are_no_images(tmp_path):

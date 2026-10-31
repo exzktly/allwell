@@ -1,12 +1,12 @@
 """The path the app spawns the grouping pre-pass from must resolve to the module.
 
-``services.input_resolution_service`` reaches the loose-TIF grouper by *path*
+``datasets.import_loose.zipper`` reaches the loose-TIF grouper by *path*
 rather than by import, because it runs as a subprocess:
 ``ZIPPER_SCRIPT = HERE / "pipeline" / "well_plate_zipper.py"``, handed to
 ``[sys.executable, str(zipper), ...]``. A path is not an import, so nothing in
 Python notices when it stops describing the tree — ``find_zipper_script()``
 simply answers ``None``, and ``run_zipper`` raises only at the moment a user
-starts a run on a folder of loose TIFs. That is the worst moment to find out and
+starts an in-place Zip loose folder. That is the worst moment to find out and
 the only one: the failure is invisible until then, and invisible in CI for ever.
 
 The move to ``pipeline/well_plate_zipper.py`` is what made this worth pinning.
@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from services.input_resolution_service import ZIPPER_SCRIPT, find_zipper_script
+from datasets.import_loose.zipper import ZIPPER_SCRIPT, find_zipper_script
 
 
 def _module_file() -> Path:

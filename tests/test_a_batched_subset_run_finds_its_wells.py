@@ -31,15 +31,15 @@ def _refuse(message):
 
 def test_one_batch_runs_the_named_wells_it_holds_and_says_the_rest_are_another_batch_s(caplog):
     with caplog.at_level(logging.INFO):
-        zips, folders = scope_to_only_wells(BATCH, [], ["A01", "B05", "C07"], refuse=_refuse,
-                                            log=logging.getLogger("t"), absent_ok=True)
-    assert zips == [("A01", "/in/A01.zip")] and folders == []
+        zips = scope_to_only_wells(BATCH, ["A01", "B05", "C07"], refuse=_refuse,
+                                   log=logging.getLogger("t"), absent_ok=True)
+    assert zips == [("A01", "/in/A01.zip")]
     assert "B05, C07 not in this input (another batch's)" in caplog.text
 
 
 def test_without_the_flag_a_named_well_missing_from_the_input_is_still_refused():
     with pytest.raises(_Refused, match="--only_wells names well\\(s\\) not in the input: B05"):
-        scope_to_only_wells(BATCH, [], ["A01", "B05"], refuse=_refuse, log=logging.getLogger("t"))
+        scope_to_only_wells(BATCH, ["A01", "B05"], refuse=_refuse, log=logging.getLogger("t"))
 
 
 def test_every_batch_of_a_subset_run_is_told_to_skip_the_other_batches_wells():

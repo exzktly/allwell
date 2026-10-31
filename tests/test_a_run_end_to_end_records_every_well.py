@@ -104,7 +104,7 @@ def _run_a_plate(tmp_path, wells, *, per_well: float):
         recorded.append((well, bool(J.record_well(out_dir, well, state))))
 
     def _resolve(opts, log_q, **kw):
-        return (in_dir, out_dir, None)
+        return (in_dir, out_dir)
 
     def _build(pipeline, i, o, opts):
         return [sys.executable, str(script), ",".join(wells), str(per_well)]

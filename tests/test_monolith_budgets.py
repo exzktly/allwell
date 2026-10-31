@@ -116,9 +116,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # `pipeline.output_images`, beside the two storage policies it now applies.
 # 3592 -> 3536: the per-well and per-FOV failure-record writers moved to
 # `pipeline.error_records`, which also retires a completed well's old records.
-# 3536 -> 3524: the staging-dir preparation moved to `pipeline.fov_checkpoint`,
-# beside `release_staging`, paying for the end-of-well GPU cache release.
-PROCESS_MICROSCOPY_BUDGET = 3524
+# 3536 -> 3062: folder mode (`process_well_folder_task`, `process_well_folders`,
+# `find_image_groups`) and the loose-image organiser were deleted when the
+# pipeline became zips-only (Datasets -> Zip loose folder converts first).
+# 3062 -> 3005: the staging-dir preparation moved to `pipeline.fov_checkpoint`,
+# beside `release_staging`, with the end-of-well GPU cache release added.
+PROCESS_MICROSCOPY_BUDGET = 3005
 
 # `services/remote_runner.py` is the largest module in the repo — nearly twice
 # `process_microscopy.py` — and until now the only large one with nothing

@@ -215,15 +215,15 @@ def test_an_unknown_settings_key_prunes_nothing(tmp_path, monkeypatch):
 def test_the_run_sweep_prunes_as_well_as_sweeps():
     """§7.7 #1: the helper is worth nothing behind an unreachable call.
 
-    Both worker pools install their stale sweep as a lambda; this reads the one
-    they actually install.
+    The worker pool installs its stale sweep as a lambda; this reads the one
+    it actually installs.
     """
     import inspect
 
     import process_microscopy as pm
     from pipeline.fov_checkpoint import sweep_run_scratch
 
-    for fn in (pm.process_well_zips, pm.process_well_folders):
+    for fn in (pm.process_well_zips,):
         src = inspect.getsource(fn)
         assert "sweep_run_scratch" in src, (
             f"{fn.__name__} installs a sweep that does not prune superseded "

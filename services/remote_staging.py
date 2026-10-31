@@ -1,35 +1,24 @@
-"""Turning the user's input into the per-well archives a remote run uploads.
+"""Turning the user's per-well archives into what a remote run uploads.
 
-Whatever layout the plate is in — one zip per well, well folders, loose TIFs at
-the top level, or a mix left by an interrupted zip-up — :func:`stage_local_zips`
-returns a :class:`ZippedInput`: a directory of ``{well}.zip`` archives plus what
-the caller must do afterwards. On the way it applies the channel filter and,
-for a resumed run, the incremental split, both by planning from each archive's
-member list before reading a byte of image data, and writing a staged copy only
-of the archives that actually change.
+The input must already be one ``{well}.zip`` per well — loose images and
+per-well folders are refused by name, with the remedy (Datasets → Zip loose
+folder), before anything is planned or sent. :func:`stage_local_zips` returns a
+:class:`ZippedInput`: a directory of ``{well}.zip`` archives plus what the
+caller must do afterwards. On the way it applies the channel filter and, for a
+resumed run, the incremental split, both by planning from each archive's member
+list before reading a byte of image data, and writing a staged copy only of the
+archives that actually change.
 
 **The user's archives are read-only here.** A filter or a split writes to a
 staging directory beside the input, never over the originals; the
 ``ZippedInput.cleanup`` the caller runs removes it, and a failure part way
-through removes it before the error propagates. Folder and loose-image plates
-are zipped into the input directory itself, deliberately, so the next run
-finds zips and skips the zip-up — and each such archive holds every image its
-folder had, because it replaces that folder as the user's copy of the well.
-The channel filter and the split then treat it exactly as they treat an
-archive the user made: read, never rewritten.
-
-What leaves the user's input is only ever a file proven to be inside an
-archive beside it — a folder's images once its archive is published, a loose
-image once the success hook has matched its name, size and CRC-32 against an
-archive member. Anything else stays, and a well that is not uploaded because
-there was nothing to pack is named in the log.
+through removes it before the error propagates.
 """
 
 from __future__ import annotations
 import copy
 import os
 import shutil
-import subprocess
 import time
 import zipfile
 from dataclasses import dataclass
@@ -39,8 +28,7 @@ from collections.abc import Callable, Iterable
 from services.remote_config import (
     REWRITE_MIN_SAVING,
 )
-from util.dir_scan import files_in, subdirs_in
-from util.image_exts import GROUP_IMAGE_EXTS, is_run_input_member
+from util.image_exts import GROUP_IMAGE_EXTS
 from pipeline.well_skip import _canonical_force_wells
 from util.well_token import canonical_well_label as _canonical_well_label
 from util.well_token import (
@@ -52,8 +40,7 @@ from pipeline.incremental_keys import (
     read_done_fov_keys,
     read_done_fov_keys_from_zip,
 )
-from util.zip_write import atomic_zip, replace_folder_with_archive
-from util.well_token import is_valid_well_name
+from util.zip_write import atomic_zip
 from util.retry_io import retry_io
 from services.remote_run_state import (
     LocalInputMode,
@@ -66,6 +53,7 @@ from services.remote_transport import (
     _fmt_bytes,
     _fmt_secs,
 )
+from pipeline.input_layout import ZIP_LOOSE_FOLDER_REMEDY, non_zip_input
 from services.remote_scratch import (
     _new_scratch_dir,
     _new_transit_dir,
@@ -104,8 +92,6 @@ def stage_local_zips(
     fluor_tokens: Iterable[str] | None = None,
     nuclear_token: str | None = None,
     log_fn: Callable[[str], None] | None = None,
-    proc_hook: Callable[[subprocess.Popen | None], None] | None = None,
-    move_source_tifs: bool = False,
     incremental: bool = False,
     prior_output_dir: Path | None = None,
     csv_prefix: str = "measurements",
@@ -117,13 +103,13 @@ def stage_local_zips(
 ) -> ZippedInput:
     """Return a directory of per-well zips for ``input_dir``.
 
-    For inputs that are already ``{well}.zip``, this is a no-op pointer.
-    For loose-image or folder layouts, runs the existing
-    ``well_plate_zipper`` (re-used via :mod:`services.input_resolution_service`)
-    to group the images into well folders, and packs each folder into a
-    full ``{well}.zip`` beside it in the input directory.
+    The input must already be one ``{well}.zip`` per well: loose images and
+    per-well folders are refused by name, with the same verdict and remedy as
+    the pipeline and the Analyze planner (``pipeline.input_layout.
+    non_zip_input``), before anything is planned or uploaded. With no filter
+    and no split this is a no-op pointer at the user's archives.
 
-    Selective staging: when ``fluor_tokens`` is restricted, every layout's
+    Selective staging: when ``fluor_tokens`` is restricted, the
     archives go through :func:`_plan_staging` / :func:`_materialize_staging`,
     which write a copy holding only the requested channels into a transit
     directory and upload that — cutting upload by the unused-channel fraction
@@ -131,10 +117,8 @@ def stage_local_zips(
     kept (segmentation needs it).
 
     *skip_wells* are wells already finished locally
-    (``services.remote_finished_wells``): in zip layout their archives are left
-    out before anything is planned or rewritten. The caller removes them from
-    the other layouts' result (``drop_finished``), which also lists them as up
-    to date.
+    (``services.remote_finished_wells``): their archives are left out before
+    anything is planned or rewritten.
 
     *only_wells* (a ``--only_wells`` subset) keeps every other well's archive
     out of planning, so a channel filter or an incremental split reads and
@@ -143,13 +127,10 @@ def stage_local_zips(
     copy of every archive on the plate before the subset was applied. It is an
     economy, not the subset itself: the caller still applies
     ``pipeline_runner.scope_staged_to_only_wells`` to whatever comes back,
-    because the layouts that are not planned (an unfiltered ZIP plate, the
-    MIXED resume) return every archive, and the whole-well zip-up of a FOLDER
-    or FLAT plate still covers the plate, since its archives become the user's
-    copy of each well.
+    because an unfiltered plate is not planned and returns every archive.
 
     *on_well_count* is told, once, how many well archives the run can hold at
-    most — as soon as every layout knows it and before anything is planned or
+    most — as soon as it is known and before anything is planned or
     rewritten — so a scheduler job can be queued while the rest of staging
     runs (``services.remote_reservation``). Planning only removes wells, so
     the count is an upper bound.
@@ -166,21 +147,20 @@ def stage_local_zips(
     # staged now, so sweeping only the home scratch would have moved the leak
     # rather than removed it.
     sweep_stale_scratch(also=[input_dir], log_fn=log_fn)
-    # Scanning the input volume to classify the layout is itself slow enough to
-    # look like a hang on a spinning external disk, and it is the very first
-    # thing that happens after "[remote] target:". Say so before starting.
+    # Scanning the input volume is itself slow enough to look like a hang on a
+    # spinning external disk, and it is the very first thing that happens after
+    # "[remote] target:". Say so before starting.
     if log_fn is not None:
         log_fn(f"[remote] scanning input: {input_dir}\n")
-    mode = _detect_local_input_mode(input_dir)
-    if log_fn is not None:
-        log_fn(f"[remote] input layout: {mode.value}\n")
+    mode = LocalInputMode.ZIP
+    well_zips = tuple(sorted(_well_zips_in(input_dir)))
+    _refuse_non_zip_input(input_dir, well_zips)
 
-    def _planned(well_zips, keep_tokens, zip_dir, *, prior_cleanup=None,
-                 on_success=None) -> ZippedInput:
+    def _planned(well_zips, keep_tokens, zip_dir) -> ZippedInput:
         """Plan, stage and describe *well_zips*: the channel filter and the
-        incremental split, whichever apply. Every layout's archives come
-        through here on an incremental run — the split is what the remote
-        side's no-re-attach, output wipe and merging fetch all key on.
+        incremental split, whichever apply. An incremental run's archives
+        always come through here — the split is what the remote side's
+        no-re-attach, output wipe and merging fetch all key on.
 
         Planned before anything moves: a member list is a small read of the
         central directory, so only the members to be uploaded are ever read —
@@ -210,75 +190,36 @@ def stage_local_zips(
                    f"{len(up_to_date_list)} already up to date.\n")
         _raise_on_zero_channel_match(zero_match)
         staged = _stage_plans(plans, zip_dir, mode=mode, incremental=incremental,
-                              up_to_date=tuple(up_to_date_list), prior_cleanup=prior_cleanup,
-                              on_success=on_success, log_fn=log_fn)
+                              up_to_date=tuple(up_to_date_list), log_fn=log_fn)
         staged.outside_subset_wells = outside
         return staged
 
-    def _then_split(zin: ZippedInput) -> ZippedInput:
-        # Grouping and zip-up produce whole-well archives; the split is applied
-        # after them, so a resumed plate in any layout uploads only what is
-        # missing rather than being recomputed — or, batched, skipped as done.
-        if not incremental:
-            return zin
-        return _planned(zin.well_zips, None, zin.zip_dir, prior_cleanup=zin.cleanup,
-                        on_success=zin.on_pipeline_success)
-
-    if mode is LocalInputMode.ZIP:
-        well_zips = tuple(sorted(_well_zips_in(input_dir)))
-        if not well_zips:
-            raise RuntimeError(
-                f"Input dir reports zip-mode but contains no A01.zip-style files: {input_dir}"
-            )
-        well_zips = _counted(_without_finished(well_zips, skip_wells))
-        if fluor_tokens is None and not incremental:
-            # No filtering — use the user's zips directly (read-only).
-            return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
-        # The user's input dir is read-only: a filter or split writes to a
-        # staging dir, never over their archives (a mistyped channel once
-        # dropped every fluor image from the originals on disk).
-        return _planned(well_zips, (_required_tokens(nuclear_token, fluor_tokens)
-                                    if fluor_tokens is not None else None), input_dir)
-
-    if mode is LocalInputMode.MIXED:
-        # v5.2.21: input has zips for some wells and folders for
-        # others — the signature of a previous run that died partway
-        # through compress_input_well_folders. Resume by trusting the
-        # existing zips and zipping the leftover folders into a
-        # staging dir.
-        mixed = _stage_mixed_mode(
-            input_dir, fluor_tokens=fluor_tokens, nuclear_token=nuclear_token,
-            log_fn=log_fn)
-        _counted(mixed.well_zips)
-        return _then_split(mixed)
-
-    # Folder or flat mode. Loose images are grouped into ``<well>/`` folders by
-    # well_plate_zipper (in ``input_dir`` itself), then each well folder is
-    # packed into ``<well>.zip`` beside it, holding **every** image the folder
-    # had. That archive is the user's copy of the well from then on — the next
-    # run finds it and skips the zip-up — so it is never filtered: the channel
-    # filter and the incremental split run afterwards through the same
-    # plan-then-materialise pass as ZIP mode, which writes the trimmed copies
-    # into a transit directory and leaves the archives in ``input_dir`` alone.
-    #
-    # Filtering these archives in place is what this used to do, on the theory
-    # that they were scratch and the loose sources were still intact. They were
-    # not: each folder's images are deleted as soon as its archive is
-    # published, so rewriting the archive down to the selected channels
-    # deleted every other channel from the only copy on disk, before a byte was
-    # uploaded and whatever the run then did.
-    well_zips, _on_success = _zip_up_in_place(
-        input_dir, mode, filename_schema=filename_schema, filename_sep=filename_sep,
-        log_fn=log_fn, proc_hook=proc_hook, move_source_tifs=move_source_tifs)
-    _counted(well_zips)
+    well_zips = _counted(_without_finished(well_zips, skip_wells))
     if fluor_tokens is None and not incremental:
-        return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips,
-                           cleanup=None, on_pipeline_success=_on_success)
-    # The same planner as ZIP mode: the user's archives are read, and only the
-    # copies that have to change are written, into a transit directory.
+        # No filtering — use the user's zips directly (read-only).
+        return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
+    # The user's input dir is read-only: a filter or split writes to a
+    # staging dir, never over their archives (a mistyped channel once
+    # dropped every fluor image from the originals on disk).
     return _planned(well_zips, (_required_tokens(nuclear_token, fluor_tokens)
-                                if fluor_tokens is not None else None),
-                    input_dir, on_success=_on_success)
+                                if fluor_tokens is not None else None), input_dir)
+
+
+def _refuse_non_zip_input(input_dir: Path, well_zips: tuple[Path, ...]) -> None:
+    """Refuse loose images, stranded well folders, or no archives at all.
+
+    ``RuntimeError`` rather than the pipeline's ``SystemExit``: this runs in
+    the app, before anything is uploaded, and the runner reports a
+    ``RuntimeError`` from staging as the run's error.
+    """
+    found = non_zip_input(input_dir, [(_canonical_well_label(p.stem), p) for p in well_zips])
+    problems = found.problems()
+    if not problems and not well_zips:
+        problems.append("no per-well <WELL>.zip archives")
+    if problems:
+        raise RuntimeError(
+            f"{input_dir} holds input a remote run would not read —\n  "
+            + "\n  ".join(problems) + f"\n\n{ZIP_LOOSE_FOLDER_REMEDY}")
 
 
 def _stage_plans(
@@ -288,8 +229,6 @@ def _stage_plans(
     mode: LocalInputMode,
     incremental: bool,
     up_to_date: tuple[str, ...],
-    prior_cleanup: Callable[[], None] | None,
-    on_success: Callable[[], None] | None,
     log_fn: Callable[[str], None] | None,
 ) -> ZippedInput:
     """Write the archives *plans* rewrite into a staging dir and describe the upload.
@@ -308,264 +247,14 @@ def _stage_plans(
         return ZippedInput(
             zip_dir=staging or zip_dir, mode=mode,
             well_zips=_materialize_staging(plans, staging, log_fn=log_fn),
-            cleanup=_both(prior_cleanup, None if staging is None else
-                          (lambda d=staging: shutil.rmtree(d, ignore_errors=True))),
-            on_pipeline_success=on_success, incremental=incremental,
+            cleanup=None if staging is None else
+                    (lambda d=staging: shutil.rmtree(d, ignore_errors=True)),
+            incremental=incremental,
             up_to_date_wells=up_to_date)
     except Exception:
         if staging is not None:
             shutil.rmtree(staging, ignore_errors=True)
         raise
-
-
-def _zip_up_in_place(
-    input_dir: Path,
-    mode: LocalInputMode,
-    *,
-    filename_schema: str,
-    filename_sep: str,
-    log_fn: Callable[[str], None] | None,
-    proc_hook: Callable[[subprocess.Popen | None], None] | None,
-    move_source_tifs: bool,
-) -> tuple[tuple[Path, ...], Callable[[], None]]:
-    """Group a FOLDER / FLAT plate into full ``<well>.zip`` archives in *input_dir*.
-
-    Returns the archives and the success hook that removes the loose top-level
-    images they now hold. See the comment at the call in
-    :func:`stage_local_zips` for why these archives are never filtered.
-    """
-    from services.input_resolution_service import run_zipper
-
-    # Snapshot the loose images BEFORE running the zipper, so the post-success
-    # deletion is judged against exactly what the user started with. The
-    # snapshot is only a candidate list: the hook deletes a file only once its
-    # bytes are proven to be inside an archive (see ``_on_success``).
-    source_loose_images: tuple[Path, ...] = tuple(sorted(
-        p for p in files_in(input_dir) if is_run_input_member(p.name)))
-    if mode is LocalInputMode.FOLDER and source_loose_images and log_fn:
-        # A prior ``--move-source-tifs`` run may have crashed mid-way, leaving
-        # some images in well folders and some still loose at the top level.
-        log_fn(
-            f"[stage] resume: found {len(source_loose_images)} leftover "
-            f"loose image(s) at top level + "
-            f"{sum(1 for p in subdirs_in(input_dir) if is_valid_well_name(p.name))} "
-            f"well folder(s); consuming leftovers into existing folders.\n"
-        )
-
-    # Capture zips that existed BEFORE this stage runs — we must NOT
-    # delete those on a partial-zipper failure (they could be user
-    # data from a prior run).
-    pre_existing_zips = {p for p in _well_zips_in(input_dir)}
-
-    # Decide whether the zipper actually needs to run: only if some loose image
-    # at the top level does not already have a copy in its well folder.
-    # Re-copying already-consumed images is wasted I/O, and confusing to watch.
-    def _basenames_inside_well_folders() -> set[str]:
-        # `subdirs_in`, not a stat per entry: in FLAT mode this sees the plate's
-        # loose images, and on Windows each stat opens a file handle.
-        names: set[str] = set()
-        for p in subdirs_in(input_dir):
-            if not is_valid_well_name(p.name):
-                continue
-            names.update(c.name for c in files_in(p) if is_run_input_member(c.name))
-        return names
-
-    folder_basenames = _basenames_inside_well_folders()
-    unconsumed_loose = tuple(
-        p for p in source_loose_images if p.name not in folder_basenames
-    )
-    zipper_will_run = bool(unconsumed_loose) or (
-        mode is LocalInputMode.FLAT and not folder_basenames
-    )
-    if mode is LocalInputMode.FOLDER and not unconsumed_loose and log_fn:
-        log_fn(
-            "[stage] all loose image(s) already copied into well folders "
-            "from a prior run; skipping zipper re-run, going straight "
-            "to zip-up.\n"
-        )
-
-    # Step 1: well_plate_zipper groups loose images into per-well subfolders
-    # (copied, or moved with ``--move-source-tifs``); it never writes zips.
-    if zipper_will_run:
-        try:
-            run_zipper(
-                input_dir,
-                input_dir,
-                log_fn=log_fn,
-                progress_fn=None,
-                filename_schema=filename_schema,
-                filename_sep=filename_sep,
-                proc_hook=proc_hook,
-                move_source_tifs=move_source_tifs,
-            )
-        except Exception:
-            # Roll back ONLY the zips we created in this aborted run.
-            # Source images / folders stay intact so the user can re-run.
-            for p in _well_zips_in(input_dir):
-                if p not in pre_existing_zips:
-                    try:
-                        p.unlink()
-                    except OSError:
-                        pass
-            raise
-        grouped_names = _basenames_inside_well_folders()
-        left_loose = [p.name for p in files_in(input_dir)
-                      if is_run_input_member(p.name) and p.name not in grouped_names]
-        if left_loose and log_fn:
-            # An image the zipper could not place in a well — its name does not
-            # parse under the schema — is not uploaded. It stays where it is,
-            # and the success hook below will not delete it; but it must be
-            # named, or a calibration frame or a mistyped file reads as part of
-            # the run.
-            log_fn(_named_list(
-                f"[stage] WARN {len(left_loose)} image(s) at the top level are "
-                f"in no well under the schema {filename_schema!r} — not "
-                f"uploaded, left where they are",
-                left_loose))
-
-    # Step 2: convert each well folder into ``{well}.zip``, holding every image
-    # the folder has (the pipeline's own image predicate — PNG and JPEG
-    # included, AppleDouble ``._*`` sidecars and other dotfiles not).
-    # From the listing's entry type, not a stat per entry. In copy mode — the
-    # default — every loose image is still in input_dir when this runs, so
-    # ``p.is_dir()`` here cost one stat per image at the start of every remote
-    # run.
-    folders_after_zipper = [
-        p for p in subdirs_in(input_dir) if is_valid_well_name(p.name)]
-    # The images a folder gave up are deleted the moment its own zip is
-    # published, rather than at the end of the run. ``_zip_well_folder`` goes
-    # through ``atomic_zip``, which renames a verified archive into place or
-    # leaves nothing at all, so nothing is dropped until a complete archive
-    # sits beside it — and that archive is never rewritten afterwards. Deferring
-    # the deletion left the input dir holding both ``<well>/`` and
-    # ``<well>.zip`` for every well for the whole run.
-    #
-    # What is deleted is the archived images, never the folder as a unit:
-    # removing the folder took everything else in it — companion XML,
-    # acquisition logs, mask subdirectories, ``.DS_Store`` — with no copy
-    # anywhere. A folder that still holds something survives carrying just that
-    # remainder, and the log names it. A folder with no images is left whole and
-    # named — there is no archive to replace it with, and it is not uploaded —
-    # and one whose well already had a user zip is left alone.
-    for folder in folders_after_zipper:
-        target = input_dir / f"{folder.name}.zip"
-        if target.exists() and target in pre_existing_zips:
-            if log_fn:
-                log_fn(f"[stage] {folder.name}/ left as it is: {target.name} "
-                       f"already exists and is what is uploaded for this well.\n")
-            continue
-        images = _zip_well_folder(folder, target)
-        if not images:
-            if log_fn:
-                log_fn(_named_list(
-                    f"[stage] WARN {folder.name}: the folder holds no images — "
-                    f"well not uploaded; folder left as it is",
-                    sorted(c.name for c in folder.rglob("*") if not c.is_dir())))
-            continue
-        outcome = replace_folder_with_archive(folder, images)
-        if log_fn:
-            n = len(images)
-            tail = (
-                "folder removed."
-                if outcome.folder_removed
-                else (f"folder kept, {len(outcome.kept)} file(s) not archived "
-                      f"(and not uploaded): {', '.join(outcome.kept)}")
-            )
-            log_fn(
-                f"[stage] zipped {folder.name} → {target.name} "
-                f"({n} image{'s' if n != 1 else ''}); {tail}\n"
-            )
-    # No rollback of the zips written above. It used to unlink them all if a
-    # later well failed to zip — which, now that each folder is consumed as it
-    # goes, would delete the only remaining copy of every well that had already
-    # succeeded. A part-zipped plate is the correct resume state anyway: the
-    # next run reads the finished wells as ZIP mode and picks up the rest.
-
-    well_zips = tuple(sorted(_well_zips_in(input_dir)))
-    if not well_zips:
-        raise RuntimeError(
-            "The grouping step produced no per-well zips; check filename_schema and separator."
-        )
-
-    def _on_success() -> None:
-        """Delete the loose top-level images this stage consumed, so the input
-        dir is now pure zip mode — each only once its bytes are proven to be
-        inside one of the well archives (same name, size and CRC-32).
-
-        In copy mode those are the originals the zipper copied into the well
-        folders, whose images are now in ``<well>.zip``. In move mode they are
-        already gone. An image that is in no archive — a calibration frame
-        whose name is not a well, a ``flatfield_reference_DAPI.tif``, a file
-        the zipper refused — stays: this hook used to unlink every top-level
-        TIF snapshotted before the zipper ran, archived or not.
-
-        Well folders are not touched here at all. Each was reduced to what its
-        archive does not hold at zip-up time; whatever remains in one is by
-        definition not in any archive.
-        """
-        from services.input_resolution_service import _delete_sources_that_landed
-
-        kept = _delete_sources_that_landed(
-            source_loose_images, input_dir,
-            filename_schema=filename_schema, filename_sep=filename_sep)
-        if kept and log_fn:
-            log_fn(_named_list(
-                f"[stage] kept {len(kept)} top-level image(s) that are in no "
-                f"well archive", [p.name for p in kept if p.exists()]))
-
-    return well_zips, _on_success
-
-
-def _named_list(head: str, names: list[str], limit: int = 20) -> str:
-    """One log line: *head*, then the first *limit* of *names*."""
-    shown = ", ".join(names[:limit])
-    more = f" (and {len(names) - limit} more)" if len(names) > limit else ""
-    return f"{head}: {shown}{more}\n" if names else f"{head}.\n"
-
-
-def _detect_local_input_mode(input_dir: Path) -> LocalInputMode:
-    """Mirror the discovery logic in process_microscopy's main(), with
-    one extension over the local script: detect MIXED mode (zips +
-    folders for different wells) so the staging path can resume from
-    a half-completed prior run rather than silently dropping the
-    unzipped wells.
-    """
-    zip_wells: set[str] = set()
-    for p in _well_zips_in(input_dir):
-        label = _canonical_well_from_path(p.stem)
-        if label is not None:
-            zip_wells.add(label)
-
-    folder_wells: set[str] = set()
-    # A raised OSError from the listing (e.g. the drive was yanked) propagates
-    # naturally to the caller. `subdirs_in` runs before the mode is known, so on
-    # a FLAT plate it sees every image — hence no stat per entry.
-    for p in subdirs_in(input_dir):
-        if not is_valid_well_name(p.name):
-            continue
-        label = _canonical_well_from_path(p.name)
-        if label is None:
-            continue
-        # Empty folders don't count — they're often leftovers from
-        # ``compress_folder_images_to_zip_and_remove`` that
-        # interrupted between zip-write and folder-delete.
-        try:
-            if not any(p.iterdir()):
-                continue
-        except OSError:
-            continue
-        folder_wells.add(label)
-
-    # MIXED iff there's at least one well with a folder that has no
-    # matching zip AND at least one well that DOES have a zip.
-    remaining = folder_wells - zip_wells
-    if zip_wells and remaining:
-        return LocalInputMode.MIXED
-    if zip_wells:
-        return LocalInputMode.ZIP
-    if folder_wells:
-        return LocalInputMode.FOLDER
-    return LocalInputMode.FLAT
 
 
 def _required_tokens(
@@ -576,218 +265,6 @@ def _required_tokens(
     if nuclear_token:
         keep.add(nuclear_token.strip())
     return keep
-
-
-def _zip_well_folder(folder: Path, out_zip: Path) -> list[Path]:
-    """Atomically zip the images directly inside ``folder`` to ``out_zip``.
-
-    Goes through :func:`util.zip_write.atomic_zip`, so it uses the same
-    ``__aw_tmp_*.pidNNN`` staging name as
-    ``process_microscopy.compress_folder_images_to_zip_and_remove`` and
-    publishes only a verified archive.
-
-    "An image" is :func:`util.image_exts.is_run_input_member` — what the
-    pipeline groups as input, and what ``well_plate_zipper`` put in this folder.
-    This used to pack ``.tif``/``.tiff`` only, so a PNG the zipper had grouped
-    sat in the folder un-uploaded with nothing said, a folder of PNGs was not
-    zipped at all, and an AppleDouble ``._x.tif`` sidecar was packed and counted
-    as an image.
-
-    Returns the images that went into the archive — the paths, not a count, so
-    the caller can hand them to
-    :func:`util.zip_write.replace_folder_with_archive` and delete exactly what
-    is now in the zip. An empty list means the folder held no images and there
-    is nothing for the caller to do.
-
-    Every image is read off the user's input volume, so the write carries the
-    shared retry shield: on a network mount a dropped session mid-plate would
-    otherwise fail the run outright with a bare errno.
-    """
-    images = sorted(p for p in files_in(folder) if is_run_input_member(p.name))
-    if not images:
-        return []
-
-    def _pack() -> None:
-        with atomic_zip(out_zip) as zf:
-            for t in images:
-                zf.write(t, arcname=t.name)
-
-    retry_io(_pack, what=out_zip.name, advice=_TRANSFER_ADVICE, path=out_zip)
-    return images
-
-
-def _both(*cleanups: Callable[[], None] | None) -> Callable[[], None] | None:
-    """One cleanup that runs each of *cleanups* given, or ``None``."""
-    fns = [f for f in cleanups if f is not None]
-    return (lambda: [f() for f in fns] and None) if fns else None
-
-
-def _stage_mixed_mode(
-    input_dir: Path,
-    *,
-    fluor_tokens: Iterable[str] | None,
-    nuclear_token: str | None,
-    log_fn: Callable[[str], None] | None,
-) -> ZippedInput:
-    """Resume from a half-completed compression: zip the leftover
-    folders, combine with the existing zips, and return the union.
-
-    v5.2.21 introduced this entry point for the MIXED input mode.
-    Detection in ``_detect_local_input_mode`` already established
-    that at least one well has a zip AND at least one DIFFERENT well
-    has a folder of TIFs — exactly the state a network-drop
-    mid-``compress_input_well_folders`` leaves behind.
-
-    v5.2.24: the newly-zipped wells now land in ``input_dir`` itself
-    (next to the existing ``{well}.zip`` files) rather than in a
-    throwaway temp dir. The user can SEE the new zips, and the next
-    run picks them up as plain ZIP mode without re-zipping. Source
-    folders are left in place so the user can verify what was kept
-    before deleting them manually — the v5.2.21 same-well
-    zip+folder detection ensures the leftover folders don't trigger
-    a re-zip on the next run.
-
-    The v5.2.18 invariant still holds for the channel-filter case:
-    when ``fluor_tokens`` is restricted, ALL zips (existing + new)
-    are copied into a temp staging dir and filtered there. The
-    originals in ``input_dir`` — including the just-written ones —
-    are never mutated by the filter.
-    """
-    existing_zip_paths = sorted(_well_zips_in(input_dir))
-    existing_wells: dict[str, Path] = {}
-    for p in existing_zip_paths:
-        label = _canonical_well_from_path(p.stem)
-        if label is not None:
-            existing_wells[label] = p
-
-    folder_wells: dict[str, Path] = {}
-    for p in subdirs_in(input_dir):
-        if not is_valid_well_name(p.name):
-            continue
-        label = _canonical_well_from_path(p.name)
-        if label is None or label in existing_wells:
-            continue
-        try:
-            if not any(p.iterdir()):
-                continue
-        except OSError:
-            continue
-        folder_wells[label] = p
-
-    if not folder_wells:
-        # Shouldn't reach here — _detect_local_input_mode wouldn't have
-        # returned MIXED. Defensive: fall back to plain ZIP mode.
-        return ZippedInput(
-            zip_dir=input_dir,
-            mode=LocalInputMode.ZIP,
-            well_zips=tuple(existing_zip_paths),
-            cleanup=None,
-        )
-
-    if log_fn:
-        log_fn(
-            f"[stage] resume detected: {len(existing_wells)} existing "
-            f"zip(s), {len(folder_wells)} leftover folder(s) to zip "
-            f"({sorted(folder_wells)[:5]}{'…' if len(folder_wells) > 5 else ''}).\n"
-        )
-
-    # v5.2.24: write new zips directly into input_dir. ``_zip_well_folder``
-    # uses an atomic ``__aw_tmp_*.pidNNN`` rename so a mid-run failure
-    # leaves either a complete zip or no zip — never a partial. Successful
-    # zips persist across a failure: the next run sees fewer leftover
-    # folders and resumes faster.
-    new_zip_paths: list[Path] = []
-    consumed: list[Path] = []
-    for label in sorted(folder_wells):
-        folder = folder_wells[label]
-        target = input_dir / f"{label}.zip"
-        tifs = _zip_well_folder(folder, target)
-        if not tifs:
-            # Nothing to pack, so no archive: listing the target anyway handed
-            # the upload a path that does not exist. The folder is left whole.
-            if log_fn:
-                log_fn(f"[stage] WARN {folder.name}: the folder holds no images — "
-                       f"well not uploaded; folder left as it is.\n")
-            continue
-        new_zip_paths.append(target)
-        # The archived TIFs go as soon as the archive is published, not at the
-        # end of the run — same reasoning as the FOLDER/FLAT zip-up above. The
-        # folder itself only goes when the archive covers everything in it: a
-        # folder that yielded no TIFs, and one still holding non-image content,
-        # both keep what they hold.
-        n = len(tifs)
-        tail = ""
-        if tifs:
-            outcome = replace_folder_with_archive(folder, tifs)
-            if outcome.folder_removed:
-                consumed.append(folder)
-                tail = "; folder removed"
-            else:
-                tail = (f"; folder kept, {len(outcome.kept)} file(s) not "
-                        f"archived: {', '.join(outcome.kept)}")
-        if log_fn:
-            log_fn(
-                f"[stage] zipped {folder.name} → {target.name} "
-                f"({n} image{'s' if n != 1 else ''}) — persisted to "
-                f"input dir{tail}.\n"
-            )
-
-    all_zips = tuple(sorted(existing_zip_paths + new_zip_paths))
-
-    # The consumed folders are already gone — each was removed as its archive
-    # landed — so the input dir is plain ZIP mode from here on rather than
-    # MIXED. This hook stays as the backstop for anything the loop above
-    # declined to consume. A folder that yielded no TIFs, and one still holding
-    # files the archive does not carry, are both deliberately absent from
-    # ``consumed`` and so are not removed here either.
-    consumed_folders = tuple(consumed)
-
-    def _on_success() -> None:
-        for folder in consumed_folders:
-            try:
-                shutil.rmtree(folder)
-            except OSError:
-                pass
-
-    if fluor_tokens is not None:
-        # v5.2.18 invariant: the channel filter must NOT mutate the user's input
-        # dir, so the filtered archives are built in a staging dir. Same
-        # plan-then-materialise as plain ZIP mode: decide which members survive
-        # from each archive's member list, then write only those. Copying every
-        # archive in full and rewriting it afterwards — which this used to do —
-        # pulls the whole plate off the input volume to discard most of it,
-        # which is worst exactly where MIXED mode is most likely: a resumed run
-        # against a slow network share.
-        plans, _unused, zero_match = _plan_staging(
-            all_zips,
-            keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
-            log_fn=log_fn,
-        )
-        _raise_on_zero_channel_match(zero_match)
-        staging = _open_staging_if_needed(plans, log_fn=log_fn)
-        try:
-            staged_zips = _materialize_staging(plans, staging, log_fn=log_fn)
-            return ZippedInput(
-                zip_dir=staging or input_dir,
-                mode=LocalInputMode.MIXED,
-                well_zips=staged_zips,
-                cleanup=(None if staging is None else
-                         (lambda d=staging: shutil.rmtree(d, ignore_errors=True))),
-                on_pipeline_success=_on_success,
-            )
-        except Exception:
-            if staging is not None:
-                shutil.rmtree(staging, ignore_errors=True)
-            raise
-
-    # Non-filter path: zips live in input_dir, no cleanup needed.
-    return ZippedInput(
-        zip_dir=input_dir,
-        mode=LocalInputMode.MIXED,
-        well_zips=all_zips,
-        cleanup=None,
-        on_pipeline_success=_on_success,
-    )
 
 
 @dataclass(frozen=True)
@@ -1285,7 +762,7 @@ def _filter_new_fovs_in_staging(
 
 
 def input_well_containers(input_dir: Path | None) -> dict[str, Path]:
-    """``{well: path}`` for the well archives and folders in an input directory.
+    """``{well: path}`` for the well archives in an input directory.
 
     "Which entries in this folder are wells?" is a question three callers ask —
     the client-side completeness check, the pre-run coverage scan, and anything
@@ -1306,9 +783,11 @@ def input_well_containers(input_dir: Path | None) -> dict[str, Path]:
         for path in sorted(Path(input_dir).iterdir()):
             if path.name.startswith(".") or path.name.startswith("_"):
                 continue
-            stem = path.stem if path.suffix == ".zip" else path.name
-            label = _canonical_well_label(stem)
-            if label and (path.is_dir() or path.suffix == ".zip"):
+            if path.suffix != ".zip":
+                continue
+            label = _canonical_well_label(path.stem)
+            # A directory named like an archive is not one.
+            if label and path.is_file():
                 out[label] = path
     except OSError:
         return {}

@@ -292,22 +292,17 @@ def test_convert_writes_dataset_folder(tmp_path):
 
 
 def test_convert_output_is_ready_analyze_input(tmp_path):
-    # The per-well zips must be usable by resolve_input_output *directly* — no
-    # well_plate_zipper regrouping pass (that's the point of zip-direct output).
+    # The per-well zips must be usable by resolve_input_output *directly* —
+    # Analyze reads per-well zips and converts nothing.
     from services.input_resolution_service import resolve_input_output
 
     p = _write_packed(tmp_path / "p.ome.tif", n_frames=6)
     dest = tmp_path / "ds"
     convert(p, dest, ConversionParams(grid_rows=1, grid_cols=3, fovs_per_well=2,
                                       frame_order="pos_in_time"))
-    logs: list[str] = []
-    in_dir, out_dir, on_success = resolve_input_output(
-        dest, log_fn=logs.append,
-        filename_schema="experiment:channel:well:fov:timepoint", filename_sep="_")
+    in_dir, out_dir = resolve_input_output(dest)
     assert in_dir == dest / "in"
     assert out_dir == dest / "out"
-    assert on_success is None  # nothing to clean up — already grouped
-    assert not any("zipper" in m.lower() for m in logs)
 
 
 def test_convert_multi_image_with_custom_origin_and_direction(tmp_path):

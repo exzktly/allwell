@@ -273,7 +273,7 @@ def _zip_stems_in(root: Path, limit: int) -> list[str]:
     sample spans multiple wells (each per-well zip holds one well) as well as
     every channel within a well."""
     stems: list[str] = []
-    # A well archive is a file, the same rule `_well_zip_among` applies on the
+    # A well archive is a file, the same rule `plan_input_layout` applies on the
     # planner side. Consistency rather than a fix: a *directory* named
     # `A01.zip` was handed to `zipfile.ZipFile`, raised, and was skipped by the
     # handler below, so nothing downstream ever saw it. Asked the same way in

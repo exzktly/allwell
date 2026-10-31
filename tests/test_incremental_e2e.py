@@ -92,7 +92,7 @@ def test_incremental_merges_only_new_fov(tmp_path):
         "exp_NIR_A01_1_T01_tophat.tif",
     }
 
-    # 2) Append FOV 2 into the well zip (what loose-file append produces), then
+    # 2) Append FOV 2 into the well zip (a new acquisition added to the plate), then
     #    re-run incrementally.
     with zipfile.ZipFile(in_dir / "A01.zip", "a") as z:
         for name, data in _group("A01", "2").items():

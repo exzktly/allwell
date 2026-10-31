@@ -564,7 +564,7 @@ VERDICT_LAYERS = ("QC_Pass", "Crop_Pass", "Gate_Pass", "Field_Pass", "Focus_Pass
 
 
 def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
-                     except_layer: str | None = None) -> pd.Series:
+                     except_layer: str | None = None, except_layers: tuple[str, ...] = ()) -> pd.Series:
     """Rows that count toward analysis: ``Included == 1`` composed with the QC,
     crop, scatter-gate and field-quality layers.
 
@@ -616,6 +616,10 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
     panel counting how many cells a cut would remove has to count over the
     cells that would otherwise be in the analysis — neither over the debris the
     QC gate already dropped, nor over the ones its own cut is about to.
+    ``except_layers`` drops several, for a surface that applies those layers
+    another way: the Nanowells page leaves a whole field's nanowells out rather
+    than subtracting the field's cells from their counts
+    (``features/nanowell/cell_gate_compute.FIELD_LAYERS``).
     """
     if "Included" not in df.columns:
         mask = pd.Series(True, index=df.index)
@@ -623,7 +627,7 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
         incl = pd.to_numeric(df["Included"], errors="coerce").fillna(0)
         mask = incl.eq(1)
     for column in VERDICT_LAYERS:
-        if column == except_layer:
+        if column == except_layer or column in except_layers:
             continue
         if column == "Gate_Pass" and not include_gate:
             continue

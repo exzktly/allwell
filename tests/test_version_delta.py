@@ -81,3 +81,53 @@ def test_preflight_fails_a_branch_with_no_bump(tmp_path):
 def test_preflight_passes_one_bump(tmp_path):
     run = _preflight(tmp_path, "9.13.13")
     assert run.returncode == 0, run.stdout + run.stderr
+
+
+# ── the CI half: a sibling that took the same number first (tracker P1) ──────
+
+def _ci_check(repo: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", "scripts/version_bump_ci.sh"], cwd=repo, capture_output=True, text=True,
+                          timeout=60)
+
+
+def test_ci_fails_the_second_of_two_pull_requests_that_bumped_to_the_same_number(tmp_path):
+    """Seven pull requests in three days merged with no increment of their own: each bumped 9.x.y to the same next
+    number as a sibling open beside it, each passed the author's preflight against a stale origin/main, and the
+    second merged cleanly. Measured on the merge itself, the first passes and the second does not."""
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    for name in ("version_bump_ci.sh", "version_delta.py"):
+        shutil.copy2(_REPO / "scripts" / name, repo / "scripts" / name)
+    (repo / "version.py").write_text('__version__ = "9.13.12"\n')
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    for branch, other in (("a", "a.txt"), ("b", "b.txt")):
+        _git(repo, "checkout", "-q", "-b", branch, "main")
+        (repo / other).write_text(branch)
+        (repo / "version.py").write_text('__version__ = "9.13.13"\n')
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", f"work on {branch}")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "--no-ff", "a", "-m", "merge a")
+    first = _ci_check(repo)
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert "9.13.12 -> 9.13.13, one increment" in first.stdout
+    _git(repo, "merge", "-q", "--no-ff", "b", "-m", "merge b")
+    second = _ci_check(repo)
+    assert second.returncode == 1, second.stdout + second.stderr
+    assert "no increment of its own" in second.stdout
+
+
+def test_ci_runs_the_check_on_every_pull_request_and_every_push_to_main():
+    import yaml
+
+    workflow = yaml.safe_load((_REPO / ".github" / "workflows" / "ci.yml").read_text())
+    triggers = workflow.get("on", workflow.get(True))                # YAML 1.1 reads a bare `on` as True
+    assert "pull_request" in triggers and triggers["push"]["branches"] == ["main"]
+    job = workflow["jobs"]["version"]
+    assert "if" not in job                                           # never skipped for a path filter
+    assert any(step.get("with", {}).get("fetch-depth") == 2 for step in job["steps"])
+    assert [s["run"] for s in job["steps"] if "run" in s] == ["scripts/version_bump_ci.sh"]

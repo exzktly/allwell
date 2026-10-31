@@ -26,7 +26,8 @@ import numpy as np
 
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell import views_compute as vc
-from review.features.nanowell.collect import MEASURABLE, OUT_OF_FOCUS, cell_positions
+from review.features.nanowell import cell_gate_compute as cg
+from review.features.nanowell.collect import FIELD_EXCLUDED, MEASURABLE, OUT_OF_FOCUS, cell_positions
 from review.features.nanowell.image_compute import tile_boxes
 
 #: The states with a nanowell seen at its place, whatever its number: a timepoint with none of them has no
@@ -107,10 +108,11 @@ def _labels(qs, rs) -> list[str]:
 
 
 def array_scene(metrics, data, well: str, timepoint: str, column: str, *, positions: str = "measured",
-                anchors: bool = True, cells: bool = False) -> ArrayScene:
+                anchors: bool = True, cells: bool = False, gate=None) -> ArrayScene:
     """The Array view of *well* at *timepoint*, coloured by *column*, with its nanowells at their *positions*
     (``"measured"`` or ``"lattice"``). *anchors* off skips reading the anchors file (a batch figure, which draws
-    no anchor); *cells* on reads the well's counted cells for the Cells layer (:func:`cells_into`)."""
+    no anchor); *cells* on reads the well's counted cells for the Cells layer (:func:`cells_into`), less those
+    *gate* (``cell_gate_compute.GateTally``) leaves out."""
     rows = metrics[(metrics["well"] == well) & (metrics["timepoint"] == timepoint)]
     states = [str(s) for s in rows["state"]]
     counts: dict[str, int] = {}
@@ -157,17 +159,28 @@ def array_scene(metrics, data, well: str, timepoint: str, column: str, *, positi
     if frame == "well" and anchors:
         _anchor_into(scene, data, block)
     if cells:
-        cells_into(scene, rows, data)
+        cells_into(scene, rows, data, gate)
     return scene
 
 
-def cells_into(scene: ArrayScene, rows, data) -> None:
+def field_sites(rows) -> frozenset:
+    """The ``(q, r)`` of *rows* (one well at one timepoint of the metrics) whose nanowell a field layer leaves out."""
+    if rows is None or not len(rows) or "state" not in rows.columns:
+        return frozenset()
+    out = rows[rows["state"] == FIELD_EXCLUDED]
+    return frozenset((_int(q), _int(r)) for q, r in zip(out["nw_q"], out["nw_r"]) if _int(q) is not None
+                     and _int(r) is not None)
+
+
+def cells_into(scene: ArrayScene, rows, data, gate=None) -> None:
     """The Cells layer: a dot at each counted cell's centre, from the run's cell table (the run keeps no outlines).
 
     In the well frame a dot is where the run measured the cell. On the lattice it keeps its offset from its
     nanowell's measured centre, added to that nanowell's lattice place, so it sits in the same spot of the same
     nanowell; a cell whose nanowell has no address or no measured centre has no place there and is counted, not
-    drawn. What was drawn and what was not is :attr:`ArrayScene.cells_note`."""
+    drawn. A cell *gate* leaves out, or one in a field the field layers exclude, is not drawn either
+    (``cell_gate_compute.hidden_cells``), so the dots are the cells the counts beside them hold. What was drawn and
+    what was not is :attr:`ArrayScene.cells_note`."""
     found = cell_positions(data, scene.well, scene.timepoint)
     if found is None:
         scene.cells = (np.zeros(0), np.zeros(0))
@@ -180,6 +193,8 @@ def cells_into(scene: ArrayScene, rows, data) -> None:
         scene.cells = (np.zeros(0), np.zeros(0))
         scene.cells_note = f"Cells: the run counted no cell in {scene.well} at {scene.timepoint}."
         return
+    hide, gated, in_fields = cg.hidden_cells(found, gate, scene.well, scene.timepoint, field_sites(rows))
+    found = found[~hide]
     x, y = found["well_x_um"].to_numpy(dtype=float), found["well_y_um"].to_numpy(dtype=float)
     unplaced = 0
     if scene.frame == "lattice":
@@ -201,6 +216,12 @@ def cells_into(scene: ArrayScene, rows, data) -> None:
             "the run keeps no cell outlines.")
     if unplaced:
         note += f" {unplaced:,} more have no place on the lattice (their nanowell has no address or measured centre)."
+    if gated:
+        note += (" Cell Gating leaves out 1 more here, which is not drawn." if gated == 1 else
+                 f" Cell Gating leaves out {gated:,} more here, which are not drawn.")
+    if in_fields:
+        note += (" 1 more is in an excluded field, which is not drawn." if in_fields == 1 else
+                 f" {in_fields:,} more are in excluded fields, which are not drawn.")
     scene.cells_note = note
 
 

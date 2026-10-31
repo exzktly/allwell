@@ -323,8 +323,14 @@ def test_a_drag_pans_the_wheel_zooms_about_the_pointer_and_1_1_shows_one_image_p
     QTest.mousePress(canvas, Qt.LeftButton, Qt.NoModifier, start)
     QTest.mouseMove(canvas, end)
     QTest.mouseRelease(canvas, Qt.LeftButton, Qt.NoModifier, end)
-    # The point pressed is under the pointer where it was released: the view moved by 50 µm left, 20 µm up.
-    assert st.region == pytest.approx((left - 50.0, top - 20.0, right - 50.0, bottom - 20.0), abs=0.5)
+    # The point pressed is under the pointer where it was released. The pointer lands on whole widget pixels, so
+    # the view moves by what those two pixels are apart in µm (about 50 left and 20 up), which on a small canvas
+    # can differ from 50 x 20 by more than half a µm.
+    ratio, inverse = canvas.devicePixelRatioF(), st.drawn.ax.transData.inverted()
+    (x0, y0), (x1, y1) = (inverse.transform((p.x() * ratio, (canvas.height() - p.y()) * ratio)) for p in (start, end))
+    dx, dy = x1 - x0, y1 - y0
+    assert (dx, dy) == pytest.approx((50.0, 20.0), abs=2.0)
+    assert st.region == pytest.approx((left - dx, top - dy, right - dx, bottom - dy), abs=1e-6)
     assert st.drawn.region == pytest.approx(st.region, abs=0.5)
     assert st.selected_sites == []                             # a drag selects nothing
     x, y = st.drawn.ax.transData.transform((60.0, 70.0))

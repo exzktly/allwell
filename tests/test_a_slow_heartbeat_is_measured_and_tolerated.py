@@ -145,3 +145,54 @@ def test_the_sweep_counts_an_older_app_s_heartbeat_as_an_owner(tmp_path):
     """Two windows on one plate, one still on an app that beats the run directory's root: the newer one's sweep
     must not take that session's live job for abandoned and cancel it."""
     assert _sweep_one(tmp_path, fresh=LEGACY_UPLOAD_HEARTBEAT).startswith("AW_OWNED 0 4242")
+
+
+# ── the remote's reading of the beat ──────────────────────────────────────────────────────────────────────────────
+
+def _check_once(tmp_path, *, touch_shim: str = "") -> subprocess.CompletedProcess:
+    """One pass of the real staleness check (``_heartbeat_stale_snippet``) under ``bash`` against a heartbeat last
+    beaten 130 s ago — older than ``UPLOAD_HEARTBEAT_STALE_S`` — with *touch_shim* run, when given, by every
+    ``touch`` the check makes before the real one (``{real}`` in it names the real ``touch``)."""
+    from services.remote_wait_snippets import _heartbeat_stale_snippet
+
+    heartbeat = tmp_path / "heartbeat"
+    heartbeat.touch()
+    then = time.time() - (UPLOAD_HEARTBEAT_STALE_S + 10)
+    os.utime(heartbeat, (then, then))
+    env = dict(os.environ, AW_HB=str(heartbeat))
+    if touch_shim:
+        shims = tmp_path / "bin"
+        shims.mkdir()
+        real = subprocess.run(["bash", "-c", "command -v touch"], capture_output=True, text=True).stdout.strip()
+        (shims / "touch").write_text(f"#!/bin/sh\n{touch_shim.format(real=real)}\nexec {real} \"$@\"\n")
+        (shims / "touch").chmod(0o755)
+        env["PATH"] = f"{shims}:{env['PATH']}"
+    init, check = _heartbeat_stale_snippet(str(heartbeat), "GONE", on_stale="exit 75")
+    return subprocess.run(["bash", "-c", init + check + 'echo "fresh=$_aw_fresh"'],
+                          capture_output=True, text=True, timeout=10, env=env)
+
+
+def test_a_beat_that_lands_while_the_check_reads_the_clock_is_seen(tmp_path):
+    """The check read the heartbeat, then touched a probe for "now". On a filesystem stalling the app's beats the
+    probe's touch stalls too, and a beat landing in the meantime was not seen while the stall was counted as age:
+    up to 105 s between beats plus the probe's own delay, against 120 s. The probe is touched first now. The shim
+    lands the app's beat while the probe's touch is in flight."""
+    landed = _check_once(tmp_path, touch_shim='case "$1" in *.now.*) {real} "$AW_HB";; esac')
+    assert (landed.returncode, landed.stdout) == (0, "fresh=1\n"), landed.stdout + landed.stderr
+
+
+def test_a_heartbeat_that_really_stopped_is_still_taken_for_gone(tmp_path):
+    out = _check_once(tmp_path)
+    assert (out.returncode, out.stdout) == (75, "GONE\n")
+
+
+def test_the_heartbeat_is_opened_just_before_its_time_is_read():
+    """``stat`` on an NFS client may answer from its attribute cache (``acregmax``, 60 s by default), holding the
+    mtime from before the last beat. Opening the file has the client fetch its attributes from the server
+    (close-to-open consistency), so the open must come directly before the read, and after the probe."""
+    from services.remote_wait_snippets import _heartbeat_stale_snippet
+
+    _init, check = _heartbeat_stale_snippet("/r/run/.aw_beat/heartbeat", "GONE")
+    open_then_read = "true 2>/dev/null </r/run/.aw_beat/heartbeat || :; _aw_hb=$(stat -c %Y /r/run/.aw_beat/heartbeat"
+    assert check.count(open_then_read) == 1, check
+    assert check.index('touch "$_aw_p"') < check.index(open_then_read)

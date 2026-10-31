@@ -47,7 +47,7 @@ SIDE_EFFECT_IMPORTS = {
 BINDING_SEAMS = {
     "ProcessPoolExecutor": "tests/test_well_worker_pool.py runs the pool in-process",
     "as_completed": "tests/test_well_worker_pool.py, paired with the executor",
-    "preflight_scratch_for_run": "tests/test_capacity.py stubs the scratch preflight",
+    "preflight_run_scratch": "tests/test_capacity.py stubs the scratch preflight",
     "prepare_models": "tests/test_only_wells_run.py wraps the model build",
     "plan_parallelism": "tests/test_acquisition_remote_transport.py stops main() "
                         "at the first step after the acquisition-record gate",

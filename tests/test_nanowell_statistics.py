@@ -276,3 +276,76 @@ def test_groups_compare_one_median_per_well(page, qtbot, monkeypatch):
     assert "ctrl:  n = 2   mean = 2.5" in samples and "drug:  n = 2   mean = 7.5" in samples
     t = st.ttest_ind([2.5, 2.5], [7.0, 8.0], equal_var=False)
     assert " ".join(_report(page, sc.GID_PAIR)).startswith(f"ctrl vs drug   t = {t.statistic:.4g}   {p_phrase(t.pvalue)}")
+
+
+def test_the_moving_average_distribution_draws_is_the_one_statistics_tests(page, qtbot):
+    """Tracker M9: Statistics tests the dots Distribution draws *Along x: Wells*, so the moving average set there is
+    applied to the values tested, the control stays on the band, and the report states the window. A Statistics
+    view that tested the raw values while Distribution drew averaged ones would compare A01's n = 4, mean 2.5."""
+    from review.features.nanowell.tab_view import VIEWS
+
+    state = _loaded(qtbot, page)
+    _choose(page, "_nw_metric_cb", "n")
+    page.widgets.get("_nw_axis_seg").setCurrentIndex(1)                    # Along x: Wells
+    page.widgets.get("_nw_moving_spin").setValue(2)
+    assert (state.axis, state.moving) == ("wells", 2)
+    page.widgets.get("_nw_view_bar").setCurrentIndex([k for k, _l in VIEWS].index("statistics"))
+    assert state.view == "statistics"
+    assert page.widgets.get("_nw_moving_spin").isVisibleTo(page.window)
+    # At t_a over 2 timepoints: A01 (1+2)/2, (2+4)/2, (0+3)/2 and its fourth is occluded at t_c, so no value;
+    # B01 (3+6)/2, then occluded at t_a, then (1+7)/2, (1+9)/2.
+    samples = " ".join(_report(page, sc.GID_SAMPLE))
+    assert "A01:  n = 3   mean = 2   " in samples and "B01:  n = 3   mean = 4.5   " in samples
+    pair = " ".join(_report(page, sc.GID_PAIR))
+    expected = st.ttest_ind([1.5, 3.0, 1.5], [4.5, 4.0, 5.0], equal_var=False)
+    assert pair.startswith(f"A01 vs B01   t = {expected.statistic:.4g}   ")
+    notes = _report(page, sc.GID_NOTE)
+    assert any(n.startswith("Moving average over 2 timepoints") for n in notes), notes
+
+
+def test_ticking_the_cohort_on_statistics_states_it_even_when_no_value_moves(page, qtbot):
+    """Tracker L12: the cached result is keyed on everything it reports, not only the values. A02 is measured at
+    every timepoint and B01's only gap is occluded at t_a already, so the Fixed cohort changes no value tested
+    here — but it does change the report, which must say the cohort is in use rather than show the cached result
+    computed without it."""
+    page.state.selection.selected_wells = {"A02", "B01"}
+    state = _open_statistics(qtbot, page)
+    _choose(page, "_nw_tp_cb", "t_a")
+    assert not any(n.startswith("Fixed cohort") for n in _report(page, sc.GID_NOTE))
+    page.widgets.get("_nw_cohort_box").setChecked(True)
+    assert state.cohort is True
+    notes = _report(page, sc.GID_NOTE)
+    assert ("Fixed cohort: only the 7 of 8 nanowells with a value at every timepoint of their well are used; the "
+            "rest are counted as outside the fixed cohort.") in notes, notes
+    page.widgets.get("_nw_cohort_box").setChecked(False)
+    assert not any(n.startswith("Fixed cohort") for n in _report(page, sc.GID_NOTE))
+
+
+def _family(result):
+    return next(t for g, t in sc.report_lines(result) if g == sc.GID_NOTE and t.startswith("Compared:"))
+
+
+def test_the_family_sentence_counts_the_comparisons_that_have_a_p():
+    """Tracker L13: three pairs of which only one could be computed is not "one comparison"; it is three, one with
+    a p, so the one p is raw — and none computed corrects nothing either."""
+    one_of_three = sc.compare([_sample("A", [1, 2, 3, 4]), _sample("B", [5, 6, 7, 9]), _sample("C", [1])], "welch")
+    assert _family(one_of_three) == ("Compared: every pair (3 comparisons, 1 computed); only one has a p, so "
+                                     "nothing to correct for.")
+    none = sc.compare([_sample("A", [1]), _sample("B", [2])], "welch")
+    assert _family(none) == "Compared: every pair (1 comparison, none computed); nothing to correct for."
+    two = sc.compare([_sample("A", [1, 2, 3, 4]), _sample("B", [5, 6, 7, 9]), _sample("C", [1, 3, 2])], "welch",
+                     control="A")
+    assert _family(two) == ("Compared: each against A (2 comparisons); p_BH is the Benjamini-Hochberg "
+                            "FDR-adjusted p across them, and the stars are of p_BH.")
+
+
+def test_a_dunnett_family_of_one_is_not_labelled_corrected_on_the_page(page, qtbot):
+    """Tracker L13: Dunnett against a control with one other well prints that comparison's p as ``p`` (a family of
+    one has nothing to correct), so the sentence under it must not call it a corrected ``p_Dunnett``."""
+    _open_statistics(qtbot, page)
+    _choose(page, "_nw_stats_test_cb", "dunnett")
+    _choose(page, "_nw_control_cb", "A01")
+    pair = _report(page, sc.GID_PAIR)
+    assert len(pair) == 1 and pair[0].startswith("B01 vs A01   t = ") and "p_Dunnett" not in pair[0], pair
+    family = [t for t in _report(page, sc.GID_NOTE) if t.startswith("Compared:")]
+    assert family == ["Compared: each against A01 (1 comparison); one comparison, so nothing to correct for."], family

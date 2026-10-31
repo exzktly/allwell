@@ -170,6 +170,10 @@ ROSTER: dict[str, list[tuple]] = {
     "Well %s — no identity sidecar to record the stage cross-check in": [((W,), "W", "note", "")],
     "Well %s — the montage archive cannot be read for the identity check: %s": [((W, "bad zip"), "W", "note", "")],
     "Well %s — registration reused from %s for %d of %d timepoint(s): %s.": [((W, "o", 1, 2, "0h"), "I", "note", "")],
+    # A plain run decides a well is not up to date because its confluence was read against another empty reference
+    # (`nanowell_task.confluence_reference_current`): the well then runs and prints its own markers.
+    "Well %s — its confluence at %s was read against another empty reference than the one saved now; it is analysed "
+    "again.": [((W, "0h"), "I", "note", "")],
     "Well %s — the grid record %s could not be read, so its registration is not reused (%s).":
         [((W, "g.json", "x"), "W", "note", "")],
     "Well %s has no acquisition record: tiles placed from a %s grid, scan %s, %s%% overlap, %s um per pixel, "

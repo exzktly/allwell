@@ -231,7 +231,8 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
     docstring.
 
     *gate* (``cell_gate_compute.GateTally``) is the cells Home's Cell Gating leaves out: they are taken out of
-    ``n`` and ``brightness_<ch>`` before anything is computed from them. ``None`` keeps the run's own counts.
+    ``n`` and ``brightness_<ch>`` before anything is computed from them, and the nanowells of a field it leaves
+    out take the state ``field_excluded``. ``None`` keeps the run's own counts.
 
     *focus* (``rim_focus_compute.RimFocusRule``) turns each measurable row whose rim was out of focus into an
     ``out_of_focus`` gap before anything is computed (``rim_focus_compute.flag``); ``None`` flags nothing.
@@ -239,7 +240,8 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
     if not is_baseline(baseline):
         raise ValueError(f"baseline must be one of {BASELINES} or a timepoint, not {baseline!r}")
     frame = _addressed_grid(data)
-    rim_focus_compute.flag(frame, focus)
+    cell_gate_compute.exclude_fields(frame, gate)          # a whole field out: its nanowells have no value at all
+    rim_focus_compute.flag(frame, focus)                   # then a rim out of focus, of what is still measurable
     measurable = frame["state"].isin(MEASURABLE)
     frame["n"] = pd.to_numeric(frame.get("n_cells"), errors="coerce").where(measurable)
     frame["c"] = pd.to_numeric(frame.get("confluence"), errors="coerce").where(measurable)
@@ -315,7 +317,7 @@ def crop_metric_lines(row, channel: str | None = None) -> list[str]:
     if channel:
         b, sig = value(f"brightness_{channel}"), value(f"signal_{channel}")
         if sig is not None:
-            items.append(f"signal {compact_number(sig)}")
+            items.append(f"fluor. {compact_number(sig)}")       # Nanowell fluorescence, as the metric is named
         if b is not None:
             items.append(f"bright {compact_number(b)}")
     return items

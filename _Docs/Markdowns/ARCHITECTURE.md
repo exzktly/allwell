@@ -720,7 +720,7 @@ allwell/
 ├── allwell_report.py            ← `python allwell_report.py` — draw a dataset's saved plots without a
 │                                  window (Saved Plots → *The headless report*)
 ├── all_well_launcher.py         ← the module PyInstaller boots + the --run-pipeline / --run-zipper
-│                                  / --run-bootstrap / --run-report / --run-nanowell-preview dispatch. A helper the *app* spawns is not an entry
+│                                  / --run-bootstrap / --run-report / --run-nanowell-preview / --run-identity dispatch. A helper the *app* spawns is not an entry
 │                                  point in this sense and does not belong here — it lives in the package
 │                                  whose work it does (see pipeline/well_plate_zipper.py below)
 │
@@ -11036,7 +11036,9 @@ calls `check_after_run` at the end of `nanowell_task._finish_well`, once the tab
 written (a well whose archive this run did not write is not checked), and `stage_check_after_run` at the end of
 `nanowell_endgame`; each logs a warning per timepoint that is not good, and a check that cannot run is logged
 and leaves no sidecar. The remote fetch (`remote_fetch_nanowells`) and batch resume (`remote_batch_resume`) carry
-the sidecar by exact name. `python -m pipeline.nanowell_identity <output_dir> [--well W]` audits an analysed
+the sidecar by exact name; no Datasets tool writes one, so a subset, concatenation, merge or relabel reads `not_checked`
+until it is audited. `python -m pipeline.nanowell_identity <output_dir> [--well W]` (in the packaged app, the app's
+executable with `--run-identity`, `audit_argv`) audits an analysed
 dataset (exit 1 when any timepoint is contradicted, 2 when any is inconclusive, 3 when any is partial — `NOT_GOOD`,
 the verdicts the run log and the summary also report — each read as Review reads it —
 `verdict_in`, the stage flag overruling the image verdict — in the summary and the exit status alike). `--well`
@@ -12997,13 +12999,18 @@ PyInstaller entry point. Two responsibilities:
    when running inside a frozen `.app` bundle — there's no Python
    interpreter on `sys.executable`, so re-exec'ing the launcher with the
    sentinel argv routes the same Python process into the pipeline.
-   `--run-zipper`, `--run-bootstrap`, `--run-report` and
-   `--run-nanowell-preview` are the same trick for `well_plate_zipper.main()`,
-   `services/remote_bootstrap.main()`, the headless report's
-   `allwell_report.main()` and Test detection's child process
-   (`services/nanowell_preview_job.main()`) (which from source is
-   `python allwell_report.py`; the spec lists it as a hidden import, since the
-   launcher reaches it through a function-level import).
+   `--run-zipper`, `--run-bootstrap`, `--run-report`,
+   `--run-nanowell-preview` and `--run-identity` are the same trick for
+   `well_plate_zipper.main()`, `services/remote_bootstrap.main()`, the headless
+   report's `allwell_report.main()` (which from source is
+   `python allwell_report.py`), Test detection's child process
+   (`services/nanowell_preview_job.main()`) and the nanowell identity audit
+   (`pipeline.nanowell_identity.main()`, `python -m pipeline.nanowell_identity`
+   from source); the spec lists each as a hidden import, since the launcher
+   reaches them through function-level imports. `--run-identity` is the one a
+   person types: the Identity view's "not checked" message names it in the
+   packaged app (`nanowell_identity.audit_argv`, quoted for the platform's
+   shell by `identity_compute.audit_command`).
 
 A frozen **windowed** (`console=False`) build leaves `sys.stdout` /
 `sys.stderr` — and `sys.__stdout__` / `sys.__stderr__` — set to None even

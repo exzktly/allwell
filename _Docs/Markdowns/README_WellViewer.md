@@ -5933,6 +5933,12 @@ was decided from (how clearly the square was found, how far the addresses landed
 tiles and the stage disagreed) and a short code for why a timepoint is not confirmed — numbers only, no images or
 paths, so they can be shared to check the thresholds against real plates:
 `python -m pipeline.nanowell_identity <output folder> --numbers > identity_numbers.csv`.
+In the packaged app there is no `python` to run this with: run the app's own executable from a terminal with
+`--run-identity` as its first argument, followed by the same arguments — on a Mac,
+`<where the app is>/AllWell-<version>.app/Contents/MacOS/AllWell --run-identity <output folder>`. The Identity view's message for a
+well that has not been checked gives the exact line for the copy of All-Well you are running, ready to paste. A dataset
+made by Subset, Concatenate, Merge Plates or a Validate relabel always starts out not checked, since its tables are new;
+run the check on its output folder.
 
 ### Image Browser
 

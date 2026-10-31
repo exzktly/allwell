@@ -309,6 +309,9 @@ hiddenimports = [
     # analysis it imports lazily in turn.
     "services.nanowell_preview_job",
     "pipeline.nanowell_preview",
+    # The nanowell identity audit, reached through the launcher's
+    # --run-identity dispatch (a function-level import).
+    "pipeline.nanowell_identity",
     # Qt-free flat-field estimators shared by pipeline + viewer (imported lazily
     # inside the review-image controller, so static analysis can miss it).
     "pipeline.flatfield",

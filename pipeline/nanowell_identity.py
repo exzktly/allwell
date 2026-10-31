@@ -146,6 +146,9 @@ SURFACE_SIDE = 48
 MAX_LISTED = 200
 
 _MONTAGE_NAME = "{well}_{tp}_montage.png"
+#: The argument ``all_well_launcher`` routes to :func:`main` in the packaged app, where ``python -m`` has no
+#: interpreter to run it (review tracker M5); :func:`audit_argv` names it there.
+FROZEN_SENTINEL = "--run-identity"
 
 
 # ── the lattice ──────────────────────────────────────────────────────────────
@@ -1376,6 +1379,17 @@ def number_rows(payloads: dict) -> list[dict]:
                 "tile_moved_um": round(max(moved), 1) if moved else None,
                 "stage_um": (stage.get(tp) or {}).get("residual_um")})
     return rows
+
+
+def audit_argv(out_dir) -> list[str]:
+    """The command that audits *out_dir* in this copy of All-Well: the app's own executable with
+    :data:`FROZEN_SENTINEL` in the packaged app, ``python -m pipeline.nanowell_identity`` (from the repository root)
+    when running from source."""
+    import sys
+
+    if getattr(sys, "frozen", False):
+        return [sys.executable, FROZEN_SENTINEL, str(out_dir)]
+    return ["python", "-m", "pipeline.nanowell_identity", str(out_dir)]
 
 
 def main(argv=None) -> int:

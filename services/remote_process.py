@@ -73,7 +73,8 @@ from services.remote_run_id import (
     remote_run_paths,
 )
 from services.remote_batch_staging import prune_staged, _empty_well_blanks, nanowell_reference_first
-from services.remote_srun_retry import queue_wait_seconds
+from services.remote_reservation import QueueWaitSpent
+from services.remote_srun_retry import QUEUE_WAIT_EXIT, queue_wait_seconds
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_handoff import chase_handoff, watch_of
@@ -709,11 +710,23 @@ class _BatchedRemoteProcess:
         proc = None
         reservation = getattr(self, "_reservation", None)
         if reservation is not None:
-            proc = reservation.hand_over(
-                _handover_driver_body(driver, env_selector=self._runner.env_selector,
-                                      scratch_dir=host.remote_scratch_dir),
-                run_pidfile=run.remote_pidfile, run_heartbeat=heartbeat)
+            try:
+                proc = reservation.hand_over(
+                    _handover_driver_body(driver, env_selector=self._runner.env_selector,
+                                          scratch_dir=host.remote_scratch_dir),
+                    run_pidfile=run.remote_pidfile, run_heartbeat=heartbeat)
+            except QueueWaitSpent as spent:
+                # Nothing launched and nothing uploaded: the run ends on the wait it already spent.
+                fail(self, f"[remote] ERROR {spent}\n")
+                self._returncode = QUEUE_WAIT_EXIT
+                return False
         if proc is None:
+            if self._stop.is_set():
+                # Stop gave the early job back, so the hand-over found it gone: asking for a fresh one now would
+                # queue a job after the user pressed Stop.
+                self._log("[remote] stopped before the first batch\n")
+                self._returncode = 130
+                return False
             proc = self._launch_driver(host, run, driver, total)
         with self._current_proc_lock:
             self._current_proc = proc

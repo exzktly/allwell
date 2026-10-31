@@ -22,6 +22,7 @@ by reading what they produce.
 
 from __future__ import annotations
 
+from services.remote_srun_retry import HANDOVER_TAKEN_LINE, HANDOVER_WAIT_LINE
 from services.remote_transport import _remote_quote
 
 # How long a granted allocation will wait for that file before giving up. The
@@ -225,9 +226,7 @@ def _wait_for_handover_snippet(command_file: str, heartbeat: str) -> str:
         f"[remote] ERROR the app stopped responding while it prepared the run "
         f"({UPLOAD_HEARTBEAT_STALE_S}s without a heartbeat) — giving the node back")
     return (
-        f'if [ ! -f {command_q} ]; then '
-        f'echo "[remote] scheduler: node granted; waiting for the app to finish '
-        f'preparing the run…"; fi; '
+        f'if [ ! -f {command_q} ]; then echo "{HANDOVER_WAIT_LINE}"; fi; '
         f'_aw_w=0; _aw_fresh=0; {init}'
         f'while [ ! -f {command_q} ]; do '
         f'{stale}'
@@ -237,5 +236,5 @@ def _wait_for_handover_snippet(command_file: str, heartbeat: str) -> str:
         f'back after {UPLOAD_WAIT_TIMEOUT_S}s with no heartbeat to say it was still preparing"; '
         f'exit {_UPLOAD_WAIT_EXIT}; fi; '
         f'sleep {UPLOAD_WAIT_POLL_S}; done; '
-        f'echo "[remote] scheduler: the run is ready — starting it on this node"; '
+        f'echo "{HANDOVER_TAKEN_LINE}"; '
     )

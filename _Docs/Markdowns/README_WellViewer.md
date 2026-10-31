@@ -1641,10 +1641,12 @@ archives and outputs are always written as per-well `.zip` archives. See
     runs out of GPU memory, the worker halves its batch, says so in the log,
     and carries on.
     If a worker cannot even load its model because the other workers have
-    filled the GPU, it tries three more times, 10 s apart, and then loads on
-    the CPU instead and carries on, much more slowly. The log says so
-    (`Cellpose cpsam could not load on GPU cuda:0 …`); fewer workers is the
-    fix for the next run.
+    filled the GPU, it waits and tries again — 10 s, then twice as long each
+    time up to 5 minutes — until there is room, and never moves to the CPU.
+    The other workers carry on with the rest of the plate meanwhile, and each
+    gives back its spare GPU memory when it finishes a well. The log says so
+    on every try (`Cellpose cpsam ran out of GPU memory loading on GPU
+    cuda:0 …`); fewer workers is the fix for the next run.
   - The remote options' **Batch size** is a different thing: how many wells
     go to the remote at a time, which bounds its disk. It has no effect on
     the GPU.

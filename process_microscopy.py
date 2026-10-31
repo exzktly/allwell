@@ -109,6 +109,7 @@ from util.zip_append import refuse_if_pending as _refuse_if_appending
 import pipeline.field_quality as _field_quality
 from pipeline.field_quality import FOCUS_COLUMN
 from pipeline.shape_features import BORDER_COLUMN, labels_touching_border
+from pipeline.nanowell_parallel import release_cellpose_gpu_cache
 import pipeline.stardist as _stardist
 import pipeline.suspend as _suspend
 from pipeline.mixed_input import consolidate_mixed_to_zips
@@ -178,7 +179,7 @@ from pipeline.fov_checkpoint import (
     _load_fov_checkpoint,
     _save_fov_checkpoint,
     _staging_dir_for,
-    release_staging, sweep_run_scratch, extract_dir_for,
+    prepare_staging_dir, release_staging, sweep_run_scratch, extract_dir_for,
 )
 from pipeline.settings_record import (
     record_well_settings,
@@ -2126,20 +2127,6 @@ def _suspended_before_any_group(well_label: str, records, failed) -> bool:
     return True
 
 
-def _prepare_staging_dir(tmp_images: Path, well_label: str) -> None:
-    """Keep a staging dir that holds per-FOV checkpoints (resume where the last attempt stopped); wipe any other."""
-    if not tmp_images.exists():
-        return
-    if any(tmp_images.glob(".fov_*.done")):
-        log.info(
-            "Well %s: resuming from %d FOV checkpoint(s) in %s",
-            well_label, sum(1 for _ in tmp_images.glob(".fov_*.done")), tmp_images.name,
-        )
-    else:
-        log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_images.name)
-        remove_directory(tmp_images)
-
-
 def process_well_zip_task(
     well_label: str,
     zip_path: Path,
@@ -2195,7 +2182,7 @@ def process_well_zip_task(
         log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_extract.name)
         remove_directory(tmp_extract)
 
-    _prepare_staging_dir(tmp_images, well_label)
+    prepare_staging_dir(tmp_images, well_label)
 
     try:
         try:
@@ -2341,6 +2328,7 @@ def process_well_zip_task(
         remove_directory(tmp_extract)
         release_staging(output_dir, well_label, tmp_images)    # kept when a suspend left the well part way
         log.info("Well %s — temporary directories removed.", well_label)
+        release_cellpose_gpu_cache()
 
 
 def process_well_folder_task(
@@ -2564,6 +2552,7 @@ def process_well_folder_task(
         if not _committed and tmp_images.exists():
             remove_directory(tmp_images)
             log.info("Well %s — staging directory removed.", well_label)
+        release_cellpose_gpu_cache()
 
 
 # ---------------------------------------------------------------------------

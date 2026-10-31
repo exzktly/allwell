@@ -298,6 +298,7 @@ def test_a_run_that_would_outlast_the_node_gets_a_fresh_one_and_runs_there(clust
     run = GrantedRun(runner, batch_size=5, nanowell=False, log_fn=lines.append, stop_event=threading.Event(),
                      sleep=sleep, clock=sleep.clock)
     run.claim()
+    run.lease.node.owned = True          # as if this window had requested it: only such a node is replaced
     assert runner.step_target.job_id == "4001"
     run.check_fit(10)                                         # 12 h wanted, 1 h left
     assert any("needs about 12 h 0 min and the granted node has" in line and "requesting a fresh one" in line
@@ -329,3 +330,106 @@ def test_the_time_left_is_read_on_the_nodes_clock(cluster):
     node = GrantedNode(host, cluster, log_fn=lambda _m: None)
     left = node.state().time_left_s
     assert left is not None and abs(left - (86400 - 7200)) < 30
+
+
+def _run_on(cluster, host, lines, *, batch=5):
+    runner = _runner_for(cluster, host)
+    run = GrantedRun(runner, batch_size=batch, nanowell=False, log_fn=lines.append, stop_event=threading.Event(),
+                     sleep=Script(cluster, []), clock=Script(cluster, []).clock)
+    run.claim()
+    return runner, run
+
+
+def test_a_run_longer_than_any_node_is_not_given_a_fresh_one_that_cannot_hold_it(cluster):
+    """Wrong implementation: renewing whenever the time left is short. A fresh node has the same limit, so the run would
+    have lost its node and still been cut off."""
+    host = RemoteHost(**HOST)
+    _granted(cluster, host, running_for_s=60, limit_s=24 * 3600)
+    lines: list[str] = []
+    runner, run = _run_on(cluster, host, lines)
+    run.lease.node.owned = True
+    run.check_fit(96)                                          # 4 h × (12 batches + 1) = 52 h, longer than 24 h
+    assert runner.step_target.job_id == "4001" and cluster.sbatch_calls() == [] and cluster.scancels() == []
+    assert any("longer than a granted node's 1 d" in line or "longer than a granted node's 24 h" in line
+               or "a fresh node would not help" in line for line in lines), lines
+    run.release()
+
+
+def test_a_node_this_window_did_not_request_is_not_replaced_for_a_run_that_will_not_fit(cluster):
+    """Wrong implementation: cancelling a node that may be another window's, in use by its run."""
+    host = RemoteHost(**HOST)
+    _granted(cluster, host, running_for_s=23 * 3600, limit_s=24 * 3600)
+    lines: list[str] = []
+    runner, run = _run_on(cluster, host, lines)
+    assert run.lease.node.owned is False
+    run.check_fit(10)
+    assert runner.step_target.job_id == "4001" and cluster.scancels() == [] and cluster.sbatch_calls() == []
+    assert any("did not request that node" in line for line in lines), lines
+    run.release()
+
+
+def test_the_time_left_is_read_again_when_the_plate_has_been_staged(cluster):
+    """The claim comes before staging, which can take hours. Wrong implementation: the claim-time reading, which
+    overstates what is left by the whole of staging."""
+    host = RemoteHost(**HOST)
+    _granted(cluster, host, running_for_s=60, limit_s=24 * 3600)           # 24 h left at the claim
+    lines: list[str] = []
+    runner, run = _run_on(cluster, host, lines)
+    run.lease.node.owned = True
+    (cluster.fake / "next_id").write_text("4002\n", encoding="utf-8")
+    granted_files(cluster, host, granted_at=int(__import__("time").time()) - 23 * 3600, limit_s=24 * 3600)  # …1 h by now
+
+    def fresh():
+        cluster.set_job(4002, "RUNNING", "None", "gpu-node-2")
+        granted_files(cluster, host, node="gpu-node-2", job=4002, limit_s=24 * 3600)
+
+    sleep = Script(cluster, [], job=4002)
+    sleep.steps = [lambda: None, lambda: None, fresh]
+    run._sleep, run._clock = sleep, sleep.clock
+    run.lease.node._sleep, run.lease.node._clock = sleep, sleep.clock
+    run.check_fit(10)                                                      # 12 h wanted
+    assert runner.step_target.job_id == "4002", lines
+    run.release()
+
+
+def test_a_scheduler_that_did_not_answer_makes_a_run_wait_not_ask_for_its_own(cluster):
+    host = RemoteHost(**HOST)
+    _granted(cluster, host)
+    (cluster.fake / "scontrol.down").touch()
+    lines: list[str] = []
+    sleep = Script(cluster, [lambda: (cluster.fake / "scontrol.down").unlink()])
+    lease = _claim(cluster, host, sleep, lines)
+    assert lease is not None and any("not readable just now; waiting" in line for line in lines), lines
+    lease.release()
+
+
+def test_a_beat_still_in_flight_when_a_run_ends_cannot_bring_the_marker_back(cluster, monkeypatch):
+    """Wrong implementation: removing the marker while the heartbeat thread is mid-ssh. The late `touch` recreated it,
+    and the rerun, started at once, waited for it to go stale."""
+    import time
+
+    from services import remote_hold
+
+    host = RemoteHost(**HOST)
+    _granted(cluster, host)
+    real_run = cluster._ssh_run
+
+    def slow(argv, *, check, timeout_s=60):
+        if argv[:1] == ["touch"] and len(argv) > 1 and argv[1].endswith("/busy") and slow.late:
+            time.sleep(2.6)                                  # longer than the heartbeat's old two-second join
+        return real_run(argv, check=check, timeout_s=timeout_s)
+
+    slow.late = False
+
+    class Quick(remote_hold._UploadHeartbeat):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, interval_s=0.05, **kw)
+
+    monkeypatch.setattr(remote_hold, "_UploadHeartbeat", Quick)
+    monkeypatch.setattr(cluster, "_ssh_run", slow)
+    lease = _claim(cluster, host, Script(cluster, []), [])
+    slow.late = True
+    time.sleep(0.4)                                          # a beat is now sleeping inside its ssh
+    lease.release()
+    time.sleep(1.5)                                          # long enough for a beat that was still in its ssh to land
+    assert not (cluster.hold_dir(host) / "busy").exists()

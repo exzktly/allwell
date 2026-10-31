@@ -273,6 +273,19 @@ def test_the_status_file_reports_busy_then_how_long_the_node_has_been_idle(hold)
     assert 1 <= int(idle.removeprefix("idle_s=")) <= 4
 
 
+# ── the clocks ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_the_idle_clock_is_this_nodes_own_and_not_the_file_servers():
+    """The heartbeat check assigns `_aw_now` from the file server's stamp. Wrong implementation: computing the idle time
+    with that same variable, which mixes the file server's clock with the node's and releases early (or never) when they
+    disagree by minutes."""
+    script = compose_hold_script(_paths(Path("/x")), limit_s=3600, idle_release_s=1800)
+    idle = [line for line in script.splitlines() if "_aw_idle=$((" in line][0]
+    assert "_aw_now" not in idle and "_aw_tick" in idle and "_aw_last_used" in idle
+    # and `_aw_last_used` is only ever set from the node's own clock
+    assert all("_aw_now" not in line for line in script.splitlines() if "_aw_last_used=" in line)
+
+
 # ── the paths ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def test_hold_paths_are_under_the_staging_dir_and_one_per_host():

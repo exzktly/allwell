@@ -12,7 +12,8 @@ from a login shell dies with its ssh session and takes its allocation with it. T
 
 * **Release** was asked for (the app wrote ``release``): it ends.
 * **The app is gone** (its heartbeat has been silent for ``UPLOAD_HEARTBEAT_STALE_S``) **and no run is using the
-  node**: it ends. A node therefore never outlives the app that asked for it by more than that, whether the app
+  node**: it ends. A node therefore never outlives the app that asked for it by more than that (and, for a run that was using it when
+  the app crashed, the ten minutes before that run's busy marker counts as abandoned), whether the app
   quit, crashed, slept or lost its network.
 * **The node has been idle** for the host's idle limit: it ends. ``0`` turns this rule off, and only this one.
 * **Slurm ends it** at ``--time``, whatever is running; the script says why it was ended.
@@ -204,14 +205,14 @@ while :; do
         _aw_busy=1
         {{ {busy_check} }} >/dev/null 2>&1
     fi
-    _aw_now=$(date +%s)
+    _aw_tick=$(date +%s)      # this node's clock; the heartbeat check below assigns _aw_now from the file server's
     if [ "$_aw_busy" = 1 ]; then
-        _aw_last_used=$_aw_now
+        _aw_last_used=$_aw_tick
         _aw_write {q["status"]} "state=busy
 idle_s=0"
     else
         {gone_check}
-        _aw_idle=$(( _aw_now - _aw_last_used ))
+        _aw_idle=$(( _aw_tick - _aw_last_used ))
         {f'if [ "$_aw_idle" -ge {idle_release_s} ]; then _aw_end "idle {idle_label}"; fi' if idle_release_s else ":"}
         _aw_write {q["status"]} "state=idle
 idle_s=$_aw_idle"
@@ -247,7 +248,7 @@ def sbatch_options(launcher: str) -> tuple[list[str], list[str], str]:
     """
     if not is_srun(launcher):
         raise HoldError("Request a node needs a Slurm scheduler command that starts with srun.")
-    tokens = [t for t in shlex.split(launcher)[1:] if t != "--pty"]
+    tokens = [t for t in shlex.split(launcher)[1:] if t not in ("--pty", "-u", "--unbuffered")]   # sbatch's -u is --usage
     tokens = one_task(tokens)
     for short, long in (("-t", "--time"), ("-o", "--output"), ("-e", "--error")):
         tokens, _ = _take_option(tokens, short, long)
@@ -298,7 +299,7 @@ def submit_script(paths: HoldPaths, script_text: str, options: list[str], *, lim
     marker = "AW_HOLD_SCRIPT_END"
     assert marker not in script_text
     argv = ["sbatch", "--parsable", f"--job-name={HOLD_JOB_NAME}", *options,
-            f"--time={render_slurm_time(limit_s)}", f"--output={paths.log}", paths.script]
+            f"--time={render_slurm_time(limit_s)}", "--output", paths.log, paths.script]      # two words: `~/` expands
     return (f"cat > {_remote_quote(paths.script)} <<'{marker}'\n{script_text}{marker}\n"
             f"_aw_out=$({_remote_join(argv)}) || exit $?\n"
             f'_aw_job=${{_aw_out%%;*}}\n'
@@ -311,7 +312,7 @@ def state_script(paths: HoldPaths) -> str:
     q = {name: _remote_quote(getattr(paths, name)) for name in ("job", "granted", "status", "ended")}
     return (f'echo "##job"; cat {q["job"]} 2>/dev/null; echo\n'
             f'_aw_job=$(cat {q["job"]} 2>/dev/null)\n'
-            f'echo "##scontrol"; [ -n "$_aw_job" ] && scontrol show job -o "$_aw_job" 2>/dev/null; echo\n'
+            f'echo "##scontrol"; [ -n "$_aw_job" ] && scontrol show job -o "$_aw_job" 2>&1; echo\n'
             f'echo "##granted"; cat {q["granted"]} 2>/dev/null\n'
             f'echo "##status"; cat {q["status"]} 2>/dev/null\n'
             f'echo "##ended"; cat {q["ended"]} 2>/dev/null\n'
@@ -321,10 +322,16 @@ def state_script(paths: HoldPaths) -> str:
             "exit 0\n")      # a missing file is an answer, not a failure: only ssh itself failing may exit non-zero
 
 
-def cancel_script(paths: HoldPaths) -> str:
+def cancel_script(paths: HoldPaths, job_id: str = "") -> str:
     """Shell that asks the hold to end (the ``release`` marker, so the script reports a release rather than a
-    cancel) and cancels its job, but only if the job is this user's (:func:`services.remote_jobs._only_my_job`)."""
-    return (f'[ -d {_remote_quote(paths.dir)} ] && touch {_remote_quote(paths.release)}\n'
+    cancel) and cancels its job, but only if the job is this user's (:func:`services.remote_jobs._only_my_job`).
+
+    With *job_id* it acts only if the hold directory still names that job (``AW_MOVED`` otherwise): the directory is
+    shared by every window, so a window that released its node earlier must not cancel the one another window has
+    asked for since."""
+    guard = (f'[ "$(cat {_remote_quote(paths.job)} 2>/dev/null)" = {shlex.quote(job_id)} ] || '
+             '{ echo AW_MOVED; exit 0; }\n') if job_id else ""
+    return (guard + f'[ -d {_remote_quote(paths.dir)} ] && touch {_remote_quote(paths.release)}\n'
             f'_aw_jid=$(cat {_remote_quote(paths.job)} 2>/dev/null)\n'
             '[ -z "$_aw_jid" ] && exit 0\n'
             + _only_my_job("_aw_jid", "AW_NOTMINE") +
@@ -336,7 +343,8 @@ def cancel_script(paths: HoldPaths) -> str:
 class HoldState:
     """What the host says about the hold now. ``phase`` is one of ``none`` (no hold), ``queued`` (the scheduler has
     not given a node), ``starting`` (a node is given and still coming up, or the script has not started),
-    ``granted``, ``busy`` (granted and a run is using it) or ``ended``."""
+    ``granted``, ``busy`` (granted and a run is using it), ``ended``, or ``unknown`` (the scheduler did not answer about a
+    job that was queued: it may well still be there, and counts as live)."""
 
     phase: str = "none"
     job_id: str = ""
@@ -357,7 +365,7 @@ class HoldState:
 
     @property
     def live(self) -> bool:
-        return self.phase in ("queued", "starting", "granted", "busy")
+        return self.phase in ("queued", "starting", "granted", "busy", "unknown")
 
     @property
     def time_left_s(self) -> int | None:
@@ -396,8 +404,11 @@ def _int(value: str) -> int:
 
 
 def _job_gres(scontrol: dict[str, str]) -> str:
-    """``gpu:1`` from a job's ``TresPerNode=gres/gpu:1`` (Slurm 21.08+) or ``Gres=gpu:1`` (older); ``""`` for none."""
-    raw = scontrol.get("TresPerNode") or scontrol.get("Gres") or ""
+    """``gpu:1`` from a job's ``TresPerNode=gres/gpu:1`` (Slurm 21.08+), ``TresPerJob`` (``--gpus``), ``TresPerTask``
+    (``--gpus-per-task``) or ``Gres=gpu:1`` (older); ``""`` for none. A step does not inherit any of them on Slurm
+    21.08+, and one that asked for no GPU runs the pipeline on the CPU without saying so."""
+    raw = next((scontrol[k] for k in ("TresPerNode", "TresPerJob", "TresPerTask", "Gres")
+                if scontrol.get(k) not in (None, "", "(null)", "N/A")), "")
     if raw in ("", "(null)", "N/A"):
         return ""
     return ",".join(item for item in (re.sub(r"^gres[/:]", "", part) for part in raw.split(",")) if item)
@@ -409,7 +420,8 @@ def parse_state(text: str) -> HoldState:
     job = s.get("job", "")
     if not job:
         return HoldState()
-    sc = dict(re.findall(r"(\w+)=(\S*)", s.get("scontrol", "")))
+    sc_text = s.get("scontrol", "")
+    sc = dict(re.findall(r"(\w+)=(\S*)", sc_text))
     granted = _pairs(s.get("granted", ""))
     status = _pairs(s.get("status", ""))
     slurm_state = (sc.get("JobState") or "").upper()
@@ -424,7 +436,11 @@ def parse_state(text: str) -> HoldState:
     if slurm_state in _TERMINAL_STATES:
         return HoldState(phase="ended", ended_reason=f"the scheduler ended the job ({slurm_state})", **common)
     if not slurm_state:
-        return HoldState(phase="ended", ended_reason="the scheduler no longer lists the job", **common)
+        if "nvalid job id" in sc_text:            # the scheduler answered, and the job is gone (purged after it ended)
+            return HoldState(phase="ended", ended_reason="the scheduler no longer lists the job", **common)
+        # The scheduler did not answer (a controller timeout, say), which says nothing about the job. Guessing
+        # "ended" released the user's view of a node that was still granted, and let a run take a second one.
+        return HoldState(phase="unknown", **common)
     if slurm_state == "PENDING":
         return HoldState(phase="queued", **common)
     if slurm_state == "RUNNING" and granted:
@@ -469,6 +485,9 @@ class GrantedNode:
         #: (:meth:`attach`). Quitting releases the first; it only stops beating for the second, which another window
         #: may still be using — the node's own script ends it two minutes after the last beat.
         self.owned = False
+        #: The job this handle asked for or found. Release acts only on that job: the directory is shared by every
+        #: window, and the job it names can have changed hands since.
+        self.job_id = ""
 
     def listen(self, *, log_fn: Callable[[str], None] | None = None,
                on_state: Callable[[HoldState], None] | None = None) -> None:
@@ -491,7 +510,10 @@ class GrantedNode:
             said = (result.stderr or "").strip().splitlines()
             raise HoldError(f"could not read the granted node's state (ssh exit {result.returncode}): "
                             f"{said[-1] if said else 'no output'}")
-        return parse_state(result.stdout or "")
+        state = parse_state(result.stdout or "")
+        if state.phase == "ended":
+            self.stop_beating()                  # an idle release left this thread beating for a job that is gone
+        return state
 
     def attach(self) -> HoldState:
         """The hold's state, and a heartbeat for it if it is live and this process is not yet beating for it.
@@ -501,6 +523,9 @@ class GrantedNode:
         later, out from under a user who is about to use it."""
         state = self.state()
         if state.live:
+            if state.job_id != self.job_id:
+                self.owned = False               # a node this handle did not ask for: not its to cancel on quitting
+                self.job_id = state.job_id
             with self._lock:
                 if self._heartbeat is None:
                     self._heartbeat = _UploadHeartbeat(self._cache, self.paths.heartbeat, log_fn=self._log)
@@ -520,11 +545,16 @@ class GrantedNode:
         and :class:`HoldError` for anything else that stops it, including :meth:`release` during the wait.
         """
         existing = self.state()
+        if existing.phase == "unknown":
+            raise HoldError("the scheduler did not answer about this host's granted node just now; try again in a "
+                            "moment.")
         if existing.live:
             raise HoldError(f"a node is already {existing.phase} for this host (job {existing.job_id}); release it "
                             "before requesting another.")
         self._cancelled.clear()
+        self.stop_beating()                      # a heartbeat left from an earlier node must not outlive its job
         self.owned = True
+        self.job_id = ""
         launcher = self.host.launch_command
         options, user_excluded, partition = sbatch_options(launcher)
         cap = self._partition_cap(partition)
@@ -555,12 +585,14 @@ class GrantedNode:
             if submitted.returncode != 0:
                 raise HoldError("the scheduler refused the request: "
                                 f"{(submitted.stderr or submitted.stdout or '').strip() or 'no reason given'}")
-            self._log(f"[remote] granted node: asked the scheduler for a node (job {submitted.stdout.strip()}, "
+            self.job_id = submitted.stdout.strip()
+            self._log(f"[remote] granted node: asked the scheduler for a node (job {self.job_id}, "
                       f"time limit {_duration(limit_s)}).\n")
             boot_failed = self._wait(began, queue_wait)
             if boot_failed is None:
                 return self.state()
-            failed_nodes.append(boot_failed)
+            if boot_failed != "?":                         # a failure that named no node cannot be excluded
+                failed_nodes.append(boot_failed)
             self._log(f"[remote] granted node: node {boot_failed} failed to boot; asking for another.\n")
             self._nap(BOOT_RETRY_PAUSE_S)
 
@@ -592,6 +624,11 @@ class GrantedNode:
             self._nap(HOLD_POLL_S)
 
     # ── release ──────────────────────────────────────────────────────────────────────────────────────────────────
+    @property
+    def active(self) -> bool:
+        """Whether quitting has anything to do for this handle: it is beating for a node, or asked for one."""
+        return self._heartbeat is not None or self.owned
+
     def stop_beating(self) -> None:
         """Stop this process's heartbeat for the node and leave the node alone."""
         with self._lock:
@@ -605,19 +642,23 @@ class GrantedNode:
         self._cancelled.set()
         self.stop_beating()
         try:
-            result = self._script(cancel_script(self.paths))
+            result = self._script(cancel_script(self.paths, self.job_id))
         except Exception as exc:
             self._log(f"[remote] granted node: WARN could not reach the host to release it ({exc}); it releases "
                       "itself within two minutes of the app's last heartbeat.\n")
             return
         out = result.stdout or ""
-        if "AW_NOTMINE" in out:
+        if "AW_MOVED" in out:
+            self._log("[remote] granted node: the node on this host is no longer the one this window asked for — "
+                      "left alone.\n")
+        elif "AW_NOTMINE" in out:
             self._log("[remote] granted node: the hold's job belongs to another user — left running.\n")
         elif "AW_SCANCELLED" in out:
             self._log(f"[remote] granted node: released — {reason}.\n")
         elif result.returncode != 0:
             self._log(f"[remote] granted node: WARN could not release it (ssh exit {result.returncode}); it "
                       "releases itself within two minutes of the app's last heartbeat.\n")
+        self.owned, self.job_id = False, ""
 
 
 # ── running on the granted node ──────────────────────────────────────────────────────────────────────────────────
@@ -667,6 +708,10 @@ def node_for(host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str], N
         node = _NODES.get(host.name)
         if node is None or node.host.ssh_alias != host.ssh_alias:
             node = _NODES[host.name] = GrantedNode(host, cache, log_fn=log_fn, sleep=sleep, clock=clock)
+        elif node.host != host and node._heartbeat is None and not node.owned:
+            # Settings edited in Manage Remotes since the handle was made (the time limit, the scheduler command, the
+            # staging directory) apply to the next request; a handle for a node that is live keeps what it started with.
+            node.host, node.paths = host, hold_paths(host)
         return node
 
 
@@ -713,8 +758,20 @@ class NodeLease:
         self.state = state
         self._log = log_fn
         self._beater: _UploadHeartbeat | None = _UploadHeartbeat(node._cache, node.paths.busy, log_fn=log_fn)
-        self._beater.beat()
-        self._beater.start()
+        try:
+            self._beater.beat()
+            self._beater.start()
+        except BaseException:
+            self.release()          # the marker was created by the claim; a lease that never formed must not keep it
+            raise
+
+    def refresh(self) -> None:
+        """Read the node's state again (the time left is the node's at this moment, not at the claim, which can be
+        hours before the plate is staged). A node that cannot be read keeps the last answer."""
+        try:
+            self.state = self.node.state()
+        except HoldError:
+            pass
 
     @property
     def target(self) -> StepTarget:
@@ -731,7 +788,9 @@ class NodeLease:
         beater, self._beater = self._beater, None
         if beater is None:
             return
-        beater.stop()
+        # Wait for a beat that is already in its ssh: one that lands after the `rm` would put the marker back, and the
+        # run's rerun, started at once, would wait for it to go stale.
+        beater.stop(wait_s=10.0)
         try:
             result = self.node._script(f"rm -f {_remote_quote(self.node.paths.busy)}\n")
             failed = result.returncode != 0
@@ -776,6 +835,8 @@ def claim_node(host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str],
                        f"job {state.job_id}.\n")
                 return NodeLease(node, state, log_fn=log_fn)
             why = "busy with another run" if answer == "AW_BUSY" else "not claimable"
+        elif state.phase == "unknown":
+            why = "not readable just now"
         else:
             why = "still being granted"
         if not said:
@@ -822,9 +883,24 @@ class GrantedRun:
         limit, rather than being killed by Slurm part-way."""
         lease = self.lease
         needed = run_estimate_s(self._runner.host, n_wells, self._batch_size, self._nanowell)
-        if lease is None or lease.fits(needed):
+        if lease is None or needed <= 0:
+            return
+        lease.refresh()
+        if lease.fits(needed):
             return
         left = lease.state.time_left_s or 0
+        limit = lease.state.limit_s
+        if limit and needed > limit:
+            # A fresh node has the same limit, so replacing this one would discard it and still not fit.
+            self._log(f"[remote] WARN scheduler: this run needs about {_duration(needed)}, longer than a granted node's "
+                      f"{_duration(limit)} time limit; a fresh node would not help, so it stays on this one and Slurm "
+                      "may end it at the limit — Resume continues from the wells that finished.\n")
+            return
+        if not lease.node.owned:
+            self._log(f"[remote] WARN scheduler: this run needs about {_duration(needed)} and the granted node has "
+                      f"{_duration(left)} left, but this window did not request that node, so it is not replaced; "
+                      "Slurm may end the run at the limit — Resume continues from the wells that finished.\n")
+            return
         self._log(f"[remote] scheduler: this run needs about {_duration(needed)} and the granted node has "
                   f"{_duration(left)} left; releasing it and requesting a fresh one.\n")
         node = lease.node
@@ -903,6 +979,8 @@ def describe_state(state: HoldState, idle_release_min: int) -> list[str]:
         return [f"Queued — waiting for the scheduler{reason}."]
     if state.phase == "starting":
         return [f"Node {state.node} is starting…" if state.node else "Node starting…"]
+    if state.phase == "unknown":
+        return ["The scheduler did not answer about this node just now; it is read again shortly."]
     first = " · ".join(p for p in (f"Node {state.node}", f"job {state.job_id}", _gpu_words(state.gpus)) if p)
     lines = [first]
     if state.granted_at and state.now_s:

@@ -84,7 +84,12 @@ def test_a_request_sends_sbatch_with_the_hosts_options_and_the_holds_own_time_li
     # The hold's own time limit (48 h), not the 4 h the scheduler command asks for one run.
     assert _opt(args, "--time") == ["--time=2-00:00:00"]
     assert not any("4:00:00" in a for a in args)
-    assert args[-1].endswith("/hold.sh") and any(a.startswith("--output=") and a.endswith("/log") for a in args)
+    assert args[-1].endswith("/hold.sh")
+    # `--output ~/…` must reach sbatch expanded: Slurm does not expand `~`, so a single-quoted `--output=~/…` made the
+    # log a path under the login shell's working directory that does not exist.
+    out = args[args.index("--output") + 1]
+    assert out.startswith("/") and out.endswith("/holds/" + hold_paths(host).dir.rsplit("/", 1)[1] + "/log"), out
+    assert not any("~" in a for a in args), args
     # The job id was recorded, the script written, the app's heartbeat is there for the script to read.
     hold_dir = cluster.hold_dir(host)
     assert (hold_dir / "job").read_text(encoding="utf-8") == "4001"
@@ -254,7 +259,10 @@ GRANTED = "node=n1\ngpus=NVIDIA A10G\ncpus=8\ngranted_at=1000\nlimit_s=86400\njo
     (_state_text(scontrol="JobId=4001 JobState=RUNNING Reason=None NodeList=n1", granted=GRANTED,
                  ended="idle 30 min"), "ended"),
     (_state_text(scontrol="JobId=4001 JobState=TIMEOUT Reason=TimeLimit NodeList=n1", granted=GRANTED), "ended"),
-    (_state_text(scontrol=""), "ended"),                                            # the scheduler forgot the job
+    (_state_text(scontrol="slurm_load_jobs error: Invalid job id specified"), "ended"),   # the scheduler forgot the job
+    # It did not answer: that says nothing about the job, and is not "ended".
+    (_state_text(scontrol=""), "unknown"),
+    (_state_text(scontrol="slurm_load_jobs error: Socket timed out on send/recv operation", granted=GRANTED), "unknown"),
 ])
 def test_the_phase_is_read_from_the_schedulers_state_and_the_hold_files(text, phase):
     assert parse_state(text).phase == phase
@@ -295,3 +303,66 @@ def test_a_scheduler_command_that_is_not_srun_cannot_request_a_node():
                                            ("12:00:00", 43200), ("2-00:00:00", 172800), ("30:00", 1800)])
 def test_a_partition_limit_is_seconds_or_none(text, seconds):
     assert parse_partition_limit(text) == seconds
+
+
+@pytest.mark.parametrize("scontrol, gres", [
+    ("TresPerJob=gres/gpu:2", "gpu:2"),                  # sbatch --gpus=2
+    ("TresPerTask=gres/gpu:1", "gpu:1"),                 # --gpus-per-task=1
+    ("TresPerNode=gres/gpu:1 TresPerJob=gres/gpu:4", "gpu:1"),     # per-node wins
+])
+def test_a_gpu_asked_for_any_way_is_asked_for_again_by_the_step(scontrol, gres):
+    """Wrong implementation: reading only TresPerNode. A step does not inherit the GPU on Slurm 21.08+, so it would run
+    the pipeline on the CPU and say nothing."""
+    state = parse_state(_state_text(scontrol=f"JobId=4001 JobState=RUNNING Reason=None NodeList=n1 {scontrol}",
+                                    granted=GRANTED))
+    assert state.gres == gres
+
+
+def test_a_scheduler_that_did_not_answer_is_neither_ended_nor_a_reason_to_request_another(cluster, nodes):
+    """Wrong implementation: "no answer" read as "the job is gone", which let a second node be requested beside a live
+    one and orphaned the first."""
+    host = RemoteHost(**HOST)
+    d = cluster.hold_dir(host)
+    d.mkdir(parents=True)
+    (d / "job").write_text("4001", encoding="utf-8")
+    cluster.set_job(4001, "RUNNING", "None", "n1")
+    (cluster.fake / "scontrol.down").touch()
+    node, _, _ = _node(cluster, nodes, _Script(cluster, []))
+    assert node.state().phase == "unknown" and node.state().live
+    with pytest.raises(HoldError, match="did not answer"):
+        node.request()
+    assert cluster.sbatch_calls() == []
+
+
+def test_srun_s_unbuffered_flag_is_not_passed_to_sbatch_where_it_means_usage():
+    options, _, _ = sbatch_options("srun -u --unbuffered --partition=gpu")
+    assert "-u" not in options and "--unbuffered" not in options and "--partition=gpu" in options
+
+
+def test_release_acts_only_on_the_job_it_asked_for(cluster, nodes):
+    """The hold directory is shared by every window. Wrong implementation: releasing whatever job the directory names
+    now, which cancelled the node another window had requested since."""
+    host = RemoteHost(**HOST)
+    d = cluster.hold_dir(host)
+    d.mkdir(parents=True)
+    (d / "job").write_text("4009", encoding="utf-8")          # another window's node
+    cluster.set_job(4009, "RUNNING", "None", "n9")
+    node, _, lines = _node(cluster, nodes, _Script(cluster, []))
+    node.owned, node.job_id = True, "4001"                     # this window's, long since released
+    node.release("quitting")
+    assert cluster.scancels() == [] and not (d / "release").exists()
+    assert any("no longer the one this window asked for" in line for line in lines)
+    assert node.owned is False and node.job_id == ""
+
+
+def test_a_node_found_after_one_was_released_is_not_owned(cluster, nodes):
+    host = RemoteHost(**HOST)
+    d = cluster.hold_dir(host)
+    d.mkdir(parents=True)
+    (d / "job").write_text("4009", encoding="utf-8")
+    cluster.set_job(4009, "RUNNING", "None", "n9")
+    _gf(cluster, host, "n9", "NVIDIA A10G", job=4009)
+    node, _, _ = _node(cluster, nodes, _Script(cluster, []))
+    node.owned, node.job_id = True, "4001"
+    node.attach()
+    assert node.owned is False and node.job_id == "4009"

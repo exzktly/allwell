@@ -187,7 +187,7 @@ def _release_granted_nodes(notice=None) -> None:
     try:
         from services.remote_hold import live_nodes, release_all
 
-        if live_nodes():
+        if any(n.active for n in live_nodes()):
             _wait_with_notice(lambda: release_all("All-Well is closing"), notice, GRANTED_CLOSE_NOTICE)
     except Exception:
         swallowed()

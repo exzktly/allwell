@@ -181,3 +181,53 @@ def test_the_real_close_calls_it_after_the_run_is_stopped_and_with_the_notice():
     assert calls["_stop_analyze_runner"].lineno < calls["_release_granted_nodes"].lineno
     assert any(kw.arg == "notice" and ast.unparse(kw.value) == "self._show_close_notice"
                for kw in calls["_release_granted_nodes"].keywords)
+
+
+def test_a_window_that_released_its_node_does_not_cancel_the_one_another_window_asked_for_since(cluster):
+    """Wrong implementation: `owned` staying true after a release, and release acting on whatever job the shared
+    directory names now."""
+    mine, host = _requested(cluster, name="shared", job=4001)
+    mine.release("done with it")
+    assert mine.owned is False
+    # Another window asks for a node on the same host, in the same directory.
+    cluster.set_job(4007, "RUNNING", "None", "gpu-node-7")
+    d = cluster.hold_dir(host)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "release").unlink(missing_ok=True)           # the new request clears what the earlier release left
+    (d / "job").write_text("4007", encoding="utf-8")
+    granted_files(cluster, host, node="gpu-node-7", job=4007)
+    before = list(cluster.scancels())
+    release_all("All-Well is closing")
+    assert cluster.scancels() == before, "quitting cancelled another window's node"
+    assert not (d / "release").exists()
+
+
+def test_the_close_shows_no_notice_for_a_host_that_merely_had_a_run(cluster):
+    """Every run on a scheduler host makes a handle; only one that is beating for a node or asked for one needs the
+    close to wait."""
+    from allwell import _release_granted_nodes
+
+    host = RemoteHost(**{**HOST, "name": "justarun"})
+    node = node_for(host, cluster, log_fn=lambda _m: None)
+    node.attach()                                  # no hold on the host
+    assert live_nodes() == [node] and not node.active
+    shown: list[str] = []
+    _release_granted_nodes(notice=lambda text: shown.append(text))
+    assert shown == []
+
+
+def test_a_node_that_ended_stops_its_heartbeat(cluster):
+    """Wrong implementation: a thread that keeps touching a heartbeat file for a job the node's script already ended —
+    one ssh every thirty seconds per node ever granted."""
+    host = RemoteHost(**{**HOST, "name": "ended"})
+    cluster.set_job(4005, "RUNNING", "None", "n5")
+    d = cluster.hold_dir(host)
+    d.mkdir(parents=True)
+    (d / "job").write_text("4005", encoding="utf-8")
+    granted_files(cluster, host, node="n5", job=4005)
+    node = node_for(host, cluster, log_fn=lambda _m: None)
+    node.attach()
+    assert node._heartbeat is not None
+    (d / "ended").write_text("idle 30 min\n", encoding="utf-8")
+    assert node.state().phase == "ended"
+    assert node._heartbeat is None

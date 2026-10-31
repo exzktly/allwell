@@ -619,3 +619,25 @@ end (CLAUDE.md §2, §6). Stacking on the branch that carries this file
 | H15 | Hold-script tests, one per release-table row, plus: no idle release while busy; a stale `busy` counts as not busy; *Never* disables only idle release; the app-gone-while-queued start-up exit | done | `tests/` | same file, one test per release-table row plus the traps above; 12 tests, ~30 s |
 | H16 | README §10 subsection and the ARCHITECTURE remote section; reconcile paragraphs that say every run asks for its own node | done | `_Docs/Markdowns/` | README §10 gets *Keeping a node between runs* (after *Max queue wait*, which it extends) with the four-row release table, the settings and the billing note; three neighbouring sentences were reconciled ("A run is always one task on one node", "A node that fails while the run is going", *Max queue wait* now also bounds Request a node and the wait for a busy node). ARCHITECTURE gets `remote_hold.py`, `slurm_ids.py` and `granted_node_panel.py` and a sentence on the config row. `test_doc_version_sync` green. Checked by grep for "its own node" / "asks for": line 1794 and the changelog-style paragraph near the end of the README describe an ordinary run and stay true. |
 | H17 | On the user's cluster: request an A10G node, run Test through it (GPU visible), fail a run, run again on the same job id, watch the idle release and the two-minute rule after quitting, measure clock skew | todo | the user's cluster | — |
+
+## 12. Adversarial review of the pushed diff
+
+A fresh reviewer read the diff for defects (CLAUDE.md §7.3). Each finding was reproduced or read against the tree before
+being worked; the fixes are in the commit that adds this section, each with a test that fails without it (mutated on HEAD).
+
+| # | Finding | State | Evidence / reason |
+|---|---|---|---|
+| R1 | `--output=~/…` single-quoted, so `~` never expanded and the hold's log path did not exist (every default host) | done | reproduced; `--output` and the path are now two words; `test_a_request_sends_sbatch_…` asserts an expanded absolute path and no `~` anywhere in the sbatch argv |
+| R2 | A batched run longer than a node's limit discarded the user's node for a fresh one that could not hold it either | done | `check_fit` renews only when the run would fit a fresh node's limit; otherwise it warns and stays (`…longer_than_any_node…`) |
+| R3 | An unanswered `scontrol` read as "ended": a second node could be requested beside a live one, and a run took its own | done | new `unknown` phase (live); `Invalid job id` is the only answer that means gone (`…did_not_answer…`, 3 tests) |
+| R4 | `owned` outlived a release; release acted on whatever job the shared directory named; `check_fit` could cancel a found node | done | release is identity-checked (`AW_MOVED`); ownership ends with the node; a node this window did not request is never replaced (`…acts_only_on_the_job_it_asked_for`, `…did_not_request_is_not_replaced…`, `…released_its_node_does_not_cancel…`) |
+| R5 | A handle kept the host it was made with after the host was edited | done | `node_for` refreshes host and paths when no node is live or owned. **No test:** the refresh is read, not driven; the risk is a stale setting, not a wrong cancel |
+| R6 | A GPU asked for with `--gpus` / `--gpus-per-task` gave the step no `--gres`: the pipeline ran on the CPU silently | done | `_job_gres` reads `TresPerNode`, `TresPerJob`, `TresPerTask`, `Gres` (3 cases) |
+| R7 | The idle time mixed the file server's clock with the node's (`_aw_now` is assigned by the heartbeat check) | done | renamed `_aw_tick`; `test_the_idle_clock_is_this_nodes_own…` is a read of the generated script — a skewed clock cannot be forced from outside |
+| R8 | A heartbeat still in its ssh when a run ended could re-create the busy marker; a failing lease constructor left it | done | `stop(wait_s=10)` before the `rm`; constructor cleans up (`…beat_still_in_flight…`) |
+| R9 | Two claimants that both find a stale marker can interleave rm/create and both win | declined | needs two windows to claim within the same instant a marker has been dead for ten minutes; the fix (a lock directory) adds a second marker whose own staleness would need the same handling. The window is recorded here, not closed |
+| R10 | Time left was the claim-time reading, hours before staging ends | done | `check_fit` re-reads the state (`…time_left_is_read_again…`) |
+| R11 | `request()` overwrote a running heartbeat; an idle-released node's heartbeat kept beating; the close notice showed for any handle | done | `request()` stops it, `state()` stops it on `ended`, the notice keys on `GrantedNode.active` (2 tests) |
+| R12 | srun's `-u` (unbuffered) passed to sbatch means `--usage`; `--exclude=?` built for an unnamed node | done | both dropped (`…unbuffered_flag_is_not_passed…`; the `?` guard is read, not driven) |
+| R13 | Docs claimed two minutes though a run that crashed mid-run counts as using the node for up to ten more | done | README table and the module docstring say so |
+

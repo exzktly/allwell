@@ -1885,7 +1885,7 @@ none depends on All-Well still running:
 | What happens | The node is released |
 |---|---|
 | You press **Release**, or quit All-Well | at once |
-| All-Well is gone (crashed, asleep, offline) and no run is using the node | within 2 minutes of its last sign of life |
+| All-Well is gone (crashed, asleep, offline) and no run is using the node | within 2 minutes of its last sign of life (a run whose window crashed mid-run still counts as using it for up to 10 more minutes) |
 | All-Well is open and no run is using the node | after *Release when idle after* (30 minutes by default) |
 | The time limit is reached (24 hours by default) | at the limit, even if a run is going |
 

@@ -6760,8 +6760,9 @@ the fraction responding above that metric's number (and the number itself),
 the fraction occupied, the nanowells used, and those excluded by reason. A metric
 drawn as Cell count because the channel has no site intensities carries no
 fraction responding, since its number was set for the other metric. A group's replicate sets are drawn as sets and its single wells on their
-own, as on the page. A well of the group with no nanowell table is named on the
-figure and gets its own row in the CSV; a group with none at all is skipped and
+own, as on the page. A well excluded on the Nanowells page with **Exclude** is still drawn when its group holds
+it: that exclusion is the page's own, so take the well out of the group to leave it out of the export. A well of
+the group with no nanowell table is named on the figure and gets its own row in the CSV; a group with none at all is skipped and
 the run says so. Saved Plots records made by this mode restore the Nanowells page
 to the figure's view and metric.
 

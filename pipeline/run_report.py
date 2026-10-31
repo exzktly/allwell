@@ -338,7 +338,7 @@ def well_is_whole(rec) -> bool:
     return not is_incomplete(rec) and not rec.get("failed")
 
 
-def seal_well_complete(output_dir: Path | str, well_label: str) -> Path | None:
+def seal_well_complete(output_dir: Path | str, well_label: str, *, rewritten: bool = False) -> Path | None:
     """Seal *well_label*'s output as covering its whole input, if this run's record says so.
 
     **Call it after both artefacts are on disk** — the same place
@@ -349,6 +349,13 @@ def seal_well_complete(output_dir: Path | str, well_label: str) -> Path | None:
     folder, nanowell) cannot each decide "complete" differently. A well whose
     record is missing, partial or failed gets no seal, which a resume reads as
     "run it again": costing compute, never a stale well reported as finished.
+
+    A sealed well's earlier failure records no longer stand, so they are moved
+    out of ``errors/`` into its ``superseded/`` archive here, at the one moment
+    every well path agrees the well is whole
+    (:func:`pipeline.error_records.retire_superseded`). *rewritten* says this run
+    rebuilt the well from scratch rather than adding to it, which is what a note
+    asking for a forced re-run needs before it is retired too.
     """
     if not well_is_whole(recorded_well_report(output_dir, well_label)):
         return None
@@ -363,6 +370,9 @@ def seal_well_complete(output_dir: Path | str, well_label: str) -> Path | None:
     with swallow(f"Well {well_label}: clearing the note that its completion seal was withdrawn"):
         for spelling in {str(well_label), canonical_well_label(str(well_label)) or str(well_label)}:
             withdrawn_note_path(output_dir, spelling).unlink(missing_ok=True)
+    from pipeline.error_records import retire_superseded
+
+    retire_superseded(output_dir, well_label, rewritten=rewritten)
     return path
 
 

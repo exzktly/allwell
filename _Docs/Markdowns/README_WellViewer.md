@@ -2358,7 +2358,9 @@ reading it. The log names any it kept over budget for that reason.
 ├── pipeline_info.json      ← schema + channel tokens + FOVs + timepoints +
 │                              gating thresholds + saved selections +
 │                              the completeness record, etc.
-├── errors/                 ← one traceback per failed field, when any fail
+├── errors/                 ← one traceback per failed field, when any fail;
+│   └── superseded/            once the well later finishes whole, its old
+│                              tracebacks move here (kept, never deleted)
 ├── provenance.jsonl        ← the dataset's history (see below)
 └── (transient tmp_<well>/  ← deleted on success)
 ```
@@ -3565,8 +3567,10 @@ field groups, missing measurements, measurements with no output archive, wells
 never processed, wells the check could not read, folder-level findings), each
 nanowell timepoint the run located but could not address — with the reason its
 grid record gives, such as *No accepted fiducial, array centre, or plate-rigid
-prediction* — the traceback files the *last* run left in `errors/` (older files
-are not listed, because that folder is never emptied), and the run's
+prediction* — the failure records in `errors/` that still stand (each says
+whether the latest run wrote it or an earlier one did; a record from before
+its well was last processed whole is not listed, and a run that finishes a well
+whole moves that well's old records to `errors/superseded/`), and the run's
 field-quality flags. When one of those cannot answer — no completeness record,
 a check that was turned off, a plate too partly measured to score — that is a
 row too, so an empty table really does mean nothing is known to be wrong. The
@@ -8335,7 +8339,8 @@ say — the raw log says so and the findings are unaffected.
    when you pick a different dataset rather than leaving an earlier check's
    results up.
    Where the run left records of its own — the per-well completeness block in
-   `pipeline_info.json` and any tracebacks under `out/errors/` — the findings
+   `pipeline_info.json` and any tracebacks still standing in `out/errors/` (not
+   those in `out/errors/superseded/`, whose wells were since processed whole) — the findings
    use them rather than guessing. A well with images and no measurements CSV
    is reported three different ways depending on what the run recorded: as
    normal ("processed every field and segmented zero cells in all of them —

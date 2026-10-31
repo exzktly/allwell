@@ -23,13 +23,14 @@ pytest.importorskip("tifffile")
 
 import process_microscopy as pm
 from services.pipeline_runner import classify_log_line
+from pipeline.error_records import write_fov_failure
 
 
 def test_dump_fov_failure_trace_writes_readable_file(tmp_path):
     try:
         raise ValueError("boom in segmentation")
     except ValueError as exc:
-        path = pm._dump_fov_failure_trace(tmp_path, "B3", "exp_nuc_B3_f01_T05", exc)
+        path = write_fov_failure(tmp_path, "B3", "exp_nuc_B3_f01_T05", exc)
 
     assert path is not None
     assert path.parent == tmp_path / "errors"

@@ -114,7 +114,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # to `pipeline.parallelism`, which also holds the Cellpose GPU plan.
 # 3676 -> 3592: the per-FOV image writer and its output-path builder moved to
 # `pipeline.output_images`, beside the two storage policies it now applies.
-PROCESS_MICROSCOPY_BUDGET = 3592
+# 3592 -> 3536: the per-well and per-FOV failure-record writers moved to
+# `pipeline.error_records`, which also retires a completed well's old records.
+PROCESS_MICROSCOPY_BUDGET = 3536
 
 # `services/remote_runner.py` is the largest module in the repo — nearly twice
 # `process_microscopy.py` — and until now the only large one with nothing

@@ -3161,10 +3161,13 @@ whose every timepoint is unaddressed covers nothing yet is not "never
 processed"),
 every needs-attention well state — a guard holds each state in
 `pipeline.completeness.NEEDS_ATTENTION` to a row, via `WELL_STATE_ROWS` — and
-the count of wells the check could not read), the traceback files in `errors/`
-written since the recorded run began
-(`pipeline.completeness.error_files_since`, the listing `errors_since` counts,
-so the two cannot disagree about which files belong to the run), and the run's
+the count of wells the check could not read), the failure records in `errors/`
+that still stand (`pipeline.error_records.current_records`: the top level, less
+any record older than its well's completion seal or than the start of a run
+whose completeness check found the well whole — a record written *during* that
+run is kept, since a forced re-run that failed leaves the earlier, whole output
+behind; each row says whether the latest run wrote it or an earlier one did),
+and the run's
 field-quality verdicts scored by `domain/field_quality_scores`. A source that
 cannot speak is a row saying so — no record, a check switched off or stopped, a
 plate too partly measured to score — so an empty table means nothing is known to
@@ -12956,8 +12959,10 @@ parent process supervises the per-well worker pool:
   drives the task and fails if any input image reaches scratch before the
   fields run, or if a resumed field reads the archive.
 - **Per-FOV failure traces.** A failed FOV-group persists its full traceback to
-  `<output_dir>/errors/<well>_<fov>_pid<N>.txt` (`_dump_fov_failure_trace`,
-  mirroring `_dump_well_failure_trace`), and `classify_log_line` treats
+  `<output_dir>/errors/<well>_<fov>_pid<N>.txt`
+  (`pipeline.error_records.write_fov_failure`, beside `write_well_failure` for a
+  whole well; `process_microscopy` re-exports both under their old
+  `_dump_*_failure_trace` names), and `classify_log_line` treats
   "failed" as ERROR so it surfaces in the GUI live log. **A line that states its
   own severity is believed before it is sniffed**: an explicit `[info]` /
   `[warn]` / `[error]` tag wins, and so does a `note:` marker, because the
@@ -12971,6 +12976,33 @@ parent process supervises the per-well worker pool:
   fault for a source whose absence is the good case. It stops short of declaring
   the run clean: a non-zero rc covers both "nothing was there" and "something
   was, and it could not be fetched", and the fetch cannot tell those apart.
+- **A failure record stands until its well is processed whole.**
+  `pipeline/error_records.py` owns everything in `errors/`: the two worker
+  traces, the download notes (`write_note`, used by
+  `pipeline.io._merge_onto_cut_csv` and `services.remote_fetch_place`), and
+  their lifecycle. Every record opens with a `Key: value` header naming its
+  `Well:` and, for a worker trace, its `Run:` — an identity `begin_run` sets in
+  `ALLWELL_RUN_ID` at the start of `main`, which every worker process inherits.
+  `pipeline.run_report.seal_well_complete`, the one moment the zip, folder and
+  nanowell paths agree a well is whole, calls `retire_superseded`, which moves
+  the well's records from any other run into `errors/superseded/` — archived,
+  never deleted, and invisible to every reader because they all glob the top
+  level only. A note carries `Remedy: force` (or, from an older build, one of
+  the two `_local_*` names) and is retired only when the run rebuilt the well
+  from scratch (`rewritten=not incremental` at each seal call): an incremental
+  run can seal a well without restoring the images a download dropped. Keying
+  on the run rather than on file times means a filesystem with a coarse clock
+  cannot make a record look older than the run that wrote it. On a remote run
+  retirement happens on the host, and since `rsync` only adds, the fetch then
+  calls `mirror_retirements`, which removes each top-level record whose
+  byte-identical copy the host archived. Readers go through `current_records`,
+  which also covers records written before retirement existed (above, QC
+  triage; §6b, Validate). Without this a well that failed once and was re-run
+  successfully kept its traceback for ever: QC triage listed it whenever the
+  run that recovered the well had not rewritten the completeness record's start
+  time, and Validate raised `recorded_failures` against a whole well.
+  `tests/test_failure_records_retire_when_a_well_completes.py` drives the
+  failing-then-recovered sequence through the real `main`.
   Whole-well vs
   partial-FOV failures are accounted separately, with a per-well breakdown and
   PARTIAL warnings that point at `--incremental`. Transient short/zero NAS
@@ -15220,8 +15252,10 @@ rows from whichever caller already has them — which is precisely what lets thi
 scan delegate without changing how many times it touches the disk.
 
 **Three sources of evidence, because a missing CSV has more than one cause.**
-`WellEvidence` merges `pipeline_info.json`'s `run_report` block, the per-failure
-tracebacks under `out/errors/`, and the run journal (§6.5), and `_no_csv_finding`
+`WellEvidence` merges `pipeline_info.json`'s `run_report` block, the failure
+records still standing under `out/errors/` (`_scan_error_files`, through
+`pipeline.error_records.current_records`, so a record its well's completion seal
+postdates is not evidence against a whole well), and the run journal (§6.5), and `_no_csv_finding`
 turns them into four different findings rather than one hedged sentence. A well
 the run recorded, covered none of, failed nothing in and left no traceback for
 *segmented zero cells* — a measurement, so reprocessing produces the same empty
@@ -15251,8 +15285,9 @@ describes the run that had just finished, a `"validate"` record describes the
 folder as it stood when someone looked at it, possibly months later and after
 hand-edits. Home's masthead reads *checked <date>* for one and *run finished
 <date>* for the other. Two smaller consequences of the same difference — a scan
-has no run boundary to filter by, so its `errors` count is every traceback
-present in `out/errors/` rather than only those the last run produced, and
+has no run boundary to filter by, so its `errors` count is every record
+standing at the top level of `out/errors/` rather than only those the last run
+produced, and
 `WellReport` carries `intent`/`covered_csv`/`covered_any` alongside `missing`,
 because how much is absent does not say how much was asked for and the plate map
 draws a fraction from both.
@@ -15619,7 +15654,9 @@ the local path does not have that gap.
 
 **What the end-of-run sweep brings back.** Two things beyond the per-well
 outputs, both because a remote run's records are useless if they stay on the
-remote. `out/errors/` — the per-failure tracebacks — is pulled, so Validate's
+remote. `out/errors/` — the per-failure tracebacks, with the host's
+`superseded/` archive — is pulled, and `pipeline.error_records.mirror_retirements`
+then drops the local copies of records the host archived, so Validate's
 `_scan_error_files` has something to read; without it that whole half of the
 "read the run's own records first" rule was local-run-only, and a remote user
 got the hedged verdict every time. And the fetched `pipeline_info.json`
@@ -20961,7 +20998,9 @@ selection or crop the view.
 **A well has fewer fields of view than were imaged.** — Its FOV-groups failed
 during processing; the well still wrote a complete-looking CSV from the ones that
 succeeded. `ls <output_dir>/errors/` names every failed (well, field, timepoint)
-with its exception type, and `cat` on one gives the traceback. The most common
+that still stands, and `cat` on one gives its exception type and traceback. A
+record whose well has since been processed whole is in `errors/superseded/`
+instead (§6.2, *A failure record stands until its well is processed whole*). The most common
 cause is the scratch volume filling mid-run (§6.2) — the message reports the free
 space at the moment of failure. Recover with `--incremental`, which reprocesses
 only the (fov, timepoint) groups missing from each CSV and merges them in; the

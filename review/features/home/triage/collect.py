@@ -48,7 +48,6 @@ from pathlib import Path
 
 from domain.image_identity import PipelineSchema, load_schema, parse_image_filename
 from review.data.field_exclusions import excluded_fields, field_key
-from util.well_token import canonical_well_label
 
 from .. import collect as hc
 
@@ -297,7 +296,10 @@ def _finding_rows(ctx) -> list[TriageRow]:
 
 
 def _started_at(ctx) -> float | None:
-    text = _record(ctx).get("started_at")
+    return _iso_time(_record(ctx).get("started_at"))
+
+
+def _iso_time(text) -> float | None:
     if not isinstance(text, str) or not text:
         return None
     try:
@@ -318,24 +320,48 @@ def output_dir(ctx) -> Path | None:
     return resolve_pipeline_info_path(Path(data_dir)).parent
 
 
+def _whole_since(ctx) -> dict[str, float]:
+    """``{well: time}`` for every well the completeness record found whole, with nothing failed.
+
+    The time is the start of the run that wrote the record (its finish, for a
+    Validate record, which has no run): a failure record from before then
+    belongs to an earlier run and the well has been found whole since, so it no
+    longer stands. One written *during* the run is never answered this way — a
+    forced re-run that failed leaves the earlier, whole output in place, and the
+    check finding that output whole says nothing about the attempt that failed.
+    """
+    record = _record(ctx)
+    since = _iso_time(record.get("started_at")) or _iso_time(record.get("finished_at"))
+    wells = record.get("wells")
+    if since is None or not isinstance(wells, dict):
+        return {}
+    return {str(well): since for well, rec in wells.items()
+            if isinstance(rec, dict) and rec.get("health") == "complete" and not rec.get("failed")}
+
+
 def _error_rows(ctx) -> list[TriageRow]:
-    from pipeline.completeness import error_files_since
+    from pipeline.error_records import current_records
 
     out = output_dir(ctx)
     if out is None:
         return []
     since = _started_at(ctx)
     rows = []
-    for err in error_files_since(out, since):
-        well = canonical_well_label(err.path.stem.split("_")[0]) or ""
-        when = "" if since is not None else (
-            " The completeness record gives no start time, so this may be "
-            "from an earlier run.")
+    for err in current_records(out, whole_since=_whole_since(ctx)):
+        if since is None:
+            when = (" The completeness record gives no start time, so this may be "
+                    "from an earlier run.")
+        elif err.mtime < since:
+            when = (" Written by an earlier run; the well has not been processed "
+                    "whole since.")
+        else:
+            when = ""
+        name = err.path.name
         rows.append(TriageRow(
-            key=_key(KIND_ERROR_FILE, well, extra=err.path.name),
+            key=_key(KIND_ERROR_FILE, err.well, extra=name),
             kind=KIND_ERROR_FILE, stage=STAGE_PROCESSING, severity="danger",
-            well=well, fov="", timepoint="", can_rerun=bool(well),
-            detail=f"{err.exception_type or 'Traceback'} — errors/{err.path.name}.{when}"))
+            well=err.well, fov="", timepoint="", can_rerun=True,
+            detail=f"{err.exception_type or 'Traceback'} — errors/{name}.{when}"))
     return rows
 
 

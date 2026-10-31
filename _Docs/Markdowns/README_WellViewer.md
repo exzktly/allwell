@@ -6552,6 +6552,11 @@ Operates on **one well at a time** (spot detection is per-frame).
   when the run finishes, is cancelled, or fails. The app stays usable while it
   runs; switching datasets mid-run cancels it rather than writing counts into
   the wrong folder.
+- **Cells that could not be counted are left blank, never 0.** A cell whose
+  field has no spot image or no mask in the well's archive, or one that could
+  not be read, gets an empty count rather than a zero, so it drops out of the
+  fraction above threshold instead of counting as negative. The closing message
+  says how many cells were left blank, and the log names the wells.
 - **Optimal use** — sweep the threshold on one representative well, confirm the
   spot overlay, then Apply to All.
 

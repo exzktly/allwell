@@ -69,12 +69,12 @@ def test_a_failed_well_keeps_its_previous_counts(tmp_path):
 def test_a_well_that_really_found_nothing_is_still_written_as_zero(tmp_path):
     """The other direction: zero is a measurement when the pass succeeded.
 
-    Skipping must key on the well having *failed*, not on it being absent from
-    ``counts`` — a well whose every cell fell below threshold is legitimately
-    absent from ``counts`` and its zeros are real.
+    Skipping must key on the well having *failed*: a well whose every cell fell
+    below threshold was counted, so ``_process_well`` gave each of its cells an
+    explicit ``0`` entry, and those zeros are real.
     """
     out_dir, well_to_zip, well_to_csv = _plate(tmp_path)
-    counts = {("A01", "1", "0", "1"): 3}
+    counts = {("A01", "1", "0", "1"): 3, ("A02", "1", "0", "1"): 0}
 
     written = _write_counts_to_csvs(
         out_dir, well_to_zip, counts, "w3cy5_smfish_count", well_to_csv,

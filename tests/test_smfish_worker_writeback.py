@@ -165,8 +165,8 @@ def test_writer_skipped_well_does_not_corrupt_other_csvs(tmp_path):
 
 
 def test_writer_zero_count_cells_get_zero_not_missing(tmp_path):
-    """Cells with no detected spots (i.e. absent from the counts dict)
-    must be written as '0', not left blank or carrying the old value."""
+    """A counted cell with no spots above the threshold — ``_process_well`` gives it an explicit ``0`` entry — is
+    written as '0', not left blank or carrying the old value."""
     csv_path = tmp_path / "B02.csv"
     _write_csv(csv_path, pd.DataFrame({
         "well": ["B02", "B02"],
@@ -175,7 +175,8 @@ def test_writer_zero_count_cells_get_zero_not_missing(tmp_path):
         "nucleus_id": ["1", "2"],
         "w3cy5_smfish_count": ["100", "200"],  # both will be replaced
     }))
-    counts = {("B02", "1", normalize_tp("24h"), "1"): 5}  # cell 2 has no spots above the new threshold
+    counts = {("B02", "1", normalize_tp("24h"), "1"): 5,
+              ("B02", "1", normalize_tp("24h"), "2"): 0}  # cell 2 was counted and has no spots above the threshold
 
     _write_counts_to_csvs(
         out_dir=tmp_path,
@@ -305,8 +306,8 @@ def test_writer_logs_zero_match_diagnostic(tmp_path, caplog):
         for m in msgs
     )
     # The column is still written (preserves the file mtime semantics);
-    # every cell gets the miss value "0".
-    assert list(_read_csv(csv_path)["w2turq_smfish_count"]) == ["0"]
+    # every cell is written blank: it was never counted, which is not a count of zero.
+    assert _read_csv(csv_path)["w2turq_smfish_count"].fillna("").tolist() == [""]
 
 
 def test_resolve_csv_path_uses_map_when_provided(tmp_path):
@@ -392,3 +393,19 @@ def test_writer_skips_locked_well_and_continues(tmp_path, caplog, monkeypatch):
     # A02 still has its pre-apply zero — the locked write was skipped,
     # not silently replaced with stale content.
     assert list(_read_csv(locked_csv)["w3cy5_smfish_count"]) == ["0"]
+
+
+def test_writer_leaves_a_cell_that_was_never_counted_blank_not_zero(tmp_path):
+    """A cell absent from ``counts`` was never counted — its field had no smFISH or mask image, or one could not be
+    read — and is written blank, so it cannot be read as a measured zero; the tally counts it for the run's message."""
+    csv_path = tmp_path / "B02.csv"
+    _write_csv(csv_path, pd.DataFrame({
+        "well": ["B02", "B02"], "fov": ["1", "2"], "timepoint": ["24h", "24h"], "nucleus_id": ["1", "1"],
+        "w3cy5_smfish_count": ["100", "200"],
+    }))
+    counts = {("B02", "1", normalize_tp("24h"), "1"): 0}                 # field 2 was never counted
+    tally: dict = {}
+    _write_counts_to_csvs(out_dir=tmp_path, well_to_zip={"B02": Path("ignored")}, counts=counts,
+                          column="w3cy5_smfish_count", well_to_csv={"B02": csv_path}, tally=tally)
+    assert _read_csv(csv_path)["w3cy5_smfish_count"].fillna("").tolist() == ["0", ""]
+    assert tally == {"uncounted": 1}

@@ -1185,15 +1185,17 @@ def stage_check(out_dir, wells=None) -> dict:
     fit and would agree with it by construction. It needs a stage position for every tile (``origin_stage_um``)
     and :data:`STAGE_MIN_WELLS` such wells at both timepoints; otherwise nothing is flagged and the reason is
     recorded. The tolerance is the image check's quarter pitch, not calibrated on a real plate's stage (tracker
-    Q5)."""
+    Q5).
+
+    *wells* limits which wells' sidecars are written and returned, never which wells are fitted: the verdict is the
+    plate's, and fitted on the named wells alone it was either refused (fewer than :data:`STAGE_MIN_WELLS`, which
+    replaced a well's flag with an empty block) or a different fit (review tracker M6)."""
     from pipeline.nanowell_task import plates_of
 
     folder = Path(out_dir) / NANOWELL_DIR
     grids = {}
     for path in sorted(folder.glob("*_grid.json")):
         well = path.name[: -len("_grid.json")]
-        if wells is not None and well not in wells:
-            continue
         try:
             grids[well] = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -1203,6 +1205,8 @@ def stage_check(out_dir, wells=None) -> dict:
     for plate, members in plates_of(grids).items():
         reference, reason = _stage_check_plate(members, results)
         references[plate], reasons[plate] = reference, reason
+    if wells is not None:
+        results = {w: entries for w, entries in results.items() if w in set(wells)}
     for well, entries in results.items():
         # Read without verifying the digest: in a batched remote run the final pass runs after a released well's
         # montage archive was deleted on the remote, which would fail the digest there and drop this block without
@@ -1279,14 +1283,21 @@ def summary_lines(results: dict) -> list[str]:
         if payload is None:
             lines.append(f"{well}: no nanowell tables")
             continue
-        counts = Counter(v.get("verdict") for v in payload["timepoints"].values())
+        found = _effective(payload)
+        counts = Counter(verdict for verdict, _why in found.values())
         lines.append(f"{well}: " + ", ".join(f"{counts[v]} {v}" for v in VERDICTS if counts[v])
                      + (f" (reference {payload['reference']})" if payload.get("reference") else
                         f" ({payload.get('reference_reason')})"))
-        for tp, v in payload["timepoints"].items():
-            if v.get("verdict") in (CONTRADICTED, INCONCLUSIVE):
-                lines.append(f"  {tp}: {v['verdict']} — {v.get('reason', '')}")
+        for tp, (verdict, reason) in found.items():
+            if verdict in (CONTRADICTED, INCONCLUSIVE):
+                lines.append(f"  {tp}: {verdict} — {reason}")
     return lines
+
+
+def _effective(payload: dict) -> dict[str, tuple[str, str]]:
+    """``timepoint -> (verdict, reason)`` of a sidecar as Review reads it (:func:`verdict_in`): the stage
+    cross-check's flag overrules the image verdict, so the audit's summary and exit status say what Review will."""
+    return {tp: verdict_in(payload, tp) for tp in payload.get("timepoints") or {}}
 
 
 def stage_check_after_run(out_dir) -> None:
@@ -1390,7 +1401,7 @@ def main(argv=None) -> int:
     else:
         for line in summary_lines(results):
             print(line)
-    verdict_set = {v.get("verdict") for p in results.values() if p for v in p["timepoints"].values()}
+    verdict_set = {verdict for p in results.values() if p for verdict, _why in _effective(p).values()}
     return 1 if CONTRADICTED in verdict_set else 2 if INCONCLUSIVE in verdict_set else 0
 
 

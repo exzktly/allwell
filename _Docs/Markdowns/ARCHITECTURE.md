@@ -11037,7 +11037,11 @@ written (a well whose archive this run did not write is not checked), and `stage
 `nanowell_endgame`; each logs a warning per timepoint that is not good, and a check that cannot run is logged
 and leaves no sidecar. The remote fetch (`remote_fetch_nanowells`) and batch resume (`remote_batch_resume`) carry
 the sidecar by exact name. `python -m pipeline.nanowell_identity <output_dir> [--well W]` audits an analysed
-dataset (exit 1 when any timepoint is contradicted, 2 when any is inconclusive); `--numbers` prints `number_rows`
+dataset (exit 1 when any timepoint is contradicted, 2 when any is inconclusive, each read as Review reads it —
+`verdict_in`, the stage flag overruling the image verdict — in the summary and the exit status alike). `--well`
+re-checks and rewrites only the named wells' sidecars, but `stage_check(out_dir, wells)` still fits the whole
+plate: *wells* limits what is written, never what is fitted, because a fit over the named wells alone was refused
+below five wells (replacing a flag with an empty block) or was a different fit; `--numbers` prints `number_rows`
 instead, one CSV row per well and timepoint (`NUMBER_COLUMNS`: peak, margin, turn, the refit's correction, the
 address distances' median, 95th percentile and maximum, loose and failing counts, the centre, square, tile and stage
 disagreements, and a `why` code), numbers only, for calibrating the thresholds on real plates. Pinned by

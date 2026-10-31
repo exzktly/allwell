@@ -8,6 +8,7 @@ nanowells are known. Each fixture is built so that the wrong rule and the right 
 """
 from __future__ import annotations
 
+import json
 import math
 
 import numpy as np
@@ -129,3 +130,46 @@ def test_a_timepoint_is_not_contradicted_on_fewer_addresses_than_the_check_needs
     assert (result["compared"], result["verdict"]) == (2 * kept, verdict)
     if verdict == ni.INCONCLUSIVE:
         assert result["reason"] == f"only {2 * kept} address(es) in common with the reference, {ni.MIN_COMPARED} needed"
+
+
+# ── M6: the audit of one well keeps the plate's stage verdict ────────────────
+PITCH_UM = 172.0
+SIX_WELLS = {"A01": (0.0, 0.0), "A02": (9000.0, 0.0), "B01": (0.0, 9000.0), "B02": (9000.0, 9000.0),
+             "C01": (0.0, 18000.0), "C02": (9000.0, 18000.0)}
+
+
+def _stage_plate(out, off="B02"):
+    """Six wells' grid records with stage origins, the plate moved and turned between T0 and T1 and *off*'s origin a
+    pitch off that motion at T1. No montages: every image verdict is inconclusive, so only the stage block can make
+    *off* contradicted."""
+    folder = out / "nanowells"
+    folder.mkdir(parents=True)
+    turn = ni._screen_rotation(0.5)
+    for well, origin in SIX_WELLS.items():
+        moved = turn @ np.asarray(origin) + (120.0, -80.0) + ((PITCH_UM, 0.0) if well == off else 0.0)
+        blocks = {tp: {"status": "ok", "pitch_um": PITCH_UM, "origin_method": "fiducial",
+                       "origin_stage_um": [float(v) for v in point]}
+                  for tp, point in (("T0", origin), ("T1", moved))}
+        (folder / f"{well}_grid.json").write_text(json.dumps({"well": well, "timepoints": blocks}))
+        (folder / f"{well}.csv").write_text("timepoint,nw_q,nw_r,well_x_um,well_y_um,owner\n")
+
+
+@pytest.mark.parametrize("named", [["B02"], ["A01"], ["A01", "A02", "B01", "B02", "C01"]])
+def test_auditing_named_wells_keeps_the_plate_s_stage_verdict(tmp_path, named, capsys):
+    """M6: the stage cross-check is a fit over the plate's wells, and ``--well`` handed it only the named ones. One
+    well is fewer than the five the fit needs, so B02's flag was replaced by an empty block and its contradiction
+    became the image check's inconclusive; five refitted the plate on a subset. The named wells are still the only
+    sidecars written, but the fit is the plate's."""
+    _stage_plate(tmp_path)
+    assert ni.main([str(tmp_path)]) == 1
+    full = {w: ni.read_sidecar(tmp_path, w)["stage"] for w in SIX_WELLS}
+    assert ni.verdicts(tmp_path, "B02", ["T1"])["T1"][0] == ni.CONTRADICTED
+    untouched = {w: (tmp_path / "nanowells" / f"{w}_identity.json").read_bytes() for w in SIX_WELLS if w not in named}
+
+    code = ni.main([str(tmp_path), *(arg for w in named for arg in ("--well", w))])
+
+    assert {w: ni.read_sidecar(tmp_path, w)["stage"] for w in SIX_WELLS} == full
+    verdict, reason = ni.verdicts(tmp_path, "B02", ["T1"])["T1"]
+    assert verdict == ni.CONTRADICTED and "rigid motion" in reason
+    assert code == (1 if "B02" in named else 2)
+    assert {w: (tmp_path / "nanowells" / f"{w}_identity.json").read_bytes() for w in untouched} == untouched

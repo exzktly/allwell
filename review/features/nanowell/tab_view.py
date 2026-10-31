@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QSplitter, QToolButton,
+    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QSplitter, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -802,8 +802,8 @@ def _go_to_button(ctx, name: str, parent) -> QPushButton:
 
 
 def _popout_window(ctx):
-    """The pop-out crops window, built on first use and kept: a top-level window owned by the app's window, so it
-    closes with it, holding one :class:`PlotCard` the controller draws the crops on."""
+    """The pop-out crops window, built on first use and kept: a non-modal dialog owned by the app's window, so it
+    stays above it and closes with it, holding one :class:`PlotCard` the controller draws the crops on."""
     window = ctx.widgets.get_or_none("_nw_popout")
     if window is not None:
         return window
@@ -851,9 +851,16 @@ def _popout_controls(ctx, window) -> QHBoxLayout:
     return row
 
 
-class _PopoutWindow(QWidget):
+class _PopoutWindow(QDialog):
+    """The pop-out's window: a non-modal ``QDialog`` owned by the app's window, as every other free-standing window in
+    Review is (the per-sample control editor, the focus curve, the gating optimizer). A dialog is a transient window
+    of its parent, so it stays above it. A plain ``QWidget`` with the ``Qt.Window`` flag carries no such owner on
+    Windows, and there the window dropped behind the app the first time its **Cells** box was toggled."""
+
     def __init__(self, parent) -> None:
-        super().__init__(parent, Qt.Window)
+        super().__init__(parent)
+        self.setModal(False)
+        self.setWindowFlag(Qt.Window, True)          # keep the title bar's minimise and maximise buttons
 
     def show_raised(self) -> None:
         self.show()

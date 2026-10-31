@@ -191,3 +191,23 @@ def test_the_site_detail_s_close_button_clears_the_selection_and_hides_the_pane(
     qtbot.mouseClick(button, Qt.LeftButton)
     assert page.state.feature_slice("nanowell").selected_sites == []
     assert not pane.isVisible()
+
+
+def test_the_pop_out_is_a_non_modal_dialog_owned_by_the_app_s_window(page, qtbot, known_crops):  # noqa: F811
+    """Reported on Windows: toggling **Cells** in the pop-out sent the window behind the app. It was a plain
+    ``QWidget`` with the ``Qt.Window`` flag, which Windows does not keep above the app's window; a dialog of the app's
+    window is kept above it. Offscreen there is no window stacking to observe, so this pins the window's type and
+    owner — the property the fix rests on — and that it stays non-modal and open while Cells is toggled."""
+    from PySide6.QtWidgets import QDialog
+
+    _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    window = _press_pop_out(qtbot, page)
+    assert isinstance(window, QDialog)
+    assert window.windowType() == Qt.Dialog
+    assert window.parentWidget() is page.window
+    assert not window.isModal()
+    box = page.widgets.get("_nw_popout_cells_box")
+    qtbot.waitUntil(lambda: box.isVisible() and box.width() > 0, timeout=5000)
+    qtbot.mouseClick(box, Qt.LeftButton)
+    assert window.isVisible() and page.state.feature_slice("nanowell").crop_cells

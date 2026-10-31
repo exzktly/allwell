@@ -186,7 +186,8 @@ def page(qtbot, dataset):  # noqa: F811
 
 def test_the_page_lays_diagnostics_out_again_when_its_canvas_settles_at_a_new_size(page, qtbot):
     """Through the real page: Diagnostics chosen on the switches, the montages read, the window made narrower —
-    the figure is drawn again for the canvas's new size, and nothing on it overlaps."""
+    the figure is drawn again for the canvas's new size, and nothing on it overlaps. The pictures lie on the card's
+    ground (the surface's unsearched corners were matplotlib's white there)."""
     from review.features.nanowell.identity_view import MODES
     from review.features.nanowell.tab_view import VIEWS
     from tests.test_nanowell_identity_view import _choose
@@ -198,13 +199,19 @@ def test_the_page_lays_diagnostics_out_again_when_its_canvas_settles_at_a_new_si
     _choose(ctx, "_nw_identity_mode_seg", "diagnostics", [k for k, _l in MODES])
     qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.crops is not None
                     and st.identity_drawn.crops.looked is not None, timeout=20000)
-    fig, canvas = ctx.widgets.get("_nw_fig"), ctx.widgets.get("_nw_canvas")
+    from matplotlib.colors import to_hex
+
     from review.features.nanowell._identity_diagnostics_render import laid_out_size
+
+    fig, canvas = ctx.widgets.get("_nw_fig"), ctx.widgets.get("_nw_canvas")
+    # Each picture lies on the card's ground: the surface's unsearched corners were matplotlib's white on the page.
+    assert {to_hex(ax.get_facecolor()) for ax in st.identity_drawn.axes.values()} == {to_hex(fig.get_facecolor())}
 
     assert st.identity_drawn.laid_out == laid_out_size(fig)
     before = st.identity_drawn.laid_out
     ctx.window.resize(ctx.window.width() - 450, ctx.window.height() - 150)
     qtbot.waitUntil(lambda: laid_out_size(fig) != before, timeout=5000)        # the canvas has shrunk
-    qtbot.waitUntil(lambda: st.identity_drawn.laid_out == laid_out_size(fig), timeout=5000)
+    qtbot.wait(800)                                                             # past the re-fit's settling delay
+    assert st.identity_drawn.laid_out == laid_out_size(fig) != before
     canvas.draw()
     assert _problems(fig) == []

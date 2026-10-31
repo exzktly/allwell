@@ -137,7 +137,7 @@ class _Pen:
 
     def __init__(self, fig, lay: dl.Layout, ts: dl.Typesetter):
         self.fig, self.w, self.h, self.ts = fig, lay.width, lay.height, ts
-        _bg, self.ink, self.muted = _inks(SimpleNamespace(figure=fig))
+        self.ground, self.ink, self.muted = _inks(SimpleNamespace(figure=fig))
 
     def frac(self, x: float, y: float) -> tuple[float, float]:
         return x / self.w, y / self.h
@@ -237,6 +237,9 @@ def _panel(pen: _Pen, ts, place: dl.PanelPlace, text: dl.PanelText, name: str):
     """A panel's axes at its place, with its title and note over it, its ticks and axis label under it."""
     ax = _image_axes(pen.fig, pen.rect(place.x, place.y, place.side, place.side))
     ax.set_axis_on()
+    # The card's ground under the image: an axes added after the card was themed is matplotlib's white, which showed
+    # round the match score's searched disc (the masked samples) as a white box on the dark card.
+    ax.set_facecolor(pen.ground)
     ax._aw_type_scale = dl.TICK_PT / _PREF_PT          # the Properties pass draws its ticks and label at TICK_PT
     ax.tick_params(labelsize=dl.TICK_PT, colors=pen.muted, length=2, pad=2)
     for axis in (ax.xaxis, ax.yaxis):                 # as many ticks as the edge holds without their labels touching

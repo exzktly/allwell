@@ -11738,11 +11738,12 @@ narrower with the site detail open, short and wide in a low window, a phone's wi
 works every place out in points from the figure's size. Its `Typesetter` measures each text with matplotlib's Agg
 renderer in the font it will be drawn in and breaks it at the words to the room it has; `layout` stacks the title, the
 verdict and the footer, then tries each arrangement — the panels in a row or the two crops over the surface; the
-checks under the pictures (two columns when each is at least `MIN_CHECK_COLUMN`) or in a column beside them on a short
-wide figure; each panel's key under it, or all three in one block when a key would take more than two rows at its
+checks under the pictures (two columns when each is at least `MIN_CHECK_COLUMN`) or, on a short wide figure, in a
+column beside them that takes the room right of the pictures (which then start at the left margin); each panel's key under it, or all three in one block when a key would take more than two rows at its
 panel's width; the panels' notes kept, or left out when no arrangement with them reaches `MIN_SIDE` — and keeps the
 one that draws the pictures largest. Room the pictures cannot use goes between them and the checks (up to
-`MAX_EXTRA_GAP`) and the rest above the footer. Each panel and its colour bar carry `_aw_type_scale`, so the
+`MAX_EXTRA_GAP`) and the rest above the footer. Each panel takes the card's ground (an axes added after the card was themed is matplotlib's white, which showed
+round the surface's searched disc), and each panel and its colour bar carry `_aw_type_scale`, so the
 Properties pass that ends every redraw sizes their ticks and labels at `TICK_PT` / `BAR_PT` rather than its 18 pt
 default, and the tick locators thin with the panel's edge. The drawing records the size it was laid out for
 (`IdentityDrawn.laid_out`); `controller.on_canvas_resized` asks `_identity_controller.needs_relayout` and redraws

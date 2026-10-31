@@ -293,9 +293,10 @@ def _fit_side(ts: Typesetter, texts: dict, plan: _Plan) -> float:
 
 
 def _place_panels(ts: Typesetter, texts: dict, plan: _Plan, top: float) -> tuple[dict, list, float]:
-    """The panels at *plan*'s image edge, each row centred in the band with its slack spread into the gaps up to
-    :data:`MAX_PANEL_GAP`, and the keys under each panel or shared under them all; returns the panels' places, the
-    keys' places and the lowest point they reach."""
+    """The panels at *plan*'s image edge, each row's slack spread into its gaps up to :data:`MAX_PANEL_GAP` and the
+    row centred in the band — or, with the checks beside the pictures, set from the band's left edge, so the checks
+    take the rest — and the keys under each panel or shared under them all; returns the panels' places, the keys'
+    places and the lowest point they reach."""
     left, width, _top, _bottom = plan.band
     out, keys, y_top, side = {}, [], top, plan.side
     for row in GRIDS[plan.grid]:
@@ -305,7 +306,7 @@ def _place_panels(ts: Typesetter, texts: dict, plan: _Plan, top: float) -> tuple
         cells = [_left_decor(ts, texts[n]) + side + _right_decor(ts, texts[n]) for n in row]
         slack = max(0.0, width - sum(cells) - PANEL_GAP * (len(row) - 1))
         gap = PANEL_GAP + (min(slack / (len(row) - 1), MAX_PANEL_GAP - PANEL_GAP) if len(row) > 1 else 0.0)
-        x = left + max(0.0, (width - sum(cells) - gap * (len(row) - 1)) / 2)
+        x = left + (0.0 if plan.beside else max(0.0, (width - sum(cells) - gap * (len(row) - 1)) / 2))
         y = y_top - above - side
         for n, cell in zip(row, cells):
             image_x = x + _left_decor(ts, texts[n])
@@ -419,8 +420,11 @@ def layout(ts: Typesetter, width: float, height: float, *, title: str, headline:
     # MAX_EXTRA_GAP, and the rest above the footer: never between the verdict and the pictures, which read together.
     spare = lowest - plan.band[3] if not plan.beside else 0.0
     extra = min(MAX_EXTRA_GAP, max(0.0, spare) / 2)
-    if plan.beside:
-        placed = _set_checks(columns, col_w, width - MARGIN - col_w, top)
+    if plan.beside:                                   # the checks take the room right of the pictures
+        x = max(p.x + p.side + _right_decor(ts, texts[n]) for n, p in panels.items()) + 2 * BLOCK_GAP
+        col_w = min(width - MARGIN - x, 1.6 * MAX_CHECK_COLUMN)
+        columns, col_w, _h = _checks_block(ts, checks, col_w, 1)
+        placed = _set_checks(columns, col_w, x, top)
     else:
         placed = _set_checks(columns, col_w, MARGIN, lowest - BLOCK_GAP - extra)
     name = ", ".join([plan.grid, "beside" if plan.beside else "below"] + (["shared key"] if plan.shared else [])

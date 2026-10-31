@@ -495,13 +495,22 @@ def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, availabl
 
 #: The columns of a nanowell run's cell table the Cells layer reads.
 CELL_POSITION_COLUMNS = ("well", "timepoint", "nw_q", "nw_r", "well_x_um", "well_y_um")
+#: The columns that identify a cell (``cell_gate_compute.CELL_KEY``), read when the table has them, so a dot can be
+#: matched to the analysis's inclusion of its cell.
+CELL_IDENTITY_COLUMNS = ("fov", "nucleus_id")
 
 
 def cell_positions(data: NanowellData, well: str, timepoint: str) -> pd.DataFrame | None:
-    """Every counted cell of *well* at *timepoint*: its nanowell's address and its centre in the well frame (µm),
+    """Every counted cell of *well* at *timepoint*: its nanowell's address, its centre in the well frame (µm), and
+    ``key``, its identity (``cell_gate_compute.CELL_KEY``; ``None`` throughout for a table without nucleus ids),
     from the run's cell table. ``None`` when the well has no cell table (a run that counted no cell, or one that
     could not count). The table is read whole once per file and kept while it is unchanged on disk, so stepping
-    through a well's timepoints reads it once."""
+    through a well's timepoints reads it once.
+
+    These are the cells the *run* counted. Which of them the analysis keeps is the Cell Gating tally's
+    (``cell_gate_compute.GateTally.left_out``), matched on ``key`` by whoever draws them."""
+    from review.features.nanowell.cell_gate_compute import cell_keys
+
     path = data.cell_tables.get(well)
     if path is None:
         return None
@@ -512,16 +521,25 @@ def cell_positions(data: NanowellData, well: str, timepoint: str) -> pd.DataFram
     frame = _read_cell_positions(str(path), stat.st_mtime_ns, stat.st_size)
     if frame is None:
         return None
-    return frame[(frame["well"] == well) & (frame["timepoint"] == timepoint)]
+    found = frame[(frame["well"] == well) & (frame["timepoint"] == timepoint)].copy()
+    keys = cell_keys(well, found)
+    found["key"] = keys if keys is not None else [None] * len(found)
+    return found
 
 
 @functools.lru_cache(maxsize=2)
 def _read_cell_positions(path: str, _mtime_ns: int, _size: int) -> pd.DataFrame | None:
-    """One cell table's positions; the modification time and size are the cache key, so an edited file is read
-    again."""
+    """One cell table's positions and identities; the modification time and size are the cache key, so an edited
+    file is read again."""
+    wanted = set(CELL_POSITION_COLUMNS) | set(CELL_IDENTITY_COLUMNS)
     try:
-        frame = pd.read_csv(path, usecols=list(CELL_POSITION_COLUMNS), dtype={"timepoint": str, "well": str})
+        frame = pd.read_csv(path, usecols=lambda column: column in wanted,
+                            dtype={"timepoint": str, "well": str, "fov": str})
     except (OSError, ValueError, pd.errors.ParserError) as exc:
         log.warning("Nanowells: the cell table %s cannot be read for the Cells layer (%s)", path, exc)
+        return None
+    missing = [c for c in CELL_POSITION_COLUMNS if c not in frame.columns]
+    if missing:
+        log.warning("Nanowells: the cell table %s has no %s column(s) for the Cells layer", path, ", ".join(missing))
         return None
     return frame.dropna(subset=["well_x_um", "well_y_um"])

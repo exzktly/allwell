@@ -17,6 +17,10 @@ cells kept. A nanowell whose cells are all left out counts 0 and has no brightne
 of the nanowell, not from its segmented cells, so no cell gate can remove anything from them; the figure's note
 says so whenever cells are left out (:func:`note`).
 
+**Which cells were left out** is kept too, by identity (:data:`CELL_KEY`), so the page's cell dots can draw a
+left-out cell differently from a kept one: the dots and the count under a nanowell then describe the same cells,
+with the difference between them visible rather than silent (:func:`left_out_keys`, :func:`cell_keys`).
+
 **A well whose cells cannot be read keeps the run's counts**, and is named in the note, so a figure mixing gated
 and ungated wells never reads as gated throughout.
 
@@ -34,6 +38,9 @@ SITE_KEY = ["well", "timepoint", "nw_q", "nw_r"]
 #: The suffix of a per-cell intensity column (``<token>_mean_intensity``), the one brightness is the mean of.
 MEAN_SUFFIX = "_mean_intensity"
 KEPT_PREFIX = "kept_"
+#: What identifies one cell across the per-cell CSV as the page reads it and as the row cache holds it: the well,
+#: and the ``(fov, timepoint, nucleus_id)`` triple in the normal form ``domain.image_identity`` gives every lookup.
+CELL_KEY = ("well", "fov", "timepoint", "nucleus_id")
 
 
 @dataclass(frozen=True)
@@ -43,11 +50,13 @@ class GateTally:
     *sites* has one row per ``(well, timepoint, nw_q, nw_r)`` that lost at least one cell: ``excluded`` (cells
     left out) and, per intensity token in lower case, ``kept_<token>`` (the kept cells' mean, NaN with none
     kept). *cells* and *excluded* count every addressed cell of those wells; *unread* names the wells whose
-    rows could not be read, whose counts are the run's own."""
+    rows could not be read, whose counts are the run's own. *left_out* is the identity (:data:`CELL_KEY`) of every
+    cell of those wells the analysis leaves out, addressed or not, which the cell dots draw hollow."""
     sites: pd.DataFrame
     cells: int = 0
     excluded: int = 0
     unread: tuple = field(default_factory=tuple)
+    left_out: frozenset = field(default_factory=frozenset)
 
 
 def _empty_sites() -> pd.DataFrame:
@@ -95,16 +104,53 @@ def well_left_out(well: str, cells: pd.DataFrame, included) -> tuple[pd.DataFram
     return sites, total, out
 
 
+def cell_keys(well: str, cells: pd.DataFrame) -> list | None:
+    """The identity (:data:`CELL_KEY`) of each row of *cells*, all taken as *well*'s; ``None`` when the rows carry
+    no nucleus id, since without one two cells of a field at a timepoint share a key and cannot be told apart.
+
+    Both sides go through this one function — the per-cell CSV the dots are read from and the row cache the
+    inclusion is read from — so a cell is the same key on both whatever spelling each gives its field or its
+    timepoint."""
+    from domain.image_identity import NUCLEUS_ID_COLUMN_NAMES, cell_key_tuples_for_dataframe, resolve_identity_column
+
+    if cells is None or resolve_identity_column(cells, *NUCLEUS_ID_COLUMN_NAMES) is None:
+        return None
+    if not len(cells):
+        return []
+    return [(str(well), *key) for key in cell_key_tuples_for_dataframe(cells)]
+
+
+def left_out_keys(well: str, cells: pd.DataFrame, included) -> frozenset:
+    """The identity (:data:`CELL_KEY`) of each of *well*'s cells the analysis leaves out: the rows of *cells* (a whole
+    CSV may hold other wells' rows too) that *included* (``df_included_mask``) says no to. Every such cell, with a
+    nanowell address or without, since the dots draw both."""
+    if cells is None or not len(cells):
+        return frozenset()
+    out = ~np.asarray(included, dtype=bool)
+    if "well" in cells.columns:
+        out &= cells["well"].astype(str).to_numpy() == str(well)
+    if not out.any():
+        return frozenset()
+    return frozenset(cell_keys(well, cells.loc[out]) or ())
+
+
 def tally(per_well, unread=()) -> GateTally:
     """One :class:`GateTally` from *per_well*, an iterable of ``(well, cells, included)``."""
-    found, cells, excluded = [], 0, 0
+    found, cells, excluded, keys = [], 0, 0, set()
     for well, frame, included in per_well:
         sites, n, out = well_left_out(well, frame, included)
         cells, excluded = cells + n, excluded + out
+        keys |= left_out_keys(well, frame, included)
         if len(sites):
             found.append(sites)
     sites = pd.concat(found, ignore_index=True) if found else _empty_sites()
-    return GateTally(sites=sites, cells=cells, excluded=excluded, unread=tuple(sorted(unread)))
+    return GateTally(sites=sites, cells=cells, excluded=excluded, unread=tuple(sorted(unread)),
+                     left_out=frozenset(keys))
+
+
+def left_out(gate: GateTally | None) -> frozenset:
+    """The cells *gate* leaves out (:attr:`GateTally.left_out`); empty with no gate."""
+    return gate.left_out if gate is not None else frozenset()
 
 
 def apply(frame: pd.DataFrame, gate: GateTally | None, channels) -> None:

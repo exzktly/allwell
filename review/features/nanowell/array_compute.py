@@ -70,7 +70,8 @@ class ArrayScene:
     anchor_text: str = ""               # how the timepoint was addressed and what its anchor does
     anchorable: bool = False            # an anchor can change this timepoint's result (``ANCHORABLE``)
     record: list = field(default_factory=list)         # (text, kind): the grid record, kind head / flag / plain
-    cells: tuple | None = None          # (x, y) of each counted cell drawn, in the scene's frame; None = not read
+    cells: tuple | None = None          # (x, y) of each counted cell the analysis keeps, in the scene's frame
+    cells_out: tuple | None = None      # (x, y) of each counted cell Cell Gating leaves out (QC, curation, gates)
     cells_note: str = ""                # what the Cells layer drew, and what it could not
 
     def centre(self) -> int | None:
@@ -107,10 +108,11 @@ def _labels(qs, rs) -> list[str]:
 
 
 def array_scene(metrics, data, well: str, timepoint: str, column: str, *, positions: str = "measured",
-                anchors: bool = True, cells: bool = False) -> ArrayScene:
+                anchors: bool = True, cells: bool = False, left_out=frozenset()) -> ArrayScene:
     """The Array view of *well* at *timepoint*, coloured by *column*, with its nanowells at their *positions*
     (``"measured"`` or ``"lattice"``). *anchors* off skips reading the anchors file (a batch figure, which draws
-    no anchor); *cells* on reads the well's counted cells for the Cells layer (:func:`cells_into`)."""
+    no anchor); *cells* on reads the well's counted cells for the Cells layer (:func:`cells_into`), *left_out*
+    (``cell_gate_compute.GateTally.left_out``) being the cells of them the analysis leaves out."""
     rows = metrics[(metrics["well"] == well) & (metrics["timepoint"] == timepoint)]
     states = [str(s) for s in rows["state"]]
     counts: dict[str, int] = {}
@@ -157,18 +159,24 @@ def array_scene(metrics, data, well: str, timepoint: str, column: str, *, positi
     if frame == "well" and anchors:
         _anchor_into(scene, data, block)
     if cells:
-        cells_into(scene, rows, data)
+        cells_into(scene, rows, data, left_out)
     return scene
 
 
-def cells_into(scene: ArrayScene, rows, data) -> None:
+def cells_into(scene: ArrayScene, rows, data, left_out=frozenset()) -> None:
     """The Cells layer: a dot at each counted cell's centre, from the run's cell table (the run keeps no outlines).
+
+    The dots are split the way each nanowell's count is: a cell in *left_out* (the cells Home's Cell Gating leaves
+    out — the QC size and shape gate, manual curation, the crop, the scatter gates) goes to
+    :attr:`ArrayScene.cells_out` and is drawn hollow, the rest to :attr:`ArrayScene.cells`, so the filled dots in a
+    nanowell are the cells its count counts.
 
     In the well frame a dot is where the run measured the cell. On the lattice it keeps its offset from its
     nanowell's measured centre, added to that nanowell's lattice place, so it sits in the same spot of the same
     nanowell; a cell whose nanowell has no address or no measured centre has no place there and is counted, not
     drawn. What was drawn and what was not is :attr:`ArrayScene.cells_note`."""
     found = cell_positions(data, scene.well, scene.timepoint)
+    scene.cells_out = (np.zeros(0), np.zeros(0))
     if found is None:
         scene.cells = (np.zeros(0), np.zeros(0))
         scene.cells_note = (f"Cells: {scene.well}'s cell table holds no cell positions, so no cell is drawn."
@@ -181,6 +189,7 @@ def cells_into(scene: ArrayScene, rows, data) -> None:
         scene.cells_note = f"Cells: the run counted no cell in {scene.well} at {scene.timepoint}."
         return
     x, y = found["well_x_um"].to_numpy(dtype=float), found["well_y_um"].to_numpy(dtype=float)
+    out = np.array([key in left_out for key in found["key"]], dtype=bool) if left_out else np.zeros(len(x), bool)
     unplaced = 0
     if scene.frame == "lattice":
         centres = {(_int(q), _int(r)): (cx, cy) for q, r, cx, cy in
@@ -195,10 +204,13 @@ def cells_into(scene: ArrayScene, rows, data) -> None:
                 lx.append(places[site][0] + x[k] - centres[site][0])
                 ly.append(places[site][1] + y[k] - centres[site][1])
         unplaced = len(found) - len(keep)
-        x, y = np.asarray(lx, dtype=float), np.asarray(ly, dtype=float)
-    scene.cells = (x, y)
+        x, y, out = np.asarray(lx, dtype=float), np.asarray(ly, dtype=float), out[keep]
+    scene.cells, scene.cells_out = (x[~out], y[~out]), (x[out], y[out])
     note = (f"Cells: a dot at the centre of each of the {len(x):,} cells the run counted here, from its cell table; "
             "the run keeps no cell outlines.")
+    if out.any():
+        note += (f" Filled: the {int((~out).sum()):,} the analysis keeps, which the counts count; hollow: the "
+                 f"{int(out.sum()):,} Cell Gating leaves out (the QC size and shape gate, curation, the gates).")
     if unplaced:
         note += f" {unplaced:,} more have no place on the lattice (their nanowell has no address or measured centre)."
     scene.cells_note = note

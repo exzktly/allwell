@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from review.features.nanowell.collect import cell_positions
 
@@ -112,11 +113,16 @@ class Crop:
     image: np.ndarray | None
     source: str                            # "tile" (full resolution) or "montage"
     note: str                              # why there is no image, or what the image is
-    #: The cells the run counted inside the crop, as ``(column, row)`` pixel positions in it (N × 2), from the
-    #: well's cell table; ``None`` when the well has no cell table, so "no table" never reads as "no cell".
+    #: The cells the run counted in the cropped nanowell, as ``(column, row)`` pixel positions in the crop (N × 2),
+    #: from the well's cell table; ``None`` when the well has no cell table, so "no table" never reads as "no cell".
+    #: Only the nanowell's own cells — those carrying its address — so the dots are the cells its count counts, not
+    #: a neighbour's that the square crop happens to reach.
     cells: np.ndarray | None = None
     #: The fluorescence channel the image is of; ``""`` for the phase image.
     channel: str = ""
+    #: Each of :attr:`cells`' identity (``cell_gate_compute.CELL_KEY``), in the same order, so whoever draws them can
+    #: tell the cells Cell Gating leaves out from the ones it keeps; ``None`` without cells or without nucleus ids.
+    keys: tuple | None = None
 
 
 _IMAGE_SUFFIXES = (".tif", ".tiff")
@@ -195,16 +201,28 @@ def _cut_at(image: np.ndarray, cx: float, cy: float, half: float) -> tuple[np.nd
     return np.array(image[top:min(y1, h), left:min(x1, w)], copy=True), left, top
 
 
-def _cells_in(cells, left_um: float, top_um: float, um_per_px: float, shape) -> np.ndarray | None:
-    """The counted cells (*cells*, a frame of ``well_x_um`` / ``well_y_um``) that fall inside a crop whose top-left
-    pixel is at ``(left_um, top_um)`` in the well frame, as pixel positions in the crop; ``None`` without a table."""
+def _cells_in(cells, left_um: float, top_um: float, um_per_px: float, shape,
+              site=None) -> tuple[np.ndarray | None, tuple | None]:
+    """``(positions, keys)``: the counted cells (*cells*, a frame of ``well_x_um`` / ``well_y_um`` and, from
+    :func:`collect.cell_positions`, ``nw_q`` / ``nw_r`` / ``key``) that fall inside a crop whose top-left pixel is at
+    ``(left_um, top_um)`` in the well frame, as pixel positions in the crop, and their identities. With *site*
+    ``(q, r)`` only the cells counted in that nanowell: the crop is a square reaching past the nanowell's rim, so
+    without it a neighbour's cells in the corners would be drawn beside a count that does not include them.
+    ``(None, None)`` without a table; keys ``None`` for a table without nucleus ids."""
     if cells is None:
-        return None
+        return None, None
     h, w = shape[:2]
     x = (cells["well_x_um"].to_numpy(dtype=float) - left_um) / um_per_px
     y = (cells["well_y_um"].to_numpy(dtype=float) - top_um) / um_per_px
     inside = (x >= -0.5) & (x <= w - 0.5) & (y >= -0.5) & (y <= h - 0.5)
-    return np.column_stack([x[inside], y[inside]])
+    if site is not None and {"nw_q", "nw_r"} <= set(cells.columns):
+        inside &= ((pd.to_numeric(cells["nw_q"], errors="coerce").to_numpy(dtype=float) == float(site[0]))
+                   & (pd.to_numeric(cells["nw_r"], errors="coerce").to_numpy(dtype=float) == float(site[1])))
+    keys = None
+    if "key" in cells.columns:
+        picked = cells["key"].to_numpy(dtype=object)[inside]
+        keys = None if any(k is None for k in picked) else tuple(picked)
+    return np.column_stack([x[inside], y[inside]]), keys
 
 
 def site_crops(data, metrics, site, *, pad: float = 1.4, channel: str = "") -> dict:
@@ -293,11 +311,13 @@ def _cut_well(data, well: str, records, pad: float, out: dict, tifffile, channel
                 note = ("from the montage: " + (why_not if zf is None else
                                                 "the nanowell has no owner tile (it is fused or shared)"
                                                 if not owned else "the owner tile's image could not be found"))
-                crop = (Crop(image, "montage", note,
-                             _cells_in(cells_at(tp), montage.origin_um[0] + cut[1] * montage.um_per_px,
-                                       montage.origin_um[1] + cut[2] * montage.um_per_px, montage.um_per_px,
-                                       image.shape))
-                        if image is not None else Crop(None, "", "Off the montage."))
+                if image is None:
+                    crop = Crop(None, "", "Off the montage.")
+                else:
+                    cells, keys = _cells_in(cells_at(tp), montage.origin_um[0] + cut[1] * montage.um_per_px,
+                                            montage.origin_um[1] + cut[2] * montage.um_per_px, montage.um_per_px,
+                                            image.shape, site[1:])
+                    crop = Crop(image, "montage", note, cells, keys=keys)
             crops[tp] = crop
     finally:
         if zf is not None:
@@ -345,6 +365,6 @@ def _tile_crop(image, data, row, owner, half_um, cells=None, channel: str = "") 
     if cut is None:
         return None
     pixels, left, top = cut
-    return Crop(pixels, "tile", f"{owner}, full resolution",
-                _cells_in(cells, float(tile["left_um"]) + left * scale, float(tile["top_um"]) + top * scale, scale,
-                          pixels.shape), channel)
+    found, keys = _cells_in(cells, float(tile["left_um"]) + left * scale, float(tile["top_um"]) + top * scale, scale,
+                            pixels.shape, (int(row["nw_q"]), int(row["nw_r"])))
+    return Crop(pixels, "tile", f"{owner}, full resolution", found, channel, keys)

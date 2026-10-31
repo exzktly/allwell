@@ -459,7 +459,8 @@ def redraw(ctx) -> None:
         if st.region_for != (well, st.layers.positions):         # another well, or the other frame: fit it
             st.region, st.region_for = None, (well, st.layers.positions)
         image, image_note = _array_image(ctx, st, well, timepoint)
-        array = {"layers": drawn_layers(st), "image": image, "image_note": image_note, "region": st.region}
+        array = {"layers": drawn_layers(st), "image": image, "image_note": image_note, "region": st.region,
+                 "left_out": cg.left_out(st.gate)}
         hidden = OVERLAYS_HIDDEN_NOTE if st.overlays_hidden else ""
         note = " ".join(filter(None, [hidden, st.array_message, note]))
     st.hits, model = draw_view(
@@ -605,7 +606,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               layers: ArrayLayers | None = None, image=None, image_note: str = "",
               region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
-              stats_cache: dict | None = None) -> tuple[object, object]:
+              stats_cache: dict | None = None, left_out=frozenset()) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -614,8 +615,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     empty states included — and fixing one fixes both. *groups* is ``group -> wells``; *timepoint* is the
     timepoint Position and *Along x: Wells* compare at; *well* and *well_timepoint* are what the Array view shows,
     with *layers* (the lattice map when none are given — a batch figure), *image* under it and *region* where it
-    looks (:func:`draw_array`); its model is the ``renderer.ArrayDrawn``.
-    The hit map is ``None`` for views with nothing to click. *responding_above* is the user's cut for *metric*
+    looks (:func:`draw_array`), and *left_out* the cells its Cells layer draws hollow; its model is the
+    ``renderer.ArrayDrawn``. The hit map is ``None`` for views with nothing to click. *responding_above* is the user's cut for *metric*
     (tracker I9), which the Distribution view states the fraction responding at. *subset* is the page's
     *Subset* (``subset_compute``): every view but the Array draws only the nanowells inside it, saying how many it
     left out; the Array view draws them all and dims the rest. *moving* is the moving average's window in
@@ -659,7 +660,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                           "dimmed.", note]))
         drawn = draw_array(fig, all_metrics, data, well=well, timepoint=well_timepoint, metric=metric,
                            channel=channel, layers=layers, image=image, image_note=image_note, region=region,
-                           selected=selected, note=note, dimmed=dimmed)
+                           selected=selected, note=note, dimmed=dimmed, left_out=left_out)
         return (drawn.hits if drawn is not None else None), drawn
     if filtered is not None:
         note = " ".join(filter(None, [ss.note(filtered), note]))
@@ -806,19 +807,20 @@ def batch_array_layers() -> ArrayLayers:
 
 def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, channel: str | None,
                layers: ArrayLayers | None = None, image=None, image_note: str = "", region=None, selected=(),
-               note: str = "", dimmed=frozenset()) -> ArrayDrawn | None:
+               note: str = "", dimmed=frozenset(), left_out=frozenset()) -> ArrayDrawn | None:
     """**The one composition of the Array view**, for the page and for Batch Export (through :func:`draw_view`).
 
     *layers* says what is drawn (the lattice map when none are given); *image* is the run montage or the tile
     store the caller holds for the well frame, *image_note* what it says about it (still reading, or why there is
-    none). ``None`` when there is nothing at all to draw, and the figure then says why.
+    none). *left_out* is the cells Cell Gating leaves out (``cell_gate_compute.GateTally.left_out``), which the
+    Cells layer draws hollow. ``None`` when there is nothing at all to draw, and the figure then says why.
     """
     layers = layers or batch_array_layers()
     if not well:
         render_message(fig, "Select a well with a nanowell table.", gid="nw-array-missing")
         return None
     scene = array_scene(metrics, data, well, timepoint, metric_column(metric, channel), positions=layers.positions,
-                        anchors=layers.anchor, cells=layers.cells)
+                        anchors=layers.anchor, cells=layers.cells, left_out=left_out)
     if scene.frame == "well" and image is not None and hasattr(image, "source"):
         # A plate placed from a scan pattern records no tile size; the tile store read it from the first image.
         width, height = image.source.tile_size_um
@@ -1395,7 +1397,8 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
                                       image_channel=image_channel, numbers=st.crop_metrics,
                                       display_range=display_range(ctx),
                                       timepoints=extremes_columns(model.timepoints, model.timepoint, st.extremes_tps),
-                                      metrics=crop_metrics(st, model.sites(), channel))
+                                      metrics=crop_metrics(st, model.sites(), channel),
+                                      left_out=cg.left_out(st.gate))
     apply_export_style_to_current(ctx, fig, canvas)
     canvas.draw_idle()
     redraw_detail(ctx)
@@ -1487,7 +1490,8 @@ def draw_popout(ctx) -> None:
                    failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
         render_crop_grid(fig, st.crops.get(site), site, cells=st.crop_cells,
                          metrics=crop_metrics(st, [site], page_channel(ctx)).get(site) if st.crop_metrics else None,
-                         image_channel=image_channel, display_range=display_range(ctx), labels=st.popout_labels)
+                         image_channel=image_channel, display_range=display_range(ctx), labels=st.popout_labels,
+                         left_out=cg.left_out(st.gate))
     canvas.draw_idle()
 
 
@@ -1524,7 +1528,7 @@ def redraw_detail(ctx) -> None:
     strip_fig, strip_canvas = ctx.widgets.get_or_none("_nw_strip_fig"), ctx.widgets.get_or_none("_nw_strip_canvas")
     if strip_fig is not None and strip_canvas is not None:
         render_crop_strip(strip_fig, crops, first, cells=st.crop_cells, image_channel=image_channel,
-                          display_range=display_range(ctx))
+                          display_range=display_range(ctx), left_out=cg.left_out(st.gate))
         strip_canvas.draw_idle()
 
 

@@ -7486,7 +7486,7 @@ traffic — the shape of a freeze in which nothing is computing anything.
 improvement rather than a trade: `os.scandir` carries the entry type with the
 listing, so `DirEntry.is_file()` answers from data the enumeration already paid
 for. Everything that classifies the entries of an input folder goes through it —
-`has_well_zip`, `iter_well_tokens`, `well_present_in_input`, `non_zip_input`'s
+`iter_well_tokens`, `well_present_in_input`, `non_zip_input`'s
 listing of the folder and of each well-named subfolder, `find_well_zips`, and
 `util.schema_infer`'s sampling. The symlink semantics are `pathlib`'s,
 deliberately: a link to a file is a file, and a dangling link is neither, which
@@ -7510,10 +7510,8 @@ holds something none of which is a well archive (`UNRECOGNISED`) apart from one
 that is genuinely empty (`EMPTY_IN`). It short-circuits on the first entry, and
 it is reached only when the folder has no archives and nothing refused in it.
 
-**A well archive is a file.** `has_well_zip`, `well_present_in_input`,
-`find_well_zips` and `_plan_grouped_root` all say so: the planner through
-`_well_zip_among` over a file listing, the presence check and `find_well_zips`
-by listing files only. A directory called `A01.zip` — what an expander names an
+**A well archive is a file.** `well_present_in_input`, `find_well_zips` and
+`_plan_grouped_root` all say so, each by listing files only. A directory called `A01.zip` — what an expander names an
 archive it has unpacked in place — answering yes would be a `GROUPED` verdict on
 a folder holding nothing the pipeline can read, and, worse, a pass from the
 pre-run guard that exists to refuse a run whose named background well is not in
@@ -7571,7 +7569,7 @@ the cost of refusing a plate does not grow with the number of images in it.
 `tests/test_remote_input_scan_cost.py` counts it the same way the Analyze test
 does (40 against 400 loose images, a slope of at most four `os.stat` calls), and
 pairs the count with the check that a *directory* named `A01.zip` is not a well
-archive to `has_well_zip`, `_well_zips_in` or `find_well_zips` — the planner and
+archive to `plan_input_layout`, `_well_zips_in` or `find_well_zips` — the planner and
 the runner have to answer that the same way, or the planner refuses a layout the
 runner then stages and skips.
 

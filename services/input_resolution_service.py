@@ -39,30 +39,6 @@ def _is_well_named(p: Path) -> bool:
     return is_valid_well_name(p.stem)
 
 
-def _well_zip_among(files: list[Path]) -> bool:
-    """True iff *files* holds at least one well-named ``<WELL>.zip``.
-
-    Takes an already-made listing so a caller that has one does not read the
-    directory again to ask this. ``Path.match`` rather than a suffix
-    comparison, because that is the rule ``glob("*.zip")`` applied and it is
-    platform-dependent in a way a hand-written test is not: case-sensitive on
-    POSIX, case-insensitive on Windows.
-    """
-    return any(p.match("*.zip") and _is_well_named(p) for p in files)
-
-
-def has_well_zip(folder: Path) -> bool:
-    """True iff *folder* contains at least one well-named ``<WELL>.zip``.
-
-    A *file* named ``<WELL>.zip``: a directory of that name is not an archive,
-    and opening it as one fails.
-    """
-    try:
-        return _well_zip_among(files_in(folder))
-    except OSError:
-        return False
-
-
 def dir_has_entries(folder: Path) -> bool:
     """True iff *folder* holds at least one entry of any kind.
 

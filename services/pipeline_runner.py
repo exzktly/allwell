@@ -51,7 +51,7 @@ from collections.abc import Callable
 
 from util.well_token import blank_wells_for_run, canonical_well_label
 from pipeline.well_skip import _canonical_force_wells, skip_wells_scope
-from services.input_resolution_service import has_well_zip, iter_well_tokens
+from services.input_resolution_service import iter_well_tokens
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
 from services.remote_config import RemoteHost
 from services.remote_runner import (
@@ -711,10 +711,6 @@ class ProgressTracker:
         and free of any dependency on the queue object.
         """
         events: list[tuple[str, object]] = []
-        # The "Zip mode detected" warning is emitted up-front in
-        # _run_pipeline_thread (before the pipeline launches) so it
-        # arrives even on early failures. No second emission needed
-        # when the pipeline echoes the same banner via stdout.
         if line.lstrip().startswith(WELL_XFER_PREFIX):
             # Per-well upload/download progress: a gauge position for one
             # well's dial, and nothing else. Claimed before the generic
@@ -1964,20 +1960,6 @@ class PipelineRunner:
             # The resolved folder may differ from the one named in the form.
             if not self._recover_appends(input_dir):
                 return
-            # A *well* archive, not any archive. ``has_well_zip`` asks the
-            # well-token canonicaliser, which is the same question the pipeline
-            # asks when it decides to segment from ``in/<WELL>.zip`` — so a
-            # stray ``archive.zip`` or ``backup.zip`` a user left in a
-            # folder-mode ``in/`` no longer tells them their compression
-            # settings were ignored when they were not.
-            # ``has_well_content``'s own docstring records this exact defect
-            # being fixed for the layout planner; this was the surviving
-            # sibling.
-            if has_well_zip(input_dir):
-                self._enqueue((
-                    "line",
-                    "[warn] Zip mode detected; folder-mode compression options do not apply.\n",
-                ))
             # Built before the directory is created, and deliberately so.
             # ``build_pipeline_args`` is pure string assembly, but it reads
             # required keys off ``opts`` and raises on a missing one — and

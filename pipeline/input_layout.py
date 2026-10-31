@@ -72,7 +72,7 @@ def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
 
     # An archive is a file: a *directory* named ``A01.zip`` matched the glob this
     # replaced, and was then handed on as a well whose every image group failed
-    # to open. The Analyze planner's ``has_well_zip`` already says such a thing is
+    # to open. The Analyze planner already says such a thing is
     # not a well archive, and the two have to agree — the planner is what decides
     # whether a run may start at all. One enumeration, no stat per entry.
     for p in files_in(input_dir):

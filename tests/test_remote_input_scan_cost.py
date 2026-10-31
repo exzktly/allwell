@@ -69,13 +69,13 @@ def test_a_directory_named_like_an_archive_is_not_a_well_archive(tmp_path):
     """The planner and the runner must answer this the same way.
 
     A *directory* called ``A01.zip`` is what an expander leaves behind when it
-    unpacks an archive in place. ``has_well_zip`` on the Analyze side says it is
+    unpacks an archive in place. The Analyze planner says it is
     not a well archive; ``_well_zips_in`` matched it with ``glob("*.zip")`` and
     said it was, and that generator is the remote side's whole answer to which
     archives a run stages. So the planner refused a layout the runner then
     staged and skipped entirely.
     """
-    from services.input_resolution_service import has_well_zip
+    from services.input_resolution_service import GROUPED, plan_input_layout
     from services.remote_scratch import _well_zips_in
     from pipeline.input_layout import find_well_zips
 
@@ -84,7 +84,7 @@ def test_a_directory_named_like_an_archive_is_not_a_well_archive(tmp_path):
     (root / "A01.zip").mkdir()
     (root / "A01.zip" / "exp_GFP_A01_f1_t0.tif").write_bytes(b"II*\0")
 
-    assert has_well_zip(root) is False
+    assert plan_input_layout(root).action != GROUPED
     assert list(_well_zips_in(root)) == []
     assert find_well_zips(root) == []
 
@@ -92,6 +92,6 @@ def test_a_directory_named_like_an_archive_is_not_a_well_archive(tmp_path):
     import zipfile
     with zipfile.ZipFile(root / "A02.zip", "w") as zf:
         zf.writestr("exp_GFP_A02_f1_t0.tif", b"II*\0")
-    assert has_well_zip(root) is True
+    assert plan_input_layout(root).action == GROUPED
     assert [p.name for p in _well_zips_in(root)] == ["A02.zip"]
     assert [w for w, _p in find_well_zips(root)] == ["A02"]

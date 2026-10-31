@@ -5,8 +5,8 @@ belong in the tab's run/log core:
 
 * ``_resolve_run_dirs_for_runner`` — the adapter handed to
   :class:`services.pipeline_runner.PipelineRunner`, which resolves the selected
-  folder into ``(input_dir, output_dir, on_success)`` and streams grouping
-  progress. Analyze only ever processes **folders**: a packed acquisition file
+  folder into ``(input_dir, output_dir)`` — refusing loose images and per-well
+  folders — and announces the resolved wells. Analyze only ever processes **folders**: a packed acquisition file
   is converted to a dataset folder first, in the Datasets → *Convert OME-TIFF*,
   *Convert CZI* or *Convert ND2* page, so no de-interleave happens here.
 * ``_packed_input_hint`` — a guard that spots a raw ``.ome.tif``, ``.czi`` or

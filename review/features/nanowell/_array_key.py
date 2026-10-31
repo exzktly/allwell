@@ -93,7 +93,7 @@ def key_entries(sites, *, colour: str, styles: dict) -> list[KeyEntry]:
     return entries
 
 
-def draw_key(ax, entries: list[KeyEntry], *, linewidth: float, fontsize: float):
+def draw_key(ax, entries: list[KeyEntry], *, linewidth: float, fontsize: float) -> object | None:
     """The key as a row of ring swatches along the top edge of *ax*, right-aligned clear of the title; ``None``
     when there is nothing to key."""
     from matplotlib.legend import Legend

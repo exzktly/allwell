@@ -60,9 +60,11 @@ central pane stack. The central stack has three pages:
 
 The mode bar (`Review` / `Analyze` / `Datasets`) drives the stack; segment index
 maps straight to stack index. It is built by `AllWellApp` but lives on the
-Review pane's mode band, along with the dataset action cluster — see
-[The rail head](#the-rail-head) — leaving the title bar itself carrying the logo
-and the version pill. The stack lives inside
+Review pane's mode band beside the page tabs — see
+[The rail head](#the-rail-head). The title bar carries the logo and the version
+pill and, at its right end on the same row, every small icon button: Split
+View's toggle, the dataset action cluster, Storage, the phone-layout button and
+help. The stack lives inside
 `ReviewApp` (`_central_pane_stack`) so Review's left rail stays put; Analyze
 and Datasets are mounted onto it by `ReviewApp.mountAnalyzePane` /
 `mountDatasetsPane` (both go through `_mount_secondary_pane`, which places a pane
@@ -164,8 +166,8 @@ and the pinned buttons together
 (`tests/test_phone_layout.py::test_the_stylesheet_touch_floors_follow_the_named_constants`).
 
 **Switching.** The way in is a phone icon (`PhoneShell.desk_button`, an
-`IconButton`) among the small icon buttons at the right end of the mode band,
-just before help — outside Review's own action cluster, like help, so it is there
+`IconButton`) among the small icon buttons at the right end of the title bar's
+header row, just before help — outside Review's own action cluster, like help, so it is there
 in every mode (Analyze, watching a run, is the commonest reason to be on a
 phone). The right end is in reach on a narrow screen because the window always
 fits its screen (below), and a phone-shaped screen also gets the banner, whose
@@ -1504,10 +1506,11 @@ allwell.main()
     ├── app.setStyleSheet(theme.qss())                        ← global QSS
     ├── AllWellApp().__init__
     │       ├── _build_ui()
-    │       │    ├── title bar (logo + version pill; the mode seg, the Review
-    │       │    │            action cluster, the phone-layout button and the
-    │       │    │            help button after it are re-parented into the
-    │       │    │            Review pane's mode band below)
+    │       │    ├── title bar (logo + version pill, then at its right end
+    │       │    │            Split View's toggle, the Review action cluster,
+    │       │    │            Storage, the phone-layout button and help; the
+    │       │    │            mode seg is re-parented into the Review pane's
+    │       │    │            mode band below, beside the page tabs)
     │       │    └── central stack:
     │       │         ├── page 0  ←  ReviewApp() (Review)
     │       │         │       ├── _build_ui()
@@ -1960,26 +1963,32 @@ labels do not fit inside. Re-expanding the rail brings it back — which is also
 the only way back to Analyze and Datasets while collapsed, since the bar is the
 app's sole mode switch.
 
-The band's right end carries the dataset action cluster — reload, presentation
-mode, full reset of saved state, reveal the dataset folder, and reset the view —
-and, outboard of it, the help-drawer button. They are built in `AllWellApp`
-alongside their handlers and then moved into the band by
-`_mount_review_actions`, which appends them after the page-tabs host; that host
-holds the band's only stretch, so both are pushed hard right whatever the tab
-strip is showing, and the band's pinned height rises to whatever the taller of
-the two needs rather than clipping them. Every one of the five acts on the
-loaded dataset or on the plots drawn from it, so `_sync_review_actions` shows
-the cluster in Review alone and hides it in Analyze and Datasets, where each
-would be a control with nothing behind it. Both mode-change handlers call it, so
-the cluster follows the seg and the pane stack alike.
+The small icon buttons do not sit in the band. They sit at the right end of the
+title bar's header row, on the same line as the logo and the version pill, so
+the page tabs keep the band's whole width: Split View's toggle and its
+right-pane picker, then the dataset action cluster — reload, presentation mode,
+reset analysis, copy analysis, reveal the dataset folder, and reset the view —
+then Storage, the phone-layout button and, last, the help-drawer button. The
+cluster, Storage and help are built in `AllWellApp` alongside their handlers;
+Split View builds its pair into the band (`review/core/split_view.py`), which
+keeps the feature one-line removable. `_mount_review_actions` appends all of
+them after the header row's stretch, re-parenting the split pair out of the
+band, so they land hard right and the band stays pinned at a tab row's height.
+On the band they competed with the page tabs for width: on a narrow window the
+tab strip scrolled while the header row above it stood empty. Every one of the
+cluster's buttons acts on the loaded dataset or on the plots drawn from it, so
+`_sync_review_actions` shows the cluster in Review alone and hides it in Analyze
+and Datasets, where each would be a control with nothing behind it. Both
+mode-change handlers call it, so the cluster follows the seg and the pane stack
+alike.
 
 The help button is deliberately not one of them, which is why it is mounted
 after the cluster rather than inside it: the manual it opens documents all three
-modes, and it keeps the band's rightmost slot in every mode while the cluster in
+modes, and it keeps the row's rightmost slot in every mode while the cluster in
 front of it comes and goes. Anything placed inside the cluster inherits the
 Review-only gating, and for this control that would leave Analyze and Datasets
 with `Ctrl+/` as their only route to the drawer — a shortcut nothing on screen
-advertises once the band's right end is empty.
+advertises once the row's right end is empty.
 
 Opening the drawer aims it at the page the user is on.
 `_help_section_for_current_page` branches on the current mode and asks that
@@ -6520,8 +6529,11 @@ can only ratchet down), plus the state-package import boundary above.
 **What:** show two *different* top-level tabs side-by-side, both updating live
 (selection / channel / plot-option / dataset changes refresh **both** panes).
 Two instances of the *same* tab are out of scope (feature figures/state are
-singletons). Entry is a top-bar **"Split view"** toggle (`columns-2` glyph) + a
-right-pane dropdown; the left pane is whatever tab was active.
+singletons). Entry is a **"Split view"** toggle (`columns-2` glyph) + a right-pane
+dropdown; the left pane is whatever tab was active. `install_split_view` builds
+both into Review's top bar, and `AllWellApp._mount_review_actions` then moves
+them onto the window's header row with the other icon buttons; the feature's
+own show/hide logic acts on the widgets wherever they sit.
 
 **Self-contained by design.** All active machinery lives in one module,
 `core/split_view.py`, wired by a *single* call — `install_split_view(app)` in
@@ -8653,8 +8665,14 @@ archive-coverage mismatches using the dataset's schema.
 
 `services/acquisition_transport` carries the record through staged inputs,
 scoped well selections and batched uploads, filtering it to actual uploaded
-identities. Full and batch transfers include a temporary `acquisition.json`,
-removed when the transfer ends. Upload and re-attach identity include record
+identities. Full and batch transfers include a temporary `acquisition.json`
+(and `nanowell_anchors.json` when the plate has anchors), written to a
+`.allwell-transit` folder beside the archives (`remote_scratch._new_transit_dir`)
+and removed when the transfer ends. Never to the OS temp folder: a remote run has
+no other reason to write to the local system drive, and while these files went
+there a full system drive failed every batch's upload with `[Errno 28]` although
+the input, output and scratch volumes had room. Nothing is created when a plate
+has neither file. Upload and re-attach identity include record
 content, so metadata-only changes invalidate reuse. `pipeline.sidecar` reads and
 validates the input record before local or remote pipeline image work. Legacy
 inputs without a record retain their existing behavior.
@@ -12108,7 +12126,12 @@ combo reads each well's worst verdict, and the timepoint shown by default is the
 inconclusive or unchecked, then first non-reference timepoint. Montages are read on a worker through the page's
 `_fetch` store. A `_fetch` read lets go of its worker bridge as soon as it delivers, and redraws nothing when the
 page's canvas no longer exists as a Qt object (`_page_alive`) — a read can outlive the window that asked for it, and
-redrawing then reached into deleted widgets. The sidecar is read once per well until the dataset reloads, so an audit run while the page is open
+redrawing then reached into deleted widgets. Every other worker result the page receives — a recompute, a tile read,
+the QC layer's update — goes through the controller's `_call` (the one way it reaches a view callback such as
+`_nw_refresh_controls`) and `redraw` / `redraw_detail`, which all do nothing once the page has been built and deleted
+(`_page_deleted`); the result itself still lands in the page's state. A recompute that finished after its window
+closed otherwise raised `Internal C++ object … already deleted` from `tab_view.refresh_controls`
+(`tests/test_nanowell_page.py::test_a_recompute_that_finishes_after_the_page_is_deleted_touches_no_widget`). The sidecar is read once per well until the dataset reloads, so an audit run while the page is open
 shows after the next load. Batch Export does not offer it (the reason is written beside its `VIEWS`: no metric, one
 figure per well and timepoint, two modes that exist only as interaction). Pinned by
 `tests/test_nanowell_identity_view.py`, including one test through the real page builder.
@@ -12121,7 +12144,7 @@ it is the page's choice of wells, not an inclusion layer. Every figure's note ca
 selected well is excluded. *Excluded (n) ▾* (`exclude_view`), shown only while any is excluded, restores
 one or all (`set_well_excluded`, `restore_every_well`).
 
-**Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a *% of sharp* spin box, 30–95) is a mirror of
+**Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a bare percentage spin box, 30–95, with no suffix (Qt refuses typing with the cursor inside one)) is a mirror of
 the Cell Gating panel's *Exclude out-of-focus nanowells*, never a setting of its own. `controller.set_rim_focus`
 refuses a fraction outside `nanowell_rim_focus.MIN_FRACTION`–`MAX_FRACTION` by name, and otherwise changes the QC
 parameters through the registry's `qc.set_params_with_progress` service — the one route a QC edit takes, so every

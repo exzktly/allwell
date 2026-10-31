@@ -53,7 +53,8 @@ def build_rim_focus_controls(ctx) -> RimFocusControls:
     box.setToolTip(RIM_FOCUS_TIP)
     spin = QSpinBox()
     spin.setRange(int(round(100 * rfc.MIN_FRACTION)), int(round(100 * rfc.MAX_FRACTION)))
-    spin.setSuffix(" % of sharp")
+    # A bare number, no suffix: Qt's spin box refuses typing and Backspace while the cursor sits in a suffix,
+    # and a long one (" % of sharp") filled most of the field, so a click there ignored every digit typed.
     spin.setToolTip(RIM_FOCUS_TIP)
     spin.setKeyboardTracking(False)          # recompute once on Enter or focus-out, not on every digit typed
     box.toggled.connect(lambda on: nwc.set_rim_focus(ctx, on=on))

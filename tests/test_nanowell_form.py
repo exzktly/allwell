@@ -457,3 +457,11 @@ def _summarisable(result):
     result.pitch_um, result.angle_deg, result.origin_method = 172.0, 0.0, "fiducial"
     result.overlap_um, result.overlap_needed_um = (130.0, 130.0), 120.0
     return result
+
+
+def test_a_blank_empty_reference_well_does_not_read_as_a_default(tab):
+    """Review tracker L9: the field's placeholder read "default", as the other fields' do, but a blank *Empty
+    reference well* is no reference at all, and so no confluence in any well. The placeholder says so; a field whose
+    blank does mean a default the pipeline picks keeps saying "default"."""
+    assert tab._nanowell_empty_well_edit.placeholderText() == "none: no confluence"
+    assert tab._nanowell_margin_edit.placeholderText() == "default"

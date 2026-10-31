@@ -55,13 +55,27 @@ class NanowellInputError(RuntimeError):
     """The inputs cannot be run in nanowell mode (no acquisition record, no tiles): named, never silent."""
 
 
-def reference_well_first(shared_kwargs_template: dict, items) -> tuple[list, list]:
+def reference_well_first(shared_kwargs_template: dict, items, output_dir=None) -> tuple[list, list]:
     """``(the empty reference well's item, the rest)`` of a run's ``(well, archive)`` *items*, for the reference to
     be measured before the wells read against it (``pipeline.nanowell_reference``); ``([], items)`` outside
-    nanowell mode, with none named, or with it not among *items*."""
+    nanowell mode, with none named, or with it not among *items*.
+
+    A reference that is named, is not among *items* and has not been measured in *output_dir* either (a well not on
+    this plate, mistyped, or left out of the run before it was ever measured) gives no well a confluence; that is
+    logged as a warning before anything runs, where the field's placeholder alone said nothing (review tracker L9).
+    A reference measured earlier, or sent to a remote run beside the wells, is read from the output folder."""
     if not shared_kwargs_template.get("_nanowell"):
         return [], list(items)
-    return nref.reference_well_first(settings_from_kwargs(shared_kwargs_template), list(items))
+    settings = settings_from_kwargs(shared_kwargs_template)
+    first, rest = nref.reference_well_first(settings, list(items))
+    well = nref.reference_well(settings)
+    if well and not first and output_dir is not None:
+        index = nref.read_index(output_dir)
+        if index is None or not nref.same_well(index.get("well"), well):
+            log.warning("The empty reference well %s is not among this run's wells and has not been measured in "
+                        "this output folder, so no well will have a confluence. Name a well of this plate that "
+                        "holds no cells, or include %s in the run.", well, well)
+    return first, rest
 
 
 def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:

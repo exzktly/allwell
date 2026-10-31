@@ -76,6 +76,11 @@ DEFAULTS = {
     "nanowell_empty_well": "",
 }
 
+#: What a blank field means, where its default is not a value the placeholder could show. A blank *Empty reference
+#: well* is no reference, and so no confluence; the placeholder read "default", which said the opposite (review
+#: tracker L9).
+PLACEHOLDERS = {"nanowell_empty_well": "none: no confluence"}
+
 #: Key -> (label, minimum, maximum, minimum is allowed). Mirrors ``pipeline.cli_args.nanowell_options_from_args``.
 _NUMERIC = {
     "nanowell_cell_diameter_um": ("Cell diameter", 0.0, None, False),

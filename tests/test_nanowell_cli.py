@@ -801,3 +801,25 @@ def test_a_re_exported_reference_measures_its_wells_again_and_an_unchanged_one_d
     assert f"SKIP well {WELL} — output already exists. Use --force to reprocess." not in said
     assert f"Well {WELL} — done. 1 timepoint(s), 0 without rows." in said
     assert any(m.startswith(f"Well {WELL} — its confluence at 0h was read against another empty reference") for m in said)
+
+
+def test_a_reference_well_that_is_not_on_the_plate_is_warned_about(tmp_path, monkeypatch, caplog):
+    """Review tracker L9: a named reference that is neither among the run's wells nor measured in the output folder
+    (here H12, which this plate does not have) gives no well a confluence, and the run said nothing until each
+    well's notes did. It warns before any well runs; a reference measured earlier is read, so is no reason to."""
+    plate = _reference_plate(tmp_path, {WELL: 1})
+    _out, said = _run_plate(monkeypatch, plate, caplog)
+    warning = (f"The empty reference well {REFERENCE} is not among this run's wells and has not been measured in this "
+               "output folder, so no well will have a confluence.")
+    assert [m for m in said if m.startswith(warning)] and said.index(
+        next(m for m in said if m.startswith(warning))) < said.index(f"Well {WELL} — done. 1 timepoint(s), 0 without rows.")
+
+    alone = json.loads((plate / "in" / "acquisition.json").read_text())
+    record = json.loads((plate / "in" / "acquisition.json").read_text())
+    record["tiles"] += _well_archive(plate, tmp_path, REFERENCE, 5)["tiles"]
+    write_record_file(plate / "in" / "acquisition.json", record)
+    _run_plate(monkeypatch, plate, caplog)                          # the reference measured here
+    (plate / "in" / f"{REFERENCE}.zip").unlink()                     # then left out of the next run
+    write_record_file(plate / "in" / "acquisition.json", alone)
+    _out, said = _run_plate(monkeypatch, plate, caplog, "--force")
+    assert not [m for m in said if m.startswith(warning)]

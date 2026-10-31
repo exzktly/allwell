@@ -2842,7 +2842,7 @@ def process_well_zips(
         )
 
     # A nanowell run's empty reference well goes first: every other well's confluence is read against it.
-    first, rest = reference_well_first(shared_kwargs_template, well_zips)
+    first, rest = reference_well_first(shared_kwargs_template, well_zips, output_dir)
     pool = partial(
         _run_well_worker_pool, output_dir=output_dir, workers=workers,
         settings_key=settings_key,

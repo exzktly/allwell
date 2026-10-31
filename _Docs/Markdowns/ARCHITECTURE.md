@@ -10478,7 +10478,9 @@ cells' own texture, and a nanowell half covered reads 1-2 % (painted, 52 % true 
 **calibrated against a named empty well** (`pipeline/nanowell_reference.py`, `--nanowell_empty_well`,
 `NanowellSettings.empty_well`, which joins `key()` and the settings digest). The reference well is measured first:
 `process_microscopy.process_well_zips` runs its worker pool twice, the reference alone and then the rest
-(`nanowell_task.reference_well_first`), and a batched remote run puts it in batch 1
+(`nanowell_task.reference_well_first`, which logs a warning before anything runs when the named reference is
+neither among the run's wells nor measured in the output folder: no well will have a confluence; the form's blank
+field reads *none: no confluence*, `nanowell_fields.PLACEHOLDERS`), and a batched remote run puts it in batch 1
 (`remote_batch_staging.nanowell_reference_first`); the batches run in sequence into one output folder whose
 `nanowells/` is never released between them. The reference well reads itself (`nanowell_reference.OWN`): each
 timepoint's own template carries the threshold measured on it (`Template.texture_cut`, set by

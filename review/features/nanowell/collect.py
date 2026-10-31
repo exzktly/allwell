@@ -499,11 +499,14 @@ def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, availabl
 
 #: The columns of a nanowell run's cell table the Cells layer reads.
 CELL_POSITION_COLUMNS = ("well", "timepoint", "nw_q", "nw_r", "well_x_um", "well_y_um")
+#: Read too when the table has it: the tile each cell was counted in, which a field exclusion is stated in
+#: (``cell_gate_compute.hidden_cells``).
+CELL_FOV_COLUMN = "fov"
 
 
 def cell_positions(data: NanowellData, well: str, timepoint: str) -> pd.DataFrame | None:
-    """Every counted cell of *well* at *timepoint*: its nanowell's address and its centre in the well frame (µm),
-    from the run's cell table. ``None`` when the well has no cell table (a run that counted no cell, or one that
+    """Every counted cell of *well* at *timepoint*: its nanowell's address, its centre in the well frame (µm) and,
+    when the table has it, its tile (``fov``), from the run's cell table. ``None`` when the well has no cell table (a run that counted no cell, or one that
     could not count). The table is read whole once per file and kept while it is unchanged on disk, so stepping
     through a well's timepoints reads it once."""
     path = data.cell_tables.get(well)
@@ -523,9 +526,16 @@ def cell_positions(data: NanowellData, well: str, timepoint: str) -> pd.DataFram
 def _read_cell_positions(path: str, _mtime_ns: int, _size: int) -> pd.DataFrame | None:
     """One cell table's positions; the modification time and size are the cache key, so an edited file is read
     again."""
+    wanted = {*CELL_POSITION_COLUMNS, CELL_FOV_COLUMN}
     try:
-        frame = pd.read_csv(path, usecols=list(CELL_POSITION_COLUMNS), dtype={"timepoint": str, "well": str})
+        frame = pd.read_csv(path, usecols=lambda c: c in wanted,
+                            dtype={"timepoint": str, "well": str, CELL_FOV_COLUMN: str})
     except (OSError, ValueError, pd.errors.ParserError) as exc:
         log.warning("Nanowells: the cell table %s cannot be read for the Cells layer (%s)", path, exc)
+        return None
+    missing = [c for c in CELL_POSITION_COLUMNS if c not in frame.columns]
+    if missing:
+        log.warning("Nanowells: the cell table %s cannot be read for the Cells layer (no %s column)", path,
+                    ", ".join(missing))
         return None
     return frame.dropna(subset=["well_x_um", "well_y_um"])

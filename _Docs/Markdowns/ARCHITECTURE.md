@@ -11444,7 +11444,7 @@ restore runs before the data is read. Batch Export's Nanowells panel fills its o
 ln n against hours over at least three timepoints with n > 0. A plate of 96 wells × 1,000 nanowells × 10
 timepoints takes about 5 s to compute.
 
-**Cell Gating reaches the counts** (`cell_gate_compute`, `controller.gate_tally` / `gated_metrics`). The run's
+**Cell Gating reaches the counts** (`cell_gate_compute`, `controller.gate_tally`, which the page's load and Batch Export's `NanowellBatchExportPanel._load` each pass to `site_metrics`). The run's
 `n_cells` is a count of per-cell rows carrying the nanowell's address, so the cells the analysis leaves out
 (`data_loading.df_included_mask(frame, except_layers=cell_gate_compute.FIELD_LAYERS)` — curation, the QC size and
 shape gate, the scatter gates; crop, focus and border pass every nanowell cell, whose table has no centroid, focus
@@ -11477,8 +11477,8 @@ and the footer states the cohort as kept of sites. `well_summary(reasons=…)`, 
 and `views_compute.trajectory_panels(cohort=…)` all apply it, so the beeswarm, the summaries and the trajectory
 medians follow the same nanowells.
 
-**The moving average** (`moving_compute`, `NanowellState.moving`, the *Moving average* spin box on *Distribution*
-and *Trajectories*; 0 is off, the spin box shows its minimum, 1, as *Off*). With a window of *N* (2 to
+**The moving average** (`moving_compute`, `NanowellState.moving`, the *Moving average* spin box on *Distribution*,
+*Trajectories* and *Statistics*; 0 is off, the spin box shows its minimum, 1, as *Off*). With a window of *N* (2 to
 `MAX_WINDOW`, 9), a nanowell's value at a timepoint is the mean of its values at that timepoint and the *N − 1*
 before it in its well's timepoint order (`tp_order`) — a trailing window counted in timepoints, not hours. A value
 is averaged only from a complete window: every timepoint of it present as a row, with a value, and joinable over
@@ -11490,8 +11490,10 @@ undefined at its own timepoint keeps its own reason (`moving_compute.apply`). Th
 measured values first, then the average is taken: decided on the averages, no nanowell would have one at the
 first timepoint and the cohort would be empty. `distribution_model(moving=…)`, `wells_summary(moving=…)` and
 `trajectory_panels(moving=…)` apply it, so the beeswarm, the summary CSV and the trajectory lines use the same
-numbers, and both figures' footers state the window (`moving_compute.describe`). Per-nanowell metrics have no
-values over time and ignore it; Array, Position, Extremes and Identity draw one timepoint and do not use it.
+numbers, and both figures' footers state the window (`moving_compute.describe`). The Statistics view builds its
+samples from that same `distribution_model(moving=…)`, so it tests the averaged values Distribution draws and its
+report carries the window's sentence. Per-nanowell metrics have no values over time and ignore it; Array, Position,
+Extremes and Identity draw one timepoint and do not use it.
 
 **The subset** (`subset_compute`, `NanowellState.subset`, the *Subset* control and its editor in `subset_view`). A
 `Subset` is a tuple of `Condition`s and a *match* (`all` or `any`); no conditions is every nanowell. A condition
@@ -11568,7 +11570,11 @@ in a `responding_above` column. When a ticked metric is drawn as another (a chan
 cut is not applied to the substitute, whose rows then carry no fraction.
 
 **Export** (`controller.export_long_csv`) writes `series_compute.long_format` plus the time source and the
-baseline, one row per nanowell and timepoint, through a temporary file.
+baseline, one row per nanowell and timepoint, through a temporary file. Its `n_cells` and `brightness_<ch>` are the
+page's, after Cell Gating, so the file records the gate beside them: `n_cells_run` (the run's own count),
+`cells_left_out` (`cell_gate_compute.left_out_counts`: what the gate took from that count, empty where there is no
+count) and `cell_gating` (`cell_gate_compute.note`, the figure's sentence, as Batch Export's summary `note` carries
+it).
 
 **Persistence** (`review/persistence/nanowell.py`). The page's choices (`state.NanowellState.to_config`) are
 the `nanowell` section of `persistence.json`; a dataset without one lands on the defaults, and
@@ -11639,8 +11645,8 @@ shared with the enlarged crops), the ranking timepoint's column outlined, each r
 value, and **every word a crop carries is written inside it**, on a translucent band of the ground: the fold change
 at its timepoint in its top-left corner (`format_value`: `2.31×`, or a signed difference on log₂), and along its
 foot one line of the nanowell's metrics there (`series_compute.crop_metric_lines`: count, confluence as a
-percentage, the shared channel's nanowell fluorescence and brightness, in that order of importance, `compact_number` for
-thousands; a state without numbers by name; a missing measurement left out, never zero) — as many as fit the
+percentage, the shared channel's nanowell fluorescence and brightness as `fluor.` and `bright`, in that order of
+importance, `compact_number` for thousands; a state without numbers by name; a missing measurement left out, never zero) — as many as fit the
 crop's width (`renderer._one_line`), the caption saying when some were left for the pop-out, which writes each
 panel's full metrics under it (`render_crop_grid(…, metrics=…)`, `controller.crop_metrics`). Text under or beside
 each crop took more of the figure than the crops did, and three lines over a crop covered the lower third of the
@@ -11659,8 +11665,9 @@ modelled on the Statistics tab and built from the same pure tests (`review/domai
 `dunnett_vs_control`, `effect_size`; `review/domain/significance` for every p's spelling and stars). It is drawn
 through `controller.draw_view(view="statistics")`, the one composition every view has; Batch Export does not offer it. **Its samples
 are the Distribution view's own dots**: `draw_view` builds the `DistributionModel` *Along x: Wells* at the page's
-timepoint (`shown_timepoint` treats this view as that axis) with the Subset, cohort, baseline and excluded wells
-already applied, and `statistics_compute.samples_from_model` reads the samples from its swarms, so the view can never
+timepoint (`shown_timepoint` treats this view as that axis) with the Subset, cohort, moving average, baseline and
+excluded wells already applied (the band offers the cohort and the moving average here, and the report carries their
+sentences, `controller._STATS_NOTES`), and `statistics_compute.samples_from_model` reads the samples from its swarms, so the view can never
 test a second reading of the tables. `NanowellState.stats_unit` (persisted, `UNITS`) picks what one value is:
 `nanowells` makes each well a sample of its nanowells — a statement about those wells, which the figure says is not
 one about their conditions, since nanowells are not replicates (§6.2j, `summary_compute`) — and `wells` makes each
@@ -11669,14 +11676,19 @@ group a sample of its wells' medians, one per well, as `group_summary` does. `Na
 (`NanowellState.control`, shared with *Along x: Wells*) lists the samples of the unit on this view
 (`statistics_view.fill_control_combo`): with none chosen every pair is compared, with one each other sample against
 it; Dunnett requires one and corrects for its own family, the other tests are Benjamini-Hochberg adjusted
-(`bh_adjust`, which reports whether it adjusted anything, so a family of one never prints `p_BH`). Three or more
+(`bh_adjust`, which reports whether it adjusted anything, so a family of one never prints `p_BH`; Dunnett marks its
+p adjusted only with more than one comparison). `statistics_compute.family_text` states the family from the
+comparisons themselves — how many, how many computed, and `StatisticsResult.correction`, which is empty unless some
+printed p was adjusted — so it never calls a raw p corrected. Three or more
 samples get the omnibus first (ANOVA, or Kruskal-Wallis for the rank tests). More than `MAX_COMPARISONS` (15)
 comparisons are refused with a sentence naming how to narrow them. Every comparison that cannot be made — fewer than
 two values, two samples constant at one value, a test scipy refuses — carries its reason in `Comparison.undefined`
 and is printed as that reason. The effect-size bootstrap is scaled down for samples of hundreds of nanowells
 (`BOOTSTRAP_BUDGET`, never below `MIN_RESAMPLES`), deterministic in the sample sizes, and the result is cached on
-`NanowellState.stats_cache` under the samples' bytes, unit, test, control, column and timepoint, so a redraw that
-changes none of them — a theme flip, a resize — does not rerun the tests. `statistics_compute.report_lines` writes
+`NanowellState.stats_cache` under everything the result is computed from or reports — each sample's values, roster
+and exclusions by reason, the notes it carries, the unit, test, control, column, label and timepoint — so a redraw
+that changes none of them — a theme flip, a resize — does not rerun the tests, and a change that moves only what
+the report says (the cohort ticked over nanowells that all have a value) is not answered from the cache. `statistics_compute.report_lines` writes
 the report as `(gid, text)` lines (`nw-stats-header`, `-omnibus`, `-sample`, `-pair`, `-note`); the renderer wraps
 them to the figure's width, shrinks the type to at least `REPORT_MIN_PT` before leaving a line out (and counts any
 left out), and draws above them a box and dots per sample with its mean (with its 95% interval on groups), or each
@@ -11720,7 +11732,10 @@ included). Four modes, `NanowellState.identity_mode` (persisted; an unknown one 
 imprecise (`warn`), wrong name (`danger`, which folds in `neighbour_of_wrong`), in a misregistered tile (`danger`,
 hatched) or not compared (muted), the legend counting each — and `auto` is `status` unless the timepoint is
 confirmed. Classes come from the sidecar's `excluded` list, or for a sidecar without one from `tiles.moved` and tile
-ownership. Failing addresses are outlined in `Colors.danger` (the sidecar's list plus every address beyond the
+ownership. In a timepoint whose verdict is `contradicted` (its own, or the stage cross-check's override) every row
+is left out of every figure, so a nanowell that lands on itself, or nearest itself, is `timepoint_out` instead
+(`danger`, cross-hatched `xx` as the Array view draws `identity_contradicted`, keyed only when present) and the
+footer says the whole timepoint is left out: a wholly contradicted timepoint never paints green. Failing addresses are outlined in `Colors.danger` (the sidecar's list plus every address beyond the
 tolerance, since the list is capped at `MAX_LISTED`), and the compared timepoint's tiles are mapped into the
 reference frame through the inverse registration, moved ones in red labelled "moved N µm", imprecise ones in amber
 labelled "N µm off"; *Blink* — the compared montage resampled onto the reference's pixel grid
@@ -11827,7 +11842,15 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   plate's every cell is never held at once. `array_compute.cells_into` puts them in the scene: where measured in
   the well frame; on the lattice at the nanowell's lattice place plus the cell's offset from that nanowell's
   measured centre, so a dot stays in the same spot of the same nanowell, and a cell whose nanowell has no address
-  or measured centre is counted in the footer, not drawn. The renderer draws them as one `scatter` of fixed
+  or measured centre is counted in the footer, not drawn. **The dots follow the counts' inclusion**
+  (`cell_gate_compute.hidden_cells`, from `array_scene(gate=…)`, which `draw_view(gate=st.gate)` passes): a cell
+  the gate leaves out is matched by its well-frame position against `GateTally.left_out` (the left-out cells'
+  positions, rounded to `POSITION_DECIMALS` µm so the row cache's and the cell table's parses agree, one dot per
+  left-out cell) and a cell of an excluded field by its `fov` (read when the table has one) against
+  `GateTally.fields`, or by its nanowell's `field_excluded` state; neither is drawn, and the footer counts each.
+  The crops follow the same rule: `image_compute` keeps each crop's cells' rows (`Crop.cell_rows`) and
+  `controller.gated_crops` drops the hidden dots when the strip, the pop-out or the Extremes montage is drawn
+  (not when cut, so a gating edit reaches crops already cut), the caption counting them. The renderer draws them as one `scatter` of fixed
   screen size (`CELL_DOT_PT2`), light with a dark rim (`ui/nanowell_sites.CELL_COLOUR`, `CELL_EDGE_COLOUR`) so
   they read over the image and over any fill, above the nanowells and under the addresses. The footer says how
   many were drawn, that the run counted no cell in the well at that timepoint, that the well has no cell table,

@@ -249,3 +249,169 @@ def test_the_field_keys_are_read_per_tile_and_never_in_an_untrusted_well():
     assert cg.excluded_fields(sites, chosen_fovs={"1"}) == {("A01", "F0", "t1"), ("A01", "F0", "t2"),
                                                            ("B01", "F0", "t1")}
     assert cg.excluded_fields(sites) == frozenset()
+
+
+# ── the cell dots follow the same inclusion as the counts (tracker M11) ─────────
+
+#: Well-frame centres (µm) of A01's nanowells; F0 owns (0,0), F1 owns (1,0), at both timepoints.
+_CENTRES = {0: (100.0, 100.0), 1: (300.0, 100.0)}
+#: A01's cells: (timepoint, q, area px, offset from the nanowell's centre). At t_c (0,0) holds a 10 px object, the
+#: one the size gate drops, beside a 50 px cell.
+_DOTS = [("t_c", 0, 10, (5.0, -3.0)), ("t_c", 0, 50, (-12.0, 8.0)), ("t_c", 1, 50, (20.0, 0.0)),
+         ("t_a", 0, 50, (1.0, 1.0)), ("t_a", 1, 50, (-4.0, 2.0)), ("t_a", 1, 50, (6.0, -6.0))]
+
+
+def _dot(tp, q, offset):
+    return (_CENTRES[q][0] + offset[0], _CENTRES[q][1] + offset[1])
+
+
+def _dataset_with_cell_positions(tmp_path):
+    from tests.test_nanowell_review_data import _dataset, _row
+
+    rows = []
+    for tp in ("t_c", "t_a"):
+        for q, (x, y) in _CENTRES.items():
+            n = sum(1 for t, cq, _a, _o in _DOTS if t == tp and cq == q)
+            rows.append({**_row(tp, q, 0, n=n, c=0.1 * n, gfp=10.0), "owner": f"F{q}", "well_x_um": x,
+                         "well_y_um": y})
+    grids = {"A01": {tp: {"status": "ok", "pitch_um": 172.0, "lattice_kind": "hex"} for tp in ("t_c", "t_a")}}
+    out = _dataset(tmp_path, {"A01": rows}, grids=grids,
+                   starts={"t_c": "2026-03-01T09:00:00", "t_a": "2026-03-01T14:00:00"})
+    pd.DataFrame([{"well": "A01", "fov": f"F{q}", "timepoint": tp, "nucleus_id": i + 1, "area_px": area,
+                   "GFP_mean_intensity": 10.0, "nw_q": q, "nw_r": 0, "well_x_um": _dot(tp, q, o)[0],
+                   "well_y_um": _dot(tp, q, o)[1]} for i, (tp, q, area, o) in enumerate(_DOTS)]
+                 ).to_csv(out / "measurements_A01.csv", index=False)
+    return out
+
+
+def test_the_array_s_cells_layer_draws_the_cells_the_counts_hold(qtbot, tmp_path):
+    """Reported by review: the Cells layer drew every cell the run counted while the counts under it were gated, so a
+    nanowell reading "0 cells" sat under drawn dots. Through the real Layers action: the size gate's 10 px object is
+    no longer drawn, the footer counts it as left out, and a field excluded in QC triage draws none of its cells."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from review.features.home.triage.controller import exclude_fields
+    from review.features.nanowell import controller as nwc
+    from review.features.qc.controller import get_qc_params, recompute_qc_all
+    from tests.test_nanowell_page import _loaded, _page, _texts
+
+    ctx = _page(qtbot, _dataset_with_cell_positions(tmp_path))
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    nwc.set_view(ctx, "array")
+    nwc.set_timepoint(ctx, "t_c")
+    ctx.widgets.get("_nw_layer_cells").trigger()
+
+    def dots():
+        found = [c for c in st.drawn.ax.collections if c.get_gid() == "nw-array-cells"]
+        return sorted(tuple(map(float, p)) for c in found for p in c.get_offsets())
+
+    every = sorted(_dot(tp, q, o) for tp, q, _a, o in _DOTS if tp == "t_c")
+    assert dots() == every
+
+    ctx.state.qc.params = replace(get_qc_params(ctx), enabled=True, min_area=30.0)
+    recompute_qc_all(ctx)
+    _reloaded(qtbot, ctx, st)
+    assert _site(st, "t_c", 0)["n"] == 1.0
+    assert dots() == sorted(_dot(tp, q, o) for tp, q, area, o in _DOTS if tp == "t_c" and area >= 30)
+    footer = re.sub(r"\s+", " ", " ".join(_texts(ctx, "nw-array-footer")))
+    assert "Cell Gating leaves out 1 more here, which is not drawn." in footer, footer
+
+    exclude_fields(ctx, [SimpleNamespace(well="A01", fov="F0", timepoint="t_a", can_exclude=True)], "soft tile")
+    _reloaded(qtbot, ctx, st)
+    nwc.set_timepoint(ctx, "t_a")
+    assert _site(st, "t_a", 0)["state"] == "field_excluded"
+    assert dots() == sorted(_dot(tp, q, o) for tp, q, _a, o in _DOTS if tp == "t_a" and q == 1)
+    footer = re.sub(r"\s+", " ", " ".join(_texts(ctx, "nw-array-footer")))
+    assert "1 more is in an excluded field, which is not drawn." in footer, footer
+
+
+def test_a_cut_crop_records_the_rows_of_the_cells_it_draws(tmp_path):
+    from review.features.nanowell import image_compute as imc
+    from tests.test_nanowell_crop_cells import _tile_data
+
+    data, metrics = _tile_data(tmp_path, [(100.0, 40.0), (98.0, 41.0), (150.0, 40.0)])
+    crop = imc.site_crops(data, metrics, ("A01", 0, 0))["t0"]
+    assert crop.cells.tolist() == [[9.0, 9.0], [5.0, 11.0]]
+    assert crop.cell_rows[["well_x_um", "well_y_um"]].values.tolist() == [[100.0, 40.0], [98.0, 41.0]]
+
+
+def test_the_crop_strip_draws_only_the_cells_the_counts_hold(qtbot, tmp_path, monkeypatch):
+    """The crop overlay goes through the same rule: the strip's dots leave out the cell the size gate drops, and the
+    caption says so."""
+    from dataclasses import replace
+
+    from PySide6.QtCore import Qt
+
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell.image_compute import Crop
+    from review.features.qc.controller import get_qc_params, recompute_qc_all
+    from tests.test_nanowell_page import _click_dot, _loaded, _page
+
+    def crops(_data, _metrics, site, **_kw):
+        """A cut crop of (0,0) at t_c as ``image_compute`` cuts one: each cell's pixel and its row, in one order."""
+        rows = pd.DataFrame([{"well": "A01", "timepoint": tp, "nw_q": q, "nw_r": 0, "fov": f"F{q}",
+                              "well_x_um": _dot(tp, q, o)[0], "well_y_um": _dot(tp, q, o)[1]}
+                             for tp, q, _a, o in _DOTS if tp == "t_c" and q == 0])
+        return {"t_c": Crop(np.zeros((40, 40)), "tile", "F0, full resolution", np.array([[3.0, 4.0], [8.0, 9.0]]),
+                            cell_rows=rows)}
+
+    monkeypatch.setattr(nwc, "site_crops", crops)
+    ctx = _page(qtbot, _dataset_with_cell_positions(tmp_path))
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    ctx.state.qc.params = replace(get_qc_params(ctx), enabled=True, min_area=30.0)
+    recompute_qc_all(ctx)
+    _reloaded(qtbot, ctx, st)
+    _click_dot(qtbot, ctx, ("A01", 0, 0))
+    box = ctx.widgets.get("_nw_strip_cells_box")
+    qtbot.waitUntil(lambda: box.isVisible() and box.width() > 0, timeout=5000)
+    qtbot.mouseClick(box, Qt.LeftButton)
+
+    def strip(gid):
+        fig = ctx.widgets.get("_nw_strip_fig")
+        return fig, [t.get_text() for t in fig.texts if t.get_gid() == gid]
+
+    qtbot.waitUntil(lambda: bool(strip("nw-crop-caption")[1]), timeout=10000)
+    fig, caption = strip("nw-crop-caption")
+    dots = [c.get_offsets().tolist() for ax in fig.axes for c in ax.collections if c.get_gid() == "nw-crop-cells"]
+    assert dots == [[[8.0, 9.0]]], dots                                  # the 10 px object's dot is gone
+    assert caption[0].endswith("; dots: the 1 cells the run counted in view; 1 more Cell Gating leaves out, not "
+                               "drawn"), caption
+
+
+def test_save_nanowell_data_records_the_gate_beside_the_gated_counts(qtbot, tmp_path, monkeypatch):
+    """Tracker M10: *Save nanowell data…* writes the page's gated count under the pipeline's own ``n_cells`` name, so
+    the file must say so — the run's own count beside it, how many cells the gate left out of each nanowell, and the
+    figure's sentence about the gate on every row, as Batch Export's summary carries it. Through the real Save menu
+    action, with the real QC size gate dropping (0,0)'s 10 px object at t_c."""
+    from dataclasses import replace
+    from pathlib import Path
+
+    from PySide6.QtGui import QAction
+
+    import review.core.csv_export as csv_export
+    from review.features.qc.controller import get_qc_params, recompute_qc_all
+    from tests.test_nanowell_page import _loaded, _page
+
+    ctx = _page(qtbot, _dataset_with_areas(tmp_path))
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    ctx.state.qc.params = replace(get_qc_params(ctx), enabled=True, min_area=30.0)
+    recompute_qc_all(ctx)
+    _reloaded(qtbot, ctx, st)
+    out = str(Path(ctx.state.dataset.data_dir) / "nanowell_metrics.csv")
+    monkeypatch.setattr(csv_export, "ask_save_csv", lambda *_a, **_k: out)
+    (action,) = [a for a in ctx.window.findChildren(QAction) if a.text() == "Save nanowell data…"]
+    action.trigger()
+    written = pd.read_csv(out, dtype={"timepoint": str})
+    assert {"n_cells_run", "cells_left_out", "cell_gating"} <= set(written.columns), list(written.columns)
+    by = {(r.timepoint, int(r.nw_q)): r for r in written.itertuples()}
+    assert (by["t_c", 0].n_cells, by["t_c", 0].n_cells_run, by["t_c", 0].cells_left_out) == (1.0, 2.0, 1)
+    assert (by["t_c", 1].n_cells, by["t_c", 1].n_cells_run, by["t_c", 1].cells_left_out) == (1.0, 1.0, 0)
+    assert (by["t_a", 0].n_cells, by["t_a", 0].n_cells_run, by["t_a", 0].cells_left_out) == (2.0, 2.0, 0)
+    assert set(written["cell_gating"]) == {
+        "Cell Gating leaves out 1 of 7 cells in these wells' nanowells: counts and brightness exclude them; "
+        "confluence and nanowell fluorescence are measured from pixels and do not."}
+    assert list(written.columns).index("n_cells_run") == list(written.columns).index("n_cells") + 1

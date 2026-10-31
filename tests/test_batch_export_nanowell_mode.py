@@ -280,3 +280,16 @@ def test_the_moving_average_reaches_the_figure_and_the_csv_says_which_window_eac
     assert list(expected["n_used"]) != list(measured["n_used"])          # the fixture can tell the two apart
     assert [(r["timepoint"], int(r["n_used"]), r["moving_average"]) for r in rows] == [
         (t, int(u), "2") for t, u in zip(expected["timepoint"], expected["n_used"])]
+
+
+def test_a_well_excluded_on_the_page_is_still_drawn_by_its_batch_group(panel, tmp_path, monkeypatch):
+    """Tracker L16, declined: the page's *Exclude* applies to the page only — "the well stays in the rest of
+    Review" — and a batch group draws the wells the user put in it. Pinned so that changing it is a decision, not
+    a drift: with A01 excluded on the page, the group's figures and its CSV still hold A01."""
+    p, ctx = panel
+    ctx.state.feature_slice("nanowell").excluded_wells = ["A01"]
+    calls = _drawn(monkeypatch)
+    p._run_batch()
+    assert [c["groups"] for c in calls] == [{"A01": ["A01"]}] * 2
+    rows = list(csv.DictReader((tmp_path / "export" / "nanowell_Drug_A_summary.csv").open()))
+    assert {r["metric"] for r in rows if r["well"] == "A01"} == {"n", "c"}

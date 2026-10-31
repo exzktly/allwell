@@ -5594,11 +5594,11 @@ the sentence names it.
   *Earliest* baseline: a count taken later — at a first measurable or a named timepoint — may follow a division,
   and the figure counts those nanowells.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
-- **Fixed cohort** (on *Distribution* and *Trajectories*) — use only the nanowells with a value at every
+- **Fixed cohort** (on *Distribution*, *Trajectories* and *Statistics*) — use only the nanowells with a value at every
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
   measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
   the footer gives the cohort's size.
-- **Moving average** (on *Distribution* and *Trajectories*) — *Off*, or 2 to 9 timepoints: each nanowell's
+- **Moving average** (on *Distribution*, *Trajectories* and *Statistics*) — *Off*, or 2 to 9 timepoints: each nanowell's
   value at a timepoint becomes the mean of its values at that timepoint and the ones before it, that many in
   all. The window counts timepoints, not hours, so with unevenly spaced acquisitions it covers a different
   stretch of time at each step. A value is averaged only when the nanowell has a value at every timepoint of
@@ -5687,7 +5687,8 @@ the sentence names it.
   one pass for the whole montage, so it fills in a moment after the ranking is drawn.
 - **Statistics** — tests whether wells, or groups of wells, differ in the **Metric** at the **Timepoint** (the
   latest by default), modelled on the Statistics tab. It compares exactly the dots the Distribution view draws
-  *Along x: Wells*: the **Baseline**, **Subset**, **Fixed cohort** and excluded wells all apply, and every nanowell
+  *Along x: Wells*: the **Baseline**, **Subset**, **Fixed cohort**, **Moving average** and excluded wells all apply
+  (the report states the cohort and the window when they are on), and every nanowell
   left out is counted under its sample. **Compare** chooses what one value is:
   - *Wells (nanowells as values)* — each well is a sample and its nanowells are the values. This says whether
     these wells' distributions differ. It says nothing about the conditions behind them, because the nanowells
@@ -5701,8 +5702,10 @@ the sentence names it.
   and the figure then draws each sample's cumulative curve), or Dunnett. **vs** lists the samples: with none
   chosen every pair is compared; with one, each other sample is compared with it only — fewer comparisons, the
   family a plate design usually means. Dunnett always needs a control and corrects for its own family
-  (*p_Dunnett*); the other tests print the raw *p* and the Benjamini-Hochberg adjusted *p_BH* when there is more
-  than one comparison, and the stars are of the adjusted p. With three or more samples an omnibus (one-way
+  (*p_Dunnett*); the other tests print the raw *p* and the Benjamini-Hochberg adjusted *p_BH* when more than one
+  comparison has a p, and the stars are of the adjusted p. A family of one — or one in which only one comparison
+  could be computed — prints that p as plain *p*, and the line under the comparisons counts how many were made, how
+  many were computed, and whether anything was corrected. With three or more samples an omnibus (one-way
   ANOVA, or Kruskal-Wallis for the rank tests) is stated first. Each sample gets a line with its n, mean, sd,
   median and interquartile range (and a 95% interval on Groups); each comparison its statistic, p, stars, Hedges'
   *g* and the difference of means with a bootstrap 95% interval. Above the report a box per sample (the dots
@@ -5734,8 +5737,11 @@ the sentence names it.
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the
     `q,r` when both are on). A nanowell without a value has no number written, never a 0. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
     from the run's cell table, so you can see where cells were found and where none were; the run does not
-    keep cell outlines, so the dot is the cell's centre, not its shape. On *Lattice* positions each dot keeps
-    its place inside its nanowell, and **Overlays** hides the dots with the other coloured layers. Datasets
+    keep cell outlines, so the dot is the cell's centre, not its shape. The dots are the cells the counts hold:
+    a cell Home's Cell Gating leaves out, or one in a field excluded in QC triage, by the field-quality flag or by
+    the FOVs chosen on Cell Gating, is not drawn, and the footer counts how many were left out for each. On
+    *Lattice* positions each dot keeps its place inside its nanowell, and **Overlays** hides the dots with the
+    other coloured layers. Datasets
     analysed before this setting existed show their cells too: nothing needs re-running. *Tiles* outlines each tile, coloured by how it was placed (green on the lattice, blue by
     overlap, amber where the acquisition record put it), with its registration residual; a tile whose size the
     record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
@@ -5789,7 +5795,9 @@ and the caption; the title stays) and **Go to nanowell**. They are the page's se
 Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted on every
 crop — the strip, the pop-out and the Extremes montage — as the Array view's *Cells* layer does on the array (the
 run keeps no cell outlines). It is one setting, also offered on the Extremes view, and kept with the page's
-settings. The caption counts the dots, and a well without a cell table is named there rather than shown as empty.
+settings. As on the Array view, a cell Cell Gating leaves out, or one in an excluded field, is not drawn. The
+caption counts the dots and those left out, and a well without a cell table is named there rather than shown as
+empty.
 The box beside **Cells** chooses what the crops are an image of: *Phase* (the image the run segmented), or any
 fluorescence channel the run read — EGFP, say — cut from that channel's image of the same tile, at the same place.
 It is one setting for every picture on the page: the strip, the pop-out, the Extremes montage and the Array view's
@@ -5820,7 +5828,10 @@ which wells are left out. It applies only to this page — the well stays in the
 the page's settings. **Excluded (n) ▾** on the band brings back one well or all of them.
 
 **Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the wells the page
-draws as one long CSV, with the baseline and where the times came from; with a Subset set, every
+draws as one long CSV, with the baseline and where the times came from. Its `n_cells` and brightness are the
+page's, so they leave out the cells Home's Cell Gating leaves out; beside them `n_cells_run` is the run's own
+count, `cells_left_out` how many cells the gating took from it, and `cell_gating` says what the gating left out
+(empty when nothing). With a Subset set, every
 row is still written, flagged in `in_subset` with the subset (`subset`) and its baseline (`subset_baseline`) beside it. Right after you change the baseline it waits:
 until the page has drawn the new baseline's numbers, saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
 drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
@@ -5902,7 +5913,8 @@ chooses what it draws:
 - **Distance map** — every nanowell at its place. *Colour* chooses how it is filled: **Status** sorts the
   nanowells into lands on itself (green), imprecise (amber), wrong name (red), in a misregistered tile (red,
   hatched) and not compared (grey), with a count of each in the legend, so the few that fail stand out among many
-  that pass; **Distance** fills each by how far its address landed from itself in nanowell spacings (the
+  that pass. In a timepoint contradicted as a whole every nanowell is left out of the figures, so none is green:
+  those that land on themselves are drawn red and cross-hatched as *Lands on itself, timepoint left out*; **Distance** fills each by how far its address landed from itself in nanowell spacings (the
   quarter-spacing limit is marked on the colour bar); **Auto** shows Status unless the timepoint is confirmed.
   Failing nanowells are outlined in red. An imaging tile a whole spacing off is drawn in red labelled with how far
   it moved; one placed slightly differently, in amber, with how far off it is.
@@ -6765,8 +6777,9 @@ the fraction responding above that metric's number (and the number itself),
 the fraction occupied, the nanowells used, and those excluded by reason. A metric
 drawn as Cell count because the channel has no site intensities carries no
 fraction responding, since its number was set for the other metric. A group's replicate sets are drawn as sets and its single wells on their
-own, as on the page. A well of the group with no nanowell table is named on the
-figure and gets its own row in the CSV; a group with none at all is skipped and
+own, as on the page. A well excluded on the Nanowells page with **Exclude** is still drawn when its group holds
+it: that exclusion is the page's own, so take the well out of the group to leave it out of the export. A well of
+the group with no nanowell table is named on the figure and gets its own row in the CSV; a group with none at all is skipped and
 the run says so. Saved Plots records made by this mode restore the Nanowells page
 to the figure's view and metric.
 

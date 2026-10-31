@@ -431,8 +431,13 @@ STATUS_CLASSES = (
     ("imprecise", "Lands nearest itself, beyond {tol:g} spacing"),
     ("wrong_name", "Wrong name: lands on another, or another lands on it"),
     ("misregistered", "In a tile placed a lattice step off"),
+    ("timepoint_out", "Lands on itself, but the whole timepoint is contradicted, so it is left out"),
     ("not_compared", "Not compared"),
 )
+#: The classes a timepoint contradicted as a whole turns into ``timepoint_out``: every nanowell of such a timepoint
+#: is left out of every figure, so none may read as one that is used (CLAUDE.md §7); a wrong name, a misregistered
+#: tile and a nanowell not compared keep their own class, which says more.
+_USED_CLASSES = frozenset({"kept", "imprecise"})
 #: How far, in pitches, an address no row of the sidecar names may land from itself and still be nearest itself:
 #: half the spacing, the nearest any other site can be on either lattice. Used only beyond the sidecar's list of
 #: failing addresses (``MAX_LISTED``), where where it landed is not recorded.
@@ -466,7 +471,11 @@ def _classes(pair: IdentityPair) -> dict:
     sidecar written before that list existed, the nanowells of the tiles it found a step off (``tiles.moved``) —
     then each listed failing address (landed on itself: imprecise; on another: a wrong name), then each distance
     (within the tolerance: kept; beyond it, nearest itself — :data:`NEAREST_ITSELF_PITCHES` — imprecise, else a
-    wrong name), and every other address of the reference not compared."""
+    wrong name), and every other address of the reference not compared. In a timepoint contradicted as a whole
+    (the pair's verdict, the stage cross-check's override included) a nanowell that lands on itself is
+    ``timepoint_out``, since it is left out with the timepoint."""
+    from pipeline.nanowell_identity import CONTRADICTED
+
     entry = pair.entry
     tolerance = float((pair.payload or {}).get("tolerance_pitches") or TOLERANCE_PITCHES)
     out: dict = {}
@@ -487,6 +496,8 @@ def _classes(pair: IdentityPair) -> dict:
                        "imprecise" if d <= NEAREST_ITSELF_PITCHES else "wrong_name")
     for address in getattr(pair.ref, "sites", None) or {}:
         out.setdefault(tuple(address), "not_compared")
+    if pair.verdict == CONTRADICTED:
+        out = {address: "timepoint_out" if cls in _USED_CLASSES else cls for address, cls in out.items()}
     return out
 
 

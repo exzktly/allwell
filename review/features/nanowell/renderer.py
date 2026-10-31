@@ -578,6 +578,9 @@ def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None) -> None:
         tally["no_table"] = tally.get("no_table", 0) + 1
         return
     tally["drawn"] = tally.get("drawn", 0) + len(crop.cells)
+    for key in ("gated", "in_fields"):
+        if getattr(crop, key, 0):
+            tally[key] = tally.get(key, 0) + getattr(crop, key)
     if len(crop.cells):
         ax.scatter(crop.cells[:, 0], crop.cells[:, 1], s=size or CELL_DOT_PT2, c=CELL_COLOUR,
                    edgecolors=CELL_EDGE_COLOUR, linewidths=0.4, zorder=5, gid="nw-crop-cells")
@@ -587,11 +590,16 @@ def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None) -> None:
 
 
 def _cells_clause(tally: dict) -> str:
-    """What the cell dots on a set of crops are, for its caption: how many were drawn, and that a crop without a
-    cell table has none drawn because none could be read — never that it holds no cells."""
+    """What the cell dots on a set of crops are, for its caption: how many were drawn, how many the page left out
+    (Cell Gating's, and an excluded field's), and that a crop without a cell table has none drawn because none could
+    be read — never that it holds no cells."""
     if not tally:
         return ""
     said = [f"dots: the {tally.get('drawn', 0):,} cells the run counted in view"] if "drawn" in tally else []
+    if tally.get("gated"):
+        said.append(f"{tally['gated']:,} more Cell Gating leaves out, not drawn")
+    if tally.get("in_fields"):
+        said.append(f"{tally['in_fields']:,} more in an excluded field, not drawn")
     if tally.get("no_table"):
         said.append(f"{tally['no_table']} crop(s) of a well without a cell table, so no cells drawn there")
     return "; ".join(said)

@@ -26,10 +26,12 @@ imply.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QWidget
 
 from ui import theme
-from widgets.plate_progress import PlateProgress, scaled_px, canon_well, status_dot
+from widgets.plate_progress import PlateProgress, scaled_px, canon_well
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -38,11 +40,26 @@ _BAR_W = 86
 _BAR_H = 6
 _CNT_W = 40
 _NM_W = 74
-#: Gap between a stage row's dot, name and bar. Off the 4-px scale on purpose,
+#: Gap between a stage row's name, bar and count. Off the 4-px scale on purpose,
 #: like the 6 px in ``plate_progress``: these rows are a fixed-width rail whose
 #: density decides how many fit, so rounding to a scale step is a design
 #: decision rather than a lint fix. Named so the number is stated once.
 _STAGE_ROW_SPACING_PX = 7
+
+
+class _StageRow(NamedTuple):
+    """One row of the stage rail: the stage's name, its bar, and its ``done/total`` count.
+
+    No coloured dot. A stage dot used to be painted from the plate's state
+    palette (complete, active, started, pending), so the same colours meant
+    two things a few pixels apart: a stage dot turned the "complete" green
+    when the Process stage finished while every processed well sat in the
+    "on server" blue. The bar and the count already say how far a stage is,
+    and the bold name says which one is running."""
+
+    name: QLabel
+    bar: QProgressBar
+    count: QLabel
 
 # Per-well transfer directions, as they arrive on a ``well_xfer`` event.
 _XFER_UP = "up"
@@ -149,7 +166,7 @@ class RunDashboard(PlateProgress):
         # to sit on "Transferring… 92%" for the whole compute phase.
         self._transfer: float | None = None
         self._transfer_direction = _XFER_UP
-        self._rail: dict[str, tuple] = {}        # stage -> (dot,name,bar,count)
+        self._rail: dict[str, _StageRow] = {}
         super().__init__("Run Progress", parent)
         self.setObjectName("RunDashboard")
 
@@ -671,8 +688,8 @@ class RunDashboard(PlateProgress):
         self._refresh_rail()
 
     def setRailBeside(self, beside: bool) -> None:
-        for _dot, _nm, bar, _cnt in getattr(self, "_rail", {}).values():
-            bar.setVisible(not beside)
+        for row in getattr(self, "_rail", {}).values():
+            row.bar.setVisible(not beside)
         super().setRailBeside(beside)
 
     def _build_rail(self) -> None:
@@ -688,16 +705,14 @@ class RunDashboard(PlateProgress):
             row_w = QWidget(self._rail_host)
             row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(_STAGE_ROW_SPACING_PX)
-            dot = status_dot(theme.Colors.run_pending)
-            row.addWidget(dot)
             nm = QLabel(label, row_w); nm.setFixedWidth(scaled_px(_NM_W))
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
             bar = QProgressBar(row_w)
             bar.setRange(0, max(1, self._total)); bar.setValue(0)
             bar.setTextVisible(False); bar.setFixedSize(scaled_px(_BAR_W), _BAR_H)
-            # Beside the plate (phone layout sideways) the bar goes: the dot's
-            # colour and the count say the same, and the plate needs the width.
+            # Beside the plate (phone layout sideways) the bar goes: the count
+            # says the same, and the plate needs the width.
             bar.setVisible(not self.isRailBeside())
             row.addWidget(bar)
             cnt = QLabel("0/0", row_w); cnt.setFixedWidth(scaled_px(_CNT_W))
@@ -705,7 +720,7 @@ class RunDashboard(PlateProgress):
             row.addWidget(cnt)
             row.addStretch(1)
             self._rail_lay.addWidget(row_w)
-            self._rail[key] = (dot, nm, bar, cnt)
+            self._rail[key] = _StageRow(nm, bar, cnt)
         self._rail_lay.addStretch(1)
         self._refresh_rail()
 
@@ -715,17 +730,12 @@ class RunDashboard(PlateProgress):
             widgets = self._rail.get(key)
             if not widgets:
                 continue
-            dot, nm, bar, cnt = widgets
+            nm, bar, cnt = widgets
             done = self._count(key)
             stage_total = self._stage_total(key)
             bar.setRange(0, max(1, stage_total)); bar.setValue(done)
             cnt.setText(f"{done}/{stage_total}")
             active = key == self._active_stage
-            complete = stage_total and done >= stage_total
-            color = (theme.Colors.run_done if complete else
-                     (theme.Colors.run_processing if active else
-                      (theme.Colors.run_on_server if done else theme.Colors.run_pending)))
-            dot.setStyleSheet(f"background:{color}; border-radius:5px;")
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};" + ("font-weight:700;" if active else ""))
 
     def _legend_items(self):

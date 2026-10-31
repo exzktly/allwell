@@ -10750,8 +10750,11 @@ of memory (`_thread_share`: the worker's budget less the tile cache's `CACHE_SHA
 **A timepoint's tiles are measured on the threads** (`_finish_timepoint`, `_tile_threads`: as many as fit beside
 this timepoint's and the next one's tiles at `TILE_WORK_BYTES_PER_PX`, measured at 40 bytes a pixel), the segmenter
 behind the worker's one re-entrant lock (`serialised`), so a worker never has two Cellpose calls in flight and the
-tiles' CPU work overlaps the GPU's. When the count is Cellpose's and the run found no GPU
-(`nanowell_parallel.gpu_in_use`: `parallelism.GPU_SHARERS_ENV` unset), tiles are measured one at a time and nothing
+tiles' CPU work overlaps the GPU's. When the count is Cellpose's and its Cellpose is not on a GPU
+(`nanowell_parallel.gpu_in_use`: once the worker's model has loaded, the device it loaded on —
+`pipeline.cellpose` marks each model it loads with `nanowell_parallel.ON_GPU_ATTR`, read from its model cache
+without importing it, since only Torch in the worker knows whether it can reach the GPU; before that, the main
+process's plan, `parallelism.GPU_SHARERS_ENV` unset), tiles are measured one at a time and nothing
 is prepared ahead: Cellpose then runs on Torch's own threads, there is no GPU time to overlap, and more threads would
 only compete for the same cores. Each well logs, through `run_well`'s *note*, how many timepoints it locates at once
 and how many tiles it measures at once, with what decided each (`_locate_threads_why`, `_tile_threads_why`: the

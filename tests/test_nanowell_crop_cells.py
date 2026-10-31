@@ -147,8 +147,14 @@ def test_a_crop_of_a_well_without_a_cell_table_is_named_in_the_caption(page, qtb
     _loaded(qtbot, page)
     _click_dot(qtbot, page, ("A01", 1, 0))
     _press(qtbot, page, "_nw_strip_cells_box")
-    caption = [t.get_text() for t in page.widgets.get("_nw_strip_fig").texts if t.get_gid() == "nw-crop-caption"]
-    assert caption[0].endswith("; 1 crop(s) of a well without a cell table, so no cells drawn there")
+
+    def caption():
+        return [t.get_text() for t in page.widgets.get("_nw_strip_fig").texts if t.get_gid() == "nw-crop-caption"]
+
+    # The crops are cut on a worker (``controller._fetch``), so the caption is drawn when they arrive, not when the
+    # box is pressed; read straight away, a slow runner found no caption at all.
+    qtbot.waitUntil(lambda: bool(caption()), timeout=10000)
+    assert caption()[0].endswith("; 1 crop(s) of a well without a cell table, so no cells drawn there")
     assert _dots(page, "_nw_strip_fig") == []
 
 

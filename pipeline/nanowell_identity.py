@@ -71,8 +71,12 @@ log = logging.getLogger("allwell.nanowell")
 
 NANOWELL_DIR = "nanowells"
 SIDECAR_SUFFIX = "_identity.json"
-#: The sidecar's format; :func:`read_sidecar` treats another as not checked.
-IDENTITY_VERSION = 1
+#: The sidecar's format and the rules its verdicts were decided by; :func:`read_sidecar` treats another as not
+#: checked. Raised whenever a change can alter a verdict, reason or exclusion a sidecar records, or the old rules'
+#: sidecars are read as the new rules' verdict on unchanged tables (review tracker M4). 2: the rules of the identity
+#: tracker's U5/U6 rows and the review's M3, M6, L17 and L18 fixes. ``tests/test_nanowell_identity_rules.py`` pins
+#: a digest of the rules to this number.
+IDENTITY_VERSION = 2
 
 CONFIRMED = "confirmed"
 CONTRADICTED = "contradicted"
@@ -89,6 +93,9 @@ GOOD = (CONFIRMED, REFERENCE)
 #: shown to: confirmed, the reference, and a partial timepoint outside its exclusions.
 AGREES = (CONFIRMED, REFERENCE, PARTIAL)
 VERDICTS = (CONFIRMED, REFERENCE, PARTIAL, INCONCLUSIVE, CONTRADICTED, NOT_CHECKED)
+#: The verdicts the run log, the audit's summary and its exit status report: every one that is not good. A partial
+#: timepoint leaves nanowells out of every join, so it is said as loudly as the others (review tracker L19).
+NOT_GOOD = (CONTRADICTED, INCONCLUSIVE, PARTIAL)
 
 #: How far, in pitches, a mapped address may land from the same address at the other timepoint. A lattice step
 #: error moves it a whole pitch; registration and site-fit noise on rendered plates are a few hundredths. Assumed,
@@ -143,6 +150,9 @@ SURFACE_SIDE = 48
 MAX_LISTED = 200
 
 _MONTAGE_NAME = "{well}_{tp}_montage.png"
+#: The argument ``all_well_launcher`` routes to :func:`main` in the packaged app, where ``python -m`` has no
+#: interpreter to run it (review tracker M5); :func:`audit_argv` names it there.
+FROZEN_SENTINEL = "--run-identity"
 
 
 # ── the lattice ──────────────────────────────────────────────────────────────
@@ -838,7 +848,11 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
         result["centre_agreement_pitches"] = round(centre, 4)
     # Problems with the registration itself, or with every address at once: nothing in the timepoint can be kept.
     whole = []
-    if diagnosis.get("kind") in ("step", "symmetry"):
+    # What the addresses say decides nothing on fewer than MIN_COMPARED of them: such a timepoint is inconclusive, as
+    # documented, not accused on two or three sites (review tracker L18). The square, the outline and the tile layout
+    # are not counts of addresses and still contradict.
+    enough = test.compared >= MIN_COMPARED
+    if enough and diagnosis.get("kind") in ("step", "symmetry"):
         whole.append(f"{test.wrong} of {test.compared} addresses land on other nanowells: {diagnosis['detail']}")
     if centre is not None and centre >= CENTRE_CONTRADICTS_PITCHES:
         whole.append(f"the array's fitted centre lands {centre:.2f} pitch from this timepoint's once registered on "
@@ -849,8 +863,8 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
                      "reference's square correlates: the run took something else for the square")
     if layout["split"]:
         whole.append(layout["reason"])
-    excluded = _excluded(test, layout, other)
-    if not whole and excluded and len(excluded) > PARTIAL_MAX_SHARE * max(test.compared, 1):
+    excluded = _excluded(test, layout, ref, other)
+    if enough and not whole and excluded and len(excluded) > PARTIAL_MAX_SHARE * test.compared:
         whole.append(f"{len(excluded)} of {test.compared} nanowells are shown wrong, more than half: "
                      f"{diagnosis['detail'] or layout['reason']}")
     notes = []
@@ -884,10 +898,16 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
     return result
 
 
-def _excluded(test: AddressTest, layout: dict, other: Timepoint) -> dict:
+def _excluded(test: AddressTest, layout: dict, ref: Timepoint, other: Timepoint) -> dict:
     """``address -> why`` for the other timepoint's nanowells shown wrong: an address whose mapped reference site
     landed on another's (``wrong_name``), the address it landed on (``neighbour_of_wrong``: that row is another
-    nanowell's), and every nanowell of a tile placed a lattice step off (``misregistered_tile``)."""
+    nanowell's), and every nanowell of a tile placed a lattice step off (``misregistered_tile``).
+
+    A moved tile is wrong in one of the two timepoints and the layout cannot say which, so the addresses it owns at
+    *either* are left out. Its addresses differ between the two at its edge: when the reference's tile is the one a
+    step off, the addresses it owns there are another tile's at the other timepoint, and leaving out only the other
+    timepoint's owners joined each of them to a different physical nanowell (review tracker M3). Only addresses the
+    other timepoint holds are listed: one it does not hold joins nothing already."""
     out: dict = {}
     for q, r, _d, lq, lr, _tile in test.failing:
         if (lq, lr) != (q, r):
@@ -896,6 +916,9 @@ def _excluded(test: AddressTest, layout: dict, other: Timepoint) -> dict:
     moved = {t for t, _d in layout.get("moved") or ()}
     for address, owner in other.owners.items():
         if owner in moved:
+            out[address] = "misregistered_tile"
+    for address, owner in ref.owners.items():
+        if owner in moved and address in other.sites:
             out[address] = "misregistered_tile"
     return out
 
@@ -973,7 +996,10 @@ def check_well(grid: dict, site_rows, montages: dict, order=None) -> dict:
         why = (f"{reference} and {other} each make the other's addresses wrong ({signature[0]}), and as many "
                "timepoints agree with each: which is right cannot be told. An anchor set by hand on the central "
                "square settles it")
-        disputed = {n for n, v in {**results, **alternative}.items() if v.get("verdict") in AGREES + (CONTRADICTED,)}
+        # Each side read on its own: merged, the alternative's verdict replaced the first's, so a timepoint confirmed
+        # against the first reference and inconclusive against the other stayed confirmed (review tracker L17).
+        disputed = {n for side in (results, alternative) for n, v in side.items()
+                    if v.get("verdict") in AGREES + (CONTRADICTED,)}
         for n in disputed:
             results[n] = {"verdict": CONTRADICTED, "reason": why, "diagnosis": {"kind": "tie", "detail": why}}
         out["reference"], out["reference_reason"] = None, why
@@ -1090,10 +1116,10 @@ def check_after_run(out_dir, well: str, order=None) -> dict | None:
         payload = check_well_dir(out_dir, well, order)
     if payload is None:
         return None
-    for tp, entry in payload["timepoints"].items():
-        if entry.get("verdict") in (CONTRADICTED, INCONCLUSIVE):
-            log.warning("Well %s timepoint %s: nanowell identity %s against %s (%s)", well, tp, entry["verdict"],
-                        payload.get("reference") or "no reference", entry.get("reason", ""))
+    for tp, (verdict, reason) in _effective(payload).items():
+        if verdict in NOT_GOOD:
+            log.warning("Well %s timepoint %s: nanowell identity %s against %s (%s)", well, tp, verdict,
+                        payload.get("reference") or "no reference", reason)
     return payload
 
 
@@ -1125,10 +1151,25 @@ def verdicts(out_dir, well: str, timepoints) -> dict[str, tuple[str, str]]:
     missing or stale, and for a timepoint it does not name. A stage-check failure overrides a good verdict."""
     payload = read_sidecar(out_dir, well)
     if payload is None:
-        why = ("the identity check has not been run on these tables" if not sidecar_path(out_dir, well).is_file()
-               else "the identity check was run on other tables than these (they changed since)")
+        why = _stale_reason(out_dir, well)
         return {tp: (NOT_CHECKED, why) for tp in timepoints}
     return {tp: verdict_in(payload, tp) for tp in timepoints}
+
+
+def _stale_reason(out_dir, well: str) -> str:
+    """Why *well* has no current sidecar: none written, one written by an earlier version of the check (whose rules
+    have changed), or one computed from other tables."""
+    path = sidecar_path(out_dir, well)
+    if not path.is_file():
+        return "the identity check has not been run on these tables"
+    try:
+        version = json.loads(path.read_text(encoding="utf-8")).get("version")
+    except (OSError, ValueError, AttributeError):
+        version = None
+    if version != IDENTITY_VERSION:
+        return ("the identity check that wrote this well's result was an earlier version, whose rules have changed "
+                "since: run it again")
+    return "the identity check was run on other tables than these (they changed since)"
 
 
 def verdict_in(payload: dict, tp: str) -> tuple[str, str]:
@@ -1169,15 +1210,17 @@ def stage_check(out_dir, wells=None) -> dict:
     fit and would agree with it by construction. It needs a stage position for every tile (``origin_stage_um``)
     and :data:`STAGE_MIN_WELLS` such wells at both timepoints; otherwise nothing is flagged and the reason is
     recorded. The tolerance is the image check's quarter pitch, not calibrated on a real plate's stage (tracker
-    Q5)."""
+    Q5).
+
+    *wells* limits which wells' sidecars are written and returned, never which wells are fitted: the verdict is the
+    plate's, and fitted on the named wells alone it was either refused (fewer than :data:`STAGE_MIN_WELLS`, which
+    replaced a well's flag with an empty block) or a different fit (review tracker M6)."""
     from pipeline.nanowell_task import plates_of
 
     folder = Path(out_dir) / NANOWELL_DIR
     grids = {}
     for path in sorted(folder.glob("*_grid.json")):
         well = path.name[: -len("_grid.json")]
-        if wells is not None and well not in wells:
-            continue
         try:
             grids[well] = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -1187,6 +1230,8 @@ def stage_check(out_dir, wells=None) -> dict:
     for plate, members in plates_of(grids).items():
         reference, reason = _stage_check_plate(members, results)
         references[plate], reasons[plate] = reference, reason
+    if wells is not None:
+        results = {w: entries for w, entries in results.items() if w in set(wells)}
     for well, entries in results.items():
         # Read without verifying the digest: in a batched remote run the final pass runs after a released well's
         # montage archive was deleted on the remote, which would fail the digest there and drop this block without
@@ -1263,14 +1308,21 @@ def summary_lines(results: dict) -> list[str]:
         if payload is None:
             lines.append(f"{well}: no nanowell tables")
             continue
-        counts = Counter(v.get("verdict") for v in payload["timepoints"].values())
+        found = _effective(payload)
+        counts = Counter(verdict for verdict, _why in found.values())
         lines.append(f"{well}: " + ", ".join(f"{counts[v]} {v}" for v in VERDICTS if counts[v])
                      + (f" (reference {payload['reference']})" if payload.get("reference") else
                         f" ({payload.get('reference_reason')})"))
-        for tp, v in payload["timepoints"].items():
-            if v.get("verdict") in (CONTRADICTED, INCONCLUSIVE):
-                lines.append(f"  {tp}: {v['verdict']} — {v.get('reason', '')}")
+        for tp, (verdict, reason) in found.items():
+            if verdict in NOT_GOOD:
+                lines.append(f"  {tp}: {verdict} — {reason}")
     return lines
+
+
+def _effective(payload: dict) -> dict[str, tuple[str, str]]:
+    """``timepoint -> (verdict, reason)`` of a sidecar as Review reads it (:func:`verdict_in`): the stage
+    cross-check's flag overrules the image verdict, so the audit's summary and exit status say what Review will."""
+    return {tp: verdict_in(payload, tp) for tp in payload.get("timepoints") or {}}
 
 
 def stage_check_after_run(out_dir) -> None:
@@ -1348,10 +1400,22 @@ def number_rows(payloads: dict) -> list[dict]:
     return rows
 
 
+def audit_argv(out_dir) -> list[str]:
+    """The command that audits *out_dir* in this copy of All-Well: the app's own executable with
+    :data:`FROZEN_SENTINEL` in the packaged app, ``python -m pipeline.nanowell_identity`` (from the repository root)
+    when running from source."""
+    import sys
+
+    if getattr(sys, "frozen", False):
+        return [sys.executable, FROZEN_SENTINEL, str(out_dir)]
+    return ["python", "-m", "pipeline.nanowell_identity", str(out_dir)]
+
+
 def main(argv=None) -> int:
     """``python -m pipeline.nanowell_identity <output_dir> [--well A01 ...] [--numbers]``: audit a dataset; exit 1
-    when any timepoint is contradicted, 2 when none is but any is inconclusive, 0 when every timepoint is good.
-    ``--numbers`` prints :func:`number_rows` as CSV in place of the summary."""
+    when any timepoint is contradicted, 2 when none is but any is inconclusive, 3 when neither but any is partial
+    (some of its nanowells left out), 0 when every timepoint is good. ``--numbers`` prints :func:`number_rows` as CSV
+    in place of the summary."""
     import argparse
     import sys
 
@@ -1374,8 +1438,8 @@ def main(argv=None) -> int:
     else:
         for line in summary_lines(results):
             print(line)
-    verdict_set = {v.get("verdict") for p in results.values() if p for v in p["timepoints"].values()}
-    return 1 if CONTRADICTED in verdict_set else 2 if INCONCLUSIVE in verdict_set else 0
+    verdict_set = {verdict for p in results.values() if p for verdict, _why in _effective(p).values()}
+    return 1 if CONTRADICTED in verdict_set else 2 if INCONCLUSIVE in verdict_set else 3 if PARTIAL in verdict_set else 0
 
 
 if __name__ == "__main__":                                        # pragma: no cover - the command line

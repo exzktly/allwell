@@ -8,8 +8,9 @@ cannot disagree about whether a result was significant.
 
 **The samples are the Distribution view's own numbers.** :func:`samples_from_model` reads the
 ``distribution_compute.DistributionModel`` drawn *Along x: Wells* — the metric, the timepoint, the baseline, the
-*Subset*, the fixed cohort, the excluded wells and every exclusion by reason already applied — so the Statistics view
-tests exactly the dots the Distribution view draws, never a second reading of the tables that could drift from it.
+*Subset*, the fixed cohort, the moving average, the excluded wells and every exclusion by reason already applied —
+so the Statistics view tests exactly the dots the Distribution view draws, never a second reading of the tables that
+could drift from it.
 
 **Two units, chosen by the user and named on the figure** (:data:`UNITS`):
 
@@ -174,10 +175,11 @@ class StatisticsResult:
 
     @property
     def correction(self) -> str:
-        """How ``p_adj`` was corrected, as the figure names it."""
-        if self.test["kind"] == "dunnett":
-            return "Dunnett's correction"
-        return "Benjamini-Hochberg" if any(c.adjusted for c in self.comparisons) else ""
+        """How ``p_adj`` was corrected, as the figure names it; ``""`` when no p printed was corrected (a family of
+        one, or one with a single computed comparison)."""
+        if not any(c.adjusted for c in self.comparisons):
+            return ""
+        return "Dunnett's correction" if self.test["kind"] == "dunnett" else "Benjamini-Hochberg"
 
 
 # ── the samples ──────────────────────────────────────────────────────────────
@@ -414,6 +416,28 @@ def sample_text(s: Sample, unit: str) -> str:
     return text
 
 
+def family_text(result: StatisticsResult) -> str:
+    """The sentence naming the family and how its p-values were corrected, counted from the comparisons themselves:
+    how many there are, how many have a p, and whether any p printed was adjusted. A family of one, or one in which
+    only one comparison could be computed, prints that p raw (``bh_adjust``; Dunnett's p for a family of one), so
+    the sentence never calls it corrected."""
+    total = len(result.comparisons)
+    computed = sum(1 for c in result.comparisons if c.ok)
+    count = f"{total} comparison{'' if total == 1 else 's'}"
+    if computed != total:
+        count += f", {'none' if not computed else computed} computed"
+    family = f"Compared: {result.family} ({count})"
+    if result.correction == "Dunnett's correction":
+        return family + "; p_Dunnett is corrected for the family by Dunnett's method."
+    if result.correction:
+        return family + "; p_BH is the Benjamini-Hochberg FDR-adjusted p across them, and the stars are of p_BH."
+    if not computed:
+        return family + "; nothing to correct for."
+    if total == 1:
+        return family + "; one comparison, so nothing to correct for."
+    return family + "; only one has a p, so nothing to correct for."
+
+
 def report_lines(result: StatisticsResult) -> list[tuple[str, str]]:
     """Every line of the view's report, ``(gid, text)``, in the order it is printed: the header, the omnibus, one
     line per sample, one per comparison, and the notes."""
@@ -439,16 +463,7 @@ def report_lines(result: StatisticsResult) -> list[tuple[str, str]]:
     lines += [(GID_SAMPLE, sample_text(s, result.unit)) for s in result.samples]
     dunnett = result.test["kind"] == "dunnett"
     lines += [(GID_PAIR, comparison_text(c, dunnett=dunnett)) for c in result.comparisons]
-    correction = result.correction
-    family = (f"Compared: {result.family} ({len(result.comparisons)} comparison"
-              f"{'' if len(result.comparisons) == 1 else 's'})")
-    if correction == "Benjamini-Hochberg":
-        family += "; p_BH is the Benjamini-Hochberg FDR-adjusted p across them, and the stars are of p_BH."
-    elif correction:
-        family += "; p_Dunnett is corrected for the family by Dunnett's method."
-    else:
-        family += "; one comparison, so nothing to correct for."
-    lines.append((GID_NOTE, family))
+    lines.append((GID_NOTE, family_text(result)))
     lines.append((GID_NOTE, "g: Hedges' g. Δ: difference of means (first minus second), with a bootstrap interval."))
     lines += [(GID_NOTE, note) for note in result.notes]
     return lines

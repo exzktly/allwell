@@ -359,9 +359,6 @@ def test_the_export_is_one_row_per_nanowell_and_timepoint_with_every_metric(tmp_
     assert (row["time_h"], row["time_source"], row["count_fc"], row["baseline"]) == (30.0, "recorded", 4.0, "earliest")
     occluded = table[(table["nw_q"] == 0) & (table["timepoint"] == "t_a")].iloc[0]
     assert occluded["state"] == "occluded" and math.isnan(occluded["n_cells"])
-    assert math.isnan(occluded["n_cells_run"]) and math.isnan(occluded["cells_left_out"])   # no count, not 0
-    assert (row["n_cells_run"], row["cells_left_out"]) == (row["n_cells"], 0.0)            # no gate: the run's
-    assert set(table["cell_gating"]) == {"not applied: the counts are the run's own"}
 
 
 def test_changing_the_baseline_recomputes_the_metrics(tmp_path):

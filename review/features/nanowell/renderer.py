@@ -566,12 +566,10 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
     fig.align_ylabels(axes)
 
 
-def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None, left_out=frozenset()) -> None:
-    """The counted cells of the cropped nanowell, as the Array view's Cells layer draws them: a light dot with a
-    dark rim at each centre (the run keeps no outlines), and a hollow ring for a cell in *left_out* — the cells Cell
-    Gating leaves out (``cell_gate_compute.GateTally.left_out``) — so the filled dots are the cells the count under
-    the crop counts. *tally* adds up what was drawn, what was left out and which crops had no cell table, for the
-    caption."""
+def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None) -> None:
+    """The counted cells of *crop*'s own nanowell, as the Array view's Cells layer draws them: a light dot with a dark
+    rim at each centre (the run keeps no outlines); a neighbour's cells in the crop's margin are not drawn. *tally* adds up what was drawn and which crops had no cell table, for
+    the caption."""
     from ui.nanowell_sites import CELL_COLOUR, CELL_EDGE_COLOUR
 
     if crop is None or crop.image is None:
@@ -579,34 +577,29 @@ def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None, left_out=
     if crop.cells is None:
         tally["no_table"] = tally.get("no_table", 0) + 1
         return
-    keys = getattr(crop, "keys", None)
-    out = (np.array([k in left_out for k in keys], dtype=bool) if left_out and keys is not None
-           and len(keys) == len(crop.cells) else np.zeros(len(crop.cells), dtype=bool))
-    tally["drawn"] = tally.get("drawn", 0) + int((~out).sum())
-    tally["left_out"] = tally.get("left_out", 0) + int(out.sum())
+    tally["drawn"] = tally.get("drawn", 0) + len(crop.cells)
+    for key in ("gated", "in_fields"):
+        if getattr(crop, key, 0):
+            tally[key] = tally.get(key, 0) + getattr(crop, key)
     if len(crop.cells):
-        kept, gone = crop.cells[~out], crop.cells[out]
-        if len(kept):
-            ax.scatter(kept[:, 0], kept[:, 1], s=size or CELL_DOT_PT2, c=CELL_COLOUR,
-                       edgecolors=CELL_EDGE_COLOUR, linewidths=0.4, zorder=5, gid="nw-crop-cells")
-        if len(gone):
-            ax.scatter(gone[:, 0], gone[:, 1], s=size or CELL_DOT_PT2, facecolors="none", edgecolors=CELL_COLOUR,
-                       linewidths=0.8, zorder=5, gid="nw-crop-cells-out")
+        ax.scatter(crop.cells[:, 0], crop.cells[:, 1], s=size or CELL_DOT_PT2, c=CELL_COLOUR,
+                   edgecolors=CELL_EDGE_COLOUR, linewidths=0.4, zorder=5, gid="nw-crop-cells")
         h, w = crop.image.shape[:2]
         ax.set_xlim(-0.5, w - 0.5)                      # the dots must not widen the image's own extent
         ax.set_ylim(h - 0.5, -0.5)
 
 
 def _cells_clause(tally: dict) -> str:
-    """What the cell dots on a set of crops are, for its caption: how many were drawn, and that a crop without a
-    cell table has none drawn because none could be read — never that it holds no cells."""
+    """What the cell dots on a set of crops are, for its caption: how many were drawn, how many the page left out
+    (Cell Gating's, and an excluded field's), and that a crop without a cell table has none drawn because none could
+    be read — never that it holds no cells."""
     if not tally:
         return ""
-    said = ([f"dots: the {tally.get('drawn', 0):,} cells the run counted in this nanowell"
-              + (" that the analysis keeps" if tally.get("left_out") else "")] if "drawn" in tally else [])
-    if tally.get("left_out"):
-        said.append(f"hollow: {tally['left_out']:,} more the run counted that Cell Gating leaves out (the QC size and "
-                    "shape gate, curation, the gates), which the counts do not count")
+    said = [f"dots: the {tally.get('drawn', 0):,} cells the run counted in this nanowell"] if "drawn" in tally else []
+    if tally.get("gated"):
+        said.append(f"{tally['gated']:,} more Cell Gating leaves out, not drawn")
+    if tally.get("in_fields"):
+        said.append(f"{tally['in_fields']:,} more in an excluded field, not drawn")
     if tally.get("no_table"):
         said.append(f"{tally['no_table']} crop(s) of a well without a cell table, so no cells drawn there")
     return "; ".join(said)
@@ -618,7 +611,7 @@ def _of_channel(image_channel: str) -> str:
 
 
 def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, image_channel: str = "",
-                      display_range=None, left_out=frozenset()) -> None:
+                      display_range=None) -> None:
     """The first selected nanowell's crops, one per timepoint, on the strip under the site detail's **Pop out**
     button: each titled with its timepoint, a timepoint without a crop saying why in its place, and where the crops
     were cut from said once in the caption. *crops* is ``None`` while they are being cut."""
@@ -644,7 +637,7 @@ def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, ima
             lo, hi = scale.of(crop)
             ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi, gid="nw-crop-image")
             if cells:
-                _draw_crop_cells(ax, crop, tally, size=6.0, left_out=left_out)
+                _draw_crop_cells(ax, crop, tally, size=6.0)
             if crop.source == "montage":
                 notes.add(crop.note)
         else:
@@ -663,8 +656,7 @@ def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, ima
 
 
 def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metrics: dict | None = None,
-                     image_channel: str = "", display_range=None, labels: bool = True,
-                     left_out=frozenset()) -> None:
+                     image_channel: str = "", display_range=None, labels: bool = True) -> None:
     """The selected nanowell at every timepoint, large: one panel per timepoint, filling the page's figure.
 
     Asked for: a larger view of a selected nanowell over time than the site detail's strip of small crops. Every
@@ -701,7 +693,7 @@ def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metr
             lo, hi = scale.of(crop)
             ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi, gid="nw-crop-grid-image")
             if cells:
-                _draw_crop_cells(ax, crop, tally, size=CELL_DOT_PT2 * 2, left_out=left_out)
+                _draw_crop_cells(ax, crop, tally, size=CELL_DOT_PT2 * 2)
             if crop.source == "montage":
                 notes.add(crop.note)
         else:
@@ -851,7 +843,7 @@ def _extremes_layout(fig, blocks, cols: int) -> _ExtremesLayout:
 
 def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cells: bool = False,
                     timepoints=None, metrics: dict | None = None, numbers: bool = True,
-                    image_channel: str = "", display_range=None, left_out=frozenset()) -> dict:
+                    image_channel: str = "", display_range=None) -> dict:
     """The *N* nanowells with the largest fold change and the *N* with the smallest, each a row of its crops at the
     timepoints shown; returns ``{axes: (well, q, r)}`` so a click on a row selects its nanowell.
 
@@ -865,8 +857,7 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
 
     The montage is laid out in inches to fill the figure (:func:`_extremes_layout`): square crops as large as the
     figure holds, the Largest and Smallest blocks side by side whenever that gives larger crops than one above the
-    other, the whole centred. With *cells* on, a cell in *left_out* (the cells Cell Gating leaves out) is drawn
-    hollow (:func:`_draw_crop_cells`)."""
+    other, the whole centred."""
     fig.clear()
     _bg, ink, faint = _inks(fig.add_subplot(111))
     fig.clear()
@@ -884,7 +875,7 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
              for tp, crop in (crops.get(row.site) or {}).items() if tp in columns or tp == ""]
     layout = _extremes_layout(fig, blocks, len(columns))
     draw = _ExtremesDrawing(fig, layout, model, metrics, crop_scale(every, display_range), cells, ink, faint)
-    draw.numbers, draw.left_out = numbers, frozenset(left_out)
+    draw.numbers = numbers
     hits: dict = {}
     for k, (title, rows) in enumerate(blocks):
         bx, by = draw.block_origin(k, blocks, len(columns))
@@ -922,7 +913,6 @@ class _ExtremesDrawing:
         self.metrics_cut = False                         # some crop had more metrics than its line holds
         self.numbers = True                              # the numbers are written on the crops (Metrics box)
         self.tally: dict = {}
-        self.left_out: frozenset = frozenset()          # the cells drawn hollow (``render_extremes``'s *left_out*)
 
     def text(self, x_in: float, y_in: float, said: str, *, color, **kw):
         """Figure text at a position in inches."""
@@ -968,7 +958,7 @@ class _ExtremesDrawing:
             lo, hi = self.scale.of(crop)
             ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi, gid="nw-extremes-image")
             if self.cells:
-                _draw_crop_cells(ax, crop, self.tally, size=max(5.0, 9.0 * s), left_out=self.left_out)
+                _draw_crop_cells(ax, crop, self.tally, size=max(5.0, 9.0 * s))
             self.sources.add(crop.source)
             if crop.source == "montage":
                 self.notes.add(crop.note)
@@ -1053,7 +1043,8 @@ MAP_CMAP = "viridis"
 #: How a nanowell without a value is outlined, by its state (fill colouring by the metric).
 _STATE_STYLE = {"occluded": ("////", "solid"), "clipped": ("", "dashed"), "absent": ("", "dotted"),
                 "not_located": ("", "dotted"), "unaddressed": ("", "dotted"),
-                "identity_contradicted": ("xx", "solid"), "out_of_focus": ("....", "solid")}
+                "identity_contradicted": ("xx", "solid"), "field_excluded": ("++", "solid"),
+                "out_of_focus": ("....", "solid")}
 #: How each tile was placed (``pipeline/tile_register.py``), as the ``Colors`` token it is drawn in: on the lattice
 #: phase, by overlap correlation, or where the acquisition record put it when neither could be measured.
 _SOURCE_TOKENS = {"lattice": "success", "overlap": "accent", "recorded": "warn"}
@@ -1169,8 +1160,6 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
         _dim_nanowells(ax, scene.sites, dimmed)
     if layers.cells and scene.cells is not None and len(scene.cells[0]):
         _draw_cells(ax, *scene.cells)
-    if layers.cells and scene.cells_out is not None and len(scene.cells_out[0]):
-        _draw_cells(ax, *scene.cells_out, left_out=True)
     if (layers.addresses or layers.values) and len(scene.sites):
         lines += _draw_labels(fig, ax, drawn, scene.sites, addresses=layers.addresses, values=layers.values)
     if in_well and layers.anchor and scene.anchor is not None:
@@ -1364,16 +1353,11 @@ def _outline_by_state(ax, sites, fused, outline: float) -> None:
                   edgecolors=[state_colour(s) for s, p in zip(sites.state, plain) if p])
 
 
-def _draw_cells(ax, x, y, *, left_out: bool = False) -> None:
+def _draw_cells(ax, x, y) -> None:
     """A dot at each counted cell's centre, a fixed size on screen whatever the zoom, over the nanowells and under
-    their addresses. A cell Cell Gating leaves out (*left_out*) is a hollow ring, so the filled dots are the cells
-    the nanowell's count counts and the rest are still seen."""
+    their addresses."""
     from ui.nanowell_sites import CELL_COLOUR, CELL_EDGE_COLOUR
 
-    if left_out:
-        ax.scatter(x, y, s=CELL_DOT_PT2, facecolors="none", edgecolors=CELL_COLOUR, linewidths=0.8, zorder=5.5,
-                   gid="nw-array-cells-out")
-        return
     ax.scatter(x, y, s=CELL_DOT_PT2, c=CELL_COLOUR, edgecolors=CELL_EDGE_COLOUR, linewidths=0.4, zorder=5.5,
                gid="nw-array-cells")
 

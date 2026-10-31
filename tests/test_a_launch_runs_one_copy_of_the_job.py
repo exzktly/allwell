@@ -102,3 +102,20 @@ def test_a_cluster_that_starts_more_anyway_runs_the_job_once(tmp_path):
 def test_a_task_count_in_the_launcher_becomes_cpus_for_one_task(launcher, expected):
     """``-n`` in a launcher is how a job template asks for cores; folded as the JupyterHub path folds it."""
     assert one_task(launcher) == expected
+
+
+@pytest.mark.parametrize(("launcher", "expected"), [
+    (["srun", "-n", "4", "--gpus-per-task=1"],
+     ["srun", "--cpus-per-task=4", "--gpus-per-task=4", "--nodes=1", "--ntasks=1"]),
+    (["srun", "--ntasks=3", "-c", "2", "--gpus-per-task", "a100:2"],
+     ["srun", "--cpus-per-task=6", "--gpus-per-task=a100:6", "--nodes=1", "--ntasks=1"]),
+    # No task count: nothing to fold, the option stays where it was written.
+    (["srun", "--gpus-per-task=2", "-c", "8"], ["srun", "--gpus-per-task=2", "-c", "8", "--nodes=1", "--ntasks=1"]),
+    # A count that is not a whole number is kept as written rather than guessed at.
+    (["srun", "-n", "2", "--gpus-per-task=many"],
+     ["srun", "--cpus-per-task=2", "--gpus-per-task=many", "--nodes=1", "--ntasks=1"]),
+])
+def test_gpus_asked_per_task_are_folded_with_the_tasks(launcher, expected):
+    """Tracker L25. ``-n 4 --gpus-per-task=1`` asks for four GPUs; folding the four tasks into one task's CPUs left
+    ``--gpus-per-task=1`` on that one task, and the run got one GPU."""
+    assert one_task(launcher) == expected

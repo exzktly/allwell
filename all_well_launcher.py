@@ -19,7 +19,8 @@ This launcher ensures:
     ``sys.executable`` points at the .app binary and not a Python
     interpreter. ``--run-report`` dispatches the same way to the headless
     report (``allwell_report.main``), which from source is
-    ``python allwell_report.py``.
+    ``python allwell_report.py``, and ``--run-identity`` to the nanowell
+    identity audit (``python -m pipeline.nanowell_identity`` from source).
 
 When running from source (not bundled), sys._MEIPASS is not set, so
 modules are loaded from the repository root instead.
@@ -232,6 +233,19 @@ def _dispatch() -> None:
         ensure_std_streams()
         from services.nanowell_preview_job import main as preview_main
         sys.exit(preview_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "--run-identity":
+        # The nanowell identity audit (``python -m pipeline.nanowell_identity
+        # <output folder>`` from source). The Identity view names it as the
+        # way to check a dataset analysed before the check existed, or one a
+        # Datasets tool rewrote; in a frozen bundle there is no interpreter to
+        # run ``python -m``, so the view names this sentinel instead
+        # (``nanowell_identity.audit_argv``). The rest of argv is the audit's
+        # own (output folder, --well, --numbers); it prints to the terminal
+        # it was started from and exits with the audit's status.
+        from util.frozen_io import ensure_std_streams
+        ensure_std_streams()
+        from pipeline.nanowell_identity import main as identity_main
+        sys.exit(identity_main(sys.argv[2:]))
     _apply_baked_theme()
     from allwell import main
     main()

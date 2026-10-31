@@ -169,7 +169,12 @@ def _scratch_dir() -> Path:
     """Base directory for AllWell's local scratch — input staging, transit
     output zips, and incremental merge temps.
 
-    Resolution order, matching ``pipeline.io.scratch_base_for`` exactly:
+    Resolution order — ``pipeline.io.scratch_base_for``'s as it applies to a
+    process on this computer, which shares its first rule and its default with
+    this one. The pipeline's other rules do not arise here: the node-local disk
+    is decided inside a Slurm job, ``--scratch_fallback_dir`` is passed only to
+    a remote run, and its last resort is the run's output folder where this one
+    falls back to the OS temp dir:
 
     1. ``$ALLWELL_SCRATCH_DIR`` — the redirectable-scratch env the GUI sets from
        its "Scratch disk" field, so a user whose data lives on a NAS but whose

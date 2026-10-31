@@ -22,6 +22,7 @@ by reading what they produce.
 
 from __future__ import annotations
 
+from services.remote_srun_retry import HANDOVER_TAKEN_LINE, HANDOVER_WAIT_LINE
 from services.remote_transport import _remote_quote
 
 # How long a granted allocation will wait for that file before giving up. The
@@ -123,6 +124,19 @@ def _heartbeat_stale_snippet(heartbeat: str, message: str, *,
       whose metadata may lag. An absent file is tolerated for the same window as
       a stale one before the node is handed back.
 
+    * **The age it reads is never more than the true age.** The app's beats
+      land at most ``UPLOAD_HEARTBEAT_S`` + ``remote_heartbeat.BEAT_TIMEOUT_S``
+      (105 s) apart, against *stale_s* (120 s) — a margin that holds only for
+      an age read correctly. Two things read it high on a shared filesystem.
+      The probe that gives "now" was touched *after* the heartbeat was read, so
+      on the same stalled filesystem that slows the beats its own delay was
+      added to the age; it is touched first now, so a beat landing meanwhile is
+      seen. And ``stat`` on an NFS client may answer from its attribute cache
+      (``acregmax``, 60 s by default), which can still hold the mtime from
+      before the last beat; the heartbeat is opened first, which under NFS's
+      close-to-open consistency (the default, ``cto``) has the client fetch the
+      file's attributes from the server.
+
     *stale_s* and *poll_s* time the check (the loop around it sleeps *poll_s*
     between calls), and *on_stale* is the shell run once the app is judged gone
     — by default the exit that hands the node back. Each check leaves
@@ -141,12 +155,14 @@ def _heartbeat_stale_snippet(heartbeat: str, message: str, *,
         f'_aw_fresh=0; '
         f'if [ -e {hb_q} ]; then '
         f'_aw_miss=0; '
-        f'_aw_hb=$(stat -c %Y {hb_q} 2>/dev/null || '
-        f'stat -f %m {hb_q} 2>/dev/null || echo ""); '
-        # "Now" by the clock that stamped the heartbeat: a probe beside it (see UPLOAD_HEARTBEAT_STALE_S).
+        # "Now" by the clock that stamped the heartbeat: a probe beside it (see UPLOAD_HEARTBEAT_STALE_S). Taken
+        # before the heartbeat is read, so the age can only be under-stated (see this function's docstring).
         f'_aw_p={probe}; _aw_now=""; '
         f'if touch "$_aw_p" 2>/dev/null; then _aw_now=$({mtime} || echo ""); rm -f "$_aw_p" 2>/dev/null; fi; '
         f'[ -n "$_aw_now" ] || _aw_now=$(date +%s); '
+        f'true 2>/dev/null <{hb_q} || :; '
+        f'_aw_hb=$(stat -c %Y {hb_q} 2>/dev/null || '
+        f'stat -f %m {hb_q} 2>/dev/null || echo ""); '
         f'if [ -z "$_aw_hb" ]; then '
         f'if [ "$_aw_warn" -eq 0 ]; then _aw_warn=1; '
         f'echo "[remote] WARN this host cannot report a file\'s modification '
@@ -225,9 +241,7 @@ def _wait_for_handover_snippet(command_file: str, heartbeat: str) -> str:
         f"[remote] ERROR the app stopped responding while it prepared the run "
         f"({UPLOAD_HEARTBEAT_STALE_S}s without a heartbeat) — giving the node back")
     return (
-        f'if [ ! -f {command_q} ]; then '
-        f'echo "[remote] scheduler: node granted; waiting for the app to finish '
-        f'preparing the run…"; fi; '
+        f'if [ ! -f {command_q} ]; then echo "{HANDOVER_WAIT_LINE}"; fi; '
         f'_aw_w=0; _aw_fresh=0; {init}'
         f'while [ ! -f {command_q} ]; do '
         f'{stale}'
@@ -237,5 +251,5 @@ def _wait_for_handover_snippet(command_file: str, heartbeat: str) -> str:
         f'back after {UPLOAD_WAIT_TIMEOUT_S}s with no heartbeat to say it was still preparing"; '
         f'exit {_UPLOAD_WAIT_EXIT}; fi; '
         f'sleep {UPLOAD_WAIT_POLL_S}; done; '
-        f'echo "[remote] scheduler: the run is ready — starting it on this node"; '
+        f'echo "{HANDOVER_TAKEN_LINE}"; '
     )

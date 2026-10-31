@@ -166,7 +166,7 @@ from pipeline.io import (
     write_well_csv,
     incremental_done_fov_keys,
     OutputCapacityMonitor,
-    preflight_scratch_for_run,
+    preflight_run_scratch,
     merge_images_into_zip,
     merge_well_records,
     remove_directory,
@@ -198,7 +198,8 @@ from pipeline.run_report import (
 from pipeline.completeness import record_run_check
 from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
 from pipeline.nanowell_task import (
-    hold_dir_for, nanowell_endgame, prepare_nanowell_run, reanchor_only_run, reference_well_first, replaced_wells,
+    confluence_reference_current, hold_dir_for, nanowell_endgame, prepare_nanowell_run, reanchor_only_run,
+    reference_well_first, replaced_wells,
 )
 from pipeline.zip_members import ZipMemberReader
 
@@ -2785,7 +2786,7 @@ def process_well_zips(
         )
 
     # A nanowell run's empty reference well goes first: every other well's confluence is read against it.
-    first, rest = reference_well_first(shared_kwargs_template, well_zips)
+    first, rest = reference_well_first(shared_kwargs_template, well_zips, output_dir)
     pool = partial(
         _run_well_worker_pool, output_dir=output_dir, workers=workers,
         settings_key=settings_key,
@@ -2794,12 +2795,11 @@ def process_well_zips(
         shared_kwargs_template=shared_kwargs_template, mode_label="Zip",
         # Zip staging (extract + images) lives under the scratch base.
         stale_sweep=lambda out: sweep_run_scratch(out, settings_key, extra_extract=True),
-        # File existence alone answered "already done" whatever the run was
-        # configured to compute, and whether or not the well had finished: a
-        # changed segmenter kept the old numbers, a well wound down part way
-        # kept its partial ones (`well_skip.finished_output`).
-        output_exists=lambda well: finished_output(output_dir, well, csv_prefix, settings_key,
-                                                   records=prior_records),
+        # File existence alone answered "already done" whatever the run was configured to compute, and whether or not
+        # the well had finished: a changed segmenter kept the old numbers, a well wound down part way kept its partial
+        # ones (`well_skip.finished_output`); a nanowell well read against another reference, its stale confluence.
+        output_exists=lambda well: (finished_output(output_dir, well, csv_prefix, settings_key, records=prior_records)
+                                    and confluence_reference_current(output_dir, well, shared_kwargs_template)),
         submit_task=_submit,
     )
     return [*pool(items=first), *(pool(items=rest) if rest else [])] if first else pool(items=well_zips)
@@ -3350,8 +3350,8 @@ def main() -> None:
     # holding the dataset (§ pipeline.io.scratch_base_for), so "there is plenty
     # of room" beside the inputs says nothing about the volume the run actually
     # writes its transient working set to.
-    preflight_scratch_for_run(
-        scratch_base_for(output_dir), input_dir,
+    preflight_run_scratch(
+        output_dir, input_dir,
         n_wells=len(well_zips) + len(well_folders),
         # ``fluor_tokens_for_quant`` already leads with the segmentation
         # channel (see ``quantified_channel_tokens``), so adding one for it
@@ -3361,7 +3361,6 @@ def main() -> None:
         workers=workers,
         allow_low_disk=bool(getattr(args, "allow_low_disk", False)),
         image_exts=_GROUP_IMAGE_EXTS,
-        output_dir=output_dir,
         count_groups=lambda: (
             len(_collect_available_fovs(
                 input_dir, filename_schema=":".join(schema), filename_sep=sep)) or 1

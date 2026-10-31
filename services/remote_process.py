@@ -42,7 +42,7 @@ from services.remote_run_state import (
 from services.remote_staging import (
     ZippedInput,
 )
-from services.remote_plate_grids import seed_plate_grids
+from services.remote_plate_grids import seed_confluence_reference, seed_plate_grids
 from services.remote_fetch import (
     Fetcher,
     _snapshot_local_artifacts,
@@ -73,7 +73,8 @@ from services.remote_run_id import (
     remote_run_paths,
 )
 from services.remote_batch_staging import prune_staged, _empty_well_blanks, nanowell_reference_first
-from services.remote_srun_retry import queue_wait_seconds
+from services.remote_reservation import QueueWaitSpent
+from services.remote_srun_retry import QUEUE_WAIT_EXIT, queue_wait_seconds
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_handoff import chase_handoff, watch_of
@@ -120,9 +121,10 @@ def _record_remote_in_journal(
 def _run_prepared(cache, run: "_RemoteRun", zipped, log, **journal_keys) -> None:
     """What both run paths do once a run's remote directories exist: write down where it went
     (:func:`_record_remote_in_journal`), and give a nanowell host the rest of the plate's grid records
-    (``services.remote_plate_grids``) before its pipeline starts."""
+    and its saved confluence reference (``services.remote_plate_grids``) before its pipeline starts."""
     _record_remote_in_journal(run.local_output_dir, run=run, **journal_keys)
     seed_plate_grids(cache, run, [Path(p).stem for p in zipped.well_zips], log)
+    seed_confluence_reference(cache, run, [Path(p).stem for p in zipped.well_zips], log)
 
 def _scheduler_handoff_lines(launcher: str, *, batch: int | None = None) -> str:
     """The lines announcing that the run is now waiting on a scheduler.
@@ -708,11 +710,23 @@ class _BatchedRemoteProcess:
         proc = None
         reservation = getattr(self, "_reservation", None)
         if reservation is not None:
-            proc = reservation.hand_over(
-                _handover_driver_body(driver, env_selector=self._runner.env_selector,
-                                      scratch_dir=host.remote_scratch_dir),
-                run_pidfile=run.remote_pidfile, run_heartbeat=heartbeat)
+            try:
+                proc = reservation.hand_over(
+                    _handover_driver_body(driver, env_selector=self._runner.env_selector,
+                                          scratch_dir=host.remote_scratch_dir),
+                    run_pidfile=run.remote_pidfile, run_heartbeat=heartbeat)
+            except QueueWaitSpent as spent:
+                # Nothing launched and nothing uploaded: the run ends on the wait it already spent.
+                fail(self, f"[remote] ERROR {spent}\n")
+                self._returncode = QUEUE_WAIT_EXIT
+                return False
         if proc is None:
+            if self._stop.is_set():
+                # Stop gave the early job back, so the hand-over found it gone: asking for a fresh one now would
+                # queue a job after the user pressed Stop.
+                self._log("[remote] stopped before the first batch\n")
+                self._returncode = 130
+                return False
             proc = self._launch_driver(host, run, driver, total)
         with self._current_proc_lock:
             self._current_proc = proc
@@ -995,6 +1009,13 @@ class _BatchedRemoteProcess:
             # Before anything is sent: what the remote already holds — finished wells to download instead, and
             # uploaded archives to put into this run's batches (`remote_batch_resume`).
             all_zips, adopted = take_from_remote(self, all_zips, force=force)
+            # `_run_prepared` sent the reference only if staging had already left its well out. Dropped here
+            # instead — complete locally, or adopted from the remote — it is not measured in any batch, so every
+            # batch reads the one this computer holds (`services.remote_plate_grids`).
+            runner = getattr(self, "_runner", None)
+            if len(all_zips) < staged_total and runner is not None:
+                seed_confluence_reference(runner._cache, getattr(runner, "_run", None),
+                                          [z.stem for z in all_zips], self._log)
 
             # Inject a synthetic "Zip mode: <total> wells" banner BEFORE
             # batch 1's stdout. The GUI's ``ProgressTracker`` locks on the

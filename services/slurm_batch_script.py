@@ -44,6 +44,8 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
+from services.remote_srun_retry import gpus_for_tasks
+
 #: Long name → whether it takes a value, for every option that describes the
 #: resources a step needs. Anything else in a job template is left out.
 _SRUN_RESOURCE_OPTIONS: dict[str, bool] = {
@@ -176,7 +178,9 @@ def single_task(flags: list[str]) -> list[str]:
     pipeline sixteen times, each with one CPU. The app runs one process that
     spreads its own workers across the CPUs it is given, so the step asks for
     one task with *tasks × cpus-per-task* CPUs. A task count that is not a
-    whole number is dropped rather than guessed at.
+    whole number is dropped rather than guessed at. ``--gpus-per-task`` is
+    scaled by the tasks as well (``remote_srun_retry.gpus_for_tasks``), or the
+    one task would get one task's GPUs.
     """
     def _value(name: str) -> str | None:
         for f in flags:
@@ -187,12 +191,15 @@ def single_task(flags: list[str]) -> list[str]:
     tasks = _value("ntasks")
     if tasks is None:
         return flags
-    out = [f for f in flags if not f.startswith(("--ntasks=", "--cpus-per-task="))]
+    out = [f for f in flags if not f.startswith(("--ntasks=", "--cpus-per-task=", "--gpus-per-task="))]
     per_task = _value("cpus-per-task") or "1"
     if tasks.isdigit() and per_task.isdigit():
         out.append(f"--cpus-per-task={int(tasks) * int(per_task)}")
     elif _value("cpus-per-task") is not None:
         out.append(f"--cpus-per-task={per_task}")
+    gpus = _value("gpus-per-task")
+    if gpus is not None:
+        out.append(f"--gpus-per-task={gpus_for_tasks(gpus, tasks)}")
     return out
 
 

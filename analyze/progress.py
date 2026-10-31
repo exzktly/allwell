@@ -414,7 +414,8 @@ class AnalyzeProgressMixin:
             if granted:
                 self._on_scheduler("granted", "" if granted == "?" else granted, "")
             else:
-                self._on_scheduler("waiting", "", "")
+                # Still waiting — and if Slurm had picked the node and was booting it, still booting.
+                self._on_scheduler("allocated" if getattr(self, "_sched_booting", False) else "waiting", "", "")
             return
         # "waiting-early", or a request the job's own launcher repeated while it waits (a node that failed to boot).
         self._sched_early = True

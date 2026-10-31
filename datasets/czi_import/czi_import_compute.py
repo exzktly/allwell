@@ -66,7 +66,14 @@ _MAPPING_FIELDS = ("well_source", "use_folder", "grid_rows", "grid_cols",
 
 
 class CziImportError(Exception):
-    """A user-facing reason the CZI can't be converted with these settings."""
+    """A user-facing reason the CZI can't be converted with these settings.
+
+    A refusal of the timepoint selection carries the source's own tokens, so the page can list them and mark a
+    ticked one the source lacks: no plan is made for that selection, which is where the page reads them otherwise."""
+
+    def __init__(self, message: str, *, source_timepoint_tokens=()) -> None:
+        super().__init__(message)
+        self.source_timepoint_tokens = tuple(source_timepoint_tokens)
 
 
 @dataclass(frozen=True)
@@ -496,7 +503,7 @@ def plan_conversion(source: CziSet, params: ConversionParams) -> ConversionPlan:
                               params.timepoint_stride,
                               params.timepoint_subset)
     except ValueError as exc:
-        raise CziImportError(str(exc)) from exc
+        raise CziImportError(str(exc), source_timepoint_tokens=source.timepoint_tokens) from exc
     return ConversionPlan(
         n_scenes=source.n_scenes,
         field_counts=[len(block) for block in well_map.positions],

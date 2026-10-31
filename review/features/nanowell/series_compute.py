@@ -231,7 +231,8 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
     docstring.
 
     *gate* (``cell_gate_compute.GateTally``) is the cells Home's Cell Gating leaves out: they are taken out of
-    ``n`` and ``brightness_<ch>`` before anything is computed from them. ``None`` keeps the run's own counts.
+    ``n`` and ``brightness_<ch>`` before anything is computed from them, and the nanowells of a field it leaves
+    out take the state ``field_excluded``. ``None`` keeps the run's own counts.
 
     *focus* (``rim_focus_compute.RimFocusRule``) turns each measurable row whose rim was out of focus into an
     ``out_of_focus`` gap before anything is computed (``rim_focus_compute.flag``); ``None`` flags nothing.
@@ -239,7 +240,8 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
     if not is_baseline(baseline):
         raise ValueError(f"baseline must be one of {BASELINES} or a timepoint, not {baseline!r}")
     frame = _addressed_grid(data)
-    rim_focus_compute.flag(frame, focus)
+    cell_gate_compute.exclude_fields(frame, gate)          # a whole field out: its nanowells have no value at all
+    rim_focus_compute.flag(frame, focus)                   # then a rim out of focus, of what is still measurable
     measurable = frame["state"].isin(MEASURABLE)
     frame["n"] = pd.to_numeric(frame.get("n_cells"), errors="coerce").where(measurable)
     frame["c"] = pd.to_numeric(frame.get("confluence"), errors="coerce").where(measurable)
@@ -315,7 +317,7 @@ def crop_metric_lines(row, channel: str | None = None) -> list[str]:
     if channel:
         b, sig = value(f"brightness_{channel}"), value(f"signal_{channel}")
         if sig is not None:
-            items.append(f"signal {compact_number(sig)}")
+            items.append(f"fluor. {compact_number(sig)}")       # Nanowell fluorescence, as the metric is named
         if b is not None:
             items.append(f"bright {compact_number(b)}")
     return items
@@ -411,18 +413,11 @@ def exclusion_reason(metrics: pd.DataFrame, metric: str, channels=()) -> pd.Seri
 
 
 def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
-    """The export table (tracker D8): one row per site and timepoint, every value and metric, in a fixed order.
-
-    ``n_cells`` is the count every figure on the page draws — the run's count less the cells Cell Gating leaves out
-    (``cell_gate_compute``). Beside it, ``n_cells_run`` is the run's own count and ``cells_left_out`` the difference,
-    so a reader can tell a gated count from the run's and see by how much; the run's ``area_est_cells`` and
-    ``count_disagreement``, which compare an area estimate against the run's count, follow ``n_cells_run``. All three
-    are empty where the nanowell has no count (occluded, clipped, not seen, left out by the rim focus rule), never
-    0."""
+    """The export table (tracker D8): one row per site and timepoint, every value and metric, in a fixed order."""
     columns = (["well", "nw_q", "nw_r", "nw_ring", "timepoint", "time_h", "state", "recorded_state", "reason",
                 "identity", "identity_ok", "focus", "rim_focus_ref", "rim_focus_ok", "fused",
-                "partially_visible", "imaged_fraction", "visible_fraction", "n_cells", "n_cells_run",
-                "cells_left_out", "area_est_cells", "count_disagreement", "confluence"]
+                "partially_visible", "imaged_fraction", "visible_fraction", "n_cells", "confluence",
+                "area_est_cells", "count_disagreement"]
                + [c for ch in channels for c in (f"brightness_{ch}", f"signal_{ch}")]
                + ["baseline_timepoint", "baseline_state", "occupancy_class", "count_fc", "seeded_later",
                   "log2_count_fc", "confluence_fc"]
@@ -430,9 +425,5 @@ def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
                + ["growth_rate"])
     out = metrics.reindex(columns=columns)
     out["n_cells"] = metrics["n"]
-    run = (pd.to_numeric(metrics["n_cells"], errors="coerce") if "n_cells" in metrics
-           else pd.Series(np.nan, index=metrics.index))
-    out["n_cells_run"] = run.where(metrics["n"].notna())
-    out["cells_left_out"] = out["n_cells_run"] - metrics["n"]
     out["confluence"] = metrics["c"]
     return out

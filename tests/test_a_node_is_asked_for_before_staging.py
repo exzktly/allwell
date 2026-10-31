@@ -485,3 +485,24 @@ def test_an_early_job_that_waited_out_max_queue_wait_is_not_asked_for_again(
             "for (it would start the wait again): no node was granted within 30 min, this host's Max queue wait "
             "— cancelled job 77 and stopped.") in text, text
     assert r._had_error, text
+
+
+def test_a_run_every_well_of_which_is_finished_on_the_host_gives_the_early_node_back(
+        plate, host, remote, stop_fetchers, monkeypatch):
+    """Tracker L23. A run whose wells are all finished and sealed on the host needs no node: the early job is given
+    back, saying why, and nothing else is asked for. The log also said "cannot take the run — it was given back;
+    asking for one now", though nothing was asked for, and deleting the give-back left every test green."""
+    from services.remote_runner import RemoteRunner
+
+    # What `remote_reuse.preflight_cache_hit` finds when the host holds every well's sealed output.
+    monkeypatch.setattr(RemoteRunner, "_preflight_cache_hit", lambda self, *_a, **_k: True)
+
+    _r, text = _run(plate, host, stop_fetchers)
+
+    assert ("[remote] scheduler: giving back the node asked for early — every well is already finished on the "
+            "host.") in text, text
+    assert "asking for one now" not in text, text
+    assert "the run is handed to the node asked for early" not in text, text
+    early = remote.jobs.procs[0]
+    early.wait(timeout=10)                       # given back: its srun killed, the job cancelled
+    assert not any(remote.root.joinpath(".allwell-staging", "reservations").iterdir()), text

@@ -225,6 +225,17 @@ def test_a_sigterm_at_the_time_limit_is_reported_as_the_time_limit_and_an_early_
     assert day.ended() == "cancelled"            # 1 s into a 24 h limit
 
 
+def test_a_release_followed_at_once_by_the_cancel_is_still_reported_as_a_release(hold):
+    """The app writes `release` and then `scancel`s; the SIGTERM can beat the script's next poll. The reason must
+    still say it was a release, not an anonymous cancel."""
+    h = hold(limit_s=3600)
+    time.sleep(1.2)
+    (h.dir / "release").touch()
+    h.proc.send_signal(signal.SIGTERM)
+    h.wait()
+    assert h.ended() == "released on request"
+
+
 # ── what the script tells the app ─────────────────────────────────────────────────────────────────────────────────
 
 def test_the_granted_file_the_status_and_the_granted_line(hold, tmp_path):

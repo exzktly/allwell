@@ -24,11 +24,27 @@ the app writes for it, are the files named in :class:`HoldPaths`.
 from __future__ import annotations
 
 import hashlib
+import re
+import shlex
+import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from services.remote_config import RemoteHost
-from services.remote_srun_retry import ALLOCATION_GRANTED
-from services.remote_transport import _remote_quote
+from services.remote_config import RemoteHost, parse_slurm_time, render_slurm_time
+from services.remote_heartbeat import _UploadHeartbeat
+from services.remote_jobs import _only_my_job
+from services.remote_srun_retry import (
+    ALLOCATION_GRANTED,
+    BOOT_RETRY_PAUSE_S,
+    _split_launcher,
+    _take_option,
+    is_srun,
+    one_task,
+    queue_wait_seconds,
+)
+from services.remote_transport import _remote_join, _remote_quote
 from services.remote_wait_snippets import (
     MID_BATCH_HEARTBEAT_STALE_S,
     UPLOAD_HEARTBEAT_STALE_S,
@@ -39,6 +55,18 @@ from services.remote_wait_snippets import (
 HOLDS_DIRNAME = "holds"
 #: How often the hold script looks at its files, in seconds.
 HOLD_POLL_S = 15
+if TYPE_CHECKING:
+    from services.remote_upload import DatasetCache
+
+#: What the hold job is called in the scheduler's queue.
+HOLD_JOB_NAME = "allwell-hold"
+#: How long one control ssh may take (the scripts below are a few small commands).
+CONTROL_TIMEOUT_S = 60
+#: ``scontrol`` job states in which the job has ended and will not run the hold script (again).
+_TERMINAL_STATES = ("COMPLETED", "CANCELLED", "FAILED", "TIMEOUT", "NODE_FAIL", "BOOT_FAIL", "PREEMPTED",
+                    "DEADLINE", "OUT_OF_MEMORY", "SPECIAL_EXIT", "REVOKED")
+#: States that mean the node the job was given did not come up (compare ``remote_srun_retry._BOOT_FAILURE_RE``).
+_BOOT_FAILED_STATES = ("BOOT_FAIL", "NODE_FAIL")
 #: A SIGTERM this close to the end of the time limit (or later) is Slurm ending the job at ``--time``; an earlier
 #: one is a ``scancel``. Slurm signals a little before it kills, so the script cannot ask for exact equality.
 TIME_LIMIT_SLACK_S = 60
@@ -149,6 +177,7 @@ _aw_end() {{
 
 # Slurm's own end of the job: SIGTERM at --time, or from a scancel (the app's Release/quit, or anyone's).
 _aw_term() {{
+    if [ -e {q["release"]} ]; then _aw_end "released on request"; fi
     _aw_elapsed=$(( $(date +%s) - _aw_start ))
     if [ "$_aw_elapsed" -ge {max(0, limit_s - TIME_LIMIT_SLACK_S)} ]; then
         _aw_end "reached its {limit_label} time limit"
@@ -193,3 +222,343 @@ idle_s=$_aw_idle"
     wait $!
 done
 '''
+
+
+# ── asking for the node ──────────────────────────────────────────────────────────────────────────────────────────
+
+class HoldError(RuntimeError):
+    """A granted node could not be requested, or was lost while it was being requested. The message is shown to the
+    user as it stands, so it names the cause."""
+
+
+class HoldQueueWaitSpent(HoldError):
+    """The scheduler did not grant the node within the host's Max queue wait; the request was cancelled."""
+
+
+def sbatch_options(launcher: str) -> tuple[list[str], list[str], str]:
+    """``(options, the launcher's own --exclude nodes, partition)`` for an ``sbatch`` that asks for what the
+    host's scheduler command (an ``srun`` line) asks for.
+
+    One node, one task (:func:`~services.remote_srun_retry.one_task`: a ``--ntasks`` is folded into
+    ``--cpus-per-task`` as it is for a run). Dropped, because they describe a run's ``srun`` and not a hold: the
+    program word, any ``--time`` (the hold has its own, :func:`hold_time_limit_s`), and the output and terminal
+    options. Everything else — partition, account, GPUs, memory, ``--exclusive`` and options this code has never
+    heard of — is kept as written, so what the cluster accepts for a run it accepts for the hold; an option
+    ``sbatch`` refuses is shown to the user with ``sbatch``'s own words.
+    """
+    if not is_srun(launcher):
+        raise HoldError("Request a node needs a Slurm scheduler command that starts with srun.")
+    tokens = [t for t in shlex.split(launcher)[1:] if t != "--pty"]
+    tokens = one_task(tokens)
+    for short, long in (("-t", "--time"), ("-o", "--output"), ("-e", "--error")):
+        tokens, _ = _take_option(tokens, short, long)
+    kept, excluded, partition = _split_launcher(tokens)
+    return kept, excluded, partition
+
+
+def parse_partition_limit(text: str) -> int | None:
+    """Seconds in a partition's time limit as ``sinfo -o %l`` prints it, ``None`` when it has none (``infinite``,
+    ``UNLIMITED``) or when the text is not a time."""
+    word = text.strip()
+    if not word or word.lower() in ("infinite", "unlimited", "n/a"):
+        return None
+    return parse_slurm_time(word)
+
+
+def partition_limit_script(partition: str) -> str:
+    """Shell printing the time limit of *partition* (or, empty, the cluster's default partition) as ``sinfo`` has
+    it. Prints nothing when ``sinfo`` is missing."""
+    if partition:
+        return f"sinfo -h -p {shlex.quote(partition)} -o %l 2>/dev/null | head -n1\n"
+    return "sinfo -h -o '%P %l' 2>/dev/null | awk '$1 ~ /\\*$/ {print $2; exit}'\n"
+
+
+def hold_time_limit_s(host: RemoteHost, partition_cap_s: int | None) -> int:
+    """The hold job's ``--time`` in seconds: the host's setting, lowered to the partition's limit when that is
+    shorter."""
+    wanted = int(host.granted_time_limit_h) * 3600
+    return min(wanted, partition_cap_s) if partition_cap_s else wanted
+
+
+def prepare_script(paths: HoldPaths) -> str:
+    """Shell that makes the hold directory and clears what an earlier hold left in it. Only ever run when no live
+    hold exists, so nothing here belongs to a running one."""
+    d = _remote_quote(paths.dir)
+    gone = " ".join(_remote_quote(f) for f in (paths.job, paths.granted, paths.busy, paths.status, paths.release,
+                                               paths.ended, paths.log, paths.script))
+    return f"mkdir -p {d} && rm -f {gone}\n"
+
+
+def submit_script(paths: HoldPaths, script_text: str, options: list[str], *, limit_s: int) -> str:
+    """Shell that writes the hold script, submits it with ``sbatch`` and records the job id.
+
+    Prints the id on success. ``sbatch``'s own error goes to stderr and its exit code is the script's, so the
+    caller can show the scheduler's words. The script text is passed through a quoted here-document, so nothing in
+    it is expanded here.
+    """
+    marker = "AW_HOLD_SCRIPT_END"
+    assert marker not in script_text
+    argv = ["sbatch", "--parsable", f"--job-name={HOLD_JOB_NAME}", *options,
+            f"--time={render_slurm_time(limit_s)}", f"--output={paths.log}", paths.script]
+    return (f"cat > {_remote_quote(paths.script)} <<'{marker}'\n{script_text}{marker}\n"
+            f"_aw_out=$({_remote_join(argv)}) || exit $?\n"
+            f'_aw_job=${{_aw_out%%;*}}\n'
+            f'printf %s "$_aw_job" > {_remote_quote(paths.job)}\n'
+            f'echo "$_aw_job"\n')
+
+
+def state_script(paths: HoldPaths) -> str:
+    """Shell that prints everything the app knows about the hold, section by section (:func:`parse_state`)."""
+    q = {name: _remote_quote(getattr(paths, name)) for name in ("job", "granted", "status", "ended")}
+    return (f'echo "##job"; cat {q["job"]} 2>/dev/null; echo\n'
+            f'_aw_job=$(cat {q["job"]} 2>/dev/null)\n'
+            f'echo "##scontrol"; [ -n "$_aw_job" ] && scontrol show job -o "$_aw_job" 2>/dev/null; echo\n'
+            f'echo "##granted"; cat {q["granted"]} 2>/dev/null\n'
+            f'echo "##status"; cat {q["status"]} 2>/dev/null\n'
+            f'echo "##ended"; cat {q["ended"]} 2>/dev/null\n'
+            "exit 0\n")      # a missing file is an answer, not a failure: only ssh itself failing may exit non-zero
+
+
+def cancel_script(paths: HoldPaths) -> str:
+    """Shell that asks the hold to end (the ``release`` marker, so the script reports a release rather than a
+    cancel) and cancels its job, but only if the job is this user's (:func:`services.remote_jobs._only_my_job`)."""
+    return (f'[ -d {_remote_quote(paths.dir)} ] && touch {_remote_quote(paths.release)}\n'
+            f'_aw_jid=$(cat {_remote_quote(paths.job)} 2>/dev/null)\n'
+            '[ -z "$_aw_jid" ] && exit 0\n'
+            + _only_my_job("_aw_jid", "AW_NOTMINE") +
+            'command -v scancel >/dev/null 2>&1 && scancel -u "$_aw_me" "$_aw_jid" 2>/dev/null\n'
+            'echo "AW_SCANCELLED $_aw_jid"\n')
+
+
+@dataclass(frozen=True)
+class HoldState:
+    """What the host says about the hold now. ``phase`` is one of ``none`` (no hold), ``queued`` (the scheduler has
+    not given a node), ``starting`` (a node is given and still coming up, or the script has not started),
+    ``granted``, ``busy`` (granted and a run is using it) or ``ended``."""
+
+    phase: str = "none"
+    job_id: str = ""
+    node: str = ""
+    gpus: str = ""
+    cpus: str = ""
+    granted_at: int = 0
+    limit_s: int = 0
+    idle_s: int = 0
+    ended_reason: str = ""
+    slurm_state: str = ""
+    slurm_reason: str = ""
+
+    @property
+    def live(self) -> bool:
+        return self.phase in ("queued", "starting", "granted", "busy")
+
+
+def _sections(text: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    current = None
+    for line in text.splitlines():
+        if line.startswith("##") and line[2:] in ("job", "scontrol", "granted", "status", "ended"):
+            current = line[2:]
+            out[current] = ""
+        elif current is not None:
+            out[current] += line + "\n"
+    return {k: v.strip() for k, v in out.items()}
+
+
+def _pairs(text: str, sep: str = "\n") -> dict[str, str]:
+    pairs = {}
+    for part in text.split(sep):
+        key, eq, value = part.partition("=")
+        if eq:
+            pairs[key.strip()] = value.strip()
+    return pairs
+
+
+def _int(value: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def parse_state(text: str) -> HoldState:
+    """:class:`HoldState` from :func:`state_script`'s output."""
+    s = _sections(text)
+    job = s.get("job", "")
+    if not job:
+        return HoldState()
+    sc = dict(re.findall(r"(\w+)=(\S*)", s.get("scontrol", "")))
+    granted = _pairs(s.get("granted", ""))
+    status = _pairs(s.get("status", ""))
+    slurm_state = (sc.get("JobState") or "").upper()
+    common = dict(job_id=job, node=granted.get("node") or sc.get("NodeList", "").replace("(null)", ""),
+                  gpus=granted.get("gpus", ""), cpus=granted.get("cpus", ""),
+                  granted_at=_int(granted.get("granted_at", "")), limit_s=_int(granted.get("limit_s", "")),
+                  idle_s=_int(status.get("idle_s", "")), slurm_state=slurm_state,
+                  slurm_reason=sc.get("Reason", ""))
+    ended = s.get("ended", "")
+    if ended:
+        return HoldState(phase="ended", ended_reason=ended, **common)
+    if slurm_state in _TERMINAL_STATES:
+        return HoldState(phase="ended", ended_reason=f"the scheduler ended the job ({slurm_state})", **common)
+    if not slurm_state:
+        return HoldState(phase="ended", ended_reason="the scheduler no longer lists the job", **common)
+    if slurm_state == "PENDING":
+        return HoldState(phase="queued", **common)
+    if slurm_state == "RUNNING" and granted:
+        return HoldState(phase="busy" if status.get("state") == "busy" else "granted", **common)
+    return HoldState(phase="starting", **common)      # CONFIGURING, or RUNNING with the script not yet started
+
+
+def _duration(seconds: float) -> str:
+    seconds = int(max(0, seconds))
+    h, rem = divmod(seconds, 3600)
+    m = rem // 60
+    return f"{h} h {m} min" if h else f"{m} min"
+
+
+class GrantedNode:
+    """One host's granted node: asking for it, reading it, giving it back.
+
+    *cache* is the host's ``DatasetCache`` (its ``_ssh_script`` makes the short control calls, and the heartbeat
+    beats through it); *log_fn* gets the lines the run log shows; *on_state* is told each state the request sees,
+    from the thread that is polling, so a GUI caller must hand it on through a queued signal. *sleep* and *clock*
+    are for tests.
+
+    :meth:`request` blocks until the node is granted, the request fails, or :meth:`release` is called from another
+    thread; run it on a worker.
+    """
+
+    def __init__(self, host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str], None],
+                 on_state: Callable[[HoldState], None] | None = None,
+                 sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic) -> None:
+        self.host = host
+        self.paths = hold_paths(host)
+        self._cache = cache
+        self._log = log_fn
+        self._on_state = on_state or (lambda _s: None)
+        self._sleep = sleep
+        self._clock = clock
+        self._heartbeat: _UploadHeartbeat | None = None
+        self._cancelled = threading.Event()
+        self._lock = threading.Lock()
+
+    # ── talking to the host ──────────────────────────────────────────────────────────────────────────────────────
+    def _script(self, script: str, *, check: bool = False):
+        return self._cache._ssh_script(script, check=check, timeout_s=CONTROL_TIMEOUT_S)
+
+    def state(self) -> HoldState:
+        """The hold as the host reports it now. A host that cannot be reached is a ``HoldError``: guessing "no
+        hold" would let a second request run beside a node that is still there."""
+        result = self._script(state_script(self.paths))
+        if result.returncode != 0:
+            said = (result.stderr or "").strip().splitlines()
+            raise HoldError(f"could not read the granted node's state (ssh exit {result.returncode}): "
+                            f"{said[-1] if said else 'no output'}")
+        return parse_state(result.stdout or "")
+
+    def _partition_cap(self, partition: str) -> int | None:
+        result = self._script(partition_limit_script(partition))
+        return parse_partition_limit(result.stdout or "") if result.returncode == 0 else None
+
+    # ── request ──────────────────────────────────────────────────────────────────────────────────────────────────
+    def request(self) -> HoldState:
+        """Ask the scheduler for the node and wait until it is granted. Returns the granted state.
+
+        Raises :class:`HoldQueueWaitSpent` when the host's Max queue wait runs out (the request is cancelled),
+        and :class:`HoldError` for anything else that stops it, including :meth:`release` during the wait.
+        """
+        existing = self.state()
+        if existing.live:
+            raise HoldError(f"a node is already {existing.phase} for this host (job {existing.job_id}); release it "
+                            "before requesting another.")
+        self._cancelled.clear()
+        launcher = self.host.launch_command
+        options, user_excluded, partition = sbatch_options(launcher)
+        cap = self._partition_cap(partition)
+        limit_s = hold_time_limit_s(self.host, cap)
+        if cap and limit_s < int(self.host.granted_time_limit_h) * 3600:
+            self._log(f"[remote] granted node: time limit {self.host.granted_time_limit_h} h, lowered to "
+                      f"{_duration(limit_s)} by the partition's limit.\n")
+        self._script(prepare_script(self.paths), check=True)
+        self._heartbeat = _UploadHeartbeat(self._cache, self.paths.heartbeat, log_fn=self._log)
+        self._heartbeat.beat()           # before the job can look, so the first thing it sees is a heartbeat
+        self._heartbeat.start()
+        try:
+            return self._ask(options, user_excluded, limit_s)
+        except BaseException:
+            self.release("the request did not complete")
+            raise
+
+    def _ask(self, options: list[str], user_excluded: list[str], limit_s: int) -> HoldState:
+        script_text = compose_hold_script(
+            self.paths, limit_s=limit_s, idle_release_s=int(self.host.granted_idle_release_min) * 60)
+        queue_wait = queue_wait_seconds(self.host)
+        began = self._clock()
+        failed_nodes: list[str] = []
+        while True:
+            excluded = [*user_excluded, *failed_nodes]
+            extra = [f"--exclude={','.join(excluded)}"] if excluded else []
+            submitted = self._script(submit_script(self.paths, script_text, [*options, *extra], limit_s=limit_s))
+            if submitted.returncode != 0:
+                raise HoldError("the scheduler refused the request: "
+                                f"{(submitted.stderr or submitted.stdout or '').strip() or 'no reason given'}")
+            self._log(f"[remote] granted node: asked the scheduler for a node (job {submitted.stdout.strip()}, "
+                      f"time limit {_duration(limit_s)}).\n")
+            boot_failed = self._wait(began, queue_wait)
+            if boot_failed is None:
+                return self.state()
+            failed_nodes.append(boot_failed)
+            self._log(f"[remote] granted node: node {boot_failed} failed to boot; asking for another.\n")
+            self._nap(BOOT_RETRY_PAUSE_S)
+
+    def _nap(self, seconds: float) -> None:
+        if self._cancelled.is_set():
+            raise HoldError("the request was cancelled.")
+        self._sleep(seconds)
+
+    def _wait(self, began: float, queue_wait: int) -> str | None:
+        """Poll until the hold is granted (``None``), its node failed to boot (that node's name), or it cannot be."""
+        while True:
+            if self._cancelled.is_set():
+                raise HoldError("the request was cancelled.")
+            state = self.state()
+            self._on_state(state)
+            if state.phase in ("granted", "busy"):
+                self._log(f"[remote] granted node: {state.node} (job {state.job_id}) is granted"
+                          f"{' — ' + state.gpus if state.gpus else ''}.\n")
+                return None
+            if state.slurm_state in _BOOT_FAILED_STATES and not state.granted_at:
+                return state.node or "?"
+            if state.phase == "ended":
+                raise HoldError(f"the node was not granted: {state.ended_reason}.")
+            if queue_wait and self._clock() - began > queue_wait:
+                self.release("it waited out this host's Max queue wait")
+                raise HoldQueueWaitSpent(
+                    f"no node was granted within {queue_wait // 60} min, this host's Max queue wait — "
+                    f"cancelled job {state.job_id}.")
+            self._nap(HOLD_POLL_S)
+
+    # ── release ──────────────────────────────────────────────────────────────────────────────────────────────────
+    def release(self, reason: str) -> None:
+        """Give the node back: stop beating, ask the script to end, cancel the job. Idempotent. A request being
+        waited on in another thread is told to stop."""
+        self._cancelled.set()
+        with self._lock:
+            heartbeat, self._heartbeat = self._heartbeat, None
+        if heartbeat is not None:
+            heartbeat.stop()
+        try:
+            result = self._script(cancel_script(self.paths))
+        except Exception as exc:
+            self._log(f"[remote] granted node: WARN could not reach the host to release it ({exc}); it releases "
+                      "itself within two minutes of the app's last heartbeat.\n")
+            return
+        out = result.stdout or ""
+        if "AW_NOTMINE" in out:
+            self._log("[remote] granted node: the hold's job belongs to another user — left running.\n")
+        elif "AW_SCANCELLED" in out:
+            self._log(f"[remote] granted node: released — {reason}.\n")
+        elif result.returncode != 0:
+            self._log(f"[remote] granted node: WARN could not release it (ssh exit {result.returncode}); it "
+                      "releases itself within two minutes of the app's last heartbeat.\n")

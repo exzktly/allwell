@@ -260,7 +260,9 @@ tolerance is a parameter of the composing function, so tests can shorten them.
    the loop's first pass finds the heartbeat stale (or missing for the check's
    tolerance) and ends it.
 2. **Every poll (15 s):**
-   - `release` exists → `ended` = `released on request`; exit 0.
+   - `release` exists → `ended` = `released on request`; exit 0. (A SIGTERM that
+     arrives with `release` already written is reported the same way: the app
+     writes `release` and then `scancel`s.)
    - `busy` exists and is fresher than `MID_BATCH_HEARTBEAT_STALE_S` → in use;
      `status` = busy; the idle clock restarts. A `busy` older than that is a run
      whose app died mid-run: count it as not busy. The run's own existing
@@ -596,7 +598,7 @@ end (CLAUDE.md §2, §6). Stacking on the branch that carries this file
 | ID | Item | State | Where | Evidence |
 |---|---|---|---|---|
 | H1 | Hold script: start-up heartbeat check, `granted` file, loop with the `release`, busy, heartbeat-silent (2 min, no run) and idle-limit rules, `ended` reason, SIGTERM handling | done | `services/remote_hold.py` | `tests/test_remote_hold_script.py` runs the script under `sh`. Mutated on HEAD, each fails with its own message: ignoring `busy` ("released while a run was using it", "released for a silent app while a run was using the node"); trusting a stale `busy` (still running after 25 s); idle 0 meaning at once ("idle 0 (Never) released the node for idleness"); every SIGTERM the time limit (`'reached its 1 h time limit' == 'cancelled'`) |
-| H2 | Submit with `sbatch`: translate the scheduler command's options, drop its `--time`, time limit = min(setting, partition cap), poll `squeue`, Max queue wait, boot-failure retry with `--exclude` | todo | `services/remote_hold.py`, `services/remote_srun_retry.py` | — |
+| H2 | Submit with `sbatch`: translate the scheduler command's options, drop its `--time`, time limit = min(setting, partition cap), poll `squeue`, Max queue wait, boot-failure retry with `--exclude` | done | `services/remote_hold.py`, `services/remote_srun_retry.py` | `tests/test_remote_hold_request.py` runs the real scripts under bash with stand-in sbatch/scontrol/scancel/sinfo/squeue. Mutated on HEAD: keeping the command's `--time` (`['--time=4:00…','--time=2-00:00:00'] == ['--time=2-00:00:00']`); boot retry without `--exclude` (`['--exclude=slow1'] == ['--exclude=slow1,dead-1']`); no queue-wait check (`the request kept waiting`); release without scancel (`the queued job must be cancelled`, 3 tests). It also caught `state_script` exiting 1 when a file was missing. Boot failure is read from `scontrol show job -o` (BOOT_FAIL / NODE_FAIL), not `sacct`, because `sacct` needs accounting enabled. |
 | H3 | Launch seam (`effective_launcher`) at every launch site; `wrap_srun_launch` branch for `--jobid`; step runs write a `job.step` sidecar; GPU/CPU step options settled by Test through the granted node | todo | `services/remote_runner.py`, `services/remote_process.py`, `services/remote_commands.py`, `services/remote_srun_retry.py`, `services/scheduler_probe.py` | — |
 | H4 | `close_remote_job`, liveness `probe` / `cancel_pending`, Stop, end-of-run and app-close teardown cancel only the step | todo | `services/remote_jobs.py`, `services/remote_liveness.py`, `services/pipeline_runner.py` | — |
 | H5 | Guard: every `scancel` call site in `services/` is on a per-function roster saying how it handles a step id; liveness check; `test_guards_bite.py` case; proved with `scripts/prove_guard.sh` | todo | `tests/` | — |

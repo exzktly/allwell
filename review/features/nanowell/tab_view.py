@@ -384,6 +384,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     computing.setObjectName("NanowellComputing")
     computing.setAlignment(Qt.AlignCenter)
     computing.hide()
+    # It covers the whole card as a scrim, so it follows the card's size while it shows, not only when shown.
+    card.canvas.mpl_connect("resize_event", lambda _event: computing.resize(card.size()))
     reg.register("_nw_computing_label", computing)
 
     detail = QWidget(splitter)

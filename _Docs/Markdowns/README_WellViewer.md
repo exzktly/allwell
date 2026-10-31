@@ -566,8 +566,10 @@ The new images need an acquisition record of their own when the analysed dataset
 the CZI, ND2 or OME import); without it the merge is refused, because the merged dataset would have no record
 to add the new timepoint from. *Concatenate* also joins two datasets that were each analysed in nanowell mode:
 nanowells are matched by address, so dataset 2's timepoints land on dataset 1's nanowells. Where the two analyses
-disagree about a well — they found different nanowells in it, a timepoint of dataset 2 sits a lattice step off, or
-it was measured on dataset 2's own fallback template — those timepoints of dataset 2 are left out, and the log
+disagree about a well — they found different nanowells in it, a timepoint of dataset 2 may sit a lattice step off
+(dataset 2's own analysis flagged it, or one side of its rim is empty as a step leaves it — a bubble or glare over
+that side looks the same, and then the timepoint is simply measured again), or it was measured on dataset 2's own
+fallback template — those timepoints of dataset 2 are left out, and the log
 names each one and why; run Analyze with Run scope set to *Fill in what's missing* to measure them onto dataset 1's
 nanowells. Each half keeps the nanowell diameter its own analysis measured. Two analyses under different nanowell
 settings are refused, as is a pair where only one dataset holds nanowell results or only one has an acquisition

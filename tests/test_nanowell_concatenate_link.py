@@ -23,15 +23,24 @@ from datasets.core.nanowell_tables import refuse_unjoinable_nanowell_tables
 from tests.fixtures.dataset_builder import build_dataset
 
 SETTINGS = {"plate_format": "100um", "cell_diameter_um": 15.0}
-ROSTER = [(q, r) for q in range(-3, 4) for r in range(-3, 4)]
+#: A 37-site hexagonal array: the shape a circular well's roster has.
+ROSTER = [(q, r) for q in range(-3, 4) for r in range(-3, 4) if max(abs(q), abs(r), abs(q + r)) <= 3]
+#: The ring of sites a disk-rule well has past its array's rim (every one ``occluded`` at every timepoint).
+DISK_RING = [(q, r) for q in range(-4, 5) for r in range(-4, 5) if max(abs(q), abs(r), abs(q + r)) == 4]
 
 
 def _dataset(root: Path, *, wells=("A01",), timepoints=("0h", "24h"), cells=1, radius=1000.0, roster=ROSTER,
-             step=None, fallback=(), ratios=None, settings=SETTINGS, tables=True):
-    """An analysed nanowell dataset: every well's tables name every timepoint, ok, on *roster*, every site
-    detected. *cells* is each site's ``n_cells`` (one dataset's rows told from the other's); *step* maps a timepoint
-    to the lattice step its detections are moved by (anchored a step off); *fallback* names the timepoints measured
-    on the well's earliest template; *ratios* gives each timepoint's template floor ratio."""
+             step=None, flagged=(), disk_rule=False, fallback=(), ratios=None, settings=SETTINGS, tables=True):
+    """An analysed nanowell dataset: every well's tables name every timepoint, ok, on *roster*, every site wholly
+    imaged and detected. *cells* is each site's ``n_cells`` (one dataset's rows told from the other's).
+
+    *step* maps a timepoint to the lattice step its origin sat off. Its rows are what the run writes for one: the
+    same addresses as every other timepoint's (one row per roster site), with the array at ``roster - step`` in its
+    frame, so no nanowell is detected on the crescent the step leaves — ``occluded``, none of the disk visible, as
+    the rendered run writes it. *flagged* are the timepoints the dataset's own run flagged ``roster_mismatch``.
+    *disk_rule* writes a well analysed before rosters were kept: no roster recorded, and rows for a ring of sites past
+    the array's rim at every timepoint. *fallback* names the timepoints measured on the well's earliest template;
+    *ratios* gives each timepoint's template floor ratio."""
     info_extra = {"nanowell": {"scheme_version": 1, "measure_version": 3, "settings": dict(settings)},
                   "acquisition": {tp: {"pixel_size_um": {"x": 4.3, "y": 4.3}} for tp in timepoints}}
     build_dataset(root, wells=list(wells), timepoints=list(timepoints), fovs=("F001", "F002"),
@@ -45,18 +54,24 @@ def _dataset(root: Path, *, wells=("A01",), timepoints=("0h", "24h"), cells=1, r
     folder = root / "out" / "nanowells"
     folder.mkdir()
     for well in wells:
-        blocks = {tp: {"status": "ok", "record_digest": f"{root.name}-{tp}",
+        consistency = {tp: "roster_mismatch" if tp in flagged else "consistent" for tp in timepoints}
+        blocks = {tp: {"status": "ok", "record_digest": f"{root.name}-{tp}", "consistency": consistency[tp],
                        "template": {"source": "earliest" if tp in fallback else "own",
                                     "floor_ratio": (ratios or {}).get(tp, 1.0)}} for tp in timepoints}
+        array = {"radius_um": radius} if disk_rule else \
+            {"radius_um": radius, "roster": [list(a) for a in roster], "roster_rule": "evidence"}
         (folder / f"{well}_grid.json").write_text(json.dumps({
-            "scheme_version": 1, "measure_version": 3, "well": well,
-            "array_radius": {"radius_um": radius, "roster": [list(a) for a in roster], "roster_rule": "evidence"},
-            "timepoints": blocks}))
-        lines = []
+            "scheme_version": 1, "measure_version": 3, "well": well, "array_radius": array, "timepoints": blocks}))
+        lines, inside = [], set(roster)
         for tp in timepoints:
             dq, dr = (step or {}).get(tp, (0, 0))
-            lines += [f"{tp},{q + dq},{r + dr},True,,{cells}\n" for q, r in roster]
-        (folder / f"{well}.csv").write_text("timepoint,nw_q,nw_r,detected,consistency,n_cells\n" + "".join(lines))
+            for q, r in [*roster, *(DISK_RING if disk_rule else ())]:
+                there = (q + dq, r + dr) in inside
+                lines.append(f"{tp},{q},{r},{there},1.0,{1.0 if there else 0.0},{'measured' if there else 'occluded'},"
+                             f"{consistency[tp]},{cells if there else ''}\n")
+        (folder / f"{well}.csv").write_text(
+            "timepoint,nw_q,nw_r,detected,imaged_fraction,visible_fraction,state,consistency,n_cells\n"
+            + "".join(lines))
         _template(folder / f"{well}_template.npz", timepoints[0])
     return root
 
@@ -142,15 +157,43 @@ def test_a_well_whose_two_rosters_differ_leaves_all_of_dataset_2_for_analyze(tmp
 
 
 def test_a_dataset_2_timepoint_anchored_a_step_off_is_set_aside_alone(tmp_path):
+    """Tracker M14. Rows exist only at the roster's addresses, at every timepoint, so the step-off timepoint's
+    detected addresses overlap dataset 1's best where they are: the check that compared addresses could not fire on
+    the tables a run writes (its old fixture moved the rows off the roster). Its empty crescent is what shows."""
     first = _dataset(tmp_path / "d1")
     second = _dataset(tmp_path / "d2", cells=7, step={"24h": (1, 0)})
     plan, _summary, _lines, dest = _concatenate(tmp_path, first, second)
-    assert list(plan.nanowell_link.set_aside.get("A01", {})) == ["72h"]
-    assert "lattice steps from dataset 1's" in plan.nanowell_link.set_aside["A01"]["72h"]
+    assert plan.nanowell_link.set_aside == {"A01": {"72h": (
+        "one side of its rim is empty, as a lattice step of (1, 0) off dataset 1's nanowells leaves it (or a bubble "
+        "or glare over that side), so its addresses may name neighbouring nanowells")}}
     grid, rows = _tables(dest)
     assert list(grid["timepoints"]) == ["0h", "24h", "48h"]
     assert {r["timepoint"] for r in rows} == {"0h", "24h", "48h"}      # no site rows without a grid block
     assert _cell_timepoints(dest) == {"0h", "24h", "48h"}
+
+
+def test_a_dataset_2_timepoint_its_own_run_flagged_is_set_aside_and_never_joined(tmp_path):
+    """Dataset 2's run found 24h's nanowells a step from its 0h's and flagged it. The link skipped a flagged
+    timepoint's rows altogether, so it was never judged, and was joined as it was."""
+    first = _dataset(tmp_path / "d1")
+    second = _dataset(tmp_path / "d2", cells=7, step={"24h": (1, 0)}, flagged=("24h",))
+    plan, _summary, _lines, dest = _concatenate(tmp_path, first, second)
+    assert plan.nanowell_link.set_aside == {"A01": {"72h": (
+        "dataset 2's own analysis flagged it roster_mismatch (its nanowells sat a lattice step from its other "
+        "timepoints'), so its addresses may name neighbouring nanowells")}}
+    assert list(_tables(dest)[0]["timepoints"]) == ["0h", "24h", "48h"]
+
+
+def test_a_disk_rule_timepoint_a_step_off_is_found_by_its_detected_addresses(tmp_path):
+    """A well analysed before rosters were kept has rows for a ring of sites past its rim, so a step-off
+    timepoint's nanowells are detected at addresses dataset 1's are not: the addresses show the step."""
+    first = _dataset(tmp_path / "d1", disk_rule=True)
+    second = _dataset(tmp_path / "d2", cells=7, step={"24h": (1, 0)}, disk_rule=True)
+    plan, _summary, _lines, _dest = _concatenate(tmp_path, first, second)
+    assert plan.nanowell_link.set_aside == {"A01": {"72h": (
+        "its nanowells sit (1, 0) lattice steps from dataset 1's, so its addresses may name neighbouring nanowells")}}
+    agreeing = _dataset(tmp_path / "d3", cells=7, disk_rule=True)
+    assert cc.build_merge_plan(first, agreeing, tmp_path / "dest3", gap_hours=24.0).nanowell_link.set_aside == {}
 
 
 def test_a_dataset_2_timepoint_measured_on_its_own_fallback_template_is_set_aside(tmp_path):

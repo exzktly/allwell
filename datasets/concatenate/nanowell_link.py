@@ -11,9 +11,11 @@ own rows already agree with that run and can be joined as they are, and sets asi
 - **A well whose two rosters differ** has every dataset 2 timepoint set aside: dataset 2's rows cover other sites
   than dataset 1's, and an incremental run decides from the evidence of both what the roster is (re-analysing the
   whole well when the new evidence changes it).
-- **A dataset 2 timepoint anchored a lattice step from the others** (:func:`pipeline.nanowell_run.misanchored`,
-  judged against dataset 1's detections as an incremental run judges a new timepoint) is set aside: its rows may
-  name each nanowell's neighbour.
+- **A dataset 2 timepoint that may sit a lattice step from dataset 1's nanowells** is set aside: its rows may name
+  each nanowell's neighbour. It may when dataset 2's own run flagged it ``roster_mismatch``, when its detected
+  addresses sit a step from dataset 1's (:func:`pipeline.nanowell_run.misanchored`, as an incremental run judges a
+  new timepoint), or when one side of its rim is empty as a step leaves it (``datasets.core.nanowell_rim``), the one
+  way a step shows in tables that have rows only at the roster's addresses (:func:`_stepped_off`).
 - **A dataset 2 timepoint measured on dataset 2's earliest template** (too few empty nanowells for its own) is set
   aside: one run would have fallen back to dataset 1's earliest template instead.
 
@@ -151,6 +153,55 @@ def _roster_reason(rule1, rule2, roster1: frozenset, roster2: frozenset) -> str 
     return None
 
 
+def flagged_timepoints(grid: dict, rows: list[dict]) -> set[str]:
+    """The addressed timepoints the well's own run flagged ``roster_mismatch``, in its grid record or its rows (the
+    run writes both)."""
+    ok = _ok(grid)
+    flagged = {tp for tp, block in (grid.get("timepoints") or {}).items()
+               if isinstance(block, dict) and block.get("consistency") == "roster_mismatch"}
+    flagged |= {row.get("timepoint") for row in rows if row.get("consistency") == "roster_mismatch"}
+    return flagged & ok
+
+
+def _stepped_off(grid1: dict, rows1: list[dict], grid2: dict, rows2: list[dict]) -> dict[str, str]:
+    """``dataset 2 timepoint -> why`` for each one that may sit a lattice step off dataset 1's nanowells, on a well
+    whose two rosters agree. Three ways to know, each covering what the others cannot see:
+
+    - dataset 2's own run flagged it ``roster_mismatch``: that run compared every nanowell it detected, beyond the
+      roster too, and found it a step from its other timepoints';
+    - its detected addresses sit a step from dataset 1's (:func:`pipeline.nanowell_run.misanchored`, as an
+      incremental run judges a new timepoint), which shows where the rows reach beyond the array (a disk-rule well's
+      ring of sites past its rim);
+    - one side of its rim is empty, as a step leaves it (``datasets.core.nanowell_rim``), which is how a step shows
+      in a well whose run kept a roster: every timepoint has rows only at the roster's addresses, so detected
+      addresses agree at every step.
+
+    The rim cannot tell a step from a bubble or glare over one side, but a set-aside timepoint is measured again by
+    an incremental Analyze, from the images, so a needless one costs that run and nothing else."""
+    from datasets.core.nanowell_rim import step_against_roster
+    from pipeline.nanowell_run import misanchored
+
+    aside = {tp: ("dataset 2's own analysis flagged it roster_mismatch (its nanowells sat a lattice step from its "
+                  "other timepoints'), so its addresses may name neighbouring nanowells")
+             for tp in sorted(flagged_timepoints(grid2, rows2))}
+    kept = set().union(*detected_by_timepoint(grid1, rows1).values())
+    for tp, step in misanchored(detected_by_timepoint(grid2, rows2), kept).items():
+        aside.setdefault(tp, f"its nanowells sit {tuple(step)} lattice steps from dataset 1's, so its addresses may "
+                             "name neighbouring nanowells")
+    if (grid2.get("array_radius") or {}).get("roster") is None:
+        return aside
+    roster = set(roster_of(grid2, rows2))
+    by_tp: dict[str, list[dict]] = {}
+    for row in rows2:
+        by_tp.setdefault(row.get("timepoint"), []).append(row)
+    for tp in sorted(_ok(grid2) - set(aside)):
+        step = step_against_roster(by_tp.get(tp, ()), roster)
+        if step != (0, 0):
+            aside[tp] = (f"one side of its rim is empty, as a lattice step of {step} off dataset 1's nanowells leaves "
+                         "it (or a bubble or glare over that side), so its addresses may name neighbouring nanowells")
+    return aside
+
+
 def plan_link(ds1_out, ds2_out, relabel: Callable[[str], str]) -> NanowellLink:
     """Decide which of dataset 2's nanowell timepoints join dataset 1's as they are (module docstring).
 
@@ -158,7 +209,6 @@ def plan_link(ds1_out, ds2_out, relabel: Callable[[str], str]) -> NanowellLink:
     checked by ``refuse_unusable_tables`` already.
     """
     from pipeline.nanowell_measure import SOURCE_EARLIEST
-    from pipeline.nanowell_run import misanchored
 
     first, second = _grids(ds1_out), _grids(ds2_out)
     joined, ds2_only, set_aside = [], [], {}
@@ -175,10 +225,7 @@ def plan_link(ds1_out, ds2_out, relabel: Callable[[str], str]) -> NanowellLink:
         if reason:
             aside = {relabel(tp): reason for tp in blocks2}
         else:
-            kept = set().union(*detected_by_timepoint(grid1, rows1).values())
-            for tp, step in misanchored(detected_by_timepoint(grid2, rows2), kept).items():
-                aside[relabel(tp)] = (f"its nanowells sit {tuple(step)} lattice steps from dataset 1's, so its "
-                                      "addresses may name neighbouring nanowells")
+            aside = {relabel(tp): why for tp, why in _stepped_off(grid1, rows1, grid2, rows2).items()}
             for tp, block in blocks2.items():
                 if (block.get("template") or {}).get("source") == SOURCE_EARLIEST and relabel(tp) not in aside:
                     aside[relabel(tp)] = ("it was measured on dataset 2's earliest empty-nanowell template, where one "

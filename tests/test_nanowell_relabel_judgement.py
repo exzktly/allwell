@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import json
 
+from datasets.core.nanowell_rim import step_against_roster
 from pipeline.nanowell_run import hex_ring
 from pipeline.nanowell_task import SITE_COLUMNS, _has_a_step_off_timepoint
 
@@ -126,7 +127,7 @@ def test_glare_over_one_side_of_the_rim_at_a_timepoint_the_run_left_consistent_i
         "0h": ("fiducial", "consistent", _rows("0h")),
         "24h": ("fiducial", "consistent", _rows("24h")),
         "48h": ("array_centre", "consistent", _rows("48h", hidden=PLUS_Q_RIM))})
-    assert rl._step_against_roster(_rows("48h", hidden=PLUS_Q_RIM), R) == (1, 0)     # the rim alone says a step
+    assert step_against_roster(_rows("48h", hidden=PLUS_Q_RIM), R) == (1, 0)          # the rim alone says a step
     before = {p.name: p.read_bytes() for p in (out / "nanowells").iterdir()}
     plans = rl.plan_dataset(out)
     assert {w: (p.verdict, p.moves, p.rim_only, p.repairable) for w, p in plans.items()} == {

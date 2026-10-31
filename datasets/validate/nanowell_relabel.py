@@ -48,7 +48,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from pipeline.nanowell_frames import SHIFT, STEP_REACH, TIE, choose_frame
+from datasets.core.nanowell_rim import site_address as _address
+from datasets.core.nanowell_rim import step_against_roster
+from pipeline.nanowell_frames import SHIFT, TIE, choose_frame
 
 NANOWELL_DIRNAME = "nanowells"
 #: Where the originals of every relabelled well are copied before the rewrite, under a folder named for the time.
@@ -62,11 +64,6 @@ RELABELLED_BY = "Datasets → Validate"
 _ADDRESS_COLUMNS = ("nw_q", "nw_r", "nw_ring", "nw_label")
 
 
-#: A timepoint is judged a lattice step off only when that step explains at least this many more of its rim sites
-#: than its own addresses do, and at least half the rim sites the step predicts: a nanowell missed at the rim, or a
-#: bubble over it, moves the count by one or two, while a step off leaves a whole crescent (17 sites on a 265-site
-#: rendered array).
-MIN_CRESCENT = 3
 #: The verdict of a well with nothing to repair whose consistent timepoints' rims read a step (``WellPlan.rim_only``).
 RIM_ONLY = "rim_only"
 
@@ -96,13 +93,6 @@ class WellPlan:
     @property
     def repairable(self) -> bool:
         return self.verdict == SHIFT and bool(self.shifts)
-
-
-def _address(row) -> tuple[int, int] | None:
-    q, r = str(row.get("nw_q") or "").strip(), str(row.get("nw_r") or "").strip()
-    if not q or not r:
-        return None
-    return int(float(q)), int(float(r))
 
 
 def _read_rows(path: Path) -> tuple[list[str], list[dict]]:
@@ -135,35 +125,6 @@ def _is_circular(grid: dict) -> bool:
     return grid.get("array_radius", {}).get("radius_um") is not None
 
 
-def _step_against_roster(rows, roster: set) -> tuple[int, int]:
-    """The step ``s`` that best explains which of this timepoint's wholly imaged roster sites hold a nanowell.
-
-    Every timepoint of a circular well is measured on one roster, so its rows exist for the same addresses whatever
-    its origin, and the nanowells it detected cannot show a step by their addresses alone. Its rim can: a timepoint
-    whose origin sits a step off measured, in its own frame, the roster disk while the array sat at ``roster - s``, so
-    a crescent of imaged roster sites on one side holds no nanowell. The step chosen is the one whose predicted
-    nanowells (``a`` such that ``a + s`` is in the roster) disagree least with the detections, and it must beat
-    ``(0, 0)`` by :data:`MIN_CRESCENT` and by half the crescent it predicts."""
-    imaged, detected = set(), set()
-    for row in rows:
-        address = _address(row)
-        try:
-            whole = float(row.get("imaged_fraction") or "nan") >= 0.999
-        except ValueError:
-            whole = False
-        if address in roster and whole:
-            imaged.add(address)
-            if str(row.get("detected")).strip().lower() == "true":
-                detected.add(address)
-    steps = [(dq, dr) for dq in range(-STEP_REACH, STEP_REACH + 1) for dr in range(-STEP_REACH, STEP_REACH + 1)]
-    predicted = {st: {a for a in imaged if (a[0] + st[0], a[1] + st[1]) in roster} for st in steps}
-    misses = {st: len(detected ^ predicted[st]) for st in steps}
-    best = min(steps, key=lambda st: (misses[st], st != (0, 0)))
-    crescent = len(imaged - predicted[best])
-    gain = misses[(0, 0)] - misses[best]
-    return best if best != (0, 0) and gain >= max(MIN_CRESCENT, crescent / 2) else (0, 0)
-
-
 def plan_well(well: str, grid: dict, site_rows: list[dict]) -> WellPlan | None:
     """The plan for one well from its grid record and sites table; ``None`` when its timepoints already share one
     frame, or it is not a circular well with a kept roster (an inferred array's timepoints are registered by the run
@@ -186,7 +147,7 @@ def plan_well(well: str, grid: dict, site_rows: list[dict]) -> WellPlan | None:
     # tables could: it compared every nanowell each timepoint detected, beyond the roster too, and flagged a timepoint
     # whose nanowells sat a step from the others' (``nanowell_run.misanchored``). A timepoint it left consistent stays
     # in the roster's frame, and a step its rim reads is only reported (``rim_only``).
-    read = {tp: _step_against_roster(rows, roster) for tp, rows in by_tp.items() if rows}
+    read = {tp: step_against_roster(rows, roster) for tp, rows in by_tp.items() if rows}
     onto = {tp: step if tp in flagged else (0, 0) for tp, step in read.items()}
     rim_only = {tp: step for tp, step in read.items() if tp not in flagged and step != (0, 0)}
     decision = choose_frame(onto, {tp: blocks[tp].get("origin_method") for tp in onto}, list(onto))

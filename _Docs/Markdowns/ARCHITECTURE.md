@@ -11318,9 +11318,17 @@ timepoints — the roster, the check that no timepoint sits a lattice step off t
 sparse timepoint falls back to. `plan_link` decides at plan time, well by well, where dataset 2's rows already agree
 with what an incremental run onto dataset 1's tables would write: a well whose two rosters differ (`roster_of`: the
 recorded set, else the addresses a disk-rule well's ok timepoints have rows for), or whose two analyses used
-different roster rules, has every dataset 2 timepoint **set aside**; so does a single dataset 2 timepoint anchored a
-step off dataset 1's detections (`nanowell_run.misanchored`, given dataset 1's detected sites as an incremental run
-gives it the kept ones) or measured on dataset 2's own fallback template (`template.source == "earliest"`). The rest
+different roster rules, has every dataset 2 timepoint **set aside**; so does a single dataset 2 timepoint that may
+sit a step off dataset 1's nanowells (`_stepped_off`), or one measured on dataset 2's own fallback template
+(`template.source == "earliest"`). `_stepped_off` knows a step three ways, each seeing what the others cannot:
+dataset 2's own run flagged the timepoint `roster_mismatch` (`flagged_timepoints`, grid block or rows; that run
+compared every nanowell it detected, beyond the roster too); its detected addresses sit a step off dataset 1's
+(`nanowell_run.misanchored`, given dataset 1's detected sites as an incremental run gives it the kept ones), which
+shows only where rows reach past the array, as a disk-rule well's ring does; or, in a well whose run kept a roster,
+one side of its rim is empty as a step leaves it (`datasets/core/nanowell_rim.step_against_roster`, shared with
+Validate's relabel). A kept roster gives every timepoint rows at the roster's addresses only, so detected addresses
+overlap best where they are and only the rim can show the step. The rim cannot tell a step from a bubble or glare
+over one side; setting such a timepoint aside costs one incremental Analyze measuring it from the images. The rest
 are joined: `carry_linked_tables` carries dataset 1's tables (`carry_nanowell_tables`), adds dataset 2's blocks and
 site rows under their renamed timepoints onto dataset 1's grid record — its `array_radius` and roster kept — and
 re-runs `flag_template_drift` over the merged blocks, so every timepoint is compared with the well's earliest. A
@@ -14635,6 +14643,7 @@ deletable:
 | `datasets/core/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count) every tool below uses for its per-well `ThreadPoolExecutor`. It **re-exports** `pipeline.explode_common.pick_workers` rather than defining it: the exploders take it from there, and this module used to hold a second implementation of the same three lines under a comment saying it mirrored the first — which is a heuristic that will be tuned in one place and not the other. |
 | `datasets/core/convert_marker.py` | The resume marker the three **packed-file converters** share (Convert OME-TIFF, Convert CZI, Convert ND2) — `mapping_signature`, the marker read/write/clear trio, `converted_wells`, `ResumeState`, `resume_state` and `destination_problem`. It is a different question from `dataset_paths.make_dataset_api`'s, which the copy tools use: theirs is "did I leave leftovers here?", answerable from the presence of a file and cleared by rebuilding. This one is "may I carry on from what is here?", which is a question about **settings** — two different mappings of one source write *identical* filenames, so nothing on disk distinguishes an `A01.zip` made from scene 0 from one made from scene 7, and only a marker recording the mapping can tell a run that may finish another's work from one that must refuse. Each converter passes its own marker filename (a folder carrying *another* converter's leftovers is not a resume either) and its own list of mapping fields; the signature also carries the source's resolved path, size and mtime, so a file replaced at the same name — a re-export, a restore, the next plate saved over the last — is a different source. `workers` is deliberately not a mapping field: it changes how fast the conversion goes and nothing about what it writes, so refusing a resume over it would refuse one that was safe. A field in `OMITTED_WHEN_EMPTY` (`timepoint_subset`) is written only when set, so markers left before it existed still match a run that leaves it empty (§6.2c). |
 | `datasets/core/timepoint_picker.py` | `TimepointPicker` — the three converters' *Timepoints* dropdown: a `CheckableDropdown` of the source's own timepoint tokens whose `subset()` is `()` with everything ticked, `None` with nothing, and otherwise the ticked tokens; a restored token the source lacks stays listed as missing (§6.2c). |
+| `datasets/core/nanowell_rim.py` | `step_against_roster` / `MIN_CRESCENT` / `site_address` — read a lattice step off a nanowell timepoint's rim from its sites table: the one way a step shows in tables that have rows only at the roster's addresses. Not proof (a bubble or glare over one side reads the same), so Validate's relabel moves only a timepoint the run flagged by it and Concatenate's link sets a timepoint aside for Analyze on it (§6.2i, §6b). Qt-free. |
 
 **Every copy tool refuses a dataset that spells one well two ways.** Subset,
 Merge Plates and Concatenate each call `well_spelling_collisions` from their own
@@ -15429,7 +15438,7 @@ for a schema that doesn't have `field_name` — silently wiping a real, correct
 rewrites measurement tables, and only their address columns.
 `datasets/validate/nanowell_relabel.py` (Qt-free) plans it from a dataset's
 tables alone: `plan_dataset(out_dir)` reads each circular well's grid record
-and sites table and, for each `ok` timepoint, `_step_against_roster` finds the
+and sites table and, for each `ok` timepoint, `datasets/core/nanowell_rim.step_against_roster` finds the
 step whose predicted nanowells (`a` such that `a + s` is in the recorded
 roster) best match which wholly imaged roster sites the timepoint detected.
 Every timepoint is measured on one roster, so detected addresses alone cannot

@@ -411,3 +411,77 @@ def test_stale_reservation_directories_are_cleared_and_live_ones_kept(host, remo
         assert live.exists()
     finally:
         reservation.release("test over")
+
+
+# ── an early job that waited out Max queue wait (tracker M2) ───────────────────
+
+_QUEUE_WAIT_OUT = ("[remote] scheduler: ERROR no node was granted within 30 min, this host's Max queue wait — "
+                   "cancelled job 77 and stopped. Raise Max queue wait for this host in Remotes (Wait indefinitely "
+                   "never gives up), or start the run again when the cluster is less busy")
+
+
+def _waits_out_max_queue_wait() -> subprocess.Popen:
+    """What the srun wrapper's early job prints and exits with when Max queue wait runs out before a grant."""
+    from services.remote_srun_retry import QUEUE_WAIT_EXIT
+
+    proc = FakeRemote._REAL_POPEN(
+        ["sh", "-c", f"echo 'srun: job 77 queued and waiting for resources'; echo \"{_QUEUE_WAIT_OUT}\"; "
+                     f"exit {QUEUE_WAIT_EXIT}"],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    proc.wait()
+    return proc
+
+
+def test_an_early_job_that_ended_says_so_when_it_ends_not_at_the_hand_over(host, remote, monkeypatch):
+    """Tracker M2. The early job ended while the plate was still being prepared, and nothing was said until the
+    run was ready: the status line went on counting "Waiting for the scheduler — 41m (job 77)" for a job that no
+    longer existed. Its end is logged as it happens, as a line the pane reads as the early wait's end."""
+    from services.pipeline_runner import _sched_events
+    from services.remote_runner import RemoteRunner
+
+    jobs = remote.jobs
+
+    def ends_at_once(_argv):
+        jobs.procs.append(_waits_out_max_queue_wait())
+        return jobs.procs[-1]
+
+    remote.install(monkeypatch, host, on_launch=ends_at_once)
+    said: list[str] = []
+    reservation = RemoteRunner(host).reserve_allocation(n_wells=2, batch_size=0, nanowell=False,
+                                                        log_fn=said.append)
+    assert reservation is not None
+    try:
+        deadline = time.monotonic() + 10
+        while not any("has ended" in s for s in said) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        # No hand-over and no `usable()` yet: the plate is still being prepared.
+        states = [e[1][0] for s in said for e in _sched_events(s)]
+        assert states == ["waiting-early", "queued", "early-ended"], said
+    finally:
+        reservation.release("test over")
+
+
+@pytest.mark.parametrize("batch_size", [0, 2], ids=["single-shot", "batched"])
+def test_an_early_job_that_waited_out_max_queue_wait_is_not_asked_for_again(
+        plate, host, remote, stop_fetchers, monkeypatch, batch_size):
+    """Tracker M2. Max queue wait is how long a run waits for a node. An early job that waited it out during
+    staging was replaced by a fresh request at the hand-over, whose wait started again from zero, so a run with a
+    30-minute limit could wait an hour. The run stops instead, saying why, and asks for nothing more."""
+    jobs = remote.jobs
+
+    def early_waits_out(argv):
+        if not jobs.procs:
+            jobs.procs.append(_waits_out_max_queue_wait())
+            return jobs.procs[-1]
+        return jobs(argv)
+
+    remote.install(monkeypatch, host, on_launch=early_waits_out)
+
+    r, text = _run(plate, host, stop_fetchers, remote_batch_size=batch_size)
+
+    assert len(remote.launched) == 1, [argv[-1][:200] for argv in remote.launched]
+    assert "[remote] scheduler: requesting allocation via: env" not in text, text
+    assert ("the node asked for early was not granted within this host's Max queue wait, so no other is asked "
+            "for (it would start the wait again): no node was granted within 30 min, this host's Max queue wait "
+            "— cancelled job 77 and stopped.") in text, text
+    assert r._had_error, text

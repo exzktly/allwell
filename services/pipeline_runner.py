@@ -65,6 +65,7 @@ from services import run_journal, run_provenance
 from services.remote_finished_wells import argv_forcing, drop_finished, nanowell_forced
 from services.remote_process import run_local_auto_threshold
 from services.remote_recover import recover_finished_outputs
+from services.remote_reservation import EARLY_JOB_ENDED
 from services.remote_run_state import refuse_remote_nanowell_incremental
 from services.sleep_guard import SleepGuard
 from services.subprocess_kill import signal_subprocess
@@ -371,9 +372,11 @@ _RE_SCHED_REQUEST = re.compile(
     r"\[remote\] scheduler: (?:batch \d+: |(?P<early>early: ))?requesting allocation via: (?P<launcher>.+)")
 # A job queued before staging (``services.remote_reservation``) is asked for with ``early:`` on its request line,
 # because the run goes on preparing while it waits: the pane counts the wait without calling the run queued. These
-# are its two ends: the run handed to it, or it given back unused.
+# are its two ends: the run handed to it, or it given back unused or ended on its own while the run is prepared
+# (``remote_reservation.EARLY_JOB_ENDED``, said as it ends, so the wait stops being counted then, not at the hand-over).
 _RE_SCHED_HANDED = re.compile(r"\[remote\] scheduler: the run is handed to the node asked for early")
-_RE_SCHED_EARLY_ENDED = re.compile(r"\[remote\] scheduler: giving back the node asked for early")
+_RE_SCHED_EARLY_ENDED = re.compile(
+    r"\[remote\] scheduler: giving back the node asked for early|" + re.escape(EARLY_JOB_ENDED))
 _RE_SCHED_GRANTED = re.compile(
     r"\[remote\] scheduler: allocation granted — job (\S+)")
 _RE_SCHED_QUEUED = re.compile(

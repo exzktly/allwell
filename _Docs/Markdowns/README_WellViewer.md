@@ -1787,10 +1787,14 @@ starts more than one copy, the run log says how many, and only the first runs.
 — queued, or granted a node that is still starting up — before it gives up. The
 time counts from the moment the run asks for the node, which on a scheduled host
 is before the plate is even planned, so the queue wait, the preparation and the
-upload run side by side: on a cluster that queues the run for longer than the setting, the run
-fails even while the plate is still uploading (a batched run stops its upload; a
-single run finishes sending first), and what reached the cluster is kept for the
-next attempt. When it runs out the job is cancelled and the run stops with
+upload run side by side, and the setting bounds all of it: on a cluster that
+queues the run for longer than the setting, the run fails. If the wait runs out
+while the plate is still being prepared on this computer, the log says so at
+once, the status line stops counting, and the run stops as soon as preparation
+is done, before anything is uploaded — it does not ask for another node and
+start the wait over. If it runs out during the upload, a batched run stops its
+upload and a single run finishes sending first; what reached the cluster is kept
+for the next attempt. When it runs out the job is cancelled and the run stops with
 `no node was granted within 30 min, this host's Max queue wait — cancelled job
 …`; raise the setting for a busy cluster, or set it to **Wait indefinitely**
 (0), which never gives up. A run that has started on its node is never cut
@@ -2100,9 +2104,12 @@ reading it. The log names any it kept over budget for that reason.
   from the node (*allocation granted*) ends the wait. A batched run holds
   one node for every batch, so it queues once. A run that turns out to need no
   node — everything already finished on the host, nothing left to send, a
-  refusal, or a Stop — gives the queued job back at once; a job that ended
-  before the run was ready (the cluster cancelled it, the connection dropped) is
-  reported in the log and the run asks for a new one. The time a granted node
+  refusal, or a Stop — gives the queued job back at once; a job that ends
+  before the run is ready (the cluster cancelled it, the connection dropped) is
+  reported in the log as it ends, the status line stops counting its wait, and
+  the run asks for a new one once it is ready — except when what ended it was
+  Max queue wait, which stops the run instead, since asking again would start
+  that wait over. The time a granted node
   spends waiting for the run counts against its time limit, as the wait for an
   upload already did; a batched run asks for enough time for every batch the
   plate could hold. **Max queue wait** in the remote host dialog is how

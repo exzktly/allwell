@@ -103,26 +103,8 @@ def _cellpose_model(model_type: str = DEFAULT_MODEL):
             raise CellposeUnavailable(f"Cellpose's {key} model cannot be used: {refusal}.")
         try:
             device, where = _cellpose_device()
-            if _allow_tf32(device):
-                where = f"{where}, TF32"
-            if major is not None and major >= 4:
-                # bfloat16 halves the weights' memory, on a GPU that computes in it; elsewhere float32 (an older
-                # GPU without bfloat16, or the CPU, where it is slow).
-                import torch
-
-                bf16 = (device.type == "cuda" and bool(torch.cuda.is_bf16_supported())
-                        and _torch_at_least(torch.__version__, BF16_MIN_TORCH))
-
-                def build(half: bool):
-                    return _cp_models.CellposeModel(gpu=device.type == "cuda", device=device, pretrained_model=key,
-                                                    use_bfloat16=half)
-                model = build(bf16)
-                if bf16:
-                    model, bf16 = _bfloat16_or_float32(model, lambda: build(False), key)
-                where = f"{where}, {'bfloat16' if bf16 else 'float32'}"
-            else:
-                model = _cp_models.CellposeModel(
-                    model_type=key, gpu=device.type == "cuda", device=device)
+            model, device, where = _load_with_gpu_room(
+                lambda on: _build_model(_cp_models, key, major, on), device, where, key)
         except Exception as exc:  # pragma: no cover - depends on optional dep
             # The model's weights are fetched on first use: offline, that fails here, before any image is seen.
             raise CellposeUnavailable(
@@ -148,6 +130,90 @@ def _cellpose_model(model_type: str = DEFAULT_MODEL):
                 logging.getLogger(name).addFilter(_CellposeChatter())
         _CELLPOSE_MODELS[key] = model
     return model
+
+
+def _build_model(cp_models, key: str, major: int | None, device):
+    """``(model, description suffix)``: *key*'s Cellpose model built on *device*. The suffix names the precision
+    the model runs in, and TF32 where it was switched on."""
+    suffix = ", TF32" if _allow_tf32(device) else ""
+    if major is not None and major >= 4:
+        # bfloat16 halves the weights' memory, on a GPU that computes in it; elsewhere float32 (an older
+        # GPU without bfloat16, or the CPU, where it is slow).
+        import torch
+
+        bf16 = (device.type == "cuda" and bool(torch.cuda.is_bf16_supported())
+                and _torch_at_least(torch.__version__, BF16_MIN_TORCH))
+
+        def build(half: bool):
+            return cp_models.CellposeModel(gpu=device.type == "cuda", device=device, pretrained_model=key,
+                                           use_bfloat16=half)
+        model = build(bf16)
+        if bf16:
+            model, bf16 = _bfloat16_or_float32(model, lambda: build(False), key)
+        return model, f"{suffix}, {'bfloat16' if bf16 else 'float32'}"
+    return cp_models.CellposeModel(model_type=key, gpu=device.type == "cuda", device=device), suffix
+
+
+#: How many more times a worker tries to load its Cellpose model onto a GPU that ran out of memory during the load,
+#: and the seconds it waits before each try. The memory is usually held by the run's other workers, each of which
+#: has its own model on the same GPU and keeps what its passes used in Torch's cache, so it does not reliably come
+#: back; the tries cover a neighbour that was in the middle of a pass, and are kept short because each is paid once
+#: per worker.
+LOAD_OOM_RETRIES = 3
+LOAD_OOM_WAIT_S = 10.0
+
+
+def _free_gpu_memory() -> None:
+    """Give back what a failed load left on the GPU: the half-built model's tensors, once nothing refers to them,
+    and the cache Torch's allocator keeps."""
+    import gc
+
+    import torch
+
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
+def _load_with_gpu_room(build, device, where: str, key: str):
+    """``(model, device, description)``: ``build(device)`` — which returns ``(model, description suffix)`` — on
+    *device*; when the GPU runs out of memory loading it, tried again ``LOAD_OOM_RETRIES`` times
+    ``LOAD_OOM_WAIT_S`` apart, and after that built on the CPU, with a warning, so the worker still segments its wells
+    rather than failing every one of them.
+
+    Running out of memory while the model loads — or in its first, test pass — is not covered by the network batch
+    halving (``_eval_halving_on_oom``), which applies to a model that has loaded: there is no batch yet to make
+    smaller. Before this, such a load raised ``CellposeUnavailable``, nothing was cached, and the worker tried again
+    on its next well and failed it the same way, so one worker of the run failed every well it was given while the
+    others carried on. A failure that is not out-of-memory, or one on the CPU, is raised as before."""
+    import time
+
+    tries = 0
+    while True:
+        try:
+            model, suffix = build(device)
+            return model, device, f"{where}{suffix}"
+        except RuntimeError as exc:
+            if getattr(device, "type", None) != "cuda" or not _is_out_of_memory(exc):
+                raise
+            reason = f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
+        # Freed outside the handler: the exception's traceback holds the frames that hold the half-built model.
+        _free_gpu_memory()
+        if tries < LOAD_OOM_RETRIES:
+            tries += 1
+            log.warning("Cellpose %s ran out of GPU memory loading on %s (%s); trying again in %.0f s, %d of %d "
+                        "(worker %d).", key, where, reason, LOAD_OOM_WAIT_S, tries, LOAD_OOM_RETRIES, os.getpid())
+            time.sleep(LOAD_OOM_WAIT_S)
+            continue
+        import torch
+
+        cpu = torch.device("cpu")
+        log.warning("Cellpose %s could not load on %s: it ran out of GPU memory on all %d tries (%s), most likely "
+                    "because the run's other workers hold the GPU's memory. This worker (%d) runs Cellpose on the "
+                    "CPU for the rest of the run — far slower, and in float32 where the GPU workers may use "
+                    "bfloat16 — rather than failing its wells. Fewer workers (--workers) would leave each worker "
+                    "room on the GPU.", key, where, LOAD_OOM_RETRIES + 1, reason, os.getpid())
+        model, suffix = build(cpu)
+        return model, cpu, f"CPU — {where} had no room for the model (out of GPU memory){suffix}"
 
 
 #: Seconds this process's Cellpose calls have spent, by Cellpose's own clock: running the network on the images
@@ -454,8 +520,23 @@ def _network_batch(model, key: str) -> int:
     torch.cuda.synchronize(index)
     before = torch.cuda.memory_allocated(index)
     torch.cuda.reset_peak_memory_stats(index)
-    model.eval(np.zeros((PROBE_TILES, 256, 256, 1), np.float32), batch_size=PROBE_TILES, normalize=False,
-               compute_masks=False)
+    try:
+        model.eval(np.zeros((PROBE_TILES, 256, 256, 1), np.float32), batch_size=PROBE_TILES, normalize=False,
+                   compute_masks=False)
+        out_of_memory = False
+    except RuntimeError as exc:
+        if not _is_out_of_memory(exc):
+            raise
+        out_of_memory = True
+    if out_of_memory:
+        # The measuring pass is not inside the halving loop, so running out of memory here failed the well. Start
+        # at half the pass that did not fit, which is where the halving would have gone, and let it go lower.
+        torch.cuda.empty_cache()
+        batch = max(1, PROBE_TILES // 2)
+        log.warning("Cellpose %s ran out of GPU memory measuring a pass of %d tiles; running %d a pass, halved again "
+                    "if that does not fit (worker %d).", key, PROBE_TILES, batch, os.getpid())
+        _NETWORK_BATCHES[key] = batch
+        return batch
     tile = (torch.cuda.max_memory_allocated(index) - before) / PROBE_TILES
     sharers = _gpu_sharers()
     batch = batch_for_memory(total, weights, tile, sharers)

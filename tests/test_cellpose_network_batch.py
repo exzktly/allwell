@@ -124,6 +124,19 @@ def test_a_worker_not_told_how_many_share_the_gpu_takes_it_as_its_own(monkeypatc
     assert cp._network_batch(_Model(_cuda(), oom=oom, memory=memory), "cpsam") == cp.NETWORK_BATCH
 
 
+def test_a_measuring_pass_that_runs_out_of_memory_starts_the_worker_at_half_of_it(monkeypatch, caplog):
+    """The measuring pass sits outside the halving loop, so running out there failed the well."""
+    memory, oom = _fake_torch(monkeypatch, total=16 * GiB, tile=200 * MiB)
+    model = _Model(_cuda(), fits=1, oom=oom, memory=memory)
+    with caplog.at_level(logging.WARNING, logger="process_microscopy"):
+        cp._eval_halving_on_oom(model, "cpsam", np.zeros((3, 4, 4, 1)))
+    assert model.batches == [cp.PROBE_TILES, 2, 1]                # measured, then 2, then halved to what fits
+    assert cp._NETWORK_BATCHES["cpsam"] == 1 and memory["emptied"] == 2
+    warned = [r.getMessage() for r in caplog.records]
+    assert warned[0].startswith(f"Cellpose cpsam ran out of GPU memory measuring a pass of {cp.PROBE_TILES} tiles; "
+                                "running 2 a pass")
+
+
 def test_off_a_gpu_the_batch_is_the_ceiling_and_nothing_is_measured(monkeypatch):
     monkeypatch.setattr(cp, "_NETWORK_BATCHES", {})
     model = _Model("cpu")

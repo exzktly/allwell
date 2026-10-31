@@ -1638,6 +1638,11 @@ archives and outputs are always written as per-well `.zip` archives. See
     chose (`Cellpose cpsam network batch: 32 tiles a pass …`); if a pass still
     runs out of GPU memory, the worker halves its batch, says so in the log,
     and carries on.
+    If a worker cannot even load its model because the other workers have
+    filled the GPU, it tries three more times, 10 s apart, and then loads on
+    the CPU instead and carries on, much more slowly. The log says so
+    (`Cellpose cpsam could not load on GPU cuda:0 …`); fewer workers is the
+    fix for the next run.
   - The remote options' **Batch size** is a different thing: how many wells
     go to the remote at a time, which bounds its disk. It has no effect on
     the GPU.
@@ -5948,7 +5953,7 @@ trajectories, starting cells, growth rate — pairs a nanowell with itself by it
 addresses were assigned a step off, turned, mirrored, or one imaging tile was placed a step off, every nanowell
 there would be paired with a neighbour, and the numbers would look normal. So after each well the analysis checks
 the addresses against the images: it registers each timepoint's whole-well montage onto a reference timepoint's
-(the earliest whose central square was found) by the central square, which is the array's one feature that does not
+(the earliest whose central square was found, or on which you set the anchor by hand — the anchor counts as the central square) by the central square, which is the array's one feature that does not
 repeat, then confirms that every nanowell, carried through that registration, lands on the nanowell with its own
 address — within a quarter of the spacing between nanowells. It also checks that no imaging tile sits differently
 against the others than it did at the reference, and, on a plate of five or more wells with stage positions, that

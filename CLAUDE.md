@@ -44,6 +44,8 @@ scripts/test.sh --nanowell                     # the nanowell end-to-end lane (g
 scripts/test.sh --nanowell-features            # the other nanowell tests (gated)
 scripts/test.sh --remote                       # the remote / HPC tests (gated)
 python scripts/lane_needed.py nanowell|remote  # does this branch need that gate's lanes? (exit 0 = yes)
+python scripts/change_scope.py                 # version-only / docs-only / code: what the fast lane runs
+ALLWELL_FULL_LANE=1 scripts/test.sh            # the whole fast lane, whatever the change
 scripts/test.sh --ui                           # only the GUI layout / appearance tests
 scripts/test.sh --no-ui                        # the fast lane as CI runs it (UI tests left out)
 scripts/test.sh tests/test_app_smoke.py -m ""  # full-app tests: one or two files at a time
@@ -100,6 +102,18 @@ the container**:
   nanowell work) and the remote gate on 27. A new nanowell or remote test joins
   its roster. Naming files (`scripts/test.sh tests/test_nanowell_run.py`) runs
   them whichever lane they belong to.
+- **Scoped by the change.** `scripts/change_scope.py` classifies the branch
+  against `origin/main`, and `scripts/test.sh`, `scripts/preflight.sh` and CI
+  all follow it. **Version-only** (only the `__version__` line of `version.py`
+  moved): no tests, no lint; CI's version-bump job is the one check left.
+  **Docs-only** (that, plus `_Docs/Markdowns/*.md`, `CLAUDE.md`,
+  `tests/FAST_LANE.md`): no lint, and the fast lane becomes the **docs lane**,
+  the ~25 test files that read those documents, computed on each run.
+  Anything else, or anything it cannot decide, is **code** and runs everything.
+  So `scripts/test.sh` on a docs branch runs the docs lane and says so on
+  stderr; `ALLWELL_FULL_LANE=1` runs the whole lane, and naming files or
+  choosing another lane is never narrowed. CI always runs the whole lane on a
+  push to `main`, which catches a test reaching a document two imports away.
 - **UI tests** (~620 tests, inside the fast lane): GUI layout and appearance —
   widget geometry, fit, colours, theme, dashboards, phone layout, and the bare
   widgets in `widgets/` (`tests/_lanes.py::UI_LANE_FILES`, each with its

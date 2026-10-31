@@ -10668,6 +10668,20 @@ the GPU as its own. A pass that still runs out of memory (`OutOfMemoryError`, or
 Torch's cache and runs again at half the batch, which the worker keeps for the rest of its run, with a warning; one
 tile that does not fit fails as before. The batch decides how many tiles share a pass, not which tiles or what they
 hold; a GPU's matrix kernels may round a pass of another size in the last bits. `tests/test_cellpose_network_batch.py`.
+A measuring pass that itself runs out of memory sits outside that loop, so it empties the cache and starts the
+worker at half of `PROBE_TILES` with a warning, and the halving goes on from there.
+
+**Running out of GPU memory while the model loads** (`pipeline.cellpose._load_with_gpu_room`). The halving needs a
+loaded model; building one, or Cellpose 4's bfloat16 test pass inside `_bfloat16_or_float32`, can run out first on
+a GPU the run's other workers already fill. That load is tried `LOAD_OOM_RETRIES` (3) more times, `LOAD_OOM_WAIT_S`
+(10 s) apart, after a `gc.collect` and `empty_cache` run outside the `except` block (the exception's traceback holds
+the half-built model). If the GPU still has no room the worker builds the model on the CPU, says so in a warning that
+names the worker and suggests fewer workers, and carries on: its description reads `CPU — <the GPU> had no room for
+the model (out of GPU memory)`, and `ON_GPU_ATTR` is false, so the nanowell count's threads follow it off the GPU.
+The alternative it replaces was worse than slow: the load raised `CellposeUnavailable`, nothing was cached, and the
+worker failed every well it took the same way while the others carried on. Any other load failure, or one on the
+CPU, still raises `CellposeUnavailable`. A CPU worker runs float32 where its GPU neighbours may run bfloat16, so its
+wells' masks can differ from theirs in the last pixels. `tests/test_cellpose_load_oom.py`.
 
 For its first measured timepoint `run_well` also keeps a sample of what the segmenter was given (`_Steps.inspect` → `measure_timepoint(inspect=…)` → `_tile_contents(keep=…)` → `_keep_crops`): `pipeline/nanowell_inspect.inspection_sites` picks the `PER_GROUP` (8) nanowells nearest the array's centre and the 8 farthest, and each is cut from the image the segmenter received, on the scale it was given it at (`segmenter_scale`), with the labels it returned, the counting circle (`circle`: the fitted centre and `INTERIOR_FRACTION` of the fitted radius, in the crop's pixels) and the labels `count_cells` counted (`counted`), so `_keep_crops` runs after the count. The sheet outlines counted labels green and the rest red, and draws the circle yellow. `WellOutcome.inspection` carries them to `nanowell_task`, which writes `nanowells/<well>_segmenter_input.png` (`nanowell_inspect.write_sheet`; the PNG is encoded with `zlib`, nothing else, because it runs on the remote worker), and `remote_fetch_nanowells.fetch_nanowell_tables` pulls it with the tables. It exists because Test detection runs on the app's own machine, where a Torch that cannot load stops it. `tile` is one call on the whole tile (`segment_tile`), and
 is what options that name no scope mean (`LEGACY_SEGMENT_SCOPE`), with the same key and digest-alias treatment as
@@ -11141,7 +11155,10 @@ of them shown wrong, contradicts only from six up, while the square, the outline
 pitches off); `reference`; and `not_checked` for a timepoint never tested. Only `confirmed` and `reference` are good;
 `AGREES` adds `partial`. Review leaves a `contradicted` timepoint and a `partial` one's `excluded` nanowells out of its
 joins (`exclusions` reads them); `inconclusive` and `not_checked` are joined and footnoted. **The reference** (`reference_candidates`, `check_well`) is an addressed
-timepoint whose square the run accepted, those whose square carries `(0, 0)` first (`square_names_the_centre`:
+timepoint whose square the run accepted (`square_accepted`: the search's scores pass the run's own rule, or the
+run anchored the timepoint on the square, `origin_method` `fiducial`, or on an anchor set by hand, `manual` — the
+anchor is the square, at the site the run snapped it to and named `(0, 0)`, whatever the failed search scored),
+those whose square carries `(0, 0)` first (`square_names_the_centre`:
 the square is the central nanowell by convention), earliest first. A reference addressed off itself would make
 every correct timepoint contradicted, so when the contradicted timepoints agree on one step or symmetry and are at
 least as many as those confirmed, the first of them is tried as the reference too, and the one more timepoints
@@ -20099,6 +20116,42 @@ you're in before you type the command.
   one roster, the hook to marking each with its own mark, `scripts/test.sh` to
   keeping each out of the fast lane, CI and preflight to running each lane behind
   its gate, and each gate to seeing both its patterns and its tests' imports.
+- **Change scope** (`scripts/change_scope.py`). Before the fast lane runs, the
+  change is classified against its base (`origin/main`, or
+  `$ALLWELL_SCOPE_BASE`; committed, uncommitted and untracked paths, through
+  `lane_needed.changed_paths`) into one of three scopes, and the fast lane and
+  lint follow it:
+  - **version-only**: every changed path is `version.py`, and every changed
+    line in it is the `__version__ = "..."` assignment. No test runs and lint is
+    skipped. CI's `version bump` job still runs, since it is the check that
+    reads that line and fails unless it is exactly one well-formed increment.
+  - **docs-only**: every other changed path matches
+    `tests/_lanes.py::DOCS_ONLY_PATTERNS` (`_Docs/Markdowns/*.md`, `CLAUDE.md`,
+    `tests/FAST_LANE.md`). Lint is skipped and the fast lane narrows to the
+    **docs lane**: the test files that, outside their docstrings, name a docs
+    file (its basename, `Markdowns` or `_Docs`) in a string constant, or import
+    directly a first-party module that does. That second rule is how
+    `test_help_topics.py` joins through `ui/help_topics.py`, the one app module
+    that reads the manual. The lane is computed on every run, about twenty-five
+    files, and crosses rosters: a UI or gated file that reads a document runs
+    in it (CI still leaves the UI ones out).
+  - **code**: anything else, and every case the script cannot decide (no git,
+    an unknown base, an empty diff). An unanswerable question runs everything.
+
+  `scripts/test.sh` narrows itself for the default lane and `--no-ui` when no
+  test files are named; `--ui`, the gated lanes and a run that names its files
+  are never narrowed, and `ALLWELL_FULL_LANE=1` turns narrowing off.
+  `scripts/preflight.sh` prints the scope first, then skips lint and tests or
+  runs the docs lane accordingly; its working-tree and version checks always
+  run. In CI, the `ruff` and `pytest (fast lane)` jobs ask the script on a pull
+  request (`fetch-depth: 0`, for the diff) and skip their steps, so the job still
+  reports green; a push to `main` always lints and runs the whole lane with
+  `ALLWELL_FULL_LANE=1`. That push is where a test that reaches a document two
+  imports away, which the docs lane cannot see, gets caught, the same backstop
+  the gated lanes rely on. `tests/test_change_scope.py` pins each scope and
+  drives the real `scripts/test.sh` in a scratch repository: nothing runs for a
+  version bump, only the docs lane runs for an edited manual, and a failing test
+  outside that lane runs again once the change is code.
 - **UI tests** (`tests/_lanes.py::UI_LANE_FILES`, ~620 tests in seventy files),
   which run in the local fast lane and are left out of CI's. They are the tests
   whose subject is how the GUI looks and lays out: widget geometry, wrapping and

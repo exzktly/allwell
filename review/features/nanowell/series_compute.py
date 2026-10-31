@@ -404,11 +404,17 @@ def exclusion_reason(metrics: pd.DataFrame, metric: str, channels=()) -> pd.Seri
 
 
 def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
-    """The export table (tracker D8): one row per site and timepoint, every value and metric, in a fixed order."""
+    """The export table (tracker D8): one row per site and timepoint, every value and metric, in a fixed order.
+
+    ``n_cells`` is the count every figure on the page draws — the run's count less the cells Cell Gating leaves out
+    (``cell_gate_compute``). Beside it, ``n_cells_run`` is the run's own count and ``cells_left_out`` the difference,
+    so a reader can tell a gated count from the run's and see by how much; the run's ``area_est_cells`` and
+    ``count_disagreement``, which compare an area estimate against the run's count, follow ``n_cells_run``. All three
+    are empty where the nanowell has no count (occluded, clipped, not seen), never 0."""
     columns = (["well", "nw_q", "nw_r", "nw_ring", "timepoint", "time_h", "state", "reason", "identity",
                 "identity_ok", "fused",
-                "partially_visible", "imaged_fraction", "visible_fraction", "n_cells", "confluence",
-                "area_est_cells", "count_disagreement"]
+                "partially_visible", "imaged_fraction", "visible_fraction", "n_cells", "n_cells_run",
+                "cells_left_out", "area_est_cells", "count_disagreement", "confluence"]
                + [c for ch in channels for c in (f"brightness_{ch}", f"signal_{ch}")]
                + ["baseline_timepoint", "baseline_state", "occupancy_class", "count_fc", "seeded_later",
                   "log2_count_fc", "confluence_fc"]
@@ -416,5 +422,9 @@ def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
                + ["growth_rate"])
     out = metrics.reindex(columns=columns)
     out["n_cells"] = metrics["n"]
+    run = (pd.to_numeric(metrics["n_cells"], errors="coerce") if "n_cells" in metrics
+           else pd.Series(np.nan, index=metrics.index))
+    out["n_cells_run"] = run.where(metrics["n"].notna())
+    out["cells_left_out"] = out["n_cells_run"] - metrics["n"]
     out["confluence"] = metrics["c"]
     return out

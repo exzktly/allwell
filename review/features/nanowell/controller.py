@@ -120,6 +120,10 @@ def export_long_csv(state, path, wells=None) -> int:
     table.insert(table.columns.get_loc("baseline_timepoint"), "baseline", state.baseline)
     # Every row is kept, and flagged: a file filtered to the page's Subset would lose rows a reader may want back,
     # and could not say which subset made it.
+    # Which cells the counts count is said in the file itself, not only on the figure: a reader of the CSV alone
+    # must be able to tell a gated count from the run's (cell population audit P3).
+    table["cell_gating"] = (("not applied: the counts are the run's own" if state.gate is None else
+                             cg.note(state.gate) or "Cell Gating leaves out no cell in these wells' nanowells"))
     table["in_subset"] = ss.inside(metrics, state.subset, state.data).to_numpy()
     table["subset"] = state.subset.label()
     table["subset_baseline"] = state.baseline

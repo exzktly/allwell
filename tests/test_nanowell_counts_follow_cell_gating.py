@@ -184,3 +184,34 @@ def test_save_cell_data_exports_exactly_the_cells_the_page_s_counts_count(qtbot,
     assert (gate.cells, gate.excluded) == (7, 1)
     exported = csc.population_mask(get_rows(ctx, "A01"), cell_scope(ctx))
     assert int(exported.sum()) == gate.cells - gate.excluded == 6
+
+
+def test_the_nanowell_csv_says_its_counts_are_gated_and_by_how_much(qtbot, tmp_path):
+    """*Save nanowell data…* wrote the gated count as ``n_cells`` with nothing in the file saying so, beside the
+    run's area estimate and disagreement flag, which compare against the run's own count (cell population audit P3).
+    Through the real page and the real QC size gate: each row carries the run's count and the cells left out, and the
+    file names the gate."""
+    from dataclasses import replace
+
+    from review.features.nanowell import controller as nwc
+    from review.features.qc.controller import get_qc_params, recompute_qc_all
+    from tests.test_nanowell_page import _loaded, _page
+
+    ctx = _page(qtbot, _dataset_with_areas(tmp_path))
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    ctx.state.qc.params = replace(get_qc_params(ctx), enabled=True, min_area=30.0)
+    recompute_qc_all(ctx)
+    nwc.nw_on_activate(ctx)
+    qtbot.waitUntil(lambda: not st.computing and st.gated_for == nwc.gate_version(ctx), timeout=20000)
+    path = tmp_path / "nanowells.csv"
+    nwc.export_long_csv(st, path, ["A01"])
+    table = pd.read_csv(path).set_index(["timepoint", "nw_q"])
+    assert table.loc[("t_c", 0), ["n_cells", "n_cells_run", "cells_left_out"]].tolist() == [1.0, 2.0, 1.0]
+    assert table.loc[("t_c", 1), ["n_cells", "n_cells_run", "cells_left_out"]].tolist() == [1.0, 1.0, 0.0]
+    columns = list(table.reset_index().columns)
+    assert columns.index("n_cells_run") == columns.index("n_cells") + 1
+    assert columns.index("area_est_cells") == columns.index("cells_left_out") + 1
+    assert set(table["cell_gating"]) == {
+        "Cell Gating leaves out 1 of 7 cells in these wells' nanowells: counts and brightness exclude them; "
+        "confluence and nanowell fluorescence are measured from pixels and do not."}

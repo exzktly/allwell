@@ -5839,7 +5839,9 @@ which wells are left out. It applies only to this page — the well stays in the
 the page's settings. **Excluded (n) ▾** on the band brings back one well or all of them.
 
 **Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the wells the page
-draws as one long CSV, with the baseline and where the times came from; with a Subset set, every
+draws as one long CSV, with the baseline and where the times came from; `n_cells` is the count the page draws (Cell Gating
+applied), with the run's own count in `n_cells_run`, the difference in `cells_left_out` and the gate described in
+`cell_gating`, so the file says which cells it counts; with a Subset set, every
 row is still written, flagged in `in_subset` with the subset (`subset`) and its baseline (`subset_baseline`) beside it. Right after you change the baseline it waits:
 until the page has drawn the new baseline's numbers, saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
 drawn wells that carry a nanowell address — the cells the page's counts count, so a cell Cell Gating leaves out

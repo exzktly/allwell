@@ -515,14 +515,20 @@ click it. The click is saved in `in/nanowell_anchors.json`
 beside the acquisition record; the run snaps it to the nearest nanowell, so it only has to land on the square.
 When several wells and timepoints need an anchor — the usual state after a run — press **Anchor queue**
 instead of picking each one: it shows the first timepoint on the plate left unaddressed, with **Set anchor**
-already on, and each click on a central square saves the anchor and, after a moment, opens the next. A *Queue*
+already on, and each click on a central square saves the anchor and, after a moment, opens the next. Each
+timepoint opens zoomed to 10× on the centre of the whole-well montage, where the central square usually is;
+press **Fit** to see the whole well when it is not there. A *Queue*
 group beside it says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous timepoint; a
-click there replaces its anchor), **Skip**, **One per well** and **Stop**. The queue holds every unaddressed
+click there replaces its anchor), **Skip**, **One per well** and **Stop** — or press **←** for Back, **→** for
+Skip and **Esc** for Stop while the queue runs. When **Set anchor** cannot be turned on for a timepoint, the figure
+says why; press Skip to go on. The queue holds every unaddressed
 timepoint without an anchor, plate order then time order, and also any timepoint whose anchor the last run could
 not use; an anchor you set that no run has used yet is not asked for again. Turn on **One per well** to be shown
 only each well's first such timepoint, and no well that already has an anchor waiting for a re-run: one click per
 well is usually enough (see above), and any timepoint the re-run still cannot address shows up in the next
-queue. The choice is remembered until you close the app. When it ends it says how many it anchored and how many
+queue. The choice is remembered until you close the app. If One per well leaves nothing to walk (every well
+waiting already has an anchor for a re-run), **Anchor queue** says so and turns One per well off, so pressing it
+again walks those timepoints too. When it ends it says how many it anchored and how many
 were skipped, and puts your plate selection back as it was.
 Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
 run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are

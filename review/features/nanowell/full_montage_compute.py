@@ -320,6 +320,15 @@ def fit_region(extent, width: int, height: int, *, margin: float = 0.02) -> tupl
     return cx - span * width / 2, cy - span * height / 2, cx + span * width / 2, cy + span * height / 2
 
 
+@dataclass(frozen=True)
+class CentreZoom:
+    """A region the Array view works out when it draws: *factor* times *Fit*, about the centre of the image layer
+    (the whole-well montage), or of everything drawn when no image is. The anchor queue opens each timepoint this
+    way, because the central square an anchor marks is usually there; a pan or a zoom replaces it with the
+    ``(left, top, right, bottom)`` it lands on."""
+    factor: float
+
+
 def zoom_region(region, factor: float, at_um: tuple[float, float]):
     """*region* scaled by *factor* (under 1 zooms in) about the well-frame point *at_um*, which stays put."""
     left, top, right, bottom = region

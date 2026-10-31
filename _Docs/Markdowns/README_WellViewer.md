@@ -1842,15 +1842,22 @@ setting on a cluster. It is where the pipeline keeps its per-well working files
 many wells as run at once. Left empty on a host that runs jobs through Slurm, the
 run uses the compute node's own disk: `/scratch` (where AWS ParallelCluster mounts
 the node's NVMe drive), else `$SLURM_TMPDIR`, as long as it is a local disk with at
-least 20 GB free; each batch's log says which disk and how much was free, or why
-none qualified. That keeps the run's heavy temporary files off the cluster's shared
+least 20 GB free; `/scratch` counts only when it is a disk of its own, not a plain
+folder on the node's system disk. Each batch's log says which disk and how much was
+free, or why none qualified. When the disk check then finds that the node's disk
+cannot hold the run's own estimate but the run's folder in the staging directory can,
+the run uses that folder instead and its log says so (`Scratch moves off the node's
+own disk …`). When a remote run is refused for scratch space, the message names this
+field — the Analyze form's own *Scratch folder* is not sent to a host. That keeps the run's heavy temporary files off the cluster's shared
 home folder, which on ParallelCluster is served by the same head node your
 connection and the run's heartbeat go through — a run writing its scratch there
 can stall the heartbeat ("did not answer within 75s"). It never uses the node's
 `/tmp`, which other people's jobs on the same node share. The trade-off: a node's
 own disk is erased when the node shuts down, so a well that a stopped or suspended
 run left part-way starts that well's fields again next time (finished wells are
-kept, and nothing is lost between the batches of one run). With no such disk, or
+kept, and nothing is lost between the batches of one run). A part-done well left
+on a node's own disk by another run is cleared from it after a week untouched, so
+it does not hold space other jobs on that node need. With no such disk, or
 on a host without Slurm, it uses the run's own folder in the host's staging
 directory (`~/.allwell-staging/runs/…/out`). A folder set here always comes first,
 whether or not the host uses Slurm. Set it to your site's real scratch: `$TMPDIR`,

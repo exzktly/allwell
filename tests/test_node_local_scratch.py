@@ -24,9 +24,17 @@ GB = 2 ** 30
 
 
 @pytest.fixture
-def disks(tmp_path, monkeypatch):
+def rooted():
+    """The folders the ``disks`` fixture puts on the node's root filesystem; a test adds to it. Empty by default,
+    because a test's temporary folders really are on this machine's root filesystem wherever ``/tmp`` is not a
+    mount of its own, and ``/scratch`` there is refused (``test_a_scratch_folder_on_the_boot_disk_is_refused…``)."""
+    return set()
+
+
+@pytest.fixture
+def disks(tmp_path, monkeypatch, rooted):
     """Three folders standing in for /scratch, $SLURM_TMPDIR and /tmp, each on a filesystem type of the test's
-    choosing, with the free space the test gives it."""
+    choosing, with the free space the test gives it, and on the root filesystem when the test puts it in ``rooted``."""
     folders = {name: tmp_path / name for name in ("scratch", "slurm_tmp", "tmp")}
     for folder in folders.values():
         folder.mkdir()
@@ -34,6 +42,7 @@ def disks(tmp_path, monkeypatch):
     free = {folder: 500 * GB for folder in folders.values()}
     monkeypatch.setattr(nd, "NODE_SCRATCH_MOUNT", str(folders["scratch"]))
     monkeypatch.setattr(nd, "filesystem_type", lambda path, mounts="/proc/mounts": kinds.get(Path(path), "xfs"))
+    monkeypatch.setattr(nd, "on_root_filesystem", lambda path: Path(path) in rooted)
     return folders, kinds, free
 
 
@@ -79,6 +88,45 @@ def test_tmpdir_and_the_system_temp_folder_are_never_taken_and_the_reason_names_
     assert not (folders["tmp"] / f"allwell-{nd._user()}").exists()
 
 
+def test_a_scratch_folder_on_the_boot_disk_is_refused_and_slurm_tmpdir_is_taken(disks, rooted):
+    """``/scratch`` qualified by its filesystem type alone, so a plain folder on ``/`` (xfs, local, writable, roomy)
+    took the run's scratch: the node's boot disk, which a run must never fill on a node it may share."""
+    folders, _kinds, free = disks
+    rooted.add(folders["scratch"])
+    folder, reason = _pick(folders, free)
+    assert (folder, reason) == (None, f"no node-local disk qualifies: {folders['scratch']} is a folder on the node's "
+                                      "root filesystem, not a disk of its own")
+    assert not list(folders["scratch"].iterdir())
+    folder, _ = _pick(folders, free, SLURM_TMPDIR=str(folders["slurm_tmp"]))
+    assert folder == folders["slurm_tmp"] / f"allwell-{nd._user()}"
+    rooted.add(folders["slurm_tmp"])           # the site's own job folder is where the site put it
+    folder, _ = _pick(folders, free, SLURM_TMPDIR=str(folders["slurm_tmp"]))
+    assert folder == folders["slurm_tmp"] / f"allwell-{nd._user()}"
+
+
+def test_the_root_filesystem_is_told_by_device_not_by_the_mount_table():
+    """The real check, unpatched: ``/`` is on itself and ``/proc`` (a mount of its own on any Linux) is not."""
+    import os
+    assert nd.on_root_filesystem("/") is True
+    if not os.path.ismount("/proc"):
+        pytest.skip("no /proc mount on this platform")
+    assert nd.on_root_filesystem("/proc") is False
+
+
+def test_a_plain_folder_on_this_machine_s_root_filesystem_is_refused_through_the_real_check(tmp_path, monkeypatch):
+    """The reviewer's probe: a mount table that says local xfs, a ``/scratch`` that is only a folder, and the device
+    check left as it ships."""
+    import os
+    if os.stat(tmp_path).st_dev != os.stat(os.sep).st_dev:
+        pytest.skip("the temporary folder is a filesystem of its own here")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(nd, "NODE_SCRATCH_MOUNT", str(scratch))
+    monkeypatch.setattr(nd, "filesystem_type", lambda path, mounts="/proc/mounts": "xfs")
+    assert nd.node_local_scratch({"SLURM_JOB_ID": "7"}, free_bytes=lambda p: 30 * GB) == (
+        None, f"no node-local disk qualifies: {scratch} is a folder on the node's root filesystem, not a disk of its own")
+
+
 def test_outside_a_slurm_job_nothing_is_chosen(disks):
     folders, _kinds, free = disks
     assert nd.node_local_scratch({}, free_bytes=lambda p: free[Path(p)]) == (None, "")
@@ -88,7 +136,18 @@ def test_outside_a_slurm_job_nothing_is_chosen(disks):
 @pytest.fixture
 def fresh_decision(monkeypatch):
     monkeypatch.setattr(pio, "_NODE_LOCAL_DECIDED", False)
+    monkeypatch.setattr(pio, "_NODE_LOCAL_FOLDER", None)
     monkeypatch.delenv(pio.SCRATCH_DIR_ENV, raising=False)
+    # Set first so monkeypatch records an undo: the decision writes it into ``os.environ`` directly.
+    monkeypatch.setenv(pio.NODE_SCRATCH_DECLINED_ENV, "")
+    monkeypatch.delenv(pio.NODE_SCRATCH_DECLINED_ENV)
+
+
+def _as_a_spawned_worker(monkeypatch):
+    """What a worker the run spawns starts with: this module imported afresh, so nothing decided yet, and the
+    parent's ``os.environ`` inherited as it stood."""
+    monkeypatch.setattr(pio, "_NODE_LOCAL_DECIDED", False)
+    monkeypatch.setattr(pio, "_NODE_LOCAL_FOLDER", None)
 
 
 def test_a_slurm_job_with_no_scratch_folder_set_runs_on_the_node_and_its_workers_inherit_it(
@@ -124,6 +183,34 @@ def test_with_no_node_local_disk_the_shared_default_stays(disks, fresh_decision,
     assert pio.scratch_base_for(tmp_path / "out") == home
     import os
     assert pio.SCRATCH_DIR_ENV not in os.environ
+
+
+def test_a_worker_keeps_the_parent_s_no_node_disk_answer_after_the_disk_frees_up(
+        disks, fresh_decision, monkeypatch, tmp_path):
+    """The parent found ``/scratch`` with 19 GB free and kept the shared default; another job then freed space, and
+    each worker, deciding afresh, took ``/scratch``. One run, two scratch folders: the parent's sweep and the
+    workers' staging no longer agreed on where a well's working files were."""
+    folders, _kinds, free = disks
+    free[folders["scratch"]] = 19 * GB
+    monkeypatch.setenv("SLURM_JOB_ID", "4812345")
+    monkeypatch.setattr(nd.shutil, "disk_usage", lambda p: type("U", (), {"free": free[Path(p)]})())
+    home = tmp_path / "home-scratch"
+    monkeypatch.setattr(pio, "default_scratch_base", lambda: home)
+    assert pio.scratch_base_for(tmp_path / "out") == home
+    free[folders["scratch"]] = 25 * GB
+    _as_a_spawned_worker(monkeypatch)
+    assert pio.scratch_base_for(tmp_path / "out") == home
+    assert not list(folders["scratch"].iterdir())
+
+
+def test_a_worker_takes_the_parent_s_node_disk(disks, fresh_decision, monkeypatch, tmp_path):
+    folders, _kinds, free = disks
+    monkeypatch.setenv("SLURM_JOB_ID", "4812345")
+    monkeypatch.setattr(nd.shutil, "disk_usage", lambda p: type("U", (), {"free": free[Path(p)]})())
+    first = pio.scratch_base_for(tmp_path / "out")
+    free[folders["scratch"]] = 1 * GB
+    _as_a_spawned_worker(monkeypatch)
+    assert pio.scratch_base_for(tmp_path / "out") == first == folders["scratch"] / f"allwell-{nd._user()}"
 
 
 # ── through the remote command the app actually sends ─────────────────────────────────────────────────────────────
@@ -171,7 +258,7 @@ def remote_env(disks, fresh_decision, monkeypatch):
     # ``publish_scratch_args`` writes both variables into ``os.environ`` directly. A bare ``delenv`` of an unset
     # variable records no undo, so the run's fallback outlived the test and became the next test's scratch
     # (``test_scratch_base`` read ``staging/runs/run-1/out``). Setting each first makes monkeypatch restore it.
-    for name in (pio.SCRATCH_FALLBACK_ENV, pio.SCRATCH_DIR_ENV):
+    for name in (pio.SCRATCH_FALLBACK_ENV, pio.SCRATCH_DIR_ENV, pio.NODE_SCRATCH_DECLINED_ENV):
         monkeypatch.setenv(name, "")
         monkeypatch.delenv(name)
     monkeypatch.setattr(nd.shutil, "disk_usage", lambda p: type("U", (), {"free": free[Path(p)]})())
@@ -198,3 +285,158 @@ def test_a_remote_run_with_no_node_disk_keeps_its_scratch_in_the_run_s_output_fo
     assert scratch == out, "without a node disk the scratch left the staging area for the home folder's quota"
     scratch_off_slurm, out = _remote_run_scratch(tmp_path, monkeypatch, slurm=False)
     assert scratch_off_slurm == out
+
+
+# ── the run's own estimate, once it exists ────────────────────────────────────────────────────────────────────────
+
+MiB = 2 ** 20
+
+
+def _preflight_remote_run(tmp_path, monkeypatch, caplog, *, free, host_scratch=""):
+    """A remote Slurm run's scratch decision, then the scratch preflight as ``process_microscopy.main`` calls it
+    (``pipeline.io.preflight_run_scratch``), against a plate whose estimate the real ``sample_image_bytes`` reads:
+    1 MiB frames, 3 channels, 2000 FOV-groups a well, 2 wells at once — 15 MiB a group, 29.3 GiB a well, 58.6 GiB
+    for the run. *free* maps a folder to its free bytes, for the decision and the preflight alike.
+    ``(scratch decided, run folder, exit code)``; the code is ``None`` when the preflight let the run start."""
+    import logging
+    import zipfile
+
+    from pipeline import capacity
+
+    monkeypatch.setattr(capacity, "free_bytes", lambda probe: free[Path(probe).parent])
+    scratch, out = _remote_run_scratch(tmp_path, monkeypatch, host_scratch=host_scratch)
+    plate = tmp_path / "in"
+    plate.mkdir()
+    for well in ("A01", "A02"):
+        with zipfile.ZipFile(plate / f"{well}.zip", "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(f"{well}_w1_t1_f1.tif", b"\0" * MiB)
+    log = logging.getLogger("process_microscopy")
+    code = None
+    with caplog.at_level(logging.INFO, logger=log.name):
+        try:
+            pio.preflight_run_scratch(out, plate, n_wells=2, n_channels=3, workers=2, image_exts=(".tif",),
+                                      count_groups=lambda: 2000, log=log)
+        except SystemExit as exc:
+            code = exc.code
+    return scratch, out, code
+
+
+def test_a_node_disk_over_the_floor_but_under_the_run_s_estimate_is_left_for_the_run_folder(
+        remote_env, monkeypatch, tmp_path, caplog):
+    """The node's disk is chosen against a fixed 20 GB before the run's estimate exists. With 25 GB free it was
+    taken, and the preflight then refused the run — 29.3 GiB for one well — that the run folder, with 1 TB, had
+    always held. Now the run moves there, for itself and its workers, before any well has written a byte."""
+    folders, _kinds, free = remote_env
+    free[folders["scratch"]] = 25 * GB
+    node = folders["scratch"] / f"allwell-{nd._user()}"
+    out = tmp_path / "staging" / "runs" / "run-1" / "out"
+    free.update({node: 25 * GB, out: 1024 * GB})
+    scratch, out, code = _preflight_remote_run(tmp_path, monkeypatch, caplog, free=free)
+    assert (scratch, code) == (node, None), "the run was refused a scratch the run folder had room for"
+    assert pio.scratch_base_for(out) == out
+    _as_a_spawned_worker(monkeypatch)
+    assert pio.scratch_base_for(out) == out, "a worker went back to the node's disk the parent left"
+    assert (f"Scratch moves off the node's own disk {node} (25.0 GiB free) to {out}: the run needs about 58.6 GiB "
+            "of scratch (2 well(s) at once, 2000 FOV-group(s) each)") in caplog.messages
+
+
+def test_a_node_disk_that_holds_the_run_is_kept(remote_env, monkeypatch, tmp_path, caplog):
+    folders, _kinds, free = remote_env
+    node = folders["scratch"] / f"allwell-{nd._user()}"
+    out = tmp_path / "staging" / "runs" / "run-1" / "out"
+    free.update({node: 100 * GB, out: 1024 * GB})
+    scratch, out, code = _preflight_remote_run(tmp_path, monkeypatch, caplog, free=free)
+    assert (scratch, code) == (node, None) and pio.scratch_base_for(out) == node
+    assert not [m for m in caplog.messages if m.startswith("Scratch moves")]
+
+
+def test_when_the_run_folder_is_no_roomier_the_node_disk_stays_and_the_refusal_names_the_remote_setting(
+        remote_env, monkeypatch, tmp_path, caplog):
+    """The advice used to name the Analyze tab's Scratch folder, which a remote run never receives
+    (``_build_remote_argv`` drops ``--scratch_dir``); what moves a remote run's scratch is the host's."""
+    folders, _kinds, free = remote_env
+    free[folders["scratch"]] = 25 * GB
+    node = folders["scratch"] / f"allwell-{nd._user()}"
+    out = tmp_path / "staging" / "runs" / "run-1" / "out"
+    free.update({node: 25 * GB, out: 10 * GB})
+    _scratch, out, code = _preflight_remote_run(tmp_path, monkeypatch, caplog, free=free)
+    assert code == 2
+    assert pio.scratch_base_for(out) == node
+    refusal = next(m for m in caplog.messages if m.startswith("Not enough scratch space"))
+    assert ("set the host's Remote scratch dir (Remotes, under Advanced (remote paths)) to move it — the Analyze "
+            "tab's Scratch folder is for runs on this computer and is not sent to a host.") in refusal
+    assert "set ALLWELL_SCRATCH_DIR (or the Analyze tab's Scratch folder, under Advanced)" not in refusal
+
+
+def test_a_scratch_folder_the_host_names_is_never_moved(remote_env, monkeypatch, tmp_path, caplog):
+    chosen = tmp_path / "chosen-scratch"
+    out = tmp_path / "staging" / "runs" / "run-1" / "out"
+    _folders, _kinds, free = remote_env
+    free.update({chosen: 25 * GB, out: 1024 * GB})
+    _scratch, out, code = _preflight_remote_run(tmp_path, monkeypatch, caplog, free=free, host_scratch=str(chosen))
+    assert code == 2
+    assert pio.scratch_base_for(out) == chosen
+
+
+# ── checkpoints left on the node's own disk ───────────────────────────────────────────────────────────────────────
+
+DAY = 24 * 3600
+
+
+def _checkpointed_staging(out: Path, well: str, settings: str, *, days_idle: float) -> Path:
+    """A stopped well's staging folder in *out*'s scratch: one field done, nothing changed for *days_idle* days."""
+    import os
+    import time
+
+    from pipeline.fov_checkpoint import _staging_dir_for
+
+    staging = _staging_dir_for(out, well, settings)
+    staging.mkdir(parents=True)
+    (staging / "partial.tif").write_bytes(b"pixels")
+    (staging / f".fov_exp_DAPI_{well}_F001_0h.done").touch()
+    then = time.time() - days_idle * DAY
+    for path in [staging, *staging.rglob("*")]:
+        os.utime(path, (then, then))
+    return staging
+
+
+def test_another_run_s_checkpoints_on_the_node_s_disk_go_after_a_week(disks, fresh_decision, monkeypatch, tmp_path):
+    """Checkpoints are kept whoever owns them, so a stopped well resumes. On a node's own disk that resume can only
+    happen on the same node, and the disk is shared with other people's jobs: a stopped well's staging stayed there
+    for as long as the node did. Another run's go once a week untouched; this plate's own are never removed by age."""
+    from pipeline.fov_checkpoint import sweep_run_scratch
+
+    folders, _kinds, free = disks
+    monkeypatch.setenv("SLURM_JOB_ID", "4812345")
+    monkeypatch.setattr(nd.shutil, "disk_usage", lambda p: type("U", (), {"free": free[Path(p)]})())
+    plate_a, plate_b = tmp_path / "plate_a", tmp_path / "plate_b"
+    plate_a.mkdir()
+    plate_b.mkdir()
+    node = folders["scratch"] / f"allwell-{nd._user()}"
+    assert pio.scratch_base_for(plate_b) == node
+    abandoned = _checkpointed_staging(plate_a, "A01", "settings-a", days_idle=8)
+    recent = _checkpointed_staging(plate_a, "A02", "settings-a", days_idle=6)
+    own = _checkpointed_staging(plate_b, "B01", "settings-b", days_idle=30)
+    assert abandoned.parent == recent.parent == own.parent == node
+
+    sweep_run_scratch(plate_b, "settings-b", extra_extract=True)
+
+    assert sorted(p.name for p in node.iterdir()) == sorted([recent.name, own.name])
+
+
+def test_a_scratch_folder_the_user_set_keeps_every_checkpoint(disks, fresh_decision, monkeypatch, tmp_path):
+    """``/scratch/$USER`` named as the host's scratch folder is the user's choice and keeps its resume."""
+    from pipeline.fov_checkpoint import sweep_run_scratch
+
+    chosen = tmp_path / "chosen"
+    monkeypatch.setenv("SLURM_JOB_ID", "4812345")
+    monkeypatch.setenv(pio.SCRATCH_DIR_ENV, str(chosen))
+    plate_a, plate_b = tmp_path / "plate_a", tmp_path / "plate_b"
+    plate_a.mkdir()
+    plate_b.mkdir()
+    abandoned = _checkpointed_staging(plate_a, "A01", "settings-a", days_idle=30)
+    assert abandoned.parent == chosen
+
+    sweep_run_scratch(plate_b, "settings-b", extra_extract=True)
+
+    assert abandoned.exists()

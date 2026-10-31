@@ -462,6 +462,45 @@ def test_a_restart_says_which_part_way_wells_will_resume(tmp_path, monkeypatch):
     assert "A04" not in log.split("will continue from their checkpoints")[1].split("\n")[0]
 
 
+def _restart_with_no_scratch_folder_set(tmp_path, monkeypatch, *, checkpoint: bool) -> tuple[str, Path]:
+    """A re-attached restart on a host with no scratch folder set; with *checkpoint*, A03's two finished fields are
+    in the earlier attempt's output folder, where that attempt's pipeline kept them (``--scratch_fallback_dir``).
+    The run's log and that folder, resolved."""
+    from pipeline.fov_checkpoint import _output_stamp
+    from services.remote_batch_resume import _settings_stamps
+
+    old = tmp_path / "remote" / "runs" / "run-old"
+    p, _plate, _run_dir, _sent, _, _ = _harness(tmp_path, monkeypatch)
+    p._pipeline_argv = ["python", "pm.py", "--input_dir", "/in", "--output_dir", "/out", "--nuclear_token", "DAPI"]
+    p._runner._run.remote_output_dir = str(old / "out")
+    p._runner._run.reattached = True
+    assert p._runner.host.remote_scratch_dir == ""
+    (old / "out").mkdir(parents=True)
+    if checkpoint:
+        (settings,) = _settings_stamps(p._pipeline_argv)[:1]
+        ours = old / "out" / f"_tmp_images_{_output_stamp(old / 'out')}_{settings}_A03"
+        ours.mkdir()
+        (ours / ".fov_exp_A03_F001.done").touch()
+        (ours / ".fov_exp_A03_F002.done").touch()
+    _run(p, monkeypatch)
+    return "".join(p._logged), (old / "out").resolve()
+
+
+def test_with_no_scratch_folder_set_the_resume_looks_where_the_pipeline_kept_its_checkpoints(tmp_path, monkeypatch):
+    """With no scratch folder set, a remote run's scratch is its own output folder (or a Slurm node's own disk) —
+    never ``~/.allwell/scratch``, which is where the probe looked, so a restart said every part-way well would start
+    again while the checkpoints sat in the folder it had just re-attached."""
+    log, out = _restart_with_no_scratch_folder_set(tmp_path, monkeypatch, checkpoint=True)
+    assert (f"[remote] 1 well(s) left part-way will continue from their checkpoints in {out}: "
+            "A03 (2 field group(s) done)\n") in log, log
+
+
+def test_with_none_found_the_line_says_a_node_s_own_disk_cannot_be_seen(tmp_path, monkeypatch):
+    log, out = _restart_with_no_scratch_folder_set(tmp_path, monkeypatch, checkpoint=False)
+    assert (f"[remote] no part-way checkpoints for this plate in {out} (a Slurm job that used its node's own disk "
+            "kept its checkpoints there, which cannot be seen from here) — wells left part-way start again.\n") in log, log
+
+
 def test_the_job_gets_its_first_batch_before_the_earlier_attempt_s_wells_download(tmp_path, monkeypatch):
     """The user's order: paint every well's state, start the job, then drain what is waiting to download — so the
     transfer fills the queue wait and the compute instead of delaying the job."""

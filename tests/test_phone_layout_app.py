@@ -57,10 +57,12 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert win.minimumWidth() <= avail.width()
     assert shell._banner is not None and _visible(shell._banner)
     assert not phone_layout.is_on()
-    # The way in is one of the small icon buttons at the top right, just
-    # before help, styled as they are, in every mode.
-    band_lay = review._top_bar.layout()
-    assert band_lay.indexOf(shell.desk_button) == band_lay.indexOf(win._help_btn) - 1
+    # The way in is one of the small icon buttons at the top right, on the
+    # header row beside the wordmark, just before help, styled as they are,
+    # in every mode.
+    head_lay = win._header.layout()
+    assert head_lay.indexOf(shell.desk_button) == head_lay.indexOf(win._help_btn) - 1
+    assert head_lay.indexOf(win._help_btn) == head_lay.count() - 1
     assert shell.desk_button.objectName() == win._help_btn.objectName() == "IconButton"
     assert not shell.desk_button.text() and _visible(shell.desk_button)
 

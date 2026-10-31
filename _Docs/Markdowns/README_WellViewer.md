@@ -5957,7 +5957,7 @@ trajectories, starting cells, growth rate — pairs a nanowell with itself by it
 addresses were assigned a step off, turned, mirrored, or one imaging tile was placed a step off, every nanowell
 there would be paired with a neighbour, and the numbers would look normal. So after each well the analysis checks
 the addresses against the images: it registers each timepoint's whole-well montage onto a reference timepoint's
-(the earliest whose central square was found) by the central square, which is the array's one feature that does not
+(the earliest whose central square was found, or on which you set the anchor by hand — the anchor counts as the central square) by the central square, which is the array's one feature that does not
 repeat, then confirms that every nanowell, carried through that registration, lands on the nanowell with its own
 address — within a quarter of the spacing between nanowells. It also checks that no imaging tile sits differently
 against the others than it did at the reference, and, on a plate of five or more wells with stage positions, that

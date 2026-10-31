@@ -11170,7 +11170,10 @@ of them shown wrong, contradicts only from six up, while the square, the outline
 pitches off); `reference`; and `not_checked` for a timepoint never tested. Only `confirmed` and `reference` are good;
 `AGREES` adds `partial`. Review leaves a `contradicted` timepoint and a `partial` one's `excluded` nanowells out of its
 joins (`exclusions` reads them); `inconclusive` and `not_checked` are joined and footnoted. **The reference** (`reference_candidates`, `check_well`) is an addressed
-timepoint whose square the run accepted, those whose square carries `(0, 0)` first (`square_names_the_centre`:
+timepoint whose square the run accepted (`square_accepted`: the search's scores pass the run's own rule, or the
+run anchored the timepoint on the square, `origin_method` `fiducial`, or on an anchor set by hand, `manual` — the
+anchor is the square, at the site the run snapped it to and named `(0, 0)`, whatever the failed search scored),
+those whose square carries `(0, 0)` first (`square_names_the_centre`:
 the square is the central nanowell by convention), earliest first. A reference addressed off itself would make
 every correct timepoint contradicted, so when the contradicted timepoints agree on one step or symmetry and are at
 least as many as those confirmed, the first of them is tried as the reference too, and the one more timepoints

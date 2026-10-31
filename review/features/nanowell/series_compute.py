@@ -10,7 +10,7 @@ number is a row with the state that explains why — ``occluded`` or ``clipped``
 roster), ``identity_contradicted`` (the identity check, ``pipeline.nanowell_identity``, found the timepoint's
 addresses naming other nanowells than the well's reference timepoint, so its rows are joined to nothing) or
 ``out_of_focus`` (the nanowell's own rim was soft against its well's sharp rims at that timepoint,
-``rim_focus_compute``; the state the run recorded is kept in ``recorded_state``). A gap therefore reads as "not
+``review.domain.nanowell_rim_focus``; the state the run recorded is kept in ``recorded_state``). A gap therefore reads as "not
 seen", never as zero, and never as a shorter series.
 
 **Undefined is NaN, never zero, and each metric's undefined cases are listed** (§3.10.1):
@@ -57,7 +57,8 @@ import numpy as np
 import pandas as pd
 
 from pipeline.nanowell_identity import CONTRADICTED, NOT_CHECKED
-from review.features.nanowell import cell_gate_compute, rim_focus_compute
+from review.domain import nanowell_rim_focus
+from review.features.nanowell import cell_gate_compute
 from review.features.nanowell.collect import (
     IDENTITY_CONTRADICTED, MEASURABLE, NOT_LOCATED, UNADDRESSED, NanowellData,
 )
@@ -234,14 +235,14 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
     ``n`` and ``brightness_<ch>`` before anything is computed from them, and the nanowells of a field it leaves
     out take the state ``field_excluded``. ``None`` keeps the run's own counts.
 
-    *focus* (``rim_focus_compute.RimFocusRule``) turns each measurable row whose rim was out of focus into an
-    ``out_of_focus`` gap before anything is computed (``rim_focus_compute.flag``); ``None`` flags nothing.
+    *focus* (``review.domain.nanowell_rim_focus.RimFocusRule``) turns each measurable row whose rim was out of focus into an
+    ``out_of_focus`` gap before anything is computed (``review.domain.nanowell_rim_focus.flag``); ``None`` flags nothing.
     """
     if not is_baseline(baseline):
         raise ValueError(f"baseline must be one of {BASELINES} or a timepoint, not {baseline!r}")
     frame = _addressed_grid(data)
     cell_gate_compute.exclude_fields(frame, gate)          # a whole field out: its nanowells have no value at all
-    rim_focus_compute.flag(frame, focus)                   # then a rim out of focus, of what is still measurable
+    nanowell_rim_focus.flag(frame, focus)                  # then a rim out of focus, of what is still measurable
     measurable = frame["state"].isin(MEASURABLE)
     frame["n"] = pd.to_numeric(frame.get("n_cells"), errors="coerce").where(measurable)
     frame["c"] = pd.to_numeric(frame.get("confluence"), errors="coerce").where(measurable)

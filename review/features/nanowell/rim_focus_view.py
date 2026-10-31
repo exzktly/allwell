@@ -1,8 +1,10 @@
 """The Nanowells page's rim focus control on its band: **Rim focus** (on / off) and the fraction of the well's sharp
 rims a nanowell must reach, as a percentage.
 
-Every control writes through the controller (``set_rim_focus``), which keeps the rule on ``NanowellState`` and
-recomputes the metrics with it; ``rim_focus_compute`` decides which nanowells are out of focus.
+A mirror of the Cell Gating panel's nanowell focus switch, never a setting of its own: both write the dataset's QC
+parameters (``QCParams.exclude_soft_nanowells`` / ``nanowell_focus_fraction``) through the controller's
+``set_rim_focus``, so the cells of an out-of-focus nanowell leave every tab (``NW_Focus_Pass``) when the nanowell
+leaves this page. ``review.domain.nanowell_rim_focus`` decides which nanowells are out of focus.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from dataclasses import dataclass
 from PySide6.QtWidgets import QCheckBox, QSpinBox
 
 from review.features.nanowell import controller as nwc
-from review.features.nanowell import rim_focus_compute as rfc
+from review.domain import nanowell_rim_focus as rfc
 
 RIM_FOCUS_TIP = (
     "Leave out a nanowell at any timepoint where its own rim was out of focus — its tile was soft while others in "
@@ -24,7 +26,9 @@ RIM_FOCUS_TIP = (
     "figure's note counts what was left out.\n\n"
     "Not seen: a timepoint blurred evenly everywhere (nothing sharp to compare with), and a nanowell whose rim "
     "could not be fitted (no rim focus; kept, and counted in the note).\n\n"
-    "This is not the QC tab's per-cell focus cut, which is measured on nuclei in the standard pipeline.")
+    "The same switch as Cell Gating's \"Exclude out-of-focus nanowells\": ticking either ticks both, and the cells of "
+    "an out-of-focus nanowell leave every tab in Review — Plotting, Scatter, histograms and exports — not only this "
+    "page.")
 
 
 @dataclass
@@ -36,10 +40,11 @@ class RimFocusControls:
     def signalling(self) -> tuple:
         return (self.box, self.spin)
 
-    def refresh(self, st) -> None:
-        self.box.setChecked(bool(st.rim_focus_on))
-        self.spin.setValue(int(round(100 * st.rim_focus_fraction)))
-        self.spin.setEnabled(bool(st.rim_focus_on))
+    def refresh(self, ctx) -> None:
+        rule = nwc.focus_rule(ctx)
+        self.box.setChecked(bool(rule.enabled))
+        self.spin.setValue(int(round(100 * rule.fraction)))
+        self.spin.setEnabled(bool(rule.enabled))
 
 
 def build_rim_focus_controls(ctx) -> RimFocusControls:

@@ -71,8 +71,8 @@ _load_nanowell_data = _lazy("review.features.nanowell.collect", "load_nanowell_d
 _site_metrics = _lazy("review.features.nanowell.series_compute", "site_metrics")
 _gate_tally = _lazy("review.features.nanowell.controller", "gate_tally")
 _gate_note = _lazy("review.features.nanowell.cell_gate_compute", "note")
-_focus_note = _lazy("review.features.nanowell.rim_focus_compute", "note")
-_RimFocusRule = _lazy("review.features.nanowell.rim_focus_compute", "RimFocusRule")
+_focus_note = _lazy("review.domain.nanowell_rim_focus", "note")
+_focus_rule = _lazy("review.features.nanowell.controller", "focus_rule")
 _baseline_at = _lazy("review.features.nanowell.series_compute", "baseline_at")
 _render_message = _lazy("review.features.nanowell.renderer", "render_message")
 _apply_subset = _lazy("review.features.nanowell.subset_compute", "apply")
@@ -365,7 +365,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
         are taken out of the counts and brightness exactly as on the page (``cell_gate_compute``), and
         *gate_note* is the sentence saying so (``""`` when it leaves nothing out), followed by the rim focus rule's
         sentence: the nanowells left out as out of focus are left out under the page's own rule
-        (``rim_focus_compute``), so an export never counts a nanowell the page shows as soft."""
+        (``review.domain.nanowell_rim_focus``, the QC layer's switch), so an export never counts a nanowell the page
+        shows as soft."""
         data_dir = self._ctx.state.dataset.data_dir
         st = self._ctx.state.feature_slice("nanowell")
         data = getattr(st, "data", None)
@@ -391,7 +392,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                 "nothing to export in this mode.")
             return None
         gate = _gate_tally(self._ctx, data)
-        rule = st.rim_focus_rule() if hasattr(st, "rim_focus_rule") else _RimFocusRule()
+        rule = _focus_rule(self._ctx)
         metrics = _site_metrics(data, baseline, gate, rule)
         note = " ".join(filter(None, [_gate_note(gate), _focus_note(metrics, rule, wells)]))
         return data, metrics, note

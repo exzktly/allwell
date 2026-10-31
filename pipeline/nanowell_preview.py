@@ -214,6 +214,9 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
         # every timepoint, and a dataset analysed before keeps the roster it was analysed with.
         result.notes.append("The nanowells at the rim are the ones this timepoint's image supports; a run decides them "
                             "over all of the well's timepoints, and adding to an analysed dataset keeps its roster")
+    note = reference_input_note(settings, well) if result.counted else None
+    if note:
+        result.notes.append(note)
     for row in measured.sites:
         result.sites.append({**row, "address": coordinate_text(row["nw_q"], row["nw_r"])})
     if segment is not None:
@@ -221,6 +224,23 @@ def preview_timepoint(zip_path, well: str, timepoint: str, settings: nr.Nanowell
                                      0.75 * settings.diameter_um, n_crops, settings.segment_on, settings.segment_scope,
                                      settings.segment_scale)
     return result
+
+
+def reference_input_note(settings: nr.NanowellSettings, well: str) -> str | None:
+    """What Test detection says when its rim-removed crops are not the image a run would count on, or ``None``.
+
+    Test detection works from the input archives alone, so it has no empty reference well's template to divide by
+    and divides by this well's own. A run with an empty reference well named divides every other well's rim-removed
+    input by the reference's template instead (``nanowell_run._segmenter_rim``), so on a loaded well the run's
+    counts can differ from these crops' outlines; the difference is said, not left for the user to find."""
+    from pipeline import nanowell_reference as nref
+
+    reference = nref.reference_well(settings)
+    if settings.segment_on != "rim" or reference is None or nref.same_well(well, reference):
+        return None
+    return (f"These crops are divided by {well}'s own picture of an empty nanowell. A run divides the rim-removed "
+            f"image by the empty reference well {reference}'s instead, so on a loaded well its outlines can differ "
+            "from these")
 
 
 def _sample_crops(sites: list, measured, images: dict, located, segment, px: float, half_um: float,

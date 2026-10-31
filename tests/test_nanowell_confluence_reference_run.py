@@ -23,6 +23,7 @@ import pipeline.suspend as _suspend
 import process_microscopy as pm
 from pipeline import nanowell_measure as nm
 from pipeline import nanowell_reference as nref
+from pipeline import nanowell_run as nr
 from tests._nanowell_run_fixture import build_well, paint_cell, record_for, threshold_segmenter
 from util.acquisition_record import write_record_file
 
@@ -129,6 +130,15 @@ def test_a_loaded_well_is_read_against_the_empty_well_measured_before_it(tmp_pat
     assert loaded["confluence"].median() > 0.5 and loaded["confluence"].quantile(0.1) > 0.4
     assert empty["confluence"].median() == 0.0
     assert not any(str(n).startswith(nref.NOTE_PREFIX) for n in block["notes"])
+    # The count's rim-removed input (the command line's default) was divided by the empty well's template in every
+    # counted nanowell, and the empty well's false-count baseline — the cells it counted per nanowell — is saved with
+    # its verdict and written on the loaded well's timepoint.
+    assert block["template"]["segmenter_template"] == {
+        "source": nr.SEGMENT_TEMPLATE_REFERENCE, "nanowells_on_reference": len(loaded), "nanowells_on_own": 0}
+    baseline = empty["n_cells"].sum() / len(empty)
+    assert index["timepoints"]["0h"]["false_cells_per_nanowell"] == pytest.approx(baseline)
+    assert empty_block["confluence_reference"]["false_cells_per_nanowell"] == pytest.approx(baseline)
+    assert block["template"]["reference_false_cells_per_nanowell"] == pytest.approx(baseline)
 
 
 def test_a_reference_well_that_holds_cells_gives_no_confluence(tmp_path, monkeypatch):

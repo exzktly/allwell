@@ -434,12 +434,14 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
             # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
             # applies to what it draws, so its box stays where it can be turned off.
-            # The moving average is offered exactly where values over time are drawn; the cohort also on Statistics,
-            # which tests one timepoint's values but uses the cohort's choice of nanowells.
+            # The moving average is offered where values over time are drawn, and both it and the cohort also on
+            # Statistics, which tests one timepoint's values as Distribution draws them: the cohort's choice of
+            # nanowells, each value averaged over the window.
             over_time = (distribution and not per_nanowell) or view == "trajectories"
-            grp_cohort.setVisible(over_time or (stats_view and not per_nanowell))
+            over_time_or_tested = over_time or (stats_view and not per_nanowell)
+            grp_cohort.setVisible(over_time_or_tested)
             moving_spin.setValue(max(st.moving, 1))
-            grp_moving.setVisible(over_time)
+            grp_moving.setVisible(over_time_or_tested)
             grp_control.setVisible(compares)
             column = nwc.drawn_metric_column(ctx)
             cut = st.thresholds.get(column) if column else None

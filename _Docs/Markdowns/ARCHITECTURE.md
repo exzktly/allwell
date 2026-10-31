@@ -11458,8 +11458,8 @@ and the footer states the cohort as kept of sites. `well_summary(reasons=…)`, 
 and `views_compute.trajectory_panels(cohort=…)` all apply it, so the beeswarm, the summaries and the trajectory
 medians follow the same nanowells.
 
-**The moving average** (`moving_compute`, `NanowellState.moving`, the *Moving average* spin box on *Distribution*
-and *Trajectories*; 0 is off, the spin box shows its minimum, 1, as *Off*). With a window of *N* (2 to
+**The moving average** (`moving_compute`, `NanowellState.moving`, the *Moving average* spin box on *Distribution*,
+*Trajectories* and *Statistics*; 0 is off, the spin box shows its minimum, 1, as *Off*). With a window of *N* (2 to
 `MAX_WINDOW`, 9), a nanowell's value at a timepoint is the mean of its values at that timepoint and the *N − 1*
 before it in its well's timepoint order (`tp_order`) — a trailing window counted in timepoints, not hours. A value
 is averaged only from a complete window: every timepoint of it present as a row, with a value, and joinable over
@@ -11471,8 +11471,10 @@ undefined at its own timepoint keeps its own reason (`moving_compute.apply`). Th
 measured values first, then the average is taken: decided on the averages, no nanowell would have one at the
 first timepoint and the cohort would be empty. `distribution_model(moving=…)`, `wells_summary(moving=…)` and
 `trajectory_panels(moving=…)` apply it, so the beeswarm, the summary CSV and the trajectory lines use the same
-numbers, and both figures' footers state the window (`moving_compute.describe`). Per-nanowell metrics have no
-values over time and ignore it; Array, Position, Extremes and Identity draw one timepoint and do not use it.
+numbers, and both figures' footers state the window (`moving_compute.describe`). The Statistics view builds its
+samples from that same `distribution_model(moving=…)`, so it tests the averaged values Distribution draws and its
+report carries the window's sentence. Per-nanowell metrics have no values over time and ignore it; Array, Position,
+Extremes and Identity draw one timepoint and do not use it.
 
 **The subset** (`subset_compute`, `NanowellState.subset`, the *Subset* control and its editor in `subset_view`). A
 `Subset` is a tuple of `Condition`s and a *match* (`all` or `any`); no conditions is every nanowell. A condition
@@ -11640,8 +11642,9 @@ modelled on the Statistics tab and built from the same pure tests (`review/domai
 `dunnett_vs_control`, `effect_size`; `review/domain/significance` for every p's spelling and stars). It is drawn
 through `controller.draw_view(view="statistics")`, the one composition every view has; Batch Export does not offer it. **Its samples
 are the Distribution view's own dots**: `draw_view` builds the `DistributionModel` *Along x: Wells* at the page's
-timepoint (`shown_timepoint` treats this view as that axis) with the Subset, cohort, baseline and excluded wells
-already applied, and `statistics_compute.samples_from_model` reads the samples from its swarms, so the view can never
+timepoint (`shown_timepoint` treats this view as that axis) with the Subset, cohort, moving average, baseline and
+excluded wells already applied (the band offers the cohort and the moving average here, and the report carries their
+sentences, `controller._STATS_NOTES`), and `statistics_compute.samples_from_model` reads the samples from its swarms, so the view can never
 test a second reading of the tables. `NanowellState.stats_unit` (persisted, `UNITS`) picks what one value is:
 `nanowells` makes each well a sample of its nanowells — a statement about those wells, which the figure says is not
 one about their conditions, since nanowells are not replicates (§6.2j, `summary_compute`) — and `wells` makes each

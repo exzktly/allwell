@@ -633,8 +633,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     (tracker I9), which the Distribution view states the fraction responding at. *subset* is the page's
     *Subset* (``subset_compute``): every view but the Array draws only the nanowells inside it, saying how many it
     left out; the Array view draws them all and dims the rest. *moving* is the moving average's window in
-    timepoints (``moving_compute``; 0 is off), which Distribution and Trajectories apply and the other views,
-    each of one timepoint or one value per nanowell, do not.
+    timepoints (``moving_compute``; 0 is off), which Distribution, Trajectories and Statistics apply and the other
+    views, each of one timepoint or one value per nanowell, do not.
 
     The Identity view draws *well* at *well_timepoint* against the well's reference timepoint
     (``_identity_controller.draw_identity``), with *identity* the page's inputs to it — its mode, the sidecar and
@@ -695,9 +695,10 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         render_position(fig, series, label=_label(metric, channel), timepoint=timepoint, note=note)
         return None, None
     if view == "statistics":
+        # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).
         model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=WELLS,
                                    groups=groups, timepoint=timepoint, time_source=data.time_source,
-                                   baseline=baseline, cohort=cohort)
+                                   baseline=baseline, cohort=cohort, moving=moving)
         result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control,
                                    cache=stats_cache)
         if tableless:
@@ -724,9 +725,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
 
 
 #: The Distribution model's notes the Statistics view carries: what changes which values were compared (the fixed
-#: cohort) and how the times were read. The rest describe the beeswarm (packing, the joined line, the fraction
-#: responding) and say nothing about a test.
-_STATS_NOTES = ("Fixed cohort", "Times are")
+#: cohort, the moving average) and how the times were read. The rest describe the beeswarm (packing, the joined
+#: line, the fraction responding) and say nothing about a test.
+_STATS_NOTES = ("Fixed cohort", "Moving average", "Times are")
 
 
 def statistics_result(model, groups: dict, *, unit: str, test: str, control: str = "",

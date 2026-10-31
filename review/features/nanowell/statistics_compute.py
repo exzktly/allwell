@@ -8,8 +8,9 @@ cannot disagree about whether a result was significant.
 
 **The samples are the Distribution view's own numbers.** :func:`samples_from_model` reads the
 ``distribution_compute.DistributionModel`` drawn *Along x: Wells* — the metric, the timepoint, the baseline, the
-*Subset*, the fixed cohort, the excluded wells and every exclusion by reason already applied — so the Statistics view
-tests exactly the dots the Distribution view draws, never a second reading of the tables that could drift from it.
+*Subset*, the fixed cohort, the moving average, the excluded wells and every exclusion by reason already applied —
+so the Statistics view tests exactly the dots the Distribution view draws, never a second reading of the tables that
+could drift from it.
 
 **Two units, chosen by the user and named on the figure** (:data:`UNITS`):
 

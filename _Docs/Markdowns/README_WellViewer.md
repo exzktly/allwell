@@ -5577,11 +5577,11 @@ the sentence names it.
   *Earliest* baseline: a count taken later — at a first measurable or a named timepoint — may follow a division,
   and the figure counts those nanowells.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
-- **Fixed cohort** (on *Distribution* and *Trajectories*) — use only the nanowells with a value at every
+- **Fixed cohort** (on *Distribution*, *Trajectories* and *Statistics*) — use only the nanowells with a value at every
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
   measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
   the footer gives the cohort's size.
-- **Moving average** (on *Distribution* and *Trajectories*) — *Off*, or 2 to 9 timepoints: each nanowell's
+- **Moving average** (on *Distribution*, *Trajectories* and *Statistics*) — *Off*, or 2 to 9 timepoints: each nanowell's
   value at a timepoint becomes the mean of its values at that timepoint and the ones before it, that many in
   all. The window counts timepoints, not hours, so with unevenly spaced acquisitions it covers a different
   stretch of time at each step. A value is averaged only when the nanowell has a value at every timepoint of
@@ -5670,7 +5670,8 @@ the sentence names it.
   one pass for the whole montage, so it fills in a moment after the ranking is drawn.
 - **Statistics** — tests whether wells, or groups of wells, differ in the **Metric** at the **Timepoint** (the
   latest by default), modelled on the Statistics tab. It compares exactly the dots the Distribution view draws
-  *Along x: Wells*: the **Baseline**, **Subset**, **Fixed cohort** and excluded wells all apply, and every nanowell
+  *Along x: Wells*: the **Baseline**, **Subset**, **Fixed cohort**, **Moving average** and excluded wells all apply
+  (the report states the cohort and the window when they are on), and every nanowell
   left out is counted under its sample. **Compare** chooses what one value is:
   - *Wells (nanowells as values)* — each well is a sample and its nanowells are the values. This says whether
     these wells' distributions differ. It says nothing about the conditions behind them, because the nanowells

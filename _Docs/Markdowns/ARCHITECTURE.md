@@ -2200,6 +2200,35 @@ itself, a sentence pointing at another corner of the window is a second answer
 to the question the button already answers, so the button hides it. The hint's
 text is kept, so clearing the action brings the line back.
 
+**While a dataset is being opened, every placeholder says so, ahead of every
+other reason.** `DatasetState.opening` holds the folder from the moment
+`load_controller.load_path` starts until it returns — `load_controller._announce_opening`,
+a re-entrant context manager that `load_directory` also enters, so Home's Reload
+is covered and the outermost block owns the marker — and
+`refresh_empty_state_pages` checks it before the no-dataset test, showing
+`ui_helpers.opening_reason(folder)` ("Opening <dataset name>…", named by
+`domain.dataset_name.dataset_display_name`) on every stack. The marker is needed
+because the opening dialog pumps the event loop on every file, so the window is
+repainted for the whole of a load, and halfway through one neither question the
+refresher otherwise asks has a true answer: on a first open there are no wells
+yet, so every page — Home with its *Open a dataset* button and recents — read
+"Load a directory." for the full length of the load; on a switch `begin_load`
+has emptied the plate while the pages still show the previous one. The context
+manager paints the placeholder on entry, before anything pumps, and in a
+`finally` clears the marker and re-resolves every stack, so a load that returns
+early (a folder with no CSVs) or raises leaves each page on what its own state
+calls for. `tests/test_opening_placeholder.py` holds the pieces;
+`tests/test_opening_placeholder_app.py` drives `ReviewApp._load_path` and reads
+Home's placeholder at every pump.
+
+**A reason that is work in progress hides the placeholder's controls.**
+`EmptyReason(busy=True)` — the opening reason and `GATING_IN_PROGRESS` — makes
+`_apply_reason` call `EmptyState.setBusy(True)`, which hides the action button
+and the entries column and shows the hint in their place; any other reason calls
+`setBusy(False)`, which brings back exactly what the site set, including entries
+replaced while busy. Neither is cleared, because Home repaints its recents during
+a load and the list must reappear when it ends.
+
 The suppression lives in the widget rather than at the call site because the
 refresher rewrites every placeholder's text, hint and icon on each pass (an
 action set once at build time survives it): a site that blanked its own hint at

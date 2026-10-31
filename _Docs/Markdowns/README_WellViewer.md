@@ -2583,6 +2583,12 @@ left off rather than sending you across the window to press the other one. There
 is one folder picker behind both. Nothing else on the page is drawn until a
 dataset is open, because there would be nothing in it to read.
 
+**While a dataset is opening**, Home and every other page say *Opening
+<dataset name>…* in place of their contents, with the button and the recent
+datasets hidden, until the dataset has finished loading; then the page fills in.
+If the folder turns out to hold nothing Review can load, the pages go back to
+what they showed before.
+
 **Under that button are the datasets you opened recently**, newest first, so
 getting back to yesterday's plate does not mean navigating to it again. Clicking
 one opens it exactly as the folder picker would. A dataset whose folder is not

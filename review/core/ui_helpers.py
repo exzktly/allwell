@@ -202,14 +202,20 @@ class EmptyReason:
     ``icon=None`` keeps whatever glyph the wrap site chose. That is the usual
     case: when a page's body is empty its glyph is the only signal left of which
     page you are on, so a reason overrides it only when it has a better one.
+
+    ``busy=True`` marks a reason that is work in progress rather than something
+    the user must do: the placeholder hides the button and entries its site gave
+    it (``EmptyState.setBusy``) for as long as the reason stands.
     """
 
-    __slots__ = ("title", "hint", "icon")
+    __slots__ = ("title", "hint", "icon", "busy")
 
-    def __init__(self, title: str, hint: str = "", icon: str | None = None) -> None:
+    def __init__(self, title: str, hint: str = "", icon: str | None = None,
+                 *, busy: bool = False) -> None:
         self.title = title
         self.hint = hint
         self.icon = icon
+        self.busy = busy
 
 
 #: The default reason. Every wrapped tab needs a dataset, so this is what a wrap
@@ -221,7 +227,20 @@ NO_DATASET = EmptyReason(NO_DATASET_TITLE, NO_DATASET_HINT)
 #: the previous dataset or this one's ungated numbers, and neither says so.
 GATING_IN_PROGRESS = EmptyReason(
     "Applying cell gating…",
-    "The plots are drawn once every well has been gated. The progress bar at the bottom shows how far it has got.")
+    "The plots are drawn once every well has been gated. The progress bar at the bottom shows how far it has got.",
+    busy=True)
+
+
+def opening_reason(folder) -> EmptyReason:
+    """Every page's placeholder while *folder* is being opened (``DatasetState.opening``).
+
+    Named after the dataset rather than the folder, by the shared rule, so an
+    in/out dataset reads as itself and not as "out".
+    """
+    from review.domain.dataset_name import dataset_display_name
+    name = dataset_display_name(folder) or "dataset"
+    return EmptyReason(empty_state_copy.OPENING_TITLE.format(name=name),
+                       empty_state_copy.OPENING_HINT, busy=True)
 
 
 def wrap_with_empty_state(
@@ -300,6 +319,8 @@ def _apply_reason(stack: QStackedWidget, reason: EmptyReason) -> None:
     if placeholder is not None:
         placeholder.setText(reason.title)
         placeholder.setHint(reason.hint)
+        if hasattr(placeholder, "setBusy"):
+            placeholder.setBusy(reason.busy)
         icon = reason.icon or getattr(stack, "_empty_default_icon", None)
         if icon:
             placeholder.setIconName(icon)
@@ -319,6 +340,9 @@ _DATA_GATED_OBJECT_NAMES = ("TabCtrl", "ControlBand")
 def refresh_empty_state_pages(win: Any) -> None:
     """Flip every registered stack to the page its current state calls for.
 
+    While a dataset is being opened (``DatasetState.opening``) every stack says
+    so, ahead of everything else: mid-load the plate is half-built, so the
+    "no dataset" test below would be true of a folder that is being read.
     With no dataset loaded every stack shows the shared "no dataset" wording.
     Otherwise each stack's own ``reason`` decides: an :class:`EmptyReason` is
     written onto its placeholder and shown, ``None`` shows the tab body.
@@ -333,9 +357,14 @@ def refresh_empty_state_pages(win: Any) -> None:
     if not stacks:
         return
     has_data = bool(win._app_state.dataset.well_paths)
+    opening = getattr(win._app_state.dataset, "opening", None)
+    opening_why = opening_reason(opening) if opening is not None else None
     ctx = getattr(win, "_ctx", None)
     for stack in stacks:
         try:
+            if opening_why is not None:
+                _apply_reason(stack, opening_why)
+                continue
             if not has_data:
                 # The site reason is deliberately not consulted: asking the user
                 # to pick wells on a plate that is not loaded is a worse message

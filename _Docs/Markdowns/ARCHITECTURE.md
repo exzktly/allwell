@@ -14200,7 +14200,11 @@ host's scratch folder) → **inside a Slurm job, the node's own disk**
 (`pipeline/node_disk.node_local_scratch`: `/scratch`, where AWS ParallelCluster
 mounts a node's NVMe drive, then `$SLURM_TMPDIR`; the first that is local — not a
 network or in-memory filesystem — writable, and has `LOCAL_SCRATCH_MIN_FREE`
-(20 GB) free, as `<disk>/allwell-<user>`) → `$ALLWELL_SCRATCH_FALLBACK_DIR`
+(20 GB) free, as `<disk>/allwell-<user>`; `/scratch` must also be a disk of its
+own, off the root filesystem by device number (`on_root_filesystem`, so a bind
+mount from `/` counts as `/`), because where the cluster mounts nothing there it
+is a plain folder on the boot disk; `$SLURM_TMPDIR` is a folder the site's Slurm
+made for the job and is not held to that) → `$ALLWELL_SCRATCH_FALLBACK_DIR`
 (`--scratch_fallback_dir`) → **`scratch/` in the app's folder** (the default
 elsewhere: `~/.allwell/scratch`, or `%LOCALAPPDATA%\allwell\scratch` on Windows —
 §5's local-files section) → `output_dir` (last resort, warned).

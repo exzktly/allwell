@@ -1837,8 +1837,9 @@ setting on a cluster. It is where the pipeline keeps its per-well working files
 many wells as run at once. Left empty on a host that runs jobs through Slurm, the
 run uses the compute node's own disk: `/scratch` (where AWS ParallelCluster mounts
 the node's NVMe drive), else `$SLURM_TMPDIR`, as long as it is a local disk with at
-least 20 GB free; each batch's log says which disk and how much was free, or why
-none qualified. That keeps the run's heavy temporary files off the cluster's shared
+least 20 GB free; `/scratch` counts only when it is a disk of its own, not a plain
+folder on the node's system disk. Each batch's log says which disk and how much was
+free, or why none qualified. That keeps the run's heavy temporary files off the cluster's shared
 home folder, which on ParallelCluster is served by the same head node your
 connection and the run's heartbeat go through — a run writing its scratch there
 can stall the heartbeat ("did not answer within 75s"). It never uses the node's

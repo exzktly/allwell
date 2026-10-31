@@ -24,9 +24,17 @@ GB = 2 ** 30
 
 
 @pytest.fixture
-def disks(tmp_path, monkeypatch):
+def rooted():
+    """The folders the ``disks`` fixture puts on the node's root filesystem; a test adds to it. Empty by default,
+    because a test's temporary folders really are on this machine's root filesystem wherever ``/tmp`` is not a
+    mount of its own, and ``/scratch`` there is refused (``test_a_scratch_folder_on_the_boot_disk_is_refused…``)."""
+    return set()
+
+
+@pytest.fixture
+def disks(tmp_path, monkeypatch, rooted):
     """Three folders standing in for /scratch, $SLURM_TMPDIR and /tmp, each on a filesystem type of the test's
-    choosing, with the free space the test gives it."""
+    choosing, with the free space the test gives it, and on the root filesystem when the test puts it in ``rooted``."""
     folders = {name: tmp_path / name for name in ("scratch", "slurm_tmp", "tmp")}
     for folder in folders.values():
         folder.mkdir()
@@ -34,6 +42,7 @@ def disks(tmp_path, monkeypatch):
     free = {folder: 500 * GB for folder in folders.values()}
     monkeypatch.setattr(nd, "NODE_SCRATCH_MOUNT", str(folders["scratch"]))
     monkeypatch.setattr(nd, "filesystem_type", lambda path, mounts="/proc/mounts": kinds.get(Path(path), "xfs"))
+    monkeypatch.setattr(nd, "on_root_filesystem", lambda path: Path(path) in rooted)
     return folders, kinds, free
 
 
@@ -77,6 +86,45 @@ def test_tmpdir_and_the_system_temp_folder_are_never_taken_and_the_reason_names_
     assert folder is None
     assert reason == f"no node-local disk qualifies: {scratch} {why}"
     assert not (folders["tmp"] / f"allwell-{nd._user()}").exists()
+
+
+def test_a_scratch_folder_on_the_boot_disk_is_refused_and_slurm_tmpdir_is_taken(disks, rooted):
+    """``/scratch`` qualified by its filesystem type alone, so a plain folder on ``/`` (xfs, local, writable, roomy)
+    took the run's scratch: the node's boot disk, which a run must never fill on a node it may share."""
+    folders, _kinds, free = disks
+    rooted.add(folders["scratch"])
+    folder, reason = _pick(folders, free)
+    assert (folder, reason) == (None, f"no node-local disk qualifies: {folders['scratch']} is a folder on the node's "
+                                      "root filesystem, not a disk of its own")
+    assert not list(folders["scratch"].iterdir())
+    folder, _ = _pick(folders, free, SLURM_TMPDIR=str(folders["slurm_tmp"]))
+    assert folder == folders["slurm_tmp"] / f"allwell-{nd._user()}"
+    rooted.add(folders["slurm_tmp"])           # the site's own job folder is where the site put it
+    folder, _ = _pick(folders, free, SLURM_TMPDIR=str(folders["slurm_tmp"]))
+    assert folder == folders["slurm_tmp"] / f"allwell-{nd._user()}"
+
+
+def test_the_root_filesystem_is_told_by_device_not_by_the_mount_table():
+    """The real check, unpatched: ``/`` is on itself and ``/proc`` (a mount of its own on any Linux) is not."""
+    import os
+    assert nd.on_root_filesystem("/") is True
+    if not os.path.ismount("/proc"):
+        pytest.skip("no /proc mount on this platform")
+    assert nd.on_root_filesystem("/proc") is False
+
+
+def test_a_plain_folder_on_this_machine_s_root_filesystem_is_refused_through_the_real_check(tmp_path, monkeypatch):
+    """The reviewer's probe: a mount table that says local xfs, a ``/scratch`` that is only a folder, and the device
+    check left as it ships."""
+    import os
+    if os.stat(tmp_path).st_dev != os.stat(os.sep).st_dev:
+        pytest.skip("the temporary folder is a filesystem of its own here")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(nd, "NODE_SCRATCH_MOUNT", str(scratch))
+    monkeypatch.setattr(nd, "filesystem_type", lambda path, mounts="/proc/mounts": "xfs")
+    assert nd.node_local_scratch({"SLURM_JOB_ID": "7"}, free_bytes=lambda p: 30 * GB) == (
+        None, f"no node-local disk qualifies: {scratch} is a folder on the node's root filesystem, not a disk of its own")
 
 
 def test_outside_a_slurm_job_nothing_is_chosen(disks):

@@ -2206,7 +2206,7 @@ other reason.** `DatasetState.opening` holds the folder from the moment
 a re-entrant context manager that `load_directory` also enters, so Home's Reload
 is covered and the outermost block owns the marker — and
 `refresh_empty_state_pages` checks it before the no-dataset test, showing
-`ui_helpers.opening_reason(folder)` ("Opening <dataset name>…", named by
+`ui_helpers.opening_reason(folder)` (`Opening <dataset name>…`, named by
 `domain.dataset_name.dataset_display_name`) on every stack. The marker is needed
 because the opening dialog pumps the event loop on every file, so the window is
 repainted for the whole of a load, and halfway through one neither question the

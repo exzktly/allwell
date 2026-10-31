@@ -125,8 +125,8 @@ def _announce_opening(ctx, folder: Path):
     its own state now calls for rather than leaving it "opening" for good.
     """
     from review.core.ui_helpers import refresh_empty_state_pages
-    dataset = ctx.state.dataset
-    if dataset.opening is not None:
+    dataset = getattr(getattr(ctx, "state", None), "dataset", None)
+    if dataset is None or dataset.opening is not None:
         yield
         return
     dataset.opening = Path(folder)

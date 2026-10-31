@@ -12093,7 +12093,7 @@ the page's card, the site detail's and the crop strip's (the pop-out window's ca
 included. *Save nanowell data…* writes `long_format` for the wells the page draws (`export_long_csv(…, wells)`:
 other wells may be loaded from an earlier selection), and is refused with a status while the metrics on hand
 were computed for another baseline than the one chosen (`loaded_for[1] != baseline`, or a load in flight); *Save cell data…* exports the per-cell rows of the drawn
-wells that carry a nanowell address (`cell_scope_compute`). The rail glyph map lives in
+wells that carry a nanowell address (`cell_scope_compute`), filtered by `df_included_mask` with the scatter gates applied — the same rule `gate_tally` takes out of each count — so the file holds exactly the cells the counts count (`test_nanowell_counts_follow_cell_gating.py::test_save_cell_data_exports_exactly_the_cells_the_page_s_counts_count`). The rail glyph map lives in
 `review/core/section_icons.py`. The Properties panel's Lines & Markers controls restyle the median line and
 the statistic marks; the beeswarm dots are deliberately not tagged `_aw_marker_collection`, because a dot's
 size is the unit the layout packs by, and a larger dot from the panel would overlap its neighbours.

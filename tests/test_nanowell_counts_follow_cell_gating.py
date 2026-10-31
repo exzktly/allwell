@@ -162,3 +162,25 @@ def test_batch_export_takes_the_same_cells_out_as_the_page(qtbot, tmp_path):
     row = metrics[(metrics["timepoint"] == "t_c") & (metrics["nw_q"] == 0)].iloc[0]
     assert (row["n"], row["brightness_GFP"]) == (1.0, 30.0)
     assert said.startswith("Cell Gating leaves out 1 of 7 cells")
+
+
+def test_save_cell_data_exports_exactly_the_cells_the_page_s_counts_count(qtbot, tmp_path):
+    """The page's *Save cell data…* scope used ``include_gate=False``, so a cell a scatter gate leaves out was in
+    the exported rows while ``gate_tally`` took it out of its nanowell's count (cell population audit P2). Through
+    the real page and the row cache both read: one cell fails a scatter gate, and the file holds every other cell."""
+    from review.data.data_loading import get_rows
+    from review.features.export import cell_scope_compute as csc
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell.cell_scope_compute import cell_scope
+    from tests.test_nanowell_page import _loaded, _page
+
+    ctx = _page(qtbot, _dataset_with_areas(tmp_path))
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    frame = get_rows(ctx, "A01")
+    frame["Gate_Pass"] = 1
+    frame.loc[frame.index[0], "Gate_Pass"] = 0                  # one cell outside the scatter gates
+    gate = nwc.gate_tally(ctx, st.data)
+    assert (gate.cells, gate.excluded) == (7, 1)
+    exported = csc.population_mask(get_rows(ctx, "A01"), cell_scope(ctx))
+    assert int(exported.sum()) == gate.cells - gate.excluded == 6

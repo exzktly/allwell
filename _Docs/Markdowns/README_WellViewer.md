@@ -5842,7 +5842,8 @@ the page's settings. **Excluded (n) ▾** on the band brings back one well or al
 draws as one long CSV, with the baseline and where the times came from; with a Subset set, every
 row is still written, flagged in `in_subset` with the subset (`subset`) and its baseline (`subset_baseline`) beside it. Right after you change the baseline it waits:
 until the page has drawn the new baseline's numbers, saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
-drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
+drawn wells that carry a nanowell address — the cells the page's counts count, so a cell Cell Gating leaves out
+(QC limits, curation, a scatter gate) is not in the file. The page's choices are kept with the dataset and restored when it
 is opened again.
 
 **Is each nanowell the same nanowell at every timepoint?** Every comparison over time — fold changes,

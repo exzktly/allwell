@@ -40,7 +40,7 @@ and nowhere else (the Analyze pane gets no new control):
   or Resume) lands on the same node.
 - **The node stays granted while any run is using it**, however long that run
   takes. Only idleness, the Release button, a silent app, or the time limit
-  ends it — within the 24-hour limit below.
+  ends it (24 hours at most, §1 *Time limit*).
 - **Release** gives the node back at once (refused while a run is using it,
   unless that run is stopped first).
 - **Release when idle**: a granted node that has run nothing for **30 minutes**

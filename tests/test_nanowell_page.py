@@ -138,11 +138,11 @@ def test_the_load_runs_off_the_event_loop_and_a_stale_result_never_replaces_a_ne
     real = controller.site_metrics
     calls = []
 
-    def slow(data, baseline, gate=None):
+    def slow(data, baseline, gate=None, focus=None):
         if baseline == "earliest":
             time.sleep(1.5)                       # the first request is the slow one, so it arrives last
         calls.append(baseline)
-        return real(data, baseline, gate)
+        return real(data, baseline, gate, focus)
 
     monkeypatch.setattr(controller, "site_metrics", slow)
     st = ctx_state = page.state.feature_slice("nanowell")
@@ -288,7 +288,7 @@ def test_changing_the_baseline_and_back_never_lands_the_stale_result(page, qtbot
     st = _loaded(qtbot, page)
     real = controller.site_metrics
     monkeypatch.setattr(controller, "site_metrics",
-                        lambda data, baseline: (time.sleep(1.2), real(data, baseline))[1])
+                        lambda data, baseline, *rest: (time.sleep(1.2), real(data, baseline, *rest))[1])
     baseline_cb = page.widgets.get("_nw_baseline_cb")
     baseline_cb.setCurrentIndex(baseline_cb.findData("first_measurable"))
     baseline_cb.setCurrentIndex(baseline_cb.findData("earliest"))
@@ -428,3 +428,22 @@ def test_along_wells_the_timepoint_named_is_the_one_drawn(qtbot, tmp_path):
     assert st.timepoint in ("", None)
     assert (nwc.shown_timepoint(ctx)[1], st.model.timepoint, ctx.widgets.get("_nw_tp_cb").currentData()) == \
         ("t_a", "t_a", "t_a")
+
+
+def test_the_rim_focus_control_on_the_band_changes_the_rule_and_the_metrics_follow(qtbot, page):
+    """The band's *Rim focus* box and percentage are what change the rule, and the page recomputes with it: the
+    metrics on hand are stamped with the rule they were computed for (``focus_for``)."""
+    from review.features.nanowell import rim_focus_compute as rfc
+
+    st = _loaded(qtbot, page)
+    assert st.focus_for == rfc.RimFocusRule().key()
+    box, spin = page.widgets.get("_nw_rim_focus_box"), page.widgets.get("_nw_rim_focus_spin")
+    assert box.isChecked() and spin.value() == 75
+    box.setChecked(False)
+    qtbot.waitUntil(lambda: st.focus_for == (False,) and not st.computing, timeout=20000)
+    assert not st.rim_focus_on and not spin.isEnabled()
+    box.setChecked(True)
+    spin.setValue(60)
+    qtbot.waitUntil(lambda: st.focus_for == (True, 0.6) and not st.computing, timeout=20000)
+    assert st.rim_focus_fraction == 0.6
+    assert "rim_focus_fraction" in st.to_config() and st.to_config()["rim_focus_on"] is True

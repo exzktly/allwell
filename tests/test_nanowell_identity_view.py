@@ -701,7 +701,7 @@ def test_the_page_s_identity_view_is_chosen_on_its_switch_and_draws_the_chosen_w
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     assert st.view == "identity"
     well_cb = ctx.widgets.get("_nw_well_cb")
     assert [well_cb.itemText(i) for i in range(well_cb.count())] == ["A01 · confirmed", "A02 · contradicted"]
@@ -720,7 +720,7 @@ def test_the_page_s_identity_view_is_chosen_on_its_switch_and_draws_the_chosen_w
     idc.blink_tick(ctx)
     assert st.identity_drawn.frame == 1
     assert idc.step_blink(ctx, 0) == 0
-    _choose(ctx, "_nw_view_seg", "distribution", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "distribution", [k for k, _l in VIEWS])
     assert not timer.isActive() and st.identity_drawn is None
     assert st.to_config()["identity_mode"] == "blink"
 
@@ -732,7 +732,7 @@ def test_a_hidden_page_stops_the_blink_on_its_next_tick(page, qtbot):
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     _choose(ctx, "_nw_identity_mode_seg", "blink", [k for k, _l in MODES])
     qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.mode == "blink", timeout=20000)
     timer = ctx.widgets.get("_nw_blink_timer")
@@ -751,7 +751,7 @@ def test_the_pointer_on_the_page_s_side_by_side_lights_the_address(page, qtbot):
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     _choose(ctx, "_nw_identity_mode_seg", "sides", [k for k, _l in MODES])
     qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.mode == "sides"
                     and len(st.identity_drawn.axes["reference"].images) == 1, timeout=20000)
@@ -793,7 +793,7 @@ def test_the_page_zooms_side_by_side_and_blink_through_its_canvas(page, qtbot):
     ctx = page
     st = _loaded(qtbot, ctx)
     canvas = ctx.widgets.get("_nw_canvas")
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     _choose(ctx, "_nw_identity_mode_seg", "sides", [k for k, _l in MODES])
     qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.mode == "sides"
                     and len(st.identity_drawn.axes["reference"].images) == 1, timeout=20000)
@@ -862,7 +862,7 @@ def test_the_page_keeps_the_zoom_when_the_montages_arrive_and_starts_another_wel
     ctx = page
     st = _loaded(qtbot, ctx)
     canvas = ctx.widgets.get("_nw_canvas")
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     assert ctx.widgets.get("_nw_identity_colour_seg").isVisibleTo(ctx.window)          # on the Distance map
     _choose(ctx, "_nw_identity_mode_seg", "diagnostics", [k for k, _l in MODES])
     assert not ctx.widgets.get("_nw_identity_colour_seg").isVisibleTo(ctx.window)
@@ -1014,7 +1014,7 @@ def test_the_page_s_nanowell_box_goes_to_the_address_keeps_it_across_timepoints_
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     edit = ctx.widgets.get("_nw_identity_focus_edit")
     assert edit.isVisibleTo(ctx.window) and edit.isEnabled()
     edit.setText("1,0")
@@ -1094,7 +1094,7 @@ def test_origin_goes_to_nanowell_0_0(page, qtbot):
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     ctx.widgets.get("_nw_identity_origin_btn").click()
     assert st.identity_focus == "0,0" and ctx.widgets.get("_nw_identity_focus_edit").text() == "0,0"
     drawn = st.identity_drawn
@@ -1108,12 +1108,12 @@ def test_go_to_nanowell_shows_the_crops_nanowell_on_blink_zoomed_onto_it(page, q
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "distribution", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "distribution", [k for k, _l in VIEWS])
     st.selected_sites = [("A02", 1, -1)]
     nwc.pop_out_crops(ctx)                                                  # builds the pop-out and its button
     ctx.widgets.get(button).click()
     assert (st.view, st.well, st.identity_mode, st.identity_focus) == ("identity", "A02", "blink", "1,-1")
-    assert ctx.widgets.get("_nw_view_seg").currentData() == "identity"
+    assert (lambda b: b.tabData(b.currentIndex()))(ctx.widgets.get("_nw_view_bar")) == "identity"
     qtbot.waitUntil(lambda: st.identity_drawn is not None and st.identity_drawn.mode == "blink", timeout=20000)
     drawn = st.identity_drawn
     assert drawn.pair.well == "A02"
@@ -1138,7 +1138,7 @@ def test_a_well_excluded_on_the_band_leaves_every_figure_and_comes_back(page, qt
 
     ctx = page
     st = _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     well_cb = ctx.widgets.get("_nw_well_cb")
     well_cb.setCurrentIndex(well_cb.findData("A02"))
     excluded_btn = ctx.widgets.get("_nw_excluded_wells_btn")

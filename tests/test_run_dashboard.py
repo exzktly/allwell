@@ -519,3 +519,24 @@ def test_a_finished_upload_still_ends_its_transfer(qapp):
     d.set_well_transfer("B02", "down", 0.5)
     d.set_well_transfer("B02", "down", 1.0)
     assert d._xfer["B02"] == ("down", 0.5), "the zip is done; the CSVs are not"
+
+
+def test_the_stage_rail_paints_no_state_colour(qapp):
+    """The stage rail carries no coloured dots. They were painted from the
+    plate's own state palette, so a stage dot meant something different from
+    the same colour on a well beside it (Process complete was the "complete"
+    green while every processed well sat in "on server" blue). The rail says
+    its progress with bars, counts and the bold active name; nothing in it is
+    filled with a colour, whatever stage a run is in."""
+    from PySide6.QtWidgets import QWidget
+
+    from widgets.run_dashboard import RunDashboard
+
+    for remote in (False, True):
+        d = RunDashboard()
+        d.reset(remote=remote, total=2)
+        d.set_active_stage("process")
+        d.set_well_stage("A01", "process")
+        d.set_well_stage("A02", "process")
+        painted = [w.styleSheet() for w in d._rail_host.findChildren(QWidget) if "background" in w.styleSheet()]
+        assert painted == [], painted

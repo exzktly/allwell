@@ -11,6 +11,8 @@ click on the canvas in the minimal shell the other page tests use, and reads the
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pytest
 
@@ -146,7 +148,7 @@ def _choose_extremes(qtbot, ctx):
     from review.features.nanowell.tab_view import VIEWS
 
     _loaded(qtbot, ctx)
-    seg = ctx.widgets.get("_nw_view_seg")
+    seg = ctx.widgets.get("_nw_view_bar")
     seg.setCurrentIndex([k for k, _l in VIEWS].index("extremes"))   # emits currentChanged, as a click does
     qtbot.waitUntil(lambda: bool(_images(ctx)) and not any(t == "Cutting…" for t in _texts(ctx, "nw-extremes-missing")),
                     timeout=10000)
@@ -185,6 +187,10 @@ def test_the_view_draws_the_ranked_rows_at_the_latest_timepoint_with_their_crops
     # Each crop carries the fold change at its own timepoint: the top row's is 1×, 1×, 4×.
     assert _texts(page, "nw-extremes-value")[:3] == ["1×", "1×", "4×"]
     caption = _texts(page, "nw-extremes-caption")[0]
+    # The fixture's wells hold fewer nanowells than rim focus needs to judge one, and the caption says so first.
+    unjudged = re.match(r"\d+ in a well with under 10 rims at that timepoint were kept unchecked\. ", caption)
+    assert unjudged
+    caption = caption[unjudged.end():]
     assert caption.startswith("6 of 8 nanowells in A01 have a count fold change at t_d; not ranked: "
                               "1 baseline occluded, 1 seeded later (0 at baseline)")
     assert "split between the two blocks" in caption

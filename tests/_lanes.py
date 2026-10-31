@@ -172,6 +172,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_parallel.py": "A nanowell worker's threads: results in order, one segmenter call at a time, budgets",
     "test_nanowell_tiles.py": "A nanowell well's tiles read from its archive once, or from a node-local copy",
     "test_nanowell_identity_review.py": "Review honours the identity check's verdicts (NANOWELL_IDENTITY_TRACKER C1-C3)",
+    "test_nanowell_rim_focus.py": "Review leaves out a nanowell at a timepoint its own rim was out of focus",
     "test_nanowell_identity_view.py": "The Nanowells page's Identity view: distances, blink, side by side, diagnostics (tracker D1-D5)",
     "test_nanowell_identity_diagnostics_layout.py": "The Identity view's Diagnostics holds together at every size the plot card takes",
     "test_nanowell_relabel_progress.py": "Validate's nanowell relabel says how far it has got, and streams a cell table",

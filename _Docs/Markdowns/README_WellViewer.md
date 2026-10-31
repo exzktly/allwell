@@ -1345,6 +1345,11 @@ exclusion actually happens, so a threshold chosen wrongly costs a tick rather
 than a re-run. Leave the box blank unless you have measured a value; see
 [Cell Gating](#cell-gating) for where that number comes from.
 
+Both apply to the standard per-cell pipeline only. A nanowell run reads
+neither: it always measures each nanowell's **rim** sharpness, and the
+Nanowells page's **Rim focus** control decides from that which nanowells were
+out of focus.
+
 ### 7. Auto-threshold — picking each channel's "on" cut
 
 Collapsed by default, with its on/off switch in the section header so it can be
@@ -2000,6 +2005,9 @@ reading it. The log names any it kept over budget for that reason.
   with a `!` (partial or unfinished). They are chosen to stay distinguishable
   with red/green colour blindness: complete and failed differ in lightness as
   well as hue, so they never read as the same colour.
+- The **Stages** list beside the plate shows each stage's progress as a bar and
+  a count (`12/40`), with the running stage in bold. It has no coloured dots, so
+  the only coloured things on the progress view are the wells and their legend.
   A well that has started is drawn as a dial rather than a flat circle: the
   darker part of it is the work already done, the lighter part what is left,
   filling clockwise from twelve o'clock. So you can see at a glance whether a
@@ -5505,8 +5513,9 @@ use them.
 
 **Controls**
 
-- **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
-  *Extremes*, *Identity* and *Statistics*. Each view shows only the controls it uses.
+- **Views** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
+  *Extremes*, *Identity* and *Statistics*, chosen from the tabs in the top bar, where the Plotting and Home
+  pages show their sub-tabs. Hover a tab for what it shows. Each view shows only the controls it uses.
 - **Metric** — what each dot is: cell count, confluence, **brightness** and **nanowell fluorescence** (both
   explained under *Brightness and nanowell fluorescence* below), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
@@ -5620,6 +5629,19 @@ the sentence names it.
   reason in its tooltip, while the *Moving average* is off, for a metric that is not a fold change, and with the
   *Earliest* baseline, which has nothing before it — choose *First measurable* or a timepoint. The footer states
   the baseline's window.
+- **Rim focus** (on by default) and **% of sharp** — leave out a nanowell at any timepoint where its own rim
+  was out of focus. Every nanowell run measures each nanowell's rim sharpness (the `focus` column of
+  `nanowells/<well>.csv`), so this works on datasets you already have, with no re-run. A nanowell is out of
+  focus at a timepoint when its rim is less sharp than this percentage (75 % by default) of the sharpest tenth
+  of its well's rims at that timepoint — so one soft tile is caught while the rest of the well is sharp. There
+  it has no count, confluence or fluorescence, no fold change from or to it and no growth rate through it; its
+  state reads *rim out of focus*, the Array view hatches it with dots, its detail names the timepoint, and the
+  footer counts the nanowells left out. Two things it cannot see, and the footer counts both: a timepoint
+  blurred evenly across the whole well (there is nothing sharp to compare with), and a nanowell whose rim could
+  not be fitted (it has no rim focus, so it is kept unchecked). A well with fewer than ten rims at a timepoint
+  is not judged. Turning it on changes the numbers a figure draws, so a figure saved before it existed redraws
+  with it applied; untick it to see the run's own counts. Batch Export's Nanowells mode uses the page's
+  setting. This is separate from the per-cell focus cut on the QC tab, which is measured on nuclei.
 - **Responding above** (on *Distribution*) — the number a nanowell's value must be above to count as
   responding, for the metric shown. Set one for each metric you use (a fold change, a count, a confluence, an
   intensity); each is remembered separately, and a channel's brightness separately from another's. The figure

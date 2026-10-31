@@ -515,14 +515,20 @@ click it. The click is saved in `in/nanowell_anchors.json`
 beside the acquisition record; the run snaps it to the nearest nanowell, so it only has to land on the square.
 When several wells and timepoints need an anchor — the usual state after a run — press **Anchor queue**
 instead of picking each one: it shows the first timepoint on the plate left unaddressed, with **Set anchor**
-already on, and each click on a central square saves the anchor and, after a moment, opens the next. A *Queue*
+already on, and each click on a central square saves the anchor and, after a moment, opens the next. Each
+timepoint opens zoomed to 10× on the centre of the whole-well montage, where the central square usually is;
+press **Fit** to see the whole well when it is not there. A *Queue*
 group beside it says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous timepoint; a
-click there replaces its anchor), **Skip**, **One per well** and **Stop**. The queue holds every unaddressed
+click there replaces its anchor), **Skip**, **One per well** and **Stop** — or press **←** for Back, **→** for
+Skip and **Esc** for Stop while the queue runs. When **Set anchor** cannot be turned on for a timepoint, the figure
+says why; press Skip to go on. The queue holds every unaddressed
 timepoint without an anchor, plate order then time order, and also any timepoint whose anchor the last run could
 not use; an anchor you set that no run has used yet is not asked for again. Turn on **One per well** to be shown
 only each well's first such timepoint, and no well that already has an anchor waiting for a re-run: one click per
 well is usually enough (see above), and any timepoint the re-run still cannot address shows up in the next
-queue. The choice is remembered until you close the app. When it ends it says how many it anchored and how many
+queue. The choice is remembered until you close the app. If One per well leaves nothing to walk (every well
+waiting already has an anchor for a re-run), **Anchor queue** says so and turns One per well off, so pressing it
+again walks those timepoints too. When it ends it says how many it anchored and how many
 were skipped, and puts your plate selection back as it was.
 Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
 run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
@@ -2005,6 +2011,9 @@ reading it. The log names any it kept over budget for that reason.
   with a `!` (partial or unfinished). They are chosen to stay distinguishable
   with red/green colour blindness: complete and failed differ in lightness as
   well as hue, so they never read as the same colour.
+- The **Stages** list beside the plate shows each stage's progress as a bar and
+  a count (`12/40`), with the running stage in bold. It has no coloured dots, so
+  the only coloured things on the progress view are the wells and their legend.
   A well that has started is drawn as a dial rather than a flat circle: the
   darker part of it is the work already done, the lighter part what is left,
   filling clockwise from twelve o'clock. So you can see at a glance whether a
@@ -5529,8 +5538,9 @@ use them.
 
 **Controls**
 
-- **View** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
-  *Extremes*, *Identity* and *Statistics*. Each view shows only the controls it uses.
+- **Views** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
+  *Extremes*, *Identity* and *Statistics*, chosen from the tabs in the top bar, where the Plotting and Home
+  pages show their sub-tabs. Hover a tab for what it shows. Each view shows only the controls it uses.
 - **Metric** — what each dot is: cell count, confluence, **brightness** and **nanowell fluorescence** (both
   explained under *Brightness and nanowell fluorescence* below), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of

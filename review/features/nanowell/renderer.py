@@ -31,7 +31,7 @@ from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
 from review.features.nanowell.extremes_compute import caption, format_value
 from review.features.nanowell.starting_cells_compute import occupancy_in_filter
-from review.features.nanowell.full_montage_compute import fit_region
+from review.features.nanowell.full_montage_compute import CentreZoom, fit_region
 from review.features.nanowell._identity_marks import mark_timepoints, split_segments
 from review.features.nanowell.identity_compute import marks_legend
 from review.features.nanowell.series_compute import baseline_text
@@ -1069,6 +1069,10 @@ def _image_extent(image) -> tuple[float, float, float, float]:
     return left, top, right, bottom
 
 
+def _centre(box) -> tuple[float, float]:
+    return (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+
+
 def _union(a, b):
     if a is None or b is None:
         return a or b
@@ -1177,7 +1181,13 @@ def _array_axes(fig, scene, image, region, *, right: float, bottom: float) -> Ar
     box = ax.get_window_extent()
     w_px, h_px = max(int(round(box.width)), 1), max(int(round(box.height)), 1)
     fit = fit_region(whole, w_px, h_px, margin=0.0)
-    x0, y0, x1, y1 = fit if region is None else fit_region(region, w_px, h_px, margin=0.0)
+    if isinstance(region, CentreZoom):
+        # Centred on the whole-well montage itself, not on the padded union with the nanowells drawn around it.
+        cx, cy = _centre(_image_extent(image) if image is not None else fit)
+        half_w, half_h = (fit[2] - fit[0]) / (2 * region.factor), (fit[3] - fit[1]) / (2 * region.factor)
+        x0, y0, x1, y1 = cx - half_w, cy - half_h, cx + half_w, cy + half_h
+    else:
+        x0, y0, x1, y1 = fit if region is None else fit_region(region, w_px, h_px, margin=0.0)
     ax.set_xlim(x0, x1)
     ax.set_ylim(y1, y0)                                                 # y down
     return ArrayDrawn(HitMap(), ax, (x0, y0, x1, y1), (w_px, h_px), scene.frame, fit=fit)

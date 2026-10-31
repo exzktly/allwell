@@ -84,18 +84,22 @@ _DETAIL_W, _DETAIL_H = 4.2, 5.0
 _STRIP_H = 1.7
 _METRIC_CB_MIN_W = 220
 
-_VIEW_TIP = ("Distribution: one dot per nanowell, per well and timepoint.\n"
-             "Array: one well's nanowells over its montage or at their lattice places — every element a layer\n"
-             "you turn on or off (Image, Positions, Layers).\n"
-             "Trajectories: each nanowell's metric over time, with the median of each occupancy class.\n"
-             "Position: the metric by ring from the central nanowell — an edge-effect check.\n"
-             "Extremes: one well's nanowells with the largest and the smallest fold change of the Metric at the\n"
-             "Timepoint, each a row of its crops over every timepoint. Click a row for its detail.\n"
-             "Identity: whether one well's addresses name the same nanowells at the Timepoint as at its reference\n"
-             "timepoint — the identity check's distances, the montages blinked or side by side, and its registration.\n"
-             "Statistics: test whether wells (their nanowells as values) or groups (their wells' medians) differ at the\n"
-             "Timepoint — t-tests, Mann-Whitney, Kolmogorov-Smirnov or Dunnett, with an omnibus, adjusted p and\n"
-             "effect sizes.")
+#: Each view's tab tooltip, keyed as :data:`VIEWS` keys them.
+_VIEW_TIPS = {
+    "distribution": "One dot per nanowell, per well and timepoint.",
+    "array": ("One well's nanowells over its montage or at their lattice places — every element a layer\n"
+              "you turn on or off (Image, Positions, Layers)."),
+    "trajectories": "Each nanowell's metric over time, with the median of each occupancy class.",
+    "position": "The metric by ring from the central nanowell — an edge-effect check.",
+    "extremes": ("One well's nanowells with the largest and the smallest fold change of the Metric at the\n"
+                 "Timepoint, each a row of its crops over every timepoint. Click a row for its detail."),
+    "identity": ("Whether one well's addresses name the same nanowells at the Timepoint as at its reference\n"
+                 "timepoint — the identity check's distances, the montages blinked or side by side, and its "
+                 "registration."),
+    "statistics": ("Test whether wells (their nanowells as values) or groups (their wells' medians) differ at the\n"
+                   "Timepoint — t-tests, Mann-Whitney, Kolmogorov-Smirnov or Dunnett, with an omnibus, adjusted p "
+                   "and effect sizes."),
+}
 _EXTREMES_TIP = ("How many nanowells each block shows: this many with the largest fold change and this many with the "
                  "smallest. A well with fewer shares them between the blocks, never showing one twice.")
 _COHORT_TIP = ("Use only the nanowells with a value at every timepoint of their well, so each line over time follows "
@@ -219,6 +223,42 @@ def _select(combo, value) -> None:
             return
 
 
+def view_index(view: str) -> int:
+    """The tab index of *view* on the view bar; the first view for a key this build does not draw."""
+    keys = [k for k, _label in VIEWS]
+    return keys.index(view) if view in keys else 0
+
+
+def build_view_bar(ctx, view: str):
+    """The page's view switch: a tab strip in the shell's mode band, like every other page's sub-tabs.
+
+    The views are a page selector, so they sit where Plotting's, Home's, Image Browser's and Batch Export's
+    sub-tabs sit — beside the Review / Analyze / Datasets selector — and carry the ``PlottingSubTabs`` object
+    name that theme.qss styles every nested page bar with, so the strips cannot drift apart. The views stay one
+    page with one state (``NanowellState.view``) rather than becoming sub-leaves: they share one figure, one band
+    and one controller, and a tab click only writes the view through :func:`controller.set_view`.
+    """
+    from PySide6.QtWidgets import QTabBar
+
+    from review.core.app_shell_view import register_page_tabs
+
+    bar = QTabBar()
+    bar.setObjectName("PlottingSubTabs")
+    bar.setExpanding(False)
+    bar.setElideMode(Qt.ElideNone)
+    bar.setUsesScrollButtons(True)
+    bar.setDrawBase(False)
+    for i, (key, label) in enumerate(VIEWS):
+        bar.addTab(label)
+        bar.setTabData(i, key)
+        bar.setTabToolTip(i, _VIEW_TIPS.get(key, ""))
+    bar.setCurrentIndex(view_index(view))
+    bar.currentChanged.connect(lambda idx: nwc.set_view(ctx, VIEWS[idx][0]) if 0 <= idx < len(VIEWS) else None)
+    ctx.widgets.register("_nw_view_bar", bar)
+    register_page_tabs(ctx.window, "Nanowells", bar)
+    return bar
+
+
 def build_nanowell_tab(ctx, parent: QWidget) -> None:
     from review.core.ui_helpers import (
         apply_plot_card_decorators, build_plot_save_menu, make_plot_with_right_dock, make_properties_button,
@@ -235,14 +275,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     layout.setSpacing(0)
     band = ControlBand(plot_area)
 
-    view_seg = SegmentedControl()
-    for key, label in VIEWS:
-        view_seg.addSegment(text=label, data=key)
-    view_seg.setCurrentByData(st.view if st.view in dict(VIEWS) else VIEWS[0][0])
-    view_seg.setToolTip(_VIEW_TIP)
-    view_seg.currentChanged.connect(lambda idx: nwc.set_view(ctx, VIEWS[idx][0]))
-    reg.register("_nw_view_seg", view_seg)
-    band.add_scope("View", view_seg)
+    view_bar = build_view_bar(ctx, st.view)
 
     metric_cb = _combo([(k, label) for k, (label, _ch) in METRICS.items()], _METRIC_TIP)
     metric_cb.setMinimumWidth(_METRIC_CB_MIN_W)
@@ -430,7 +463,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     def page_visible() -> bool:
         return band.isVisible()          # the band shows whenever the page does, empty state or not
 
-    controls = (metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, moving_spin,
+    controls = (view_bar, metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, moving_spin,
                 baseline_moving_spin,
                 responding_edit, extremes_spin, extremes_cells, extremes_numbers, *identity.signalling, *start.signalling,
                 *array_controls.signalling, *statistics.signalling, *rim_focus.signalling)
@@ -441,7 +474,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         try:
             _select(metric_cb, st.metric)
             view = st.view if st.view in dict(VIEWS) else VIEWS[0][0]
-            view_seg.setCurrentByData(view)
+            view_bar.setCurrentIndex(view_index(view))
             _grey_metrics(metric_cb, view, channel, nwc.page_channel_name(ctx))
             _fill_channels(channel_cb, st.data, channel)
             channel_cb.setEnabled(channel_cb.count() > 0 and METRICS.get(st.metric, ("", False))[1]
@@ -922,6 +955,7 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
     layers_btn, layer_actions, colour_actions = _layers_button(ctx, band)
     overlays_btn = _button("Overlays", _OVERLAYS_TIP, None)
     overlays_btn.setCheckable(True)
+    overlays_btn.setProperty("variant", "toggle")         # "secondary" paints checked and unchecked the same
     overlays_btn.setChecked(True)
     overlays_btn.toggled.connect(lambda on: nwc.set_overlays(ctx, on))
     reg.register("_nw_overlays_btn", overlays_btn)
@@ -953,6 +987,7 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
 
     anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
     anchor_btn.setCheckable(True)
+    anchor_btn.setProperty("variant", "toggle")         # "secondary" paints checked and unchecked the same
     anchor_btn.toggled.connect(lambda on: nwc.set_anchor_mode(ctx, on))
     clear_anchor_btn = _button("Clear anchor", "Remove this well's anchor at this timepoint.",
                                lambda: nwc.clear_anchor(ctx))

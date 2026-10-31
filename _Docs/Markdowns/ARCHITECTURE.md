@@ -9685,7 +9685,14 @@ It holds the selection as a value (`()` all, `None` nothing ticked — refused b
 from each successful plan and a queued job's restored selection can arrive
 before the scan that lists the tokens. A restored token the source lacks is
 kept and listed as *(not in this source)*, so the plan refuses it by name
-instead of the page converting a different set than the job asked for; the
+instead of the page converting a different set than the job asked for. That
+refusal is the one plan the page cannot read the source's tokens from, so each
+converter's error (`CziImportError`, `Nd2ImportError`, `OmeImportError`)
+carries them as `source_timepoint_tokens` when it refuses the timepoint
+selection, and the page lists them from it. Without them a job reopened
+through `show_job` would list only its own ticked tokens, unmarked, and a
+source switched under a selection would go on listing the previous file's
+(`tests/test_timepoint_picker.py`). The
 menu's **All** resets to the whole timelapse rather than ticking every listed
 row, which is what leads out of that refusal before the real tokens are known.
 
@@ -11318,9 +11325,17 @@ timepoints — the roster, the check that no timepoint sits a lattice step off t
 sparse timepoint falls back to. `plan_link` decides at plan time, well by well, where dataset 2's rows already agree
 with what an incremental run onto dataset 1's tables would write: a well whose two rosters differ (`roster_of`: the
 recorded set, else the addresses a disk-rule well's ok timepoints have rows for), or whose two analyses used
-different roster rules, has every dataset 2 timepoint **set aside**; so does a single dataset 2 timepoint anchored a
-step off dataset 1's detections (`nanowell_run.misanchored`, given dataset 1's detected sites as an incremental run
-gives it the kept ones) or measured on dataset 2's own fallback template (`template.source == "earliest"`). The rest
+different roster rules, has every dataset 2 timepoint **set aside**; so does a single dataset 2 timepoint that may
+sit a step off dataset 1's nanowells (`_stepped_off`), or one measured on dataset 2's own fallback template
+(`template.source == "earliest"`). `_stepped_off` knows a step three ways, each seeing what the others cannot:
+dataset 2's own run flagged the timepoint `roster_mismatch` (`flagged_timepoints`, grid block or rows; that run
+compared every nanowell it detected, beyond the roster too); its detected addresses sit a step off dataset 1's
+(`nanowell_run.misanchored`, given dataset 1's detected sites as an incremental run gives it the kept ones), which
+shows only where rows reach past the array, as a disk-rule well's ring does; or, in a well whose run kept a roster,
+one side of its rim is empty as a step leaves it (`datasets/core/nanowell_rim.step_against_roster`, shared with
+Validate's relabel). A kept roster gives every timepoint rows at the roster's addresses only, so detected addresses
+overlap best where they are and only the rim can show the step. The rim cannot tell a step from a bubble or glare
+over one side; setting such a timepoint aside costs one incremental Analyze measuring it from the images. The rest
 are joined: `carry_linked_tables` carries dataset 1's tables (`carry_nanowell_tables`), adds dataset 2's blocks and
 site rows under their renamed timepoints onto dataset 1's grid record — its `array_radius` and roster kept — and
 re-runs `flag_template_drift` over the merged blocks, so every timepoint is compared with the well's earliest. A
@@ -11334,8 +11349,12 @@ writing, two analyses under different nanowell settings, scheme or measurement v
 nanowell results, and a pair in which only one has an acquisition record (`_refuse_dropping_the_nanowell_record`
 with `both_analysed`). The merged sidecar's `acquisition` block takes both datasets', dataset 2's renamed. What a
 join does not equalise, and the log says so: each half keeps the nanowell diameter (a median over its own run's
-timepoints) and array radius its own run measured. `_verify`'s zero-cell-rows refusal is waived for these merges,
-because a nanowell well with no cells writes an empty per-cell table as its measurement.
+timepoints) and array radius its own run measured. `_verify`'s zero-cell-rows refusal is waived well by well: a
+nanowell well none of whose nanowells holds a cell writes an empty per-cell table as its measurement, so a well
+whose sites tables count no cell at the timepoints the merge keeps (`nanowell_link.counted_cells`, dataset 2's
+set-aside timepoints left out) is not a merge that matched nothing. Any other well — one with no sites table, or one
+whose sites count cells no per-cell table holds — still counts, and a merge that wrote no cell row with one of
+those is refused, naming the cells a nanowell well lost.
 `tests/test_nanowell_concatenate_link.py` drives each decision through `build_merge_plan` and `execute_plan`;
 `tests/test_nanowell_merge_endtoend.py` joins two real analyses (an incremental Analyze then measures nothing) and
 sets aside one whose roster differs (it then measures exactly that timepoint). Validate checks the tables against
@@ -14681,6 +14700,7 @@ deletable:
 | `datasets/core/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count) every tool below uses for its per-well `ThreadPoolExecutor`. It **re-exports** `pipeline.explode_common.pick_workers` rather than defining it: the exploders take it from there, and this module used to hold a second implementation of the same three lines under a comment saying it mirrored the first — which is a heuristic that will be tuned in one place and not the other. |
 | `datasets/core/convert_marker.py` | The resume marker the three **packed-file converters** share (Convert OME-TIFF, Convert CZI, Convert ND2) — `mapping_signature`, the marker read/write/clear trio, `converted_wells`, `ResumeState`, `resume_state` and `destination_problem`. It is a different question from `dataset_paths.make_dataset_api`'s, which the copy tools use: theirs is "did I leave leftovers here?", answerable from the presence of a file and cleared by rebuilding. This one is "may I carry on from what is here?", which is a question about **settings** — two different mappings of one source write *identical* filenames, so nothing on disk distinguishes an `A01.zip` made from scene 0 from one made from scene 7, and only a marker recording the mapping can tell a run that may finish another's work from one that must refuse. Each converter passes its own marker filename (a folder carrying *another* converter's leftovers is not a resume either) and its own list of mapping fields; the signature also carries the source's resolved path, size and mtime, so a file replaced at the same name — a re-export, a restore, the next plate saved over the last — is a different source. `workers` is deliberately not a mapping field: it changes how fast the conversion goes and nothing about what it writes, so refusing a resume over it would refuse one that was safe. A field in `OMITTED_WHEN_EMPTY` (`timepoint_subset`) is written only when set, so markers left before it existed still match a run that leaves it empty (§6.2c). |
 | `datasets/core/timepoint_picker.py` | `TimepointPicker` — the three converters' *Timepoints* dropdown: a `CheckableDropdown` of the source's own timepoint tokens whose `subset()` is `()` with everything ticked, `None` with nothing, and otherwise the ticked tokens; a restored token the source lacks stays listed as missing (§6.2c). |
+| `datasets/core/nanowell_rim.py` | `step_against_roster` / `MIN_CRESCENT` / `site_address` — read a lattice step off a nanowell timepoint's rim from its sites table: the one way a step shows in tables that have rows only at the roster's addresses. Not proof (a bubble or glare over one side reads the same), so Validate's relabel moves only a timepoint the run flagged by it and Concatenate's link sets a timepoint aside for Analyze on it (§6.2i, §6b). Qt-free. |
 
 **Every copy tool refuses a dataset that spells one well two ways.** Subset,
 Merge Plates and Concatenate each call `well_spelling_collisions` from their own
@@ -15475,7 +15495,7 @@ for a schema that doesn't have `field_name` — silently wiping a real, correct
 rewrites measurement tables, and only their address columns.
 `datasets/validate/nanowell_relabel.py` (Qt-free) plans it from a dataset's
 tables alone: `plan_dataset(out_dir)` reads each circular well's grid record
-and sites table and, for each `ok` timepoint, `_step_against_roster` finds the
+and sites table and, for each `ok` timepoint, `datasets/core/nanowell_rim.step_against_roster` finds the
 step whose predicted nanowells (`a` such that `a + s` is in the recorded
 roster) best match which wholly imaged roster sites the timepoint detected.
 Every timepoint is measured on one roster, so detected addresses alone cannot
@@ -15483,13 +15503,34 @@ show a step in the tables; the rim can, because a timepoint anchored a site
 off measured the roster disk while its array sat a step away, leaving a
 crescent of imaged, empty roster sites on one side. A step counts only when it
 beats `(0, 0)` by `MIN_CRESCENT` sites and by half the crescent it predicts.
+**Only a timepoint the run flagged `roster_mismatch` is moved by what its rim
+reads**; the others sit at `(0, 0)`. A bubble or glare over one side of the rim
+leaves the same crescent, written the same way — the rendered run writes the
+crescent of a timepoint a step off `occluded` with `visible_fraction` 0, as it
+writes a bubble — so the tables cannot tell the two apart. The run could: it
+compared every nanowell each timepoint detected, beyond the roster too
+(`nanowell_run.misanchored`), and flags a timepoint whose nanowells sit a step
+from the others'. Taken from the rim alone, glare at a consistent timepoint
+would rename every nanowell in it, or join a step-off timepoint's frame and
+outvote the right one (`tests/test_nanowell_relabel_judgement.py`). A
+consistent timepoint whose rim reads a step is still reported, never moved, in
+`WellPlan.rim_only`: on its own it is an info finding,
+`nanowell_rim_unconfirmed` (verdict `RIM_ONLY`, not repairable), and beside
+another verdict a sentence of that well's finding. That covers a dataset whose
+run kept a roster without flagging steps, which nothing in the tables rules
+out.
 The steps then go through `pipeline/nanowell_frames.choose_frame` — the run's
 own ranking (hand-set anchor, central square, array centre, plate-rigid; then
 most timepoints; then earliest), shared with `nanowell_run._settle_steps` so
 the run and the repair cannot disagree. A plan is `shift` (repairable:
 `nanowell_misaddressed`), `tie` (`nanowell_frames_ambiguous`: set an anchor by
 hand and re-run), or `unexplained` (a `roster_mismatch` no step within reach
-explains, or a disk-rule well with no kept roster: re-run). `build_report`
+explains, or a disk-rule well with no kept roster: re-run). A `shift` plan
+also carries in `unexplained` every flagged timepoint it neither moves nor
+re-rosters; its finding names them, and the repair leaves them flagged — only
+the timepoints in `moves` have their grid block and site rows set
+`consistent` — so Review goes on warning about them and the next run still
+re-analyses the well (`nanowell_task._has_a_step_off_timepoint`). `build_report`
 lists each as a warning and puts the repairable wells in
 `DatasetReport.misaddressed_nanowell_wells`, which makes the report
 `repairable`. `apply_repairs` plans again from disk, so a repeat is a no-op,
@@ -15546,6 +15587,21 @@ and `C08` name the same well and the two sides of that comparison are a GUI
 field and a zip stem. The Analyze form carries it as a visible **Force these
 wells** field rather than hidden run state: it re-segments and overwrites, so it
 must be something the user can see and clear.
+
+**A handoff into Analyze owns Run scope whole.** `AllWellApp._open_dataset_in_analyze`
+is the one door for this button, the import pages' *Open in Analyze*, and
+Review's *Finish this run*, *Re-run wells* and *Re-run anchored wells*
+(`review/core/analyze_handoff.py`). It writes all four Run-scope controls
+whether or not its caller names a value: *If a well already has output* to Fill
+in what's missing when the caller asks for an incremental run and to Skip it
+otherwise, *Only these wells* and *Force these wells* to the caller's lists
+(blank when it names none), and *Skip these wells* to blank. The sidecar it
+applies first restores what its own run was told (`force`, `incremental`,
+`force_wells`), and whatever was typed on the form earlier is still there;
+either, left alone, would narrow, unforce, re-force or refuse the run being
+handed over — a remote nanowell *Re-run wells*, handed over with Incremental
+off because such a run refuses it, would get it back from a completion run's
+sidecar (`tests/test_only_wells_handoff.py`).
 
 **A remote run needs telling twice.** The flag on the remote command line is not
 enough on its own, because the client decides what to upload before the remote

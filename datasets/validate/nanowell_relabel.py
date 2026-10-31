@@ -14,6 +14,14 @@ the central square, then the array's centre), then the most timepoints, is kept.
 then relabelled: a row's measurements were taken at a physical nanowell, and only its name was wrong, so address
 ``(q, r)`` becomes ``(q + dq, r + dr)`` and every value stays as measured.
 
+Only a timepoint the run flagged ``roster_mismatch`` is read for a step. A step shows in the tables only as a
+crescent of empty rim sites on one side, and a bubble or glare over that side leaves the same crescent, written the
+same way (``occluded``, nothing of the disk visible). The run itself could tell them apart, since it compared every
+nanowell each timepoint detected, beyond the roster too, and it flags a timepoint whose nanowells sat a step from the
+others'; a timepoint it left consistent is taken to be in the roster's frame. Its rim reading a step is still
+reported (``nanowell_rim_unconfirmed``, an info finding, or a sentence of the well's finding), never acted on: a
+dataset whose run kept a roster without that check would show a real step only that way.
+
 What a relabel cannot give back is the rim. The wrong origin put that timepoint's roster disk a step off, so it
 measured a crescent of sites beyond the array's rim and none of the crescent inside it on the far side. Rows that
 land outside the well's roster are dropped; roster nanowells the timepoint never measured get a row that says so —
@@ -22,7 +30,9 @@ the roster keeps its row in the cell table with its nanowell address blanked. Ev
 
 Two cases are reported and left alone: two frames that rank alike (nothing says which is right; an anchor set by
 hand on one timepoint, then a re-run of the well, settles it), and a timepoint flagged ``roster_mismatch`` that no
-step within reach explains (a re-run of the well is the repair). Only circular wells are considered: an inferred
+step within reach explains (a re-run of the well is the repair). Such a timepoint keeps its flag even when the
+repair relabels the well's other timepoints: only a timepoint the repair moves, or re-rosters, is marked
+``consistent``, so Review goes on warning about the rest and the next run still re-analyses them. Only circular wells are considered: an inferred
 array's timepoints are registered by the run itself and each may see a different array.
 
 Qt-free. The originals are copied to ``out/nanowells/relabel_backup/<time>/`` before anything is written.
@@ -38,7 +48,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from pipeline.nanowell_frames import SHIFT, STEP_REACH, TIE, choose_frame
+from datasets.core.nanowell_rim import site_address as _address
+from datasets.core.nanowell_rim import step_against_roster
+from pipeline.nanowell_frames import SHIFT, TIE, choose_frame
 
 NANOWELL_DIRNAME = "nanowells"
 #: Where the originals of every relabelled well are copied before the rewrite, under a folder named for the time.
@@ -52,11 +64,8 @@ RELABELLED_BY = "Datasets → Validate"
 _ADDRESS_COLUMNS = ("nw_q", "nw_r", "nw_ring", "nw_label")
 
 
-#: A timepoint is judged a lattice step off only when that step explains at least this many more of its rim sites
-#: than its own addresses do, and at least half the rim sites the step predicts: a nanowell missed at the rim, or a
-#: bubble over it, moves the count by one or two, while a step off leaves a whole crescent (17 sites on a 265-site
-#: rendered array).
-MIN_CRESCENT = 3
+#: The verdict of a well with nothing to repair whose consistent timepoints' rims read a step (``WellPlan.rim_only``).
+RIM_ONLY = "rim_only"
 
 
 @dataclass(frozen=True)
@@ -65,14 +74,16 @@ class WellPlan:
 
     *moves* maps each timepoint whose rows are rewritten to the step its addresses move by (``(0, 0)`` for one that
     keeps its addresses but whose roster changes); *roster_offset* is the winning frame's own step, so the repaired
-    roster is the recorded one moved by ``-roster_offset``."""
+    roster is the recorded one moved by ``-roster_offset``. *rim_only* maps each timepoint the run left consistent
+    whose rim alone reads a step to that step: it is reported and never moved (module docstring)."""
     well: str
-    verdict: str                                   # SHIFT (repairable), TIE, or "unexplained"
+    verdict: str                                   # SHIFT (repairable), TIE, "unexplained", or RIM_ONLY
     moves: dict = field(default_factory=dict)
     reference: str | None = None
     frames: tuple = ()
     unexplained: tuple = ()                        # roster_mismatch timepoints no step explains
     roster_offset: tuple = (0, 0)
+    rim_only: dict = field(default_factory=dict)
 
     @property
     def shifts(self) -> dict:
@@ -82,13 +93,6 @@ class WellPlan:
     @property
     def repairable(self) -> bool:
         return self.verdict == SHIFT and bool(self.shifts)
-
-
-def _address(row) -> tuple[int, int] | None:
-    q, r = str(row.get("nw_q") or "").strip(), str(row.get("nw_r") or "").strip()
-    if not q or not r:
-        return None
-    return int(float(q)), int(float(r))
 
 
 def _read_rows(path: Path) -> tuple[list[str], list[dict]]:
@@ -121,35 +125,6 @@ def _is_circular(grid: dict) -> bool:
     return grid.get("array_radius", {}).get("radius_um") is not None
 
 
-def _step_against_roster(rows, roster: set) -> tuple[int, int]:
-    """The step ``s`` that best explains which of this timepoint's wholly imaged roster sites hold a nanowell.
-
-    Every timepoint of a circular well is measured on one roster, so its rows exist for the same addresses whatever
-    its origin, and the nanowells it detected cannot show a step by their addresses alone. Its rim can: a timepoint
-    whose origin sits a step off measured, in its own frame, the roster disk while the array sat at ``roster - s``, so
-    a crescent of imaged roster sites on one side holds no nanowell. The step chosen is the one whose predicted
-    nanowells (``a`` such that ``a + s`` is in the roster) disagree least with the detections, and it must beat
-    ``(0, 0)`` by :data:`MIN_CRESCENT` and by half the crescent it predicts."""
-    imaged, detected = set(), set()
-    for row in rows:
-        address = _address(row)
-        try:
-            whole = float(row.get("imaged_fraction") or "nan") >= 0.999
-        except ValueError:
-            whole = False
-        if address in roster and whole:
-            imaged.add(address)
-            if str(row.get("detected")).strip().lower() == "true":
-                detected.add(address)
-    steps = [(dq, dr) for dq in range(-STEP_REACH, STEP_REACH + 1) for dr in range(-STEP_REACH, STEP_REACH + 1)]
-    predicted = {st: {a for a in imaged if (a[0] + st[0], a[1] + st[1]) in roster} for st in steps}
-    misses = {st: len(detected ^ predicted[st]) for st in steps}
-    best = min(steps, key=lambda st: (misses[st], st != (0, 0)))
-    crescent = len(imaged - predicted[best])
-    gain = misses[(0, 0)] - misses[best]
-    return best if best != (0, 0) and gain >= max(MIN_CRESCENT, crescent / 2) else (0, 0)
-
-
 def plan_well(well: str, grid: dict, site_rows: list[dict]) -> WellPlan | None:
     """The plan for one well from its grid record and sites table; ``None`` when its timepoints already share one
     frame, or it is not a circular well with a kept roster (an inferred array's timepoints are registered by the run
@@ -167,17 +142,30 @@ def plan_well(well: str, grid: dict, site_rows: list[dict]) -> WellPlan | None:
     for row in site_rows:
         if row.get("timepoint") in by_tp:
             by_tp[row["timepoint"]].append(row)
-    onto = {tp: _step_against_roster(rows, roster) for tp, rows in by_tp.items() if rows}
+    # Only a flagged timepoint is moved by what its rim reads. The rim cannot tell a step from a bubble or glare over
+    # one side (the rendered run writes both crescents ``occluded`` with no visible disk), but the run that wrote the
+    # tables could: it compared every nanowell each timepoint detected, beyond the roster too, and flagged a timepoint
+    # whose nanowells sat a step from the others' (``nanowell_run.misanchored``). A timepoint it left consistent stays
+    # in the roster's frame, and a step its rim reads is only reported (``rim_only``).
+    read = {tp: step_against_roster(rows, roster) for tp, rows in by_tp.items() if rows}
+    onto = {tp: step if tp in flagged else (0, 0) for tp, step in read.items()}
+    rim_only = {tp: step for tp, step in read.items() if tp not in flagged and step != (0, 0)}
     decision = choose_frame(onto, {tp: blocks[tp].get("origin_method") for tp in onto}, list(onto))
     if decision.verdict == SHIFT:
         winner = onto[decision.reference]
         moves = {tp: (step[0] - winner[0], step[1] - winner[1]) for tp, step in onto.items()}
         if winner == (0, 0):
             moves = {tp: m for tp, m in moves.items() if m != (0, 0)}
-        return WellPlan(well, SHIFT, moves, decision.reference, decision.frames, roster_offset=winner)
+        # A flagged timepoint the repair neither moves nor re-rosters keeps its flag and is reported: the repair has
+        # not explained its mismatch, and the flag is what makes Review warn and the next run re-analyse it.
+        left = tuple(tp for tp in flagged if tp not in moves)
+        return WellPlan(well, SHIFT, moves, decision.reference, decision.frames, unexplained=left,
+                        roster_offset=winner, rim_only=rim_only)
     if decision.verdict == TIE:
-        return WellPlan(well, TIE, frames=decision.frames)
-    return WellPlan(well, "unexplained", unexplained=flagged) if flagged else None
+        return WellPlan(well, TIE, frames=decision.frames, rim_only=rim_only)
+    if flagged:
+        return WellPlan(well, "unexplained", unexplained=flagged, rim_only=rim_only)
+    return WellPlan(well, RIM_ONLY, rim_only=rim_only) if rim_only else None
 
 
 def plan_dataset(out_dir, progress: Callable[[str], None] | None = None) -> dict[str, WellPlan]:
@@ -200,19 +188,39 @@ def plan_dataset(out_dir, progress: Callable[[str], None] | None = None) -> dict
         if progress is not None:
             verdict = ("timepoints share one frame" if plan is None else
                        "to relabel: " + ", ".join(f"{tp} by {st}" for tp, st in plan.shifts.items())
+                       + (f"; {', '.join(plan.unexplained)} stay flagged" if plan.unexplained else "")
                        if plan.repairable else f"left alone ({plan.verdict})")
             progress(f"  {well} ({k}/{len(grids)}): {verdict}")
     return plans
 
 
+def _rim_only_sentence(plan: WellPlan) -> str:
+    """What *plan* says about the timepoints it reports and never moves (``WellPlan.rim_only``)."""
+    read = ", ".join(f"{tp} (as {step} would)" for tp, step in plan.rim_only.items())
+    return (f"the rim of timepoint(s) {read} is empty on one side as a lattice step would leave it, but the run "
+            "found their nanowells in the other timepoints' frame (they are not flagged roster_mismatch), so they are "
+            "left as they are: a bubble or glare over that side of the rim reads the same way in the tables. If the "
+            "Array view shows their addresses a nanowell off, re-run the well")
+
+
 def finding_of(plan: WellPlan) -> tuple[str, str, str]:
     """``(severity, code, message)`` Validate lists for *plan*."""
+    if plan.verdict == RIM_ONLY:
+        return ("info", "nanowell_rim_unconfirmed", f"{plan.well}: {_rim_only_sentence(plan)}")
+    severity, code, message = _finding_of(plan)
+    return severity, code, message + (f". Also, {_rim_only_sentence(plan)}" if plan.rim_only else "")
+
+
+def _finding_of(plan: WellPlan) -> tuple[str, str, str]:
     if plan.repairable:
         moved = ", ".join(f"{tp} by {step}" for tp, step in plan.shifts.items())
+        left = (f". Timepoint(s) {', '.join(plan.unexplained)} are also flagged roster_mismatch and no lattice step "
+                "explains it: the repair leaves them flagged, and a re-run of the well is their repair"
+                if plan.unexplained else "")
         return ("warning", "nanowell_misaddressed",
                 f"{plan.well}: timepoint(s) addressed a lattice step off {plan.reference}'s nanowells ({moved}), so "
                 "their rows name neighbouring nanowells and Review pairs each nanowell with its neighbour over time. "
-                "Apply repairs relabels them onto its addresses (the originals are backed up)")
+                f"Apply repairs relabels them onto its addresses (the originals are backed up){left}")
     if plan.verdict == TIE:
         frames = " vs ".join("/".join(frame) for frame in plan.frames)
         return ("warning", "nanowell_frames_ambiguous",
@@ -242,11 +250,13 @@ def _ring(q: int, r: int, kind) -> int | None:
 
 
 def _relabel_sites(rows, shifts: dict, roster: set, kinds: dict, columns: list[str]) -> tuple[list, dict]:
-    """The sites table with each shifted timepoint's rows renamed, and per timepoint ``(dropped, unmeasured)``."""
+    """The sites table with each shifted timepoint's rows renamed, and per timepoint ``(dropped, unmeasured)``. Only
+    the timepoints in *shifts* (the plan's moves) lose a ``roster_mismatch`` flag; another timepoint's rows keep it."""
     out, counts, seen = [], {}, {tp: set() for tp in shifts}
     for row in rows:
         tp = row.get("timepoint")
-        row = dict(row, consistency="consistent") if row.get("consistency") == "roster_mismatch" else dict(row)
+        repaired = tp in shifts and row.get("consistency") == "roster_mismatch"
+        row = dict(row, consistency="consistent") if repaired else dict(row)
         address = _address(row)
         if tp in shifts and address is not None:
             dq, dr = shifts[tp]
@@ -381,9 +391,9 @@ def _rewrite_well(plan: WellPlan, grid: dict, grid_path: Path, sites_path: Path,
         + "; ".join(f"{tp}: {d} beyond the rim dropped, {u} never measured" for tp, (d, u) in counts.items()))
 
     stamp = datetime.now().isoformat(timespec="seconds")
-    for tp, block in blocks.items():
-        if isinstance(block, dict) and block.get("consistency") == "roster_mismatch":
-            block.update(consistency="consistent", consistency_detail="")
+    for tp in plan.moves:                      # only what the repair explains: plan.unexplained stays flagged
+        if blocks[tp].get("consistency") == "roster_mismatch":
+            blocks[tp].update(consistency="consistent", consistency_detail="")
     if plan.roster_offset != (0, 0):
         grid["array_radius"]["roster"] = [list(a) for a in sorted(roster)]
     for tp, shift in plan.moves.items():

@@ -1974,20 +1974,26 @@ class AllWellApp(QMainWindow):
         if edit is not None:
             edit.setEnabled(True)
             edit.setText(str(dataset_path))
+        # Run scope is the handoff's decision, all of it, so every control in it
+        # is written whether or not the caller names a value. The sidecar just
+        # applied restores what *its* run was told (Redo it / Fill in what's
+        # missing, Force these wells), and anything left on the form from
+        # earlier is still there: either would otherwise quietly narrow,
+        # unforce, re-force or refuse the run this handoff is setting up.
         existing = getattr(self._analyze, "_existing_output_cb", None)
-        if existing is not None and incremental:
-            existing.setValue("incremental")
+        if existing is not None:
+            existing.setValue("incremental" if incremental else "skip")
         forced = [str(w).strip() for w in (force_wells or []) if str(w).strip()]
         force_edit = getattr(self._analyze, "_force_wells_edit", None)
-        if force_edit is not None and forced:
+        if force_edit is not None:
             force_edit.setText(", ".join(forced))
         only = [str(w).strip() for w in (only_wells or []) if str(w).strip()]
         only_edit = getattr(self._analyze, "_only_wells_edit", None)
         if only_edit is not None:
-            # Always written — cleared when the caller names no subset. A
-            # subset left in the field from earlier would otherwise quietly
-            # narrow the run this handoff is setting up.
             only_edit.setText(", ".join(only))
+        skip_edit = getattr(self._analyze, "_skip_wells_edit", None)
+        if skip_edit is not None:
+            skip_edit.setText("")
         if incremental or forced or only:
             reveal = getattr(self._analyze, "reveal_section", None)
             if callable(reveal):

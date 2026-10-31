@@ -566,8 +566,10 @@ The new images need an acquisition record of their own when the analysed dataset
 the CZI, ND2 or OME import); without it the merge is refused, because the merged dataset would have no record
 to add the new timepoint from. *Concatenate* also joins two datasets that were each analysed in nanowell mode:
 nanowells are matched by address, so dataset 2's timepoints land on dataset 1's nanowells. Where the two analyses
-disagree about a well — they found different nanowells in it, a timepoint of dataset 2 sits a lattice step off, or
-it was measured on dataset 2's own fallback template — those timepoints of dataset 2 are left out, and the log
+disagree about a well — they found different nanowells in it, a timepoint of dataset 2 may sit a lattice step off
+(dataset 2's own analysis flagged it, or one side of its rim is empty as a step leaves it — a bubble or glare over
+that side looks the same, and then the timepoint is simply measured again), or it was measured on dataset 2's own
+fallback template — those timepoints of dataset 2 are left out, and the log
 names each one and why; run Analyze with Run scope set to *Fill in what's missing* to measure them onto dataset 1's
 nanowells. Each half keeps the nanowell diameter its own analysis measured. Two analyses under different nanowell
 settings are refused, as is a pair where only one dataset holds nanowell results or only one has an acquisition
@@ -8391,7 +8393,16 @@ say — the raw log says so and the findings are unaffected.
    left alone. In one, two timepoints anchored equally well disagree, and
    nothing in the tables says which is right: set an anchor by hand on the
    central square at one of them, then re-run the well. In the other, no
-   small step explains the disagreement: re-run the well.
+   small step explains the disagreement: re-run the well. A relabelled well
+   can still hold such a timepoint; Validate names it, and the repair leaves
+   it flagged, so Review keeps warning about it and the next run of the well
+   still re-analyses it. Only a timepoint the original run itself flagged is
+   ever relabelled. A bubble or glare over one side of the array's rim leaves
+   the tables looking just as a step off would, so when a timepoint the run
+   found consistent has one side of its rim empty, Validate notes it (an
+   information line, "the rim of timepoint(s) … is empty on one side") and
+   changes nothing; look at that timepoint in the Array view, and re-run the
+   well if its addresses really are a nanowell off.
 3. If a well is genuinely missing FOV/timepoint work, **Complete this run in
    Analyze** opens the dataset there set up to finish it: the Analyze form is
    filled in from the dataset's own recorded settings (schema, separator,
@@ -8404,7 +8415,11 @@ say — the raw log says so and the findings are unaffected.
    incremental run would skip forever, so they are re-segmented in full.
    **Only these wells** is filled with the wells that need work — the partial
    ones and the forced ones — so the run touches nothing that is already
-   whole. Press Run and only the missing `(FOV, timepoint)` pairs are
+   whole. **Skip these wells** is emptied, and **Force these wells** holds only
+   the wells this handoff names, whatever was typed there before or recorded
+   by the dataset's earlier run; the same is true of every button that opens a
+   dataset in Analyze (Review's *Finish this run* and *Re-run wells*, the
+   import pages' *Open in Analyze*). Press Run and only the missing `(FOV, timepoint)` pairs are
    processed, merged into the existing per-well CSVs and `<WELL>_out.zip`
    archives; wells that are already complete are left untouched. Without that
    tick a plain re-run would skip every well that already has any output at

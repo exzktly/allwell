@@ -149,8 +149,23 @@ def test_the_line_status_counts_from_the_summaries(monkeypatch):
 
     monkeypatch.setattr(controller, "get_rows", lambda *a: pytest.fail("a well was read to count it"))
     ctx = SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(
-        summaries={"A01": WellSummary(n_rows=1_104_480), "A02": WellSummary(n_rows=12)})))
-    assert controller.line_status_text(ctx, [], set(), [], ["A01", "A02"]) == "2 well(s)  |  1,104,492 nuclei"
+        cache={}, summaries={"A01": WellSummary(n_rows=1_104_480), "A02": WellSummary(n_rows=12)})))
+    assert controller.line_status_text(ctx, [], set(), [], ["A01", "A02"]) == (
+        "2 well(s)  |  0 included in the 0 loaded well(s); 1,104,492 nuclei in all (2 well(s) not loaded, so not "
+        "counted as included or not)")
+
+
+def test_the_line_status_counts_the_cells_the_plots_count(monkeypatch):
+    """Audit P4: the line said "N nuclei" from every row while the plots and their n panel count only the cells
+    ``df_included_mask`` keeps. A held well is counted through the mask; the QC failure here is not in the count."""
+    import pandas as pd
+
+    from review.features.lineplot import controller
+
+    monkeypatch.setattr(controller, "get_rows", lambda *a: pytest.fail("a well was read to count it"))
+    held = pd.DataFrame({"Included": [1, 1, 1, 0], "QC_Pass": [1, 0, 1, 1]})
+    ctx = SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(cache={"A01": held}, summaries={})))
+    assert controller.line_status_text(ctx, [], set(), [], ["A01"]) == "1 well(s)  |  2 of 4 nuclei included"
 
 
 def test_a_pooled_group_is_not_held_twice(monkeypatch):

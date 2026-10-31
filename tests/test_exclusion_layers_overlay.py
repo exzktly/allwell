@@ -476,3 +476,37 @@ def test_the_hover_readout_tells_kept_from_unknown():
     on_kept = SimpleNamespace(state=SimpleNamespace(review_image=SimpleNamespace(
         exclusion_reasons_by_nid={3: ()})))
     assert "kept" in exclusion_phrase(on_kept, 3)
+
+
+# ── the Review CSV table's Included column ─────────────────────────────────────
+
+def test_the_table_s_included_column_agrees_with_the_overlay_for_every_layer():
+    """The table composed the override, ``Included``, ``QC_Pass`` and ``Crop_Pass`` only, so a cell a gate, the
+    field, focus, border, excluded-field or FOV layer dropped read Included = 1 beside an overlay outlining it as
+    excluded (cell population audit P8). One cell per layer, each failing only that layer."""
+    from review.data.data_loading import VERDICT_LAYERS
+    from review.features.image_browser.review_image.collect import review_effective_included
+
+    cols = {layer: [1] * (len(VERDICT_LAYERS) + 1) for layer in VERDICT_LAYERS}
+    for k, layer in enumerate(VERDICT_LAYERS):
+        cols[layer][k] = 0                                      # cell k+1 fails only `layer`; the last fails none
+    df = _frame(Included=[1] * (len(VERDICT_LAYERS) + 1), **cols)
+    ctx = _ctx(df)
+    inc = review_build_include_map(ctx, _mask(len(VERDICT_LAYERS) + 1, size=8 * len(VERDICT_LAYERS) + 16),
+                                   WELL, FOV, TP)
+    table = {int(row["nucleus_id"]): review_effective_included(ctx, WELL, row) for row in df.to_dict("records")}
+    assert table == {nid: ("1" if kept else "0") for nid, kept in inc.items()}
+    assert list(table.values()).count("1") == 1                 # only the cell that fails nothing
+
+
+def test_an_unreadable_included_is_out_in_the_overlay_and_the_table_as_in_the_analysis():
+    """Audit U1: the overlay read a NaN ``Included`` as kept and the table wrote it as ``nan``, while
+    ``df_included_mask`` drops the row (``fillna(0)``). All three now agree it is out."""
+    from review.data.data_loading import df_included_mask
+    from review.features.image_browser.review_image.collect import review_effective_included
+
+    df = _frame(Included=[1, np.nan])
+    ctx = _ctx(df)
+    assert df_included_mask(df).tolist() == [True, False]
+    assert review_build_include_map(ctx, _mask(2), WELL, FOV, TP) == {1: True, 2: False}
+    assert [review_effective_included(ctx, WELL, row) for row in df.to_dict("records")] == ["1", "0"]

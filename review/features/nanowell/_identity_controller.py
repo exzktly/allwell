@@ -193,6 +193,14 @@ def leave(ctx, st) -> None:
         timer.stop()
 
 
+def needs_relayout(drawn, fig) -> bool:
+    """Whether *drawn* is a Diagnostics figure laid out for another size than *fig* has now. Diagnostics works out
+    every place from the figure's size (``_identity_diagnostics_layout``), so once the canvas settles at a new size
+    the page draws it again; the other modes keep their figure fractions and are left alone."""
+    return (drawn is not None and drawn.mode == "diagnostics" and fig is not None
+            and tuple(drawn.laid_out) != idr.laid_out_size(fig))
+
+
 def _blinking(ctx, st) -> bool:
     drawn = st.identity_drawn
     fig = ctx.widgets.get_or_none("_nw_fig")

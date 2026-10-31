@@ -138,6 +138,46 @@ def test_the_address_and_the_imaging_field_are_conditions():
     assert sorted(odd + even) == sorted(zip(frame["well"], frame["nw_q"], frame["nw_r"]))
 
 
+def _seam_plate():
+    """Four nanowells over two timepoints: (0,0) never on a seam, (1,0) on one at t1 only (not at the baseline t0),
+    (2,0) on one at both, and (3,0) with no flag recorded at t1. The flag comes as the CSV reader gives it — a bool,
+    or its text in an older table — and is missing where a run recorded none."""
+    flags = {(0, "t0"): False, (0, "t1"): False, (1, "t0"): False, (1, "t1"): True,
+             (2, "t0"): True, (2, "t1"): "True", (3, "t0"): "False", (3, "t1"): None}
+    rows = [{"well": "A01", "nw_q": q, "nw_r": 0, "timepoint": tp, "tp_order": i, "n": 1.0, "n0": 1.0,
+             "baseline_timepoint": "t0", "fused": flags[(q, tp)]} for q in range(4) for i, tp in enumerate(("t0", "t1"))]
+    return pd.DataFrame(rows), SimpleNamespace(grids={}, timepoints=lambda well=None: ["t0", "t1"])
+
+
+def test_the_nanowells_on_a_tile_seam_can_be_kept_alone_or_left_out():
+    frame, data = _seam_plate()
+
+    def kept(op, at):
+        return sorted({q for _w, q, _r in _addresses(frame, C("fused", op, at=at), data=data)})
+
+    assert kept("yes", "any") == [1, 2]                   # ever on a seam
+    assert kept("no", "every") == [0]                     # never on one; (3,0) has no flag at t1, so is undecided
+    assert kept("yes", "baseline") == [2]
+    assert kept("no", "baseline") == [0, 1, 3]
+    assert kept("yes", "tp:t1") == [1, 2]
+    _rows, done = ss.apply(frame, ss.Subset((C("fused", "no", at="every"),)).validated(), "earliest", data=data)
+    assert (done.kept, done.outside, done.unknown) == (1, 2, 1)
+    assert C("fused", "no", at="every").validated().text() == "On a tile seam at every timepoint: no"
+
+
+def test_a_seam_condition_takes_yes_or_no_and_persists():
+    for bad in (C("fused", "ge", 1), C("fused", "in", values=("x",)), C("fused", "yes", at="soon")):
+        with pytest.raises(ValueError):
+            bad.validated()
+    assert C("fused", "yes", 5, 7).validated() == C("fused", "yes", at="baseline")      # no bound is kept
+    st = NanowellState()
+    st.subset = ss.Subset((C("fused", "no", at="every"), C("n0", "ge", 1))).validated()
+    restored = NanowellState()
+    restored.apply_config(st.to_config())
+    assert restored.subset == st.subset
+    assert "a" not in st.to_config()["subset"]["conditions"][0]
+
+
 # ── what a subset is ─────────────────────────────────────────────────────────
 def test_a_condition_that_is_not_one_is_refused_with_its_reason():
     for bad in (C("n", "between", 3, 2, at="latest"), C("owner", "in", values=()), C("nope", "ge", 1),
@@ -261,3 +301,18 @@ def test_an_imaging_field_condition_is_built_from_the_tiles_the_run_recorded(pag
     row.op_cb.setCurrentIndex(row.op_cb.findData("not_in"))
     assert any(t.startswith("No nanowell of the drawn wells is in the subset (Imaging field at baseline is not one "
                             "of F0)") for t in _texts(page))
+
+
+def test_a_seam_condition_is_built_in_the_editor(page):
+    """Choosing *On a tile seam* shows yes / no and no number; *no at every timepoint* reaches the page's subset."""
+    editor = _editor(page)
+    editor.add_btn.click()
+    row = editor.rows[0]
+    row.field_cb.setCurrentIndex(row.field_cb.findData("fused"))
+    assert [row.op_cb.itemData(i) for i in range(row.op_cb.count())] == ["yes", "no"]
+    assert not row.a_spin.isVisibleTo(page.window) and not row.tiles_btn.isVisibleTo(page.window)
+    assert row.at_cb.isVisibleTo(page.window)
+    row.op_cb.setCurrentIndex(row.op_cb.findData("no"))
+    row.at_cb.setCurrentIndex(row.at_cb.findData("every"))
+    st = page.state.feature_slice("nanowell")
+    assert st.subset == ss.Subset((C("fused", "no", at="every"),))

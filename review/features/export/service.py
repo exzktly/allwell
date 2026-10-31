@@ -1213,16 +1213,18 @@ def _scope_block(ctx, scope, *, wells, missing_verdicts, header_len: int,
         f"# value column: {scope.val_col}",
         f"# timepoints (h): {tps}",
         f"# above-threshold rule: {on_rule}",
-        "# inclusion: Included AND QC_Pass AND Crop_Pass"
-        + (" AND Gate_Pass" if scope.include_gate else " (Gate_Pass not applied)"),
+        "# inclusion: " + csc.inclusion_rule(scope.include_gate),
         "# channel cutoffs: " + (", ".join(f"{c}>{g:g}" for c, g in sorted(gates.items()))
                                  or "none"),
-        f"# rows are this plot's cell population; the figure drew {scope.drawn_subset}=1",
+        f"# rows are this plot's cell population; the figure drew {csc.drawn_subset_text(scope.drawn_subset)}",
         f"# wells ({len(wells)}): " + ", ".join(w for _g, w in wells),
     ]
-    if missing_verdicts:
-        lines.append("# verdict layers not computed for every well (written as 1): "
-                     + ", ".join(missing_verdicts))
+    core = [c for c in missing_verdicts if c in csc.VERDICT_COLUMNS]
+    partial = [c for c in missing_verdicts if c not in csc.VERDICT_COLUMNS]
+    if core:
+        lines.append("# verdict layers not computed for every well (written as 1): " + ", ".join(core))
+    if partial:
+        lines.append("# verdict layers applied to some wells only (blank where not applied): " + ", ".join(partial))
     if unreadable:
         # Otherwise a well whose rows would not load is indistinguishable from
         # one that had no passing cells — both simply contribute nothing.

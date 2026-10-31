@@ -896,12 +896,38 @@ def line_status_text(ctx, series_list, fc_misses, active_rsets, selected) -> str
                       for r in active_rsets)
         # threshold + band now live in the always-visible status chips (F1).
         return f"{len(active_rsets)} replicate set(s)  ·  {n_wells} well(s)"
-    # Every opened well's row count is in its summary, so the line does not read
-    # each selected well — from disk, for one the row cache has evicted — to count.
-    summaries = getattr(ctx.state.dataset, "summaries", None) or {}
-    n_total = sum(summaries[lbl].n_rows if lbl in summaries else len(get_rows(ctx, lbl))
-                  for lbl in selected)
-    return f"{len(selected)} well(s)  |  {n_total:,} nuclei"
+    return f"{len(selected)} well(s)  |  {_nuclei_counted(ctx, selected)}"
+
+
+def _nuclei_counted(ctx, selected) -> str:
+    """The status line's cell count: the cells the plots count — ``df_included_mask``, the population every line,
+    fraction and n panel is computed over — out of every row, so the number beside the plots is not the raw row
+    count presented as their n (cell population audit P4).
+
+    Counted over the frames the row cache holds, without reading an evicted well from disk; a well that is not held
+    has its rows in the total from its summary, and the line says the included count does not cover it rather than
+    guessing."""
+    from review.data.data_loading import df_included_mask
+
+    dataset = ctx.state.dataset
+    summaries = getattr(dataset, "summaries", None) or {}
+    included = total = 0
+    unheld = []
+    for lbl in selected:
+        try:
+            frame = dataset.cache[lbl]
+        except KeyError:
+            frame = None
+        if frame is not None:
+            total += len(frame)
+            included += int(df_included_mask(frame).sum())
+        else:
+            unheld.append(lbl)
+            total += summaries[lbl].n_rows if lbl in summaries else len(get_rows(ctx, lbl))
+    if unheld:
+        return (f"{included:,} included in the {len(selected) - len(unheld)} loaded well(s); {total:,} nuclei in "
+                f"all ({len(unheld)} well(s) not loaded, so not counted as included or not)")
+    return f"{included:,} of {total:,} nuclei included"
 
 
 def redraw_line_plots(

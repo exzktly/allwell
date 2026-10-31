@@ -18,7 +18,7 @@ import numpy as np
 import numpy as _np
 import pandas as pd
 
-from review.data.data_loading import df_included_mask, get_rows, resolve_value_series
+from review.data.data_loading import VERDICT_LAYERS, df_included_mask, get_rows, resolve_value_series
 from review.data.image_resolver import normalize_numeric_token
 from review.data.image_resolver import resolve_ref_by_fov_tp as _resolve_ref_by_fov_tp
 from review.core.ui_helpers import safe_int_or_none as _safe_int_or_none
@@ -274,7 +274,9 @@ def _verdict(sub, column):
     """
     if column not in sub.columns:
         return pd.Series(1, index=sub.index)
-    return pd.to_numeric(sub[column], errors="coerce").fillna(1).astype(int)
+    # ``Included`` is the one layer the chokepoint reads fail-closed (``fillna(0)``): a row whose own curation
+    # verdict is unreadable is out of the analysis, so the overlay must not outline it as kept (audit U1).
+    return pd.to_numeric(sub[column], errors="coerce").fillna(0 if column == "Included" else 1).astype(int)
 
 
 def exclusion_phrase(ctx, nid: int) -> str:
@@ -384,6 +386,10 @@ def review_build_exclusion_reasons(
     undo something that would not bring it back.
     """
     center = _np.asarray(mask_arr)
+    # Every label starts as kept and only a row can exclude it, so a label with no CSV row would be outlined as
+    # kept. The pipeline cannot produce one: the label image it saves is the one it quantifies, and it writes a row
+    # for every label in it (``process_microscopy._quantify_image_group``). Recorded as declined in the cell
+    # population audit (U2) rather than changed, so a reader does not take the absence of a guard as an oversight.
     reasons: dict[int, tuple[str, ...]] = {
         int(nid): () for nid in _np.unique(center) if int(nid) > 0
     }
@@ -948,11 +954,13 @@ def review_effective_included(ctx, label: str, row: dict) -> str:
         if ovr is not None:
             val = ovr
     if val is None:
-        val = str(row.get("Included", "1"))
-    # Compose the QC and crop layers: a QC-failed cell (QC_Pass == 0) or a cell
-    # cropped out (Crop_Pass == 0) is excluded regardless of manual curation —
-    # effective = manual-keep AND passes-QC AND inside-crop.
-    for col in ("QC_Pass", "Crop_Pass"):
+        val = _included_text(row.get("Included", "1"))
+    # Compose every verdict layer the analysis applies (``df_included_mask``'s own roster, ``VERDICT_LAYERS``): a
+    # cell any layer fails is excluded regardless of manual curation. Composing only QC and crop here left a cell a
+    # scatter gate, the field, focus, border, excluded-field or FOV layer drops reading Included = 1 in the table
+    # while the overlay beside it outlined it as excluded (cell population audit P8). An unreadable verdict keeps
+    # the row, as the mask's does.
+    for col in VERDICT_LAYERS:
         flag = row.get(col, 1)
         try:
             if int(float(str(flag).strip() or "1")) == 0:
@@ -960,6 +968,16 @@ def review_effective_included(ctx, label: str, row: dict) -> str:
         except (TypeError, ValueError):
             pass
     return val
+
+
+def _included_text(value) -> str:
+    """A row's own ``Included`` as the table writes it: ``"1"`` or ``"0"``. Missing or unreadable is ``"0"``, as
+    ``df_included_mask`` reads it (``fillna(0)``) — the table must not keep a cell the analysis drops."""
+    try:
+        number = float(str(value).strip())
+    except (TypeError, ValueError):
+        return "0"
+    return "1" if number == 1 else "0"
 
 
 def collect_region_delete_targets(

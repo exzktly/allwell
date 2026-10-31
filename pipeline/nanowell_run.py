@@ -1476,6 +1476,8 @@ class _Prepared:
     norm: object
     #: Whether *segment* is the production Cellpose (no segmenter handed in): on a CPU it runs on Torch's own threads.
     cellpose: bool = False
+    #: Fused site index -> the real tile its row names (``pipeline.nanowell_seams.SeamTiles.reported``).
+    reported: dict = field(default_factory=dict)
 
 
 def _prepare_timepoint(located: Located, images: dict, settings: NanowellSettings, array_radius_um: float | None, *,
@@ -1485,6 +1487,7 @@ def _prepare_timepoint(located: Located, images: dict, settings: NanowellSetting
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_detect import FITTED, MIN_REFINE_RADIUS_PX
     from pipeline.nanowell_sites import check_format
+    from pipeline.nanowell_seams import is_seam_tile
     from pipeline.tile_grid import ownership_report
 
     px = located.pixel_size_um
@@ -1503,6 +1506,9 @@ def _prepare_timepoint(located: Located, images: dict, settings: NanowellSetting
     fused = set(report.fused_indices)
     out = Measured(located.timepoint, notes=list(located.notes))
     kind = located.fit.kind if located.fit is not None else None
+    # The fused sites are given an image to be counted on (an edge site its holding tile, a blend site a seam tile
+    # blended from every tile covering it), so a nanowell on a seam has a count like any other (pipeline.nanowell_seams).
+    located, images, channels, report, seams = _with_seam_tiles(located, images, channels, report, centres, settings)
     geoms, by_tile = _owned_geometries(located, images, settings, centres, report)
     # The format check's second half, which needs fitted nanowells and so could not run while locating (the montage
     # is too coarse to fit them): the sites fitted here at full resolution against the setting's diameter. A
@@ -1515,7 +1521,10 @@ def _prepare_timepoint(located: Located, images: dict, settings: NanowellSetting
     if fmt.status == "format_mismatch" or (fmt.ok is None and geoms and fine_enough):
         out.notes.append(fmt.reason)
     visibility, coverage = _visibility_and_coverage(located, geoms, array_radius_um)
-    template = _pooled_template(located, images, settings, geoms, by_tile, visibility, coverage, earliest_template)
+    # Built from the ordinary tiles' sites alone: a blended crop is not a tile's own optics.
+    template = _pooled_template(located, images, settings, geoms, {t: v for t, v in by_tile.items()
+                                                                  if not is_seam_tile(t)},
+                                visibility, coverage, earliest_template)
     if template is None:
         out.notes.append("No template could be built (no fully imaged, visible site): contents are undefined")
     else:
@@ -1540,13 +1549,38 @@ def _prepare_timepoint(located: Located, images: dict, settings: NanowellSetting
                                  f"({', '.join(borrowed)}): their fluorescence background is the well's")
     return _Prepared(located, images, settings, channels, out, addressed, addresses, points_m, detected, report, fused,
                      kind, geoms, by_tile, visibility, coverage, template, segment, norm,
-                     cellpose=segmenter is None and count_cells)
+                     cellpose=segmenter is None and count_cells, reported=seams.reported)
+
+
+def _with_seam_tiles(located: Located, images: dict, channels: dict | None, report, centres,
+                     settings: NanowellSettings):
+    """``(located, images, channels, report, seams)`` with every fused site given an owner it can be counted on:
+    the seam tiles' positions and images added beside the real tiles', the channels answering a seam tile id with
+    that channel blended the same way, and *report*'s owners naming the new owners (``pipeline.nanowell_seams``).
+    Nothing changes when no site is fused."""
+    from pipeline import nanowell_measure as nm
+    from pipeline.nanowell_seams import SeamTiles, rectangles_of, seam_tiles
+
+    if not report.fused_indices:
+        return located, images, channels, report, SeamTiles(report.owners)
+    px = located.pixel_size_um
+    pitch = located.pitch_um or settings.pitch_um
+    diameter = located.diameter_um or settings.diameter_um
+    rectangles = rectangles_of(located.plan, located.positions)
+    surround = nm.template_half(diameter / 2 / px) * px + 0.5 * pitch
+    seams = seam_tiles(report, centres, rectangles, images, diameter, pitch, surround, px)
+    if seams.positions:
+        located = replace(located, positions={**located.positions, **seams.positions})
+        images = {**images, **seams.images}
+        channels = seams.channels(channels, rectangles, px)
+    return located, images, channels, replace(report, owners=seams.owners), seams
 
 
 def _finish_timepoint(prep: _Prepared, *, on_segmented=None, inspect: dict | None = None) -> Measured:
     """The second half of :func:`measure_timepoint`: every tile's contents, then a row for every roster site."""
     from pipeline import nanowell_measure as nm
     from pipeline.nanowell_parallel import ordered_results, serialised, synchronised
+    from pipeline.nanowell_seams import is_seam_tile
 
     located, images, settings, channels, out = prep.located, prep.images, prep.settings, prep.channels, prep.out
     addressed, addresses, points_m, detected = prep.addressed, prep.addresses, prep.points_m, prep.detected
@@ -1569,6 +1603,8 @@ def _finish_timepoint(prep: _Prepared, *, on_segmented=None, inspect: dict | Non
         own_keep = None if keep is None else (keep[0], {})
         got, table, notes = _tile_contents(owner, indices, located, images, settings, geoms, addresses, template,
                                            tile_segment, channels, kind, norm, on_segmented=tick, keep=own_keep)
+        if is_seam_tile(owner) and "fov" in table:      # a cell names the real tile its nanowell's row names
+            table["fov"] = [prep.reported.get(i, owner) for i in table["site_index"]]
         return got, table, notes, own_keep
 
     for got, table, notes, own_keep in ordered_results(tile, imaged.items(), threads):
@@ -1591,7 +1627,7 @@ def _finish_timepoint(prep: _Prepared, *, on_segmented=None, inspect: dict | Non
                               addressed=addressed, occluded_below=settings.occluded_below,
                               clipped_below=settings.clipped_below)
         out.sites.append(_site_row(located.timepoint, i, address, geoms[i], visibility[i], coverage[i], got, state,
-                                   report.owners[i], detected[i], i in fused, channels, kind))
+                                   prep.reported.get(i, report.owners[i]), detected[i], i in fused, channels, kind))
     return out
 
 

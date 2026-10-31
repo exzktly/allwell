@@ -365,7 +365,10 @@ in the wrong places, and the montage shows it. The record, archive and grid chec
 channels at run time** is on, or for a queued job whose input folder does not exist yet; the pipeline itself
 still refuses such a well, naming the reason. An overlap shorter
 than a nanowell needs is logged once as a warning with the expected number of nanowells on a seam, and the
-run goes on.
+run goes on. Those nanowells are still counted: each is measured from an image blended from the tiles that cover
+it, and its row is flagged `fused` so you can keep or leave out the seam nanowells in Review (the **Subset**
+condition *On a tile seam*). A nanowell near the scan's outer edge, inside one tile but short of the margin, is
+counted on that tile and flagged the same way.
 
 **Reuse registration** (a folder and a **Browse…** button) is for analysing a plate a second time with other
 segmentation or measurement settings — another cell diameter, margin, or occlusion or clipping threshold — without
@@ -3887,7 +3890,9 @@ row, holding five actions:
   the cells a cutoff excluded are the denominator a fraction was computed
   against, so a file without them could not reproduce the number on the figure.
   A `#` comment block above the table records the value column, timepoints,
-  threshold, gate layers and wells that produced it, and names the line the
+  threshold, the full inclusion rule the rows were filtered by (every layer:
+  curation, QC, crop, gates, and the field, focus, border and FOV exclusions),
+  and the wells that produced it, and names the line the
   table starts on. Read it with
   `pandas.read_csv(path, comment="#", float_precision="round_trip")` — the
   values are written at full precision, and pandas' default reader does not
@@ -5634,7 +5639,12 @@ the sentence names it.
     value at each of its well's timepoints);
   - **position** — the *ring* (lattice steps from the central nanowell), the *distance from the centre* in µm (on
     the well's lattice at its measured pitch), or the address *q* / *r*;
-  - **imaging field** — the tile the nanowell was cut from, *is one of* or *is not one of* the tiles you tick.
+  - **imaging field** — the tile the nanowell was cut from, *is one of* or *is not one of* the tiles you tick;
+  - **on a tile seam** — *yes* or *no*: whether no one tile held the nanowell with margin, so it was counted from
+    an image blended from the tiles covering it (a nanowell near the scan's outer edge counts too). Read at a
+    timepoint like a metric: *no* *at every timepoint* leaves out every nanowell that was ever on a seam; *yes*
+    *at any timepoint* keeps only those. Datasets analysed before seam nanowells were counted have them with no
+    count.
 
   A number is compared with ≥, ≤, =, *between* or *not between* (both ends included). Every change is applied as
   you make it; a range typed upside down is said under the conditions and changes nothing until it is fixed.
@@ -5920,8 +5930,10 @@ page's, so they leave out the cells Home's Cell Gating leaves out; beside them `
 count, `cells_left_out` how many cells the gating took from it, and `cell_gating` says what the gating left out
 (empty when nothing). With a Subset set, every
 row is still written, flagged in `in_subset` with the subset (`subset`) and its baseline (`subset_baseline`) beside it. Right after you change the baseline it waits:
-until the page has drawn the new baseline's numbers, saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
-drawn wells that carry a nanowell address. The page's choices are kept with the dataset and restored when it
+until the page has drawn the new baseline's numbers — or, after you change which cells count (QC limits, curation,
+gates), the new counts — saving says so and writes nothing. *Save cell data…* writes the per-cell rows of the
+drawn wells that carry a nanowell address — the cells the page's counts count, so a cell Cell Gating leaves out
+(QC limits, curation, a scatter gate) is not in the file. The page's choices are kept with the dataset and restored when it
 is opened again.
 
 **Is each nanowell the same nanowell at every timepoint?** Every comparison over time — fold changes,
@@ -6012,11 +6024,18 @@ chooses what it draws:
   labels stay still; when they are wrong, the labels jump a nanowell or turn.
 - **Side by side** — the two images next to each other; point at a nanowell on either and it lights on both, with a
   cross where the registration says it should be.
-- **Diagnostics** — how the central square was found, in three pictures: the reference image around its square
-  (what was looked for), the later image turned into the reference's orientation with the match outlined (where it
-  was found), and the match score across the search area with the best and next-best places marked (how clearly).
-  Below them, one line per check with a ✓, ✗ or ! — the verdict and why, the square, how the plate moved, the
-  array's outline, the tiles and the addresses — and a check that could not run says why.
+- **Diagnostics** — how the central square was found. The verdict comes first, in the largest type, with its ✓, ✗
+  or ! and why. Then three pictures: the reference image around its square, outlined dashed (what was looked for);
+  the later image turned into the reference's orientation, with the match outlined and the square the run itself
+  picked circled round it (where it was found); and the match score across the search area, with a cross where the
+  square was, a circle on the best match and a diamond on the next-best place (how clearly). Each picture names its
+  marks in a small key under it, with the scores. Below the pictures, one line per check with a ✓, ✗ or ! — the
+  square, how the plate moved, the array's outline, the tiles and the addresses — and a check that could not run says
+  why. The page arranges all of this for the size of the plot: on a short, wide window the checks move beside the
+  pictures, and resizing the window or opening the site detail lays it out again. On a very small plot (a phone held
+  upright, say) the footer is left out first and then the checks fold into one line that counts them — for example
+  *Checks: 4 passed, 1 failed, 1 noted* — so the verdict and the pictures keep their room; make the plot larger to
+  read each check.
 
 Every Compare mode zooms with the scroll wheel and pans by dragging. Side by side's two images move together, as do
 Diagnostics' two images. The zoom stays while the same well, timepoint and mode are shown and resets when any of them
@@ -6643,6 +6662,11 @@ Operates on **one well at a time** (spot detection is per-frame).
   when the run finishes, is cancelled, or fails. The app stays usable while it
   runs; switching datasets mid-run cancels it rather than writing counts into
   the wrong folder.
+- **Cells that could not be counted are left blank, never 0.** A cell whose
+  field has no spot image or no mask in the well's archive, or one that could
+  not be read, gets an empty count rather than a zero, so it drops out of the
+  fraction above threshold instead of counting as negative. The closing message
+  says how many cells were left blank, and the log names the wells.
 - **Optimal use** — sweep the threshold on one representative well, confirm the
   spot overlay, then Apply to All.
 
@@ -7249,6 +7273,16 @@ Every copy is recorded in the dataset's history (`provenance.jsonl`).
 Switch to **Datasets** with the title-bar segmented control (the third segment,
 beside Review and Analyze). Unlike Review there is no plate/well picker — the left
 sidebar is just a list of dataset-level tools.
+
+**Your exclusions travel with the data.** Subset, Merge Plates and Concatenate
+carry what decides which cells count: cells you excluded by hand, your QC limits
+(Home ▸ Cell Gating), the crop region, and fields you excluded during QC triage —
+renamed along with the wells and timepoints they belong to. A merged plate can
+hold only one set of QC limits and one crop, so it takes the first dataset's,
+and the run log says by name when the second dataset's were different, so you
+can check them before comparing the plates. Anything that could not be carried
+(an unreadable settings file, an exclusion of a well or timepoint the tool did
+not keep) is counted in the log.
 
 ### Convert OME-TIFF
 

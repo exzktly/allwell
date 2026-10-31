@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 
 from review.data.data_loading import (
+    VERDICT_LAYERS,
     df_included_mask,
     resolve_value_series,
     resolved_timepoints,
@@ -54,6 +55,26 @@ from domain.tp_match import tp_close_mask
 #: app means "passed", so an absent layer is written as 1 and named in the scope
 #: block instead.
 VERDICT_COLUMNS = ("QC_Pass", "Crop_Pass", "Gate_Pass")
+#: The other layers ``df_included_mask`` applies. Each is written only while its exclusion is switched on, and only
+#: for the wells it can judge, so absent from every well means the layer is off; absent from some wells and present
+#: in others is what the scope block has to name.
+OPTIONAL_VERDICT_COLUMNS = tuple(c for c in VERDICT_LAYERS if c not in VERDICT_COLUMNS)
+
+
+def inclusion_rule(include_gate: bool) -> str:
+    """The rule the rows were filtered by, as the scope block states it: every layer ``df_included_mask`` applies,
+    taken from its own roster (``VERDICT_LAYERS``) so the stated rule cannot fall behind the applied one."""
+    layers = [c for c in VERDICT_LAYERS if include_gate or c != "Gate_Pass"]
+    rule = " AND ".join(["Included", *layers])
+    if not include_gate:
+        rule += " (Gate_Pass not applied)"
+    return rule + "; a layer a well's rows do not carry passes every row"
+
+
+def drawn_subset_text(drawn_subset: str) -> str:
+    """*drawn_subset* as a condition: a bare marker name gains ``=1``; a scope that wrote its own condition (one
+    holding ``=``) is taken as written."""
+    return drawn_subset if "=" in drawn_subset else f"{drawn_subset}=1"
 
 #: The two markers every scope carries. ``plot_in_population`` is the narrower
 #: set the tab's own statistic is computed over (finite area, per-channel
@@ -348,9 +369,11 @@ def header_for(frames_columns: Sequence[Sequence[str]], scope: CellScope) -> lis
 
 
 def missing_verdict_layers(frames_columns: Sequence[Sequence[str]]) -> list[str]:
-    """Verdict layers absent from at least one well, for the scope block."""
-    out = []
-    for col in VERDICT_COLUMNS:
-        if any(col not in cols for cols in frames_columns):
+    """Verdict layers the scope block must name: a core layer (``VERDICT_COLUMNS``) absent from any well, and an
+    optional one (``OPTIONAL_VERDICT_COLUMNS``) present in some wells and absent from others."""
+    out = [col for col in VERDICT_COLUMNS if any(col not in cols for cols in frames_columns)]
+    for col in OPTIONAL_VERDICT_COLUMNS:
+        held = [col in cols for cols in frames_columns]
+        if any(held) and not all(held):
             out.append(col)
     return out

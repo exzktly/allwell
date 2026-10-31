@@ -71,7 +71,12 @@ def build_queue(ctx) -> tuple[aqc.AnchorQueue | None, str]:
     if not queue.items:
         why = "No nanowell timepoint is waiting for an anchor"
         if items:
-            why += f" (One per well is on: {len(items)} more wait in wells that already have one)"
+            # One per well left nothing: every well with a waiting timepoint already has an anchor for a re-run,
+            # which is the remedy the message names. Its toggle sits in the group shown only during a walk, so it is
+            # turned off here, or nothing on the page could ever walk the rest.
+            st.anchor_queue_per_well = False
+            why += (f" with One per well: {len(items)} more wait in wells that already have one. One per well is now "
+                    "off, so Anchor queue walks them all")
         why += "."
         if pending:
             why += (f" {len(pending)} timepoint(s) have an anchor that no run has used yet: Re-run anchored wells… "
@@ -106,11 +111,14 @@ def _open_current(ctx, queue) -> bool:
     if set(ctx.state.selection.selected_wells) != wanted:
         set_selected_wells(ctx, wanted)
     shown = nwc.open_for_anchor(ctx, item.well, item.timepoint, zoom=OPEN_ZOOM)
-    if shown and item.refused:
-        st = _state(ctx)
-        if st is not None and not st.array_message:
+    st = _state(ctx)
+    if shown and st is not None:
+        if item.refused and not st.array_message:
             st.array_message = ("The last run could not address this timepoint from the anchor set here: click the "
                                 "central square again.")
+        elif st.array_message and not st.anchor_mode:
+            # Set anchor could not be turned on here (the figure says why): say how the walk goes on.
+            st.array_message += " Skip (→) goes on to the next one."
     nwc._call(ctx, "_nw_refresh_controls")
     return shown
 

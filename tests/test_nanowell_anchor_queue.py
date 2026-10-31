@@ -290,5 +290,69 @@ def test_one_per_well_walks_each_well_s_first_timepoint_and_ends_by_itself(qtbot
 
     ctx.widgets.get("_nw_queue_btn").click()                         # the next walk starts one per well too
     assert st.anchor_queue is None and st.array_message == (
-        "No nanowell timepoint is waiting for an anchor (One per well is on: 1 more wait in wells that already have "
-        "one). 2 timepoint(s) have an anchor that no run has used yet: Re-run anchored wells… addresses them.")
+        "No nanowell timepoint is waiting for an anchor with One per well: 1 more wait in wells that already have "
+        "one. One per well is now off, so Anchor queue walks them all. 2 timepoint(s) have an anchor that no run has "
+        "used yet: Re-run anchored wells… addresses them.")
+    # One per well's toggle is shown only during a walk, so the refusal turned it off: the next press is not
+    # refused the same way for ever, and walks the timepoint one per well left out.
+    assert not st.anchor_queue_per_well
+    ctx.widgets.get("_nw_queue_btn").click()
+    assert shown() == ("B01", "t_a")
+    assert not ctx.widgets.get("_nw_queue_per_well_btn").isChecked()
+
+
+def test_the_walk_s_keys_skip_go_back_and_stop_only_while_it_runs(qtbot, tmp_path):
+    """→ Skip, ← Back, Esc Stop: pressed as keys on the page's window, the way a person does between clicks."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from review.features.nanowell import controller as nwc
+    from tests.test_an_unaddressed_nanowell_timepoint_offers_its_anchor import _Rail
+    from tests.test_nanowell_page import _page
+
+    out = _dataset_with_unaddressed(tmp_path)
+    ctx = _page(qtbot, out)
+    ctx.window._notebook = _Rail(ctx)
+    ctx.state.selection.selected_wells = {"A02"}
+    st = ctx.state.feature_slice("nanowell")
+    nwc.nw_on_activate(ctx)
+    qtbot.waitUntil(lambda: st.metrics is not None and not st.computing, timeout=20000)
+    canvas = ctx.widgets.get("_nw_canvas")
+    window = canvas.window()
+    window.show()
+    window.activateWindow()
+    qtbot.waitUntil(window.isActiveWindow, timeout=5000)
+
+    def shown():
+        qtbot.waitUntil(lambda: st.anchor_pending is None and not st.computing and st.drawn is not None
+                        and st.anchor_mode, timeout=20000)
+        return st.anchor_queue.index, nwc.page_well(ctx), nwc.page_timepoint(ctx, nwc.page_well(ctx))
+
+    QTest.keyClick(window, Qt.Key_Right)                             # no walk: the key does nothing
+    assert st.anchor_queue is None
+    ctx.widgets.get("_nw_queue_btn").click()
+    assert shown() == (0, "A01", "t_a")
+    QTest.keyClick(window, Qt.Key_Left)                              # Back at the first item: nothing before it
+    assert shown() == (0, "A01", "t_a")
+    QTest.keyClick(window, Qt.Key_Right)
+    assert shown() == (1, "B01", "t_c")
+    QTest.keyClick(window, Qt.Key_Left)
+    assert shown() == (0, "A01", "t_a")
+    QTest.keyClick(window, Qt.Key_Escape)
+    assert st.anchor_queue is None
+    assert set(ctx.state.selection.selected_wells) == {"A02"}
+
+
+def test_every_on_off_button_on_the_array_band_shows_when_it_is_on(qtbot, tmp_path):
+    """The UX review measured it: ``variant="secondary"`` overrides the theme's ``:checked`` fill, so *Set anchor*,
+    *Overlays* and *One per well* painted on and off identically (``#1a2230`` both) and nobody could tell whether a
+    click would set an anchor. A checkable button there takes the theme's ``toggle`` variant."""
+    from PySide6.QtWidgets import QPushButton
+
+    from tests.test_nanowell_page import _page, _write_nanowell_dataset
+
+    ctx = _page(qtbot, _write_nanowell_dataset(tmp_path))
+    names = ("_nw_anchor_btn", "_nw_overlays_btn", "_nw_queue_per_well_btn")
+    buttons = {name: ctx.widgets.get_or_none(name) for name in names}
+    assert all(isinstance(b, QPushButton) and b.isCheckable() for b in buttons.values()), buttons
+    assert {name: b.property("variant") for name, b in buttons.items()} == dict.fromkeys(names, "toggle")

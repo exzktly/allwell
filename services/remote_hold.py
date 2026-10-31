@@ -458,7 +458,8 @@ class GrantedNode:
         self.paths = hold_paths(host)
         self._cache = cache
         self._log = log_fn
-        self._on_state = on_state or (lambda _s: None)
+        #: Told each state the request sees, from the thread that is polling; assign to listen after construction.
+        self.on_state: Callable[[HoldState], None] = on_state or (lambda _s: None)
         self._sleep = sleep
         self._clock = clock
         self._heartbeat: _UploadHeartbeat | None = None
@@ -468,6 +469,15 @@ class GrantedNode:
         #: (:meth:`attach`). Quitting releases the first; it only stops beating for the second, which another window
         #: may still be using — the node's own script ends it two minutes after the last beat.
         self.owned = False
+
+    def listen(self, *, log_fn: Callable[[str], None] | None = None,
+               on_state: Callable[[HoldState], None] | None = None) -> None:
+        """Point this handle's log lines and state updates at a new listener. The registry hands the same handle to every
+        caller in the process, so a dialog opened a second time would otherwise keep talking to the first one's."""
+        if log_fn is not None:
+            self._log = log_fn
+        if on_state is not None:
+            self.on_state = on_state
 
     # ── talking to the host ──────────────────────────────────────────────────────────────────────────────────────
     def _script(self, script: str, *, check: bool = False):
@@ -565,7 +575,7 @@ class GrantedNode:
             if self._cancelled.is_set():
                 raise HoldError("the request was cancelled.")
             state = self.state()
-            self._on_state(state)
+            self.on_state(state)
             if state.phase in ("granted", "busy"):
                 self._log(f"[remote] granted node: {state.node} (job {state.job_id}) is granted"
                           f"{' — ' + state.gpus if state.gpus else ''}.\n")
@@ -858,3 +868,51 @@ def release_all(reason: str, *, timeout_s: float = 10.0) -> bool:
     for t in threads:
         t.join(max(0.0, deadline - time.monotonic()))
     return not any(t.is_alive() for t in threads)
+
+
+# ── what Manage Remotes shows ───────────────────────────────────────────────────────────────────────────────────────
+
+def can_request(host: RemoteHost) -> tuple[bool, str]:
+    """``(whether Request a node applies to *host*, why not)``: only a Slurm ``srun`` scheduler command can be turned into
+    the hold job (:func:`sbatch_options`)."""
+    if not host.compute_launcher.strip():
+        return False, "Requesting a node needs the host to run compute on a node it schedules."
+    if not is_srun(host.compute_launcher):
+        return False, "Requesting a node needs a Slurm (srun) scheduler command."
+    return True, ""
+
+
+def _gpu_words(gpus: str) -> str:
+    """``1× NVIDIA A10G`` from ``NVIDIA A10G``; ``2× NVIDIA A10G`` from the same name twice."""
+    names = [g.strip() for g in gpus.split(",") if g.strip()]
+    counts: dict[str, int] = {}
+    for name in names:
+        counts[name] = counts.get(name, 0) + 1
+    return ", ".join(f"{n}× {name}" for name, n in counts.items())
+
+
+def describe_state(state: HoldState, idle_release_min: int) -> list[str]:
+    """The lines Manage Remotes shows under the host list for *state*: what the node is, how long it has been granted
+    and has left, and what will release it. Empty lines are never returned."""
+    if state.phase == "none":
+        return ["No node granted."]
+    if state.phase == "ended":
+        return [f"Released — {state.ended_reason}." if state.ended_reason else "Released."]
+    if state.phase == "queued":
+        reason = f" ({state.slurm_reason})" if state.slurm_reason and state.slurm_reason != "None" else ""
+        return [f"Queued — waiting for the scheduler{reason}."]
+    if state.phase == "starting":
+        return [f"Node {state.node} is starting…" if state.node else "Node starting…"]
+    first = " · ".join(p for p in (f"Node {state.node}", f"job {state.job_id}", _gpu_words(state.gpus)) if p)
+    lines = [first]
+    if state.granted_at and state.now_s:
+        left = state.time_left_s
+        lines.append(f"Granted {_duration(state.now_s - state.granted_at)} ago"
+                     + (f" · {_duration(left)} left" if left is not None else ""))
+    if state.phase == "busy":
+        lines.append("In use by a run.")
+    elif idle_release_min:
+        lines.append(f"Idle {_duration(state.idle_s)} — released after {idle_release_min} min idle.")
+    else:
+        lines.append(f"Idle {_duration(state.idle_s)} — idle release is off.")
+    return lines

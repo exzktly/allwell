@@ -34,34 +34,60 @@ _SCONTROL = r'''#!/bin/bash
 id="$4"
 [ -e "$FAKE/jobs/$id" ] || exit 1
 IFS='|' read -r state reason node < "$FAKE/jobs/$id"
-echo "JobId=$id JobName=allwell-hold UserId=me(1) JobState=$state Reason=$reason NodeList=${node:-(null)}"
+echo "JobId=$id JobName=allwell-hold UserId=me(1) JobState=$state Reason=$reason NodeList=${node:-(null)} TresPerNode=gres/gpu:1"
 '''
 _SCANCEL = r'''#!/bin/bash
 echo "$@" >> "$FAKE/scancel.log"
-for a in "$@"; do case "$a" in [0-9]*) echo "CANCELLED|None|" > "$FAKE/jobs/$a";; esac; done
+for a in "$@"; do
+  case "$a" in
+    -*) ;;
+    *.*) grep -vx "$a" "$FAKE/steps" > "$FAKE/steps.tmp" 2>/dev/null; mv "$FAKE/steps.tmp" "$FAKE/steps" 2>/dev/null;;
+    [0-9]*) echo "CANCELLED|None|" > "$FAKE/jobs/$a";;
+  esac
+done
 '''
 _SINFO = r'''#!/bin/bash
 [ -e "$FAKE/sinfo.out" ] && cat "$FAKE/sinfo.out"
 exit 0
 '''
 _SQUEUE = r'''#!/bin/bash
-cat "$FAKE/squeue.owner" 2>/dev/null || id -un
+# squeue -h -j <job> -o <fmt>, or squeue -h -s<job>.<step> -o %i; a step id given to -j is "Invalid job id", as in Slurm.
+fmt="%T"; jid=""; step=""
+while [ $# -gt 0 ]; do
+  case "$1" in -j) jid="$2"; shift;; -o) fmt="$2"; shift;; -s*) step="${1#-s}";; esac; shift
+done
+if [ -n "$step" ]; then
+  [ -e "$FAKE/jobs/${step%%.*}" ] || { echo "slurm_load_job_step error: Invalid job id specified" >&2; exit 1; }
+  grep -qx "$step" "$FAKE/steps" 2>/dev/null && echo "$step"
+  exit 0
+fi
+case "$jid" in *.*) echo "slurm_load_jobs error: Invalid job id specified" >&2; exit 1;; esac
+if [ -n "$jid" ]; then
+  [ -e "$FAKE/jobs/$jid" ] || { echo "slurm_load_jobs error: Invalid job id specified" >&2; exit 1; }
+  IFS='|' read -r st reason node < "$FAKE/jobs/$jid"
+  owner=$(cat "$FAKE/squeue.owner" 2>/dev/null || id -un)
+  out="$fmt"; out="${out//%T/$st}"; out="${out//%u/$owner}"; out="${out//%i/$jid}"
+  echo "$out"
+fi
 '''
 
 
 class Cluster:
     """The stand-in host: a bin directory, a state directory and a home directory, and a fake ``DatasetCache``."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, home: Path | None = None):
+        """*home* shares the host's HOME with another harness (``FakeRemote``'s root), so both see one filesystem."""
         self.root = root
         self.fake = root / "fake"
-        self.home = root / "home"
+        self.home = home if home is not None else root / "home"
         self.bin = root / "bin"
         for d in (self.fake, self.home, self.bin):
-            d.mkdir()
+            d.mkdir(parents=True, exist_ok=True)
         for name, text in (("sbatch", _SBATCH), ("scontrol", _SCONTROL), ("scancel", _SCANCEL),
                            ("sinfo", _SINFO), ("squeue", _SQUEUE)):
-            (self.bin / name).write_text(text, encoding="utf-8")
+            # `FAKE` is baked in so the stand-ins work under a harness that gives its shell only HOME and PATH.
+            (self.bin / name).write_text(text.replace("#!/bin/bash\n", f"#!/bin/bash\nFAKE=${{FAKE:-{self.fake}}}\n", 1),
+                                         encoding="utf-8")
             (self.bin / name).chmod(0o755)
         self.env = {**os.environ, "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "HOME": str(self.home),
                     "FAKE": str(self.fake)}
@@ -79,6 +105,11 @@ class Cluster:
     def set_job(self, job: int, state: str, reason: str = "None", node: str = "") -> None:
         (self.fake / "jobs").mkdir(exist_ok=True)
         (self.fake / "jobs" / str(job)).write_text(f"{state}|{reason}|{node}\n", encoding="utf-8")
+
+    def add_step(self, step_id: str) -> None:
+        """A running step, ``<job>.<step>``, of a job already set."""
+        with (self.fake / "steps").open("a", encoding="utf-8") as fh:
+            fh.write(step_id + "\n")
 
     def sbatch_calls(self) -> list[list[str]]:
         return [p.read_text(encoding="utf-8").splitlines() for p in sorted(self.fake.glob("sbatch.*.args"))]

@@ -50,6 +50,7 @@ from services import ssh_key_setup
 from services.subprocess_kill import signal_subprocess
 from services.remote_srun_retry import redirect_words_message, stray_words_message
 from services.scheduler_probe import ProbeRun
+from analyze.granted_node_panel import GrantedNodePanel
 from analyze.scheduler_test_dialog import SchedulerTestDialog
 from services.subprocess_text import TEXT_UTF8
 from ui import theme
@@ -1554,6 +1555,7 @@ class ManageRemotesDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._hosts: dict[str, RemoteHost] = {}       # as last read from remotes.toml; the granted-node panel shows one
         self.setWindowTitle("Manage Remote Servers")
         self.setModal(True)
         self.resize(640, 420)
@@ -1578,6 +1580,9 @@ class ManageRemotesDialog(QDialog):
         self._empty_hint.setObjectName("Muted")
         self._empty_hint.setWordWrap(True)
         left.addWidget(self._empty_hint)
+        # The node this host keeps granted between runs (Request a node / Release / Test the node).
+        self._node_panel = GrantedNodePanel(self)
+        left.addWidget(self._node_panel)
         layout.addLayout(left, 1)
 
         # ── Buttons ─────────────────────────────────────────────────────
@@ -1654,6 +1659,7 @@ class ManageRemotesDialog(QDialog):
         for name, host in remotes.items():
             item = QListWidgetItem(f"{name}    (ssh:{host.ssh_alias})", self._list)
             item.setData(Qt.UserRole, name)
+        self._hosts = remotes
         self._empty_hint.setVisible(self._list.count() == 0)
         if prev:
             for i in range(self._list.count()):
@@ -1677,6 +1683,7 @@ class ManageRemotesDialog(QDialog):
         # commonest thing a user does while waiting for one.
         self._test_btn.setEnabled(has_sel and not probe_in_flight(self))
         self._bootstrap_btn.setEnabled(has_sel)
+        self._node_panel.set_host(self._hosts.get(self._selected_name() or ""))
 
     # ── actions ─────────────────────────────────────────────────────────
 

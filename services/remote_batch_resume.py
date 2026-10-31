@@ -580,19 +580,25 @@ def report_resumable_checkpoints(runner, run, wells: list[str], *, scratch: str,
     The pipeline names a well's staging directory ``_tmp_images_<output stamp>_<settings stamp>_<well>`` under its
     scratch base (``pipeline.fov_checkpoint._staging_dir_for``); the output stamp hashes the output directory's
     resolved path, which only the host can resolve, so it is asked for (``pwd -P``) rather than guessed. The scratch
-    base is the one the journal recorded, else what the host's configuration gives the pipeline. Informational: a
-    probe that fails says nothing, and the pipeline decides for itself.
+    base is the one the journal recorded, else the host's scratch folder, else the run's own output folder: with no
+    scratch folder set, the remote argv names that folder as the pipeline's ``--scratch_fallback_dir``, which it uses
+    whenever no node-local disk is taken (``pipeline.io.scratch_base_for``). A Slurm job that took its node's own
+    disk kept its checkpoints there, out of sight of this probe, and the line says so. Informational: a probe that
+    fails says nothing, and the pipeline decides for itself.
     """
     import hashlib
 
     if not wells:
         return
-    base = scratch or (runner.host.remote_scratch_dir or "~/.allwell/scratch")
     probe = runner._cache._ssh_script(
         f"cd {_remote_quote(run.remote_output_dir)} 2>/dev/null && pwd -P\n", check=False)
     resolved = ((probe.stdout or "").strip().splitlines() or [""])[-1] if probe is not None else ""
     if not resolved:
         return
+    base = scratch or runner.host.remote_scratch_dir or resolved
+    unseen = ("" if scratch or runner.host.remote_scratch_dir or not getattr(runner.host, "compute_launcher", "")
+              else " (a Slurm job that used its node's own disk kept its checkpoints there, which cannot be seen "
+                   "from here)")
     stamp = hashlib.blake2b(resolved.encode(), digest_size=6).hexdigest()
     where = base if base.startswith("$") else _remote_quote(base)     # `$TMPDIR` must expand; a path must not split
     listing = runner._cache._ssh_script(
@@ -614,4 +620,5 @@ def report_resumable_checkpoints(runner, run, wells: list[str], *, scratch: str,
         log(f"[remote] {len(resumable)} well(s) left part-way will continue from their checkpoints in {base}: "
             + ", ".join(f"{w} ({n} field group(s) done)" for w, n in sorted(resumable.items())) + "\n")
     else:
-        log(f"[remote] no part-way checkpoints for this plate in {base} — wells left part-way start again.\n")
+        log(f"[remote] no part-way checkpoints for this plate in {base}{unseen} — wells left part-way start "
+            "again.\n")

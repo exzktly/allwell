@@ -311,3 +311,40 @@ def test_the_remotes_dialog_will_not_save_such_a_launcher(qtbot, monkeypatch):
 
     assert written == [], "a launcher that hides the run's output was saved"
     assert said == [redirect_words_message("srun -p cpu --output=job.log")]
+
+
+def test_a_node_that_fails_while_the_early_job_waits_for_its_run_is_not_called_a_run(tmp_path):
+    """Tracker L24. The job asked for before staging (``services.remote_reservation``) prints its first line, then
+    waits on its node for the app to hand it the run. A node that failed in that wait was reported as failing
+    "while the run was going on it … resume the run to continue from where it stopped" — but nothing had run, and
+    the app asks for another node once the run is ready. Still not retried here: the job's first line is in."""
+    from services.remote_srun_retry import HANDOVER_WAIT_LINE
+
+    bindir = _cluster(tmp_path, [("run", "n01"), ("run", "n03")])
+    _write_exe(bindir.parent / "state" / "outcome1", (
+        "JOB=1001\nNODE=n01\n"
+        f'echo "{ALLOCATION_GRANTED} — job 1001 on n01 (partition cpu)"\n'
+        f'echo "{HANDOVER_WAIT_LINE}"\n'
+        'echo "srun: error: Node failure on $NODE" >&2\nexit 1\n'))
+    out, calls, _ = _wrapped(tmp_path, bindir)
+    assert calls == 1, out.stdout
+    assert out.returncode == 1
+    assert ("[remote] scheduler: ERROR node n01 failed while it waited for the run to be prepared — nothing had "
+            "started on it; another node is asked for once the run is ready") in out.stdout, out.stdout
+    assert "resume the run" not in out.stdout, out.stdout
+
+
+def test_a_node_that_fails_after_the_early_job_took_its_run_is_still_a_run(tmp_path):
+    """The other half of L24: once the early job has started the run it was handed, a node failure is the run's."""
+    from services.remote_srun_retry import HANDOVER_TAKEN_LINE, HANDOVER_WAIT_LINE
+
+    bindir = _cluster(tmp_path, [("run", "n01"), ("run", "n03")])
+    _write_exe(bindir.parent / "state" / "outcome1", (
+        "JOB=1001\nNODE=n01\n"
+        f'echo "{ALLOCATION_GRANTED} — job 1001 on n01 (partition cpu)"\n'
+        f'echo "{HANDOVER_WAIT_LINE}"\necho "{HANDOVER_TAKEN_LINE}"\n'
+        'echo "srun: error: Node failure on $NODE" >&2\nexit 1\n'))
+    out, calls, _ = _wrapped(tmp_path, bindir)
+    assert calls == 1, out.stdout
+    assert ("ERROR node n01 failed while the run was going on it — not retried, because asking again would start "
+            "the run from its beginning; resume the run to continue from where it stopped") in out.stdout, out.stdout

@@ -251,14 +251,6 @@ def _widget_point(ctx, st, x_um, y_um):
     return canvas, QPoint(int(round(px / ratio)), int(round(canvas.height() - py / ratio)))
 
 
-def _um_per_widget_pixel(canvas, st) -> float:
-    """How many µm one widget pixel spans on the drawn axes, along whichever axis spans more."""
-    inv = st.drawn.ax.transData.inverted()
-    ratio = canvas.devicePixelRatioF()
-    (x0, y0), (x1, _), (_, y1) = inv.transform([(0.0, 0.0), (ratio, 0.0), (0.0, ratio)])
-    return float(max(abs(x1 - x0), abs(y1 - y0)))
-
-
 def test_full_resolution_draws_each_tile_where_it_was_placed_and_says_why_the_timepoint_is_unaddressed(
         montage_page, qtbot):
     ctx, _in_dir = montage_page
@@ -331,12 +323,14 @@ def test_a_drag_pans_the_wheel_zooms_about_the_pointer_and_1_1_shows_one_image_p
     QTest.mousePress(canvas, Qt.LeftButton, Qt.NoModifier, start)
     QTest.mouseMove(canvas, end)
     QTest.mouseRelease(canvas, Qt.LeftButton, Qt.NoModifier, end)
-    # The point pressed is under the pointer where it was released: the view moved by 50 µm left, 20 µm up — to
-    # within one widget pixel, because _widget_point rounds the press and the release to whole pixels (half a pixel
-    # each). How many µm a pixel is depends on the canvas's size, which differs between machines: on CI's runner it
-    # is more than the 0.5 µm a fixed tolerance allowed, and the drag read 0.52 µm off.
-    tol = max(0.5, _um_per_widget_pixel(canvas, st))
-    assert st.region == pytest.approx((left - 50.0, top - 20.0, right - 50.0, bottom - 20.0), abs=tol)
+    # The point pressed is under the pointer where it was released. The pointer lands on whole widget pixels, so
+    # the view moves by what those two pixels are apart in µm (about 50 left and 20 up), which on a small canvas
+    # can differ from 50 x 20 by more than half a µm.
+    ratio, inverse = canvas.devicePixelRatioF(), st.drawn.ax.transData.inverted()
+    (x0, y0), (x1, y1) = (inverse.transform((p.x() * ratio, (canvas.height() - p.y()) * ratio)) for p in (start, end))
+    dx, dy = x1 - x0, y1 - y0
+    assert (dx, dy) == pytest.approx((50.0, 20.0), abs=2.0)
+    assert st.region == pytest.approx((left - dx, top - dy, right - dx, bottom - dy), abs=1e-6)
     assert st.drawn.region == pytest.approx(st.region, abs=0.5)
     assert st.selected_sites == []                             # a drag selects nothing
     x, y = st.drawn.ax.transData.transform((60.0, 70.0))

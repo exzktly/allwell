@@ -190,6 +190,37 @@ def test_the_square_anchored_baseline_is_kept_when_the_later_timepoints_share_a_
     assert rl.plan_dataset(out) == {}
 
 
+def test_a_repair_that_fails_part_way_leaves_the_well_as_it_was_and_a_retry_moves_it_once(tmp_path, monkeypatch):
+    """Tracker H4. The cell tables were rewritten first and the sites table and grid record last; the plan is made
+    from the sites table, so a failure between the two (a full disk, with the backup and a ``.part`` beside each
+    table) left the cells moved and the plan unchanged, and Apply again moved them a second lattice step. A failure
+    anywhere must leave every table as it was, so the retry's plan is the first one and applies once."""
+    from datasets.validate import nanowell_relabel as rl
+
+    out = _old_tables(tmp_path, monkeypatch, {"T0": True, "T1": False, "T2": False}, {"T0": 1, "T1": 4, "T2": 3},
+                      {"T1": 1, "T2": 1})
+    tables = [out / "m_A01.csv", out / "nanowells" / "A01.csv", out / "nanowells" / "A01_grid.json"]
+    before = [p.read_bytes() for p in tables]
+    plan = rl.plan_dataset(out)["A01"]
+
+    def fails_after_the_cells(text):        # the step between the cell tables and the sites table
+        if "cell(s) read" in text:
+            raise OSError(28, "No space left on device")
+
+    with pytest.raises(OSError):
+        rl.relabel_dataset(out, {"A01": plan}, ["m"], progress=fails_after_the_cells)
+    assert [p.read_bytes() for p in tables] == before
+    assert not list(out.rglob("*.part"))
+
+    again = rl.plan_dataset(out)["A01"]
+    assert (again.shifts, again.roster_offset) == (plan.shifts, plan.roster_offset)
+    rl.relabel_dataset(out, {"A01": again}, ["m"])
+    assert _follows(list(csv.DictReader((out / "nanowells" / "A01.csv").open())), ["T0", "T1", "T2"])
+    cells = list(csv.DictReader((out / "m_A01.csv").open()))
+    assert {(r["nw_q"], r["nw_r"]) for r in cells if r["timepoint"] == "T2"} <= {(str(q), str(r)) for q, r in PAINT}
+    assert rl.plan_dataset(out) == {}
+
+
 def test_two_equally_anchored_timepoints_a_site_apart_are_reported_and_left_untouched(tmp_path, monkeypatch):
     """Neither reads the square and their centres land a site apart: the tables cannot say which is right."""
     from datasets.validate import nanowell_relabel as rl
@@ -225,16 +256,16 @@ def test_a_relabelled_origin_moves_by_the_measured_offset_between_the_old_and_ne
 def test_two_hidden_rim_nanowells_are_not_read_as_a_step():
     """A bubble over two rim nanowells, where the image covers only those two of the rim wholly: they are imaged and
     empty, which is also what a step (1, 0) predicts there. Two sites are noise, not a crescent."""
-    from datasets.validate.nanowell_relabel import _step_against_roster
+    from datasets.core.nanowell_rim import step_against_roster
 
     roster = {(q, r) for q in range(-3, 4) for r in range(-3, 4) if max(abs(q), abs(r), abs(q + r)) <= 3}
     interior = {a for a in roster if max(abs(a[0]), abs(a[1]), abs(a[0] + a[1])) <= 2}
     hidden = {(3, 0), (2, 1)}
     rows = [{"timepoint": "T1", "nw_q": str(q), "nw_r": str(r), "imaged_fraction": "1.0",
              "detected": str((q, r) not in hidden)} for q, r in sorted(interior | hidden)]
-    assert _step_against_roster(rows, roster) == (0, 0)
+    assert step_against_roster(rows, roster) == (0, 0)
     # The same rim with a whole crescent empty is a step.
     crescent = {a for a in roster if (a[0] + 1, a[1]) not in roster}
     rows = [{"timepoint": "T1", "nw_q": str(q), "nw_r": str(r), "imaged_fraction": "1.0",
              "detected": str((q, r) not in crescent)} for q, r in sorted(roster)]
-    assert _step_against_roster(rows, roster) == (1, 0)
+    assert step_against_roster(rows, roster) == (1, 0)

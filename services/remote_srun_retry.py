@@ -147,9 +147,19 @@ _BOOT_FAILURE_RE = "Something is wrong with the boot of the nodes|Node failure o
 #: output the run has started: a failure after it is not a boot failure, and
 #: the queue wait is over.
 ALLOCATION_GRANTED = "[remote] scheduler: allocation granted"
+#: What the early job (``services.remote_reservation``) says on its node while it waits for the app to hand it the
+#: run, and once it has the run and starts it (``services.remote_wait_snippets._wait_for_handover_snippet`` prints
+#: them). A node that fails between the two had nothing running on it (branch 3b below).
+HANDOVER_WAIT_LINE = "[remote] scheduler: node granted; waiting for the app to finish preparing the run…"
+HANDOVER_TAKEN_LINE = "[remote] scheduler: the run is ready — starting it on this node"
 #: What the wrapper says when Slurm refuses the request outright ("Requested node configuration is not
 #: available"): no node it could give matches the scheduler command. ``services.run_evidence`` reads it.
 NO_NODE_FITS = "[remote] scheduler: ERROR Slurm has no node that can take this request"
+#: What the wrapper says when Slurm refused a request the wrapper itself had narrowed — to the powered-on nodes
+#: (branch 3a) or by excluding the nodes that failed to boot (3c′) — and it asks again without that narrowing. srun's
+#: refusal is in the stream before each, and is not the run's failure: ``services.run_evidence`` forgets it here.
+REFUSAL_RETRIED_POWERED_ON = "[remote] scheduler: no powered-on node can take this request — letting Slurm boot one"
+REFUSAL_RETRIED_BOOT_EXCLUSIONS = "[remote] scheduler: every node that can take this request has failed to boot"
 
 #: What the wrapper exits with when :func:`queue_wait_seconds` passed without a
 #: node being granted — distinct from ``srun``'s own codes, so the run reports
@@ -334,6 +344,19 @@ def _split_launcher(tokens: list[str]) -> tuple[list[str], list[str], str]:
 #: into ``--cpus-per-task`` (:func:`one_task`); the others are dropped.
 _TASK_COUNT_OPTS = (("-n", "--ntasks"), ("-N", "--nodes"), ("", "--ntasks-per-node"))
 _CPUS_OPTS = ("-c", "--cpus-per-task")
+#: GPUs asked for per task: folded with the tasks, like the CPUs (:func:`gpus_for_tasks`).
+_GPUS_PER_TASK = "--gpus-per-task"
+
+
+def gpus_for_tasks(per_task: str, tasks: str) -> str:
+    """The ``--gpus-per-task`` value for one task that stands in for *tasks* tasks: ``1`` for 4 tasks is ``4``,
+    ``a100:2`` for 3 is ``a100:6``. Folding the tasks and keeping the value as written gave the run one task's GPUs.
+    A value or count that is not a plain number (a list of types, say) is returned as written rather than guessed
+    at. Used by :func:`one_task` and :func:`services.slurm_batch_script.single_task`."""
+    kind, sep, count = per_task.rpartition(":")
+    if "," in per_task or not (tasks.isdigit() and count.isdigit()):
+        return per_task
+    return f"{kind}{sep}{int(tasks) * int(count)}"
 
 
 def _take_option(tokens: list[str], short: str, long: str) -> tuple[list[str], list[str]]:
@@ -374,6 +397,8 @@ def one_task(tokens: list[str]) -> list[str]:
     A ``--ntasks`` written into the launcher is how a job template asks for cores, so it is folded into
     ``--cpus-per-task`` as :func:`services.slurm_batch_script.single_task` does for a JupyterHub profile: ``-n 4
     -c 2`` becomes ``--cpus-per-task=8``. A count that is not a whole number is dropped rather than guessed at.
+    ``--gpus-per-task`` is folded the same way (:func:`gpus_for_tasks`): ``-n 4 --gpus-per-task=1`` asks for four
+    GPUs, and is ``--gpus-per-task=4`` on the one task.
     """
     out = list(tokens)
     tasks: list[str] = []
@@ -388,6 +413,9 @@ def one_task(tokens: list[str]) -> list[str]:
             out.append(f"--cpus-per-task={int(n) * int(per)}")
         elif cpus:
             out.append(f"--cpus-per-task={per}")
+        out, gpus = _take_option(out, "", _GPUS_PER_TASK)
+        if gpus:
+            out.append(f"{_GPUS_PER_TASK}={gpus_for_tasks(gpus[-1], n)}")
     return [*out, "--nodes=1", "--ntasks=1"]
 
 
@@ -423,6 +451,7 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
     where = partition or "the default partitions"
     merge = "tr , '\\n' | grep -v '^$' | sort -u | paste -sd, -"
     granted = shlex.quote(ALLOCATION_GRANTED)
+    waiting, taken = shlex.quote(HANDOVER_WAIT_LINE), shlex.quote(HANDOVER_TAKEN_LINE)
     return "".join((
         f"_aw_pid={remote_pidfile_q}; _aw_err={err_file_q}; _aw_rcf={err_file_q}.rc; _aw_pend={err_file_q}.pend; ",
         f"_aw_qto={err_file_q}.qto; ",
@@ -512,15 +541,21 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         'if [ "$_aw_rc" != 0 ] && [ "$_aw_go" = 0 ] && [ -n "$_aw_asleep" ] '
         "&& grep -q '^srun: .*Requested node configuration is not available' \"$_aw_err\"; then ",
         "_aw_awake=0; ",
-        'echo "[remote] scheduler: no powered-on node can take this request — letting Slurm boot one"; ',
+        f'echo "{REFUSAL_RETRIED_POWERED_ON}"; ',
         "continue; fi; ",
         # 3b. The node failed after the job started on it: not a boot failure, and not retried — asking again
         # would run the job from its beginning, the batch driver from batch 1 and a single run from its top.
         f"if [ \"$_aw_rc\" != 0 ] && [ \"$_aw_go\" = 1 ] && grep -qE '^srun: .*({_BOOT_FAILURE_RE})' \"$_aw_err\"; "
         "then _aw_bad=$(sed -nE 's/^srun: .*Node failure on ([^ ]+).*/\\1/p' \"$_aw_err\" | head -n1); ",
-        'echo "[remote] scheduler: ERROR node ${_aw_bad:-?} failed while the run was going on it — not retried, '
+        # The job asked for before staging (`services.remote_reservation`) prints its first line and then waits on
+        # its node to be handed the run: a node that failed in that wait had nothing running on it, and the app
+        # asks for another node once the run is ready, so there is nothing to resume.
+        f'if grep -qF {waiting} "$_aw_err" && ! grep -qF {taken} "$_aw_err"; then ',
+        'echo "[remote] scheduler: ERROR node ${_aw_bad:-?} failed while it waited for the run to be prepared — '
+        'nothing had started on it; another node is asked for once the run is ready"; ',
+        'else echo "[remote] scheduler: ERROR node ${_aw_bad:-?} failed while the run was going on it — not retried, '
         'because asking again would start the run from its beginning; resume the run to continue from where it '
-        'stopped"; ',
+        'stopped"; fi; ',
         # 3c. The node did not boot: exclude it and ask again.
         f"elif [ \"$_aw_rc\" != 0 ] && grep -qE '^srun: .*({_BOOT_FAILURE_RE})' \"$_aw_err\"; then ",
         "_aw_bad=$(sed -nE 's/^srun: .*Nodes ([^ ]+) are still not ready.*/\\1/p; "
@@ -540,7 +575,7 @@ def wrap_srun_launch(launcher: str, inner_quoted: str, remote_pidfile_q: str,
         'if [ "$_aw_rc" != 0 ] && [ "$_aw_go" = 0 ] && [ "$_aw_x" != "$_aw_ux" ] '
         "&& grep -q '^srun: .*Requested node configuration is not available' \"$_aw_err\"; then ",
         '_aw_x=$_aw_ux; ',
-        'echo "[remote] scheduler: every node that can take this request has failed to boot at least once '
+        f'echo "{REFUSAL_RETRIED_BOOT_EXCLUSIONS} at least once '
         f'($_aw_failed) — trying them again in {int(boot_retry_pause_s)} s"; ',
         'echo $$ > "$_aw_pid"; ' f'sleep {int(boot_retry_pause_s)}; ',
         f'echo "[remote] scheduler: requesting allocation via: {launcher_str}${{_aw_x:+ --exclude=$_aw_x}}"; ',

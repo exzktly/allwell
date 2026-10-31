@@ -150,7 +150,10 @@ def test_a_mirrored_lattice_is_contradicted(pair):
 def test_one_tile_a_step_off_leaves_out_exactly_that_tile_s_nanowells(pair):
     """A tile placed a step off moves its sites' positions and addresses together, so every address still lands on
     itself; the tile layout is what shows it. Only that tile's nanowells are left out (U5): the registration is
-    trusted and the other tiles' nanowells land on themselves."""
+    trusted and the other tiles' nanowells land on themselves. Which of the two timepoints placed the tile wrongly
+    cannot be told, so the addresses the tile owns at the reference are left out too (review tracker M3): the plate
+    moved against the tile grid, so the reference's tile owns two addresses here that the other timepoint's F1
+    owns."""
     ref, other = pair
     step = _a1(other)
     broken = copy.deepcopy(other)
@@ -167,8 +170,10 @@ def test_one_tile_a_step_off_leaves_out_exactly_that_tile_s_nanowells(pair):
     assert result["tiles"]["moved"] and result["tiles"]["moved"][0][0] == TILE
     assert result["tiles"]["moved"][0][1] == pytest.approx(PITCH, abs=1.0)
     in_tile = {a for a, owner in broken.owners.items() if owner == TILE}
-    assert {(q, r) for q, r, why in result["excluded"] if why == "misregistered_tile"} == in_tile
-    assert len(result["excluded"]) == len(in_tile) < result["compared"] / 2
+    at_reference = {a for a, owner in ref.owners.items() if owner == TILE and a in broken.sites} - in_tile
+    assert sorted(at_reference) == [(6, -1), (7, -1)]
+    assert {(q, r) for q, r, why in result["excluded"] if why == "misregistered_tile"} == in_tile | at_reference
+    assert len(result["excluded"]) == len(in_tile) + 2 < result["compared"] / 2
 
 
 def test_wrong_names_confined_to_one_tile_leave_out_those_nanowells_only(pair):

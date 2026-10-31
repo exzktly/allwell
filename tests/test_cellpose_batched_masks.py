@@ -5,6 +5,13 @@ builds each image's masks on its own — two loops of small GPU steps per crop. 
 loops once for the whole batch. The point of the module is that nothing about a crop's masks changes, so the first
 half of this file holds it to that against Cellpose itself (skipped where Cellpose and Torch are not installed, as in
 CI); the second half holds the wiring in ``pipeline.cellpose._segment_cellpose_many`` with a fake model.
+
+Why the first half does not run in CI (review tracker L11, declined): ``cellpose_masks`` is Torch code throughout —
+the batched flow following is ``torch.nn.functional.grid_sample`` over tensors — so a frozen fixture of Cellpose's
+own masks would still need Torch to compute the side under test, and the test stack leaves Torch out on purpose
+(``tests/requirements-dev.txt``, CLAUDE.md §1). What CI does hold is the guard that keeps the batched build to the
+one Cellpose it was proven against (``test_only_the_proven_cellpose_is_batched``, ``SUPPORTED_VERSION``) and the
+wiring below. Run this file where Cellpose and Torch are installed when ``cellpose_masks`` changes.
 """
 
 from __future__ import annotations

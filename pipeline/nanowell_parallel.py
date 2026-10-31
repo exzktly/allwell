@@ -86,12 +86,36 @@ def pool_workers(environ=None) -> int:
     return _positive_int(environ.get(POOL_WORKERS_ENV, "")) or 1
 
 
+#: The attribute ``pipeline.cellpose`` sets on each model it loads: whether it loaded on a GPU.
+ON_GPU_ATTR = "allwell_on_gpu"
+
+
+def _loaded_segmenter_on_gpu() -> bool | None:
+    """Whether the Cellpose models this process has loaded are on a GPU, read from ``pipeline.cellpose``'s model
+    cache (each model carries :data:`ON_GPU_ATTR`) without importing it; ``None`` when none has loaded."""
+    import sys
+
+    cellpose = sys.modules.get("pipeline.cellpose")
+    models = getattr(cellpose, "_CELLPOSE_MODELS", None) or {}
+    found = [flag for m in models.values() if (flag := getattr(m, ON_GPU_ATTR, None)) is not None]
+    return any(found) if found else None
+
+
 def gpu_in_use(environ=None) -> bool:
-    """Whether the run put this worker's Cellpose on a GPU: the main process exports how many workers share each GPU
-    (``parallelism.GPU_SHARERS_ENV``) only when it found one. Without one, Cellpose runs on the CPU on Torch's own
-    threads, and threads of ours beside it would only compete with them for the same cores."""
+    """Whether this worker's Cellpose is on a GPU. Without one, Cellpose runs on the CPU on Torch's own threads, and
+    threads of ours beside it would only compete with them for the same cores.
+
+    Once the worker's model has loaded, the device it loaded on (:func:`_loaded_segmenter_on_gpu`): only Torch in the
+    worker knows whether it can use the GPU, and a node whose GPU this Torch cannot reach (a CPU-only build, a driver
+    too old) was otherwise treated as a GPU node (review tracker L10). Before that — and with *environ* given — the
+    main process's plan: it exports how many workers share each GPU (``parallelism.GPU_SHARERS_ENV``) only when it
+    found one."""
     from pipeline.parallelism import GPU_SHARERS_ENV
 
+    if environ is None:
+        loaded = _loaded_segmenter_on_gpu()
+        if loaded is not None:
+            return loaded
     environ = os.environ if environ is None else environ
     return _positive_int(environ.get(GPU_SHARERS_ENV, "")) is not None
 

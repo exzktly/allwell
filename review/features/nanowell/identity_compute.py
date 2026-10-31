@@ -94,8 +94,19 @@ HOVER_PITCHES = 0.5
 
 
 def audit_command(out_dir) -> str:
-    """The command that runs the identity check over an analysed dataset."""
-    return f"python -m pipeline.nanowell_identity {out_dir if out_dir else '<output folder>'}"
+    """The command that runs the identity check over an analysed dataset, as a line to paste into a terminal: the
+    packaged app's own executable with its sentinel when frozen (``nanowell_identity.audit_argv``), where ``python -m``
+    cannot run, and quoted for the platform's shell. Without a folder it names a placeholder."""
+    import os
+    import shlex
+    import subprocess
+
+    from pipeline.nanowell_identity import audit_argv
+
+    placeholder = "<output folder>"
+    argv = audit_argv(out_dir if out_dir else placeholder)
+    quote = (lambda a: subprocess.list2cmdline([a])) if os.name == "nt" else shlex.quote
+    return " ".join(a if a == placeholder else quote(a) for a in argv)
 
 
 def worst_verdict(data, well: str) -> str | None:
@@ -222,7 +233,7 @@ def identity_message(pair: IdentityPair, out_dir=None) -> str:
 
     if pair.payload is None or pair.verdict == NOT_CHECKED:
         return (f"{pair.well} at {pair.timepoint}: the nanowell identity check has not been run on these tables "
-                f"({pair.reason}). Run it with:\n{audit_command(out_dir)}")
+                f"({pair.reason}). Run it in a terminal with:\n{audit_command(out_dir)}")
     if pair.reference is None:
         return (f"{pair.well} has no reference timepoint to compare {pair.timepoint} with: "
                 f"{pair.payload.get('reference_reason') or pair.reason}.")
@@ -431,8 +442,13 @@ STATUS_CLASSES = (
     ("imprecise", "Lands nearest itself, beyond {tol:g} spacing"),
     ("wrong_name", "Wrong name: lands on another, or another lands on it"),
     ("misregistered", "In a tile placed a lattice step off"),
+    ("timepoint_out", "Lands on itself, but the whole timepoint is contradicted, so it is left out"),
     ("not_compared", "Not compared"),
 )
+#: The classes a timepoint contradicted as a whole turns into ``timepoint_out``: every nanowell of such a timepoint
+#: is left out of every figure, so none may read as one that is used (CLAUDE.md §7); a wrong name, a misregistered
+#: tile and a nanowell not compared keep their own class, which says more.
+_USED_CLASSES = frozenset({"kept", "imprecise"})
 #: How far, in pitches, an address no row of the sidecar names may land from itself and still be nearest itself:
 #: half the spacing, the nearest any other site can be on either lattice. Used only beyond the sidecar's list of
 #: failing addresses (``MAX_LISTED``), where where it landed is not recorded.
@@ -466,7 +482,11 @@ def _classes(pair: IdentityPair) -> dict:
     sidecar written before that list existed, the nanowells of the tiles it found a step off (``tiles.moved``) —
     then each listed failing address (landed on itself: imprecise; on another: a wrong name), then each distance
     (within the tolerance: kept; beyond it, nearest itself — :data:`NEAREST_ITSELF_PITCHES` — imprecise, else a
-    wrong name), and every other address of the reference not compared."""
+    wrong name), and every other address of the reference not compared. In a timepoint contradicted as a whole
+    (the pair's verdict, the stage cross-check's override included) a nanowell that lands on itself is
+    ``timepoint_out``, since it is left out with the timepoint."""
+    from pipeline.nanowell_identity import CONTRADICTED
+
     entry = pair.entry
     tolerance = float((pair.payload or {}).get("tolerance_pitches") or TOLERANCE_PITCHES)
     out: dict = {}
@@ -487,6 +507,8 @@ def _classes(pair: IdentityPair) -> dict:
                        "imprecise" if d <= NEAREST_ITSELF_PITCHES else "wrong_name")
     for address in getattr(pair.ref, "sites", None) or {}:
         out.setdefault(tuple(address), "not_compared")
+    if pair.verdict == CONTRADICTED:
+        out = {address: "timepoint_out" if cls in _USED_CLASSES else cls for address, cls in out.items()}
     return out
 
 

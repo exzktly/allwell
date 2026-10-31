@@ -122,3 +122,27 @@ def test_a_job_given_back_unused_ends_the_wait(qapp):
     # An ordinary request after it is an ordinary wait again.
     _feed(host, "[remote] scheduler: requesting allocation via: srun -p gpu\n")
     assert "Queued on the scheduler" in _headline(host), _headline(host)
+
+
+def test_a_job_handed_the_run_while_its_node_boots_still_says_it_is_booting(qapp):
+    """Tracker L22. Slurm had picked the early job's node and was booting it when the plate was ready; the hand-over
+    turned the status line back into "Waiting for the scheduler", as though the job were queued again."""
+    host = _host(qapp)
+    _feed(host, REQUEST)
+    _feed(host, "srun: job 4812345 queued and waiting for resources\n")
+    _feed(host, "srun: job 4812345 has been allocated resources\n")
+    assert _status(host).startswith("Node allocated, waiting for it to boot — "), _status(host)
+    _feed(host, HANDED)
+    assert _status(host).startswith("Node allocated, waiting for it to boot — "), _status(host)
+    assert _status(host).endswith(" (job 4812345)"), _status(host)
+    assert "Queued on the scheduler" in _headline(host), _headline(host)
+
+
+def test_a_job_handed_the_run_while_still_queued_says_it_is_waiting(qapp):
+    """The other half of L22: a job still queued at the hand-over is waiting, not booting."""
+    host = _host(qapp)
+    _feed(host, REQUEST)
+    _feed(host, "srun: job 4812345 queued and waiting for resources\n")
+    _feed(host, HANDED)
+    assert _status(host).startswith("Waiting for the scheduler — "), _status(host)
+    assert _status(host).endswith(" (job 4812345)"), _status(host)

@@ -20,6 +20,14 @@ it. The re-anchoring pass already fits only records made under this run's settin
 run, so the copied records are read and never rewritten; the verification fetch that pulls ``nanowells/`` back
 brings them back unchanged. Each is a few kilobytes.
 
+The plate's empty confluence reference (``nanowells/_confluence_reference/``, ``pipeline.nanowell_reference``) is
+sent for the same reason. Every well's confluence is read against it, and it is measured only when its own well
+runs, so a remote run that does not compute that well — a re-run of a few wells, or a resume whose reference
+finished earlier — found no reference on the host, and every well it ran came back with no confluence, which the
+fetch then wrote over the values this computer already had. It is sent when, and only when, its well is not among
+the wells this run computes: a run that measures the reference again must not read the previous one in its place.
+The pipeline reads a reference only under the run's own settings, so one measured under others is refused there.
+
 Best-effort: a copy that fails is said in the run log and costs only what the run cost before — the timepoints the
 plate would have addressed stay unaddressed and say why — never the run itself.
 """
@@ -34,6 +42,10 @@ from util.well_token import canonical_well_label
 
 NANOWELL_DIR = "nanowells"
 GRID_SUFFIX = "_grid.json"
+#: ``pipeline.nanowell_reference.DIR_NAME`` and its index, named here so this module needs nothing of the pipeline;
+#: ``tests/test_a_remote_nanowell_rerun_has_the_plate_and_uses_new_anchors.py`` holds the two equal.
+REFERENCE_DIR = "_confluence_reference"
+REFERENCE_INDEX = "reference.json"
 
 
 def plate_grid_records(local_output_dir, run_wells: Iterable[str]) -> list[Path]:
@@ -80,4 +92,47 @@ def seed_plate_grids(cache, run, run_wells: Iterable[str], log: Callable[[str], 
     else:
         log("[remote] nanowell: the other wells' grid records could not be sent; timepoints that only the rest of "
             "the plate could address will stay unaddressed\n")
+    return sent
+
+
+def confluence_reference_to_send(local_output_dir, run_wells: Iterable[str]) -> Path | None:
+    """*local_output_dir*'s saved confluence reference folder, when the well it was measured on is not in
+    *run_wells*; ``None`` when there is none, its index is unreadable, or this run measures that well itself."""
+    import json
+
+    folder = Path(local_output_dir) / NANOWELL_DIR / REFERENCE_DIR
+    try:
+        well = json.loads((folder / REFERENCE_INDEX).read_text()).get("well")
+    except (OSError, ValueError, AttributeError):
+        return None
+    well = canonical_well_label(well or "") or (str(well).strip().upper() if well else None)
+    if not well or well in {canonical_well_label(w) or str(w).upper() for w in run_wells}:
+        return None
+    return folder
+
+
+def seed_confluence_reference(cache, run, run_wells: Iterable[str], log: Callable[[str], None]) -> bool:
+    """Copy the plate's saved confluence reference into *run*'s remote ``nanowells/`` when this run does not
+    measure the reference well itself (see the module docstring); return whether it was sent."""
+    if not getattr(run, "nanowell", False):
+        return False
+    folder = confluence_reference_to_send(run.local_output_dir, run_wells)
+    if folder is None:
+        return False
+    from services.remote_config import resolve_rsync_binary, to_rsync_path
+    from services.remote_transport import _rsync_ssh_transport, _rsync_with_retry
+
+    dest_dir = f"{run.remote_output_dir}/{NANOWELL_DIR}"
+    sent = False
+    with swallow("copy the plate's confluence reference to the remote"):
+        cache._ssh_run(["mkdir", "-p", dest_dir], check=True)
+        cmd = [resolve_rsync_binary(), *_rsync_ssh_transport(cache.host), "-a", "--update",
+               to_rsync_path(folder), f"{cache.host.ssh_alias}:{dest_dir}/"]
+        sent = _rsync_with_retry(cmd, log_fn=log, timeout=120).returncode == 0
+    if sent:
+        log("[remote] nanowell: sent the plate's empty confluence reference, so the wells of this run read their "
+            "confluence against it\n")
+    else:
+        log("[remote] nanowell: the plate's empty confluence reference could not be sent; the wells of this run "
+            "will come back with no confluence\n")
     return sent

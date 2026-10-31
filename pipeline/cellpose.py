@@ -131,6 +131,9 @@ def _cellpose_model(model_type: str = DEFAULT_MODEL):
         # states where segmentation actually happened: the main process can
         # count GPUs, but only Torch in the worker knows whether it can use one.
         log.info("Cellpose %s on %s (worker %d).", key, where, os.getpid())
+        from pipeline.nanowell_parallel import ON_GPU_ATTR
+
+        setattr(model, ON_GPU_ATTR, device.type == "cuda")   # a nanowell worker's threads follow where it runs
         # Cellpose logs "No cell pixels found." for every image it finds no cell in. A nanowell run gives it one image
         # per nanowell, so that bare line, naming no well, nanowell or time, was the only thing a long count printed,
         # and read as the run being stuck. The count's own progress lines say what it is doing instead

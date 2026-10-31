@@ -33,6 +33,10 @@ This is that step for a remote run, asked once, before staging, with the pipelin
   missing timepoints to its earlier tables (the host never has them), so a well short of any — left part way by a
   run that stopped, or given new timepoints since — is not finished: it is sent whole and analysed again in full,
   and the runner forces it (``nanowell_forced``) so an earlier attempt's output on the host cannot stand in for it;
+* **a nanowell well read against another empty reference than the one saved here now is never finished**
+  (``pipeline.nanowell_task.confluence_reference_current``), and **when the reference well itself is to be sent, no
+  well is**: the host measures it first and every well's confluence is then read against what it measures, which a
+  well left out here was not;
 * **an empty-well blank is never left out**: it is the input the correction of every other well is built from,
   which staging never drops either. A plate whose only unfinished archive is its finished blank ends before upload
   (``PipelineRunner._nothing_left_to_upload``).
@@ -89,7 +93,35 @@ def finished_here(output_dir: Path, pipeline_argv: Sequence[str], wells: Iterabl
         if (csv is not None and csv.stat().st_size > 0 and well_settings_allow_reuse(output_dir, label, key)
                 and _whole(records.get(label)) and covered(label)):
             out.append(label)
-    return out
+    return _read_against_the_reference(output_dir, args, wells, out) if args.nanowell_format else out
+
+
+def _read_against_the_reference(output_dir: Path, args, wells: Iterable[str], finished: list[str]) -> list[str]:
+    """*finished* less the nanowell wells whose confluence was read against another empty reference than the one
+    saved in *output_dir* now, and empty when the reference well is among *wells* and not finished itself: the host
+    measures it before any other well, so a well left out here would keep a confluence read against the reference
+    as it was (review tracker M7). Unchanged when no reference is named; nothing finished when the options cannot be
+    read."""
+    import copy
+
+    from pipeline import nanowell_reference as nref
+    from pipeline.cli_args import nanowell_options_from_args
+    from pipeline.nanowell_task import confluence_reference_current, settings_from_kwargs
+
+    def refuse(message: str) -> None:
+        raise ValueError(message)
+
+    try:
+        spec = nanowell_options_from_args(copy.copy(args), refuse)
+    except (ValueError, SystemExit):
+        return []
+    template = {"_nanowell": spec}
+    reference = nref.reference_well(settings_from_kwargs(template))
+    if reference is None:
+        return finished
+    if reference in {canonical_well_label(w) or w for w in wells} and reference not in finished:
+        return []
+    return [w for w in finished if confluence_reference_current(output_dir, w, template)]
 
 
 #: The one keyed option that cannot change a well's own output: it only switches the plate-level cell-gating pass

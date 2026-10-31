@@ -166,3 +166,15 @@ def test_the_pop_out_s_labels_setting_is_kept_with_the_page():
     again = NanowellState()
     again.apply_config(st.to_config())
     assert again.popout_labels is False
+
+
+def test_the_crop_numbers_name_nanowell_fluorescence_as_the_metric_is_named(page, qtbot, known_crops):  # noqa: F811
+    """Tracker L21: the metric is *Nanowell fluorescence* everywhere on the page, so the numbers under its crops say
+    ``fluor.``, not the retired "signal"."""
+    _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    _press_pop_out(qtbot, page)
+    qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
+    numbers = " · ".join(_popout_texts(page, "nw-crop-grid-metrics"))
+    assert "fluor. " in numbers and "bright " in numbers, numbers
+    assert "signal" not in numbers, numbers

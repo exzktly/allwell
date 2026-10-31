@@ -105,12 +105,12 @@ def test_run_dashboard_legend_is_local_by_default(qapp):
     from widgets.run_dashboard import RunDashboard
 
     assert _legend(RunDashboard()) == ("Wells", [
-        (C.text_muted, "pending"),
-        (C.warn, "processing"),
-        (C.accent, "processed"),
-        (C.success, "complete"),
-        (C.stale, "partial / unfinished"),
-        (C.danger, "failed"),
+        (C.run_pending, "pending"),
+        (C.run_processing, "processing"),
+        (C.run_on_server, "processed"),
+        (C.run_done, "complete"),
+        (C.run_partial, "partial / unfinished"),
+        (C.run_failed, "failed"),
     ])
 
 
@@ -124,13 +124,13 @@ def test_run_dashboard_legend_names_the_transfer_stages_when_remote(qapp):
     dash = RunDashboard()
     dash.reset(remote=True)
     assert _legend(dash) == ("Wells", [
-        (C.text_muted, "pending"),
-        (C.accent2, "uploaded"),
-        (C.warn, "processing"),
-        (C.accent, "on server"),
-        (C.success, "downloaded"),
-        (C.stale, "partial / unfinished"),
-        (C.danger, "failed"),
+        (C.run_pending, "pending"),
+        (C.run_uploaded, "uploaded"),
+        (C.run_processing, "processing"),
+        (C.run_on_server, "on server"),
+        (C.run_done, "downloaded"),
+        (C.run_partial, "partial / unfinished"),
+        (C.run_failed, "failed"),
     ])
 
 

@@ -1986,6 +1986,12 @@ reading it. The log names any it kept over budget for that reason.
   **Suspend** and **Stop** take its place; they are not shown while nothing is
   running. The log streams the pipeline's stdout/stderr live.
 - The **plate map** above the log colours each well by the stage it has reached.
+  The colours are grey (pending), pale lavender (uploaded, remote runs only),
+  amber (processing), blue (processed, or on the server for a remote run),
+  green (complete or downloaded), dark red with a `✕` (failed) and near-white
+  with a `!` (partial or unfinished). They are chosen to stay distinguishable
+  with red/green colour blindness: complete and failed differ in lightness as
+  well as hue, so they never read as the same colour.
   A well that has started is drawn as a dial rather than a flat circle: the
   darker part of it is the work already done, the lighter part what is left,
   filling clockwise from twelve o'clock. So you can see at a glance whether a

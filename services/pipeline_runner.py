@@ -2546,11 +2546,13 @@ class PipelineRunner:
         awake.start()
         try:
             self._enqueue(("line", f"[remote] target: {self._remote.name}\n"))
-            granted.claim()      # before anything is staged: preparing a plate must not run the node's idle clock
             incremental = self._recover_remote_outputs(output_dir, args, opts)
             if incremental is None:
                 return
             refuse_remote_nanowell_incremental(args)       # before anything is staged or sent (X29)
+            # After the refusals, which must not wait on a busy node, and before anything is staged: preparing and
+            # uploading a plate must not run the node's idle clock.
+            granted.claim()
             # What is finished here under these settings is not sent again, as a local run skips it
             # (services.remote_finished_wells); an incremental run's split decides per field instead.
             finished = [] if incremental else self._finished_here(output_dir, args, opts)

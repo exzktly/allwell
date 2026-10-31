@@ -105,7 +105,16 @@ they're shell-wide:
   fills the ring and hands the formatted line to a
   `core.worker_bridge.GuiLogRelay`; it reads no widget state at all, because it
   runs on whichever thread logged the record. Whether the drawer is open is
-  decided on the other side of that relay, in `_append_log_line`.
+  decided on the other side of that relay, in `_append_log_line`. Every entry
+  starts with the time it was logged and is separated from the next by a blank
+  line, so a multi-line record (a traceback) reads as one entry: both this
+  drawer and Review's own status log take their formatter from
+  `core/log_view.log_formatter`, which refuses a format not starting with
+  `%(asctime)s`, and add entries through `append_entry` (live) or
+  `entries_text` (the drawer refilled from its ring on open). Review's status
+  log writes each entry as HTML, escaped and `white-space: pre-wrap`, so a
+  message holding `<` is shown rather than parsed and a traceback keeps its
+  line breaks.
 - **Status bar** (bottom of the window) with a status-message label and
   key-hint chips.
 - **App icon, window geometry persistence.**
@@ -980,6 +989,8 @@ allwell/
 │   │                              which puts a worker's log lines on the GUI thread
 │   ├── log_mirror.py           ← mirror_line(): copies the warnings and errors the Analyze
 │   │                              and Datasets panes show in their own logs into the app log
+│   ├── log_view.py             ← how both log views lay out an entry: the time at its
+│   │                              head (log_formatter), a blank line between entries
 │   ├── panes.py                ← PANE_MODES and the index/name lookups either way —
 │   │                              the roster of the application's three panes
 │   ├── process.py              ← owner.pid and pid_alive(): whether the process that

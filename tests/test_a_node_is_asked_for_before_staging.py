@@ -506,3 +506,31 @@ def test_a_run_every_well_of_which_is_finished_on_the_host_gives_the_early_node_
     early = remote.jobs.procs[0]
     early.wait(timeout=10)                       # given back: its srun killed, the job cancelled
     assert not any(remote.root.joinpath(".allwell-staging", "reservations").iterdir()), text
+
+
+@pytest.mark.parametrize("batch_size", [0, 2], ids=["single-shot", "batched"])
+def test_a_stop_just_before_the_hand_over_queues_no_fresh_job(plate, host, remote, stop_fetchers, monkeypatch,
+                                                              batch_size):
+    """Tracker L26. Stop gives the early job back (its watcher, within half a second). Pressed as the run became
+    ready, the hand-over then found the job given back and the launch asked for a fresh one — a job queued after
+    the user pressed Stop. The run stops instead, and nothing more is asked of the scheduler."""
+    from services.remote_reservation import Reservation
+
+    real_usable = Reservation.usable
+
+    def stopped_first(self):
+        self._stop.set()                                  # what PipelineRunner.stop sets first
+        deadline = time.monotonic() + 10
+        while not self._released and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert self._released, "the early job was not given back on Stop"
+        return real_usable(self)
+
+    monkeypatch.setattr(Reservation, "usable", stopped_first)
+
+    r, text = _run(plate, host, stop_fetchers, remote_batch_size=batch_size)
+
+    assert len(remote.launched) == 1, [argv[-1][:200] for argv in remote.launched]
+    assert "[remote] scheduler: requesting allocation via: env" not in text, text
+    assert "giving back the node asked for early — the run was stopped" in text, text
+    assert r.was_stopped, text

@@ -721,6 +721,12 @@ class _BatchedRemoteProcess:
                 self._returncode = QUEUE_WAIT_EXIT
                 return False
         if proc is None:
+            if self._stop.is_set():
+                # Stop gave the early job back, so the hand-over found it gone: asking for a fresh one now would
+                # queue a job after the user pressed Stop.
+                self._log("[remote] stopped before the first batch\n")
+                self._returncode = 130
+                return False
             proc = self._launch_driver(host, run, driver, total)
         with self._current_proc_lock:
             self._current_proc = proc

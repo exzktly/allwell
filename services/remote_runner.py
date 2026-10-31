@@ -182,6 +182,16 @@ class _PreparedRun:
     paths: RemoteRunPaths
 
 
+def _refuse_after_stop(stop_event: threading.Event | None) -> None:
+    """Raise when the run was stopped before its node was asked for.
+
+    Stop gives the job asked for before staging back (``Reservation._watch_stop``), and the hand-over then finds it
+    gone and the launch would ask for a fresh one: a job queued after the user pressed Stop. The runner reads the
+    exception, with its stop event set, as the Stop it is."""
+    if stop_event is not None and stop_event.is_set():
+        raise RuntimeError("the run was stopped before its node was asked for")
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # RemoteRunner — orchestrator
 # ────────────────────────────────────────────────────────────────────────────
@@ -358,6 +368,7 @@ class RemoteRunner:
         # Not asked on a cache hit: the run needs no node, and `usable` on the job just given back would log that it
         # cannot take the run and that one is asked for now, when nothing is.
         reserved = reservation is not None and not cache_hit and reservation.usable()
+        _refuse_after_stop(stop_event)
         overlap, ssh_argv = self._compose_launch(
             prep, zipped, pipeline_argv, output_filter, cache_hit, log, reserved=reserved)
         remote_sentinel = prep.paths.sentinel
@@ -376,6 +387,7 @@ class RemoteRunner:
             popen = (self._hand_over(reservation, prep, zipped, pipeline_argv, output_filter)
                      if reserved else None)
             if popen is None:
+                _refuse_after_stop(stop_event)     # a Stop the hand-over lost to: no fresh job after it
                 if reserved:
                     log(_scheduler_handoff_lines(self.host.launch_command))
                 popen = self._start_ssh(ssh_argv)

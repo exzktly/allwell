@@ -54,7 +54,14 @@ _OME_SUFFIXES = (".ome.tif", ".ome.tiff")
 
 
 class OmeImportError(Exception):
-    """A user-facing reason the OME-TIFF can't be converted with these settings."""
+    """A user-facing reason the OME-TIFF can't be converted with these settings.
+
+    A refusal of the timepoint selection carries the source's own tokens, so the page can list them and mark a
+    ticked one the source lacks: no plan is made for that selection, which is where the page reads them otherwise."""
+
+    def __init__(self, message: str, *, source_timepoint_tokens=()) -> None:
+        super().__init__(message)
+        self.source_timepoint_tokens = tuple(source_timepoint_tokens)
 
 
 @dataclass(frozen=True)
@@ -779,7 +786,7 @@ def plan_conversion(layout: OmeLayout, params: ConversionParams) -> ConversionPl
         kept = timepoint_plan(source_tokens, params.timepoint_stride,
                               params.timepoint_subset)
     except ValueError as exc:
-        raise OmeImportError(str(exc)) from exc
+        raise OmeImportError(str(exc), source_timepoint_tokens=source_tokens) from exc
     return ConversionPlan(
         single_image=layout.single_image,
         n_positions=n_positions,

@@ -9685,7 +9685,14 @@ It holds the selection as a value (`()` all, `None` nothing ticked — refused b
 from each successful plan and a queued job's restored selection can arrive
 before the scan that lists the tokens. A restored token the source lacks is
 kept and listed as *(not in this source)*, so the plan refuses it by name
-instead of the page converting a different set than the job asked for; the
+instead of the page converting a different set than the job asked for. That
+refusal is the one plan the page cannot read the source's tokens from, so each
+converter's error (`CziImportError`, `Nd2ImportError`, `OmeImportError`)
+carries them as `source_timepoint_tokens` when it refuses the timepoint
+selection, and the page lists them from it. Without them a job reopened
+through `show_job` would list only its own ticked tokens, unmarked, and a
+source switched under a selection would go on listing the previous file's
+(`tests/test_timepoint_picker.py`). The
 menu's **All** resets to the whole timelapse rather than ticking every listed
 row, which is what leads out of that refusal before the real tokens are known.
 

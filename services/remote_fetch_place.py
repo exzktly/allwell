@@ -170,9 +170,8 @@ def set_aside_unreadable_zip(target: Path, well: str, *, log: Callable[[str], No
     except OSError as exc:
         message += f" (Setting it aside failed: {exc}.)"
     try:
-        errors = target.parent / "errors"
-        errors.mkdir(parents=True, exist_ok=True)
-        (errors / f"{well}_local_zip_unreadable.txt").write_text(f"Well: {well}\n\n{message}\n", encoding="utf-8")
+        from pipeline.error_records import write_note
+        write_note(target.parent, well, f"{well}_local_zip_unreadable.txt", message)
     except OSError as exc:
         log(f"[remote] WARNING {well}: could not record the loss in errors/ ({exc})\n")
     log(f"[remote] WARNING {well}: {message}\n")

@@ -55,6 +55,8 @@ from pipeline.field_quality_record import (
     merge_fetched_field_quality,
     read_field_quality_block,
 )
+# Stdlib-only: the failure records in errors/ (pipeline.io is imported lazily, by its writers alone).
+from pipeline.error_records import mirror_retirements
 from pipeline.run_report import (
     merge_fetched_run_report,
     read_run_report_block,
@@ -1533,6 +1535,8 @@ class FetchedOutputVerifier:
             absent_note="The pipeline only creates errors/ when a well or "
                         "FOV-group fails, so a clean run has none.",
         )
+        # rsync only adds: drop the local copies of records the host archived as superseded.
+        mirror_retirements(run.local_output_dir)
 
         short_reanchored = pull_nanowell_results(self, log=log)      # nanowell tables + re-anchored wells
         # The fetched pipeline_info.json reflects only the (partial) input the

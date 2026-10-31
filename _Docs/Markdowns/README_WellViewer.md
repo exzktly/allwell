@@ -2004,6 +2004,12 @@ reading it. The log names any it kept over budget for that reason.
   **Suspend** and **Stop** take its place; they are not shown while nothing is
   running. The log streams the pipeline's stdout/stderr live.
 - The **plate map** above the log colours each well by the stage it has reached.
+  The colours are grey (pending), pale lavender (uploaded, remote runs only),
+  amber (processing), blue (processed, or on the server for a remote run),
+  green (complete or downloaded), dark red with a `✕` (failed) and near-white
+  with a `!` (partial or unfinished). They are chosen to stay distinguishable
+  with red/green colour blindness: complete and failed differ in lightness as
+  well as hue, so they never read as the same colour.
   A well that has started is drawn as a dial rather than a flat circle: the
   darker part of it is the work already done, the lighter part what is left,
   filling clockwise from twelve o'clock. So you can see at a glance whether a
@@ -2379,7 +2385,9 @@ reading it. The log names any it kept over budget for that reason.
 ├── pipeline_info.json      ← schema + channel tokens + FOVs + timepoints +
 │                              gating thresholds + saved selections +
 │                              the completeness record, etc.
-├── errors/                 ← one traceback per failed field, when any fail
+├── errors/                 ← one traceback per failed field, when any fail;
+│   └── superseded/            once the well later finishes whole, its old
+│                              tracebacks move here (kept, never deleted)
 ├── provenance.jsonl        ← the dataset's history (see below)
 └── (transient tmp_<well>/  ← deleted on success)
 ```
@@ -3586,8 +3594,10 @@ field groups, missing measurements, measurements with no output archive, wells
 never processed, wells the check could not read, folder-level findings), each
 nanowell timepoint the run located but could not address — with the reason its
 grid record gives, such as *No accepted fiducial, array centre, or plate-rigid
-prediction* — the traceback files the *last* run left in `errors/` (older files
-are not listed, because that folder is never emptied), and the run's
+prediction* — the failure records in `errors/` that still stand (each says
+whether the latest run wrote it or an earlier one did; a record from before
+its well was last processed whole is not listed, and a run that finishes a well
+whole moves that well's old records to `errors/superseded/`), and the run's
 field-quality flags. When one of those cannot answer — no completeness record,
 a check that was turned off, a plate too partly measured to score — that is a
 row too, so an empty table really does mean nothing is known to be wrong. The
@@ -8382,7 +8392,8 @@ say — the raw log says so and the findings are unaffected.
    when you pick a different dataset rather than leaving an earlier check's
    results up.
    Where the run left records of its own — the per-well completeness block in
-   `pipeline_info.json` and any tracebacks under `out/errors/` — the findings
+   `pipeline_info.json` and any tracebacks still standing in `out/errors/` (not
+   those in `out/errors/superseded/`, whose wells were since processed whole) — the findings
    use them rather than guessing. A well with images and no measurements CSV
    is reported three different ways depending on what the run recorded: as
    normal ("processed every field and segmented zero cells in all of them —
@@ -8978,8 +8989,10 @@ switch back to the desktop layout to use them.
 - **Progress ▾** — the headline, the overall bar, the stages, and the plate map
   coloured by each well's progress, one above the other. Tap a well to see what
   it is doing on the line under the plate. The log is below, with long lines
-  wrapped; when the screen is too short for both, swipe up past the plate to
-  reach it. Sideways, the progress sits on the left and the log on the right.
+  wrapped, and scrolls inside its own box. Everything fits on one screen: on a
+  short screen the plate map is drawn smaller to leave room for the last few
+  lines of the log. Sideways, the progress sits on the left — the stages beside
+  the plate — and the log on the right.
 
 **Run Pipeline**, **Suspend**, **+ Queue** and **Stop** sit in a bar along the
 bottom of the screen in both views, so they are always in reach. Starting a run —

@@ -111,8 +111,8 @@ def test_uploaded_and_computing_are_different_colours(qapp):
     d.set_well_stage("A01", "upload")
     d.set_well_stage("A02", "upload")
     d.set_well_stage("A02", "active")
-    assert d._well_color("A01") == theme.Colors.accent2      # on the remote
-    assert d._well_color("A02") == theme.Colors.warn         # being computed
+    assert d._well_color("A01") == theme.Colors.run_uploaded      # on the remote
+    assert d._well_color("A02") == theme.Colors.run_processing         # being computed
     assert d._well_color("A01") != d._well_color("A02")
 
 
@@ -166,10 +166,10 @@ def test_remote_threshold_does_not_count_as_download(qapp):
     assert d._count("threshold") == 3
     assert d._count("download") == 0          # nothing fetched yet
     from ui.theme import Colors
-    assert d._well_color("A01") == Colors.accent      # blue: computed, awaiting fetch
+    assert d._well_color("A01") == Colors.run_on_server      # blue: computed, awaiting fetch
     d.set_well_stage("A01", "download")
     assert d._count("download") == 1
-    assert d._well_color("A01") == Colors.success  # green only once data is local
+    assert d._well_color("A01") == Colors.run_done  # green only once data is local
 
 
 def test_dashboard_error_wins(qapp):
@@ -178,7 +178,7 @@ def test_dashboard_error_wins(qapp):
     d = RunDashboard(); d.reset(remote=True, total=1)
     d.set_well_stage("A01", "process")
     d.set_well_stage("A01", "error")
-    assert d._well_color("A01") == Colors.danger and "failed" in d._well_tooltip("A01")
+    assert d._well_color("A01") == Colors.run_failed and "failed" in d._well_tooltip("A01")
 
 
 def test_dashboard_rail_local_vs_remote(qapp):
@@ -321,16 +321,16 @@ def test_a_transfer_is_painted_in_the_colour_it_is_heading_toward(qtbot):
     dash.reset(remote=True, total=4)
 
     dash.set_well_stage("A01", "process")
-    assert dash._well_color("A01") == theme.Colors.accent, "computed, awaiting fetch"
+    assert dash._well_color("A01") == theme.Colors.run_on_server, "computed, awaiting fetch"
 
     # Download in flight — the well is becoming local, so it reads as local.
     dash.set_well_transfer("A01", "down", 0.4)
-    assert dash._well_color("A01") == theme.Colors.success
+    assert dash._well_color("A01") == theme.Colors.run_done
     assert dash._well_fraction("A01") == pytest.approx(0.4)
 
     # And it stays that colour once the fetch lands.
     dash.set_well_stage("A01", "download")
-    assert dash._well_color("A01") == theme.Colors.success
+    assert dash._well_color("A01") == theme.Colors.run_done
 
 
 def test_an_upload_in_flight_reads_as_heading_to_the_remote(qtbot):
@@ -345,15 +345,15 @@ def test_an_upload_in_flight_reads_as_heading_to_the_remote(qtbot):
     dash.reset(remote=True, total=4)
 
     dash.set_well_stage("B02", "group")
-    assert dash._well_color("B02") == theme.Colors.text_muted
+    assert dash._well_color("B02") == theme.Colors.run_pending
 
     dash.set_well_transfer("B02", "up", 0.5)
-    assert dash._well_color("B02") == theme.Colors.accent2
+    assert dash._well_color("B02") == theme.Colors.run_uploaded
 
     # A well that is already computing is not "heading to the remote" any more,
     # so a stale upload marker must not repaint it away from amber.
     dash.set_well_stage("B02", "active")
-    assert dash._well_color("B02") == theme.Colors.warn
+    assert dash._well_color("B02") == theme.Colors.run_processing
 
 
 def test_local_auto_threshold_records_reach_the_line_stream():
@@ -447,7 +447,7 @@ def test_an_upload_repaints_the_well_too(qapp):
     d.reset(remote=True, total=1)
     pushed = _colour_spy(d)
     d.set_well_transfer("A01", "up", 0.3)
-    assert pushed[-1] == theme.Colors.accent2
+    assert pushed[-1] == theme.Colors.run_uploaded
 
 
 def test_a_finished_zip_freezes_the_ring_instead_of_reverting_to_blue(qapp):

@@ -41,11 +41,11 @@ _PREFIX = {"I": "2026-05-27 10:30:45  INFO      ", "W": "2026-05-27 10:30:45  WA
 # ── what the plate is told, per outcome ─────────────────────────────────────────
 # (colour token or None, glyph or None). "complete" is a local run's processed well; "fetched" a remote one's.
 _STATES = {
-    "processing": ("warn", None),
-    "complete": ("accent", None),
-    "fetched": ("success", None),
-    "partial": ("stale", "!"),
-    "failed": ("danger", "✕"),
+    "processing": ("run_processing", None),
+    "complete": ("run_on_server", None),
+    "fetched": ("run_done", None),
+    "partial": ("run_partial", "!"),
+    "failed": ("run_failed", "✕"),
     "pending": (None, None),
 }
 
@@ -260,6 +260,10 @@ def _token(colour: str | None) -> str | None:
     if colour is None:
         return None
     names = [k for k, v in vars(theme.Colors).items() if v == colour and not k.startswith("_")]
+    # The run plate paints with the ``run_*`` tokens, some of which share a
+    # value with a general token (``run_done`` is ``success``'s green), so the
+    # plate's own name wins.
+    names.sort(key=lambda k: not k.startswith("run_"))
     return names[0] if names else colour
 
 
@@ -307,10 +311,10 @@ def test_a_well_still_computing_when_the_run_ends_is_unfinished_not_processing(t
     _drive(tab, [_PREFIX["I"] + "Zip mode: 2 wells", _PREFIX["I"] + f"Well {WELL} — starting (pid 1)",
                  _PREFIX["I"] + f"Well {WELL} — 12 FOV-group(s)", _PREFIX["I"] + f"Well {WELL} — FOV 3/12 done"],
            remote=False)
-    assert (_token(_last(tab.colours)), _last(tab.glyphs)) == ("warn", None)
+    assert (_token(_last(tab.colours)), _last(tab.glyphs)) == ("run_processing", None)
     tab._log_q.put(("finished", None))      # the run's last event, through the tab's own drain
     tab._poll_log()
-    assert (_token(_last(tab.colours)), _last(tab.glyphs)) == ("stale", "!")
+    assert (_token(_last(tab.colours)), _last(tab.glyphs)) == ("run_partial", "!")
     assert tab._dashboard._well_tooltip(WELL) == (
         f"{WELL}: unfinished — the run ended before this well finished; it has no complete output "
         "(FOV 3/12 reached)")

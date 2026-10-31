@@ -111,6 +111,34 @@ class Colors:
     # render guard caught.
     stale           = "#22D3EE"   # --stale : output present, archive missing
 
+    # ── Run plate (Analyze's per-well run status map) ────────────────────
+    # The run plate paints seven states at once and has to stay readable for
+    # someone with red/green colour vision deficiency. Built from the general
+    # status tokens above, it was not: under a deuteranopia simulation (Machado
+    # 2009) "complete" green and "failed" red landed at ΔE76 ≈ 9 (7 on the grey
+    # theme) — the same olive — and under protanopia "uploaded" and "on server"
+    # fell to ≈ 8. These seven are chosen so that every pair stays at ΔE ≥ 34
+    # under normal vision, deuteranopia and protanopia (≥ 20 under the rarer
+    # tritanopia), mostly by separating the states in *lightness* rather than
+    # hue alone: failed is a dark red against a light green, partial a
+    # near-white, uploaded a pale lavender against a deep "on server" blue.
+    # They keep the plate's meanings — green is done, amber is working, blue is
+    # "over there", red is failed — and its one-colour-per-state contract.
+    #
+    # They are plate-local on purpose, and not re-pointed status tokens:
+    # ``success`` / ``danger`` / ``stale`` colour text, badges and other plates
+    # across the app (``stale`` means "output here, archive missing" on
+    # Review's Home plate), and re-tuning those would repaint all of them. No
+    # theme overrides these: the separation is measured against the dark panel
+    # both shipped themes use, and it is the property being protected.
+    run_pending     = "#5F6B7C"   # grouped, queued for processing
+    run_uploaded    = "#C4B5FD"   # on the remote, waiting its turn
+    run_processing  = "#F5B700"   # computing right now (also re-anchoring)
+    run_on_server   = "#3B6FE8"   # computed (on the server, or locally before threshold)
+    run_done        = "#4ADE80"   # downloaded (remote) / thresholded (local)
+    run_failed      = "#B91C1C"   # errored — drawn with the ✕ glyph as well
+    run_partial     = "#F5F5F5"   # finished short of its input — drawn with "!"
+
     # ── Data-viz / trace colors (categorical, keyed to wells) ────────────
     # The 96-colour ``WELL_COLORS_TUPLE`` is the canonical palette and is
     # used as-is here so that matplotlib's ``axes.prop_cycle``

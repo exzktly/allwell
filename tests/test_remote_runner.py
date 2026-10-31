@@ -2065,6 +2065,8 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/parallelism.py",
         "pipeline/slurm_node.py",
         "pipeline/completeness.py",
+        # The failure records in errors/, retired by the worker when it seals a well.
+        "pipeline/error_records.py",
         # The blank-well sampler + model builders behind empty_well correction.
         "pipeline/empty_well.py",
         # Per-field image-quality metrics (focus, saturation, dynamic range,

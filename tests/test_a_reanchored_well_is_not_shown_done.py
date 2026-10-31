@@ -58,7 +58,7 @@ def _downloaded(tab, *, remote: bool = True) -> None:
     dash.reset(remote=remote, total=4)
     for stage in ("group", "upload", "process", "download") if remote else ("group", "process", "threshold"):
         dash.set_well_stage(WELL, stage)
-    assert _last_colour(tab) == theme.Colors.success
+    assert _last_colour(tab) == theme.Colors.run_done
 
 
 REANCHOR = f"Well {WELL} — re-anchoring T03, T05 from the plate's other wells."
@@ -69,7 +69,7 @@ def test_a_downloaded_well_shows_computing_while_it_is_re_anchored(tab):
     _downloaded(tab)
     _feed(tab, REANCHOR, f"Well {WELL} — 4 step(s): its 2 timepoint(s), each located, then measured",
           f"Well {WELL} — step 2/4 done", SITES)
-    assert _last_colour(tab) == theme.Colors.warn
+    assert _last_colour(tab) == theme.Colors.run_processing
     tip = tab._dashboard._well_tooltip(WELL)
     assert tip == (f"{WELL}: processing again — re-anchoring T03, T05 from the plate's other wells, "
                    "T03: 796/1326 nanowells segmented")
@@ -80,12 +80,12 @@ def test_a_downloaded_well_shows_computing_while_it_is_re_anchored(tab):
 def test_it_waits_on_the_server_until_its_second_pull_lands(tab):
     _downloaded(tab)
     _feed(tab, REANCHOR, SITES, f"Well {WELL} — re-anchored. 8 timepoint(s), 0 without rows.")
-    assert _last_colour(tab) == theme.Colors.accent, "re-anchored on the server, its new output not local yet"
+    assert _last_colour(tab) == theme.Colors.run_on_server, "re-anchored on the server, its new output not local yet"
     assert tab._dashboard._well_tooltip(WELL) == (
         f"{WELL}: on server — re-anchored on the server; its output is downloaded again when its batch or the "
         "run ends")
     _feed(tab, f"[remote] {WELL}: pulled again after the end-of-run re-anchoring re-ran it.\n")
-    assert _last_colour(tab) == theme.Colors.success
+    assert _last_colour(tab) == theme.Colors.run_done
     assert tab._dashboard._well_tooltip(WELL) == f"{WELL}: fetched locally"
 
 
@@ -98,7 +98,7 @@ def test_it_waits_on_the_server_until_its_second_pull_lands(tab):
 def test_a_second_pull_that_falls_short_leaves_it_on_the_server_and_says_why(tab, line):
     _downloaded(tab)
     _feed(tab, REANCHOR, f"Well {WELL} — re-anchored. 8 timepoint(s), 0 without rows.", line)
-    assert _last_colour(tab) == theme.Colors.accent
+    assert _last_colour(tab) == theme.Colors.run_on_server
     assert tab._dashboard._well_tooltip(WELL) == (
         f"{WELL}: on server — its re-anchored output did not all arrive; the copy here predates the "
         "re-anchoring, and the remote keeps the new one")
@@ -112,7 +112,7 @@ def test_a_re_run_that_placed_nothing_leaves_the_well_as_it_was(tab):
     grid = {"timepoints": {"T03": {"status": "unaddressed", "origin_method": None}}}
     _downloaded(tab)
     _feed(tab, REANCHOR, reanchored_line(WELL, grid, {"T03": object()}, 8, 1))
-    assert _last_colour(tab) == theme.Colors.success
+    assert _last_colour(tab) == theme.Colors.run_done
     assert tab._dashboard._well_tooltip(WELL) == (
         f"{WELL}: fetched locally — re-anchoring placed none of its unaddressed timepoints; the result here "
         "stands")
@@ -161,9 +161,9 @@ def test_a_download_after_the_re_run_brings_its_output(tab):
     for stage in ("group", "upload", "process"):
         dash.set_well_stage(WELL, stage)
     _feed(tab, REANCHOR, f"Well {WELL} — re-anchored. 8 timepoint(s), 0 without rows.")
-    assert _last_colour(tab) == theme.Colors.accent
+    assert _last_colour(tab) == theme.Colors.run_on_server
     dash.set_well_stage(WELL, "download")
-    assert _last_colour(tab) == theme.Colors.success
+    assert _last_colour(tab) == theme.Colors.run_done
 
 
 def test_the_rail_does_not_count_a_well_being_re_anchored(tab):
@@ -184,7 +184,7 @@ def test_a_run_that_ends_during_the_re_anchoring_says_it_did_not_finish(tab):
     _downloaded(tab)
     _feed(tab, REANCHOR, SITES)
     tab._dashboard.set_cancelled("stopped")
-    assert _last_colour(tab) == theme.Colors.success
+    assert _last_colour(tab) == theme.Colors.run_done
     assert tab._dashboard._well_tooltip(WELL) == (
         f"{WELL}: fetched locally — the run ended before its re-anchoring did; its unaddressed timepoints stay "
         "unaddressed")
@@ -193,16 +193,16 @@ def test_a_run_that_ends_during_the_re_anchoring_says_it_did_not_finish(tab):
 def test_on_a_local_run_it_is_complete_again_when_the_re_run_ends(tab):
     _downloaded(tab, remote=False)
     _feed(tab, REANCHOR, SITES)
-    assert _last_colour(tab) == theme.Colors.warn
+    assert _last_colour(tab) == theme.Colors.run_processing
     _feed(tab, f"Well {WELL} — re-anchored. 8 timepoint(s), 0 without rows.")
-    assert _last_colour(tab) == theme.Colors.success
+    assert _last_colour(tab) == theme.Colors.run_done
 
 
 def test_a_failed_re_anchoring_leaves_the_well_as_it_was_and_says_so(tab):
     _downloaded(tab)
     _feed(tab, REANCHOR, f"Well {WELL} — re-anchoring failed (ValueError: bad fit); its timepoints stay "
                          "unaddressed.")
-    assert _last_colour(tab) == theme.Colors.success, "its data is the first run's, already local"
+    assert _last_colour(tab) == theme.Colors.run_done, "its data is the first run's, already local"
     assert "re-anchoring failed" in tab._dashboard._well_tooltip(WELL)
 
 

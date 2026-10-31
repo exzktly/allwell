@@ -239,6 +239,9 @@ class PlateProgress(QWidget):
         body.addWidget(self._rail_host)
         self._body_lay = body
         self._stacked = False
+        # Stacked, but with the stage rail beside the plate rather than above
+        # it (``setRailBeside``): phone layout sideways, where height is short.
+        self._rail_beside = False
         # The column dividers, kept so a stacked body can drop them: between
         # rows a vertical rule is a stray stub, not a divider.
         self._dividers: list[QFrame] = []
@@ -531,8 +534,7 @@ class PlateProgress(QWidget):
         off a short screen — and so do the column dividers.
         """
         self._stacked = bool(stacked)
-        self._body_lay.setDirection(
-            QBoxLayout.TopToBottom if self._stacked else QBoxLayout.LeftToRight)
+        self._apply_body_direction()
         for d in self._dividers:
             d.setVisible(not self._stacked)
         legend = getattr(self, "_legend_host", None)
@@ -567,6 +569,38 @@ class PlateProgress(QWidget):
                                      and bool(self._well_detail.text()))
         self._pin_rail_width()
 
+    def setRailBeside(self, beside: bool) -> None:
+        """While stacked, put the stage rail beside the plate, not above it.
+
+        For phone layout sideways, where the page is ~390 pt tall: with the
+        rail above it, the headline, bar and three stage rows leave the plate
+        under a hundred points. Beside it, the plate takes the height the rail
+        leaves free. No effect at the desk, where the body is a row anyway.
+        """
+        self._rail_beside = bool(beside)
+        self._apply_body_direction()
+
+    def isRailBeside(self) -> bool:
+        return self._rail_beside
+
+    def plate_room_width(self) -> int:
+        """The width the plate could take in the body as it is laid out now,
+        whatever cap it carries: the body's width, less the stage rail and the
+        gap when the rail is beside it. For a host that fits the plate to a
+        height (``analyze/phone_view``), which cannot read it off the plate's
+        own column once a cap has narrowed that column."""
+        margins = self._body_lay.contentsMargins()
+        room = self._body.width() - margins.left() - margins.right()
+        if self._body_lay.direction() == QBoxLayout.LeftToRight:
+            room -= self._rail_host.width() + self._body_lay.spacing()
+        return max(1, room)
+
+    def _apply_body_direction(self) -> None:
+        column = self._stacked and not self._rail_beside
+        self._body_lay.setDirection(
+            QBoxLayout.TopToBottom if column else QBoxLayout.LeftToRight)
+        self._pin_rail_width()
+
     def _show_well_detail(self, well_id: str) -> None:
         """Say what a tapped well's hover would have said — there is no hover
         on a touch screen, and on a phone the tap is how to ask."""
@@ -579,7 +613,13 @@ class PlateProgress(QWidget):
         return self._stacked
 
     def _pin_rail_width(self) -> None:
-        if self._stacked:
+        if self._stacked and self._rail_beside:
+            # Beside the plate, the rail's preferred width (its progress bars
+            # ask for a lot) would leave the plate a sliver; it takes its
+            # minimum and the plate the rest.
+            self._rail_host.setMinimumWidth(0)
+            self._rail_host.setMaximumWidth(self._rail_host.minimumSizeHint().width())
+        elif self._stacked:
             self._rail_host.setMinimumWidth(0)
             self._rail_host.setMaximumWidth(_QWIDGETSIZE_MAX)
         else:

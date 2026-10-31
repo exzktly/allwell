@@ -1012,7 +1012,7 @@ def run_zip_task(well_label, zip_path, output_dir, shared_kwargs_template, nucle
         total = len(grid["timepoints"])
         record_nanowell_completeness(output_dir, well_label, grid, failed)
         record_well_settings(output_dir, well_label, settings_key)
-        seal_well_complete(output_dir, well_label)       # after the montage archive and the tables
+        seal_well_complete(output_dir, well_label, rewritten=not incremental)  # after the montage archive and tables
         # "— done." exactly as a field-mode well says it: the remote Fetcher and Analyze's progress count a well
         # finished by that marker (``services/remote_wire._RE_WELL_DONE``), and a variant fetched nothing in-stream.
         # A re-anchoring re-run says something else: the well finished once already, and a second "done" read as a

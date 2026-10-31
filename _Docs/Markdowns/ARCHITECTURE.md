@@ -11653,7 +11653,10 @@ group a sample of its wells' medians, one per well, as `group_summary` does. `Na
 (`NanowellState.control`, shared with *Along x: Wells*) lists the samples of the unit on this view
 (`statistics_view.fill_control_combo`): with none chosen every pair is compared, with one each other sample against
 it; Dunnett requires one and corrects for its own family, the other tests are Benjamini-Hochberg adjusted
-(`bh_adjust`, which reports whether it adjusted anything, so a family of one never prints `p_BH`). Three or more
+(`bh_adjust`, which reports whether it adjusted anything, so a family of one never prints `p_BH`; Dunnett marks its
+p adjusted only with more than one comparison). `statistics_compute.family_text` states the family from the
+comparisons themselves — how many, how many computed, and `StatisticsResult.correction`, which is empty unless some
+printed p was adjusted — so it never calls a raw p corrected. Three or more
 samples get the omnibus first (ANOVA, or Kruskal-Wallis for the rank tests). More than `MAX_COMPARISONS` (15)
 comparisons are refused with a sentence naming how to narrow them. Every comparison that cannot be made — fewer than
 two values, two samples constant at one value, a test scipy refuses — carries its reason in `Comparison.undefined`

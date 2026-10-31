@@ -319,3 +319,33 @@ def test_ticking_the_cohort_on_statistics_states_it_even_when_no_value_moves(pag
             "rest are counted as outside the fixed cohort.") in notes, notes
     page.widgets.get("_nw_cohort_box").setChecked(False)
     assert not any(n.startswith("Fixed cohort") for n in _report(page, sc.GID_NOTE))
+
+
+def _family(result):
+    return next(t for g, t in sc.report_lines(result) if g == sc.GID_NOTE and t.startswith("Compared:"))
+
+
+def test_the_family_sentence_counts_the_comparisons_that_have_a_p():
+    """Tracker L13: three pairs of which only one could be computed is not "one comparison"; it is three, one with
+    a p, so the one p is raw — and none computed corrects nothing either."""
+    one_of_three = sc.compare([_sample("A", [1, 2, 3, 4]), _sample("B", [5, 6, 7, 9]), _sample("C", [1])], "welch")
+    assert _family(one_of_three) == ("Compared: every pair (3 comparisons, 1 computed); only one has a p, so "
+                                     "nothing to correct for.")
+    none = sc.compare([_sample("A", [1]), _sample("B", [2])], "welch")
+    assert _family(none) == "Compared: every pair (1 comparison, none computed); nothing to correct for."
+    two = sc.compare([_sample("A", [1, 2, 3, 4]), _sample("B", [5, 6, 7, 9]), _sample("C", [1, 3, 2])], "welch",
+                     control="A")
+    assert _family(two) == ("Compared: each against A (2 comparisons); p_BH is the Benjamini-Hochberg "
+                            "FDR-adjusted p across them, and the stars are of p_BH.")
+
+
+def test_a_dunnett_family_of_one_is_not_labelled_corrected_on_the_page(page, qtbot):
+    """Tracker L13: Dunnett against a control with one other well prints that comparison's p as ``p`` (a family of
+    one has nothing to correct), so the sentence under it must not call it a corrected ``p_Dunnett``."""
+    _open_statistics(qtbot, page)
+    _choose(page, "_nw_stats_test_cb", "dunnett")
+    _choose(page, "_nw_control_cb", "A01")
+    pair = _report(page, sc.GID_PAIR)
+    assert len(pair) == 1 and pair[0].startswith("B01 vs A01   t = ") and "p_Dunnett" not in pair[0], pair
+    family = [t for t in _report(page, sc.GID_NOTE) if t.startswith("Compared:")]
+    assert family == ["Compared: each against A01 (1 comparison); one comparison, so nothing to correct for."], family

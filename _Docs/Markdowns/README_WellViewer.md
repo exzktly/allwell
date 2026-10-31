@@ -5685,8 +5685,10 @@ the sentence names it.
   and the figure then draws each sample's cumulative curve), or Dunnett. **vs** lists the samples: with none
   chosen every pair is compared; with one, each other sample is compared with it only — fewer comparisons, the
   family a plate design usually means. Dunnett always needs a control and corrects for its own family
-  (*p_Dunnett*); the other tests print the raw *p* and the Benjamini-Hochberg adjusted *p_BH* when there is more
-  than one comparison, and the stars are of the adjusted p. With three or more samples an omnibus (one-way
+  (*p_Dunnett*); the other tests print the raw *p* and the Benjamini-Hochberg adjusted *p_BH* when more than one
+  comparison has a p, and the stars are of the adjusted p. A family of one — or one in which only one comparison
+  could be computed — prints that p as plain *p*, and the line under the comparisons counts how many were made, how
+  many were computed, and whether anything was corrected. With three or more samples an omnibus (one-way
   ANOVA, or Kruskal-Wallis for the rank tests) is stated first. Each sample gets a line with its n, mean, sd,
   median and interquartile range (and a 95% interval on Groups); each comparison its statistic, p, stars, Hedges'
   *g* and the difference of means with a bootstrap 95% interval. Above the report a box per sample (the dots

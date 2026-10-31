@@ -64,6 +64,14 @@ class DatasetState:
     # length so the status bar can say which well each phase is reading
     # (``review/core/load_progress.py``); ``None`` otherwise.
     read_listener: Callable[[str], None] | None = None
+    # The folder a load is reading, from the moment ``load_controller.load_path``
+    # (or ``load_directory`` on its own) starts until it returns; ``None``
+    # otherwise. While it is set every page's placeholder says the dataset is
+    # being opened instead of resolving its own reason — which, half-way through
+    # a load, is "no dataset" (``begin_load`` has emptied ``well_paths``) or the
+    # previous dataset's state. Not reset by :meth:`begin_load`, which runs
+    # inside the load it describes.
+    opening: Path | None = None
     fov_tp_extractor: Callable[[str], tuple[str, str]] | None = None
     persistence_doc: object = None
 

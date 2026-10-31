@@ -24,3 +24,16 @@ NO_DATASET_HINT = "The Open button is at the top of the left rail (⌘O)."
 #: The same two lines for a matplotlib canvas, which has no second label to put
 #: the hint in.
 NO_DATASET_MESSAGE = f"{NO_DATASET_TITLE}\n{NO_DATASET_HINT}"
+
+#: While a dataset is being opened. Every page shows this in place of its body,
+#: Home included, so the window never states "no dataset" about a folder it is
+#: in the middle of reading — the opening dialog pumps the event loop on every
+#: file, so whatever the pages said before the load is on screen throughout it.
+#: ``{name}`` is the dataset's display name (``domain.dataset_name``).
+OPENING_TITLE = "Opening {name}…"
+
+#: Under it. No control to point at: there is nothing to do but wait, and the
+#: placeholder's own button and recent-datasets list are hidden for the length
+#: of the load (``EmptyState.setBusy``).
+OPENING_HINT = ("Reading its wells and restoring your saved analysis. "
+                "Each page fills in once the dataset has finished loading.")

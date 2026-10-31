@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 import csv
 import logging
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
@@ -108,6 +109,37 @@ def _close_opening_dialog(ctx) -> None:
             swallowed()
 
 
+@contextmanager
+def _announce_opening(ctx, folder: Path):
+    """Have every page say *folder* is being opened, for the length of the block.
+
+    The opening dialog pumps the event loop on every file, so the window is
+    repainted throughout a load — and without this, what it repainted was
+    whatever the pages said before it began: "no dataset" on a first open
+    (Home's placeholder offering to open one), the previous plate on a switch.
+    Re-entrant, because ``load_path`` wraps ``load_directory`` and Home's Reload
+    calls ``load_directory`` alone: the outermost block owns the marker.
+
+    Cleared and re-resolved on the way out however the load ended, so a load
+    that returns early (no CSVs) or raises puts each page back on whatever
+    its own state now calls for rather than leaving it "opening" for good.
+    """
+    from review.core.ui_helpers import refresh_empty_state_pages
+    dataset = getattr(getattr(ctx, "state", None), "dataset", None)
+    if dataset is None or dataset.opening is not None:
+        yield
+        return
+    dataset.opening = Path(folder)
+    with swallow("show the opening placeholder"):
+        refresh_empty_state_pages(ctx.window)
+    try:
+        yield
+    finally:
+        dataset.opening = None
+        with swallow("resolve the placeholders after a load"):
+            refresh_empty_state_pages(ctx.window)
+
+
 def _resolve_fov_tp_extractor(extractor, pipeline_info: dict) -> Callable | None:
     """Return *extractor* unchanged when read_pipeline_info gave us one;
     otherwise build a separator-aware 5-field fallback from
@@ -131,6 +163,13 @@ def load_path(ctx, path: Path) -> None:
         return
     app._cleanup_tmp()
     _recover_in_place_append(path)
+    with _announce_opening(ctx, path):
+        _load_path_announced(ctx, app, path)
+    _remember_if_it_loaded(ctx, path)
+    _prune_frame_cache(ctx, path)
+
+
+def _load_path_announced(ctx, app, path: Path) -> None:
     # Visible "Opening dataset…" guard so a slow-network open never looks frozen.
     _make_opening_dialog(ctx, "Opening dataset…")
     try:
@@ -155,8 +194,6 @@ def load_path(ctx, path: Path) -> None:
             app._load_directory(path)
     finally:
         _close_opening_dialog(ctx)
-    _remember_if_it_loaded(ctx, path)
-    _prune_frame_cache(ctx, path)
 
 
 def _recover_in_place_append(path: Path) -> None:
@@ -448,7 +485,8 @@ def load_directory(ctx, d: Path, label=None) -> None:
     from review.core import plot_hold
     plot_hold.hold(ctx, plot_hold.HOLD_LOADING)
     try:
-        _load_directory_held(ctx, d, label)
+        with _announce_opening(ctx, d):
+            _load_directory_held(ctx, d, label)
     finally:
         if plot_hold.held_for(ctx) == plot_hold.HOLD_LOADING:
             plot_hold.release(ctx)

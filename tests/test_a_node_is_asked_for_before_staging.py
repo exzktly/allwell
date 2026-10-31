@@ -65,10 +65,46 @@ def _job(tmp_path: Path, *, heartbeat_age: float = 0.0):
     return paths, proc
 
 
+def _read_until(proc, text: str, timeout: float = 30.0) -> list[str]:
+    """The job's lines up to and including the first containing *text*; fails if it exits or *timeout* passes first.
+
+    A reader thread, because ``readline`` on the pipe blocks and a job that never prints *text* would hang the test."""
+    import queue
+    import threading
+
+    lines: queue.Queue = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(ln) for ln in proc.stdout] + [lines.put(None)], daemon=True).start()
+    seen: list[str] = []
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            line = lines.get(timeout=0.2)
+        except queue.Empty:
+            continue
+        assert line is not None, f"the job exited before saying {text!r}: {''.join(seen)}"
+        seen.append(line)
+        if text in line:
+            proc._aw_lines = lines                 # the rest of its output, for the caller
+            return seen
+    raise AssertionError(f"the job had not said {text!r} after {timeout:.0f} s: {''.join(seen)}")
+
+
+def _rest(proc, timeout: float = 30.0) -> list[str]:
+    """The job's remaining lines, once it has exited."""
+    proc.wait(timeout=timeout)
+    rest: list[str] = []
+    while (line := proc._aw_lines.get(timeout=5)) is not None:
+        rest.append(line)
+    return rest
+
+
 def test_the_job_waits_for_the_run_and_then_runs_it_in_its_own_shell(tmp_path):
     paths, proc = _job(tmp_path)
     try:
-        time.sleep(1)
+        # The command file is written only once the job has said it is waiting for it. A fixed one-second sleep
+        # here let a slow CI runner reach its first check after the file existed, so the job, correctly, never
+        # said it was waiting, and the assertion below failed on a job that had behaved exactly as it should.
+        head = _read_until(proc, "waiting for the app to finish preparing the run")
         assert proc.poll() is None, "the job did not wait for the run"
         run_dir = tmp_path / "runs" / "r1"
         run_dir.mkdir(parents=True)
@@ -77,13 +113,12 @@ def test_the_job_waits_for_the_run_and_then_runs_it_in_its_own_shell(tmp_path):
         body = f'echo "RAN pid=$$ recorded=$(cat {run_pid})"; exit 7\n'
         subprocess.run(["sh", "-c", _write_command_script(paths, body, run_pid, str(run_dir / "heartbeat"))],
                        check=True)
-        out, _ = proc.communicate(timeout=30)
+        out = "".join(head + _rest(proc))
     finally:
         if proc.poll() is None:
             proc.kill()
     assert proc.returncode == 7, out
     lines = out.splitlines()
-    assert any("waiting for the app to finish preparing the run" in ln for ln in lines), out
     ran = [ln for ln in lines if ln.startswith("RAN ")]
     assert len(ran) == 1, out
     # The run directory's pidfile names the job's own shell: Stop's kill reaches the job through it.

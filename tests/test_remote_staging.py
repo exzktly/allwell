@@ -65,33 +65,6 @@ def _folder_plate(tmp_path: Path) -> tuple[Path, Path]:
     return plate, out
 
 
-def test_a_filtered_resume_of_a_mixed_plate_leaves_only_its_archives(tmp_path):
-    """A channel filter stages filtered copies (one cleanup); the resume then
-    splits those into a second staging directory (another). After cleanup the
-    plate holds exactly what staging is meant to leave: the well archive it
-    built in place for the folder well, and the empty transit parent."""
-    out = tmp_path / "out"
-    out.mkdir()
-    _prior_csv(out / "measurements_A01.csv", [("1", "T01")])
-    _prior_csv(out / "measurements_B02.csv", [("1", "T01")])
-    plate = tmp_path / "plate"
-    plate.mkdir()
-    _zip(plate / "A01.zip", ["e_w1_A01_1_T01.tif", "e_w1_A01_2_T01.tif",
-                             "e_w2_A01_2_T01.tif"])
-    (plate / "B02").mkdir()
-    for name in ("e_w1_B02_1_T01.tif", "e_w1_B02_2_T01.tif", "e_w2_B02_2_T01.tif"):
-        (plate / "B02" / name).write_bytes(b"data")
-    before = _tree(tmp_path)
-
-    zipped = remote_runner.stage_local_zips(
-        plate, filename_schema=SCHEMA, filename_sep=SEP, fluor_tokens=["w1"],
-        nuclear_token="w1", incremental=True, prior_output_dir=out)
-    assert zipped.cleanup is not None
-    zipped.cleanup()
-
-    assert sorted(_tree(tmp_path) - before) == ["plate/.allwell-transit", "plate/B02.zip"]
-
-
 def test_a_failure_while_writing_the_split_leaves_no_staging_behind(tmp_path, monkeypatch):
     """Archives already in zip form, one of them partial, so the split has to
     rewrite it; the rewrite then fails. Nothing staging created may remain
@@ -113,55 +86,6 @@ def test_a_failure_while_writing_the_split_leaves_no_staging_behind(tmp_path, mo
             plate, filename_schema=SCHEMA, filename_sep=SEP, incremental=True,
             prior_output_dir=out)
     assert sorted(_tree(tmp_path) - before) == ["plate/.allwell-transit"]
-
-
-def test_the_split_keeps_the_callback_that_removes_zipped_sources(tmp_path):
-    """A folder plate's success callback removes its leftover sources. A
-    resumed run is split after the zip-up, and the split must hand the
-    callback on rather than drop it."""
-    plate, out = _folder_plate(tmp_path)
-    zipped = remote_runner.stage_local_zips(
-        plate, filename_schema=SCHEMA, filename_sep=SEP, incremental=True,
-        prior_output_dir=out)
-    try:
-        assert zipped.incremental
-        assert zipped.on_pipeline_success is not None
-    finally:
-        if zipped.cleanup is not None:
-            zipped.cleanup()
-
-
-def test_combined_cleanups_all_run():
-    """The helper that joins the zipper's cleanup to the split's runs both.
-    Through ``stage_local_zips`` the two directories nest, so running only the
-    outer one hides the defect; this is the helper's own contract."""
-    ran: list[str] = []
-    joined = remote_staging._both(lambda: ran.append("a"), None,
-                                 lambda: ran.append("b"))
-    assert joined is not None
-    joined()
-    assert ran == ["a", "b"]
-    assert remote_staging._both(None, None) is None
-
-
-def test_a_typoed_channel_on_a_mixed_plate_fails_before_staging(tmp_path):
-    """A plate interrupted part way through its zip-up — some wells zipped,
-    some still folders — goes through its own staging path, which has its own
-    zero-match check. Measured: disabling that one left every test green; the
-    ZIP-layout test only reaches the other."""
-    plate = tmp_path / "plate"
-    plate.mkdir()
-    _zip(plate / "A01.zip", ["e_w1_A01_1_T01.tif"])
-    (plate / "B02").mkdir()
-    (plate / "B02" / "e_w1_B02_1_T01.tif").write_bytes(b"data")
-    before = _tree(tmp_path)
-
-    with pytest.raises(RuntimeError, match="matched zero images in 2 well"):
-        remote_runner.stage_local_zips(
-            plate, filename_schema=SCHEMA, filename_sep=SEP,
-            nuclear_token="w9", fluor_tokens=["w8"])
-    leftover = sorted(_tree(tmp_path) - before)
-    assert not [p for p in leftover if "allwell-stage" in p], leftover
 
 
 def test_a_staged_member_is_copied_a_chunk_at_a_time(tmp_path, monkeypatch):

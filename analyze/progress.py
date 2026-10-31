@@ -72,7 +72,7 @@ _STAGE_PHASES = {
 
 
 def _counted(verb: str, done: int, total: int, noun: str = "wells") -> str:
-    """``"Grouping 3 / 40 wells  (7%)"`` — one spelling for every counted phase.
+    """``"Uploading 3 / 40 wells  (7%)"`` — one spelling for every counted phase.
 
     A total of zero means the phase's population is not known yet rather than
     that it is empty, so the phrase counts up without a denominator instead of
@@ -264,16 +264,16 @@ class AnalyzeProgressMixin:
         if phase == _PHASE_PREPARE:
             return "Preparing…"
         if phase == _PHASE_GROUP:
-            return _counted("Grouping", int(getattr(self, "_zipper_done", 0)),
+            return _counted("Reading", int(getattr(self, "_zipper_done", 0)),
                             self._dashboard.overall_maximum())
         if phase == _PHASE_GROUPED:
             # Staging rewrites every archive before the first byte is sent, and
             # on a large plate that is minutes — so the remote wording names the
             # upload it is preparing rather than a pipeline that will not start
             # until the scheduler says so.
-            return ("Grouped — preparing the upload…"
+            return ("Ready — preparing the upload…"
                     if getattr(self, "_run_remote", False)
-                    else "Grouped — starting the pipeline…")
+                    else "Ready — starting the pipeline…")
         if phase == _PHASE_UPLOAD:
             done, total = self._dashboard.stage_progress("upload")
             return _counted("Uploading", done, total)
@@ -565,15 +565,17 @@ class AnalyzeProgressMixin:
         self._stop_scheduler_timer()
 
     def _apply_grouping_event(self, kind: str, payload: object) -> None:
-        """Render the grouping phase's own events onto the dashboard.
+        """Render the Ready stage's events onto the dashboard.
 
-        ``zipper_start`` opens the Group stage with the well count it is about
-        to cover, ``zipper_well`` advances it one well, and ``zipper_done``
-        closes it and hands the run to the pipeline. ``stage_total`` gives one
+        Nothing is grouped: the input is already one archive per well. The
+        events keep their historical ``zipper_*`` names and announce the wells
+        the resolved input holds — ``zipper_start`` opens the Ready stage with
+        the well count, ``zipper_well`` marks one well ready, and
+        ``zipper_done`` hands the run to the pipeline. ``stage_total`` gives one
         rail row a denominator of its own, for a stage whose population differs
         from the run's (see
         :meth:`widgets.run_dashboard.RunDashboard.set_stage_total`) — on a
-        remote run Group and Download span the whole plate while the stages
+        remote run Ready and Download span the whole plate while the stages
         between them only ever see the wells the upload split sent.
 
         All four live here rather than in the tab's polling loop because they

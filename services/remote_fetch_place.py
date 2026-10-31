@@ -131,8 +131,9 @@ def local_output_mb(run, well: str) -> float | None:
     """How much of *well*'s fetched output is in place locally, in MB, or ``None`` when none of it is.
 
     For the "zip" half of the end-of-run retry's report, which is what paints a well downloaded on the plate. The
-    output is the zip itself in ZIP/FLAT mode, its extraction ``<well>_out/`` in FOLDER mode, and nothing at all
-    under CSV-only — and reporting only the first left a well rescued in either of the others uncoloured for good.
+    output is the zip itself, nothing at all under CSV-only, or — on a plate an earlier version fetched from a
+    folder-input run — its extraction ``<well>_out/``, which a resume of that plate must still count as in place
+    rather than download again. Reporting only the zip left a well rescued in either of the others uncoloured.
     """
     from services.remote_run_state import OutputFilter
     from util.disk_space import directory_bytes

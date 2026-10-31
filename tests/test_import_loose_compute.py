@@ -222,15 +222,13 @@ def test_convert_to_new_destination_callback_invocations_are_not_corrupted(tmp_p
 
 def test_convert_in_place_writes_real_zips_not_bare_folders(tmp_path):
     """Regression for the reported "sits stuck, no zips made" bug: apply.py's
-    convert_in_place() used to call
-    services.input_resolution_service._consolidate_mixed_to_zips after
-    run_zipper, which is a documented no-op when zero zips already exist —
-    exactly the state after a fresh pipeline/well_plate_zipper.py run (it only ever
-    produces per-well folders, never zips). Every well was left as a bare
-    folder forever, with the run still reporting success. This test drives
-    the real subprocess-backed run_zipper (stdlib-only, no imaging stack, the
-    same real path tests/test_loose_in_folder.py exercises) end to end and
-    asserts actual .zip files land on disk."""
+    convert_in_place() used to finish with a consolidation helper that is a
+    no-op when zero zips already exist — exactly the state after a fresh
+    pipeline/well_plate_zipper.py run (it only ever produces per-well folders,
+    never zips). Every well was left as a bare folder forever, with the run
+    still reporting success. This test drives the real subprocess-backed
+    run_zipper (stdlib-only, no imaging stack) end to end and asserts actual
+    .zip files land on disk."""
     src = tmp_path / "loose"
     _write_loose(src, ["A01", "B02", "C03"], timepoints=("0h", "24h"))
 
@@ -238,7 +236,7 @@ def test_convert_in_place_writes_real_zips_not_bare_folders(tmp_path):
 
     assert "3 per-well zip(s)" in summary
     for well in ("A01", "B02", "C03"):
-        zip_path = src / f"{well}.zip"
+        zip_path = src / "in" / f"{well}.zip"
         assert zip_path.exists(), f"{well}: expected {zip_path} on disk, found a bare folder instead"
         assert not (src / well).exists()  # folder consumed by the zip step
         with zipfile.ZipFile(zip_path) as zf:
@@ -270,7 +268,7 @@ def test_convert_in_place_with_move_source_tifs_deletes_originals(tmp_path):
 
     assert "2 per-well zip(s)" in summary
     for well in ("A01", "B02"):
-        zip_path = src / f"{well}.zip"
+        zip_path = src / "in" / f"{well}.zip"
         assert zip_path.exists()
         with zipfile.ZipFile(zip_path) as zf:
             members = set(zf.namelist())
@@ -289,12 +287,56 @@ def test_convert_in_place_is_idempotent_on_rerun(tmp_path):
     _write_loose(src, ["A01"], timepoints=("0h",))
 
     il_apply.convert_in_place(src, filename_schema=SCHEMA, filename_sep=SEP)
-    first_mtime = (src / "A01.zip").stat().st_mtime_ns
+    first_mtime = (src / "in" / "A01.zip").stat().st_mtime_ns
 
     summary = il_apply.convert_in_place(src, filename_schema=SCHEMA, filename_sep=SEP)
 
     assert "0 per-well zip(s)" in summary
-    assert (src / "A01.zip").stat().st_mtime_ns == first_mtime
+    assert (src / "in" / "A01.zip").stat().st_mtime_ns == first_mtime
+    assert not (src / "A01.zip").exists()
+
+
+def test_an_in_place_result_is_runnable_analyze_input(tmp_path):
+    """The bug this layout fixes: the archives landed beside the source, in a
+    folder Analyze refuses (it reads a folder named ``in`` or one containing
+    ``in/``), under the page's own "Open in Analyze" button."""
+    from services.input_resolution_service import plan_input_layout
+
+    src = tmp_path / "myplate"
+    _write_loose(src, ["A01", "B02"], timepoints=("0h",))
+    il_apply.convert_in_place(src, filename_schema=SCHEMA, filename_sep=SEP,
+                              move_source_tifs=True)
+
+    plan = plan_input_layout(src)
+    assert plan.runnable, plan.message
+    assert plan.input_dir == src / "in" and plan.output_dir == src / "out"
+
+
+def test_an_in_place_run_on_a_folder_named_in_leaves_the_archives_there(tmp_path):
+    src = tmp_path / "plate" / "in"
+    _write_loose(src, ["A01"], timepoints=("0h",))
+    il_apply.convert_in_place(src, filename_schema=SCHEMA, filename_sep=SEP)
+    assert (src / "A01.zip").is_file() and not (src / "in").exists()
+
+
+def test_an_archive_already_in_in_is_never_overwritten(tmp_path):
+    """A new archive whose name is taken in ``in/`` stays beside the source
+    and the run fails naming it — replacing it would swap one plate's well for
+    another's."""
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01", "B02"], timepoints=("0h",))
+    (src / "in").mkdir()
+    with zipfile.ZipFile(src / "in" / "Z.zip", "w") as zf:
+        zf.writestr("x", b"x")
+    for well in ("A01", "B02"):
+        (src / f"{well}.zip").write_bytes(b"new")
+    (src / "in" / "B02.zip").write_bytes(b"old")
+
+    with pytest.raises(ValueError, match="B02.zip"):
+        il_apply._move_archives_into_in(src, log_fn=lambda _m: None)
+    assert (src / "in" / "B02.zip").read_bytes() == b"old"
+    assert (src / "B02.zip").read_bytes() == b"new"
+    assert (src / "in" / "A01.zip").read_bytes() == b"new"
 
 
 def test_zip_well_folders_reports_done_for_an_already_zipped_well(tmp_path):

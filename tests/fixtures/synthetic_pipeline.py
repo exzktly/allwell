@@ -135,6 +135,39 @@ def write_synthetic_fov(
     return nuclear_path, fluor_path
 
 
+def write_synthetic_well_zip(
+    parent: Path,
+    *,
+    well: str = "A01",
+    n_fovs: int = 2,
+    timepoint: str = "0",
+    nuclear_token: str = "DAPI",
+    fluor_token: str = "GFP",
+    sep: str = "_",
+) -> Path:
+    """Write ``parent/<well>.zip`` holding ``n_fovs`` FOVs, each a nuclear +
+    fluor TIFF named per the default 5-field schema — the pipeline's one input
+    layout. Returns the archive.
+
+    Used by the directory-level end-to-end test (``process_well_zip_task``),
+    which discovers FOV groups in the archive, segments each, and assembles one
+    per-well CSV.
+    """
+    import shutil
+    import zipfile
+
+    staging = Path(parent) / f"_stage_{well}"
+    folder = write_synthetic_well_folder(
+        staging, well=well, n_fovs=n_fovs, timepoint=timepoint,
+        nuclear_token=nuclear_token, fluor_token=fluor_token, sep=sep)
+    archive = Path(parent) / f"{well}.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        for path in sorted(folder.iterdir()):
+            zf.write(path, arcname=path.name)
+    shutil.rmtree(staging)
+    return archive
+
+
 def write_synthetic_well_folder(
     parent: Path,
     *,
@@ -147,10 +180,7 @@ def write_synthetic_well_folder(
 ) -> Path:
     """Write a per-well folder ``parent/<well>/`` with ``n_fovs`` FOVs, each a
     nuclear + fluor TIFF named per the default 5-field schema. Returns the folder.
-
-    Used by the directory-level end-to-end test (``process_well_folder_task``),
-    which discovers FOV groups in the folder, segments each, and assembles one
-    per-well CSV.
+    :func:`write_synthetic_well_zip` packs one into the archive a run reads.
     """
     folder = Path(parent) / well
     folder.mkdir(parents=True, exist_ok=True)

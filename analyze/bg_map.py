@@ -398,9 +398,7 @@ class AnalyzeBackgroundMapMixin:
             return list(_ALL_WELLS)
         wells: list[str] = []
         with swallow("listing the plate's wells for the pairing editor"):
-            wells = iter_all_well_tokens(
-                Path(raw), filename_schema=self._build_schema_arg(),
-                filename_sep=self._filename_sep())
+            wells = iter_all_well_tokens(Path(raw))
         return wells or list(_ALL_WELLS)
 
     # ── the editor window ────────────────────────────────────────────────
@@ -1076,12 +1074,7 @@ class AnalyzeBackgroundMapMixin:
             # asked. The pipeline refuses the same two things at run start.
             return None
         input_dir = Path(self._input_edit.text().strip())
-        sep = self._schema_picker.separator()
-        schema = [f.strip().lower()
-                  for f in self._build_schema_arg().split(":") if f.strip()]
-        missing = [w for w in wells
-                   if not well_present_in_input(input_dir, w, schema=schema,
-                                                sep=sep)]
+        missing = [w for w in wells if not well_present_in_input(input_dir, w)]
         if missing:
             label = ", ".join(f"'{w}'" for w in missing)
             return (f"Background well {label} was not found in the input folder."

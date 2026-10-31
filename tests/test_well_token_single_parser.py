@@ -195,7 +195,6 @@ def test_every_reader_of_the_field_sees_the_same_wells(tmp_path):
     reachable without a GUI or a remote host and holds them against it.
     """
     from pipeline.empty_well import BlankGroups
-    from services.input_resolution_service import _blank_well_tokens
     from util.well_token import blank_wells_for_run, split_background_wells
 
     field = "H01:H03"
@@ -208,5 +207,3 @@ def test_every_reader_of_the_field_sees_the_same_wells(tmp_path):
 
     # The union both flags feed, which is what staging and the hold-out read.
     assert blank_wells_for_run(field, "") == expected
-    # And the incremental-scope reader, which had its own regex once.
-    assert _blank_well_tokens({"background_well": field}) == set(expected)

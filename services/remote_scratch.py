@@ -57,7 +57,7 @@ def _well_zips_in(input_dir: Path):
 
     **An archive is a file.** A *directory* named ``A01.zip`` — what an expander
     names an archive it has unpacked in place — matched ``glob("*.zip")``, so
-    this said yes to it while the Analyze planner's ``has_well_zip`` says no.
+    this said yes to it while the Analyze planner says no.
     Those two have to agree: this generator is the remote side's whole answer,
     feeding the mode detector, the staging set, the rollback set and the
     mixed-mode branch, so disagreeing meant the planner refused a layout the

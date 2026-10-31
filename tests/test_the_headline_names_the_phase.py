@@ -93,7 +93,7 @@ def test_a_scheduler_wait_is_not_still_called_grouping(qapp):
     host._apply_progress_event("sched", ("waiting", "", "srun -p gpu --gres=gpu:1"))
 
     line = _headline(host)
-    assert "Grouped" not in line, line
+    assert "Ready —" not in line, line
     assert "segmentation" not in line, line
     assert "scheduler" in line.lower(), line
 
@@ -117,12 +117,12 @@ def test_being_granted_a_node_says_the_pipeline_is_starting(qapp):
 
 # ── the phases either side of it ─────────────────────────────────────────────
 
-def test_grouping_counts_the_wells_it_has_grouped(qapp):
+def test_the_ready_stage_counts_the_wells_it_has_read(qapp):
     host = _host(qapp)
     host._apply_grouping_event("zipper_start", 4)
-    assert _headline(host) == "Grouping 0 / 4 wells  (0%)"
+    assert _headline(host) == "Reading 0 / 4 wells  (0%)"
     host._apply_grouping_event("zipper_well", "A01")
-    assert _headline(host) == "Grouping 1 / 4 wells  (25%)"
+    assert _headline(host) == "Reading 1 / 4 wells  (25%)"
 
 
 def test_a_local_run_is_not_told_it_is_preparing_an_upload(qapp):
@@ -281,4 +281,4 @@ def test_the_next_run_gets_its_headline_back(qapp):
     host._dashboard.reset(remote=True, total=4)
     host._reset_run_phase(remote=True)
     host._apply_grouping_event("zipper_start", 4)
-    assert _headline(host) == "Grouping 0 / 4 wells  (0%)"
+    assert _headline(host) == "Reading 0 / 4 wells  (0%)"

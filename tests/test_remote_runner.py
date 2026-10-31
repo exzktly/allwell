@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import tempfile
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -34,7 +33,6 @@ from services.remote_conda import (
 from services.remote_transport import _rsync_ssh_transport
 from services.remote_upload import DatasetCache
 from services.remote_staging import (
-    _detect_local_input_mode,
     _member_matches,
     _required_tokens,
 )
@@ -42,7 +40,6 @@ from services.remote_fetch import Fetcher
 from tests._repo_scan import parse_source
 from services.remote_fetch import FetchedOutputVerifier
 from services import remote_fetch
-from services import remote_staging
 from services import remote_scratch
 from services import remote_scratch
 
@@ -78,64 +75,61 @@ def _make_well_zip(parent: Path, name: str, members: list[str]) -> Path:
     return p
 
 
-# ── input-mode detection ────────────────────────────────────────────────────
+# ── staging takes per-well zips and refuses everything else ─────────────────
 
 
-def test_detect_zip_mode(tmp_path):
-    _make_well_zip(tmp_path, "A01.zip", ["NIR_F001.tif", "GFP_F001.tif"])
-    _make_well_zip(tmp_path, "B02.zip", ["NIR_F001.tif"])
-    assert _detect_local_input_mode(tmp_path) is LocalInputMode.ZIP
-
-
-def test_detect_folder_mode(tmp_path):
-    (tmp_path / "A01").mkdir()
-    (tmp_path / "B02").mkdir()
-    (tmp_path / "A01" / "NIR_F001.tif").write_bytes(b"\0")
-    assert _detect_local_input_mode(tmp_path) is LocalInputMode.FOLDER
-
-
-def test_detect_flat_mode(tmp_path):
+def _flat(tmp_path):
     (tmp_path / "Exp_NIR_A01_F001.tif").write_bytes(b"\0")
     (tmp_path / "Exp_GFP_A01_F001.tif").write_bytes(b"\0")
-    assert _detect_local_input_mode(tmp_path) is LocalInputMode.FLAT
 
 
-def test_detect_mixed_mode_zips_plus_folders_for_other_wells(tmp_path):
-    """v5.2.21: input dir has zips for some wells AND folders for
-    DIFFERENT wells — the signature of a previous run that died
-    partway through compress_input_well_folders. Must be recognised
-    as MIXED so the staging path can resume."""
+def _folders(tmp_path):
+    for w in ("A01", "B02"):
+        (tmp_path / w).mkdir()
+        (tmp_path / w / "NIR_F001.tif").write_bytes(b"\0")
+
+
+def _mixed(tmp_path):
+    """Zips for some wells, folders of images for others: a remote run used to
+    zip the folders up and run them; now it would skip them silently."""
     _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
-    _make_well_zip(tmp_path, "A02.zip", ["NIR.tif"])
     (tmp_path / "B03").mkdir()
     (tmp_path / "B03" / "NIR.tif").write_bytes(b"\0")
-    (tmp_path / "B04").mkdir()
-    (tmp_path / "B04" / "NIR.tif").write_bytes(b"\0")
-    assert _detect_local_input_mode(tmp_path) is LocalInputMode.MIXED
 
 
-def test_detect_mode_empty_leftover_folders_dont_trigger_mixed(tmp_path):
-    """Compress-and-delete sometimes leaves empty folder husks (the
-    rename completed, the rmtree raced with another process). An
-    empty folder should NOT trigger MIXED detection — it's just
-    cleanup debris, not real loose content."""
-    _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
-    (tmp_path / "A01").mkdir()  # empty husk left behind
-    (tmp_path / "B02").mkdir()  # another empty husk
-    assert _detect_local_input_mode(tmp_path) is LocalInputMode.ZIP
+def _empty(tmp_path):
+    pass
 
 
-def test_detect_mode_folder_with_existing_zip_for_same_well_is_zip(tmp_path):
-    """If a well has BOTH a zip AND a folder of TIFs (the truly
-    half-finished case where the zip was written but the folder
-    rmtree never ran), the zip wins — same well, no extra work to do
-    on the leftover folder. MIXED should be reserved for wells with
-    NO existing zip."""
+@pytest.mark.parametrize("build, said", [
+    (_flat, "2 loose image(s) at the top level"),
+    (_folders, "2 well folder(s) with no <WELL>.zip: A01/ (1 image(s)), B02/"),
+    (_mixed, "1 well folder(s) with no <WELL>.zip: B03/"),
+    (_empty, "no per-well <WELL>.zip archives"),
+])
+def test_staging_refuses_input_it_would_not_upload(tmp_path, build, said):
+    build(tmp_path)
+    before = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
+    with pytest.raises(RuntimeError) as refused:
+        stage_local_zips(tmp_path, filename_schema="experiment:channel:well:fov",
+                         filename_sep="_")
+    assert said in str(refused.value), str(refused.value)
+    assert "Datasets → Zip loose folder" in str(refused.value)
+    assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")) == before, (
+        "a refused staging changed the user's input")
+
+
+def test_staging_takes_a_plate_whose_leftover_folders_twin_their_archives(tmp_path):
+    """An empty husk, and a folder beside its own well's archive, are what
+    earlier versions left behind; neither stops a run."""
     _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
     (tmp_path / "A01").mkdir()
     (tmp_path / "A01" / "NIR.tif").write_bytes(b"\0")
-    # No OTHER wells with folders only — so this is ZIP mode.
-    assert _detect_local_input_mode(tmp_path) is LocalInputMode.ZIP
+    (tmp_path / "B02").mkdir()                      # empty husk
+    zipped = stage_local_zips(tmp_path, filename_schema="experiment:channel:well:fov",
+                              filename_sep="_")
+    assert [p.name for p in zipped.well_zips] == ["A01.zip"]
+    assert zipped.mode is LocalInputMode.ZIP
 
 
 # ── stage_local_zips: zip-input fast path ───────────────────────────────────
@@ -153,187 +147,6 @@ def test_stage_local_zips_zip_input_passthrough(tmp_path):
     assert zipped.zip_dir == tmp_path  # no copy
     assert len(zipped.well_zips) == 2
     assert zipped.cleanup is None  # no temp dir to clean up
-
-
-def test_stage_local_zips_mixed_mode_resumes_from_leftover_folders(tmp_path):
-    """v5.2.21: a dropped-drive interrupted a prior local
-    compress_input_well_folders run, leaving the input dir with some
-    completed zips and some unzipped folders. The staging step must
-    pick this up as a resume — zip the leftover folders and combine
-    with the existing zips for the union of wells, not silently drop
-    the folders by picking ZIP mode.
-
-    v5.2.24: new zips now persist in the input dir so the user can
-    see them and so the next run picks them up as plain ZIP mode."""
-    _make_well_zip(tmp_path, "A01.zip", ["A01_NIR_F001.tif"])
-    _make_well_zip(tmp_path, "A02.zip", ["A02_NIR_F001.tif"])
-    (tmp_path / "B03").mkdir()
-    (tmp_path / "B03" / "B03_NIR_F001.tif").write_bytes(b"\xff" * 64)
-    (tmp_path / "B03" / "B03_GFP_F001.tif").write_bytes(b"\xff" * 64)
-    (tmp_path / "B04").mkdir()
-    (tmp_path / "B04" / "B04_NIR_F001.tif").write_bytes(b"\xff" * 64)
-
-    logs: list[str] = []
-    zipped = stage_local_zips(
-        tmp_path,
-        filename_schema="well:channel:fov",
-        filename_sep="_",
-        log_fn=logs.append,
-    )
-
-    assert zipped.mode is LocalInputMode.MIXED
-    # Four wells total: 2 existing zips + 2 newly-zipped from folders.
-    assert len(zipped.well_zips) == 4
-    names = sorted(p.name for p in zipped.well_zips)
-    assert names == ["A01.zip", "A02.zip", "B03.zip", "B04.zip"]
-    # The resume log line must surface so the user knows what's
-    # happening (and which wells are being newly zipped).
-    blob = "".join(logs)
-    assert "resume detected" in blob
-    assert "B03" in blob
-    assert "B04" in blob
-    # v5.2.24: the log says where the new zips landed.
-    assert "persisted to input dir" in blob
-
-    # v5.2.24: ALL zips — existing AND newly-zipped — live in the
-    # user's input dir, not in a throwaway tempdir.
-    assert zipped.zip_dir == tmp_path
-    for p in zipped.well_zips:
-        assert p.parent == tmp_path, f"{p} should be in input dir"
-    # Concrete file existence check, post-call.
-    assert (tmp_path / "B03.zip").exists()
-    assert (tmp_path / "B04.zip").exists()
-
-    # New zips actually contain the source TIFs.
-    b03 = tmp_path / "B03.zip"
-    with zipfile.ZipFile(b03, "r") as zf:
-        assert sorted(zf.namelist()) == ["B03_GFP_F001.tif", "B03_NIR_F001.tif"]
-
-    # No tempdir was created → no cleanup callback needed.
-    assert zipped.cleanup is None
-    # Each source folder is removed the moment its own archive is published,
-    # so the input dir never holds two full copies of a well at once. The
-    # archive beside it is complete — `_zip_well_folder` publishes atomically.
-    assert not (tmp_path / "B03").exists()
-    assert not (tmp_path / "B04").exists()
-    assert "folder removed" in blob
-
-
-def test_stage_local_zips_mixed_mode_persisted_zips_survive_for_next_run(tmp_path):
-    """v5.2.24: a second call to stage_local_zips after the first
-    one wrote new zips must see plain ZIP mode (not MIXED) — the
-    persistence is what makes the resume self-healing."""
-    _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
-    (tmp_path / "B02").mkdir()
-    (tmp_path / "B02" / "NIR.tif").write_bytes(b"\xff" * 32)
-
-    # First call: writes B02.zip into tmp_path.
-    first = stage_local_zips(
-        tmp_path,
-        filename_schema="well:channel",
-        filename_sep="_",
-    )
-    assert first.mode is LocalInputMode.MIXED
-    assert (tmp_path / "B02.zip").exists()
-
-    # Second call: same input dir. The detector now sees zips for
-    # both wells, so MIXED → ZIP. No re-zipping happens (the
-    # existing zip wins per v5.2.21 same-well precedence).
-    second = stage_local_zips(
-        tmp_path,
-        filename_schema="well:channel",
-        filename_sep="_",
-    )
-    assert second.mode is LocalInputMode.ZIP
-    assert second.cleanup is None
-    assert set(p.name for p in second.well_zips) == {"A01.zip", "B02.zip"}
-
-
-def test_stage_local_zips_mixed_mode_preserves_user_zips_on_error(tmp_path):
-    """If _stage_mixed_mode raises mid-zip (e.g. PermissionError on
-    a folder), the user's pre-existing zips MUST be untouched. Any
-    successfully-written new zips persist (resume behavior). No
-    leaked staging tempdir."""
-    _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
-    original_bytes = (tmp_path / "A01.zip").read_bytes()
-    (tmp_path / "B02").mkdir()
-    (tmp_path / "B02" / "NIR.tif").write_bytes(b"\xff" * 32)
-
-
-    def fake_zip_well_folder(folder: Path, out_zip: Path) -> int:
-        raise PermissionError("drive yanked mid-zip")
-
-    original = remote_staging._zip_well_folder
-    remote_staging._zip_well_folder = fake_zip_well_folder
-    try:
-        with pytest.raises(PermissionError, match="drive yanked"):
-            stage_local_zips(
-                tmp_path,
-                filename_schema="well:channel",
-                filename_sep="_",
-            )
-    finally:
-        remote_staging._zip_well_folder = original
-
-    # User's existing zip is byte-for-byte unchanged.
-    assert (tmp_path / "A01.zip").read_bytes() == original_bytes
-    # Folder is untouched.
-    assert (tmp_path / "B02" / "NIR.tif").exists()
-    # No partial zip survived (atomic rename inside _zip_well_folder).
-    assert not (tmp_path / "B02.zip").exists()
-    # No leaked staging dirs in /tmp.
-    leaked = list(Path(tempfile.gettempdir()).glob("allwell-resume-*"))
-    assert not leaked, f"staging dir leaked on error: {leaked}"
-
-
-def test_stage_local_zips_mixed_mode_with_fluor_filter_still_copies_to_tempdir(tmp_path):
-    """v5.2.18 invariant: with a channel filter, the filter must NOT
-    mutate the user's input dir. New zips still land in input_dir
-    (for the user to see), but the FILTERED versions go into a temp
-    staging dir and the originals stay full-channel."""
-    _make_well_zip(
-        tmp_path, "A01.zip",
-        ["A01_NIR.tif", "A01_GFP.tif", "A01_mCherry.tif"],
-    )
-    a01_before = (tmp_path / "A01.zip").read_bytes()
-    (tmp_path / "B02").mkdir()
-    (tmp_path / "B02" / "B02_NIR.tif").write_bytes(b"\xff" * 32)
-    (tmp_path / "B02" / "B02_GFP.tif").write_bytes(b"\xff" * 32)
-    (tmp_path / "B02" / "B02_mCherry.tif").write_bytes(b"\xff" * 32)
-
-    zipped = stage_local_zips(
-        tmp_path,
-        filename_schema="well:channel",
-        filename_sep="_",
-        nuclear_token="NIR",
-        fluor_tokens=["GFP"],  # drops mCherry
-    )
-
-    # The newly-zipped well lives in input_dir AND retains full
-    # channel set (filter ran on a copy, not on this file).
-    b02_in_input = tmp_path / "B02.zip"
-    assert b02_in_input.exists()
-    with zipfile.ZipFile(b02_in_input, "r") as zf:
-        assert "B02_mCherry.tif" in zf.namelist()
-
-    # User's existing A01.zip in input_dir is byte-for-byte unchanged.
-    assert (tmp_path / "A01.zip").read_bytes() == a01_before
-
-    # The returned well_zips point at the FILTERED copies in the
-    # temp staging dir.
-    assert zipped.zip_dir != tmp_path
-    assert zipped.cleanup is not None
-    for p in zipped.well_zips:
-        assert p.parent == zipped.zip_dir
-    # Filtered copies dropped mCherry.
-    with zipfile.ZipFile(zipped.zip_dir / "B02.zip", "r") as zf:
-        assert "B02_mCherry.tif" not in zf.namelist()
-
-    zipped.cleanup()
-    assert not zipped.zip_dir.exists()
-    # Input dir survives cleanup.
-    assert (tmp_path / "A01.zip").exists()
-    assert (tmp_path / "B02.zip").exists()
 
 
 # ── selective channel staging ───────────────────────────────────────────────
@@ -1882,7 +1695,7 @@ def test_verify_expects_out_zip_even_in_folder_mode(host, tmp_path):
         remote_output_dir="/r/out",
         remote_pidfile="/r/pid",
         local_output_dir=tmp_path,
-        local_input_mode=LocalInputMode.FOLDER,
+        local_input_mode=LocalInputMode.ZIP,
     )
     run.expected_wells = {"A01", "B02"}
     runner._run = run
@@ -2088,10 +1901,9 @@ def test_required_files_list_is_what_we_promised():
         # Per-FOV resume checkpoints, keyed on the output directory and the
         # settings so one plate cannot resume another's intermediates.
         "pipeline/fov_checkpoint.py",
-        # Which of the three input layouts a plate is in; process_microscopy
+        # The zips-only input check (and its refusal); process_microscopy
     # imports it at module scope.
     "pipeline/input_layout.py",
-    "pipeline/mixed_input.py",
     "pipeline/incremental_keys.py",
         "pipeline/well_skip.py",
         # The per-worker process settings `_worker_init` makes; the re-anchoring's pool runs it too.
@@ -3565,15 +3377,15 @@ def test_close_remote_job_swallows_ssh_errors():
         r.close_remote_job()  # must not raise
 
 
-def test_retry_repulls_out_zip_for_folder_mode(host, tmp_path, monkeypatch):
-    """Audit G2 — a FOLDER + FULL run whose out-zip failed to land must still
-    be re-pulled. ``_verify_local_manifest`` requires ``{well}_out.zip`` for
-    every FULL run (FOLDER included), so if ``_retry_missing_wells`` skips the
-    zip re-pull for FOLDER, verify→retry→verify never converges and remote
-    cleanup is skipped forever."""
+def test_retry_repulls_out_zip_for_a_full_run(host, tmp_path, monkeypatch):
+    """Audit G2 — a FULL run whose out-zip failed to land must still be
+    re-pulled. ``_verify_local_manifest`` requires ``{well}_out.zip`` for every
+    FULL run, so if ``_retry_missing_wells`` skipped the zip re-pull,
+    verify→retry→verify would never converge and remote cleanup would be
+    skipped forever."""
     import services.remote_runner as rr
     run = _make_run(tmp_path)
-    run.local_input_mode = rr.LocalInputMode.FOLDER
+    run.local_input_mode = rr.LocalInputMode.ZIP
     run.output_filter = rr.OutputFilter.FULL
     run.expected_wells = {"A01"}
     runner = rr.RemoteRunner(host)
@@ -3594,7 +3406,7 @@ def test_retry_repulls_out_zip_for_folder_mode(host, tmp_path, monkeypatch):
     runner._output_verifier()._retry_missing_wells(["missing A01_out.zip locally"], log=lambda _m: None)
 
     assert any("A01_out.zip" in p for p in pulled), \
-        "FOLDER-mode out-zip must be re-pulled (was silently skipped)"
+        "a FULL run's missing out-zip must be re-pulled (was once silently skipped)"
 
 
 def test_close_remote_job_warns_on_ssh_failure():

@@ -59,7 +59,7 @@ def plate(tmp_path):
 
 def _resolver_for(plate):
     def _resolve(opts, log_q, **kw):
-        return (plate / "in", plate / "out", None)
+        return (plate / "in", plate / "out")
     return _resolve
 
 

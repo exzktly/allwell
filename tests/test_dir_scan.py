@@ -46,8 +46,8 @@ def test_the_classification_is_the_one_pathlib_gives(tmp_path):
 
     ``Path.is_file`` follows symlinks, so a link to a file is a file and a
     dangling link is neither a file nor a directory — and a dangling ``*.tif``
-    link is not a hypothetical here: ``tif_files_in``'s docstring records one
-    reaching the zipper as an input image. ``DirEntry.is_file`` follows links
+    link is not a hypothetical here: one once reached the zipper as an input
+    image. ``DirEntry.is_file`` follows links
     too, which is why this holds; asserted rather than assumed because a
     ``follow_symlinks=False`` anywhere in the module would silently reclassify
     every link in a plate.

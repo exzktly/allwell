@@ -1839,7 +1839,11 @@ run uses the compute node's own disk: `/scratch` (where AWS ParallelCluster moun
 the node's NVMe drive), else `$SLURM_TMPDIR`, as long as it is a local disk with at
 least 20 GB free; `/scratch` counts only when it is a disk of its own, not a plain
 folder on the node's system disk. Each batch's log says which disk and how much was
-free, or why none qualified. That keeps the run's heavy temporary files off the cluster's shared
+free, or why none qualified. When the disk check then finds that the node's disk
+cannot hold the run's own estimate but the run's folder in the staging directory can,
+the run uses that folder instead and its log says so (`Scratch moves off the node's
+own disk …`). When a remote run is refused for scratch space, the message names this
+field — the Analyze form's own *Scratch folder* is not sent to a host. That keeps the run's heavy temporary files off the cluster's shared
 home folder, which on ParallelCluster is served by the same head node your
 connection and the run's heartbeat go through — a run writing its scratch there
 can stall the heartbeat ("did not answer within 75s"). It never uses the node's

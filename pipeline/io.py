@@ -31,6 +31,7 @@ import os
 import shutil
 import time
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 from util.well_token import safe_well
@@ -139,6 +140,9 @@ def publish_scratch_args(scratch_dir: Path | None, fallback_dir: Path | None) ->
 
 
 _NODE_LOCAL_DECIDED = False
+#: The node-local folder this process chose (:func:`_node_local_scratch_once`), so the scratch preflight can tell it
+#: from a folder the run was given; ``None`` in a worker, which inherits the choice rather than making it.
+_NODE_LOCAL_FOLDER: Path | None = None
 
 #: Set by the process that decided a Slurm job's scratch stays off the node's own disk. The workers it spawns
 #: inherit the environment but not this module's state, so without it each would decide again, against a disk whose
@@ -152,7 +156,7 @@ def _node_local_scratch_once() -> Path | None:
     A folder found is written to ``$ALLWELL_SCRATCH_DIR``, which every later :func:`scratch_base_for` reads first
     and every worker process inherits; no folder is written to :data:`NODE_SCRATCH_DECLINED_ENV`, which the workers
     inherit just the same. Either way a run never splits its scratch across two disks."""
-    global _NODE_LOCAL_DECIDED
+    global _NODE_LOCAL_DECIDED, _NODE_LOCAL_FOLDER
     if _NODE_LOCAL_DECIDED or os.environ.get(NODE_SCRATCH_DECLINED_ENV, "").strip():
         return None
     _NODE_LOCAL_DECIDED = True
@@ -161,6 +165,7 @@ def _node_local_scratch_once() -> Path | None:
     folder, reason = node_local_scratch()
     if folder is not None:
         os.environ[SCRATCH_DIR_ENV] = str(folder)
+        _NODE_LOCAL_FOLDER = folder
         log.info("Scratch on %s — a Slurm job with no scratch folder set; set the host's scratch folder in "
                  "Remotes to choose another", reason)
         return folder
@@ -221,6 +226,12 @@ def scratch_base_for(output_dir: Path) -> Path:
     local = _node_local_scratch_once()
     if local is not None:
         return local
+    return _shared_scratch_base(output_dir)
+
+
+def _shared_scratch_base(output_dir: Path) -> Path:
+    """:func:`scratch_base_for`'s rules 3 to 5: where the scratch goes when no folder is set and no node-local disk
+    is taken."""
     fallback = os.environ.get(SCRATCH_FALLBACK_ENV, "").strip()
     if fallback:
         try:
@@ -243,6 +254,39 @@ def scratch_base_for(output_dir: Path) -> Path:
         "Default" if on_the_desktop() else "Home", default_scratch_label(), output_dir,
     )
     return output_dir
+
+
+def _node_local_alternative(output_dir: Path) -> tuple[Path, Callable[[], None]] | None:
+    """``(base, move)`` when this run's scratch is the node-local disk this process chose: where the scratch would
+    go without it, and a callable that moves it there for this process and every worker it starts. ``None`` when
+    the scratch is a folder the run was given, or anything else this process did not choose.
+
+    The node-local choice is made against a fixed floor at the first :func:`scratch_base_for`, before the run's own
+    estimate exists; the scratch preflight, which has the estimate and runs before any well writes to the scratch,
+    uses this to leave a disk too small for the run (``pipeline.capacity._leave_a_disk_too_small``)."""
+    chosen = _NODE_LOCAL_FOLDER
+    if chosen is None or os.environ.get(SCRATCH_DIR_ENV, "").strip() != str(chosen):
+        return None
+
+    def _move() -> None:
+        global _NODE_LOCAL_FOLDER
+        os.environ.pop(SCRATCH_DIR_ENV, None)
+        os.environ[NODE_SCRATCH_DECLINED_ENV] = "1"
+        _NODE_LOCAL_FOLDER = None
+
+    return _shared_scratch_base(output_dir), _move
+
+
+def preflight_run_scratch(output_dir: Path, input_dir: Path, **kwargs) -> None:
+    """:func:`pipeline.capacity.preflight_scratch_for_run` on this run's scratch base, told the two things only this
+    module knows: whether that base is a node-local disk this process chose and may give up
+    (:func:`_node_local_alternative`), and whether the run was sent from the app to a host — the one caller of
+    ``--scratch_fallback_dir`` (:data:`SCRATCH_FALLBACK_ENV`) is the remote runner — whose scratch is set in Remotes,
+    not in the Analyze tab."""
+    preflight_scratch_for_run(
+        scratch_base_for(output_dir), input_dir, output_dir=output_dir,
+        alternative=lambda: _node_local_alternative(output_dir),
+        sent_to_a_host=bool(os.environ.get(SCRATCH_FALLBACK_ENV, "").strip()), **kwargs)
 
 
 # ---------------------------------------------------------------------------

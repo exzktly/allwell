@@ -166,7 +166,7 @@ from pipeline.io import (
     write_well_csv,
     incremental_done_fov_keys,
     OutputCapacityMonitor,
-    preflight_scratch_for_run,
+    preflight_run_scratch,
     merge_images_into_zip,
     merge_well_records,
     remove_directory,
@@ -3406,8 +3406,8 @@ def main() -> None:
     # holding the dataset (§ pipeline.io.scratch_base_for), so "there is plenty
     # of room" beside the inputs says nothing about the volume the run actually
     # writes its transient working set to.
-    preflight_scratch_for_run(
-        scratch_base_for(output_dir), input_dir,
+    preflight_run_scratch(
+        output_dir, input_dir,
         n_wells=len(well_zips) + len(well_folders),
         # ``fluor_tokens_for_quant`` already leads with the segmentation
         # channel (see ``quantified_channel_tokens``), so adding one for it
@@ -3417,7 +3417,6 @@ def main() -> None:
         workers=workers,
         allow_low_disk=bool(getattr(args, "allow_low_disk", False)),
         image_exts=_GROUP_IMAGE_EXTS,
-        output_dir=output_dir,
         count_groups=lambda: (
             len(_collect_available_fovs(
                 input_dir, filename_schema=":".join(schema), filename_sep=sep)) or 1

@@ -12880,7 +12880,25 @@ parent process supervises the per-well worker pool:
     the default, the app folder's `scratch/` beside an output dir on the same volume —
     the two needs are summed against one free figure, because checking either
     alone reports that the run fits when it does not. The resolved base is
-    logged on the `Scratch  :` line either way.
+    logged on the `Scratch  :` line either way. Its advice for moving the
+    scratch depends on who reads it (`capacity._MOVE_IT`): a run on this
+    computer is told `ALLWELL_SCRATCH_DIR` or the Analyze tab's *Scratch
+    folder*; a run the app sent to a host (`sent_to_a_host`, which
+    `pipeline.io.preflight_run_scratch` reads from `--scratch_fallback_dir`, a
+    flag only the remote runner passes) is told the host's *Remote scratch
+    dir*, because `_build_remote_argv` never sends the Analyze field.
+    `process_microscopy.main` calls it through `pipeline.io.preflight_run_scratch`,
+    which also lets it give up a node-local disk the run chose for itself
+    (`_node_local_alternative` → `capacity._leave_a_disk_too_small`): that disk
+    was taken against a fixed 20 GB floor at the first `scratch_base_for`,
+    before the well list and group count this estimate needs exist, so when the
+    shared default (`_shared_scratch_base`) holds more of the run than the node's
+    disk — all of it against not every well at once, or one well against none —
+    the run moves there, logging `Scratch moves off the node's own disk …`, and
+    `$ALLWELL_NODE_SCRATCH_DECLINED` keeps its workers there too. Nothing has
+    written to the scratch by then. A folder the run was given is never moved,
+    and a node disk that the shared default does not beat is kept, because it is
+    off the filesystem the run's heartbeat goes through.
   - **The mid-run projection.** `OutputCapacityMonitor`, fed one call per
     completed well by `_run_well_worker_pool`, measures the output actually
     written and projects the wells still to come. "Written" is the growth of the
@@ -14234,7 +14252,10 @@ and written to the environment the run's workers inherit: a folder to
 (`pipeline.io.NODE_SCRATCH_DECLINED_ENV`). So every later call and every worker
 process takes the parent's answer even as the disk fills or frees up; a worker
 deciding afresh would otherwise take a `/scratch` another job had made room on
-since, and split the run's scratch between two disks. `$TMPDIR` and the system
+since, and split the run's scratch between two disks. The 20 GB floor is fixed
+because the decision comes before the run's own estimate; the scratch preflight,
+which has it, moves the run back to the shared default when that holds more of
+the run (§ `pipeline/capacity.py`, the up-front preflight). `$TMPDIR` and the system
 temporary directory are never candidates: a login environment often sets
 `$TMPDIR` to `/tmp`, and without `--exclusive` the node's boot disk is shared with
 other jobs. The cost is the resume of a well a stopped or suspended run left

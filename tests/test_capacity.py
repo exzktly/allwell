@@ -395,11 +395,11 @@ def test_main_passes_the_real_channel_count(monkeypatch, tmp_path):
 
     seen = {}
 
-    def _spy(*_a, **kw):
-        seen.update(kw)
+    def _spy(*a, **kw):
+        seen.update(kw, args=a)
         raise SystemExit(99)
 
-    monkeypatch.setattr(pm, "preflight_scratch_for_run", _spy)
+    monkeypatch.setattr(pm, "preflight_run_scratch", _spy)
     (tmp_path / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
     monkeypatch.setattr(sys, "argv", [
         "process_microscopy.py",
@@ -412,6 +412,7 @@ def test_main_passes_the_real_channel_count(monkeypatch, tmp_path):
         pm.main()
     # w1594 + the four fluor tokens. Not six.
     assert seen["n_channels"] == 5
+    assert seen["args"] == (tmp_path / "out", tmp_path)     # the output folder, whose scratch it checks
 
 
 def test_the_refusal_quotes_the_figure_it_tested(monkeypatch):

@@ -38,6 +38,8 @@ from PySide6.QtWidgets import (
 )
 
 from services.remote_config import (
+    GRANTED_IDLE_RELEASE_MIN_RANGE,
+    GRANTED_TIME_LIMIT_H_RANGE,
     RemoteHost,
     delete_remote,
     load_remotes,
@@ -412,6 +414,43 @@ class RemoteFormDialog(QDialog):
         wait_row.addWidget(self._queue_wait_spin)
         wait_row.addStretch(1)
         sched_layout.addLayout(wait_row)
+
+        # The node "Request a node" keeps granted between runs (services.remote_hold): how long it stays at most,
+        # and how long it may sit unused. Both are per host (RemoteHost.granted_time_limit_h / granted_idle_release_min).
+        # The scheduler command's own --time is a different thing: it is one run's.
+        sched_layout.addWidget(QLabel("Granted node (Request a node in Manage Remotes)", self._scheduled_box))
+        limit_row = QHBoxLayout()
+        limit_row.setSpacing(6)
+        limit_row.addWidget(QLabel("Time limit", self._scheduled_box))
+        self._granted_limit_spin = QSpinBox(self._scheduled_box)
+        self._granted_limit_spin.setRange(*GRANTED_TIME_LIMIT_H_RANGE)
+        self._granted_limit_spin.setSuffix(" h")
+        self._granted_limit_spin.setValue(host.granted_time_limit_h)
+        self._granted_limit_spin.setToolTip(
+            "How long a node from \"Request a node\" stays granted at most. Slurm ends the node at this limit "
+            "even if a run is still going; a run that would not fit in the time left gets a fresh node instead. "
+            "If your cluster's partition allows less, its limit is used."
+        )
+        limit_row.addWidget(self._granted_limit_spin)
+        limit_row.addWidget(QLabel("Release when idle after", self._scheduled_box))
+        self._granted_idle_spin = QSpinBox(self._scheduled_box)
+        self._granted_idle_spin.setRange(*GRANTED_IDLE_RELEASE_MIN_RANGE)
+        self._granted_idle_spin.setSuffix(" min")
+        self._granted_idle_spin.setSpecialValueText("Never")
+        self._granted_idle_spin.setValue(host.granted_idle_release_min)
+        self._granted_idle_spin.setToolTip(
+            "A granted node that no run has used for this long is released. \"Never\" keeps it until you press "
+            "Release, quit All-Well, or the time limit runs out."
+        )
+        limit_row.addWidget(self._granted_idle_spin)
+        limit_row.addStretch(1)
+        sched_layout.addLayout(limit_row)
+        granted_hint = QLabel(
+            "A released node is powered down by the cluster on its own schedule (on AWS ParallelCluster, after its "
+            "scale-down idle time). A granted node is billed while idle.", self._scheduled_box)
+        granted_hint.setObjectName("Muted")
+        granted_hint.setWordWrap(True)
+        sched_layout.addWidget(granted_hint)
         main_form.addRow(self._scheduled_box)
 
         # Restore the last-fetched profiles for this host (cached locally) so
@@ -670,6 +709,8 @@ class RemoteFormDialog(QDialog):
             exclusive_node=self._exclusive_cb.isChecked(),
             jupyterhub_config_path=self._jhub_path_edit.text().strip(),
             queue_wait_timeout_min=self._queue_wait_spin.value(),
+            granted_time_limit_h=self._granted_limit_spin.value(),
+            granted_idle_release_min=self._granted_idle_spin.value(),
         )
 
     # ── compute-location toggle ────────────────────────────────────────────

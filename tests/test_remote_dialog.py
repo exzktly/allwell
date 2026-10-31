@@ -126,6 +126,29 @@ def test_form_result_host_round_trip(qtbot, isolated_config):
     assert host.extra_args == ("--workers", "8", "--tf_threads", "4")
 
 
+def test_form_granted_node_settings_reach_the_saved_host(qtbot, isolated_config):
+    """The two Granted node spin boxes show the host's values and what the user sets is what result_host() returns
+    (48 h and 7 min, neither a default, so a field that is built but not read back cannot pass)."""
+    dlg = RemoteFormDialog()
+    qtbot.addWidget(dlg)
+    assert dlg._granted_limit_spin.value() == 24
+    assert dlg._granted_idle_spin.value() == 30
+    dlg._name_edit.setText("dev")
+    dlg._ssh_alias_edit.setText("dev-box")
+    dlg._granted_limit_spin.setValue(48)
+    dlg._granted_idle_spin.setValue(7)
+    host = dlg.result_host()
+    assert (host.granted_time_limit_h, host.granted_idle_release_min) == (48, 7)
+
+    edit = RemoteFormDialog(host=RemoteHost(name="b", ssh_alias="b", granted_time_limit_h=72,
+                                            granted_idle_release_min=0))
+    qtbot.addWidget(edit)
+    assert edit._granted_limit_spin.value() == 72
+    assert edit._granted_idle_spin.value() == 0
+    assert edit._granted_idle_spin.specialValueText() == "Never"
+    assert edit.result_host().granted_idle_release_min == 0
+
+
 # ── ManageRemotesDialog ─────────────────────────────────────────────────────
 
 

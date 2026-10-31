@@ -82,3 +82,50 @@ def test_a_reference_tile_a_step_off_leaves_out_every_address_it_names_wrongly(r
     assert edge == [(1, 5), (2, 3), (3, 1), (4, -1), (5, -3), (6, -5)]
     assert {a: why for q, r, why in result["excluded"] if (a := (q, r)) in edge} == dict.fromkeys(
         edge, "misregistered_tile")
+
+
+# ── L17: a tie between two references ────────────────────────────────────────
+def _step(s):
+    return {"verdict": ni.CONTRADICTED, "reason": "step", "diagnosis": {"kind": "step", "step": list(s)}}
+
+
+def test_a_tie_contradicts_a_timepoint_confirmed_only_against_one_of_the_two(monkeypatch):
+    """L17: T0 and T1 each make the other a step off, and as many timepoints agree with each (T0 with T3, T1 with T2),
+    so which is right cannot be told. T3 is confirmed against T0 and inconclusive against T1: if T1 is right, T3's
+    agreement with T0 puts it a step off too. The tie merged the two sides' verdicts with T1's overriding, read T3 as
+    inconclusive there, and left it ``confirmed`` against a reference the check had just declined."""
+    order = ["T0", "T1", "T2", "T3"]
+    table = {("T0", "T1"): _step((1, 0)), ("T0", "T2"): _step((1, 0)), ("T0", "T3"): {"verdict": ni.CONFIRMED},
+             ("T1", "T0"): _step((-1, 0)), ("T1", "T2"): {"verdict": ni.CONFIRMED},
+             ("T1", "T3"): {"verdict": ni.INCONCLUSIVE, "reason": "margin"}}
+    monkeypatch.setattr(ni, "compare", lambda ref, other: dict(table[(ref.name, other.name)]))
+    monkeypatch.setattr(ni, "reference_candidates", lambda timepoints, order: list(order))
+    monkeypatch.setattr(ni, "square_names_the_centre", lambda t: True)
+    out = ni.check_well({"timepoints": {t: {"status": "ok"} for t in order}}, [], {}, order)
+    assert out["reference"] is None
+    assert {tp: v["verdict"] for tp, v in out["timepoints"].items()} == dict.fromkeys(order, ni.CONTRADICTED)
+    assert "cannot be told" in out["timepoints"]["T3"]["reason"]
+
+
+# ── L18: too few addresses to accuse ─────────────────────────────────────────
+def _small(name, addresses, relabel=lambda a: a):
+    t = _blank(name)
+    t.centre_um = None
+    for q, r in addresses:
+        t.sites[relabel((q, r))] = tuple(float(v) for v in _pos(q, r))
+        t.owners[relabel((q, r))] = "F0"
+    return t
+
+
+SMALL = [(q, r) for q in range(-5, 6) for r in range(-5, 6) if max(abs(q), abs(r), abs(q + r)) <= 4]
+
+
+@pytest.mark.parametrize("kept, verdict", [(2, ni.INCONCLUSIVE), (3, ni.CONTRADICTED)])
+def test_a_timepoint_is_not_contradicted_on_fewer_addresses_than_the_check_needs(registered, kept, verdict):
+    """L18: the compared timepoint holds only *kept* sites, every one a lattice step off. Two give four compared
+    addresses, fewer than ``MIN_COMPARED`` (6): the documented verdict is inconclusive, and the step was accused
+    first. Three give six, enough to decide, and the step is contradicted as before."""
+    result = ni.compare(_small("T0", SMALL), _small("T1", SMALL[:kept], lambda a: (a[0] + 1, a[1])))
+    assert (result["compared"], result["verdict"]) == (2 * kept, verdict)
+    if verdict == ni.INCONCLUSIVE:
+        assert result["reason"] == f"only {2 * kept} address(es) in common with the reference, {ni.MIN_COMPARED} needed"

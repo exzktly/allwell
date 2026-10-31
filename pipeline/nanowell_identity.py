@@ -838,7 +838,11 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
         result["centre_agreement_pitches"] = round(centre, 4)
     # Problems with the registration itself, or with every address at once: nothing in the timepoint can be kept.
     whole = []
-    if diagnosis.get("kind") in ("step", "symmetry"):
+    # What the addresses say decides nothing on fewer than MIN_COMPARED of them: such a timepoint is inconclusive, as
+    # documented, not accused on two or three sites (review tracker L18). The square, the outline and the tile layout
+    # are not counts of addresses and still contradict.
+    enough = test.compared >= MIN_COMPARED
+    if enough and diagnosis.get("kind") in ("step", "symmetry"):
         whole.append(f"{test.wrong} of {test.compared} addresses land on other nanowells: {diagnosis['detail']}")
     if centre is not None and centre >= CENTRE_CONTRADICTS_PITCHES:
         whole.append(f"the array's fitted centre lands {centre:.2f} pitch from this timepoint's once registered on "
@@ -850,7 +854,7 @@ def compare(ref: Timepoint, other: Timepoint) -> dict:
     if layout["split"]:
         whole.append(layout["reason"])
     excluded = _excluded(test, layout, ref, other)
-    if not whole and excluded and len(excluded) > PARTIAL_MAX_SHARE * max(test.compared, 1):
+    if enough and not whole and excluded and len(excluded) > PARTIAL_MAX_SHARE * test.compared:
         whole.append(f"{len(excluded)} of {test.compared} nanowells are shown wrong, more than half: "
                      f"{diagnosis['detail'] or layout['reason']}")
     notes = []
@@ -982,7 +986,10 @@ def check_well(grid: dict, site_rows, montages: dict, order=None) -> dict:
         why = (f"{reference} and {other} each make the other's addresses wrong ({signature[0]}), and as many "
                "timepoints agree with each: which is right cannot be told. An anchor set by hand on the central "
                "square settles it")
-        disputed = {n for n, v in {**results, **alternative}.items() if v.get("verdict") in AGREES + (CONTRADICTED,)}
+        # Each side read on its own: merged, the alternative's verdict replaced the first's, so a timepoint confirmed
+        # against the first reference and inconclusive against the other stayed confirmed (review tracker L17).
+        disputed = {n for side in (results, alternative) for n, v in side.items()
+                    if v.get("verdict") in AGREES + (CONTRADICTED,)}
         for n in disputed:
             results[n] = {"verdict": CONTRADICTED, "reason": why, "diagnosis": {"kind": "tie", "detail": why}}
         out["reference"], out["reference_reason"] = None, why

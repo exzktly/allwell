@@ -10999,7 +10999,8 @@ so leaving out only the compared timepoint's joined the reference's edge rows to
 address at once is wrong (a constant step or a lattice symmetry, a rim centre 1.5 pitches off, a square the run
 took elsewhere, a split tile layout, a mirror or another lattice kind, or more than `PARTIAL_MAX_SHARE` (half) of the
 nanowells shown wrong); `inconclusive` (no reference square, no montage, a margin too low, an unaddressed timepoint,
-fewer than `MIN_COMPARED` addresses in common, a tile layout from another grid, a rim centre between 0.75 and 1.5
+fewer than `MIN_COMPARED` (6) addresses in common — however those few land: a step or symmetry, or more than half
+of them shown wrong, contradicts only from six up, while the square, the outline and the tile layout still can —, a tile layout from another grid, a rim centre between 0.75 and 1.5
 pitches off); `reference`; and `not_checked` for a timepoint never tested. Only `confirmed` and `reference` are good;
 `AGREES` adds `partial`. Review leaves a `contradicted` timepoint and a `partial` one's `excluded` nanowells out of its
 joins (`exclusions` reads them); `inconclusive` and `not_checked` are joined and footnoted. **The reference** (`reference_candidates`, `check_well`) is an addressed
@@ -11007,8 +11008,10 @@ timepoint whose square the run accepted, those whose square carries `(0, 0)` fir
 the square is the central nanowell by convention), earliest first. A reference addressed off itself would make
 every correct timepoint contradicted, so when the contradicted timepoints agree on one step or symmetry and are at
 least as many as those confirmed, the first of them is tried as the reference too, and the one more timepoints
-agree with is kept; alike, the one whose square carries `(0, 0)`; otherwise both groups are `contradicted`, as the
-run leaves both frames of a tie unaddressed. **Limitation**: the check assumes the plate turns less than 30° (hexagonal) or 45° (square lattice)
+agree with is kept; alike, the one whose square carries `(0, 0)`; otherwise every timepoint that agrees with or is
+contradicted by *either* candidate is `contradicted` (each side's verdicts read on its own, so a timepoint confirmed
+against one and inconclusive against the other is not left confirmed), as the run leaves both frames of a tie
+unaddressed. **Limitation**: the check assumes the plate turns less than 30° (hexagonal) or 45° (square lattice)
 between timepoints, or by a turn the square breaks. A *physical* turn by a symmetry the lattice and the square share
 — 180° on either lattice, 90° on a square one — registers as no turn, and labels folded the same way are confirmed;
 nothing in the images tells it from no turn. A keyed

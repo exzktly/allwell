@@ -11427,15 +11427,23 @@ timepoints takes about 5 s to compute.
 
 **Cell Gating reaches the counts** (`cell_gate_compute`, `controller.gate_tally` / `gated_metrics`). The run's
 `n_cells` is a count of per-cell rows carrying the nanowell's address, so the cells the analysis leaves out
-(`data_loading.df_included_mask` — curation, the QC size and shape gate, crop, scatter gates, field and focus
-layers) are tallied per `(well, timepoint, nw_q, nw_r)` from the row cache (`get_rows`, the well's own label or
+(`data_loading.df_included_mask(frame, except_layers=cell_gate_compute.FIELD_LAYERS)` — curation, the QC size and
+shape gate, the scatter gates; crop, focus and border pass every nanowell cell, whose table has no centroid, focus
+or border column) are tallied per `(well, timepoint, nw_q, nw_r)` from the row cache (`get_rows`, the well's own label or
 the label registered for the CSV `NanowellData.cell_tables` names). `site_metrics(data, baseline, gate)` subtracts
 them from `n` — never recounting, so with nothing gated out every count is the run's own — and replaces
 `brightness_<ch>` with the kept cells' mean, before any baseline, fold change, growth rate or occupancy class is
 computed, so the *Subset* and *Starting cells* follow. Only rows with a count change: an occluded nanowell keeps no
-count. Confluence and `signal_<ch>` are pixel measurements and are not touched. `cell_gate_compute.note` is the
-figure's sentence while anything is left out, naming wells whose rows could not be read (they keep the run's
-counts). The tally runs on the page's load worker with the metrics; `NanowellState.gated_for` records the
+count. Confluence and `signal_<ch>` are pixel measurements and are not touched. **The field layers**
+(`FIELD_LAYERS`: `Field_Pass`, `Excluded_Field_Pass`, `FOV_Pass`) decide whole fields, and in nanowell mode a field is
+a tile at one timepoint, the site row's `owner`. They are never subtracted from counts, which made a loaded nanowell
+in an excluded tile read as measured and emptied and left its empty ones counted. `controller._excluded_fields` reads
+the fields they leave out from the state they project from (QC triage's `field_exclusions`, the run's flagged fields
+while their exclusion is on, the FOVs chosen on Cell Gating; never in a well `untrusted_wells` names), so a tile
+with no cell in it is included, and `cell_gate_compute.exclude_fields` gives each of its rows the state
+`collect.FIELD_EXCLUDED` before `site_metrics` reads any value: no count, confluence, brightness or signal, and the
+reason `field_excluded` on every metric. `cell_gate_compute.note` is the figure's sentence while anything is left
+out — the cells, the excluded fields, and the wells whose rows could not be read (they keep the run's counts). The tally runs on the page's load worker with the metrics; `NanowellState.gated_for` records the
 `StatsCacheState.population_version` it was taken at, which every invalidation that drops the populations raises,
 so `ensure_loaded` and `redraw` recompute when Cell Gating changes. Batch Export's Nanowells panel calls the same
 `gate_tally` in `_load`, so an export never disagrees with the page. `tests/test_nanowell_counts_follow_cell_gating.py`

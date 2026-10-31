@@ -17,6 +17,20 @@ cells kept. A nanowell whose cells are all left out counts 0 and has no brightne
 of the nanowell, not from its segmented cells, so no cell gate can remove anything from them; the figure's note
 says so whenever cells are left out (:func:`note`).
 
+**A whole field is left out as a whole field.** Three layers speak about fields rather than cells
+(:data:`FIELD_LAYERS`): the run's field-quality flag, a field excluded by hand in QC triage, and the FOVs chosen on
+Cell Gating. In nanowell mode a field is a tile, and each nanowell is owned by one tile at each timepoint (the
+site row's ``owner``, the cell row's ``fov``). Subtracting such a field's cells from its nanowells' counts made
+every loaded nanowell in it read as measured and emptied — a count of 0, a fold change of 0, a dot at zero — and
+left its empty nanowells counted as empty, from a field the analysis had excluded. So those layers are left out of
+the per-cell inclusion here, and the fields they exclude are read from the app's own state instead
+(:func:`excluded_fields`, gathered by ``controller.gate_tally``), so a field with no cell in it is excluded too:
+each nanowell such a tile owns at that timepoint takes the state :data:`collect.FIELD_EXCLUDED`
+(:func:`exclude_fields`), with no count, confluence, brightness or signal, and every metric says why. A well
+whose FOV labels are untrusted is not filtered, the refusal those layers make everywhere else. The crop, focus and
+border layers need per-cell centroid, focus and border columns that a nanowell cell table does not have, so they
+pass every nanowell cell, as they pass any cell they cannot place.
+
 **A well whose cells cannot be read keeps the run's counts**, and is named in the note, so a figure mixing gated
 and ungated wells never reads as gated throughout.
 
@@ -31,6 +45,8 @@ import numpy as np
 import pandas as pd
 
 SITE_KEY = ["well", "timepoint", "nw_q", "nw_r"]
+#: The inclusion layers that decide whole fields, applied here by field (:func:`exclude_fields`) and never per cell.
+FIELD_LAYERS = ("Field_Pass", "Excluded_Field_Pass", "FOV_Pass")
 #: The suffix of a per-cell intensity column (``<token>_mean_intensity``), the one brightness is the mean of.
 MEAN_SUFFIX = "_mean_intensity"
 KEPT_PREFIX = "kept_"
@@ -43,11 +59,13 @@ class GateTally:
     *sites* has one row per ``(well, timepoint, nw_q, nw_r)`` that lost at least one cell: ``excluded`` (cells
     left out) and, per intensity token in lower case, ``kept_<token>`` (the kept cells' mean, NaN with none
     kept). *cells* and *excluded* count every addressed cell of those wells; *unread* names the wells whose
-    rows could not be read, whose counts are the run's own."""
+    rows could not be read, whose counts are the run's own. *fields* holds the ``(well, tile, timepoint)`` the
+    field layers leave out (:func:`excluded_fields`), whose nanowells are excluded whole."""
     sites: pd.DataFrame
     cells: int = 0
     excluded: int = 0
     unread: tuple = field(default_factory=tuple)
+    fields: frozenset = frozenset()
 
 
 def _empty_sites() -> pd.DataFrame:
@@ -95,8 +113,45 @@ def well_left_out(well: str, cells: pd.DataFrame, included) -> tuple[pd.DataFram
     return sites, total, out
 
 
-def tally(per_well, unread=()) -> GateTally:
-    """One :class:`GateTally` from *per_well*, an iterable of ``(well, cells, included)``."""
+def excluded_fields(sites: pd.DataFrame, *, excluded=(), flagged=(), chosen_fovs=None, untrusted=()) -> frozenset:
+    """The ``(well, tile, timepoint)`` of *sites* (the page's site table) that a field layer leaves out.
+
+    *excluded* and *flagged* are ``(well, fov, timepoint)`` keys — QC triage's exclusions, and the run's flagged
+    fields when their exclusion is on; *chosen_fovs* the FOV labels chosen on Cell Gating (``None``: every field);
+    *untrusted* the wells whose FOV labels cannot be joined on, which are never filtered."""
+    from review.data.fov_selection import fov_match_key
+
+    if not len(sites) or "owner" not in sites.columns:
+        return frozenset()
+    named = {tuple(str(v) for v in key) for key in (*excluded, *flagged)}
+    chosen = None if chosen_fovs is None else {fov_match_key(f) for f in chosen_fovs}
+    skip = {str(w) for w in untrusted}
+    keys = sites[["well", "owner", "timepoint"]].dropna().astype(str).drop_duplicates()
+    out = set()
+    for well, owner, tp in keys.itertuples(index=False):
+        if well in skip:
+            continue
+        if (well, owner, tp) in named or (chosen is not None and fov_match_key(owner) not in chosen):
+            out.add((well, owner, tp))
+    return frozenset(out)
+
+
+def exclude_fields(frame: pd.DataFrame, gate: GateTally | None) -> None:
+    """Give every row of *frame* (``series_compute``'s addressed grid) whose tile *gate* leaves out the state
+    :data:`collect.FIELD_EXCLUDED`, in place, before anything is read from its values."""
+    if gate is None or not gate.fields or not len(frame) or "owner" not in frame.columns:
+        return
+    from review.features.nanowell.collect import FIELD_EXCLUDED
+
+    keys = pd.MultiIndex.from_arrays([frame["well"].astype(str), frame["owner"].astype(str),
+                                      frame["timepoint"].astype(str)])
+    hit = pd.Series(keys.isin(list(gate.fields)), index=frame.index) & frame["owner"].notna()
+    frame.loc[hit, "state"] = FIELD_EXCLUDED
+
+
+def tally(per_well, unread=(), fields=frozenset()) -> GateTally:
+    """One :class:`GateTally` from *per_well*, an iterable of ``(well, cells, included)``, where *included* leaves
+    out :data:`FIELD_LAYERS`; *fields* is :func:`excluded_fields`'s answer."""
     found, cells, excluded = [], 0, 0
     for well, frame, included in per_well:
         sites, n, out = well_left_out(well, frame, included)
@@ -104,7 +159,8 @@ def tally(per_well, unread=()) -> GateTally:
         if len(sites):
             found.append(sites)
     sites = pd.concat(found, ignore_index=True) if found else _empty_sites()
-    return GateTally(sites=sites, cells=cells, excluded=excluded, unread=tuple(sorted(unread)))
+    return GateTally(sites=sites, cells=cells, excluded=excluded, unread=tuple(sorted(unread)),
+                     fields=frozenset(fields))
 
 
 def apply(frame: pd.DataFrame, gate: GateTally | None, channels) -> None:
@@ -132,10 +188,20 @@ def apply(frame: pd.DataFrame, gate: GateTally | None, channels) -> None:
 
 def note(gate: GateTally | None) -> str:
     """The figure's sentence about the gate: ``""`` when it left nothing out."""
-    if gate is None or not gate.excluded:
+    if gate is None or not (gate.excluded or gate.fields):
         return ""
-    said = (f"Cell Gating leaves out {gate.excluded:,} of {gate.cells:,} cells in these wells' nanowells: counts "
-            "and brightness exclude them; confluence and nanowell fluorescence are measured from pixels and do not.")
+    said = ""
+    if gate.excluded:
+        said = (f"Cell Gating leaves out {gate.excluded:,} of {gate.cells:,} cells in these wells' nanowells: "
+                "counts and brightness exclude them; confluence and nanowell fluorescence are measured from pixels "
+                "and do not.")
+    if gate.fields:
+        n = len(gate.fields)
+        said += (" " if said else "") + (
+            f"{n:,} excluded field (a tile at one timepoint) leaves out every nanowell it holds, with no value at all."
+            if n == 1 else
+            f"{n:,} excluded fields (a tile at one timepoint each) leave out every nanowell they hold, with no value "
+            "at all.")
     if gate.unread:
         said += f" The cells of {', '.join(gate.unread)} could not be read, so their counts are the run's own."
     return said

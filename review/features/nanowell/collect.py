@@ -51,6 +51,10 @@ UNADDRESSED, NOT_LOCATED = "unaddressed", "not_located"
 #: A timepoint whose addresses the identity check found naming other nanowells than the well's reference timepoint
 #: does (``pipeline.nanowell_identity``): its rows are kept out of every join over time, with the check's reason.
 IDENTITY_CONTRADICTED = "identity_contradicted"
+#: A timepoint of a tile the analysis leaves out as a whole field — the run's field-quality flag, a field excluded
+#: by hand in QC triage, or a field not among the FOVs chosen on Cell Gating (``cell_gate_compute.FIELD_LAYERS``):
+#: every nanowell that tile owns there is left out, an empty one as much as a loaded one, with no value at all.
+FIELD_EXCLUDED = "field_excluded"
 #: States whose contents metrics are defined (tracker §3.5).
 MEASURABLE = frozenset({MEASURED, EMPTY})
 

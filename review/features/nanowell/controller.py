@@ -311,6 +311,7 @@ def gate_tally(ctx, data) -> cg.GateTally | None:
 
     if data is None or not len(data.sites):
         return None
+    fields = _excluded_fields(ctx, data)
     per_well, unread = [], []
     for well in data.wells:
         label = _cell_label(ctx, well, data)
@@ -327,8 +328,21 @@ def gate_tally(ctx, data) -> cg.GateTally | None:
             unread.append(well)
             continue
         if frame is not None and len(frame):
-            per_well.append((well, frame, df_included_mask(frame).to_numpy()))
-    return cg.tally(per_well, unread)
+            # The field layers are applied by field (`cell_gate_compute.exclude_fields`), never to the counts.
+            per_well.append((well, frame, df_included_mask(frame, except_layers=cg.FIELD_LAYERS).to_numpy()))
+    return cg.tally(per_well, unread, fields)
+
+
+def _excluded_fields(ctx, data) -> frozenset:
+    """The tiles the field layers leave out of *data*'s wells (``cell_gate_compute.excluded_fields``), read from
+    the same state those layers project from: QC triage's exclusions, the run's flagged fields while their
+    exclusion is on, and the FOVs chosen on Cell Gating; never in a well whose FOV labels are untrusted."""
+    from review.data import field_exclusions, field_quality_cache, fov_selection
+
+    flagged = field_quality_cache.flagged_fields(ctx)[0] if field_quality_cache.exclusion_is_on(ctx) else ()
+    return cg.excluded_fields(data.sites, excluded=field_exclusions.excluded_fields(ctx), flagged=flagged,
+                              chosen_fovs=fov_selection.selected_fovs(ctx),
+                              untrusted=field_quality_cache.untrusted_wells(ctx))
 
 
 def gated_metrics(ctx, data, baseline: str) -> pd.DataFrame | None:

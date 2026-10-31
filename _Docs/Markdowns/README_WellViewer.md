@@ -5522,9 +5522,11 @@ gives no fold change ("no signal above background at baseline"), since a ratio o
 brightness fold change needs counted cells at both timepoints.
 
 **Cell Gating applies here too.** A nanowell's cell count, and its brightness, use only the cells the rest of
-Review counts: the size and shape gate, cells excluded by hand, the crop, the scatter gates and the field and focus
-exclusions set on Home ▸ [Cell Gating](#cell-gating). So to drop objects by size from the nanowells, set *min area* /
-*max area* there. Each nanowell's count is the run's count less the cells gated out of it, and brightness is
+Review counts: the size and shape gate, cells excluded by hand and the scatter gates set on Home ▸
+[Cell Gating](#cell-gating). So to drop objects by size from the nanowells, set *min area* / *max area* there. A
+field left out as a whole — excluded in QC triage, flagged by the run while *exclude flagged fields* is on, or not
+among the FOVs chosen on Cell Gating — is a tile at one timepoint here, and every nanowell it holds is left out with
+the reason *field excluded*, empty ones included, rather than counted as emptied. Each nanowell's count is the run's count less the cells gated out of it, and brightness is
 averaged over the cells kept; everything computed from the count follows — fold changes, growth rate, occupancy,
 *Starting cells* and the *Subset* conditions. Confluence and nanowell fluorescence are measured from the
 nanowell's pixels rather than from its segmented cells, so a gate cannot change them. While a gate leaves any cell

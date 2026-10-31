@@ -228,11 +228,13 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None) -> pd.
     docstring.
 
     *gate* (``cell_gate_compute.GateTally``) is the cells Home's Cell Gating leaves out: they are taken out of
-    ``n`` and ``brightness_<ch>`` before anything is computed from them. ``None`` keeps the run's own counts.
+    ``n`` and ``brightness_<ch>`` before anything is computed from them, and the nanowells of a field it leaves
+    out take the state ``field_excluded``. ``None`` keeps the run's own counts.
     """
     if not is_baseline(baseline):
         raise ValueError(f"baseline must be one of {BASELINES} or a timepoint, not {baseline!r}")
     frame = _addressed_grid(data)
+    cell_gate_compute.exclude_fields(frame, gate)          # a whole field out: its nanowells have no value at all
     measurable = frame["state"].isin(MEASURABLE)
     frame["n"] = pd.to_numeric(frame.get("n_cells"), errors="coerce").where(measurable)
     frame["c"] = pd.to_numeric(frame.get("confluence"), errors="coerce").where(measurable)

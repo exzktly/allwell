@@ -162,3 +162,90 @@ def test_batch_export_takes_the_same_cells_out_as_the_page(qtbot, tmp_path):
     row = metrics[(metrics["timepoint"] == "t_c") & (metrics["nw_q"] == 0)].iloc[0]
     assert (row["n"], row["brightness_GFP"]) == (1.0, 30.0)
     assert said.startswith("Cell Gating leaves out 1 of 7 cells")
+
+
+# ── a whole field left out leaves its nanowells out (tracker H3) ─────────────
+
+def _dataset_with_two_tiles(tmp_path):
+    """Well A01 at t_c and t_a. Tile F0 owns (0,0), two 50 px cells, and (3,0), an empty nanowell; tile F1 owns
+    (1,0), two 50 px cells. Every nanowell holds the same at both timepoints."""
+    from tests.test_nanowell_review_data import _dataset, _row
+
+    def owned(row, owner):
+        return {**row, "owner": owner}
+
+    rows = []
+    for tp in ("t_c", "t_a"):
+        rows += [owned(_row(tp, 0, 0, n=2, c=0.2, gfp=100.0), "F0"), owned(_row(tp, 3, 0, "empty", n=0, c=0.0,
+                                                                                gfp=0.0), "F0"),
+                 owned(_row(tp, 1, 0, n=2, c=0.2, gfp=100.0), "F1")]
+    out = _dataset(tmp_path, {"A01": rows}, starts={"t_c": "2026-03-01T09:00:00", "t_a": "2026-03-01T14:00:00"})
+    cells = [(tp, fov, q) for tp in ("t_c", "t_a") for fov, q in (("F0", 0), ("F0", 0), ("F1", 1), ("F1", 1))]
+    pd.DataFrame([{"well": "A01", "fov": fov, "timepoint": tp, "nucleus_id": i + 1, "area_px": 50,
+                   "GFP_mean_intensity": 10.0, "nw_q": q, "nw_r": 0} for i, (tp, fov, q) in enumerate(cells)]
+                 ).to_csv(out / "measurements_A01.csv", index=False)
+    return out
+
+
+def _reloaded(qtbot, ctx, st):
+    from review.features.nanowell import controller as nwc
+
+    nwc.nw_on_activate(ctx)
+    qtbot.waitUntil(lambda: not st.computing and st.gated_for == nwc.gate_version(ctx), timeout=20000)
+
+
+def test_a_field_excluded_in_qc_triage_leaves_out_every_nanowell_it_holds(qtbot, tmp_path):
+    """Reported by review: subtracting an excluded field's cells made its loaded nanowells read as measured and
+    emptied (n 2 -> 0, fold change 0, a dot at zero) and left its empty ones counted as empty. Each nanowell the
+    field holds is left out with the reason, the empty one too, and the other tile's are untouched."""
+    from types import SimpleNamespace
+
+    from review.features.home.triage.controller import exclude_fields
+    from review.features.nanowell import series_compute as sc
+    from tests.test_nanowell_page import _loaded, _page, _texts
+
+    ctx = _page(qtbot, _dataset_with_two_tiles(tmp_path))
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    assert (_site(st, "t_a", 0)["state"], _site(st, "t_a", 0)["count_fc"]) == ("measured", 1.0)
+
+    field = SimpleNamespace(well="A01", fov="F0", timepoint="t_a", can_exclude=True)
+    assert exclude_fields(ctx, [field], "soft tile") == 1
+    _reloaded(qtbot, ctx, st)
+
+    for q in (0, 3):                                             # loaded and empty, both in F0 at t_a
+        row = _site(st, "t_a", q)
+        assert row["state"] == "field_excluded", (q, row["state"])
+        assert np.isnan(row["n"]) and np.isnan(row["c"]) and np.isnan(row["count_fc"])
+    why = sc.exclusion_reason(st.metrics, "count_fc", ["GFP"])
+    at = st.metrics.index[(st.metrics["timepoint"] == "t_a") & (st.metrics["nw_q"] == 0)][0]
+    assert why[at] == "field_excluded"
+    assert (_site(st, "t_c", 0)["state"], _site(st, "t_c", 0)["n"]) == ("measured", 2.0)   # F0 at t_c: kept
+    assert (_site(st, "t_a", 1)["n"], _site(st, "t_a", 1)["count_fc"]) == (2.0, 1.0)        # F1: kept
+    said = re.sub(r"\s+", " ", " ".join(_texts(ctx)))
+    assert "1 excluded field (a tile at one timepoint) leaves out every nanowell it holds" in said
+    assert "Cell Gating leaves out" not in said                  # no cell was subtracted from any count
+
+
+def test_fovs_chosen_on_cell_gating_leave_out_the_other_tiles_nanowells(qtbot, tmp_path):
+    from review.features.qc.controller import recompute_qc_all
+    from tests.test_nanowell_page import _loaded, _page
+
+    ctx = _page(qtbot, _dataset_with_two_tiles(tmp_path))
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    ctx.state.cell_gating.fov_selection = {"F1"}
+    recompute_qc_all(ctx)
+    _reloaded(qtbot, ctx, st)
+    assert [_site(st, tp, q)["state"] for tp in ("t_c", "t_a") for q in (0, 3)] == ["field_excluded"] * 4
+    assert [_site(st, tp, 1)["n"] for tp in ("t_c", "t_a")] == [2.0, 2.0]
+
+
+def test_the_field_keys_are_read_per_tile_and_never_in_an_untrusted_well():
+    sites = pd.DataFrame({"well": ["A01", "A01", "A01", "B01"], "owner": ["F0", "F1", "F0", "F0"],
+                          "timepoint": ["t1", "t1", "t2", "t1"]})
+    assert cg.excluded_fields(sites, excluded=[("A01", "F0", "t1")]) == {("A01", "F0", "t1")}
+    assert cg.excluded_fields(sites, flagged=[("B01", "F0", "t1")], untrusted=["B01"]) == frozenset()
+    assert cg.excluded_fields(sites, chosen_fovs={"1"}) == {("A01", "F0", "t1"), ("A01", "F0", "t2"),
+                                                           ("B01", "F0", "t1")}
+    assert cg.excluded_fields(sites) == frozenset()

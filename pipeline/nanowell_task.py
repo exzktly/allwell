@@ -90,10 +90,14 @@ def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:
 
 def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
                     template_path, staging_dir, settings_key, scratch_dir, expected_shape, stored_placements=None,
-                    manual_anchors=MappingProxyType({}), release=None):
+                    manual_anchors=MappingProxyType({}), release=None, confluence_reference=None):
     """``run_well`` over *todo* on what an earlier run kept (*prior*, or ``None``): ``(outcome, fixed radius,
     fixed roster, kept template)``. *expected_shape* is a described grid's shape: a well short of a whole row or
-    column is incomplete, which a record's positions alone could not show."""
+    column is incomplete, which a record's positions alone could not show. *confluence_reference* is what the well's
+    confluence is read against (:func:`_confluence_reference_for` when not given): the one its kept timepoints were
+    checked against, so the timepoints it measures are read against the same."""
+    if confluence_reference is None:
+        confluence_reference = _confluence_reference_for(well_label, settings, template_path)
     fixed, fixed_roster = _prior_array(prior)
     saved = nm.load_template(template_path) if prior else None
     outcome = nr.run_well(well_label, record, todo, load_phase, settings, segmenter=segmenter, channels=channels,
@@ -107,7 +111,7 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
                           manual_anchors=manual_anchors, progress=lambda done, total: _log_steps(well_label, done, total),
                           site_progress=lambda tp, done, total: _log_sites(well_label, tp, done, total),
                           note=lambda text: log.info("Well %s — %s", well_label, text), release=release,
-                          confluence_reference=_confluence_reference_for(well_label, settings, template_path))
+                          confluence_reference=confluence_reference)
     return outcome, fixed, fixed_roster, saved
 
 
@@ -117,6 +121,33 @@ def _confluence_reference_for(well_label, settings, template_path):
     if nref.same_well(well_label, nref.reference_well(settings)):
         return nref.OWN
     return nref.load(Path(template_path).parent.parent, settings)
+
+
+def confluence_reference_current(output_dir, well_label, shared_kwargs_template) -> bool:
+    """Whether a finished *well_label* in *output_dir* read its confluence against the empty reference as it is saved
+    there now, at every timepoint it measured (``nanowell_reference.KEY_FIELD`` against ``Reference.key_at``); a
+    well that did not may not be skipped as up to date (review tracker M7). True outside nanowell mode, with no
+    reference named (naming one changes the settings key, which decides that), and for a well with no grid record,
+    which the run's other checks decide. A timepoint recorded before the key existed has none, and is measured
+    again."""
+    if not shared_kwargs_template.get("_nanowell"):
+        return True
+    path = Path(output_dir) / NANOWELL_DIR / f"{well_label}_grid.json"
+    try:
+        grid = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    settings = settings_from_kwargs(shared_kwargs_template)
+    if nref.reference_well(settings) is None:
+        return True                 # nothing to be read against; naming one changes the settings key
+    reference = _confluence_reference_for(well_label, settings, path)
+    stale = [tp for tp, block in (grid.get("timepoints") or {}).items()
+             if isinstance(block, dict) and block.get("status") == nr.OK
+             and block.get(nref.KEY_FIELD) != reference.key_at(tp)]
+    if stale:
+        log.info("Well %s — its confluence at %s was read against another empty reference than the one saved now; "
+                 "it is analysed again.", well_label, ", ".join(stale))
+    return not stale
 
 
 def _log_steps(well_label: str, done: int, total: int) -> None:
@@ -463,7 +494,7 @@ def _json_default(value):
 
 
 def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, record,
-                 manual_anchors=None, anchors_digest: str = "") -> dict | None:
+                 manual_anchors=None, anchors_digest: str = "", reference_key=None) -> dict | None:
     """What an earlier run of this well left, if it is still valid for this one: ``(grid, site rows, cell rows)``.
 
     Valid means: the settings that produced it are this run's (the same check the per-field path makes),
@@ -472,7 +503,10 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
     with: a timepoint anchored by its fiducial, or by an earlier click, is recomputed when a click is set or moved.
     A timepoint the end-of-run pass anchored from the rest of the plate (``plate_rigid``) is kept only under the
     plate's anchors as they were then (*anchors_digest*): its origin was carried from another timepoint, or other
-    wells, any of which a moved or cleared click may have changed.
+    wells, any of which a moved or cleared click may have changed. With *reference_key* (``timepoint -> key``,
+    ``nanowell_reference.Reference.key_at``) a timepoint is kept only when its confluence was read against the
+    empty reference as it is saved now: one measured while the reference was missing or since re-exported is
+    measured again (review tracker M7).
     Anything else is recomputed, never reused. ``None`` when nothing can be reused.
     """
     from pipeline.settings_record import well_settings_allow_reuse
@@ -496,7 +530,8 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
             and grid["timepoints"][tp].get("record_digest") == nr.record_digest(record, well_label, tp)
             and grid["timepoints"][tp].get("manual_anchor_um") == _anchor_list((manual_anchors or {}).get(tp))
             and (grid["timepoints"][tp].get("origin_method") != "plate_rigid"
-                 or grid["timepoints"][tp].get("anchors_digest", "") == anchors_digest)}
+                 or grid["timepoints"][tp].get("anchors_digest", "") == anchors_digest)
+            and (reference_key is None or grid["timepoints"][tp].get(nref.KEY_FIELD) == reference_key(tp))}
     if not kept:
         return None
     sites_path = Path(prior_dir) / NANOWELL_DIR / f"{well_label}.csv"
@@ -729,8 +764,13 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     timepoints = timepoint_order(record, well_label)
     output_dir = Path(output_dir)
     manual, digest = _well_manual_anchors(Path(zip_path).parent, well_label)
+    # Read once: the kept timepoints are checked against it, the measured ones read against it, and each records
+    # its key (``nanowell_reference.KEY_FIELD``), so all three are the same reference.
+    reference = _confluence_reference_for(well_label, settings,
+                                          Path(prior_dir or output_dir) / NANOWELL_DIR / f"{well_label}_grid.json")
+    keyed = nref.reference_well(settings) is not None     # with none named, the settings key already says so
     prior = (_prior_state(prior_dir or output_dir, well_label, csv_prefix, settings_key, timepoints, record, manual,
-                          digest) if incremental else None)
+                          digest, reference_key=reference.key_at if keyed else None) if incremental else None)
     todo = [tp for tp in timepoints if prior is None or tp not in prior["kept"]]
     if not todo:
         log.info("Well %s — up to date (no new timepoints).", well_label)
@@ -745,7 +785,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         return _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
                                Path(prior_dir or output_dir) / NANOWELL_DIR / template_path.name, staging_dir,
                                settings_key, scratch_dir, tuple(pattern["grid"]) if described else None, placements,
-                               manual, tiles.release)
+                               manual, tiles.release, reference)
 
     def load_phase(tp, tile) -> np.ndarray | None:
         found = index.get((tp, tile))
@@ -769,7 +809,8 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
                                              for name in (nuclear, *fluors)])
     try:
         return _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, record, timepoints,
-                            digest, prior, todo, run, staging_dir, write_csv, template_path)
+                            digest, prior, todo, run, staging_dir, write_csv, template_path,
+                            reference if keyed else None)
     finally:
         log.info("Well %s — %s.", well_label, tiles.summary())
         tiles.close()
@@ -796,8 +837,9 @@ def _save_confluence_reference(output_dir, well_label, settings, outcome, sites,
 
 
 def _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, record, timepoints, digest,
-                 prior, todo, run, staging_dir, write_csv, template_path):
-    """:func:`process_well_zip`'s run and its writing, while the well's archive is open to read tiles from."""
+                 prior, todo, run, staging_dir, write_csv, template_path, reference=None):
+    """:func:`process_well_zip`'s run and its writing, while the well's archive is open to read tiles from.
+    *reference* is what the measured timepoints' confluence was read against; each records its key."""
     outcome, fixed, fixed_roster, saved = run(prior, todo)
     if prior is not None and (outcome.roster_change or outcome.frame_change):
         # An incremental run must give the roster a run over every timepoint would (tracker X35a-R1): a rim nanowell
@@ -813,6 +855,10 @@ def _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, rec
         log.warning("Well %s — %s.", well_label, reason)
     _log_reused_registration(well_label, outcome, todo)
     _stamp_anchors(outcome, todo, digest)
+    if reference is not None:
+        for tp in todo:
+            if isinstance(outcome.timepoints.get(tp), dict):
+                outcome.timepoints[tp][nref.KEY_FIELD] = reference.key_at(tp)
     px_by_tp = {tp: float(record["timepoints"][tp]["pixel_size_um"]["x"]) for tp in todo
                 if tp in record["timepoints"]}
     records = cell_records(outcome, well_label, fluor_tokens, px_by_tp)

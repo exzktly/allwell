@@ -198,7 +198,8 @@ from pipeline.run_report import (
 from pipeline.completeness import record_run_check
 from pipeline.sidecar import preserve_existing_user_blocks, check_acquisition_inputs
 from pipeline.nanowell_task import (
-    hold_dir_for, nanowell_endgame, prepare_nanowell_run, reanchor_only_run, reference_well_first, replaced_wells,
+    confluence_reference_current, hold_dir_for, nanowell_endgame, prepare_nanowell_run, reanchor_only_run,
+    reference_well_first, replaced_wells,
 )
 from pipeline.zip_members import ZipMemberReader
 
@@ -2850,12 +2851,11 @@ def process_well_zips(
         shared_kwargs_template=shared_kwargs_template, mode_label="Zip",
         # Zip staging (extract + images) lives under the scratch base.
         stale_sweep=lambda out: sweep_run_scratch(out, settings_key, extra_extract=True),
-        # File existence alone answered "already done" whatever the run was
-        # configured to compute, and whether or not the well had finished: a
-        # changed segmenter kept the old numbers, a well wound down part way
-        # kept its partial ones (`well_skip.finished_output`).
-        output_exists=lambda well: finished_output(output_dir, well, csv_prefix, settings_key,
-                                                   records=prior_records),
+        # File existence alone answered "already done" whatever the run was configured to compute, and whether or not
+        # the well had finished: a changed segmenter kept the old numbers, a well wound down part way kept its partial
+        # ones (`well_skip.finished_output`); a nanowell well read against another reference, its stale confluence.
+        output_exists=lambda well: (finished_output(output_dir, well, csv_prefix, settings_key, records=prior_records)
+                                    and confluence_reference_current(output_dir, well, shared_kwargs_template)),
         submit_task=_submit,
     )
     return [*pool(items=first), *(pool(items=rest) if rest else [])] if first else pool(items=well_zips)

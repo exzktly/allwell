@@ -21,6 +21,14 @@ Stored under ``<output>/nanowells/_confluence_reference/``: ``reference.json`` (
 the settings key and each timepoint's verdict) and one ``<timepoint>.npz`` per empty timepoint
 (``nanowell_measure.save_template``). ``nanowells/`` is kept on the remote between batches, so a batch after the
 one that measured the reference reads it there. Qt-free, like every ``pipeline`` module.
+
+**What a well's confluence was read against is part of what makes it reusable.** The settings key names the
+reference *well* only, so a well measured while the reference was missing, failed or loaded, or before the reference
+was re-exported, would otherwise be kept as up to date beside a reference that now says something else (review
+tracker M7). Each measured timepoint records :meth:`Reference.key_at` in its grid block (:data:`KEY_FIELD`): a digest
+of the template's *content* where there was one, never of the ``.npz`` file (whose zip entries carry the time it was
+written, and an incremental run of the reference rewrites every kept template), else why there was none, as a code.
+A run keeps that timepoint, or skips the well, only when the key is the one the reference saved now gives.
 """
 
 from __future__ import annotations
@@ -36,6 +44,9 @@ MAX_LOADED_SHARE = 0.05
 DIR_NAME = "_confluence_reference"
 EMPTY, LOADED, UNVERIFIED = "empty", "loaded", "unverified"
 NOTE_PREFIX = "No confluence at this timepoint"
+#: The grid block field a measured timepoint records :meth:`Reference.key_at` in.
+KEY_FIELD = "confluence_reference_key"
+OWN_KEY = "own"
 
 
 @dataclass(frozen=True)
@@ -44,11 +55,14 @@ class Reference:
 
     ``own``: this well is the reference and reads itself. Otherwise ``templates`` maps each timepoint at which the
     reference was empty to its template (carrying its threshold), and ``reasons`` says why any other timepoint has
-    none; ``default`` is the reason for a timepoint the reference does not have."""
+    none; ``default`` is the reason for a timepoint the reference does not have. ``codes`` and ``default_code`` say
+    the same as short words, for :meth:`key_at`."""
     own: bool = False
     templates: dict = field(default_factory=dict)
     reasons: dict = field(default_factory=dict)
     default: str = ""
+    codes: dict = field(default_factory=dict)
+    default_code: str = "absent"
 
     def at(self, timepoint) -> tuple:
         """``(template or None, why there is none)`` at *timepoint*."""
@@ -57,13 +71,41 @@ class Reference:
             return template, ""
         return None, self.reasons.get(timepoint, self.default)
 
+    def key_at(self, timepoint) -> str:
+        """What a well's confluence at *timepoint* is read against, as a short string a later run compares with the
+        one the well recorded: :data:`OWN_KEY` for the reference itself, the template's content digest
+        (:func:`template_key`), or ``none:<why>`` when there is no template there (``unnamed``, ``unmeasured``,
+        ``other_settings``, ``absent``, or the timepoint's verdict). Codes rather than the reasons' sentences, so
+        rewording a reason re-runs nothing."""
+        if self.own:
+            return OWN_KEY
+        template = self.templates.get(timepoint)
+        if template is not None:
+            return template_key(template)
+        return f"none:{self.codes.get(timepoint, self.default_code)}"
+
+
+def template_key(template) -> str:
+    """A digest of what a template *is* — its pixels, its threshold and how it was taken — so the same template read
+    back from a file written at another time, or by another run, gives the same key."""
+    import hashlib
+
+    import numpy as np
+
+    h = hashlib.blake2b(digest_size=8)
+    h.update(np.ascontiguousarray(template.array, dtype=np.float64).tobytes())
+    h.update(repr((int(template.half), str(template.source), int(template.n_sites), int(template.candidates),
+                   None if template.texture_cut is None else float(template.texture_cut),
+                   tuple(int(v) for v in template.used))).encode())
+    return f"template:{h.hexdigest()}"
+
 
 OWN = Reference(own=True)
 
 
 def none_named() -> Reference:
     return Reference(default="no empty reference well was named (--nanowell_empty_well), and confluence is "
-                             "calibrated against one")
+                             "calibrated against one", default_code="unnamed")
 
 
 def reference_well(settings) -> str | None:
@@ -178,19 +220,21 @@ def load(output_dir, settings) -> Reference:
         return none_named()
     index = read_index(output_dir)
     if index is None or not same_well(index.get("well"), well):
-        return Reference(default=f"the empty reference well {well} has not been measured in this output folder")
+        return Reference(default=f"the empty reference well {well} has not been measured in this output folder",
+                         default_code="unmeasured")
     if index.get("measure_version") != nm.MEASURE_VERSION or index.get("settings") != json.loads(
             json.dumps(settings.key(), default=str)):
         return Reference(default=f"the empty reference well {well} was measured under other settings; run it "
-                                 "again with these")
-    templates, reasons = {}, {}
+                                 "again with these", default_code="other_settings")
+    templates, reasons, codes = {}, {}, {}
     for tp, found in index.get("timepoints", {}).items():
         loaded = nm.load_template(directory(output_dir) / found["template"]) if found.get("template") else None
         if loaded is not None and found["status"] == EMPTY:
             templates[tp] = loaded[0]
         else:
             reasons[tp] = reason(well, tp, found)
-    return Reference(templates=templates, reasons=reasons,
+            codes[tp] = found["status"] if found.get("status") != EMPTY else "untemplated"
+    return Reference(templates=templates, reasons=reasons, codes=codes,
                      default=f"the empty reference well {well} has no such timepoint")
 
 

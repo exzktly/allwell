@@ -463,7 +463,7 @@ timepoint where more than 5 % of its nanowells hold a counted cell, or a timepoi
 confluence** there (blank, never 0); the timepoint's notes in `<well>_grid.json` and the run log say why, and the
 reference well's grid record holds its verdict (`confluence_reference`). Cell counts and fluorescence do not depend
 on it. A remote run that does not include the reference well — re-running a few wells, or resuming a plate whose
-reference finished earlier — is sent the reference this computer already holds, so its wells keep their confluence. Results measured this way carry a measurement version: adding timepoints to a dataset
+reference finished earlier — is sent the reference this computer already holds, so its wells keep their confluence. A well is kept as up to date only beside the reference it was read against: when the reference well is analysed for the first time after them, analysed again on other images (re-exported, forced), or judged empty at a timepoint where it was not before, every well read against it before is analysed again, locally or sent again to a remote, and the run log says which and why. Running the reference again on the same images changes nothing and re-runs no other well. Results measured this way carry a measurement version: adding timepoints to a dataset
 measured by an earlier version analyses the well again in full, and Merge Plates refuses to combine two datasets
 measured by different versions. The nanowells of a circular array are the
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image

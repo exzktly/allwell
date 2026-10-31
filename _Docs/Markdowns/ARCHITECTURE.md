@@ -10501,6 +10501,25 @@ under `nanowells/`, so a remote run's fetch of that directory brings it back wit
 not measure the reference well itself — a re-run of a few wells, or a resume whose reference finished earlier — is
 sent the local one before its pipeline starts (`services/remote_plate_grids.seed_confluence_reference`, see *The host
 is given the rest of the plate*).
+**Reuse is keyed on what the reference held, not only on its name.** The settings key names the reference well;
+what a well's confluence was read against is recorded per timepoint in its grid block
+(`nanowell_reference.KEY_FIELD`, `confluence_reference_key`, stamped by `nanowell_task._finish_well` from the one
+`Reference` `process_well_zip` loads for the well): `Reference.key_at` is `own` for the reference itself, the
+template's content digest (`template_key`: its pixels, threshold, half-size, source and crops — never the `.npz`
+file, whose zip entries carry the time of writing, and each save of the reference rewrites every kept template)
+or `none:<code>` where there was none (`unmeasured`, `other_settings`, `absent`, `loaded`, `unverified`,
+`untemplated`; codes rather than the reasons' sentences, so rewording one re-runs nothing). A timepoint is kept by
+an incremental run only under the key the reference saved now gives (`_prior_state(reference_key=…)`), and a
+finished well is skipped by a plain run only when every `ok` timepoint's key still matches
+(`nanowell_task.confluence_reference_current`, ANDed into `process_well_zips`' `output_exists`, asked after the
+reference's own pool has run). So a well read while the reference was missing, failed or loaded, or before it was
+re-exported, is measured again rather than kept blank or beside another reference's numbers. A remote run's
+`remote_finished_wells.finished_here` applies the same check to the local output, and leaves nothing out when the
+reference well itself is to be sent (`_read_against_the_reference`): the host measures it first. With no reference
+named nothing is keyed (naming one changes the settings key). A block written before the key existed has none, so
+a plate analysed with a reference by an earlier build is measured again once. Registered in
+`tests/test_reuse_is_keyed_completely.py` (`nanowell_task.confluence_reference_current`, and two keys of
+`finished_here`); driven end to end in `tests/test_nanowell_cli.py`.
 Because "departs from the floor" includes the optical halo of a cell, it reads high: on the synthetic scene it lies
 between the painted coverage and the coverage of a disk 3 px larger in radius, which makes it a monotone measure of
 loading rather than an area.

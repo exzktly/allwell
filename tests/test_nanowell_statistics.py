@@ -289,7 +289,7 @@ def test_the_moving_average_distribution_draws_is_the_one_statistics_tests(page,
     page.widgets.get("_nw_axis_seg").setCurrentIndex(1)                    # Along x: Wells
     page.widgets.get("_nw_moving_spin").setValue(2)
     assert (state.axis, state.moving) == ("wells", 2)
-    page.widgets.get("_nw_view_seg").setCurrentIndex([k for k, _l in VIEWS].index("statistics"))
+    page.widgets.get("_nw_view_bar").setCurrentIndex([k for k, _l in VIEWS].index("statistics"))
     assert state.view == "statistics"
     assert page.widgets.get("_nw_moving_spin").isVisibleTo(page.window)
     # At t_a over 2 timepoints: A01 (1+2)/2, (2+4)/2, (0+3)/2 and its fourth is occluded at t_c, so no value;

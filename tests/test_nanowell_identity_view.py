@@ -1262,7 +1262,7 @@ def test_the_page_draws_a_wholly_contradicted_timepoint_crossed_out_and_says_eve
     ctx = _page(qtbot, out)
     ctx.state.selection.selected_wells = {"A01"}
     _loaded(qtbot, ctx)
-    _choose(ctx, "_nw_view_seg", "identity", [k for k, _l in VIEWS])
+    _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
     assert _page_texts(ctx, "nw-identity-title") == ["A01 · T1 vs T0 · contradicted"]
     ax = ctx.widgets.get("_nw_fig").axes
     status = ctx.state.feature_slice("nanowell").identity_drawn.status

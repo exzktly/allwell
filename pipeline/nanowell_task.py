@@ -1379,7 +1379,13 @@ def reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token,
     rerun = partial(_reanchor_well, output_dir=output_dir, shared_kwargs_template=shared_kwargs_template,
                     nuclear_token=nuclear_token, fluor_tokens=fluor_tokens, csv_prefix=csv_prefix, schema=schema,
                     sep=sep, settings_key=settings_key, grouper=grouper, parse=parse, segmenter=segmenter)
-    for well, by_tp, error in _each_reanchored(rerun, jobs, pool):
+    # The empty reference well first, alone: every other well's confluence is read against the templates it saves,
+    # and run beside them in the pool a well could read the reference while it was being rewritten (review tracker
+    # L8). A well that is not re-run here keeps what it read; its timepoints' reference keys say so to the next run.
+    reference = nref.reference_well(settings_from_kwargs(shared_kwargs_template))
+    first = [job for job in jobs if nref.same_well(job[0], reference)]
+    rest = [job for job in jobs if job not in first]
+    for well, by_tp, error in _each_reanchored(rerun, first, None) + _each_reanchored(rerun, rest, pool):
         if error:
             reasons.update({(well, tp): f"the re-run failed: {error}" for tp in by_tp})
     after = _read_grids(output_dir, here)

@@ -11084,7 +11084,11 @@ a timepoint anchored a step off is confirmed once `_settle_steps` moves it, and 
 the wells in parallel on the run's worker pool (`pool`, which `process_microscopy` gives as `_well_pool` — the same
 spawned, `_worker_init`-ed pool the wells ran on; `reanchor_plate` → `_each_reanchored` → `_reanchor_well`, a
 module-level function a worker can be handed, which catches a well's failure in the worker; a worker that dies
-fails only the well it held). In a batched remote run it runs once, after the last batch
+fails only the well it held). The empty reference well, when it is among the wells to re-run, runs first and
+alone, in the parent, and the rest only after it: they read their confluence against the templates it saves,
+and beside it in the pool a well could read them while they were being rewritten. A well not re-run keeps what
+it read, and its timepoints' `confluence_reference_key` tells the next run whether that is still the reference's.
+In a batched remote run it runs once, after the last batch
 (`--nanowell_hold_dir` / `--nanowell_reanchor_only`, below).
 What it does:
 the wells anchored on their own evidence at a reference timepoint and at this one fix the plate's rigid

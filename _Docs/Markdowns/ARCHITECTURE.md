@@ -10983,7 +10983,7 @@ cells:
 | Level | Base layer (every run) | Nanowell layer (nanowell runs only) | Link between them |
 |---|---|---|---|
 | Plate | `pipeline_info.json` | its `nanowell` and `acquisition` blocks | same file |
-| Well | `<prefix>_<well>.csv.gz`, `<well>_out.zip` | `nanowells/<well>.csv`, `_grid.json`, `_identity.json`, `_template.npz` | the well, from the file name |
+| Well | `<prefix>_<well>.csv.gz`, `<well>_out.zip` | `nanowells/<well>.csv`, `_grid.json`, `_identity.json`, `_template.npz`, `_masks.npz` | the well, from the file name |
 | Image / timepoint | standard: one field at one timepoint, the unit of work; images in `<well>_out.zip` | one `_grid.json` entry and one `_identity.json` verdict per timepoint | `(well, timepoint)` |
 | Nanowell | — | one row of `nanowells/<well>.csv` per nanowell and timepoint, keyed by `(timepoint, nw_q, nw_r)` | — |
 | Cell | one row of `<prefix>_<well>.csv.gz` | — (holds no cells) | the cell row's `nw_q`, `nw_r` name its nanowell |
@@ -11289,6 +11289,29 @@ differ (an anchor set, moved or cleared since); `pipeline.nanowell_task.force_we
 wells to `--force_wells` before the pool runs (not under `--force` or `--incremental`, where nothing is skipped up
 front), and `finished_here` never counts them finished. An anchor the last run used — accepted or refused — is
 recorded and therefore no reason to run again.
+**The re-run does not segment again.** Every reuse above is keyed on a timepoint's *rows*, which a click changes,
+so a re-run after one recomputes the well — but a click decides which nanowell is which, not where a crop is cut or
+what it holds, so the segmenter is given the same pixels as before. `pipeline/nanowell_masks.py` keeps what it
+returned: `MaskStore` (one per well, built in `process_well_zip`, read from `prior_dir or output_dir` and written to
+`nanowells/<well>_masks.npz` when the well ends, after a failure too) wraps the segmenter in `_prepare_timepoint`
+(`MaskStore.wrap`, before `nanowell_parallel.serialised` wraps it in turn), and a call is answered from the store
+when `mask_key` matches: the input's bytes, dtype and shape, `lowhigh`, `max_size_fraction`, and the segmenter's
+`cache_identity`. Anything upstream that changes what the segmenter sees — template, levels, crop window,
+registration, images — changes the bytes and misses, so no reuse rests on an argument that the input should be
+the same. Cellpose's identity (`nanowell_measure.cellpose_segmenter`) is the diameter it resizes to, its options,
+the Cellpose and Torch versions, the device kind and `code_digest` of `pipeline.cellpose` and
+`pipeline.cellpose_masks` (the compiled code, so an edit there retires every mask without a version to remember); a
+segmenter with no identity — every test stand-in — is never cached. What is stored is the segmenter's raw labels,
+before `segment_sites` drops a neighbour's objects or renumbers, so everything after it is recomputed. Each entry
+records its timepoint; a save keeps the entries this run used and those of timepoints it never segmented, and
+drops the rest. The run log names, per well, how many segmenter inputs were answered. Measured on the synthetic
+plate (`tests/test_nanowell_mask_reuse_run.py`): with the click, every crop is byte-identical to the run without
+it, under the default segmenter input and under `raw`/`tile`, so the re-run makes no segmenter call and writes the
+same rows as a re-run with no store at all. A rim that moves a lattice step with the click would change that ring's
+crops, and under `levelled`/`nanowells` scaling the range taken from them; those crops are segmented again. The file
+is not in `remote_fetch_nanowells`' list, so a remote run keeps its masks on the host, and no dataset tool carries
+it: a missing or stale file costs time, never a wrong mask. Pinned by `tests/test_nanowell_masks.py` and
+`test_reuse_is_keyed_completely.py` (`nanowell_masks.mask_key`, every key mutated alone).
 Subset, Merge Plates and Concatenate carry it through `datasets/core/nanowell_anchors_carry.py`: Subset keeps
 the anchors of what it keeps, Merge Plates renames dataset 2's wells by the remap, Concatenate shifts dataset
 2's timepoints (and an in-place addition preserves and restores the file with the record). Two sources that

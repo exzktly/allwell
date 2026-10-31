@@ -157,6 +157,7 @@ NANOWELL_E2E_FILES = {
     "test_nanowell_tile_brightness.py": "tiles of different gain and offset, and a misread surround, measure alike; 105 s",
     "test_nanowell_real_plate.py": "tracker section F: the real plate's geometry on rendered tiles; 20 s",
     "test_nanowell_manual_anchor_run.py": "an anchor set by hand addresses a well end to end; 40 s",
+    "test_nanowell_mask_reuse_run.py": "a well re-run after a click takes its cell masks from the run before; 90 s",
     "test_nanowell_segmenter_input_sheet.py": "a run writes the sample of what its segmenter was given; 8 s",
     "test_a_remote_nanowell_run_on_a_standin_cluster.py": "a batched remote nanowell run through its final re-anchoring pass on the stand-in cluster (tracker P1); 27 s",
 }
@@ -169,6 +170,7 @@ NANOWELL_E2E_FILES = {
 NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_confluence_reference.py": "confluence against the empty reference well, on a painted scene",
     "test_nanowell_segmenter_reference.py": "the rim-removed count input divided by the empty reference well's template",
+    "test_nanowell_masks.py": "the kept cell masks: answered only for the same segmenter input",
     "test_nanowell_parallel.py": "A nanowell worker's threads: results in order, one segmenter call at a time, budgets",
     "test_nanowell_tiles.py": "A nanowell well's tiles read from its archive once, or from a node-local copy",
     "test_nanowell_seams.py": "A fused nanowell's image: its holding tile, or a seam tile blended from the tiles covering it",

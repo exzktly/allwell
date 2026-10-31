@@ -167,6 +167,8 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # Threads inside a nanowell worker (locating timepoints, measuring tiles) and
     # the lock its segmenter sits behind. Imported by pipeline/nanowell_run.py.
     "pipeline/nanowell_parallel.py",
+    # A well's kept cell masks, keyed on the segmenter's input: the nanowell task reads and writes them.
+    "pipeline/nanowell_masks.py",
     # The fused nanowells' images: an edge site's holding tile, a seam site's blended crop.
     # Imported by pipeline/nanowell_run.py.
     "pipeline/nanowell_seams.py",

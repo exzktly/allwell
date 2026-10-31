@@ -20,7 +20,7 @@ import pytest
 import process_microscopy as pm
 from pipeline import nanowell_measure as nm
 import tests.test_nanowell_manual_anchor_run as anchor_run
-from pipeline.nanowell_masks import masks_path
+from pipeline.nanowell_masks import MaskStore, masks_path
 from tests._nanowell_run_fixture import build_well
 from tests.test_nanowell_reanchor import TILE, _write_plate
 from util.nanowell_anchors import anchors_path, set_anchor
@@ -112,8 +112,11 @@ def test_a_re_run_after_a_click_segments_nothing_again_and_writes_the_same_rows(
     assert (grid["24h"]["status"], grid["24h"]["origin_method"]) == ("ok", "plate_rigid")
     assert reused_calls == 0, f"the re-run after the click segmented {reused_calls} crop(s) it had segmented before"
 
-    # The control: the same re-run with no masks kept segments every crop, and must write the same rows.
+    # The control: the same re-run with no store at all segments every crop, and must give the same label images and
+    # write the same rows. No store, not merely no file: a store keyed on too little hands one crop's mask to another
+    # within a run too, so a control that still had one would be wrong the same way.
     kept.unlink()
+    monkeypatch.setattr(MaskStore, "wrap", lambda self, segment, timepoint: segment)
     out = rerun()
     assert calls, "with no masks kept the re-run segmented nothing: the comparison measures nothing"
     assert len(labels) == len(reused_labels) >= 2

@@ -193,6 +193,26 @@ REUSE_CONTRACTS = {
             "when set, so a marker written before the field existed still "
             "matches a run that leaves it empty"),
     },
+    # A nanowell well's kept cell masks (``pipeline.nanowell_masks``): the labels
+    # a segmenter returned for one input, handed back for the same input. The
+    # key is everything that decides those labels, so what is reused is the
+    # segmenter's answer to a question it has already been asked.
+    "nanowell_masks.mask_key": {
+        "identity": (
+            "the segmenter itself: for Cellpose its model, the diameter it "
+            "resizes to, the Cellpose and Torch versions, the device kind and "
+            "the code between Cellpose and the labels. Another segmenter's "
+            "masks for the same pixels are another segmentation"),
+        "pixels": (
+            "the input's bytes. Everything upstream that changes what the "
+            "segmenter sees — the template, the levels, the crop window, the "
+            "registration, the images themselves — changes these, which is why "
+            "nothing upstream needs a key of its own"),
+        "dtype": "the same bytes read as another type are another image",
+        "shape": "the same bytes in another shape are another image, and the labels must match the input's shape",
+        "lowhigh": "the range Cellpose scales the input by, handed in rather than read from the pixels",
+        "max_size_fraction": "the area cap a mask may reach before Cellpose drops it as an outlier",
+    },
     # A nanowell run's tile registration, reused from an earlier run's grid
     # record (``--nanowell_registration_from``, or the output folder's own).
     # Reusing it is only right when registering again would give the same
@@ -1283,6 +1303,55 @@ def test_a_stored_placement_is_taken_only_under_its_own_key_and_for_the_same_til
     assert taken.positions() == {"F0": (0.0, 0.0), "F1": (90.25, -0.5)}
     assert nr.stored_placement([("/b", block)], "k1", ["F0", "F1", "F2"]) is None   # another grid of tiles
     assert nr.stored_placement([("/old", old)], "k1", ["F0", "F1"]) is None
+
+
+# ── nanowell_masks.mask_key ─────────────────────────────────────────────────
+
+_MASKS = "nanowell_masks.mask_key"
+
+
+def _mask_key(change: str | None = None) -> str:
+    import numpy as np
+
+    from pipeline.nanowell_masks import mask_key
+
+    image = np.arange(30, dtype=np.float64).reshape(5, 6) / 30
+    identity, lowhigh, cap = "cellpose cpsam", (0.1, 0.9), 1.0
+    if change == "identity":
+        identity = "cellpose cyto3"
+    elif change == "pixels":
+        image = image.copy()
+        image[2, 3] += 1e-12
+    elif change == "dtype":
+        image = image.astype(np.float32)
+    elif change == "shape":
+        image = image.reshape(6, 5)
+    elif change == "lowhigh":
+        lowhigh = (0.1, 0.95)
+    elif change == "max_size_fraction":
+        cap = 0.4
+    elif change is not None:
+        raise AssertionError(f"no mutation written for {change!r}: add one beside its reason in REUSE_CONTRACTS")
+    return mask_key(identity, image, lowhigh, cap)
+
+
+@pytest.mark.parametrize("key", sorted(REUSE_CONTRACTS[_MASKS]))
+def test_changing_one_mask_input_alone_changes_the_key(key):
+    assert _mask_key() == _mask_key(), "the key is not even stable for one input"
+    assert _mask_key(key) != _mask_key(), (
+        f"mask_key ignores {key!r}, so one input's masks would be handed back for another. It is keyed because: "
+        f"{REUSE_CONTRACTS[_MASKS][key]}.")
+
+
+def test_the_mask_roster_names_every_argument_the_key_takes():
+    """``mask_key``'s own arguments, read off its signature, against the roster (``image`` is pixels, dtype and
+    shape): an argument added without a reason beside it fails here."""
+    import inspect
+
+    from pipeline.nanowell_masks import mask_key
+
+    taken = set(inspect.signature(mask_key).parameters) - {"image"} | {"pixels", "dtype", "shape"}
+    assert taken == set(REUSE_CONTRACTS[_MASKS])
 
 
 # ── the remote run's reuse decisions, key by key (tracker F8) ───────────────

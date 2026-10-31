@@ -2055,6 +2055,8 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/cellpose_masks.py",
         "pipeline/nanowell_parallel.py",
         "pipeline/nanowell_tiles.py",
+        # Which folders are the node's own disk; where a Slurm job's scratch goes there.
+        "pipeline/node_disk.py",
         # Worker / thread planning and the Cellpose GPU plan, imported by
         # process_microscopy at module scope.
         "pipeline/parallelism.py",

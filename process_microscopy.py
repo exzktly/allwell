@@ -237,71 +237,13 @@ def _report_worker_failure(well_label: str, output_dir: Path | None, exc: BaseEx
     log.error("FAILED well %s: %s.%s", well_label, exc, err_hint, exc_info=True)
 
 
-def _dump_well_failure_trace(output_dir: Path, well_label: str, exc: BaseException) -> Path | None:
-    """Persist a worker-side exception trace for *well_label*.
-
-    ProcessPoolExecutor pickles the exception back to the parent, but if the
-    worker's stderr is muted (e.g. broken pipe to the GUI log queue) the
-    underlying traceback never reaches the user — they only see a generic
-    ``OSError: [Errno 9] Bad file descriptor`` re-raised at the parent's
-    ``future.result()`` call site. Writing the full ``traceback.format_exc()``
-    to ``<output_dir>/errors/<well>_pid<N>.txt`` guarantees a readable trace
-    even when the live log path is broken.
-
-    Returns the trace-file path on success, or None if the trace could not be
-    written (e.g. read-only output dir).
-    """
-    import traceback as _tb
-    try:
-        err_dir = output_dir / "errors"
-        err_dir.mkdir(parents=True, exist_ok=True)
-        err_path = err_dir / f"{well_label}_pid{os.getpid()}.txt"
-        with err_path.open("w") as fh:
-            fh.write(f"Well: {well_label}\n")
-            fh.write(f"PID:  {os.getpid()}\n")
-            fh.write(f"Exception type: {type(exc).__name__}\n")
-            fh.write("\n")
-            fh.write(_tb.format_exc())
-        return err_path
-    except Exception:
-        return None
-
-
-def _dump_fov_failure_trace(
-    output_dir: Path, well_label: str, fov_stem: str, exc: BaseException,
-) -> Path | None:
-    """Persist a worker-side exception trace for a single FOV-group.
-
-    The per-well analogue (:func:`_dump_well_failure_trace`) only fires when a
-    *whole* well fails. An individual FOV-group failure is caught inside the
-    worker (the well keeps going and writes a partial CSV/zip), logged with
-    ``exc_info=True`` — but never persisted. If the live log stream is muted or
-    the line scrolls past, the cause is lost and the well silently drops a
-    timepoint. Writing the full ``traceback.format_exc()`` to
-    ``<output_dir>/errors/<well>_<fov>_pid<N>.txt`` guarantees a durable,
-    readable trace for exactly the "why did this timepoint fail?" case.
-
-    *output_dir* must be the persistent dataset output dir (NOT the per-well
-    ``tmp_images`` staging dir, which is deleted on cleanup).
-
-    Returns the trace-file path on success, or None if it could not be written.
-    """
-    import traceback as _tb
-    try:
-        err_dir = output_dir / "errors"
-        err_dir.mkdir(parents=True, exist_ok=True)
-        safe_fov = _safe_well(str(fov_stem))
-        err_path = err_dir / f"{_safe_well(well_label)}_{safe_fov}_pid{os.getpid()}.txt"
-        with err_path.open("w") as fh:
-            fh.write(f"Well:      {well_label}\n")
-            fh.write(f"FOV-group: {fov_stem}\n")
-            fh.write(f"PID:       {os.getpid()}\n")
-            fh.write(f"Exception type: {type(exc).__name__}\n")
-            fh.write("\n")
-            fh.write(_tb.format_exc())
-        return err_path
-    except Exception:
-        return None
+# The per-well and per-FOV-group failure records, and their retirement once a
+# well later completes, live in ``pipeline.error_records``.
+from pipeline.error_records import (  # noqa: E402
+    begin_run as _begin_error_run,
+    write_fov_failure as _dump_fov_failure_trace,
+    write_well_failure as _dump_well_failure_trace,
+)
 
 
 def _ensure_stardist_runtime_deps() -> None:
@@ -2374,7 +2316,8 @@ def process_well_zip_task(
             # Here, and not in the parent's result loop: see
             # `record_well_settings` on why the caller has to be past every
             # short circuit and after both artefacts are written.
-            record_well_settings(output_dir, well_label, settings_key); seal_well_complete(output_dir, well_label)
+            record_well_settings(output_dir, well_label, settings_key)
+            seal_well_complete(output_dir, well_label, rewritten=not incremental)
             log.info("Well %s — done.", well_label)
             return records, failed
         except BaseException as exc:
@@ -2591,7 +2534,8 @@ def process_well_folder_task(
             # Here, and not in the parent's result loop: see
             # `record_well_settings` on why the caller has to be past every
             # short circuit and after both artefacts are written.
-            record_well_settings(output_dir, well_label, settings_key); seal_well_complete(output_dir, well_label)
+            record_well_settings(output_dir, well_label, settings_key)
+            seal_well_complete(output_dir, well_label, rewritten=not incremental)
             log.info("Well %s — done.", well_label)
             return records, failed
         except BaseException as exc:
@@ -3436,11 +3380,11 @@ def main() -> None:
     clear_run_report(output_dir)
     _field_quality.clear_field_quality(output_dir)
 
-    # The boundary the end-of-run completeness check counts tracebacks from.
-    # ``errors/`` is never cleared and its filenames carry a pid but no run id,
-    # so without a start time a clean re-run into this same output dir would
-    # inherit the previous run's failures and report a healthy plate as broken.
+    # The boundary the end-of-run completeness check counts this run's
+    # tracebacks from, and the run identity every failure record carries — what
+    # lets a well this run completes retire the records earlier runs left it.
     run_started_at = time.time()
+    _begin_error_run()
 
     # Per-well failures are surfaced here so main() can signal them via the
     # process exit code (audit E5) rather than always exiting 0.

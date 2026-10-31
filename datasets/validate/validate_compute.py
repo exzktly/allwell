@@ -431,21 +431,19 @@ def _as_int(value) -> int | None:
 
 
 def _scan_error_files(paths) -> dict[str, tuple[str, ...]]:
-    """Per-well traceback files the run left under ``out/errors/``.
+    """Per-well failure records that still stand under ``out/errors/``.
 
-    Named ``<well>_<fov>_pid<N>.txt`` (or ``<well>_pid<N>.txt`` when a whole
-    well failed), so the well is the leading token up to the first separator
-    that yields a well label.
+    Read through :func:`pipeline.error_records.current_records`, so a record a
+    later whole run of its well archived (or, for one written before records
+    were archived, one older than the well's completion seal) is not evidence
+    against a well whose output is whole.
     """
-    err_dir = paths.out_dir / _ERRORS_DIRNAME
+    from pipeline.error_records import current_records
+
     found: dict[str, list[str]] = {}
-    if not err_dir.is_dir():
-        return {}
-    with swallow(f"scan {err_dir}"):
-        for path in sorted(err_dir.glob("*.txt")):
-            well = canonical_well_label(path.stem.split("_")[0])
-            if well:
-                found.setdefault(well, []).append(path.name)
+    with swallow(f"scan {paths.out_dir / _ERRORS_DIRNAME}"):
+        for rec in current_records(paths.out_dir):
+            found.setdefault(rec.well, []).append(rec.path.name)
     return {well: tuple(names) for well, names in found.items()}
 
 

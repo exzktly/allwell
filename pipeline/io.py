@@ -1306,10 +1306,9 @@ def _merge_onto_cut_csv(target: Path, fetched: list[dict], exc: BaseException, *
                f"short. The well's out.zip still lists that group as done, so an incremental run will not "
                f"recompute it: re-run well {well} with --force (Force in Analyze) to restore it.")
     with swallow(f"recording the cut-short CSV of {well}"):
-        errors = target.parent / "errors"
-        errors.mkdir(parents=True, exist_ok=True)
-        (errors / f"{well}_local_csv_cut_short.txt").write_text(
-            f"Well: {well}\nException type: {type(exc).__name__}\n\n{message}\n")
+        from pipeline.error_records import write_note
+        write_note(target.parent, well, f"{well}_local_csv_cut_short.txt", message,
+                   exception_type=type(exc).__name__)
     if log_fn:
         log_fn(f"[remote] WARNING {well}: {message}\n")
     return max(0, added)

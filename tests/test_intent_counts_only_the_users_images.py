@@ -151,22 +151,21 @@ def test_the_largest_image_wins_not_the_first(tmp_path):
 # ── P7: a PNG plate published no timepoints ─────────────────────────────────
 
 def test_a_png_plate_reports_its_timepoints(tmp_path):
-    """`_collect_image_stems` took `.tif`/`.tiff` in all three of its loops.
+    """`_collect_image_stems` took `.tif`/`.tiff` only.
 
     The pipeline groups `.png`, `.jpg` and `.jpeg` as well, so a PNG plate
     published an empty `available_timepoints` and an empty `available_fovs`,
-    and Review read it as a plate with no timepoints at all. The file already
-    imported the one definition of the set at line 74 and then re-spelled a
-    narrower one at three call sites.
+    and Review read it as a plate with no timepoints at all.
     """
     from process_microscopy import _collect_image_stems
 
     d = tmp_path / "in"
     d.mkdir()
-    (d / "Plate_DAPI_A01_F1_T1.png").write_bytes(b"x")
-    (d / "Plate_GFP_A01_F1_T1.png").write_bytes(b"x")
-    (d / "._Plate_DAPI_A01_F1_T1.png").write_bytes(b"junk")
-    (d / ".DS_Store").write_bytes(b"junk")
+    with zipfile.ZipFile(d / "A01.zip", "w") as zf:
+        zf.writestr("Plate_DAPI_A01_F1_T1.png", b"x")
+        zf.writestr("Plate_GFP_A01_F1_T1.png", b"x")
+        zf.writestr("._Plate_DAPI_A01_F1_T1.png", b"junk")
+        zf.writestr(".DS_Store", b"junk")
     with zipfile.ZipFile(d / "B02.zip", "w") as zf:
         zf.writestr("Plate_DAPI_B02_F1_T1.png", b"x")
         zf.writestr("__MACOSX/._Plate_DAPI_B02_F1_T1.png", b"junk")

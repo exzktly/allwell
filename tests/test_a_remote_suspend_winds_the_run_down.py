@@ -446,8 +446,8 @@ def test_a_slow_failed_click_does_not_undo_a_later_one_that_landed(runner):
     """Two clicks; the first ssh times out *after* the second succeeded.
 
     Before, the first thread cleared the suspend, so the run that the second
-    request did wind down was reported as finished — success hooks and the
-    half-done folder handed to Review.
+    request did wind down was reported as finished — the half-done folder
+    handed to Review.
     """
     import threading
 
@@ -486,10 +486,9 @@ def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag, stop_flag=F
 
     import services.pipeline_runner as pr
 
-    hooks: list[str] = []
     zipped = types.SimpleNamespace(
         up_to_date_wells=(), well_zips=(), incremental=False, mode=types.SimpleNamespace(value="zip"),
-        on_pipeline_success=lambda: hooks.append("zipped"), cleanup=None)
+        cleanup=None)
     monkeypatch.setattr(pr, "stage_local_zips", lambda *a, **k: zipped)
     verified: list[str] = []
 
@@ -534,7 +533,7 @@ def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag, stop_flag=F
     kinds = []
     while not r.log_q.empty():
         kinds.append(r.log_q.get_nowait()[0])
-    return r, kinds, verified, hooks
+    return r, kinds, verified
 
 
 def test_a_run_that_says_it_saw_the_request_is_suspended_whatever_the_ssh_said(
@@ -543,7 +542,7 @@ def test_a_run_that_says_it_saw_the_request_is_suspended_whatever_the_ssh_said(
 
     The line is the pipeline's own, as `pipeline.suspend` writes it.
     """
-    r, kinds, verified, hooks = _drive_remote_run(
+    r, kinds, verified = _drive_remote_run(
         monkeypatch, tmp_path, suspend_flag=False, asked=True,
         lines=["Well A01 F001 starting\n",
                "2026 WARNING SUSPEND requested (request file /x) — finishing\n",
@@ -554,18 +553,16 @@ def test_a_run_that_says_it_saw_the_request_is_suspended_whatever_the_ssh_said(
     # only the missing groups and never re-attaches). Kept "for the resume",
     # the suspended run's directory stayed on the host for ever.
     assert verified == ["all"], "a suspended run's remote directory was kept for ever"
-    assert hooks == []
     assert r.was_suspended
 
 
 def test_a_run_that_never_saw_one_still_finishes(monkeypatch, tmp_path):
     """The control: no request on the stream and none asked is a completion."""
-    r, kinds, verified, hooks = _drive_remote_run(
+    r, kinds, verified = _drive_remote_run(
         monkeypatch, tmp_path, suspend_flag=False,
         lines=["Well A01 F001 starting\n", "Well A01 F001 done.\n"])
     assert "done" in kinds and "suspended" not in kinds, kinds
     assert verified == ["all"]
-    assert hooks == ["zipped"]
 
 
 def test_a_well_that_starts_after_the_request_leaves_nothing(tmp_path):
@@ -641,14 +638,13 @@ def test_the_request_path_exists_only_once_the_upload_is_done(
 
 def test_a_stopped_remote_run_that_exits_zero_is_neither_done_nor_cleaned(
         monkeypatch, tmp_path):
-    """A Stop the remote pipeline wound down from is a stop: no success hooks,
-    no "done", and its remote output left in place rather than deleted."""
-    r, kinds, verified, hooks = _drive_remote_run(
+    """A Stop the remote pipeline wound down from is a stop: no "done", and
+    its remote output left in place rather than deleted."""
+    r, kinds, verified = _drive_remote_run(
         monkeypatch, tmp_path, suspend_flag=False, stop_flag=True,
         lines=["Well A01 F001 starting\n", "Well A01 F001 done.\n"])
     assert "done" not in kinds and "error" in kinds, kinds
     assert verified == ["none"]
-    assert hooks == []
     assert r.cancel_state_at_failure == (True, False)
 
 

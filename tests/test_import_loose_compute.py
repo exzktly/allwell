@@ -222,15 +222,13 @@ def test_convert_to_new_destination_callback_invocations_are_not_corrupted(tmp_p
 
 def test_convert_in_place_writes_real_zips_not_bare_folders(tmp_path):
     """Regression for the reported "sits stuck, no zips made" bug: apply.py's
-    convert_in_place() used to call
-    services.input_resolution_service._consolidate_mixed_to_zips after
-    run_zipper, which is a documented no-op when zero zips already exist —
-    exactly the state after a fresh pipeline/well_plate_zipper.py run (it only ever
-    produces per-well folders, never zips). Every well was left as a bare
-    folder forever, with the run still reporting success. This test drives
-    the real subprocess-backed run_zipper (stdlib-only, no imaging stack, the
-    same real path tests/test_loose_in_folder.py exercises) end to end and
-    asserts actual .zip files land on disk."""
+    convert_in_place() used to finish with a consolidation helper that is a
+    no-op when zero zips already exist — exactly the state after a fresh
+    pipeline/well_plate_zipper.py run (it only ever produces per-well folders,
+    never zips). Every well was left as a bare folder forever, with the run
+    still reporting success. This test drives the real subprocess-backed
+    run_zipper (stdlib-only, no imaging stack) end to end and asserts actual
+    .zip files land on disk."""
     src = tmp_path / "loose"
     _write_loose(src, ["A01", "B02", "C03"], timepoints=("0h", "24h"))
 

@@ -17472,7 +17472,10 @@ quietly wrong.
   the app honours cannot drift. Order is about the reader rather than about
   precedence: the composition is an AND, so a cell failing three layers is out
   for all three and none of them is "the" cause. Manual comes first because it
-  is the one a click undoes.
+  is the one a click undoes. The Review CSV table's `Included` column
+  (`review_effective_included`) composes the same layers from `data_loading.VERDICT_LAYERS`, and an unreadable
+  `Included` is out in the overlay, the table and `df_included_mask` alike, so the column beside the picture
+  cannot say kept for a cell the outline shows removed.
 * **Each answer needs its own colour.** `_layer_inks` maps each label to a design
   token, chosen by measurement: every pairwise CIE76 ΔE is at least 31 and every
   relative luminance at least 0.28, which is what a one-pixel stroke needs on

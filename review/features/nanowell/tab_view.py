@@ -193,6 +193,15 @@ def baseline_moving_greyed(st, column: str | None) -> str | None:
     return None
 
 
+def _refresh_baseline_moving(spin, st, column: str | None) -> None:
+    """The Baseline average spin box: the state's window, enabled only where it reaches the figure, and its tooltip
+    naming the reason when it does not."""
+    spin.setValue(max(st.baseline_moving, 1))
+    greyed = baseline_moving_greyed(st, column)
+    spin.setEnabled(greyed is None)
+    spin.setToolTip(_BASELINE_MOVING_TIP + (f"\n\n({_BASELINE_MOVING_OFF[greyed]})" if greyed else ""))
+
+
 def _combo(items, tip: str) -> QComboBox:
     cb = QComboBox()
     for data, label in items:
@@ -478,12 +487,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_cohort.setVisible(over_time or (stats_view and not per_nanowell))
             moving_spin.setValue(max(st.moving, 1))
             grp_moving.setVisible(over_time)
-            baseline_moving_spin.setValue(max(st.baseline_moving, 1))
+            _refresh_baseline_moving(baseline_moving_spin, st, nwc.drawn_metric_column(ctx))
             grp_baseline_moving.setVisible(over_time)
-            greyed = baseline_moving_greyed(st, nwc.drawn_metric_column(ctx))
-            baseline_moving_spin.setEnabled(greyed is None)
-            baseline_moving_spin.setToolTip(_BASELINE_MOVING_TIP + (f"\n\n({_BASELINE_MOVING_OFF[greyed]})"
-                                                                    if greyed else ""))
             grp_control.setVisible(compares)
             column = nwc.drawn_metric_column(ctx)
             cut = st.thresholds.get(column) if column else None

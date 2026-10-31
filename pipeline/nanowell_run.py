@@ -1211,7 +1211,7 @@ def _confluence_basis(located, images, template, reference, norm: Normalisation,
     return calibration, levels, calibration.texture_cut
 
 
-def _reference_rim(owner, indices, located, images, geoms, template, norm: Normalisation):
+def _reference_rim(owner, indices, located, images, geoms, template, norm: Normalisation) -> tuple | None:
     """``(the tile divided by the empty reference well's template, the sites in it)``, or ``None``.
 
     ``None`` when the timepoint reads against its own template (the reference well itself, or a caller measuring one

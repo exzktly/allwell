@@ -21,6 +21,13 @@ the arrangement that draws them largest:
 Room the pictures cannot use (their edge is set by the width) goes between them and the checks, up to
 :data:`MAX_EXTRA_GAP`, and the rest above the footer — never between the verdict and the pictures.
 
+**A figure too small for all of it** gives up the reference text before the pictures. When no arrangement reaches
+:data:`MIN_SIDE` even without the panels' notes, the footer (the units and the zoom hint) is left out; when that is
+still not enough, the per-check lines are folded into one :func:`summary_check` line that counts them by state and
+says to enlarge the card to read them. The verdict and the three pictures are always drawn. Without this a phone-sized
+card shrank the pictures towards nothing while every text kept its room, and the tick labels, checks and footer were
+drawn over one another.
+
 Everything here is arithmetic on points and measured text widths, no artist is made; ``_identity_diagnostics_render``
 draws at the places this returns. Positions are in points from the figure's lower left corner.
 """
@@ -402,6 +409,27 @@ def _headline(ts: Typesetter, text: str, inner: float, y: float) -> Headline:
     return Headline(lead, reason_rows, y - HEADLINE_PT, lead_w)
 
 
+#: The check :func:`summary_check` stands in for the per-check lines with, on a figure too small for them.
+SUMMARY_KEY = "summary"
+_STATE_WORDS = (("pass", "passed"), ("fail", "failed"), ("warn", "warned"), ("info", "noted"), ("skip", "not run"))
+
+
+@dataclass
+class SummaryCheck:
+    """The one line the per-check detail folds into (:data:`SUMMARY_KEY`); drawn as a check of state ``info``."""
+    text: str
+    key: str = SUMMARY_KEY
+    state: str = "info"
+
+
+def summary_check(checks: list) -> SummaryCheck:
+    """*checks* counted by state, in words, and where to read them: ``"Checks: 4 passed, 1 failed, 1 noted — make
+    the card larger to read each one."``"""
+    counts = [f"{sum(c.state == state for c in checks)} {word}" for state, word in _STATE_WORDS
+              if any(c.state == state for c in checks)]
+    return SummaryCheck(f"Checks: {', '.join(counts)} — make the card larger to read each one.")
+
+
 def layout(ts: Typesetter, width: float, height: float, *, title: str, headline: str, texts: dict, checks: list,
            footer: list[str]) -> Layout:
     """Place everything on a *width* × *height* point figure (module docstring). *texts* is ``{panel name:
@@ -410,10 +438,17 @@ def layout(ts: Typesetter, width: float, height: float, *, title: str, headline:
     title_y = height - MARGIN
     head = _headline(ts, headline, inner, title_y - rows_height(1, TITLE_PT) - 3.0)
     top = head.baselines()[-1] - REASON_PT * (LEADING - 1.0) - 2.0 - BLOCK_GAP
-    footer_rows = [row for line in footer for row in ts.wrap(line, FOOTER_PT, inner)]
-    footer_y = MARGIN * 0.6 + rows_height(len(footer_rows), FOOTER_PT)
-    bottom = footer_y + BLOCK_GAP
-    plan = _choose(ts, texts, _plans(ts, checks, inner=inner, top=top, bottom=bottom))
+    # The reference text gives way before the pictures do (module docstring): the full figure, then without the
+    # footer, then with the checks folded into one line — the first that lets a picture reach MIN_SIDE, or the last.
+    folded = [summary_check(checks)] if checks else []
+    for footer_lines_, checks_ in ((footer, checks), ([], checks), ([], folded)):
+        footer_rows = [row for line in footer_lines_ for row in ts.wrap(line, FOOTER_PT, inner)]
+        footer_y = MARGIN * 0.6 + rows_height(len(footer_rows), FOOTER_PT)
+        bottom = footer_y + BLOCK_GAP if footer_rows else MARGIN
+        plan = _choose(ts, texts, _plans(ts, checks_, inner=inner, top=top, bottom=bottom))
+        if plan.side >= MIN_SIDE:
+            break
+    checks = checks_
     columns, col_w, checks_h = plan.checks
     panels, keys, lowest = _place_panels(ts, texts, plan, top)
     # Room the pictures cannot use (their edge set by the width) goes between them and the checks, up to
@@ -428,5 +463,6 @@ def layout(ts: Typesetter, width: float, height: float, *, title: str, headline:
     else:
         placed = _set_checks(columns, col_w, MARGIN, lowest - BLOCK_GAP - extra)
     name = ", ".join([plan.grid, "beside" if plan.beside else "below"] + (["shared key"] if plan.shared else [])
-                     + ([] if plan.notes else ["no notes"]))
+                     + ([] if plan.notes else ["no notes"]) + ([] if footer_rows else ["no footer"])
+                     + (["checks folded"] if checks is folded and folded else []))
     return Layout(width, height, title_y, head, panels, keys, placed, footer_rows, footer_y, name)

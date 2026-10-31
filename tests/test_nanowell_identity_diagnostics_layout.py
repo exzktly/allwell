@@ -24,8 +24,11 @@ import pytest
 from tests.test_nanowell_identity_view import _draw, _montages, _texts, dataset  # noqa: F401  (a fixture)
 
 #: The sizes the plot card is seen at, in inches: the default, the site detail open beside it, a short wide window,
-#: a large window, a phone's width.
-SIZES = ((8.0, 6.4), (6.0, 6.4), (12.0, 4.5), (10.0, 7.0), (4.0, 6.0))
+#: a large window, a phone's width — and three cards smaller than that phone. The layout held at 4 × 6 here and
+#: overlapped on CI, whose text set a hair larger: 4 × 6 was the edge of what it could fit, and below it the pictures
+#: shrank towards nothing while every text kept its room. A card smaller than the layout was tuned for must still
+#: draw nothing over anything else.
+SIZES = ((8.0, 6.4), (6.0, 6.4), (12.0, 4.5), (10.0, 7.0), (4.0, 6.0), (4.0, 5.0), (3.8, 6.0), (3.5, 5.5))
 WELLS = ("A01", "A02", "A04")
 
 
@@ -215,3 +218,27 @@ def test_the_page_lays_diagnostics_out_again_when_its_canvas_settles_at_a_new_si
     assert st.identity_drawn.laid_out == laid_out_size(fig) != before
     canvas.draw()
     assert _problems(fig) == []
+
+
+def test_a_card_too_small_for_the_checks_folds_them_into_one_line_and_keeps_the_pictures(dataset):  # noqa: F811
+    """On a card too small for the per-check lines, they fold into one line that counts them by state and says where
+    to read them, after the footer has already given way; the verdict and the three pictures stay (that nothing then
+    overlaps is the size-grid test's). A04's checks at 3.5 x 5.5 in: four passed, one failed, one noted (the plate's
+    movement, an ``info`` line)."""
+    from review.features.nanowell._identity_diagnostics_layout import SUMMARY_KEY
+
+    fig, drawn = _styled(dataset, "A04", (3.5, 5.5))
+    assert " ".join(_texts(fig, f"nw-identity-check-{SUMMARY_KEY}")) == (
+        "Checks: 4 passed, 1 failed, 1 noted — make the card larger to read each one.")
+    assert _texts(fig, "nw-identity-check-addresses") == [] and _texts(fig, "nw-identity-footer") == []
+    assert _texts(fig, "nw-identity-check-verdict")
+    assert all(drawn.axes[name].get_window_extent().width > 0 for name in ("looked", "found", "surface"))
+
+
+def test_the_default_card_keeps_every_check_and_the_footer(dataset):  # noqa: F811
+    """The fold is the last resort: at the default card size every check has its own line and the footer is drawn."""
+    from review.features.nanowell._identity_diagnostics_layout import SUMMARY_KEY
+
+    fig, _drawn = _styled(dataset, "A04", (8.0, 6.4))
+    assert _texts(fig, f"nw-identity-check-{SUMMARY_KEY}") == []
+    assert _texts(fig, "nw-identity-check-addresses") and _texts(fig, "nw-identity-footer")

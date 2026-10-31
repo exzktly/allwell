@@ -11814,14 +11814,17 @@ checks under the pictures (two columns when each is at least `MIN_CHECK_COLUMN`)
 column beside them that takes the room right of the pictures (which then start at the left margin); each panel's key under it, or all three in one block when a key would take more than two rows at its
 panel's width; the panels' notes kept, or left out when no arrangement with them reaches `MIN_SIDE` — and keeps the
 one that draws the pictures largest. Room the pictures cannot use goes between them and the checks (up to
-`MAX_EXTRA_GAP`) and the rest above the footer. Each panel takes the card's ground (an axes added after the card was themed is matplotlib's white, which showed
+`MAX_EXTRA_GAP`) and the rest above the footer. On a figure too small for all of that, the reference text gives way
+before the pictures: when no arrangement reaches `MIN_SIDE` even without the notes, the footer is left out, and when
+that is still not enough the per-check lines fold into one `summary_check` line (`SUMMARY_KEY`), which counts them by
+state and says to enlarge the card; the verdict and the three pictures are always drawn. Each panel takes the card's ground (an axes added after the card was themed is matplotlib's white, which showed
 round the surface's searched disc), and each panel and its colour bar carry `_aw_type_scale`, so the
 Properties pass that ends every redraw sizes their ticks and labels at `TICK_PT` / `BAR_PT` rather than its 18 pt
 default, and the tick locators thin with the panel's edge. The drawing records the size it was laid out for
 (`IdentityDrawn.laid_out`); `controller.on_canvas_resized` asks `_identity_controller.needs_relayout` and redraws
 Diagnostics once the canvas settles at another size (the zoom is kept, as on any redraw of the same well, timepoint
 and mode). `tests/test_nanowell_identity_diagnostics_layout.py` reads every drawn text's window extent back, after
-the Properties pass, at five card sizes and on the real page after a resize: inside the figure, overlapping no other
+the Properties pass, at eight card sizes (down to 3.5 × 5.5 in, smaller than a phone's) and on the real page after a resize: inside the figure, overlapping no other
 text, and off every picture it does not belong to.
 
 Every mode zooms and pans: the scroll wheel zooms about the pointer and a drag pans, through the canvas wiring the

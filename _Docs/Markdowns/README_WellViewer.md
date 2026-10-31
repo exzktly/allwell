@@ -5962,7 +5962,10 @@ chooses what it draws:
   marks in a small key under it, with the scores. Below the pictures, one line per check with a ✓, ✗ or ! — the
   square, how the plate moved, the array's outline, the tiles and the addresses — and a check that could not run says
   why. The page arranges all of this for the size of the plot: on a short, wide window the checks move beside the
-  pictures, and resizing the window or opening the site detail lays it out again.
+  pictures, and resizing the window or opening the site detail lays it out again. On a very small plot (a phone held
+  upright, say) the footer is left out first and then the checks fold into one line that counts them — for example
+  *Checks: 4 passed, 1 failed, 1 noted* — so the verdict and the pictures keep their room; make the plot larger to
+  read each check.
 
 Every Compare mode zooms with the scroll wheel and pans by dragging. Side by side's two images move together, as do
 Diagnostics' two images. The zoom stays while the same well, timepoint and mode are shown and resets when any of them

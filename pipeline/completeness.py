@@ -352,55 +352,21 @@ def _member_names(container: Path) -> set | None:
     if container is None:
         return None
     try:
-        if container.is_dir():
-            names = {p.name for p in container.iterdir() if p.is_file()}
-        else:
-            with zipfile.ZipFile(container) as zf:
-                names = {Path(n).name for n in zf.namelist() if not n.endswith("/")}
+        with zipfile.ZipFile(container) as zf:
+            names = {Path(n).name for n in zf.namelist() if not n.endswith("/")}
     except (OSError, zipfile.BadZipFile):
         return None
     return names or None
 
 
 def resolve_input_container(recorded) -> Path | None:
-    """Where a well's input actually is *now*, not where it was before the run.
-
-    Folder mode hands this check the ``<WELL>/`` folder paths the run resolved
-    at its start, and the per-well worker compresses that folder into
-    ``<WELL>.zip`` and removes it. So by the time completeness runs, every path
-    it was given is gone: `_member_names` answered ``None`` for all of them,
-    intent was 0 for all of them, nothing could ever be missing, and a folder
-    run reported 96 of 96 whatever it had actually produced. Structurally
-    incapable of reporting a partial well — not a threshold that was too loose,
-    a comparison with nothing on one side.
-
-    So the recorded path is a starting point rather than the answer: if it is
-    gone and the archive the run would have written in its place is there, that
-    archive is the input container.
-    """
+    """The well's input archive as the run recorded it, or ``None`` when it is
+    gone — "nothing to compare against", which the caller reports, never an
+    empty archive that would claim nothing was asked for."""
     if recorded is None:
         return None
     recorded = Path(recorded)
-    if recorded.exists():
-        return recorded
-    if recorded.suffix:
-        return None
-    # The worker names the archive from the **canonical** well label, not from
-    # the folder's own spelling — `find_well_folders` accepts `a01`, `A1` and
-    # `a1` for well A01 and hands back `(canonical, actual_path)`. Guessing
-    # `<folder>.zip` therefore found nothing for three of the four spellings,
-    # which left P4 unfixed for them *and* tripped the new empty-comparison
-    # flag, marking a perfectly finished plate's record `partial_scan`.
-    from util.well_token import canonical_well_label
-
-    candidates = [recorded.with_suffix(".zip")]
-    canon = canonical_well_label(recorded.name)
-    if canon:
-        candidates.append(recorded.with_name(f"{canon}.zip"))
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return None
+    return recorded if recorded.exists() else None
 
 
 def csv_keys_and_state(path: Path) -> tuple[set[tuple[str, str]], str]:
@@ -633,9 +599,6 @@ def scan_run(
 
     for well in wells:
         try:
-            # Resolved now, not as the run recorded it: folder mode zips the
-            # folder away mid-run, so the recorded path is stale by the time
-            # this reads it.
             container = resolve_input_container(in_map.get(well))
             recorded_container = in_map.get(well)
             cov = _scan_well_coverage(

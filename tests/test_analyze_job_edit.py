@@ -40,7 +40,6 @@ _OPTS = {
     # is over the whole dict, not a subset of it.
     "compress_input_well_folders": True,
     "compress_output_well_folders": True,
-    "move_source_tifs": True,
     "remote_batch_size": "12",
     # One choice of three on the form ("If a well already has output"): Redo
     # it is force with incremental off. The pipeline always ignored
@@ -190,11 +189,10 @@ def test_the_fixture_is_all_non_default(tab):
     """Guards the guard: a round trip over default values proves nothing.
 
     Every key in ``_OPTS`` that a hydrator could plausibly get wrong must
-    differ from what a fresh form collects. The three always-on constants are
+    differ from what a fresh form collects. The two always-on constants are
     exempt — they have no widget to restore them into and cannot vary.
     """
     constants = {"compress_input_well_folders", "compress_output_well_folders",
-                 "move_source_tifs",
                  # nanowell mode pins label-free segmentation, which has no cytoplasm channel, so a saved
                  # nanowell spec always carries it blank.
                  "cytoplasm_token",

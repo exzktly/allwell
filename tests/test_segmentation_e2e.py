@@ -9,7 +9,7 @@ disk — the per-well CSV, the ``pipeline_info.json`` sidecar, and the label ima
 inside the per-well output zip — plus the tab's own completion contract (the
 ``on_pipeline_complete`` callback and the "Processing Complete" log banner).
 
-Nothing here is mocked: the grouping (zipper) phase, the subprocess launch, the
+Nothing here is mocked: input resolution, the subprocess launch, the
 log/progress plumbing, segmentation, quantification, CSV assembly and output
 zipping all run for real. That is the point — the arg-mapping and form-state
 tests (``test_segmentation_methods.py``, ``test_labelfree_phase.py``) already
@@ -106,20 +106,27 @@ WELLS = ("A01", "A02")
 
 
 def _make_plate(root: Path, channels: dict[str, str], *, wells=WELLS, n_fovs: int = 1) -> Path:
-    """Write loose schema-named TIFFs under ``root/raw`` and return that folder.
+    """Write ``root/raw/in/<well>.zip`` of schema-named TIFFs; return ``raw``.
 
-    Loose TIFs at the top level is the layout a user drops on the app most
-    often, so the run also exercises the grouping (zipper) phase that turns them
-    into ``raw/in/<well>.zip`` before the pipeline starts. Two wells: the tab
-    refuses a folder holding three or fewer TIFs (it can't tell that layout
-    apart from a stray drop), and a second well proves the per-well partitioning
-    of the CSVs.
+    Per-well archives are the one layout Analyze runs, and selecting the
+    dataset folder rather than its ``in/`` exercises the resolver too. Two
+    wells, so the per-well partitioning of the CSVs is proved.
     """
+    import shutil
+    import zipfile
+
     raw = Path(root) / "raw"
-    raw.mkdir(parents=True, exist_ok=True)
+    in_dir = raw / "in"
+    in_dir.mkdir(parents=True, exist_ok=True)
     for well in wells:
+        staging = Path(root) / f"_stage_{well}"
+        staging.mkdir(parents=True, exist_ok=True)
         for fov in range(1, n_fovs + 1):
-            write_synthetic_channels(raw, channels, well=well, fov=str(fov))
+            write_synthetic_channels(staging, channels, well=well, fov=str(fov))
+        with zipfile.ZipFile(in_dir / f"{well}.zip", "w") as zf:
+            for path in sorted(staging.iterdir()):
+                zf.write(path, arcname=path.name)
+        shutil.rmtree(staging)
     return raw
 
 

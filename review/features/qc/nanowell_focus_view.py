@@ -68,7 +68,8 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
     head_layout.addWidget(below)
     spin = QSpinBox(head)
     spin.setRange(int(round(100 * rfc.MIN_FRACTION)), int(round(100 * rfc.MAX_FRACTION)))
-    spin.setSuffix(" %")
+    # A bare number, no suffix: Qt's spin box refuses typing and Backspace while the cursor sits in a suffix, so a
+    # click after the number ignored every digit typed. The labels either side say what the number is.
     spin.setValue(int(round(100 * params.nanowell_focus_fraction)))
     spin.setKeyboardTracking(False)          # one recompute on Enter or focus-out, not one per digit
     spin.setToolTip(TOOLTIP)

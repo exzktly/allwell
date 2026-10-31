@@ -345,7 +345,6 @@ REMOTE_FILES: dict[str, str] = {
     "test_srun_boot_retry.py": "The ``srun`` wrapper prefers awake nodes and retries a node that fails to boot",
     "test_ssh_key_setup.py": "Tests for services.ssh_key_setup (v5.2.1)",
     "test_staged_archives_key_the_same.py": "A retry of an unchanged plate keys its staged upload the same; a changed image or channel list keys it anew",
-    "test_staging_keeps_every_image.py": "Remote staging never deletes an image the user had; the channel filter changes only the upload",
     "test_staging_rewrite_reasons.py": "Why an upload rewrites a well archive, and when it should not bother",
     "test_stop_never_waits_on_a_remote_upload.py": "Stop, pressed while a remote run is still uploading, answers at once",
     "test_stream_rsync_retry.py": "Audit A11 — the shared streaming-rsync retry loop",
@@ -359,6 +358,23 @@ REMOTE_FILES: dict[str, str] = {
 }
 
 
+#: Files that are prose and nothing else: no module imports them, and the app reads
+#: only the manual (``ui/help_topics.py``). A change confined to these and
+#: ``version.py`` is **docs-only**, and ``scripts/change_scope.py`` narrows the fast
+#: lane to the tests that read them. A ``.md`` file outside this list (under
+#: ``_Docs/design/``, say) is not here because nothing has checked that no build or
+#: test consumes it; a change to it runs everything, which is the safe direction.
+DOCS_ONLY_PATTERNS: tuple[str, ...] = (
+    r"^_Docs/Markdowns/[^/]+\.md$",
+    r"^CLAUDE\.md$",
+    r"^tests/FAST_LANE\.md$",
+)
+
+#: The one file whose sole change is **version-only**: no test can be affected by
+#: the number, and the CI ``version bump`` job is the check that reads it.
+VERSION_FILE = "version.py"
+
+
 #: The harness files every gate watches: a change to how lanes are split or run
 #: can break any of them.
 _HARNESS = (
@@ -366,6 +382,7 @@ _HARNESS = (
     r"^tests/conftest\.py$",
     r"^scripts/test\.sh$",
     r"^scripts/lane_needed\.py$",
+    r"^scripts/change_scope\.py$",
     r"^pyproject\.toml$",
     r"^tests/requirements-dev\.txt$",
     r"^\.github/workflows/ci\.yml$",

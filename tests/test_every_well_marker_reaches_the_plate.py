@@ -75,7 +75,6 @@ ROSTER: dict[str, list[tuple]] = {
     "SKIP well {} — empty-well reference only; already complete locally.\n": [((W,), "-", "fetched", "")],
     # the well's lifecycle
     "Well %s — starting (pid %d)": [((W, 12), "I", "processing", "")],
-    "Well %s — starting (folder mode, pid %d)": [((W, 12), "I", "processing", "")],
     "Well %s — done.": [((W,), "I", "complete", "")],
     "Well {} — done. (finished on the remote by an earlier attempt)\n": [((W,), "-", "complete", "")],
     "Well %s — done. %d timepoint(s), %d without rows.": [
@@ -122,11 +121,7 @@ ROSTER: dict[str, list[tuple]] = {
     "Well %-12s -> %s  (+%d row(s), merged)": [((W, "m_A01.csv", 10), "I", "note", "")],
     "Well %s: %d image(s) -> %s": [((W, 3, "A01_out.zip"), "I", "note", "")],             # the out.zip it wrote
     "Well %s: merged %d new image(s) -> %s": [((W, 3, "A01_out.zip"), "I", "note", "")],
-    "Well %s: compressed input folder -> %s (%d image(s))": [((W, "x.zip", 3), "I", "note", "")],
-    "Well %s: compressed output folder -> %s (%d image(s))": [((W, "x.zip", 3), "I", "note", "")],
-    "Well %s: output folder -> %s": [((W, "A01_out"), "I", "note", "")],
     "Well %s — temporary directories removed.": [((W,), "I", "note", "")],                # after "— done."
-    "Well %s — staging directory removed.": [((W,), "I", "note", "")],
     "Well %s: removing stale tmp dir %s": [((W, ".tmp"), "W", "note", "")],
     "Well %s: resuming from %d FOV checkpoint(s) in %s": [((W, 3, ".s"), "I", "note", "")],
     "Well %s — keeping its %d FOV checkpoint(s) for the resume.": [((W, 3), "I", "note", "")],

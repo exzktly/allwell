@@ -28,7 +28,7 @@ import process_microscopy as pm
 from tests.fixtures.synthetic_pipeline import (
     DEFAULT_CENTERS,
     write_synthetic_fov,
-    write_synthetic_well_folder,
+    write_synthetic_well_zip,
 )
 
 pytestmark = pytest.mark.slow
@@ -142,13 +142,13 @@ def test_pipeline_writes_output_images(tmp_path, stardist_worker):
     assert any("GFP" in n and n.endswith("_tophat.tif") for n in written)
 
 
-# ── Directory-level (multi-well) pipeline: folder discovery -> CSV assembly ───
+# ── Directory-level (multi-well) pipeline: archive discovery -> CSV assembly ──
 #
-# These drive ``process_well_folder_task`` — the picklable per-well lifecycle the
+# These drive ``process_well_zip_task`` — the picklable per-well lifecycle the
 # worker pool dispatches — directly (in-process, after one _worker_init), so the
 # higher orchestration above ``process_image_group`` is exercised: FOV-group
-# discovery in a well folder, multi-FOV processing, per-well CSV assembly, and
-# the staging -> final output-folder rename. Two wells confirm the partitioning.
+# discovery in a well archive, multi-FOV processing, per-well CSV assembly, and
+# the output archive. Two wells confirm the partitioning.
 
 SCHEMA = "experiment:channel:well:fov:timepoint".split(":")
 
@@ -167,9 +167,9 @@ def _template():
 
 
 def _run_well(well, n_fovs, in_root, out_dir, worker):
-    folder = write_synthetic_well_folder(in_root, well=well, n_fovs=n_fovs)
-    return pm.process_well_folder_task(
-        well, folder, out_dir, _template(), "DAPI", ["GFP"], "measurements",
+    archive = write_synthetic_well_zip(in_root, well=well, n_fovs=n_fovs)
+    return pm.process_well_zip_task(
+        well, archive, out_dir, _template(), "DAPI", ["GFP"], "measurements",
         schema=SCHEMA, sep="_",
     )
 
@@ -187,20 +187,26 @@ def test_directory_pipeline_assembles_per_well_csvs(tmp_path, stardist_worker):
     # 9 nuclei per FOV: A01 has 2 FOVs (18), B02 has 1 (9).
     assert len(recs_a) >= 16 and len(recs_b) >= 8
 
-    csv_a = out / "measurements_A01.csv"
-    csv_b = out / "measurements_B02.csv"
-    assert csv_a.exists() and csv_b.exists()
+    # A finished well's CSV is gzipped (`pipeline.io.write_well_csv`).
+    import gzip as _gzip
+    from pipeline.well_skip import existing_csv_for_well
 
-    rows_a = list(_csv.DictReader(csv_a.open()))
-    rows_b = list(_csv.DictReader(csv_b.open()))
+    def _rows(well):
+        path = existing_csv_for_well(out, well, "measurements")
+        assert path.exists(), path
+        opener = _gzip.open if path.suffix == ".gz" else open
+        with opener(path, "rt", newline="") as fh:
+            return list(_csv.DictReader(fh))
+
+    rows_a = _rows("A01")
+    rows_b = _rows("B02")
     # CSV row counts match the returned records; A01 spans both FOVs.
     assert len(rows_a) == len(recs_a)
     assert sorted({r["fov"] for r in rows_a}) == ["1", "2"]
     assert all(r["well"] == "A01" for r in rows_a)
     assert all(r["well"] == "B02" for r in rows_b)
 
-    # Per-well output is compressed to <well>_out.zip (compression is always
-    # on — folder mode zips the staged output folder before returning).
+    # Per-well output is compressed to <well>_out.zip (compression is always on).
     import zipfile as _zipfile
     for well in ("A01", "B02"):
         out_zip = out / f"{well}_out.zip"

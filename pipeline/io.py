@@ -210,10 +210,8 @@ def scratch_base_for(output_dir: Path) -> Path:
     on local storage leaves only the two per-well result writes (the CSV and the
     ``<well>_out.zip``) on the network volume.
 
-    Both zip- and folder-mode temps tolerate a separate filesystem: nothing is
-    renamed across the boundary (folder mode's staging commit falls back to a
-    copy when the rename would be cross-device — see
-    :func:`_commit_staging_dir`).
+    The temps tolerate a separate filesystem: nothing is renamed across the
+    boundary.
     """
     override = os.environ.get(SCRATCH_DIR_ENV, "").strip()
     if override:
@@ -367,41 +365,6 @@ def remove_directory(path: Path, *, retries: int = 4, backoff: float = 0.5) -> N
             "can be removed manually.",
             path, retries, last_exc,
         )
-
-
-def _commit_staging_dir(tmp_images: Path, final_out: Path) -> None:
-    """Move the folder-mode staging dir into place as *final_out*.
-
-    A plain ``rename`` is the fast path and the only one that was possible when
-    the staging dir was pinned under ``output_dir``. Now that folder-mode
-    staging honours the scratch base (which defaults to ``~/.allwell/scratch``,
-    off the output volume), the two can live on different filesystems, where
-    ``rename`` raises ``EXDEV``. Fall back to a copy + remove in that case.
-
-    The copy is deliberately not atomic: the caller has already removed any
-    previous *final_out*, and a crash mid-copy leaves the well's per-FOV
-    checkpoints intact for ``--incremental`` to resume from.
-
-    Once the move is complete those checkpoints are spent — the well's CSV was
-    written before this is called — so they are dropped from *final_out*. Left
-    there they were the only thing the output folder held after its images
-    were archived, so every folder-mode well kept an ``out/<WELL>/`` of hidden
-    files the log reported as "not carried by the archive".
-    """
-    try:
-        tmp_images.rename(final_out)
-    except OSError as exc:
-        if exc.errno != errno.EXDEV:
-            raise
-        log.info(
-            "Well output staged on a different filesystem than %s; copying "
-            "instead of renaming.", final_out.parent,
-        )
-        shutil.copytree(tmp_images, final_out, dirs_exist_ok=True)
-        remove_directory(tmp_images)
-    for spent in final_out.glob(".fov_*"):
-        with swallow(f"removing the spent checkpoint {spent.name}"):
-            spent.unlink()
 
 
 #: How long a working folder that belongs to no plate this run can name must

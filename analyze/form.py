@@ -367,11 +367,9 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
                     f"('{pos}').\n\nThey have to differ — the threshold comes "
                     "from the separation between them.")
         input_dir = Path(self._input_edit.text().strip())
-        sep = self._schema_picker.separator()
-        schema = [f.strip().lower() for f in self._build_schema_arg().split(":") if f.strip()]
         from services.input_resolution_service import well_present_in_input
         missing_wells = [w for w in (pos, neg) if check_input  # False: input not readable yet
-                         and not well_present_in_input(input_dir, w, schema=schema, sep=sep)]
+                         and not well_present_in_input(input_dir, w)]
         if missing_wells:
             label = ", ".join(f"'{w}'" for w in missing_wells)
             return (f"Control well {label} was not found in the input folder.\n\n"
@@ -405,17 +403,11 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
             mesh_sigma=self._mesh_sigma_edit.text(),
             no_tophat_nir=self._no_tophat_nir_cb.isChecked(),
             no_tophat_fluor=self._no_tophat_fluor_cb.isChecked(),
-            # Always-on (no longer user options): zip in/out + move loose TIFs.
+            # Always-on (no longer user options): zip in/out.
             compress_input_well_folders=True,
             compress_output_well_folders=True,
-            move_source_tifs=True,
             remote_batch_size=self._remote_batch_size_edit.text(),
             force=self._existing_output_cb.value() == "force",
-            # services.input_resolution_service.select_incremental_scope may
-            # still override this during input resolution (it forces a full
-            # reprocess when loose images land under a cross-well flat-field /
-            # background model), but it never clears a True the form set: with
-            # nothing appended it returns before touching the key.
             incremental=self._existing_output_cb.value() == "incremental",
             **well_scope_options(self),
             **storage_options(self),

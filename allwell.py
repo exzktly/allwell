@@ -440,8 +440,9 @@ class AllWellApp(QMainWindow):
         # Every action in this cluster acts on the loaded dataset or on the
         # plots Review draws from it, so the cluster belongs to Review and to no
         # other mode. It is built here, where those handlers live, and then
-        # dropped into the mode band's right end (``_mount_review_actions``) so
-        # the whole of the app's chrome sits on one row;
+        # mounted at this header row's right end (``_mount_review_actions``),
+        # on the same line as the wordmark and version, so the page tabs in the
+        # band below keep that band's full width;
         # ``_sync_review_actions`` takes it off screen in Analyze and Datasets,
         # where every one of them would be a control with nothing to act on.
         # The help button is deliberately NOT one of them — see below.
@@ -586,7 +587,7 @@ class AllWellApp(QMainWindow):
         review_topbar = getattr(self._review, "_top_bar", None)
         if review_topbar is not None and review_topbar.layout() is not None:
             review_topbar.layout().insertWidget(0, self._mode_seg)
-            self._mount_review_actions(review_topbar)
+        self._mount_review_actions(header)
 
         self._analyze = AnalyzeTab(
             parent=None,
@@ -780,14 +781,16 @@ class AllWellApp(QMainWindow):
                                          if self._analyze_phone is not None else None),
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
-        # Among the small icon buttons at the band's right end, just before
-        # help: like help, in every mode, since Analyze (watching a run) is the
-        # commonest reason to be on a phone.
-        band_lay = band.layout() if band is not None else None
-        if band_lay is not None:
+        # Among the small icon buttons at the header row's right end, just
+        # before help: like help, in every mode, since Analyze (watching a run)
+        # is the commonest reason to be on a phone. Phone layout hides the
+        # header row and this button with it; the way back is ⋯ › Desktop.
+        header = getattr(self, "_header", None)
+        head_lay = header.layout() if header is not None else None
+        if head_lay is not None:
             help_btn = getattr(self, "_help_btn", None)
-            at = band_lay.indexOf(help_btn) if help_btn is not None else -1
-            band_lay.insertWidget(at if at >= 0 else band_lay.count(),
+            at = head_lay.indexOf(help_btn) if help_btn is not None else -1
+            head_lay.insertWidget(at if at >= 0 else head_lay.count(),
                                   self._phone.desk_button)
         if nav is not None:
             # A section tapped in the open drawer is a request to see it: the
@@ -1460,48 +1463,46 @@ class AllWellApp(QMainWindow):
             bar.setFixedWidth(width)
 
     # ── the Review action cluster ────────────────────────────────────────
-    def _mount_review_actions(self, band) -> None:
-        """Drop the dataset actions, then the help button, into the band's right end.
+    def _mount_review_actions(self, row) -> None:
+        """Mount the top-right icons at the right end of the header row.
 
-        They used to sit in the window header, a row above — so the top of the
-        window was two strips of chrome, and the actions were as prominent in
-        Analyze and Datasets (where none of them has anything to act on) as in
-        Review. The band already carries the mode selector and the page tabs and
-        already runs the full width of the window, so the cluster goes to its
-        right end and the header row below it disappears.
+        The header row holds the wordmark and the version pill and is otherwise
+        empty, so the icons go there: Split View's toggle (and its right-pane
+        picker), the Review-only dataset cluster, Storage, and Help last. They
+        used to sit at the right end of the mode band below, where every icon
+        took width from the page tabs sharing that band — on a narrow window
+        the tab strip scrolled while the header above it stood empty.
 
-        The page-tabs host holds the band's only stretch, so both are pushed
-        hard right whatever the tab strip is showing. Help goes on last, so it
-        keeps the band's rightmost slot in every mode while the cluster in front
-        of it appears and disappears with the mode.
+        Split View builds its toggle into the Review band itself
+        (``review/core/split_view.py``); it is re-parented here rather than
+        built here, so the feature stays one-line removable and keeps its own
+        show/hide logic, which acts on the widget wherever it sits.
+
+        The header row ends in a stretch (``_build_ui``), so everything added
+        here lands hard right. Help goes on last, so it keeps the rightmost
+        slot in every mode while the cluster in front of it appears and
+        disappears with the mode.
         """
-        layout = band.layout()
-        box = getattr(self, "_review_actions", None)
-        storage_btn = getattr(self, "_storage_btn", None)
-        help_btn = getattr(self, "_help_btn", None)
+        layout = row.layout()
         if layout is None:
             return
-        if box is not None:
-            layout.addWidget(box)
-        if storage_btn is not None:
-            layout.addWidget(storage_btn)
-        if help_btn is not None:
-            layout.addWidget(help_btn)
-        # The band is pinned to a tab bar's height — a row of text. The icon
-        # buttons are taller than that, so raise the pin rather than let the
-        # layout clip them; a clipped glyph reads as a broken icon. Whichever of
-        # the two is present is measured, rather than the cluster alone: they
-        # are the same height today (both rows of one icon button), so this is
-        # about a build that has one and not the other — a trimmed build, or a
-        # partial construction that never reached the cluster. Hiding the
-        # cluster outside Review does *not* shrink this: a hidden widget keeps
-        # its sizeHint.
-        needed = max(
-            (w.sizeHint().height() for w in (box, help_btn) if w is not None),
-            default=0,
-        )
-        if needed > band.minimumHeight():
-            band.setFixedHeight(needed)
+        split = getattr(getattr(getattr(getattr(self, "_review", None),
+                                        "_ctx", None), "runtime", None),
+                        "split", None)
+        for w in (getattr(split, "toggle_btn", None),
+                  getattr(split, "pane_combo", None),
+                  getattr(self, "_review_actions", None),
+                  getattr(self, "_storage_btn", None),
+                  getattr(self, "_help_btn", None)):
+            if w is not None:
+                # Re-parenting by hand first: a widget that already belongs to
+                # another layout must leave it, or that layout keeps a dead
+                # item and the band below would still reserve its width.
+                old = w.parentWidget()
+                old_layout = old.layout() if old is not None else None
+                if old_layout is not None and old is not row:
+                    old_layout.removeWidget(w)
+                layout.addWidget(w)
         self._sync_review_actions()
 
     def _sync_review_actions(self) -> None:

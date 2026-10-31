@@ -40,7 +40,7 @@ from tifffile import imread
 
 from pipeline.background import estimate_background_field
 from pipeline.flatfield import estimate_basic_flatfield
-from pipeline.input_layout import find_well_folders, find_well_zips
+from pipeline.input_layout import find_well_zips
 from pipeline.io import load_2d_gray
 from util.image_exts import is_run_input_member
 from util.timepoint import parse_hours as _tp_parse_hours
@@ -125,7 +125,6 @@ class _StemReader:
                  wells: set[str], tokens: list[str]) -> None:
         fields = list(schema or [])
         self.chan_idx = fields.index("channel") if "channel" in fields else -1
-        self.well_idx = fields.index("well") if "well" in fields else -1
         self.tp_idx = fields.index("timepoint") if "timepoint" in fields else -1
         self.sep = sep
         self.wells = wells
@@ -136,22 +135,15 @@ class _StemReader:
         """Whether a channel slot and at least one blank well were both given."""
         return self.chan_idx >= 0 and bool(self.wells)
 
-    def token_of(self, stem: str, *, require_well: bool) -> str | None:
+    def token_of(self, stem: str) -> str | None:
         """The channel token this stem names, or None if it is not wanted.
 
-        *require_well* is the difference between the two layouts that establish
-        the well from the **container** — a ``<WELL>.zip`` or a ``<WELL>/``
-        folder, whose members need not carry the well token — and loose TIFFs,
-        where the filename is the only thing that says which well a frame is
-        from.
+        The well comes from the **container** (the ``<WELL>.zip`` the member
+        sits in), so the stem need not carry the well token.
         """
         parts = stem.split(self.sep)
         if self.chan_idx >= len(parts):
             return None
-        if require_well:
-            if self.well_idx < 0 or self.well_idx >= len(parts) \
-                    or _bg_well_key(parts[self.well_idx]) not in self.wells:
-                return None
         tok = parts[self.chan_idx].strip().lower()
         if self.want and tok not in self.want:
             return None
@@ -170,13 +162,10 @@ _Sources = dict[str, dict[str, list]]
 
 def _sources_from_well_zips(input_dir: Path, reader: _StemReader,
                             found: _Sources) -> bool:
-    """Collect blank frames from ``<input_dir>/<WELL>.zip`` — the default layout.
+    """Collect blank frames from ``<input_dir>/<WELL>.zip`` — the input layout.
 
-    Returns whether any blank's archive was **seen**, which is what decides
-    whether the per-well-folder tier below runs at all. Seen, not read
-    successfully: an archive that is present but unreadable still means this
-    plate is zip-grouped, and falling through to the folder tier would search a
-    layout the plate does not use.
+    Returns whether any blank's archive was **seen** (present, whether or not
+    it could be read).
     """
     seen = False
     for well, zpath in find_well_zips(input_dir):
@@ -189,38 +178,13 @@ def _sources_from_well_zips(input_dir: Path, reader: _StemReader,
                     if not is_run_input_member(member.filename):
                         continue
                     stem = Path(Path(member.filename).name).stem
-                    tok = reader.token_of(stem, require_well=False)
+                    tok = reader.token_of(stem)
                     if tok is not None:
                         found[tok][reader.tp_of(stem)].append(
                             (zpath, member.filename))
         except (OSError, zipfile.BadZipFile):
             continue
     return seen
-
-
-def _sources_from_well_folders(input_dir: Path, reader: _StemReader,
-                               found: _Sources) -> None:
-    """Collect blank frames from ``<input_dir>/<WELL>/…`` — the folder layout."""
-    for well, folder in find_well_folders(input_dir):
-        if _bg_well_key(well) not in reader.wells:
-            continue
-        for path in sorted(folder.rglob("*.tif*")):
-            tok = reader.token_of(path.stem, require_well=False)
-            if tok is not None:
-                found[tok][reader.tp_of(path.stem)].append(path)
-
-
-def _sources_from_loose_tifs(input_dir: Path, reader: _StemReader,
-                             found: _Sources) -> None:
-    """Collect blank frames from loose TIFFs anywhere under *input_dir*.
-
-    The last resort, and the only tier where the filename must carry the well
-    token: nothing else here says which well a loose frame came from.
-    """
-    for path in sorted(input_dir.rglob("*.tif*")):
-        tok = reader.token_of(path.stem, require_well=True)
-        if tok is not None:
-            found[tok][reader.tp_of(path.stem)].append(path)
 
 
 def _load_capped(sources: list, max_samples: int) -> list[np.ndarray]:
@@ -277,16 +241,11 @@ def sample_empty_well_images(
     canonical timepoint (:func:`_empty_well_tp_key`); the special ``_POOLED_TP``
     key holds every frame for that channel across all timepoints (the
     missing-timepoint fallback). Frames from all named blank wells (and all
-    their FOVs) at a given timepoint are pooled. Reads from whichever input
-    layout holds each well: a per-well ``<WELL>.zip`` (default), a per-well
-    folder, or loose TIFFs.
+    their FOVs) at a given timepoint are pooled, read from each blank's
+    ``<WELL>.zip``.
 
     Background drifts over time, so a per-timepoint field corrects each
     timepoint on its own; pooling multiple blank wells de-noises the estimate.
-
-    The three layouts are tried in that order and are **not** additive: a plate
-    is in one of them, and reading a second would mix a well's archived frames
-    with whatever loose copies happen to be lying beside it.
     """
     reader = _StemReader(
         schema=schema, sep=sep, tokens=tokens,
@@ -296,10 +255,7 @@ def sample_empty_well_images(
         return {}
 
     found: _Sources = defaultdict(lambda: defaultdict(list))
-    if not _sources_from_well_zips(input_dir, reader, found):
-        _sources_from_well_folders(input_dir, reader, found)
-    if not found:
-        _sources_from_loose_tifs(input_dir, reader, found)
+    _sources_from_well_zips(input_dir, reader, found)
     return _stacks_from_sources(found, max_samples)
 
 
@@ -427,15 +383,27 @@ def _basic_flatfield_models(input_dir: Path, reader: _StemReader,
     additive background does. The single field is stored under ``_POOLED_TP`` so
     the lookup is the same shape as the empty-well models beside it.
     """
-    by_token: dict[str, list[Path]] = {}
-    for path in sorted(input_dir.rglob("*.tif*")):
-        parts = path.stem.split(reader.sep)
-        if reader.chan_idx >= len(parts):
+    # Every well's archive, every channel member — the whole plate, read where
+    # the run reads it. This scanned `rglob("*.tif*")` on disk, which on a
+    # zipped plate found nothing at all: no field was built and every frame
+    # passed through uncorrected, with nothing to say so.
+    by_token: dict[str, list[tuple[Path, str]]] = {}
+    for _well, zpath in find_well_zips(input_dir):
+        try:
+            with zipfile.ZipFile(zpath, "r") as zf:
+                members = sorted(zf.namelist())
+        except (OSError, zipfile.BadZipFile):
             continue
-        tok = parts[reader.chan_idx].strip().lower()
-        if reader.want and tok not in reader.want:
-            continue
-        by_token.setdefault(tok, []).append(path)
+        for member in members:
+            if not is_run_input_member(member):
+                continue
+            parts = Path(Path(member).name).stem.split(reader.sep)
+            if reader.chan_idx >= len(parts):
+                continue
+            tok = parts[reader.chan_idx].strip().lower()
+            if reader.want and tok not in reader.want:
+                continue
+            by_token.setdefault(tok, []).append((zpath, member))
 
     models: dict[str, dict[str, np.ndarray]] = {}
     for tok, paths in by_token.items():
@@ -663,6 +631,23 @@ def shared_kwargs_for_well(shared_kwargs: dict, well_label: str) -> dict:
     return out
 
 
+def _require_basic_models(what: str, grouped, source) -> None:
+    """Stop a ``basic`` run that built no field for any channel.
+
+    The same reasoning as :func:`_require_empty_well_models`: with no model,
+    every frame passes through uncorrected and the output looks exactly like a
+    corrected run's.
+    """
+    if any((grouped or {}).values()):
+        return
+    raise SystemExit(
+        f"--{what.lower().replace('-', '')} basic was requested, but no usable "
+        f"frames were found in the well archives in {source}, so no field could "
+        f"be built. Nothing would be corrected, and the output would be "
+        f"indistinguishable from a corrected run — so this run stops instead."
+    )
+
+
 def require_grouped_models(what: str, mode: str, grouped, groups: BlankGroups,
                            source) -> None:
     """:func:`_require_empty_well_models`, asked once per pairing group.
@@ -673,6 +658,9 @@ def require_grouped_models(what: str, mode: str, grouped, groups: BlankGroups,
     reporting success would wave the run through. So each group answers for
     itself, and the message names the blank that produced nothing.
     """
+    if mode == "basic":
+        _require_basic_models(what, grouped, source)
+        return
     if mode != "empty_well":
         return
     for group, blanks in groups.by_group.items():
@@ -699,7 +687,7 @@ def refuse_uncovered_wells(groups: BlankGroups, *well_lists) -> None:
     """
     if not (groups.paired and groups.in_force):
         return
-    # Each list is `find_well_zips` / `find_well_folders`' own `(well, path)`
+    # Each list is `find_well_zips`' own `(well, path)`
     # shape, taken rather than pre-flattened so the caller cannot build the
     # label list a different way than the run's own discovery did.
     missing = groups.uncovered(

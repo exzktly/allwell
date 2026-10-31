@@ -6,9 +6,7 @@ link's target is unmounted, moved, or deleted, the link itself is still a
 directory entry — ``ls`` shows it and ``os.walk`` lists it among ``files`` — but
 opening it fails.
 
-The rest of the pipeline never trips on this: ``organize_loose_tifs_into_well_folders``
-and ``find_image_groups`` discover images through ``Path.is_file()`` / an
-existence check, both of which follow the link and treat a broken one as absent.
+``Path.is_file()`` follows the link and treats a broken one as absent.
 The zipper's ``group_by_well`` used a bare ``os.walk`` + extension check, so it
 collected the broken link, and ``folder_well``'s ``shutil.copy2`` (which follows
 symlinks) then opened the missing target and raised a bare ``FileNotFoundError``

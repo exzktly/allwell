@@ -35,7 +35,7 @@ def _run(tmp_path, monkeypatch, *, driver_lines, wells=("A01", "A02", "A03"), st
 
     zipped = types.SimpleNamespace(
         up_to_date_wells=(), well_zips=(), incremental=False, mode=types.SimpleNamespace(value="zip"),
-        on_pipeline_success=None, cleanup=None)
+        cleanup=None)
     monkeypatch.setattr(pr, "stage_local_zips", lambda *a, **k: zipped)
     proc = _FakeProc()
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: proc)

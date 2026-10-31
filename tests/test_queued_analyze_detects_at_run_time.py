@@ -394,20 +394,12 @@ def test_the_pre_run_report_describes_the_detected_layout(tab, tmp_path,
     seen: list[dict] = []
     monkeypatch.setattr(preflight, "_scan_coverage",
                         lambda _in, _out, opts: seen.append(dict(opts)))
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(preflight, "plan_incremental_scope",
-                        lambda _opts, _in: SimpleNamespace(preview="3 new images"))
-    tab._preflight_input = str(raw)
-    tab._preflight_dir = str(tmp_path / "plate" / "out")
     tab._preflight_scanning = ""
-    assert tab._scope_line() == "3 new images"      # the sentence, without it
     tab._auto_detect_cb.setChecked(True)
     # Ticking repaints the readout from the (empty) input field; point the
     # report back at the plate.
     tab._preflight_input = str(raw)
     tab._preflight_dir = str(tmp_path / "plate" / "out")
-    assert tab._scope_line() == ""        # counted under the frozen schema
     tab._start_coverage_scan()
     qtbot.waitUntil(lambda: bool(seen), timeout=5000)
     assert seen[0]["nuclear_token"] == "DAPI"

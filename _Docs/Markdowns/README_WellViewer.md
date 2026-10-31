@@ -5839,7 +5839,8 @@ each well's array moved with the plate. Each timepoint gets one of:
   labelled *inconclusive* at its place on the time axis, and every line into or out of it is dashed. Look at them
   in the Identity view before relying on them;
 - **not checked** — the tables were analysed before this check existed, or changed after it ran (a Validate
-  relabel, a concatenation). The footer says so, and these timepoints are used as they are. When only some of a
+  relabel, a concatenation), or the check that ran on them was an earlier version whose rules have changed since
+  (run it again, below). The footer says so, and these timepoints are used as they are. When only some of a
   well's timepoints are unchecked (a timepoint added later), the line plots dot-hatch those (..).
 
 When two timepoints disagree and nothing tells which is right, both are **contradicted**; when the earliest

@@ -221,3 +221,92 @@ def test_the_audit_says_a_partial_timepoint_and_exits_3(partial_well, capsys):
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == "A01: 1 reference, 1 partial (reference T0)"
     assert lines[1].startswith("  T1: partial — 34 of 154 nanowells left out (misregistered_tile: tile(s) F1 ")
+
+
+# ── M4: a sidecar is believed only under the rules that wrote it ─────────────
+def test_a_sidecar_from_the_earlier_rules_reads_not_checked_and_says_why(partial_well):
+    """M4: the verdict rules changed (an imprecise tile stopped contradicting, partial timepoints arrived, and the
+    review's fixes since) while ``IDENTITY_VERSION`` stayed 1, so a sidecar written by the earlier rules, over tables
+    that have not changed, was read as current and kept verdicts the rules now reverse. Such a sidecar must read not
+    checked, and say that it is the check that changed, not the tables."""
+    payload = ni.check_well_dir(partial_well, "A01")
+    assert ni.verdicts(partial_well, "A01", ["T1"])["T1"][0] == ni.PARTIAL
+    ni.write_sidecar(partial_well, "A01", {**payload, "version": 1})
+    assert ni.read_sidecar(partial_well, "A01") is None
+    assert ni.verdicts(partial_well, "A01", ["T1"]) == {"T1": (
+        ni.NOT_CHECKED, "the identity check that wrote this well's result was an earlier version, whose rules have "
+                        "changed since: run it again")}
+
+
+#: Top-level names in ``pipeline/nanowell_identity.py`` whose code cannot change what a sidecar records: how a
+#: sidecar is read back (a reader change reinterprets every sidecar alike), how the run and the audit report, and
+#: the command line. Everything else in the module — thresholds, geometry, registration, the verdict rules, the
+#: stage fit, what is written — is the rules a sidecar's verdicts were decided by.
+NOT_RULES = frozenset({
+    "IDENTITY_VERSION", "log", "NOT_GOOD", "FROZEN_SENTINEL", "read_sidecar", "verdicts", "verdict_in", "exclusions",
+    "_stale_reason", "check_after_run", "stage_check_after_run", "summary_lines", "_effective", "wells_in",
+    "NUMBER_COLUMNS", "_WHY", "number_rows", "audit_argv", "main"})
+#: ``IDENTITY_VERSION -> digest of the rules`` (:func:`_rules_digest`). When this test fails, the rules changed: if
+#: the change can alter any verdict, reason or exclusion a sidecar records, raise ``IDENTITY_VERSION`` and pin the
+#: new digest under the new number, so every sidecar the old rules wrote reads not checked; if it truly cannot (a
+#: rename, a refactor shown to change no output), re-pin under the current number and say why in the commit.
+RULES = {2: "ae668fd907ba71362d0bbd5ca698a7ad"}
+
+
+def _rules_digest() -> str:
+    """A digest of the identity module's rules: every top-level statement outside :data:`NOT_RULES`, its source with
+    comments, docstrings and whitespace removed (so prose edits do not count and the digest is the same on every
+    Python version, which an ``ast.dump`` is not)."""
+    import ast
+    import hashlib
+    import io
+    import tokenize
+
+    from tests._repo_scan import REPO_ROOT, parse_source
+
+    path = REPO_ROOT / "pipeline" / "nanowell_identity.py"
+    source = path.read_text(encoding="utf-8")
+    lines = source.splitlines(keepends=True)
+    starts = [0]
+    for line in lines:
+        starts.append(starts[-1] + len(line))
+
+    def offset(row, col_bytes):
+        return starts[row - 1] + len(lines[row - 1].encode("utf-8")[:col_bytes].decode("utf-8"))
+
+    drop = [(starts[t.start[0] - 1] + t.start[1], starts[t.end[0] - 1] + t.end[1])
+            for t in tokenize.generate_tokens(io.StringIO(source).readline) if t.type == tokenize.COMMENT]
+    tree = parse_source(path)
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if (isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and body
+                and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            doc = body[0]
+            drop.append((offset(doc.lineno, doc.col_offset), offset(doc.end_lineno, doc.end_col_offset)))
+
+    def named(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return {node.name}
+        targets = node.targets if isinstance(node, ast.Assign) else [getattr(node, "target", None)]
+        return {t.id for t in targets if isinstance(t, ast.Name)}
+
+    digest = hashlib.sha256()
+    for node in tree.body:
+        if named(node) & NOT_RULES or (node is tree.body[0] and isinstance(node, ast.Expr)):
+            continue
+        start, end = offset(node.lineno, node.col_offset), offset(node.end_lineno, node.end_col_offset)
+        text = list(source[start:end])
+        for a, b in drop:
+            for k in range(max(a, start), min(b, end)):
+                text[k - start] = " "
+        digest.update("".join("".join(text).split()).encode("utf-8"))
+    return digest.hexdigest()[:32]
+
+
+def test_the_identity_rules_carry_the_version_they_were_written_under():
+    """M4's guard: changing a rule without raising ``IDENTITY_VERSION`` fails here, so a sidecar the old rules wrote
+    is never read as the new rules' verdict. See :data:`RULES` for what to do when it fails."""
+    assert ni.IDENTITY_VERSION in RULES, f"IDENTITY_VERSION {ni.IDENTITY_VERSION} has no pinned rules digest"
+    assert _rules_digest() == RULES[ni.IDENTITY_VERSION], (
+        f"the identity rules changed under IDENTITY_VERSION {ni.IDENTITY_VERSION}: digest now {_rules_digest()}")

@@ -71,8 +71,12 @@ log = logging.getLogger("allwell.nanowell")
 
 NANOWELL_DIR = "nanowells"
 SIDECAR_SUFFIX = "_identity.json"
-#: The sidecar's format; :func:`read_sidecar` treats another as not checked.
-IDENTITY_VERSION = 1
+#: The sidecar's format and the rules its verdicts were decided by; :func:`read_sidecar` treats another as not
+#: checked. Raised whenever a change can alter a verdict, reason or exclusion a sidecar records, or the old rules'
+#: sidecars are read as the new rules' verdict on unchanged tables (review tracker M4). 2: the rules of the identity
+#: tracker's U5/U6 rows and the review's M3, M6, L17 and L18 fixes. ``tests/test_nanowell_identity_rules.py`` pins
+#: a digest of the rules to this number.
+IDENTITY_VERSION = 2
 
 CONFIRMED = "confirmed"
 CONTRADICTED = "contradicted"
@@ -1147,10 +1151,25 @@ def verdicts(out_dir, well: str, timepoints) -> dict[str, tuple[str, str]]:
     missing or stale, and for a timepoint it does not name. A stage-check failure overrides a good verdict."""
     payload = read_sidecar(out_dir, well)
     if payload is None:
-        why = ("the identity check has not been run on these tables" if not sidecar_path(out_dir, well).is_file()
-               else "the identity check was run on other tables than these (they changed since)")
+        why = _stale_reason(out_dir, well)
         return {tp: (NOT_CHECKED, why) for tp in timepoints}
     return {tp: verdict_in(payload, tp) for tp in timepoints}
+
+
+def _stale_reason(out_dir, well: str) -> str:
+    """Why *well* has no current sidecar: none written, one written by an earlier version of the check (whose rules
+    have changed), or one computed from other tables."""
+    path = sidecar_path(out_dir, well)
+    if not path.is_file():
+        return "the identity check has not been run on these tables"
+    try:
+        version = json.loads(path.read_text(encoding="utf-8")).get("version")
+    except (OSError, ValueError, AttributeError):
+        version = None
+    if version != IDENTITY_VERSION:
+        return ("the identity check that wrote this well's result was an earlier version, whose rules have changed "
+                "since: run it again")
+    return "the identity check was run on other tables than these (they changed since)"
 
 
 def verdict_in(payload: dict, tp: str) -> tuple[str, str]:

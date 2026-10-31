@@ -11031,7 +11031,14 @@ for fifteen timepoints. **Files**: the check reads only what the run writes — 
 `<well>_out.zip`, `nanowells/<well>_grid.json`, `nanowells/<well>.csv` — and writes `nanowells/<well>_identity.json`
 (`check_well_dir`) with a digest of those files (`inputs_digest`: the two tables' bytes and the montages' CRCs);
 `read_sidecar` / `verdicts` read a sidecar whose digest no longer matches (a relabel, a concatenation, a re-run)
-as `not_checked`, never as its stale verdict, and a stage-check failure overrules a good image verdict. The run
+as `not_checked`, never as its stale verdict, and so is one of another `IDENTITY_VERSION`, with its own reason
+(`_stale_reason`: the check that wrote it was an earlier version). The version is the key for the *rules*: the
+digest says the tables are the same, only the version says the verdicts were decided the same way, so it is raised
+whenever a change can alter a verdict, reason or exclusion a sidecar records.
+`tests/test_nanowell_identity_rules.py::test_the_identity_rules_carry_the_version_they_were_written_under` pins a
+digest of the module's rules (every top-level statement but the readers, the reporting and the command line, with
+comments, docstrings and whitespace removed, so it is the same on every Python version) to the version, and fails
+when one changes without the other, and a stage-check failure overrules a good image verdict. The run
 calls `check_after_run` at the end of `nanowell_task._finish_well`, once the tables and the montage archive are
 written (a well whose archive this run did not write is not checked), and `stage_check_after_run` at the end of
 `nanowell_endgame`; each logs a warning per timepoint that is not good, and a check that cannot run is logged

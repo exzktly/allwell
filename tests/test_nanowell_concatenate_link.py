@@ -263,3 +263,50 @@ def test_a_dataset_1_well_whose_record_names_no_timepoint_still_takes_dataset_2s
     _plan, _summary, _lines, dest = _concatenate(tmp_path, first, second)
     grid, rows = _tables(dest)
     assert list(grid["timepoints"]) == ["48h", "72h"] and {r["n_cells"] for r in rows} == {"7"}
+
+
+def _empty_cell_tables(root: Path, *, delete=False) -> None:
+    """Every per-cell table of *root* left with its header and no rows (*delete*: not there at all)."""
+    for path in (root / "out").glob("measurements_*.csv"):
+        if delete:
+            path.unlink()
+        else:
+            path.write_text(path.read_text().splitlines()[0] + "\n")
+
+
+def test_a_merge_that_found_no_cell_table_is_refused_though_its_nanowells_hold_cells(tmp_path):
+    """Tracker L28. A merge that writes no cell row anywhere is refused (no measurements CSV was matched), except
+    where an empty per-cell table is a measurement: a nanowell well none of whose nanowells holds a cell. The
+    exception was taken for the whole plan whenever both datasets were nanowell datasets, so a merge that found none
+    of either dataset's cell tables passed, over sites tables counting a cell in every nanowell."""
+    first, second = _dataset(tmp_path / "d1", cells=1), _dataset(tmp_path / "d2", cells=7)
+    _empty_cell_tables(first, delete=True)
+    _empty_cell_tables(second, delete=True)
+    plan = cc.build_merge_plan(first, second, tmp_path / "dest", gap_hours=24.0)
+    with pytest.raises(cc.ConcatError, match="the merge wrote zero measurement rows across 1 well") as refused:
+        apply.execute_plan(plan, log=lambda _line: None)
+    # 37 nanowells at two timepoints of each dataset: one cell each in dataset 1's, seven in dataset 2's.
+    assert str(refused.value).endswith("A01's nanowell sites tables count 592 cell(s) that no per-cell table holds.")
+
+
+def test_a_nanowell_merge_whose_nanowells_hold_no_cell_is_not_refused_for_its_empty_cell_tables(tmp_path):
+    """The control: no cell in any nanowell, so the empty per-cell tables are the measurement."""
+    first, second = _dataset(tmp_path / "d1", cells=0), _dataset(tmp_path / "d2", cells=0)
+    _empty_cell_tables(first)
+    _empty_cell_tables(second)
+    _plan, summary, _lines, dest = _concatenate(tmp_path, first, second)
+    assert list(_tables(dest)[0]["timepoints"]) == ["0h", "24h", "48h", "72h"]
+
+
+def test_a_plain_well_beside_cell_free_nanowell_wells_is_still_refused_when_no_cell_table_was_found(tmp_path):
+    """Per well: the nanowell wells' empty tables are measurements, the plain well's missing table is not."""
+    first, second = _dataset(tmp_path / "d1", wells=("A01", "B02"), cells=0), \
+        _dataset(tmp_path / "d2", wells=("A01", "B02"), cells=0)
+    for root in (first, second):
+        _empty_cell_tables(root)
+        for name in ("B02_grid.json", "B02.csv", "B02_template.npz"):
+            (root / "out" / "nanowells" / name).unlink()
+        (root / "out" / "measurements_B02.csv").unlink()
+    plan = cc.build_merge_plan(first, second, tmp_path / "dest", gap_hours=24.0)
+    with pytest.raises(cc.ConcatError, match="the merge wrote zero measurement rows across 2 well"):
+        apply.execute_plan(plan, log=lambda _line: None)

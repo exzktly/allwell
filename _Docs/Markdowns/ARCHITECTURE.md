@@ -11349,8 +11349,12 @@ writing, two analyses under different nanowell settings, scheme or measurement v
 nanowell results, and a pair in which only one has an acquisition record (`_refuse_dropping_the_nanowell_record`
 with `both_analysed`). The merged sidecar's `acquisition` block takes both datasets', dataset 2's renamed. What a
 join does not equalise, and the log says so: each half keeps the nanowell diameter (a median over its own run's
-timepoints) and array radius its own run measured. `_verify`'s zero-cell-rows refusal is waived for these merges,
-because a nanowell well with no cells writes an empty per-cell table as its measurement.
+timepoints) and array radius its own run measured. `_verify`'s zero-cell-rows refusal is waived well by well: a
+nanowell well none of whose nanowells holds a cell writes an empty per-cell table as its measurement, so a well
+whose sites tables count no cell at the timepoints the merge keeps (`nanowell_link.counted_cells`, dataset 2's
+set-aside timepoints left out) is not a merge that matched nothing. Any other well — one with no sites table, or one
+whose sites count cells no per-cell table holds — still counts, and a merge that wrote no cell row with one of
+those is refused, naming the cells a nanowell well lost.
 `tests/test_nanowell_concatenate_link.py` drives each decision through `build_merge_plan` and `execute_plan`;
 `tests/test_nanowell_merge_endtoend.py` joins two real analyses (an incremental Analyze then measures nothing) and
 sets aside one whose roster differs (it then measures exactly that timepoint). Validate checks the tables against

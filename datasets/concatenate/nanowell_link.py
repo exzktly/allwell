@@ -237,6 +237,31 @@ def plan_link(ds1_out, ds2_out, relabel: Callable[[str], str]) -> NanowellLink:
     return NanowellLink(tuple(joined), tuple(ds2_only), set_aside)
 
 
+def counted_cells(ds1_out, ds2_out, link: NanowellLink | None, relabel: Callable[[str], str]) -> dict[str, int]:
+    """``canonical well -> cells`` the nanowell sites tables count at the timepoints a merge keeps: every one of
+    dataset 1's, and dataset 2's that *link* does not set aside (none of dataset 2's when *ds2_out* is ``None``, a
+    raw dataset 2). A well with no sites table is absent. A blank ``n_cells`` (a site not measured) counts none."""
+    counts: dict[str, int] = {}
+    sides = [(ds1_out, None)] + ([(ds2_out, link)] if ds2_out is not None else [])
+    for out_dir, side_link in sides:
+        for well, grid_path in _grids(out_dir).items():
+            table = sites_table(grid_path.parent, grid_path.name[: -len("_grid.json")])
+            if table is None:
+                continue
+            with table.open(newline="", encoding="utf-8") as fh:
+                rows = list(csv.DictReader(fh))
+            kept = [r for r in rows if side_link is None or not side_link.sets_aside(well, relabel(r["timepoint"]))]
+            counts[well] = counts.get(well, 0) + sum(_cells(r.get("n_cells")) for r in kept)
+    return counts
+
+
+def _cells(value) -> int:
+    try:
+        return int(float(str(value).strip() or 0))
+    except ValueError:
+        return 0
+
+
 def _write_table(folder: Path, well: str, grid: dict, rows: list[dict], header: list[str]) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     table, record = folder / f"{well}.csv", folder / f"{well}_grid.json"

@@ -203,7 +203,7 @@ One granted node per host per user: Request is refused while a live hold exists.
 | `granted` | hold script, on start | `node=…`, `gpus=…`, `cpus=…`, `granted_at=<epoch>`, `limit_s=…` |
 | `heartbeat` | app, every 30 s | its mtime is the app's last sign of life |
 | `busy` | app, at the start of each run | present while a run is using, or preparing to use, the node; refreshed by the run's heartbeat |
-| `last_used` | hold script | epoch at which the node was last seen busy; the idle clock reads it |
+| `status` | hold script, every poll | `state=busy\|idle` and `idle_s=<seconds>`; the app shows the idle time from it, so it never compares its clock with the node's |
 | `release` | app | its presence asks the hold script to exit now |
 | `ended` | hold script, on exit | one line saying why (`idle 30 min`, …) |
 | `log` | Slurm (`sbatch -o`) | the batch job's own output |
@@ -251,28 +251,35 @@ it under `sh` with a fake `squeue`, a fake `nvidia-smi` and a controllable clock
 the way `services/remote_wait_snippets.py` is tested. Every interval and
 tolerance is a parameter of the composing function, so tests can shorten them.
 
-1. **On start:** if `heartbeat` is older than `UPLOAD_HEARTBEAT_STALE_S` (120 s,
-   `services/remote_wait_snippets.py`), write `ended` = `the app was gone when the
-   node was granted` and exit 0. Otherwise write `granted` (node from
-   `$SLURMD_NODENAME`, GPUs from `nvidia-smi -L` when it exists, CPUs from
-   `$SLURM_CPUS_ON_NODE`, `granted_at`, `limit_s`), write `last_used` = now, and
-   print the existing `ALLOCATION_GRANTED` line
-   (`services/remote_srun_retry.py` ~line 149) with the job and node, so code that
-   already reads that line reads it here too.
-2. **Every 15 s:**
+1. **On start:** write `granted` (node from `$SLURMD_NODENAME`, GPUs from
+   `nvidia-smi -L` when it exists, CPUs from `$SLURM_CPUS_ON_NODE`, `granted_at`,
+   `limit_s`, `job`) and `status`, and print the existing `ALLOCATION_GRANTED`
+   line (`services/remote_srun_retry.py` ~line 149) with the job, node and
+   partition, so code that already reads that line reads it here too. A hold
+   whose app is already gone when the node is granted needs no separate check:
+   the loop's first pass finds the heartbeat stale (or missing for the check's
+   tolerance) and ends it.
+2. **Every poll (15 s):**
    - `release` exists → `ended` = `released on request`; exit 0.
-   - `busy` exists and is fresher than `MID_BATCH_HEARTBEAT_STALE_S` (the run's
-     own heartbeat tolerance mid-batch, `services/remote_wait_snippets.py`) → in
-     use; write `last_used` = now; next iteration. A `busy` older than that is a
-     run whose app died mid-run: count it as not busy. The run's own existing
+   - `busy` exists and is fresher than `MID_BATCH_HEARTBEAT_STALE_S` → in use;
+     `status` = busy; the idle clock restarts. A `busy` older than that is a run
+     whose app died mid-run: count it as not busy. The run's own existing
      watchdogs already end such a run; this only stops the hold waiting on a
      dead marker.
-   - Not busy and `heartbeat` older than `UPLOAD_HEARTBEAT_STALE_S` → `ended` =
-     `All-Well stopped answering <n> min ago and no run was using it`; exit 0.
-   - Not busy, idle limit > 0, and now − `last_used` ≥ idle limit → `ended` =
-     `idle <n> min`; exit 0.
+   - Not busy and `heartbeat` stale (`UPLOAD_HEARTBEAT_STALE_S`) → `ended` =
+     `All-Well stopped answering (2 min without a heartbeat) and no run was using
+     it`; exit 0.
+   - Not busy, idle limit > 0, and idle time ≥ idle limit → `ended` = `idle 30
+     min`; exit 0.
+   Both staleness checks are `remote_wait_snippets._heartbeat_stale_snippet`, the
+   one the upload wait and the batch driver already use (it reads "now" from the
+   file server that stamped the file, copes with a non-GNU `stat`, and tolerates
+   a file that has not appeared yet), so the clock-skew risk in §10 is already
+   covered for the heartbeat. The idle clock and elapsed time use the node's own
+   `date` against the node's own `date`.
 3. **On SIGTERM** (the time limit or `scancel`): write `ended` = `reached its
-   <n> h time limit` when elapsed ≥ `limit_s` − 60 s, else `cancelled`; exit.
+   <n> h time limit` when elapsed ≥ `limit_s` − 60 s, else `cancelled`; exit. The
+   script naps with `sleep & wait`, so the signal is answered at once.
 
 The batch script exiting releases the allocation. Nothing else is needed for the
 node to be given back; the cluster powers it down on its own schedule.
@@ -588,7 +595,7 @@ end (CLAUDE.md §2, §6). Stacking on the branch that carries this file
 
 | ID | Item | State | Where | Evidence |
 |---|---|---|---|---|
-| H1 | Hold script: start-up heartbeat check, `granted` file, loop with the `release`, busy, heartbeat-silent (2 min, no run) and idle-limit rules, `ended` reason, SIGTERM handling | todo | `services/remote_hold.py` | — |
+| H1 | Hold script: start-up heartbeat check, `granted` file, loop with the `release`, busy, heartbeat-silent (2 min, no run) and idle-limit rules, `ended` reason, SIGTERM handling | done | `services/remote_hold.py` | `tests/test_remote_hold_script.py` runs the script under `sh`. Mutated on HEAD, each fails with its own message: ignoring `busy` ("released while a run was using it", "released for a silent app while a run was using the node"); trusting a stale `busy` (still running after 25 s); idle 0 meaning at once ("idle 0 (Never) released the node for idleness"); every SIGTERM the time limit (`'reached its 1 h time limit' == 'cancelled'`) |
 | H2 | Submit with `sbatch`: translate the scheduler command's options, drop its `--time`, time limit = min(setting, partition cap), poll `squeue`, Max queue wait, boot-failure retry with `--exclude` | todo | `services/remote_hold.py`, `services/remote_srun_retry.py` | — |
 | H3 | Launch seam (`effective_launcher`) at every launch site; `wrap_srun_launch` branch for `--jobid`; step runs write a `job.step` sidecar; GPU/CPU step options settled by Test through the granted node | todo | `services/remote_runner.py`, `services/remote_process.py`, `services/remote_commands.py`, `services/remote_srun_retry.py`, `services/scheduler_probe.py` | — |
 | H4 | `close_remote_job`, liveness `probe` / `cancel_pending`, Stop, end-of-run and app-close teardown cancel only the step | todo | `services/remote_jobs.py`, `services/remote_liveness.py`, `services/pipeline_runner.py` | — |
@@ -602,6 +609,6 @@ end (CLAUDE.md §2, §6). Stacking on the branch that carries this file
 | H12 | Run log lines: running on the granted node, busy and waiting, fresh node for time; the hold's `ended` reason surfaced | todo | `services/remote_runner.py`, `services/remote_hold.py` | — |
 | H13 | Datasets job queue: every remote job goes through the granted node; consecutive jobs take the lease in turn | todo | `services/job_queue.py` (verify; likely no change) | — |
 | H14 | Caller-sequence test: request → run fails → run again uses the same job id, with no new allocation in between | todo | `tests/` | — |
-| H15 | Hold-script tests, one per release-table row, plus: no idle release while busy; a stale `busy` counts as not busy; *Never* disables only idle release; the app-gone-while-queued start-up exit | todo | `tests/` | — |
+| H15 | Hold-script tests, one per release-table row, plus: no idle release while busy; a stale `busy` counts as not busy; *Never* disables only idle release; the app-gone-while-queued start-up exit | done | `tests/` | same file, one test per release-table row plus the traps above; 12 tests, ~30 s |
 | H16 | README §10 subsection and the ARCHITECTURE remote section; reconcile paragraphs that say every run asks for its own node | todo | `_Docs/Markdowns/` | — |
 | H17 | On the user's cluster: request an A10G node, run Test through it (GPU visible), fail a run, run again on the same job id, watch the idle release and the two-minute rule after quitting, measure clock skew | todo | the user's cluster | — |

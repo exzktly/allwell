@@ -32,6 +32,10 @@ _HELD_ONLY_READERS: dict[str, str] = {
     "review/data/narrow_rows.py::narrow_rows": (
         "One well: a held frame is returned as held, and a missing one read narrowly from disk."),
     "review/data/data_loading.py::held_wells_note": "Counts the held wells, to say when a readout covers only them.",
+    "review/features/lineplot/controller.py::_nuclei_counted": (
+        "The Line Graphs status line's included count, refreshed on every redraw: counts the held wells through "
+        "df_included_mask, takes an unheld well's total from its summary, and says the included count does not "
+        "cover it rather than reading it from disk."),
     "review/features/image_browser/image_table/_hover_mfi.py::_lookup_context": (
         "One well: copies a held frame on the GUI thread so the hover thread never reads one being rewritten; "
         "a missing one is read from disk by the thread, into its scratch cache."),

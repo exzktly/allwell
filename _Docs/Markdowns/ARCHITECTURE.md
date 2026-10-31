@@ -10697,6 +10697,20 @@ the GPU as its own. A pass that still runs out of memory (`OutOfMemoryError`, or
 Torch's cache and runs again at half the batch, which the worker keeps for the rest of its run, with a warning; one
 tile that does not fit fails as before. The batch decides how many tiles share a pass, not which tiles or what they
 hold; a GPU's matrix kernels may round a pass of another size in the last bits. `tests/test_cellpose_network_batch.py`.
+A measuring pass that itself runs out of memory sits outside that loop, so it empties the cache and starts the
+worker at half of `PROBE_TILES` with a warning, and the halving goes on from there.
+
+**Running out of GPU memory while the model loads** (`pipeline.cellpose._load_with_gpu_room`). The halving needs a
+loaded model; building one, or Cellpose 4's bfloat16 test pass inside `_bfloat16_or_float32`, can run out first on
+a GPU the run's other workers already fill. That load is tried `LOAD_OOM_RETRIES` (3) more times, `LOAD_OOM_WAIT_S`
+(10 s) apart, after a `gc.collect` and `empty_cache` run outside the `except` block (the exception's traceback holds
+the half-built model). If the GPU still has no room the worker builds the model on the CPU, says so in a warning that
+names the worker and suggests fewer workers, and carries on: its description reads `CPU — <the GPU> had no room for
+the model (out of GPU memory)`, and `ON_GPU_ATTR` is false, so the nanowell count's threads follow it off the GPU.
+The alternative it replaces was worse than slow: the load raised `CellposeUnavailable`, nothing was cached, and the
+worker failed every well it took the same way while the others carried on. Any other load failure, or one on the
+CPU, still raises `CellposeUnavailable`. A CPU worker runs float32 where its GPU neighbours may run bfloat16, so its
+wells' masks can differ from theirs in the last pixels. `tests/test_cellpose_load_oom.py`.
 
 For its first measured timepoint `run_well` also keeps a sample of what the segmenter was given (`_Steps.inspect` → `measure_timepoint(inspect=…)` → `_tile_contents(keep=…)` → `_keep_crops`): `pipeline/nanowell_inspect.inspection_sites` picks the `PER_GROUP` (8) nanowells nearest the array's centre and the 8 farthest, and each is cut from the image the segmenter received, on the scale it was given it at (`segmenter_scale`), with the labels it returned, the counting circle (`circle`: the fitted centre and `INTERIOR_FRACTION` of the fitted radius, in the crop's pixels) and the labels `count_cells` counted (`counted`), so `_keep_crops` runs after the count. The sheet outlines counted labels green and the rest red, and draws the circle yellow. `WellOutcome.inspection` carries them to `nanowell_task`, which writes `nanowells/<well>_segmenter_input.png` (`nanowell_inspect.write_sheet`; the PNG is encoded with `zlib`, nothing else, because it runs on the remote worker), and `remote_fetch_nanowells.fetch_nanowell_tables` pulls it with the tables. It exists because Test detection runs on the app's own machine, where a Torch that cannot load stops it. `tile` is one call on the whole tile (`segment_tile`), and
 is what options that name no scope mean (`LEGACY_SEGMENT_SCOPE`), with the same key and digest-alias treatment as

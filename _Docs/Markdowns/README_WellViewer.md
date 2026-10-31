@@ -1640,6 +1640,11 @@ archives and outputs are always written as per-well `.zip` archives. See
     chose (`Cellpose cpsam network batch: 32 tiles a pass …`); if a pass still
     runs out of GPU memory, the worker halves its batch, says so in the log,
     and carries on.
+    If a worker cannot even load its model because the other workers have
+    filled the GPU, it tries three more times, 10 s apart, and then loads on
+    the CPU instead and carries on, much more slowly. The log says so
+    (`Cellpose cpsam could not load on GPU cuda:0 …`); fewer workers is the
+    fix for the next run.
   - The remote options' **Batch size** is a different thing: how many wells
     go to the remote at a time, which bounds its disk. It has no effect on
     the GPU.

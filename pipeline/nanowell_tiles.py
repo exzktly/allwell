@@ -12,7 +12,7 @@ been measured (``run_well(release=…)``), as far as the worker's share of memor
 (``nanowell_parallel.worker_memory_budget``, ``CACHE_SHARE`` of it: the rest is for the threads locating
 timepoints). A tile the cache has no room for is read again, as before. When the cache cannot hold the whole well
 and the archive is on a network filesystem, the archive is first copied to the node's own disk
-(:func:`local_temp_dir`: ``$SLURM_TMPDIR``, ``$TMPDIR``, the system's temporary directory) when that has room for
+(:func:`local_temp_dir`: ``/scratch``, ``$SLURM_TMPDIR``, ``$TMPDIR``, the system's temporary directory) when that has room for
 it, so the reads the cache cannot spare come off local disk. The copy is opened and unlinked at once (Linux, the only
 platform that copies), so it is gone the moment the well ends or its worker is killed. A machine that cannot say how
 much memory is free (not Linux) keeps nothing in memory and reads every tile in place, as before.
@@ -26,7 +26,6 @@ from __future__ import annotations
 import io
 import logging
 import os
-import re
 import shutil
 import tempfile
 import threading
@@ -37,6 +36,8 @@ from pathlib import Path
 
 import numpy as np
 
+from pipeline.node_disk import (  # noqa: F401 — re-exported: callers and tests read them here
+    MEMORY_FILESYSTEMS, NETWORK_FILESYSTEMS, NODE_SCRATCH_MOUNT, _unescape, filesystem_type, is_network)
 from pipeline.zip_members import ZipMemberReader
 
 log = logging.getLogger("process_microscopy")
@@ -45,57 +46,19 @@ log = logging.getLogger("process_microscopy")
 #: (``nanowell_run._locate_threads``).
 CACHE_SHARE = 0.5
 
-#: Filesystem types (``/proc/mounts``) whose reads cross the network, where a stall can hold up every node at once.
-NETWORK_FILESYSTEMS = frozenset({
-    "nfs", "nfs4", "lustre", "gpfs", "cifs", "smb3", "smbfs", "beegfs", "ceph", "cephfs", "panfs", "wekafs",
-    "glusterfs", "fuse.glusterfs", "fuse.sshfs", "fuse.s3fs", "fuse.gcsfuse", "9p", "afs", "orangefs", "pvfs2",
-})
-
 #: Free space the node's disk must keep beyond the copies every worker may be making at once.
 LOCAL_COPY_HEADROOM = 1 << 30
 
-#: Filesystems that hold their files in memory: a copy there is memory taken exactly when memory was short, and it
-#: counts against the job's own limit.
-MEMORY_FILESYSTEMS = frozenset({"tmpfs", "ramfs", "devtmpfs"})
-
-
-def _unescape(field: str) -> str:
-    """A ``/proc/mounts`` field with its octal escapes (``\\040`` space, ``\\011`` tab, ``\\012`` newline,
-    ``\\134`` backslash) decoded."""
-    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
-
-
-def filesystem_type(path: Path | str, mounts: str = "/proc/mounts") -> str | None:
-    """The type of the filesystem *path* is on, from the longest mount point containing it; ``None`` where the
-    mount table cannot be read (not Linux)."""
-    try:
-        target = os.path.realpath(path)
-        best, kind = "", None
-        with open(mounts, encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                fields = line.split()
-                if len(fields) < 3:
-                    continue
-                point = _unescape(fields[1])
-                inside = target == point or target.startswith(point.rstrip("/") + "/") or point == "/"
-                if inside and len(point) >= len(best):
-                    best, kind = point, fields[2]
-        return kind
-    except OSError:
-        return None
-
-
-def is_network(path: Path | str) -> bool:
-    """Whether *path* is on a filesystem in ``NETWORK_FILESYSTEMS``; ``False`` when that cannot be told."""
-    return filesystem_type(path) in NETWORK_FILESYSTEMS
-
 
 def local_temp_dir(environ=None) -> Path | None:
-    """The node's own disk for a temporary copy: the first of ``$SLURM_TMPDIR``, ``$TMPDIR`` and the system's
-    temporary directory that exists, is writable and is neither on a network filesystem nor held in memory
-    (``MEMORY_FILESYSTEMS``); ``None`` when none is."""
+    """The node's own disk for a temporary copy: the first of ``/scratch`` (where AWS ParallelCluster mounts a node's
+    local NVMe drive), ``$SLURM_TMPDIR``, ``$TMPDIR`` and the system's temporary directory that exists, is
+    writable and is neither on a network filesystem nor held in memory (``MEMORY_FILESYSTEMS``); ``None`` when none
+    is. The system's temporary directory is acceptable here, unlike for a run's scratch
+    (``pipeline.node_disk.node_local_scratch``): the copy is one archive, opened and unlinked at once, and made only
+    when the disk has room for it."""
     environ = os.environ if environ is None else environ
-    for raw in (environ.get("SLURM_TMPDIR"), environ.get("TMPDIR"), tempfile.gettempdir()):
+    for raw in (NODE_SCRATCH_MOUNT, environ.get("SLURM_TMPDIR"), environ.get("TMPDIR"), tempfile.gettempdir()):
         if not raw:
             continue
         folder = Path(raw)

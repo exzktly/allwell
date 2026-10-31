@@ -129,6 +129,31 @@ def default_scratch_base() -> Path | None:
     return default_scratch_dir()
 
 
+_NODE_LOCAL_DECIDED = False
+
+
+def _node_local_scratch_once() -> Path | None:
+    """The node-local scratch for this Slurm job, decided and logged once per process; ``None`` when there is none.
+
+    A folder found is written to ``$ALLWELL_SCRATCH_DIR``, which every later :func:`scratch_base_for` reads first
+    and every worker process inherits, so a run never splits its scratch across two disks."""
+    global _NODE_LOCAL_DECIDED
+    if _NODE_LOCAL_DECIDED:
+        return None
+    _NODE_LOCAL_DECIDED = True
+    from pipeline.node_disk import node_local_scratch
+
+    folder, reason = node_local_scratch()
+    if folder is not None:
+        os.environ[SCRATCH_DIR_ENV] = str(folder)
+        log.info("Scratch on %s — a Slurm job with no scratch folder set; set the host's scratch folder in "
+                 "Remotes to choose another", reason)
+        return folder
+    if reason:
+        log.info("Scratch stays on the shared default: %s", reason)
+    return None
+
+
 def scratch_base_for(output_dir: Path) -> Path:
     """Directory that holds per-well working files (zip extraction + temp images).
 
@@ -136,10 +161,15 @@ def scratch_base_for(output_dir: Path) -> Path:
 
     1. ``$ALLWELL_SCRATCH_DIR`` — the redirectable-scratch env the GUI sets from
        its "Scratch disk" field and the remote runner already uses.
-    2. ``scratch`` in the app's folder — ``%LOCALAPPDATA%\\allwell\\scratch``
+    2. Inside a Slurm job, the node's own disk (:func:`pipeline.node_disk.node_local_scratch`: ``/scratch``, where
+       AWS ParallelCluster mounts the node's NVMe drive, then ``$SLURM_TMPDIR``). Chosen once per process and
+       written to ``$ALLWELL_SCRATCH_DIR``, so every later call — and every worker the run starts — takes the same
+       folder even as the disk fills. On a cluster the next rule's home folder is a network filesystem shared by
+       every node; scratch traffic there stalled the app's run heartbeat (``services/remote_heartbeat.py``).
+    3. ``scratch`` in the app's folder — ``%LOCALAPPDATA%\\allwell\\scratch``
        on Windows, ``~/.allwell/scratch`` on macOS and Linux
        (:func:`default_scratch_base`).
-    3. *output_dir* — last-resort fallback when neither of the above can be
+    4. *output_dir* — last-resort fallback when none of the above can be
        created, so an unwritable home never fails the run outright.
 
     **Why local per-user storage is the default.** This scratch carries the whole
@@ -168,6 +198,9 @@ def scratch_base_for(output_dir: Path) -> Path:
             return p
         except OSError as exc:
             log.warning("Scratch dir %s unusable (%s); falling back.", override, exc)
+    local = _node_local_scratch_once()
+    if local is not None:
+        return local
     home = default_scratch_base()
     if home is not None:
         return home

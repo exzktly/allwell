@@ -10738,8 +10738,10 @@ copies), and the copy is opened and unlinked at once and read through `/proc/sel
 ends or its worker is killed. The archive's reader (`pipeline/zip_members.ZipMemberReader`) lends each read a free
 handle and opens another only when every open one is in use, so a well holds as many handles as it ever read at
 once. Each well logs one line on
-how its tiles were read (`WellTiles.summary`). The run's scratch stays where it was: it holds the resume checkpoints,
-which a node-local directory wiped at the end of a job would lose. `tests/test_nanowell_tiles.py`,
+how its tiles were read (`WellTiles.summary`). The copy's folder is `local_temp_dir`: `/scratch`, `$SLURM_TMPDIR`,
+`$TMPDIR`, then the system temporary directory, sharing `pipeline/node_disk.py`'s test of what is local. The system
+temporary directory is acceptable for this copy, unlike for a run's scratch, because the copy is one archive, unlinked
+at once, and made only when the disk has room. `tests/test_nanowell_tiles.py`,
 `tests/test_nanowell_parallel.py`.
 
 **Agreeing on the tile layout** (`run_well` → `_agree_tile_layouts`; `tile_register.pair_offsets`,
@@ -14115,10 +14117,29 @@ Linux, at a path the user had never chosen and could not find.
 **Scratch (bulk, transient).** `pipeline.io.scratch_base_for(output_dir)` decides
 where per-well working files go: the extracted input TIFs, every intermediate
 image, and the per-FOV checkpoints. Resolution order is `$ALLWELL_SCRATCH_DIR`
-(set by `--scratch_dir` or the Analyze tab's *Scratch folder* field) →
-**`scratch/` in the app's folder** (the default: `~/.allwell/scratch`, or
-`%LOCALAPPDATA%\allwell\scratch` on Windows — §5's local-files section) →
-`output_dir` (last resort, warned).
+(set by `--scratch_dir`, the Analyze tab's *Scratch folder* field, or a remote
+host's scratch folder) → **inside a Slurm job, the node's own disk**
+(`pipeline/node_disk.node_local_scratch`: `/scratch`, where AWS ParallelCluster
+mounts a node's NVMe drive, then `$SLURM_TMPDIR`; the first that is local — not a
+network or in-memory filesystem — writable, and has `LOCAL_SCRATCH_MIN_FREE`
+(20 GB) free, as `<disk>/allwell-<user>`) → **`scratch/` in the app's folder**
+(the default elsewhere: `~/.allwell/scratch`, or `%LOCALAPPDATA%\allwell\scratch`
+on Windows — §5's local-files section) → `output_dir` (last resort, warned).
+
+The node-local step exists because on a cluster the home folder is a network
+filesystem shared by every node — on ParallelCluster served by the head node that
+the app's ssh and run heartbeat also go through — and a nanowell run's scratch
+traffic there stalled the heartbeat's `touch` past its 75 s allowance. It is
+decided once per process (`pipeline.io._node_local_scratch_once`), logged with the
+disk and its free space (or, when nothing qualifies, what each candidate lacked),
+and written to `$ALLWELL_SCRATCH_DIR`, so every later call and every worker
+process uses the same folder even as the disk fills. `$TMPDIR` and the system
+temporary directory are never candidates: a login environment often sets
+`$TMPDIR` to `/tmp`, and without `--exclusive` the node's boot disk is shared with
+other jobs. The cost is the resume of a well a stopped or suspended run left
+part-way: a node-local folder is gone once the node is, so that well redoes its
+fields on the next run. Every batch of one run shares one allocation and so one
+node, and finished wells are unaffected. `tests/test_node_local_scratch.py`.
 
 The default used to be `output_dir`, and the Analyze field auto-seeded
 `<input>/Temp`, so *both* put the whole run's bulk I/O on user-chosen volumes.

@@ -109,9 +109,10 @@ class RemoteHost:
     """Where the pipeline keeps its transient working files **on the remote**.
 
     Exported as ``ALLWELL_SCRATCH_DIR`` inside the composed remote command, which
-    is what ``pipeline.io.scratch_base_for`` reads. Empty (the default, and every
-    pre-existing config) leaves the pipeline on the remote's ``~/.allwell/scratch``
-    — byte-identical to previous behaviour.
+    is what ``pipeline.io.scratch_base_for`` reads. Empty (the default) lets the
+    pipeline choose: inside a Slurm job the node's own disk
+    (``pipeline.node_disk.node_local_scratch``: ``/scratch``, then
+    ``$SLURM_TMPDIR``), otherwise the remote's ``~/.allwell/scratch``.
 
     It matters most on a cluster, where that default is the worst available
     choice: a run's working set is roughly six float32 intermediates per

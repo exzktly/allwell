@@ -170,6 +170,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # A well's tiles read once and kept until measured, or the archive copied to
     # the node's own disk. Imported by pipeline/nanowell_task.py at module scope.
     "pipeline/nanowell_tiles.py",
+    # Which folders are the node's own disk, and where a Slurm job's scratch goes
+    # there. Imported by pipeline/nanowell_tiles.py at module scope and by
+    # pipeline/io.scratch_base_for, so every remote run needs it.
+    "pipeline/node_disk.py",
     # Worker count, threads per worker and the Cellpose GPU plan. Imported by
     # process_microscopy at module scope, so the remote needs it to start.
     "pipeline/parallelism.py",

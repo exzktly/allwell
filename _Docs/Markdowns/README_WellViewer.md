@@ -1822,9 +1822,21 @@ which profile lost what. Check the filled-in command before saving.
 **Remote scratch dir**, under *Advanced (remote paths)* in that dialog, is worth
 setting on a cluster. It is where the pipeline keeps its per-well working files
 *on the remote* — roughly six uncompressed intermediates per field, for as
-many wells as run at once. Left empty it uses the remote's home directory, which on an HPC system is exactly the volume with
-the small quota, and a run that overflows it fails partway through with a
-message about space. Set it to your site's real scratch: `$TMPDIR`,
+many wells as run at once. Left empty on a host that runs jobs through Slurm, the
+run uses the compute node's own disk: `/scratch` (where AWS ParallelCluster mounts
+the node's NVMe drive), else `$SLURM_TMPDIR`, as long as it is a local disk with at
+least 20 GB free; each batch's log says which disk and how much was free, or why
+none qualified. That keeps the run's heavy temporary files off the cluster's shared
+home folder, which on ParallelCluster is served by the same head node your
+connection and the run's heartbeat go through — a run writing its scratch there
+can stall the heartbeat ("did not answer within 75s"). It never uses the node's
+`/tmp`, which other people's jobs on the same node share. The trade-off: a node's
+own disk is erased when the node shuts down, so a well that a stopped or suspended
+run left part-way starts that well's fields again next time (finished wells are
+kept, and nothing is lost between the batches of one run). With no such disk, or
+on a host without Slurm, it uses the remote's home directory, which on an HPC
+system is exactly the volume with the small quota, and a run that overflows it
+fails partway through with a message about space. Set it to your site's real scratch: `$TMPDIR`,
 `$SLURM_TMPDIR` and `/scratch/$USER` all work as written — the value is expanded
 on the remote, not here. A per-job folder (`$TMPDIR` or `$SLURM_TMPDIR` on most
 clusters) is emptied when the job ends, which costs the resume of a well a
@@ -2215,8 +2227,9 @@ reading it. The log names any it kept over budget for that reason.
   earlier attempt's record says was finished, uploaded or downloaded that is
   nonetheless being redone, with the reason. A well the earlier attempt left
   part-way continues from its last finished field rather than starting again —
-  including on a plate corrected against an empty-well blank — provided the host's scratch folder survives between runs (the default
-  `~/.allwell/scratch` does; a per-job `$SLURM_TMPDIR` does not). The run log
+  including on a plate corrected against an empty-well blank — provided the host's scratch folder survives between runs
+  (`~/.allwell/scratch` and `/scratch/$USER` on a shared filesystem do; a node's own disk, which a Slurm host uses by
+  default, and a per-job `$SLURM_TMPDIR` do not, and such a well then redoes its fields). The run log
   names the folder on each batch's `Scratch  :` line, and the host's
   **Remote scratch dir** field (*Advanced (remote paths)* in the host dialog) is empty when
   it is the default. A

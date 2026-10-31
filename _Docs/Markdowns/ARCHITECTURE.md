@@ -14229,8 +14229,12 @@ the app's ssh and run heartbeat also go through — and a nanowell run's scratch
 traffic there stalled the heartbeat's `touch` past its 75 s allowance. It is
 decided once per process (`pipeline.io._node_local_scratch_once`), logged with the
 disk and its free space (or, when nothing qualifies, what each candidate lacked),
-and written to `$ALLWELL_SCRATCH_DIR`, so every later call and every worker
-process uses the same folder even as the disk fills. `$TMPDIR` and the system
+and written to the environment the run's workers inherit: a folder to
+`$ALLWELL_SCRATCH_DIR`, no folder to `$ALLWELL_NODE_SCRATCH_DECLINED`
+(`pipeline.io.NODE_SCRATCH_DECLINED_ENV`). So every later call and every worker
+process takes the parent's answer even as the disk fills or frees up; a worker
+deciding afresh would otherwise take a `/scratch` another job had made room on
+since, and split the run's scratch between two disks. `$TMPDIR` and the system
 temporary directory are never candidates: a login environment often sets
 `$TMPDIR` to `/tmp`, and without `--exclusive` the node's boot disk is shared with
 other jobs. The cost is the resume of a well a stopped or suspended run left

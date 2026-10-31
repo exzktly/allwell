@@ -140,14 +140,20 @@ def publish_scratch_args(scratch_dir: Path | None, fallback_dir: Path | None) ->
 
 _NODE_LOCAL_DECIDED = False
 
+#: Set by the process that decided a Slurm job's scratch stays off the node's own disk. The workers it spawns
+#: inherit the environment but not this module's state, so without it each would decide again, against a disk whose
+#: free space has changed since, and the run's scratch would be split between the parent's folder and theirs.
+NODE_SCRATCH_DECLINED_ENV = "ALLWELL_NODE_SCRATCH_DECLINED"
+
 
 def _node_local_scratch_once() -> Path | None:
-    """The node-local scratch for this Slurm job, decided and logged once per process; ``None`` when there is none.
+    """The node-local scratch for this Slurm job, decided and logged once per run; ``None`` when there is none.
 
     A folder found is written to ``$ALLWELL_SCRATCH_DIR``, which every later :func:`scratch_base_for` reads first
-    and every worker process inherits, so a run never splits its scratch across two disks."""
+    and every worker process inherits; no folder is written to :data:`NODE_SCRATCH_DECLINED_ENV`, which the workers
+    inherit just the same. Either way a run never splits its scratch across two disks."""
     global _NODE_LOCAL_DECIDED
-    if _NODE_LOCAL_DECIDED:
+    if _NODE_LOCAL_DECIDED or os.environ.get(NODE_SCRATCH_DECLINED_ENV, "").strip():
         return None
     _NODE_LOCAL_DECIDED = True
     from pipeline.node_disk import node_local_scratch
@@ -159,6 +165,7 @@ def _node_local_scratch_once() -> Path | None:
                  "Remotes to choose another", reason)
         return folder
     if reason:
+        os.environ[NODE_SCRATCH_DECLINED_ENV] = "1"
         log.info("Scratch stays on the shared default: %s", reason)
     return None
 
@@ -173,7 +180,8 @@ def scratch_base_for(output_dir: Path) -> Path:
     2. Inside a Slurm job, the node's own disk (:func:`pipeline.node_disk.node_local_scratch`: ``/scratch``, where
        AWS ParallelCluster mounts the node's NVMe drive, then ``$SLURM_TMPDIR``). Chosen once per process and
        written to ``$ALLWELL_SCRATCH_DIR``, so every later call — and every worker the run starts — takes the same
-       folder even as the disk fills. On a cluster the next rule's home folder is a network filesystem shared by
+       folder even as the disk fills; a run that finds none writes :data:`NODE_SCRATCH_DECLINED_ENV`, so its workers
+       do not find one either when the disk frees up later. On a cluster the next rule's home folder is a network filesystem shared by
        every node; scratch traffic there stalled the app's run heartbeat (``services/remote_heartbeat.py``).
     3. ``$ALLWELL_SCRATCH_FALLBACK_DIR`` (``--scratch_fallback_dir``) — what the remote runner passes: the run's
        own output folder in the host's staging area, so a remote run without a node-local disk keeps the scratch

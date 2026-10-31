@@ -137,6 +137,15 @@ def test_outside_a_slurm_job_nothing_is_chosen(disks):
 def fresh_decision(monkeypatch):
     monkeypatch.setattr(pio, "_NODE_LOCAL_DECIDED", False)
     monkeypatch.delenv(pio.SCRATCH_DIR_ENV, raising=False)
+    # Set first so monkeypatch records an undo: the decision writes it into ``os.environ`` directly.
+    monkeypatch.setenv(pio.NODE_SCRATCH_DECLINED_ENV, "")
+    monkeypatch.delenv(pio.NODE_SCRATCH_DECLINED_ENV)
+
+
+def _as_a_spawned_worker(monkeypatch):
+    """What a worker the run spawns starts with: this module imported afresh, so nothing decided yet, and the
+    parent's ``os.environ`` inherited as it stood."""
+    monkeypatch.setattr(pio, "_NODE_LOCAL_DECIDED", False)
 
 
 def test_a_slurm_job_with_no_scratch_folder_set_runs_on_the_node_and_its_workers_inherit_it(
@@ -172,6 +181,34 @@ def test_with_no_node_local_disk_the_shared_default_stays(disks, fresh_decision,
     assert pio.scratch_base_for(tmp_path / "out") == home
     import os
     assert pio.SCRATCH_DIR_ENV not in os.environ
+
+
+def test_a_worker_keeps_the_parent_s_no_node_disk_answer_after_the_disk_frees_up(
+        disks, fresh_decision, monkeypatch, tmp_path):
+    """The parent found ``/scratch`` with 19 GB free and kept the shared default; another job then freed space, and
+    each worker, deciding afresh, took ``/scratch``. One run, two scratch folders: the parent's sweep and the
+    workers' staging no longer agreed on where a well's working files were."""
+    folders, _kinds, free = disks
+    free[folders["scratch"]] = 19 * GB
+    monkeypatch.setenv("SLURM_JOB_ID", "4812345")
+    monkeypatch.setattr(nd.shutil, "disk_usage", lambda p: type("U", (), {"free": free[Path(p)]})())
+    home = tmp_path / "home-scratch"
+    monkeypatch.setattr(pio, "default_scratch_base", lambda: home)
+    assert pio.scratch_base_for(tmp_path / "out") == home
+    free[folders["scratch"]] = 25 * GB
+    _as_a_spawned_worker(monkeypatch)
+    assert pio.scratch_base_for(tmp_path / "out") == home
+    assert not list(folders["scratch"].iterdir())
+
+
+def test_a_worker_takes_the_parent_s_node_disk(disks, fresh_decision, monkeypatch, tmp_path):
+    folders, _kinds, free = disks
+    monkeypatch.setenv("SLURM_JOB_ID", "4812345")
+    monkeypatch.setattr(nd.shutil, "disk_usage", lambda p: type("U", (), {"free": free[Path(p)]})())
+    first = pio.scratch_base_for(tmp_path / "out")
+    free[folders["scratch"]] = 1 * GB
+    _as_a_spawned_worker(monkeypatch)
+    assert pio.scratch_base_for(tmp_path / "out") == first == folders["scratch"] / f"allwell-{nd._user()}"
 
 
 # ── through the remote command the app actually sends ─────────────────────────────────────────────────────────────
@@ -219,7 +256,7 @@ def remote_env(disks, fresh_decision, monkeypatch):
     # ``publish_scratch_args`` writes both variables into ``os.environ`` directly. A bare ``delenv`` of an unset
     # variable records no undo, so the run's fallback outlived the test and became the next test's scratch
     # (``test_scratch_base`` read ``staging/runs/run-1/out``). Setting each first makes monkeypatch restore it.
-    for name in (pio.SCRATCH_FALLBACK_ENV, pio.SCRATCH_DIR_ENV):
+    for name in (pio.SCRATCH_FALLBACK_ENV, pio.SCRATCH_DIR_ENV, pio.NODE_SCRATCH_DECLINED_ENV):
         monkeypatch.setenv(name, "")
         monkeypatch.delenv(name)
     monkeypatch.setattr(nd.shutil, "disk_usage", lambda p: type("U", (), {"free": free[Path(p)]})())

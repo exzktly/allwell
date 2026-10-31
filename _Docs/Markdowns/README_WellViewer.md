@@ -3046,7 +3046,7 @@ choice applies once, when the menu closes.
   line beneath it says how many of the cells being analysed touch the border,
   across the whole plate, and whether they are currently kept or excluded.
 
-  **Exclude out-of-focus nanowells … rim below 75 % of the well's sharpest
+  **Exclude out-of-focus nanowells … rim below 75 (percent) of the well's sharpest
   rims** appears in place of the per-cell focus switch on a dataset analysed in
   nanowell mode (a nanowell run measures no per-cell focus, so that switch
   would have nothing to judge; a plate merged from a nanowell and an ordinary

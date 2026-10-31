@@ -315,22 +315,20 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     band.add_scope("", rim_focus.box, rim_focus.spin)
 
     moving_spin = QSpinBox()
-    moving_spin.setRange(1, MAX_WINDOW)          # 1 is off, shown as "Off"; a window of one timepoint averages nothing
-    moving_spin.setSpecialValueText("Off")
-    moving_spin.setSuffix(" timepoints")
+    # 1 is off: a window of one timepoint averages nothing. The box holds the bare number and its label says what
+    # it counts — no "Off" or unit inside the box, which Qt's spin box refuses to type over.
+    moving_spin.setRange(1, MAX_WINDOW)
     moving_spin.setToolTip(_MOVING_TIP)
     moving_spin.valueChanged.connect(lambda value: nwc.set_moving(ctx, value))
     reg.register("_nw_moving_spin", moving_spin)
-    grp_moving = band.add_scope("Moving average", moving_spin)
+    grp_moving = band.add_scope("Moving average (timepoints, 1 = off)", moving_spin)
 
     baseline_moving_spin = QSpinBox()
     baseline_moving_spin.setRange(1, MAX_WINDOW)     # 1 is off, as on the endpoint's window
-    baseline_moving_spin.setSpecialValueText("Off")
-    baseline_moving_spin.setSuffix(" timepoints")
     baseline_moving_spin.setToolTip(_BASELINE_MOVING_TIP)
     baseline_moving_spin.valueChanged.connect(lambda value: nwc.set_baseline_moving(ctx, value))
     reg.register("_nw_baseline_moving_spin", baseline_moving_spin)
-    grp_baseline_moving = band.add_scope("Baseline average", baseline_moving_spin)
+    grp_baseline_moving = band.add_scope("Baseline average (timepoints, 1 = off)", baseline_moving_spin)
 
     well_cb = QComboBox()
     well_cb.setToolTip(_WELL_TIP)

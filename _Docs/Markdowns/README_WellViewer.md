@@ -3046,7 +3046,7 @@ choice applies once, when the menu closes.
   line beneath it says how many of the cells being analysed touch the border,
   across the whole plate, and whether they are currently kept or excluded.
 
-  **Exclude out-of-focus nanowells … rim below 75 % of the well's sharpest
+  **Exclude out-of-focus nanowells … rim below 75 (percent) of the well's sharpest
   rims** appears in place of the per-cell focus switch on a dataset analysed in
   nanowell mode (a nanowell run measures no per-cell focus, so that switch
   would have nothing to judge; a plate merged from a nanowell and an ordinary
@@ -3706,9 +3706,9 @@ offered yet.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ All-Well                       ↻  ⛶  ⌂  i                       │  ← title bar
+│ All-Well v…               ◫  ↻  ⛶  ⌂  ⛁  ▯  i                   │  ← title bar
 ├──────────────┬──────────────────────────────────────────────────┤
-│ Review Analyze Datasets │ Bar Plots  Line Graphs  Scatter  …  ⊟ │  ← one band
+│ Review Analyze Datasets │ Bar Plots  Line Graphs  Scatter  …    │  ← one band
 ├──────────────┼──────────────────────────────────────────────────┤
 │ 📁 my_run  ▾ │  Channel [GFP ▾] Property [Mean ▾]  Display ▾ ⚙  │  ← controls
 │  ⊙ Plotting  │  ┌────────────────────────────────────────────┐  │
@@ -5709,7 +5709,7 @@ the sentence names it.
   reason in its tooltip, while the *Moving average* is off, for a metric that is not a fold change, and with the
   *Earliest* baseline, which has nothing before it — choose *First measurable* or a timepoint. The footer states
   the baseline's window.
-- **Rim focus** (on by default) and **% of sharp** — leave out a nanowell at any timepoint where its own rim
+- **Rim focus** (on by default) and its percentage box beside it — leave out a nanowell at any timepoint where its own rim
   was out of focus. Every nanowell run measures each nanowell's rim sharpness (the `focus` column of
   `nanowells/<well>.csv`), so this works on datasets you already have, with no re-run. A nanowell is out of
   focus at a timepoint when its rim is less sharp than this percentage (75 % by default) of the sharpest tenth

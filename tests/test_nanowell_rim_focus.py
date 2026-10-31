@@ -175,3 +175,30 @@ def test_the_per_cell_layer_judges_exactly_the_nanowell_timepoints_the_page_does
     cells = pd.DataFrame({"well": ["A01", "A01", "A01", "B01"], "timepoint": ["t3", "t2", "t3", "t3"],
                           "nw_q": [0, 0, None, 0], "nw_r": [0, 0, None, 0]})
     assert rfc.cell_pass(cells, flagged).tolist() == [0, 1, 1, 1]   # its other timepoint, unaddressed, other well
+
+
+def test_a_percentage_typed_into_cell_gating_s_nanowell_focus_box_is_taken(qtbot):
+    """Typing a percentage into Cell Gating's *rim below …* box sets it, with the cursor where a click to the
+    right of the number leaves it. The box once carried a " %" suffix, and Qt's spin box refuses typing and
+    Backspace with the cursor inside a suffix, so the value typed was ignored (the reported bug)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QWidget
+
+    from review.domain.qc_params import QCParams
+    from review.features.qc import nanowell_focus_view
+
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    _row, widgets = nanowell_focus_view.build_row(parent, QCParams(), 0, 400)
+    spin = widgets["nanowell_focus_fraction"]
+    seen = []
+    spin.valueChanged.connect(seen.append)
+    edit = spin.lineEdit()
+    assert edit.text() == "75"                       # the number alone: nothing in the field refuses the cursor
+    edit.setFocus()
+    edit.setCursorPosition(len(edit.text()))
+    qtbot.keyClick(edit, Qt.Key_Backspace)
+    qtbot.keyClick(edit, Qt.Key_Backspace)
+    qtbot.keyClicks(edit, "60")
+    qtbot.keyClick(edit, Qt.Key_Return)
+    assert (edit.text(), spin.value(), seen) == ("60", 60, [60])

@@ -701,3 +701,125 @@ def test_no_image_groups_names_a_partner_that_differs_only_by_extension(tmp_path
         zf.writestr("exp_GFP_A01_F0_0h.TIF", b"x")
     reason = no_groups_reason(archive, "PHASE", ["GFP"], ["experiment", "channel", "well", "fov", "timepoint"], "_")
     assert "no GFP image" in reason and "'exp_GFP_A01_F0_0h.tif'" in reason
+
+
+# ── a well's confluence is reused only beside the reference it was read against (review tracker M7) ──────────
+REFERENCE = "H12"
+
+
+def _well_archive(plate, root, well, seed):
+    """Write *well*'s single-tile archive into *plate*'s ``in/`` and return its record."""
+    rendered, record = build_well(rows=1, cols=1, tile=(900, 900), well=well, timepoint="0h", radius_fraction=0.26,
+                                  seed=seed)
+    tif = root / "frame.tif"
+    with zipfile.ZipFile(plate / "in" / f"{well}.zip", "w") as zf:
+        for fov, image in rendered.images.items():
+            for channel, frame in (("PHASE", image), ("GFP", image * 0 + 10.0)):
+                imwrite(str(tif), frame.astype("float32"))
+                zf.write(tif, f"exp_{channel}_{well}_{fov}_0h.tif")
+    return record
+
+
+def _reference_plate(root, seeds: dict):
+    """``in/`` with one single-tile archive per well of *seeds* (``well -> render seed``) and their record."""
+    plate = root / "plate"
+    (plate / "in").mkdir(parents=True, exist_ok=True)
+    records = [_well_archive(plate, root, well, seed) for well, seed in seeds.items()]
+    record = records[0]
+    for other in records[1:]:
+        record["tiles"] += other["tiles"]
+    write_record_file(plate / "in" / "acquisition.json", record)
+    return plate
+
+
+def _run_plate(monkeypatch, plate, caplog, *extra):
+    """``process_microscopy.main`` with the real ``process_well_zips`` — the reference's pool first, then the rest,
+    each skipping what is up to date — on an in-process pool, so the stand-in segmenter reaches the wells."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    monkeypatch.setattr(pm, "_well_pool", lambda *a, **k: ThreadPoolExecutor(max_workers=1))
+    monkeypatch.setattr(nm, "cellpose_segmenter", lambda *a, **k: threshold_segmenter())
+    monkeypatch.setattr(_suspend, "install_handlers", lambda **k: None)
+    monkeypatch.setattr(_suspend, "watch_parent", lambda *a, **k: None)
+    monkeypatch.setattr(sys, "argv", [
+        "process_microscopy.py", "--input_dir", str(plate / "in"), "--output_dir", str(plate / "out"),
+        "--phase_token", "PHASE", "--fluor_tokens", "GFP", "--filename_schema", ":".join(SCHEMA), "--workers", "1",
+        "--background", "none", "--flatfield", "none", "--no_auto_threshold", "--no_run_check",
+        "--nanowell_segment_on", "rim", "--nanowell_format", "100um", "--nanowell_empty_well", REFERENCE, *extra])
+    caplog.clear()
+    with caplog.at_level("INFO"):
+        pm.main()
+    return plate / "out", [r.getMessage() for r in caplog.records]
+
+
+def _confluence(out, well):
+    return {r["confluence"] for r in _rows(out, f"{well}.csv") if r["state"] in ("measured", "empty")}
+
+
+@pytest.mark.parametrize("mode", [(), ("--incremental",)], ids=["plain", "incremental"])
+def test_a_well_read_before_its_reference_was_measured_is_measured_again_once_it_is(
+        tmp_path, monkeypatch, caplog, mode):
+    """M7 (a): A01 is analysed while the reference H12 is not on the plate, so it has no confluence and says why, and
+    is sealed complete. Once H12 is added, a re-run — plain or incremental — measured H12 and then skipped A01 as up
+    to date, blank, beside a reference that now gives it a confluence. The settings key names the reference well, not
+    what it holds."""
+    plate = _reference_plate(tmp_path, {WELL: 1})
+    out, _said = _run_plate(monkeypatch, plate, caplog, *mode)
+    assert _confluence(out, WELL) == {""}                                   # blank, never 0
+    record = json.loads((plate / "in" / "acquisition.json").read_text())
+    record["tiles"] += _well_archive(plate, tmp_path, REFERENCE, 5)["tiles"]
+    write_record_file(plate / "in" / "acquisition.json", record)
+
+    out, said = _run_plate(monkeypatch, plate, caplog, *mode)
+
+    assert f"Well {WELL} — done. 1 timepoint(s), 0 without rows." in said
+    measured = _confluence(out, WELL)
+    assert "" not in measured                                               # every nanowell read, now
+    values = sorted(float(v) for v in measured)
+    assert values[0] >= 0.0 and values[len(values) // 2] < 0.05             # empty nanowells (measured: 0.0 to 0.23)
+    from pipeline import nanowell_reference as nref
+
+    grid = json.loads((out / "nanowells" / f"{WELL}_grid.json").read_text())
+    assert grid["timepoints"]["0h"][nref.KEY_FIELD].startswith("template:")
+
+
+def test_a_re_exported_reference_measures_its_wells_again_and_an_unchanged_one_does_not(tmp_path, monkeypatch, caplog):
+    """M7 (b): the plate is analysed with H12 as the reference; H12 is then run again by itself (``--force_wells``).
+    Re-run on the same images it saves the same templates — rewritten files, the same content — and A01 is still up
+    to date. Re-exported (other images), A01 was read against a reference that is gone: it is analysed again rather
+    than kept beside the new one, which mixed the two references' confluence invisibly."""
+    plate = _reference_plate(tmp_path, {WELL: 1, REFERENCE: 5})
+    out, said = _run_plate(monkeypatch, plate, caplog)
+    assert f"Well {WELL} — done. 1 timepoint(s), 0 without rows." in said
+
+    out, said = _run_plate(monkeypatch, plate, caplog, "--force_wells", REFERENCE)
+    assert f"Well {REFERENCE} — done. 1 timepoint(s), 0 without rows." in said
+    assert f"SKIP well {WELL} — output already exists. Use --force to reprocess." in said
+
+    _well_archive(plate, tmp_path, REFERENCE, 9)                             # the same tile, imaged again
+    out, said = _run_plate(monkeypatch, plate, caplog, "--force_wells", REFERENCE)
+    assert f"SKIP well {WELL} — output already exists. Use --force to reprocess." not in said
+    assert f"Well {WELL} — done. 1 timepoint(s), 0 without rows." in said
+    assert any(m.startswith(f"Well {WELL} — its confluence at 0h was read against another empty reference") for m in said)
+
+
+def test_a_reference_well_that_is_not_on_the_plate_is_warned_about(tmp_path, monkeypatch, caplog):
+    """Review tracker L9: a named reference that is neither among the run's wells nor measured in the output folder
+    (here H12, which this plate does not have) gives no well a confluence, and the run said nothing until each
+    well's notes did. It warns before any well runs; a reference measured earlier is read, so is no reason to."""
+    plate = _reference_plate(tmp_path, {WELL: 1})
+    _out, said = _run_plate(monkeypatch, plate, caplog)
+    warning = (f"The empty reference well {REFERENCE} is not among this run's wells and has not been measured in this "
+               "output folder, so no well will have a confluence.")
+    assert [m for m in said if m.startswith(warning)] and said.index(
+        next(m for m in said if m.startswith(warning))) < said.index(f"Well {WELL} — done. 1 timepoint(s), 0 without rows.")
+
+    alone = json.loads((plate / "in" / "acquisition.json").read_text())
+    record = json.loads((plate / "in" / "acquisition.json").read_text())
+    record["tiles"] += _well_archive(plate, tmp_path, REFERENCE, 5)["tiles"]
+    write_record_file(plate / "in" / "acquisition.json", record)
+    _run_plate(monkeypatch, plate, caplog)                          # the reference measured here
+    (plate / "in" / f"{REFERENCE}.zip").unlink()                     # then left out of the next run
+    write_record_file(plate / "in" / "acquisition.json", alone)
+    _out, said = _run_plate(monkeypatch, plate, caplog, "--force")
+    assert not [m for m in said if m.startswith(warning)]

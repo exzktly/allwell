@@ -720,7 +720,7 @@ allwell/
 ├── allwell_report.py            ← `python allwell_report.py` — draw a dataset's saved plots without a
 │                                  window (Saved Plots → *The headless report*)
 ├── all_well_launcher.py         ← the module PyInstaller boots + the --run-pipeline / --run-zipper
-│                                  / --run-bootstrap / --run-report / --run-nanowell-preview dispatch. A helper the *app* spawns is not an entry
+│                                  / --run-bootstrap / --run-report / --run-nanowell-preview / --run-identity dispatch. A helper the *app* spawns is not an entry
 │                                  point in this sense and does not belong here — it lives in the package
 │                                  whose work it does (see pipeline/well_plate_zipper.py below)
 │
@@ -10485,7 +10485,9 @@ cells' own texture, and a nanowell half covered reads 1-2 % (painted, 52 % true 
 **calibrated against a named empty well** (`pipeline/nanowell_reference.py`, `--nanowell_empty_well`,
 `NanowellSettings.empty_well`, which joins `key()` and the settings digest). The reference well is measured first:
 `process_microscopy.process_well_zips` runs its worker pool twice, the reference alone and then the rest
-(`nanowell_task.reference_well_first`), and a batched remote run puts it in batch 1
+(`nanowell_task.reference_well_first`, which logs a warning before anything runs when the named reference is
+neither among the run's wells nor measured in the output folder: no well will have a confluence; the form's blank
+field reads *none: no confluence*, `nanowell_fields.PLACEHOLDERS`), and a batched remote run puts it in batch 1
 (`remote_batch_staging.nanowell_reference_first`); the batches run in sequence into one output folder whose
 `nanowells/` is never released between them. The reference well reads itself (`nanowell_reference.OWN`): each
 timepoint's own template carries the threshold measured on it (`Template.texture_cut`, set by
@@ -10504,10 +10506,34 @@ count's levels and fluorescence still use the well's own template. With no refer
 output folder, none at that timepoint, or one that was not empty there, every site's confluence is `None` — never
 0 — and the timepoint's notes say which (`nanowell_reference.NOTE_PREFIX`). `measure_timepoint` with no reference
 (Test detection) reads a timepoint against itself, which is right only for the empty well. The reference folder lies
-under `nanowells/`, so a remote run's fetch of that directory brings it back with the rest; a remote run that does
+under `nanowells/`, so verification's pull of that directory brings it back with the rest — but only as a whole and
+only as this run's: `remote_fetch_nanowells.pull_nanowell_results` sets the local one aside first and
+`_settle_reference` keeps the pulled one only when the well its index names is one this run fetched and every
+template the index names arrived, else puts the local one back and logs why (an index and its templates make
+sense only together: a transfer cut off after `reference.json` paired a new index with old `tpNNNN.npz` of the
+same names, and a copy an earlier attempt left on the host replaced the plate's); a remote run that does
 not measure the reference well itself — a re-run of a few wells, or a resume whose reference finished earlier — is
 sent the local one before its pipeline starts (`services/remote_plate_grids.seed_confluence_reference`, see *The host
 is given the rest of the plate*).
+**Reuse is keyed on what the reference held, not only on its name.** The settings key names the reference well;
+what a well's confluence was read against is recorded per timepoint in its grid block
+(`nanowell_reference.KEY_FIELD`, `confluence_reference_key`, stamped by `nanowell_task._finish_well` from the one
+`Reference` `process_well_zip` loads for the well): `Reference.key_at` is `own` for the reference itself, the
+template's content digest (`template_key`: its pixels, threshold, half-size, source and crops — never the `.npz`
+file, whose zip entries carry the time of writing, and each save of the reference rewrites every kept template)
+or `none:<code>` where there was none (`unmeasured`, `other_settings`, `absent`, `loaded`, `unverified`,
+`untemplated`; codes rather than the reasons' sentences, so rewording one re-runs nothing). A timepoint is kept by
+an incremental run only under the key the reference saved now gives (`_prior_state(reference_key=…)`), and a
+finished well is skipped by a plain run only when every `ok` timepoint's key still matches
+(`nanowell_task.confluence_reference_current`, ANDed into `process_well_zips`' `output_exists`, asked after the
+reference's own pool has run). So a well read while the reference was missing, failed or loaded, or before it was
+re-exported, is measured again rather than kept blank or beside another reference's numbers. A remote run's
+`remote_finished_wells.finished_here` applies the same check to the local output, and leaves nothing out when the
+reference well itself is to be sent (`_read_against_the_reference`): the host measures it first. With no reference
+named nothing is keyed (naming one changes the settings key). A block written before the key existed has none, so
+a plate analysed with a reference by an earlier build is measured again once. Registered in
+`tests/test_reuse_is_keyed_completely.py` (`nanowell_task.confluence_reference_current`, and two keys of
+`finished_here`); driven end to end in `tests/test_nanowell_cli.py`.
 Because "departs from the floor" includes the optical halo of a cell, it reads high: on the synthetic scene it lies
 between the painted coverage and the coverage of a disk 3 px larger in radius, which makes it a monotone measure of
 loading rather than an area.
@@ -10731,8 +10757,11 @@ of memory (`_thread_share`: the worker's budget less the tile cache's `CACHE_SHA
 **A timepoint's tiles are measured on the threads** (`_finish_timepoint`, `_tile_threads`: as many as fit beside
 this timepoint's and the next one's tiles at `TILE_WORK_BYTES_PER_PX`, measured at 40 bytes a pixel), the segmenter
 behind the worker's one re-entrant lock (`serialised`), so a worker never has two Cellpose calls in flight and the
-tiles' CPU work overlaps the GPU's. When the count is Cellpose's and the run found no GPU
-(`nanowell_parallel.gpu_in_use`: `parallelism.GPU_SHARERS_ENV` unset), tiles are measured one at a time and nothing
+tiles' CPU work overlaps the GPU's. When the count is Cellpose's and its Cellpose is not on a GPU
+(`nanowell_parallel.gpu_in_use`: once the worker's model has loaded, the device it loaded on —
+`pipeline.cellpose` marks each model it loads with `nanowell_parallel.ON_GPU_ATTR`, read from its model cache
+without importing it, since only Torch in the worker knows whether it can reach the GPU; before that, the main
+process's plan, `parallelism.GPU_SHARERS_ENV` unset), tiles are measured one at a time and nothing
 is prepared ahead: Cellpose then runs on Torch's own threads, there is no GPU time to overlap, and more threads would
 only compete for the same cores. Each well logs, through `run_well`'s *note*, how many timepoints it locates at once
 and how many tiles it measures at once, with what decided each (`_locate_threads_why`, `_tile_threads_why`: the
@@ -11000,11 +11029,14 @@ hidden, and the correlation following a decoy — contradicts correct addresses;
 and nothing in one timepoint's image tells the two apart.
 **Verdicts**: `confirmed`; `partial` — the registration is trusted and most nanowells land on themselves, but some
 are shown wrong, and only those are listed in `excluded` (`_excluded`: an address whose mapped site landed on
-another's, the address it landed on, every nanowell of a moved tile); `contradicted` — the registration or every
+another's, the address it landed on, and every address a moved tile owns at *either* timepoint — the
+layout cannot say which of the two placed it a step off, and at the tile's edge the two own different addresses,
+so leaving out only the compared timepoint's joined the reference's edge rows to other nanowells); `contradicted` — the registration or every
 address at once is wrong (a constant step or a lattice symmetry, a rim centre 1.5 pitches off, a square the run
 took elsewhere, a split tile layout, a mirror or another lattice kind, or more than `PARTIAL_MAX_SHARE` (half) of the
 nanowells shown wrong); `inconclusive` (no reference square, no montage, a margin too low, an unaddressed timepoint,
-fewer than `MIN_COMPARED` addresses in common, a tile layout from another grid, a rim centre between 0.75 and 1.5
+fewer than `MIN_COMPARED` (6) addresses in common — however those few land: a step or symmetry, or more than half
+of them shown wrong, contradicts only from six up, while the square, the outline and the tile layout still can —, a tile layout from another grid, a rim centre between 0.75 and 1.5
 pitches off); `reference`; and `not_checked` for a timepoint never tested. Only `confirmed` and `reference` are good;
 `AGREES` adds `partial`. Review leaves a `contradicted` timepoint and a `partial` one's `excluded` nanowells out of its
 joins (`exclusions` reads them); `inconclusive` and `not_checked` are joined and footnoted. **The reference** (`reference_candidates`, `check_well`) is an addressed
@@ -11012,8 +11044,10 @@ timepoint whose square the run accepted, those whose square carries `(0, 0)` fir
 the square is the central nanowell by convention), earliest first. A reference addressed off itself would make
 every correct timepoint contradicted, so when the contradicted timepoints agree on one step or symmetry and are at
 least as many as those confirmed, the first of them is tried as the reference too, and the one more timepoints
-agree with is kept; alike, the one whose square carries `(0, 0)`; otherwise both groups are `contradicted`, as the
-run leaves both frames of a tie unaddressed. **Limitation**: the check assumes the plate turns less than 30° (hexagonal) or 45° (square lattice)
+agree with is kept; alike, the one whose square carries `(0, 0)`; otherwise every timepoint that agrees with or is
+contradicted by *either* candidate is `contradicted` (each side's verdicts read on its own, so a timepoint confirmed
+against one and inconclusive against the other is not left confirmed), as the run leaves both frames of a tie
+unaddressed. **Limitation**: the check assumes the plate turns less than 30° (hexagonal) or 45° (square lattice)
 between timepoints, or by a turn the square breaks. A *physical* turn by a symmetry the lattice and the square share
 — 180° on either lattice, 90° on a square one — registers as no turn, and labels folded the same way are confirmed;
 nothing in the images tells it from no turn. A keyed
@@ -11033,13 +11067,27 @@ for fifteen timepoints. **Files**: the check reads only what the run writes — 
 `<well>_out.zip`, `nanowells/<well>_grid.json`, `nanowells/<well>.csv` — and writes `nanowells/<well>_identity.json`
 (`check_well_dir`) with a digest of those files (`inputs_digest`: the two tables' bytes and the montages' CRCs);
 `read_sidecar` / `verdicts` read a sidecar whose digest no longer matches (a relabel, a concatenation, a re-run)
-as `not_checked`, never as its stale verdict, and a stage-check failure overrules a good image verdict. The run
+as `not_checked`, never as its stale verdict, and so is one of another `IDENTITY_VERSION`, with its own reason
+(`_stale_reason`: the check that wrote it was an earlier version). The version is the key for the *rules*: the
+digest says the tables are the same, only the version says the verdicts were decided the same way, so it is raised
+whenever a change can alter a verdict, reason or exclusion a sidecar records.
+`tests/test_nanowell_identity_rules.py::test_the_identity_rules_carry_the_version_they_were_written_under` pins a
+digest of the module's rules (every top-level statement but the readers, the reporting and the command line, with
+comments, docstrings and whitespace removed, so it is the same on every Python version) to the version, and fails
+when one changes without the other, and a stage-check failure overrules a good image verdict. The run
 calls `check_after_run` at the end of `nanowell_task._finish_well`, once the tables and the montage archive are
 written (a well whose archive this run did not write is not checked), and `stage_check_after_run` at the end of
 `nanowell_endgame`; each logs a warning per timepoint that is not good, and a check that cannot run is logged
 and leaves no sidecar. The remote fetch (`remote_fetch_nanowells`) and batch resume (`remote_batch_resume`) carry
-the sidecar by exact name. `python -m pipeline.nanowell_identity <output_dir> [--well W]` audits an analysed
-dataset (exit 1 when any timepoint is contradicted, 2 when any is inconclusive); `--numbers` prints `number_rows`
+the sidecar by exact name; no Datasets tool writes one, so a subset, concatenation, merge or relabel reads `not_checked`
+until it is audited. `python -m pipeline.nanowell_identity <output_dir> [--well W]` (in the packaged app, the app's
+executable with `--run-identity`, `audit_argv`) audits an analysed
+dataset (exit 1 when any timepoint is contradicted, 2 when any is inconclusive, 3 when any is partial — `NOT_GOOD`,
+the verdicts the run log and the summary also report — each read as Review reads it —
+`verdict_in`, the stage flag overruling the image verdict — in the summary and the exit status alike). `--well`
+re-checks and rewrites only the named wells' sidecars, but `stage_check(out_dir, wells)` still fits the whole
+plate: *wells* limits what is written, never what is fitted, because a fit over the named wells alone was refused
+below five wells (replacing a flag with an empty block) or was a different fit; `--numbers` prints `number_rows`
 instead, one CSV row per well and timepoint (`NUMBER_COLUMNS`: peak, margin, turn, the refit's correction, the
 address distances' median, 95th percentile and maximum, loose and failing counts, the centre, square, tile and stage
 disagreements, and a `why` code), numbers only, for calibrating the thresholds on real plates. Pinned by
@@ -11053,7 +11101,11 @@ a timepoint anchored a step off is confirmed once `_settle_steps` moves it, and 
 the wells in parallel on the run's worker pool (`pool`, which `process_microscopy` gives as `_well_pool` — the same
 spawned, `_worker_init`-ed pool the wells ran on; `reanchor_plate` → `_each_reanchored` → `_reanchor_well`, a
 module-level function a worker can be handed, which catches a well's failure in the worker; a worker that dies
-fails only the well it held). In a batched remote run it runs once, after the last batch
+fails only the well it held). The empty reference well, when it is among the wells to re-run, runs first and
+alone, in the parent, and the rest only after it: they read their confluence against the templates it saves,
+and beside it in the pool a well could read them while they were being rewritten. A well not re-run keeps what
+it read, and its timepoints' `confluence_reference_key` tells the next run whether that is still the reference's.
+In a batched remote run it runs once, after the last batch
 (`--nanowell_hold_dir` / `--nanowell_reanchor_only`, below).
 What it does:
 the wells anchored on their own evidence at a reference timepoint and at this one fix the plate's rigid
@@ -13047,13 +13099,18 @@ PyInstaller entry point. Two responsibilities:
    when running inside a frozen `.app` bundle — there's no Python
    interpreter on `sys.executable`, so re-exec'ing the launcher with the
    sentinel argv routes the same Python process into the pipeline.
-   `--run-zipper`, `--run-bootstrap`, `--run-report` and
-   `--run-nanowell-preview` are the same trick for `well_plate_zipper.main()`,
-   `services/remote_bootstrap.main()`, the headless report's
-   `allwell_report.main()` and Test detection's child process
-   (`services/nanowell_preview_job.main()`) (which from source is
-   `python allwell_report.py`; the spec lists it as a hidden import, since the
-   launcher reaches it through a function-level import).
+   `--run-zipper`, `--run-bootstrap`, `--run-report`,
+   `--run-nanowell-preview` and `--run-identity` are the same trick for
+   `well_plate_zipper.main()`, `services/remote_bootstrap.main()`, the headless
+   report's `allwell_report.main()` (which from source is
+   `python allwell_report.py`), Test detection's child process
+   (`services/nanowell_preview_job.main()`) and the nanowell identity audit
+   (`pipeline.nanowell_identity.main()`, `python -m pipeline.nanowell_identity`
+   from source); the spec lists each as a hidden import, since the launcher
+   reaches them through function-level imports. `--run-identity` is the one a
+   person types: the Identity view's "not checked" message names it in the
+   packaged app (`nanowell_identity.audit_argv`, quoted for the platform's
+   shell by `identity_compute.audit_command`).
 
 A frozen **windowed** (`console=False`) build leaves `sys.stdout` /
 `sys.stderr` — and `sys.__stdout__` / `sys.__stderr__` — set to None even
@@ -13119,7 +13176,7 @@ Small dependency-light service modules used by `analyze/tab.py`:
 | `ssh_key_setup.py` | Ed25519 keypair generation at `~/.ssh/allwell_<alias>` + the copy command behind the remote-host wizard: `ssh-copy-id` when it is installed, otherwise one `ssh` call carrying the public key's type and base64 (never its free-text comment) inside a single double-quoted remote command, because cmd.exe does not honour POSIX single quotes and splits an unquoted line at `&&`. That remote half appends the key only when no line already holds it as a field of its own (`_key_entry_pattern`: at the start of a line or after a space, so an entry with options counts and a key glued onto the previous line's comment does not), and first ends a last line that has no newline (`_END_LAST_LINE`), so the key always starts a line of its own; both are written without `$` or `"`, which PowerShell and the local shell would act on inside the double quotes. `tests/test_ssh_key_setup.py` runs it under `sh -c` against a scratch home. Its passphrase check rests on every ssh the app starts running with `BatchMode=yes` (`remote_config.unattended_options`). |
 | `subprocess_kill.py` | Kills a spawned pipeline's whole process group / session (what Stop uses): `os.killpg` on POSIX, `CTRL_BREAK_EVENT` on Windows. **A child it signals must be started in a group of its own**, and `own_process_group_kwargs()` is the one place that spells both halves — `start_new_session` on POSIX, `CREATE_NEW_PROCESS_GROUP` on Windows — for `Popen` to spread. On Windows the Ctrl-Break goes to a console process group, and a child that leads none passes it to every process on the console, the app included, which Windows then ends with `STATUS_CONTROL_C_EXIT`: no traceback and nothing in the boot log. Both remote `ssh` spawns asked only for the POSIX half, so Stop on a remote run closed the app when it had been launched from a terminal. `tests/test_spawned_processes_lead_their_own_group.py` fails on any function that asks for a POSIX session without the Windows group, and pins the two `ssh` spawns to the helper. |
 | `subprocess_text.py` | `TEXT_UTF8` — the one spelling of "decode this subprocess's output as UTF-8", splatted into every `subprocess.run` / `Popen` whose text-mode output the app reads. `text=True` on its own decodes with `locale.getpreferredencoding(False)`, which is UTF-8 on macOS and Linux but the ANSI codepage on Windows — so the `✓` / `→` markers, the em-dash in `Well X — done.` and any non-ASCII byte in a path either mojibake or raise `UnicodeDecodeError` out of a reader thread, skipping the `proc.wait()` behind it. `errors="replace"` is the second half: a `?` in a log line beats an exception that makes the GUI report a run as never started while it keeps going. `tests/test_subprocess_text_decoding.py` fails on any text-mode call in the tree that names no codec, including one whose flag sits in a kwargs dict; `services/remote_bootstrap.py` spells the same three arguments out because it stays stdlib-only. |
-| *(pipeline)* `settings_record.py` + `util/settings_digest.py` | Which configuration produced each well's output, recorded beside it as `<out>/.aw_settings/<WELL>.json`. `KEYED_ON` is the roster of what invalidates a prior result — the segmenter and every one of its thresholds, the channels quantified, the QC gate, both top-hat radii and FFT bands, the mesh background parameters, the flat-field and blank, the auto-threshold controls and their control wells, and the filename schema — with the reason each entry is in it; `settings_digest` hashes whatever of them a run states. **The keys are `process_microscopy.build_parser()` destinations**, because the one caller digests that parser's namespace: a key spelled any other way contributes nothing, silently, which is how the first version of the roster came to name six options that do not exist and leave fifteen real ones unkeyed. `NOT_KEYED_ON` is its complement, carrying the reason each remaining option is outside the key, so the two partition the parser exactly and a newly added option fails the suite until someone classifies it. Both of the pipeline's reuse predicates consult the record: the plain re-run skip (`well_skip.output_exists_for_well`) and the incremental done-set. Without it, re-running a plate with a different segmenter was answered "up to date" while `write_pipeline_info` rewrote the sidecar to advertise the new configuration, so the plate described a setup that had produced none of the numbers in it. The marker is written by the worker, after both the CSV and the archive are on disk and past every short circuit — a well that logged "up to date (no new FOVs)" computed nothing and must not be credited with this run's settings. A remote run's marker is written on the worker host, so `Fetcher._pull_settings_marker` brings each well's back with its output rather than the client recomputing a second copy of the digest. **A well with no recorded digest is accepted**, so introducing the check forces nobody to reprocess anything; the cost is that a plate written before the record existed keeps the old behaviour until its next forced run. The digest is deliberately blind to the paths, to `--force`/`--incremental` and to anything about the machine, so a plate computed locally and on a worker host produces the same key. Registered in `tests/test_reuse_is_keyed_completely.py`, which drives every key through `well_settings_allow_reuse` itself rather than only through the digest.  **A change to the digest's definition is not a change of settings.** When the definition changes — the nanowell options stopped counting outside nanowell mode, `nanowell_geometry` was added, the Cellpose options (`cellpose_*`) stopped counting outside a Cellpose segmentation (`CELLPOSE_METHODS`) when the default model moved from cyto3 to cpsam — the same options hash differently, and every well and every part-way checkpoint an earlier build recorded would read as another configuration's: finished wells re-run, half-finished ones started again. So the pipeline's settings key is `settings_key_for(opts)`: the current digest, then `~`, then each digest `_EARLIER_DEFINITIONS` says an earlier definition would have produced for the same options (`legacy_settings_digests`). An earlier definition may also restate the options as that build recorded them (`as_recorded`): `_before_cpsam` gives a non-Cellpose run the old `cellpose_model` default (cyto3) and a nanowell run on cyto3 no `nanowell_cellpose_model`, the way the form then sent it — never a run whose model changed, so a cyto3 run is not reused by a cpsam one (`tests/test_a_half_finished_well_resumes_across_builds.py`, pinned to what the previous build records). `settings_match` and the checkpoint loader accept any of them; `record_well_settings` and the checkpoint writer record only the first (`primary_settings_key`); `fov_checkpoint._staging_dir_for` takes over a staging directory named for an earlier digest when this run's own does not exist yet, and `prune_superseded_staging` keeps it. `tests/test_a_half_finished_well_resumes_across_builds.py` pins the earlier digest to the value that build's own code computes, and runs `main()` over a checkpoint it left. |
+| *(pipeline)* `settings_record.py` + `util/settings_digest.py` | Which configuration produced each well's output, recorded beside it as `<out>/.aw_settings/<WELL>.json`. `KEYED_ON` is the roster of what invalidates a prior result — the segmenter and every one of its thresholds, the channels quantified, the QC gate, both top-hat radii and FFT bands, the mesh background parameters, the flat-field and blank, the auto-threshold controls and their control wells, and the filename schema — with the reason each entry is in it; `settings_digest` hashes whatever of them a run states, an option naming a well as the pipeline acts on it (`_CANONICAL`: `nanowell_empty_well` through `canonical_well_label`, so `h12` and `H12` are one key, and the digest of the spelling as typed, which the build that introduced the option recorded, is accepted as an alias — `_digest(..., as_spelled=True)` in `legacy_settings_digests`). **The keys are `process_microscopy.build_parser()` destinations**, because the one caller digests that parser's namespace: a key spelled any other way contributes nothing, silently, which is how the first version of the roster came to name six options that do not exist and leave fifteen real ones unkeyed. `NOT_KEYED_ON` is its complement, carrying the reason each remaining option is outside the key, so the two partition the parser exactly and a newly added option fails the suite until someone classifies it. Both of the pipeline's reuse predicates consult the record: the plain re-run skip (`well_skip.output_exists_for_well`) and the incremental done-set. Without it, re-running a plate with a different segmenter was answered "up to date" while `write_pipeline_info` rewrote the sidecar to advertise the new configuration, so the plate described a setup that had produced none of the numbers in it. The marker is written by the worker, after both the CSV and the archive are on disk and past every short circuit — a well that logged "up to date (no new FOVs)" computed nothing and must not be credited with this run's settings. A remote run's marker is written on the worker host, so `Fetcher._pull_settings_marker` brings each well's back with its output rather than the client recomputing a second copy of the digest. **A well with no recorded digest is accepted**, so introducing the check forces nobody to reprocess anything; the cost is that a plate written before the record existed keeps the old behaviour until its next forced run. The digest is deliberately blind to the paths, to `--force`/`--incremental` and to anything about the machine, so a plate computed locally and on a worker host produces the same key. Registered in `tests/test_reuse_is_keyed_completely.py`, which drives every key through `well_settings_allow_reuse` itself rather than only through the digest.  **A change to the digest's definition is not a change of settings.** When the definition changes — the nanowell options stopped counting outside nanowell mode, `nanowell_geometry` was added, the Cellpose options (`cellpose_*`) stopped counting outside a Cellpose segmentation (`CELLPOSE_METHODS`) when the default model moved from cyto3 to cpsam — the same options hash differently, and every well and every part-way checkpoint an earlier build recorded would read as another configuration's: finished wells re-run, half-finished ones started again. So the pipeline's settings key is `settings_key_for(opts)`: the current digest, then `~`, then each digest `_EARLIER_DEFINITIONS` says an earlier definition would have produced for the same options (`legacy_settings_digests`). An earlier definition may also restate the options as that build recorded them (`as_recorded`): `_before_cpsam` gives a non-Cellpose run the old `cellpose_model` default (cyto3) and a nanowell run on cyto3 no `nanowell_cellpose_model`, the way the form then sent it — never a run whose model changed, so a cyto3 run is not reused by a cpsam one (`tests/test_a_half_finished_well_resumes_across_builds.py`, pinned to what the previous build records). `settings_match` and the checkpoint loader accept any of them; `record_well_settings` and the checkpoint writer record only the first (`primary_settings_key`); `fov_checkpoint._staging_dir_for` takes over a staging directory named for an earlier digest when this run's own does not exist yet, and `prune_superseded_staging` keeps it. `tests/test_a_half_finished_well_resumes_across_builds.py` pins the earlier digest to the value that build's own code computes, and runs `main()` over a checkpoint it left. |
 | `run_detect.py` | Run-time detection of an Analyze run's filename schema, separator and channel roles from its input (`resolve_detection`, for a `RunSpec` with `auto_detect`), preferring a chained converter's recorded `upstream_layout`, and the checks that the detected channels fit every option naming a channel (`channel_option_errors`). Detection that cannot decide raises `DetectionError`; it never falls back to the job's frozen values. `scan_pipeline_info` is the confidence rule the form's **Detect from filenames** shares. |
 | `run_journal.py` | The record of what a run intended, where it sent the work, and what became of each well — opened before the first well is processed, amended as the run goes, closed with an outcome, so a record still open at the next start-up is a run the app was killed during (§6.5). Stdlib-only. Writes `<output_dir>/.aw_journal/`: `run.json` for the run (its `remote` address, plus the `remote_history` of up to `REMOTE_HISTORY_MAX` addresses earlier runs of the plate used, which `stored_remote_addresses` reads so a later run cannot erase where finished output was) and one `wells/<WELL>.json` per well, `pipeline/run_report.py`'s one-atomic-file-per-unit shape so the orchestrator, the worker pool and the Fetcher thread all record without a lock. **Evidence, never authority** — `pipeline.completeness` stays the answer to "is this well complete" and the artefacts stay the done-set, so a journal that goes missing costs answers rather than making a good dataset look empty. It drives exactly one decision, the remote re-attach above. A well record can name the run it belongs to: `open_run` returns a token, and a writer that hands it back cannot file its progress under a previous run's surviving record — which is what a run whose own `open_run` failed would otherwise do. The local path passes it (`analyze.progress._journal_well`); the remote writers — `_record_remote_in_journal` and the Fetcher's three `record_well` calls — do not, so they are trusted writes and that protection does not extend to them. The consequence is worth stating rather than leaving implied: on a *remote* run whose own `open_run` failed, those four still write into whatever record survives in that directory, which in that exact scenario is the previous run's, still open because the index is holding it for resume. Measured: run 2's remote address and its uploaded wells land inside run 1's record. Re-attach is keyed on the cache key and would therefore decline, so no wrong numbers follow — but run 1's tally and per-well detail are corrupted, and its resume offer describes a run that did not produce them — while a run's *own* completion lines, which are parsed on the GUI thread and therefore arrive after the worker thread closed the record, are still accepted. Asking the cheaper question instead, "is a run open here", refused the tail of every plate: a 24-well run recorded four wells and the pre-run readout said so. `tests/test_a_run_end_to_end_records_every_well.py` drives a real run through a real drain and is the only test on either side of this record that does. `WELL_STATES` is the single roster of what a run can have done to a well, guarded by `tests/test_no_second_journal_vocabulary.py` — which walks dict keys as well as tuples, lists and sets, because a states-to-words table is presentation only for as long as the module holding it also consults the canonical roster; one that does not is holding its only copy, and anything iterating it drops every state it fails to spell.  `open_run` clears the per-well records, which describe the current run, but first carries the last state each well reached in every earlier run into `previous_wells` (`previous_well_states`), so a restart can tell what the attempt it resumes uploaded, finished or never received; `remote_batch_resume` names the wells whose recorded state the remote no longer bears out. The remote address also gains `remote_scratch_dir` (`record_remote_scratch`), from the pipeline's own `Scratch  :` line as the batched driver's output is read (`remote_batch_resume.note_remote_scratch`): the host-expanded base under which a well's part-way checkpoints live, which a re-attached restart reads back to report, before anything runs, which wells will continue from how many checkpointed field groups (`report_resumable_checkpoints`, counting only directories carrying this output directory's stamp — asked of the host with `pwd -P` — and this run's settings stamps). |
 | `run_provenance.py` | An Analyze run's two lines in the dataset's provenance log (§5.7). `PipelineRunner._open_journal` calls `begin_run`, which appends `run_started` (mode, input folder, the exact pipeline argv, and the run-scope options `force` / `force_wells` / `incremental` / `only_wells`) and fingerprints the sidecar's current `run_check` block; `_close_journal` calls `finish_run`, which appends `run_finished` with the journal's outcome and this run's `run_check` totals. Emitted by the runner rather than the pipeline because the runner is the one process that sees the start and end of every run — a remote pipeline's own writes would stay on the worker host, since the fetch pulls named files only — and because `process_microscopy.py` is at its line budget. The cost is stated: a pipeline launched from a terminal writes no run events. **The `run_check` is quoted only if it changed during the run.** A run that died before its end-of-run check leaves the previous run's block in the sidecar; its timestamps are second-resolution, so two runs of a small plate can share one, and comparing them let a failed run quote the previous run's healthy totals. Comparing a digest taken at `begin_run` instead has no resolution limit; a run that rewrote a byte-identical block is reported as having none, which errs toward unknown. `argv` is recorded rather than a settings digest because the client's opts are not the pipeline's parsed namespace, so a client-side digest would not match `.aw_settings/`. Pinned by `tests/test_provenance_log.py`, which drives the real runner twice (the history grows while the journal is replaced) and the remote open/fetch/close order. |

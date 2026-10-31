@@ -226,6 +226,36 @@ def test_a_well_never_checked_says_so_and_names_the_audit_command(dataset):
     assert f"python -m pipeline.nanowell_identity {out}" in said
 
 
+def test_the_packaged_app_names_an_audit_it_can_run(monkeypatch):
+    """Review tracker M5: in the packaged app ``python -m pipeline.nanowell_identity`` cannot run — there is no
+    interpreter with the app's modules on its path — so the remedy the view named was unreachable there. Frozen, it
+    names the app's own executable with the launcher's sentinel, quoted for a shell."""
+    import sys
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", "/Applications/All Well.app/Contents/MacOS/AllWell")
+    monkeypatch.setattr("os.name", "posix")
+    assert ni.audit_argv("/data/run 1") == [
+        "/Applications/All Well.app/Contents/MacOS/AllWell", "--run-identity", "/data/run 1"]
+    assert ic.audit_command("/data/run 1") == (
+        "'/Applications/All Well.app/Contents/MacOS/AllWell' --run-identity '/data/run 1'")
+    monkeypatch.setattr(sys, "frozen", False)
+    assert ic.audit_command(None) == "python -m pipeline.nanowell_identity <output folder>"
+
+
+def test_the_launcher_dispatches_the_identity_sentinel_to_the_audit():
+    """The sentinel the frozen command names is the one ``all_well_launcher`` routes to the audit's ``main``, before
+    the GUI starts. The launcher is never imported in a test (its own docstring says why), so this reads its source,
+    as ``test_nanowell_preview_job.py`` does for the preview's sentinel."""
+    from tests._repo_scan import REPO_ROOT
+
+    source = (REPO_ROOT / "all_well_launcher.py").read_text(encoding="utf-8")
+    assert f'sys.argv[1] == "{ni.FROZEN_SENTINEL}"' in source
+    assert "from pipeline.nanowell_identity import main as identity_main" in source
+    assert "sys.exit(identity_main(sys.argv[2:]))" in source
+    assert source.index(ni.FROZEN_SENTINEL) < source.index("from allwell import main")
+
+
 def test_the_reference_timepoint_says_it_is_the_reference(dataset):
     fig, drawn = _draw(dataset, "A01", tp="T0")
     assert drawn is None
@@ -497,7 +527,10 @@ def _offsets(collection) -> set:
 def test_a_partial_well_s_status_puts_exactly_the_stepped_tile_s_nanowells_in_the_misregistered_class(dataset):
     _out, _data, ref, other = dataset
     broken = _tile_off(other)
+    # The tile's addresses at either timepoint, as the check leaves them out (review tracker M3): which of the two
+    # placed it a step off cannot be told, and the plate moved against the tiles, so the two own different edges.
     in_tile = {a for a, owner in broken.owners.items() if owner == TILE}
+    in_tile |= {a for a, owner in ref.owners.items() if owner == TILE and a in broken.sites}
     status = ic.status_map(_pair(dataset, "A04"))
     assert status.members("misregistered") == in_tile
     assert status.members("kept") == (set(ref.sites) & set(broken.sites)) - in_tile

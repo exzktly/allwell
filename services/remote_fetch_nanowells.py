@@ -23,6 +23,14 @@ At verification the whole ``nanowells/`` directory and every re-anchored well no
 (:func:`pull_nanowell_results`). A well whose tables did not arrive fails verification
 (:func:`missing_nanowell_tables`), which keeps the remote copy.
 
+The empty reference (``nanowells/_confluence_reference/``, ``pipeline.nanowell_reference``) comes back with that
+directory but is not a well's file: it is an index and the templates it names, which only make sense together, and
+every other well's confluence is read against it. So the one here is set aside before the pull and put back unless
+the pulled one is this run's own measurement — the well it names is one this run fetched — and arrived whole, every
+template its index names present (:func:`_settle_reference`). Pulled over it directly, a transfer cut off after the
+index paired the new index with the old templates of the same names, and a copy the run did not measure (one an
+earlier attempt left on the host) replaced the plate's (review tracker L7).
+
 This lives in its own module because ``remote_fetch.py`` is line-budgeted: the hooks there are single calls,
 and everything else is here.
 """
@@ -112,7 +120,10 @@ def pull_nanowell_results(verifier, *, log) -> list[str]:
         return []
     short: list[str] = []
     remote, local = f"{verifier.host.ssh_alias}:{run.remote_output_dir}", Path(run.local_output_dir)
-    if not verifier._rsync_optional(f"{remote}/{NANOWELL_DIR}/", local / NANOWELL_DIR, log_fn=log):
+    kept = _set_reference_aside(local / NANOWELL_DIR)
+    pulled = verifier._rsync_optional(f"{remote}/{NANOWELL_DIR}/", local / NANOWELL_DIR, log_fn=log)
+    _settle_reference(local / NANOWELL_DIR, kept, pulled, run, log)
+    if not pulled:
         # The grid records here may then predate the end-of-run re-anchoring, so which wells it re-ran — and
         # whether this plate's tables are its own — is unknown: verification fails and the remote is kept (A4).
         log(f"[remote] the {NANOWELL_DIR}/ tables could not be pulled; keeping the run on the remote.\n")
@@ -134,6 +145,54 @@ def pull_nanowell_results(verifier, *, log) -> list[str]:
         retire_superseded_csvs([str(p) for p in local.glob(f"*_{well}.csv.gz")], local)
         log(f"[remote] {well}: pulled again after the end-of-run re-anchoring re-ran it.\n")
     return short
+
+
+_KEPT_SUFFIX = ".kept"
+
+
+def _set_reference_aside(folder: Path) -> Path | None:
+    """Move the local empty reference out of the way of the pull; the place it went, or ``None`` when there is none.
+    One a previous pull set aside and never settled (the app stopped between the two) is the plate's and comes back
+    first."""
+    from pipeline.nanowell_reference import DIR_NAME
+    from shutil import rmtree as remove_tree
+
+    current, kept = folder / DIR_NAME, folder / f".{DIR_NAME}{_KEPT_SUFFIX}"
+    if kept.is_dir():
+        if current.exists():
+            remove_tree(current)
+        kept.rename(current)
+    if not current.is_dir():
+        return None
+    current.rename(kept)
+    return kept
+
+
+def _settle_reference(folder: Path, kept: Path | None, pulled: bool, run, log) -> None:
+    """Keep the empty reference the pull brought, or put back the one set aside (:func:`_set_reference_aside`)."""
+    from pipeline import nanowell_reference as nref
+    from shutil import rmtree as remove_tree
+    from util.well_token import canonical_well_label
+
+    current = folder / nref.DIR_NAME
+    index = nref.read_index(folder.parent) if pulled and current.is_dir() else None
+    well = canonical_well_label(str((index or {}).get("well") or "")) or ""
+    named = [entry.get("template") for entry in ((index or {}).get("timepoints") or {}).values()
+             if isinstance(entry, dict) and entry.get("template")]
+    ours = well in {canonical_well_label(w) or w for w in run.fetched_wells}
+    whole = index is not None and all((current / name).is_file() for name in named)
+    if index is not None and ours and whole:
+        if kept is not None:
+            remove_tree(kept)
+        return
+    if index is not None or (current.exists() and kept is not None):
+        why = ("it arrived incomplete" if pulled and ours else
+               f"this run did not measure {well or 'its well'}" if index is not None else "the pull failed")
+        log(f"[remote] the empty reference fetched back was not taken ({why}); the one here is kept.\n")
+    if current.exists():
+        remove_tree(current)
+    if kept is not None:
+        kept.rename(current)
 
 
 def _this_runs(run, well: str) -> bool:

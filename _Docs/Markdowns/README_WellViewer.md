@@ -456,14 +456,17 @@ timepoint.
 
 **Confluence needs an empty reference well.** Confluence is read as texture against an empty nanowell, and a loaded
 well has none: calibrated on its own cells, a nanowell half covered read 1-3 %. So name a plate well that holds no
-cells in **Empty reference well** (on the command line `--nanowell_empty_well H12`). It is analysed before the other
+cells in **Empty reference well** (on the command line `--nanowell_empty_well H12`); left blank, the field reads
+*none: no confluence*. A named well that is not among the run's wells and was not measured in the output folder
+before — a well this plate does not have, or a typo — is warned about in the run log before any well runs. It is
+analysed before the other
 wells, and at every timepoint each well's confluence is read against that well's empty nanowells imaged at the same
 timepoint, which also corrects for exposure or medium changing over the time course. Without one — none named, or a
 timepoint where more than 5 % of its nanowells hold a counted cell, or a timepoint it does not have — **no well has a
 confluence** there (blank, never 0); the timepoint's notes in `<well>_grid.json` and the run log say why, and the
 reference well's grid record holds its verdict (`confluence_reference`). Cell counts and fluorescence do not depend
 on it. A remote run that does not include the reference well — re-running a few wells, or resuming a plate whose
-reference finished earlier — is sent the reference this computer already holds, so its wells keep their confluence. Results measured this way carry a measurement version: adding timepoints to a dataset
+reference finished earlier — is sent the reference this computer already holds, so its wells keep their confluence. A well is kept as up to date only beside the reference it was read against: when the reference well is analysed for the first time after them, analysed again on other images (re-exported, forced), or judged empty at a timepoint where it was not before, every well read against it before is analysed again, locally or sent again to a remote, and the run log says which and why. Running the reference again on the same images changes nothing and re-runs no other well. Results measured this way carry a measurement version: adding timepoints to a dataset
 measured by an earlier version analyses the well again in full, and Merge Plates refuses to combine two datasets
 measured by different versions. The nanowells of a circular array are the
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image
@@ -5852,7 +5855,8 @@ each well's array moved with the plate. Each timepoint gets one of:
 - **partial** — the timepoint registered cleanly and most of its nanowells land on themselves, but some do not:
   those whose address landed on a neighbour, and every nanowell of an imaging tile that was placed a whole nanowell
   spacing off in the montage. Only those nanowells are left out of comparisons over time; the rest of the timepoint
-  is used. The line plots hatch it (`\\`) and the Identity view's *Status* colouring shows which were left out;
+  is used. The line plots hatch it (`\\`), the Identity view's *Status* colouring shows which were left out, and
+  the analysis log names the timepoint and how many nanowells it leaves out;
 - **contradicted** — the registration itself, or every address at once, is wrong (all one step off, turned, a decoy
   taken for the square). Its values are still drawn — a count at that timepoint is a count of some nanowell — over a
   cross-hatched (xx) background, but as points joined to nothing: no fold change, growth rate or trajectory line
@@ -5866,7 +5870,8 @@ each well's array moved with the plate. Each timepoint gets one of:
   labelled *inconclusive* at its place on the time axis, and every line into or out of it is dashed. Look at them
   in the Identity view before relying on them;
 - **not checked** — the tables were analysed before this check existed, or changed after it ran (a Validate
-  relabel, a concatenation). The footer says so, and these timepoints are used as they are. When only some of a
+  relabel, a concatenation), or the check that ran on them was an earlier version whose rules have changed since
+  (run it again, below). The footer says so, and these timepoints are used as they are. When only some of a
   well's timepoints are unchecked (a timepoint added later), the line plots dot-hatch those (..).
 
 When two timepoints disagree and nothing tells which is right, both are **contradicted**; when the earliest
@@ -5950,14 +5955,23 @@ Blink's labels are bold with a dark outline, green on the reference and amber on
 selected nanowell on Identity ▸ Blink, in its well and zoomed onto it.
 
 To check a dataset analysed earlier without analysing it again, run
-`python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well): it writes
+`python -m pipeline.nanowell_identity <output folder>` (add `--well A01` to check one well; the check of
+stage positions still compares that well with the whole plate): it writes
 `nanowells/<well>_identity.json` beside the tables, prints each well's verdicts, and Review picks them up the next
-time the dataset is opened. It exits 1 when any timepoint is contradicted and 2 when any is inconclusive. Add
+time the dataset is opened. It exits 1 when any timepoint is contradicted (by the images or by the stage
+positions), 2 when any is inconclusive, and 3 when any is partial (some of its nanowells left out); 0 means every
+timepoint is confirmed. The summary lists every timepoint that is not confirmed, partial ones included. Add
 `--numbers` to print, in place of the summary, one CSV row per well and timepoint with the measurements each verdict
 was decided from (how clearly the square was found, how far the addresses landed, how far the array's outline, the
 tiles and the stage disagreed) and a short code for why a timepoint is not confirmed — numbers only, no images or
 paths, so they can be shared to check the thresholds against real plates:
 `python -m pipeline.nanowell_identity <output folder> --numbers > identity_numbers.csv`.
+In the packaged app there is no `python` to run this with: run the app's own executable from a terminal with
+`--run-identity` as its first argument, followed by the same arguments — on a Mac,
+`<where the app is>/AllWell-<version>.app/Contents/MacOS/AllWell --run-identity <output folder>`. The Identity view's message for a
+well that has not been checked gives the exact line for the copy of All-Well you are running, ready to paste. A dataset
+made by Subset, Concatenate, Merge Plates or a Validate relabel always starts out not checked, since its tables are new;
+run the check on its output folder.
 
 ### Image Browser
 

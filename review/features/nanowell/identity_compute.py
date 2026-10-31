@@ -94,8 +94,19 @@ HOVER_PITCHES = 0.5
 
 
 def audit_command(out_dir) -> str:
-    """The command that runs the identity check over an analysed dataset."""
-    return f"python -m pipeline.nanowell_identity {out_dir if out_dir else '<output folder>'}"
+    """The command that runs the identity check over an analysed dataset, as a line to paste into a terminal: the
+    packaged app's own executable with its sentinel when frozen (``nanowell_identity.audit_argv``), where ``python -m``
+    cannot run, and quoted for the platform's shell. Without a folder it names a placeholder."""
+    import os
+    import shlex
+    import subprocess
+
+    from pipeline.nanowell_identity import audit_argv
+
+    placeholder = "<output folder>"
+    argv = audit_argv(out_dir if out_dir else placeholder)
+    quote = (lambda a: subprocess.list2cmdline([a])) if os.name == "nt" else shlex.quote
+    return " ".join(a if a == placeholder else quote(a) for a in argv)
 
 
 def worst_verdict(data, well: str) -> str | None:
@@ -222,7 +233,7 @@ def identity_message(pair: IdentityPair, out_dir=None) -> str:
 
     if pair.payload is None or pair.verdict == NOT_CHECKED:
         return (f"{pair.well} at {pair.timepoint}: the nanowell identity check has not been run on these tables "
-                f"({pair.reason}). Run it with:\n{audit_command(out_dir)}")
+                f"({pair.reason}). Run it in a terminal with:\n{audit_command(out_dir)}")
     if pair.reference is None:
         return (f"{pair.well} has no reference timepoint to compare {pair.timepoint} with: "
                 f"{pair.payload.get('reference_reason') or pair.reason}.")

@@ -11425,7 +11425,7 @@ restore runs before the data is read. Batch Export's Nanowells panel fills its o
 ln n against hours over at least three timepoints with n > 0. A plate of 96 wells × 1,000 nanowells × 10
 timepoints takes about 5 s to compute.
 
-**Cell Gating reaches the counts** (`cell_gate_compute`, `controller.gate_tally` / `gated_metrics`). The run's
+**Cell Gating reaches the counts** (`cell_gate_compute`, `controller.gate_tally`, which the page's load and Batch Export's `NanowellBatchExportPanel._load` each pass to `site_metrics`). The run's
 `n_cells` is a count of per-cell rows carrying the nanowell's address, so the cells the analysis leaves out
 (`data_loading.df_included_mask(frame, except_layers=cell_gate_compute.FIELD_LAYERS)` — curation, the QC size and
 shape gate, the scatter gates; crop, focus and border pass every nanowell cell, whose table has no centroid, focus

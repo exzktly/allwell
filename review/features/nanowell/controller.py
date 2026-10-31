@@ -345,12 +345,6 @@ def _excluded_fields(ctx, data) -> frozenset:
                               untrusted=field_quality_cache.untrusted_wells(ctx))
 
 
-def gated_metrics(ctx, data, baseline: str) -> pd.DataFrame | None:
-    """:func:`site_metrics` with the cells Home's Cell Gating leaves out taken out — what the page draws and
-    Batch Export exports, so the two never disagree."""
-    return _metrics_of(data, baseline, gate_tally(ctx, data))
-
-
 def ensure_loaded(ctx, *, force: bool = False) -> None:
     """Load the dataset's tables and compute the metrics on a worker, unless they are current.
 

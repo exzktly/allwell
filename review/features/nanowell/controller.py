@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 from domain.nanowell_roster import mixed_rules_note
 from review.features.nanowell import cell_gate_compute as cg
+from review.features.nanowell import rim_focus_compute as rfc
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
@@ -70,8 +71,9 @@ def load_into(state, data_dir) -> None:
     for problem in data.problems:
         log.warning("Nanowells: %s", problem)
     state.data = data
-    state.metrics = site_metrics(data, state.baseline)
+    state.metrics = site_metrics(data, state.baseline, focus=state.rim_focus_rule())
     state.loaded_for = (str(data_dir), state.baseline)     # what the page's own load records (roll-up review X16)
+    state.focus_for = state.rim_focus_rule().key()
     state.loaded_wells, state.parts_for = frozenset(data.available), str(data_dir)   # every well was read
 
 
@@ -79,9 +81,10 @@ def set_baseline(state, baseline: str) -> None:
     """Change the baseline and recompute every metric that depends on it."""
     state.baseline = baseline
     if state.data is not None:
-        state.metrics = site_metrics(state.data, baseline)
+        state.metrics = site_metrics(state.data, baseline, focus=state.rim_focus_rule())
         if state.loaded_for is not None:
             state.loaded_for = (state.loaded_for[0], baseline)
+            state.focus_for = state.rim_focus_rule().key()
 
 
 def replicate_groups(ctx, wells) -> dict:
@@ -274,14 +277,14 @@ def _call(ctx, name: str) -> None:
         fn()
 
 
-def _metrics_of(data, baseline: str, gate=None) -> pd.DataFrame | None:
+def _metrics_of(data, baseline: str, gate=None, focus=None) -> pd.DataFrame | None:
     """The metrics of *data*, ``None`` with no data; with no well read yet (nothing selected) an empty table, so
     the page counts as loaded and says what to select rather than reading on."""
     if data is None:
         return None
     if not len(data.sites):
         return pd.DataFrame(columns=["well", "timepoint", "nw_q", "nw_r", "state"])
-    return site_metrics(data, baseline, gate)
+    return site_metrics(data, baseline, gate, focus)
 
 
 def gate_version(ctx) -> int:
@@ -331,10 +334,11 @@ def gate_tally(ctx, data) -> cg.GateTally | None:
     return cg.tally(per_well, unread)
 
 
-def gated_metrics(ctx, data, baseline: str) -> pd.DataFrame | None:
-    """:func:`site_metrics` with the cells Home's Cell Gating leaves out taken out — what the page draws and
-    Batch Export exports, so the two never disagree."""
-    return _metrics_of(data, baseline, gate_tally(ctx, data))
+def gated_metrics(ctx, data, baseline: str, focus=None) -> pd.DataFrame | None:
+    """:func:`site_metrics` with the cells Home's Cell Gating leaves out taken out and the nanowells whose rim was
+    out of focus under *focus* (``rim_focus_compute.RimFocusRule``) left out — what the page draws and Batch Export
+    exports, so the two never disagree."""
+    return _metrics_of(data, baseline, gate_tally(ctx, data), focus)
 
 
 def ensure_loaded(ctx, *, force: bool = False) -> None:
@@ -356,10 +360,11 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         st.well_parts, st.parts_for, st.loaded_wells = {}, str(data_dir or ""), frozenset()
     wells = wanted | st.loaded_wells
     key = (str(data_dir or ""), st.baseline)
-    version = gate_version(ctx)
+    version = (gate_version(ctx), st.rim_focus_rule().key())
     if not force and st.computing and st.pending_for == (key, wells, version):
         return                                           # this very request is already running
-    if not force and st.loaded_for == key and wanted <= st.loaded_wells and st.gated_for == version:
+    if (not force and st.loaded_for == key and wanted <= st.loaded_wells
+            and (st.gated_for, st.focus_for) == version):
         if st.computing:
             # The current data is what is wanted again (a baseline changed and changed back): whatever is
             # running is for another key and now stale, so it must not land when it finishes.
@@ -368,7 +373,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
             _call(ctx, "_nw_show_computing")
         return
     st.request += 1
-    request, baseline = st.request, st.baseline
+    request, baseline, focus = st.request, st.baseline, st.rim_focus_rule()
     st.computing, st.pending_for = True, (key, wells, version)
     same_wells = wanted <= st.loaded_wells and st.loaded_for is not None and st.loaded_for[0] == key[0]
     previous = st.data if same_wells else None
@@ -379,20 +384,20 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         # while this runs moves the version, and the next draw asks again (``redraw``).
         if previous is not None:
             gate = gate_tally(ctx, previous)
-            return previous, _metrics_of(previous, baseline, gate), "", parts, gate
+            return previous, _metrics_of(previous, baseline, gate, focus), "", parts, gate
         try:
             data = load_nanowell_data(Path(data_dir), wells=sorted(wells), parts=parts) if data_dir else None
         except NanowellSchemeError as exc:
             return None, None, str(exc), parts, None
         gate = gate_tally(ctx, data)
-        return data, _metrics_of(data, baseline, gate), "", parts, gate
+        return data, _metrics_of(data, baseline, gate, focus), "", parts, gate
 
     def done(result):
         if request != st.request:
             return                                       # a newer request has been made; this one is stale
         data, metrics, error, read, gate = result
         st.data, st.metrics, st.load_error = data, metrics, error
-        st.gate, st.gated_for = gate, version
+        st.gate, (st.gated_for, st.focus_for) = gate, version
         st.loaded_for, st.computing = key, False
         if st.parts_for == key[0]:
             st.well_parts, st.loaded_wells = read, wells
@@ -407,7 +412,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
             return
         st.reset_data()
         st.computing, st.load_error, st.loaded_for = False, f"Loading failed: {message}", key
-        st.gated_for = version                           # failed at this version: a redraw must not retry it
+        st.gated_for, st.focus_for = version             # failed at this version: a redraw must not retry it
         _call(ctx, "_nw_refresh_controls")
         redraw(ctx)
 
@@ -423,10 +428,13 @@ def redraw(ctx) -> None:
     if st is None or fig is None or canvas is None:
         return
     stale_gate = st.loaded_for is not None and st.gated_for != gate_version(ctx)
-    if st.loaded_for is not None and (st.loaded_for[1] != st.baseline or stale_gate) and not st.computing:
-        # The baseline changed without a load (a reset, a restore), or Cell Gating changed which cells count:
-        # what is on hand was computed for something else, so fetch the right metrics rather than draw fold
-        # changes against the wrong baseline or counts that hold cells the gate has left out.
+    stale_focus = st.loaded_for is not None and st.focus_for != st.rim_focus_rule().key()
+    if st.loaded_for is not None and (st.loaded_for[1] != st.baseline or stale_gate or stale_focus) \
+            and not st.computing:
+        # The baseline or the rim focus rule changed without a load (a reset, a restore), or Cell Gating changed
+        # which cells count: what is on hand was computed for something else, so fetch the right metrics rather
+        # than draw fold changes against the wrong baseline, counts that hold cells the gate has left out, or
+        # counts from nanowells the rule now leaves out.
         ensure_loaded(ctx)
     _call(ctx, "_nw_refresh_controls")
     _call(ctx, "_nw_show_computing")
@@ -439,10 +447,11 @@ def redraw(ctx) -> None:
     from review.core.plot_style import set_pref_scope
 
     set_pref_scope(ctx, fig, "" if st.view == "distribution" else st.view)
-    if st.loaded_for is not None and st.loaded_for[1] != st.baseline:
+    if st.loaded_for is not None and (st.loaded_for[1] != st.baseline or stale_focus):
         return                                           # the right metrics are on their way
     metric, channel, note = resolve_metric(st.view, st.metric, page_channel_name(ctx), st.data.channels)
-    note = " ".join(filter(None, [note, excluded_note(ctx), cg.note(st.gate)]))
+    note = " ".join(filter(None, [note, excluded_note(ctx), cg.note(st.gate),
+                                  rfc.note(st.metrics, st.rim_focus_rule(), page_wells(ctx))]))
     well = page_well(ctx)
     st.extreme_axes = {}
     if st.view == "identity":
@@ -1920,6 +1929,29 @@ def set_page_baseline(ctx, baseline: str) -> None:
     redraw(ctx)
 
 
+def set_rim_focus(ctx, *, on: bool | None = None, fraction: float | None = None) -> None:
+    """Turn the rim focus rule on or off, or change its fraction, and recompute the metrics with it. A fraction
+    out of range (``rim_focus_compute.clamp_fraction``) is refused with the range named, and nothing changes."""
+    st = _state(ctx)
+    if st is None:
+        return
+    if fraction is not None:
+        accepted = rfc.clamp_fraction(fraction)
+        if accepted is None:
+            ctx.notify.set_status(f"Rim focus: give a fraction from {rfc.MIN_FRACTION:g} to {rfc.MAX_FRACTION:g}.")
+            _call(ctx, "_nw_refresh_controls")
+            return
+        fraction = accepted
+    new_on = st.rim_focus_on if on is None else bool(on)
+    new_fraction = st.rim_focus_fraction if fraction is None else fraction
+    if (new_on, new_fraction) == (st.rim_focus_on, st.rim_focus_fraction):
+        return
+    st.rim_focus_on, st.rim_focus_fraction = new_on, new_fraction
+    _save_soon(ctx)
+    ensure_loaded(ctx)
+    redraw(ctx)
+
+
 def _set(ctx, name: str, value) -> None:
     st = _state(ctx)
     if st is None or getattr(st, name) == value:
@@ -1939,8 +1971,9 @@ def export_page_csv(ctx) -> None:
     if st is None or st.metrics is None:
         ctx.notify.set_status("There are no nanowell tables loaded to save.")
         return
-    if st.computing or st.loaded_for is None or st.loaded_for[1] != st.baseline:
-        # The metrics on hand were computed for another baseline; written now, the file would label them with
+    if (st.computing or st.loaded_for is None or st.loaded_for[1] != st.baseline
+            or st.focus_for != st.rim_focus_rule().key()):
+        # The metrics on hand were computed for another baseline or rim focus rule; written now, the file would label them with
         # the new one (roll-up review X12).
         ctx.notify.set_status(f"The nanowell metrics for baseline {st.baseline!r} are still being computed; "
                               "save again once the page has drawn them.")

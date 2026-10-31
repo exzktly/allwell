@@ -26,12 +26,12 @@ import numpy as np
 
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell import views_compute as vc
-from review.features.nanowell.collect import MEASURABLE, cell_positions
+from review.features.nanowell.collect import MEASURABLE, OUT_OF_FOCUS, cell_positions
 from review.features.nanowell.image_compute import tile_boxes
 
 #: The states with a nanowell seen at its place, whatever its number: a timepoint with none of them has no
 #: addresses, and the figure says why.
-_SEEN = MEASURABLE | {"occluded", "clipped"}
+_SEEN = MEASURABLE | {"occluded", "clipped", OUT_OF_FOCUS}
 
 
 @dataclass

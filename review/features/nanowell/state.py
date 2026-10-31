@@ -11,6 +11,7 @@ import math
 from dataclasses import dataclass, field, replace
 
 from review.features.nanowell.moving_compute import clamp_window
+from review.features.nanowell.rim_focus_compute import DEFAULT_FRACTION, RimFocusRule, clamp_fraction
 from review.features.nanowell.series_compute import is_baseline
 from review.features.nanowell.statistics_compute import TEST_KEYS as STATS_TESTS
 from review.features.nanowell.statistics_compute import UNITS as STATS_UNITS
@@ -178,12 +179,20 @@ class NanowellState:
     stats_unit: str = "nanowells"
     #: The Statistics view's test (``statistics_compute.TEST_KEYS``).
     stats_test: str = "welch"
+    #: Whether a nanowell whose rim was out of focus at a timepoint is left out there (``rim_focus_compute``), and
+    #: the fraction of its well's sharp rims it must reach. On by default, and on for settings saved before the
+    #: rule existed: a soft nanowell's count is not a measurement of its cells.
+    rim_focus_on: bool = True
+    rim_focus_fraction: float = DEFAULT_FRACTION
 
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
-    metrics: object = None                  # series_compute.site_metrics(data, baseline)
+    metrics: object = None                  # series_compute.site_metrics(data, baseline, focus=rim_focus_rule())
     load_error: str = ""
     loaded_for: object = None               # (data_dir, baseline) the data and metrics were computed for
+    #: The rim focus rule's key (``RimFocusRule.key``) the metrics were computed with: a change of the rule moves it
+    #: and the page recomputes (``controller.ensure_loaded``), as ``gated_for`` does for Cell Gating.
+    focus_for: object = None
     #: The cells Home's Cell Gating leaves out of the metrics (``cell_gate_compute.GateTally``), and the
     #: ``stats_cache.population_version`` they were tallied at: a gating edit moves the version and the page
     #: recomputes (``controller.ensure_loaded``).
@@ -257,7 +266,7 @@ class NanowellState:
 
     def reset_data(self) -> None:
         self.data, self.metrics, self.load_error, self.loaded_for = None, None, "", None
-        self.gate, self.gated_for = None, None
+        self.gate, self.gated_for, self.focus_for = None, None, None
         self.loaded_wells, self.well_parts, self.parts_for = frozenset(), {}, None
         self.crops, self.montages, self.fetching, self.fetch_bridges = {}, {}, set(), []
         self.region = self.region_for = self.press = self.drawn = None
@@ -267,6 +276,10 @@ class NanowellState:
         self.identity_zoom, self.identity_zoom_for, self.identity_press = {}, None, None
         self.stats_cache = None
         self.release_tiles()
+
+    def rim_focus_rule(self) -> RimFocusRule:
+        """The rim focus rule the metrics are computed with."""
+        return RimFocusRule(self.rim_focus_on, self.rim_focus_fraction)
 
     def to_config(self) -> dict:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,
@@ -280,6 +293,7 @@ class NanowellState:
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
                 "excluded_wells": list(self.excluded_wells),
                 "stats_unit": self.stats_unit, "stats_test": self.stats_test,
+                "rim_focus_on": self.rim_focus_on, "rim_focus_fraction": self.rim_focus_fraction,
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -305,6 +319,9 @@ class NanowellState:
         unit, test = config.get("stats_unit"), config.get("stats_test")
         self.stats_unit = unit if unit in STATS_UNITS else fresh.stats_unit
         self.stats_test = test if test in STATS_TESTS else fresh.stats_test
+        self.rim_focus_on = config.get("rim_focus_on") is not False
+        fraction = clamp_fraction(config.get("rim_focus_fraction"))
+        self.rim_focus_fraction = fresh.rim_focus_fraction if fraction is None else fraction
         self.subset = _subset_from(config)
         wells = config.get("excluded_wells")
         self.excluded_wells = sorted({w for w in wells if isinstance(w, str) and w}) if isinstance(wells, list) else []

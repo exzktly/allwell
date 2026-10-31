@@ -11430,7 +11430,24 @@ those whose labels happen to parse — and the growth rate is undefined.
 every timepoint of its well. A timepoint where it has no row still has one, with a state saying why:
 `unaddressed` (the timepoint was located but given no origin), `not_located` (the grid record names the
 timepoint and the table has no row for it) or `absent` (addressed, not in that roster), plus the grid's
-reason, or its status, or a sentence saying the grid lists the timepoint and the table has no rows. Every row
+reason, or its status, or a sentence saying the grid lists the timepoint and the table has no rows.
+**Rim focus** (`rim_focus_compute`, run by `site_metrics` before anything is computed, with the
+`RimFocusRule` the page holds — `NanowellState.rim_focus_on` / `rim_focus_fraction`, on and 0.75 by default
+and for settings saved before the rule): a measurable row whose `focus` (the pipeline's `rim_focus`) is below
+the rule's fraction of its well's 90th-percentile rim focus at that timepoint becomes `out_of_focus`, with
+the state the run recorded in `recorded_state`, the reference in `rim_focus_ref`, `rim_focus_ok` False and
+the two numbers in its reason. The verdict is Review's, never the pipeline's, so changing the rule recomputes
+and needs no re-run, and it is per nanowell because a tile is focused on its own. It is relative because the
+only absolute focus calibration is on nuclei (`field_quality_record.FOCUS_SCORE_CEILING`); on rendered tiles
+a sharp image reads no lower than 0.89 of its own 90th percentile and a 3 px blur 0.67. As a state rather than
+a flag, it reaches everything a state does: no `n` / `c` / brightness / signal, so no fold change, growth
+rate, occupancy class, moving average or cohort membership through it, the Array view's dotted hatch
+(`renderer._STATE_STYLE`), the detail's state line and the distribution's exclusion reasons (`rim out of
+focus`). A row with no rim focus (predicted geometry, off the image, or a run without the column) and a well
+with fewer than `MIN_SITES` rims at a timepoint are never flagged; `rim_focus_compute.note` puts both counts
+and the number left out in every figure's footer on the page, and Batch Export computes with the page's rule
+and carries the same sentence. The page's metrics are stamped with the rule's key (`NanowellState.focus_for`,
+beside `gated_for`), so a changed rule recomputes as a Cell Gating edit does. Every row
 carries its timepoint's identity verdict (`identity`, `identity_reason`; `NanowellData.identity`, read per well by
 `read_well_part` through `pipeline.nanowell_identity.verdicts`) and `identity_ok`, False on every row of a
 `contradicted` timepoint and on each nanowell a `partial` one leaves out (`NanowellData.identity_excluded`, through
@@ -11846,6 +11863,10 @@ it is the page's choice of wells, not an inclusion layer. Every figure's note ca
 ("Excluded on this page: …") so a figure short of a selected well says so; the empty state names the case where every
 selected well is excluded. *Excluded (n) ▾* (`exclude_view`), shown only while any is excluded, restores
 one or all (`set_well_excluded`, `restore_every_well`).
+
+**Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a *% of sharp* spin box, 30–95) writes through
+`controller.set_rim_focus`, which refuses a fraction outside `rim_focus_compute.MIN_FRACTION`–`MAX_FRACTION` by name,
+saves the page's settings and recomputes the metrics with the new rule (see *Joining* above for what the rule does).
 
 **The Array view** is one well at one timepoint, every element of it a layer that is on or off, drawn by one
 renderer whatever is on, so a nanowell reads the same — and is clickable, pannable and zoomable — under every

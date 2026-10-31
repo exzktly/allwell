@@ -82,12 +82,13 @@ _REANCHOR_LEFT_AS_IT_WAS = {
 
 #: A well that finished with less output than it had input — FOV-groups failed
 #: or never attempted, timepoints without rows, nothing measured at all — and a
-#: well the run ended under. Its own hue, because the plate's contract is that
-#: no two states share a colour and every other one is taken here: ``warn``
-#: says it is still computing, ``success`` / ``accent`` that it finished whole.
-#: ``stale`` is the anomaly hue no other state of this plate paints, and on
-#: Review's Home plate it already means "output here, but not whole".
-_PARTIAL_COLOR_TOKEN = "stale"
+#: well the run ended under. Its own colour, because the plate's contract is
+#: that no two states share one and every other one is taken here:
+#: ``run_processing`` says it is still computing, ``run_done`` /
+#: ``run_on_server`` that it finished whole. ``run_partial`` is a near-white,
+#: chosen (with the rest of the ``run_*`` set in ``ui/theme.py``) to stay
+#: distinct from every other state under red/green colour vision deficiency.
+_PARTIAL_COLOR_TOKEN = "run_partial"
 #: The glyph a partial or unfinished well carries, beside the failed ✕.
 _PARTIAL_GLYPH = "!"
 _FAILED_GLYPH = "✕"
@@ -590,11 +591,11 @@ class RunDashboard(PlateProgress):
         is the *download*, not the (server-side) threshold; for a local run it is
         the threshold. Blue is "computed but the data isn't local yet"."""
         if w in self._errored:
-            return theme.Colors.danger
+            return theme.Colors.run_failed
         if w in self._reanchoring:
-            return theme.Colors.warn                       # computing again
+            return theme.Colors.run_processing                       # computing again
         if w in self._refetch:
-            return theme.Colors.accent                     # re-anchored on the server, not pulled again yet
+            return theme.Colors.run_on_server                     # re-anchored on the server, not pulled again yet
         if self._is_partial(w) and not (self._remote and w in self._xfer):
             # Finished short of its input, or left unfinished — painted so,
             # never in the colour a whole well takes. A download in flight
@@ -614,37 +615,36 @@ class RunDashboard(PlateProgress):
             if xfer is not None and not self._has("download", w):
                 direction, _frac = xfer
                 if direction == _XFER_DOWN:
-                    return theme.Colors.success           # filling toward local
+                    return theme.Colors.run_done           # filling toward local
                 if direction == _XFER_UP and w not in self._active:
-                    return theme.Colors.accent2           # filling toward the remote
+                    return theme.Colors.run_uploaded           # filling toward the remote
             if self._has("download", w):
-                return theme.Colors.success               # fetched locally — done
+                return theme.Colors.run_done               # fetched locally — done
             if self._has("process", w) or self._has("threshold", w):
-                return theme.Colors.accent                # computed on server, awaiting fetch
+                return theme.Colors.run_on_server                # computed on server, awaiting fetch
             if w in self._active:
-                return theme.Colors.warn                   # computing right now
+                return theme.Colors.run_processing                   # computing right now
             if self._has("upload", w):
-                # On the remote, waiting its turn. This used to share ``warn``
-                # with a computing well, so a plate mid-run was a solid block of
-                # amber that said nothing about which wells were actually being
-                # worked on — and now that a computing well carries a dial, the
-                # two differed in shape while their colour still claimed they
-                # were the same state. ``accent2`` is a neighbour of the
-                # ``accent`` used for "computed, awaiting fetch": both mean "it
-                # is over there", and the pair reads as one family.
-                return theme.Colors.accent2
+                # On the remote, waiting its turn. Not the computing amber: a
+                # plate mid-run would then be a solid block of one colour that
+                # said nothing about which wells were actually being worked on.
+                # ``run_uploaded`` is a pale lavender beside the deep
+                # ``run_on_server`` blue: both mean "it is over there", so the
+                # pair reads as one family, and they differ in lightness so
+                # the two stay apart under protanopia, where their hues merge.
+                return theme.Colors.run_uploaded
             if self._has("group", w):
-                return theme.Colors.text_muted             # grouped, queued for processing
+                return theme.Colors.run_pending             # grouped, queued for processing
             return None
         # local
         if self._has("threshold", w):
-            return theme.Colors.success
+            return theme.Colors.run_done
         if self._has("process", w):
-            return theme.Colors.accent
+            return theme.Colors.run_on_server
         if w in self._active:
-            return theme.Colors.warn                       # actively computing
+            return theme.Colors.run_processing                       # actively computing
         if self._has("group", w):
-            return theme.Colors.text_muted                 # grouped, queued for processing
+            return theme.Colors.run_pending                 # grouped, queued for processing
         return None
 
     def _count(self, stage: str) -> int:
@@ -688,7 +688,7 @@ class RunDashboard(PlateProgress):
             row_w = QWidget(self._rail_host)
             row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(_STAGE_ROW_SPACING_PX)
-            dot = status_dot(theme.Colors.text_muted)
+            dot = status_dot(theme.Colors.run_pending)
             row.addWidget(dot)
             nm = QLabel(label, row_w); nm.setFixedWidth(scaled_px(_NM_W))
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
@@ -722,9 +722,9 @@ class RunDashboard(PlateProgress):
             cnt.setText(f"{done}/{stage_total}")
             active = key == self._active_stage
             complete = stage_total and done >= stage_total
-            color = (theme.Colors.success if complete else
-                     (theme.Colors.warn if active else
-                      (theme.Colors.accent if done else theme.Colors.text_muted)))
+            color = (theme.Colors.run_done if complete else
+                     (theme.Colors.run_processing if active else
+                      (theme.Colors.run_on_server if done else theme.Colors.run_pending)))
             dot.setStyleSheet(f"background:{color}; border-radius:5px;")
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};" + ("font-weight:700;" if active else ""))
 
@@ -732,14 +732,14 @@ class RunDashboard(PlateProgress):
         """The only legend here whose rows are decided at run time: a remote
         run gains an Upload stage and renames the two that follow it, since
         "processed" happens on the server and "complete" means fetched back."""
-        items = [(theme.Colors.text_muted, "pending")]
+        items = [(theme.Colors.run_pending, "pending")]
         if self._remote:
-            items.append((theme.Colors.accent2, "uploaded"))
-        items.append((theme.Colors.warn, "processing"))
-        items.append((theme.Colors.accent, "on server" if self._remote else "processed"))
-        items.append((theme.Colors.success, "downloaded" if self._remote else "complete"))
+            items.append((theme.Colors.run_uploaded, "uploaded"))
+        items.append((theme.Colors.run_processing, "processing"))
+        items.append((theme.Colors.run_on_server, "on server" if self._remote else "processed"))
+        items.append((theme.Colors.run_done, "downloaded" if self._remote else "complete"))
         items.append((getattr(theme.Colors, _PARTIAL_COLOR_TOKEN), "partial / unfinished"))
-        items.append((theme.Colors.danger, "failed"))
+        items.append((theme.Colors.run_failed, "failed"))
         return "Wells", items
 
     def _detail(self, w: str) -> str:

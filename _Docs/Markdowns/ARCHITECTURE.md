@@ -12158,7 +12158,12 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   nanowell into an oval, and a draw made while the canvas was still being laid out showed one flattened row). It leaves a canvas that is no longer visible alone: the timer can fire after the page closes, and a redraw then queues matplotlib's deferred draw onto a canvas about to be deleted; the image is drawn for exactly that region and those pixels; the nanowells are filled by the
   metric (`MAP_CMAP`, with a colour bar; a nanowell without a value is a grey outline styled by its state,
   `_STATE_STYLE`, never a colour of the scale) or outlined in `ui/nanowell_sites.state_colour`, a fused one
-  dashed in `FUSED_COLOUR` either way, at `outline_width_px` of the median drawn diameter (6 % of it, 2.5–8 px), the central nanowell boxed; labels in
+  dashed in `FUSED_COLOUR` either way, at `outline_width_px` of the median drawn diameter (6 % of it, 2.5–8 px), the central nanowell boxed; a key
+  along the top edge of the axes (`_array_key.py`: `key_entries` decides it, pure, `draw_key` draws it) with one
+  ring swatch per way a nanowell in view is outlined — the state's colour, or the grey no-value outline with its
+  dash or hatch, and the fused dash — each with how many drawn nanowells it covers, so it names only what is on
+  screen; the states with no colour of their own share one swatch that names them all. It is a standalone legend
+  (`ax.add_artist`), so the export-style pass sizes its text but never moves it; labels in
   `LABEL_COLOUR` (`_draw_labels`: the `q,r` with *Addresses*, the metric value to three significant figures with
   *Values*, one under the other when both are on, `site_label_texts`; a nanowell without a value writes no number)
   only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them

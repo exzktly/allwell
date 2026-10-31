@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from review.features.nanowell._array_key import draw_key, key_entries
 from review.features.nanowell.array_compute import padded
 from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
@@ -1108,11 +1109,11 @@ def array_footer(scene, layers, *, label: str, image_note: str = "", note: str =
                  "one timepoint to the next (the square is the central nanowell)." if not in_well and scene.pitch_um
                  else "Measured positions in the well frame (the square is the central nanowell).")
     if layers.nanowells and len(sites):
-        lines.append(f"Filled by {label}; grey outlines have no value: hatched occluded, dashed clipped, dotted not "
-                     "seen. Dashed in the fused colour: on a tile seam, measured from a blended crop."
+        lines.append(f"Filled by {label}; a grey outline has no value, its hatch or dash naming why (the key above "
+                     "the array). Fused: on a tile seam, measured from a blended crop."
                      if layers.colour == "metric" else
-                     "Outlined by state: blue measured, green empty, amber occluded, red clipped, grey not seen; dashed "
-                     "in the fused colour: on a tile seam, measured from a blended crop.")
+                     "Outlined by state, as the key above the array shows. Fused: on a tile seam, measured from a "
+                     "blended crop.")
     if layers.cells and scene.cells_note:
         lines.append(scene.cells_note)
     if in_well and layers.tiles and scene.tiles:
@@ -1158,6 +1159,8 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     if layers.nanowells and len(scene.sites):
         _draw_nanowells(fig, ax, drawn, scene, layers, label=label, selected=selected)
         _dim_nanowells(ax, scene.sites, dimmed)
+        draw_key(ax, key_entries(scene.sites, colour=layers.colour, styles=_STATE_STYLE), linewidth=1.4,
+                 fontsize=7.0)
     if layers.cells and scene.cells is not None and len(scene.cells[0]):
         _draw_cells(ax, *scene.cells)
     if (layers.addresses or layers.values) and len(scene.sites):

@@ -5840,7 +5840,9 @@ the sentence names it.
   - **Layers** — *Nanowells*, either *filled by the metric* (the colour bar names it; a nanowell without a
     value is a grey outline, never a colour: hatched where it was occluded, dashed where clipped, dotted where
     it was not seen) or *outlined by state* in the colours Test detection uses (blue measured, green empty,
-    amber occluded, red clipped, grey not seen). The outline's width follows the nanowell's size on screen (about
+    amber occluded, red clipped, grey for the other states). A key along the top of the array shows each
+    outline the view holds as a small ring drawn the same way — colour, dash and hatch — with how many
+    nanowells it covers, and lists only what is on screen. The outline's width follows the nanowell's size on screen (about
     6 % of its diameter, never under 2.5 or over 8 screen pixels), so it stays visible zoomed out and on a phone. Either way a nanowell on a tile seam is dashed in purple and
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the

@@ -37,6 +37,7 @@ import numpy as np
 import pandas as pd
 
 from domain.nanowell_roster import roster_rule
+from review.features.nanowell.cell_gate_compute import cell_keys
 
 log = logging.getLogger("review")
 
@@ -509,8 +510,6 @@ def cell_positions(data: NanowellData, well: str, timepoint: str) -> pd.DataFram
 
     These are the cells the *run* counted. Which of them the analysis keeps is the Cell Gating tally's
     (``cell_gate_compute.GateTally.left_out``), matched on ``key`` by whoever draws them."""
-    from review.features.nanowell.cell_gate_compute import cell_keys
-
     path = data.cell_tables.get(well)
     if path is None:
         return None

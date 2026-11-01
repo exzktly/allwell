@@ -2125,33 +2125,59 @@ folder it belongs to. Hover over a row for the full paths on the server and on
 your computer. Folders made by an older version of All-Well have no label, so
 their project shows as "—".
 
-**It only ever deletes All-Well's own run and dataset folders.** Every deletion
-is checked twice, once in All-Well and again on the server at the moment it
-happens. All-Well acts only inside the `runs/` and `datasets/` folders of the
-host's staging folder, never through a symbolic link, and never on a folder
-whose name is not one All-Well creates. A folder someone else put there is
-listed as *Not All-Well's* and cannot be deleted or given an expiry from here. If
-the staging folder is set to `/` or to your home folder, or turns out to be a link
-to one of them, nothing is listed or deleted, and the window says why.
+**It only ever deletes All-Well's own run and dataset folders, and only yours.**
+Every deletion is checked twice, once in All-Well and again on the server at the
+moment it happens. All-Well acts only inside the `runs/` and `datasets/` folders
+of the host's staging folder. It never acts through a symbolic link, never on a
+mount point or a folder with something mounted inside it, never on a folder whose
+name is not one All-Well creates, and never on a folder another user owns. Such
+folders are listed as *Not All-Well's* or *Another user's* and cannot be deleted
+or given an expiry from here. If the staging folder is set to `/` or to your home
+folder, or turns out to be a link to one of them, nothing is listed or deleted,
+and the window says why.
 
-- **Delete…** removes the selected folders after asking you. A folder a run is
-  using right now (its app is still connected, its Slurm job is still queued or
-  running, or it was written to in the last 15 minutes) is shown as *In use* and
-  left alone, even if it is selected. Deleting a run folder does not touch results
-  already downloaded, but anything it had not yet sent back is lost, and a later
-  resume of that plate starts over; deleting a dataset only means the next run of
-  that plate uploads it again.
-- **Keep forever** marks folders that should never be removed automatically.
+**A folder something still needs is left alone, even when you select it.** A run
+folder counts as in use when:
+
+- its app is still connected;
+- its Slurm job is still running, or `squeue` cannot be asked about it;
+- its process is still alive;
+- it holds nanowell wells waiting for re-anchoring;
+- another run re-attached to it and is still going;
+- or something in it was written in the last 15 minutes.
+
+A dataset counts as in use while a run is reading it, or if it was used in the
+last 15 minutes. While a job is only waiting in the Slurm queue, what keeps its
+folder in use is the app staying connected.
+
+- **Delete…** removes the selected folders after asking you. The confirmation
+  says how many of the run folders hold results All-Well never confirmed as
+  downloaded. Deleting a run folder does not touch results already on your
+  computer, but anything it had not yet sent back is lost, and a later resume of
+  that plate starts over. Deleting a dataset only means the next run of that
+  plate uploads it again.
+- **Keep forever** protects folders from the expiry rule, the automatic cache
+  clean-up and the clean-up of a plate's earlier attempts. **Delete…** can still
+  remove them.
 - **Expire in N days** removes the selected folders automatically once that time
-  has passed. **Use host rule** drops a folder's own setting.
+  has passed. Starting a new run in a folder clears that date, because the folder
+  holds new work. **Use host rule** drops a folder's own setting.
 - **Remove folders left untouched for N days** (then **Save**) is the host-wide
-  rule; "never" (0) is the default. Nothing runs on the server by itself, so
-  All-Well removes expired folders at the start of each run on that host, and
-  **Remove expired now** does it on request. It never removes a folder in use, a
-  kept folder, the folders of the plate being run, or a dataset a run used in the
-  last seven days. It also never removes a folder automatically unless the
-  folder carries the label All-Well writes for it, so folders from older
-  versions are only ever removed by you, with **Delete…**.
+  rule; 0, the default, means never. Changing the host's address or staging folder
+  in **Edit…** resets this rule to never. Nothing runs on the server by itself, so
+  All-Well removes expired folders in the background each time a run on that host
+  starts, at most 25 per run, and **Remove expired now** does it on request. The
+  server makes the final decision for each folder.
+
+  Automatic removal only ever takes a folder that:
+
+  - carries the label All-Well writes for it, so folders from older versions are
+    only ever removed by you, with **Delete…**;
+  - holds results that were downloaded and verified, if it is a run folder;
+  - is not kept and is due;
+  - and, if it is a dataset, has not been used in the last seven days.
+
+  It never takes the folders of the plate being run.
 
 ### 11. Run / Suspend / Stop / Log
 

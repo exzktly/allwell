@@ -49,6 +49,7 @@ def _run_folder(staging, name, project, days=40):
     (d / "out" / "A1_out.zip").write_bytes(b"x" * 2000)
     (d / rs.RUN_LABEL).write_text(json.dumps({"run_id": name, "project": project, "created": 1_700_000_000,
                                                "output_dir": f"/u/{project}/out"}))
+    (d / rs.RUN_FETCHED).write_text("1")         # its results were downloaded and verified
     for p in (d / "out" / "A1_out.zip", d / "out", d / rs.RUN_LABEL, d):
         _age(p, days)
     return d
@@ -200,3 +201,32 @@ def test_a_folder_all_well_did_not_make_is_shown_but_never_deleted(qtbot, staged
     qtbot.mouseClick(dlg._delete_btn, Qt.LeftButton)
     assert not dlg._busy and (foreign / "keep.csv").read_text() == "mine"
     assert "not made by All-Well" in dlg._status.text()
+
+
+@pytest.mark.parametrize("field, value", [("_ssh_alias_edit", "me@another-server"),
+                                          ("_staging_dir_edit", "/scratch/me/allwell-staging")])
+def test_pointing_a_host_elsewhere_drops_its_storage_expiry(qtbot, field, value):
+    """An expiry rule carried to another server or folder would start removing things there."""
+    host = RemoteHost(name="h", ssh_alias="me@h", storage_expiry_days=12, auto_gc=True)
+    form = RemoteFormDialog(None, host=host)
+    qtbot.addWidget(form)
+    getattr(form, field).setText(value)
+    result = form.result_host()
+    assert result.storage_expiry_days == 0
+    assert result.auto_gc is True
+
+
+def test_a_failed_refresh_leaves_nothing_to_act_on(qtbot, staged):
+    host, _ = staged
+    dlg = _open(qtbot, host)
+    assert dlg._listing is not None
+
+    def down(script, *, check, timeout_s=None):
+        return subprocess.CompletedProcess([], 255, "", "ssh: connect to host h: Connection timed out")
+
+    dlg._cache._ssh_script = down
+    dlg.refresh()
+    qtbot.waitUntil(lambda: not dlg._busy, timeout=10_000)
+    assert dlg._listing is None and dlg._tree.topLevelItemCount() == 0
+    assert not dlg._sweep_btn.isEnabled()
+    assert "Nothing shown is current" in dlg._status.text()

@@ -696,8 +696,20 @@ class RemoteFormDialog(QDialog):
         raw_extras = self._extra_args_edit.text().strip()
         extras: tuple[str, ...] = tuple(raw_extras.split()) if raw_extras else ()
         defaults = RemoteHost(name="_", ssh_alias="_")
+        base = self._base_host
+        alias = self._ssh_alias_edit.text().strip()
+        staging = self._staging_dir_edit.text().strip() or defaults.remote_staging_dir
+        # The carried-over settings describe one server and one folder: pointed
+        # somewhere else, the measured bandwidth and the storage expiry rule no
+        # longer apply, and an expiry rule silently carried to another folder
+        # would start removing things there.
+        if alias != base.ssh_alias:
+            base = replace(base, measured_bandwidth_mbps=defaults.measured_bandwidth_mbps,
+                           storage_expiry_days=defaults.storage_expiry_days)
+        elif staging != base.remote_staging_dir:
+            base = replace(base, storage_expiry_days=defaults.storage_expiry_days)
         return replace(
-            self._base_host,
+            base,
             name=self._name_edit.text().strip(),
             ssh_alias=self._ssh_alias_edit.text().strip(),
             remote_project_dir=(self._project_dir_edit.text().strip()

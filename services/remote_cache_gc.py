@@ -35,10 +35,18 @@ def in_use_stamp(staging_dir: str, key: str) -> str:
     return f"{staging_dir}/datasets/{IN_USE_STAMP_DIR}/{key}"
 
 
+#: Beside the datasets, the per-dataset expiry the Storage browser writes
+#: (``services.remote_storage``); a dataset whose file reads ``keep`` is never evicted.
+USER_EXPIRY_DIR = ".aw_expiry"
+#: Beside the datasets, each dataset's label (``services.remote_storage``).
+LABEL_DIR = ".aw_labels"
+
+
 def listing_script(staging_dir: str) -> str:
-    """Remote bash printing ``<bytes>\\t<last used, epoch s>\\t<key>`` per
+    """Remote bash printing ``<bytes>\\t<last used, epoch s>\\t<key>[\\tkeep]`` per
     dataset, then ``now\\t<epoch s>``. A dataset never stamped (uploaded
-    before stamps existed) reports its directory's own mtime."""
+    before stamps existed) reports its directory's own mtime; one the user
+    marked *Keep forever* in the Storage browser carries a fourth ``keep`` field."""
     return (
         f"cd {staging_dir}/datasets 2>/dev/null || {{ echo 'now\t'\"$(date +%s)\"; exit 0; }}\n"
         "for d in */; do\n"
@@ -47,7 +55,8 @@ def listing_script(staging_dir: str) -> str:
         f"  stamp={IN_USE_STAMP_DIR}/\"$d\"\n"
         "  if [ -e \"$stamp\" ]; then used=$(stat -c %Y -- \"$stamp\"); "
         "else used=$(stat -c %Y -- \"$d\"); fi || exit 3\n"
-        "  printf '%s\\t%s\\t%s\\n' \"$size\" \"$used\" \"$d\"\n"
+        f"  k=''; [ -f {USER_EXPIRY_DIR}/\"$d\" ] && [ \"$(head -c 4 {USER_EXPIRY_DIR}/\"$d\")\" = keep ] && k='\\tkeep'\n"
+        "  printf '%s\\t%s\\t%s%b\\n' \"$size\" \"$used\" \"$d\" \"$k\"\n"
         "done\n"
         "echo 'now\t'\"$(date +%s)\"\n"
     )
@@ -58,6 +67,7 @@ class Dataset:
     key: str
     size: int
     last_used: int
+    kept: bool = False          # marked Keep forever in the Storage browser
 
 
 def parse_listing(text: str) -> tuple[list[Dataset], int] | None:
@@ -69,8 +79,9 @@ def parse_listing(text: str) -> tuple[list[Dataset], int] | None:
         parts = line.rstrip("\n").split("\t")
         if len(parts) == 2 and parts[0] == "now" and parts[1].strip().isdigit():
             now = int(parts[1])
-        elif len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit() and parts[2]:
-            datasets.append(Dataset(parts[2], int(parts[0]), int(parts[1])))
+        elif len(parts) in (3, 4) and parts[0].isdigit() and parts[1].isdigit() and parts[2]:
+            datasets.append(Dataset(parts[2], int(parts[0]), int(parts[1]),
+                                    kept=len(parts) == 4 and parts[3] == "keep"))
     return None if now is None else (datasets, now)
 
 
@@ -86,6 +97,8 @@ def plan_eviction(datasets: list[Dataset], now: int, max_bytes: int, *,
     for d in sorted(datasets, key=lambda d: d.last_used):
         if total <= max_bytes:
             break
+        if d.kept:
+            continue                    # the user asked to keep it; it still counts towards the budget
         if now - d.last_used < window_s:
             kept.append(d)
             continue
@@ -105,8 +118,12 @@ def collect_garbage(cache, max_bytes: int, log: Callable[[str], None]) -> None:
         return
     evict, kept = plan_eviction(*parsed, max_bytes)
     for d in evict:
+        # Its label and expiry go with it, or a later upload of the same plate
+        # would inherit a label and an expiry that described this copy.
         result = cache._ssh_run(["rm", "-rf", f"{staging}/datasets/{d.key}",
-                                 in_use_stamp(staging, d.key)], check=False)
+                                 in_use_stamp(staging, d.key),
+                                 f"{staging}/datasets/{LABEL_DIR}/{d.key}.json",
+                                 f"{staging}/datasets/{USER_EXPIRY_DIR}/{d.key}"], check=False)
         if result.returncode != 0:
             log(f"[remote] gc: could not evict dataset {d.key} (exit {result.returncode}: "
                 f"{(result.stderr or '').strip()})\n")

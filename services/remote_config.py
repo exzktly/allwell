@@ -994,7 +994,7 @@ def _clamped(value: Any, default: int, bounds: tuple[int, int]) -> int:
         return default
     try:
         number = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):     # OverflowError: a TOML ``inf``
         return default
     return max(bounds[0], min(bounds[1], number))
 

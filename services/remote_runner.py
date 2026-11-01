@@ -103,6 +103,7 @@ from services.remote_srun_retry import queue_wait_seconds
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
 from services import remote_reuse as _reuse
+from services import remote_storage as _storage
 from services.remote_run_id import (
     RemoteRunPaths,
     _compute_run_id,
@@ -800,6 +801,14 @@ class RemoteRunner:
         verdict = self._output_verifier().verify(ok, log=log, suspended=suspended)
         if not verdict.passed:
             return False
+        # Its results are home and verified: the folders it used may now be
+        # removed by the storage expiry (``remote_storage``), never before. A
+        # suspended run's folder still holds the work its resume continues.
+        if not suspended and not dry_run:
+            try:
+                _storage.mark_fetched(self._cache, run, log)
+            except Exception:
+                swallowed("marking this run's remote folders as downloaded")
 
         # Cleanup according to the user's flag. Fires only after verify
         # passes — there's no path that can lose remote state if a fetch

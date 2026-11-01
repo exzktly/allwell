@@ -218,12 +218,13 @@ def test_the_scripts_expand_a_tilde_staging_dir(tmp_path, monkeypatch):
 _TAGS = iter(range(100, 10_000))
 
 
-def _item(kind="run", last_used=0, expiry="", active=False, labelled=True):
-    """A listed folder with an All-Well name, labelled as itself unless told otherwise."""
+def _item(kind="run", last_used=0, expiry="", active=False, labelled=True, fetched=True):
+    """A listed folder with an All-Well name, labelled as itself and (a run) its
+    results downloaded, unless told otherwise."""
     name = _run_name(next(_TAGS)) if kind == "run" else _key(next(_TAGS))
     label = {("run_id" if kind == "run" else "cache_key"): name} if labelled else {}
     return rs.StorageItem(kind, name, modified=last_used, last_used=last_used, active=active,
-                          expiry=expiry, label=label)
+                          expiry=expiry, label=label, fetched=fetched and kind == "run")
 
 
 def test_what_expires_and_what_never_does():
@@ -231,11 +232,15 @@ def test_what_expires_and_what_never_does():
     cases = {
         "untouched-31d": _item(last_used=now - 31 * DAY),
         "untouched-29d": _item(last_used=now - 29 * DAY),
-        "kept": _item(last_used=0, expiry=rs.KEEP),
+        "kept": _item(last_used=DAY, expiry=rs.KEEP),
         "explicit-past": _item(last_used=now, expiry=str(now - 1)),
-        "explicit-future": _item(last_used=0, expiry=str(now + DAY)),
-        "in-use": _item(last_used=0, active=True),
-        "unlabelled-old": _item(last_used=0, labelled=False),
+        "explicit-future": _item(last_used=DAY, expiry=str(now + DAY)),
+        "in-use": _item(last_used=DAY, active=True),
+        "unlabelled-old": _item(last_used=DAY, labelled=False),
+        "not-downloaded": _item(last_used=DAY, fetched=False),
+        "last-use-unreadable": _item(last_used=0),
+        "last-use-unreadable, dated": _item(last_used=0, expiry=str(now - 1)),
+        "ds-last-use-unreadable, dated": _item(kind="dataset", last_used=0, expiry=str(now - 1)),
         "ds-old": _item(kind="dataset", last_used=now - 31 * DAY),
         "ds-recent": _item(kind="dataset", last_used=now - IN_USE_WINDOW_S + DAY, expiry=str(now - 1)),
     }
@@ -261,6 +266,7 @@ def test_label_and_sweep_removes_expired_folders_but_not_the_run_starting(tmp_pa
     # Folders other runs labelled; only a folder labelled as itself is removed automatically.
     for name in (RUN_STRANGER,):
         (tmp_path / "runs" / name / rs.RUN_LABEL).write_text(json.dumps({"run_id": name}))
+        (tmp_path / "runs" / name / rs.RUN_FETCHED).write_text("1")
     labels = tmp_path / "datasets" / rs.DATASET_LABEL_DIR
     labels.mkdir()
     (labels / f"{KEY_STRANGER}.json").write_text(json.dumps({"cache_key": KEY_STRANGER}))
@@ -273,7 +279,7 @@ def test_label_and_sweep_removes_expired_folders_but_not_the_run_starting(tmp_pa
                           local_input_dir=Path("/u/P/in"), local_output_dir=Path("/u/P/out"))
     lines: list[str] = []
 
-    rs.label_and_sweep(cache, run, lines.append)
+    rs.label_and_sweep(cache, run, lines.append, background=False)
 
     assert sorted(p.name for p in (tmp_path / "runs").iterdir()) == sorted([RUN_EARLIER, RUN_MINE])
     assert sorted(p.name for p in (tmp_path / "datasets").iterdir() if not p.name.startswith(".")) == [KEY_MINE]
@@ -282,7 +288,7 @@ def test_label_and_sweep_removes_expired_folders_but_not_the_run_starting(tmp_pa
     assert any(f"removed expired dataset {KEY_STRANGER}" in line for line in lines)
     # Nothing expired: one ssh call per run start, no more.
     cache.scripts.clear()
-    rs.label_and_sweep(cache, run, lines.append)
+    rs.label_and_sweep(cache, run, lines.append, background=False)
     assert len(cache.scripts) == 1
 
 
@@ -296,7 +302,7 @@ def test_label_and_sweep_on_a_host_that_cannot_be_asked_says_so():
     run = SimpleNamespace(run_id=RUN_A, cache_key=KEY_1, remote_input_dir="", remote_output_dir="",
                           local_input_dir=None, local_output_dir=None)
     lines: list[str] = []
-    rs.label_and_sweep(_Down(), run, lines.append)
+    rs.label_and_sweep(_Down(), run, lines.append, background=False)
     assert len(lines) == 1 and "nothing expired was removed" in lines[0]
 
 

@@ -131,6 +131,8 @@ _REMOVE_IF_IDLE = (
     "_aw_clean() {{ d=$1; [ -d \"$d\" ] || {{ echo \"AW_ABSENT $d\"; return; }}; _live=; "
     "_jid=$(cat \"$d/run.pid.slurm\" 2>/dev/null); "
     "ls \"$d/{hold}\"/*.zip >/dev/null 2>&1 && _live=held; "
+    # Marked *Keep forever* in the Storage browser (``services.remote_storage``).
+    "[ \"$(head -c 4 \"$d/.aw_expiry\" 2>/dev/null)\" = keep ] && _live=kept; "
     "if [ -n \"$_jid\" ]; then if command -v squeue >/dev/null 2>&1; then "
     # (A template for str.format: the brace group's braces are doubled.)
     "_o=$(" + squeue_listing("_jid", "%i").replace("{", "{{").replace("}", "}}") + " 2>&1); _r=$?; "
@@ -157,6 +159,7 @@ def clean_earlier_attempts(runner, *, log: Callable[[str], None]) -> None:
     * a scheduler job recorded in it may still be running, or its heartbeat is fresh, or either cannot be told
       (``_REMOVE_IF_IDLE``) — never while that attempt's job may live;
     * its output directory holds a well that is not here, or cannot be listed: work this run did not bring home.
+    * it is marked *Keep forever* in the Storage browser (``services.remote_storage``).
 
     The re-attached output directory this run wrote into is among them, and goes like the rest once verified.
     """
@@ -200,6 +203,7 @@ def clean_earlier_attempts(runner, *, log: Callable[[str], None]) -> None:
                 + ("its scheduler job is still running" if why == "job" else
                    "it is still beating its heartbeat" if why == "heartbeat" else
                    "it holds wells waiting for an end-of-run re-anchoring" if why == "held" else
+                   "it is marked Keep forever in Manage Remotes → Storage" if why == "kept" else
                    "whether its scheduler job still runs could not be told") + ".\n")
 
 

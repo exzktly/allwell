@@ -52,18 +52,24 @@ def _age(path: Path, days: float = 40) -> None:
 
 
 def _snapshot(root: Path) -> dict[str, str]:
-    """Every path under *root*, with what it is: a link's target, a file's hash."""
+    """Every path under *root*, with what it is: a link's target, a folder's mode,
+    a file's mode, mtime and hash."""
     out: dict[str, str] = {}
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         for name in dirnames + filenames:
             p = Path(dirpath) / name
             rel = str(p.relative_to(root))
+            st = p.lstat()
             if p.is_symlink():
                 out[rel] = "link:" + os.readlink(p)
             elif p.is_dir():
-                out[rel] = "dir"
+                # Not a directory's mtime: removing a target legitimately touches its parent.
+                out[rel] = f"dir:{oct(st.st_mode)}"
             else:
-                out[rel] = "file:" + hashlib.sha256(p.read_bytes()).hexdigest()
+                # A file's mode and mtime too: a chmod or a write that restores the
+                # same bytes is still a change to somebody else's file.
+                out[rel] = (f"file:{oct(st.st_mode)}:{st.st_mtime_ns}:"
+                            + hashlib.sha256(p.read_bytes()).hexdigest())
     return out
 
 
@@ -86,6 +92,7 @@ def sandbox(tmp_path, monkeypatch):
     (good / "out").mkdir(parents=True)
     (good / "out" / "A1_out.zip").write_bytes(b"x" * 100)
     (good / rs.RUN_LABEL).write_text(json.dumps({"run_id": GOOD_RUN, "project": "P"}))
+    (good / rs.RUN_FETCHED).write_text("1")
     ds = datasets / GOOD_KEY
     ds.mkdir(parents=True)
     (ds / "A1.zip").write_bytes(b"z")
@@ -122,7 +129,8 @@ _BASE = "home/.allwell-staging"
 #: them), the nested run (the link inside it goes; its target does not), and the
 #: good dataset's own label.
 _TARGETS = (f"{_BASE}/runs/{GOOD_RUN}", f"{_BASE}/datasets/{GOOD_KEY}", f"{_BASE}/runs/{NESTED_RUN}")
-_TARGET_FILES = {f"{_BASE}/datasets/{rs.DATASET_LABEL_DIR}/{GOOD_KEY}.json"}
+#: The staging folder's clock probe is the one file the scripts may create outside a target.
+_TARGET_FILES = {f"{_BASE}/datasets/{rs.DATASET_LABEL_DIR}/{GOOD_KEY}.json", f"{_BASE}/{rs.NOW_PROBE}"}
 
 
 def _is_target(path: str) -> bool:
@@ -135,7 +143,8 @@ def _assert_only_targets_changed(sandbox, before: dict[str, str], *, targets_all
     deleted there. With *targets_allowed* False not even the targets may change."""
     after = _snapshot(sandbox.root)
     touched = {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
-    breaches = {k for k in touched if not (targets_allowed and _is_target(k))}
+    probe = f"{_BASE}/{rs.NOW_PROBE}"            # the clock probe every script touches
+    breaches = {k for k in touched if k != probe and not (targets_allowed and _is_target(k))}
     assert breaches == set(), f"paths outside the run/dataset targets changed, vanished or appeared: {sorted(breaches)}"
 
 
@@ -173,7 +182,7 @@ def test_the_sweep_and_expiry_touch_nothing_else(sandbox):
                           remote_input_dir="", remote_output_dir="", local_input_dir=None,
                           local_output_dir=Path("/nowhere"))
     lines: list[str] = []
-    rs.label_and_sweep(cache, run, lines.append)
+    rs.label_and_sweep(cache, run, lines.append, background=False)
     assert any(GOOD_RUN in line and "removed expired" in line for line in lines)
     assert not any("my-own-results" in line for line in lines)
     _assert_only_targets_changed(sandbox, before)
@@ -228,7 +237,7 @@ def test_the_server_refuses_on_its_own_when_python_lets_a_name_through(sandbox, 
     for script in (rs.delete_script(sandbox.staging_text, [rs.StorageItem("run", name, 0, 0)]),
                    rs.set_expiry_script(sandbox.staging_text, [rs.StorageItem("run", name, 0, 0)], rs.KEEP)):
         result = cache._ssh_script(script, check=False)
-        assert result.stdout.split("\t")[0] in ("refused", "gone"), result.stdout + result.stderr
+        assert rs.status_of(result.stdout.split("\t")[0]) == "refused", result.stdout + result.stderr
     _assert_only_targets_changed(sandbox, before, targets_allowed=False)
 
 
@@ -239,5 +248,5 @@ def test_the_sweep_s_server_side_label_check_holds_even_if_python_skips_it(sandb
     (unlabelled / "out").mkdir(parents=True)
     cache = _LocalCache(sandbox.staging_text)
     item = rs.StorageItem("run", unlabelled.name, 0, 0)
-    outcomes, _ = rs.delete_items(cache, [item], require_label=True)
-    assert outcomes == {("run", unlabelled.name): "refused"} and unlabelled.is_dir()
+    outcomes, _ = rs.delete_items(cache, [item], automatic=True, host_days=1)
+    assert outcomes == {("run", unlabelled.name): "refused:unlabelled"} and unlabelled.is_dir()

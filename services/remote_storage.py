@@ -10,80 +10,83 @@ A remote run leaves two kinds of folder under ``remote_staging_dir``:
 
 Both names are hashes, so on the server nothing says which plate a folder came
 from. Cancelled jobs, abandoned runs, failures and every change to the
-upload's content leave folders behind, and the only way to tell them apart was
-to read their contents by hand. This module is what the Manage Remotes
+upload's content leave folders behind. This module is what the Manage Remotes
 *Storage…* browser (``analyze/remote_storage_dialog.py``) and the run-start
 sweep both stand on.
 
-**It can delete nothing but a run or dataset folder, and the rule is enforced
-twice.** This module runs ``rm -rf`` on a shared server, so a mistake in it is
-not a wrong number but somebody's data. Every check is made in Python *and
-again on the server*, so neither side alone is the only thing standing between
-a bug and a deletion:
+**Confinement: it can delete nothing but All-Well's own run and dataset
+folders, and every rule is enforced twice** — in Python before a script is
+built, and again by the script on the server at the moment it acts — so neither
+layer alone stands between a bug and somebody's data:
 
 1. *The staging directory must be a real, specific folder*
-   (:func:`validate_staging_dir`): absolute or ``~/``-relative, no ``.`` or
-   ``..`` component, no control characters, and never ``/`` or ``~`` itself.
-   On the server every script that writes or deletes ``cd``\\ s into it and
-   refuses outright when its *physical* path is ``/`` or the home directory.
+   (:func:`validate_staging_dir`): absolute or ``~/``-relative, no ``.``/``..``/
+   empty component, no control character, no surrounding whitespace, never
+   ``/`` or ``~``. Every script ``cd``\\ s into it and refuses when its
+   *physical* path is ``/`` or the home folder.
 2. *A target is always ``runs/<name>`` or ``datasets/<name>``, relative to that
-   directory.* ``<name>`` is one plain path component (:data:`_NAME_RE`:
-   letters, digits, ``. _ -``, not starting with a dot); the kind is one of two
-   literals. On the server the target must be a real directory, not a symbolic
-   link, inside a ``runs`` / ``datasets`` that is not a link either, and its
-   physical path must be exactly ``<staging>/<runs|datasets>/<name>`` — so a
-   link, a bind mount or a name that somehow slipped through cannot point the
-   deletion anywhere else. The only other files ever removed are a dataset's
-   three bookkeeping files (its in-use stamp, label and expiry), each a plain
-   file named after the dataset inside its own non-link folder.
-3. *It must be All-Well's folder* (``_aw_ours`` in :func:`_guard_functions`):
-   its name has the shape All-Well gives it (``run-<hex>[-<hex>]``, or a hex
-   dataset key), or — a run folder of an older build only — it holds a file
-   only All-Well's run machinery writes there (:data:`_RUN_MARKERS`). A label
-   does not count, since anything could carry one. A folder somebody else put
-   in ``runs/`` or ``datasets/`` is listed but can be neither deleted nor given
-   an expiry here.
-4. *Automatic removal needs more than that:* the folder must carry an
-   All-Well label naming that very folder (:attr:`StorageItem.labelled`),
-   checked again on the server before the ``rm``. A folder made before labels
-   existed is therefore never removed automatically — only by a person, in the
-   browser, after a confirmation that lists it.
+   folder*, ``<name>`` one plain path component (:data:`_NAME_RE`). On the
+   server (``_aw_inside``) it must be a real directory, not a link, inside a
+   non-link ``runs``/``datasets``, on the **same filesystem** as its parent (a
+   mount point is refused), with a physical path of exactly
+   ``<staging>/<top>/<name>``. The ``rm`` itself runs from inside the checked
+   ``runs``/``datasets`` (re-checked with ``pwd -P``) on ``./<name>``, with
+   ``--one-file-system``; a server whose ``rm`` lacks that flag refuses to
+   delete at all. Links are never listed. A dataset's stamp, label and expiry
+   are removed only as plain files in non-link bookkeeping folders. Every file
+   this module writes goes through a temporary file and ``mv``, so it never
+   writes through a link or a hard link.
+3. *Only All-Well's folders, and only your own*: the name has the shape
+   All-Well gives (``run-<hex>[-<hex>]``, a hex dataset key) or — an older
+   build's run folder — it holds ``.aw_beat``/``.aw_upload_complete``/
+   ``.aw_upload_alive``; and the folder is owned by the user the app logs in
+   as (``[ -O ]``). Anything else is listed and left alone.
+4. *Automatic removal* (the sweep and *Remove expired now*) is decided by the
+   server, not by the listing it started from: the folder must carry an
+   All-Well label naming that very folder, a run folder must carry the marker
+   written once its results were downloaded and verified (``.aw_fetched``),
+   its expiry is re-read and re-evaluated against the server's own clock, and
+   a dataset a run used within :data:`~services.remote_cache_gc.IN_USE_WINDOW_S`
+   is kept.
 
-``tests/test_remote_storage_is_confined.py`` builds a staging tree surrounded by
-decoys — sibling folders, symbolic links out of it, a staging directory that is
-itself a link to the home directory — runs every script against it, and checks
-that nothing outside a run or dataset folder changed.
+**In use — kept by every deletion, manual or automatic, checked on the server
+at the moment of deletion.** A run folder is in use when its heartbeat is
+fresh; when ``squeue`` lists the job in its ``run.pid.slurm`` as alive, **or
+cannot say** (``squeue`` missing, failing for any reason other than "invalid
+job id", or the sidecar unreadable); when its ``run.pid`` is alive
+(``kill -0`` or ``ps -p``, so a process of another user still counts); when
+its ``keep/`` holds nanowell wells waiting for re-anchoring; when anything in
+it other than this module's own files was written in the last
+:data:`RECENT_WRITE_MIN` minutes; or when a run that re-attached to it
+(``.aw_borrowed_by``) is itself in use. A dataset is in use when it was
+stamped or written in the last :data:`RECENT_WRITE_MIN` minutes, when a run in
+use names it in its label, or when any run in use carries no label to say
+which dataset it reads. "Now" is the staging filesystem's own clock (the mtime
+of a probe file it touches), so a skewed login-node clock cannot make a fresh
+heartbeat look stale. An mtime that cannot be read is never treated as epoch
+zero: such a folder is not due.
 
 **Labels.** Each run writes a small JSON label the first time it uses a
-folder: the project name (the folder that holds the ``in`` folder), the local
-input and output paths, the client machine and the time. A run directory keeps
-its label at ``runs/<id>/.aw_label.json``. A dataset keeps its label *beside*
-the datasets, at ``datasets/.aw_labels/<key>.json``, because a dataset
-directory is the pipeline's input directory and must hold nothing but the
-plate — the same reason the cache GC's in-use stamps live in
-``datasets/.aw_last_used/``. A folder made before labels existed has none and
-is shown as unlabelled.
+folder: the project (the folder holding the ``in`` folder), the local input
+and output paths, the client machine and the time. A run folder keeps its
+label at ``runs/<id>/.aw_label.json``; a dataset beside the datasets, at
+``datasets/.aw_labels/<key>.json``, because a dataset folder is the pipeline's
+input folder and holds the plate only. Labels are written with a private umask.
+Starting a run in a folder also clears its ``.aw_fetched`` marker and any
+dated expiry (``keep`` stays), so a reused folder is judged as fresh work.
 
-**Expiry.** A folder expires when it has been left untouched for the host's
-``storage_expiry_days`` (0, the default, means never), or at an explicit time
-set on that folder in the browser, and a folder marked *keep* never expires.
-The per-folder setting lives in ``runs/<id>/.aw_expiry`` or
-``datasets/.aw_expiry/<key>``, holding either ``keep`` or an epoch second.
-Nothing runs on the server by itself — many clusters forbid ``cron`` on login
-nodes — so expired folders are removed by the app: at the start of every run
-on that host (:func:`label_and_sweep`), and on request from the browser.
+**Expiry.** A folder expires once untouched for the host's
+``storage_expiry_days`` (0, the default, means never), or at a date set on it
+in the browser; ``keep`` never expires. The setting lives in
+``runs/<id>/.aw_expiry`` or ``datasets/.aw_expiry/<key>``. Nothing runs on the
+server by itself, so expired folders are removed by the app: in the
+background after each run on that host starts (:func:`label_and_sweep`), and
+on request from the browser. The run that is starting is protected, along
+with every folder labelled with its local output directory.
 
-**What is never removed automatically.** A folder that is in use: a run
-directory whose heartbeat is fresh, whose pid is alive, whose Slurm job is
-still queued or running, or in which anything was written in the last
-:data:`RECENT_WRITE_MIN` minutes; and a dataset a run used within the cache
-GC's in-use window (:data:`services.remote_cache_gc.IN_USE_WINDOW_S`), because
-a run that is still reading it may have started days ago. The run that is
-starting is protected too, along with every folder labelled with its local
-output directory — the earlier attempts a resume would re-attach to. The
-in-use check is made again on the server at the moment of deletion, so a run
-that started between the listing and the removal is not touched.
-
+``tests/test_remote_storage_is_confined.py`` runs every script against a home
+folder of decoys and checks nothing outside the targets changed;
+``tests/test_remote_storage_liveness.py`` holds every in-use rule above.
 Qt-free; it talks to the host only through a ``DatasetCache``'s
 ``_ssh_script``, so tests drive it with a fake.
 """
@@ -91,55 +94,70 @@ Qt-free; it talks to the host only through a ``DatasetCache``'s
 from __future__ import annotations
 
 import json
+import math
 import re
 import shlex
 import socket
+import threading
 import time
 import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from services.remote_cache_gc import IN_USE_STAMP_DIR, IN_USE_WINDOW_S
+from services.remote_cache_gc import IN_USE_STAMP_DIR, IN_USE_WINDOW_S, LABEL_DIR, USER_EXPIRY_DIR
+from services.remote_commands import HOLD_DIR
 from services.remote_run_id import HEARTBEAT_DIR, LEGACY_UPLOAD_HEARTBEAT, UPLOAD_SENTINEL, remote_run_dir
 from services.remote_transport import _remote_quote
 from services.remote_wait_snippets import MID_BATCH_HEARTBEAT_STALE_S
 from services.slurm_ids import squeue_listing
+from util.aw_safe import swallowed
 
 #: The label inside a run directory.
 RUN_LABEL = ".aw_label.json"
 #: The per-folder expiry setting inside a run directory.
 RUN_EXPIRY = ".aw_expiry"
-#: Directories, under ``datasets/``, holding one label / expiry file per key.
-DATASET_LABEL_DIR = ".aw_labels"
-DATASET_EXPIRY_DIR = ".aw_expiry"
+#: Written into a run folder once its results were downloaded and verified;
+#: automatic removal of a run folder requires it.
+RUN_FETCHED = ".aw_fetched"
+#: One run id per line: the runs that re-attached to this folder's ``out/``.
+RUN_BORROWED_BY = ".aw_borrowed_by"
+#: Directories, under ``datasets/``, holding one label / expiry file per key —
+#: named where the cache GC, which removes them with their dataset, defines them.
+DATASET_LABEL_DIR = LABEL_DIR
+DATASET_EXPIRY_DIR = USER_EXPIRY_DIR
+#: The probe file, in the staging folder, whose mtime is the filesystem's "now".
+NOW_PROBE = ".aw_now"
 #: The expiry value that means "never remove this folder automatically".
 KEEP = "keep"
 #: A folder written to within this many minutes is treated as in use.
 RECENT_WRITE_MIN = 15
-#: How long one listing may take. The detailed listing runs ``du`` over every
-#: folder, which on a busy shared filesystem holding a few terabytes of plates
-#: is minutes, not seconds.
+#: The detailed listing runs ``du`` over every folder: minutes on a busy shared
+#: filesystem holding a few terabytes of plates.
 LISTING_TIMEOUT_S = 900.0
+#: The run-start label-and-list call: stats only, no tree walks.
+RUN_START_TIMEOUT_S = 120.0
 #: How long one deletion script may take — ``rm -rf`` of several plates.
 DELETE_TIMEOUT_S = 1800.0
+#: The most folders one run start's background sweep removes.
+SWEEP_MAX_PER_RUN = 25
 
 KINDS = ("run", "dataset")
-#: The top-level folder each kind lives in, under the staging directory.
 _TOP = {"run": "runs", "dataset": "datasets"}
 #: A folder name this module will act on: one path component, not hidden.
 _NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,199}$")
 #: The names All-Well gives its folders: ``run-<cache key prefix>-<argv digest>``
 #: (``remote_run_id._run_id_body``; one hex group in older builds) and a hex
-#: content fingerprint (``remote_scratch.fingerprint_archives`` and
+#: content fingerprint (``remote_scratch.fingerprint_archives``,
 #: ``acquisition_transport.acquisition_cache_key``).
 _RUN_NAME_RE = r"^run-[0-9a-f]{8,64}(-[0-9a-f]{8,64})?$"
 _DATASET_NAME_RE = r"^[0-9a-f]{16,128}$"
-#: Files inside a run folder that only All-Well's run machinery writes there, and
-#: that mark a folder of an older build (whose name may have another shape) as
-#: All-Well's. Not the label, which anything could carry, and not ``run.pid``,
-#: which is a generic name.
+#: Files only All-Well's run machinery writes into a run folder, marking an
+#: older build's folder (whose name may have another shape) as All-Well's. Not
+#: the label, which anything could carry, and not the generic ``run.pid``.
 _RUN_MARKERS = (HEARTBEAT_DIR, UPLOAD_SENTINEL, LEGACY_UPLOAD_HEARTBEAT)
+#: This module's own files: writing them is not a run using the folder.
+_OWN_FILES = (RUN_LABEL, RUN_EXPIRY, RUN_FETCHED, RUN_BORROWED_BY)
 #: ``squeue %T`` states of a job that has ended (``services.remote_sweep``).
 _ENDED_STATES = "COMPLETED|CANCELLED*|FAILED|TIMEOUT|NODE_FAIL|PREEMPTED|BOOT_FAIL|DEADLINE|OUT_OF_MEMORY"
 _DAY = 86400
@@ -152,24 +170,26 @@ class UnsafeStagingDir(ValueError):
 def validate_staging_dir(staging_dir: str) -> str:
     """*staging_dir* without a trailing slash, or :class:`UnsafeStagingDir`.
 
-    Refuses anything but a specific folder: empty, ``/``, ``~``, a relative
-    path, a ``.`` or ``..`` component, an empty component, or any control or
-    non-printing character. The server repeats the important half — it refuses
-    a staging directory whose physical path is ``/`` or the home directory —
-    because a path can be fine as text and still resolve there.
+    Refuses anything but a specific folder: empty, ``/``, ``~``, a relative or
+    ``~user`` path, a ``.``/``..``/empty component, a control or non-printing
+    character, and surrounding whitespace — which is refused rather than
+    stripped, because the rest of the app uses the value as written and a
+    stripped one names a different folder. The server repeats the important
+    half: it refuses a folder whose physical path is ``/`` or the home folder.
     """
     s = str(staging_dir or "")
     if any(unicodedata.category(c).startswith("C") for c in s):
         raise UnsafeStagingDir(f"the staging folder {s!r} contains a control character")
-    s = s.strip().rstrip("/")
+    if s != s.strip():
+        raise UnsafeStagingDir(f"the staging folder {s!r} begins or ends with a space")
+    s = s.rstrip("/")
     if s.startswith("~/"):
         rest = s[2:]
     elif s.startswith("/"):
         rest = s[1:]
     else:
         raise UnsafeStagingDir(f"the staging folder {staging_dir!r} must start with / or ~/")
-    parts = rest.split("/")
-    if not rest or any(p in ("", ".", "..") for p in parts):
+    if not rest or any(p in ("", ".", "..") for p in rest.split("/")):
         raise UnsafeStagingDir(f"the staging folder {staging_dir!r} is not a specific folder")
     return s
 
@@ -189,48 +209,140 @@ def _q(text: str) -> str:
     return shlex.quote(text)
 
 
-# ── the server-side guards every writing script starts with ─────────────────
+# ── the server-side guards ──────────────────────────────────────────────────
 
 def _preamble(staging_dir: str, *, missing_ok: bool = False) -> str:
-    """Bash that enters the staging directory and refuses to go on when it is
-    missing (silently with *missing_ok*: nothing there is nothing to list) or
-    physically ``/`` or the home directory. Every path after it is relative to
-    ``aw_root``, the physical staging directory."""
+    """Bash that enters the staging directory, refuses to go on when it is
+    missing (quietly with *missing_ok*) or physically ``/`` or the home folder,
+    sets ``now`` from the staging filesystem's own clock, and defines every
+    guard and liveness function. Every path after it is relative to the
+    physical staging directory ``aw_root``."""
     root = _remote_quote(validate_staging_dir(staging_dir))
-    missing = "exit 0" if missing_ok else "printf 'root\\tthe staging folder does not exist\\n'; exit 0"
+    # A listing (*missing_ok*) always prints its clock line, so a refusal reads
+    # as a refusal and a missing folder as an empty one — never as "no listing".
+    clock = "printf 'now\\t%s\\n' \"$(date +%s)\"; " if missing_ok else ""
+    missing = (f"{clock}exit 0" if missing_ok
+               else "printf 'root\\tthe staging folder does not exist\\n'; exit 0")
     return (
         "set -u\n"
+        "umask 077\n"
+        "_aw_mtime() { stat -c %Y -- \"$1\" 2>/dev/null || stat -f %m -- \"$1\" 2>/dev/null; }\n"
+        "_aw_dev() { stat -c %d -- \"$1\" 2>/dev/null || stat -f %d -- \"$1\" 2>/dev/null; }\n"
         f"cd -- {root} 2>/dev/null || {{ {missing}; }}\n"
         "aw_root=$(pwd -P) || exit 3\n"
         "aw_home=$(cd ~ 2>/dev/null && pwd -P) || aw_home=/\n"
         "if [ \"$aw_root\" = / ] || [ \"$aw_root\" = \"$aw_home\" ]; then\n"
-        "  printf 'root\\trefused: the staging folder is / or the home folder (%s)\\n' \"$aw_root\"; exit 0; fi\n"
-        + _guard_functions()
+        f"  {clock}printf 'root\\trefused: the staging folder is / or the home folder (%s)\\n' \"$aw_root\"; exit 0; fi\n"
+        # The staging filesystem's clock, not the login node's: an NFS server's
+        # mtimes are its own, and a skewed client clock made fresh look stale.
+        "now=$(date +%s)\n"
+        f"if [ ! -L {NOW_PROBE} ] && {{ : > {NOW_PROBE}; }} 2>/dev/null; then "
+        f"t=$(_aw_mtime {NOW_PROBE}) && [ -n \"$t\" ] && now=$t; fi\n"
+        + _guard_functions() + _liveness_functions()
     )
 
 
 def _guard_functions() -> str:
-    """``_aw_inside K N``: ``K/N`` is a real directory directly inside a real
-    ``K`` in the staging directory. ``_aw_ours K N``: it is All-Well's.
-    ``_aw_labelled K N``: its All-Well label names it. ``_aw_plain_dir K/D``: a
-    bookkeeping folder that is not a link."""
+    """``_aw_inside K N`` (a real folder directly inside a real ``K``, same
+    filesystem, exact physical path), ``_aw_ours K N``, ``_aw_mine K N``,
+    ``_aw_labelled K N``, ``_aw_plain_dir P``, ``_aw_put FILE TEXT`` (write via
+    a temporary file and ``mv``, never through a link)."""
     run_markers = " || ".join(f"[ -e \"runs/$2/{m}\" ]" for m in _RUN_MARKERS)
     return (
         "_aw_inside() { case \"$1\" in runs|datasets) ;; *) return 1;; esac\n"
         "  [ -d \"$1\" ] && [ ! -L \"$1\" ] && [ -d \"$1/$2\" ] && [ ! -L \"$1/$2\" ] || return 1\n"
-        "  [ \"$(cd -- \"$1/$2\" 2>/dev/null && pwd -P)\" = \"$aw_root/$1/$2\" ]; }\n"
+        "  [ \"$(cd -- \"$1/$2\" 2>/dev/null && pwd -P)\" = \"$aw_root/$1/$2\" ] || return 1\n"
+        "  local a b; a=$(_aw_dev \"$1/$2\") && b=$(_aw_dev \"$1\") && [ -n \"$a\" ] && [ \"$a\" = \"$b\" ] || return 1\n"
+        "  ! _aw_mount at \"$1/$2\"; }\n"
+        # A bind mount on the same filesystem keeps its device number, so only the
+        # mount table tells it apart. ``at``: P itself is a mount point; ``under``:
+        # P or anything inside it is. A table that cannot be searched answers yes;
+        # with no table at all (not Linux) only ``mountpoint`` can answer.
+        "_aw_mount() { local p=\"$aw_root/$2\" e\n"
+        "  if [ -r /proc/self/mountinfo ]; then\n"
+        "    e=$(printf '%s' \"$p\" | sed 's/\\\\/\\\\134/g; s/ /\\\\040/g; s/\t/\\\\011/g')\n"
+        "    [ -n \"$e\" ] || return 0\n"
+        # Through the environment: ``awk -v`` would decode the ``\\040`` escapes again.
+        "    AW_P=\"$e\" AW_M=\"$1\" awk 'BEGIN {p = ENVIRON[\"AW_P\"]; m = ENVIRON[\"AW_M\"]} "
+        "$5 == p || (m == \"under\" && index($5, p \"/\") == 1) {f = 1} END {exit !f}' /proc/self/mountinfo; return; fi\n"
+        "  command -v mountpoint >/dev/null 2>&1 && mountpoint -q -- \"$p\"; }\n"
         "_aw_ours() { if [ \"$1\" = runs ]; then\n"
         f"    [[ $2 =~ {_RUN_NAME_RE} ]] || {run_markers}\n"
-        "  else\n"
-        f"    [[ $2 =~ {_DATASET_NAME_RE} ]]\n"
-        "  fi; }\n"
-        "_aw_labelled() { if [ \"$1\" = runs ]; then l=\"runs/$2/" + RUN_LABEL + "\"; k=run_id\n"
+        f"  else [[ $2 =~ {_DATASET_NAME_RE} ]]; fi; }}\n"
+        "_aw_mine() { [ -O \"$1/$2\" ]; }\n"
+        "_aw_labelled() { local l k\n"
+        f"  if [ \"$1\" = runs ]; then l=\"runs/$2/{RUN_LABEL}\"; k=run_id\n"
         f"  else l=\"datasets/{DATASET_LABEL_DIR}/$2.json\"; k=cache_key; fi\n"
-        # The name is letters, digits and ``. _ -`` (``_NAME_RE``), so escaping the
-        # dots is all it takes to match it literally inside the pattern.
+        # The name is letters, digits and ``. _ -``, so escaping the dots is all
+        # it takes to match it literally.
         "  [ -f \"$l\" ] && [ ! -L \"$l\" ] && "
         "grep -qE \"\\\"$k\\\"[[:space:]]*:[[:space:]]*\\\"${2//./\\\\.}\\\"\" \"$l\"; }\n"
         "_aw_plain_dir() { [ -d \"$1\" ] && [ ! -L \"$1\" ]; }\n"
+        "_aw_put() { local dir t; dir=$(dirname -- \"$1\"); _aw_plain_dir \"$dir\" && [ ! -L \"$1\" ] || return 1\n"
+        "  t=$(mktemp \"$dir/.aw_tmp.XXXXXX\") || return 1\n"
+        "  if printf '%s\\n' \"$2\" > \"$t\" && mv -f -- \"$t\" \"$1\"; then return 0; fi; rm -f -- \"$t\"; return 1; }\n"
+        "_aw_unput() { local dir; dir=$(dirname -- \"$1\"); [ -e \"$1\" ] || [ -L \"$1\" ] || return 0\n"
+        "  _aw_plain_dir \"$dir\" && [ -f \"$1\" ] && [ ! -L \"$1\" ] && rm -f -- \"$1\"; }\n"
+        # A dated expiry is cleared when a run uses the folder again; ``keep`` stays.
+        "_aw_clear_dated() { [ -f \"$1\" ] && [ ! -L \"$1\" ] && _aw_plain_dir \"$(dirname -- \"$1\")\" || return 0\n"
+        "  [[ $(head -c 32 \"$1\") =~ ^[0-9]+$ ]] && rm -f -- \"$1\"; return 0; }\n"
+    )
+
+
+def _liveness_functions() -> str:
+    """``_aw_run_active D`` and ``_aw_dataset_active D STAMP NAME``: the one
+    definition of "in use", shared by the listing and every deletion. Each
+    answers *yes* whenever it cannot tell."""
+    not_own = " ".join(f"! -name {f}" for f in _OWN_FILES)
+    return (
+        "_aw_newest() { local m=0 p t; for p in \"$@\"; do [ -e \"$p\" ] || continue\n"
+        "  t=$(_aw_mtime \"$p\") && [ -n \"$t\" ] && [ \"$t\" -gt \"$m\" ] && m=$t; done; echo \"$m\"; }\n"
+        f"_aw_recent() {{ [ -n \"$(find \"$1\" -mindepth 1 -type f -mmin -{RECENT_WRITE_MIN} {not_own} "
+        "-print -quit 2>/dev/null)\" ]; }\n"
+        "_aw_run_self_active() { local d=$1 h t z jid o r st p\n"
+        f"  for h in \"$d/{HEARTBEAT_DIR}/alive\" \"$d/{LEGACY_UPLOAD_HEARTBEAT}\"; do\n"
+        "    [ -e \"$h\" ] || continue; t=$(_aw_mtime \"$h\"); [ -n \"$t\" ] || return 0\n"
+        f"    [ $((now - t)) -lt {MID_BATCH_HEARTBEAT_STALE_S} ] && return 0; done\n"
+        f"  for z in \"$d/{HOLD_DIR}\"/*.zip; do [ -e \"$z\" ] && return 0; done\n"
+        "  if [ -e \"$d/run.pid.slurm\" ]; then\n"
+        "    jid=$(head -c 64 \"$d/run.pid.slurm\" 2>/dev/null | tr -cd '0-9.'); [ -n \"$jid\" ] || return 0\n"
+        "    command -v squeue >/dev/null 2>&1 || return 0\n"
+        "    o=$(" + squeue_listing("jid") + " 2>&1); r=$?\n"
+        "    if [ $r -eq 0 ]; then st=$(printf '%s\\n' \"$o\" | head -n 1)\n"
+        f"      case \"$st\" in ''|{_ENDED_STATES}) ;; *) return 0;; esac\n"
+        "    else printf '%s' \"$o\" | grep -qi 'invalid job id' || return 0; fi\n"
+        "  fi\n"
+        "  if [ -s \"$d/run.pid\" ]; then p=$(head -c 32 \"$d/run.pid\" | tr -cd '0-9')\n"
+        "    if [ -n \"$p\" ]; then kill -0 \"$p\" 2>/dev/null && return 0; ps -p \"$p\" >/dev/null 2>&1 && return 0; fi\n"
+        "  fi\n"
+        "  _aw_recent \"$d\"; }\n"
+        "_aw_run_active() { local b o; _aw_run_self_active \"$1\" && return 0\n"
+        f"  b=\"$1/{RUN_BORROWED_BY}\"; [ -f \"$b\" ] && [ ! -L \"$b\" ] || return 1\n"
+        "  while IFS= read -r o; do\n"
+        f"    [[ $o =~ {_RUN_NAME_RE} ]] && [ -d \"runs/$o\" ] && [ ! -L \"runs/$o\" ] && "
+        "_aw_run_self_active \"runs/$o\" && return 0\n"
+        "  done < \"$b\"; return 1; }\n"
+        # Which datasets runs in use are reading, worked out once per script.
+        "aw_scanned=0; aw_active_keys=''; aw_active_unknown=0\n"
+        "_aw_scan_runs() { [ $aw_scanned = 1 ] && return; aw_scanned=1; local r l k\n"
+        "  for r in runs/*; do [ -d \"$r\" ] && [ ! -L \"$r\" ] || continue; _aw_run_active \"$r\" || continue\n"
+        f"    l=\"$r/{RUN_LABEL}\"; k=''\n"
+        "    if [ -f \"$l\" ] && [ ! -L \"$l\" ]; then k=$(grep -oE '\"cache_key\"[[:space:]]*:[[:space:]]*\"[0-9a-f]+\"' "
+        "\"$l\" | grep -oE '[0-9a-f]{16,}' | head -n 1); fi\n"
+        "    if [ -n \"$k\" ]; then aw_active_keys=\"$aw_active_keys $k \"; else aw_active_unknown=1; fi\n"
+        "  done; }\n"
+        "_aw_dataset_active() { local d=$1 s=$2 n=$3 t\n"
+        "  if [ -e \"$s\" ]; then t=$(_aw_mtime \"$s\"); [ -n \"$t\" ] || return 0\n"
+        f"    [ $((now - t)) -lt {RECENT_WRITE_MIN * 60} ] && return 0; fi\n"
+        "  _aw_recent \"$d\" && return 0\n"
+        "  _aw_scan_runs; [ $aw_active_unknown = 1 ] && return 0\n"
+        "  case \"$aw_active_keys\" in *\" $n \"*) return 0;; esac; return 1; }\n"
+        # When a folder was last used; 0 when that cannot be read.
+        "_aw_last_used() { if [ \"$1\" = runs ]; then\n"
+        f"    _aw_newest \"runs/$2/out\" \"runs/$2/in\" \"runs/$2/{HEARTBEAT_DIR}/alive\" "
+        f"\"runs/$2/{LEGACY_UPLOAD_HEARTBEAT}\" \"runs/$2/run.pid\"\n"
+        f"  elif [ -e \"datasets/{IN_USE_STAMP_DIR}/$2\" ]; then _aw_newest \"datasets/{IN_USE_STAMP_DIR}/$2\"\n"
+        "  else _aw_newest \"datasets/$2\"; fi; }\n"
     )
 
 
@@ -266,25 +378,50 @@ def make_label(*, local_input_dir: Path | str | None, local_output_dir: Path | s
     }
 
 
-def label_script(staging_dir: str, *, run_id: str, dataset_key: str, label: dict) -> str:
-    """Remote bash writing *label* for ``runs/<run_id>`` and (when given)
-    ``datasets/<dataset_key>``, each only if that folder exists, is a real
-    folder inside the staging directory, and has no label yet — so the label
-    records when the folder was *first* used. Never writes through a link."""
+def label_script(staging_dir: str, *, run_id: str, dataset_key: str, label: dict,
+                 borrowed_run: str = "") -> str:
+    """Remote bash recording that a run is starting in its folders.
+
+    For ``runs/<run_id>`` and ``datasets/<dataset_key>`` (when given): write the
+    label if there is none yet (so it records the *first* use), and clear any
+    dated expiry. For the run folder, and for ``runs/<borrowed_run>`` (the folder
+    whose ``out/`` a re-attached run writes into), clear ``.aw_fetched`` — this
+    run's results are not downloaded yet. The borrowed folder also records the
+    borrower in ``.aw_borrowed_by``, so it counts as in use while the borrower
+    is. Acts only on real, All-Well, own folders inside the staging folder.
+    """
     text = _q(json.dumps(label, separators=(",", ":"), sort_keys=True))
     out = _preamble(staging_dir)
-    if run_id and _NAME_RE.match(run_id):
-        n = _q(run_id)
-        target = f"runs/{run_id}/{RUN_LABEL}"
-        out += (f"if _aw_inside runs {n} && [ ! -e {_q(target)} ] && [ ! -L {_q(target)} ]; then "
-                f"printf '%s\\n' {text} > {_q(target)} 2>/dev/null; fi\n")
-    if dataset_key and _NAME_RE.match(dataset_key):
-        n = _q(dataset_key)
+    if run_id and re.match(_RUN_NAME_RE, run_id):
+        d = f"runs/{run_id}"
+        out += (f"if _aw_inside runs {_q(run_id)} && _aw_mine runs {_q(run_id)}; then "
+                f"[ -e {_q(d + '/' + RUN_LABEL)} ] || _aw_put {_q(d + '/' + RUN_LABEL)} {text}; "
+                f"_aw_clear_dated {_q(d + '/' + RUN_EXPIRY)}; _aw_unput {_q(d + '/' + RUN_FETCHED)}; fi\n")
+    if borrowed_run and borrowed_run != run_id and re.match(_RUN_NAME_RE, borrowed_run) and run_id:
+        d = f"runs/{borrowed_run}"
+        out += (f"if _aw_inside runs {_q(borrowed_run)} && _aw_mine runs {_q(borrowed_run)}; then "
+                f"b={_q(d + '/' + RUN_BORROWED_BY)}; "
+                f"o=$( {{ [ -f \"$b\" ] && [ ! -L \"$b\" ] && grep -vxF {_q(run_id)} \"$b\"; }} 2>/dev/null; "
+                f"printf '%s' {_q(run_id)}); _aw_put \"$b\" \"$o\"; "
+                f"_aw_clear_dated {_q(d + '/' + RUN_EXPIRY)}; _aw_unput {_q(d + '/' + RUN_FETCHED)}; fi\n")
+    if dataset_key and re.match(_DATASET_NAME_RE, dataset_key):
         labels = f"datasets/{DATASET_LABEL_DIR}"
         target = f"{labels}/{dataset_key}.json"
-        out += (f"if _aw_inside datasets {n}; then [ -e {_q(labels)} ] || mkdir {_q(labels)} 2>/dev/null; "
-                f"if _aw_plain_dir {_q(labels)} && [ ! -e {_q(target)} ] && [ ! -L {_q(target)} ]; then "
-                f"printf '%s\\n' {text} > {_q(target)} 2>/dev/null; fi; fi\n")
+        out += (f"if _aw_inside datasets {_q(dataset_key)} && _aw_mine datasets {_q(dataset_key)}; then "
+                f"[ -e {_q(labels)} ] || mkdir {_q(labels)} 2>/dev/null; "
+                f"[ -e {_q(target)} ] || _aw_put {_q(target)} {text}; "
+                f"_aw_clear_dated {_q(f'datasets/{DATASET_EXPIRY_DIR}/{dataset_key}')}; fi\n")
+    return out
+
+
+def mark_fetched_script(staging_dir: str, run_ids: Iterable[str]) -> str:
+    """Remote bash writing ``.aw_fetched`` into each run folder: its results were
+    downloaded and verified, so automatic removal may consider it."""
+    out = _preamble(staging_dir)
+    for rid in run_ids:
+        if rid and re.match(_RUN_NAME_RE, rid):
+            out += (f"if _aw_inside runs {_q(rid)} && _aw_mine runs {_q(rid)}; then "
+                    f"_aw_put {_q(f'runs/{rid}/{RUN_FETCHED}')} \"$now\"; fi\n")
     return out
 
 
@@ -296,13 +433,15 @@ class StorageItem:
 
     kind: str                  # "run" | "dataset"
     name: str
-    modified: int              # the folder's own mtime (epoch s, remote clock)
-    last_used: int             # newest sign of use (epoch s, remote clock)
+    modified: int              # the folder's own mtime (epoch s, server clock); 0 when unknown
+    last_used: int             # newest sign of use (epoch s, server clock); 0 when unknown
     size: int | None = None    # bytes; None when not measured
     active: bool | None = None  # None when not checked
     expiry: str = ""           # "", KEEP, or an epoch second as text
     label: dict = field(default_factory=dict, compare=False, hash=False)
-    marked: bool = False       # holds a file only All-Well writes (server-checked)
+    marked: bool = False       # the server found it All-Well's
+    mine: bool = True          # owned by the user the app logs in as
+    fetched: bool = False      # a run folder whose results were downloaded and verified
 
     @property
     def project(self) -> str:
@@ -310,9 +449,13 @@ class StorageItem:
 
     @property
     def created(self) -> int | None:
-        """When the folder was first used, from its label; ``None`` when unlabelled."""
+        """When the folder was first used, from its label; ``None`` when unlabelled or unreadable."""
         value = self.label.get("created")
-        return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        return int(value) if 0 < value < 1e11 else None
 
     @property
     def output_dir(self) -> str:
@@ -320,13 +463,16 @@ class StorageItem:
 
     @property
     def ours(self) -> bool:
-        """Whether All-Well made this folder: its name has All-Well's shape, or (a
-        run folder only) it holds a file only All-Well's run machinery writes.
-        Only such a folder may be deleted or given an expiry, and the server
-        checks the same thing again."""
+        """All-Well made it: an All-Well name, or (an older run folder) a file
+        only All-Well's run machinery writes. The server checks it again."""
         if self.kind == "dataset":
             return bool(re.match(_DATASET_NAME_RE, self.name))
         return self.marked or bool(re.match(_RUN_NAME_RE, self.name))
+
+    @property
+    def actionable(self) -> bool:
+        """Whether the browser may delete it or set its expiry: All-Well's and yours."""
+        return self.ours and self.mine
 
     @property
     def labelled(self) -> bool:
@@ -340,89 +486,43 @@ class StorageItem:
         return f"{staging_dir}/datasets/{self.name}"
 
 
-def _shell_functions() -> str:
-    """Bash defining ``_aw_newest`` and the two in-use predicates, shared by the
-    listing and the deletion so both apply one definition of "in use"."""
-    return (
-        "_aw_mtime() { stat -c %Y -- \"$1\" 2>/dev/null; }\n"
-        "_aw_newest() { m=0; for p in \"$@\"; do [ -e \"$p\" ] || continue; "
-        "t=$(_aw_mtime \"$p\") || continue; [ \"$t\" -gt \"$m\" ] && m=$t; done; echo \"$m\"; }\n"
-        # Files only, and not this module's own: writing a label or an expiry is
-        # not a run using the folder, and counting it hid every folder just
-        # labelled or given an expiry behind "in use" for the next quarter hour.
-        "_aw_recent() { [ -n \"$(find \"$1\" -mindepth 1 -type f -mmin -" + str(RECENT_WRITE_MIN)
-        + f" ! -name {RUN_LABEL} ! -name {RUN_EXPIRY} -print -quit 2>/dev/null)\" ]; }}\n"
-        # A run is in use while its app beats, while its Slurm job is alive, while
-        # its pid is alive (a direct-ssh host), or while anything in it is written.
-        "_aw_run_active() { d=$1\n"
-        f"  for h in \"$d/{HEARTBEAT_DIR}/alive\" \"$d/{LEGACY_UPLOAD_HEARTBEAT}\"; do\n"
-        "    if [ -e \"$h\" ]; then t=$(_aw_mtime \"$h\") && "
-        f"[ $((now - t)) -lt {MID_BATCH_HEARTBEAT_STALE_S} ] && return 0; fi\n"
-        "  done\n"
-        "  if [ -s \"$d/run.pid.slurm\" ]; then\n"
-        "    if command -v squeue >/dev/null 2>&1; then\n"
-        "      jid=$(head -c 64 \"$d/run.pid.slurm\" | tr -cd '0-9.')\n"
-        "      if [ -n \"$jid\" ]; then st=$(" + squeue_listing("jid") + " 2>/dev/null | head -n 1)\n"
-        f"        case \"$st\" in ''|{_ENDED_STATES}) ;; *) return 0;; esac; fi\n"
-        "    fi\n"
-        "  elif [ -s \"$d/run.pid\" ]; then\n"
-        "    p=$(head -c 32 \"$d/run.pid\" | tr -cd '0-9')\n"
-        "    [ -n \"$p\" ] && kill -0 \"$p\" 2>/dev/null && return 0\n"
-        "  fi\n"
-        "  _aw_recent \"$d\"; }\n"
-        # A dataset is in use while it is being uploaded to or freshly stamped.
-        "_aw_dataset_active() { d=$1; s=$2\n"
-        "  if [ -e \"$s\" ]; then t=$(_aw_mtime \"$s\") && "
-        f"[ $((now - t)) -lt {RECENT_WRITE_MIN * 60} ] && return 0; fi\n"
-        "  _aw_recent \"$d\"; }\n"
-    )
-
-
 def listing_script(staging_dir: str, *, detail: bool) -> str:
     """Remote bash printing ``now\\t<epoch>`` and then one line per folder::
 
-        item <kind> <name> <bytes|-> <mtime> <last used> <1|0|-> <expiry> <ours 1|0> <label JSON>
+        item kind name bytes|- mtime|- last_used active(1|0|-) expiry ours mine fetched label_json
 
-    tab-separated, then ``free\\t<bytes>``. *detail* measures each folder's size
-    and checks whether it is in use, which walks every tree; without it the
-    listing is a few ``stat`` calls per folder, cheap enough to run at the start
-    of every run. Symbolic links, and anything that is not a real folder
-    directly inside a real ``runs`` / ``datasets``, are never listed — so they
-    can never be offered for deletion. A staging directory that resolves to
-    ``/`` or the home folder lists nothing and says why (``root`` line).
+    tab-separated, then ``free\\t<bytes>``. *detail* measures sizes and checks
+    whether each folder is in use, which walks every tree; without it the
+    listing is a few ``stat`` calls per folder. Links, mount points and
+    anything not a real folder directly inside a real ``runs``/``datasets``
+    are never listed. A staging folder the server refuses lists nothing and
+    says why (``root`` line).
     """
     size = ('sz=$(du -sb -- "$d" 2>/dev/null | cut -f1); [ -n "$sz" ] || sz=-'
             if detail else "sz=-")
     run_act = ('if _aw_run_active "$d"; then a=1; else a=0; fi' if detail else "a=-")
-    ds_act = ('if _aw_dataset_active "$d" "$stamp"; then a=1; else a=0; fi' if detail else "a=-")
-    emit = ("if _aw_ours \"$top\" \"$n\"; then o=1; else o=0; fi\n"
-            "  printf 'item\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "
-            "\"$kind\" \"$n\" \"$sz\" \"$mt\" \"$used\" \"$a\" \"$exp\" \"$o\" \"$lab\"\n")
+    ds_act = ('if _aw_dataset_active "$d" "$stamp" "$n"; then a=1; else a=0; fi' if detail else "a=-")
+    emit = ("if _aw_ours \"$top\" \"$n\"; then o=1; else o=0; fi; if _aw_mine \"$top\" \"$n\"; then m=1; else m=0; fi\n"
+            "  mt=$(_aw_mtime \"$d\"); [ -n \"$mt\" ] || mt=-; used=$(_aw_last_used \"$top\" \"$n\")\n"
+            "  printf 'item\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "
+            "\"$kind\" \"$n\" \"$sz\" \"$mt\" \"$used\" \"$a\" \"$exp\" \"$o\" \"$m\" \"$f\" \"$lab\"\n")
     read_exp = "exp=''; [ -f \"$ef\" ] && [ ! -L \"$ef\" ] && exp=$(head -c 32 \"$ef\" | tr -cd 'a-z0-9')\n"
     read_lab = "lab=''; [ -f \"$lf\" ] && [ ! -L \"$lf\" ] && lab=$(head -c 8192 \"$lf\" | tr -d '\\n\\t\\r')\n"
-    loop = ("for d in {top}/*; do n=${{d#{top}/}}; _aw_inside {top} \"$n\" || continue\n"
-            "  top={top}; [[ $n =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{{0,199}}$ ]] || continue\n")
+    loop = ("for d in {top}/*; do n=${{d#{top}/}}; top={top}\n"
+            "  [[ $n =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{{0,199}}$ ]] || continue; _aw_inside {top} \"$n\" || continue\n")
     return (
-        "now=$(date +%s)\n"
-        "printf 'now\\t%s\\n' \"$now\"\n"
-        + _preamble(staging_dir, missing_ok=True)
-        + _shell_functions()
+        _preamble(staging_dir, missing_ok=True)
+        + "printf 'now\\t%s\\n' \"$now\"\n"
         + loop.format(top="runs")
         + "  kind=run\n"
-        # Not the run directory's own mtime: writing its label or expiry moves
-        # that, and would restart the expiry clock of a folder nobody ran in.
-        f"  mt=$(_aw_mtime \"$d\") || mt=0; used=$(_aw_newest \"$d/out\" \"$d/in\" "
-        f"\"$d/{HEARTBEAT_DIR}/alive\" \"$d/{LEGACY_UPLOAD_HEARTBEAT}\" \"$d/run.pid\")\n"
-        "  [ \"$used\" -gt 0 ] || used=$mt\n"
         f"  {size}; {run_act}\n"
+        f"  f=0; [ -f \"$d/{RUN_FETCHED}\" ] && f=1\n"
         f"  ef=\"$d/{RUN_EXPIRY}\"; lf=\"$d/{RUN_LABEL}\"\n"
         f"  {read_exp}  {read_lab}  {emit}"
         "done\n"
         + loop.format(top="datasets")
-        + "  kind=dataset\n"
+        + "  kind=dataset; f=0\n"
         f"  stamp=\"datasets/{IN_USE_STAMP_DIR}/$n\"\n"
-        "  mt=$(_aw_mtime \"$d\") || mt=0\n"
-        "  if [ -e \"$stamp\" ]; then used=$(_aw_mtime \"$stamp\") || used=$mt; else used=$mt; fi\n"
         f"  {size}; {ds_act}\n"
         f"  ef=\"datasets/{DATASET_EXPIRY_DIR}/$n\"; lf=\"datasets/{DATASET_LABEL_DIR}/$n.json\"\n"
         f"  {read_exp}  {read_lab}  {emit}"
@@ -435,13 +535,13 @@ def listing_script(staging_dir: str, *, detail: bool) -> str:
 @dataclass(frozen=True)
 class Listing:
     items: tuple[StorageItem, ...]
-    now: int                    # the remote's clock when it listed
+    now: int                    # the staging filesystem's clock when it listed
     free_bytes: int | None = None
     refused: str = ""           # why the server would not act in this staging folder, if it would not
 
 
 def _int_or_none(text: str) -> int | None:
-    return int(text) if text.isdigit() else None
+    return int(text) if text.isdigit() and len(text) < 19 else None
 
 
 def parse_listing(text: str) -> Listing | None:
@@ -453,23 +553,23 @@ def parse_listing(text: str) -> Listing | None:
     refused = ""
     for line in (text or "").splitlines():
         parts = line.split("\t")
-        if parts[0] == "now" and len(parts) == 2 and parts[1].strip().isdigit():
+        if parts[0] == "now" and len(parts) == 2 and _int_or_none(parts[1].strip()) is not None:
             now = int(parts[1])
         elif parts[0] == "free" and len(parts) == 2:
             free = _int_or_none(parts[1].strip())
         elif parts[0] == "root" and len(parts) == 2:
             refused = parts[1]
-        elif parts[0] == "item" and len(parts) == 10 and parts[1] in KINDS and _NAME_RE.match(parts[2]):
+        elif parts[0] == "item" and len(parts) == 12 and parts[1] in KINDS and _NAME_RE.match(parts[2]):
             try:
-                label = json.loads(parts[9]) if parts[9] else {}
+                label = json.loads(parts[11]) if parts[11] else {}
             except ValueError:
                 label = {}
             items.append(StorageItem(
                 kind=parts[1], name=parts[2], size=_int_or_none(parts[3]),
                 modified=_int_or_none(parts[4]) or 0, last_used=_int_or_none(parts[5]) or 0,
                 active={"1": True, "0": False}.get(parts[6]),
-                expiry=parts[7] if parts[7] == KEEP or parts[7].isdigit() else "",
-                marked=parts[8] == "1",
+                expiry=parts[7] if parts[7] == KEEP or _int_or_none(parts[7]) is not None else "",
+                marked=parts[8] == "1", mine=parts[9] == "1", fetched=parts[10] == "1",
                 label=label if isinstance(label, dict) else {},
             ))
     return None if now is None else Listing(tuple(items), now, free, refused)
@@ -477,7 +577,8 @@ def parse_listing(text: str) -> Listing | None:
 
 def list_storage(cache, *, detail: bool = True) -> tuple[Listing | None, str]:
     """``(listing, error)`` for *cache*'s host; the listing is ``None`` with the
-    reason in *error* when the remote could not be asked."""
+    reason in *error* when the remote could not be asked. A listing the server
+    refused comes back empty with the refusal as *error*."""
     try:
         script = listing_script(cache.host.remote_staging_dir, detail=detail)
     except UnsafeStagingDir as exc:
@@ -488,31 +589,34 @@ def list_storage(cache, *, detail: bool = True) -> tuple[Listing | None, str]:
     listing = parse_listing(result.stdout)
     if listing is None:
         return None, "the remote returned no listing"
-    return (listing, listing.refused)
+    return listing, listing.refused
 
 
 # ── expiry ──────────────────────────────────────────────────────────────────
 
 def effective_expiry(item: StorageItem, host_days: int) -> int | None:
-    """When *item* expires (epoch s, remote clock), or ``None`` for never."""
+    """When *item* expires (epoch s, server clock), or ``None`` for never — including
+    when its last use could not be read, which is never taken as epoch zero."""
     if item.expiry == KEEP:
         return None
     if item.expiry.isdigit():
         return int(item.expiry)
-    if host_days > 0:
+    if host_days > 0 and item.last_used > 0:
         return item.last_used + host_days * _DAY
     return None
 
 
 def plan_expired(items: Iterable[StorageItem], now: int, host_days: int, *,
                  protect: Callable[[StorageItem], bool] = lambda _i: False) -> list[StorageItem]:
-    """The folders the sweep removes: expired, labelled by All-Well as this very
-    folder, not known to be in use, not protected, and — for a dataset — not
-    used within the cache GC's in-use window, since a run reading it may have
-    started long ago. An unlabelled folder is never removed automatically."""
+    """The candidates for automatic removal: All-Well's, yours, labelled as
+    themselves, a run folder's results downloaded, due, not known to be in use,
+    not protected, and — a dataset — not used within the in-use window. The
+    server decides again before it removes anything."""
     out = []
     for item in items:
-        if not (item.ours and item.labelled):
+        if not (item.actionable and item.labelled) or item.last_used <= 0:
+            continue
+        if item.kind == "run" and not item.fetched:
             continue
         due = effective_expiry(item, host_days)
         if due is None or now < due or item.active or protect(item):
@@ -525,7 +629,7 @@ def plan_expired(items: Iterable[StorageItem], now: int, host_days: int, *,
 
 def expiry_value(*, keep: bool = False, days: int | None = None, now: int | None = None) -> str:
     """The text written to an expiry file: ``keep``, an epoch *days* from *now*,
-    or ``""`` (remove the file: the host's default applies again)."""
+    or ``""`` (remove the file: the host's rule applies again)."""
     if keep:
         return KEEP
     if days is not None:
@@ -533,87 +637,131 @@ def expiry_value(*, keep: bool = False, days: int | None = None, now: int | None
     return ""
 
 
+def _expiry_file(item: StorageItem) -> str:
+    if item.kind == "run":
+        return f"runs/{item.name}/{RUN_EXPIRY}"
+    return f"datasets/{DATASET_EXPIRY_DIR}/{item.name}"
+
+
 def set_expiry_script(staging_dir: str, items: Iterable[StorageItem], value: str) -> str:
     """Remote bash setting each folder's expiry to *value* (see :func:`expiry_value`),
-    printing ``ok``, ``refused`` or ``fail`` then ``\\t<kind>\\t<name>`` per
-    folder. Writes only into a real, All-Well folder, never through a link."""
+    printing ``ok``, ``refused`` or ``fail`` then ``\\t<kind>\\t<name>`` per folder."""
     if value and value != KEEP and not value.isdigit():
         raise ValueError(f"not an expiry value: {value!r}")
     lines = [_preamble(staging_dir).rstrip("\n")]
     for item in _checked(items):
-        top, n = _TOP[item.kind], _q(item.name)
+        top, n, target = _TOP[item.kind], _q(item.name), _expiry_file(item)
         tag = f"{item.kind}\\t{item.name}"
-        if item.kind == "run":
-            parent, target = f"runs/{item.name}", f"runs/{item.name}/{RUN_EXPIRY}"
-        else:
-            parent, target = f"datasets/{DATASET_EXPIRY_DIR}", f"datasets/{DATASET_EXPIRY_DIR}/{item.name}"
-        make = "" if item.kind == "run" else f"{{ [ -e {_q(parent)} ] || mkdir {_q(parent)}; }} && "
-        act = (f"printf '%s\\n' {_q(value)} > {_q(target)}" if value else f"rm -f -- {_q(target)}")
+        make = "" if item.kind == "run" else (
+            f"{{ [ -e datasets/{DATASET_EXPIRY_DIR} ] || mkdir datasets/{DATASET_EXPIRY_DIR}; }} && ")
+        # Clearing goes through ``_aw_unput``, which checks the parent folder too:
+        # a bare ``rm`` on ``datasets/.aw_expiry/<key>`` followed a linked
+        # ``.aw_expiry`` and removed a file of the same name wherever it pointed.
+        act = (f"_aw_put {_q(target)} {_q(value)}" if value else f"_aw_unput {_q(target)}")
         lines.append(
-            f"if ! _aw_inside {top} {n} || ! _aw_ours {top} {n}; then printf 'refused\\t{tag}\\n'; "
-            f"elif {make}_aw_plain_dir {_q(parent)} && [ ! -L {_q(target)} ] && {{ {act}; }} 2>/dev/null; "
-            f"then printf 'ok\\t{tag}\\n'; else printf 'fail\\t{tag}\\n'; fi")
+            f"if ! _aw_inside {top} {n} || ! _aw_ours {top} {n} || ! _aw_mine {top} {n}; then "
+            f"printf 'refused\\t{tag}\\n'; "
+            f"elif {make}{act} 2>/dev/null; then printf 'ok\\t{tag}\\n'; else printf 'fail\\t{tag}\\n'; fi")
     return "\n".join(lines) + "\nexit 0\n"
 
 
 # ── deletion ────────────────────────────────────────────────────────────────
 
-def _checked(items: Iterable[StorageItem], *, require_ours: bool = True) -> list[StorageItem]:
+def _checked(items: Iterable[StorageItem], *, require_actionable: bool = True) -> list[StorageItem]:
     """*items*, refusing any whose kind or name could reach outside its folder,
-    and (by default) any the listing did not identify as All-Well's."""
+    and (by default) any the listing did not report as All-Well's and yours."""
     out = list(items)
     for item in out:
         if item.kind not in KINDS or not isinstance(item.name, str) or not _NAME_RE.match(item.name):
             raise ValueError(f"refusing to act on {item.kind!r} folder {item.name!r}")
-        if require_ours and not item.ours:
+        if require_actionable and not item.ours:
             raise ValueError(f"refusing to act on {item.kind} folder {item.name!r}: All-Well did not make it")
+        if require_actionable and not item.mine:
+            raise ValueError(f"refusing to act on {item.kind} folder {item.name!r}: another user owns it")
     return out
 
 
-def delete_script(staging_dir: str, items: Iterable[StorageItem], *, require_label: bool = False) -> str:
+def _due_check(top: str, n: str, host_days: int) -> str:
+    """Bash defining ``_aw_due``: true when the folder is due for *automatic*
+    removal, judged on the server from its own files and clock."""
+    expiry = (f"\"runs/{n}/{RUN_EXPIRY}\"" if top == "runs"
+              else f"\"datasets/{DATASET_EXPIRY_DIR}/{n}\"")
+    return (
+        f"_aw_due() {{ local e='' u; [ -f {expiry} ] && [ ! -L {expiry} ] && "
+        f"e=$(head -c 32 {expiry} | tr -cd 'a-z0-9')\n"
+        f"  u=$(_aw_last_used {top} {_q(n)}); [ -n \"$u\" ] && [ \"$u\" -gt 0 ] || return 1\n"
+        + (f"  [ $((now - u)) -ge {IN_USE_WINDOW_S} ] || return 1\n" if top == "datasets" else "")
+        + "  case \"$e\" in keep) return 1;; '') ;; *[!0-9]*) return 1;; *) [ \"$now\" -ge \"$e\" ]; return;; esac\n"
+        f"  [ {int(host_days)} -gt 0 ] && [ $((now - u)) -ge {int(host_days) * _DAY} ]; }}\n"
+    )
+
+
+def delete_script(staging_dir: str, items: Iterable[StorageItem], *, automatic: bool = False,
+                  host_days: int = 0) -> str:
     """Remote bash removing each folder, printing ``gone``, ``busy``,
-    ``refused`` or ``fail`` then ``\\t<kind>\\t<name>`` per folder.
+    ``refused:<why>`` or ``fail`` then ``\\t<kind>\\t<name>`` per folder.
 
     The server removes ``<runs|datasets>/<name>`` only when it is a real folder
-    directly inside the staging directory (:func:`_guard_functions`), All-Well's,
-    labelled as itself when *require_label* (the automatic sweep), and not in
-    use at that moment. A dataset's stamp, label and expiry — plain files in
-    their own non-link folders — go with it.
+    directly inside the staging folder on the same filesystem, All-Well's, yours,
+    and not in use at that moment. *automatic* (the sweep, *Remove expired now*)
+    also requires its label to name it, a run folder's ``.aw_fetched``, and that
+    it is due by its own expiry or *host_days*. The ``rm`` runs from inside the
+    re-checked ``runs``/``datasets`` with ``--one-file-system``. A dataset's
+    stamp, label and expiry — plain files in non-link folders — go with it.
     """
-    lines = ["now=$(date +%s)", _preamble(staging_dir).rstrip("\n"), _shell_functions().rstrip("\n")]
+    lines = [_preamble(staging_dir).rstrip("\n"),
+             # Refuse to delete at all where rm cannot be kept on one filesystem.
+             "aw_onefs=1; rm -rf --one-file-system -- ./.aw_rm_probe_absent 2>/dev/null || aw_onefs=0"]
     for item in _checked(items):
-        top, n = _TOP[item.kind], _q(item.name)
-        d = _q(f"{top}/{item.name}")
-        tag = f"{item.kind}\\t{item.name}"
-        labelled = f" || ! _aw_labelled {top} {n}" if require_label else ""
+        top, n = _TOP[item.kind], item.name
+        nq, d = _q(n), _q(f"{top}/{n}")
+        tag = f"{item.kind}\\t{n}"
+        auto = ""
+        if automatic:
+            lines.append(_due_check(top, n, host_days).rstrip("\n"))
+            auto = (f"elif ! _aw_labelled {top} {nq}; then printf 'refused:unlabelled\\t{tag}\\n'; "
+                    + (f"elif [ ! -f runs/{nq}/{RUN_FETCHED} ]; then printf 'refused:not-downloaded\\t{tag}\\n'; "
+                       if item.kind == "run" else "")
+                    + f"elif ! _aw_due; then printf 'refused:not-due\\t{tag}\\n'; ")
         if item.kind == "run":
             busy, extra = f"_aw_run_active {d}", ""
         else:
-            stamp = f"datasets/{IN_USE_STAMP_DIR}/{item.name}"
-            busy = f"_aw_dataset_active {d} {_q(stamp)}"
+            stamp = f"datasets/{IN_USE_STAMP_DIR}/{n}"
+            busy = f"_aw_dataset_active {d} {_q(stamp)} {nq}"
             extra = "".join(
                 f"if _aw_plain_dir {_q(folder)} && [ -f {_q(f)} ] && [ ! -L {_q(f)} ]; then rm -f -- {_q(f)}; fi; "
-                for folder, f in (
-                    (f"datasets/{IN_USE_STAMP_DIR}", stamp),
-                    (f"datasets/{DATASET_LABEL_DIR}", f"datasets/{DATASET_LABEL_DIR}/{item.name}.json"),
-                    (f"datasets/{DATASET_EXPIRY_DIR}", f"datasets/{DATASET_EXPIRY_DIR}/{item.name}")))
+                for folder, f in ((f"datasets/{IN_USE_STAMP_DIR}", stamp),
+                                  (f"datasets/{DATASET_LABEL_DIR}", f"datasets/{DATASET_LABEL_DIR}/{n}.json"),
+                                  (f"datasets/{DATASET_EXPIRY_DIR}", f"datasets/{DATASET_EXPIRY_DIR}/{n}")))
+        remove = (f"( cd -- {top} && [ \"$(pwd -P)\" = \"$aw_root/{top}\" ] && [ ! -L ./{nq} ] "
+                  f"&& rm -rf --one-file-system -- ./{nq} ) 2>/dev/null")
         lines.append(
             f"if [ ! -e {d} ] && [ ! -L {d} ]; then printf 'gone\\t{tag}\\n'; "
-            f"elif ! _aw_inside {top} {n} || ! _aw_ours {top} {n}{labelled}; then printf 'refused\\t{tag}\\n'; "
+            f"elif ! _aw_inside {top} {nq}; then printf 'refused:outside\\t{tag}\\n'; "
+            f"elif ! _aw_ours {top} {nq}; then printf 'refused:not-all-well\\t{tag}\\n'; "
+            f"elif ! _aw_mine {top} {nq}; then printf 'refused:not-yours\\t{tag}\\n'; "
+            f"elif _aw_mount under {d}; then printf 'refused:holds-a-mount\\t{tag}\\n'; "
+            f"{auto}"
             f"elif {busy}; then printf 'busy\\t{tag}\\n'; "
-            f"elif rm -rf -- {d} 2>/dev/null; then {extra}printf 'gone\\t{tag}\\n'; "
+            f"elif [ $aw_onefs = 0 ]; then printf 'refused:rm-cannot-stay-on-one-filesystem\\t{tag}\\n'; "
+            f"elif {remove}; then {extra}printf 'gone\\t{tag}\\n'; "
             f"else printf 'fail\\t{tag}\\n'; fi")
     return "\n".join(lines) + "\nexit 0\n"
 
 
+def status_of(outcome: str) -> str:
+    """``refused`` from ``refused:not-due`` — the status without its reason."""
+    return outcome.split(":", 1)[0]
+
+
 def parse_outcomes(text: str) -> tuple[dict[tuple[str, str], str], str]:
-    """``({(kind, name): status}, refusal)`` from a deletion or expiry script's
+    """``({(kind, name): outcome}, refusal)`` from a deletion or expiry script's
     output; *refusal* is why the server would not act in the staging folder at all."""
     out: dict[tuple[str, str], str] = {}
     refusal = ""
     for line in (text or "").splitlines():
         parts = line.split("\t")
-        if len(parts) == 3 and parts[1] in KINDS:
+        if len(parts) == 3 and parts[1] in KINDS and status_of(parts[0]) in ("gone", "busy", "refused", "fail", "ok"):
             out[(parts[1], parts[2])] = parts[0]
         elif len(parts) == 2 and parts[0] == "root":
             refusal = parts[1]
@@ -633,15 +781,14 @@ def run_outcome_script(cache, script: str, items: list[StorageItem], *,
     return outcomes, error
 
 
-def delete_items(cache, items: Iterable[StorageItem], *,
-                 require_label: bool = False) -> tuple[dict[tuple[str, str], str], str]:
+def delete_items(cache, items: Iterable[StorageItem], *, automatic: bool = False,
+                 host_days: int = 0) -> tuple[dict[tuple[str, str], str], str]:
     """Remove *items* from *cache*'s host (see :func:`delete_script`)."""
     items = _checked(items)
     if not items:
         return {}, ""
-    return run_outcome_script(
-        cache, delete_script(cache.host.remote_staging_dir, items, require_label=require_label), items,
-        timeout_s=DELETE_TIMEOUT_S)
+    script = delete_script(cache.host.remote_staging_dir, items, automatic=automatic, host_days=host_days)
+    return run_outcome_script(cache, script, items, timeout_s=DELETE_TIMEOUT_S)
 
 
 def set_expiry(cache, items: Iterable[StorageItem], value: str) -> tuple[dict[tuple[str, str], str], str]:
@@ -660,26 +807,33 @@ def describe(item: StorageItem) -> str:
 
 
 def remove_expired(cache, listing: Listing, *, log: Callable[[str], None], host_days: int | None = None,
-                   protect: Callable[[StorageItem], bool] = lambda _i: False) -> list[StorageItem]:
-    """Remove every folder :func:`plan_expired` names; the ones removed. *host_days*
-    defaults to the host's own ``storage_expiry_days``. The server re-checks that
-    each one is labelled as itself before removing it."""
+                   protect: Callable[[StorageItem], bool] = lambda _i: False,
+                   limit: int | None = None) -> list[StorageItem]:
+    """Remove the folders :func:`plan_expired` names, oldest first, at most *limit*
+    of them; the ones removed. *host_days* defaults to the host's own rule. The
+    server decides each one again (:func:`delete_script` with ``automatic``)."""
     days = cache.host.storage_expiry_days if host_days is None else host_days
-    due = plan_expired(listing.items, listing.now, days, protect=protect)
+    due = sorted(plan_expired(listing.items, listing.now, days, protect=protect), key=lambda i: i.last_used)
+    if limit is not None:
+        due = due[:limit]
     if not due:
         return []
-    outcomes, error = delete_items(cache, due, require_label=True)
+    outcomes, error = delete_items(cache, due, automatic=True, host_days=days)
     removed = []
     for item in due:
-        status = outcomes.get((item.kind, item.name), "unknown")
+        outcome = outcomes.get((item.kind, item.name), "unknown")
+        status = status_of(outcome)
         if status == "gone":
             removed.append(item)
             idle = max(0, listing.now - item.last_used) // _DAY
             log(f"[remote] storage: removed expired {describe(item)}, untouched {idle} day(s)\n")
         elif status == "busy":
             log(f"[remote] storage: kept expired {describe(item)}: it is in use\n")
+        elif status == "refused":
+            why = outcome.partition(":")[2] or error
+            log(f"[remote] storage: kept {describe(item)}: the server declined ({why})\n")
         else:
-            log(f"[remote] storage: could not remove expired {describe(item)} ({status}"
+            log(f"[remote] storage: could not remove expired {describe(item)} ({outcome}"
                 f"{'; ' + error if error else ''})\n")
     return removed
 
@@ -707,10 +861,15 @@ def protect_for_run(run, staging_dir: str) -> Callable[[StorageItem], bool]:
     return protect
 
 
-def label_and_sweep(cache, run, log: Callable[[str], None]) -> None:
-    """Label the folders *run* is using and remove expired ones, in one ssh call
-    when nothing has expired. Best-effort: a host that cannot be asked loses only
-    the label and the sweep, never the run."""
+def label_and_sweep(cache, run, log: Callable[[str], None], *, background: bool = True) -> None:
+    """Label the folders *run* is using, list the host, and remove what has
+    expired — the removal on a background thread, so it never holds up the run.
+
+    The label-and-list call is bounded by :data:`RUN_START_TIMEOUT_S` and walks
+    no trees. Best-effort: a host that cannot be asked loses only the label and
+    the sweep, never the run. At most :data:`SWEEP_MAX_PER_RUN` folders go per
+    run start.
+    """
     staging = cache.host.remote_staging_dir
     try:
         validate_staging_dir(staging)
@@ -720,15 +879,43 @@ def label_and_sweep(cache, run, log: Callable[[str], None]) -> None:
     dataset_key = (run.cache_key if str(run.remote_input_dir) == f"{staging}/datasets/{run.cache_key}" else "")
     label = make_label(local_input_dir=run.local_input_dir, local_output_dir=run.local_output_dir,
                        run_id=run.run_id, cache_key=run.cache_key)
-    # Two scripts, one call: the label script stops at its own refusal, and the
-    # listing then reports it in its ``root`` line.
-    script = ("(\n" + label_script(staging, run_id=run.run_id, dataset_key=dataset_key, label=label) + ")\n"
+    borrowed = _run_name_of(str(run.remote_output_dir), staging)
+    # Two scripts in one call, each in its own subshell: one's refusal cannot stop the other.
+    script = ("(\n" + label_script(staging, run_id=run.run_id, dataset_key=dataset_key, label=label,
+                                   borrowed_run=borrowed if borrowed != run.run_id else "") + ")\n"
               + "(\n" + listing_script(staging, detail=False) + ")\n")
-    result = cache._ssh_script(script, check=False, timeout_s=LISTING_TIMEOUT_S)
+    result = cache._ssh_script(script, check=False, timeout_s=RUN_START_TIMEOUT_S)
     listing = parse_listing(result.stdout) if result.returncode == 0 else None
     if listing is None or listing.refused:
         why = listing.refused if listing is not None else f"exit {result.returncode}"
         log(f"[remote] storage: could not list {staging} ({why}); "
             "this run's folders are unlabelled and nothing expired was removed\n")
         return
-    remove_expired(cache, listing, log=log, protect=protect_for_run(run, staging))
+    protect = protect_for_run(run, staging)
+    if not plan_expired(listing.items, listing.now, cache.host.storage_expiry_days, protect=protect):
+        return
+
+    def sweep() -> None:
+        try:
+            remove_expired(cache, listing, log=log, protect=protect, limit=SWEEP_MAX_PER_RUN)
+        except Exception:
+            swallowed("removing expired folders on the remote")
+
+    if background:
+        threading.Thread(target=sweep, name="allwell-storage-sweep", daemon=True).start()
+    else:
+        sweep()
+
+
+def mark_fetched(cache, run, log: Callable[[str], None]) -> None:
+    """Record on the server that *run*'s results were downloaded and verified,
+    in its own folder and the one it re-attached to. Best-effort."""
+    staging = cache.host.remote_staging_dir
+    try:
+        script = mark_fetched_script(staging, [run.run_id, _run_name_of(str(run.remote_output_dir), staging)])
+    except UnsafeStagingDir:
+        return
+    result = cache._ssh_script(script, check=False, timeout_s=RUN_START_TIMEOUT_S)
+    if result.returncode != 0:
+        log(f"[remote] storage: could not mark {run.run_id} as downloaded (exit {result.returncode}); "
+            "its folder will not be removed automatically\n")

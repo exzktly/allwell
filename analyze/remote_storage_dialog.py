@@ -66,6 +66,8 @@ def expiry_text(item: rs.StorageItem, now: int, host_days: int) -> tuple[str, fl
     """``(text, sort key)`` for the Expires column."""
     if not item.ours:
         return "Not All-Well's (left alone)", float("inf")
+    if not item.mine:
+        return "Another user's (left alone)", float("inf")
     if item.active:
         return "In use", -1.0
     if item.expiry == rs.KEEP:
@@ -74,8 +76,12 @@ def expiry_text(item: rs.StorageItem, now: int, host_days: int) -> tuple[str, fl
     if due is None:
         return "Never", float("inf")
     if due <= now:
+        if item.kind == "run" and not item.fetched:
+            return "Expired, kept: results not downloaded", float(due)
+        if not item.labelled:
+            return "Expired, kept: no label (delete by hand)", float(due)
         held = item.kind == "dataset" and now - item.last_used < IN_USE_WINDOW_S
-        return ("Expired (held: used recently)" if held else "Expired"), float(due)
+        return ("Expired, kept: used recently" if held else "Expired"), float(due)
     days = max(1, (due - now + _DAY - 1) // _DAY)
     return f"in {days} d{'' if item.expiry else ' (host rule)'}", float(due)
 
@@ -170,7 +176,8 @@ class RemoteStorageDialog(QDialog):
         actions.addWidget(self._delete_btn)
         actions.addSpacing(12)
         self._keep_btn = QPushButton("Keep forever", self)
-        self._keep_btn.setToolTip("Never remove the selected folders automatically.")
+        self._keep_btn.setToolTip("The expiry rule, the cache clean-up and the earlier-attempt clean-up never "
+                                  "remove the selected folders. Delete… still can.")
         self._keep_btn.clicked.connect(lambda: self._apply_expiry(rs.expiry_value(keep=True), "kept"))
         actions.addWidget(self._keep_btn)
         self._expire_btn = QPushButton("Expire in", self)
@@ -258,6 +265,10 @@ class RemoteStorageDialog(QDialog):
     def _on_listed(self, result, error: str, message: str = "") -> None:
         listing, why = result if result else (None, error)
         if listing is None:
+            # What is on screen is no longer known to be true: nothing may be
+            # deleted or swept on the strength of it.
+            self._listing = None
+            self._tree.clear()
             self._status.setText(f"{message + ' ' if message else ''}Could not list "
                                  f"{self._host.remote_staging_dir}: {why or error}. Nothing shown is current.")
             return
@@ -329,6 +340,10 @@ class RemoteStorageDialog(QDialog):
         if any(i.kind == "dataset" and now - i.last_used < IN_USE_WINDOW_S for i in items):
             warn.append("A dataset here was used in the last "
                         f"{IN_USE_WINDOW_S // _DAY} days; the next run of that plate uploads it again.")
+        unfetched = [i for i in items if i.kind == "run" and not i.fetched]
+        if unfetched:
+            warn.append(f"{len(unfetched)} run folder(s) hold results All-Well never confirmed as downloaded. "
+                        "Check the plate's local output before deleting them.")
         if any(i.kind == "run" for i in items):
             warn.append("Results already downloaded are not affected, but anything a run left unfetched "
                         "is lost, and a later resume of that plate starts over.")
@@ -338,11 +353,11 @@ class RemoteStorageDialog(QDialog):
 
     def _on_delete(self) -> None:
         chosen = self.selected_items()
-        items = [i for i in chosen if i.ours and not i.active]
+        items = [i for i in chosen if i.actionable and not i.active]
         skipped = len(chosen) - len(items)
         if not items:
-            self._status.setText("Every selected folder is in use by a run or was not made by All-Well; "
-                                 "nothing to delete.")
+            self._status.setText("Every selected folder is in use by a run, was not made by All-Well, or "
+                                 "belongs to another user; nothing to delete.")
             return
         if not self._confirm("Delete remote folders", self.delete_prompt(items)):
             return
@@ -352,12 +367,19 @@ class RemoteStorageDialog(QDialog):
 
     def _on_outcomes(self, result, error: str, verb: str, skipped: int = 0) -> None:
         outcomes, why = result if result else ({}, error)
-        done = sum(1 for s in outcomes.values() if s in ("gone", "ok"))
-        busy = sum(1 for s in outcomes.values() if s == "busy") + skipped
-        failed = [f"{k} {n}" for (k, n), s in outcomes.items() if s not in ("gone", "ok", "busy")]
+        status = {key: rs.status_of(o) for key, o in outcomes.items()}
+        done = sum(1 for s in status.values() if s in ("gone", "ok"))
+        busy = sum(1 for s in status.values() if s == "busy")
+        refused = [f"{n} ({o.partition(':')[2] or 'refused'})" for (_k, n), o in outcomes.items()
+                   if rs.status_of(o) == "refused"]
+        failed = [f"{k} {n}" for (k, n), s in status.items() if s not in ("gone", "ok", "busy", "refused")]
         parts = [f"{done} folder(s) {verb}."]
         if busy:
-            parts.append(f"{busy} in use or not All-Well's, and left alone.")
+            parts.append(f"{busy} in use and left alone.")
+        if skipped:
+            parts.append(f"{skipped} in use, not All-Well's or another user's, and not sent.")
+        if refused:
+            parts.append(f"The server refused {len(refused)}: {', '.join(refused[:4])}{' …' if len(refused) > 4 else ''}.")
         if failed:
             parts.append(f"Failed: {', '.join(failed[:6])}{' …' if len(failed) > 6 else ''}.")
         if why:
@@ -372,7 +394,7 @@ class RemoteStorageDialog(QDialog):
         self._apply_expiry(rs.expiry_value(days=days, now=now), f"set to expire in {days} days")
 
     def _apply_expiry(self, value: str, verb: str) -> None:
-        items = [i for i in self.selected_items() if i.ours]
+        items = [i for i in self.selected_items() if i.actionable]
         if items:
             self._run_async(lambda: rs.set_expiry(self._cache, items, value),
                             lambda result, error: self._on_outcomes(result, error, verb),

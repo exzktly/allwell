@@ -100,6 +100,9 @@ class ImageTableState:
     # Bar thickness in px-at-a-nominal-240 px cell (scaled to each image like the
     # label font). User-tunable because a too-thin bar can disappear on downscale.
     scale_bar_thickness_px: int = 4
+    # Write the bar's length ("50 µm") beside it. On by default: a bar with no
+    # length on it says nothing a reader can use without the figure legend.
+    scale_bar_label: bool = True
 
     # Burned-in cell labels (identity text drawn into the pixels). ``label_mode``
     # "none"/"identity"; ``label_cells`` picks which cell(s) ("all" or a grid corner);
@@ -189,6 +192,10 @@ class ImageTableState:
     # the status line and the saved figure's line say what the frame leaves out.
     # Same per-pass lifetime as the records above.
     nanowell_frame_notes: set = field(default_factory=set)
+    # ``(well, token_lower, tp) -> k``: how many times finer than its frame a
+    # cropped metric map was last drawn (``image_compose._finer_metric_map``),
+    # so its scale bar is measured on the pixels actually drawn.
+    nanowell_display_scale: dict = field(default_factory=dict)
 
     #: Why this pass planned **no bar at all**, or ``""`` when it planned one.
     #:
@@ -231,6 +238,7 @@ class ImageTableState:
         self.partial_scans = set()
         self.scale_bar_refusals = set()
         self.nanowell_frame_notes = set()
+        self.nanowell_display_scale = {}
         self.scale_bar_plan_note = ""
 
     def effective_row_dims(self) -> list:
@@ -289,6 +297,11 @@ class ChannelSpec:
     # Binary renders only: give every label id its own colour instead of painting
     # them all white, so two nuclei that touch are not one shape.
     label_colors: bool = False
+    # Auto window per cell instead of one window pooled across the grid. Pooling
+    # is what makes brightness comparable from well to well, and it can leave a
+    # dim well near-black; this trades the comparison for visibility, and the
+    # colour key under the grid says which one is in force.
+    auto_per_cell: bool = False
 
     def axis_token(self) -> str:
         """Token this channel contributes to an axis / ``active_channels``.
@@ -303,6 +316,12 @@ class ChannelSpec:
         ``corrected`` keeps the bare token so previously saved views still
         resolve; the other three ride ``"<CHAN> (raw|mask|binary)"``.
         """
+        from review.data.nanowell_images import is_nanowell_frame
+
+        if is_nanowell_frame(self.channel):
+            # A nanowell frame has no render variants, and a metric's label is
+            # prose (``log₂``, ``n₀``) that upper-casing would break.
+            return str(self.channel or "").strip()
         base = str(self.channel or "").strip().upper()
         return f"{base}{_RENDER_SUFFIXES.get(self.render, '')}"
 
@@ -312,6 +331,7 @@ class ChannelSpec:
             "boundary": bool(self.boundary), "colormap": self.colormap,
             "lut_min": self.lut_min, "lut_max": self.lut_max, "log": bool(self.log),
             "label_colors": bool(self.label_colors),
+            "auto_per_cell": bool(self.auto_per_cell),
         }
 
     @classmethod
@@ -322,6 +342,7 @@ class ChannelSpec:
             boundary=bool(d.get("boundary", False)), colormap=d.get("colormap", "Greys"),
             lut_min=d.get("lut_min"), lut_max=d.get("lut_max"), log=bool(d.get("log", False)),
             label_colors=bool(d.get("label_colors", False)),
+            auto_per_cell=bool(d.get("auto_per_cell", False)),
         )
 
 

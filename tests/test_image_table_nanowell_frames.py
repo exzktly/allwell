@@ -109,18 +109,35 @@ def test_a_metric_map_fills_each_nanowell_with_its_value_and_leaves_the_rest_emp
     assert not frame.undefined.any() and frame.um_per_px == fx.PX_UM
 
 
-def test_a_nanowell_with_no_value_is_marked_undefined_never_background_or_zero(qtbot, tmp_path):
+def test_a_nanowell_with_no_value_is_an_empty_ring_never_background_a_disc_or_zero(qtbot, tmp_path):
     ctx, _out = _loaded(qtbot, tmp_path)
     cache: dict = {}
     got = load_frame_array(ctx, cache, "A01", BRIGHTNESS_MAP, "24", "F0")
     frame = nanowell_frame_of(cache, "A01", BRIGHTNESS_MAP, "24")
     for (q, r), n, gfp in zip(fx.SITES, fx.COUNTS["A01"]["24h"], fx.GFP["A01"]):
+        y, x = _px(q, r)
+        around = frame.undefined[y - 2:y + 3, x - 2:x + 3]
         if n:
-            assert got[_px(q, r)] == pytest.approx(gfp) and not frame.undefined[_px(q, r)]
+            assert got[y, x] == pytest.approx(gfp) and not around.any()
         else:
-            assert np.isnan(got[_px(q, r)]) and frame.undefined[_px(q, r)]
+            # Its rim is marked and its middle is empty: a ring, which no value of any colormap can look like.
+            assert np.isnan(got[y, x]) and not frame.undefined[y, x] and around.any()
     assert not frame.undefined[0, 0]
-    assert "1 of 5 nanowells have no GFP Brightness" in frame.note
+    assert frame.missing == {"no cells": 1} and frame.total == 5
+
+
+def test_the_ring_is_the_rim_of_the_nanowell_and_a_value_fills_its_disc():
+    import pandas as pd
+
+    from review.features.nanowell.table_frame_compute import metric_map
+
+    rows = pd.DataFrame({"well_x_um": [20.0, 60.0], "well_y_um": [20.0, 20.0], "radius_um": [10.0, 10.0],
+                         "v": [7.0, float("nan")]})
+    frame = metric_map(rows, "v", "V", (0.0, 0.0, 1.0, 40, 80), pd.Series(["", "occluded"], index=rows.index))
+    assert frame.values[20, 20] == 7.0 and frame.values[20, 11] == 7.0 and not frame.undefined[10:31, 10:31].any()
+    assert np.isnan(frame.values[20, 60]) and not frame.undefined[20, 60]           # the middle is empty
+    assert frame.undefined[20, 51] and frame.undefined[11, 60]                      # the rim is the ring
+    assert frame.missing == {"occluded": 1} and frame.total == 2
 
 
 def test_a_metric_map_follows_the_nanowells_baseline_rather_than_a_cached_copy(qtbot, tmp_path):
@@ -153,7 +170,9 @@ def test_the_cell_draws_background_black_and_an_undefined_nanowell_in_the_undefi
     rgb = cell_display_rgb(ctx, cache, cell, 0, None, arr)
     assert tuple(rgb[0, 0]) == (0, 0, 0)
     empty = next(s for s, n in zip(fx.SITES, fx.COUNTS["A01"]["24h"]) if not n)
-    assert tuple(rgb[_px(*empty)]) == _undefined_rgb()
+    y, x = _px(*empty)
+    assert tuple(rgb[y, x]) == (0, 0, 0)                                   # the ring's empty middle
+    assert (rgb[y - 2:y + 3, x - 2:x + 3] == np.array(_undefined_rgb(), dtype=np.uint8)).all(axis=-1).any()
     # The window is the defined values' own (10 to 50 here), not NaN: the brightest nanowell is the colormap's top.
     brightest = fx.SITES[int(np.argmax([g if n else -1 for g, n in zip(fx.GFP["A01"], fx.COUNTS["A01"]["24h"])]))]
     top = tuple(int(v) for v in (np.asarray(colormaps[METRIC_MAP_COLORMAP](1.0)[:3]) * 255).astype(np.uint8))
@@ -174,16 +193,20 @@ def test_a_scale_bar_on_a_frame_is_measured_at_the_frame_s_scale_not_the_tiles(q
     assert cell_chrome_kwargs(ctx, 0, 0, fluor, plan)["bar_px"] == 86
 
 
-def test_what_a_frame_leaves_out_reaches_the_status_line(qtbot, tmp_path):
+def test_what_the_frames_leave_out_is_one_sentence_per_metric_summed_over_the_wells(qtbot, tmp_path):
     from review.features.image_browser.image_table.image_compose import (
         _load_array, partial_scan_clause, reset_scan_misses,
     )
 
     ctx, _out = _loaded(qtbot, tmp_path)
     reset_scan_misses(ctx)
-    _load_array(ctx, {}, "A01", BRIGHTNESS_MAP, "24", "F0")
+    for well in ("A01", "B01"):           # the token as the axis now carries it: the metric's own spelling
+        _load_array(ctx, {}, well, metric_token("GFP Brightness (mean per-cell intensity)"), "24", "F0")
+    empty = sum(1 for well in ("A01", "B01") for n in fx.COUNTS[well]["24h"] if not n)
     clause = partial_scan_clause(ctx)
-    assert "Nanowell frames" in clause and "A01 24" in clause and "have no GFP Brightness" in clause
+    assert (f"NW: GFP Brightness: {empty} of 10 nanowells in 2 wells have no value ({empty} no cells), "
+            "drawn as empty rings") in clause
+    assert "A01" not in clause and "B01" not in clause              # summed, not listed well by well
     reset_scan_misses(ctx)
     assert partial_scan_clause(ctx) == ""
 

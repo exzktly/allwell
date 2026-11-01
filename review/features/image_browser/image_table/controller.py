@@ -55,6 +55,7 @@ from review.features.image_browser.image_table.image_compose import (  # noqa: F
     NUC_SEG_TOKEN,
     OVERLAY_CHAN,
     _binary_base,
+    _channel_opts_for,
     _is_binary_variant,
     _is_mask_variant,
     _compose_image_table_rgb,
@@ -370,7 +371,7 @@ _DISPLAY_INT_KEYS = ("label_font_px",)
 _DISPLAY_INT_MIN1_KEYS = ("scale_bar_thickness_px",)
 _DISPLAY_STR_KEYS = ("scale_bar_cells", "scale_bar_img_corner", "scale_bar_color",
                      "label_mode", "label_cells", "label_img_corner", "label_color")
-_DISPLAY_BOOL_KEYS = ("label_bg", "scale_bar_show")
+_DISPLAY_BOOL_KEYS = ("label_bg", "scale_bar_show", "scale_bar_label")
 
 
 def image_table_set_display(ctx, key: str, value) -> None:
@@ -626,11 +627,13 @@ def _install_cell_events(
         # An overlay cell shows a blend but can only quote ONE channel's pixel, so
         # the readout names the channel the number came from beside the cell's own
         # label — a value with no channel on it is not a measurement.
-        chan_lbl = chan.upper()
+        from review.data.nanowell_images import display_token, is_nanowell_frame
+
+        chan_lbl = display_token(chan)
         if readout != chan:
-            chan_lbl = f"{chan_lbl} ({readout.upper()})"
+            chan_lbl = f"{chan_lbl} ({display_token(readout)})"
         prefix = f"{well_display_label(ctx, well)} {chan_lbl} T:{tp}"
-        if fov:
+        if fov and not is_nanowell_frame(chan):
             prefix += f" FOV:{fov}"
         mfi = _cell_mfi(ctx, _lbl, readout, well, tp, fov, x, y)
         return f"{prefix}  ({x}, {y}) = {intensity}{_mfi_suffix(mfi)}"
@@ -888,6 +891,9 @@ def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
             # map is empty here, so _parse_lut gives the pre-pooling answer.
             if _parse_lut(ctx, r, chan) != (None, None):
                 continue
+            # "per cell" on the channel's LUT row: each cell keeps its own auto-fit.
+            if (_channel_opts_for(ctx, chan) or {}).get("auto_per_cell"):
+                continue
             # Per cell, so one unreadable frame costs the pooling that cell's
             # contribution and nothing more — pooling the rest still beats
             # dropping every channel back to per-cell auto-fit.
@@ -919,14 +925,65 @@ def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
             if a.size == 0:
                 continue
             lo, hi = float(a.min()), float(a.max())
+            positive = a[a > 0]
+            low_pos = float(positive.min()) if positive.size else None
             base = _binary_base(chan).strip().lower()
             cur = pooled.get(base)
             if cur is None:
-                pooled[base] = [lo, hi]
+                pooled[base] = [lo, hi, low_pos, chan]
             else:
                 cur[0] = min(cur[0], lo)
                 cur[1] = max(cur[1], hi)
-    st.auto_lut_by_channel = {k: (v[0], v[1]) for k, v in pooled.items()}
+                if low_pos is not None:
+                    cur[2] = low_pos if cur[2] is None else min(cur[2], low_pos)
+    st.auto_lut_by_channel = {k: _centred_window(ctx, v) for k, v in pooled.items()}
+
+
+def _centred_window(ctx, pooled: list) -> tuple[float, float]:
+    """The pooled ``(lo, hi)``, centred on "no change" for a nanowell fold change.
+
+    A fold change pooled to its own min and max puts 1 wherever the data happen to
+    fall, so no colour means "unchanged" and a gain and a loss of the same size
+    look different. A ratio (log-scaled on its row) gets ``(1/k, k)``, a fold
+    change already on a log scale ``(-m, m)``, so the diverging map's midpoint is
+    no change. A zero ratio has no logarithm; it sits at the bottom of the window.
+    """
+    from review.data.observations import fold_change_scale, nanowell_metric_for_token
+
+    lo, hi, low_pos, chan = pooled
+    scale = fold_change_scale(nanowell_metric_for_token(ctx, chan))
+    if scale == "log":
+        m = max(abs(lo), abs(hi)) or 1.0
+        return -m, m
+    if scale == "ratio" and low_pos is not None and hi > 0:
+        k = max(hi, 1.0 / low_pos, 1.0 + 1e-6)
+        return 1.0 / k, k
+    return lo, hi
+
+
+def _add_colour_key(ctx, cells, grid, sz: int) -> None:
+    """Put the colour key (``image_compose.colour_keys``) under the grid when it holds a nanowell metric map or
+    fluorescence montage: a metric drawn as colours is unreadable without one."""
+    from PySide6.QtGui import QImage, QPixmap
+
+    from review.features.image_browser.image_table._colour_key import key_rgb
+    from review.features.image_browser.image_table.image_compose import colour_keys
+
+    cols = max((len(row) for row in cells), default=1)
+    rgb = key_rgb(colour_keys(ctx, cells), width_px=max(_KEY_MIN_PX, sz * cols))
+    if rgb is None:
+        return
+    h, w = rgb.shape[:2]
+    image = QImage(rgb.tobytes(), w, h, 3 * w, QImage.Format_RGB888).copy()
+    label = QLabel()
+    label.setObjectName("ImageTableColourKey")
+    label.setPixmap(QPixmap.fromImage(image))
+    label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+    grid.addWidget(label, grid.rowCount(), 0, 1, max(1, grid.columnCount()))
+
+
+#: The colour key is at least this wide, so a one-column grid's key is not squeezed.
+_KEY_MIN_PX = 520
 
 
 def generate_status_message(ctx, cells, n, rendered, unrendered, failed,
@@ -1157,6 +1214,8 @@ def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
     # Axis labels + inter-group spacing that mirror the builder's nesting.
     if plan is not None:
         _facet.render_facet_chrome(grid, plan)
+    with swallow("image table: colour key"):
+        _add_colour_key(ctx, cells, grid, sz)
 
     ctx.state.image_table.last_render = rendered
     ctx.state.image_table.image_cache = cache

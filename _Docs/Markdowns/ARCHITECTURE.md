@@ -1275,6 +1275,8 @@ review/
 │   │   │                 renderer.py, build_layout.py, export.py,
 │   │   │                 _frames.py (the per-field frame plan the PowerPoint
 │   │   │                 export places, built in the export figure's own pass),
+│   │   │                 _colour_key.py (the key under a grid of nanowell
+│   │   │                 metric maps and montages, as pixels: §6.2l),
 │   │   │                 _phone_fit.py (phone layout: cells sized to the
 │   │   │                 screen's width, redrawn when the layout changes)
 │   │   │                 (controller = orchestration; the compose/layout/export
@@ -13623,6 +13625,9 @@ the metric; the frame's own µm/px; and a note of what it leaves out.
 - **Montage pixels are not tile pixels.** A frame's scale bar is measured at the frame's µm/px
   (`image_compose._nanowell_frame_bar_px`), never at **Pixel µm/px**: the montage is the well downsampled to fit one
   picture, and the tiles' pixel size draws a bar several times too short. A frame whose scale is unknown carries no bar.
+  Every Image Table bar, a frame's or not, writes its length beside it ("50 µm", **Label the bar**,
+  `ImageTableState.scale_bar_label`; `draw_cell_chrome`'s `bar_text`, placed by `bar_text_rect_px`, which the
+  PowerPoint plan's "Scale bar length" text box shares).
 - **Fluorescence montages** are stitched with the Array view's own reader (`full_montage_compute.TileStore`, its
   `values` method: the sampled pixels unstretched, NaN off every tile) at the pyramid level the frame's scale needs,
   so the row's LUT — pooled across the grid by Auto — sets the brightness of every well alike. Reading a well's tiles
@@ -13633,14 +13638,49 @@ the metric; the frame's own µm/px; and a note of what it leaves out.
   change the values and no image-cache key could see them, a metric map is never memoised by the Image Table; the
   observations memo is keyed on all of them, so asking again repaints discs and reads nothing.
 - **Nothing drawn as something else.** The composer (`image_compose._compose_image_table_rgb`) draws a NaN pixel black
-  and an undefined nanowell in `Colors.plot_undefined_ink`, after the LUT, and the LUT window is the finite pixels'
-  (`ui_helpers.lut_colormap_to_rgb`; the Auto pool skips NaN too). A metric map's default colormap is
-  `viridis` (`builder_view._default_colormap_for`) whatever channel its name carries, because a black-based ramp
-  would draw its lowest values in the background's black. An empty nanowell's count is 0 and drawn as 0; its
-  brightness is undefined and drawn in the undefined ink. What each frame leaves out — tiles with no image, nanowells
-  with no value (counted by reason) or no position, a bar it cannot carry — is recorded per pass in
-  `ImageTableState.nanowell_frame_notes` and reported by `image_compose.nanowell_frame_clause`, which
-  `partial_scan_clause` carries, so the Generate line and every saved figure's line say it.
+  and the frame's `undefined` pixels in `Colors.plot_undefined_ink`, after the LUT, and the LUT window is the finite
+  pixels' (`ui_helpers.lut_colormap_to_rgb`; the Auto pool skips NaN too). A nanowell with no value of the metric is
+  drawn as its **rim only** — an empty ring, its middle black (`table_frame_compute.metric_map`) — so it differs from
+  every value by shape, not just by a colour a colormap could also hold. An empty nanowell's count is 0 and drawn as
+  0; its brightness has no value and is a ring.
+- **Colormaps.** A metric map defaults to `viridis` (`builder_view._default_colormap_for`) whatever channel its name
+  carries, because a black-based ramp would draw its lowest values in the background's black. A fold change
+  (`observations.fold_change_scale`) defaults to the diverging `coolwarm`, and `builder_view.new_channel_spec` turns
+  on log scale for a ratio; the pooled Auto window is then centred on "no change" (`controller._centred_window`):
+  `(1/k, k)` for a ratio, `(-m, m)` for a fold change already on a log scale. Transmitted light — `MONTAGE`, the
+  run's phase channel, or a channel named phase / BF / DIC / TL as a whole word — defaults to `Greys`
+  (`builder_view._is_transmitted`); a tint made the phase montage read as fluorescence. `viridis` and `coolwarm` are
+  in `LUT_COLOR_NAMES`, so the LUT editor shows them, and a ramp's chip swatch is the ramp
+  (`builder_view._cmap_swatch`).
+- **The colour key.** Under a grid holding any metric map or fluorescence montage, one row per such channel
+  (`image_compose.colour_keys` decides, `_colour_key.key_rgb` draws, Qt-free): the full metric name, a strip of the
+  row's colormap with the window's ends (and "1 = no change" for a fold change, at the place the cells' colouring
+  puts it, `_colour_key.key_ticks`), what the window is — one shared by every well shown, a fixed one, or each cell's
+  own — and for a metric map the "no value" ring. The live grid adds it as a label under the cells
+  (`controller._add_colour_key`), the saved figure as an axes below the grid in the publication palette
+  (`export._draw_colour_key`), and the PowerPoint plan as a "Colour key" picture of its own (`FrameCollector.add_key`).
+  A LUT row's **per cell** (`ChannelSpec.auto_per_cell`) keeps that channel out of the pooled window, so each cell is
+  scaled to its own range; the key then says the colours are not comparable between cells.
+- **Labels.** `nanowell_images.display_token` names a frame on axes, chips, titles and the hover line: a metric by its
+  short label (`short_label`, cut at its explanation, `NW: GFP Brightness`) in its own case — `ChannelSpec.axis_token`
+  keeps a nanowell frame's case, since upper-casing broke `log₂` and `n₀` — while the key and the chip's tooltip give
+  the full label. A frame shows the whole well, so neither the corner of a grid made only of frames
+  (`facet_view.plan_facets`) nor a frame's identity label names a field.
+- **The builder.** The Channels tray folds the metric maps behind one **Nanowell metrics** toggle
+  (`builder_view._build_tray`), and the starting table (`_default_spec`) holds `MONTAGE` and the raw channels but no
+  fluorescence montage or metric map: each montage reads every tile of every well shown.
+- **A crop re-paints a metric map.** Its discs are geometry, so when a crop would enlarge them into stair steps,
+  `image_compose._finer_metric_map` asks the service for just the cropped window, up to 8 × finer, until its longer
+  side reaches 640 px (`table_frame`'s `window` / `oversample`, `table_frame_compute.window_geometry`). The factor is
+  recorded per cell (`ImageTableState.nanowell_display_scale`) and the scale bar is measured on the pixels drawn. A
+  montage is never re-drawn finer: its pixels are the measurement.
+- **What is left out.** What each frame leaves out is recorded per pass in `ImageTableState.nanowell_frame_notes`:
+  a metric map's nanowells with no value by reason (`NanowellFrame.missing`, out of `NanowellFrame.total`), and any
+  frame's own sentence (a tile with no image, a frame of unknown scale, nanowells with no position).
+  `image_compose.nanowell_frame_clause`, which `partial_scan_clause` carries so the Generate line and every saved
+  figure's line say it, sums the first across the wells shown into one sentence per metric ("NW: Count fold change:
+  180 of 412 nanowells in 4 wells have no value (104 seeded later, …), drawn as empty rings") and lists the first two
+  sentences, counting and logging the rest.
 
 Segmentation
 draws a frame that has no label map rather than aborting: the image without outlines, a status line saying why, and

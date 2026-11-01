@@ -20,9 +20,14 @@ beneath it. The frame carries that scale, which is what a scale bar on it must u
 draw a bar several times too short.
 
 **Nothing drawn as something else.** Outside every tile and every nanowell a frame is NaN, which the Image Table
-draws as background. A nanowell with no value of the metric (empty, occluded, out of focus, gated out, …) is marked
-in :attr:`NanowellFrame.undefined` and drawn in the undefined ink, never as background and never as a value; the
-frame's note counts them by reason, and counts the nanowells with no measured position, which are not drawn.
+draws as background. A nanowell with no value of the metric (empty, occluded, out of focus, gated out, …) has its
+rim marked in :attr:`NanowellFrame.undefined` and is drawn as an empty ring in the undefined ink — never as
+background and never as a filled disc; :attr:`NanowellFrame.missing` counts them by reason, and the note counts the
+nanowells with no measured position, which are not drawn.
+
+**Re-painted for a crop.** A metric map is geometry, not pixels, so when a crop would blow its discs up into stair
+steps the Image Table asks for just the cropped window at a finer scale (:func:`table_frame`'s *window* and
+*oversample*). A montage never is: its pixels are what the run or the tiles hold.
 
 Qt-free. Called from the Image Table's prefetch pool as well as the GUI thread, so the shared page state (the
 read-wells cache, the observations memo) is touched under one lock; stitching, the slow part, is not.
@@ -130,11 +135,18 @@ def _stored_shape(data, well: str, timepoint: str) -> tuple[int, int] | None:
     return int(height), int(width)
 
 
-def table_frame(ctx, well: str, tp, token: str) -> NanowellFrame | None:
+def table_frame(ctx, well: str, tp, token: str, *, window=None, oversample: int = 1) -> NanowellFrame | None:
     """The nanowell frame *token* names (``nanowell_images``) for *well* at *tp*, or ``None`` when *token* is not
-    one. A frame that cannot be drawn is a :class:`NanowellFrame` with no values and a note saying why."""
+    one. A frame that cannot be drawn is a :class:`NanowellFrame` with no values and a note saying why.
+
+    *window* ``(y0, x0, y1, x1)`` and *oversample* re-paint part of a **metric map** at *oversample* × the frame's
+    resolution: the Image Table asks for this when a crop would otherwise blow each disc up into stair steps. A
+    disc's geometry is exact, so it can be drawn at any resolution; a montage's pixels are what the run or the tiles
+    hold, and are never re-drawn finer than the frame (the call returns ``None`` for one)."""
     channel, label = montage_channel(token), metric_label(token)
     if channel is None and label is None:
+        return None
+    if window is not None and label is None:
         return None
     with _LOCK:
         data, why = _data(ctx, well)
@@ -150,7 +162,24 @@ def table_frame(ctx, well: str, tp, token: str) -> NanowellFrame | None:
         return _phase_frame(data, well, timepoint, geometry)
     if channel is not None:
         return channel_frame(data, well, timepoint, channel, geometry)
+    if window is not None:
+        geometry = window_geometry(geometry, window, oversample)
+        if geometry is None:
+            return None
     return _metric_frame(ctx, well, timepoint, label, geometry)
+
+
+def window_geometry(geometry, window, oversample: int):
+    """*geometry*'s pixels ``window`` ``(y0, x0, y1, x1)`` as a geometry of its own, *oversample* × finer; ``None``
+    when the window holds no pixel of the frame."""
+    left, top, scale, height, width = geometry
+    y0, x0, y1, x1 = (int(v) for v in window)
+    y0, y1 = max(0, min(y0, height)), max(0, min(y1, height))
+    x0, x1 = max(0, min(x0, width)), max(0, min(x1, width))
+    k = max(1, int(oversample))
+    if y1 <= y0 or x1 <= x0:
+        return None
+    return left + x0 * scale, top + y0 * scale, scale / k, (y1 - y0) * k, (x1 - x0) * k
 
 
 def _phase_frame(data, well: str, timepoint: str, geometry) -> NanowellFrame:
@@ -208,7 +237,11 @@ def _metric_frame(ctx, well: str, timepoint: str, label: str, geometry) -> Nanow
 
 def metric_map(rows, column: str, label: str, geometry, why=None) -> NanowellFrame:
     """*rows*' nanowells as discs on *geometry*, each filled with its *column* value (see the module docstring);
-    *why* (aligned to *rows*) names the reason each undefined value is undefined, for the note."""
+    *why* (aligned to *rows*) names the reason each undefined value is undefined, counted in
+    :attr:`NanowellFrame.missing`.
+
+    A nanowell with no value is drawn as its rim alone — an empty ring in the undefined ink — so it differs from a
+    value by its shape and not only by a colour a colormap might also hold."""
     import pandas as pd
 
     left, top, scale, height, width = geometry
@@ -228,28 +261,27 @@ def metric_map(rows, column: str, label: str, geometry, why=None) -> NanowellFra
         radius = radii.get(idx)
         radius = fallback if radius is None or not np.isfinite(radius) else float(radius)
         cx, cy, r = (x - left) / scale, (y - top) / scale, max(radius / scale, 0.75)
+        if cx + r < 0 or cy + r < 0 or cx - r > width or cy - r > height:
+            continue                     # outside a cropped window: neither drawn nor counted
         y0, y1 = max(0, int(math.floor(cy - r))), min(height, int(math.ceil(cy + r)) + 1)
         x0, x1 = max(0, int(math.floor(cx - r))), min(width, int(math.ceil(cx + r)) + 1)
         if y1 <= y0 or x1 <= x0:
-            unplaced += 1
             continue
         gy, gx = np.mgrid[y0:y1, x0:x1]
-        disc = (gx + 0.5 - cx) ** 2 + (gy + 0.5 - cy) ** 2 <= r * r
+        d2 = (gx + 0.5 - cx) ** 2 + (gy + 0.5 - cy) ** 2
+        disc = d2 <= r * r
         value = vals.get(idx)
         drawn += 1
         if value is not None and np.isfinite(value):
             values[y0:y1, x0:x1][disc] = float(value)
             undefined[y0:y1, x0:x1][disc] = False
         else:
-            undefined[y0:y1, x0:x1][disc] = True
+            rim = max(1.0, r * 0.18)
+            ring = disc & (d2 >= (r - rim) ** 2)
+            undefined[y0:y1, x0:x1][ring] = True
             text = str(why.get(idx) or "") if why is not None else ""
             reasons[text or "no value"] = reasons.get(text or "no value", 0) + 1
-    notes = []
-    if reasons:
-        listed = "; ".join(f"{n} {text}" for text, n in sorted(reasons.items(), key=lambda kv: -kv[1]))
-        notes.append(f"{sum(reasons.values())} of {drawn} nanowells have no {label} value ({listed}).")
-    if unplaced:
-        notes.append(f"{unplaced} nanowell(s) have no measured position in the frame and are not drawn.")
+    note = f"{unplaced} nanowell(s) have no measured position and are not drawn." if unplaced else ""
     if not drawn:
-        return NanowellFrame(None, scale, note=" ".join(notes) or "No nanowell to draw at this timepoint.")
-    return NanowellFrame(values, scale, undefined, " ".join(notes))
+        return NanowellFrame(None, scale, note=note or "No nanowell to draw at this timepoint.")
+    return NanowellFrame(values, scale, undefined, note, missing=reasons, total=drawn)

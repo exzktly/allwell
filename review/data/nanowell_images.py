@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import io
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -49,14 +49,19 @@ class NanowellFrame:
     """One nanowell frame, in the montage's geometry.
 
     *values* is float32, rows × columns, NaN wherever nothing was imaged or no nanowell is. *undefined* marks the
-    pixels of nanowells that are there but have no value of the metric (``None`` for a montage), so a nanowell
-    with no value is never drawn as background. *um_per_px* is the frame's own scale (``None`` when unknown), which
+    pixels of nanowells that are there but have no value of the metric (``None`` for a montage) — each one's rim,
+    so a nanowell with no value is drawn as an empty ring: never as background, and never as a filled disc that
+    could be read as a value. *um_per_px* is the frame's own scale (``None`` when unknown), which
     a scale bar must use rather than the tiles' pixel size. *note* says what the frame leaves out, or why there is
     no frame (then *values* is ``None``)."""
     values: np.ndarray | None
     um_per_px: float | None = None
     undefined: np.ndarray | None = None
     note: str = ""
+    #: A metric map's nanowells with no value, by reason (``{"no cells": 34, "occluded": 2}``), and how many
+    #: nanowells it drew: what the status line sums across wells rather than repeating per well.
+    missing: dict = field(default_factory=dict)
+    total: int = 0
 
 
 def montage_token(channel: str = "") -> str:
@@ -94,6 +99,32 @@ def is_nanowell_frame(token) -> bool:
 
 def is_metric_map(token) -> bool:
     return metric_label(token) is not None
+
+
+def short_label(label: str) -> str:
+    """A metric label without its explanation — ``"GFP Brightness (mean per-cell intensity)"`` →
+    ``"GFP Brightness"``, ``"log₂ count fold change, (n + 1) / (n₀ + 1)"`` → ``"log₂ count fold change"`` — for a
+    row label or a chip, where the full label (kept for the tooltip and the colour key) took a quarter of a figure's
+    width."""
+    text = str(label or "").strip()
+    cuts = [text.find(stop) for stop in (" (", ", ") if stop in text]
+    if cuts:
+        text = text[:min(cuts)]
+    return text.strip() or str(label or "").strip()
+
+
+def display_token(token) -> str:
+    """How an axis, a chip or a title names a channel token: a nanowell frame by its short, case-kept name (a
+    metric's label is prose with symbols in it — ``log₂``, ``n₀`` — that upper-casing breaks), anything else
+    upper-cased as the Image Table always has."""
+    text = str(token or "").strip()
+    label = metric_label(text)
+    if label is not None:
+        return f"{METRIC_PREFIX}{short_label(label)}"
+    channel = montage_channel(text)
+    if channel:
+        return f"{PHASE_MONTAGE} {channel.upper()}"
+    return text.upper()
 
 
 def _hours(token) -> float:

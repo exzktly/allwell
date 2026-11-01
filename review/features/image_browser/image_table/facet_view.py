@@ -104,7 +104,9 @@ def _fmt(ctx, dim: str, val: str) -> str:
             chans = _axis_dim_values(ctx, "channel", collapse_overlay=False)
             joined = "+".join(str(c).upper() for c in chans)
             return f"{joined} overlay" if joined else "overlay"
-        return str(val).upper()
+        from review.data.nanowell_images import display_token
+
+        return display_token(val)
     if dim == "well":
         # Show the well's custom label (Home → Well Labels) instead
         # of its A01-style position when one is defined — matching every plot tab.
@@ -306,9 +308,16 @@ def plan_facets(ctx, cells) -> FacetPlan | None:
     # plate mode ``well`` varies per cell (composed from the row/col axes), so it's
     # not a fixed corner value even though the literal "well" dim isn't on an axis.
     plate = bool({"well_row", "well_col"} & (set(row_dims) | set(col_dims)))
+    # A grid of nothing but nanowell frames shows whole wells, so a field held
+    # fixed names nothing the reader sees.
+    from review.data.nanowell_images import is_nanowell_frame
+
+    whole_wells = all(is_nanowell_frame(cell.get("chan")) for row in cells for cell in row if cell.get("chan"))
     fixed = []
     for dim in ("well", "timepoint", "fov"):
         if plate and dim == "well":
+            continue
+        if whole_wells and dim == "fov":
             continue
         if dim not in row_dims and dim not in col_dims:
             v = _cv(cells[0][0], dim)

@@ -13896,7 +13896,16 @@ the metric; the frame's own µm/px; and a note of what it leaves out.
   is the slow part; it runs in the Image Table's prefetch pool, and a montage is memoised in the image cache like any
   frame.
 - **Metric maps** are painted from `observation_compute.nanowell_observations`, the plot tools' own rows (the page's
-  Baseline, rim-focus rule and Cell Gating), so a value on the map is the value a plot draws. Because those settings
+  Baseline, rim-focus rule and Cell Gating), so a value on the map is the value a plot draws. A fold-change map can
+  instead pin its own baseline in its token — `NW: <label> @<code>`, the code being the page's own (`earliest`,
+  `first_measurable`, `tp:<timepoint>`; `nanowell_images.metric_token` / `metric_baseline`) — chosen under **Fold
+  change relative to** in the channel's ⚙ menu (`builder_view.baseline_choices`, which lists the page's baseline,
+  the two rules and every timepoint the run recorded). The baseline is passed to `nanowell_observations`, whose memo
+  is keyed on it, so two rows of one metric can take their fold changes from two timepoints side by side; a code the
+  page does not know is a frame with no values and a note. Because the baseline is in the token, it reaches the
+  label (`display_token`: `NW: Count fold change vs 0h`), the cache keys, the pooled window and the export with no
+  plumbing of its own, and the colour key names every fold change's reference — the pinned one, or the page's
+  Baseline as it is now (`image_compose._baseline_phrase`). Because those settings
   change the values and no image-cache key could see them, a metric map is never memoised by the Image Table; the
   observations memo is keyed on all of them, so asking again repaints discs and reads nothing.
 - **Nothing drawn as something else.** The composer (`image_compose._compose_image_table_rgb`) draws a NaN pixel in

@@ -94,7 +94,7 @@ def test_the_real_docs_lane_finds_the_known_readers():
         assert reader in lane, reader
     # Cites ARCHITECTURE.md only in its docstring, and reads no document.
     assert "test_hot_paths_stay_linear.py" not in lane
-    assert "test_version_delta.py" not in lane
+    assert "test_bump_version.py" not in lane
 
 
 def test_every_docs_only_pattern_matches_a_tracked_file():

@@ -80,12 +80,16 @@ def ensure_read(ctx, *, force: bool = False) -> None:
         if st.qc_reading != sig:
             return                                       # a newer read was asked for; it will land instead
         st.qc_records, st.qc_signature, st.qc_reading, st.qc_bridge = records, sig, None, None
+        st.qc_error = ""
         _after_read(ctx)
 
     def failed(message) -> None:
         log.warning("Nanowells QC: the plate's records could not be read: %s", message)
         if st.qc_reading == sig:
-            st.qc_reading, st.qc_bridge = None, None
+            # Held against this signature, so the figure says why rather than reading again on every refresh.
+            st.qc_records, st.qc_signature, st.qc_reading, st.qc_bridge = None, sig, None, None
+            st.qc_error = str(message)
+            _after_read(ctx)
 
     st.qc_bridge = run_off_thread(lambda: qc.read_plate(data_dir, path), on_done=done, on_failed=failed)
 
@@ -105,7 +109,7 @@ def draw(ctx, st, fig, canvas) -> None:
 
     st.hits, st.drawn = None, None
     data_dir = ctx.state.dataset.data_dir
-    st.qc_drawn = draw_qc(fig, matrix(ctx), which=st.qc_wells, out_dir=Path(data_dir) if data_dir else None,
+    st.qc_drawn = draw_qc(fig, matrix(ctx), which=st.qc_wells, error=st.qc_error, out_dir=Path(data_dir) if data_dir else None,
                           message=st.qc_message, highlight=st.qc_highlight, excluded=st.excluded_wells)
     apply_export_style_to_current(ctx, fig, canvas)
     if st.qc_drawn is not None and st.qc_drawn.relabel is not None:

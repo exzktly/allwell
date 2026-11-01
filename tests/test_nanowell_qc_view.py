@@ -233,3 +233,25 @@ def test_leaving_the_array_view_mid_walk_ends_the_walk_there(qc_page, qtbot):
     assert st.qc_message == ("Anchor queue finished: 0 of 2 timepoint(s) anchored, 2 skipped. Re-run anchored "
                              "wells… to address them from the anchors.")
     assert not ctx.state.selection.selected_wells                  # the selection it started with
+
+
+def test_a_plate_that_cannot_be_read_says_why_on_the_figure_and_is_not_read_again(qc_page, qtbot, monkeypatch):
+    from review.features.nanowell import controller as nwc
+
+    ctx, st, out = qc_page
+    calls = []
+
+    def broken(*_args):
+        calls.append(1)
+        raise OSError("disk unplugged")
+
+    monkeypatch.setattr(qc, "read_plate", broken)
+    import os
+    os.utime(out / "nanowells" / "A01_grid.json", ns=(1, 1))
+    nwc.redraw(ctx)
+    qtbot.waitUntil(lambda: bool(st.qc_error), timeout=10000)
+    texts = [t.get_text() for ax in ctx.widgets.get("_nw_fig").axes for t in ax.texts]
+    assert texts == ["The plate's grid records and identity checks could not be read: disk unplugged"]
+    nwc.redraw(ctx)
+    nwc.redraw(ctx)
+    assert len(calls) == 1

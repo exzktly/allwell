@@ -281,6 +281,7 @@ class NanowellState:
     qc_drawn: object = None
     qc_message: str = ""
     qc_highlight: frozenset = frozenset()
+    qc_error: str = ""                       # why the last read of the plate's records failed, said on the figure
 
     def release_tiles(self) -> None:
         """Stop the reads of the tiles held so far and let their pixels go: another well, timepoint or dataset."""

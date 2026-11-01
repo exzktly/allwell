@@ -84,10 +84,14 @@ def _row_tops(wells) -> list:
 
 
 def draw_qc(fig, matrix, *, which: str, out_dir, message: str = "", highlight=frozenset(),
-            excluded=()) -> QcDrawn | None:
+            excluded=(), error: str = "") -> QcDrawn | None:
     """Draw *matrix*, the wells *which* (``qc_compute.WELL_FILTERS``) chooses as rows. *message* is the last anchor
     action's result, written under the title; *highlight* rings those ``(well, timepoint)`` cells; *excluded* wells
     are labelled so (the page's choice, not the run's — they keep their row)."""
+    if matrix is None and error:
+        render_message(fig, f"The plate's grid records and identity checks could not be read: {error}",
+                       gid="nw-qc-failed")
+        return None
     if matrix is None:
         render_message(fig, "Reading the plate's grid records and identity checks…", gid="nw-qc-reading")
         return None

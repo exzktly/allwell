@@ -144,8 +144,14 @@ class Colors:
     run_processing  = "#FDE047"   # computing right now (also re-anchoring)
     run_on_server   = "#3B6FE8"   # computed (on the server, or locally before threshold)
     run_done        = "#10B981"   # downloaded (remote) / thresholded (local)
-    run_failed      = "#DC2626"   # errored — drawn with the ✕ glyph as well
-    run_partial     = "#F5F5F5"   # finished short of its input — drawn with "!"
+    # A well with a problem is white and says which problem with its glyph:
+    # a red ✕ for failed, a dark "!" for partial or unfinished. Failed used to
+    # be a red fill, and red is the hue a red/green deficient viewer loses —
+    # it read as the same muted tone as the run's other wells, set apart only
+    # by its ✕. White is the one fill no other state takes, it reads the same
+    # under every vision, and it groups the wells that need a look.
+    run_problem     = "#F5F5F5"   # failed, partial or unfinished — the glyph says which
+    run_failed_mark = "#DC2626"   # the ✕ on a failed well
 
     # ── Data-viz / trace colors (categorical, keyed to wells) ────────────
     # The 96-colour ``WELL_COLORS_TUPLE`` is the canonical palette and is

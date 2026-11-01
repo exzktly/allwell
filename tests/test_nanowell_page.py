@@ -552,11 +552,17 @@ def test_the_array_footer_is_short_until_notes_is_turned_on(qtbot, page):
     assert "4 nanowells: 3 with a value · 1 occluded" in short
     assert not any(t.startswith(("Measured positions", "Filled by")) or t.endswith(": ok.") for t in short)
     where = tuple(st.drawn.ax.get_position().bounds)
+    fig = page.widgets.get("_nw_fig")
+    placed = [t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-array-footer"]
     button = page.widgets.get("_nw_notes_btn")
     button.click()                                                     # the band's button
     assert st.layers.notes and page.widgets.get("_nw_layer_notes").isChecked()
     assert _texts(page, "nw-array-footer") == short                    # the footer itself is unchanged
     assert tuple(st.drawn.ax.get_position().bounds) == pytest.approx(where)
+    # The footer's lines stay where they were, the notes going under them (UX review, round 3: a guide between the
+    # array and the counts it explains put the alert line in the middle, and moved it).
+    assert [t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-array-footer"] == pytest.approx(placed)
+    assert max(t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-array-notes") < min(placed)
     assert _texts(page, "nw-array-notes") == [
         "Measured positions in the well frame (the square is the central nanowell).",
         "Fill: Cell count. Grey outline: no value — the words inside say why; hatches and dashes mark states (see key)."]

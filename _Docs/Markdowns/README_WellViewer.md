@@ -6146,7 +6146,8 @@ the sentence names it.
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the
     `q,r` when both are on). A nanowell without a value never has a number written (never a 0): it writes why instead, as above. A label
-    in a nanowell without a fill has a thin outline of the background colour, so it reads over a hatch. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
+    in a nanowell without a fill has a thin outline of the background colour, and one in a hatched nanowell sits on a
+    small patch of it, so it reads over the hatch. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
     from the run's cell table, so you can see where cells were found and where none were; the run does not
     keep cell outlines, so the dot is the cell's centre, not its shape. The dots are the cells the counts hold:
     a cell Home's Cell Gating leaves out, or one in a field excluded in QC triage, by the field-quality flag or by
@@ -6165,7 +6166,7 @@ the sentence names it.
     earliest one is shown in amber: most nanowells there may hold cells, and that timepoint's counts and
     confluence may be biased. *Notes* (off until you turn it on; also the **Notes** button beside **Overlays**)
     explains how to read the figure — how the positions are drawn, what the fill and outlines mean, what the tile
-    colours mean — in the space between the array and the footer, saying only what applies to what is on screen. That space is kept whether Notes is on or off, so the array never moves, shrinks or is covered
+    colours mean — under the footer's lines, which stay exactly where they are, saying only what applies to what is on screen. That space is kept whether Notes is on or off, so the array never moves, shrinks or is covered
     when you turn it on. The footer under the figure is the same either way: the page's
     notes, one line of counts that adds up to the roster in the key's own groups (*19 nanowells: 13 with a value ·
     4 no value · 2 rim out of focus*), and anything that went wrong or is missing — no addresses, nothing placed,

@@ -12315,7 +12315,7 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   `LABEL_COLOUR` (`_draw_labels`: the `q,r` with *Addresses*, the metric value to three significant figures with
   *Values*, one under the other when both are on, `site_label_texts`; a nanowell without a value writes its reason's
   tag, never a number) — in a nanowell drawn without a fill, with a stroke of the figure's ground around it
-  (`patheffects.withStroke`, 3.5 pt) so it reads over a hatch; on the metric's fill, plain — only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
+  (`patheffects.withStroke`, 3.5 pt) — or, in a hatched nanowell (one whose state has a `_STATE_STYLE` hatch), on a small solid patch of the ground instead, since a halo loses to a hatch —; on the metric's fill, plain — only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
   (beyond, the footer asks for a zoom); tiles coloured by their placement `source`
   (lattice, overlap, recorded) with the residual, or — with no tile size in the acquisition record — their corner
   marked and the figure saying the outline is unknown, never a guessed rectangle; the anchor as a crosshair;
@@ -12325,7 +12325,7 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   whatever went wrong or is missing (no addresses, nothing placed, the image's state, the Cells layer's tally, and
   the anchor's status when it is not a plain `ok` — `_anchor_owed`; a plain `ok` is never written). How to read the
   figure is `array_notes`, each line only when it applies to what is drawn (the fused sentence only with a fused
-  nanowell, the tile colours only with tiles), and is written only with `notes` on, between the array and the footer, in room `render_array` reserves for it whether `notes` is on or off: turning Notes on never moves, shrinks or covers the array (a box drawn over the array's foot was tried and hid its bottom row). It returns an `ArrayDrawn` (the hit map, the axes, the
+  nanowell, the tile colours only with tiles), and is written only with `notes` on, under the footer's lines (which stay where they are with Notes off, straight under the array), in room `render_array` reserves for it whether `notes` is on or off: turning Notes on never moves, shrinks or covers the array (a box drawn over the array's foot was tried and hid its bottom row). It returns an `ArrayDrawn` (the hit map, the axes, the
   region shown and its size in pixels, and the tiles' `Rendered`), which the page keeps on `state.drawn`.
 - **Full resolution** (`full_montage_compute`, Qt-free): every tile from `in/<well>.zip` (the member
   `image_compute._member_for` finds) at the grid record's `left_um`/`top_um`, at the x pixel size, in the

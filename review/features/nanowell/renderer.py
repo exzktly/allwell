@@ -1220,14 +1220,16 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     if in_well and layers.anchor and scene.anchor is not None:
         _draw_anchor(ax, drawn, scene.anchor)
     _ink(ax.set_title(f"{scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
+    # The footer's lines start straight under the array, where they are with Notes off; the notes go under them, in
+    # the reserved room at the foot, so turning Notes on never moves a line being read (UX review, round 3).
+    top = len(lines) + len(notes) - 1
     for i, text in enumerate(lines):
-        y = _FOOTER_BASE + (len(lines) - 1 - i) * _LINE
-        _ink(fig.text(0.03, y, text, fontsize=7.5, color=ink if i == 0 else muted, gid="nw-array-footer"),
-             muted=i != 0)
+        _ink(fig.text(0.03, _FOOTER_BASE + (top - i) * _LINE, text, fontsize=7.5, color=ink if i == 0 else muted,
+                      gid="nw-array-footer"), muted=i != 0)
     if layers.notes:
-        for j, text in enumerate(notes):                 # between the array and the footer, in the reserved room
-            y = _FOOTER_BASE + (len(lines) + len(notes) - 1 - j) * _LINE
-            _ink(fig.text(0.03, y, text, fontsize=7.5, color=muted, gid="nw-array-notes"), muted=True)
+        for j, text in enumerate(notes):
+            _ink(fig.text(0.03, _FOOTER_BASE + (top - len(lines) - j) * _LINE, text, fontsize=7.5, color=muted,
+                          gid="nw-array-notes"), muted=True)
     if layers.record:
         _draw_record(fig, scene.record, right + 0.08, ink, muted)
     return drawn
@@ -1457,6 +1459,10 @@ def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool, why: d
     # metric, whose labels read on the fill and are left plain — a dark stroke there only roughened them.
     halo = [patheffects.withStroke(linewidth=3.5, foreground=_inks(ax)[0])]
     filled = np.zeros(len(labels), dtype=bool) if filled is None else np.asarray(filled, dtype=bool)
+    # Over a hatch a halo still loses to the pattern (UX review, round 3): a hatched nanowell's label sits on a small
+    # solid patch of the ground instead.
+    hatched = np.array([bool(_STATE_STYLE.get(str(state), ("", ""))[0]) for state in sites.state], dtype=bool)
+    backing = {"boxstyle": "round,pad=0.15", "facecolor": _inks(ax)[0], "edgecolor": "none", "alpha": 0.9}
     show = ((labels != "") & (diameter >= MIN_LABEL_DIAMETER_PX) & (sites.x >= x0) & (sites.x <= x1)
             & (sites.y >= y0) & (sites.y <= y1))
     what = "addresses and values" if addresses and values else "addresses" if addresses else "values"
@@ -1472,9 +1478,10 @@ def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool, why: d
         lines = labels[k].count("\n") + 1
         # Two lines share the height one line had, so each is a little smaller.
         size = diameter[k] * (0.22 if lines == 1 else 0.17) * 72.0 / fig.dpi
+        backed = hatched[k] and not filled[k]
         ax.text(sites.x[k], sites.y[k], labels[k], ha="center", va="center", clip_on=True, zorder=6,
                 fontsize=max(5.0, min(8.0, size)), color=LABEL_COLOUR, linespacing=1.0, gid="nw-array-address",
-                path_effects=[] if filled[k] else halo)
+                path_effects=[] if filled[k] or backed else halo, bbox=backing if backed else None)
     return []
 
 

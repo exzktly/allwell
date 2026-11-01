@@ -169,6 +169,32 @@ def test_every_label_has_a_halo_of_the_ground_so_it_reads_over_a_hatch(qc_page):
         assert to_hex(effects[0]._gc["foreground"]) == ground
 
 
+def test_a_hatched_nanowell_s_label_sits_on_a_patch_of_the_ground():
+    """Over the dot hatch of an out-of-focus nanowell a halo still lost to the pattern (UX review, round 3): its label
+    sits on a solid patch of the ground; a plain outlined nanowell's keeps the halo."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.colors import to_hex
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.array_compute import ArrayScene
+    from review.features.nanowell.renderer import _inks, render_array
+    from review.features.nanowell.state import ArrayLayers
+    from tests.test_nanowell_array_key import _sites
+
+    sites = _sites(["out_of_focus", "measured"])
+    sites.radius[:] = 45.0
+    scene = ArrayScene("A01", "0h", "lattice", sites, 2, 0, {"out_of_focus": 1, "measured": 1}, 100.0)
+    fig = Figure(figsize=(8.0, 6.0), dpi=100)
+    FigureCanvasAgg(fig)
+    drawn = render_array(fig, scene, ArrayLayers(image="off", colour="state", addresses=True, values=False),
+                         label="Cell count")
+    labels = {t.get_text(): t for t in drawn.ax.texts if t.get_gid() == "nw-array-address"}
+    soft, plain = labels["0,0"], labels["1,0"]
+    assert soft.get_bbox_patch() is not None and not soft.get_path_effects()
+    assert to_hex(soft.get_bbox_patch().get_facecolor()) == to_hex(_inks(drawn.ax)[0])
+    assert plain.get_bbox_patch() is None and plain.get_path_effects()
+
+
 def test_a_label_on_a_metric_fill_has_no_halo(qc_page):
     """A dark stroke roughened the labels on the metric's fill, which read on it unaided: only the nanowells without a
     fill (no value, hatched or not) get the halo."""

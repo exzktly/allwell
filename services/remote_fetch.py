@@ -431,6 +431,9 @@ class Fetcher:
         self._log = log_fn or (lambda _msg: None)
         self._progress = getattr(progress_fn, "download", progress_fn)  # its own direction (TransferProgress)
         self._delete_after_download = delete_after_download
+        # Told each well whose remote files were deleted: a batched run sends a well of its next batch in its place
+        # (``remote_batch_step.well_removed``).
+        self.on_well_removed: Callable[[str], None] | None = None
         self._stop = threading.Event()
         self._pending: queue.Queue = queue.Queue()  # well labels, after_queued tasks, None
         # (well, step, since) for the drain heartbeat; replaced whole, never mutated.
@@ -1111,8 +1114,10 @@ class Fetcher:
         its download is safe — bounds peak remote disk to about one well's
         output. Non-fatal; ``verify_and_cleanup`` is the backstop."""
         paths = well_files_to_delete(self.run, well)      # none for a nanowell run: see remote_fetch_nanowells
-        if paths:
-            delete_remote_paths(self.host, paths, what=f"per-well files of {well}", log_fn=self._log)
+        if paths and delete_remote_paths(self.host, paths, what=f"per-well files of {well}", log_fn=self._log):
+            if self.on_well_removed is not None:
+                with swallow(f"telling the batch upload {well} left the remote"):
+                    self.on_well_removed(well)
 
     def _merge_fetched_csvs(self, tmp_csv_dir: Path) -> list[str]:
         """Merge each partial per-well CSV pulled into *tmp_csv_dir* into the

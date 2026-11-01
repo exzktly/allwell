@@ -23,7 +23,7 @@ import os
 import queue
 import subprocess
 import sys
-from functools import lru_cache
+from functools import lru_cache, partial
 import threading
 from pathlib import Path
 from collections.abc import Callable
@@ -82,7 +82,7 @@ from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_handoff import chase_handoff, watch_of
 from services.remote_batch_ledger import checked, fail, failed_batches_line, ledger_of
-from services.remote_batch_step import Step, abandon_upload_ahead, run_batch
+from services.remote_batch_step import Step, abandon_upload_ahead, run_batch, well_removed
 from services.remote_batch_resume import (
     _blank_argv, announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
     reattach_output_dir, stage_leftovers, take_from_remote)
@@ -403,7 +403,8 @@ class _BatchedRemoteProcess:
         self._log = log_fn or (lambda _m: None)
         self._progress = progress_fn
         self._stop = stop_event or threading.Event()
-        # The next batch's upload, sent while the current one runs (`remote_batch_step._Ahead`); `None` between.
+        # The next batch's upload, a well per well of the current one that leaves the remote
+        # (`remote_batch_step._Ahead`); `None` between.
         self._upload_ahead = None
         # Set by `note_suspend_requested`: finish the batch in flight, send no
         # more. Separate from `_stop`, which tears the batch in flight down.
@@ -518,6 +519,8 @@ class _BatchedRemoteProcess:
             delete_after_download=True,
             poll_sidecar=True,
         )
+        # Each well deleted from the remote makes room for one of the next batch (`remote_batch_step._Ahead`).
+        self._fetcher.on_well_removed = partial(well_removed, self)
         # ``well_count_total`` is set in ``_run_batches`` AFTER the
         # local-completion filter runs (a pre-filter set would lock
         # in the raw count and the GUI's progress denominator would
@@ -1149,8 +1152,8 @@ class _BatchedRemoteProcess:
             self._log(
                 f"[remote] batched mode: {len(all_zips)} well(s) in "
                 f"{n_batches} batch(es) of up to {self._batch_size} "
-                # Two batches at the peak: the one running and the next, uploading meanwhile (remote_batch_step).
-                f"(peak remote disk ≈ {min(2, n_batches) * self._batch_size + len(blanks)} "
+                # One batch at the peak: the next goes up a well in place of each one that leaves (remote_batch_step).
+                f"(peak remote disk ≈ {self._batch_size + len(blanks)} "
                 f"well-input)\n"
             )
 

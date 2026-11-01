@@ -2091,13 +2091,16 @@ Choosing a remote reveals a **Remote options** group, hidden for a local run
 because none of it applies:
 
 - **Batch size (0 = one per worker).** Any positive `N` processes `N` wells at
-  a time. While one batch runs on the node the next one is already uploading
-  (`batch 2/5: uploading 7 well-zip(s) while batch 1 runs`), so after the first
-  batch the node waits only for whatever of an upload is still left when the
-  batch before it ends; peak disk on the remote is roughly
-  two batches of input — the one running and the one waiting — plus about one
-  well of output, at the cost of reloading the segmentation model once per
-  batch (a few seconds each). `0`, the default, sends one well
+  a time. While one batch runs on the node, the next one goes up a well at a
+  time: each time a finished well is downloaded and removed from the remote,
+  one well of the next batch is uploaded in its place
+  (`batch 2/5: 7 well-zip(s) to upload while batch 1 runs, one as each of its
+  wells leaves the remote`). So peak disk on the remote is roughly one batch of
+  input plus about one well of output, and when a batch ends the node waits
+  only for the wells of the next one that had no room yet. A nanowell run keeps
+  each batch's wells on the remote until the batch ends, so its next batch goes
+  up then. The cost is reloading the segmentation model once per batch (a few
+  seconds each). `0`, the default, sends one well
   for each worker the pipeline will start, so the first upload is only as big
   as the workers need and the run starts after that many wells rather than the
   whole plate. The workers are counted before the run the way the node counts
@@ -2114,8 +2117,8 @@ because none of it applies:
   where the remote's disk allows it. A Suspend or Stop during a batch also ends
   the next batch's upload; a resume picks up what it had sent. A nanowell run holds a whole
   batch's input and output until that batch ends, and then frees them, so for
-  nanowells the peak is about `2N` wells of input (the batch running and the
-  next) plus `N` wells of output —
+  nanowells the peak is about `N` wells of input (the next batch goes up once
+  the running one has ended) plus `N` wells of output —
   plus every well kept for the end-of-run re-anchoring: a well with a
   timepoint whose nanowells could not be numbered keeps its input and output
   on the remote until the last batch is done, when every such well is re-run

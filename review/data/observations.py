@@ -11,7 +11,8 @@ Imports no feature.
 from __future__ import annotations
 
 from review.domain.observation import (
-    CELLS, NANOWELL_CELL_PREFIX, NANOWELL_SERVICE, NANOWELLS, ObservationTable, is_nanowell_cell_column,
+    CELLS, NANOWELL_CELL_PREFIX, NANOWELL_METRICS_SERVICE, NANOWELL_SERVICE, NANOWELLS, ObservationTable,
+    is_nanowell_cell_column,
 )
 
 
@@ -40,6 +41,15 @@ def nanowell_observations(ctx, wells) -> ObservationTable | None:
     if not is_nanowell_dataset(ctx):
         return None
     return ctx.features.query("observations.nanowell", ctx, list(wells), default=None)   # NANOWELL_SERVICE
+
+
+def nanowell_metric_specs(ctx, wells) -> tuple | None:
+    """The metrics :func:`nanowell_observations` would offer for *wells*, with no rows read or computed, or ``None``
+    when this build or this dataset has none. For a picker's entries: computing the whole table to name its metrics
+    held up every nanowell plate's load."""
+    if not is_nanowell_dataset(ctx):
+        return None
+    return ctx.features.query(NANOWELL_METRICS_SERVICE, ctx, list(wells), default=None)
 
 
 def occupied_nanowells_by_well(ctx, wells) -> dict[str, int]:

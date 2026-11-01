@@ -3268,7 +3268,10 @@ choice applies once, when the menu closes.
   is **on by default** for a nanowell dataset. The line beneath it says, across
   the whole plate, how many nanowell-timepoints were out of focus, how many
   cells that excludes, and how many nanowells it could not check (a rim that
-  could not be fitted, or a well with too few rims at that timepoint). The
+  could not be fitted, or a well with too few rims at that timepoint). That
+  line is counted in the background, so it reads *Checking each nanowell's rim
+  focus across the plate…* for a moment after a dataset opens or the setting
+  changes; the rest of the app is usable meanwhile. The
   Segmentation overlay's **Why removed** outlines those cells in pink as
   *nanowell rim out of focus*, and the inclusion funnel lists them as
   *Nanowell out of focus*. The same switch is mirrored as **Rim focus** on the

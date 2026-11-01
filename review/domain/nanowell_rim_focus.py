@@ -203,19 +203,58 @@ def cell_pass(cells: pd.DataFrame, flagged: pd.DataFrame) -> pd.Series:
 
     *flagged* is one or more wells' :func:`flag_sites` frames; *cells* carries :data:`CELL_KEY` and a ``well``
     column. A cell with no address, no timepoint, or a nanowell-timepoint the table does not hold passes: a cell
-    nobody judged is not a cell judged and found wanting."""
+    nobody judged is not a cell judged and found wanting.
+
+    This runs on every well each time the verdict layers are projected — at every dataset load and on every
+    plate-wide narrow read — so it is written for a million-cell well. The well and timepoint are compared as text,
+    exactly as the site table states them, but the text conversion is done once per *distinct* value rather than
+    once per cell; each cell's address is then packed into one integer and looked up with ``np.isin``. Building a
+    four-level ``MultiIndex`` of every cell instead cost about a second per large well, which is most of what made
+    a nanowell plate slow to open."""
     passed = pd.Series(1, index=cells.index, dtype=int)
     if flagged is None or not len(flagged) or not len(cells) or any(c not in cells for c in CELL_KEY + ("well",)):
         return passed
     soft = flagged.loc[flagged["rim_focus_ok"].eq(False), ["well", "timepoint", "nw_q", "nw_r"]]
     if not len(soft):
         return passed
-
-    def keys(frame):
-        q = pd.to_numeric(frame["nw_q"], errors="coerce")
-        r = pd.to_numeric(frame["nw_r"], errors="coerce")
-        return pd.MultiIndex.from_arrays([frame["well"].astype(str), frame["timepoint"].astype(str),
-                                          q.round().astype("Int64"), r.round().astype("Int64")])
-
-    hit = keys(cells).isin(keys(soft))
+    soft_keys, levels = _packed_keys(soft, None)
+    cell_keys, _ = _packed_keys(cells, levels)
+    hit = np.isin(cell_keys, soft_keys[soft_keys >= 0]) & (cell_keys >= 0)
     return passed.where(~hit, 0)
+
+
+#: Bits of a packed address given to each of its four parts (:func:`_packed_keys`). A nanowell coordinate is offset
+#: by half its range, so an axial ``q`` / ``r`` may be negative.
+_KEY_BITS = 16
+_KEY_SPAN = 1 << _KEY_BITS
+_KEY_OFFSET = _KEY_SPAN // 2
+
+
+def _text_codes(values: pd.Series, levels: dict | None) -> tuple[np.ndarray, dict]:
+    """Each value's code by its text (``str(value)``, as ``astype(str)`` spells it), converting each distinct value
+    once. With *levels* given, a value not in it codes as ``-1``; without, the levels are the values seen."""
+    codes, uniques = pd.factorize(values, use_na_sentinel=False)
+    texts = [str(u) for u in uniques]
+    if levels is None:
+        levels = {}
+        for text in texts:
+            levels.setdefault(text, len(levels))
+    lookup = np.array([levels.get(text, -1) for text in texts], dtype=np.int64)
+    return (lookup[codes] if len(lookup) else np.full(len(values), -1, dtype=np.int64)), levels
+
+
+def _packed_keys(frame: pd.DataFrame, levels: tuple[dict, dict] | None):
+    """``(keys, (well_levels, timepoint_levels))``: one int64 per row packing its well, timepoint, ``nw_q`` and
+    ``nw_r``, or ``-1`` for a row with no address, a coordinate out of range, or (with *levels* given) a well or
+    timepoint the levels do not hold — none of which can match a flagged nanowell-timepoint."""
+    wells, well_levels = _text_codes(frame["well"], None if levels is None else levels[0])
+    tps, tp_levels = _text_codes(frame["timepoint"], None if levels is None else levels[1])
+    q = pd.to_numeric(frame["nw_q"], errors="coerce").to_numpy(dtype=float).round()
+    r = pd.to_numeric(frame["nw_r"], errors="coerce").to_numpy(dtype=float).round()
+    valid = ((wells >= 0) & (tps >= 0) & np.isfinite(q) & np.isfinite(r)
+             & (np.abs(q) < _KEY_OFFSET) & (np.abs(r) < _KEY_OFFSET)
+             & (wells < _KEY_OFFSET) & (tps < _KEY_SPAN))         # the well's bits stay clear of the sign bit
+    qi = np.where(valid, q, 0).astype(np.int64) + _KEY_OFFSET
+    ri = np.where(valid, r, 0).astype(np.int64) + _KEY_OFFSET
+    keys = (((wells << _KEY_BITS | tps) << _KEY_BITS | qi) << _KEY_BITS) | ri
+    return np.where(valid, keys, -1), (well_levels, tp_levels)

@@ -111,3 +111,35 @@ def test_the_rows_follow_the_rim_focus_rule_in_force_without_the_page_ever_openi
     off = nanowell_observations(nw_ctx, ["A01"])
     # Fewer than ten rims a timepoint: the rule on cannot judge them and says so; off, it says nothing.
     assert on.notes and not off.notes
+
+
+def test_the_metric_names_alone_match_the_table_s_and_read_no_rows(nw_ctx, monkeypatch):
+    """The per-cell Scatter's "Nanowell ▸" entries need only the metric names, and they are built while the tab
+    builds inside the dataset load. Computing the whole nanowell table there cost seconds per plate, so the names
+    come from the site tables' header rows: the same names the table offers, with no table read."""
+    from review.data.observations import nanowell_metric_specs, nanowell_observations
+    from review.features.nanowell import observation_compute
+
+    full = nanowell_observations(nw_ctx, ["A01", "B01"])
+    nw_ctx.state.feature_slice("nanowell").observation_memo.clear()
+
+    def no_rows(*_a, **_k):
+        raise AssertionError("the metric names were computed by reading the nanowell tables")
+
+    monkeypatch.setattr(observation_compute, "load_nanowell_data", no_rows)
+    names = nanowell_metric_specs(nw_ctx, ["A01", "B01"])
+    assert [(m.key, m.label) for m in names] == [(m.key, m.label) for m in full.metrics]
+    assert any(m.key == "brightness_GFP" for m in names)
+
+
+def test_the_scatter_s_nanowell_entries_are_listed_without_computing_the_table(nw_ctx, monkeypatch):
+    from review.features.nanowell import observation_compute
+    from review.features.scatter._observations import cell_nanowell_entries
+
+    def no_rows(*_a, **_k):
+        raise AssertionError("the Scatter's picker computed the nanowell table to list its entries")
+
+    monkeypatch.setattr(observation_compute, "load_nanowell_data", no_rows)
+    entries = cell_nanowell_entries(nw_ctx)
+    assert entries["Nanowell ▸ Cell count"] == "n"
+    assert entries["Nanowell ▸ GFP Brightness (mean per-cell intensity)"] == "brightness_GFP"

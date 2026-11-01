@@ -1339,7 +1339,8 @@ review/
 │   │                 cell_scope_compute.py, moving_compute.py  ← the Nanowells page: nanowell
 │   │                 tables, per-nanowell metrics, the Distribution beeswarm
 │   │                 and site detail [removable]; observation_compute.py and
-│   │                 overlay_compute.py answer the observations.nanowell and
+│   │                 overlay_compute.py answer the observations.nanowell,
+│   │                 observations.nanowell_metrics and
 │   │                 segmentation.nanowell_overlay services (§6.2l)
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
 │   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
@@ -5155,10 +5156,18 @@ Segmentation overlay (*nanowell rim out of focus*, `Colors.exclusion_nanowell_fo
 other nine inks) and the inclusion funnel (*Nanowell out of focus*) each name the rule that left a cell out. The
 rule and its domain constants live in `review/domain/` because the layer is registered unconditionally, like
 every inclusion layer: a build without the Nanowells page must still leave out the same cells, and
-`review/data` may not import a feature. The site table is read through `nanowell_focus_gate.site_table` —
-only `SITE_COLUMNS`, memoised on the file's path, modification time and size, with the rule applied after the
-lookup — and `nanowell_dir` there is the one answer to where a dataset's nanowell tables are (the Nanowells
-feature's `collect` imports it). The switch is `QCParams.exclude_soft_nanowells`, with
+`review/data` may not import a feature. **Its cost is paid once per well, not once per projection.** The
+projector runs on every well at every dataset load (`load_controller` calls `qc.recompute_all`), every QC edit and
+every plate-wide narrow read, all on the calling thread, so `nanowell_focus_gate.flagged_sites` memoises the
+*judged* site table on the file's path, modification time and size **and** the rule's key
+(`_judged_site_table`, over `_read_site_table`, which reads only `SITE_COLUMNS`): a change of fraction re-judges
+without re-reading, and a repeat projection judges nothing. The judged frame is shared between callers and must
+not be mutated. `cell_pass` packs each cell's well, timepoint, `nw_q` and `nw_r` into one int64 and looks it up
+with `np.isin`, converting the well and timepoint to text once per distinct value — the same comparison as a
+four-level `MultiIndex` of every cell, which cost about a second per million-cell well and made a nanowell plate
+slow to open; `tests/test_nanowell_rim_focus.py` pins the comparison on the edge cases (text timepoints, rounded
+and negative axial coordinates, categorical columns, unaddressed cells). `nanowell_dir` there is the one answer
+to where a dataset's nanowell tables are (the Nanowells feature's `collect` imports it). The switch is `QCParams.exclude_soft_nanowells`, with
 `nanowell_focus_fraction`; `from_pipeline_info` seeds it on for a nanowell run
 (`default_exclude_soft_nanowells`), because the rule is relative and needs no number from the user, and
 `load_from_data_dir` applies that default to a section saved before the key existed, as it does for the border
@@ -5168,7 +5177,11 @@ with nanowell tables, where the per-cell focus row is hidden unless the plate al
 (`mixed_with_ordinary_plate`): a nanowell run records no per-cell focus, so that row could only have sent the
 user to re-run for a measurement a nanowell run never makes. Its sentence (`nanowell_focus_status`) counts from
 the site tables — what the rule would do before it is ticked — and the cells it is excluding, plate-wide
-(`plate_scan.every_well`), and names what it kept unchecked. The panel builds its parameters from the ones in
+(`plate_scan.every_well`), and names what it kept unchecked. Because that reads every well, the row counts
+it on a worker (`nanowell_focus_view._count_off_thread`, through `run_off_thread`): the panel is refreshed inside
+the dataset load, and counting there on the GUI thread froze a large plate's load. Until the answer arrives the
+line reads `COUNTING`; each refresh supersedes the one before, so an older count finishing later is dropped
+rather than written over a newer one, and nothing is written once the label is gone. The panel builds its parameters from the ones in
 force (`get_qc_params(ctx).with_updates(...)`) rather than from the constructor, so a field it holds no box for
 survives an edit of one it does.
 
@@ -13517,10 +13530,15 @@ Baseline, rim-focus rule and Cell Gating tally — so a fold change on a plot an
 `occupied` flag and `timepoint_hours` read the way the cell rows read it, so a plot's timepoint choices select the same
 rows. Wells are read once into the page's `well_parts`; the table is memoised on `(folder, wells, baseline, focus rule,
 gating version)`, every input that changes a row. The page's Fixed cohort and Moving average are figure transforms,
-not row properties, and are not applied.
+not row properties, and are not applied. A second service, `observations.nanowell_metrics`
+(`nanowell_metric_specs`), names the same metrics with no rows read: the channels come from the site tables' header
+rows (`collect.site_channels`, the same derivation `load_nanowell_data` applies to the columns it reads). The
+per-cell Scatter's "Nanowell ▸" picker entries (`scatter/_observations.cell_nanowell_entries`) use it, because they
+are built while the Scatter tab builds inside the dataset load, where computing the table only to name its metrics
+cost seconds.
 
 **The asker** (`review/data/observations.py`). `nanowell_observations(ctx, wells)` asks the registry
-(`ctx.features.query`) and gets `None` from a build without the feature; `available_observations` is `(cells,)` or
+(`ctx.features.query`) and gets `None` from a build without the feature, as does `nanowell_metric_specs`; `available_observations` is `(cells,)` or
 `(cells, nanowells)` from the dataset (`is_nanowell_run`) and the build. `observation_groups` is the members every
 plot draws (replicate sets, else selected wells). `with_nanowell_columns` joins a cell's own nanowell's metric onto its
 row as a `nw::<key>` column, on `(timepoint, nw_q, nw_r)`; a cell with no address gets no value. `nw::` columns are

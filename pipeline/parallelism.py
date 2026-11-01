@@ -224,7 +224,12 @@ def plan_parallelism(args, log: logging.Logger) -> ParallelPlan:
     n_gpu = visible_gpu_count() if method in CELLPOSE_METHODS else 0
     sharers = -(-workers // n_gpu) if n_gpu else 0
 
-    if args.cpu_only:
+    if method in CELLPOSE_METHODS:
+        # The lines below are TensorFlow's, for StarDist, which a Cellpose run never loads: its device is the
+        # Cellpose line's, and --cpu_only (StarDist's switch) does not keep it off a GPU.
+        device_str = "Cellpose — the GPU when one is visible (see the Cellpose line)" + (
+            "; --cpu_only is StarDist's and does not apply" if args.cpu_only else "")
+    elif args.cpu_only:
         device_str = "CPU only (--cpu_only)"
     elif on_mac:
         device_str = "Metal GPU (macOS) if tensorflow-metal installed, else CPU"

@@ -23,7 +23,7 @@ claimed.
 from __future__ import annotations
 
 from util.timepoint import sort_key as tp_sort_key
-from review.data.frame_load import NUC_SEG_TOKEN, binary_variant, norm_token
+from review.data.frame_load import MONTAGE_TOKEN, NUC_SEG_TOKEN, binary_variant, norm_token
 from review.domain.viewer_state import parse_rc
 
 
@@ -74,7 +74,12 @@ def channel_options(ctx) -> list[str]:
     seg_tok = (ctx.state.channel.seg_channel_token or "").strip()
     if not seg_tok:
         seg_tok = (info.get("nuclear_token") or "").strip()
-    if seg_tok:
+    from review.domain.qc_params import is_nanowell_run
+    if is_nanowell_run(info):
+        # A nanowell run writes no segmentation overlay — NUC+SEG would be "(no image)" in every cell — and keeps
+        # one stitched montage per well and timepoint, the picture it analysed: that is offered first instead.
+        options.insert(0, MONTAGE_TOKEN)
+    elif seg_tok:
         options.append(NUC_SEG_TOKEN)
 
     # Append user-defined ratio metrics as virtual channels.  The display

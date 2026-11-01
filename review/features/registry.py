@@ -305,6 +305,11 @@ def _svc_nanowell_open_anchor():
     return open_for_anchor
 
 
+def _svc_nanowell_follow_qc_params():
+    from review.features.nanowell.controller import nw_on_qc_params_changed
+    return nw_on_qc_params_changed
+
+
 def _redraw_nanowell():
     from review.features.nanowell.controller import redraw
     return redraw
@@ -1112,7 +1117,10 @@ def _features() -> list[FeatureDescriptor]:
             view_state_io=_nanowell_view_state_io,
             per_well_selection=True,
             # QC Triage's and Home's *Set anchor…* for a timepoint the run left unaddressed.
-            services={"nanowell.open_anchor": _svc_nanowell_open_anchor},
+            # *nanowell.follow_qc_params*: the QC layer's after-apply step, so a Cell Gating change reaches the page
+            # while it is on screen (Split View) rather than only when it is next shown.
+            services={"nanowell.open_anchor": _svc_nanowell_open_anchor,
+                      "nanowell.follow_qc_params": _svc_nanowell_follow_qc_params},
         ),
         # ── Images ────────────────────────────────────────────────────────
         FeatureDescriptor(

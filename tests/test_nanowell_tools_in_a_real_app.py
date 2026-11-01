@@ -1,4 +1,4 @@
-"""The Nanowells page's tools where the page meets the rest of the app (``SLOW_LANE_COVERAGE_TRACKER.md`` N1-N5).
+"""The Nanowells page's tools where the page meets the rest of the app, each driven in a real ``ReviewApp``.
 
 The page is tested in depth in the fast lane through its real builder, ``build_nanowell_tab``, inside the minimal shell
 (``tests/_minimal_shell.py``). That shell has no mode band, no rail page stack and no Home editors, and the fast tests
@@ -160,9 +160,8 @@ def test_the_band_s_rim_focus_switch_and_cell_gating_s_are_one_setting_and_line_
     assert not gate.isChecked()                                      # Cell Gating's switch shows the same setting
     assert counted() == "1 well(s)  |  26 of 26 nuclei included"
 
-    # And the other way, where a person does it: on Home's Cell Gating, then back to the Nanowells page. (With the
-    # page on screen the band does not follow a Cell Gating change until the page is shown again; only Split View
-    # can put both on screen at once, and the tracker records that as its own finding.)
+    # And the other way, where a person does it: on Home's Cell Gating, then back to the Nanowells page. (In Split
+    # View both are on screen at once; the last test in this file drives that case.)
     viewer_app._notebook.setCurrentByName("Home")
     gate.setChecked(True)
     assert ctx.state.qc.params.exclude_soft_nanowells
@@ -237,3 +236,35 @@ def test_the_crops_pop_out_is_owned_by_the_app_window_and_go_to_nanowell_moves_t
     assert bar.tabData(bar.currentIndex()) == "identity"
     assert popout.isVisible()                                        # the pop-out stays open beside it
     popout.close()
+
+
+# ── N6: a Cell Gating change reaches the page while it is on screen ──────────
+def test_in_split_view_a_cell_gating_focus_change_reaches_the_nanowells_page_beside_it(viewer_app, qtbot, tmp_path):
+    """Split View puts Home's Cell Gating and the Nanowells page on screen together. A change to Cell Gating's
+    nanowell focus switch must move the band's *Rim focus* box and recompute the page's metrics for the new rule
+    then, not when the page is next shown: the QC layer's after-apply fan-out redrew Line, Distribution and Heat Map
+    only, so the page went on drawing the soft nanowell the rule now leaves out, with the box beside it still ticked."""
+    from review.core import split_view as sv
+    from tests.test_nanowell_focus_filter import _dataset
+
+    viewer_app._load_path(_dataset(tmp_path))
+    viewer_app.show()
+    qtbot.waitExposed(viewer_app)
+    ctx, st = _open(viewer_app, qtbot, {"A01"})
+    sv.enter_split(ctx, "Home", "Nanowells")
+    assert ctx.runtime.split.active
+    box = ctx.widgets.get("_nw_rim_focus_box")
+    gate = ctx.widgets.get("_qc_gate_widgets")["exclude_soft_nanowells"]
+    assert ctx.widgets.get("_nw_page_visible")() and box.isChecked() and gate.isChecked()
+    assert st.focus_for == (True, 0.75)
+
+    gate.setChecked(False)                                           # on Cell Gating, in the other pane
+    assert not ctx.state.qc.params.exclude_soft_nanowells
+    try:
+        qtbot.waitUntil(lambda: st.focus_for == (False,) and not st.computing and not box.isChecked(), timeout=20000)
+    except qtbot.TimeoutError:
+        pass                                                         # the assertion below names what was left stale
+    # The metrics are computed for the rule in force, and the band says what is in force.
+    assert (st.focus_for, box.isChecked()) == ((False,), False), "the Nanowells page kept the previous focus rule"
+    _settle(qtbot, ctx, st)
+    sv.exit_split(ctx)

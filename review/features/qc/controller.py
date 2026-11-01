@@ -179,6 +179,11 @@ def _after_qc_params_applied(ctx) -> None:
         redraw_app(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
+    # ``redraw_app`` reaches Line, Distribution and Heat Map. The Nanowells page draws from the same parameters
+    # (its rim focus rule and the cells Cell Gating keeps) and is not one of those scopes, so it is told directly;
+    # without it, the page beside Cell Gating in Split View went on drawing under the previous rule.
+    with swallow("Nanowells: follow the QC parameters"):
+        ctx.features.call("nanowell.follow_qc_params", ctx)
 
 
 def set_qc_params_with_progress(ctx, params: QCParams, *, on_done=None) -> None:

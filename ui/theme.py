@@ -112,32 +112,43 @@ class Colors:
     stale           = "#22D3EE"   # --stale : output present, archive missing
 
     # ── Run plate (Analyze's per-well run status map) ────────────────────
-    # The run plate paints seven states at once and has to stay readable for
-    # someone with red/green colour vision deficiency. Built from the general
-    # status tokens above, it was not: under a deuteranopia simulation (Machado
-    # 2009) "complete" green and "failed" red landed at ΔE76 ≈ 9 (7 on the grey
-    # theme) — the same olive — and under protanopia "uploaded" and "on server"
-    # fell to ≈ 8. These seven are chosen so that every pair stays at ΔE ≥ 34
-    # under normal vision, deuteranopia and protanopia (≥ 20 under the rarer
-    # tritanopia), mostly by separating the states in *lightness* rather than
-    # hue alone: failed is a dark red against a light green, partial a
-    # near-white, uploaded a pale lavender against a deep "on server" blue.
-    # They keep the plate's meanings — green is done, amber is working, blue is
-    # "over there", red is failed — and its one-colour-per-state contract.
+    # The run plate paints its states at once and has to stay readable for
+    # someone with red/green colour vision deficiency, the commonest kind.
+    # Under it, red and green collapse onto one yellow-brown axis and what is
+    # left to tell colours apart is lightness and blue-against-yellow. Two
+    # earlier palettes failed that: "complete" green and "failed" red read as
+    # one olive, and later a light green "complete" and an amber "processing"
+    # at the same lightness were reported as hard to tell apart (CIEDE2000
+    # ≈ 4 between a complete well and a just-started processing dial).
+    #
+    # This palette puts the two states a running plate shows most on opposite
+    # ends of the axis that survives: "complete" is a forest green that reads
+    # as a dark khaki, and "processing" a plum that reads as a slate blue.
+    # Every pair of states — including the pale "remaining" tint of each dial
+    # (a well just started) — stays at CIEDE2000 ≥ 13 under normal vision and
+    # under deuteranopia and protanopia at full and partial severity (Machado
+    # et al. 2009). The four coloured states sit at a matched, moderate
+    # chroma, so no one of them shouts; "on server" keeps blue.
+    #
+    # Problems are not a colour. A failed well and a partial or unfinished one
+    # are both white (``run_problem``, the one fill no other state takes, and
+    # the same under every vision) and say which problem with their glyph: a
+    # red ✕ (``run_failed_mark``) or a dark "!". A red fill for "failed" was
+    # the hue a red/green deficient viewer loses, set apart only by its ✕.
     #
     # They are plate-local on purpose, and not re-pointed status tokens:
     # ``success`` / ``danger`` / ``stale`` colour text, badges and other plates
-    # across the app (``stale`` means "output here, archive missing" on
-    # Review's Home plate), and re-tuning those would repaint all of them. No
-    # theme overrides these: the separation is measured against the dark panel
-    # both shipped themes use, and it is the property being protected.
-    run_pending     = "#5F6B7C"   # grouped, queued for processing
-    run_uploaded    = "#C4B5FD"   # on the remote, waiting its turn
-    run_processing  = "#F5B700"   # computing right now (also re-anchoring)
-    run_on_server   = "#3B6FE8"   # computed (on the server, or locally before threshold)
-    run_done        = "#4ADE80"   # downloaded (remote) / thresholded (local)
-    run_failed      = "#B91C1C"   # errored — drawn with the ✕ glyph as well
-    run_partial     = "#F5F5F5"   # finished short of its input — drawn with "!"
+    # across the app, and re-tuning those would repaint all of them. No theme
+    # overrides these: the separation is measured against the dark panel both
+    # shipped themes use, and every one is at least 3:1 against it.
+    # tests/test_run_plate_is_colour_blind_safe.py holds all of that.
+    run_pending     = "#918A83"   # grouped, queued for processing (warm grey)
+    run_uploaded    = "#F0C74C"   # on the remote, waiting its turn (gold)
+    run_processing  = "#B24DA1"   # computing right now, also re-anchoring (plum)
+    run_on_server   = "#0095FF"   # computed: on the server, or locally before threshold (azure)
+    run_done        = "#00854D"   # downloaded (remote) / thresholded (local) (forest green)
+    run_problem     = "#F5F5F5"   # failed, partial or unfinished — the glyph says which
+    run_failed_mark = "#DC2626"   # the ✕ on a failed well
 
     # ── Data-viz / trace colors (categorical, keyed to wells) ────────────
     # The 96-colour ``WELL_COLORS_TUPLE`` is the canonical palette and is

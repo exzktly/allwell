@@ -201,6 +201,7 @@ class _PlateGrid(QWidget):
         self._single_select = False
         self._tooltip_provider = None          # Callable[[str], str] | None
         self._markers: dict[tuple[int, int], str] = {}  # per-well glyph overlay
+        self._marker_inks: dict[tuple[int, int], str] = {}  # a glyph's own ink, when the host names one
         self._colored_wells_lit = False        # paint colour-override wells raised/lit
         # Draw a rim on every selected well, on top of whatever the fill says.
         # Off by default: on a plate whose fill is free, selection already shows
@@ -593,16 +594,24 @@ class _PlateGrid(QWidget):
     def set_tooltip_provider(self, provider) -> None:
         self._tooltip_provider = provider
 
-    def set_well_marker(self, well_id, glyph) -> None:
+    def set_well_marker(self, well_id, glyph, ink: str | None = None) -> None:
         """Overlay a short glyph (e.g. a status icon) centred on a well, or
-        clear it with ``glyph=None``."""
+        clear it with ``glyph=None``. *ink* is the glyph's own colour; without
+        one it takes the ink :func:`marker_ink` picks for the well's fill. A
+        host names one when the glyph's colour says something, as the run
+        plate's red ✕ on a white "problem" well does."""
         parsed = _parse_well_id(well_id)
         if parsed is None:
             return
         if glyph:
             self._markers[parsed] = str(glyph)
+            if ink:
+                self._marker_inks[parsed] = str(ink)
+            else:
+                self._marker_inks.pop(parsed, None)
         else:
             self._markers.pop(parsed, None)
+            self._marker_inks.pop(parsed, None)
         self.update()
 
     def clear_well_fractions(self) -> None:
@@ -613,6 +622,7 @@ class _PlateGrid(QWidget):
     def clear_well_markers(self) -> None:
         if self._markers:
             self._markers.clear()
+            self._marker_inks.clear()
             self.update()
 
     def selection_rim(self) -> bool:
@@ -1252,7 +1262,7 @@ class _PlateGrid(QWidget):
             p.setFont(f)
             # Ink chosen from the fill it will sit on, not from whether the
             # well happens to carry a group colour — see ``marker_ink``.
-            p.setPen(QColor(marker_ink(
+            p.setPen(QColor(self._marker_inks.get(key) or marker_ink(
                 group_color.name() if group_color is not None else None)))
             p.drawText(wr, int(Qt.AlignCenter), glyph)
             p.setFont(self.font())
@@ -1806,9 +1816,10 @@ class WellPlateSelector(QWidget):
     def setWellState(self, well_id, state: str) -> None:
         self._grid.set_well_state(well_id, state)
 
-    def setWellMarker(self, well_id, glyph) -> None:
-        """Overlay a glyph (e.g. a status icon) on a well; ``None`` clears it."""
-        self._grid.set_well_marker(well_id, glyph)
+    def setWellMarker(self, well_id, glyph, ink: str | None = None) -> None:
+        """Overlay a glyph (e.g. a status icon) on a well; ``None`` clears it.
+        *ink* gives the glyph its own colour (see ``set_well_marker``)."""
+        self._grid.set_well_marker(well_id, glyph, ink)
 
     def clearWellMarkers(self) -> None:
         self._grid.clear_well_markers()

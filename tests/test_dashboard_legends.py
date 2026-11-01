@@ -25,6 +25,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from ui import theme  # noqa: E402
+from widgets.well_plate_selector import marker_ink  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -38,8 +39,9 @@ def _dot_color(label: QLabel) -> str | None:
     return m.group(1).strip() if m else None
 
 
-def _legend(dash) -> tuple[str, list[tuple[str, str]]]:
-    """The heading and the (colour, label) rows a dashboard's legend draws."""
+def _legend(dash) -> tuple[str, list[tuple]]:
+    """The heading and the rows a dashboard's legend draws: ``(colour, label)``, or ``(colour, label, glyph, ink)``
+    for a row whose swatch carries a glyph — read back off the drawn widgets."""
     lay = dash._legend_lay
     head, rows = "", []
     for i in range(lay.count()):
@@ -49,9 +51,14 @@ def _legend(dash) -> tuple[str, list[tuple[str, str]]]:
         if isinstance(w, QLabel):
             head = w.text()
             continue
-        dots = [_dot_color(k) for k in w.findChildren(QLabel)]
-        texts = [k.text() for k in w.findChildren(QLabel) if k.text()]
-        rows.append((next((d for d in dots if d), ""), texts[0] if texts else ""))
+        labels = w.findChildren(QLabel)
+        swatch = next((k for k in labels if _dot_color(k)), None)
+        texts = [k.text() for k in labels if k is not swatch and k.text()]
+        row = (_dot_color(swatch) if swatch else "", texts[0] if texts else "")
+        if swatch is not None and swatch.text():
+            ink = re.search(r"(?<![-\w])color:\s*([^;]+);", swatch.styleSheet())
+            row += (swatch.text(), ink.group(1).strip() if ink else None)
+        rows.append(row)
     return head, rows
 
 
@@ -109,8 +116,8 @@ def test_run_dashboard_legend_is_local_by_default(qapp):
         (C.run_processing, "processing"),
         (C.run_on_server, "processed"),
         (C.run_done, "complete"),
-        (C.run_partial, "partial / unfinished"),
-        (C.run_failed, "failed"),
+        (C.run_problem, "partial / unfinished", "!", marker_ink(C.run_problem)),
+        (C.run_problem, "failed", "✕", C.run_failed_mark),
     ])
 
 
@@ -129,21 +136,26 @@ def test_run_dashboard_legend_names_the_transfer_stages_when_remote(qapp):
         (C.run_processing, "processing"),
         (C.run_on_server, "on server"),
         (C.run_done, "downloaded"),
-        (C.run_partial, "partial / unfinished"),
-        (C.run_failed, "failed"),
+        (C.run_problem, "partial / unfinished", "!", marker_ink(C.run_problem)),
+        (C.run_problem, "failed", "✕", C.run_failed_mark),
     ])
 
 
 def test_the_run_plate_paints_no_two_states_alike(qapp):
-    """The partial colour is one no other run-plate state paints: a partial well
-    drawn in a finished well's colour is the defect it exists to end (tracker B3)."""
+    """No two run-plate states look alike in the legend. A partial well drawn in a finished well's colour is the
+    defect this exists to end (tracker B3). Failed and partial share the white problem fill on purpose and are told
+    apart by their glyphs, so what must be unique is the fill and glyph together, and the problem fill is one no
+    other state paints."""
     from widgets.run_dashboard import RunDashboard
 
     for remote in (False, True):
         dash = RunDashboard()
         dash.reset(remote=remote)
-        colours = [colour for colour, _label in _legend(dash)[1]]
-        assert len(set(colours)) == len(colours), colours
+        rows = _legend(dash)[1]
+        looks = [(row[0], row[2] if len(row) > 2 else None) for row in rows]
+        assert len(set(looks)) == len(looks), looks
+        glyphless = [colour for colour, glyph in looks if glyph is None]
+        assert C.run_problem not in glyphless, rows
 
 
 def test_a_rebuild_does_not_stack_a_second_copy(qapp):

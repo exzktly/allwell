@@ -2252,12 +2252,14 @@ folder in use is the app staying connected.
   **Suspend** and **Stop** take its place; they are not shown while nothing is
   running. The log streams the pipeline's stdout/stderr live.
 - The **plate map** above the log colours each well by the stage it has reached.
-  The colours are grey (pending), pale lavender (uploaded, remote runs only),
-  amber (processing), blue (processed, or on the server for a remote run),
-  green (complete or downloaded), dark red with a `✕` (failed) and near-white
-  with a `!` (partial or unfinished). They are chosen to stay distinguishable
-  with red/green colour blindness: complete and failed differ in lightness as
-  well as hue, so they never read as the same colour.
+  The colours are warm grey (pending), gold (uploaded, remote runs only), plum
+  (processing), blue (processed, or on the server for a remote run) and forest
+  green (complete or downloaded). A well with a problem is white and says which
+  problem with its mark: a red `✕` (failed) or a dark `!` (partial or
+  unfinished). The colours are chosen to stay distinguishable with red/green
+  colour blindness — complete and processing read as a dark khaki and a slate
+  blue — including a well that has only just started, whose dial is still
+  mostly a pale tint of its colour.
 - The **Stages** list beside the plate shows each stage's progress as a bar and
   a count (`12/40`), with the running stage in bold. It has no coloured dots, so
   the only coloured things on the progress view are the wells and their legend.

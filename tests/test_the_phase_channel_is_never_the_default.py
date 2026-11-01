@@ -1,4 +1,4 @@
-"""A run that lists its phase channel first must not open its plots on it (NANOWELL_OBSERVATIONS_TRACKER #1).
+"""A run that lists its phase channel first must not open its plots on it (ARCHITECTURE §6.2l).
 
 A nanowell run writes ``fluor_tokens: ["PHASE", "GFP"]``, and the channel list used to take the first token as the
 default, so every plot opened on "PHASE Mean Intensity" — the brightness of a brightfield image, titled as if it

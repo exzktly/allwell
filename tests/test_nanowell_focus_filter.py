@@ -133,9 +133,94 @@ def test_the_cell_gating_panel_shows_the_nanowell_row_and_hides_the_per_cell_one
     w = ctx.widgets.get("_qc_gate_widgets")
     assert w["nanowell_focus_row"].isVisible() and not w["focus_row"].isVisible()
     assert w["exclude_soft_nanowells"].isChecked()
-    assert w["nanowell_focus_status"].text() == (
-        "1 nanowell-timepoint (1 nanowell) out of focus across the plate — excluded, 1 cell. "
-        "Kept unchecked: 1 with no rim focus (rim not fitted).")
+    expected = ("1 nanowell-timepoint (1 nanowell) out of focus across the plate — excluded, 1 cell. "
+                "Kept unchecked: 1 with no rim focus (rim not fitted).")
+    qtbot.waitUntil(lambda: w["nanowell_focus_status"].text() == expected, timeout=10000)
+
+
+def test_refreshing_the_panel_counts_off_the_gui_thread(qtbot, loaded, monkeypatch):
+    """The panel is refreshed inside the dataset load, and its sentence judges every well's site table and reads
+    every well's cells. Counted on the GUI thread, that froze a large nanowell plate's load for most of a minute
+    (the reported regression). The refresh must return at once saying it is counting, and the count must run on
+    another thread and then land on the label."""
+    import threading
+
+    from PySide6.QtWidgets import QWidget
+
+    from review.features.qc import nanowell_focus_view
+    from review.features.qc.tab_view import build_qc_gate_controls
+
+    ctx, _window = loaded
+    host = QWidget()
+    qtbot.addWidget(host)
+    build_qc_gate_controls(ctx, host)
+    w = ctx.widgets.get("_qc_gate_widgets")
+    qtbot.waitUntil(lambda: w["nanowell_focus_status"].text() != nanowell_focus_view.COUNTING, timeout=10000)
+
+    gate, threads = threading.Event(), []
+
+    def slow_status(_ctx):
+        threads.append(threading.get_ident())
+        gate.wait(10)
+        return ("counted on the worker", False)
+
+    monkeypatch.setattr(nanowell_focus_view, "nanowell_focus_status", slow_status)
+    nanowell_focus_view.refresh(ctx, w)
+    assert w["nanowell_focus_status"].text() == nanowell_focus_view.COUNTING
+    gate.set()
+    qtbot.waitUntil(lambda: w["nanowell_focus_status"].text() == "counted on the worker", timeout=10000)
+    assert threads and threads[0] != threading.get_ident()
+
+
+def test_a_newer_refresh_is_not_overwritten_by_an_older_count(qtbot, loaded, monkeypatch):
+    """Two refreshes in a row (the load refreshes the panel more than once): the first count finishing last must
+    not replace the second's sentence."""
+    import threading
+
+    from PySide6.QtWidgets import QLabel
+
+    from review.features.qc import nanowell_focus_view
+
+    ctx, _window = loaded
+    label = QLabel()
+    qtbot.addWidget(label)
+    first_started, first_may_finish, answers = threading.Event(), threading.Event(), iter(["first", "second"])
+
+    def status(_ctx):
+        answer = next(answers)
+        if answer == "first":
+            first_started.set()
+            first_may_finish.wait(10)
+        return (answer, False)
+
+    monkeypatch.setattr(nanowell_focus_view, "nanowell_focus_status", status)
+    nanowell_focus_view.refresh(ctx, {"nanowell_focus_status": label})
+    assert first_started.wait(10)                    # the first count is running before the second is asked for
+    nanowell_focus_view.refresh(ctx, {"nanowell_focus_status": label})
+    qtbot.waitUntil(lambda: label.text() == "second", timeout=10000)
+    first_may_finish.set()
+    qtbot.wait(300)                                  # let the first count's answer arrive, and be dropped
+    assert label.text() == "second"
+
+
+def test_each_site_table_is_judged_once_per_rule_however_often_the_layer_is_projected(loaded, monkeypatch):
+    """The projector runs on every well at every load, every QC recompute and every plate-wide narrow read.
+    Re-judging the whole site table each time was much of the slow load; it is judged once per file version and
+    rule, and again only when the rule changes."""
+    from review.data import nanowell_focus_gate as gate
+    from review.domain import nanowell_rim_focus as rfc
+
+    ctx, _window = loaded
+    gate._judged_site_table.cache_clear()
+    calls = []
+    real = gate.flag_sites
+    monkeypatch.setattr(gate, "flag_sites", lambda *a, **k: calls.append(a[1]) or real(*a, **k))
+    for _ in range(3):
+        gate.apply_nanowell_focus_to_cache(ctx)
+        gate.plate_tally(ctx, rfc.RimFocusRule(True, ctx.state.qc.params.nanowell_focus_fraction))
+    assert calls == ["A01"]
+    gate.plate_tally(ctx, rfc.RimFocusRule(True, 0.5))
+    assert calls == ["A01", "A01"]
 
 
 def test_a_qc_section_saved_before_the_switch_existed_opens_with_it_on(loaded):

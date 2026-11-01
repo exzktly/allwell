@@ -1,5 +1,4 @@
-"""A nanowell dataset in a build without the Nanowells feature, and in one with it (NANOWELL_OBSERVATIONS_TRACKER
-#20, #2; amendment B).
+"""A nanowell dataset in a build without the Nanowells feature, and in one with it (ARCHITECTURE §6.2l; amendment B).
 
 Removing the Nanowells feature removes nanowell plotting with it: no Observations toggle, no nanowell overlays, and
 cell plots that say the nanowell views are not in this build. The app must still boot, load a nanowell dataset and

@@ -1,4 +1,4 @@
-"""Multivariate can take each cell's own nanowell's metrics as features (NANOWELL_OBSERVATIONS_TRACKER #10).
+"""Multivariate can take each cell's own nanowell's metrics as features (ARCHITECTURE §6.2l).
 
 On a nanowell plate the feature picker gains a **Nanowell** family; a cell's value is its own nanowell's at its
 timepoint, joined on its address. So a PCA or correlation over GFP and the nanowell's count, confluence and

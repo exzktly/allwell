@@ -322,7 +322,7 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
             )
         return
     # No label map is not "nothing to show": the image is drawn without outlines and the shortfall is said
-    # (NANOWELL_OBSERVATIONS_TRACKER #4). A nanowell run never writes one.
+    # (ARCHITECTURE §6.2l). A nanowell run never writes one.
     no_mask = mask_ref is None
     state.review_image.is_tif = str(getattr(fluor_ref, "name", "")).lower().endswith((".tif", ".tiff"))
     if not _NP_AVAILABLE:

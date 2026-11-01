@@ -44,8 +44,8 @@ _STATES = {
     "processing": ("run_processing", None),
     "complete": ("run_on_server", None),
     "fetched": ("run_done", None),
-    "partial": ("run_partial", "!"),
-    "failed": ("run_failed", "✕"),
+    "partial": ("run_problem", "!"),
+    "failed": ("run_problem", "✕"),
     "pending": (None, None),
 }
 
@@ -242,7 +242,7 @@ def tab(qtbot):
     t.colours, t.glyphs = [], []
     real_colour, real_glyph = plate.setWellColor, plate.setWellMarker
     plate.setWellColor = lambda w, c: (t.colours.append((w, c)), real_colour(w, c))
-    plate.setWellMarker = lambda w, g: (t.glyphs.append((w, g)), real_glyph(w, g))
+    plate.setWellMarker = lambda w, g, ink=None: (t.glyphs.append((w, g)), real_glyph(w, g, ink))
     yield t
     t._alive = False
 
@@ -320,7 +320,7 @@ def test_a_well_still_computing_when_the_run_ends_is_unfinished_not_processing(t
     assert (_token(_last(tab.colours)), _last(tab.glyphs)) == ("run_processing", None)
     tab._log_q.put(("finished", None))      # the run's last event, through the tab's own drain
     tab._poll_log()
-    assert (_token(_last(tab.colours)), _last(tab.glyphs)) == ("run_partial", "!")
+    assert (_token(_last(tab.colours)), _last(tab.glyphs)) == ("run_problem", "!")
     assert tab._dashboard._well_tooltip(WELL) == (
         f"{WELL}: unfinished — the run ended before this well finished; it has no complete output "
         "(FOV 3/12 reached)")

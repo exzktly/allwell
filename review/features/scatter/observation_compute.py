@@ -1,4 +1,4 @@
-"""Scatter of nanowell observations: any nanowell metric against any other (NANOWELL_OBSERVATIONS_TRACKER #9).
+"""Scatter of nanowell observations: any nanowell metric against any other (ARCHITECTURE §6.2l).
 
 With the band's Observations set to Nanowells, a point is one nanowell at one timepoint — or, under
 **Points: per well**, one well's median over its nanowells at one timepoint. The rows are the Nanowells feature's

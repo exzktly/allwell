@@ -1,4 +1,4 @@
-"""Line Graphs under **Observations: Nanowells** (NANOWELL_OBSERVATIONS_TRACKER #14).
+"""Line Graphs under **Observations: Nanowells** (ARCHITECTURE §6.2l).
 
 Four panels, as for cells: the band's nanowell metric over time — each member's mean over its wells of each well's
 median over its nanowells, with a ``± SEM over wells`` band when it has two or more wells; the occupied share (the

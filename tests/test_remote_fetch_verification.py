@@ -21,11 +21,12 @@ from __future__ import annotations
 
 import gzip
 import zipfile
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from services import remote_fetch
+from services import remote_fetch, remote_storage
 from services.remote_config import RemoteHost
 from services.remote_runner import (
     LocalInputMode,
@@ -107,12 +108,36 @@ def test_verification_retries_a_missing_well_and_passes_once_it_lands(
         return {"A01"}
 
     monkeypatch.setattr(FetchedOutputVerifier, "_retry_missing_wells", fake_retry)
+    marked: list[str] = []
+    monkeypatch.setattr(remote_storage, "mark_fetched", lambda cache, r, log: marked.append(r.run_id))
 
     ok = runner.verify_and_cleanup(ok=True, cleanup_mode="run", log_fn=lambda _m: None)
 
     assert retried == [["missing CSV for A01"]]
     assert ok is True
     assert [c for c in rm_calls if c and c[0] == "rm"], "cleanup did not run"
+    assert marked == [run.run_id], "a verified run is marked downloaded, so the storage expiry may consider it"
+
+
+@pytest.mark.parametrize("passed, suspended, dry_run, expected", [
+    (True, False, False, True),
+    (False, False, False, False),       # verification failed: the results are not home
+    (True, True, False, False),         # suspended: its folder holds the work its resume continues
+    (True, False, True, False),         # a dry run changes nothing on the remote
+])
+def test_only_a_verified_finished_run_is_marked_downloaded(host, tmp_path, monkeypatch,
+                                                          passed, suspended, dry_run, expected):
+    """``remote_storage`` removes a run folder automatically only once it carries
+    the marker, so writing it early would let the sweep take unfetched results."""
+    runner = RemoteRunner(host)
+    runner._run = _run(tmp_path)
+    monkeypatch.setattr(FetchedOutputVerifier, "verify",
+                        lambda self, ok, *, log, suspended=False: SimpleNamespace(passed=passed))
+    marked: list[str] = []
+    monkeypatch.setattr(remote_storage, "mark_fetched", lambda cache, r, log: marked.append(r.run_id))
+    runner.verify_and_cleanup(ok=True, cleanup_mode="none", dry_run=dry_run, suspended=suspended,
+                              log_fn=lambda _m: None)
+    assert bool(marked) is expected
 
 
 def _fetcher(host, run):

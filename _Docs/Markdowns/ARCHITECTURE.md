@@ -11149,7 +11149,8 @@ before the run rewrites its grid record; `_log_reused_registration` logs one lin
 remote run cannot read either folder (its output folder on the host is a fresh one), so
 `services.remote_registration.send_registration`, called once the run's address is fixed (`RemoteRunner`'s single-shot
 preparation and `_BatchedRemoteProcess.__init__`), uploads each sent well's grid record from the first local folder
-holding one — the Reuse registration folder, then the local output folder — into `<run_dir>/reg/nanowells/` and
+holding one — the Reuse registration folder, then the local output folder — and its cell masks (`<well>_masks.npz`,
+chosen the same way) into `<run_dir>/reg/nanowells/` and
 records `_RemoteRun.registration_dir`; `RemoteRunner._build_remote_argv` drops the local folder's flag and appends
 `--nanowell_registration_from <run_dir>/reg` instead. Nothing is trusted for having been sent: the host applies the
 same key, and a failed upload costs only the reuse. Grid records written before the key existed carry no `registration` block and are never reused.
@@ -11506,7 +11507,8 @@ recorded and therefore no reason to run again.
 **The re-run does not segment again.** Every reuse above is keyed on a timepoint's *rows*, which a click changes,
 so a re-run after one recomputes the well — but a click decides which nanowell is which, not where a crop is cut or
 what it holds, so the segmenter is given the same pixels as before. `pipeline/nanowell_masks.py` keeps what it
-returned: `MaskStore` (one per well, built in `process_well_zip`, read from `prior_dir or output_dir` and written to
+returned: `MaskStore` (one per well, built in `process_well_zip`, read from `prior_dir or output_dir` — or, when that
+holds none, from the `--nanowell_registration_from` folder (`nanowell_task._masks_source`) — and written to
 `nanowells/<well>_masks.npz` when the well ends, after a failure too) wraps the segmenter in `_prepare_timepoint`
 (`MaskStore.wrap`, before `nanowell_parallel.serialised` wraps it in turn), and a call is answered from the store
 when `mask_key` matches: the input's bytes, dtype and shape, `lowhigh`, `max_size_fraction`, and the segmenter's
@@ -11524,9 +11526,11 @@ drops the rest. The run log names, per well, how many segmenter inputs were answ
 plate (`tests/test_nanowell_mask_reuse_run.py`): with the click, every crop is byte-identical to the run without
 it, under the default segmenter input and under `raw`/`tile`, so the re-run makes no segmenter call and writes the
 same rows as a re-run with no store at all. A rim that moves a lattice step with the click would change that ring's
-crops, and under `levelled`/`nanowells` scaling the range taken from them; those crops are segmented again. The file
-is not in `remote_fetch_nanowells`' list, so a remote run keeps its masks on the host, and no dataset tool carries
-it: a missing or stale file costs time, never a wrong mask. Pinned by `tests/test_nanowell_masks.py` and
+crops, and under `levelled`/`nanowells` scaling the range taken from them; those crops are segmented again. A remote
+run's masks come back best-effort (`remote_fetch_nanowells._fetch_masks`, not counted against the well's tables),
+and a remote re-run is sent them with the registration (`services.remote_registration`, into the folder its
+`--nanowell_registration_from` names). No dataset tool carries the file: a missing or stale one costs time, never a
+wrong mask. Pinned by `tests/test_nanowell_masks.py` and
 `test_reuse_is_keyed_completely.py` (`nanowell_masks.mask_key`, every key mutated alone).
 Subset, Merge Plates and Concatenate carry it through `datasets/core/nanowell_anchors_carry.py`: Subset keeps
 the anchors of what it keeps, Merge Plates renames dataset 2's wells by the remap, Concatenate shifts dataset

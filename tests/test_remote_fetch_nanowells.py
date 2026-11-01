@@ -40,7 +40,8 @@ def test_the_tables_and_the_template_are_pulled_by_exact_name_into_the_nanowells
                                   "A01_identity.json", "A010.csv", "A010_segmenter_input.png", "A010_identity.json"})
     assert fetch_nanowell_tables(fetcher, "A01") == 5
     names = ["A01.csv", "A01_grid.json", "A01_template.npz", "A01_segmenter_input.png", "A01_identity.json"]
-    assert fetcher.listed == [f"gpu:/scratch/out/nanowells/{n}" for n in names]
+    # The cell masks are listed too (``_fetch_masks``), and not counted: this host has none, as an older run's has not.
+    assert fetcher.listed == [f"gpu:/scratch/out/nanowells/{n}" for n in [*names, "A01_masks.npz"]]
     assert [f for f, _ in fetcher.pulled] == [f"/scratch/out/nanowells/{n}" for n in names]
     assert {d for _, d in fetcher.pulled} == {str(tmp_path / "nanowells")} and (tmp_path / "nanowells").is_dir()
 
@@ -115,7 +116,8 @@ def test_fetching_a_well_through_the_fetcher_brings_its_tables(tmp_path, monkeyp
     finally:
         fetcher.cancel()
     assert sorted(p.name for p in (out / "nanowells").iterdir()) == [
-        "A01.csv", "A01_grid.json", "A01_identity.json", "A01_segmenter_input.png", "A01_template.npz"]
+        "A01.csv", "A01_grid.json", "A01_identity.json", "A01_masks.npz", "A01_segmenter_input.png",
+        "A01_template.npz"]                   # the masks too: a later run, here or sent back, segments only what changed
     assert deleted == []                      # the re-anchoring may re-run A01 from what is on the remote (X2)
 
 

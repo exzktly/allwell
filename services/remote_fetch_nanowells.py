@@ -41,6 +41,9 @@ import json
 from pathlib import Path
 
 NANOWELL_DIR = "nanowells"
+#: ``pipeline.nanowell_masks.MASKS_SUFFIX``, restated so this module stays free of the pipeline's numeric imports
+#: (``tests/test_a_remote_rerun_reuses_registration.py`` holds the two equal).
+MASKS_SUFFIX = "_masks.npz"
 
 
 def fetch_nanowell_tables(fetcher, well: str) -> int | None:
@@ -72,7 +75,20 @@ def fetch_nanowell_tables(fetcher, well: str) -> int | None:
             landed = fetcher._pull_listed(host, files, dest)
             pulled += landed
             whole = whole and landed == len(files)
+    _fetch_masks(fetcher, well, dest)
     return pulled if whole else None
+
+
+def _fetch_masks(fetcher, well: str, dest: Path) -> None:
+    """Pull ``<well>_masks.npz`` too (``pipeline.nanowell_masks``): the cells the segmenter found, keyed on its input,
+    which a later run of the well — here, or sent back to a host (``services.remote_registration``) — answers from
+    instead of segmenting again. Best-effort: without it a later run segments again, which is slower and no less
+    right, so a listing or pull that fails does not count against the well's tables."""
+    host, files, _bytes = fetcher._list_remote_glob(
+        f"{fetcher.host.ssh_alias}:{fetcher.run.remote_output_dir}/{NANOWELL_DIR}/{well}{MASKS_SUFFIX}")
+    if files:
+        dest.mkdir(parents=True, exist_ok=True)
+        fetcher._pull_listed(host, files, dest)
 
 
 def well_files_to_delete(run, well: str) -> list[str]:

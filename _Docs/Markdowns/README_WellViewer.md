@@ -458,7 +458,9 @@ In `nanowells/`, per well:
 - `<well>_masks.npz`: the cell masks Cellpose returned, kept so a re-run of the well — after an anchor is set, or
   with settings that do not change what Cellpose is shown — segments only what it has not seen. Each is taken back
   only for the exact pixels, scaling and model it was made from; anything else is segmented again. Deleting the file
-  costs nothing but time. A remote run leaves it on the cluster: it is not fetched back. The per-cell Scatter selects cells by `timepoint_hours`, so a nanowell plate
+  costs nothing but time. A remote run fetches it back with the well's tables, and a remote re-run is sent it (with
+  the well's registration, from the Reuse registration folder or else the output folder), so a well re-run on a
+  host is not segmented again either. The per-cell Scatter selects cells by `timepoint_hours`, so a nanowell plate
 analysed before the per-cell CSV carried that column shows no points there (the line and bar plots are
 unaffected); re-analyse it with **Redo it** (`--force`) to rewrite its tables.
 

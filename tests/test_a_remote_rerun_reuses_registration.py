@@ -41,8 +41,10 @@ def test_each_sent_well_takes_the_first_local_folder_that_has_its_record(tmp_pat
     _grid(out, "A01")                                   # read after the Reuse registration folder, as the pipeline does
     a02_out = _grid(out, "A02")
     _grid(out, "A03")                                   # not sent by this run
-    assert local_grids(_argv(out, reg), ["A02", "A01", "B01"]) == [a01_reg, a02_out]
-    assert local_grids(_argv(out), ["A01"]) == [out / "nanowells" / "A01_grid.json"]
+    a01_masks = out / "nanowells" / "A01_masks.npz"     # chosen on its own: the earlier folder has none
+    a01_masks.write_bytes(b"npz")
+    assert local_grids(_argv(out, reg), ["A02", "A01", "B01"]) == [a01_reg, a01_masks, a02_out]
+    assert local_grids(_argv(out), ["A01"]) == [out / "nanowells" / "A01_grid.json", a01_masks]
     assert local_grids(_argv(out, nanowell=False), ["A01"]) == []
 
 
@@ -67,7 +69,7 @@ def test_the_records_go_to_the_run_s_own_folder_and_a_failed_upload_names_none(t
     assert cache.ssh == [["mkdir", "-p", "~/.st/runs/run-x/reg/nanowells"]]
     assert cache.sent[0][:2] == ([grid], "~/.st/runs/run-x/reg/nanowells")
     assert "log_fn" not in cache.sent[0][2], "a grid record logged as an upload reads as a well to the progress view"
-    assert "stored registration sent for 1 well(s)" in "".join(logged)
+    assert "stored registration sent for 1 well(s), cell masks for 0" in "".join(logged)
     failed = _Cache(rc=23)
     assert send_registration(failed, "/r", _argv(out), ["A01"], logged.append) == ""
     assert "could not be sent (rsync rc=23)" in logged[-1]
@@ -129,3 +131,30 @@ def test_both_remote_run_paths_send_the_records():
 
     assert "_prepare_run" in callers("services/remote_runner.py", "send_registration")
     assert "__init__" in callers("services/remote_process.py", "send_registration")
+
+
+def test_the_restated_names_match_the_pipeline_s():
+    from pipeline.nanowell_masks import MASKS_SUFFIX
+    from pipeline.nanowell_task import NANOWELL_DIR
+    from services import remote_fetch_nanowells as rfn
+
+    assert (rfn.MASKS_SUFFIX, rfn.NANOWELL_DIR) == (MASKS_SUFFIX, NANOWELL_DIR)
+
+
+def test_a_fetched_well_brings_its_masks_back_without_counting_them_against_its_tables(tmp_path):
+    """The masks a host made come back for the next run; a host without them (an older run) loses nothing."""
+    from services.remote_fetch_nanowells import fetch_nanowell_tables
+
+    listed: list[str] = []
+
+    def list_glob(pattern):
+        listed.append(pattern.rsplit("/", 1)[-1])
+        name = pattern.rsplit("/", 1)[-1]
+        return ("h", [] if name.endswith("_masks.npz") else [name], 1)
+
+    fetcher = types.SimpleNamespace(
+        run=types.SimpleNamespace(nanowell=True, local_output_dir=tmp_path, remote_output_dir="/r/out"),
+        host=types.SimpleNamespace(ssh_alias="h"), _list_remote_glob=list_glob,
+        _pull_listed=lambda host, files, dest: len(files))
+    assert fetch_nanowell_tables(fetcher, "A01") == 5
+    assert "A01_masks.npz" in listed

@@ -267,6 +267,8 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_failed_remote_listing_keeps_the_data.py": "A remote command that failed is never read as nothing there: the fetch keeps the well, verify fails closed",
     "test_a_failing_heartbeat_is_reported.py": "A heartbeat that is not reaching the host says so, before the host acts on the silence",
     "test_a_slow_heartbeat_is_measured_and_tolerated.py": "A heartbeat on a slow shared filesystem is measured, given time to land, and kept out of the busy folder",
+    "test_a_stuck_heartbeat_says_where_it_is_stuck.py": "A beat that never returns, and an app that was not running, each leave a line in the run log",
+    "test_a_control_command_returns_at_its_timeout_on_windows.py": "A timed-out ssh control command returns at its timeout on Windows, though a process it started holds its pipes",
     "test_a_run_stream_has_its_own_connection.py": "A run's output stream rides a connection of its own, never the shared master",
     "test_a_forced_well_keeps_the_plate_s_reuse.py": "Forcing one well redoes it; the run's address and re-attach stay the plate's",
     "test_a_launch_runs_one_copy_of_the_job.py": "A launch runs one copy of the job, however many tasks the environment asks srun for",

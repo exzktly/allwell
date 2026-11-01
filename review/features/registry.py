@@ -305,6 +305,12 @@ def _svc_nanowell_open_anchor():
     return open_for_anchor
 
 
+def _svc_nanowell_segmentation_overlay():
+    # Segmentation's points-and-rims overlay for a nanowell tile (nanowell/overlay_compute.py).
+    from review.features.nanowell.overlay_compute import nanowell_overlay
+    return nanowell_overlay
+
+
 def _svc_nanowell_observations():
     # The plot tools' nanowell observations (review/domain/observation.py); a build without this feature has none.
     from review.features.nanowell.observation_compute import nanowell_observations
@@ -1127,7 +1133,8 @@ def _features() -> list[FeatureDescriptor]:
             # while it is on screen (Split View) rather than only when it is next shown.
             services={"nanowell.open_anchor": _svc_nanowell_open_anchor,
                       "nanowell.follow_qc_params": _svc_nanowell_follow_qc_params,
-                      "observations.nanowell": _svc_nanowell_observations},
+                      "observations.nanowell": _svc_nanowell_observations,
+                      "segmentation.nanowell_overlay": _svc_nanowell_segmentation_overlay},
         ),
         # ── Images ────────────────────────────────────────────────────────
         FeatureDescriptor(

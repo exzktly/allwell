@@ -81,7 +81,12 @@ Recorded so a later reader can tell an area that was reviewed and cleared from o
 A second pass (rows R12–R20) reviewed in depth the pull requests the first had only read lightly: #1055, #1057,
 #1061, #1067, #1073, #1078, #1079 (its srun watchdog run, not only read), #1082, #1085, #1087, #1090, #1091, #1095,
 #1122–#1125, #1127, #1129, #1134, #1143, and #1138's transport, Slurm and identity commits. (#1126 was never merged.)
-Still given only a stat-level look: #1133, #1135, #1136 and #1137 (UI-only), and rows L9 and L10 of #1138.
+#1133, #1135, #1136 and #1137 were then read in depth too, with nothing to fix: the computing scrim follows the card
+and takes a theme token; nothing reads the stage rail's old four-part rows; the queue's ←/→/Esc keys were run and do
+nothing while the Queue group is hidden, and `CentreZoom` in `st.region` is never unpacked as a rectangle (zoom, pan
+and 1:1 read the drawn limits); the view tab bar falls back to the first view and is held quiet during a refresh. Two
+keyboard notes, not defects: Esc ends a walk even while a text field has focus, and → with the view tab bar focused
+steps the queue rather than the tab. Rows L9 and L10 of #1138 were not re-read.
 
 ## Lifetime
 

@@ -36,17 +36,21 @@ def _key(sites, colour):
     return [(e.label, e.colour, e.linestyle, e.hatch) for e in key_entries(sites, colour=colour, styles=_STATE_STYLE)]
 
 
-def test_by_state_each_state_in_view_is_keyed_once_in_its_own_colour_with_its_count():
+def test_by_state_each_state_in_view_is_keyed_once_in_its_own_colour_and_mark_with_its_count():
+    """Each state has its own entry in its colour and its mark (``_STATE_STYLE``): the states that share the muted
+    colour used to be one swatch naming them all, and drawn identically (``test_nanowell_array_marks_are_distinct``).
+    The fused measured nanowell is counted as fused only: a measured nanowell's mark is a plain ring, which the fused
+    dashed ring replaces."""
     from ui.nanowell_sites import FUSED_COLOUR, STATE_COLOURS, state_colour
 
-    # The fused nanowell is measured: it is drawn dashed in the fused colour, so it is keyed there, not as measured.
     sites = _sites(["empty", "measured", "measured", "clipped", "measured", "field_excluded", "out_of_focus",
                     "field_excluded"], fused=[4])
     assert _key(sites, "state") == [
         ("measured · 2", STATE_COLOURS["measured"], "solid", ""),
         ("empty · 1", STATE_COLOURS["empty"], "solid", ""),
-        ("clipped · 1", STATE_COLOURS["clipped"], "solid", ""),
-        ("field excluded / rim out of focus · 3", state_colour("field_excluded"), "solid", ""),
+        ("clipped · 1", STATE_COLOURS["clipped"], "dashed", ""),
+        ("field excluded · 2", state_colour("field_excluded"), "solid", "++"),
+        ("rim out of focus · 1", state_colour("out_of_focus"), "solid", "...."),
         ("fused: on a tile seam · 1", FUSED_COLOUR, "dashed", ""),
     ]
 

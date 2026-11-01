@@ -104,8 +104,17 @@ def test_the_nanowells_are_filled_by_the_metric_or_outlined_by_state_in_the_shar
     ctx = qc_page
     st = ctx.state.feature_slice("nanowell")
     states = list(st.metrics[(st.metrics["well"] == "A01") & (st.metrics["timepoint"] == "t_a")]["state"])
-    (outlines,) = st.drawn.ax.collections                              # Array QC: by state
-    assert [to_hex(c) for c in outlines.get_edgecolors()] == [to_hex(state_colour(s)) for s in states]
+    # Array QC: by state. Each state is drawn as its own collection, with its own mark (``_STATE_STYLE``), so each
+    # nanowell's ring colour is read back by where it is drawn.
+    sites = st.drawn.sites
+    ring = {}
+    for coll in st.drawn.ax.collections:
+        edges = coll.get_edgecolors()
+        for j, (x, y) in enumerate(coll.get_offsets()):
+            ring[(round(float(x), 3), round(float(y), 3))] = to_hex(edges[j % len(edges)])
+    drawn = [ring[(round(float(x), 3), round(float(y), 3))] for x, y in zip(sites.x, sites.y)]
+    assert drawn == [to_hex(state_colour(s)) for s in sites.state]
+    assert sorted(sites.state) == sorted(states)
     ctx.widgets.get("_nw_colour_metric").trigger()
     filled = [c for c in st.drawn.ax.collections if c.get_array() is not None]
     assert len(filled) == 1 and list(filled[0].get_array()) == [2.0, 4.0, 3.0, 1.0]     # the cell counts at t_a

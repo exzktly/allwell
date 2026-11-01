@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from review.features.nanowell._array_key import draw_key, key_entries, reason_tag, state_word
+from review.features.nanowell._array_key import KEY_COLUMNS, draw_key, key_entries, reason_tag, state_word
 from review.features.nanowell.array_compute import padded
 from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
@@ -1117,9 +1117,15 @@ def _state_text(row: dict) -> str:
 MAP_CMAP = "viridis"
 #: How a nanowell without a value is outlined, by its state (fill colouring by the metric).
 _STATE_STYLE = {"occluded": ("////", "solid"), "clipped": ("", "dashed"), "absent": ("", "dotted"),
-                "not_located": ("", "dotted"), "unaddressed": ("", "dotted"),
+                "not_located": ("", "dashdot"), "unaddressed": ("--", "dotted"),
                 "identity_contradicted": ("xx", "solid"), "field_excluded": ("++", "solid"),
                 "out_of_focus": ("....", "solid")}
+#: The height of one row of the Array view's key, as a share of the figure: the axes give up one per row past the first.
+_KEY_ROW = 0.035
+#: The rule ``_STATE_STYLE`` keeps: every state a nanowell can have without a value draws a mark no other state
+#: draws, under either colouring (filled by the metric, it is the mark alone in grey; outlined by state, the mark in
+#: the state's colour), so each cause of a nanowell's exclusion can be read off the array.
+#: ``tests/test_nanowell_array_marks_are_distinct.py`` renders every state and holds the marks apart.
 #: How each tile was placed (``pipeline/tile_register.py``), as the ``Colors`` token it is drawn in: on the lattice
 #: phase, by overlap correlation, or where the acquisition record put it when neither could be measured.
 _SOURCE_TOKENS = {"lattice": "success", "overlap": "accent", "recorded": "warn"}
@@ -1163,34 +1169,36 @@ def _union(a, b):
     return min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])
 
 
-def _head(scene, layers) -> str:
+def _head(scene, layers, dimmed: int = 0) -> str:
     """The counts line, in the key's own groups so it adds up to the roster: ``19 nanowells: 13 with a value · 4 no
-    value · 2 rim out of focus``. A fused nanowell is counted as fused, as the key counts it; one without a measured
-    position as not placed."""
+    value · 2 rim out of focus``, one without a measured position as not placed. A fused nanowell is counted under its
+    state like any other, and the fused and the ones outside the *Subset* (*dimmed*) are said after it, since they are
+    marks over a state rather than states: ``…; 1 fused (on a tile seam); 3 outside the Subset``."""
     sites = scene.sites
     states = np.array([str(s) for s in sites.state], dtype=object)
-    fused = np.asarray(sites.fused, dtype=bool)
-    plain = ~fused
     parts: list[tuple[str, int]] = []
     if layers.colour == "metric":
         has = np.isfinite(np.asarray(sites.values, dtype=float))
         measurable = np.isin(states, ["measured", "empty"])
-        parts += [("with a value", int((plain & has).sum())), ("no value", int((plain & ~has & measurable).sum()))]
-        rest = plain & ~has & ~measurable
+        parts += [("with a value", int(has.sum())), ("no value", int((~has & measurable).sum()))]
+        rest = ~has & ~measurable
     else:
-        rest = plain
+        rest = np.ones(len(states), dtype=bool)
     tally: dict[str, int] = {}
     for state in states[rest]:
         tally[state] = tally.get(state, 0) + 1
     parts += [(state_word(k), v) for k, v in sorted(tally.items(), key=lambda kv: -kv[1])]
-    parts += [("fused", int(fused.sum())), ("not placed (no measured position)", int(scene.unplaced))]
+    parts.append(("not placed (no measured position)", int(scene.unplaced)))
     undrawn = int(scene.roster) - len(sites) - int(scene.unplaced)
     parts.append(("not drawn", max(undrawn, 0)))
     said = " · ".join(f"{n:,} {what}" for what, n in parts if n)
-    return f"{scene.roster:,} nanowells: {said}" if said else f"{scene.roster:,} nanowells"
+    head = f"{scene.roster:,} nanowells: {said}" if said else f"{scene.roster:,} nanowells"
+    fused = int(np.asarray(sites.fused, dtype=bool).sum())
+    return head + (f"; {fused:,} fused (on a tile seam)" if fused else "") + (
+        f"; {dimmed:,} outside the Subset" if dimmed else "")
 
 
-def array_footer(scene, layers, *, label: str, image_note: str = "", note: str = "") -> list[str]:
+def array_footer(scene, layers, *, label: str, image_note: str = "", note: str = "", dimmed: int = 0) -> list[str]:
     """The lines under the Array view: the page's note, the counts, and what went wrong or is missing — no
     addresses, nothing placed, the image's state, what the Cells layer could not draw, and the anchor's status when it
     is not a plain ``ok`` (``_anchor_owed``). How to read the figure is :func:`array_notes`, drawn only with *Notes*
@@ -1201,7 +1209,7 @@ def array_footer(scene, layers, *, label: str, image_note: str = "", note: str =
         lines.append(f"No addresses at this timepoint: {scene.reason}")
     if not len(sites):
         lines.append(f"{scene.well} at {scene.timepoint}: {scene.no_places}, so no nanowell is drawn.")
-    lines.append(_head(scene, layers))
+    lines.append(_head(scene, layers, dimmed))
     if layers.cells and scene.cells_note:
         lines.append(scene.cells_note)
     if in_well and layers.image != "off" and image_note:
@@ -1256,12 +1264,18 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     fig.clear()
     in_well = scene.frame == "well"
     image = image if in_well and layers.image != "off" else None
-    lines = array_footer(scene, layers, label=label, image_note=image_note, note=note)
+    veiled = sum(1 for site in scene.sites.sites if tuple(site) in dimmed) if dimmed else 0
+    lines = array_footer(scene, layers, label=label, image_note=image_note, note=note, dimmed=veiled)
     # The Notes lines' room is reserved whether Notes is on or off, so turning it on writes into space that was
     # already there and the array neither moves nor shrinks (nor is covered: a box over its foot hid a row).
     notes = array_notes(scene, layers, label=label)
     right = 0.62 if layers.record else 0.86
-    drawn = _array_axes(fig, scene, image, region, right=right,
+    # The key sits above the axes, one row per KEY_COLUMNS entries: the axes start lower for each row past the first,
+    # or a key naming many causes ran off the top of the figure.
+    entries = (key_entries(scene.sites, colour=layers.colour, styles=_STATE_STYLE, why=scene.why, dimmed=veiled)
+               if layers.nanowells and len(scene.sites) else [])
+    key_rows = -(-len(entries) // KEY_COLUMNS)
+    drawn = _array_axes(fig, scene, image, region, right=right, top=0.92 - max(key_rows - 1, 0) * _KEY_ROW,
                         bottom=_FOOTER_BASE + (len(lines) + len(notes)
                                                + (1 if layers.addresses or layers.values else 0) + 0.5) * _LINE)
     ax = drawn.ax
@@ -1274,8 +1288,7 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     if layers.nanowells and len(scene.sites):
         _draw_nanowells(fig, ax, drawn, scene, layers, label=label, selected=selected)
         _dim_nanowells(ax, scene.sites, dimmed)
-        draw_key(ax, key_entries(scene.sites, colour=layers.colour, styles=_STATE_STYLE, why=scene.why), linewidth=1.4,
-                 fontsize=7.0, ink=_inks(ax)[1])
+        draw_key(ax, entries, linewidth=1.4, fontsize=7.0, ink=_inks(ax)[1])
     if layers.cells and scene.cells is not None and len(scene.cells[0]):
         _draw_cells(ax, *scene.cells)
     if (layers.addresses or layers.values) and len(scene.sites):
@@ -1301,9 +1314,9 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     return drawn
 
 
-def _array_axes(fig, scene, image, region, *, right: float, bottom: float) -> ArrayDrawn:
+def _array_axes(fig, scene, image, region, *, right: float, bottom: float, top: float = 0.92) -> ArrayDrawn:
     """The axes, looking at *region* (or at everything drawn) widened to their shape, so pixels stay square."""
-    ax = fig.add_axes([0.03, bottom, right - 0.03, 0.92 - bottom])
+    ax = fig.add_axes([0.03, bottom, right - 0.03, top - bottom])
     ax.set_axis_off()
     # A map in the well frame, with its own zoom: an axis range, log scale or tick choice typed in Properties is the
     # Distribution's (the page's views share one figure, and its typed prefs with it), and applied here it squeezed
@@ -1459,26 +1472,36 @@ def _fill_by_metric(fig, ax, sites, fused, outline: float, label: str) -> None:
         _ink(bar.ax.set_ylabel(label, fontsize=_PREF_PT * GRID_TYPE_SCALE, color=ink))
         bar.ax.tick_params(labelsize=_PREF_PT * GRID_TYPE_SCALE, colors=muted)
     states = np.array(sites.state, dtype=object)
-    groups = [(~has & np.isin(states, ["measured", "empty"]), "", "solid")] + [
-        (~has & (states == s), hatch, style) for s, (hatch, style) in _STATE_STYLE.items()]
-    for mask, hatch, style in groups:
-        mask = mask & ~fused
-        if mask.any():
-            coll = _ellipses(ax, sites, mask, facecolors="none", edgecolors=Colors.plot_undefined_ink,
-                             linewidths=outline, zorder=3)
-            coll.set_linestyle(style)
-            if hatch:
-                coll.set_hatch(hatch)
+    grey = Colors.plot_undefined_ink
+    _state_marks(ax, sites, fused, outline, ~has & np.isin(states, ["measured", "empty"]), "", "solid", grey)
+    for state, (hatch, style) in _STATE_STYLE.items():
+        _state_marks(ax, sites, fused, outline, ~has & (states == state), hatch, style, grey)
+
+
+def _state_marks(ax, sites, fused, outline: float, mask, hatch: str, style: str, colour) -> None:
+    """The nanowells in *mask* drawn with one state's mark: a ring in *style* with *hatch* inside, in *colour*. A fused nanowell's ring is the fused one, dashed in purple, drawn by the
+    caller; it still carries its state's hatch here, so a fused nanowell excluded as out of focus, occluded or in an
+    excluded field still says so."""
+    for part, ring in ((mask & ~fused, True), (mask & fused, False)):
+        if not part.any() or (not ring and not hatch):
+            continue
+        coll = _ellipses(ax, sites, part, facecolors="none", edgecolors=colour, linewidths=outline if ring else 0.0,
+                         zorder=3)
+        coll.set_linestyle(style)
+        if hatch:
+            coll.set_hatch(hatch)
 
 
 def _outline_by_state(ax, sites, fused, outline: float) -> None:
+    """Each nanowell outlined in its state's colour, with its state's mark (``_STATE_STYLE``) — so two states that
+    share the muted colour (absent, not located, unaddressed, identity contradicted, field excluded, rim out of
+    focus) are still told apart."""
     from ui.nanowell_sites import state_colour
 
-    plain = ~fused
-    if plain.any():
-        _ellipses(ax, sites, plain, facecolors="none", linewidths=outline, zorder=3,
-                  edgecolors=[state_colour(s) for s, p in zip(sites.state, plain) if p])
-
+    states = np.array([str(s) for s in sites.state], dtype=object)
+    for state in sorted(set(states)):
+        hatch, style = _STATE_STYLE.get(state, ("", "solid"))
+        _state_marks(ax, sites, fused, outline, states == state, hatch, style, state_colour(state))
 
 def _draw_cells(ax, x, y) -> None:
     """A dot at each counted cell's centre, a fixed size on screen whatever the zoom, over the nanowells and under

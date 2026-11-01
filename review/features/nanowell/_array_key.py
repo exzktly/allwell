@@ -27,6 +27,7 @@ class KeyEntry:
     colour: str
     linestyle: str = "solid"
     hatch: str = ""
+    alpha: float = 1.0
 
 
 #: The state words as the key writes them.
@@ -37,6 +38,10 @@ _WORDS = {"out_of_focus": "rim out of focus", "not_located": "not located", "ide
 #: The order the coloured states are keyed in: the nanowells a result is made of first, then the reasons a
 #: nanowell has none.
 _ORDER = ("measured", "empty", "occluded", "clipped")
+
+
+#: Entries per row of the key; the renderer lowers the array by a row's height for each row past the first.
+KEY_COLUMNS = 4
 
 
 def _row_major(items: list, ncol: int) -> list:
@@ -110,44 +115,52 @@ def _no_value_entries(sites, bare, why: dict) -> list[str]:
     return out
 
 
-def key_entries(sites, *, colour: str, styles: dict, why: dict | None = None) -> list[KeyEntry]:
-    """The key for the nanowells in *sites* drawn with *colour* (``"state"`` or ``"metric"``).
+def key_entries(sites, *, colour: str, styles: dict, why: dict | None = None, dimmed: int = 0) -> list[KeyEntry]:
+    """The key for the nanowells in *sites* drawn with *colour* (``"state"`` or ``"metric"``): one entry per mark the
+    view draws, each counting every nanowell that carries it, so every cause of a nanowell's exclusion is named.
 
-    *styles* is the renderer's ``state -> (hatch, linestyle)`` for a nanowell without a value. A fused nanowell is
-    drawn dashed in the fused colour whatever else it is, so it is counted there and nowhere else, as it is drawn.
-    *why* (``array_compute.no_value_reasons``) names why a measured nanowell has no value; the key then has one "no
-    value" entry per reason, since a fold change is undefined on a nanowell full of cells whenever its baseline had
-    none, and the reader must be able to tell which nanowell is which (each writes its reason's tag inside itself).
+    *styles* is the renderer's ``state -> (hatch, linestyle)``, one distinct mark per state, used under both
+    colourings: filled by the metric, a nanowell without a value is that mark in grey; outlined by state, it is that
+    mark in the state's colour. A fused nanowell is ringed dashed in the fused colour whatever else it is, and keeps
+    its state's hatch inside — so it is counted as fused, and under its state too where the state has a hatch.
+    *why* (``array_compute.no_value_reasons``) names why a measured nanowell has no value: one entry per reason, since
+    a fold change is undefined on a nanowell full of cells whenever its baseline had none, and each such nanowell
+    writes its reason's tag inside itself. *dimmed* counts the nanowells outside the page's *Subset*, drawn under a
+    veil of the ground.
     """
-    from ui.nanowell_sites import FUSED_COLOUR, STATE_COLOURS, state_colour
+    from ui.nanowell_sites import FUSED_COLOUR, state_colour
     from ui.theme import Colors
 
     states = np.array([str(s) for s in sites.state], dtype=object)
     fused = np.asarray(sites.fused, dtype=bool)
     plain = ~fused
+
+    def carrying(mask, hatch: str):
+        """The nanowells of *mask* that show the mark: every unfused one, and a fused one only through its hatch."""
+        return mask & (plain | bool(hatch))
+
     entries: list[KeyEntry] = []
     if colour == "metric":
         has = np.isfinite(np.asarray(sites.values, dtype=float))
-        bare = plain & ~has & np.isin(states, ["measured", "empty"])
+        bare = ~has & np.isin(states, ["measured", "empty"])
         if bare.any():
             entries += [KeyEntry(label, Colors.plot_undefined_ink) for label in _no_value_entries(sites, bare, why or {})]
         for state, (hatch, style) in styles.items():
-            n = int((plain & ~has & (states == state)).sum())
+            n = int(carrying(~has & (states == state), hatch).sum())
             if n:
                 entries.append(KeyEntry(_count(f"no value: {state_word(state)}", n), Colors.plot_undefined_ink,
                                         style, hatch))
     else:
-        for state in sorted(STATE_COLOURS, key=lambda k: _ORDER.index(k) if k in _ORDER else len(_ORDER)):
-            n = int((plain & (states == state)).sum())
+        present = sorted(set(states), key=lambda k: (_ORDER.index(k) if k in _ORDER else len(_ORDER), k))
+        for state in present:
+            hatch, style = styles.get(state, ("", "solid"))
+            n = int(carrying(states == state, hatch).sum())
             if n:
-                entries.append(KeyEntry(_count(state_word(state), n), STATE_COLOURS[state]))
-        # Every state without a colour of its own is drawn in the one muted colour, so it is one swatch naming them.
-        rest = sorted({s for s, p in zip(states, plain) if p and s not in STATE_COLOURS})
-        if rest:
-            n = int((plain & np.isin(states, rest)).sum())
-            entries.append(KeyEntry(_count(" / ".join(state_word(s) for s in rest), n), state_colour(rest[0])))
+                entries.append(KeyEntry(_count(state_word(state), n), state_colour(state), style, hatch))
     if fused.any():
         entries.append(KeyEntry(_count("fused: on a tile seam", int(fused.sum())), FUSED_COLOUR, "dashed"))
+    if dimmed:
+        entries.append(KeyEntry(_count("outside the Subset (veiled)", int(dimmed)), Colors.text_muted, alpha=0.35))
     return entries
 
 
@@ -178,10 +191,10 @@ def draw_key(ax, entries: list[KeyEntry], *, linewidth: float, fontsize: float, 
             ring.set_transform(trans)               # after update_prop, which copies the handle's own transform over
             return [ring]
 
-    ncol = min(len(entries), 4)
+    ncol = min(len(entries), KEY_COLUMNS)
     entries = _row_major(entries, ncol)
     handles = [Patch(facecolor="none", edgecolor=e.colour, linestyle=e.linestyle, hatch=e.hatch or None,
-                     linewidth=linewidth, label=e.label) for e in entries]
+                     linewidth=linewidth, label=e.label, alpha=e.alpha) for e in entries]
     key = Legend(ax, handles, [e.label for e in entries], loc="lower right", bbox_to_anchor=(1.0, 1.0),
                  ncol=ncol, frameon=False, fontsize=fontsize, handlelength=1.6, handleheight=1.6,
                  columnspacing=1.2, handletextpad=0.5, borderaxespad=0.2, borderpad=0.1,

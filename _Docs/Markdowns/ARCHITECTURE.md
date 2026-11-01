@@ -12298,13 +12298,20 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   its figure is no longer the size it was laid out for) (without it a resize squashed every
   nanowell into an oval, and a draw made while the canvas was still being laid out showed one flattened row). It leaves a canvas that is no longer visible alone: the timer can fire after the page closes, and a redraw then queues matplotlib's deferred draw onto a canvas about to be deleted; the image is drawn for exactly that region and those pixels; the nanowells are filled by the
   metric (`MAP_CMAP`, with a colour bar; a nanowell without a value is a grey outline styled by its state,
-  `_STATE_STYLE`, never a colour of the scale) or outlined in `ui/nanowell_sites.state_colour`, a fused one
-  dashed in `FUSED_COLOUR` either way, at `outline_width_px` of the median drawn diameter (6 % of it, 2.5–8 px), the central nanowell boxed; a key
+  `_STATE_STYLE`, never a colour of the scale) or outlined in `ui/nanowell_sites.state_colour` with the same
+  `_STATE_STYLE` mark (`_outline_by_state`, both through `_state_marks`). `_STATE_STYLE` gives every state a nanowell
+  can have without a value a mark — dash pattern and hatch — no other state has, under either colouring, so every
+  cause of an exclusion can be read off the array; `tests/test_nanowell_array_marks_are_distinct.py` renders one of
+  each and holds the drawn marks apart. A fused one is ringed dashed in `FUSED_COLOUR` either way and keeps its
+  state's hatch inside the ring (`_state_marks` draws the hatch with no ring), and one outside the *Subset* is under
+  the `_dim_nanowells` veil; at `outline_width_px` of the median drawn diameter (6 % of it, 2.5–8 px), the central nanowell boxed; a key
   along the top edge of the axes (`_array_key.py`: `key_entries` decides it, pure, `draw_key` draws it) with one
   ring swatch per way a nanowell in view is outlined — the state's colour, or the grey no-value outline with its
   dash or hatch, and the fused dash — each with how many drawn nanowells it covers, so it names only what is on
-  screen; the states with no colour of their own share one swatch that names them all; every entry ends with its
-  count. A plain no-value nanowell (measured or empty, no value of the metric) has an entry per reason —
+  screen; one entry per state, never one swatch for several (each counts the nanowells carrying its mark: a fused
+  one under its state only where the state has a hatch), the fused ring, and `outside the Subset (veiled)` when the
+  Subset dims any; every entry ends with its count, and the axes start one `_KEY_ROW` lower for each row of
+  `KEY_COLUMNS` entries past the first so a long key stays on the figure. A plain no-value nanowell (measured or empty, no value of the metric) has an entry per reason —
   `no value: no cells at baseline ("0 at base") · 3`, the commonest three and then `other reasons` — from
   `ArrayScene.why` (`array_compute.no_value_reasons`, `(q, r) -> label` from `series_compute.exclusion_reason` worded
   by `distribution_compute.reason_label`, so the key and the Distribution footer give the same cause), and the
@@ -12324,7 +12331,8 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   marked and the figure saying the outline is unknown, never a guessed rectangle; the anchor as a crosshair;
   the run record beside the axes, a suspect template in amber. `array_footer` writes the page's note, one counts
   line in the key's own groups that adds up to the roster (`_head`: `19 nanowells: 13 with a value · 4 no value · 2
-  rim out of focus`, a fused nanowell counted as fused and one without a measured position as not placed), and
+  rim out of focus`, a fused nanowell counted under its state and one without a measured position as not placed,
+  then the marks laid over a state — `; 1 fused (on a tile seam); 3 outside the Subset`), and
   whatever went wrong or is missing (no addresses, nothing placed, the image's state, the Cells layer's tally, and
   the anchor's status when it is not a plain `ok` — `_anchor_owed`; a plain `ok` is never written). How to read the
   figure is `array_notes`, each line only when it applies to what is drawn (the fused sentence only with a fused

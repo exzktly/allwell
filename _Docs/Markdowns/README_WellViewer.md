@@ -6146,9 +6146,14 @@ the sentence names it.
     place on the lattice, so they are greyed there, and the figure says so. A well whose grid record has no
     pitch says so instead of drawing a lattice.
   - **Layers** — *Nanowells*, either *filled by the metric* (the colour bar names it; a nanowell without a
-    value is a grey outline, never a colour: hatched where it was occluded, dashed where clipped, dotted where
-    it was not seen) or *outlined by state* in the colours Test detection uses (blue measured, green empty,
-    amber occluded, red clipped, grey for the other states). A key along the top of the array shows each
+    value is a grey outline, never a colour) or *outlined by state* in the colours Test detection uses (blue
+    measured, green empty, amber occluded, red clipped, grey for the other states). Either way every reason a
+    nanowell has no value draws its own mark, so no two can be confused: occluded is hatched with diagonal lines,
+    clipped dashed, absent from the roster dotted, not located dash-dotted, unaddressed (no address) dotted with
+    horizontal lines inside, identity contradicted cross-hatched, in an excluded field gridded, rim out of focus
+    filled with dots; a measured nanowell without a value is a plain ring with its reason written inside it. A
+    fused nanowell keeps its state's hatch inside its purple dashed ring, and one outside the **Subset** is dimmed
+    under a veil. A key along the top of the array shows each
     outline the view holds as a small ring drawn the same way — colour, dash and hatch — with how many
     nanowells it covers, and lists only what is on screen. Its words are in the figure's own ink, so they read on
     the dark screen theme and on publication white alike. A plain grey ring keyed *no value* is a nanowell that

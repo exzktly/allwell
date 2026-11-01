@@ -7235,6 +7235,25 @@ ring, so "which group is this well in" and "which group am I editing" stay
 readable at the same time. Wells the dataset doesn't have are drawn as empty
 sockets and ignore the drag.
 
+Groups can also be built **by sample variable** — what the
+[Variables](#variables) tab says the wells *are*, rather than where they
+sit. The **By variable:** row above the plate takes a variable and one of its
+values; **Add** puts every loaded well holding that value into the selected
+group, and **Remove** takes them out. Pick *(no value)* to find the wells never
+given one. **Quick Setup → One group per value of…** replaces every group with
+one per value of the chosen variable, named by the value (with its unit) and in
+the variable's own value order; a value no well holds makes no group. Either way
+the selection is taken **when you make it**: the groups hold wells and samples
+exactly as hand-built ones do, and do not follow later edits to the variables.
+
+A sample definition whose wells all hold the value joins as a whole sample, as
+on the plate. One whose wells hold *different* values is not pulled in whole —
+that would export wells under a value they do not hold — so only its matching
+wells join, as single wells, and the line under the row names the sample that
+was split. Removing a value keeps a sample that also holds other values and
+says so; drag it off the plate to remove it. Wells with no value for the
+variable are listed there after a Quick Setup, rather than left out silently.
+
 Batch figures are drawn through the **same renderers as the on-screen plots**, so
 a group's figure matches what the plotting tab shows for that selection: each
 group is drawn in its own **distinct colour**, **solo wells are labelled by their

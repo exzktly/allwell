@@ -62,6 +62,7 @@ from review.features.batch_export.service import (
 )
 from review.features.batch_export._cell_rows import write_cell_rows
 from review.features.batch_export._destinations import DestinationSpool
+from review.features.batch_export.variable_select_panel import VariableSelectMixin
 from review.features.batch_export._panels import (
     AxesSpec, Panel, PanelAxis, figure_height, panel_axes, pin_scales,
 )
@@ -287,7 +288,7 @@ class SkippedJob(str):
     """
 
 
-class BatchExportPanel(QWidget):
+class BatchExportPanel(VariableSelectMixin, QWidget):
     """Batch export panel — defines export groups and runs the export."""
 
     #: Line & bar exports carry the Error-band (SEM/SD) + per-FOV-points spread
@@ -584,6 +585,7 @@ class BatchExportPanel(QWidget):
         qs_menu = QMenu(qs_btn)
         qs_menu.addAction("One group per row  (Row A = all A wells, \u2026)", self._quick_by_row)
         qs_menu.addAction("One group per column  (Col 01 = all col-01 wells, \u2026)", self._quick_by_col)
+        self._vsel_add_quick_setup_menu(qs_menu)
         qs_btn.setMenu(qs_menu)
         hdr1.addWidget(qs_btn)
         layout.addLayout(hdr1)
@@ -600,10 +602,12 @@ class BatchExportPanel(QWidget):
 
         layout.addWidget(build_hline_separator(None))
 
-        hint = QLabel("Left-drag wells onto the plate map to add them to the selected group.")
+        hint = QLabel("Left-drag wells onto the plate map to add them to the "
+                      "selected group, or add every well holding a sample-variable value.")
         hint.setWordWrap(True)
         hint.setContentsMargins(6, 2, 6, 2)
         layout.addWidget(hint)
+        self._build_variable_select_row(layout)
 
         # The app's plate control, in its "paint" selection model: the plate
         # reports the press/drag/release gesture and this panel applies it to
@@ -1097,6 +1101,8 @@ class BatchExportPanel(QWidget):
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
         self._refresh_channel_combos()
+        # Variables arrive with a dataset, often opened after this panel was built.
+        self._vsel_refresh_variables()
         if hasattr(self, "_fc_ctrl_combo"):
             self._repopulate_fc_control_combo()
 

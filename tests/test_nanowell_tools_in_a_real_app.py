@@ -54,7 +54,7 @@ def test_the_view_strip_sits_in_the_mode_band_and_each_tab_draws_its_view(viewer
     ctx, st = _open(viewer_app, qtbot, {"A01", "B01"})
     bar = ctx.widgets.get("_nw_view_bar")
     host = viewer_app._page_tabs_host
-    assert viewer_app._page_tabs_bar_by_name["Nanowells"] is bar
+    assert viewer_app._page_tabs_bar_by_name.get("Nanowells") is bar, "the strip was never mounted in the band"
     assert host.currentWidget() is viewer_app._page_tabs_by_name["Nanowells"]   # the band shows this page's strip
     assert bar.isVisibleTo(viewer_app)
     assert [bar.tabText(i) for i in range(bar.count())] == [label for _k, label in VIEWS]

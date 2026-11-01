@@ -88,7 +88,11 @@ _HARD_FAIL = True
 # own their names, and deleted the nine lazy binds nothing read (five bar
 # helpers, two figure-save orchestrators, two review-image handlers): 849 -> 844.
 # The rail-glyph map moved to ``review/core/section_icons.py``: 844 -> 834.
-RUNTIME_APP_LINE_BUDGET = 834
+# The glyphs moved onto the feature descriptors (``FeatureDescriptor.icon``)
+# and the window's ``_SECTION_ICONS`` bridge went with them: 834 -> 830.
+# The heat-map drag-mode shim went when drag mode became a descriptor flag
+# (``plate_drag_source``): 830 -> 829.
+RUNTIME_APP_LINE_BUDGET = 829
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
 # Code-review X13: removed 3 dead never-read attrs (_montage_chan_cb,

@@ -669,7 +669,7 @@ def build_centre(win, parent: QWidget) -> None:
     groups: list[tuple[str, list[tuple[str, Callable[[], None]]]]] = [
         (group, [(d.name, _top_level_builder(d.name))
                  for d in win._features.in_group(group)])
-        for group in ("Home", "Analysis", "Images", "Data")
+        for group in win._features.groups()
     ]
 
     def _new_tab(title: str) -> QWidget:
@@ -684,9 +684,9 @@ def build_centre(win, parent: QWidget) -> None:
         tab_frames[title] = frame
         return frame
 
-    # Add tabs in group order. The tab bar / group separator chrome retired
-    # in Phase 15 — RailNav (in the left sidebar) is now the only section
-    # selector, so group_starts is unused at the view layer.
+    # Add tabs in group order. RailNav (in the left sidebar) is the only
+    # section selector, and it draws each group's caption from the
+    # descriptors (``tab_controller.sync_section_nav_from_notebook``).
     for group_idx, (_group_label, tabs) in enumerate(groups):
         for tab_idx_in_group, (title, builder) in enumerate(tabs):
             _new_tab(title)

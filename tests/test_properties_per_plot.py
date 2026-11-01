@@ -39,7 +39,7 @@ def _two_plots():
 
 
 def _sidebar(qtbot, monkeypatch, app, fig, name="line"):
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     monkeypatch.setattr(ExportStyleSidebar, "_redraw_bound_figure", lambda self: True, raising=False)
     sb = ExportStyleSidebar(app, None, fig, None, default_name=name)

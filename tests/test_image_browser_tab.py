@@ -87,7 +87,7 @@ def test_image_browser_is_single_rail_entry(viewer_app):
     for leaf in _SUBTABS:
         assert leaf not in names
     # The rail entry carries the section icon.
-    assert app._SECTION_ICONS.get("Image Browser")
+    assert app._ctx.features.get("Image Browser").icon
     # It IS lazy-only: the Image Browser container (and all its sub-tabs) is
     # deferred until the user first clicks the rail entry, so it does not drain
     # at load time. smFISH is also lazy.

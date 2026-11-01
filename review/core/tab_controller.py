@@ -10,6 +10,7 @@ from functools import partial
 from review.core import rail_plate as _rail_plate
 from core.safe import swallow, swallowed
 from review.core.lazy import lazy as _lazy
+from review.core.feature_registry import FeatureDescriptor
 
 _logger = logging.getLogger("review.runtime_app")
 
@@ -39,33 +40,55 @@ split_visible_provider = None   # fn(ctx) -> set[str] of visible leaves | None
 split_nav_intercept = None      # fn(ctx, key) -> bool (True = consume nav)
 
 
-#: The per-tab sidebar sections, in the order they are stacked on the rail.
-#: Hidden together at the top of every tab change and shown again by whichever
-#: ``on_activate`` hooks run. ``_sidebar_cell_browser_frame`` is deliberately in
-#: the list even though it is designed to show *alongside* the main frame: it
-#: carries no plate, so it never competes for the picker.
-SIDEBAR_SECTION_FRAMES = (
-    "_sidebar_main_frame",
-    "_sidebar_preview_frame",
-    "_sidebar_image_table_frame",
-    "_sidebar_sample_frame",
-    "_sidebar_cell_browser_frame",
-)
-
-
 def _sidebar_section_frames(ctx) -> list:
-    """Every per-tab sidebar section that currently exists.
+    """Every per-tab rail frame that currently exists, in rail order.
 
-    Missing entries are skipped rather than assumed: several of these frames
-    belong to removable features, and a profile build without one registers no
-    widget for it.
+    The list is the registry's (``FeatureRegistry.rail_sections``): the frames
+    the present pages declare, which are exactly the frames the shell built.
+    Hidden together at the top of every tab change and shown again for the
+    pages on screen by :func:`show_rail_sections`. Cell Browser's frame is in it
+    even though it shows *alongside* the main frame: it carries no plate, so it
+    never competes for the picker.
     """
     out = []
-    for name in SIDEBAR_SECTION_FRAMES:
-        frame = ctx.widgets.get_or_none(name)
+    for sec in ctx.features.rail_sections():
+        frame = ctx.widgets.get_or_none(sec.key)
         if frame is not None:
             out.append(frame)
     return out
+
+
+def rail_descriptor(desc: FeatureDescriptor | None) -> FeatureDescriptor | None:
+    """The descriptor whose ``rail_sections`` the tab switch should show for a
+    page, or ``None`` for the rail's default (the main frame).
+
+    A page speaks for its rail when it declares frames *or* has a hook — a hook
+    with no frames (Home, Statistics) means "this page shows none or decides for
+    itself". A page with neither is the generic plot fallback. Declaring frames
+    without a hook still gets those frames, rather than having them silently
+    replaced by the main frame.
+    """
+    if desc is None or (desc.on_activate is None and not desc.rail_sections):
+        return None
+    return desc
+
+
+def show_rail_sections(ctx, desc) -> None:
+    """Show the rail frames page *desc* declares, then repaint the rail plate
+    if the main frame is among them.
+
+    Runs before the page's own ``on_activate``, so a hook carries only what is
+    particular to its page. ``None`` — a page with no descriptor or no hook —
+    shares the main frame, the rail's default.
+    """
+    from review.core.feature_registry import MAIN_RAIL_SECTION
+    sections = desc.rail_sections if desc is not None else (MAIN_RAIL_SECTION,)
+    for sec in sections:
+        frame = ctx.widgets.get_or_none(sec.key)
+        if frame is not None:
+            frame.setVisible(True)
+    if any(sec.key == MAIN_RAIL_SECTION.key for sec in sections):
+        ctx.coordinator.refresh_sidebar_map()
 
 
 def _section_plates(ctx, frame) -> list:
@@ -141,25 +164,22 @@ def on_tab_change(ctx, _e=None) -> None:
     _visible_tabs = visible_centre_tabs(ctx)
     _also_visible = [t for t in sorted(_visible_tabs) if t and t != tab]
 
-    # Heat-map layout configurator lives inside the standard sidebar but is
-    # only relevant on the Heat Map tab — in either pane.
-    _hm_frame = ctx.widgets.get_or_none("_heatmap_sidebar_frame")
-    if _hm_frame is not None:
-        _hm_frame.setVisible("Heat Map" in _visible_tabs)
-    # The sidebar plate-map doubles as the heat-map drag source on the
-    # Heat Map tab -- flip each WellButton into drag-source mode while
-    # that tab is active. Focused tab only, unlike the frame above: drag mode
-    # changes what a plate *click* does, and the plate is shared, so following
-    # an unfocused Heat Map would rewire the clicks of the pane the user is
-    # actually working in.
-    sync_heatmap_well_drag_mode(ctx, tab == "Heat Map")
+    # The rail plate doubles as a drag source on a page that declares it
+    # (``FeatureDescriptor.plate_drag_source`` — Heat Map's layout configurator
+    # takes its wells by drag). Focused page only, unlike the rail frames below,
+    # which follow visibility: drag mode changes what a plate *click* does, and
+    # the plate is shared, so following an unfocused page would rewire the
+    # clicks of the pane the user is actually working in.
+    _focused_desc = ctx.features.get(tab)
+    sync_rail_plate_drag_mode(
+        ctx, bool(_focused_desc is not None and _focused_desc.plate_drag_source))
 
     # Per-tab activation is dispatched through the feature registry: each
-    # descriptor's ``on_activate`` hook owns its sidebar-visibility + refresh
-    # (the bodies relocated from this ladder, see ``features/registry.py``). A
-    # tab with no descriptor / no hook falls back to the generic plot path
-    # (unified picker + redraw) — the same behaviour the old ``else`` gave Line
-    # Graphs and any unknown leaf.
+    # descriptor declares its rail frames (``rail_sections``), which
+    # ``show_rail_sections`` shows, and its ``on_activate`` hook does the rest
+    # (``features/registry.py``). A tab with no descriptor or no hook falls back to the
+    # generic plot path (main frame + redraw) — the same behaviour the old
+    # ``else`` gave Line Graphs and any unknown leaf.
     # The other visible pane first, so anything the two hooks both write —
     # the plate's mode, the rep-colour map — settles on the focused pane's
     # terms. Only the hook runs for it: the descriptor-less fallback below
@@ -170,23 +190,21 @@ def on_tab_change(ctx, _e=None) -> None:
     # showing that is all it needs here.
     for _other in _also_visible:
         _other_desc = ctx.features.get(_other)
+        show_rail_sections(ctx, rail_descriptor(_other_desc))
         if _other_desc is not None and _other_desc.on_activate is not None:
             try:
                 _other_desc.on_activate(ctx)
             except Exception:
                 swallowed(f"tab_controller: on_activate failed for {_other!r}")
-        else:
-            ctx.widgets.get("_sidebar_main_frame").setVisible(True)
     # Which frames the unfocused panes turned on. Everything was hidden a few
     # lines above, so "visible now" is exactly "shown by one of those hooks".
     _other_frames = [f for f in _frames if not f.isHidden()]
 
     desc = ctx.features.get(tab)
+    show_rail_sections(ctx, rail_descriptor(desc))
     if desc is not None and desc.on_activate is not None:
         desc.on_activate(ctx)
     else:
-        ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-        ctx.coordinator.refresh_sidebar_map()
         redraw_app(ctx)
 
     # **One well picker on screen, and it belongs to the focused pane.** Three
@@ -496,14 +514,14 @@ def is_tab_visible(ctx, name: str) -> bool:
     return name in visible_centre_tabs(ctx)
 
 
-def sync_heatmap_well_drag_mode(ctx, enable: bool) -> None:
-    """Toggle WELL_MIME drag/drop on the sidebar plate widget.
+def sync_rail_plate_drag_mode(ctx, enable: bool) -> None:
+    """Toggle WELL_MIME drag/drop on the rail plate.
 
     When *enable* is True, the plate exports the well under the pointer via
     the WELL_MIME format on left-button drag (clicks stop toggling
-    selection) and accepts dropped tokens as a "return to palette" action
-    that unassigns the well from the active heat-map layout (handled by
-    ``_on_sidebar_plate_well_dropped``). When False, drag/drop is disabled
+    selection) and accepts dropped tokens, which
+    ``selection_controller.on_sidebar_plate_well_dropped`` hands to the page —
+    on Heat Map, a "return to palette" that unassigns the well from the layout. When False, drag/drop is disabled
     and the plate reverts to plain selection behaviour.
     """
     plate = ctx.widgets.get_or_none("_sidebar_plate")
@@ -519,6 +537,23 @@ def sync_heatmap_well_drag_mode(ctx, enable: bool) -> None:
 
 
 
+def _rail_group_caption(ctx, nav, desc) -> str:
+    """The group caption to put before *desc*'s rail row, or ``""``.
+
+    A caption opens each registry group (``FeatureDescriptor.group``) where the
+    previous row belongs to a different one. The first group is the landing
+    page's (Home) rather than a group of pages, so it is never captioned; a
+    page with no descriptor joins whatever group is open.
+    """
+    group = desc.group if desc is not None else ""
+    groups = ctx.features.groups()
+    if not group or (groups and group == groups[0]):
+        return ""
+    keys = nav.items()
+    prev = ctx.features.get(keys[-1]) if keys else None
+    return "" if prev is not None and prev.group == group else group
+
+
 def sync_section_nav_from_notebook(ctx) -> None:
     app = ctx.window  # transitional bridge (A3)
     nav = getattr(app, "_section_nav", None)
@@ -531,7 +566,11 @@ def sync_section_nav_from_notebook(ctx) -> None:
         for title in nb.pageNames():
             if title in existing:
                 continue
-            nav.addItem(title, icon=app._SECTION_ICONS.get(title), key=title)
+            desc = ctx.features.get(title)
+            group = _rail_group_caption(ctx, nav, desc)
+            if group:
+                nav.addCaption(group)
+            nav.addItem(title, icon=(desc.icon or None) if desc else None, key=title)
             app._section_nav_keys.append(title)
         cur = nb.currentName() if nb.count() else None
         if cur:

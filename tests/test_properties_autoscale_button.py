@@ -103,7 +103,7 @@ def _two_panel_figure():
 
 def _build_sidebar(qtbot, monkeypatch, *, redraw_ok: bool = True):
     """The built sidebar, the app, and the list of redraws it asked for."""
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     fig = _two_panel_figure()
     app = _stub_app()
@@ -210,7 +210,7 @@ def test_the_axes_scale_themselves_again_after_the_press(qtbot, monkeypatch):
     that redraws but leaves panel 2's bucket has the style pass put 0…1 straight
     back on it."""
     from review.core.plot_style import apply_export_style_to_current
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     app, sb, fig, _r = _build_sidebar(qtbot, monkeypatch)
     _type_limits_everywhere(sb)

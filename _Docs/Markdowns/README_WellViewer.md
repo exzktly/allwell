@@ -3985,17 +3985,23 @@ offered yet.
   the manual to match, so the drawer describes only what that build has; if the
   trim cannot be applied it says so at the top of the manual rather than
   quietly showing you the full one.
-- **Section rail** — the left navigator lists every centre tab (Plotting, etc.),
-  grouped into **Analysis**, **Images**, and **Data**, under the dataset control
-  at its head. Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
+- **Section rail** — the left navigator lists every centre tab (Plotting, etc.)
+  under the dataset control at its head: **Home** first, then four groups —
+  **Analysis** (Plotting, Statistics, Multivariate, Spatial: methods that work
+  on any plate), **Assays** (Nanowells, smFISH: pages that need that kind of
+  input data, and say so when a dataset has none), **Inspect** (Image Browser,
+  Review CSV: the images and per-cell rows behind a number) and **Output**
+  (Saved Plots, Batch Export). Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
   beside the mode selector. `Ctrl+B` collapses the rail, as does the small
   button floating on the rail's right edge — it stays put when the rail hides,
   so it is also how you bring the rail back. The mode selector is the top of
   that same column and collapses with it, so while the rail is hidden the
   sub-tabs run to the window's left edge; bring the rail back to switch between
   Review, Analyze, and Datasets.
-- **Plate map + Saved selections** — pinned to the bottom of the left rail; the
-  well selection they drive is what every tab plots (see below).
+- **Plate map, selection footer and Saved selections** — directly under the
+  section list, in that order: the plate, a line with the selection count and
+  **All** / **None**, then the Saved selections drawer. The well selection they
+  drive is what every tab plots (see below).
 - **Controls band** — the row directly above the plot canvas: what is shown on
   the left (channel, property, timepoint, threshold), what to do with it on the
   right (`Display ▾`, `Save ▾`, Properties).
@@ -4032,9 +4038,18 @@ Home → Ratios editor appear here as virtual channels.
 
 The 8×12 plate map in the left sidebar drives every plot and table. Click
 a well to toggle it; drag across wells to multi-toggle; click a row letter
-or column number to toggle the whole row / column; **Select all** /
-**Select none** clear or fill in one click. The selection survives across
-tabs and is what every plot / aggregate / export consumes.
+or column number to toggle the whole row / column. Under the plate, the
+**selection footer** says how many wells are selected ("3 wells selected"), and
+its **All** and **None** buttons fill or clear the selection in one click. With
+replicate groups defined, the plate on a plotting tab shows groups rather than
+wells: the footer then counts the groups shown ("2/3 sets visible"), and **All**
+/ **None** show or hide every group. On Home and Review CSV, which edit wells
+one at a time, the plate always selects wells and **All** / **None** select and
+clear them. On a page that shows one well at a time (smFISH, Playground) the
+plate picks a single well and **All** is not offered — unless groups are
+defined, when the plate shows groups as it does elsewhere. The Image Table's own picker ends in
+the same footer. The selection survives across tabs and is what every plot /
+aggregate / export consumes.
 
 Every plate map in the app — this one, the pickers on the Statistics, Image
 Browser, Preview and Home panels, the Datasets tools' own well
@@ -4045,8 +4060,10 @@ the next.
 
 #### Saved selections and Split View
 
-- **Saved selections** — the collapsible drawer under the plate map saves the
-  current well selection under a name so you can reload it in one click. A
+- **Saved selections** — the collapsible drawer directly under the selection
+  footer saves the current well selection under a name so you can reload it in
+  one click. Its header shows how many you have saved — "Saved selections (3)" —
+  so you can tell it holds something without opening it. A
   saved selection only restores which wells are lit: it pools nothing, so it is
   neither a group nor a replicate set. Loading one drives both the plate
   selection and, where a tab keeps its
@@ -5750,7 +5767,7 @@ scatter and the phenotype-composition bars.
 
 ### Spatial analysis
 
-The **Spatial** tab (Analysis rail, next to Multivariate) analyses per-cell
+The **Spatial** tab (under **Analysis** on the rail, next to Multivariate) analyses per-cell
 positions in the well plane — the pipeline emits `shape_centroid_row` /
 `shape_centroid_col` for every segmented cell (in pixels of its field), and a
 nanowell run also each cell's position across the whole well in µm, which the
@@ -5840,7 +5857,7 @@ level — timepoints are already the X-axis.
 
 ### Nanowells
 
-The **Nanowells** page (Analysis rail, after Spatial) draws a dataset analysed in nanowell mode (Analyze ▸
+The **Nanowells** page (under **Assays** on the rail, beside smFISH) draws a dataset analysed in nanowell mode (Analyze ▸
 Nanowells): one dot per nanowell, so you see how the nanowells of a well spread, how that spread changes over
 time, and how wells and replicate groups compare. A dataset without nanowell tables shows a page saying so.
 
@@ -6501,7 +6518,7 @@ run the check on its output folder.
 
 ### Image Browser
 
-The **Image Browser** rail entry (Images group) hosts four image-review
+The **Image Browser** rail entry (under **Inspect**, beside Review CSV) hosts four image-review
 sub-tabs on a sub-tab bar: **Segmentation**, **Image Table**, **Cell Browser**,
 and **Playground**. All read the per-well processed-image ZIPs, loaded on
 demand — if a sub-tab reports "No images found", confirm the results folder

@@ -22,6 +22,9 @@ API
 * ``setCount(key, n | None)`` — show or hide the trailing count chip.
 * ``setItemEnabled(key, bool)`` — disable a row (greyed, click-inert).
 * ``items() -> list[str]`` — the keys in order.
+* ``addCaption(text)`` — a group heading above the rows added after it. Not an
+  item: it has no key, is never current, and hides itself while every row in
+  its group is hidden.
 * signal ``currentChanged(key)``
 * ``bindingAdapter()`` — returns ``(getter, setter, signal)``.
 
@@ -38,7 +41,7 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
@@ -46,6 +49,10 @@ from PySide6.QtWidgets import (
 from ui import theme
 from widgets import icons
 from widgets.selection_chip import SelectionChip
+
+
+#: The active row's accent strip is never thinner than this, whatever the font.
+_STRIP_MIN_PX = 2
 
 
 class _RailNavRow(QFrame):
@@ -80,7 +87,7 @@ class _RailNavRow(QFrame):
         self._strip.setProperty("active", False)
         # ~13% of body height (2px at 1×, scales on hi-dpi); architecture §7
         # mandates fontMetrics-derived sizes.
-        self._strip.setFixedWidth(max(2, round(self.fontMetrics().height() * 0.13)))
+        self._strip.setFixedWidth(max(_STRIP_MIN_PX, round(self.fontMetrics().height() * 0.13)))
         outer.addWidget(self._strip, 0)
 
         body = QFrame(self)
@@ -196,6 +203,16 @@ class _RailNavRow(QFrame):
         super().showEvent(ev)
 
 
+class _RailNavCaption(QLabel):
+    """A group heading in the RailNav — muted small caps, aligned with the
+    row labels below it."""
+
+    def __init__(self, text: str, parent: QWidget) -> None:
+        super().__init__(text.upper(), parent)
+        self.setObjectName("RailNavCaption")
+        self._group_text = text
+
+
 class RailNav(QFrame):
     currentChanged = Signal(str)
     #: A row the *user* clicked — including the current one. Unlike
@@ -228,6 +245,9 @@ class RailNav(QFrame):
         self._rows: dict[str, _RailNavRow] = {}
         self._order: list[str] = []
         self._current: str | None = None
+        # Rows and captions in the order they were added: what ``setColumns``
+        # lays out, and how a caption knows which rows are its group.
+        self._entries: list[QWidget] = []
 
         self.setStyleSheet(self._build_qss())
 
@@ -243,10 +263,62 @@ class RailNav(QFrame):
             row.setCount(count)
         self._rows[k] = row
         self._order.append(k)
-        self._lay.addWidget(row)
+        self._entries.append(row)
+        self._place(row)
+        row.installEventFilter(self)
+        self._sync_captions()
         if self._current is None:
             self._set_current_internal(k, emit=False)
         return row
+
+    def addCaption(self, text: str) -> QLabel:
+        """Head the rows added after this call with a group caption.
+
+        A caption is not an item — it has no key and can never be current — so
+        ``items()`` and the selection model are untouched. It hides itself
+        while every row in its group is hidden (phone layout hides some), so a
+        heading never stands over nothing.
+        """
+        cap = _RailNavCaption(text, self)
+        self._entries.append(cap)
+        self._place(cap)
+        self._sync_captions()
+        return cap
+
+    def captions(self) -> list[str]:
+        """The group captions in order, as given to :meth:`addCaption`."""
+        return [e._group_text for e in self._entries if isinstance(e, _RailNavCaption)]
+
+    def eventFilter(self, obj, ev):
+        # A row shown or hidden by its host (phone layout hides two) may empty
+        # or refill its group.
+        if ev.type() in (QEvent.ShowToParent, QEvent.HideToParent) and obj in self._entries:
+            self._sync_captions()
+        return super().eventFilter(obj, ev)
+
+    def _groups(self) -> list[tuple[QLabel | None, list[_RailNavRow]]]:
+        """The entries split at each caption: ``(caption or None, its rows)``."""
+        out: list[tuple[QLabel | None, list[_RailNavRow]]] = [(None, [])]
+        for e in self._entries:
+            if isinstance(e, _RailNavCaption):
+                out.append((e, []))
+            else:
+                out[-1][1].append(e)
+        return out
+
+    def _sync_captions(self) -> None:
+        for cap, rows in self._groups():
+            if cap is not None:
+                cap.setVisible(any(not r.isHidden() for r in rows))
+
+    def _place(self, w: QWidget) -> None:
+        """Append *w* to the current layout: a list row, or the next grid cell
+        (a caption takes a grid row of its own, across every column)."""
+        n = getattr(self, "_columns", 1)
+        if n == 1:
+            self._lay.addWidget(w)
+            return
+        self._relayout_grid(n)
 
     def setCurrentKey(self, key: str | None) -> None:
         if key is None or key == self._current:
@@ -280,28 +352,46 @@ class RailNav(QFrame):
         if n == getattr(self, "_columns", 1):
             return
         self._columns = n
-        from PySide6.QtWidgets import QGridLayout
+        if n == 1:
+            lay = self._fresh_layout(QVBoxLayout)
+            for e in self._entries:
+                lay.addWidget(e)
+        else:
+            self._relayout_grid(n)
+        self._sync_captions()
+
+    def _fresh_layout(self, kind):
+        """Detach every entry from the current layout and install a new
+        *kind* of layout in its place."""
         old = self.layout()
-        rows = [self._rows[k] for k in self._order]
-        for r in rows:
-            old.removeWidget(r)
+        for e in self._entries:
+            old.removeWidget(e)
         holder = QWidget()
         holder.setLayout(old)          # re-home the old layout so it can die
         holder.deleteLater()
-        if n == 1:
-            lay = QVBoxLayout(self)
-            for r in rows:
-                lay.addWidget(r)
-        else:
-            lay = QGridLayout(self)
-            # Shown rows first, so a hidden one leaves no hole in the grid.
-            ordered = ([r for r in rows if not r.isHidden()]
-                       + [r for r in rows if r.isHidden()])
-            for i, r in enumerate(ordered):
-                lay.addWidget(r, i // n, i % n)
+        lay = kind(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(1)
         self._lay = lay
+        return lay
+
+    def _relayout_grid(self, n: int) -> None:
+        """Lay every entry out as an *n*-column grid. Each caption starts a
+        grid row of its own spanning every column, and its group's tiles
+        follow from the first column; within a group, shown rows come first,
+        so a hidden one leaves no hole in the grid."""
+        from PySide6.QtWidgets import QGridLayout
+        lay = self._fresh_layout(QGridLayout)
+        r = 0
+        for cap, rows in self._groups():
+            if cap is not None:
+                lay.addWidget(cap, r, 0, 1, n)
+                r += 1
+            ordered = ([w for w in rows if not w.isHidden()]
+                       + [w for w in rows if w.isHidden()])
+            for i, w in enumerate(ordered):
+                lay.addWidget(w, r + i // n, i % n)
+            r += (len(ordered) + n - 1) // n
 
     def items(self) -> list[str]:
         return list(self._order)
@@ -386,6 +476,18 @@ class RailNav(QFrame):
            so the pseudo-state resolves normally. */
         QLabel#RailNavRowLabel[active="true"] {{
             color: {c.text_primary};
+        }}
+        /* A group caption: the row label's left edge (the 6px body margin,
+           the accent strip and the body's own md padding), muted caption type,
+           a gap above it that separates the group from the one before. */
+        QLabel#RailNavCaption {{
+            color: {c.text_muted};
+            font-family: {t.family};
+            font-size: {t.caption_size}px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            background: transparent;
+            padding: {theme.Spacing.sm}px 0 {theme.Spacing.xs}px {theme.Spacing.md + 8}px;
         }}
         """
 

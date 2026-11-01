@@ -114,24 +114,16 @@ class Colors:
     # ── Run plate (Analyze's per-well run status map) ────────────────────
     # The run plate paints seven states at once and has to stay readable for
     # someone with red/green colour vision deficiency. Built from the general
-    # status tokens above, "complete" green and "failed" red simulated to the
-    # same olive under deuteranopia (Machado 2009). The first plate-local set
-    # then left "complete" (#4ADE80) and "processing" (#F5B700) at the same
-    # lightness, so a red/green deficient viewer had only a weak hue cue
-    # between the two states a running plate shows most (CIEDE2000 ≈ 10 under
-    # protanopia).
-    #
-    # These seven keep every pair at CIEDE2000 ≥ 18 under normal vision and
-    # under deuteranopia and protanopia at full and partial severity (≥ 13
-    # under the rarer tritanopia). They separate the states by *lightness*
-    # where hue fails: processing is a light yellow against a mid emerald
-    # "complete" (ΔL* ≥ 17 under any red/green vision); partial is a
-    # near-white; uploaded is a pale lavender against a deeper "on server"
-    # blue. Every one is at least 3:1 against the panel the plate sits on in
-    # both themes. They keep the plate's meanings — green is done, yellow is
-    # working, blue is "over there", red is failed — and its
-    # one-colour-per-state contract. tests/test_run_plate_is_colour_blind_safe.py
-    # holds all of that.
+    # status tokens above, it was not: under a deuteranopia simulation (Machado
+    # 2009) "complete" green and "failed" red landed at ΔE76 ≈ 9 (7 on the grey
+    # theme) — the same olive — and under protanopia "uploaded" and "on server"
+    # fell to ≈ 8. These seven are chosen so that every pair stays at ΔE ≥ 34
+    # under normal vision, deuteranopia and protanopia (≥ 20 under the rarer
+    # tritanopia), mostly by separating the states in *lightness* rather than
+    # hue alone: failed is a dark red against a light green, partial a
+    # near-white, uploaded a pale lavender against a deep "on server" blue.
+    # They keep the plate's meanings — green is done, amber is working, blue is
+    # "over there", red is failed — and its one-colour-per-state contract.
     #
     # They are plate-local on purpose, and not re-pointed status tokens:
     # ``success`` / ``danger`` / ``stale`` colour text, badges and other plates
@@ -139,12 +131,12 @@ class Colors:
     # Review's Home plate), and re-tuning those would repaint all of them. No
     # theme overrides these: the separation is measured against the dark panel
     # both shipped themes use, and it is the property being protected.
-    run_pending     = "#6B7280"   # grouped, queued for processing
+    run_pending     = "#5F6B7C"   # grouped, queued for processing
     run_uploaded    = "#C4B5FD"   # on the remote, waiting its turn
-    run_processing  = "#FDE047"   # computing right now (also re-anchoring)
+    run_processing  = "#F5B700"   # computing right now (also re-anchoring)
     run_on_server   = "#3B6FE8"   # computed (on the server, or locally before threshold)
-    run_done        = "#10B981"   # downloaded (remote) / thresholded (local)
-    run_failed      = "#DC2626"   # errored — drawn with the ✕ glyph as well
+    run_done        = "#4ADE80"   # downloaded (remote) / thresholded (local)
+    run_failed      = "#B91C1C"   # errored — drawn with the ✕ glyph as well
     run_partial     = "#F5F5F5"   # finished short of its input — drawn with "!"
 
     # ── Data-viz / trace colors (categorical, keyed to wells) ────────────

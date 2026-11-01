@@ -144,11 +144,12 @@ jobs:
     # split or speed up, not a number to raise again.
     #
     # Gated, like the job below: on a pull request scripts/lane_needed.py decides
-    # whether the change can reach a nanowell test (a nanowell, pipeline/ or
-    # process_microscopy.py path, or a module a nanowell test imports directly),
-    # and the job passes without running the lane when it cannot. A push to main
-    # always runs it: the gate reads direct imports only, and the merge is where a
-    # change two imports away gets caught.
+    # whether the change can reach a nanowell test (a changed definition followed
+    # through its importers to a nanowell test or to a file one runs, such as
+    # process_microscopy.py), and the job passes without running the lane when it
+    # cannot. A push to main always runs it: the merge is where what the script
+    # cannot follow (a module named by a computed string, a data file read at run
+    # time) gets caught.
     name: pytest (nanowell lane)
     runs-on: ubuntu-latest
     timeout-minutes: 20

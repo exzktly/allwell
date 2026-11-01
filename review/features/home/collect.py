@@ -158,6 +158,16 @@ CELL_UNCHECKED = "unchecked"
 CELL_NO_OUTPUT = "no_output"
 
 
+#: How a ``CELL_INPUT_ONLY`` well is named when the run that wrote the record
+#: ended early (:func:`run_ended_early`). On disk the well looks the same either
+#: way — input present, nothing written — so it keeps its painted state and its
+#: colour; what changes is the explanation. "Staged, never processed" after a
+#: run that lost its node mid-plate reads as though the run skipped the wells it
+#: simply never got to, and sends the reader looking for a fault in those wells.
+INPUT_ONLY_LABEL = "Staged, never processed"
+NOT_REACHED_LABEL = "Not reached — run ended early"
+
+
 @dataclass(frozen=True)
 class Missing:
     """A figure the page could not obtain, and why.
@@ -289,6 +299,23 @@ def identity(ctx) -> dict:
     }
 
 
+def run_ended_early(ctx) -> bool:
+    """Whether the run that wrote the record stopped before its end.
+
+    Read from the record's ``ended_early`` (written by the client-side check
+    after a remote run, from the pipeline's exit status) or ``suspended``,
+    which implies it and is the only one older records carry. ``False`` for a
+    record the Validate tool wrote, which cannot know how the run ended.
+    """
+    block = _record(ctx)
+    return bool(block.get("ended_early") or block.get("suspended"))
+
+
+def input_only_label(ended_early: bool) -> str:
+    """The name of a ``CELL_INPUT_ONLY`` well, given how the run ended."""
+    return NOT_REACHED_LABEL if ended_early else INPUT_ONLY_LABEL
+
+
 def plate_cells(ctx) -> dict:
     """Every well the record knows, as the state the plate paints it in.
 
@@ -385,7 +412,7 @@ def plate_legend(ctx) -> list:
         (CELL_COMPLETE, "complete"),
         (CELL_PARTIAL, "partial"),
         (CELL_FAILED, "failed"),
-        (CELL_INPUT_ONLY, "input only"),
+        (CELL_INPUT_ONLY, "not reached" if run_ended_early(ctx) else "input only"),
         (CELL_NO_MEASUREMENTS, "no measurements"),
         (CELL_CSV_ONLY, "measurements, no output archive"),
         (CELL_NO_OUTPUT, "no output yet"),
@@ -518,6 +545,7 @@ def health_rows(ctx) -> list:
 
     wells = block.get("wells") or {}
     cells = plate_cells(ctx)
+    ended_early = run_ended_early(ctx)
 
     def _fully_unaddressed(well) -> bool:
         # A nanowell well whose whole shortfall is timepoints located but not addressed: its own row below names
@@ -536,7 +564,10 @@ def health_rows(ctx) -> list:
          "the run recorded failed field-groups for these wells"),
         (CELL_PARTIAL, "warn", "Partial wells",
          "their CSVs cover fewer field groups than the input held"),
-        (CELL_INPUT_ONLY, "warn", "Staged, never processed",
+        (CELL_INPUT_ONLY, "warn", input_only_label(ended_early),
+         "the run ended before it got to these wells (it was stopped or suspended, lost its node or "
+         "connection, or exited with an error); their input is present and nothing was written — "
+         "finish the run to process them" if ended_early else
          "input is present and nothing was written"),
         (CELL_NO_MEASUREMENTS, "warn", "Images, no measurements",
          "output images exist with no readable CSV behind them"),
@@ -980,7 +1011,9 @@ def next_step(ctx) -> dict:
                 "action": "complete", "label": "Finish this run"}
     if unstarted:
         return {"severity": "warn",
-                "text": f"{unstarted} well(s) were staged and never processed.",
+                "text": (f"{unstarted} well(s) were not reached — the run ended before it processed them."
+                         if run_ended_early(ctx) else
+                         f"{unstarted} well(s) were staged and never processed."),
                 "action": "complete", "label": "Finish this run"}
 
     work = {row["key"]: row["count"] for row in your_work(ctx)}

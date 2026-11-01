@@ -12,6 +12,12 @@ to that 60 px and draws the number in 14 px: "75" needs 15, "100" needs 22.
 widest value needs — after every polish and whenever their range or decimals change. (Never a prefix or suffix: the
 app puts a unit in the label beside the box, ``tests/test_entry_fields_hold_only_the_value.py``.) A row short of room then wraps, scrolls or squeezes something else, never the number. They are the only
 spin boxes the application constructs (``tests/test_spin_boxes_keep_their_number.py`` holds every site to that).
+
+They also commit a typed value only when it is finished — on Enter or when the box loses focus — rather than on every
+keystroke (``setKeyboardTracking(False)``). Qt's default emits ``valueChanged`` for each digit, so typing "100" into a
+box wired to a recompute ran it for 1, then 10, then 100: a two-bin histogram drawn on the way to two hundred, a
+DBSCAN pass per digit. The arrows, the wheel and ``setValue`` still emit at once; only typing waits.
+``tests/test_spin_boxes_commit_typed_values_once.py`` holds it.
 """
 
 from __future__ import annotations
@@ -25,7 +31,11 @@ _REHOLD = (QEvent.Polish, QEvent.StyleChange, QEvent.FontChange, QEvent.Show)
 
 
 class _HoldsItsNumber:
-    """Mixed into a Qt spin box: keep its explicit minimum width at its size hint."""
+    """Mixed into a Qt spin box: keep its explicit minimum width at its size hint, and commit typing once."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.setKeyboardTracking(False)          # one valueChanged per typed value, not per keystroke (docstring)
 
     def _hold(self) -> None:
         width = self.sizeHint().width()

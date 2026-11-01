@@ -559,6 +559,7 @@ def scan_run(
     fov_field_present: bool, started_at: float | None = None,
     finished_at: str = "", started_at_iso: str = "", duration_s: float | None = None,
     host: str = "", mode: str = "", failed_by_well=None, suspended: bool = False,
+    ended_early: bool = False,
     max_missing_per_well: int = MAX_MISSING_PER_WELL,
 ) -> dict:
     """Build the ``run_check`` block for a finished run.
@@ -626,7 +627,7 @@ def scan_run(
         records,
         finished_at=finished_at, started_at_iso=started_at_iso,
         duration_s=duration_s, host=host, mode=mode, schema=schema, sep=sep,
-        csv_prefix=csv_prefix, suspended=suspended, partial_scan=partial_scan,
+        csv_prefix=csv_prefix, suspended=suspended, ended_early=ended_early, partial_scan=partial_scan,
         unreadable=unreadable,
         errors={"files": error_count, "by_type": error_types},
         findings=findings,
@@ -705,7 +706,7 @@ def build_block(
     records: dict, *, finished_at: str = "", started_at_iso: str = "",
     duration_s: float | None = None, host: str = "", mode: str = "",
     schema=(), sep: str = "", csv_prefix: str = "", suspended: bool = False,
-    partial_scan: bool = False, unreadable: int = 0,
+    ended_early: bool = False, partial_scan: bool = False, unreadable: int = 0,
     errors: dict | None = None,
     findings=None, source: str = "run",
 ) -> dict:
@@ -716,6 +717,16 @@ def build_block(
     the block cannot acquire two shapes — a reader that learns to render one
     renders the other, and the totals are summed in one place rather than
     twice from two loops that could drift.
+
+    *ended_early* records that the run did not reach its own end: it was
+    stopped, suspended, lost its node or its connection, or exited with an
+    error. It is what lets a reader tell a well the run never got to from a
+    well the run was asked to process and wrote nothing for — on disk the two
+    look identical (input present, no output), and only the run knows which it
+    was. A suspended run is always one that ended early, so ``suspended``
+    implies it. Records written before the field existed, and every record the
+    Validate tool writes, carry ``False``: Validate describes the folder as it
+    stands and does not know how the run that wrote it ended.
     """
     totals = dict.fromkeys(HEALTH_STATES, 0)
     for rec in records.values():
@@ -741,6 +752,7 @@ def build_block(
         "skipped": False,
         "skipped_reason": "",
         "suspended": bool(suspended),
+        "ended_early": bool(ended_early or suspended),
         "partial_scan": bool(partial_scan),
         "wells": records,
         "totals": {
@@ -880,6 +892,7 @@ def record_run_check(
     *, info_path, output_dir, in_containers, schema, sep: str, csv_prefix: str,
     started_at: float | None, mode: str, atomic_writer, log,
     skip: bool = False, suspended: bool = False, failed_by_well=None,
+    ended_early: bool = False,
 ) -> dict:
     """Read back what a run wrote, and record whether it covers its input.
 
@@ -905,6 +918,11 @@ def record_run_check(
     already answered by the per-well failure list. Cost is one input-container
     listing, one output-container listing and one CSV read per well, all
     page-cache-warm because the run has just written them.
+
+    *ended_early* says the run stopped before its end (see :func:`build_block`).
+    The pipeline's own end-of-run call never passes it — reaching this call is
+    reaching the end — but the client-side check after a remote run does, from
+    the remote pipeline's exit status.
 
     *atomic_writer* is injected — ``pipeline.io._safe_atomic_text_write``, the
     same shape ``run_report.merge_into_pipeline_info`` takes — so this module
@@ -951,6 +969,7 @@ def record_run_check(
             failed_by_well=(failed_groups_by_well(info_path)
                             if failed_by_well is None else failed_by_well),
             suspended=suspended,
+            ended_early=ended_early,
         )
         merge_into_pipeline_info(
             info_path, {"run_check": block}, atomic_writer=atomic_writer)

@@ -60,6 +60,8 @@ from .collect import (
     CELL_CSV_ONLY,
     CELL_PARTIAL,
     CELL_UNCHECKED,
+    INPUT_ONLY_LABEL,
+    input_only_label,
 )
 
 #: One colour per painted state. Read through ``theme.Colors`` so a theme swap
@@ -93,7 +95,7 @@ STATE_LABELS = {
     CELL_COMPLETE: "Complete",
     CELL_PARTIAL: "Partial",
     CELL_FAILED: "Failures recorded",
-    CELL_INPUT_ONLY: "Staged, never processed",
+    CELL_INPUT_ONLY: INPUT_ONLY_LABEL,
     CELL_NO_MEASUREMENTS: "Images, no measurements",
     CELL_CSV_ONLY: "Measurements, no output archive",
     CELL_UNCHECKED: "Not checked",
@@ -189,8 +191,20 @@ def paint_field_quality(plate: WellPlateSelector, flagged_wells) -> None:
         plate.setWellMarker(well, FLAGGED_FIELD_GLYPH)
 
 
+def state_label(state: str, *, ended_early: bool = False) -> str:
+    """The name of a painted state, worded for how the run ended.
+
+    Only ``CELL_INPUT_ONLY`` depends on it: after a run that ended early such a
+    well is one the run never reached, not one it skipped
+    (``collect.input_only_label``).
+    """
+    if state == CELL_INPUT_ONLY:
+        return input_only_label(ended_early)
+    return STATE_LABELS.get(state, state)
+
+
 def well_tooltip(well: str, cells: dict, record_wells: dict,
-                 field_quality: dict | None = None) -> str:
+                 field_quality: dict | None = None, *, ended_early: bool = False) -> str:
     """What a well says when the pointer rests on it.
 
     Reads the numbers the record already holds rather than deriving anything —
@@ -201,11 +215,15 @@ def well_tooltip(well: str, cells: dict, record_wells: dict,
     marker. A glyph with no explanation is a puzzle rather than a finding, and
     deriving the sentence here would be a second derivation of something the
     marker already asserts.
+
+    *ended_early* is ``collect.run_ended_early``: it decides whether a well
+    with input and no output is named "not reached" or "staged, never
+    processed".
     """
     state = (cells or {}).get(well)
     if state is None:
         return f"{well} · not in this dataset"
-    label = STATE_LABELS.get(state, state)
+    label = state_label(state, ended_early=ended_early)
     quality = (field_quality or {}).get(well, "")
     rec = (record_wells or {}).get(well)
     if not isinstance(rec, dict):

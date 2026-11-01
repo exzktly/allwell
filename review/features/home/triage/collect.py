@@ -207,6 +207,7 @@ def _well_rows(ctx) -> list[TriageRow]:
     if not isinstance(wells, dict):
         return []
     schema = _schema(ctx)
+    ended_early = hc.run_ended_early(ctx)
     rows: list[TriageRow] = []
     for well in sorted(wells):
         rec = wells[well]
@@ -227,7 +228,9 @@ def _well_rows(ctx) -> list[TriageRow]:
                 key=_key(KIND_UNSTARTED, well), kind=KIND_UNSTARTED,
                 stage=STAGE_PROCESSING, severity="warn", well=well, fov="",
                 timepoint="", can_rerun=True,
-                detail="Input is present and nothing was written for it."))
+                detail=("The run ended before it reached this well: its input is present and nothing was "
+                        "written for it." if ended_early else
+                        "Input is present and nothing was written for it.")))
             continue
         for name in rec.get("failed") or []:
             fov, tp = _failed_address(str(name), schema)

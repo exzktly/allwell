@@ -20618,7 +20618,9 @@ help while `qtbot` still holds the app).
 
 **The slow lane runs on demand, not on PRs and not on a schedule** —
 `.github/workflows/slow-lane.yml`, six sharded runners, dispatched by hand from
-the Actions tab; `scripts/test_slow.sh` runs the same lane locally. It is not a
+the Actions tab or started by pushing a commit to a `slow-lane/<name>` branch
+(the route for a session that may push but may not dispatch workflows; no
+ordinary branch matches it); `scripts/test_slow.sh` runs the same lane locally. It is not a
 PR gate because it takes minutes rather than seconds and its per-test memory
 profile is fragile under parallel load. It exists because the ~270 tests it
 covers previously had *no* automated coverage anywhere, so a test could sit red

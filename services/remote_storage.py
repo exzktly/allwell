@@ -519,7 +519,10 @@ def listing_script(staging_dir: str, *, detail: bool) -> str:
     are never listed. A staging folder the server refuses lists nothing and
     says why (``root`` line).
     """
-    size = ('sz=$(du -sbx -- "$d" 2>/dev/null | cut -f1); [ -n "$sz" ] || sz=-'
+    # GNU du gives bytes (-b); BSD/macOS du has no -b, so fall back to KiB (-k) there.
+    size = ('sz=$(du -sbx -- "$d" 2>/dev/null | cut -f1); '
+            '[ -n "$sz" ] || { k=$(du -skx -- "$d" 2>/dev/null | cut -f1); [ -n "$k" ] && sz=$((k * 1024)); }; '
+            '[ -n "$sz" ] || sz=-'
             if detail else "sz=-")
     fetched = ('f=0; _aw_fetched_current "$d" && f=1' if detail else f'f=0; [ -f "$d/{RUN_FETCHED}" ] && f=1')
     run_act = ('if _aw_run_active "$d"; then a=1; else a=0; fi' if detail else "a=-")
@@ -549,7 +552,10 @@ def listing_script(staging_dir: str, *, detail: bool) -> str:
         f"  ef=\"datasets/{DATASET_EXPIRY_DIR}/$n\"; lf=\"datasets/{DATASET_LABEL_DIR}/$n.json\"\n"
         f"  {read_exp}  {read_lab}  {emit}"
         "done\n"
-        "free=$(df -PB1 . 2>/dev/null | awk 'NR==2 {print $4}'); printf 'free\\t%s\\n' \"${free:--}\"\n"
+        # GNU df takes -B1; BSD/macOS df does not, so fall back to KiB (-k) there.
+        "free=$(df -PB1 . 2>/dev/null | awk 'NR==2 {print $4}')\n"
+        "[ -n \"$free\" ] || { k=$(df -Pk . 2>/dev/null | awk 'NR==2 {print $4}'); [ -n \"$k\" ] && free=$((k * 1024)); }\n"
+        "printf 'free\\t%s\\n' \"${free:--}\"\n"
         "exit 0\n"
     )
 

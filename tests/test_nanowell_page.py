@@ -540,8 +540,9 @@ def _key_texts(ctx):
 def test_the_array_footer_is_short_until_notes_is_turned_on(qtbot, page):
     """Reported: "The text at the bottom of the array tab take up way too much space". With *Notes* off (the default)
     the footer is the page's note, the counts — in the key's own groups, adding up to the roster (UX review N1) — and
-    what went wrong. Notes, on the band beside Overlays as well as in the Layers menu (N6), puts how to read the figure
-    in a box over the foot of the array, so the array neither moves nor shrinks (N3), and says only what applies to
+    what went wrong. Notes, on the band beside Overlays as well as in the Layers menu (N6), writes how to read the figure
+    between the array and the footer, in room kept for it either way, so the array neither moves, shrinks nor is
+    covered (N3), and says only what applies to
     what is drawn: no fused sentence with no fused nanowell, no plain "ok" grid status (N4)."""
     _loaded(qtbot, page)
     nwc.set_view(page, "array")
@@ -556,11 +557,14 @@ def test_the_array_footer_is_short_until_notes_is_turned_on(qtbot, page):
     assert st.layers.notes and page.widgets.get("_nw_layer_notes").isChecked()
     assert _texts(page, "nw-array-footer") == short                    # the footer itself is unchanged
     assert tuple(st.drawn.ax.get_position().bounds) == pytest.approx(where)
-    (notes,) = _texts(page, "nw-array-notes")
-    assert notes.splitlines() == [
+    assert _texts(page, "nw-array-notes") == [
         "Measured positions in the well frame (the square is the central nanowell).",
-        "Filled by Cell count. A grey outline has no value: its hatch or dash names its state, and with Values on the "
-        "words inside it say why (the key above the array lists each)."]
+        "Fill: Cell count. Grey outline: no value — the words inside say why; hatches and dashes mark states (see key)."]
+    # Written under the array, not over it (UX review round 2: a box over its foot hid the bottom row).
+    renderer = st.drawn.ax.figure.canvas.get_renderer()
+    under = st.drawn.ax.get_window_extent(renderer).y0
+    assert all(t.get_window_extent(renderer).y1 <= under for t in page.widgets.get("_nw_fig").texts
+               if t.get_gid() == "nw-array-notes")
     nwc.apply_array_preset(page, "qc")                                 # a preset keeps the reader's choice
     assert st.layers.notes and button.isChecked()
     page.widgets.get("_nw_layer_notes").trigger()                      # and the menu entry turns both off
@@ -579,8 +583,8 @@ def test_a_nanowell_with_cells_and_no_fold_change_says_why_on_the_array(qtbot, p
     st = page.state.feature_slice("nanowell")
     assert nwc.page_well(page) == "A01" and st.metric == "count_fc"
     keyed = _key_texts(page)
-    assert "no value: baseline occluded (base occl.) · 1" in keyed
-    assert "no value: no cells at baseline (0 at base) · 1" in keyed
+    assert 'no value: baseline occluded ("base occl.") · 1' in keyed
+    assert 'no value: no cells at baseline ("0 at base") · 1' in keyed
     labels = dict(zip([s[1:] for s in st.drawn.sites.sites], _texts(page, "nw-array-address")))
     assert (labels[(2, 0)].splitlines()[-1], labels[(3, 0)].splitlines()[-1]) == ("0 at base", "base occl.")
 

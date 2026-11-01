@@ -64,7 +64,7 @@ _IMAGES = (("off", "Off"), ("montage", "Run montage"), ("tiles", "Full resolutio
 _POSITIONS = (("measured", "Measured"), ("lattice", "Lattice"))
 #: The Array view's switchable layers, in the order its Layers menu lists them, with what each draws.
 #: The band's *Notes* button: the Layers menu's *Notes*, where it can be found.
-_NOTES_TIP = ("How to read the array — the positions, the fill and outlines, the tile colours — in a box over its foot. "
+_NOTES_TIP = ("How to read the array — the positions, the fill and outlines, the tile colours — under the array, in room kept for it so the array never moves. "
               "Off, the footer keeps the counts and anything that went wrong. The same switch as Layers → Notes.")
 _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or outlined by its state."),
            ("addresses", "Addresses", "Each nanowell's q,r, wherever it is drawn large enough to hold it."),

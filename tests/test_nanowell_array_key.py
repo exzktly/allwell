@@ -135,10 +135,10 @@ def test_a_nanowell_with_no_value_is_keyed_with_why():
     sites = _sites(["measured"] * 6, values=[2.0, np.nan, np.nan, np.nan, np.nan, np.nan])
     one = {(k, 0): "no cells at baseline" for k in range(1, 6)}
     assert [e.label for e in key_entries(sites, colour="metric", styles=_STATE_STYLE, why=one)] == [
-        "no value: no cells at baseline (0 at base) · 5"]
+        'no value: no cells at baseline ("0 at base") · 5']
     mixed = {**one, (4, 0): "baseline occluded", (5, 0): "baseline occluded", (3, 0): "no count"}
     assert [e.label for e in key_entries(sites, colour="metric", styles=_STATE_STYLE, why=mixed)] == [
-        "no value: baseline occluded (base occl.) · 2", "no value: no cells at baseline (0 at base) · 2",
+        'no value: baseline occluded ("base occl.") · 2', 'no value: no cells at baseline ("0 at base") · 2',
         "no value: no count · 1"]
     many = {(1, 0): "baseline occluded", (2, 0): "no count", (3, 0): "no cells at baseline", (4, 0): "baseline clipped",
             (5, 0): "baseline rim out of focus"}

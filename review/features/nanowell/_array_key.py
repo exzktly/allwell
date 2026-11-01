@@ -95,8 +95,8 @@ def reason_tag(reason: str) -> str:
 
 
 def _no_value_entries(sites, bare, why: dict) -> list[str]:
-    """One "no value" label per reason, each ending with its count: ``no value: no cells at baseline (0 at base) · 3``
-    — the reason in full, then in brackets the tag the nanowells carry inside them (``reason_tag``) — so the reason
+    """One "no value" label per reason, each ending with its count: ``no value: no cells at baseline ("0 at base") · 3``
+    — the reason in full, then in quotes the tag the nanowells carry inside them (``reason_tag``) — so the reason
     of any one nanowell on the array can be read off it. Without reasons, one ``no value · N``."""
     out = []
     for reason, n in _why(sites, bare, why):
@@ -106,7 +106,7 @@ def _no_value_entries(sites, bare, why: dict) -> list[str]:
             out.append(_count("no value: other reasons", n))
         else:
             tag = reason_tag(reason)
-            out.append(_count(f"no value: {reason}" + (f" ({tag})" if tag != reason else ""), n))
+            out.append(_count(f"no value: {reason}" + (f' ("{tag}")' if tag != reason else ""), n))
     return out
 
 

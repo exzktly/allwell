@@ -12298,10 +12298,10 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   dash or hatch, and the fused dash — each with how many drawn nanowells it covers, so it names only what is on
   screen; the states with no colour of their own share one swatch that names them all; every entry ends with its
   count. A plain no-value nanowell (measured or empty, no value of the metric) has an entry per reason —
-  `no value: no cells at baseline (0 at base) · 3`, the commonest three and then `other reasons` — from
+  `no value: no cells at baseline ("0 at base") · 3`, the commonest three and then `other reasons` — from
   `ArrayScene.why` (`array_compute.no_value_reasons`, `(q, r) -> label` from `series_compute.exclusion_reason` worded
   by `distribution_compute.reason_label`, so the key and the Distribution footer give the same cause), and the
-  bracketed tag (`_array_key.reason_tag`) is what each such nanowell writes inside itself with *Values* on, so the
+  quoted tag (`_array_key.reason_tag`) is what each such nanowell writes inside itself with *Values* on, so the
   reason of any one nanowell can be read off the array: a fold change on a nanowell full of cells is undefined
   whenever its baseline had none or was not measurable, and a bare "no value" read as "not measured". It is a
   standalone legend (`ax.add_artist`), so the export-style pass sizes its text but never moves it. The Array
@@ -12311,7 +12311,7 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   `LABEL_COLOUR` (`_draw_labels`: the `q,r` with *Addresses*, the metric value to three significant figures with
   *Values*, one under the other when both are on, `site_label_texts`; a nanowell without a value writes its reason's
   tag, never a number) — in a nanowell drawn without a fill, with a stroke of the figure's ground around it
-  (`patheffects.withStroke`) so it reads over a hatch; on the metric's fill, plain — only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
+  (`patheffects.withStroke`, 3.5 pt) so it reads over a hatch; on the metric's fill, plain — only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
   (beyond, the footer asks for a zoom); tiles coloured by their placement `source`
   (lattice, overlap, recorded) with the residual, or — with no tile size in the acquisition record — their corner
   marked and the figure saying the outline is unknown, never a guessed rectangle; the anchor as a crosshair;
@@ -12321,9 +12321,7 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   whatever went wrong or is missing (no addresses, nothing placed, the image's state, the Cells layer's tally, and
   the anchor's status when it is not a plain `ok` — `_anchor_owed`; a plain `ok` is never written). How to read the
   figure is `array_notes`, each line only when it applies to what is drawn (the fused sentence only with a fused
-  nanowell, the tile colours only with tiles), and is drawn only with `notes` on, by `_draw_notes`, in a box over
-  the foot of the axes: the footer's reserved height does not depend on it, so turning Notes on never moves or
-  shrinks the array. It returns an `ArrayDrawn` (the hit map, the axes, the
+  nanowell, the tile colours only with tiles), and is written only with `notes` on, between the array and the footer, in room `render_array` reserves for it whether `notes` is on or off: turning Notes on never moves, shrinks or covers the array (a box drawn over the array's foot was tried and hid its bottom row). It returns an `ArrayDrawn` (the hit map, the axes, the
   region shown and its size in pixels, and the tiles' `Rendered`), which the page keeps on `state.drawn`.
 - **Full resolution** (`full_montage_compute`, Qt-free): every tile from `in/<well>.zip` (the member
   `image_compute._member_for` finds) at the grid record's `left_um`/`top_um`, at the x pixel size, in the

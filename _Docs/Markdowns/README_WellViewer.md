@@ -6139,8 +6139,8 @@ the sentence names it.
     was measured — cells may be plainly visible in it — but has no value of the chosen **Metric**. For a fold change
     that is almost always its baseline: *no cells at baseline* when it held none at the baseline timepoint, or
     *baseline occluded* / *baseline rim out of focus* when the baseline could not be measured. The key has one entry
-    per reason (the commonest three, then *other reasons*), each with a short tag in brackets — *no value: no cells
-    at baseline (0 at base) · 3* — and with **Values** on each such nanowell writes that tag inside itself, so you
+    per reason (the commonest three, then *other reasons*), each with a short tag in quotes — *no value: no cells
+    at baseline ("0 at base") · 3* — and with **Values** on each such nanowell writes that tag inside itself, so you
     can read the reason of the one you are looking at. Every key entry ends with its count. The outline's width follows the nanowell's size on screen (about
     6 % of its diameter, never under 2.5 or over 8 screen pixels), so it stays visible zoomed out and on a phone. Either way a nanowell on a tile seam is dashed in purple and
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
@@ -6165,8 +6165,8 @@ the sentence names it.
     earliest one is shown in amber: most nanowells there may hold cells, and that timepoint's counts and
     confluence may be biased. *Notes* (off until you turn it on; also the **Notes** button beside **Overlays**)
     explains how to read the figure — how the positions are drawn, what the fill and outlines mean, what the tile
-    colours mean — in a box over the bottom of the array, saying only what applies to what is on screen. The array
-    does not move or shrink when you turn it on. The footer under the figure is the same either way: the page's
+    colours mean — in the space between the array and the footer, saying only what applies to what is on screen. That space is kept whether Notes is on or off, so the array never moves, shrinks or is covered
+    when you turn it on. The footer under the figure is the same either way: the page's
     notes, one line of counts that adds up to the roster in the key's own groups (*19 nanowells: 13 with a value ·
     4 no value · 2 rim out of focus*), and anything that went wrong or is missing — no addresses, nothing placed,
     no montage, a grid status other than *ok*.

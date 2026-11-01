@@ -1155,8 +1155,8 @@ def array_notes(scene, layers, *, label: str) -> list[str]:
     if layers.nanowells and len(sites):
         fused = " Fused (dashed purple): on a tile seam, measured from a blended crop." \
             if np.asarray(sites.fused, dtype=bool).any() else ""
-        lines.append(f"Filled by {label}. A grey outline has no value: its hatch or dash names its state, and with "
-                     "Values on the words inside it say why (the key above the array lists each)." + fused
+        lines.append(f"Fill: {label}. Grey outline: no value — the words inside say why; hatches and dashes mark "
+                     "states (see key)." + fused
                      if layers.colour == "metric" else
                      "Outlined by state, as the key above the array shows." + fused)
     if in_well and layers.tiles and scene.tiles:
@@ -1191,10 +1191,13 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     in_well = scene.frame == "well"
     image = image if in_well and layers.image != "off" else None
     lines = array_footer(scene, layers, label=label, image_note=image_note, note=note)
+    # The Notes lines' room is reserved whether Notes is on or off, so turning it on writes into space that was
+    # already there and the array neither moves nor shrinks (nor is covered: a box over its foot hid a row).
+    notes = array_notes(scene, layers, label=label)
     right = 0.62 if layers.record else 0.86
     drawn = _array_axes(fig, scene, image, region, right=right,
-                        bottom=_FOOTER_BASE + (len(lines) + (1 if layers.addresses or layers.values else 0) + 0.5)
-                        * _LINE)
+                        bottom=_FOOTER_BASE + (len(lines) + len(notes)
+                                               + (1 if layers.addresses or layers.values else 0) + 0.5) * _LINE)
     ax = drawn.ax
     drawn.sites = scene.sites
     _bg, ink, muted = _inks(ax)
@@ -1222,21 +1225,12 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
         _ink(fig.text(0.03, y, text, fontsize=7.5, color=ink if i == 0 else muted, gid="nw-array-footer"),
              muted=i != 0)
     if layers.notes:
-        _draw_notes(ax, array_notes(scene, layers, label=label), muted)
+        for j, text in enumerate(notes):                 # between the array and the footer, in the reserved room
+            y = _FOOTER_BASE + (len(lines) + len(notes) - 1 - j) * _LINE
+            _ink(fig.text(0.03, y, text, fontsize=7.5, color=muted, gid="nw-array-notes"), muted=True)
     if layers.record:
         _draw_record(fig, scene.record, right + 0.08, ink, muted)
     return drawn
-
-
-def _draw_notes(ax, lines: list[str], muted) -> None:
-    """The *Notes* lines in a box over the foot of the array: drawn over the axes rather than under them, so the
-    footer reserves the same height with Notes on or off and the array neither moves nor shrinks."""
-    if not lines:
-        return
-    ground = _inks(ax)[0]
-    box = {"boxstyle": "round,pad=0.4", "facecolor": ground, "alpha": 0.88, "edgecolor": muted, "linewidth": 0.5}
-    _ink(ax.text(0.01, 0.01, "\n".join(lines), transform=ax.transAxes, ha="left", va="bottom", fontsize=7.5,
-                 color=muted, bbox=box, zorder=9, linespacing=1.5, gid="nw-array-notes"), muted=True)
 
 
 def _array_axes(fig, scene, image, region, *, right: float, bottom: float) -> ArrayDrawn:
@@ -1461,7 +1455,7 @@ def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool, why: d
     # A halo of the ground under a label in a nanowell drawn without a fill: over its hatch (the out-of-focus dots, the
     # occluded lines) the bare label could not be read. *filled* (one bool per site) marks the nanowells filled by the
     # metric, whose labels read on the fill and are left plain — a dark stroke there only roughened them.
-    halo = [patheffects.withStroke(linewidth=2.0, foreground=_inks(ax)[0])]
+    halo = [patheffects.withStroke(linewidth=3.5, foreground=_inks(ax)[0])]
     filled = np.zeros(len(labels), dtype=bool) if filled is None else np.asarray(filled, dtype=bool)
     show = ((labels != "") & (diameter >= MIN_LABEL_DIAMETER_PX) & (sites.x >= x0) & (sites.x <= x1)
             & (sites.y >= y0) & (sites.y <= y1))

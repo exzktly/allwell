@@ -135,6 +135,27 @@ def _cellpose_plan(method: str, workers: int, available: int,
         f"context on one device; each worker logs the device its model loaded on")
 
 
+def expected_workers(cpu_count: int, n_gpu: int, method: str, *, workers: int = 0, tf_threads: int = 0) -> int:
+    """How many workers :func:`plan_parallelism` will start on a Linux node with *cpu_count* CPUs and *n_gpu* visible
+    GPUs, for a run asking for *workers* / *tf_threads* (``0`` = the default) — worked out before the run, by the app,
+    which has neither the node nor its ``args``.
+
+    The same arithmetic as :func:`plan_parallelism` and :func:`_cellpose_plan` (one core kept back, ``tf_threads``
+    threads a worker, an explicit ``--workers`` clamped to the core budget, Cellpose capped at
+    :data:`CELLPOSE_WORKERS_PER_GPU` a GPU unless ``--workers`` was given);
+    ``tests/test_batch_size_follows_the_workers.py`` holds the two to the same answer. The remote batch size uses it
+    when the Analyze tab's Batch size is 0 (``services.remote_batch_auto``)."""
+    available = max(1, cpu_count - 1)
+    threads = min(tf_threads, available) if tf_threads > 0 else min(4, available)
+    count = max(1, available // threads)
+    override = workers > 0
+    if override:
+        count = max(1, min(workers, available))
+    if method in CELLPOSE_METHODS and n_gpu > 0 and not override:
+        count = min(count, n_gpu * CELLPOSE_WORKERS_PER_GPU)
+    return count
+
+
 def slurm_cpu_shortfall(cpu_count: int, *, node_cpus: int | None = None,
                         env: dict | None = None) -> str:
     """A warning when a Slurm job was given one or two of a bigger node's CPUs.

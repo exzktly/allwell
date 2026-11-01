@@ -26,6 +26,8 @@ from services import remote_storage as rs  # noqa: E402
 from services.remote_config import RemoteHost, load_remotes, write_remote  # noqa: E402
 
 DAY = 86400
+RUN_A = "run-00000000000000aa-0000000000000011"
+RUN_B = "run-00000000000000bb-0000000000000022"
 
 
 class _LocalCache:
@@ -45,7 +47,7 @@ def _run_folder(staging, name, project, days=40):
     d = staging / "runs" / name
     (d / "out").mkdir(parents=True)
     (d / "out" / "A1_out.zip").write_bytes(b"x" * 2000)
-    (d / rs.RUN_LABEL).write_text(json.dumps({"project": project, "created": 1_700_000_000,
+    (d / rs.RUN_LABEL).write_text(json.dumps({"run_id": name, "project": project, "created": 1_700_000_000,
                                                "output_dir": f"/u/{project}/out"}))
     for p in (d / "out" / "A1_out.zip", d / "out", d / rs.RUN_LABEL, d):
         _age(p, days)
@@ -56,8 +58,8 @@ def _run_folder(staging, name, project, days=40):
 def staged(tmp_path, monkeypatch):
     monkeypatch.setenv("ALLWELL_REMOTES", str(tmp_path / "remotes.toml"))
     staging = tmp_path / "staging"
-    _run_folder(staging, "run-aaa", "ProjA")
-    _run_folder(staging, "run-bbb", "ProjB")
+    _run_folder(staging, RUN_A, "ProjA")
+    _run_folder(staging, RUN_B, "ProjB")
     host = RemoteHost(name="h", ssh_alias="me@h", remote_staging_dir=str(staging))
     write_remote(host)
     return host, staging
@@ -81,7 +83,7 @@ def _row(dlg, folder):
 def test_the_browser_shows_each_folder_s_project_and_size(qtbot, staged):
     host, _ = staged
     dlg = _open(qtbot, host)
-    row = _row(dlg, "run-bbb")
+    row = _row(dlg, RUN_B)
     assert row.text(0) == "ProjB"
     assert row.text(1) == "Run"
     # The 2,000-byte output plus the label and directory entries ``du -sb`` counts.
@@ -97,14 +99,14 @@ def test_delete_removes_only_the_selected_folder_from_the_server(qtbot, staged, 
     dlg = _open(qtbot, host)
     prompts: list[str] = []
     monkeypatch.setattr(dlg, "_confirm", lambda _title, text: prompts.append(text) or True)
-    _row(dlg, "run-aaa").setSelected(True)
+    _row(dlg, RUN_A).setSelected(True)
     assert dlg._delete_btn.isEnabled()
 
     qtbot.mouseClick(dlg._delete_btn, Qt.LeftButton)
     qtbot.waitUntil(lambda: dlg._tree.topLevelItemCount() == 1 and not dlg._busy, timeout=10_000)
 
-    assert sorted(p.name for p in (staging / "runs").iterdir()) == ["run-bbb"]
-    assert "run run-aaa (project ProjA)" in prompts[0]
+    assert sorted(p.name for p in (staging / "runs").iterdir()) == [RUN_B]
+    assert f"run {RUN_A} (project ProjA)" in prompts[0]
     assert dlg._status.text().startswith("1 folder(s) deleted.")
 
 
@@ -112,41 +114,41 @@ def test_a_refused_confirmation_deletes_nothing(qtbot, staged, monkeypatch):
     host, staging = staged
     dlg = _open(qtbot, host)
     monkeypatch.setattr(dlg, "_confirm", lambda *_a: False)
-    _row(dlg, "run-aaa").setSelected(True)
+    _row(dlg, RUN_A).setSelected(True)
     qtbot.mouseClick(dlg._delete_btn, Qt.LeftButton)
     assert not dlg._busy
-    assert sorted(p.name for p in (staging / "runs").iterdir()) == ["run-aaa", "run-bbb"]
+    assert sorted(p.name for p in (staging / "runs").iterdir()) == [RUN_A, RUN_B]
 
 
 def test_keep_forever_writes_the_expiry_on_the_server(qtbot, staged):
     host, staging = staged
     dlg = _open(qtbot, host)
-    _row(dlg, "run-aaa").setSelected(True)
+    _row(dlg, RUN_A).setSelected(True)
     qtbot.mouseClick(dlg._keep_btn, Qt.LeftButton)
-    qtbot.waitUntil(lambda: _row(dlg, "run-aaa").text(6) == "Never (kept)" and not dlg._busy, timeout=10_000)
-    assert (staging / "runs" / "run-aaa" / rs.RUN_EXPIRY).read_text().strip() == rs.KEEP
+    qtbot.waitUntil(lambda: _row(dlg, RUN_A).text(6) == "Never (kept)" and not dlg._busy, timeout=10_000)
+    assert (staging / "runs" / RUN_A / rs.RUN_EXPIRY).read_text().strip() == rs.KEEP
 
 
 def test_the_host_rule_is_saved_and_remove_expired_honours_keep(qtbot, staged, monkeypatch):
     host, staging = staged
-    (staging / "runs" / "run-aaa" / rs.RUN_EXPIRY).write_text("keep\n")
+    (staging / "runs" / RUN_A / rs.RUN_EXPIRY).write_text("keep\n")
     dlg = _open(qtbot, host)
     saved: list[RemoteHost] = []
     dlg.host_changed.connect(saved.append)
     dlg._host_days.setValue(30)
-    assert _row(dlg, "run-bbb").text(6) == "Never"      # unsaved: nothing re-drawn yet
+    assert _row(dlg, RUN_B).text(6) == "Never"      # unsaved: nothing re-drawn yet
     qtbot.mouseClick(dlg._save_rule_btn, Qt.LeftButton)
 
     assert load_remotes()["h"].storage_expiry_days == 30
     assert saved and saved[0].storage_expiry_days == 30
-    assert _row(dlg, "run-bbb").text(6) == "Expired"
-    assert _row(dlg, "run-aaa").text(6) == "Never (kept)"
+    assert _row(dlg, RUN_B).text(6) == "Expired"
+    assert _row(dlg, RUN_A).text(6) == "Never (kept)"
 
     monkeypatch.setattr(dlg, "_confirm", lambda *_a: True)
     qtbot.mouseClick(dlg._sweep_btn, Qt.LeftButton)
     qtbot.waitUntil(lambda: dlg._tree.topLevelItemCount() == 1 and not dlg._busy, timeout=10_000)
-    assert sorted(p.name for p in (staging / "runs").iterdir()) == ["run-aaa"]
-    assert "removed expired run run-bbb" in dlg._status.text()
+    assert sorted(p.name for p in (staging / "runs").iterdir()) == [RUN_A]
+    assert f"removed expired run {RUN_B}" in dlg._status.text()
 
 
 def test_manage_remotes_opens_the_browser_on_the_selected_host(qtbot, staged, monkeypatch):
@@ -181,3 +183,20 @@ def test_editing_a_host_keeps_the_settings_the_form_does_not_show(qtbot):
     qtbot.addWidget(form)
     result = form.result_host()
     assert (result.storage_expiry_days, result.auto_gc, result.measured_bandwidth_mbps) == (12, True, 42.0)
+
+
+def test_a_folder_all_well_did_not_make_is_shown_but_never_deleted(qtbot, staged, monkeypatch):
+    host, staging = staged
+    foreign = staging / "runs" / "my-results"
+    foreign.mkdir()
+    (foreign / "keep.csv").write_text("mine")
+    _age(foreign, 40)
+    dlg = rsd.RemoteStorageDialog(None, host, cache=_LocalCache(host))
+    qtbot.addWidget(dlg)
+    qtbot.waitUntil(lambda: dlg._tree.topLevelItemCount() == 3 and not dlg._busy, timeout=10_000)
+    assert _row(dlg, "my-results").text(6) == "Not All-Well's (left alone)"
+    monkeypatch.setattr(dlg, "_confirm", lambda *_a: pytest.fail("asked to confirm deleting a foreign folder"))
+    _row(dlg, "my-results").setSelected(True)
+    qtbot.mouseClick(dlg._delete_btn, Qt.LeftButton)
+    assert not dlg._busy and (foreign / "keep.csv").read_text() == "mine"
+    assert "not made by All-Well" in dlg._status.text()

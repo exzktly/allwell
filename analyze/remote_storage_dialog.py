@@ -64,6 +64,8 @@ def _date(epoch: int | None) -> str:
 
 def expiry_text(item: rs.StorageItem, now: int, host_days: int) -> tuple[str, float]:
     """``(text, sort key)`` for the Expires column."""
+    if not item.ours:
+        return "Not All-Well's (left alone)", float("inf")
     if item.active:
         return "In use", -1.0
     if item.expiry == rs.KEEP:
@@ -261,7 +263,8 @@ class RemoteStorageDialog(QDialog):
             return
         self._listing = listing
         self._populate()
-        self._status.setText(message)
+        # A server that refused the staging folder lists nothing; say why, never "empty".
+        self._status.setText(" ".join(p for p in (message, f"The server refused: {why}." if why else "") if p))
 
     def _populate(self) -> None:
         listing = self._listing
@@ -335,14 +338,14 @@ class RemoteStorageDialog(QDialog):
 
     def _on_delete(self) -> None:
         chosen = self.selected_items()
-        active = [i for i in chosen if i.active]
-        items = [i for i in chosen if not i.active]
+        items = [i for i in chosen if i.ours and not i.active]
+        skipped = len(chosen) - len(items)
         if not items:
-            self._status.setText("Every selected folder is in use by a run; nothing to delete.")
+            self._status.setText("Every selected folder is in use by a run or was not made by All-Well; "
+                                 "nothing to delete.")
             return
         if not self._confirm("Delete remote folders", self.delete_prompt(items)):
             return
-        skipped = len(active)
         self._run_async(lambda: rs.delete_items(self._cache, items),
                         lambda result, error: self._on_outcomes(result, error, "deleted", skipped),
                         f"Deleting {len(items)} folder(s)…")
@@ -354,7 +357,7 @@ class RemoteStorageDialog(QDialog):
         failed = [f"{k} {n}" for (k, n), s in outcomes.items() if s not in ("gone", "ok", "busy")]
         parts = [f"{done} folder(s) {verb}."]
         if busy:
-            parts.append(f"{busy} in use and left alone.")
+            parts.append(f"{busy} in use or not All-Well's, and left alone.")
         if failed:
             parts.append(f"Failed: {', '.join(failed[:6])}{' …' if len(failed) > 6 else ''}.")
         if why:
@@ -369,7 +372,7 @@ class RemoteStorageDialog(QDialog):
         self._apply_expiry(rs.expiry_value(days=days, now=now), f"set to expire in {days} days")
 
     def _apply_expiry(self, value: str, verb: str) -> None:
-        items = self.selected_items()
+        items = [i for i in self.selected_items() if i.ours]
         if items:
             self._run_async(lambda: rs.set_expiry(self._cache, items, value),
                             lambda result, error: self._on_outcomes(result, error, verb),

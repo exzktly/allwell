@@ -32,6 +32,15 @@ OBSERVATION_LABELS = {CELLS: "Cells", NANOWELLS: "Nanowells"}
 #: The registry service the Nanowells feature answers with an :class:`ObservationTable`.
 NANOWELL_SERVICE = "observations.nanowell"
 
+#: A per-cell column holding the cell's own nanowell's metric: ``nw::<metric key>``. A nanowell metric is not a
+#: fluorescence intensity, so no ON cutoff or fluorescence gate applies to it (``metric_registry``).
+NANOWELL_CELL_PREFIX = "nw::"
+
+
+def is_nanowell_cell_column(column) -> bool:
+    return isinstance(column, str) and column.startswith(NANOWELL_CELL_PREFIX)
+
+
 #: Metrics that are 0/1 flags, whose well summary is a share (the mean), never a median.
 SHARE_METRICS = frozenset({"occupied"})
 #: The columns every nanowell observation row carries besides its metrics.

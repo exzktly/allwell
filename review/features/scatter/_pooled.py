@@ -33,6 +33,7 @@ from domain.tp_match import tp_close_mask
 from review.data.cell_pool import CellPool
 from review.data.data_loading import get_rows
 from review.data.narrow_rows import narrow_rows, value_inputs
+from review.data.observations import is_nanowell_cell_column, with_nanowell_columns
 from review.features.scatter._cells import well_cloud
 
 #: The most cells the tab draws. Above it, a stated sample is drawn. Matplotlib
@@ -76,6 +77,9 @@ def _narrow_columns(col_x: str, col_y: str, gates, ratios) -> set[str] | None:
     """What :func:`well_cloud` reads beyond the identity and verdict columns, or ``None``."""
     want = {"timepoint_hours", "area_px", "filename", "nucleus_id"}
     for key in (col_x, col_y, *(g.get(k) for g in gates or [] for k in ("x_col", "y_col"))):
+        if is_nanowell_cell_column(key):
+            want |= {"timepoint", "nw_q", "nw_r"}          # the cell's nanowell address; the value is joined on it
+            continue
         cols = value_inputs(key or "", ratios)
         if cols is None:
             return None
@@ -110,6 +114,7 @@ def collect_scatter_pooled(ctx, plan, *, col_x: str, col_y: str, target_tps, flu
         for group in plan:
             for well in group.wells:
                 df = narrow_rows(ctx, well, want) if want is not None else get_rows(ctx, well)
+                df = with_nanowell_columns(ctx, df, well, (col_x, col_y))
                 cloud = well_cloud(df, col_x=col_x, col_y=col_y, target_tps=target_tps,
                                    fluor_gate_x=fluor_gate_x, fluor_gate_y=fluor_gate_y,
                                    gates=gates, ratios=ratios)

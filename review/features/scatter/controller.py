@@ -477,8 +477,8 @@ def redraw_scatter_orchestrate(ctx) -> None:
 
     metric_x = scatter_axis_metric_key(ctx, "x")
     metric_y = scatter_axis_metric_key(ctx, "y")
-    col_x = col_for_scatter_axis(ctx, ch_x_entry, metric_x)
-    col_y = col_for_scatter_axis(ctx, ch_y_entry, metric_y)
+    col_x = _observations.cell_axis_column(ctx, ch_x_entry) or col_for_scatter_axis(ctx, ch_x_entry, metric_x)
+    col_y = _observations.cell_axis_column(ctx, ch_y_entry) or col_for_scatter_axis(ctx, ch_y_entry, metric_y)
 
     from review.domain.plate_layout import WELL_COLORS
     redraw_scatter(
@@ -602,6 +602,12 @@ def update_scatter_menus(ctx) -> None:
     cells_sections = [("", list(scatter_ch_options))]
     if shape_labels:
         cells_sections.append(("Shape Features", shape_labels))
+    # On a nanowell plate each cell can also be plotted against its own nanowell's metrics (cell GFP against the
+    # nanowell's crowding, say) — present only when the Nanowells feature supplies them.
+    nanowell_labels = list(_observations.cell_nanowell_entries(ctx))
+    if nanowell_labels:
+        cells_sections.append((_observations.CELL_NANOWELL_SECTION, nanowell_labels))
+        cells_ch_options = cells_ch_options + nanowell_labels
 
     ch_x_cb = ctx.widgets.get_or_none("_scatter_ch_x_cb")
     ch_y_cb = ctx.widgets.get_or_none("_scatter_ch_y_cb")

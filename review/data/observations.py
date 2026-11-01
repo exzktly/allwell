@@ -10,7 +10,9 @@ Imports no feature.
 
 from __future__ import annotations
 
-from review.domain.observation import CELLS, NANOWELL_SERVICE, NANOWELLS, ObservationTable
+from review.domain.observation import (
+    CELLS, NANOWELL_CELL_PREFIX, NANOWELL_SERVICE, NANOWELLS, ObservationTable, is_nanowell_cell_column,
+)
 
 
 def is_nanowell_dataset(ctx) -> bool:
@@ -79,3 +81,54 @@ def observation_groups(ctx) -> list[tuple[str, tuple[str, ...], str]]:
     selected = sorted((w for w in ctx.state.selection.selected_wells if w in paths), key=parse_rc)
     selected = apply_order(selected, list(ctx.state.plot.line_order_wells or []), key=lambda x: x)
     return [(well_display_label(ctx, w), (w,), color_for_well(w)) for w in selected]
+
+
+#: The labels of the nanowell metrics last joined onto cell rows, so an axis can name a ``nw::`` column without the
+#: Nanowells feature (labels only; every value comes from the table itself).
+_NANOWELL_LABELS: dict[str, str] = {}
+
+
+def nanowell_cell_label(column: str) -> str:
+    """The axis label of a ``nw::<key>`` column: ``Nanowell ▸ <metric label>``."""
+    key = column[len(NANOWELL_CELL_PREFIX):]
+    return f"Nanowell ▸ {_NANOWELL_LABELS.get(key, key)}"
+
+
+def nanowell_cell_column(key: str) -> str:
+    return f"{NANOWELL_CELL_PREFIX}{key}"
+
+
+def with_nanowell_columns(ctx, df, well: str, columns):
+    """*df* (one well's cell rows) with each ``nw::<key>`` of *columns* filled from the cell's own nanowell.
+
+    A cell names its nanowell by ``(timepoint, nw_q, nw_r)``; the value is that nanowell's at the cell's timepoint,
+    as the Nanowells feature computes it. A cell with no address, or in a build or dataset without nanowell
+    observations, gets NaN — no value, never a borrowed one. *df* itself is not changed.
+    """
+    import numpy as np
+
+    wanted = [c for c in columns if is_nanowell_cell_column(c)]
+    if df is None or not wanted:
+        return df
+    out = df.copy()
+    for column in wanted:
+        out[column] = np.nan
+    table = nanowell_observations(ctx, [well])
+    if table is None or table.frame.empty or not {"nw_q", "nw_r", "timepoint"} <= set(df.columns):
+        return out
+    keys = [c[len(NANOWELL_CELL_PREFIX):] for c in wanted]
+    _NANOWELL_LABELS.update({m.key: m.label for m in table.metrics})
+    sites = table.frame[table.frame["well"] == well][["timepoint", "nw_q", "nw_r", *[k for k in keys if k in
+                                                                                   table.frame.columns]]].copy()
+    for col in ("nw_q", "nw_r"):
+        sites[col] = sites[col].astype(float)
+    sites["timepoint"] = sites["timepoint"].astype(str)
+    left = out[["timepoint", "nw_q", "nw_r"]].copy()
+    left["timepoint"] = left["timepoint"].astype(str)
+    for col in ("nw_q", "nw_r"):
+        left[col] = left[col].astype(float)
+    merged = left.reset_index().merge(sites, on=["timepoint", "nw_q", "nw_r"], how="left").set_index("index")
+    for column, key in zip(wanted, keys):
+        if key in merged.columns:
+            out.loc[merged.index, column] = merged[key].to_numpy(dtype=float)
+    return out

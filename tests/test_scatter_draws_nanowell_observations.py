@@ -46,7 +46,10 @@ def scatter_ctx(qtbot, tmp_path):
 
 
 def _points(ax) -> np.ndarray:
+    """Every drawn marker: the nanowell scatter's collections and the cell scatter's marker-only lines."""
     offsets = [c.get_offsets() for c in ax.collections if len(c.get_offsets())]
+    offsets += [np.column_stack(ln.get_data()) for ln in ax.lines
+                if ln.get_linestyle() in ("None", "none", "") and len(ln.get_xdata())]
     return np.vstack(offsets) if offsets else np.empty((0, 2))
 
 
@@ -110,3 +113,24 @@ def test_under_cells_the_scatter_draws_cells_as_before(scatter_ctx):
     # Cells, and the footer says they are a nanowell plate's cells, pooled from its occupied nanowells.
     assert _footer(fig) == "Observations: cells · pooled from 3–4 occupied nanowells per well"
     assert not scatter_ctx.widgets.get("_scatter_ch_x_cb").parentWidget().isHidden()
+
+
+def test_a_cell_can_be_set_against_its_own_nanowell_s_metric(scatter_ctx):
+    """Cells on X, each cell's own nanowell's count on Y (NANOWELL_OBSERVATIONS_TRACKER #11)."""
+    from review.features.scatter.controller import redraw_scatter_orchestrate, update_scatter_menus
+
+    update_scatter_menus(scatter_ctx)
+    y = scatter_ctx.widgets.get("_scatter_ch_y_cb")
+    entry = "Nanowell ▸ Cell count"
+    assert y.findText(entry) >= 0
+    y.setCurrentText(entry)
+    x = scatter_ctx.widgets.get("_scatter_ch_x_cb")
+    x.setCurrentText("GFP")
+    scatter_ctx.runtime.scatter.tp_selections = {k: float(k) == 24.0 for k in scatter_ctx.runtime.scatter.tp_selections}
+    redraw_scatter_orchestrate(scatter_ctx)
+    got = sorted(map(tuple, _points(scatter_ctx.widgets.get("_ax_scatter"))))
+    # Every cell at 24 h: its GFP, and the count of the nanowell it sits in — one point per cell, so a nanowell of
+    # n cells contributes n points at (its GFP, n).
+    want = sorted((GFP[w][i], float(n)) for w in COUNTS for i, n in enumerate(COUNTS[w]["24h"]) for _ in range(n))
+    assert got == want
+    assert scatter_ctx.widgets.get("_ax_scatter").get_ylabel().startswith("Nanowell ▸ Cell count")

@@ -153,3 +153,33 @@ def redraw(ctx, page: str) -> None:
     fig.text(0.01, 0.005, footer, ha="left", va="bottom", fontsize=7, color=muted, gid="observations_footer")
     apply_export_style_to_current(ctx, fig, canvas)
     canvas.draw_idle()
+
+
+#: The section and label prefix of a cell axis that is the cell's own nanowell's metric.
+CELL_NANOWELL_SECTION = "Nanowell (of this cell)"
+CELL_NANOWELL_PREFIX = "Nanowell ▸ "
+
+
+def cell_nanowell_entries(ctx) -> dict[str, str]:
+    """``label -> metric key`` for the per-cell pickers' "Nanowell ▸" entries: each cell takes its own nanowell's
+    value at its timepoint (``review/data/observations.with_nanowell_columns``). Empty where nanowell observations
+    are not available (a standard plate, or a build without the Nanowells feature)."""
+    from review.data.observations import available_observations, nanowell_observations, observation_groups
+
+    if NANOWELLS not in available_observations(ctx):
+        return {}
+    wells = [w for _l, ws, _c in observation_groups(ctx) for w in ws] or list(ctx.state.dataset.well_paths)[:1]
+    table = nanowell_observations(ctx, wells) if wells else None
+    if table is None:
+        return {}
+    return {f"{CELL_NANOWELL_PREFIX}{m.label}": m.key for m in table.metrics}
+
+
+def cell_axis_column(ctx, entry: str) -> str | None:
+    """The joined column for a "Nanowell ▸" entry, ``None`` for any other entry."""
+    from review.data.observations import nanowell_cell_column
+
+    if not str(entry).startswith(CELL_NANOWELL_PREFIX):
+        return None
+    key = cell_nanowell_entries(ctx).get(entry)
+    return nanowell_cell_column(key) if key else None

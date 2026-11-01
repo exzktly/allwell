@@ -18,11 +18,8 @@ from review.domain.observation import CELLS, NANOWELLS, OBSERVATION_LABELS, foot
 
 #: Plotting leaves that draw cells only, each with why. A leaf that gains a nanowell view leaves this roster.
 CELLS_ONLY = {
-    "Bar Plots": "nanowell well medians not yet drawn (tracker #13)",
-    "Line Graphs": "nanowell well medians over time not yet drawn (tracker #14)",
     "Response Curves": "a dose axis is a sample variable; nanowell responses not yet drawn (tracker #13)",
     "Distribution": "nanowell distributions are still drawn on the Nanowells page (tracker #12)",
-    "Heat Map": "nanowell well medians not yet drawn (tracker #15)",
 }
 
 
@@ -80,10 +77,10 @@ def test_a_standard_plate_shows_nothing(shell, mini_dataset):
 def test_a_nanowell_plate_offers_the_toggle_on_a_leaf_that_draws_nanowells_and_says_why_elsewhere(shell):
     ctx = _nanowell(shell)
     assert ob.band_mode(ctx, "Scatter Plot") == "toggle"
-    assert ob.band_mode(ctx, "Bar Plots") == "cells_only"
+    assert ob.band_mode(ctx, "Response Curves") == "cells_only"
     ctx.state.plot.observations = NANOWELLS
     assert ob.effective_observations(ctx, "Scatter Plot") == NANOWELLS
-    assert ob.effective_observations(ctx, "Bar Plots") == CELLS
+    assert ob.effective_observations(ctx, "Response Curves") == CELLS
 
 
 def test_without_the_nanowells_feature_a_nanowell_plate_shows_nothing(shell, monkeypatch):
@@ -106,7 +103,7 @@ def test_the_band_shows_the_toggle_or_its_text_and_the_toggle_records_the_choice
     group = ctx.widgets.get("_plotting_observations_grp")
     static = ctx.widgets.get("_plotting_observations_static")
     assert not group.isHidden() and static.isHidden()
-    ob.refresh(ctx, "Bar Plots")
+    ob.refresh(ctx, "Response Curves")
     assert group.isHidden() and not static.isHidden()
     toggle = ctx.widgets.get("_plotting_observations_toggle")
     toggle.setCurrentByData(NANOWELLS)

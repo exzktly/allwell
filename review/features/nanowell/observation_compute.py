@@ -52,8 +52,13 @@ def _metric_specs(channels) -> tuple[ObservationMetric, ...]:
 
 
 def _frame(metrics: pd.DataFrame) -> pd.DataFrame:
+    from pipeline.nanowell_task import timepoint_hours
+
     frame = metrics.copy()
     frame["occupied"] = (pd.to_numeric(frame["n"], errors="coerce") >= 1).astype(float).where(frame["n"].notna())
+    # The timepoint as the cell rows' ``timepoint_hours`` reads it, so a plot's timepoint choices (built from the
+    # cell rows) select the same rows here. ``time_h`` stays the acquisition record's clock, which may differ.
+    frame["timepoint_hours"] = frame["timepoint"].map(timepoint_hours)
     return frame.reset_index(drop=True)
 
 

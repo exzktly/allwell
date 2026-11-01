@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from review.domain.observation import NANOWELLS, ObservationTable, footer_line
+from review.domain.observation import NANOWELLS, SHARE_METRICS, ObservationTable, footer_line
 
 
 @dataclass
@@ -77,7 +77,9 @@ def nanowell_scatter(table: ObservationTable, x_key: str, y_key: str, groups, *,
         mine = rows["well"].isin(group.wells) & both
         if per_well:
             medians = (pd.DataFrame({"well": rows["well"], "timepoint": rows["timepoint"], "x": x, "y": y})[mine]
-                       .groupby(["well", "timepoint"], sort=True)[["x", "y"]].median())
+                       .groupby(["well", "timepoint"], sort=True)
+                       .agg({"x": "mean" if x_key in SHARE_METRICS else "median",
+                             "y": "mean" if y_key in SHARE_METRICS else "median"}))
             series.append(NanowellSeries(group.label, group.color, medians["x"].to_numpy(float),
                                          medians["y"].to_numpy(float),
                                          [(w, tp, None, None) for w, tp in medians.index]))

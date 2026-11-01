@@ -276,7 +276,8 @@ def build_centre(win, parent: QWidget) -> None:
         # The combo paints its own "Channel: " prefix (LabeledComboBox), so
         # it needs no separate ControlBand label — pass "" so add_scope adds
         # the combo alone rather than pairing it with a QLabel.
-        win._plotting_channel_grp = band.add_scope("", win._plotting_channel_cb)
+        win._plotting_channel_grp = win._ctx.widgets.register(
+            "_plotting_channel_grp", band.add_scope("", win._plotting_channel_cb))
         # Legacy display-only chip remains as an attribute for code that
         # still pokes at ``_plotting_channel_chip`` — point it at the new
         # combo so callers that read its text still work.
@@ -309,7 +310,8 @@ def build_centre(win, parent: QWidget) -> None:
                 swallowed()  # was: pass (silent except)
 
         win._plotting_metric_cb.currentIndexChanged.connect(_on_global_metric)
-        win._plotting_metric_grp = band.add_scope("", win._plotting_metric_cb)
+        win._plotting_metric_grp = win._ctx.widgets.register(
+            "_plotting_metric_grp", band.add_scope("", win._plotting_metric_cb))
 
         # Group the plot's members by a sample variable instead of by the user's
         # replicate sets. In the scope zone because that is exactly what it does
@@ -431,8 +433,8 @@ def build_centre(win, parent: QWidget) -> None:
         # rather than handing it back, so it is fished out and registered here —
         # two of three captions switching and the third not would be worse than
         # either consistent choice.
-        win._plotting_thresh_frac_grp = band.add_scope(
-            "ON threshold", win._plotting_thresh_frac_stepper, trailing=True)
+        win._plotting_thresh_frac_grp = win._ctx.widgets.register("_plotting_thresh_frac_grp", band.add_scope(
+            "ON threshold", win._plotting_thresh_frac_stepper, trailing=True))
         _thr_cap = win._plotting_thresh_frac_grp.findChild(QLabel)
         if _thr_cap is not None:
             win._ctx.widgets.register("_plotting_thresh_frac_lbl", _thr_cap)

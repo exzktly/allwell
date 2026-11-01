@@ -1200,10 +1200,14 @@ def _features() -> list[FeatureDescriptor]:
             on_channel_changed=_channel_bar,
             redraw=_redraw_bar_plots,
             fold_change_scope_factory=_fold_change_scope_bar,
+            # Well medians over nanowells under Observations: Nanowells (<feature>/_observations.py).
+            observations=("cells", "nanowells"),
         ),
         FeatureDescriptor(name="Line Graphs", parent="Plotting", build=_build_lineplot,
                           on_activate=_activate_default_plot,
-                          redraw=_redraw_line_graphs),
+                          redraw=_redraw_line_graphs,
+                          # Well medians over time under Observations: Nanowells (lineplot/_observations.py).
+                          observations=("cells", "nanowells")),
         FeatureDescriptor(name="Response Curves", parent="Plotting",
                           build=_build_response, redraw=_redraw_response,
                           on_activate=_activate_response,
@@ -1242,6 +1246,8 @@ def _features() -> list[FeatureDescriptor]:
                     _svc_heatmap_refresh_layout_sidebar,
                 "heatmap.well_dropped": _svc_heatmap_well_dropped,
             },
+            # Well medians over nanowells under Observations: Nanowells (<feature>/_observations.py).
+            observations=("cells", "nanowells"),
         ),
 
         # ── Image Browser sub-leaves (dispatch hooks only) ─────────────────

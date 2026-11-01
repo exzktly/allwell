@@ -58,3 +58,24 @@ def occupied_nanowells_by_well(ctx, wells) -> dict[str, int]:
         addressed = rows[["nw_q", "nw_r"]].dropna()
         out[well] = int(len(addressed.drop_duplicates()))
     return out
+
+
+def observation_groups(ctx) -> list[tuple[str, tuple[str, ...], str]]:
+    """``(legend label, wells, colour)`` per plotted member: the replicate sets when any are active, else each
+    selected well — the members every plot draws, in their order (as ``scatter.collect.scatter_groups``)."""
+    from review.domain.plot_members import plot_replicate_sets
+    from review.domain.plot_order import apply_order
+    from review.domain.selections_model import (
+        color_for_replicate_set, color_for_well, replicate_display_label, well_display_label,
+    )
+    from review.domain.viewer_state import parse_rc
+
+    paths = ctx.state.dataset.well_paths
+    rsets = plot_replicate_sets(ctx)
+    if rsets:
+        rsets = apply_order(rsets, list(ctx.state.plot.line_order_rsets or []), key=lambda r: getattr(r, "name", ""))
+        return [(replicate_display_label(ctx, r), tuple(w for w in r.wells if w in paths),
+                 color_for_replicate_set(r, ctx.state.selection.selections)) for r in rsets]
+    selected = sorted((w for w in ctx.state.selection.selected_wells if w in paths), key=parse_rc)
+    selected = apply_order(selected, list(ctx.state.plot.line_order_wells or []), key=lambda x: x)
+    return [(well_display_label(ctx, w), (w,), color_for_well(w)) for w in selected]

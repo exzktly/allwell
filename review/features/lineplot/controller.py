@@ -1091,6 +1091,11 @@ def redraw_line_plots(
         canvas.draw_idle()
         return
 
+    from review.features.lineplot import _observations as _nw_lines
+    if _nw_lines.draw(ctx, ax_mean, ax_frac, ax_n, ax_cdf, legend_kw):
+        apply_export_style_to_current(ctx, fig, canvas)
+        canvas.draw_idle()
+        return
     # Single source of truth: ask ``collect_line_series`` for the
     # fully-normalized series in legend order, then paint via the shared
     # renderer (also used by the batch export, so the panel set never drifts).

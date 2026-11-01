@@ -681,10 +681,14 @@ def _draw_heatmap(ctx) -> None:
     err = np.full((layout.rows, layout.cols), np.nan, dtype=float)
     cell_well_index: dict[tuple[int, int], list[str]] = {}
 
+    from review.features.heatmap._observations import nanowell_grid
+    nw = nanowell_grid(ctx, layout, tp, lambda ws: _expand_repset_wells(ctx, ws))
     for (r, c), wells in layout.cells.items():
         if not (0 <= r < layout.rows and 0 <= c < layout.cols):
             continue
         cell_well_index[(r, c)] = list(wells)
+        if nw is not None:
+            continue                       # under Observations: Nanowells the values are the wells' medians
         try:
             arr[r, c], err[r, c] = _cell_stat(
                 ctx, wells, tp, metric, val_col,
@@ -693,6 +697,8 @@ def _draw_heatmap(ctx) -> None:
         except Exception:
             arr[r, c] = float("nan")
             err[r, c] = float("nan")
+    if nw is not None:
+        arr, err, metric = nw.arr, nw.err, nw.label
 
     # Cache for click/hover handlers (stamped onto ``app._heatmap_*`` by the
     # runtime namespace so the app-native mouse handlers keep resolving).
@@ -709,7 +715,7 @@ def _draw_heatmap(ctx) -> None:
     # Pool min/max across every timepoint so the colormap stays consistent
     # while the user scrubs the timepoint slider. Cached so this only
     # recomputes when an input changes.
-    g_vmin, g_vmax = _compute_global_range(
+    g_vmin, g_vmax = (nw.vmin, nw.vmax) if nw is not None else _compute_global_range(
         ctx, layout, metric, val_col,
         threshold, fluor_gates, ratios,
     )
@@ -929,7 +935,7 @@ def _draw_heatmap(ctx) -> None:
             # would otherwise reset the log ticks it just installed. ``cla()``
             # drops the attribute, so re-stamp it on every redraw.
             setattr(cax, "_aw_colorbar", True)
-            ctx.runtime.heatmap.colorbar.set_label(_metric_axis_label(metric, ctx),
+            ctx.runtime.heatmap.colorbar.set_label(metric if nw is not None else _metric_axis_label(metric, ctx),
                                                    fontsize=8, color=_muted_fg)
             cax.tick_params(colors=_muted_fg, labelsize=7)
             for _spi in cax.spines.values():
@@ -945,7 +951,7 @@ def _draw_heatmap(ctx) -> None:
         try:
             ctx.runtime.heatmap.colorbar = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.03)
             setattr(ctx.runtime.heatmap.colorbar.ax, "_aw_colorbar", True)
-            ctx.runtime.heatmap.colorbar.set_label(_metric_axis_label(metric, ctx),
+            ctx.runtime.heatmap.colorbar.set_label(metric if nw is not None else _metric_axis_label(metric, ctx),
                                                    fontsize=8, color=_muted_fg)
             ctx.runtime.heatmap.colorbar.ax.tick_params(colors=_muted_fg, labelsize=7)
             for _spi in ctx.runtime.heatmap.colorbar.ax.spines.values():
@@ -968,7 +974,12 @@ def _draw_heatmap(ctx) -> None:
     title = (
         f"{active_channel_label(ctx)}"
         f" — {metric} — {_tp_label(tp, _rescale_for(ctx.state.plot))}"
-    )
+    ) if nw is None else f"Nanowells — {metric} — {_tp_label(tp, _rescale_for(ctx.state.plot))}"
+    from review.core.observation_band import FOOTER_GID
+    for _t in [t for t in fig.texts if t.get_gid() == FOOTER_GID]:
+        _t.remove()
+    if nw is not None:
+        fig.text(0.01, 0.002, nw.footer, ha="left", va="bottom", fontsize=7, color=_muted_fg, gid=FOOTER_GID)
     if show_error and np.isfinite(err).any():
         # Which spread the ``±`` under each value is, in the same two words
         # every other error-bearing figure in the app uses. A grid whose cells

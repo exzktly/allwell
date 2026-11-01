@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from review.domain.observation import CELLS, NANOWELLS, OBSERVATION_LABELS
 
+#: Leaves whose axes choose their own nanowell metrics (Scatter's X / Y pickers), so the band's Metric is not shown.
+OWN_AXES_LEAVES = frozenset({"Scatter Plot"})
 #: The static text on a nanowell dataset's leaf that draws cells only.
 CELLS_ONLY_TEXT = "Observations: cells — no nanowell view for this plot"
 
@@ -73,6 +75,23 @@ def build_observation_controls(ctx, band) -> None:
     static_group = band.add_scope("", static)
     static_group.setVisible(False)
     ctx.widgets.register("_plotting_observations_static", static_group)
+    # Under Nanowells, one Metric picker stands in for Channel / Property / ON threshold (they describe a cell).
+    from widgets.labeled_combo import LabeledComboBox
+
+    metric = ctx.widgets.register("_plotting_nw_metric_cb", LabeledComboBox("Metric"))
+
+    def _on_metric(_idx: int) -> None:
+        key = metric.currentData()
+        if key and key != getattr(ctx.state.plot, "nanowell_metric", ""):
+            ctx.state.plot.nanowell_metric = key
+            from review.core.plot_orchestrator import redraw_every_scope
+
+            redraw_every_scope(ctx)
+
+    metric.currentIndexChanged.connect(_on_metric)
+    metric_group = band.add_scope("", metric)
+    metric_group.setVisible(False)
+    ctx.widgets.register("_plotting_nw_metric_grp", metric_group)
 
 
 def set_observations(ctx, observations: str) -> None:
@@ -101,6 +120,18 @@ def refresh(ctx, title: str) -> None:
             toggle.setCurrentByData(getattr(ctx.state.plot, "observations", CELLS))
         finally:
             toggle.blockSignals(blocked)
+    # A leaf drawing nanowells with the band's scope (not Scatter, whose axes pick their own) swaps the cell
+    # controls for the Metric picker; the cell controls come back on any other leaf or under Cells.
+    band_metric = effective_observations(ctx, title) == NANOWELLS and title not in OWN_AXES_LEAVES
+    metric_group = ctx.widgets.get_or_none("_plotting_nw_metric_grp")
+    if metric_group is not None:
+        metric_group.setVisible(band_metric)
+    if band_metric:
+        for name in ("_plotting_channel_grp", "_plotting_metric_grp", "_plotting_thresh_frac_grp"):
+            grp = ctx.widgets.get_or_none(name)
+            if grp is not None:
+                grp.setVisible(False)
+        populate_metric_picker(ctx)
 
 
 def refresh_current(ctx) -> None:
@@ -138,3 +169,48 @@ def stamp_cells_footer(ctx, fig, wells=None) -> str:
     muted = tokens_for(axes[0])[2] if axes else None
     fig.text(0.01, 0.002, line, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID)
     return line
+
+
+#: What a nanowell figure says when the band's Fold change menu is on: it normalises cell plots, not these.
+FOLD_CHANGE_NOT_APPLIED = ("The Fold change menu normalises cell plots; for nanowells pick a fold-change metric "
+                           "(against the Nanowells page's Baseline).")
+
+
+def nanowell_table_for(ctx, wells):
+    """The nanowell observations of *wells*, or ``None`` (``review/data/observations``)."""
+    from review.data.observations import nanowell_observations
+
+    return nanowell_observations(ctx, wells) if wells else None
+
+
+def chosen_metric(ctx, table) -> str:
+    """The band's nanowell metric, defaulting to the cell count when unset or not in *table*."""
+    keys = [m.key for m in table.metrics] if table is not None else []
+    key = getattr(ctx.state.plot, "nanowell_metric", "") or ""
+    if key in keys:
+        return key
+    return "n" if "n" in keys else (keys[0] if keys else "")
+
+
+def populate_metric_picker(ctx) -> None:
+    """Fill the band's Metric picker from the selected wells' nanowell metrics, keeping the choice."""
+    from review.data.observations import observation_groups
+
+    combo = ctx.widgets.get_or_none("_plotting_nw_metric_cb")
+    if combo is None:
+        return
+    wells = [w for _label, ws, _c in observation_groups(ctx) for w in ws]
+    table = nanowell_table_for(ctx, wells)
+    if table is None:
+        return
+    keys = [m.key for m in table.metrics]
+    blocked = combo.blockSignals(True)
+    try:
+        if [combo.itemData(i) for i in range(combo.count())] != keys:
+            combo.clear()
+            for m in table.metrics:
+                combo.addItem(m.label, m.key)
+        key = chosen_metric(ctx, table)
+        combo.setCurrentIndex(keys.index(key) if key in keys else 0)
+    finally:
+        combo.blockSignals(blocked)

@@ -32,6 +32,8 @@ OBSERVATION_LABELS = {CELLS: "Cells", NANOWELLS: "Nanowells"}
 #: The registry service the Nanowells feature answers with an :class:`ObservationTable`.
 NANOWELL_SERVICE = "observations.nanowell"
 
+#: Metrics that are 0/1 flags, whose well summary is a share (the mean), never a median.
+SHARE_METRICS = frozenset({"occupied"})
 #: The columns every nanowell observation row carries besides its metrics.
 NANOWELL_ID_COLUMNS = ("well", "timepoint", "time_h", "nw_q", "nw_r", "state")
 
@@ -124,3 +126,66 @@ def pooled_cells_line(occupied_by_well: dict[str, int], *, nanowell_views: bool)
     if not nanowell_views:
         line += " · nanowell views are not in this build"
     return line
+
+
+def well_medians(table: ObservationTable, key: str, wells, timepoints_h=None, *, how: str | None = None) -> pd.DataFrame:
+    """Each well's median of metric *key* over its nanowells, per timepoint.
+
+    Columns ``well``, ``timepoint``, ``timepoint_hours``, ``median``, ``n`` (nanowells with a value) and
+    ``total`` (nanowell rows). A well-timepoint with no defined value has ``median`` NaN and ``n`` 0 — not
+    computed is not zero (CLAUDE.md §7). *timepoints_h* restricts to those hours (``timepoint_hours``).
+
+    *how* ``"mean"`` takes the mean instead, and is the only right reduction of a 0/1 metric such as ``occupied``:
+    its mean is the share of nanowells, its median merely says whether more than half qualify. The column keeps the
+    name ``median`` so every caller reads one shape. Left unset, *how* is ``"mean"`` for the 0/1 metrics
+    (:data:`SHARE_METRICS`) and ``"median"`` otherwise.
+    """
+    how = how or ("mean" if key in SHARE_METRICS else "median")
+    import math
+
+    frame = table.frame
+    cols = ["well", "timepoint", "timepoint_hours", "median", "n", "total"]
+    if frame.empty or key not in frame.columns:
+        return pd.DataFrame(columns=cols)
+    scope = frame["well"].isin(list(wells))
+    if timepoints_h is not None:
+        wanted = [float(t) for t in timepoints_h]
+        hours = pd.to_numeric(frame["timepoint_hours"], errors="coerce")
+        scope &= hours.map(lambda h: h == h and any(math.isclose(h, t, abs_tol=1e-6) for t in wanted))
+    rows = frame[scope].assign(_v=table.values(key)[scope])
+    out = (rows.groupby(["well", "timepoint", "timepoint_hours"], sort=True)["_v"]
+           .agg(median=how, n="count", total="size").reset_index())
+    return out[cols]
+
+
+@dataclass(frozen=True)
+class GroupPoint:
+    """One group at one timepoint: the mean of its wells' medians, the spread over wells, how many wells."""
+
+    label: str
+    timepoint_hours: float
+    mean: float
+    sem: float          # NaN with fewer than two wells: one well has no spread over wells
+    n_wells: int
+    well_values: tuple[float, ...]
+
+
+def group_points(medians: pd.DataFrame, groups) -> list[GroupPoint]:
+    """Per group (``label``, ``wells``) and timepoint, the wells are the replicates: mean ± SEM over well medians.
+
+    Nanowells are never pooled across wells into one sample — that would treat nanowells as replicates.
+    """
+    import math
+
+    out: list[GroupPoint] = []
+    if medians.empty:
+        return out
+    for label, wells in groups:
+        mine = medians[medians["well"].isin(list(wells)) & medians["median"].notna()]
+        for hours, sub in mine.groupby("timepoint_hours", sort=True):
+            vals = tuple(float(v) for v in sub["median"])
+            n = len(vals)
+            mean = sum(vals) / n
+            sem = (math.sqrt(sum((v - mean) ** 2 for v in vals) / (n - 1)) / math.sqrt(n)) if n >= 2 else float("nan")
+            out.append(GroupPoint(label, float(hours), mean, sem, n, vals))
+    return out

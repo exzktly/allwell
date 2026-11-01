@@ -93,8 +93,14 @@ the container**:
     batches, Slurm, bootstrap, the Remotes dialogs (~100 s).
 
   `scripts/lane_needed.py nanowell|remote` decides: a changed path matching the
-  gate's patterns, or a module one of its tests imports *directly*, means run it
-  (as does a diff it cannot compute). `scripts/preflight.sh` and CI both ask;
+  gate's patterns means run it. A module one of its tests imports *directly*
+  means run it only when what changed in it reaches that test — the changed
+  definitions, widened to the definitions in the same module that use them, are
+  named by a lane test that imports the module (or that test reads the module
+  wholesale). `tests/_lanes.py` reaches a gate only when that gate's own rosters
+  or triggers change. Anything it cannot narrow — a new, deleted or unparseable
+  file, a changed import or other non-definition statement, a diff it cannot
+  compute — means run it. `scripts/preflight.sh` and CI both ask;
   CI also runs every gated lane on each push to `main`, which is where a change
   two imports away gets caught. **If you skip preflight, ask the script yourself
   and run the lanes it names before pushing.** Over the 52 merges before the

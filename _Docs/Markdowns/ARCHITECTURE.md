@@ -20219,10 +20219,29 @@ you're in before you type the command.
   `GATES` in the same module names two gates, `nanowell` (both nanowell lanes)
   and `remote`, each with its rosters and path patterns.
   `scripts/lane_needed.py <gate> [--base REF]` answers whether a change needs
-  them: a changed path matching the patterns, or a first-party module one of the
-  gate's roster files imports **directly** (read from the files' syntax trees on
-  each run, so a new test extends its trigger by joining the roster), means run
-  it; a diff that cannot be computed means run it. The import closure cannot be
+  them. A changed path matching the patterns means run it; a diff that cannot be
+  computed means run it. A first-party module one of the gate's roster files
+  imports **directly** (read from the files' syntax trees on each run, so a new
+  test extends its trigger by joining the roster) means run it only when what
+  changed in it reaches that test: the script compares the module's syntax tree
+  on the base with the tree now, names the top-level definitions that changed —
+  functions, classes, assignments, and each class's own members, docstrings and
+  comments ignored — widens that set to every definition in the module that
+  refers to one of them, and runs the lane when a roster file that imports the
+  module refers to one of those names or reads the module wholesale (`vars`,
+  `dir`, `inspect.getmembers`, a `getattr` with a computed name). A new, deleted
+  or unparseable file, or a change to a module-level statement that defines
+  nothing (an import, a conditional block), cannot be narrowed and runs the
+  lane. Without this, `ui/theme.py` — imported by nearly every test — started
+  both gates on a one-colour edit. `tests/_lanes.py`, which holds every roster,
+  reaches a gate only when that gate's rosters (as sets of files) or trigger
+  patterns differ between the two versions, both loaded; before, adding any test
+  to any list counted as a harness change for both gates, which it did on 19 of
+  60 merges. Replayed over those 60 merges, the remote gate fires on 27 rather
+  than 41 and the nanowell gate on 51 rather than 52; the two failures `main`
+  saw on merges whose lane is now skipped were reproduced as passing on that
+  merge and its parent. `tests/test_a_gated_lane_runs_on_what_changed.py`
+  holds the narrowing. The import closure cannot be
   the trigger — one `import analyze.tab` reaches most of the application — so a
   module two imports away can still move a gated test without triggering its
   lane. CI's `nanowell` job (the end-to-end lane) and `gated` job (the feature

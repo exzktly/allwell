@@ -10712,9 +10712,9 @@ file, whose zip entries carry the time of writing, and each save of the referenc
 or `none:<code>` where there was none (`unmeasured`, `other_settings`, `absent`, `untemplated`, and `loaded` /
 `unverified` read from a reference saved by the earlier count-based rule; codes rather than the reasons' sentences,
 so rewording one re-runs nothing). A reference saved by that rule holds timepoints marked `loaded` or `unverified`
-with no template: `nanowell_reference.own`, which `_confluence_reference_for` gives the reference well itself, keys
-those apart (`own:refused`, `Reference.refused`), so the reference's recorded `own` no longer matches there and it is
-measured again — incrementally, only at those timepoints — and every well read against its refusal follows. A timepoint is kept by
+with no template; nothing re-measures them on a later plain run (the reference well's own key is `own` whatever its
+saved verdicts say), so those timepoints keep no confluence, with the reason in their notes, until the plate is
+re-run with Force. A timepoint is kept by
 an incremental run only under the key the reference saved now gives (`_prior_state(reference_key=…)`), and a
 finished well is skipped by a plain run only when every `ok` timepoint's key still matches
 (`nanowell_task.confluence_reference_current`, ANDed into `process_well_zips`' `output_exists`, asked after the

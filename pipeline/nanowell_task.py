@@ -133,14 +133,11 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
 
 
 def _confluence_reference_for(well_label, settings, template_path):
-    """What *well_label*'s confluence is read against: itself when it is the empty reference well
-    (``pipeline.nanowell_reference.own``, which keys apart any timepoint an earlier rule refused, so it is measured
-    again), else the reference saved in this output folder (``pipeline.nanowell_reference.load``), else nothing,
-    with the reason."""
-    output_dir = Path(template_path).parent.parent
+    """What *well_label*'s confluence is read against: itself when it is the empty reference well, else the
+    reference saved in this output folder (``pipeline.nanowell_reference.load``), else nothing, with the reason."""
     if nref.same_well(well_label, nref.reference_well(settings)):
-        return nref.own(output_dir, well_label)
-    return nref.load(output_dir, settings)
+        return nref.OWN
+    return nref.load(Path(template_path).parent.parent, settings)
 
 
 def confluence_reference_current(output_dir, well_label, shared_kwargs_template) -> bool:

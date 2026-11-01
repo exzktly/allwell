@@ -25,8 +25,8 @@ confluence. Debris is filtered after the run, in QC.
 A timepoint has no confluence — ``None``, never 0 — in every well when the reference has no template there, when
 the reference has no such timepoint, when no reference well was named, or when this output folder holds no
 reference measured under the run's settings. Each says why in the timepoint's notes. A reference saved by the
-earlier count-based rule, with a timepoint marked ``loaded`` or ``unverified`` and so no template, is measured
-again (:func:`own`): those statuses are no longer written, and the template they withheld is needed.
+earlier count-based rule, with a timepoint marked ``loaded`` or ``unverified`` and so no template, is not measured
+again by a later run: those timepoints keep no confluence, and say why, until the plate is re-run with Force.
 
 Stored under ``<output>/nanowells/_confluence_reference/``: ``reference.json`` (the well, the measurement version,
 the settings key and each timepoint's verdict) and one ``<timepoint>.npz`` per empty timepoint
@@ -57,7 +57,6 @@ DIR_NAME = "_confluence_reference"
 #: ``empty`` is the only status :func:`verdict` writes. ``loaded`` and ``unverified`` are read from references saved
 #: by the earlier count-based rule, which refused the timepoint and saved no template for it.
 EMPTY, LOADED, UNVERIFIED = "empty", "loaded", "unverified"
-REFUSED_BY_THE_OLD_RULE = (LOADED, UNVERIFIED)
 NOTE_PREFIX = "No confluence at this timepoint"
 #: The note on the reference well's own timepoint when many of its nanowells hold a counted object.
 LOOKS_LOADED_PREFIX = "Named empty reference well holds counted objects"
@@ -70,13 +69,10 @@ OWN_KEY = "own"
 class Reference:
     """What a well's confluence is read against, timepoint by timepoint.
 
-    ``own``: this well is the reference and reads itself; ``refused`` then names its timepoints an earlier
-    count-based rule refused and saved no template for, which :meth:`key_at` keys apart so they are measured again.
-    Otherwise ``templates`` maps each timepoint at which the reference was empty to its template (carrying its
+    ``own``: this well is the reference and reads itself. Otherwise ``templates`` maps each timepoint at which the reference was empty to its template (carrying its
     threshold), and ``reasons`` says why any other timepoint has none; ``default`` is the reason for a timepoint the
     reference does not have. ``codes`` and ``default_code`` say the same as short words, for :meth:`key_at`."""
     own: bool = False
-    refused: frozenset = frozenset()
     templates: dict = field(default_factory=dict)
     reasons: dict = field(default_factory=dict)
     default: str = ""
@@ -100,7 +96,7 @@ class Reference:
         ``other_settings``, ``absent``, or the timepoint's verdict). Codes rather than the reasons' sentences, so
         rewording a reason re-runs nothing."""
         if self.own:
-            return f"{OWN_KEY}:refused" if str(timepoint) in self.refused else OWN_KEY
+            return OWN_KEY
         template = self.templates.get(timepoint)
         if template is not None:
             return template_key(template)
@@ -123,19 +119,6 @@ def template_key(template) -> str:
 
 
 OWN = Reference(own=True)
-
-
-def own(output_dir, well: str) -> Reference:
-    """What the reference *well* itself reads against: :data:`OWN`, unless the reference saved in *output_dir* was
-    written by the earlier count-based rule and refused some of its timepoints (``loaded`` / ``unverified``, no
-    template saved). Those are then keyed apart (``Reference.refused``), so the well's recorded key no longer matches
-    there and the run measures them again, saving the template every other well's confluence needs."""
-    index = read_index(output_dir)
-    if index is None or not same_well(index.get("well"), well):
-        return OWN
-    refused = frozenset(str(tp) for tp, found in (index.get("timepoints") or {}).items()
-                        if isinstance(found, dict) and found.get("status") in REFUSED_BY_THE_OLD_RULE)
-    return Reference(own=True, refused=refused) if refused else OWN
 
 
 def none_named() -> Reference:

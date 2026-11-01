@@ -11269,8 +11269,12 @@ spawned, `_worker_init`-ed pool the wells ran on; `reanchor_plate` → `_each_re
 module-level function a worker can be handed, which catches a well's failure in the worker; a worker that dies
 fails only the well it held). The empty reference well, when it is among the wells to re-run, runs first and
 alone, in the parent, and the rest only after it: they read their confluence against the templates it saves,
-and beside it in the pool a well could read them while they were being rewritten. A well not re-run keeps what
-it read, and its timepoints' `confluence_reference_key` tells the next run whether that is still the reference's.
+and beside it in the pool a well could read them while they were being rewritten. The reference's re-run can
+save a template for a timepoint it has only now been addressed at, which the other wells measured earlier with no
+reference there; so once it has run, every other well of the run whose `confluence_reference_key` at a measured
+timepoint no longer matches (`confluence_reference_current`) joins the pass as an incremental re-run with no plate
+prediction, which measures exactly those timepoints again and keeps the rest. Left alone, such a well said "the
+reference has no timepoint" — false by then — and the run reported success.
 In a batched remote run it runs once, after the last batch
 (`--nanowell_hold_dir` / `--nanowell_reanchor_only`, below).
 What it does:

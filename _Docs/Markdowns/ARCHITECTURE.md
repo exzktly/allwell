@@ -13429,7 +13429,13 @@ parent process supervises the per-well worker pool:
   cannot make a record look older than the run that wrote it. On a remote run
   retirement happens on the host, and since `rsync` only adds, the fetch then
   calls `mirror_retirements`, which removes each top-level record whose
-  byte-identical copy the host archived. Readers go through `current_records`,
+  byte-identical copy the host archived. The `Remedy: force` notes a *local*
+  download writes (`<well>_local_csv_cut_short.txt`,
+  `<well>_local_zip_unreadable.txt`) never reached the host, so neither path
+  can retire them; once a forced, non-incremental remote run of the well has
+  been fetched and verified whole, the verifier archives them itself
+  (`FetchedOutputVerifier._retire_answered_force_notes` →
+  `error_records.retire_force_notes`). Readers go through `current_records`,
   which also covers records written before retirement existed (above, QC
   triage; §6b, Validate). Without this a well that failed once and was re-run
   successfully kept its traceback for ever: QC triage listed it whenever the

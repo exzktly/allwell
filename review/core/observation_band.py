@@ -109,3 +109,32 @@ def refresh_current(ctx) -> None:
     title = stack.currentName() if stack is not None else ""
     if title:
         refresh(ctx, title)
+
+
+#: The gid of the footer line a plot carries about its observations.
+FOOTER_GID = "observations_footer"
+
+
+def stamp_cells_footer(ctx, fig, wells=None) -> str:
+    """On a nanowell dataset, write the cell plot's footer onto *fig* (and return it); ``""`` elsewhere.
+
+    "Observations: cells · pooled from N occupied nanowells per well", plus "· nanowell views are not in this
+    build" when the build has no Nanowells feature — so a cell plot of a nanowell plate never reads as an ordinary
+    one, in any build, on screen or exported. The previous footer is removed first; a redraw writes one line.
+    """
+    from review.data.observations import is_nanowell_dataset, nanowell_views_available, occupied_nanowells_by_well
+    from review.domain.observation import pooled_cells_line
+
+    for text in [t for t in getattr(fig, "texts", []) if t.get_gid() == FOOTER_GID]:
+        text.remove()
+    if fig is None or not is_nanowell_dataset(ctx):
+        return ""
+    if wells is None:
+        wells = getattr(getattr(ctx.state, "selection", None), "selected_wells", None) or ()
+    line = pooled_cells_line(occupied_nanowells_by_well(ctx, wells), nanowell_views=nanowell_views_available(ctx))
+    from review.core.plot_style import tokens_for
+
+    axes = getattr(fig, "axes", [])
+    muted = tokens_for(axes[0])[2] if axes else None
+    fig.text(0.01, 0.002, line, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID)
+    return line

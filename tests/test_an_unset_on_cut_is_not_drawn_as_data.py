@@ -33,6 +33,11 @@ def bar_ctx(qtbot, tmp_path):
     frame = QWidget()
     QHBoxLayout(frame)
     window.setCentralWidget(frame)
+    # The Plotting page's shared band, as centre_view registers it: a leaf's controls live in its slots, and a
+    # free-standing fallback band nothing holds would be collected with every control in it.
+    from review.core.ui_helpers import PLOTTING_BAND_KEY
+    from widgets.control_band import ControlBand
+    ctx.widgets.register(PLOTTING_BAND_KEY, ControlBand(frame))
     build_bar_plots_tab(ctx, frame)
     ctx.state.selection.selected_wells = {"A01", "B01"}
     from review.features.barplot.controller import ordered_bar_keys, update_bar_tp_menu
@@ -86,13 +91,18 @@ def line_ctx(qtbot, tmp_path):
     from tests._minimal_shell import load_dataset, minimal_shell
     from tests.fixtures.nanowell_dataset import build_nanowell_dataset
 
-    root = build_nanowell_dataset(tmp_path / "nw")
+    root = build_nanowell_dataset(tmp_path / "nw_line")
     ctx, window = minimal_shell(qtbot)
     window._ctx, window._app_state, window._features = ctx, ctx.state, ctx.features
     load_dataset(ctx, root / "out")
     frame = QWidget()
     QHBoxLayout(frame)
     window.setCentralWidget(frame)
+    # The Plotting page's shared band, as centre_view registers it: a leaf's controls live in its slots, and a
+    # free-standing fallback band nothing holds would be collected with every control in it.
+    from review.core.ui_helpers import PLOTTING_BAND_KEY
+    from widgets.control_band import ControlBand
+    ctx.widgets.register(PLOTTING_BAND_KEY, ControlBand(frame))
     build_line_graphs_tab(ctx, frame)
     ctx.state.selection.selected_wells = {"A01", "B01"}
     return ctx
@@ -114,3 +124,25 @@ def test_the_line_tab_says_it_too_and_draws_a_stored_zero(line_ctx):
     line_ctx.state.cell_gating.thresh_frac_on["phase"] = 0.0
     ax_frac, _ax_n = _draw_lines(line_ctx, "phase")
     assert _notes(ax_frac) == [] and len(ax_frac.lines) >= 2
+
+
+def _footers(fig) -> list[str]:
+    return [t.get_text() for t in fig.texts if t.get_gid() == "observations_footer"]
+
+
+def test_a_nanowell_plate_s_cell_plots_say_their_cells_are_pooled_from_occupied_nanowells(bar_ctx, line_ctx):
+    _draw(bar_ctx, "gfp")
+    assert _footers(bar_ctx.runtime.barplot.fig) == [
+        "Observations: cells · pooled from 3–4 occupied nanowells per well"]
+    _draw(bar_ctx, "gfp")                                   # a redraw writes one line, not two
+    assert len(_footers(bar_ctx.runtime.barplot.fig)) == 1
+    _draw_lines(line_ctx, "gfp")
+    assert _footers(line_ctx.widgets.get("_line_fig")) == [
+        "Observations: cells · pooled from 3–4 occupied nanowells per well"]
+
+
+def test_without_the_nanowells_feature_the_footer_says_the_views_are_not_in_this_build(bar_ctx, monkeypatch):
+    monkeypatch.setattr(bar_ctx.features, "service", lambda key: None)
+    _draw(bar_ctx, "gfp")
+    assert _footers(bar_ctx.runtime.barplot.fig) == [
+        "Observations: cells · pooled from 3–4 occupied nanowells per well · nanowell views are not in this build"]

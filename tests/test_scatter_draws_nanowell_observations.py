@@ -107,5 +107,6 @@ def test_under_cells_the_scatter_draws_cells_as_before(scatter_ctx):
 
     redraw_scatter_orchestrate(scatter_ctx)
     fig = scatter_ctx.widgets.get("_scatter_fig")
-    assert not [t for t in fig.texts if t.get_gid() == "observations_footer"]
+    # Cells, and the footer says they are a nanowell plate's cells, pooled from its occupied nanowells.
+    assert _footer(fig) == "Observations: cells · pooled from 3–4 occupied nanowells per well"
     assert not scatter_ctx.widgets.get("_scatter_ch_x_cb").parentWidget().isHidden()

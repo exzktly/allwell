@@ -1259,6 +1259,8 @@ def redraw_bars(ctx) -> None:
                 f"bars, and the brackets need bars to sit on.")
         if cut_not_set:
             blank_for_unset_cut(ax_frac, ax_n)
+        from review.core.observation_band import stamp_cells_footer
+        stamp_cells_footer(ctx, ctx.runtime.barplot.fig)
         apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
         return
     draw_grouped_bar_mode(
@@ -1275,6 +1277,8 @@ def redraw_bars(ctx) -> None:
     )
     if cut_not_set:
         blank_for_unset_cut(ax_frac, ax_n)
+    from review.core.observation_band import stamp_cells_footer
+    stamp_cells_footer(ctx, ctx.runtime.barplot.fig)
     apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
 
 

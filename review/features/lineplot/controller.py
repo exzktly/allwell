@@ -1145,6 +1145,9 @@ def redraw_line_plots(
         from review.core.threshold_note import blank_for_unset_cut
         blank_for_unset_cut(ax_frac, ax_n)
 
+    from review.core.observation_band import stamp_cells_footer
+    stamp_cells_footer(ctx, fig, selected)
+
     ctx.notify.set_status(line_status_text(
         ctx, series_list, fc_misses, active_rsets, selected))
 

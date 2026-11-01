@@ -17,7 +17,7 @@ def is_nanowell_dataset(ctx) -> bool:
     """Whether the loaded dataset was written by a nanowell run."""
     from review.domain.qc_params import is_nanowell_run
 
-    return is_nanowell_run(getattr(ctx.state.dataset, "pipeline_info", None))
+    return is_nanowell_run(getattr(getattr(ctx.state, "dataset", None), "pipeline_info", None))
 
 
 def nanowell_views_available(ctx) -> bool:

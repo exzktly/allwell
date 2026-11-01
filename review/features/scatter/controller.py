@@ -232,6 +232,8 @@ def redraw_scatter(
     # ax.clear() at the top of this redraw voids any live RectangleSelector;
     # rebuild it against the fresh axes when gate-draw mode is armed.
     refresh_gate_selector(ctx)
+    from review.core.observation_band import stamp_cells_footer
+    stamp_cells_footer(ctx, scatter_fig)
     scatter_canvas.draw()
 
 

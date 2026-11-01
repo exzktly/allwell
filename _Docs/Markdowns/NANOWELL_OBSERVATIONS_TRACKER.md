@@ -37,7 +37,7 @@ States: `todo`, `doing`, `done` (with the test that fails without the fix), `dec
 | 15 | Heat Map under Nanowells: well medians; empty state links to Nanowells ▸ Array | todo | |
 | 16 | Statistics under Nanowells (subsumes Nanowells ▸ Statistics) | todo | |
 | 17 | Batch Export's Nanowells mode reaches the feature through services, not `_lazy` imports | todo | |
-| 18 | Every figure's footer begins "Observations: cells" / "Observations: nanowells"; without the feature, "pooled from N occupied nanowells per well · nanowell views are not in this build" | todo | |
+| 18 | Every figure's footer begins "Observations: cells" / "Observations: nanowells"; without the feature, "pooled from N occupied nanowells per well · nanowell views are not in this build" | doing | `observation_band.stamp_cells_footer` on Bar, Line and per-cell Scatter of a nanowell plate; nanowell Scatter writes `footer_line`. Tests: the last two of `tests/test_an_unset_on_cut_is_not_drawn_as_data.py` (removing the Bar stamp fails them) and the Scatter file. A standard plate's figures carry no footer, as before. **Still owed:** Distribution, Heat Map, Response and the Batch Export figures |
 | 19 | A status-bar message belongs to the tab that wrote it | todo | |
 | 20 | `test_feature_removal` case: a nanowell dataset with the Nanowells package blocked | todo | |
 | 21 | ARCHITECTURE.md and README_WellViewer.md describe all of the above | todo | |

@@ -3999,7 +3999,9 @@ window, ε, an axis limit — takes effect when you press **Enter**, click into
 another box, or stop typing for a second — not as you type each digit. Typing
 `200` redraws once, at 200, rather than at 2, then 20, then 200. Clicking a plot
 or a tab after typing is fine: the number applies a second after your last
-keystroke either way. The box's up/down arrows and the mouse
+keystroke either way. Until it applies, the number is shown in *italics*; it
+turns upright once it is in force — so if you pause mid-number, the upright text
+is what was applied. The box's up/down arrows and the mouse
 wheel still apply each step straight away.
 
 #### Channel selector
@@ -6044,7 +6046,7 @@ the sentence names it.
   select fewer wells to see (and click) single nanowells.
 - **Nothing without a number is drawn, and nothing is dropped silently.** Under each swarm, "excl. N" counts
   the nanowells that have no value there, and the footer lists them by reason: occluded, clipped, no address,
-  not located, fused (no count), empty at baseline, seeded later (empty at baseline, cells later), and so on.
+  not located, fused (no count), empty at baseline, no cells at baseline (none at the baseline, cells later), and so on.
   "Nanowells used U of R" (on *Along x: Time*, "Nanowell × timepoint values", since a nanowell is counted at
   each timepoint) adds up the panels drawn, and the number of wells; past twelve panels the rest are named,
   not counted. A selected well with no nanowell table is named in the footer, not drawn.
@@ -6080,7 +6082,7 @@ the sentence names it.
   ranking timepoint is always shown. Crops too small to hold a line of measurements show the fold change only, and
   the caption says so. All crops share one brightness scale, so a nanowell that filled
   with cells reads brighter than one that emptied. Nanowells without a fold change at the ranking timepoint
-  (occluded, seeded later, and so on) are not ranked and are counted by reason in the caption; a well with
+  (occluded, no cells at baseline, and so on) are not ranked and are counted by reason in the caption; a well with
   fewer nanowells than both blocks need splits them between the two and never shows one twice. Click any crop
   to open that nanowell's site detail. The crops are cut from the run's raw images as for the site detail, in
   one pass for the whole montage, so it fills in a moment after the ranking is drawn.
@@ -6134,14 +6136,17 @@ the sentence names it.
     outline the view holds as a small ring drawn the same way — colour, dash and hatch — with how many
     nanowells it covers, and lists only what is on screen. Its words are in the figure's own ink, so they read on
     the dark screen theme and on publication white alike. A plain grey ring keyed *no value* is a nanowell that
-    was measured — cells may be plainly visible in it — but has no value of the chosen **Metric**, and the key
-    says why: for a fold change that is almost always its baseline, *seeded later (0 at baseline)* when it held
-    no cells at the baseline timepoint, or *baseline occluded* / *baseline rim out of focus* when the baseline
-    could not be measured; with several causes it lists the commonest three, with counts. The outline's width follows the nanowell's size on screen (about
+    was measured — cells may be plainly visible in it — but has no value of the chosen **Metric**. For a fold change
+    that is almost always its baseline: *no cells at baseline* when it held none at the baseline timepoint, or
+    *baseline occluded* / *baseline rim out of focus* when the baseline could not be measured. The key has one entry
+    per reason (the commonest three, then *other reasons*), each with a short tag in brackets — *no value: no cells
+    at baseline (0 at base) · 3* — and with **Values** on each such nanowell writes that tag inside itself, so you
+    can read the reason of the one you are looking at. Every key entry ends with its count. The outline's width follows the nanowell's size on screen (about
     6 % of its diameter, never under 2.5 or over 8 screen pixels), so it stays visible zoomed out and on a phone. Either way a nanowell on a tile seam is dashed in purple and
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the
-    `q,r` when both are on). A nanowell without a value has no number written, never a 0. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
+    `q,r` when both are on). A nanowell without a value never has a number written (never a 0): it writes why instead, as above. Every
+    label has a thin outline of the background colour, so it reads over a hatched nanowell. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
     from the run's cell table, so you can see where cells were found and where none were; the run does not
     keep cell outlines, so the dot is the cell's centre, not its shape. The dots are the cells the counts hold:
     a cell Home's Cell Gating leaves out, or one in a field excluded in QC triage, by the field-quality flag or by
@@ -6158,10 +6163,13 @@ the sentence names it.
     pitch, angle, overlap, nanowells detected of the roster), the empty-nanowell template the counts were
     divided by, and the status of every other timepoint; a template the run found far from the well's
     earliest one is shown in amber: most nanowells there may hold cells, and that timepoint's counts and
-    confluence may be biased. *Notes* (off until you turn it on) writes the footer in full: how the positions,
-    the fill and the outlines are drawn, what the tile colours mean, and the grid status even when it is *ok*.
-    Off, the footer keeps only the page's notes, the counts by state, and anything that went wrong or is missing
-    — no addresses, nothing placed, no montage, a grid status other than *ok* — so the array keeps the room.
+    confluence may be biased. *Notes* (off until you turn it on; also the **Notes** button beside **Overlays**)
+    explains how to read the figure — how the positions are drawn, what the fill and outlines mean, what the tile
+    colours mean — in a box over the bottom of the array, saying only what applies to what is on screen. The array
+    does not move or shrink when you turn it on. The footer under the figure is the same either way: the page's
+    notes, one line of counts that adds up to the roster in the key's own groups (*19 nanowells: 13 with a value ·
+    4 no value · 2 rim out of focus*), and anything that went wrong or is missing — no addresses, nothing placed,
+    no montage, a grid status other than *ok*.
   - **Layers → Show as** sets every layer at once: *Array map* (lattice places filled by the metric), *Array
     QC* (the run montage, the tiles and the nanowells by state, with the run record) or *Full montage* (full
     resolution, nanowells by state with their addresses and values, and the anchor). *Notes* stays as you set it.
@@ -6183,7 +6191,7 @@ the sentence names it.
 
   Click a nanowell to open its site detail, as on the beeswarm (with **Set anchor** on, a click sets the anchor
   instead). Double-click a nanowell to centre it, zoom until it fills the view and open its site detail —
-  anywhere inside its rim counts, and it works with the overlays hidden. The footer counts the nanowells by state. The page remembers the layers with its
+  anywhere inside its rim counts, and it works with the overlays hidden. The footer counts the nanowells in the key's groups. The page remembers the layers with its
   other settings; a page saved on the old *Array map* or *Array QC* view opens on the Array view with the
   layers that view drew.
 

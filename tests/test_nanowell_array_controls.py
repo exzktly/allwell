@@ -143,9 +143,29 @@ def test_each_nanowell_is_labelled_with_its_address_and_its_value_of_the_chosen_
     metric_cb = ctx.widgets.get("_nw_metric_cb")
     metric_cb.setCurrentIndex(metric_cb.findData("c"))
     assert st.metric == "c"
-    # A nanowell without a value writes nothing: it is not a zero.
-    assert _labels(ctx) == ["0.125", "0.5", "1.75"]
+    # A nanowell without a value writes why it has none, never a number: it is not a zero.
+    assert _labels(ctx) == ["0.125", "0.5", "1.75", "no conf."]
     assert not any("zoom in" in t for t in _texts(ctx, "nw-array-footer"))
+
+
+def test_every_label_has_a_halo_of_the_ground_so_it_reads_over_a_hatch(qc_page):
+    """The addresses on the out-of-focus nanowells could not be read over the dot hatch (UX review N7): each label
+    is drawn with a stroke of the figure's ground around it."""
+    from matplotlib.colors import to_hex
+    from matplotlib.patheffects import withStroke
+
+    from review.features.nanowell.renderer import _inks
+
+    ctx = qc_page
+    _toggle(ctx, "addresses")
+    st = ctx.state.feature_slice("nanowell")
+    labels = [t for t in st.drawn.ax.texts if t.get_gid() == "nw-array-address"]
+    assert labels
+    ground = to_hex(_inks(st.drawn.ax)[0])
+    for label in labels:
+        effects = label.get_path_effects()
+        assert [type(e) for e in effects] == [withStroke], label.get_text()
+        assert to_hex(effects[0]._gc["foreground"]) == ground
 
 
 def test_a_label_writes_three_significant_figures_and_never_a_missing_value_as_a_number():
@@ -153,10 +173,15 @@ def test_a_label_writes_three_significant_figures_and_never_a_missing_value_as_a
 
     from review.features.nanowell.renderer import site_label_texts
 
-    sites = SimpleNamespace(labels=["0,0", "1,-1", "", ""], values=np.array([12.3456, np.nan, 0.0, np.nan]))
+    sites = SimpleNamespace(labels=["0,0", "1,-1", "", ""], values=np.array([12.3456, np.nan, 0.0, np.nan]),
+                            sites=[("A01", 0, 0), ("A01", 1, -1), ("A01", 2, 0), ("A01", 3, 0)])
     assert site_label_texts(sites, addresses=True, values=True) == ["0,0\n12.3", "1,-1", "0", ""]
     assert site_label_texts(sites, addresses=False, values=True) == ["12.3", "", "0", ""]
     assert site_label_texts(sites, addresses=True, values=False) == ["0,0", "1,-1", "", ""]
+    # With the reasons known, a nanowell without a value writes its reason's tag where the value would be.
+    why = {(1, -1): "no cells at baseline", (3, 0): "baseline occluded"}
+    assert site_label_texts(sites, addresses=True, values=True, why=why) == [
+        "0,0\n12.3", "1,-1\n0 at base", "0", "base occl."]
 
 
 def test_values_are_on_by_default_and_the_saved_layers_keep_them():

@@ -20,13 +20,16 @@ digit. "Finished" is Enter, the box losing focus, or a pause of :data:`TYPING_PA
 optional: a click on a plot canvas, a tool button or a tab bar ends no edit, and a window that is not the active one
 has no focus to lose, so without it a number typed and then left was silently dropped — reported on the Nanowells
 page's Rim focus box, whose first change (made with Enter) applied and whose later ones (ended by a click) did not.
-The arrows, the wheel and ``setValue`` still emit at once; only typing waits.
+The arrows, the wheel and ``setValue`` still emit at once; only typing waits. While typed text is not yet the value in
+force it is shown in italics (:meth:`_HoldsItsNumber.pending`), so a number waiting for its pause is never mistaken
+for one already applied — a pause in the middle of a number commits what is there, and the change of style says so.
 ``tests/test_spin_boxes_commit_typed_values_once.py`` holds it.
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QTimer
+from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
 
 #: How long a pause in typing commits the number typed (module docstring): long enough that typing "60" at an
@@ -52,6 +55,25 @@ class _HoldsItsNumber:
         self._commit_pause.setInterval(TYPING_PAUSE_MS)
         self._commit_pause.timeout.connect(self.interpretText)
         self.lineEdit().textEdited.connect(lambda _text: self._commit_pause.start())
+        # Typed but not yet in force: italics until it commits or is put back.
+        self.lineEdit().textChanged.connect(lambda _text: self._show_pending())
+        self.valueChanged.connect(lambda _value: self._show_pending())
+
+    def pending(self) -> bool:
+        """Whether the text in the field is not the value in force: typed and not yet committed."""
+        text = self.lineEdit().text().strip()
+        if text == self.textFromValue(self.value()).strip():
+            return False
+        if self.validate(text, 0)[0] != QValidator.Acceptable:
+            return True
+        return self.valueFromText(text) != self.value()
+
+    def _show_pending(self) -> None:
+        font = self.lineEdit().font()
+        pending = self.pending()
+        if font.italic() != pending:
+            font.setItalic(pending)
+            self.lineEdit().setFont(font)
 
     def _hold(self) -> None:
         width = self.sizeHint().width()

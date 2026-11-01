@@ -135,8 +135,8 @@ def test_the_map_draws_the_chosen_well_and_the_timepoint_control_steps_its_timep
     # Its wells hold fewer nanowells than rim focus needs to judge one, and the footer says so before the rest.
     unjudged = re.match(r"Focus unchecked: \d+ under 10 rims in the well\. ", footer[0])
     assert unjudged
-    assert footer[0][unjudged.end():].startswith("Nanowell identity — A01 not checked")
-    assert footer[1] == "4 nanowells in the roster · with a value 3 · measured 2 · empty 1 · occluded 1"
+    assert footer[0][unjudged.end():].startswith("Nanowell addresses: A01 not yet verified")
+    assert footer[1] == "4 nanowells: 3 with a value · 1 occluded"
     tp_cb = page.widgets.get("_nw_tp_cb")
     # The Plotting tabs' control: the timepoints in time order, named by their hours, the first one shown.
     assert [tp_cb.itemText(i) for i in range(tp_cb.count())] == ["0 h", "5 h"]
@@ -146,7 +146,7 @@ def test_the_map_draws_the_chosen_well_and_the_timepoint_control_steps_its_timep
     assert st.timepoint == "t_a"
     title = [ax._left_title.get_text() for ax in page.widgets.get("_nw_fig").axes]
     assert "A01 · t_a" in title
-    assert _fig_texts(page, "nw-array-footer")[1].startswith("4 nanowells in the roster · with a value 4 ·")
+    assert _fig_texts(page, "nw-array-footer")[1] == "4 nanowells: 4 with a value"
     well_cb = page.widgets.get("_nw_well_cb")
     assert [well_cb.itemText(i) for i in range(well_cb.count())] == ["A01", "B01"]
     well_cb.setCurrentIndex(1)

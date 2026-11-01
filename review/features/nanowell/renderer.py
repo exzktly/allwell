@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from review.features.nanowell._array_key import draw_key, key_entries
+from review.features.nanowell._array_key import draw_key, key_entries, reason_tag, state_word
 from review.features.nanowell.array_compute import padded
 from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
@@ -1097,49 +1097,72 @@ def _union(a, b):
     return min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])
 
 
-def array_footer(scene, layers, *, label: str, image_note: str = "", note: str = "") -> list[str]:
-    """The lines under the Array view: what is drawn, how to read it, and what could not be drawn and why.
+def _head(scene, layers) -> str:
+    """The counts line, in the key's own groups so it adds up to the roster: ``19 nanowells: 13 with a value · 4 no
+    value · 2 rim out of focus``. A fused nanowell is counted as fused, as the key counts it; one without a measured
+    position as not placed."""
+    sites = scene.sites
+    states = np.array([str(s) for s in sites.state], dtype=object)
+    fused = np.asarray(sites.fused, dtype=bool)
+    plain = ~fused
+    parts: list[tuple[str, int]] = []
+    if layers.colour == "metric":
+        has = np.isfinite(np.asarray(sites.values, dtype=float))
+        measurable = np.isin(states, ["measured", "empty"])
+        parts += [("with a value", int((plain & has).sum())), ("no value", int((plain & ~has & measurable).sum()))]
+        rest = plain & ~has & ~measurable
+    else:
+        rest = plain
+    tally: dict[str, int] = {}
+    for state in states[rest]:
+        tally[state] = tally.get(state, 0) + 1
+    parts += [(state_word(k), v) for k, v in sorted(tally.items(), key=lambda kv: -kv[1])]
+    parts += [("fused", int(fused.sum())), ("not placed (no measured position)", int(scene.unplaced))]
+    undrawn = int(scene.roster) - len(sites) - int(scene.unplaced)
+    parts.append(("not drawn", max(undrawn, 0)))
+    said = " · ".join(f"{n:,} {what}" for what, n in parts if n)
+    return f"{scene.roster:,} nanowells: {said}" if said else f"{scene.roster:,} nanowells"
 
-    With the *Notes* layer off (``layers.notes``, the default) the footer is only what the reader is owed: the page's
-    note, the counts, and anything that went wrong or is missing — no addresses, nothing placed, no montage, a grid
-    status other than ``ok``, and what a layer the reader turned on could not draw. How to read the figure (the
-    positions, the fill and outlines, the tile colours) is the key's job above the array, and is written out only
-    with *Notes* on: a footer of six lines took a third of the figure from the array it describes."""
-    sites, in_well, full = scene.sites, scene.frame == "well", bool(layers.notes)
+
+def array_footer(scene, layers, *, label: str, image_note: str = "", note: str = "") -> list[str]:
+    """The lines under the Array view: the page's note, the counts, and what went wrong or is missing — no
+    addresses, nothing placed, the image's state, what the Cells layer could not draw, and the anchor's status when it
+    is not a plain ``ok`` (``_anchor_owed``). How to read the figure is :func:`array_notes`, drawn only with *Notes*
+    on and over the foot of the array rather than here, so turning it on never moves or shrinks the array."""
+    sites, in_well = scene.sites, scene.frame == "well"
     lines = [note] if note else []
     if scene.reason:
         lines.append(f"No addresses at this timepoint: {scene.reason}")
     if not len(sites):
         lines.append(f"{scene.well} at {scene.timepoint}: {scene.no_places}, so no nanowell is drawn.")
-    counts = " · ".join(f"{k.replace('_', ' ')} {v:,}" for k, v in sorted(scene.counts.items(), key=lambda kv: -kv[1]))
-    head = f"{scene.roster:,} nanowells in the roster"
-    if layers.colour == "metric":
-        head += f" · with a value {int(np.isfinite(sites.values).sum()):,}"
-    head += (f" · {counts}" if counts else "")
-    if scene.unplaced:
-        head += f" · {scene.unplaced:,} without a measured position, not drawn"
-    lines.append(head)
-    if full:
-        lines.append(f"Lattice positions at the measured pitch {scene.pitch_um:.1f} µm, so a nanowell keeps its place "
-                     "from one timepoint to the next (the square is the central nanowell)."
-                     if not in_well and scene.pitch_um
-                     else "Measured positions in the well frame (the square is the central nanowell).")
-    if full and layers.nanowells and len(sites):
-        lines.append(f"Filled by {label}; a grey outline has no value, its hatch or dash naming why (the key above "
-                     "the array). Fused: on a tile seam, measured from a blended crop."
-                     if layers.colour == "metric" else
-                     "Outlined by state, as the key above the array shows. Fused: on a tile seam, measured from a "
-                     "blended crop.")
+    lines.append(_head(scene, layers))
     if layers.cells and scene.cells_note:
         lines.append(scene.cells_note)
-    if full and in_well and layers.tiles and scene.tiles:
-        lines.append("Tiles: green placed on the lattice, blue by overlap correlation, amber where the acquisition "
-                     "record put them; each labelled with its registration residual.")
     if in_well and layers.image != "off" and image_note:
         lines.append(image_note)
-    if in_well and layers.anchor and scene.anchor_text and (full or _anchor_owed(scene)):
+    if in_well and layers.anchor and scene.anchor_text and _anchor_owed(scene):
         lines += scene.anchor_text.split("\n")
-    if full and not in_well and (layers.image != "off" or layers.tiles or layers.anchor):
+    return lines
+
+
+def array_notes(scene, layers, *, label: str) -> list[str]:
+    """How to read what the Array view draws (the *Notes* layer): each line only when what it explains is on
+    screen — the fused sentence only with a fused nanowell drawn, the tile colours only with tiles drawn."""
+    sites, in_well = scene.sites, scene.frame == "well"
+    lines = [f"Lattice positions at the measured pitch {scene.pitch_um:.1f} µm, so a nanowell keeps its place from "
+             "one timepoint to the next (the square is the central nanowell)." if not in_well and scene.pitch_um
+             else "Measured positions in the well frame (the square is the central nanowell)."]
+    if layers.nanowells and len(sites):
+        fused = " Fused (dashed purple): on a tile seam, measured from a blended crop." \
+            if np.asarray(sites.fused, dtype=bool).any() else ""
+        lines.append(f"Filled by {label}. A grey outline has no value: its hatch or dash names its state, and with "
+                     "Values on the words inside it say why (the key above the array lists each)." + fused
+                     if layers.colour == "metric" else
+                     "Outlined by state, as the key above the array shows." + fused)
+    if in_well and layers.tiles and scene.tiles:
+        lines.append("Tiles: green placed on the lattice, blue by overlap correlation, amber where the acquisition "
+                     "record put them; each labelled with its registration residual.")
+    if not in_well and (layers.image != "off" or layers.tiles or layers.anchor):
         lines.append("The image, the tiles and the anchor are in the well frame, not on the lattice: switch Positions "
                      "to Measured to draw them.")
     return lines
@@ -1187,7 +1210,8 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     if layers.cells and scene.cells is not None and len(scene.cells[0]):
         _draw_cells(ax, *scene.cells)
     if (layers.addresses or layers.values) and len(scene.sites):
-        lines += _draw_labels(fig, ax, drawn, scene.sites, addresses=layers.addresses, values=layers.values)
+        lines += _draw_labels(fig, ax, drawn, scene.sites, addresses=layers.addresses, values=layers.values,
+                              why=scene.why)
     if in_well and layers.anchor and scene.anchor is not None:
         _draw_anchor(ax, drawn, scene.anchor)
     _ink(ax.set_title(f"{scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
@@ -1195,9 +1219,22 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
         y = _FOOTER_BASE + (len(lines) - 1 - i) * _LINE
         _ink(fig.text(0.03, y, text, fontsize=7.5, color=ink if i == 0 else muted, gid="nw-array-footer"),
              muted=i != 0)
+    if layers.notes:
+        _draw_notes(ax, array_notes(scene, layers, label=label), muted)
     if layers.record:
         _draw_record(fig, scene.record, right + 0.08, ink, muted)
     return drawn
+
+
+def _draw_notes(ax, lines: list[str], muted) -> None:
+    """The *Notes* lines in a box over the foot of the array: drawn over the axes rather than under them, so the
+    footer reserves the same height with Notes on or off and the array neither moves nor shrinks."""
+    if not lines:
+        return
+    ground = _inks(ax)[0]
+    box = {"boxstyle": "round,pad=0.4", "facecolor": ground, "alpha": 0.88, "edgecolor": muted, "linewidth": 0.5}
+    _ink(ax.text(0.01, 0.01, "\n".join(lines), transform=ax.transAxes, ha="left", va="bottom", fontsize=7.5,
+                 color=muted, bbox=box, zorder=9, linespacing=1.5, gid="nw-array-notes"), muted=True)
 
 
 def _array_axes(fig, scene, image, region, *, right: float, bottom: float) -> ArrayDrawn:
@@ -1394,24 +1431,33 @@ def value_text(value) -> str:
     return f"{value:.3g}" if value is not None and np.isfinite(value) else ""
 
 
-def site_label_texts(sites, *, addresses: bool, values: bool) -> list[str]:
+def site_label_texts(sites, *, addresses: bool, values: bool, why: dict | None = None) -> list[str]:
     """What each nanowell's label says: its ``q,r`` (the *Addresses* layer) over its value of the page's metric
-    (the *Values* layer), whichever of the two it has; ``""`` where it has neither."""
+    (the *Values* layer), whichever of the two it has; ``""`` where it has neither. A nanowell without a value writes,
+    with *Values* on, the tag of why it has none (*why*, ``array_compute.no_value_reasons``; ``_array_key.reason_tag``)
+    — never a number — so two no-value nanowells for different reasons can be told apart on the array."""
+    why = why or {}
     out = []
-    for address, value in zip(sites.labels, sites.values):
-        parts = ([address] if addresses and address else []) + ([value_text(value)] if values else [])
+    for site, address, value in zip(sites.sites, sites.labels, sites.values):
+        said = value_text(value) or reason_tag(why.get((site[1], site[2]), ""))
+        parts = ([address] if addresses and address else []) + ([said] if values else [])
         out.append("\n".join(p for p in parts if p))
     return out
 
 
-def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool) -> list[str]:
+def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool, why: dict | None = None) -> list[str]:
     """Each nanowell's label (its address, its value, or both) in view inside a nanowell drawn large enough to
     hold it; a footer line when none is, or when too many are to write."""
     from ui.nanowell_sites import LABEL_COLOUR, MIN_LABEL_DIAMETER_PX
 
     x0, y0, x1, y1 = drawn.region
     diameter = 2 * sites.radius * drawn.size_px[0] / max(x1 - x0, 1e-9)
-    labels = np.array(site_label_texts(sites, addresses=addresses, values=values), dtype=object)
+    from matplotlib import patheffects
+
+    labels = np.array(site_label_texts(sites, addresses=addresses, values=values, why=why), dtype=object)
+    # A halo of the ground under every label: over a hatched nanowell (the out-of-focus dots, the occluded lines) the
+    # bare label could not be read.
+    halo = [patheffects.withStroke(linewidth=2.0, foreground=_inks(ax)[0])]
     show = ((labels != "") & (diameter >= MIN_LABEL_DIAMETER_PX) & (sites.x >= x0) & (sites.x <= x1)
             & (sites.y >= y0) & (sites.y <= y1))
     what = "addresses and values" if addresses and values else "addresses" if addresses else "values"
@@ -1428,7 +1474,8 @@ def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool) -> lis
         # Two lines share the height one line had, so each is a little smaller.
         size = diameter[k] * (0.22 if lines == 1 else 0.17) * 72.0 / fig.dpi
         ax.text(sites.x[k], sites.y[k], labels[k], ha="center", va="center", clip_on=True, zorder=6,
-                fontsize=max(5.0, min(8.0, size)), color=LABEL_COLOUR, linespacing=1.0, gid="nw-array-address")
+                fontsize=max(5.0, min(8.0, size)), color=LABEL_COLOUR, linespacing=1.0, gid="nw-array-address",
+                path_effects=halo)
     return []
 
 

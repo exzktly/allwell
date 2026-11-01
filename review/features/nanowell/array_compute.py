@@ -169,7 +169,7 @@ def array_scene(metrics, data, well: str, timepoint: str, column: str, *, positi
 
 def no_value_reasons(metrics, data, well: str, timepoint: str, column: str) -> dict:
     """``(q, r) -> label`` for each nanowell of *well* at *timepoint* that was measured (or empty) and still has no
-    value of *column*, saying why — ``seeded later (0 at baseline)``, ``baseline occluded``, ``no count`` — as the
+    value of *column*, saying why — ``no cells at baseline``, ``baseline occluded``, ``no count`` — as the
     Distribution view's footer words it (``series_compute.exclusion_reason``, ``distribution_compute.reason_label``).
 
     The Array view's key used to say only "no value" for these, which reads as "nothing measured" on a nanowell whose

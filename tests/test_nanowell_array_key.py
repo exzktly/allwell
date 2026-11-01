@@ -127,15 +127,23 @@ def test_the_key_s_words_are_in_the_figure_s_ink_not_matplotlib_s_black():
 def test_a_nanowell_with_no_value_is_keyed_with_why():
     """Asked: "what is the meaning of the nanowell status no value? I see clearly identifiable cells in them". A
     measured nanowell has no value of a fold change when its baseline had no cells or was not measurable, however
-    many cells it holds now; the key says which, most common first, rather than a bare "no value"."""
-    from review.features.nanowell._array_key import key_entries
+    many cells it holds now. The key has one entry per reason, most common first, each ending with its count and
+    naming the tag the nanowells carry inside them (UX review B1, N2)."""
+    from review.features.nanowell._array_key import key_entries, reason_tag
     from review.features.nanowell.renderer import _STATE_STYLE
 
     sites = _sites(["measured"] * 6, values=[2.0, np.nan, np.nan, np.nan, np.nan, np.nan])
-    one = {(k, 0): "seeded later (0 at baseline)" for k in range(1, 6)}
-    assert key_entries(sites, colour="metric", styles=_STATE_STYLE, why=one)[0].label == (
-        "no value: seeded later (0 at baseline) · 5")
+    one = {(k, 0): "no cells at baseline" for k in range(1, 6)}
+    assert [e.label for e in key_entries(sites, colour="metric", styles=_STATE_STYLE, why=one)] == [
+        "no value: no cells at baseline (0 at base) · 5"]
     mixed = {**one, (4, 0): "baseline occluded", (5, 0): "baseline occluded", (3, 0): "no count"}
-    assert key_entries(sites, colour="metric", styles=_STATE_STYLE, why=mixed)[0].label == (
-        "no value · 5: baseline occluded 2, seeded later (0 at baseline) 2, no count 1")
-    assert key_entries(sites, colour="metric", styles=_STATE_STYLE)[0].label == "no value · 5"   # no reasons known
+    assert [e.label for e in key_entries(sites, colour="metric", styles=_STATE_STYLE, why=mixed)] == [
+        "no value: baseline occluded (base occl.) · 2", "no value: no cells at baseline (0 at base) · 2",
+        "no value: no count · 1"]
+    many = {(1, 0): "baseline occluded", (2, 0): "no count", (3, 0): "no cells at baseline", (4, 0): "baseline clipped",
+            (5, 0): "baseline rim out of focus"}
+    assert [e.label for e in key_entries(sites, colour="metric", styles=_STATE_STYLE, why=many)][-1] == (
+        "no value: other reasons · 2")
+    assert [e.label for e in key_entries(sites, colour="metric", styles=_STATE_STYLE)] == ["no value · 5"]
+    assert (reason_tag("baseline rim out of focus"), reason_tag("baseline: no count"), reason_tag("")) == (
+        "base soft", "base: no count", "")

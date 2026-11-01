@@ -11738,7 +11738,8 @@ are undefined with the reason `identity_contradicted`, a fold change from a base
 identity_contradicted`, the growth rate skips it, the occupancy class is not taken at it, Trajectories draw it as a
 point joined to nothing (`TrajectoryPanel.line_ok`) and in no class median, and the export carries `identity` and
 `identity_ok` beside its values. Every figure `controller.draw_view` composes says in its footer which
-timepoints were contradicted and which wells are not confirmed or not checked (`identity_compute.identity_note`):
+timepoints were contradicted and which wells are not confirmed or not yet verified, as a statement about the
+addresses (`identity_compute.identity_note`: `Nanowell addresses: A01 not yet verified — see the Identity view.`):
 a dataset analysed before the check existed reads `not_checked` until the audit command is run over it. The line plots
 mark it where it is (`identity_compute.timepoint_marks`, drawn by `_identity_marks`): Trajectories (through
 `TrajectoryPanel.marks`) and the Distribution view over time (`DistributionModel.identity_marks`) draw a light hatched
@@ -12242,8 +12243,10 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   `montage_um_per_px`, read on a worker, the last `MONTAGES_KEPT` kept) or `tiles` (full resolution, below);
   `positions` — `measured` (the well frame, where the run found each nanowell) or `lattice` (`map_model`'s
   places, U4); `colour` — `metric` or `state`; and the switches `nanowells`, `addresses`, `values`, `cells`,
-  `tiles`, `anchor`, `record`, `notes`. `notes` is how much of the footer is written (below), not something drawn on
-  the array, so `controller.apply_array_preset` carries it across a preset rather than resetting it. The *Overlays* button (`state.overlays_hidden`, not persisted) hides the coloured layers
+  `tiles`, `anchor`, `record`, `notes`. `notes` is how the figure is explained (below), not something drawn on the
+  array, so `controller.apply_array_preset` carries it across a preset rather than resetting it; it has a checkable
+  *Notes* button on the band beside *Overlays* (`_nw_notes_btn`) as well as its Layers entry, both refreshed from the
+  one switch. The *Overlays* button (`state.overlays_hidden`, not persisted) hides the coloured layers
   (`OVERLAY_SWITCHES`: nanowells, cells, tiles, anchor) without touching the switches: the controller draws
   `controller.drawn_layers(st)` — `ArrayLayers.without_overlays()` while hidden — so showing them again restores
   exactly what was on, and the footer carries `OVERLAYS_HIDDEN_NOTE` meanwhile; `anchor_controls` reads the drawn
@@ -12293,27 +12296,34 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   along the top edge of the axes (`_array_key.py`: `key_entries` decides it, pure, `draw_key` draws it) with one
   ring swatch per way a nanowell in view is outlined — the state's colour, or the grey no-value outline with its
   dash or hatch, and the fused dash — each with how many drawn nanowells it covers, so it names only what is on
-  screen; the states with no colour of their own share one swatch that names them all. The plain no-value entry
-  (measured or empty, no value of the metric) names why from `ArrayScene.why` — `array_compute.no_value_reasons`,
-  `(q, r) -> label` from `series_compute.exclusion_reason` worded by `distribution_compute.reason_label`, so the
-  key and the Distribution footer give the same cause: a fold change on a nanowell full of cells is undefined
+  screen; the states with no colour of their own share one swatch that names them all; every entry ends with its
+  count. A plain no-value nanowell (measured or empty, no value of the metric) has an entry per reason —
+  `no value: no cells at baseline (0 at base) · 3`, the commonest three and then `other reasons` — from
+  `ArrayScene.why` (`array_compute.no_value_reasons`, `(q, r) -> label` from `series_compute.exclusion_reason` worded
+  by `distribution_compute.reason_label`, so the key and the Distribution footer give the same cause), and the
+  bracketed tag (`_array_key.reason_tag`) is what each such nanowell writes inside itself with *Values* on, so the
+  reason of any one nanowell can be read off the array: a fold change on a nanowell full of cells is undefined
   whenever its baseline had none or was not measurable, and a bare "no value" read as "not measured". It is a
   standalone legend (`ax.add_artist`), so the export-style pass sizes its text but never moves it. The Array
   axes are an image panel, which that pass skips entirely, so `draw_key` writes the words in the figure's ink
   (`renderer._inks`) itself and tags them `follows_theme` for a capture's flip — left to matplotlib's default
   they were black on the screen theme's near-black ground; labels in
   `LABEL_COLOUR` (`_draw_labels`: the `q,r` with *Addresses*, the metric value to three significant figures with
-  *Values*, one under the other when both are on, `site_label_texts`; a nanowell without a value writes no number)
-  only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
+  *Values*, one under the other when both are on, `site_label_texts`; a nanowell without a value writes its reason's
+  tag, never a number), each with a stroke of the figure's ground around it (`patheffects.withStroke`) so it reads
+  over a hatch, only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
   (beyond, the footer asks for a zoom); tiles coloured by their placement `source`
   (lattice, overlap, recorded) with the residual, or — with no tile size in the acquisition record — their corner
   marked and the figure saying the outline is unknown, never a guessed rectangle; the anchor as a crosshair;
-  the run record beside the axes, a suspect template in amber. `array_footer` writes the page's note, the counts
-  by state and whatever went wrong or is missing (no addresses, nothing placed, the unplaced count, the image's
-  state, the Cells layer's tally, and the anchor's status when it is not a plain `ok` — `_anchor_owed`); how to
-  read the figure (positions, fill and outlines, tile colours, the lattice frame's greyed layers) is written only
-  with the `notes` switch on, because six lines of explanation took a third of the figure from the array and the
-  key above it already says most of it. It returns an `ArrayDrawn` (the hit map, the axes, the
+  the run record beside the axes, a suspect template in amber. `array_footer` writes the page's note, one counts
+  line in the key's own groups that adds up to the roster (`_head`: `19 nanowells: 13 with a value · 4 no value · 2
+  rim out of focus`, a fused nanowell counted as fused and one without a measured position as not placed), and
+  whatever went wrong or is missing (no addresses, nothing placed, the image's state, the Cells layer's tally, and
+  the anchor's status when it is not a plain `ok` — `_anchor_owed`; a plain `ok` is never written). How to read the
+  figure is `array_notes`, each line only when it applies to what is drawn (the fused sentence only with a fused
+  nanowell, the tile colours only with tiles), and is drawn only with `notes` on, by `_draw_notes`, in a box over
+  the foot of the axes: the footer's reserved height does not depend on it, so turning Notes on never moves or
+  shrinks the array. It returns an `ArrayDrawn` (the hit map, the axes, the
   region shown and its size in pixels, and the tiles' `Rendered`), which the page keeps on `state.drawn`.
 - **Full resolution** (`full_montage_compute`, Qt-free): every tile from `in/<well>.zip` (the member
   `image_compute._member_for` finds) at the grid record's `left_um`/`top_um`, at the x pixel size, in the
@@ -21620,7 +21630,7 @@ The map (each rule links to the test that holds it):
 | A well token is judged by `util.well_token`, never a local whole-token regex (§15) | `tests/test_well_token_single_parser.py` |
 | A removable feature's state slice is reached from outside that feature through `state.feature_slice(name)`, never by attribute. `AppState.__getattr__` **raises** for a slice whose feature is not in `FEATURES`, so a profile build without it fails at the access — and `getattr(ctx.state.stats, "pairwise", [])` does not help, because the default covers a missing *attribute* on an object that already exists and reaching the object is what raises. Removability is read from `profiles/full.toml`, so a slice whose feature is kept forever (`bar`, `preview`, `review_image`) is not the subject; `features/registry.py` is exempt because every access there sits inside that feature's own activation hook, and the guard fails if that exemption stops describing a real access | `tests/test_disabled_feature_slices.py`, with bite cases in `tests/test_guards_bite.py` |
 | Every spin box the application builds is `widgets.spin_box.SpinBox` / `DoubleSpinBox`. The stylesheet's `min-width` floor becomes an explicit 60 px minimum on a bare `QSpinBox`, and a row short of room squeezes the box to it — a 14 px text area, which clipped the QC panel's and the Nanowells band's focus percentages; the subclasses hold their minimum at their whole size hint | `tests/test_spin_boxes_keep_their_number.py` (an AST guard over every package, the reported QC row in a 330 px panel, and the squeezed row with each class) |
-| A typed number is applied once, when it is finished. `SpinBox` / `DoubleSpinBox` set `setKeyboardTracking(False)`, so `valueChanged` fires on Enter, on focus-out, or after `TYPING_PAUSE_MS` (one second) without typing, rather than per keystroke (the arrows, the wheel and `setValue` still fire at once) — typing "200" into a box wired to a recompute no longer runs it for 2 and 20 first. The pause is started by `textEdited` alone, so a refresh from state never commits anything; it exists because Enter and focus-out are not always reachable — a click on a plot canvas, a tool button or a tab bar ends no edit, and a window left inactive has no focus to lose — and a number typed and then left was silently dropped. The Properties panel's bound `QLineEdit`s (the axis limits) apply on `editingFinished`; their setters emit it themselves, so a programmatic set still applies immediately | `tests/test_spin_boxes_commit_typed_values_once.py` (types into each class and the panel's real binding keystroke by keystroke) |
+| A typed number is applied once, when it is finished. `SpinBox` / `DoubleSpinBox` set `setKeyboardTracking(False)`, so `valueChanged` fires on Enter, on focus-out, or after `TYPING_PAUSE_MS` (one second) without typing, rather than per keystroke (the arrows, the wheel and `setValue` still fire at once) — typing "200" into a box wired to a recompute no longer runs it for 2 and 20 first. The pause is started by `textEdited` alone, so a refresh from state never commits anything; while the field holds typed text that is not the value in force (`pending()`) it is drawn in italics, so a number waiting for its pause — or a partial one a mid-number pause is about to commit — never looks applied; it exists because Enter and focus-out are not always reachable — a click on a plot canvas, a tool button or a tab bar ends no edit, and a window left inactive has no focus to lose — and a number typed and then left was silently dropped. The Properties panel's bound `QLineEdit`s (the axis limits) apply on `editingFinished`; their setters emit it themselves, so a programmatic set still applies immediately | `tests/test_spin_boxes_commit_typed_values_once.py` (types into each class and the panel's real binding keystroke by keystroke) |
 | `swallow` and `swallowed` are not swapped. They are near-identical names with opposite call shapes — a context manager and a call for inside an `except` block — and swapping them fails only when the line runs. `with swallowed():` raises **before** the body, so the work it was meant to guard never happens; `swallowed()` outside a handler logs a suppression with no exception in flight, which reads as a failure that did not occur | `tests/test_safe_helpers_used_right.py`, with bite cases in `tests/test_guards_bite.py` |
 | A text-mode subprocess names its codec. `text=True` alone decodes the pipe with `locale.getpreferredencoding(False)` — UTF-8 here, the ANSI codepage on a user's Windows box — so a stream that reads correctly for the developer mojibakes the remote's `✓` / `→` markers for them and raises `UnicodeDecodeError` out of a reader thread on the first byte the codepage has no character for, skipping the `proc.wait()` behind it | `tests/test_subprocess_text_decoding.py`, with bite cases in `tests/test_guards_bite.py` |
 | A captured subprocess's timeout holds on Windows. `subprocess.run`'s Windows branch waits, after killing a child that timed out, with no timeout for pipes that a process the child started can hold open for ever; `util.bounded_run.run_bounded` is the one spelling | `tests/test_subprocess_timeouts_return_on_windows.py`, with bite cases in `tests/test_guards_bite.py` |

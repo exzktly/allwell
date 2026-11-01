@@ -538,36 +538,51 @@ def _key_texts(ctx):
 
 
 def test_the_array_footer_is_short_until_notes_is_turned_on(qtbot, page):
-    """Reported: "The text at the bottom of the array tab take up way too much space". With the Layers menu's *Notes*
-    off (the default) the footer is the counts and what went wrong; how to read the figure is the key's job, and is
-    written out only with Notes on."""
+    """Reported: "The text at the bottom of the array tab take up way too much space". With *Notes* off (the default)
+    the footer is the page's note, the counts — in the key's own groups, adding up to the roster (UX review N1) — and
+    what went wrong. Notes, on the band beside Overlays as well as in the Layers menu (N6), puts how to read the figure
+    in a box over the foot of the array, so the array neither moves nor shrinks (N3), and says only what applies to
+    what is drawn: no fused sentence with no fused nanowell, no plain "ok" grid status (N4)."""
     _loaded(qtbot, page)
     nwc.set_view(page, "array")
     st = page.state.feature_slice("nanowell")
-    assert not st.layers.notes
+    assert not st.layers.notes and not _texts(page, "nw-array-notes")
     short = _texts(page, "nw-array-footer")
-    assert any(t.startswith("4 nanowells in the roster") for t in short)
-    assert not any(t.startswith(("Measured positions", "Filled by", "Outlined by")) for t in short)
-    page.widgets.get("_nw_layer_notes").trigger()                     # a click on the menu item
-    full = _texts(page, "nw-array-footer")
-    assert st.layers.notes and len(full) > len(short)
-    assert "Measured positions in the well frame (the square is the central nanowell)." in full
-    assert any(t.startswith("Filled by Cell count;") for t in full)
+    assert "4 nanowells: 3 with a value · 1 occluded" in short
+    assert not any(t.startswith(("Measured positions", "Filled by")) or t.endswith(": ok.") for t in short)
+    where = tuple(st.drawn.ax.get_position().bounds)
+    button = page.widgets.get("_nw_notes_btn")
+    button.click()                                                     # the band's button
+    assert st.layers.notes and page.widgets.get("_nw_layer_notes").isChecked()
+    assert _texts(page, "nw-array-footer") == short                    # the footer itself is unchanged
+    assert tuple(st.drawn.ax.get_position().bounds) == pytest.approx(where)
+    (notes,) = _texts(page, "nw-array-notes")
+    assert notes.splitlines() == [
+        "Measured positions in the well frame (the square is the central nanowell).",
+        "Filled by Cell count. A grey outline has no value: its hatch or dash names its state, and with Values on the "
+        "words inside it say why (the key above the array lists each)."]
     nwc.apply_array_preset(page, "qc")                                 # a preset keeps the reader's choice
-    assert st.layers.notes
+    assert st.layers.notes and button.isChecked()
+    page.widgets.get("_nw_layer_notes").trigger()                      # and the menu entry turns both off
+    assert not st.layers.notes and not button.isChecked() and not _texts(page, "nw-array-notes")
 
 
-def test_a_nanowell_with_cells_and_no_fold_change_is_keyed_with_why(qtbot, page):
+def test_a_nanowell_with_cells_and_no_fold_change_says_why_on_the_array(qtbot, page):
     """Asked: "what is the meaning of the nanowell status no value? I see clearly identifiable cells in them". At t_a,
     A01's nanowell (2, 0) holds 3 cells and (3, 0) holds 1, but at the baseline t_c (2, 0) held none and (3, 0) was
-    occluded: both count fold changes are undefined, and the key says why rather than a bare "no value"."""
+    occluded: both count fold changes are undefined. Each says which inside itself, and the key names both (UX
+    review B1: the two could not be told apart on the array)."""
     _loaded(qtbot, page)
     nwc.set_view(page, "array")
     nwc._set(page, "metric", "count_fc")
     nwc.set_timepoint(page, "t_a")
     st = page.state.feature_slice("nanowell")
     assert nwc.page_well(page) == "A01" and st.metric == "count_fc"
-    assert "no value · 2: baseline occluded 1, seeded later (0 at baseline) 1" in _key_texts(page)
+    keyed = _key_texts(page)
+    assert "no value: baseline occluded (base occl.) · 1" in keyed
+    assert "no value: no cells at baseline (0 at base) · 1" in keyed
+    labels = dict(zip([s[1:] for s in st.drawn.sites.sites], _texts(page, "nw-array-address")))
+    assert (labels[(2, 0)].splitlines()[-1], labels[(3, 0)].splitlines()[-1]) == ("0 at base", "base occl.")
 
 
 def test_the_rim_focus_control_on_the_band_changes_the_qc_layer_s_rule_and_the_metrics_follow(qtbot, page):

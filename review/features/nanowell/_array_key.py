@@ -57,26 +57,57 @@ def _count(label: str, n: int) -> str:
 
 def _why(sites, bare, why: dict) -> list[tuple[str, int]]:
     """Why the *bare* nanowells (measured, no value) have none, most common first, at most three and the rest as
-    ``other``: ``[("seeded later (0 at baseline)", 12), …]``."""
+    ``other``; a nanowell whose reason is unknown is counted under ``""``: ``[("no cells at baseline", 12), …]``."""
     tally: dict[str, int] = {}
     for k in np.flatnonzero(bare):
         _w, q, r = sites.sites[k]
-        reason = why.get((q, r))
-        if reason:
-            tally[reason] = tally.get(reason, 0) + 1
+        reason = why.get((q, r)) or ""
+        tally[reason] = tally.get(reason, 0) + 1
     ranked = sorted(tally.items(), key=lambda kv: (-kv[1], kv[0]))
     if len(ranked) > 3:
         ranked = ranked[:3] + [("other", sum(n for _r, n in ranked[3:]))]
     return ranked
 
 
-def _no_value_label(n: int, reasons: list[tuple[str, int]]) -> str:
-    """The "no value" entry's words: ``no value: seeded later (0 at baseline) · 4`` when one reason covers them all,
-    ``no value · 7: seeded later (0 at baseline) 4, baseline occluded 3`` when several do."""
-    if len(reasons) == 1 and reasons[0][1] == n:
-        return _count(f"no value: {reasons[0][0]}", n)
-    said = ", ".join(f"{reason} {k:,}" for reason, k in reasons)
-    return _count("no value", n) + (f": {said}" if said else "")
+#: The short words a no-value nanowell writes inside itself, where its value would be (:func:`reason_tag`): the key
+#: lists the same reasons in full, each beside the tag the nanowells carry.
+_TAGS = {"no cells at baseline": "0 at base", "empty at baseline": "0 at base", "no count": "no count",
+         "fused, no count": "fused", "no confluence": "no conf.", "no cells": "no cells",
+         "no fluorescence": "no fluor.", "< 3 timepoints with cells": "< 3 tps", "no count at baseline": "base: no n",
+         "no confluence at baseline": "base: no conf.", "no signal at baseline": "base: no sig.",
+         "occluded": "occl.", "clipped": "clipped", "rim out of focus": "soft", "no address": "no addr.",
+         "not located": "not found", "not in roster": "absent", "never measured": "never",
+         "identity contradicted": "id. wrong", "field excluded": "field excl.", "outside the fixed cohort": "cohort"}
+
+
+def reason_tag(reason: str) -> str:
+    """*reason* (a ``distribution_compute.reason_label``) as the few words a nanowell has room for:
+    ``no cells at baseline`` → ``0 at base``, ``baseline occluded`` → ``base occl.``; ``""`` for no reason."""
+    if not reason:
+        return ""
+    if reason in _TAGS:
+        return _TAGS[reason]
+    for head, joined in (("baseline: ", "base: "), ("baseline ", "base ")):
+        if reason.startswith(head):
+            rest = reason[len(head):]
+            return joined + _TAGS.get(rest, rest)
+    return reason if len(reason) <= 10 else reason[:9] + "…"
+
+
+def _no_value_entries(sites, bare, why: dict) -> list[str]:
+    """One "no value" label per reason, each ending with its count: ``no value: no cells at baseline (0 at base) · 3``
+    — the reason in full, then in brackets the tag the nanowells carry inside them (``reason_tag``) — so the reason
+    of any one nanowell on the array can be read off it. Without reasons, one ``no value · N``."""
+    out = []
+    for reason, n in _why(sites, bare, why):
+        if not reason:
+            out.append(_count("no value", n))
+        elif reason == "other":
+            out.append(_count("no value: other reasons", n))
+        else:
+            tag = reason_tag(reason)
+            out.append(_count(f"no value: {reason}" + (f" ({tag})" if tag != reason else ""), n))
+    return out
 
 
 def key_entries(sites, *, colour: str, styles: dict, why: dict | None = None) -> list[KeyEntry]:
@@ -84,8 +115,9 @@ def key_entries(sites, *, colour: str, styles: dict, why: dict | None = None) ->
 
     *styles* is the renderer's ``state -> (hatch, linestyle)`` for a nanowell without a value. A fused nanowell is
     drawn dashed in the fused colour whatever else it is, so it is counted there and nowhere else, as it is drawn.
-    *why* (``array_compute.no_value_reasons``) names why a measured nanowell has no value; the "no value" entry then
-    says so, since a fold change is undefined on a nanowell full of cells whenever its baseline had none.
+    *why* (``array_compute.no_value_reasons``) names why a measured nanowell has no value; the key then has one "no
+    value" entry per reason, since a fold change is undefined on a nanowell full of cells whenever its baseline had
+    none, and the reader must be able to tell which nanowell is which (each writes its reason's tag inside itself).
     """
     from ui.nanowell_sites import FUSED_COLOUR, STATE_COLOURS, state_colour
     from ui.theme import Colors
@@ -98,8 +130,7 @@ def key_entries(sites, *, colour: str, styles: dict, why: dict | None = None) ->
         has = np.isfinite(np.asarray(sites.values, dtype=float))
         bare = plain & ~has & np.isin(states, ["measured", "empty"])
         if bare.any():
-            entries.append(KeyEntry(_no_value_label(int(bare.sum()), _why(sites, bare, why or {})),
-                                    Colors.plot_undefined_ink))
+            entries += [KeyEntry(label, Colors.plot_undefined_ink) for label in _no_value_entries(sites, bare, why or {})]
         for state, (hatch, style) in styles.items():
             n = int((plain & ~has & (states == state)).sum())
             if n:

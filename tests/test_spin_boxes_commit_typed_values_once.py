@@ -88,6 +88,28 @@ def test_a_number_typed_and_left_commits_once_after_a_pause(qtbot, cls, typed, e
     assert seen == [expected]                            # once
 
 
+@pytest.mark.parametrize(("cls", "typed"), [(SpinBox, "6"), (DoubleSpinBox, "0.2")])
+def test_typed_text_not_yet_in_force_is_shown_in_italics(qtbot, cls, typed):
+    """A pause in the middle of a number commits what is there, so a number waiting to be committed must look
+    different from one in force (UX review N5): italic while pending, upright once committed or set from state."""
+    box = cls()
+    qtbot.addWidget(box)
+    box.setRange(0, 100)
+    box.setValue(7)
+    edit = box.lineEdit()
+    assert not edit.font().italic()
+    edit.selectAll()
+    qtbot.keyClicks(edit, typed)
+    assert box.pending() and edit.font().italic()
+    qtbot.keyClick(edit, Qt.Key_Return)
+    assert not box.pending() and not edit.font().italic()
+    edit.selectAll()
+    qtbot.keyClicks(edit, "9")
+    assert edit.font().italic()
+    box.setValue(30)                                     # a refresh from state: in force, so upright
+    assert not edit.font().italic()
+
+
 def test_a_value_set_from_state_starts_no_pause(qtbot):
     """Only typing starts the pause: a refresh from state is already committed and must not commit anything later."""
     box = SpinBox()

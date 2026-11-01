@@ -142,10 +142,29 @@ def test_the_array_view_outlines_by_state_dashes_a_fused_site_and_labels_where_t
 
     roomy = (MIN_LABEL_DIAMETER_PX + 2) / 100.0                       # px per µm: a 100 µm nanowell just fits it
     fig, drawn = _array_figure(colour="state", px_per_um=roomy)
-    plain, fused = drawn.ax.collections
-    assert [to_hex(c) for c in plain.get_edgecolors()] == [to_hex(state_colour(s)) for s in ("unaddressed", "empty")]
-    assert [to_hex(c) for c in fused.get_edgecolors()] == [to_hex(FUSED_COLOUR)]
-    assert fused.get_linestyle()[0][1] is not None                     # dashed
+    # One collection per state (each with its own mark, ``_STATE_STYLE``) and one for the fused rings: each nanowell's
+    # ring is read back by where it is drawn.
+    sites = drawn.sites
+    rings = {}
+    for coll in drawn.ax.collections:
+        if not coll.get_linewidths().any():
+            continue                                                   # a fused nanowell's state hatch, no ring
+        edges, styles = coll.get_edgecolors(), coll.get_linestyle()
+        for j, (x, y) in enumerate(coll.get_offsets()):
+            rings[(round(float(x), 3), round(float(y), 3))] = (to_hex(edges[j % len(edges)]),
+                                                                styles[j % len(styles)][1] is not None)
+    drawn_rings = [rings[(round(float(x), 3), round(float(y), 3))] for x, y in zip(sites.x, sites.y)]
+    fused = np.asarray(sites.fused, dtype=bool)
+    assert [r for r, f in zip(drawn_rings, fused) if f] == [(to_hex(FUSED_COLOUR), True)] * 2      # dashed, fused
+    # The fused occluded nanowell keeps its state's hatch inside the fused ring.
+    occluded = next(k for k, (st, f) in enumerate(zip(sites.state, fused)) if f and st == "occluded")
+    at = (round(float(sites.x[occluded]), 3), round(float(sites.y[occluded]), 3))
+    assert any(coll.get_hatch() == "////" and at in {(round(float(x), 3), round(float(y), 3))
+                                                     for x, y in coll.get_offsets()}
+               for coll in drawn.ax.collections)
+    assert [r[0] for r, f in zip(drawn_rings, fused) if not f] == [
+        to_hex(state_colour(s)) for s, f in zip(sites.state, fused) if not f]
+    assert sorted(s for s, f in zip(sites.state, fused) if not f) == ["empty", "unaddressed"]
     labels = [t for t in drawn.ax.texts if t.get_gid() == "nw-array-address"]
     assert [t.get_text() for t in labels] == ["1,2", "0,0", "2,-1"]    # the unaddressed site has nothing to write
     assert {to_hex(t.get_color()) for t in labels} == {to_hex(LABEL_COLOUR)}

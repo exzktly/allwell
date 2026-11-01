@@ -1,5 +1,5 @@
 """The UX review of the Image Table's nanowell frames, one test per finding
-(``_Docs/Markdowns/NANOWELL_FRAMES_UX_TRACKER.md``; ARCHITECTURE §6.2l).
+(ARCHITECTURE §6.2l; the review's tracker, closed and deleted, is in this file's git history beside it).
 
 An independent reviewer read real renders of a four-well plate and found the metric maps unreadable as numbers (no
 colour key), the phase montage drawn green, "no value" mistakable for a value, the status line a cut-off wall of

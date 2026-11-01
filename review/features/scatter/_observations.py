@@ -11,6 +11,8 @@ imports that feature (``review/data/observations``).
 
 from __future__ import annotations
 
+from widgets.plot_card import follows_theme
+
 from review.domain.observation import NANOWELLS
 from review.features.scatter.collect import scatter_groups
 from review.features.scatter.observation_compute import default_axes, nanowell_scatter
@@ -129,9 +131,9 @@ def redraw(ctx, page: str) -> None:
     table = nanowell_observations(ctx, [w for g in groups for w in g.wells]) if groups else None
     if table is None or not groups:
         ax.set_axis_off()
-        ax.text(0.5, 0.5, "No wells selected — nothing to plot." if not groups else
+        follows_theme(ax.text(0.5, 0.5, "No wells selected — nothing to plot." if not groups else
                 "No nanowell tables for the selected wells.", transform=ax.transAxes, ha="center", va="center",
-                color=muted, fontsize=10)
+                color=muted, fontsize=10), muted=True)
         canvas.draw_idle()
         return
     x_key, y_key = _populate(ctx, page, table)
@@ -150,7 +152,7 @@ def redraw(ctx, page: str) -> None:
     if any(len(s.x) for s in drawn.series):
         ax.legend(loc="best", fontsize=8, framealpha=0.0, facecolor="none")
     footer = "\n".join([drawn.footer, *drawn.notes])
-    fig.text(0.01, 0.005, footer, ha="left", va="bottom", fontsize=7, color=muted, gid="observations_footer")
+    follows_theme(fig.text(0.01, 0.005, footer, ha="left", va="bottom", fontsize=7, color=muted, gid="observations_footer"), muted=True)
     apply_export_style_to_current(ctx, fig, canvas)
     canvas.draw_idle()
 
@@ -183,3 +185,29 @@ def cell_axis_column(ctx, entry: str) -> str | None:
         return None
     key = cell_nanowell_entries(ctx).get(entry)
     return nanowell_cell_column(key) if key else None
+
+
+def drew_nanowells(ctx, page: str) -> bool:
+    """Under Observations: Nanowells draw *page* from nanowell rows and return ``True``; else sync the pickers
+    back to the cell ones and return ``False`` so the caller draws cells."""
+    if sync_controls(ctx) != NANOWELLS:
+        return False
+    redraw(ctx, page)
+    return True
+
+
+def add_cell_nanowell_section(ctx, sections: list, options: list) -> list:
+    """Append the "Nanowell (of this cell)" section to the cell pickers' *sections*; return the options with it.
+
+    On a nanowell plate each cell can be plotted against its own nanowell's metrics (cell GFP against the
+    nanowell's crowding, say) — offered only when the Nanowells feature supplies them."""
+    labels = list(cell_nanowell_entries(ctx))
+    if labels:
+        sections.append((CELL_NANOWELL_SECTION, labels))
+    return list(options) + labels
+
+
+def stamp_cells_footer(ctx, fig) -> None:
+    from review.core.observation_band import stamp_cells_footer as _stamp
+
+    _stamp(ctx, fig)

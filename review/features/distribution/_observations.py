@@ -9,14 +9,16 @@ a replicate. Rows come from the Nanowells feature through ``review/data/observat
 
 from __future__ import annotations
 
-import math
+from widgets.plot_card import follows_theme
+
+from domain.tp_match import tp_close
 
 from review.domain.observation import NANOWELLS
 
 LEAF = "Distribution"
 
 
-def nanowell_groups(ctx, tp_filter):
+def nanowell_groups(ctx, tp_filter) -> tuple[list, str, str] | None:
     """``(groups, axis label, footer)`` under Nanowells, ``None`` when the tab draws cells. *groups* are the
     renderer's ``(label, colour, values)``."""
     from review.core.observation_band import chosen_metric, effective_observations, nanowell_table_for
@@ -35,7 +37,7 @@ def nanowell_groups(ctx, tp_filter):
     scope = frame["well"].isin(wells)
     if tp_filter is not None:
         hours = frame["timepoint_hours"].astype(float)
-        scope &= hours.map(lambda h: h == h and math.isclose(h, float(tp_filter), abs_tol=1e-6))
+        scope &= hours.map(lambda h: h == h and tp_close(h, float(tp_filter)))
     values = table.values(key)
     groups = []
     for label, ws, color in members:
@@ -67,5 +69,5 @@ def label_and_footer(fig, label: str, footer: str) -> None:
         if ax.get_xlabel():
             ax.set_xlabel(label)
     muted = tokens_for(fig.axes[0])[2] if fig.axes else None
-    fig.text(0.01, 0.002, footer, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID)
+    follows_theme(fig.text(0.01, 0.002, footer, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID), muted=True)
 

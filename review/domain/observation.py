@@ -150,7 +150,7 @@ def well_medians(table: ObservationTable, key: str, wells, timepoints_h=None, *,
     (:data:`SHARE_METRICS`) and ``"median"`` otherwise.
     """
     how = how or ("mean" if key in SHARE_METRICS else "median")
-    import math
+    from domain.tp_match import tp_close
 
     frame = table.frame
     cols = ["well", "timepoint", "timepoint_hours", "median", "n", "total"]
@@ -160,7 +160,7 @@ def well_medians(table: ObservationTable, key: str, wells, timepoints_h=None, *,
     if timepoints_h is not None:
         wanted = [float(t) for t in timepoints_h]
         hours = pd.to_numeric(frame["timepoint_hours"], errors="coerce")
-        scope &= hours.map(lambda h: h == h and any(math.isclose(h, t, abs_tol=1e-6) for t in wanted))
+        scope &= hours.map(lambda h: h == h and any(tp_close(h, t) for t in wanted))
     rows = frame[scope].assign(_v=table.values(key)[scope])
     out = (rows.groupby(["well", "timepoint", "timepoint_hours"], sort=True)["_v"]
            .agg(median=how, n="count", total="size").reset_index())

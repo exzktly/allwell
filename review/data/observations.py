@@ -39,7 +39,7 @@ def nanowell_observations(ctx, wells) -> ObservationTable | None:
     """The nanowell rows of *wells*, or ``None`` when this build or this dataset has none."""
     if not is_nanowell_dataset(ctx):
         return None
-    return ctx.features.query(NANOWELL_SERVICE, ctx, list(wells), default=None)
+    return ctx.features.query("observations.nanowell", ctx, list(wells), default=None)   # NANOWELL_SERVICE
 
 
 def occupied_nanowells_by_well(ctx, wells) -> dict[str, int]:

@@ -14,7 +14,7 @@ Qt-free.
 
 from __future__ import annotations
 
-import math
+from domain.tp_match import tp_close
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -54,7 +54,7 @@ def _in_timepoints(frame: pd.DataFrame, timepoints_h) -> pd.Series:
         return pd.Series(True, index=frame.index)
     wanted = [float(t) for t in timepoints_h]
     hours = frame["timepoint"].map(_hours)
-    return hours.map(lambda h: any(math.isclose(h, t, abs_tol=1e-6) for t in wanted) if h == h else False)
+    return hours.map(lambda h: any(tp_close(h, t) for t in wanted) if h == h else False)
 
 
 def nanowell_scatter(table: ObservationTable, x_key: str, y_key: str, groups, *, timepoints_h=None,

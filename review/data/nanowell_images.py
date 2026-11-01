@@ -12,11 +12,12 @@ Qt-free.
 from __future__ import annotations
 
 import io
-import math
 import zipfile
 from pathlib import Path
 
 import numpy as np
+
+from domain.tp_match import tp_close
 
 MONTAGE_SUFFIX = "_montage.png"
 
@@ -34,7 +35,7 @@ def _same_timepoint(label: str, tp) -> bool:
     if str(label) == str(tp):
         return True
     a, b = _hours(label), _hours(tp)
-    return a == a and b == b and math.isclose(a, b, abs_tol=1e-6)
+    return a == a and b == b and tp_close(a, b)
 
 
 def montage_member(names, well: str, tp) -> str | None:

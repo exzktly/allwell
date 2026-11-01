@@ -1230,7 +1230,7 @@ def redraw_bars(ctx) -> None:
     tp_strs = [_rescale_tp(t, _tp_rescale) for t in target_ts]
     tp_str_combined = ", ".join(tp_strs)
 
-    if _nw_bars.draw(ctx, ax_mean, ax_frac, ax_n, target_ts, f"t = {tp_str_combined} h"):
+    if _nw_bars.draw(ctx, ax_mean, ax_frac, ax_n, target_ts, timepoint_title(target_ts, tp_str_combined)):
         apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
         return
     if draw_per_cell_bar_mode(

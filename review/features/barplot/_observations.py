@@ -14,6 +14,8 @@ feature's, asked for through ``review/data/observations``; nothing here imports 
 
 from __future__ import annotations
 
+from widgets.plot_card import follows_theme
+
 from review.domain.observation import NANOWELLS
 
 LEAF = "Bar Plots"
@@ -39,8 +41,8 @@ def draw(ctx, ax_mean, ax_frac, ax_n, target_ts, tp_label: str) -> bool:
         text.remove()
     _bg, title_fg, muted, _grid, _spine = tokens_for(ax_mean)
     if table is None:
-        ax_mean.text(0.5, 0.5, "No nanowell tables for the selected wells.", transform=ax_mean.transAxes,
-                     ha="center", va="center", color=muted)
+        follows_theme(ax_mean.text(0.5, 0.5, "No nanowell tables for the selected wells.", transform=ax_mean.transAxes,
+                     ha="center", va="center", color=muted), muted=True)
         return True
     key = chosen_metric(ctx, table)
     label = table.metric(key).label if table.metric(key) else key
@@ -85,5 +87,5 @@ def draw(ctx, ax_mean, ax_frac, ax_n, target_ts, tp_label: str) -> bool:
              *table.notes]
     if _fc.fold_change_state(ctx).active:
         lines.append(FOLD_CHANGE_NOT_APPLIED)
-    fig.text(0.01, 0.002, "\n".join(lines), ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID)
+    follows_theme(fig.text(0.01, 0.002, "\n".join(lines), ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID), muted=True)
     return True

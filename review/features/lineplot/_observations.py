@@ -9,6 +9,8 @@ used as replicates). Per-nanowell trajectories stay on the Nanowells page, where
 
 from __future__ import annotations
 
+from widgets.plot_card import follows_theme
+
 import numpy as np
 
 from review.domain.observation import NANOWELLS
@@ -36,8 +38,8 @@ def draw(ctx, ax_mean, ax_frac, ax_n, ax_cdf, legend_kw: dict) -> bool:
         text.remove()
     _bg, title_fg, muted, _grid, _spine = tokens_for(ax_mean)
     if table is None:
-        ax_mean.text(0.5, 0.5, "No nanowell tables for the selected wells.", transform=ax_mean.transAxes,
-                     ha="center", va="center", color=muted)
+        follows_theme(ax_mean.text(0.5, 0.5, "No nanowell tables for the selected wells.", transform=ax_mean.transAxes,
+                     ha="center", va="center", color=muted), muted=True)
         return True
     key = chosen_metric(ctx, table)
     label = table.metric(key).label if table.metric(key) else key
@@ -77,5 +79,5 @@ def draw(ctx, ax_mean, ax_frac, ax_n, ax_cdf, legend_kw: dict) -> bool:
              *table.notes]
     if _fc.fold_change_state(ctx).active:
         lines.append(FOLD_CHANGE_NOT_APPLIED)
-    fig.text(0.01, 0.002, "\n".join(lines), ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID)
+    follows_theme(fig.text(0.01, 0.002, "\n".join(lines), ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID), muted=True)
     return True

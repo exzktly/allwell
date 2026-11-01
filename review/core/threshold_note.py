@@ -7,6 +7,8 @@ good output). One helper for the Bar and Line tabs, so they cannot word it diffe
 
 from __future__ import annotations
 
+from widgets.plot_card import follows_theme
+
 #: The panels' replacement text. Named so tests and both tabs share it.
 ON_CUT_NOT_SET_NOTE = ("ON threshold not set — every cell counts as above it.\n"
                        "Set one in the band or in Cell Gating.")
@@ -30,5 +32,5 @@ def blank_for_unset_cut(*axes) -> None:
             legend.remove()
         ax.set_yticks([])
         muted = tokens_for(ax)[2]
-        ax.text(0.5, 0.5, ON_CUT_NOT_SET_NOTE, transform=ax.transAxes, ha="center", va="center",
-                color=muted, fontsize=9, gid="on_cut_not_set")
+        follows_theme(ax.text(0.5, 0.5, ON_CUT_NOT_SET_NOTE, transform=ax.transAxes, ha="center", va="center",
+                color=muted, fontsize=9, gid="on_cut_not_set"), muted=True)

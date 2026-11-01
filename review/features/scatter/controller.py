@@ -48,12 +48,12 @@ from review.features.scatter._annotations import (
     draw_scatter_agg_legends,
     note_sampled,
     note_value_labels_unavailable,
+    whiskers_or_none,  # re-exported: Batch Export and a test reach it here
 )
 from review.features.scatter._pooled import SCATTER_MAX_POINTS
 from review.features.scatter._layout import (
     _render_scatter_faceted, _scatter_col_label, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix,
 )
-from review.domain.observation import NANOWELLS
 from review.features.scatter import _observations
 
 
@@ -234,32 +234,8 @@ def redraw_scatter(
     # ax.clear() at the top of this redraw voids any live RectangleSelector;
     # rebuild it against the fresh axes when gate-draw mode is armed.
     refresh_gate_selector(ctx)
-    from review.core.observation_band import stamp_cells_footer
-    stamp_cells_footer(ctx, scatter_fig)
+    _observations.stamp_cells_footer(ctx, scatter_fig)
     scatter_canvas.draw()
-
-
-def _finite_positive(v) -> bool:
-    """True iff *v* is a real number strictly greater than 0."""
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return False
-    return 0.0 < f < float("inf")  # finite & positive (NaN/inf compare False)
-
-
-def whiskers_or_none(errs):
-    """The sequence to hand ``errorbar``, or ``None`` when it would draw noise.
-
-    ``capsize`` draws a cap at every point even where the bar has zero length,
-    so a group with no computable spread came out wearing a cross at the centre
-    of its marker that reads as a measured error of zero. The tab has always
-    passed ``None`` in that case; the Batch Export twin of this figure passed
-    the raw sequence, so the same points that carry no whisker on screen carried
-    phantom caps in the exported file.
-    """
-    seq = list(errs or [])
-    return seq if any(_finite_positive(e) for e in seq) else None
 
 
 def redraw_scatter_agg(
@@ -405,8 +381,7 @@ def redraw_scatter_orchestrate(ctx) -> None:
     timepoints available -> "No timepoints available." placeholder;
     none selected -> "Please select timepoints to plot."
     """
-    if _observations.sync_controls(ctx) == NANOWELLS:
-        _observations.redraw(ctx, "cells")
+    if _observations.drew_nanowells(ctx, "cells"):
         return
     # Scatter Plot: Cells tab body is built lazily -- bail out if the
     # user triggers a redraw before that builder has run.
@@ -499,8 +474,7 @@ def redraw_scatter_agg_orchestrate(ctx) -> None:
     stat_x_var = ctx.widgets.get_or_none("_scatter_agg_stat_x_var")
     if stat_x_var is None:
         return
-    if _observations.sync_controls(ctx) == NANOWELLS:
-        _observations.redraw(ctx, "aggregate")
+    if _observations.drew_nanowells(ctx, "aggregate"):
         return
     clear_cut_status(ctx)   # before every exit below, not only the drawn one
     # Sync the hidden stat-string combos with the new per-axis
@@ -602,12 +576,7 @@ def update_scatter_menus(ctx) -> None:
     cells_sections = [("", list(scatter_ch_options))]
     if shape_labels:
         cells_sections.append(("Shape Features", shape_labels))
-    # On a nanowell plate each cell can also be plotted against its own nanowell's metrics (cell GFP against the
-    # nanowell's crowding, say) — present only when the Nanowells feature supplies them.
-    nanowell_labels = list(_observations.cell_nanowell_entries(ctx))
-    if nanowell_labels:
-        cells_sections.append((_observations.CELL_NANOWELL_SECTION, nanowell_labels))
-        cells_ch_options = cells_ch_options + nanowell_labels
+    cells_ch_options = _observations.add_cell_nanowell_section(ctx, cells_sections, cells_ch_options)
 
     ch_x_cb = ctx.widgets.get_or_none("_scatter_ch_x_cb")
     ch_y_cb = ctx.widgets.get_or_none("_scatter_ch_y_cb")

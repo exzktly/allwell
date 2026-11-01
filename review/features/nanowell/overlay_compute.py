@@ -14,7 +14,7 @@ same rule the page's crops use, ``image_compute``). Qt-free.
 
 from __future__ import annotations
 
-import math
+from domain.tp_match import tp_close
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -44,7 +44,7 @@ def _same_timepoint(label, tp) -> bool:
         return True
     try:
         h = _hours(label)
-        return h == h and math.isclose(h, float(tp), abs_tol=1e-6)
+        return h == h and tp_close(h, float(tp))
     except (TypeError, ValueError):
         return False
 

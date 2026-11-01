@@ -9,6 +9,8 @@ selection.
 
 from __future__ import annotations
 
+from widgets.plot_card import follows_theme
+
 from review.domain.fold_change_scopes import plots_held
 # Names used only in annotations. Under ``from __future__ import
 # annotations`` these are never evaluated, so importing them for real would
@@ -1041,7 +1043,7 @@ def _stamp_grid_footer(ctx, fig, nw, muted) -> None:
     for text in [t for t in fig.texts if t.get_gid() == FOOTER_GID]:
         text.remove()
     if nw is not None:
-        fig.text(0.01, 0.002, nw.footer, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID)
+        follows_theme(fig.text(0.01, 0.002, nw.footer, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID), muted=True)
     else:
         from review.core.observation_band import stamp_cells_footer
         stamp_cells_footer(ctx, fig)

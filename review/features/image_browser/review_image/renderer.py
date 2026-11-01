@@ -475,9 +475,11 @@ def _draw_without_label_map(ctx, status, well, fov_raw, tp_raw) -> None:
         if status is not None:
             status.setText(NO_LABEL_MAP)
         return
-    service = ctx.features.service("segmentation.nanowell_overlay") if getattr(ctx, "features", None) else None
-    overlay = service(ctx, well, fov_raw, tp_raw) if service is not None else None
-    text = NO_LABEL_MAP_NANOWELL.format(overlays="" if service is not None else OVERLAYS_NOT_IN_BUILD)
+    from review.data.observations import nanowell_views_available
+
+    in_build = nanowell_views_available(ctx)
+    overlay = ctx.features.query("segmentation.nanowell_overlay", ctx, well, fov_raw, tp_raw, default=None)
+    text = NO_LABEL_MAP_NANOWELL.format(overlays="" if in_build else OVERLAYS_NOT_IN_BUILD)
     if overlay is not None and overlay.note:
         text += " " + overlay.note
     if status is not None:

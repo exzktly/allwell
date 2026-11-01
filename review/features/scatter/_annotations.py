@@ -225,3 +225,26 @@ def draw_scatter_agg_legends(ax_agg, scatter_data, marker_fg) -> None:
              for tp, color in sorted(tps.items())],
             'lower right', "Timepoint",
         )
+
+
+def _finite_positive(v) -> bool:
+    """True iff *v* is a real number strictly greater than 0."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return False
+    return 0.0 < f < float("inf")  # finite & positive (NaN/inf compare False)
+
+
+def whiskers_or_none(errs):
+    """The sequence to hand ``errorbar``, or ``None`` when it would draw noise.
+
+    ``capsize`` draws a cap at every point even where the bar has zero length,
+    so a group with no computable spread came out wearing a cross at the centre
+    of its marker that reads as a measured error of zero. The tab has always
+    passed ``None`` in that case; the Batch Export twin of this figure passed
+    the raw sequence, so the same points that carry no whisker on screen carried
+    phantom caps in the exported file.
+    """
+    seq = list(errs or [])
+    return seq if any(_finite_positive(e) for e in seq) else None

@@ -17,6 +17,8 @@ that cannot draw nanowells, whatever the toggle last said on another leaf. Core:
 
 from __future__ import annotations
 
+from widgets.plot_card import follows_theme
+
 from review.domain.observation import CELLS, NANOWELLS, OBSERVATION_LABELS
 
 #: Leaves whose axes choose their own nanowell metrics (Scatter's X / Y pickers), so the band's Metric is not shown.
@@ -176,7 +178,7 @@ def stamp_cells_footer(ctx, fig, wells=None) -> str:
 
     axes = getattr(fig, "axes", [])
     muted = tokens_for(axes[0])[2] if axes else None
-    fig.text(0.01, 0.002, line, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID)
+    follows_theme(fig.text(0.01, 0.002, line, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID), muted=True)
     return line
 
 

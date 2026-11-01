@@ -29,6 +29,7 @@ import subprocess
 from dataclasses import dataclass
 
 from services.remote_transport import _remote_quote
+from services.slurm_ids import hold_check_shell, is_step, squeue_listing
 from services.subprocess_text import TEXT_UTF8
 
 #: How long one probe may take. It runs on a thread of its own, but a probe that
@@ -57,18 +58,21 @@ class Liveness:
     job_state: str = ""
 
 
-def _script(pidfile: str, job_hint: str) -> str:
+def _script(pidfile: str, job_hint: str, staging_dir: str = "~/.allwell-staging") -> str:
     pid_q, sidecar_q = _remote_quote(pidfile), _remote_quote(f"{pidfile}.slurm")
     hint = job_hint if job_hint.isdigit() else ""
     return (
+        f'{hold_check_shell(staging_dir)}'
         f'_pid=$(cat {pid_q} 2>/dev/null); _jid=$(cat {sidecar_q} 2>/dev/null); '
         f'[ -z "$_jid" ] && _jid="{hint}"; '
         'if [ -z "$_pid" ]; then echo "AW_PID none"; '
         'elif kill -0 "$_pid" 2>/dev/null; then echo "AW_PID $_pid alive"; '
         'else echo "AW_PID $_pid gone"; fi; '
-        'if [ -n "$_jid" ]; then '
+        # A sidecar that names a granted node's own job says nothing about this run (the node outlives it), so
+        # the pid decides; one that names a step (`<job>.<step>`) is asked about as a step.
+        'if [ -n "$_jid" ] && ! _aw_is_hold "$_jid"; then '
         'if command -v squeue >/dev/null 2>&1; then '
-        'echo "AW_JOB $_jid $(squeue -h -j "$_jid" -o %T 2>/dev/null | head -n1)"; '
+        f'echo "AW_JOB $_jid $({squeue_listing("_jid")} 2>/dev/null | head -n1)"; '
         'else echo "AW_JOB $_jid ?"; fi; fi; echo AW_END'
     )
 
@@ -85,7 +89,8 @@ def probe(host, pidfile: str, *, scheduler: bool, job_hint: str = "",
     """
     name = getattr(host, "name", "") or getattr(host, "ssh_alias", "the host")
     try:
-        result = subprocess.run(host.ssh_argv(allocate_tty=False) + [_script(pidfile, job_hint)],
+        result = subprocess.run(host.ssh_argv(allocate_tty=False) + [
+            _script(pidfile, job_hint, getattr(host, "remote_staging_dir", "~/.allwell-staging"))],
                                 capture_output=True, timeout=timeout_s, **TEXT_UTF8)
     except subprocess.TimeoutExpired:
         return Liveness(UNREACHABLE, f"{name} did not answer within {int(timeout_s)} s")
@@ -103,6 +108,9 @@ def probe(host, pidfile: str, *, scheduler: bool, job_hint: str = "",
         jid, state = job[0], (job[1] if len(job) > 1 else "")
         if state == "?":
             return Liveness(UNKNOWN, f"{name} has no squeue to ask about job {jid}", jid, "")
+        if is_step(jid) and state:
+            # A step has no state to report: `squeue -s` printing its id is the scheduler listing it.
+            return Liveness(ALIVE, f"the scheduler lists step {jid}", jid, "RUNNING")
         if state.upper() in _LIVE_JOB_STATES:
             return Liveness(ALIVE, f"the scheduler lists job {jid} as {state.upper()}", jid, state.upper())
         return Liveness(GONE, f"the scheduler no longer lists job {jid}", jid, state.upper())
@@ -133,7 +141,11 @@ def cancel_pending(host, job_id: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> 
 
     if not job_id.isdigit():
         return False
-    script = (f'_jid={job_id}; ' + _only_my_job("_jid", "AW_NOTMINE") +
+    # Never a granted node's own job: a run's teardown must not release the node (services/slurm_ids.py). The id
+    # the stream named is a run's own queued job, so this only ever declines a mistake.
+    script = (hold_check_shell(getattr(host, "remote_staging_dir", "~/.allwell-staging")) +
+              f'_jid={job_id}; if _aw_is_hold "$_jid"; then echo AW_END; exit 0; fi; ' +
+              _only_my_job("_jid", "AW_NOTMINE") +
               '[ "$(squeue -h -j "$_jid" -o %T 2>/dev/null | head -n1)" = PENDING ] && '
               'scancel -u "$_aw_me" "$_jid" 2>/dev/null; echo AW_END')
     try:

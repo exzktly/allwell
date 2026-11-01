@@ -1823,7 +1823,8 @@ written. Whether ticked or not, it is the scheduler command's `--cpus-per-task`
 that decides how many of the node's CPUs the run uses; the run log warns when
 Slurm gave it only one or two of a bigger node's.
 
-**A run is always one task on one node.** The app adds `--nodes=1 --ntasks=1`
+**A run is always one task on one node.** (While you keep a node granted — *Keeping a
+node between runs*, below — the run is one task of that node.) The app adds `--nodes=1 --ntasks=1`
 to the `srun` command it sends, because Slurm runs the whole job once per task
 and the run is a single process that spreads its own workers over the CPUs it is
 given. A task count can come from the cluster's environment as well as from the
@@ -1849,7 +1850,65 @@ for the next attempt. When it runs out the job is cancelled and the run stops wi
 …`; raise the setting for a busy cluster, or set it to **0**
 (no limit), which never gives up. A run that has started on its node is never cut
 short by it, however long it runs. It applies when the scheduler command is an
-`srun` command.
+`srun` command. It also bounds *Request a node* (below), and a run that is
+waiting for a granted node another run is using.
+
+### Keeping a node between runs
+
+On a cluster where the node you need is slow to get — a GPU node that has to
+boot, say — a run that fails after its node was granted used to give the node
+back, and running it again queued for a new one. **Request a node** in
+*Manage…* keeps one for you instead.
+
+Select a host in *Manage…* whose *Run compute* is *On a node it schedules* with
+an `srun` scheduler command, and press **Request a node** in the *Granted node*
+box under the list. The app asks the scheduler for a node with that host's
+scheduler command (partition, GPUs, CPUs, memory, and `--exclusive` if ticked),
+waits for it like any job (*Queued…*, *Node starting…*), and shows the node, its
+GPUs, how long it has been granted and has left, and what will release it. From
+then on **every remote run on that host goes to the node** — runs from the Analyze
+form, Resume, and every job in the Datasets job queue — and none of them
+queues. A run that fails or is stopped ends only itself; run it again and it lands
+on the same node.
+
+A granted node runs **one run at a time**. A second run on the same host waits
+for it (bounded by *Max queue wait*) rather than asking for a node of its own,
+because two runs on one GPU is how a model fails to load for want of memory.
+
+A run is told which node it is on in its log (*running on the granted node … — no
+queue wait*). A run that would outlast the node's time limit — its scheduler
+command's `--time`, scaled by its batches — gets a fresh node, with a fresh limit,
+instead of being cut off part-way; the log says so.
+
+**Test the node** sends the scheduler Test's job to the node as a run would be
+sent, to see the CPUs and GPUs a run on it gets. **Release** gives the node back
+at once; if a run is using it you are asked first, because releasing stops the run.
+
+**What ends a granted node.** All of these are enforced on the node itself, so
+none depends on All-Well still running:
+
+| What happens | The node is released |
+|---|---|
+| You press **Release**, or quit All-Well | at once |
+| All-Well is gone (crashed, asleep, offline) and no run is using the node | within 2 minutes of its last sign of life (a run whose window crashed mid-run still counts as using it for up to 10 more minutes) |
+| All-Well is open and no run is using the node | after *Release when idle after* (30 minutes by default) |
+| The time limit is reached (24 hours by default) | at the limit, even if a run is going |
+
+Quitting releases the nodes that window asked for. A node it only *found* — one
+another window asked for — is not its to cancel: this window stops keeping it
+alive and, if nobody else is, it ends two minutes later.
+
+The two settings are per host, in *Add…* / *Edit…* under the scheduler command,
+in **Granted node**: **Time limit** (hours; default 24) and **Release when idle
+after** (minutes; default 30, `0` to turn that rule off). The time limit is
+the granted node's own; it is separate from the `--time` in the scheduler command,
+which still sizes each run and is not given to the node. A partition that allows
+less than the time limit caps it, and the log says so.
+
+A released node is powered down by the cluster on its own schedule (on AWS
+ParallelCluster, after its scale-down idle time), and a node that is always kept
+up is never powered down. **A granted node is billed while it is idle**, which is
+what the idle release and the app-gone rule are for.
 
 **A scheduler command that sends the run's output elsewhere is refused**, when
 you save the host and when a run starts: `-o` / `--output`, `-e` / `--error`
@@ -1864,7 +1923,8 @@ look hung. Leave them out; the run's own log keeps all of it.
 that fails to start is replaced automatically (see *A node that fails to boot is
 retried* below), but once the run has started on a node, asking again would
 start it from the beginning. The run stops and the log says which node failed;
-**Resume** continues from where it stopped.
+**Resume** continues from where it stopped. (A granted node is the exception to
+"asked for": a rerun goes to the node you are keeping, if it is still granted.)
 
 **Fetch** next to *Compute profile* reads the cluster's JupyterHub
 configuration and lists the compute options its web page offers; picking one

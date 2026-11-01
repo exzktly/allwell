@@ -30,8 +30,10 @@ name: CI
 # On a pull request the ruff and fast-lane jobs first ask scripts/change_scope.py
 # what the change can reach: a version-only change (just the __version__ line)
 # lints and tests nothing, a docs-only one skips lint and runs the docs lane,
-# and anything else runs in full. The version-bump job always runs. A push to
-# main always runs everything.
+# and anything else runs in full. A push to main always runs everything.
+#
+# Pull requests do not bump version.py: version-bump.yml does that on main after
+# each merge, so there is no version check here.
 
 on:
   pull_request:
@@ -55,8 +57,7 @@ jobs:
         with:
           python-version: "3.11"
       # scripts/change_scope.py: a pull request that changes only the version number or documentation has
-      # no Python to lint beyond the __version__ line, which the version-bump job reads. A push to main
-      # always lints.
+      # no Python to lint beyond the __version__ line. A push to main always lints.
       - name: Does this change hold code?
         id: scope
         run: |
@@ -71,21 +72,6 @@ jobs:
       - name: ruff check
         if: steps.scope.outputs.scope == 'code'
         run: ruff check .
-
-  # Every pull request bumps version.py exactly once (CLAUDE.md §6), measured against the base as it stands now:
-  # see scripts/version_bump_ci.sh for why the author's own preflight check is not enough.
-  version:
-    name: version bump
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: One increment against the base
-        run: scripts/version_bump_ci.sh
 
   test:
     name: pytest (fast lane)

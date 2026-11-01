@@ -98,6 +98,7 @@ from services.remote_suspend import request_suspend as _request_suspend
 from services.remote_code_sync import sync_pipeline_code
 from services.remote_commands import _compose_remote_cmd, _handover_job_body, pack_for_login_shell
 from services.remote_reservation import Reservation
+from services.remote_hold import NodeLease, StepTarget, claim_node, step_launcher
 from services.remote_srun_retry import queue_wait_seconds
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
@@ -228,6 +229,23 @@ class RemoteRunner:
         self._cancelled: threading.Event = threading.Event()
         # The version directory the last sync filled (remote_code_sync).
         self._code_dir = ""
+        #: Set while the host has a granted node this run is going to use (services.remote_hold): the run is then a
+        #: step of the node's job, and :meth:`launcher` says so. ``None`` is the ordinary run, one job of its own.
+        self.step_target: StepTarget | None = None
+
+    def launcher(self) -> str:
+        """The scheduler command this run launches with: a step on the granted node when there is one, else the host's.
+        Every launch site asks here, so none can forget the node."""
+        return step_launcher(self.step_target) if self.step_target is not None else self.host.launch_command
+
+    def claim_granted_node(self, *, log_fn: Callable[[str], None], stop_event: threading.Event | None = None,
+                           **timing) -> NodeLease | None:
+        """Take this host's granted node for the run about to start, and make :meth:`launcher` a step of it; ``None``
+        (and the host's own command) when there is none. The facade ``PipelineRunner`` calls, beside
+        :meth:`reserve_allocation`. *timing* is ``sleep`` / ``clock``, for tests."""
+        lease = claim_node(self.host, self._cache, log_fn=log_fn, stop_event=stop_event, **timing)
+        self.step_target = lease.target if lease is not None else None
+        return lease
 
     @property
     def run(self) -> _RemoteRun | None:
@@ -389,7 +407,7 @@ class RemoteRunner:
             if popen is None:
                 _refuse_after_stop(stop_event)     # a Stop the hand-over lost to: no fresh job after it
                 if reserved:
-                    log(_scheduler_handoff_lines(self.host.launch_command))
+                    log(_scheduler_handoff_lines(self.launcher()))
                 popen = self._start_ssh(ssh_argv)
             self._run.owns_remote_job = True     # from here the job is ours to cancel
             try:
@@ -636,7 +654,7 @@ class RemoteRunner:
         # directory that is still filling.
         overlap = bool(self.host.compute_launcher.strip()) and not cache_hit
         remote_cmd = _compose_remote_cmd(
-            self.host.launch_command,
+            self.launcher(),
             remote_pidfile,
             remote_argv,
             cache_hit=cache_hit,
@@ -664,7 +682,7 @@ class RemoteRunner:
         if not cache_hit and not reserved:
             # A cache hit short-circuits to a ``true`` no-op and consumes no
             # allocation, so it is not waiting for one.
-            log(_scheduler_handoff_lines(self.host.launch_command))
+            log(_scheduler_handoff_lines(self.launcher()))
         return overlap, ssh_argv
 
     def _hand_over(self, reservation: Reservation, prep: _PreparedRun, zipped: ZippedInput,

@@ -75,6 +75,7 @@ from services.remote_run_id import (
 from services.remote_batch_staging import prune_staged, _empty_well_blanks, nanowell_reference_first
 from services.remote_reservation import QueueWaitSpent
 from services.remote_srun_retry import QUEUE_WAIT_EXIT, queue_wait_seconds
+from services.slurm_ids import is_step_launcher, launcher_job_id
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_handoff import chase_handoff, watch_of
@@ -148,6 +149,9 @@ def _scheduler_handoff_lines(launcher: str, *, batch: int | None = None) -> str:
     launcher = (launcher or "").strip()
     if not launcher:
         return ""
+    if is_step_launcher(launcher):
+        # A step on a granted node waits for no one, and must not print the request line the pane counts a wait from.
+        return f"[remote] scheduler: running on the granted node (job {launcher_job_id(launcher)}) — no queue wait.\n"
     where = f"batch {batch}: " if batch is not None else ""
     return (
         f"[remote] scheduler: {where}requesting allocation via: {launcher}\n"
@@ -744,7 +748,7 @@ class _BatchedRemoteProcess:
 
     def _launch_driver(self, host, run, driver: str, total: int) -> subprocess.Popen:
         """Ask the scheduler for the node the driver holds for the whole run, and start the ssh that waits on it."""
-        launcher, note = scale_launcher_time(host.launch_command, total)
+        launcher, note = scale_launcher_time(self._runner.launcher(), total)
         if note:
             self._log(note)
         # One hand-off for the run rather than one per batch — there is one

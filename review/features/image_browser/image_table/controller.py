@@ -143,8 +143,7 @@ def image_table_refresh_picker(ctx) -> None:
     lbl = getattr(ctx.runtime.image_table, "count_lbl", None)
     if lbl is not None:
         n = len(ctx.state.image_table.active_wells)
-        lbl.setText(f"{n} well{'s' if n != 1 else ''} selected" if n
-                    else "No wells selected")
+        lbl.setText(f"{n} well{'s' if n != 1 else ''} selected" if n else "No wells selected")
 
 
 def image_table_refresh_empty_state(ctx) -> None:

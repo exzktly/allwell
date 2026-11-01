@@ -3983,6 +3983,14 @@ offered yet.
 
 These affordances are global — set them once and every tab honours them.
 
+#### Typing a number
+
+A number you type into a box — bins, a cluster count, a moving-average
+window, ε, an axis limit — takes effect when you press **Enter** or click out
+of the box, not as you type each digit. Typing `200` redraws once, at 200,
+rather than at 2, then 20, then 200. The box's up/down arrows and the mouse
+wheel still apply each step straight away.
+
 #### Channel selector
 
 The single channel dropdown at the top of every plotting sub-tab is shared

@@ -345,6 +345,11 @@ def _plot_groups_delete(ctx, group_id: str) -> None:
     _plot_groups_schedule_save(ctx)
 
 
+def saved_selections_title(n: int) -> str:
+    """The drawer's header: "Saved selections", with the count once there is one."""
+    return f"Saved selections ({n})" if n else "Saved selections"
+
+
 def refresh_plot_groups_sidebar(ctx) -> None:
     """Rebuild the Saved selections quick-load buttons across every registered drawer.
 
@@ -367,6 +372,11 @@ def refresh_plot_groups_sidebar(ctx) -> None:
     groups = list(ctx.state.selection.plot_groups or [])
     valid = set(ctx.state.dataset.well_paths or {})
     for drawer in drawers:
+        # The header carries the count, so a collapsed drawer still says it
+        # holds something.
+        section = drawer.get("section")
+        if section is not None:
+            section.setTitle(saved_selections_title(len(groups)))
         lay = drawer.get("list_layout")
         if lay is None:
             continue

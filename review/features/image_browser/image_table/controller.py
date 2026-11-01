@@ -141,7 +141,8 @@ def image_table_refresh_picker(ctx) -> None:
     lbl = getattr(ctx.runtime.image_table, "count_lbl", None)
     if lbl is not None:
         n = len(ctx.state.image_table.active_wells)
-        lbl.setText(f"{n} well{'s' if n != 1 else ''} active")
+        lbl.setText(f"{n} well{'s' if n != 1 else ''} selected" if n
+                    else "No wells selected")
 
 
 def image_table_refresh_empty_state(ctx) -> None:
@@ -151,7 +152,7 @@ def image_table_refresh_empty_state(ctx) -> None:
     plate, so the app-wide well selection does not drive it — but the placeholder
     still has two states to tell apart. Its standing text asks the user to choose
     wells and channels above and press Generate, which with no dataset open is an
-    instruction that cannot be followed: the picker reads "0 wells active" and
+    instruction that cannot be followed: the picker reads "No wells selected" and
     the Channels panel two rows up already says "load a dataset to see channels".
     So with no dataset it says the same thing the rest of Review says, in the
     same words.

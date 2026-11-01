@@ -7,9 +7,7 @@ Saved selections, which the frame also hosts, live in
 from __future__ import annotations
 
 
-from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from functools import partial
 from review.core.selection_controller import on_sidebar_plate_col_activated
 from review.core.selection_controller import on_sidebar_plate_corner_toggled
@@ -25,13 +23,12 @@ from review.core.saved_selections import refresh_plot_groups_sidebar
 def build_sidebar(win, parent: QWidget) -> None:
     """Build the 8x12 plate-map well selector in the sidebar.
 
-    Creates:
-      - "WELLS" header
-      - Row/Col quick-select buttons (A-H, 01-12)
-      - 8x12 WellButton plate-map grid with drag-to-select bindings
-      - All / None buttons
-      - Selected-well count label
-      - Group-mode hint label
+    Creates, top to bottom:
+      - the 8x12 well-plate selector (mounted in the rail's plate slot)
+      - the selection footer: count, **All**, **None**
+      - the group-mode hint
+      - the Saved selections drawer
+      - the Heat Map layout configurator (shown on Heat Map only)
     """
     from review.domain.plate_layout import PLATE_ROWS as _PLATE_ROWS, PLATE_COLS as _PLATE_COLS
     from review.core.rail_plate import mount_rail_plate
@@ -63,10 +60,9 @@ def build_sidebar(win, parent: QWidget) -> None:
     win._sidebar_plate = win._ctx.widgets.register("_sidebar_plate", plate)
     win._sidebar_map_outer = plate
 
-    # Select all / Select none are now driven by the small toggle circle
-    # the WellPlateSelector paints in the plate's top-left corner (it
-    # appears on multi-select plates only; smFISH/Segmentation single-
-    # select plates leave the corner blank).
+    # The small toggle circle the WellPlateSelector paints in the plate's
+    # top-left corner is a shortcut for the footer's All / None below (it
+    # appears on multi-select plates only).
 
     # Tokens-only stub: a {tok: None} dict that doubles as the "sidebar built"
     # sentinel and the loaded-well token list for _refresh_sidebar_map and the
@@ -87,35 +83,44 @@ def build_sidebar(win, parent: QWidget) -> None:
     from review.core.ui_helpers import well_plate_tooltip_provider
     plate.setWellTooltipProvider(well_plate_tooltip_provider(win._ctx))
 
-    # User request: All 96 / Invert / Clear quick-select buttons removed
-    # from the sidebar — row and column header clicks on the plate cover
-    # the multi-select cases; ⌘A / Clear are exposed elsewhere. Tip line
-    # below the buttons also removed (functionality is discoverable via
-    # the plate header hover state).
-
-    # "Deselect all" button. Replaces the old selected-well count indicator
-    # (count + pill chip), which was redundant with the plate itself. The
-    # selection-count writers in selection_controller guard with hasattr, so
-    # omitting ``_sel_count_lbl`` / ``_sel_count_chip`` here is safe — they
-    # simply no-op.
+    # The selection footer: the count, then **All** and **None** — the same
+    # widget and the same words as under the Image Table's picker, so a
+    # selection reads and changes the same way on every page. Registered as
+    # ``_sel_count_lbl``, the key ``selection_controller.refresh_sidebar_map_now``
+    # writes the count to: "3 wells selected" when the plate selects wells,
+    # "2/3 sets visible" when it shows groups, where All and None show and hide
+    # every set instead.
+    from review.core.selection_controller import select_all as _select_all
     from review.core.selection_controller import select_none as _select_none
-    deselect_row = QWidget(parent)
-    deselect_row_layout = QHBoxLayout(deselect_row)
-    deselect_row_layout.setContentsMargins(0, 0, 0, 0)
-    deselect_row_layout.setSpacing(8)
-    win._deselect_all_btn = QPushButton("Deselect all", deselect_row)
-    win._deselect_all_btn.setProperty("variant", "secondary")
-    win._deselect_all_btn.setToolTip("Clear the current well selection.")
-    win._deselect_all_btn.clicked.connect(lambda _=False: _select_none(win._ctx))
-    deselect_row_layout.addWidget(win._deselect_all_btn)
-    deselect_row_layout.addStretch(1)
-    layout.addWidget(deselect_row)
+    from widgets.selection_footer import SelectionFooter
+    footer = SelectionFooter(
+        parent,
+        all_tooltip="Select every loaded well — or, with groups defined, show every group.",
+        none_tooltip="Clear the selection — or, with groups defined, hide every group.",
+    )
+    footer.selectAllRequested.connect(lambda: _select_all(win._ctx))
+    footer.selectNoneRequested.connect(lambda: _select_none(win._ctx))
+    win._ctx.widgets.register("_sel_count_lbl", footer)
+    layout.addWidget(footer)
 
     # Group-mode hint
     win._line_group_hint = QLabel("", parent)
     win._line_group_hint.setObjectName("Accent")
     win._line_group_hint.setWordWrap(True)
     layout.addWidget(win._line_group_hint)
+
+    # Saved selections: named well subsets the user can reload in one click.
+    # Directly under the footer, because saving is something done *to* the
+    # selection the footer counts — a drawer pinned at the rail's foot sat a
+    # screen's height away from the plate it saves. Collapsed by default; its
+    # header carries the count, so a closed drawer still says it holds
+    # something.
+    plot_groups_section = build_plot_groups_drawer(
+        win._ctx, parent, include_add_controls=True,
+    )
+    layout.addWidget(plot_groups_section)
+    win._plot_groups_sidebar_section = plot_groups_section
+    win._plot_groups_refresh = lambda: refresh_plot_groups_sidebar(win._ctx)
 
     # Heat-map layout configurator (sidebar variant). Hidden by default;
     # ``_on_tab_change`` reveals it when the Heat Map tab is active.
@@ -124,22 +129,6 @@ def build_sidebar(win, parent: QWidget) -> None:
     if heatmap_frame is not None:
         heatmap_frame.setVisible(False)
 
-    # Absorb leftover vertical space so the well picker stays pinned to the
-    # top of the sidebar even when the sidebar is taller than its contents.
-    # Placed *before* the Saved selections drawer so that drawer is pinned to the
-    # bottom of the sidebar and expands upward (see below).
+    # Absorb leftover vertical space so everything above stays pinned to the
+    # plate rather than spreading down the rail.
     layout.addStretch(1)
-
-    # Saved selections are quick-load well subsets for plotting only. They live
-    # in a collapsible drawer pinned to the bottom of the sidebar so users can
-    # save the current selection and restore it later without creating stats /
-    # replicate groups. Collapsed by default — only the header shows until the
-    # user opens it — so the name field + saved list never push up into (and
-    # overlap) the selected-well count bar above the plate. The symbols keep the
-    # ``plot_group`` spelling; only what a user reads was renamed.
-    plot_groups_section = build_plot_groups_drawer(
-        win._ctx, parent, include_add_controls=True,
-    )
-    layout.addWidget(plot_groups_section)
-    win._plot_groups_sidebar_section = plot_groups_section
-    win._plot_groups_refresh = lambda: refresh_plot_groups_sidebar(win._ctx)

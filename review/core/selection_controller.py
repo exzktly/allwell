@@ -428,11 +428,26 @@ def select_col(ctx, col: str) -> None:
 
 
 def select_all(ctx) -> None:
+    """Select every loaded well — or, in group mode, show every group.
+
+    Group mode follows :func:`select_none`'s rule: groups or a variable
+    grouping exist **and** the current tab is not a per-well tab. On a per-well
+    tab (Cell Browser / Home / Review CSV) the plate selects wells even when
+    groups exist, so **All** selects wells there; asking only whether groups
+    exist showed every group instead and left the plate on that page unchanged.
+    """
     app = ctx.window  # transitional bridge (A3)
-    if _grouping_variable(ctx):  # grouped by a variable: show every value
+    sel = app._app_state.selection
+    try:
+        _tab = app._current_centre_tab()
+    except Exception:
+        _tab = ""
+    grouping = bool(_grouping_variable(ctx))
+    rep_mode = (bool(sel.selections) or grouping) and not _is_per_well_tab(ctx, _tab)
+    if rep_mode and grouping:  # grouped by a variable: show every value
         _set_values_hidden(ctx, [r.value_id for r in _value_sets(ctx)], target=False)
-    elif app._app_state.selection.selections:  # rep-mode: show every group
-        _set_groups_hidden(ctx, app._app_state.selection.selections, target=False)
+    elif rep_mode:  # group mode: show every group
+        _set_groups_hidden(ctx, sel.selections, target=False)
     else:
         app._app_state.selection.select_wells(app._app_state.dataset.well_paths.keys())
         app._event_bus.selection_changed.emit(app._app_state.selection)
@@ -1147,6 +1162,10 @@ def refresh_sidebar_map_now(ctx) -> None:
     plate.setSelectionMode("passive" if rep_mode else "select")
     plate.setRowColumnSelectable(not smfish)
     plate.setSingleSelectionMode(smfish and not rep_mode)
+    # The footer's **All** means nothing on a plate that holds one well.
+    footer = getattr(app, "_sel_count_lbl", None)
+    if footer is not None and hasattr(footer, "setAllVisible"):
+        footer.setAllVisible(not (smfish and not rep_mode))
     plate.clearWellColors()
     plate.setWellColors(colors)
     # Plotting tabs in rep-mode paint the visible group wells (clicks toggle a

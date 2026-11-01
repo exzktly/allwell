@@ -42,7 +42,7 @@ def test_a_montage_row_and_a_metric_row_are_drawn_for_every_well(nanowell_image_
     from review.features.image_browser.image_table.state import Axis, TableSpec
 
     ctx = nanowell_image_table
-    montage, brightness = montage_token("GFP"), metric_token("GFP Brightness (mean per-cell intensity)")
+    montage, brightness = montage_token("GFP"), metric_token("GFP Cell fluorescence (mean per cell, own-well background subtracted)")
     offered = channel_options(ctx)
     assert montage in offered and brightness in offered
 
@@ -109,4 +109,4 @@ def test_the_saved_figure_and_the_slide_carry_the_colour_key_and_the_tray_folds_
     assert "NW: Cell count" not in chips and "MONTAGE GFP" in chips
     toggle.click()
     chips = [lb.text() for lb in body.findChildren(QLabel) if lb.objectName() == "ITBChanLbl"]
-    assert "NW: Cell count" in chips and "NW: GFP Brightness" in chips
+    assert "NW: Cell count" in chips and "NW: GFP Cell fluorescence" in chips

@@ -22,7 +22,8 @@ metric                 value                                           undefined
                                                                        0), or either timepoint has no count
 ``log2_count_fc``      log2((n + 1) / (n₀ + 1))                        either timepoint has no count
 ``confluence_fc``      c(t) / c(baseline)                              c(baseline) = 0, or either is unmeasurable
-``brightness_fc_<ch>`` mean per-cell intensity, t over baseline        no cells, or no fluorescence, at either
+``brightness_fc_<ch>`` cells' mean intensity less the background, t    no cells, or no fluorescence, at either, or
+                       over baseline                                   no signal above background at baseline
 ``signal_fc_<ch>``     site-integrated intensity, t over baseline      unmeasurable or no fluorescence at either,
                                                                        or no signal above background at baseline
 ``growth_rate``        slope of ln n against time (per hour)           fewer than three timepoints with a time and
@@ -35,6 +36,11 @@ level times the interior's pixel count (``nanowell_measure.site_fluorescence``; 
 tile's nanowells of each one's modal interior level, so no empty nanowell is needed), so it is near zero for an empty
 nanowell and can be negative; a ratio over a baseline at or below zero has no meaning, which is the
 one undefined case this table adds to §3.10.1's ("no signal above background at baseline").
+
+Both fluorescence metrics stand on one background, the one the run chose (``background_compute``): nanowell
+fluorescence is taken over it in the pipeline, and :func:`site_metrics` takes the site's ``<channel>_background``
+off the cells' mean, after Cell Gating. Below the empty well's floor a cell fluorescence can be negative too, and
+its fold change over such a baseline is undefined for the same reason.
 
 **Baseline** (§3.10.1): ``"earliest"`` — the well's earliest timepoint, so a site unmeasurable there has no
 fold change — or ``"first_measurable"``, the labelled alternative for a bubble that clears after t₀: for each
@@ -250,6 +256,14 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
         frame[f"brightness_{ch}"] = frame[f"brightness_{ch}"].where(measurable)
         frame[f"signal_{ch}"] = frame[f"{ch}_integrated"].where(measurable)
     cell_gate_compute.apply(frame, gate, data.channels)
+    for ch in data.channels:
+        # The cells' mean less the level the run took off the nanowell's fluorescence, so both metrics are measured
+        # above the same background (``background_compute``). After the gate, which recomputes the mean from the
+        # cells it keeps. A run without the column measured none, and its brightness stays the cells' raw mean; a
+        # site the run left without a level (an empty well with none at that timepoint) has no brightness either.
+        level = frame.get(f"{ch}_background")
+        if level is not None:
+            frame[f"brightness_{ch}"] = frame[f"brightness_{ch}"] - pd.to_numeric(level, errors="coerce")
     base = {}
     for value in ["n", "c"] + [f"{kind}_{ch}" for ch in data.channels for kind in ("brightness", "signal")]:
         mask = _baseline_rows(frame, baseline, value)
@@ -320,7 +334,7 @@ def crop_metric_lines(row, channel: str | None = None) -> list[str]:
         if sig is not None:
             items.append(f"fluor. {compact_number(sig)}")       # Nanowell fluorescence, as the metric is named
         if b is not None:
-            items.append(f"bright {compact_number(b)}")
+            items.append(f"per cell {compact_number(b)}")    # Cell fluorescence (mean per cell)
     return items
 
 

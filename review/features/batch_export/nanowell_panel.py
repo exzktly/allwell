@@ -191,8 +191,9 @@ class NanowellBatchExportPanel(BatchExportPanel):
         row.setContentsMargins(12, 2, 12, 2)
         self._add_bold_label(row, "Metrics:", min_width=_FIELD_LABEL_W)
         self._metric_list = QListWidget()
-        self._metric_list.setToolTip("One figure per ticked metric. Brightness and nanowell fluorescence use the channel "
-                                     "chosen in the app's channel selector.")
+        self._metric_list.setToolTip("One figure per ticked metric. Cell fluorescence and nanowell fluorescence use the channel "
+                                     "chosen in the app's channel selector; each figure's axis names the "
+                                     "background they were measured above.")
         for key, label in _metric_labels().items():
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, key)
@@ -338,7 +339,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
 
     def _summary_footnotes(self) -> list[str]:
         return ["Wells are the replicate unit: a replicate set's wells are drawn side by side, as on the page.",
-                "Brightness and nanowell fluorescence use the channel chosen in the app's channel selector."]
+                "Cell fluorescence and nanowell fluorescence use the channel chosen in the app's channel selector; "
+                "each figure's axis names the background they were measured above."]
 
     # ── the run ──────────────────────────────────────────────────────────
     def _selected_metrics(self) -> list[str]:

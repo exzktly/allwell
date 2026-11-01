@@ -24,12 +24,12 @@ ROW = {"state": "measured", "n": 6.0, "c": 0.24, "brightness_GFP": 10.0, "signal
 
 # ── the metrics under a crop ─────────────────────────────────────────────────
 def test_a_measured_crop_is_captioned_with_its_count_confluence_fluorescence_and_brightness():
-    assert crop_metric_lines(ROW, "GFP") == ["6 cells", "24% conf.", "fluor. 5.79k", "bright 10"]
+    assert crop_metric_lines(ROW, "GFP") == ["6 cells", "24% conf.", "fluor. 5.79k", "per cell 10"]
     assert crop_metric_lines({**ROW, "n": 1.0}, None) == ["1 cell", "24% conf."]       # no channel: no intensities
 
 
 def test_a_missing_measurement_is_left_out_and_a_state_without_numbers_is_named():
-    assert crop_metric_lines({**ROW, "c": math.nan, "signal_GFP": None}, "GFP") == ["6 cells", "bright 10"]
+    assert crop_metric_lines({**ROW, "c": math.nan, "signal_GFP": None}, "GFP") == ["6 cells", "per cell 10"]
     assert crop_metric_lines({"state": "occluded", "n": None}, "GFP") == ["occluded"]
     assert crop_metric_lines({**ROW, "state": "empty", "n": 0.0, "c": 0.0}, None) == ["0 cells", "0% conf."]
 
@@ -44,15 +44,15 @@ def test_big_numbers_are_written_short(value, text):
 
 
 def test_items_are_packed_into_as_few_lines_as_the_width_holds():
-    items = ["6 cells", "24% conf.", "bright 10", "fluor. 5.79k"]
-    assert renderer._pack(items, 400, 6.5) == ["6 cells · 24% conf. · bright 10 · fluor. 5.79k"]
-    assert renderer._pack(items, 80, 6.5) == ["6 cells · 24% conf.", "bright 10", "fluor. 5.79k"]
+    items = ["6 cells", "24% conf.", "per cell 10", "fluor. 5.79k"]
+    assert renderer._pack(items, 400, 6.5) == ["6 cells · 24% conf. · per cell 10 · fluor. 5.79k"]
+    assert renderer._pack(items, 80, 6.5) == ["6 cells · 24% conf.", "per cell 10", "fluor. 5.79k"]
     assert renderer._pack(items, 10, 6.5) == items                              # one each when nothing fits
 
 
 def test_a_crop_s_line_keeps_the_measurements_that_fit_in_order_and_counts_the_rest():
-    items = ["6 cells", "24% conf.", "fluor. 5.79k", "bright 10"]
-    assert renderer._one_line(items, 400, 6.5) == ("6 cells · 24% conf. · fluor. 5.79k · bright 10", 0)
+    items = ["6 cells", "24% conf.", "fluor. 5.79k", "per cell 10"]
+    assert renderer._one_line(items, 400, 6.5) == ("6 cells · 24% conf. · fluor. 5.79k · per cell 10", 0)
     assert renderer._one_line(items, 70, 6.5) == ("6 cells · 24% conf.", 2)
     assert renderer._one_line(items, 5, 6.5) == ("", 4)
 

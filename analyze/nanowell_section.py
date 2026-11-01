@@ -21,12 +21,22 @@ from PySide6.QtWidgets import (
 
 from analyze.domain.nanowell_fields import (
     CELLPOSE_MODEL_CHOICES, CUSTOM_FORMAT, DEFAULTS, PLACEHOLDERS, PREFILLED, GEOMETRY_CHOICES, LEGACY_CELLPOSE_MODEL,
-    PLATE_FORMAT_CHOICES, LEGACY_SEGMENT_ON, LEGACY_SEGMENT_SCOPE, REGISTRATION_FROM_KEY, RESIZE_CHOICES, SEGMENT_ON_CHOICES,
+    FLUOR_BACKGROUND_CHOICES, PLATE_FORMAT_CHOICES, LEGACY_SEGMENT_ON, LEGACY_SEGMENT_SCOPE, REGISTRATION_FROM_KEY, RESIZE_CHOICES, SEGMENT_ON_CHOICES,
     SEGMENT_SCOPE_CHOICES, SCAN_CHOICES,
     nanowell_enabled, nanowell_option_errors,
 )
 from analyze.domain.well_list import incremental_is_moot
 
+_FLUOR_BACKGROUND_TIP = (
+    "What every fluorescence number of a nanowell is measured above — cell fluorescence (mean per cell) and nanowell fluorescence "
+    "alike.\n"
+    "This well's nanowell floor: the bare floor between and under the cells of the same tile. It needs nothing "
+    "else, but nanowells crowded with cells leave little bare floor to read it from.\n"
+    "Empty reference well: the floor of the Empty reference well's nanowells at the same timepoint, which no cell "
+    "of the measured well can raise. Where that well has no level for a channel (no image in it, or it was not "
+    "measured), that channel's fluorescence is left blank with the reason, never measured above something else.\n"
+    "A nanowell run applies no Image correction (flat-field or background subtraction); that section is hidden "
+    "while Nanowell array is chosen.")
 _REGISTRATION_TIP = (
     "An earlier nanowell run's output folder whose tile registration this run reuses, so a second analysis with "
     "other segmentation or measurement settings skips registering the tiles. A timepoint's stored registration is "
@@ -195,6 +205,7 @@ class AnalyzeNanowellSectionMixin:
         for key, label, attr, tip in _FIELDS:
             if key not in _COUNT_FIELDS:                # the count's own rows sit with segmentation (above)
                 self._nanowell_field_rows.append(self._nanowell_edit_row(sec, key, label, attr, tip))
+        self._nanowell_field_rows.append(self._build_nanowell_fluor_background_row(sec))
         row = self._row(sec, "Scan order", tooltip="Only with a tile grid: where the stage started and how it ran.")
         self._nanowell_scan_cb = QComboBox(row)
         for value in SCAN_CHOICES:
@@ -362,6 +373,19 @@ class AnalyzeNanowellSectionMixin:
         r.layout().addStretch(1)
         return r.parentWidget()
 
+    def _build_nanowell_fluor_background_row(self, sec: QWidget) -> QWidget:
+        """What every fluorescence number of a nanowell is measured above: the row beside the empty reference well,
+        since one of its two answers is that well. The Image correction section, which a nanowell run does not
+        apply, is hidden in nanowell mode (``form._hide_corrections_for_nanowells``), so this is the only background
+        the form offers for one."""
+        row = self._row(sec, "Fluorescence background", tooltip=_FLUOR_BACKGROUND_TIP)
+        self._nanowell_fluor_background_cb = QComboBox(row)
+        for value, label in FLUOR_BACKGROUND_CHOICES:
+            self._nanowell_fluor_background_cb.addItem(label, userData=value)
+        row.layout().addWidget(self._nanowell_fluor_background_cb)
+        row.layout().addStretch(1)
+        return row.parentWidget()
+
     def _refresh_nanowell_custom(self) -> None:
         """The diameter and pitch rows belong to a custom format only: shown for it, hidden otherwise."""
         custom = self._nanowell_format_cb.currentData() == CUSTOM_FORMAT
@@ -382,6 +406,8 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_segment_on_cb.setEnabled(on)
         self._nanowell_segment_scope_cb.setEnabled(on)
         self._nanowell_resize_cb.setEnabled(on)
+        self._nanowell_fluor_background_cb.setEnabled(on)
+        self._hide_corrections_for_nanowells(on)
         # The count's rows live on the Segmentation section's label-free page: shown in nanowell mode, and the
         # page's own note (and its pixel diameter, which the count does not read) hidden then.
         box = getattr(self, "_nanowell_count_box", None)
@@ -496,6 +522,8 @@ class AnalyzeNanowellSectionMixin:
         out["nanowell_segment_scope"] = (self._nanowell_segment_scope_cb.currentData()
                                          or SEGMENT_SCOPE_CHOICES[0][0])
         out["nanowell_resize"] = self._nanowell_resize_cb.currentData() or RESIZE_CHOICES[0][0]
+        out["nanowell_fluor_background"] = (self._nanowell_fluor_background_cb.currentData()
+                                            or FLUOR_BACKGROUND_CHOICES[0][0])
         out[REGISTRATION_FROM_KEY] = self._nanowell_registration_edit.text().strip()
         return out
 
@@ -557,6 +585,9 @@ class AnalyzeNanowellSectionMixin:
         # And for the resize: absent or None is a run that resized to the cell diameter, every run's default.
         self._nanowell_resize_cb.setCurrentIndex(
             max(self._nanowell_resize_cb.findData(str(d.get("nanowell_resize") or RESIZE_CHOICES[0][0])), 0))
+        # And for the fluorescence background: absent or None is a run that measured above each tile's own floor.
+        self._nanowell_fluor_background_cb.setCurrentIndex(max(self._nanowell_fluor_background_cb.findData(
+            str(d.get("nanowell_fluor_background") or FLUOR_BACKGROUND_CHOICES[0][0])), 0))
         self._nanowell_registration_edit.setText(str(d.get(REGISTRATION_FROM_KEY) or ""))
         if d.get("nanowell_cell_diameter_um") not in (None, ""):
             # A size the dataset states is a size already set: the carry-over from the pixel diameter must not

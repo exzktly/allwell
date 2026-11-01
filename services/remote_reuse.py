@@ -24,6 +24,7 @@ from pathlib import Path
 from pipeline.run_report import cross_build_note
 from services import remote_finished_wells as _finished
 from services.remote_run_id import _choose_remote_output_dir, _forced_from_argv, _pipeline_launch_is_pointless
+from services.slurm_ids import squeue_listing
 from util.aw_safe import swallowed
 from util.well_token import canonical_well_label
 
@@ -131,7 +132,8 @@ _REMOVE_IF_IDLE = (
     "_jid=$(cat \"$d/run.pid.slurm\" 2>/dev/null); "
     "ls \"$d/{hold}\"/*.zip >/dev/null 2>&1 && _live=held; "
     "if [ -n \"$_jid\" ]; then if command -v squeue >/dev/null 2>&1; then "
-    "_o=$(squeue -h -j \"$_jid\" -o %i 2>&1); _r=$?; "
+    # (A template for str.format: the brace group's braces are doubled.)
+    "_o=$(" + squeue_listing("_jid", "%i").replace("{", "{{").replace("}", "}}") + " 2>&1); _r=$?; "
     "if [ $_r -eq 0 ] && echo \"$_o\" | grep -qx \"$_jid\"; then _live=job; "
     "elif [ $_r -ne 0 ] && ! echo \"$_o\" | grep -qi 'invalid job id'; then _live=unknown; fi; "
     "else _live=unknown; fi; fi; "

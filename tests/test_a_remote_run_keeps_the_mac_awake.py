@@ -87,6 +87,7 @@ def _run_remote(monkeypatch, tmp_path, *, macos: bool, spawn_raises=None):
     r = pr.PipelineRunner()
     r._remote = types.SimpleNamespace(name="h")
     r._remote_runner = types.SimpleNamespace(
+        claim_granted_node=lambda **k: None,  # no granted node on this host
         estimate=lambda z: types.SimpleNamespace(format=lambda: "est"),
         spawn=spawn, verify_and_cleanup=lambda ok, **k: True,
         close_remote_job=lambda **k: None, cancel=lambda proc: None,

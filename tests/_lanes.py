@@ -274,6 +274,14 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_remote_run_keeps_the_mac_awake.py": "A remote run holds caffeinate from its start to its end, on macOS only",
     "test_a_remote_run_on_a_standin_cluster.py": "The app's remote path and the real remote side as a pair — srun, driver, conda guard, the pipeline — with faults on cue (tracker P1)",
     "test_a_remote_run_over_a_failing_link.py": "The same pair over a link whose nth ssh fails or one call hangs: correct or visibly failed (tracker P1)",
+    "test_a_run_on_a_granted_node_is_a_step.py": "While a node is granted a run launches as a step of it: plainly, with a job.step sidecar, announcing no queue wait",
+    "test_a_run_claims_the_granted_node.py": "A run claims the granted node one at a time, waits for it and asks for none of its own, and gets a fresh one when it would outlast the limit",
+    "test_quitting_gives_back_the_granted_node.py": "Quitting releases the nodes this window asked for, only stops beating for one it found, and cannot hang on a silent host",
+    "test_manage_remotes_granted_node.py": "Manage Remotes' Granted node panel: Request, Release (asking first while a run uses the node), Test the node, and finding a node already granted",
+    "test_a_failed_run_is_rerun_on_the_same_granted_node.py": "Request a node, run, fail, run again: the same node, no second allocation, and the end of a run never cancels the node",
+    "test_a_run_never_cancels_the_granted_node.py": "A run on a granted node ends its own step; no cancel, probe, sweep or clean-up of a run releases the node",
+    "test_remote_hold_request.py": "Requesting a granted node: the sbatch sent, the queue wait, the boot retry, and giving the node back",
+    "test_remote_hold_script.py": "The granted node's hold script, run under sh: release, idle, app-gone and time-limit endings, and what must not end it",
     "test_a_remote_run_says_how_it_ended.py": "A remote run says what ended it, and calls its job closed only once the host confirms it",
     "test_a_silent_remote_stream_is_noticed.py": "A remote run quiet for twenty minutes outside a queue wait is said and checked with the host",
     "test_a_remote_suspend_winds_the_run_down.py": "A remote Suspend asks the pipeline to wind down; it does not kill the session",
@@ -364,7 +372,7 @@ DOCS_ONLY_PATTERNS: tuple[str, ...] = (
 )
 
 #: The one file whose sole change is **version-only**: no test can be affected by
-#: the number, and the CI ``version bump`` job is the check that reads it.
+#: the number. Pull requests no longer move it; ``version-bump.yml`` does, on main.
 VERSION_FILE = "version.py"
 
 

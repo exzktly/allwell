@@ -304,6 +304,9 @@ class _Remote:
     def cancel(self, _proc):
         self.cancelled = True
 
+    def claim_granted_node(self, **_k):
+        return None       # no granted node on this host
+
 
 class _LiveProc:
     pid = 999_999
@@ -512,6 +515,7 @@ def _drive_remote_run(monkeypatch, tmp_path, *, lines, suspend_flag, stop_flag=F
             return 0
 
     remote = types.SimpleNamespace(
+        claim_granted_node=lambda **k: None,  # no granted node on this host
         estimate=lambda z: types.SimpleNamespace(format=lambda: "est"),
         spawn=lambda *a, **k: _Proc(),
         verify_and_cleanup=lambda ok, cleanup_mode, **k: verified.append(cleanup_mode) or True,

@@ -61,6 +61,7 @@ def _remote(p, proc, remote_root: Path, sent: list[str]):
 
     run_dir = remote_root / "runs" / "run-test"
     p._runner = types.SimpleNamespace(
+        launcher=lambda: p._runner.host.launch_command,       # RemoteRunner.launcher(): the host's command, no node granted
         _cache=types.SimpleNamespace(_ssh_run=ssh_run,
                                      upload_subset=upload_subset),
         _run=types.SimpleNamespace(

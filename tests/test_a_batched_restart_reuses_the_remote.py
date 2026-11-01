@@ -69,6 +69,7 @@ def _harness(tmp_path, monkeypatch, *, earlier=(), force=False, nanowell=False):
     p._fetcher.run.nanowell = nanowell
     p._journal_keys = dict(argv_digest="d", source_key="s", host_alias="h")
     p._runner = types.SimpleNamespace(
+        launcher=lambda: p._runner.host.launch_command,       # RemoteRunner.launcher(): the host's command, no node granted
         _cache=types.SimpleNamespace(_ssh_run=lambda argv, *, check, **kw: _bash(argv, script=False),
                                      _ssh_script=lambda script, *, check: _bash(script, script=True),
                                      upload_subset=upload_subset),

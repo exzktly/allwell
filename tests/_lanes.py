@@ -70,6 +70,7 @@ UI_LANE_FILES: dict[str, str] = {
     "test_plate_tooltip_guard.py": "the plate tooltip handler on an inactive window",
     "test_plot_card_header_state.py": "PlotCard header controls keep their state",
     "test_plot_card_save_button.py": "PlotCard's hover save buttons",
+    "test_rail_nav_group_grid.py": "phone layout's rail grid keeps each group under its caption",
     "test_rail_nav_height.py": "a rail nav takes its rows' height, not the region's",
     "test_rail_nav_label_follows_selection.py": "only the selected rail entry is bright",
     "test_responsive_row.py": "a row of panels stacks before it clips",

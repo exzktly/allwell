@@ -124,7 +124,6 @@ EXPRESSION_ALLOWLIST = {
     "widgets/lut_selector.py:167",
     "widgets/lut_selector.py:254",
     "widgets/lut_selector.py:255",
-    "widgets/rail_nav.py:83",
     "widgets/stepper.py:289",
     "widgets/stepper.py:390",
     "widgets/styled_slider.py:41",

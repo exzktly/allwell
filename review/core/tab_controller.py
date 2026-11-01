@@ -527,6 +527,22 @@ def sync_heatmap_well_drag_mode(ctx, enable: bool) -> None:
 
 
 
+def _rail_group_caption(ctx, nav, desc) -> str:
+    """The group caption to put before *desc*'s rail row, or ``""``.
+
+    A caption opens each registry group (``FeatureDescriptor.group``) where the
+    previous row belongs to a different one. Home is the landing page rather
+    than a group of pages, so it is never captioned; a page with no descriptor
+    joins whatever group is open.
+    """
+    group = desc.group if desc is not None else ""
+    if not group or group == "Home":
+        return ""
+    keys = nav.items()
+    prev = ctx.features.get(keys[-1]) if keys else None
+    return "" if prev is not None and prev.group == group else group
+
+
 def sync_section_nav_from_notebook(ctx) -> None:
     app = ctx.window  # transitional bridge (A3)
     nav = getattr(app, "_section_nav", None)
@@ -540,6 +556,9 @@ def sync_section_nav_from_notebook(ctx) -> None:
             if title in existing:
                 continue
             desc = ctx.features.get(title)
+            group = _rail_group_caption(ctx, nav, desc)
+            if group:
+                nav.addCaption(group)
             nav.addItem(title, icon=(desc.icon or None) if desc else None, key=title)
             app._section_nav_keys.append(title)
         cur = nb.currentName() if nb.count() else None

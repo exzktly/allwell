@@ -37,8 +37,8 @@ Derived from the rows below — recount them rather than editing a number here.
 
 | Id | Finding | Place | State | Evidence |
 |---|---|---|---|---|
-| G1 | The registry declares Home / Analysis / Images / Data, but the rail draws eleven undifferentiated rows: the group chrome was retired and `group_starts` is unused. Show a caption above each group except Home, derived from each descriptor's `group`, so no new roster is written. | `widgets/rail_nav.py`, `review/core/tab_controller.py::sync_section_nav_from_notebook` | todo | |
-| G2 | Phone layout lays the rail out as a two-column grid (`RailNav.setColumns(2)`); a caption must span both columns and start a fresh grid row, not occupy a tile. | `widgets/rail_nav.py::setColumns` | todo | |
+| G1 | The registry declares Home / Analysis / Images / Data, but the rail draws eleven undifferentiated rows: the group chrome was retired and `group_starts` is unused. Show a caption above each group except Home, derived from each descriptor's `group`, so no new roster is written. | `widgets/rail_nav.py`, `review/core/tab_controller.py::sync_section_nav_from_notebook` | done | `RailNav.addCaption` (not an item: no key, never current); `tab_controller._rail_group_caption` opens each group from `FeatureDescriptor.group`, Home uncaptioned. `tests/test_rail_nav_groups.py` drives the real `sync_section_nav_from_notebook` over the real registry; mutation (caption call removed) → 2 failed. A caption hides while its whole group is hidden; mutation → 1 failed. |
+| G2 | Phone layout lays the rail out as a two-column grid (`RailNav.setColumns(2)`); a caption must span both columns and start a fresh grid row, not occupy a tile. | `widgets/rail_nav.py::setColumns` | done | `RailNav._relayout_grid`: a caption takes a grid row across every column and its group's tiles start under it. `tests/test_rail_nav_group_grid.py` (UI lane); mutation (caption placed in one cell) → 1 failed. |
 
 ## Step 3 — one selection footer, and Saved selections beside it
 

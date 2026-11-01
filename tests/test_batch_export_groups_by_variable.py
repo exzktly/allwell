@@ -150,6 +150,10 @@ def _pick(combo, text):
     combo.setCurrentIndex(idx)
 
 
+def _status(panel):
+    return panel._vsel_status_text()
+
+
 def test_the_add_button_fills_the_active_group(panel, qtbot):
     from PySide6.QtCore import Qt
 
@@ -160,8 +164,12 @@ def test_the_add_button_fills_the_active_group(panel, qtbot):
     grp = panel._groups[0]
     assert [r.name for r in grp.members] == ["R1"]
     assert grp.solo_wells == ["A03", "A04"]
-    status = panel._vsel_status.text()
-    assert "added 4 wells" in status and "Mix" in status
+    # Named for the value, not for its wells: the name is the figure's title.
+    assert grp.name == "HeLa"
+    assert _status(panel) == (
+        "Added 4 wells to \u201cHeLa\u201d.\n"
+        "\u26a0 1 replicate set split (Mix): its other wells are not HeLa, "
+        "so A03 joined as solo wells.")
     # The plate shows the result: the boundary call carries the group colour
     # for exactly the group's wells (CLAUDE.md §7.4 #1).
     sent = {}
@@ -174,6 +182,63 @@ def test_the_add_button_fills_the_active_group(panel, qtbot):
     assert grp.wells == []
 
 
+def test_the_name_follows_the_values_and_survives_a_drag(panel):
+    panel._grp_add()
+    _pick(panel._vsel_var_cb, "Cell line")
+    _pick(panel._vsel_val_cb, "HeLa")
+    panel._vsel_add()
+    _pick(panel._vsel_val_cb, "U2OS")
+    panel._vsel_add()
+    grp = panel._groups[0]
+    assert grp.name == "HeLa + U2OS"
+    # A drag no longer renames it to a list of wells.
+    panel._plate_press("C01")
+    panel._plate_release()
+    assert "C01" in grp.wells
+    assert grp.name == "HeLa + U2OS"
+    _pick(panel._vsel_val_cb, "HeLa")
+    panel._vsel_remove()
+    assert grp.name == "U2OS"
+
+
+def test_a_hand_given_name_is_kept(panel, monkeypatch):
+    from review.features.batch_export import base_panel
+
+    panel._grp_add()
+    _pick(panel._vsel_var_cb, "Cell line")
+    _pick(panel._vsel_val_cb, "HeLa")
+    panel._vsel_add()
+    assert panel._groups[0].name == "HeLa"
+    monkeypatch.setattr(base_panel, "ask_name_dialog", lambda *a, **k: "Mine")
+    panel._grp_rename(0)
+    # A group the value had named, then renamed by hand, keeps the hand name.
+    _pick(panel._vsel_val_cb, "U2OS")
+    panel._vsel_add()
+    assert panel._groups[0].name == "Mine"
+
+
+def test_add_with_no_group_makes_one_named_for_the_value(panel):
+    assert panel._groups == []
+    _pick(panel._vsel_var_cb, "Cell line")
+    _pick(panel._vsel_val_cb, "U2OS")
+    panel._vsel_add()
+    assert [g.name for g in panel._groups] == ["U2OS"]
+    assert panel._groups[0].wells == ["B02", "H12", "B01"]
+
+
+def test_removal_names_the_set_it_kept(panel):
+    from review.features.batch_export._common import BarGroup
+
+    panel._groups.append(BarGroup("G", members=[ReplicateSet("Mix", ["A03", "B01"])]))
+    panel._active_grp = 0
+    _pick(panel._vsel_var_cb, "Cell line")
+    _pick(panel._vsel_val_cb, "HeLa")
+    panel._vsel_remove()
+    assert [r.name for r in panel._groups[0].members] == ["Mix"]
+    assert "Kept Mix" in _status(panel)
+    assert "\u2212 button" in _status(panel)
+
+
 def test_quick_setup_makes_one_group_per_value(panel):
     menu = panel._vsel_quick_menu
     menu.aboutToShow.emit()
@@ -181,14 +246,44 @@ def test_quick_setup_makes_one_group_per_value(panel):
     action.trigger()
     assert [g.name for g in panel._groups] == ["U2OS", "HeLa"]
     assert panel._groups[1].wells == ["A01", "A02", "A03", "A04"]
-    assert "C01" in panel._vsel_status.text()
+    assert _status(panel) == (
+        "2 groups, one per Cell line.\n"
+        "\u26a0 1 well with no Cell line left out: C01.\n"
+        "\u26a0 1 replicate set split across groups (Mix): their wells hold "
+        "different values.")
     # The groups persist like hand-made ones.
     doc = panel._ctx.runtime.batch_export.export_groups_doc
     assert [g["name"] for g in doc["groups"]] == ["U2OS", "HeLa"]
 
 
-def test_the_row_is_disabled_on_a_plate_with_no_variables(panel):
+@pytest.mark.parametrize("answer, expected", [("No", ["Mine"]), ("Yes", ["U2OS", "HeLa"])])
+def test_quick_setup_asks_before_replacing_groups(panel, monkeypatch, answer, expected):
+    from PySide6.QtWidgets import QMessageBox
+
+    from review.features.batch_export._common import BarGroup
+
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(
+        lambda *a, **k: asked.append(a) or getattr(QMessageBox, answer)))
+    panel._groups.append(BarGroup("Mine", solo_wells=["D01"]))
+    panel._active_grp = 0
+    panel._quick_by_variable(panel._vsel_var_cb.currentData())
+    assert len(asked) == 1
+    assert [g.name for g in panel._groups] == expected
+
+
+def test_a_status_about_old_variables_is_cleared(panel):
+    panel._vsel_add()
+    assert _status(panel)
     panel._ctx.state.selection.variables = sv.VariableSet()
     panel._vsel_refresh_variables()
-    assert not panel._vsel_var_cb.isEnabled()
-    assert not panel._vsel_add_btn.isEnabled()
+    assert _status(panel) == ""
+
+
+def test_the_row_says_where_to_define_variables_when_there_are_none(panel):
+    panel._ctx.state.selection.variables = sv.VariableSet()
+    panel._vsel_refresh_variables()
+    assert not panel._vsel_controls.isVisibleTo(panel)
+    assert not panel._vsel_buttons.isVisibleTo(panel)
+    assert panel._vsel_empty.isVisibleTo(panel)
+    assert "Home \u2192 Sample Map \u2192 Variables" in panel._vsel_empty.text()

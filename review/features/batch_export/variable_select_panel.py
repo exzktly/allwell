@@ -10,8 +10,17 @@ are unassigned are Qt-free and live in :mod:`._variable_groups`; this mixin
 only reads the plate's variables, drives the two combos and says what each
 action did on the status line beneath them. A selection that could not be
 taken exactly as asked — a replicate set split because its wells disagree, a
-removal that had to keep a set, wells with no value — is stated there rather
-than left for the exported figures to reveal.
+removal that had to keep a set, wells with no value — is stated there, on a
+warning line of its own, rather than left for the exported figures to reveal.
+
+**A group built from values is named for them.** A new group is auto-named
+from its members, which for a group filled by ``Cell line = HeLa`` is a list of
+twenty well tokens — and that name is the exported figure's title. So the
+first value added to an auto-named group names it (``HeLa``), a second extends
+the name (``HeLa + U2OS``), removing a value drops it from the name, and a
+later plate drag leaves the name alone, because the group is no longer one the
+app named from its wells. Renaming by hand ends all of that
+(``_vsel_forget_name``, called from ``_grp_rename``).
 
 Mixed into :class:`base_panel.BatchExportPanel`, which owns ``_groups``,
 ``_active_grp``, ``_refresh_group_list`` and the auto-name bookkeeping this
@@ -21,7 +30,18 @@ the Response panel's own variable combos.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QMenu, QVBoxLayout
+from html import escape
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from review.core.lazy import lazy as _lazy
 from review.features.batch_export._common import BarGroup, btn_secondary
@@ -31,24 +51,43 @@ from review.features.batch_export._variable_groups import (
     membership_for_value,
     remove_membership,
 )
+from ui import theme
 
 # The same roster the plate drag reads (``base_panel._rep_sets_loaded``), so a
 # set chosen here is the set a drag would have pulled in.
 _rep_sets_loaded = _lazy("review.domain.plot_members", "plot_replicate_sets_loaded")
 
-#: Item data for the value combo's "no value" entry. A string rather than
+#: Item data for the value combo's "not set" entry. A string rather than
 #: ``None`` because ``QComboBox.findData(None)`` matches nothing.
 _UNASSIGNED = "\x00unassigned"
 
-_VSEL_COMBO_MIN_W = 110
+#: What the row says, and the Quick Setup submenu says, on a plate with no
+#: sample variables — one wording for both, naming where they are defined.
+NO_VARIABLES_TEXT = "No sample variables — define them in Home → Sample Map → Variables."
+
+#: How many wells a status line names before it says "and N more".
+_MAX_NAMED_WELLS = 8
+
+_VSEL_COMBO_MIN_W = 90
 
 
 def _well_order_key(tok: str):
     return (tok[:1], int(tok[1:]) if tok[1:].isdigit() else 0)
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _wells_list(wells) -> str:
+    wells = list(wells)
+    shown = ", ".join(wells[:_MAX_NAMED_WELLS])
+    more = len(wells) - _MAX_NAMED_WELLS
+    return f"{shown} and {more} more" if more > 0 else shown
+
+
 class VariableSelectMixin:
-    """The "By variable" row and the per-value Quick Setup entry."""
+    """The "Select by variable" row and the per-value Quick Setup entry."""
 
     # ── data ─────────────────────────────────────────────────────────────
     def _vsel_variable_set(self):
@@ -64,31 +103,65 @@ class VariableSelectMixin:
         vset = self._vsel_variable_set()
         return list(getattr(vset, "variables", ()) or ())
 
+    def _vsel_value_names(self) -> dict:
+        """``{id(group): [value label, …]}`` for groups named by their values."""
+        names = getattr(self, "_vsel_named_groups", None)
+        if names is None:
+            names = self._vsel_named_groups = {}
+        return names
+
+    def _vsel_forget_name(self, grp) -> None:
+        """*grp* was renamed by hand: stop naming it after its values."""
+        self._vsel_value_names().pop(id(grp), None)
+
     # ── UI ───────────────────────────────────────────────────────────────
     def _build_variable_select_row(self, layout: QVBoxLayout) -> None:
-        row = QHBoxLayout()
+        # The controls sit in one container so the empty state can replace them
+        # with a sentence, rather than leaving dead combos that look live.
+        self._vsel_controls = QWidget()
+        row = QHBoxLayout(self._vsel_controls)
         row.setContentsMargins(8, 2, 8, 2)
-        row.addWidget(QLabel("By variable:"))
+        row.addWidget(QLabel("Select by variable:"))
         self._vsel_var_cb = QComboBox()
         self._vsel_var_cb.setMinimumWidth(_VSEL_COMBO_MIN_W)
-        self._vsel_var_cb.setToolTip("A sample variable from Home → Variables")
+        self._vsel_var_cb.setToolTip("A sample variable from Home → Sample Map → Variables")
         self._vsel_val_cb = QComboBox()
         self._vsel_val_cb.setMinimumWidth(_VSEL_COMBO_MIN_W)
         self._vsel_val_cb.setToolTip("Every loaded well holding this value")
         row.addWidget(self._vsel_var_cb, 1)
         row.addWidget(self._vsel_val_cb, 1)
-        self._vsel_add_btn = btn_secondary(None, "Add", self._vsel_add)
+        layout.addWidget(self._vsel_controls)
+
+        # "Add wells", not "Add": the header's "+ Add" a few centimetres away
+        # makes a group, and two buttons reading the same word must not do
+        # different things.
+        btns = QHBoxLayout()
+        btns.setContentsMargins(8, 0, 8, 2)
+        btns.addStretch(1)
+        self._vsel_add_btn = btn_secondary(None, "Add wells", self._vsel_add)
         self._vsel_add_btn.setToolTip(
-            "Add every well holding this value to the selected group")
-        self._vsel_remove_btn = btn_secondary(None, "Remove", self._vsel_remove)
+            "Add every well holding this value to the selected group "
+            "(or to a new group named after the value, if there is none)")
+        self._vsel_remove_btn = btn_secondary(None, "Remove wells", self._vsel_remove)
         self._vsel_remove_btn.setToolTip(
             "Take every well holding this value out of the selected group")
-        row.addWidget(self._vsel_add_btn)
-        row.addWidget(self._vsel_remove_btn)
-        layout.addLayout(row)
+        btns.addWidget(self._vsel_add_btn)
+        btns.addWidget(self._vsel_remove_btn)
+        self._vsel_buttons = QWidget()
+        self._vsel_buttons.setLayout(btns)
+        layout.addWidget(self._vsel_buttons)
+
+        self._vsel_empty = QLabel(NO_VARIABLES_TEXT)
+        self._vsel_empty.setWordWrap(True)
+        self._vsel_empty.setContentsMargins(8, 2, 8, 2)
+        self._vsel_empty.setStyleSheet(f"color: {theme.Colors.text_muted};")
+        layout.addWidget(self._vsel_empty)
+
         self._vsel_status = QLabel("")
         self._vsel_status.setWordWrap(True)
+        self._vsel_status.setTextFormat(Qt.RichText)
         self._vsel_status.setContentsMargins(8, 0, 8, 2)
+        self._vsel_status.hide()
         layout.addWidget(self._vsel_status)
         self._vsel_var_cb.currentIndexChanged.connect(
             lambda _i: self._vsel_refresh_values())
@@ -99,11 +172,17 @@ class VariableSelectMixin:
 
         A name is renamed and an index moves when another variable is defined;
         either would re-point the row at a different variable while the combo
-        went on reading the same word.
+        went on reading the same word. A status line describing the previous
+        variables is cleared when they change, since it would describe a plate
+        that is no longer on screen.
         """
         combo = getattr(self, "_vsel_var_cb", None)
         if combo is None:
             return
+        vset = self._vsel_variable_set()
+        if vset is not getattr(self, "_vsel_seen_vset", None):
+            self._vsel_seen_vset = vset
+            self._vsel_say("")
         previous = combo.currentData()
         blocked = combo.blockSignals(True)
         try:
@@ -115,9 +194,9 @@ class VariableSelectMixin:
         finally:
             combo.blockSignals(blocked)
         has_any = combo.count() > 0
-        combo.setEnabled(has_any)
-        if not has_any:
-            combo.setPlaceholderText("No sample variables")
+        self._vsel_controls.setVisible(has_any)
+        self._vsel_buttons.setVisible(has_any)
+        self._vsel_empty.setVisible(not has_any)
         self._vsel_refresh_values()
 
     def _vsel_refresh_values(self) -> None:
@@ -134,7 +213,7 @@ class VariableSelectMixin:
                 for value in variable.values:
                     combo.addItem(variable.display_label(value.id) or value.label,
                                   value.id)
-                combo.addItem("(no value)", _UNASSIGNED)
+                combo.addItem("(not set)", _UNASSIGNED)
             idx = combo.findData(previous) if previous is not None else -1
             combo.setCurrentIndex(idx if idx >= 0 else (0 if combo.count() else -1))
         finally:
@@ -143,21 +222,41 @@ class VariableSelectMixin:
         for w in (combo, self._vsel_add_btn, self._vsel_remove_btn):
             w.setEnabled(on)
 
-    def _vsel_say(self, text: str) -> None:
+    def _vsel_say(self, text: str, warnings=()) -> None:
+        """Show *text*, then each warning on its own warn-coloured line."""
         label = getattr(self, "_vsel_status", None)
-        if label is not None:
-            label.setText(text)
+        if label is None:
+            return
+        lines = [escape(text)] if text else []
+        lines += [f'<span style="color:{theme.Colors.warn};">⚠ {escape(w)}</span>'
+                  for w in warnings]
+        label.setText("<br>".join(lines))
+        label.setVisible(bool(lines))
+
+    def _vsel_status_text(self) -> str:
+        """The status line as plain text — what a test or a screen reader gets."""
+        from PySide6.QtGui import QTextDocument
+
+        label = getattr(self, "_vsel_status", None)
+        if label is None or not label.text():
+            return ""
+        doc = QTextDocument()
+        doc.setHtml(label.text())
+        return doc.toPlainText()
 
     # ── actions ──────────────────────────────────────────────────────────
     def _vsel_current(self) -> tuple | None:
-        """``(variable, value_id or None, label)`` for the row, or ``None``."""
+        """``(variable, value_id or None, value label)`` for the row, or ``None``."""
         vset = self._vsel_variable_set()
         variable = vset.by_id(self._vsel_var_cb.currentData()) if vset else None
         data = self._vsel_val_cb.currentData()
         if variable is None or data is None:
             return None
         value_id = None if data == _UNASSIGNED else data
-        return variable, value_id, f"{variable.name} = {self._vsel_val_cb.currentText()}"
+        label = self._vsel_val_cb.currentText()
+        if value_id is None:
+            label = f"{variable.name} not set"
+        return variable, value_id, label
 
     def _vsel_membership(self):
         picked = self._vsel_current()
@@ -169,30 +268,62 @@ class VariableSelectMixin:
             self._vsel_loaded_wells(), self._vsel_rep_sets())
         return membership, label
 
-    def _vsel_add(self) -> None:
-        grp = self._active_group()
-        if grp is None:
-            self._vsel_say("Select or add a group first.")
+    def _vsel_name_after_add(self, grp, label: str) -> None:
+        names = self._vsel_value_names()
+        if id(grp) in self._auto_named_group_ids:
+            # Leaving the auto-name set is what keeps a later drag from
+            # replacing the value name with a list of wells.
+            self._auto_named_group_ids.discard(id(grp))
+            names[id(grp)] = []
+        if id(grp) in names:
+            if label not in names[id(grp)]:
+                names[id(grp)].append(label)
+            grp.name = " + ".join(names[id(grp)])
+
+    def _vsel_name_after_remove(self, grp, label: str) -> None:
+        names = self._vsel_value_names()
+        held = names.get(id(grp))
+        if held is None or label not in held:
             return
+        held.remove(label)
+        if held:
+            grp.name = " + ".join(held)
+        else:
+            # Nothing left that the name stood for: back to a member name.
+            names.pop(id(grp), None)
+            self._auto_named_group_ids.add(id(grp))
+            self._refresh_auto_group_name(grp)
+
+    def _vsel_add(self) -> None:
         membership, label = self._vsel_membership()
         if membership is None:
             return
         if not membership.wells:
             self._vsel_say(f"No loaded well holds {label}.")
             return
+        grp = self._active_group()
+        if grp is None:
+            # The obvious intent of "add these wells" with no group: a group of
+            # them. Refusing would make the user find "+ Add" and come back.
+            grp = BarGroup("New Group")
+            self._groups.append(grp)
+            self._auto_named_group_ids.add(id(grp))
+            self._active_grp = len(self._groups) - 1
         gained = add_membership(grp, membership)
-        self._refresh_auto_group_name(grp)
+        self._vsel_name_after_add(grp, label)
         self._refresh_group_list()
-        msg = (f"{label}: added {gained} well{'s' if gained != 1 else ''} "
-               f"to “{grp.name}”")
+        text = f"Added {_plural(gained, 'well')} to “{grp.name}”."
         if gained < len(membership.wells):
-            msg += f" ({len(membership.wells) - gained} already in it)"
-        msg += "."
+            text += f" {len(membership.wells) - gained} were already in it."
+        warnings = []
         if membership.split_sets:
-            msg += (" Split, because their wells hold different values: "
-                    + ", ".join(membership.split_sets)
-                    + " — only the matching wells were added, as solo wells.")
-        self._vsel_say(msg)
+            in_sets = {w for r in self._vsel_rep_sets() for w in r.wells}
+            split_wells = [w for w in membership.solo_wells if w in in_sets]
+            warnings.append(
+                f"{_plural(len(membership.split_sets), 'replicate set')} split "
+                f"({', '.join(membership.split_sets)}): its other wells are not "
+                f"{label}, so {_wells_list(split_wells)} joined as solo wells.")
+        self._vsel_say(text, warnings)
 
     def _vsel_remove(self) -> None:
         grp = self._active_group()
@@ -203,14 +334,15 @@ class VariableSelectMixin:
         if membership is None:
             return
         removed, kept = remove_membership(grp, membership)
-        self._refresh_auto_group_name(grp)
+        self._vsel_name_after_remove(grp, label)
         self._refresh_group_list()
-        msg = (f"{label}: removed {removed} well{'s' if removed != 1 else ''} "
-               f"from “{grp.name}”.")
+        text = f"Removed {_plural(removed, 'well')} from “{grp.name}”."
+        warnings = []
         if kept:
-            msg += (" Kept, because they also hold other values: "
-                    + ", ".join(kept) + " — drag them off the plate to remove them.")
-        self._vsel_say(msg)
+            warnings.append(
+                f"Kept {', '.join(kept)}: it also holds wells that are not "
+                f"{label}. Use its − button on the group card to remove it.")
+        self._vsel_say(text, warnings)
 
     # ── Quick Setup ──────────────────────────────────────────────────────
     def _vsel_add_quick_setup_menu(self, menu: QMenu) -> None:
@@ -231,7 +363,7 @@ class VariableSelectMixin:
             sub.clear()
             variables = self._vsel_variables()
             if not variables:
-                act = sub.addAction("No sample variables (Home → Variables)")
+                act = sub.addAction(NO_VARIABLES_TEXT)
                 act.setEnabled(False)
                 return
             for variable in variables:
@@ -241,30 +373,51 @@ class VariableSelectMixin:
         sub.aboutToShow.connect(_fill)
         _fill()
 
+    def _vsel_confirm_replace(self) -> bool:
+        """Ask before a Quick Setup replaces groups the user built.
+
+        A user may expect "one group per value" to *add* groups; Clear All
+        asks first for the same loss, so this does too.
+        """
+        if not self._groups:
+            return True
+        ret = QMessageBox.question(
+            self, "Replace export groups?",
+            f"Replace the {_plural(len(self._groups), 'existing group')} "
+            "with one group per value?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        return ret == QMessageBox.Yes
+
     def _quick_by_variable(self, variable_id: str) -> None:
         """Replace every group with one per value of *variable_id*."""
         vset = self._vsel_variable_set()
         variable = vset.by_id(variable_id) if vset else None
-        if variable is None:
+        if variable is None or not self._vsel_confirm_replace():
             return
         groups, unassigned = groups_per_value(
             vset, variable_id, self._vsel_loaded_wells(), self._vsel_rep_sets())
         self._groups.clear()
         self._auto_named_group_ids.clear()
+        self._vsel_value_names().clear()
         split: list[str] = []
         for vg in groups:
             m = vg.membership
-            self._groups.append(BarGroup(vg.name, members=list(m.members),
-                                         solo_wells=list(m.solo_wells)))
+            grp = BarGroup(vg.name, members=list(m.members),
+                           solo_wells=list(m.solo_wells))
+            self._groups.append(grp)
+            self._vsel_value_names()[id(grp)] = [vg.name]
             split.extend(s for s in m.split_sets if s not in split)
         self._active_grp = 0 if self._groups else -1
         self._refresh_group_list()
-        msg = f"{len(groups)} group{'s' if len(groups) != 1 else ''} from {variable.name}."
+        warnings = []
         if unassigned:
-            n = len(unassigned)
-            msg += (f" {n} well{'s' if n != 1 else ''} with no {variable.name} "
-                    f"left out: {', '.join(unassigned)}.")
+            warnings.append(
+                f"{_plural(len(unassigned), 'well')} with no {variable.name} "
+                f"left out: {_wells_list(unassigned)}.")
         if split:
-            msg += (" Split, because their wells hold different values: "
-                    + ", ".join(split) + ".")
-        self._vsel_say(msg)
+            warnings.append(
+                f"{_plural(len(split), 'replicate set')} split across groups "
+                f"({', '.join(split)}): their wells hold different values.")
+        self._vsel_say(
+            f"{_plural(len(groups), 'group')}, one per {variable.name}.", warnings)

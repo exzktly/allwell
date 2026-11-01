@@ -102,7 +102,7 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     # saved group to drive the Image Table grid, without leaving the tab. The
     # drawer's Add uses its own name field (see build_plot_groups_drawer), so it
     # doesn't collide with the main sidebar's Add.
-    from review.core.sidebar_view import build_plot_groups_drawer
+    from review.core.saved_selections import build_plot_groups_drawer
     # build_plot_groups_drawer is a shared core sidebar builder; it takes ctx
     # (drawer registry on ctx.runtime.plot_groups, widgets via ctx.widgets).
     #
@@ -123,7 +123,7 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     # has registered itself — otherwise the first paint of the sidebar
     # shows an empty group list even when groups exist in ctx state.
     try:
-        from review.core.sidebar_view import refresh_plot_groups_sidebar
+        from review.core.saved_selections import refresh_plot_groups_sidebar
         refresh_plot_groups_sidebar(ctx)
     except Exception:
         swallowed("image table picker: saved selections refresh on build")

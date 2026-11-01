@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from review.core import sidebar_view as SV
+from review.core import saved_selections as SV
 from review.features.image_browser.image_table.controller import (
     image_table_active_wells,
 )

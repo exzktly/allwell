@@ -194,6 +194,10 @@ class DistributionModel:
     identity_marks: dict = field(default_factory=dict)
     #: *Colour by* / *Split by* / *Then by* (``decorate_compute``): the dots' inks and the bands. Undecorated by default.
     decoration: Decoration = field(default_factory=Decoration)
+    #: ``well -> what the figure calls it`` (``controller.well_names``), for the Statistics samples of the
+    #: ``nanowells`` unit; a well missing from it prints itself. (A sub-swarm under a group prints the bare well:
+    #: the group's name is on the tick above it.)
+    well_names: dict = field(default_factory=dict)
 
     def swarms(self):
         return [s for p in self.panels for s in p.swarms]

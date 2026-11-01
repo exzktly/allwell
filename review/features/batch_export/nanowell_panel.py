@@ -57,6 +57,8 @@ from widgets.spin_box import SpinBox
 _draw_view = _lazy("review.features.nanowell.controller", "draw_view")
 _resolve_metric = _lazy("review.features.nanowell.controller", "resolve_metric")
 _batch_array_layers = _lazy("review.features.nanowell.controller", "batch_array_layers")
+_named_groups = _lazy("review.features.nanowell.controller", "named_groups")
+_well_names = _lazy("review.features.nanowell.controller", "well_names")
 _wells_summary = _lazy("review.features.nanowell.distribution_compute", "wells_summary")
 _metric_labels = _lazy("review.features.nanowell.distribution_compute", "metric_labels")
 _metric_column = _lazy("review.features.nanowell.distribution_compute", "metric_column")
@@ -439,16 +441,15 @@ class NanowellBatchExportPanel(BatchExportPanel):
         """``group -> wells`` for the figure: the export group's replicate sets and solo wells, as the page draws
         a selection, kept to the wells with a nanowell table. The page's *Exclude* list is not applied: it is the
         page's own choice of wells and leaves the well in the rest of Review (the manual says so), and a batch group
-        is the wells the user put in it (tracker L16, declined)."""
-        out = {}
-        for rset in grp.members:
-            members = [w for w in rset.wells if w in have]
-            if members:
-                out[rset.name] = members
-        for well in grp.solo_wells:
-            if well in have and not any(well in m for m in out.values()):
-                out[well] = [well]
-        return out
+        is the wells the user put in it (tracker L16, declined).
+
+        Named as the page names its groups (``controller.named_groups``): a set by its display label, a well by its
+        label beside the well, so a batch figure's ticks read as the page's do."""
+        sets = [(rset, [w for w in rset.wells if w in have]) for rset in grp.members]
+        sets = [(rset, members) for rset, members in sets if members]
+        placed = {w for _rset, members in sets for w in members}
+        solo = [w for w in grp.solo_wells if w in have and w not in placed]
+        return _named_groups(self._ctx, sets, solo)
 
     def _export_group(self, grp: BarGroup, write_dir: Path, data, metrics, settings: dict,
                       used_stems: set) -> str | None:
@@ -486,7 +487,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                    moving=settings["moving"], baseline_moving=settings["baseline_moving"],
                                    well=well or "", well_timepoint=shown if well else "",
                                    note=note, tableless=tableless, responding_above=cut,
-                                   subset=settings["subset"])
+                                   subset=settings["subset"], names=_well_names(self._ctx, wells))
                     self._figure_view = {"view": view, "metric": drawn, "axis": settings["axis"],
                                          "baseline": settings["baseline"], "cohort": settings["cohort"],
                                          "moving": settings["moving"],

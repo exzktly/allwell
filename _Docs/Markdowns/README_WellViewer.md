@@ -5956,6 +5956,10 @@ the sentence names it.
   *Earliest* baseline: a count taken later — at a first measurable or a named timepoint — may follow a division,
   and the figure counts those nanowells.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
+- **Names.** Wells and groups are called what every other tab calls them: a replicate group by its name, a well by
+  the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two
+  wells drawn side by side share a name, each gets its well added (`HeLa · 1 µM (A01)`); the views of one well and
+  the **Well** list always show both. Under a group of several wells, each well's own swarm is marked with its well.
 - **Group by** and **Decorate** (once the plate has a variable, Home → Sample Map → Variables) — the same
   controls as on the Plotting row, and the same settings: choosing one here changes it on every plot, and one chosen
   on a Plotting tab shows here. **Group by** pools the page's wells by a variable's values instead of by your

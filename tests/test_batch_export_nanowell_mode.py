@@ -141,9 +141,17 @@ def test_a_group_s_replicate_sets_stay_sets_and_its_solo_wells_stand_alone():
     from review.domain.batch_models import ReplicateSet
     from review.features.batch_export.nanowell_panel import NanowellBatchExportPanel
 
+    from types import SimpleNamespace
+
     grp = BarGroup("G", members=[ReplicateSet("Drug", ["A01", "A02", "H12"])], solo_wells=["B03", "A02", "C09"])
-    groups = NanowellBatchExportPanel._figure_groups(None, grp, {"A01", "A02", "B03"})
+    ctx = SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(well_labels={}, well_paths={}),
+                                                selection=SimpleNamespace(variables=None)))
+    groups = NanowellBatchExportPanel._figure_groups(SimpleNamespace(_ctx=ctx), grp, {"A01", "A02", "B03"})
     assert groups == {"Drug": ["A01", "A02"], "B03": ["B03"]}
+    # A labelled well is named as the page names it, by its label.
+    ctx.state.dataset.well_labels = {"B03": "Vehicle"}
+    groups = NanowellBatchExportPanel._figure_groups(SimpleNamespace(_ctx=ctx), grp, {"A01", "A02", "B03"})
+    assert groups == {"Drug": ["A01", "A02"], "Vehicle": ["B03"]}
 
 
 def test_an_array_map_at_a_timepoint_the_well_lacks_says_so(panel, tmp_path, monkeypatch):

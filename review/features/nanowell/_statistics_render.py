@@ -102,7 +102,7 @@ def _ecdfs(ax, result, ink) -> None:
         x = np.sort(s.values)
         y = np.arange(1, x.size + 1) / x.size
         ax.step(x, y, where="post", color=_colour(i, s, result.unit), linewidth=1.4,
-                label=f"{s.name} (n = {s.n:,})")
+                label=f"{s.label or s.name} (n = {s.n:,})")
     ax.set_ylim(0, 1.02)
     ax.set_xlabel(result.label, color=ink)
     ax.set_ylabel("Cumulative fraction", color=ink)
@@ -140,7 +140,7 @@ def _boxes(ax, result, ink, muted) -> None:
         else:
             _ink(ax.plot([i], [mean], marker="D", color=ink, markersize=4, linestyle="none", zorder=4)[0])
     ax.set_xticks(range(len(result.samples)))
-    ax.set_xticklabels([f"{s.name}\nn = {s.n:,}" for s in result.samples])
+    ax.set_xticklabels([f"{s.label or s.name}\nn = {s.n:,}" for s in result.samples])
     ax.set_xlim(-0.6, len(result.samples) - 0.4)
     ax.set_ylabel(result.label, color=ink)
     ax.grid(axis="y", alpha=0.3)

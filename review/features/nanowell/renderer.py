@@ -345,6 +345,7 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
             rows_here += 1
         lines_used = max(lines_used, rows_here)
         if subwells and sum(1 for s in panel.swarms if round(s.x) == round(swarm.x)) > 1:
+            # The bare well: the group's own name is on the tick above, and the slot is one well wide.
             _ink(ax.text(swarm.x, 0, swarm.well, transform=_below(ax, 4), ha="center", va="top",
                          fontsize=ANNOTATION_PT, color=muted, gid="nw-subwell"), muted=True)
     # The axis label goes under whatever the swarms wrote below the ticks, and under the bands' headers.
@@ -964,7 +965,7 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
                 if numbers:
                     draw.crop_text(ax, row, tp)
     _ink(fig.text(0.02, 1 - 0.2 / draw.h_in,
-                  f"{model.well} · the nanowells with the largest and smallest {label.lower()}",
+                  f"{model.name or model.well} · the nanowells with the largest and smallest {label.lower()}",
                   fontsize=10, color=ink, va="top", gid="nw-extremes-title"))
     _ink(fig.text(0.02, 0.012, draw.caption(label, columns, note, image_channel), fontsize=7, color=faint,
                   gid="nw-extremes-caption", wrap=True), muted=True)
@@ -1240,7 +1241,7 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
         lines += _draw_labels(fig, ax, drawn, scene.sites, addresses=layers.addresses, values=layers.values)
     if in_well and layers.anchor and scene.anchor is not None:
         _draw_anchor(ax, drawn, scene.anchor)
-    _ink(ax.set_title(f"{scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
+    _ink(ax.set_title(f"{scene.name or scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
     for i, text in enumerate(lines):
         y = _FOOTER_BASE + (len(lines) - 1 - i) * _LINE
         _ink(fig.text(0.03, y, text, fontsize=7.5, color=ink if i == 0 else muted, gid="nw-array-footer"),
@@ -1519,6 +1520,11 @@ def _ring(x, y, radius, colour):
 
 
 # ── trajectories (V4) ────────────────────────────────────────────────────────
+def _named(item) -> str:
+    """What a figure calls a panel's or a line's well: the name the page gave it, else the well itself."""
+    return item.name or item.well
+
+
 def render_trajectories(fig, panels, *, label: str, time_source: str | None = None, note: str = "",
                         cohort: bool = False) -> None:
     """One panel per well: a thin line per nanowell, a thick median per occupancy class at baseline.
@@ -1586,7 +1592,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
                         fontsize=ANNOTATION_PT, ground=inks[0])
         _trajectory_ticks(ax, panel)
         _no_offset(ax)
-        _ink(ax.set_title(panel.well, fontsize=10, fontweight="bold", loc="left", color=ink))
+        _ink(ax.set_title(_named(panel), fontsize=10, fontweight="bold", loc="left", color=ink))
         ax.grid(alpha=0.3)
         drawn += len(panel.lines)
         without += panel.n_without_value
@@ -1690,7 +1696,7 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
         # well's place in this list, A03 drawn alone took A01's colour and no well matched its swatch on the plate.
         colour = color_for_well(s.well)
         ax.fill_between(s.rings, s.q1, s.q3, color=colour, alpha=0.18, linewidth=0)
-        ax.plot(s.rings, s.median, color=colour, marker="o", markersize=3, linewidth=1.4, label=s.well)
+        ax.plot(s.rings, s.median, color=colour, marker="o", markersize=3, linewidth=1.4, label=_named(s))
         share.bar(s.rings + (k - (len(series) - 1) / 2) * width, s.excluded_share, width=width, color=colour)
     ax.set_ylabel(label, color=ink)
     _no_offset(ax)

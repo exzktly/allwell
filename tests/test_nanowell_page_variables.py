@@ -287,7 +287,9 @@ def test_colour_by_on_the_page_recolours_the_dots_on_the_canvas(page):
     drawn = {ticks[int(round(c.get_offsets()[:, 0].mean()))]: {to_hex(f) for f in c.get_facecolors()}
              for c in ax.collections if c.get_gid() == "nw-dots"}
     palette = vs.colors_for(page.state.selection.variables, "line")
-    assert drawn["A01"] == {to_hex(palette["u"])} and drawn["A02"] == {to_hex(palette["h"])}
+    # Ticks name each well by its variables, as the plot tabs do, with the well beside it.
+    assert drawn["U2OS · 1 µM (A01)"] == {to_hex(palette["u"])}
+    assert drawn["HeLa · 0 µM (A02)"] == {to_hex(palette["h"])}
 
 
 def test_split_by_on_the_page_bands_the_groups_and_enables_then_by(page):
@@ -303,3 +305,65 @@ def test_split_by_on_the_page_bands_the_groups_and_enables_then_by(page):
     fig = page.widgets.get("_nw_fig")
     assert _texts(fig, "nw-band") == ["0 µM", "1 µM", vs.UNASSIGNED_LABEL]
     assert np.isfinite([t.get_position()[0] for t in fig.axes[0].texts if t.get_gid() == "nw-band"]).all()
+
+
+# ── names: the page calls wells and groups what every plot tab calls them ──────
+def test_each_view_names_a_well_by_its_label_as_the_plot_tabs_do(page):
+    from review.features.nanowell import controller as nwc
+
+    page.state.dataset.well_labels = {"B02": "Vehicle"}
+    # The Well Labels name wins, else the variables the well holds; two wells drawn under one label are told
+    # apart by their wells, and a partial description already carries its well (``label_for_well``).
+    assert nwc.well_names(page, WELLS) == {
+        "A01": "U2OS · 1 µM (A01)", "A02": "HeLa · 0 µM", "B01": "U2OS · 1 µM (B01)", "B02": "Vehicle",
+        "C01": "HeLa (C01)"}
+    # A one-well view and the Well combo always carry the well.
+    assert nwc.well_caption(page, "B02") == "Vehicle (B02)" and nwc.well_caption(page, "C01") == "HeLa (C01)"
+    page.state.selection.variables = sv.VariableSet(variables=(), assignments={})
+    assert nwc.well_names(page, ["A01"]) == {"A01": "A01"} and nwc.well_caption(page, "A01") == "A01"
+    page.state.selection.variables = _vset()
+
+    nwc.set_view(page, "distribution")
+    nwc.set_axis(page, dc.WELLS)
+    ticks = [t.get_text() for t in page.widgets.get("_nw_fig").axes[0].get_xticklabels()]
+    assert ticks == ["U2OS · 1 µM (A01)", "HeLa · 0 µM", "U2OS · 1 µM (B01)", "Vehicle", "HeLa (C01)"]
+
+    nwc.set_view(page, "trajectories")
+    titles = [ax.get_title(loc="left") for ax in page.widgets.get("_nw_fig").axes if ax.get_title(loc="left")]
+    assert titles[:2] == ["U2OS · 1 µM (A01)", "HeLa · 0 µM"]
+
+    nwc.set_view(page, "array")
+    well_cb = page.widgets.get("_nw_well_cb")
+    assert well_cb.itemText(0) == "U2OS · 1 µM (A01)" and well_cb.itemData(0) == "A01"
+    assert any(ax.get_title(loc="left").startswith("U2OS · 1 µM (A01) · ") for ax in page.widgets.get("_nw_fig").axes)
+
+
+def test_a_named_replicate_set_keeps_its_name_and_two_groups_never_share_one(page):
+    from review.domain.batch_models import ReplicateSet
+    from review.features.nanowell import controller as nwc
+
+    page.state.selection.selections = [{"name": "Treated", "wells": ["A01", "B01"], "hidden": False}]
+    assert list(nwc.page_groups(page))[0] == "Treated"
+    page.state.selection.selections = []
+    page.state.dataset.well_labels = {"A01": "Same", "A02": "Same"}
+    groups = nwc.page_groups(page)
+    assert groups["Same (A01)"] == ["A01"] and groups["Same (A02)"] == ["A02"]
+    # A set and a lone well under one name would be one key, and pooled: the later one is told apart.
+    page.state.dataset.well_labels = {"A01": "Same"}
+    assert nwc.named_groups(page, [(ReplicateSet("Same", ["B01"]), ["B01"])], ["A01"]) == {
+        "Same": ["B01"], "Same [A01]": ["A01"]}
+
+
+def test_statistics_over_nanowells_labels_each_well_but_matches_vs_by_the_well(page):
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell import statistics_compute as sc
+
+    nwc.set_view(page, "statistics")
+    st = page.state.feature_slice("nanowell")
+    st.stats_unit = sc.NANOWELLS
+    st.control = "A02"
+    nwc.redraw(page)
+    result = st.stats_cache["result"]
+    assert {s.name: s.label for s in result.samples}["A02"] == "HeLa · 0 µM (A02)"
+    ticks = [t.get_text() for ax in page.widgets.get("_nw_fig").axes for t in ax.get_xticklabels()]
+    assert any(t.startswith("HeLa · 0 µM (A02)") for t in ticks)

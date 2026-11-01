@@ -21,6 +21,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from core.safe import swallow
+from review.features.nanowell import controller as nwc
 from widgets.labeled_combo import LabeledComboBox
 
 #: The page's widget names for the three decoration combos, keyed by the ``PlotState`` field each writes.
@@ -72,12 +73,11 @@ def build_variable_controls(ctx, band) -> SimpleNamespace:
 
     def refresh(view: str) -> None:
         from review.core.group_by_controller import fill_decoration_combos, fill_group_by_combo
-        from review.features.nanowell.controller import DECORATED_VIEWS
 
         has_variables = fill_group_by_combo(ctx, group_cb)
         fill_decoration_combos(ctx, combos, {"colour_by_variable": NO_COLOUR_LABEL})
         group_grp.setVisible(has_variables)
-        button.setVisible(has_variables and view in DECORATED_VIEWS)
+        button.setVisible(has_variables and view in nwc.DECORATED_VIEWS)
 
     return SimpleNamespace(group_by=group_cb, group=group_grp, decorate=button, combos=combos, refresh=refresh,
                            signalling=(group_cb, *combos.values()))
@@ -91,20 +91,18 @@ def on_group_by(ctx, variable_id: str) -> None:
     whose tables have not been read, and that handler reads them.
     """
     from review.core.group_by_controller import refresh_group_by_combo, set_group_by_variable
-    from review.features.nanowell.controller import nw_on_selection_changed
 
     with swallow("apply Group by from the Nanowells page"):
         set_group_by_variable(ctx, variable_id)
         refresh_group_by_combo(ctx)
-        nw_on_selection_changed(ctx)
+        nwc.nw_on_selection_changed(ctx)
 
 
 def on_decoration(ctx, field: str, variable_id: str) -> None:
     """Apply *Colour by*, *Split by* or *Then by* from the page: the shared setting, the band's combos, the page."""
     from review.core.group_by_controller import refresh_decoration_combos, set_decoration_variable
-    from review.features.nanowell.controller import redraw
 
     with swallow("apply a decoration from the Nanowells page"):
         set_decoration_variable(ctx, field, variable_id)
         refresh_decoration_combos(ctx)
-        redraw(ctx)                      # refreshes the page's controls first: *Then by* follows *Split by*
+        nwc.redraw(ctx)                  # refreshes the page's controls first: *Then by* follows *Split by*

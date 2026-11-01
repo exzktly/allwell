@@ -12440,7 +12440,20 @@ the first, Position and *Along x: Wells* offer every timepoint and start at the 
 the slider and the figure always agree. `page_well` is the chosen well when it is drawn, else the first drawn
 well. Wells are what `data_loading.plot_group_well_lists(ctx, fallback_to_all=False)` says every plotting tab
 draws — so a group-by variable, hidden sets and the solo-well toggles mean the same here as elsewhere — never
-every loaded well as a fallback, grouped by `replicate_groups` over those wells only. Brightness and nanowell fluorescence, and
+every loaded well as a fallback, grouped by `replicate_groups` over those wells only. **Groups and wells are named as
+every plot tab names them.** `replicate_groups` keys each group by its display name through `named_groups` — a set by
+`selections_model.replicate_display_label`, a solo set or lone well by its label — because the key is what the ticks,
+the time panels' titles, the *vs* combo and the Statistics samples print. A well's label is `well_display_label`'s
+(the Well Labels name, else its sample variables, else the well), through `well_names`, which adds the well only when
+two wells drawn together share a label (`HeLa · 1 µM (A01)` beside `HeLa · 1 µM (B01)`), the same restraint
+`sample_variables.label_for_well` shows on ticks; `well_caption` always adds it, for the one-well views and the *Well*
+combo, where the physical well is the point. `named_groups` tells apart any two groups still sharing a name with
+their wells, since one key would pool them. `draw_view`'s *names* (`well -> name`) carries the labels to the views
+that name a well standing alone: a Trajectories panel (`TrajectoryPanel.name`), a Position line
+(`PositionSeries.name`), the Array title (`ArrayScene.name`) and a Statistics sample of the nanowells unit
+(`Sample.label`, while `Sample.name` stays the well that *vs* matches); Extremes' title is `well_caption`'s. A
+sub-swarm under a group prints its bare well, the group's name being on the tick above it. Batch Export's Nanowells
+mode names its groups and wells through the same two functions. Brightness and nanowell fluorescence, and
 their fold changes, are drawn for the page's own **Channel** (`_nw_channel_cb`, `NanowellState.channel`, persisted),
 beside Metric on every view: the app's shared channel selector sits on the Plotting band, which this page does not show,
 so the page cannot depend on it alone. `controller.page_channel_name` resolves it — the page's choice when set; else

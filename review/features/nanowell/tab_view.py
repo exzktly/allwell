@@ -510,7 +510,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             for well in nwc.page_wells(ctx) if st.data else []:
                 # On the Identity view each well says its worst verdict, so a contradicted one is found at a glance.
                 worst = worst_verdict(st.data, well) if view == "identity" else None
-                well_cb.addItem(f"{well} · {worst.replace('_', ' ')}" if worst else well, well)
+                name = nwc.well_caption(ctx, well)        # its label as the plot tabs name it, and the well
+                well_cb.addItem(f"{name} · {worst.replace('_', ' ')}" if worst else name, well)
             _select(well_cb, nwc.page_well(ctx))
             stats_view = view == "statistics"
             fill_control_combo(ctx, st, control_cb, on_statistics=stats_view, tip=_CONTROL_TIP)

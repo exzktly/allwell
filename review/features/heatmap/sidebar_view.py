@@ -50,6 +50,7 @@ SIDEBAR_LAYOUT_NAME = "Sidebar"
 from review.core.dnd import WELL_MIME  # shared drag/drop token
 from ui import theme
 from widgets.separator import build_hline_separator
+from widgets.spin_box import SpinBox
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -232,12 +233,12 @@ def build_heatmap_layout_sidebar(ctx, parent: QWidget) -> QWidget:
     size_layout.setContentsMargins(6, 0, 6, 0)
     size_layout.setSpacing(4)
     size_layout.addWidget(QLabel("Rows:", size_row))
-    rows_spin = QSpinBox(size_row)
+    rows_spin = SpinBox(size_row)
     rows_spin.setRange(1, 32)
     rows_spin.setValue(8)
     size_layout.addWidget(rows_spin)
     size_layout.addWidget(QLabel("Cols:", size_row))
-    cols_spin = QSpinBox(size_row)
+    cols_spin = SpinBox(size_row)
     cols_spin.setRange(1, 32)
     cols_spin.setValue(12)
     size_layout.addWidget(cols_spin)

@@ -51,6 +51,7 @@ from review.features.image_browser.image_table.grid_layout import (
     _axis_dim_values,
     _find_ratio_for_channel,
 )
+from widgets.spin_box import SpinBox, DoubleSpinBox
 
 
 # The PowerPoint writer, bound the way every other cross-feature call here is:
@@ -137,8 +138,7 @@ def set_gallery_quality(ctx, key: str) -> None:
 def image_table_open_export_settings(ctx) -> None:
     """Pop a small modal dialog to edit the image-table export options."""
     from PySide6.QtWidgets import (
-        QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-        QFormLayout, QSpinBox,
+        QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
     )
 
     opts = _export_opts(ctx)
@@ -159,7 +159,7 @@ def image_table_open_export_settings(ctx) -> None:
     )
     form.addRow("Save to Saved Plots quality:", quality_cb)
 
-    pad_spin = QDoubleSpinBox(dlg)
+    pad_spin = DoubleSpinBox(dlg)
     pad_spin.setRange(0.0, 4.0)
     pad_spin.setSingleStep(0.05)
     pad_spin.setDecimals(2)
@@ -167,7 +167,7 @@ def image_table_open_export_settings(ctx) -> None:
     pad_spin.setToolTip("Outer margin around the saved figure (pad_inches).")
     form.addRow("Outer margin (in):", pad_spin)
 
-    cell_spin = QDoubleSpinBox(dlg)
+    cell_spin = DoubleSpinBox(dlg)
     cell_spin.setRange(0.0, 4.0)
     cell_spin.setSingleStep(0.05)
     cell_spin.setDecimals(2)
@@ -186,12 +186,12 @@ def image_table_open_export_settings(ctx) -> None:
     )
     form.addRow("Show titles:", titles_cb)
 
-    title_size_spin = QSpinBox(dlg)
+    title_size_spin = SpinBox(dlg)
     title_size_spin.setRange(4, 24)
     title_size_spin.setValue(int(opts.get("title_fontsize", 7)))
     form.addRow("Title font size:", title_size_spin)
 
-    dpi_spin = QSpinBox(dlg)
+    dpi_spin = SpinBox(dlg)
     dpi_spin.setRange(72, 1200)
     dpi_spin.setSingleStep(25)
     dpi_spin.setValue(int(opts.get("dpi", 300)))

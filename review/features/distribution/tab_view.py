@@ -10,8 +10,7 @@ from review.core.channel_state_controller import on_plot_channel_selected
 
 
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QSpinBox,
-    QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QVBoxLayout, QWidget,
 )
 
 from review.core.ui_helpers import (
@@ -21,6 +20,7 @@ from review.features.export.service import (
 from review.features.distribution.cell_scope_compute import cell_scope
 from review.data.data_loading import get_all_timepoints
 from widgets.labeled_combo import LabeledComboBox
+from widgets.spin_box import SpinBox
 
 
 _MODE_OPTIONS = ["Histogram", "Histogram + KDE", "KDE only", "CDF", "Violin (per group)"]
@@ -70,7 +70,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     ctrl.add_scope("Mode", mode_cb)
     reg.register("_distribution_mode_var", mode_cb)   # legacy alias → same widget
 
-    bins_spin = reg.register("_distribution_bins_spin", QSpinBox(ctrl))
+    bins_spin = reg.register("_distribution_bins_spin", SpinBox(ctrl))
     # No practical upper bound — fine-grained / over-sampled histograms are
     # a legitimate request when distributions are concentrated in a narrow
     # window of the channel's dynamic range. Qt's QSpinBox tops out at

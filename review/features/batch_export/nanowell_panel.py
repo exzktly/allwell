@@ -35,7 +35,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -51,6 +50,7 @@ from review.features.batch_export._panels import Panel
 from review.features.batch_export.base_panel import BatchExportPanel, SkippedJob
 from ui import theme
 from widgets.separator import build_hline_separator
+from widgets.spin_box import SpinBox
 
 # Nanowells is a removable feature: every symbol comes through a lazy proxy, so a build without it still imports
 # this module (the tab does not offer the mode there — ``tab_view._offered_modes``).
@@ -151,14 +151,14 @@ class NanowellBatchExportPanel(BatchExportPanel):
         # The fields hold the bare number; the label beside each says what it counts (no text inside the box,
         # which Qt's spin box refuses to type over).
         row.addWidget(QLabel("Moving average (timepoints, 1 = off)"))
-        self._moving_spin = QSpinBox()
+        self._moving_spin = SpinBox()
         self._moving_spin.setRange(1, _moving_max())       # 1 is off, as on the page
         self._moving_spin.setToolTip("Distribution and Trajectories: each nanowell's value as the mean over this "
                                      "many timepoints ending at it, as the page's Moving average control. The "
                                      "summary CSV's moving_average column says the window each row used.")
         row.addWidget(self._moving_spin)
         row.addWidget(QLabel("Baseline average (timepoints, 1 = off)"))
-        self._baseline_moving_spin = QSpinBox()
+        self._baseline_moving_spin = SpinBox()
         self._baseline_moving_spin.setRange(1, _moving_max())
         self._baseline_moving_spin.setToolTip(
             "With the moving average on, a fold change's baseline as the mean over this many timepoints ending at "

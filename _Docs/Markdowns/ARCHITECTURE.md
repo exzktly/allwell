@@ -15205,7 +15205,13 @@ a copy of this one. It is locked (`setEnabled(False)`) for the run's duration �
 a click would edit the very order being converted — and each well fills as a
 dial. `explode_ome_tiff` takes a `well_progress_fn(well, done, total)` beside
 its run-wide `progress_fn`, ticking once per plane written with that well's own
-share. The denominator is `explode_common.publishing_total` — the well's FOVs ×
+share. The run-wide count is reported while the converter still holds the lock it
+counts planes under, in all three converters, so the counts arrive in order and the
+last is the total: reported after the lock, two wells' threads could deliver 3 and
+4 before 2, and the page — which keeps the last count and re-shows it when the run
+ends — read `2 of 4 image(s)` at the end of a run that wrote four
+(`tests/test_converter_progress_order.py`). The per-well ticks stay outside the lock,
+since each names its own well. The denominator is `explode_common.publishing_total` — the well's FOVs ×
 timepoints × channels **plus one**, and that last step is reported only after
 the well's `atomic_zip` block exits, i.e. once the archive has been closed,
 verified and renamed onto `<WELL>.zip`. All three converters (OME-TIFF, CZI,

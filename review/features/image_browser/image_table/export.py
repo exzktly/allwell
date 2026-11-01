@@ -163,10 +163,9 @@ def image_table_open_export_settings(ctx) -> None:
     pad_spin.setRange(0.0, 4.0)
     pad_spin.setSingleStep(0.05)
     pad_spin.setDecimals(2)
-    pad_spin.setSuffix(" in")
     pad_spin.setValue(float(opts.get("pad_inches", 0.10)))
     pad_spin.setToolTip("Outer margin around the saved figure (pad_inches).")
-    form.addRow("Outer margin:", pad_spin)
+    form.addRow("Outer margin (in):", pad_spin)
 
     cell_spin = QDoubleSpinBox(dlg)
     cell_spin.setRange(0.0, 4.0)

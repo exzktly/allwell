@@ -5877,7 +5877,11 @@ A nanowell dataset also opens in every other Review tab, which read it like this
   - **NW: *metric name*** (one per nanowell metric: cell count, confluence, brightness, fold changes, growth rate,
     occupied) — each nanowell drawn as a disc in its metric's colour, *viridis* by default. A fold change is drawn
     blue below 1, red above and grey at 1, on a log scale, so a doubling and a halving are equally strong. The values
-    follow the Nanowells page's **Baseline** and the Cell Gating rules, so they match the page and the plots.
+    follow the Nanowells page's **Baseline** and the Cell Gating rules, so they match the page and the plots. To take
+    a fold change from a particular timepoint instead, open the channel's ⚙ menu and choose under **Fold change
+    relative to**: the page's baseline, the earliest or first measurable timepoint, or any timepoint of the run. The
+    row then reads e.g. *NW: Count fold change vs 0h*, and adding the same metric twice with two baselines shows them
+    side by side. The colour key always says what each fold change is relative to.
     Outside the nanowells is dark grey, so even the lowest values stand out; a nanowell with no value (no cells for
     a brightness, out of focus, gated out) is an **empty ring**, never a coloured disc.
 

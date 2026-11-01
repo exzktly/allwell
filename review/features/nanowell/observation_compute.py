@@ -78,9 +78,13 @@ def nanowell_metric_specs(ctx, wells) -> tuple[ObservationMetric, ...] | None:
     return None if channels is None else _metric_specs(channels)
 
 
-def nanowell_observations(ctx, wells) -> ObservationTable | None:
+def nanowell_observations(ctx, wells, baseline: str | None = None) -> ObservationTable | None:
     """The nanowell rows of *wells* (an iterable of well labels), or ``None`` when the dataset holds no nanowell
-    tables. Reads on the calling thread; a well already read by the page or an earlier call is not read again."""
+    tables. Reads on the calling thread; a well already read by the page or an earlier call is not read again.
+
+    *baseline* (a ``series_compute`` baseline code) takes the fold changes from it instead of the page's own Baseline:
+    the Image Table's metric maps pin one per channel, so two baselines can be drawn side by side. It is part of the
+    memo key, as the page's is."""
     st = ctx.state.feature_slice("nanowell")
     data_dir = getattr(ctx.state.dataset, "data_dir", None)
     if st is None or not data_dir:
@@ -90,7 +94,8 @@ def nanowell_observations(ctx, wells) -> ObservationTable | None:
     # before the page was ever opened, or after the rule changed while it was hidden.
     sync_focus_rule(ctx, st)
     focus = st.rim_focus_rule()
-    key = (str(data_dir), wells, st.baseline, focus.key(), gate_version(ctx))
+    baseline = st.baseline if baseline is None else baseline
+    key = (str(data_dir), wells, baseline, focus.key(), gate_version(ctx))
     memo = st.observation_memo
     if key in memo:
         return memo[key]
@@ -107,7 +112,7 @@ def nanowell_observations(ctx, wells) -> ObservationTable | None:
         table = ObservationTable(NANOWELLS, pd.DataFrame(columns=["well", "timepoint", "nw_q", "nw_r", "state"]),
                                  _metric_specs(data.channels))
     else:
-        metrics = site_metrics(data, st.baseline, gate_tally(ctx, data), focus)
+        metrics = site_metrics(data, baseline, gate_tally(ctx, data), focus)
         frame = _frame(metrics)
         channels = list(data.channels)
 

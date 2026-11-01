@@ -44,11 +44,12 @@ from pathlib import Path
 
 import numpy as np
 
-from review.data.nanowell_images import NanowellFrame, metric_label, montage_channel
+from review.data.nanowell_images import NanowellFrame, metric_baseline, metric_label, montage_channel
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell.image_compute import read_montage, tile_boxes
 from review.features.nanowell.observation_compute import nanowell_observations
+from review.features.nanowell.series_compute import is_baseline
 
 log = logging.getLogger("review")
 
@@ -166,7 +167,7 @@ def table_frame(ctx, well: str, tp, token: str, *, window=None, oversample: int 
         geometry = window_geometry(geometry, window, oversample)
         if geometry is None:
             return None
-    return _metric_frame(ctx, well, timepoint, label, geometry)
+    return _metric_frame(ctx, well, timepoint, label, geometry, metric_baseline(token))
 
 
 def window_geometry(geometry, window, oversample: int) -> tuple | None:
@@ -221,9 +222,12 @@ def channel_frame(data, well: str, timepoint: str, channel: str, geometry) -> Na
     return NanowellFrame(values, scale, note=" ".join(notes))
 
 
-def _metric_frame(ctx, well: str, timepoint: str, label: str, geometry) -> NanowellFrame:
+def _metric_frame(ctx, well: str, timepoint: str, label: str, geometry, baseline: str | None = None) -> NanowellFrame:
+    """*label*'s map, its fold changes taken from *baseline* (``None``: the Nanowells page's own Baseline)."""
+    if baseline is not None and not is_baseline(baseline):
+        return NanowellFrame(None, geometry[2], note=f"{baseline!r} is not a baseline the Nanowells page knows.")
     with _LOCK:
-        table = nanowell_observations(ctx, [well])
+        table = nanowell_observations(ctx, [well], baseline)
     if table is None:
         return NanowellFrame(None, geometry[2], note="This dataset holds no nanowell tables.")
     spec = next((m for m in table.metrics if m.label.lower() == label.lower() or m.key.lower() == label.lower()), None)

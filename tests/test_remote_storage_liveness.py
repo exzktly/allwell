@@ -387,10 +387,13 @@ def test_a_live_pid_of_another_user_still_counts(staging):
 
 # ── M4: the server re-checks keep and the due date itself ───────────────────
 
-@pytest.mark.parametrize("expiry", ["keep", str(int(time.time()) + 10 * DAY)])
+# Named, not computed at collection: a parameter built from the clock gives
+# each xdist worker a different test id, and the run refuses to start.
+@pytest.mark.parametrize("expiry", ["keep", "ten-days-ahead"])
 def test_an_automatic_delete_re_reads_the_expiry_on_the_server(staging, expiry):
     d = _run(staging, RUN)
-    (d / rs.RUN_EXPIRY).write_text(expiry + "\n")
+    value = rs.KEEP if expiry == "keep" else str(int(time.time()) + 10 * DAY)
+    (d / rs.RUN_EXPIRY).write_text(value + "\n")
     _age(d / rs.RUN_EXPIRY)
     assert _delete(_LocalCache(staging), "run", RUN, automatic=True, host_days=1) == "refused:not-due"
     assert d.exists()

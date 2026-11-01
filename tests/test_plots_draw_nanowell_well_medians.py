@@ -95,3 +95,26 @@ def test_a_heat_map_cell_is_the_mean_over_its_wells_of_their_medians(qtbot, tmp_
     assert grid.label == "Cell count"
     ctx.state.plot.observations = "cells"
     assert nanowell_grid(ctx, layout, 24.0, lambda ws: list(ws)) is None
+
+
+def test_a_distribution_is_of_every_nanowell_value_not_of_cells(qtbot, tmp_path):
+    from review.features.distribution._observations import nanowell_groups
+    from tests.fixtures.nanowell_dataset import COUNTS
+
+    ctx = _shell(qtbot, tmp_path, "review.features.lineplot.tab_view.build_line_graphs_tab", "dist")
+    groups, label, footer = nanowell_groups(ctx, 24.0)
+    got = {lbl: sorted(vals.tolist()) for lbl, _c, vals in groups}
+    # One value per nanowell — the zeros included, since an empty nanowell has a count of 0 — not one per cell.
+    assert got == {w: sorted(float(n) for n in COUNTS[w]["24h"]) for w in ("A01", "B01")}
+    assert label == "Cell count"
+    assert footer.startswith("Observations: nanowells · 10 of 10 used") and "each point is one nanowell" in footer
+
+
+def test_the_distribution_tab_draws_them_through_its_own_renderer(qtbot, tmp_path):
+    from review.features.distribution.controller import redraw_distribution
+
+    ctx = _shell(qtbot, tmp_path, "review.features.distribution.tab_view.build_distribution_tab", "dist_tab")
+    redraw_distribution(ctx)
+    fig = ctx.widgets.get("_distribution_fig")
+    assert _footer(fig).startswith("Observations: nanowells")
+    assert any(ax.get_xlabel() == "Cell count" for ax in fig.axes)

@@ -1232,6 +1232,8 @@ def _features() -> list[FeatureDescriptor]:
             on_channel_changed=_channel_distribution,
             redraw=_redraw_distribution,
             states=(StateSpec("distribution", _state_distribution),),
+            # Each nanowell's value of the band's metric under Observations: Nanowells (distribution/_observations.py).
+            observations=("cells", "nanowells"),
         ),
         FeatureDescriptor(
             name="Heat Map", parent="Plotting", build=_build_heatmap,

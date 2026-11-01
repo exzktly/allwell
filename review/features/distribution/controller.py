@@ -374,6 +374,14 @@ def redraw_distribution(ctx) -> None:
     layout_choice = layout_cb.currentText() if layout_cb is not None else "Overlay"
 
     tp_filter = tp_h if math.isfinite(tp_h) else None
+    from review.features.distribution import _observations as _nw_dist
+    nanowell = _nw_dist.nanowell_groups(ctx, tp_filter)
+    if nanowell is not None:
+        nw_groups, nw_label, nw_footer = nanowell
+        _draw_distribution(ctx, canvas, nw_groups, mode, bins, log_x, log_y, tp_h, layout_choice, None)
+        _nw_dist.label_and_footer(fig, nw_label, nw_footer)
+        canvas.draw_idle()
+        return
     pooled = collect_distribution(ctx, val_col=val_col, fluor_gates=fluor_gates, ratios=ratios,
                                   tp_filter=tp_filter, display_label=_display_label_for)
     if pooled is not None:

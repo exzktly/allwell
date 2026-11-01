@@ -19,7 +19,6 @@ from review.domain.observation import CELLS, NANOWELLS, OBSERVATION_LABELS, foot
 #: Plotting leaves that draw cells only, each with why. A leaf that gains a nanowell view leaves this roster.
 CELLS_ONLY = {
     "Response Curves": "a dose axis is a sample variable; nanowell responses not yet drawn (tracker #13)",
-    "Distribution": "nanowell distributions are still drawn on the Nanowells page (tracker #12)",
 }
 
 

@@ -342,7 +342,7 @@ def _time_axis(model, frame) -> dict:
     hours = {tp: _hours(frame, tp) for tp in tps}
     if tps and all(math.isfinite(h) for h in hours.values()):
         model.x_label = "Time (h)"
-        named = [tp for tp in tps if tp not in (f"{hours[tp]:g} h", f"{hours[tp]:g}h", f"{hours[tp]:g}")]
+        named = [tp for tp in tps if not names_its_hours(tp, hours[tp])]
         if named:
             model.time_note = "Timepoints: " + " · ".join(f"{hours[tp]:g} h {tp}" for tp in tps) + "."
         return {tp: f"{hours[tp]:g}" for tp in tps}
@@ -381,6 +381,13 @@ def _time_panels(model, frame, column, reasons, groups, channels) -> None:
         model.panels.append(panel)
 
 
+def names_its_hours(timepoint: str, hours: float) -> bool:
+    """Whether the label *timepoint* is just its own time in hours (``24 h``, ``24h``, ``24``), so writing the hours
+    beside it would say the same thing twice. An exact match: a substring test left the hours out of ``T12`` at 2 h,
+    whose name merely contains a 2."""
+    return timepoint in (f"{hours:g} h", f"{hours:g}h", f"{hours:g}")
+
+
 def _wells_panel(model, frame, column, reasons, groups, timepoint, control, channels) -> None:
     tps = _order(frame)
     if model.metric not in PER_NANOWELL:
@@ -389,7 +396,7 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
         reasons = reasons[frame.index]
     model.timepoint = timepoint if model.metric not in PER_NANOWELL else ""
     at = _hours(frame, timepoint) if model.timepoint else math.nan
-    panel = Panel(title=((f"At {timepoint}" + (f" · {at:g} h" if math.isfinite(at) and f"{at:g}" not in timepoint
+    panel = Panel(title=((f"At {timepoint}" + (f" · {at:g} h" if math.isfinite(at) and not names_its_hours(timepoint, at)
                                                  else "")) if model.timepoint else "One value per nanowell"),
                   swarms=[], ticks=[])
     summary = (well_summary(frame, column, channels, reasons=reasons, responding_above=model.responding_above)

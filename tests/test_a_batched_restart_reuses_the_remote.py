@@ -755,3 +755,45 @@ def test_a_resume_takes_the_staged_batches_of_an_intermediate_attempt(tmp_path, 
     assert p._returncode == 0, p._logged
     assert not {"b2/A03.zip", "b2/A04.zip"} & set(sent), (
         f"the intermediate attempt's uploaded batch was sent again: {sent}")
+
+
+def test_adopting_the_finished_reference_well_brings_the_plate_s_reference_too(tmp_path, monkeypatch):
+    """The empty reference is a plate-level folder beside the wells' tables. Adopting the well it was measured
+    from out of an earlier attempt's directory left it behind, so every well this attempt computed in its fresh
+    directory read "the empty reference well has not been measured here" and had no confluence. A reference
+    measured from another well is not taken with this one."""
+    import json
+
+    old = tmp_path / "remote" / "runs" / "run-old"
+    earlier = [{"remote_output_dir": str(old / "out"), "remote_input_dir": str(old / "in")}]
+    p, plate, run_dir, sent, observed, _ = _harness(tmp_path, monkeypatch, earlier=earlier, nanowell=True)
+    _finished_on(old / "out", "A01")
+    _finished_on(old / "out", "A02")
+    ref = old / "out" / "nanowells" / "_confluence_reference"
+    ref.mkdir(parents=True)
+    (ref / "reference.json").write_text(json.dumps({"well": "A02", "timepoints": {}}, indent=1))
+    (ref / "tp0000.npz").write_bytes(b"template")
+
+    _run(p, monkeypatch)
+
+    assert p._returncode == 0, p._logged
+    mine = run_dir / "out" / "nanowells" / "_confluence_reference"
+    assert (mine / "reference.json").is_file() and (mine / "tp0000.npz").read_bytes() == b"template"
+    assert (ref / "reference.json").is_file(), "the earlier attempt's copy is never moved"
+
+
+def test_a_reference_measured_from_a_well_not_adopted_stays_behind(tmp_path, monkeypatch):
+    import json
+
+    old = tmp_path / "remote" / "runs" / "run-old"
+    earlier = [{"remote_output_dir": str(old / "out"), "remote_input_dir": str(old / "in")}]
+    p, plate, run_dir, sent, observed, _ = _harness(tmp_path, monkeypatch, earlier=earlier, nanowell=True)
+    _finished_on(old / "out", "A01")
+    ref = old / "out" / "nanowells" / "_confluence_reference"
+    ref.mkdir(parents=True)
+    (ref / "reference.json").write_text(json.dumps({"well": "A05", "timepoints": {}}, indent=1))
+
+    _run(p, monkeypatch)
+
+    assert p._returncode == 0, p._logged
+    assert not (run_dir / "out" / "nanowells" / "_confluence_reference").exists()

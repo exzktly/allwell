@@ -5978,7 +5978,11 @@ the sentence names it.
   footer counts the nanowells left out. Two things it cannot see, and the footer counts both: a timepoint
   blurred evenly across the whole well (there is nothing sharp to compare with), and a nanowell whose rim could
   not be fitted (it has no rim focus, so it is kept unchecked). A well with fewer than ten rims at a timepoint
-  is not judged. It is the same switch as **Exclude out-of-focus nanowells** on the Cell Gating tab — ticking
+  is not judged. The footer says it briefly — *Out of focus, left out: 12 nanowell-timepoints (6 nanowells; rim
+  under 75% of its well's sharpest)* and *Focus unchecked: 3 rim not fitted* — where "the well's sharpest" is the
+  sharpest tenth described above. A percentage typed into the box takes effect on Enter, on Tab, or when you
+  click the figure or another control; the page redrawing meanwhile (tiles arriving on the Array view) never
+  puts the old number back. It is the same switch as **Exclude out-of-focus nanowells** on the Cell Gating tab — ticking
   either ticks both — so the cells of an out-of-focus nanowell also leave Plotting, Scatter, histograms and
   exports, not only this page. Turning it on changes the numbers a figure draws, so a figure saved before it
   existed redraws with it applied; untick it to see the run's own counts. Batch Export's Nanowells mode uses the
@@ -6110,7 +6114,12 @@ the sentence names it.
     it was not seen) or *outlined by state* in the colours Test detection uses (blue measured, green empty,
     amber occluded, red clipped, grey for the other states). A key along the top of the array shows each
     outline the view holds as a small ring drawn the same way — colour, dash and hatch — with how many
-    nanowells it covers, and lists only what is on screen. The outline's width follows the nanowell's size on screen (about
+    nanowells it covers, and lists only what is on screen. Its words are in the figure's own ink, so they read on
+    the dark screen theme and on publication white alike. A plain grey ring keyed *no value* is a nanowell that
+    was measured — cells may be plainly visible in it — but has no value of the chosen **Metric**, and the key
+    says why: for a fold change that is almost always its baseline, *seeded later (0 at baseline)* when it held
+    no cells at the baseline timepoint, or *baseline occluded* / *baseline rim out of focus* when the baseline
+    could not be measured; with several causes it lists the commonest three, with counts. The outline's width follows the nanowell's size on screen (about
     6 % of its diameter, never under 2.5 or over 8 screen pixels), so it stays visible zoomed out and on a phone. Either way a nanowell on a tile seam is dashed in purple and
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the
@@ -6131,10 +6140,13 @@ the sentence names it.
     pitch, angle, overlap, nanowells detected of the roster), the empty-nanowell template the counts were
     divided by, and the status of every other timepoint; a template the run found far from the well's
     earliest one is shown in amber: most nanowells there may hold cells, and that timepoint's counts and
-    confluence may be biased.
+    confluence may be biased. *Notes* (off until you turn it on) writes the footer in full: how the positions,
+    the fill and the outlines are drawn, what the tile colours mean, and the grid status even when it is *ok*.
+    Off, the footer keeps only the page's notes, the counts by state, and anything that went wrong or is missing
+    — no addresses, nothing placed, no montage, a grid status other than *ok* — so the array keeps the room.
   - **Layers → Show as** sets every layer at once: *Array map* (lattice places filled by the metric), *Array
     QC* (the run montage, the tiles and the nanowells by state, with the run record) or *Full montage* (full
-    resolution, nanowells by state with their addresses and values, and the anchor).
+    resolution, nanowells by state with their addresses and values, and the anchor). *Notes* stays as you set it.
   - **Overlays** — one button that takes every coloured layer (the nanowells, the tiles, the anchor and the cells) off
     the image and puts them back, for a quick look at what is underneath. The Layers menu's choices are kept,
     so pressing it again restores exactly what was on; while they are hidden the footer says so, and Set

@@ -48,7 +48,7 @@ POSITIONS = ("measured", "lattice")
 #: What a nanowell's fill says: the page's metric, or the state the run recorded for it.
 COLOURINGS = ("metric", "state")
 #: The layers that are on or off, as :class:`ArrayLayers` names them.
-LAYER_SWITCHES = ("nanowells", "addresses", "values", "cells", "tiles", "anchor", "record")
+LAYER_SWITCHES = ("nanowells", "addresses", "values", "cells", "tiles", "anchor", "record", "notes")
 #: The layers drawn in colour over the image, which the page's one *Overlays* button takes off and puts back
 #: together (:meth:`ArrayLayers.without_overlays`). The labels are text, not colour, and keep their own switches.
 OVERLAY_SWITCHES = ("nanowells", "cells", "tiles", "anchor")
@@ -68,6 +68,7 @@ class ArrayLayers:
     tiles: bool = False                     # each tile's placement, coloured by how the run placed it
     anchor: bool = True                     # the anchor set by hand, and the grid status that says whether to set one
     record: bool = False                    # the grid record of every timepoint, beside the figure
+    notes: bool = False                     # the footer's full notes; off, only its counts and what went wrong
 
     PRESETS = ("map", "qc", "full")
 

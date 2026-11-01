@@ -72,7 +72,10 @@ _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or ou
            ("tiles", "Tiles", "Each tile's placement, coloured by how the run placed it, with its residual."),
            ("anchor", "Anchor", "The anchor set by hand, and what the grid record says about addressing this "
                                 "timepoint; with it on, Set anchor is offered."),
-           ("record", "Run record", "The grid record of this timepoint and a line for every other, beside the figure."))
+           ("record", "Run record", "The grid record of this timepoint and a line for every other, beside the figure."),
+           ("notes", "Notes", "The footer in full: how the positions, fills, outlines and tiles are drawn, and the "
+                              "grid status of this timepoint. Off, the footer keeps the counts and anything that "
+                              "went wrong."))
 #: The Layers menu's presets: every layer at once, as the views this one replaced drew them.
 _PRESETS = (("map", "Array map — lattice places, filled by the metric"),
             ("qc", "Array QC — montage, tiles and nanowell states, run record"),
@@ -402,6 +405,10 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_card", card)
     reg.register("_nw_fig", card.figure)
     reg.register("_nw_canvas", card.canvas)
+    # A click on the figure takes the keyboard focus, so a number still being typed in a band box (Rim focus, whose
+    # boxes commit on Enter or focus-out) is committed by the click rather than left uncommitted under a figure
+    # that never changes.
+    card.canvas.setFocusPolicy(Qt.ClickFocus)
     apply_plot_card_decorators(ctx, card, "Nanowells")
     card.plotThemeChanged.connect(lambda _m: nwc.redraw(ctx))
     card.canvas.mpl_connect("button_press_event", lambda event: nwc.on_click(ctx, event))

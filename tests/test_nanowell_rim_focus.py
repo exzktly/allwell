@@ -84,8 +84,8 @@ def test_only_the_soft_nanowell_is_flagged_and_an_unfitted_rim_is_kept(tmp_path)
     t = rfc.tally(metrics)
     assert (t.flagged, t.nanowells, t.unjudged, t.unreferenced, t.recorded) == (1, 1, 1, 0, True)
     said = rfc.note(metrics, rfc.RimFocusRule())
-    assert said.startswith("1 nanowell-timepoint (1 nanowell) left out as out of focus")
-    assert "1 with no rim focus (rim not fitted) were kept unchecked." in said
+    assert said == ("Out of focus, left out: 1 nanowell-timepoint (1 nanowell; rim under 75% of its well's sharpest). "
+                    "Focus unchecked: 1 rim not fitted.")
 
 
 def test_the_fraction_decides_and_off_flags_nothing(tmp_path):

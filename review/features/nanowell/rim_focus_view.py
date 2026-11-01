@@ -44,7 +44,7 @@ class RimFocusControls:
     def refresh(self, ctx) -> None:
         rule = nwc.focus_rule(ctx)
         self.box.setChecked(bool(rule.enabled))
-        self.spin.setValue(int(round(100 * rule.fraction)))
+        self.spin.show_value(int(round(100 * rule.fraction)))   # never over a number being typed
         self.spin.setEnabled(bool(rule.enabled))
 
 

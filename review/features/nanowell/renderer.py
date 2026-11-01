@@ -1098,8 +1098,14 @@ def _union(a, b):
 
 
 def array_footer(scene, layers, *, label: str, image_note: str = "", note: str = "") -> list[str]:
-    """The lines under the Array view: what is drawn, how to read it, and what could not be drawn and why."""
-    sites, in_well = scene.sites, scene.frame == "well"
+    """The lines under the Array view: what is drawn, how to read it, and what could not be drawn and why.
+
+    With the *Notes* layer off (``layers.notes``, the default) the footer is only what the reader is owed: the page's
+    note, the counts, and anything that went wrong or is missing — no addresses, nothing placed, no montage, a grid
+    status other than ``ok``, and what a layer the reader turned on could not draw. How to read the figure (the
+    positions, the fill and outlines, the tile colours) is the key's job above the array, and is written out only
+    with *Notes* on: a footer of six lines took a third of the figure from the array it describes."""
+    sites, in_well, full = scene.sites, scene.frame == "well", bool(layers.notes)
     lines = [note] if note else []
     if scene.reason:
         lines.append(f"No addresses at this timepoint: {scene.reason}")
@@ -1113,10 +1119,12 @@ def array_footer(scene, layers, *, label: str, image_note: str = "", note: str =
     if scene.unplaced:
         head += f" · {scene.unplaced:,} without a measured position, not drawn"
     lines.append(head)
-    lines.append(f"Lattice positions at the measured pitch {scene.pitch_um:.1f} µm, so a nanowell keeps its place from "
-                 "one timepoint to the next (the square is the central nanowell)." if not in_well and scene.pitch_um
-                 else "Measured positions in the well frame (the square is the central nanowell).")
-    if layers.nanowells and len(sites):
+    if full:
+        lines.append(f"Lattice positions at the measured pitch {scene.pitch_um:.1f} µm, so a nanowell keeps its place "
+                     "from one timepoint to the next (the square is the central nanowell)."
+                     if not in_well and scene.pitch_um
+                     else "Measured positions in the well frame (the square is the central nanowell).")
+    if full and layers.nanowells and len(sites):
         lines.append(f"Filled by {label}; a grey outline has no value, its hatch or dash naming why (the key above "
                      "the array). Fused: on a tile seam, measured from a blended crop."
                      if layers.colour == "metric" else
@@ -1124,17 +1132,24 @@ def array_footer(scene, layers, *, label: str, image_note: str = "", note: str =
                      "blended crop.")
     if layers.cells and scene.cells_note:
         lines.append(scene.cells_note)
-    if in_well and layers.tiles and scene.tiles:
+    if full and in_well and layers.tiles and scene.tiles:
         lines.append("Tiles: green placed on the lattice, blue by overlap correlation, amber where the acquisition "
                      "record put them; each labelled with its registration residual.")
     if in_well and layers.image != "off" and image_note:
         lines.append(image_note)
-    if in_well and layers.anchor and scene.anchor_text:
+    if in_well and layers.anchor and scene.anchor_text and (full or _anchor_owed(scene)):
         lines += scene.anchor_text.split("\n")
-    if not in_well and (layers.image != "off" or layers.tiles or layers.anchor):
+    if full and not in_well and (layers.image != "off" or layers.tiles or layers.anchor):
         lines.append("The image, the tiles and the anchor are in the well frame, not on the lattice: switch Positions "
                      "to Measured to draw them.")
     return lines
+
+
+def _anchor_owed(scene) -> bool:
+    """Whether the anchor's lines say something the reader must see with *Notes* off: a grid status other than
+    ``ok``, or a second line (an anchor set by hand, a file that cannot be used, how to set one). A plain
+    "A01 at t_c: ok." says only that nothing is wrong."""
+    return scene.status != "ok" or "\n" in scene.anchor_text
 
 
 def render_array(fig, scene, layers, *, label: str, image=None, image_note: str = "", selected=(),
@@ -1167,8 +1182,8 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     if layers.nanowells and len(scene.sites):
         _draw_nanowells(fig, ax, drawn, scene, layers, label=label, selected=selected)
         _dim_nanowells(ax, scene.sites, dimmed)
-        draw_key(ax, key_entries(scene.sites, colour=layers.colour, styles=_STATE_STYLE), linewidth=1.4,
-                 fontsize=7.0)
+        draw_key(ax, key_entries(scene.sites, colour=layers.colour, styles=_STATE_STYLE, why=scene.why), linewidth=1.4,
+                 fontsize=7.0, ink=_inks(ax)[1])
     if layers.cells and scene.cells is not None and len(scene.cells[0]):
         _draw_cells(ax, *scene.cells)
     if (layers.addresses or layers.values) and len(scene.sites):

@@ -478,6 +478,68 @@ def test_a_percentage_typed_into_the_rim_focus_box_is_taken(qtbot, page):
                     and not getattr(canvas, "_draw_pending", False), timeout=5000)
 
 
+def test_a_rim_focus_percentage_being_typed_survives_a_redraw_and_a_click_on_the_figure_applies_it(qtbot, page):
+    """Reported: "changes to focus threshold in array do not have an effect". The box commits on Enter or focus-out,
+    and every redraw refreshed the band, whose ``setValue`` rewrote the field with the rule in force — so on the Array
+    view, which redraws as each tile arrives, the number typed was put back before it was ever committed. And a click
+    on the figure did not end the edit either: the canvas took no focus, so the box kept it, uncommitted."""
+    from PySide6.QtCore import QPoint, Qt
+
+    st = _loaded(qtbot, page)
+    spin, canvas = page.widgets.get("_nw_rim_focus_spin"), page.widgets.get("_nw_canvas")
+    edit = spin.lineEdit()
+    qtbot.mouseClick(edit, Qt.LeftButton)
+    edit.selectAll()
+    qtbot.keyClicks(edit, "60")
+    nwc.redraw(page)                                    # a tile arriving, a refit: anything that redraws
+    assert edit.text() == "60"                          # what was typed is still there
+    qtbot.mouseClick(canvas, Qt.LeftButton, pos=QPoint(40, 40))
+    assert page.state.qc.params.nanowell_focus_fraction == 0.6
+    qtbot.waitUntil(lambda: st.focus_for == (True, 0.6) and not st.computing, timeout=20000)
+    timer = page.widgets.get("_nw_refit_timer")
+    qtbot.waitUntil(lambda: not (timer is not None and timer.isActive())
+                    and not getattr(canvas, "_draw_pending", False), timeout=5000)
+
+
+def _key_texts(ctx):
+    fig = ctx.widgets.get("_nw_fig")
+    return [t.get_text() for ax in fig.axes for a in ax.artists if a.get_gid() == "nw-array-key"
+            for t in a.get_texts()]
+
+
+def test_the_array_footer_is_short_until_notes_is_turned_on(qtbot, page):
+    """Reported: "The text at the bottom of the array tab take up way too much space". With the Layers menu's *Notes*
+    off (the default) the footer is the counts and what went wrong; how to read the figure is the key's job, and is
+    written out only with Notes on."""
+    _loaded(qtbot, page)
+    nwc.set_view(page, "array")
+    st = page.state.feature_slice("nanowell")
+    assert not st.layers.notes
+    short = _texts(page, "nw-array-footer")
+    assert any(t.startswith("4 nanowells in the roster") for t in short)
+    assert not any(t.startswith(("Measured positions", "Filled by", "Outlined by")) for t in short)
+    page.widgets.get("_nw_layer_notes").trigger()                     # a click on the menu item
+    full = _texts(page, "nw-array-footer")
+    assert st.layers.notes and len(full) > len(short)
+    assert "Measured positions in the well frame (the square is the central nanowell)." in full
+    assert any(t.startswith("Filled by Cell count;") for t in full)
+    nwc.apply_array_preset(page, "qc")                                 # a preset keeps the reader's choice
+    assert st.layers.notes
+
+
+def test_a_nanowell_with_cells_and_no_fold_change_is_keyed_with_why(qtbot, page):
+    """Asked: "what is the meaning of the nanowell status no value? I see clearly identifiable cells in them". At t_a,
+    A01's nanowell (2, 0) holds 3 cells and (3, 0) holds 1, but at the baseline t_c (2, 0) held none and (3, 0) was
+    occluded: both count fold changes are undefined, and the key says why rather than a bare "no value"."""
+    _loaded(qtbot, page)
+    nwc.set_view(page, "array")
+    nwc._set(page, "metric", "count_fc")
+    nwc.set_timepoint(page, "t_a")
+    st = page.state.feature_slice("nanowell")
+    assert nwc.page_well(page) == "A01" and st.metric == "count_fc"
+    assert "no value · 2: baseline occluded 1, seeded later (0 at baseline) 1" in _key_texts(page)
+
+
 def test_the_rim_focus_control_on_the_band_changes_the_qc_layer_s_rule_and_the_metrics_follow(qtbot, page):
     """The band's *Rim focus* box and percentage are a mirror of the QC layer's switch: they change the dataset's
     QC parameters, and the page recomputes with the rule: the metrics on hand are stamped with the rule they were

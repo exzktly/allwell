@@ -188,7 +188,7 @@ def test_the_view_draws_the_ranked_rows_at_the_latest_timepoint_with_their_crops
     assert _texts(page, "nw-extremes-value")[:3] == ["1×", "1×", "4×"]
     caption = _texts(page, "nw-extremes-caption")[0]
     # The fixture's wells hold fewer nanowells than rim focus needs to judge one, and the caption says so first.
-    unjudged = re.match(r"\d+ in a well with under 10 rims at that timepoint were kept unchecked\. ", caption)
+    unjudged = re.match(r"Focus unchecked: \d+ under 10 rims in the well\. ", caption)
     assert unjudged
     caption = caption[unjudged.end():]
     assert caption.startswith("6 of 8 nanowells in A01 have a count fold change at t_d; not ranked: "

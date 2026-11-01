@@ -38,6 +38,16 @@ class _HoldsItsNumber:
             self._hold()
         return handled
 
+    def show_value(self, value) -> None:
+        """Show *value* as a refresh from state would: set it only when the box does not already hold it.
+
+        ``setValue`` rewrites the text field even when the value is unchanged, so a refresh that ran while the user
+        was typing — a redraw, a tile arriving — threw the typed number away before Enter could commit it. With
+        keyboard tracking off the box's value stays the committed one until Enter or focus-out, so an equal value
+        here means the state has not moved and the field is left as the user has it."""
+        if self.value() != value:
+            self.setValue(value)
+
     def setRange(self, low, high) -> None:  # Qt naming
         super().setRange(low, high)
         self._hold()

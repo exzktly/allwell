@@ -1097,7 +1097,8 @@ allwell/
 │                                  and notice_badge.py (the "!" unread pip on the log button)
 │                                  and spin_box.py (SpinBox / DoubleSpinBox, the only spin
 │                                  boxes the app builds: no layout squeezes their number;
-│                                  test_spin_boxes_keep_their_number.py)
+│                                  test_spin_boxes_keep_their_number.py; show_value, the
+│                                  refresh that never overwrites a number being typed)
 │                                  and progress_popup.py (ProgressPopup, the application-modal
 │                                  progress bar the Cell Gating panel's jobs run behind)
 ├── startup/                     ← what runs before the application exists (§4)
@@ -12191,7 +12192,12 @@ selected well is excluded. *Excluded (n) ▾* (`exclude_view`), shown only while
 one or all (`set_well_excluded`, `restore_every_well`).
 
 **Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a bare percentage spin box, 30–95, with no suffix (Qt refuses typing with the cursor inside one)) is a mirror of
-the Cell Gating panel's *Exclude out-of-focus nanowells*, never a setting of its own. `controller.set_rim_focus`
+the Cell Gating panel's *Exclude out-of-focus nanowells*, never a setting of its own. The box commits on Enter or
+focus-out (keyboard tracking off), so two things keep a typed number alive until then: `RimFocusControls.refresh`
+and the Cell Gating panel's refresh write it through `SpinBox.show_value`, which leaves a box already holding the
+rule's value untouched (a plain `setValue` rewrote the field on every redraw, and the Array view redraws as each
+tile arrives, so the typed number was put back before it was committed); and the page's canvas takes
+`Qt.ClickFocus`, so a click on the figure ends the edit and commits it. `controller.set_rim_focus`
 refuses a fraction outside `nanowell_rim_focus.MIN_FRACTION`–`MAX_FRACTION` by name, and otherwise changes the QC
 parameters through the registry's `qc.set_params_with_progress` service — the one route a QC edit takes, so every
 verdict layer is re-projected, the panel repainted (`qc.refresh_gate_widgets`) and the page recomputed (see
@@ -12218,7 +12224,8 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   `montage_um_per_px`, read on a worker, the last `MONTAGES_KEPT` kept) or `tiles` (full resolution, below);
   `positions` — `measured` (the well frame, where the run found each nanowell) or `lattice` (`map_model`'s
   places, U4); `colour` — `metric` or `state`; and the switches `nanowells`, `addresses`, `values`, `cells`,
-  `tiles`, `anchor`, `record`. The *Overlays* button (`state.overlays_hidden`, not persisted) hides the coloured layers
+  `tiles`, `anchor`, `record`, `notes`. `notes` is how much of the footer is written (below), not something drawn on
+  the array, so `controller.apply_array_preset` carries it across a preset rather than resetting it. The *Overlays* button (`state.overlays_hidden`, not persisted) hides the coloured layers
   (`OVERLAY_SWITCHES`: nanowells, cells, tiles, anchor) without touching the switches: the controller draws
   `controller.drawn_layers(st)` — `ArrayLayers.without_overlays()` while hidden — so showing them again restores
   exactly what was on, and the footer carries `OVERLAYS_HIDDEN_NOTE` meanwhile; `anchor_controls` reads the drawn
@@ -12268,16 +12275,27 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   along the top edge of the axes (`_array_key.py`: `key_entries` decides it, pure, `draw_key` draws it) with one
   ring swatch per way a nanowell in view is outlined — the state's colour, or the grey no-value outline with its
   dash or hatch, and the fused dash — each with how many drawn nanowells it covers, so it names only what is on
-  screen; the states with no colour of their own share one swatch that names them all. It is a standalone legend
-  (`ax.add_artist`), so the export-style pass sizes its text but never moves it; labels in
+  screen; the states with no colour of their own share one swatch that names them all. The plain no-value entry
+  (measured or empty, no value of the metric) names why from `ArrayScene.why` — `array_compute.no_value_reasons`,
+  `(q, r) -> label` from `series_compute.exclusion_reason` worded by `distribution_compute.reason_label`, so the
+  key and the Distribution footer give the same cause: a fold change on a nanowell full of cells is undefined
+  whenever its baseline had none or was not measurable, and a bare "no value" read as "not measured". It is a
+  standalone legend (`ax.add_artist`), so the export-style pass sizes its text but never moves it. The Array
+  axes are an image panel, which that pass skips entirely, so `draw_key` writes the words in the figure's ink
+  (`renderer._inks`) itself and tags them `follows_theme` for a capture's flip — left to matplotlib's default
+  they were black on the screen theme's near-black ground; labels in
   `LABEL_COLOUR` (`_draw_labels`: the `q,r` with *Addresses*, the metric value to three significant figures with
   *Values*, one under the other when both are on, `site_label_texts`; a nanowell without a value writes no number)
   only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
   (beyond, the footer asks for a zoom); tiles coloured by their placement `source`
   (lattice, overlap, recorded) with the residual, or — with no tile size in the acquisition record — their corner
   marked and the figure saying the outline is unknown, never a guessed rectangle; the anchor as a crosshair;
-  the run record beside the axes, a suspect template in amber. `array_footer` writes what is drawn and how to
-  read it, the image's state and the anchor's status. It returns an `ArrayDrawn` (the hit map, the axes, the
+  the run record beside the axes, a suspect template in amber. `array_footer` writes the page's note, the counts
+  by state and whatever went wrong or is missing (no addresses, nothing placed, the unplaced count, the image's
+  state, the Cells layer's tally, and the anchor's status when it is not a plain `ok` — `_anchor_owed`); how to
+  read the figure (positions, fill and outlines, tile colours, the lattice frame's greyed layers) is written only
+  with the `notes` switch on, because six lines of explanation took a third of the figure from the array and the
+  key above it already says most of it. It returns an `ArrayDrawn` (the hit map, the axes, the
   region shown and its size in pixels, and the tiles' `Rendered`), which the page keeps on `state.drawn`.
 - **Full resolution** (`full_montage_compute`, Qt-free): every tile from `in/<well>.zip` (the member
   `image_compute._member_for` finds) at the grid record's `left_um`/`top_um`, at the x pixel size, in the

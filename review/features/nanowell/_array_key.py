@@ -55,11 +55,37 @@ def _count(label: str, n: int) -> str:
     return f"{label} · {n:,}"
 
 
-def key_entries(sites, *, colour: str, styles: dict) -> list[KeyEntry]:
+def _why(sites, bare, why: dict) -> list[tuple[str, int]]:
+    """Why the *bare* nanowells (measured, no value) have none, most common first, at most three and the rest as
+    ``other``: ``[("seeded later (0 at baseline)", 12), …]``."""
+    tally: dict[str, int] = {}
+    for k in np.flatnonzero(bare):
+        _w, q, r = sites.sites[k]
+        reason = why.get((q, r))
+        if reason:
+            tally[reason] = tally.get(reason, 0) + 1
+    ranked = sorted(tally.items(), key=lambda kv: (-kv[1], kv[0]))
+    if len(ranked) > 3:
+        ranked = ranked[:3] + [("other", sum(n for _r, n in ranked[3:]))]
+    return ranked
+
+
+def _no_value_label(n: int, reasons: list[tuple[str, int]]) -> str:
+    """The "no value" entry's words: ``no value: seeded later (0 at baseline) · 4`` when one reason covers them all,
+    ``no value · 7: seeded later (0 at baseline) 4, baseline occluded 3`` when several do."""
+    if len(reasons) == 1 and reasons[0][1] == n:
+        return _count(f"no value: {reasons[0][0]}", n)
+    said = ", ".join(f"{reason} {k:,}" for reason, k in reasons)
+    return _count("no value", n) + (f": {said}" if said else "")
+
+
+def key_entries(sites, *, colour: str, styles: dict, why: dict | None = None) -> list[KeyEntry]:
     """The key for the nanowells in *sites* drawn with *colour* (``"state"`` or ``"metric"``).
 
     *styles* is the renderer's ``state -> (hatch, linestyle)`` for a nanowell without a value. A fused nanowell is
     drawn dashed in the fused colour whatever else it is, so it is counted there and nowhere else, as it is drawn.
+    *why* (``array_compute.no_value_reasons``) names why a measured nanowell has no value; the "no value" entry then
+    says so, since a fold change is undefined on a nanowell full of cells whenever its baseline had none.
     """
     from ui.nanowell_sites import FUSED_COLOUR, STATE_COLOURS, state_colour
     from ui.theme import Colors
@@ -72,7 +98,8 @@ def key_entries(sites, *, colour: str, styles: dict) -> list[KeyEntry]:
         has = np.isfinite(np.asarray(sites.values, dtype=float))
         bare = plain & ~has & np.isin(states, ["measured", "empty"])
         if bare.any():
-            entries.append(KeyEntry(_count("no value", int(bare.sum())), Colors.plot_undefined_ink))
+            entries.append(KeyEntry(_no_value_label(int(bare.sum()), _why(sites, bare, why or {})),
+                                    Colors.plot_undefined_ink))
         for state, (hatch, style) in styles.items():
             n = int((plain & ~has & (states == state)).sum())
             if n:
@@ -93,9 +120,13 @@ def key_entries(sites, *, colour: str, styles: dict) -> list[KeyEntry]:
     return entries
 
 
-def draw_key(ax, entries: list[KeyEntry], *, linewidth: float, fontsize: float) -> object | None:
+def draw_key(ax, entries: list[KeyEntry], *, linewidth: float, fontsize: float, ink: str) -> object | None:
     """The key as a row of ring swatches along the top edge of *ax*, right-aligned clear of the title; ``None``
-    when there is nothing to key."""
+    when there is nothing to key.
+
+    Its words are written in *ink*, the figure's own (``renderer._inks``). The Array view's axes are an image
+    panel, which the export-style pass leaves alone, so nothing recolours the key after this: left at matplotlib's
+    default black it was black words on the screen theme's near-black ground."""
     from matplotlib.legend import Legend
     from matplotlib.legend_handler import HandlerPatch
     from matplotlib.patches import Circle, Patch
@@ -126,6 +157,7 @@ def draw_key(ax, entries: list[KeyEntry], *, linewidth: float, fontsize: float) 
                  handler_map={Patch: _Ring()})
     key.set_gid("nw-array-key")
     for text in key.get_texts():
+        text.set_color(ink)
         follows_theme(text)
     ax.add_artist(key)
     return key

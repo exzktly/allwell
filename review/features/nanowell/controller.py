@@ -1108,7 +1108,8 @@ def apply_array_preset(ctx, name: str) -> None:
     st = _state(ctx)
     if st is None or name not in ArrayLayers.PRESETS:
         return
-    st.layers = ArrayLayers.preset(name)
+    # The footer's Notes switch is how much the reader wants to read, not part of what a preset draws: kept.
+    st.layers = replace(ArrayLayers.preset(name), notes=st.layers.notes)
     st.region, st.anchor_mode = None, False
     _save_soon(ctx)
     _call(ctx, "_nw_refresh_controls")

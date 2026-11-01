@@ -157,6 +157,9 @@ _EXTREMES_TPS_TIP = ("The timepoints the montage shows as columns. Fewer columns
                      "timepoint is always shown.")
 #: How long the page's canvas must hold one size before the Array view is re-fitted to it, in milliseconds.
 _REFIT_MS = 60
+#: How long, in ms, the selection must be still before the page reads the wells it adds: long enough to take a few
+#: quick clicks on the plate as one change, short enough that a single click reads at once to the eye.
+LOAD_DEBOUNCE_MS = 250
 _CROP_METRICS_TIP = ("Write each crop's numbers on it: its fold change in the corner and a line of its metrics along "
                      "its foot. Off leaves the crops bare; the row labels still give each nanowell's rank and value.")
 _POPOUT_METRICS_TIP = ("Write each crop's measurements under it — the same setting as the Extremes view's Metrics.")
@@ -428,6 +431,13 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     # It covers the whole card as a scrim, so it follows the card's size while it shows, not only when shown.
     card.canvas.mpl_connect("resize_event", lambda _event: computing.resize(card.size()))
     reg.register("_nw_computing_label", computing)
+    # A selection change reads the wells it adds once the selection has been still this long, so a run of clicks on
+    # the plate starts one load rather than one per click (``controller.queue_load``).
+    load_timer = QTimer(card)
+    load_timer.setSingleShot(True)
+    load_timer.setInterval(LOAD_DEBOUNCE_MS)
+    load_timer.timeout.connect(lambda: nwc.run_queued_load(ctx))
+    reg.register("_nw_load_timer", load_timer)
 
     detail = QWidget(splitter)
     detail_layout = QVBoxLayout(detail)
@@ -460,7 +470,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         detail.setVisible(on)
 
     def show_computing() -> None:
-        computing.setVisible(bool(st.computing) and st.metrics is not None)
+        computing.setVisible(nwc.computing_shown(ctx))
         computing.resize(card.size())
         computing.raise_()
 

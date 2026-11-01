@@ -145,7 +145,7 @@ def test_form_granted_node_settings_reach_the_saved_host(qtbot, isolated_config)
     qtbot.addWidget(edit)
     assert edit._granted_limit_spin.value() == 72
     assert edit._granted_idle_spin.value() == 0
-    assert edit._granted_idle_spin.specialValueText() == "Never"
+    assert edit._granted_idle_spin.specialValueText() == "" and edit._granted_idle_spin.suffix() == ""
     assert edit.result_host().granted_idle_release_min == 0
 
 

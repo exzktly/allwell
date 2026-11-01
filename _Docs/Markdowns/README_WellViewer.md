@@ -1898,7 +1898,7 @@ alive and, if nobody else is, it ends two minutes later.
 
 The two settings are per host, in *Add…* / *Edit…* under the scheduler command,
 in **Granted node**: **Time limit** (hours; default 24) and **Release when idle
-after** (minutes; default 30, **Never** to turn that rule off). The time limit is
+after** (minutes; default 30, `0` to turn that rule off). The time limit is
 the granted node's own; it is separate from the `--time` in the scheduler command,
 which still sizes each run and is not given to the node. A partition that allows
 less than the time limit caps it, and the log says so.

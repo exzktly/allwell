@@ -422,10 +422,9 @@ class RemoteFormDialog(QDialog):
         sched_layout.addWidget(QLabel("Granted node (Request a node in Manage Remotes)", self._scheduled_box))
         limit_row = QHBoxLayout()
         limit_row.setSpacing(6)
-        limit_row.addWidget(QLabel("Time limit", self._scheduled_box))
+        limit_row.addWidget(QLabel("Time limit (hours)", self._scheduled_box))
         self._granted_limit_spin = QSpinBox(self._scheduled_box)
         self._granted_limit_spin.setRange(*GRANTED_TIME_LIMIT_H_RANGE)
-        self._granted_limit_spin.setSuffix(" h")
         self._granted_limit_spin.setValue(host.granted_time_limit_h)
         self._granted_limit_spin.setToolTip(
             "How long a node from \"Request a node\" stays granted at most. Slurm ends the node at this limit "
@@ -433,14 +432,13 @@ class RemoteFormDialog(QDialog):
             "If your cluster's partition allows less, its limit is used."
         )
         limit_row.addWidget(self._granted_limit_spin)
-        limit_row.addWidget(QLabel("Release when idle after", self._scheduled_box))
+        limit_row.addWidget(QLabel("Release when idle after (min, 0 = never)", self._scheduled_box))
         self._granted_idle_spin = QSpinBox(self._scheduled_box)
         self._granted_idle_spin.setRange(*GRANTED_IDLE_RELEASE_MIN_RANGE)
-        self._granted_idle_spin.setSuffix(" min")
-        self._granted_idle_spin.setSpecialValueText("Never")
+        # Bare numbers: the labels say the unit and what 0 means (Qt refuses typing over text inside the box).
         self._granted_idle_spin.setValue(host.granted_idle_release_min)
         self._granted_idle_spin.setToolTip(
-            "A granted node that no run has used for this long is released. \"Never\" keeps it until you press "
+            "A granted node that no run has used for this long is released. 0 keeps it until you press "
             "Release, quit All-Well, or the time limit runs out."
         )
         limit_row.addWidget(self._granted_idle_spin)

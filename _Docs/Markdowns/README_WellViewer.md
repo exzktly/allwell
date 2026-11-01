@@ -5891,7 +5891,8 @@ the sentence names it.
 
 **Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
 brightness and nanowell fluorescence against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
-six nanowells to compare; clicking empty space on the plot clears them. A timepoint where the
+six nanowells to compare; the **✕** at the top of the site detail closes it and clears them, as does clicking empty
+space on the plot. A timepoint where the
 nanowell has no number is a gap and a hatched band, with its state written above the plot — never a zero.
 Under the plots, a strip of crops shows the first selected nanowell at each timepoint, cut at full resolution
 from the image the run segmented (the well's archive in `in/`). When that archive is not beside the dataset

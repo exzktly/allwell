@@ -1638,10 +1638,16 @@ archives and outputs are always written as per-well `.zip` archives. See
     for a nanowell run unless you are measuring: each worker sizes how many
     network tiles it runs at once to its share of the GPU's memory, so more
     workers on one GPU each run smaller batches rather than running out of
-    memory, but whether a third worker is faster than two has not been
+    memory. The share counts only the memory that is actually free on that GPU
+    when the worker starts, so a GPU partly held by something else — another
+    run, a process left behind by an earlier one, another user's job — gives
+    smaller batches instead of an out-of-memory error. Whether a third worker is faster than two has not been
     measured. Compare the count's `s each` in the log with each setting on one
     well before changing it for a plate. Each worker's log says the batch it
-    chose (`Cellpose cpsam network batch: 32 tiles a pass …`); if a pass still
+    chose and how much of the GPU was free (`Cellpose cpsam network batch: 32
+    tiles a pass (… 3 worker(s) share cuda:0's 22.0 GB, 21.1 GB of it free …)`);
+    a free figure well below the total means something else holds that GPU's
+    memory, which `nvidia-smi` names. If a pass still
     runs out of GPU memory, the worker halves its batch, says so in the log,
     and carries on.
     If a worker cannot even load its model because the other workers have

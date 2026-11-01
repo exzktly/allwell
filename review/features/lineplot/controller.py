@@ -1139,6 +1139,12 @@ def redraw_line_plots(
         color_mode=line_color_mode(ctx.state.plot),
     )
 
+    from review.core.channel_state_controller import on_cut_not_set
+    if on_cut_not_set(ctx, ctx.state.channel.active_val_col, channel=ctx.state.channel.active_channel):
+        # The Fraction / Events panels of a cutoff that cuts nothing are 1.0 and the cell count by construction.
+        from review.core.threshold_note import blank_for_unset_cut
+        blank_for_unset_cut(ax_frac, ax_n)
+
     ctx.notify.set_status(line_status_text(
         ctx, series_list, fc_misses, active_rsets, selected))
 

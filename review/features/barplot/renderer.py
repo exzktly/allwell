@@ -1153,6 +1153,12 @@ def redraw_bars(ctx) -> None:
     threshold = on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col,
         channel=ctx.state.channel.active_channel)
+    from review.core.channel_state_controller import on_cut_not_set
+    from review.core.threshold_note import blank_for_unset_cut
+    # A cutoff nobody set that cuts nothing draws a 1.0 / N panel for every well;
+    # it is replaced by a sentence saying so, after the panels are drawn.
+    cut_not_set = on_cut_not_set(ctx, ctx.state.channel.active_val_col,
+                                 channel=ctx.state.channel.active_channel)
 
     active_rsets = plot_replicate_sets(ctx)
     # Keep the Display-popover toggles (notably "Pool Replicates", hidden until
@@ -1251,6 +1257,8 @@ def redraw_bars(ctx) -> None:
                 ctx, ax_mean,
                 f"{_per_cell_mode_name(ctx)} draws per-cell points rather than "
                 f"bars, and the brackets need bars to sit on.")
+        if cut_not_set:
+            blank_for_unset_cut(ax_frac, ax_n)
         apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
         return
     draw_grouped_bar_mode(
@@ -1265,6 +1273,8 @@ def redraw_bars(ctx) -> None:
         band_lbl=band_lbl,
         use_sem=use_sem,
     )
+    if cut_not_set:
+        blank_for_unset_cut(ax_frac, ax_n)
     apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
 
 

@@ -1127,6 +1127,36 @@ def on_cutoff_for_column(ctx, val_col: str, *, channel: str | None = None) -> fl
     return get_thresh_frac_on(ctx, channel)
 
 
+def on_cut_not_set(ctx, val_col: str, *, channel: str | None = None) -> bool:
+    """Whether *val_col*'s ON cutoff is one nobody set **and** that cuts nothing.
+
+    A channel with no stored ThreshFracOn falls back to its default. For the
+    segmentation channel that default is 0.0 — no cut — so "fraction of cells
+    above threshold" is 1.0 and "events above threshold" is the cell count, for
+    every well, by construction. Drawn as bars they look like a measurement. A
+    nanowell run hits this on its first plot: its segmentation channel is the
+    phase channel, and every intensity column is above 0.
+
+    A cutoff the user stored is data, including a deliberate 0. A readout
+    channel's non-zero default (50.0) is a real cut and keeps drawing. Counts
+    and shape columns are not intensity cuts and never qualify.
+    """
+    from review.domain.gating_state import default_thresh_frac_on
+    from review.domain.metric_registry import CUTOFF_INTENSITY, cutoff_kind_for_column
+
+    if cutoff_kind_for_column(val_col) != CUTOFF_INTENSITY:
+        return False
+    if channel is None:
+        from review.data.metric_labels import split_metric_col
+        parts = split_metric_col(val_col) if isinstance(val_col, str) else None
+        channel = parts[0] if parts else ctx.state.channel.active_channel
+    # Read defensively, as ``get_thresh_count_on`` is: unit tests stand the state up as a bare namespace.
+    stored = getattr(getattr(ctx.state, "cell_gating", None), "thresh_frac_on", None)
+    if stored is None or _gating_row_key(ctx, channel) in stored:
+        return False
+    return default_thresh_frac_on(channel, seg_channel_token_of(ctx)) == 0.0
+
+
 def ensure_cell_gating_tab_built(ctx) -> bool:
     """Materialize the lazily-built Cell Gating sub-tab and return whether its
     widget maps now exist.

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 import time
 
 import pytest
@@ -28,7 +29,7 @@ from analyze import granted_node_panel as gnp                                   
 from analyze.granted_node_panel import GrantedNodePanel                           # noqa: E402
 from analyze.remote_dialog import ManageRemotesDialog                             # noqa: E402
 from services.remote_config import RemoteHost, write_remote                       # noqa: E402
-from services.remote_hold import node_for                                         # noqa: E402
+from services.remote_hold import live_nodes, node_for                             # noqa: E402
 from tests._hold_cluster import HOST, Cluster, Script, granted_files             # noqa: E402
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
@@ -42,9 +43,24 @@ def cluster(tmp_path, monkeypatch):
     c = Cluster(tmp_path)
     monkeypatch.setattr(gnp, "DatasetCache", lambda host: c)
     yield c
+    _join_panel_threads()
     for node in remote_hold.live_nodes():
         node.stop_beating()
     remote_hold._NODES.clear()
+
+
+def _join_panel_threads(timeout_s: float = 10.0) -> None:
+    """Wait for every thread the Granted node panel started (``aw-granted-node-read`` / ``-request`` / ``-release``).
+
+    A read still answering when a test ends calls ``GrantedNode.attach``, which starts a heartbeat for a live node
+    whenever it has none. Stopping the heartbeats first and letting that read land afterwards restarts one, and the
+    autouse run-thread check reports it against the test that happened to end mid-read. So the panel's threads finish
+    first, and only then are the heartbeats stopped.
+    """
+    deadline = time.monotonic() + timeout_s
+    for thread in threading.enumerate():
+        if thread.name.startswith("aw-granted-node-") and thread is not threading.current_thread():
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
 
 @pytest.fixture
@@ -230,3 +246,31 @@ def test_the_dialog_shows_the_panel_for_the_selected_host(qtbot, tmp_path, monke
             dlg._list.setCurrentRow(row)
     qtbot.waitUntil(lambda: dlg._node_panel._host.name == "plain", timeout=5000)
     assert not dlg._node_panel._request_btn.isEnabled() and "schedules" in _text(dlg._node_panel)
+
+
+# ── teardown ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_a_read_still_running_when_the_test_ends_leaves_no_heartbeat(qtbot, panel, cluster, monkeypatch):
+    """A read the panel started is still answering when the test ends — the timer's, or the one a finished Request
+    asks for — and ``attach`` starts a heartbeat for the granted node after the ``cluster`` fixture stopped them.
+
+    Wrong implementation: a teardown that stops the heartbeats without waiting for the panel's threads, which the
+    autouse run-thread check then reports against whichever test happened to end mid-read (it did, in CI, on
+    ``test_request_sends_the_hosts_command_to_the_scheduler_and_shows_the_node``).
+    """
+    from services.remote_hold import GrantedNode
+
+    host = RemoteHost(**HOST)
+    _seed_granted(cluster, host)
+    panel.set_host(host)
+    qtbot.waitUntil(lambda: panel._release_btn.isEnabled(), timeout=10000)
+    for node in live_nodes():
+        node.stop_beating()                              # as if the node had been read, and its beat stopped since
+    real = GrantedNode.attach
+
+    def slow_attach(self):
+        time.sleep(0.5)                                  # still answering when the test body returns
+        return real(self)
+
+    monkeypatch.setattr(GrantedNode, "attach", slow_attach)
+    panel.refresh()

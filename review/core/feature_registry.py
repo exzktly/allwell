@@ -125,6 +125,11 @@ class FeatureDescriptor:
     # because a widget-presence check happens to return first, which is an
     # accident of layout rather than a contract.
     services: Mapping[str, Callable] = field(default_factory=dict)
+    # What this Plotting leaf can draw its points from (``review/domain/observation.py``): ``("cells",)``, or
+    # ``("cells", "nanowells")`` for a leaf that reads nanowell observations. The band's Observations toggle is
+    # offered on a leaf that declares nanowells, on a nanowell dataset, in a build with the Nanowells feature;
+    # ``tests/test_observations_band.py`` holds every Plotting leaf to a declaration with a reason.
+    observations: tuple[str, ...] = ("cells",)
     # Selection-behaviour flags (replace the hard-coded tab-name string sets).
     per_well_selection: bool = False     # was membership in _PER_WELL_TABS
     single_well_selection: bool = False  # was the smFISH single-well check

@@ -1212,6 +1212,8 @@ def _features() -> list[FeatureDescriptor]:
             on_channel_changed=_channel_scatter,
             redraw=_redraw_scatter,
             states=(StateSpec("scatter", _state_scatter),),
+            # Any nanowell metric against any other, per nanowell or as well medians (scatter/_observations.py).
+            observations=("cells", "nanowells"),
         ),
         FeatureDescriptor(
             name="Distribution", parent="Plotting", build=_build_distribution,

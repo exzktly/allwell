@@ -401,6 +401,11 @@ def redraw_scatter_orchestrate(ctx) -> None:
     timepoints available -> "No timepoints available." placeholder;
     none selected -> "Please select timepoints to plot."
     """
+    from review.domain.observation import NANOWELLS
+    from review.features.scatter import _observations
+    if _observations.sync_controls(ctx) == NANOWELLS:
+        _observations.redraw(ctx, "cells")
+        return
     # Scatter Plot: Cells tab body is built lazily -- bail out if the
     # user triggers a redraw before that builder has run.
     ch_x_var = ctx.widgets.get_or_none("_scatter_ch_x_var")
@@ -491,6 +496,11 @@ def redraw_scatter_agg_orchestrate(ctx) -> None:
     """Redraw the aggregate scatter plot with current selections."""
     stat_x_var = ctx.widgets.get_or_none("_scatter_agg_stat_x_var")
     if stat_x_var is None:
+        return
+    from review.domain.observation import NANOWELLS
+    from review.features.scatter import _observations
+    if _observations.sync_controls(ctx) == NANOWELLS:
+        _observations.redraw(ctx, "aggregate")
         return
     clear_cut_status(ctx)   # before every exit below, not only the drawn one
     # Sync the hidden stat-string combos with the new per-axis

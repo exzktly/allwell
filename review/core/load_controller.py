@@ -864,6 +864,10 @@ def _load_directory_held(ctx, d: Path, label=None) -> None:
     except Exception:
         logging.getLogger("review").exception(
             "post-load active-tab refresh failed")
+    # Whether the Plotting band offers Observations: Cells | Nanowells depends on the dataset just loaded.
+    with swallow("refresh the Plotting band's Observations toggle", level=logging.WARNING):
+        from review.core.observation_band import refresh_current
+        refresh_current(ctx)
     progress.__exit__(None, None, None)
     _say_loaded(ctx, app, n, display, gating_started)
 

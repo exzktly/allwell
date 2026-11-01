@@ -76,6 +76,9 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx))
     ctrl.add_scope("property", metric_y_cb)
     reg.register("_scatter_metric_y_var", metric_y_cb)
+    # Under Observations: Nanowells these four give way to an X / Y nanowell-metric pair.
+    from review.features.scatter._observations import build_axis_controls
+    build_axis_controls(ctx, ctrl, "cells")
 
     # Self-describing — the button's own text carries the "Timepoints: …
     # selected" readout (see update_scatter_tp_selection_display), so it needs

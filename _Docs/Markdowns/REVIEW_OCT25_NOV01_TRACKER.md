@@ -15,7 +15,7 @@ incomplete implementations). Findings were reproduced against the tree before
 being entered here; areas checked and found sound are listed at the end so a
 later reader can tell a cleared area from an unreviewed one.
 
-**Status, derived from the rows below.** Recount with
+**Status, derived from the rows below:** 10 rows — 10 `done`, 0 `todo`, 0 `declined`. Recount with
 `grep -c '| \`done\` |' _Docs/Markdowns/REVIEW_OCT25_NOV01_TRACKER.md` (and
 likewise for `todo` and `declined`); never edit a count by hand alone.
 
@@ -33,3 +33,34 @@ likewise for `todo` and `declined`); never edit a count by hand alone.
 | R8 | #1153 | science | Medium | The mask cache's code identity (`pipeline/nanowell_masks.code_digest`) hashes only `func.__code__`, which holds neither the function's keyword defaults nor the values of module constants it reads. `cellpose_segmenter` leaves `flow_threshold` and `cellprob_threshold` at their signature defaults, so editing either reuses masks the current code would not produce, and the run reports success. | Hash the defaults and keyword defaults of every function digested, and the module's scalar and tuple constants, alongside the code. | `tests/test_nanowell_masks.py::test_the_code_digest_moves_when_a_default_or_a_module_constant_does`, `::test_the_code_digest_is_stable_for_defaults_whose_repr_names_an_address` | `done` |
 | R9 | #1148 | implementation | Medium | `pipeline/cellpose._load_with_gpu_room` retries a CUDA out-of-memory load for ever, backing off to 300 s, on the grounds that another worker will free memory. With one worker, a GPU held by another process, or a GPU too small for the model, nothing frees it, so the well never finishes or fails and a Slurm allocation burns to its time limit. | Bound the total wait, then raise `CellposeUnavailable` so the well lands in `errors/` with the reason. | `tests/test_cellpose_load_oom.py::test_a_load_that_never_fits_is_given_up_after_a_bounded_wait` (times out on main) | `done` |
 | R10 | #1150 | implementation | Low | Analyze's planner (`services/input_resolution_service._plan_grouped_root`, `well_present_in_input`) matches well archives with case-sensitive `Path.match("*.zip")`, while the pipeline and `iter_well_tokens` use `suffix.lower() == ".zip"`. An `in/` of `A01.ZIP` archives the pipeline reads plans as "nothing to process", and a folder beside an upper-case archive is reported as needing zipping. | Use `util.well_token.is_well_archive` for both predicates, and compare the suffix in any case at the three siblings that answer the same question for the run: `pipeline/capacity.sample_image_bytes`, `pipeline/auto_threshold._input_archive_for`, `util/schema_infer`'s archive sampler. | `tests/test_input_layout_plan.py::test_an_upper_case_zip_is_a_well_archive_to_the_planner_as_to_the_run`, `::test_the_pipeline_s_own_archive_lookups_read_an_upper_case_zip` | `done` |
+
+## Checked and found sound
+
+Recorded so a later reader can tell an area that was reviewed and cleared from one nobody looked at.
+
+- **Nanowell science.** The endpoint moving average (trailing, complete-only, a missing timepoint counted as a gap,
+  log₂ averaged as logs); the order rebase → cohort → moving average, the same in Distribution, `wells_summary`,
+  Trajectories and Statistics; Benjamini–Hochberg step-up and its wording; the named-timepoint baseline; the subset
+  builder's all/any and every-timepoint rules; the Extremes split and tie order; rim focus (relative 90th-percentile
+  reference, `MIN_SITES`, measurable-only flagging) on the page, the cell layer and Batch Export alike; the focus
+  gate's join and its place in `VERDICT_LAYERS`; cell gating's per-cell-mean brightness; the empty-well segmenter
+  calibration's fallback and reuse key; smFISH writing blank rather than 0 for uncounted cells.
+- **Remote / HPC.** The seal and finished-well definitions; the batch ledger and hand-off acknowledgement;
+  `merge_fetched_csvs`; scratch per plate and node-local scratch; the held-node hold script, release and log
+  dedupe; the reservation walltime bound; skip wells; `--ntasks` folding.
+- **Analyze / Datasets.** `timepoint_plan` and the converters' resume signature; reading FOVs from the zip; the
+  Concatenate nanowell link's set-aside rule; the job queue's multi-link cycle check and `materialise`; the
+  `zips-only-input` deletions (no live reference left).
+- **Tooling.** `change_scope.py` (an unknown diff is code) and the version-bump workflow.
+
+Not reviewed in depth: #1055, #1057, #1061, #1067, #1073, #1078, #1079, #1082, #1085, #1087, #1090, #1091, #1095,
+#1122–#1127, #1129, #1133–#1137, #1143, and most of #1138's transport, Slurm and identity commits.
+
+Noticed while fixing R10 and left for a change of its own: the Datasets tools match well archives with
+case-sensitive `glob("*.zip")` (`datasets/core/dataset_paths.py`, `datasets/core/convert_marker.py`). The archives
+they read are ones All-Well itself wrote in lower case, so no reviewed defect depends on them.
+
+## Lifetime
+
+Every row above is `done`. This file stays until the follow-up that fixes what the slow lane found on `main`
+(step 7 of the review) closes its own rows here; that pull request deletes it and says so in its body.

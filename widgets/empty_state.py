@@ -50,6 +50,10 @@ from ui import theme
 from widgets import icons
 
 
+#: The progress bar's widest, in characters of the placeholder's font (``setProgress``).
+_PROGRESS_WIDTH_CHARS = 40
+
+
 class EmptyState(QWidget):
     def __init__(self, text: str = "", icon: str = "image", parent=None,
                  *, hint: str = "") -> None:
@@ -164,7 +168,7 @@ class EmptyState(QWidget):
         # whole page: a full-width bar on a wide canvas reads as a banner. Its
         # width shrinks with the page (the layout may give it less), so a
         # phone-width placeholder still fits.
-        self._progress.setMaximumWidth(self.fontMetrics().horizontalAdvance("0") * 40)
+        self._progress.setMaximumWidth(self.fontMetrics().horizontalAdvance("0") * _PROGRESS_WIDTH_CHARS)
 
     def _aw_rescale(self) -> None:
         """Re-measure after a UI scale (phone layout's rescale pass): the

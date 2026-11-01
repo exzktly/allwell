@@ -10,6 +10,7 @@ from functools import partial
 from review.core import rail_plate as _rail_plate
 from core.safe import swallow, swallowed
 from review.core.lazy import lazy as _lazy
+from review.core.feature_registry import FeatureDescriptor
 
 _logger = logging.getLogger("review.runtime_app")
 
@@ -57,7 +58,7 @@ def _sidebar_section_frames(ctx) -> list:
     return out
 
 
-def rail_descriptor(desc):
+def rail_descriptor(desc: FeatureDescriptor | None) -> FeatureDescriptor | None:
     """The descriptor whose ``rail_sections`` the tab switch should show for a
     page, or ``None`` for the rail's default (the main frame).
 

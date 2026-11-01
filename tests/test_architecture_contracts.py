@@ -378,23 +378,14 @@ def _nested_removable_packages() -> dict[str, str]:
     return out
 
 
-#: The one sanctioned shape for reaching a nested removable sub-package from
-#: outside it: a container's own sub-tab dispatch, which selects a builder by the
-#: tab's *name* (``sub.tabText(idx)``). In a stripped build the tab does not
-#: exist, so the branch holding the import is unreachable — which is exactly what
-#: is NOT true of an ordinary helper call, and why this list is per
-#: ``(importer, target package)`` rather than per file.
-#:
-#: `features/registry.py` is exempt wholesale (it is the assembly point) and is
-#: skipped before this is consulted.
-_DISPATCH_EXEMPT = {
-    ("review/features/image_browser/controller.py",
-     "review.features.image_browser.image_table"),
-    ("review/features/image_browser/controller.py",
-     "review.features.image_browser.cell_browser"),
-    ("review/features/image_browser/controller.py",
-     "review.features.image_browser.playground"),
-}
+#: Reaches into a nested removable sub-package from outside it that are
+#: sanctioned, per ``(importer, target package)``. Empty: the one shape that
+#: needed it — Image Browser's container selecting a sub-tab's builder by the
+#: tab's name — is gone, because each sub-leaf's builder is its descriptor's
+#: ``build`` in ``features/registry.py`` (the assembly point, exempt
+#: wholesale and skipped before this is consulted). A new entry needs a reason
+#: why the import is unreachable in a build that strips the package.
+_DISPATCH_EXEMPT: set[tuple[str, str]] = set()
 
 
 def _nested_offenders():

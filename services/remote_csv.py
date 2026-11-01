@@ -14,6 +14,7 @@ from pathlib import Path
 
 from util.aw_safe import swallow
 from util.csv_gz import gz_path, is_gz_csv_name, plain_path
+from util.bounded_run import run_bounded
 
 
 def compress_remote_csvs(host, remote_output_dir: str, well: str,
@@ -38,7 +39,7 @@ def compress_remote_csvs(host, remote_output_dir: str, well: str,
         f'done\n'
     )
     try:
-        res = subprocess.run(
+        res = run_bounded(
             host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
             input=script.encode("utf-8"), capture_output=True, timeout=600)
     except (subprocess.TimeoutExpired, OSError) as exc:

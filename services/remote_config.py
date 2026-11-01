@@ -57,6 +57,7 @@ from services.slurm_batch_script import (
     launcher_from_batch_script,
     single_task,
 )
+from util.bounded_run import run_bounded
 
 _LOG = logging.getLogger(__name__)
 
@@ -1448,7 +1449,7 @@ def query_jupyterhub_profiles(
         remote_cmd += f" {shlex.quote(path)}"
     argv = host.ssh_argv(allocate_tty=False) + [remote_cmd]
     try:
-        result = subprocess.run(
+        result = run_bounded(
             argv, capture_output=True, timeout=timeout, **TEXT_UTF8,
         )
     except subprocess.TimeoutExpired:

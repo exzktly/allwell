@@ -25,6 +25,7 @@ import time
 import pytest
 
 from services.remote_transport import SSH_TIMED_OUT, ssh_control
+from util import bounded_run
 
 pytestmark = pytest.mark.skipif(shutil.which("sh") is None, reason="needs a POSIX sh")
 
@@ -41,7 +42,10 @@ class _Host:
 
 
 def _windows_after_kill(monkeypatch) -> None:
-    """From the child's kill on, ``subprocess`` behaves as it does on Windows (see the module docstring)."""
+    """This process takes the Windows path (``util.bounded_run.WINDOWS``), and from the child's kill on ``subprocess``
+    behaves as it does on Windows (see the module docstring) — so ``subprocess.run`` called anywhere after the kill
+    takes its Windows branch."""
+    monkeypatch.setattr(bounded_run, "WINDOWS", True)
     kill = subprocess.Popen.kill
 
     def kill_then_windows(self):
@@ -81,8 +85,10 @@ class _Echo:
         return ["sh", "-c", self.script, "ssh"]
 
 
-def test_a_command_that_answers_is_unchanged():
-    """The control: output, exit code, stdin as bytes, and check=True's error all still come through."""
+@pytest.mark.parametrize("windows", [True, False], ids=["windows", "posix"])
+def test_a_command_that_answers_is_unchanged(monkeypatch, windows):
+    """The control: output, exit code, stdin as bytes, and check=True's error all still come through, on both paths."""
+    monkeypatch.setattr(bounded_run, "WINDOWS", windows)
     ok = ssh_control(_Echo('echo out; echo err >&2; exit 3'), [], check=False, timeout_s=10)
     assert (ok.returncode, ok.stdout, ok.stderr) == (3, "out\n", "err\n")
     piped = ssh_control(_Echo("cat"), [], check=False, timeout_s=10, stdin=b"a\nb\n")

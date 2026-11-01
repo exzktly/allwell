@@ -39,6 +39,7 @@ from services.remote_config import (
     unattended_options,
 )
 from util.aw_safe import swallow, swallowed
+from util.bounded_run import run_bounded
 from services.subprocess_kill import own_process_group_kwargs
 from services.subprocess_text import TEXT_UTF8
 
@@ -113,7 +114,7 @@ def _rsync_version() -> tuple[int, int]:
     ``_rsync_supports_append_verify`` (≥ 3.0) so we don't fork+exec
     ``rsync --version`` twice on startup."""
     try:
-        result = subprocess.run(
+        result = run_bounded(
             [resolve_rsync_binary(), "--version"],
             capture_output=True, timeout=5, **TEXT_UTF8,
         )
@@ -593,7 +594,7 @@ def _rsync_run_cancellable(
     killed mid-flight (the bug that made the final per-well fetch retry-loop
     and fail on big zips / slow links)."""
     if stop_event is None:
-        return subprocess.run(
+        return run_bounded(
             cmd, capture_output=capture_output,
             timeout=timeout, cwd=cwd, **TEXT_UTF8,
         )
@@ -767,67 +768,26 @@ def recover_dead_master(host: "RemoteHost") -> bool:
     if not any(a.startswith("ControlMaster=") for a in base):
         return False
     try:
-        if subprocess.run(base + ["true"], capture_output=True,
+        if run_bounded(base + ["true"], capture_output=True,
                           timeout=_MASTER_PROBE_TIMEOUT_S).returncode == 0:
             return False
     except subprocess.TimeoutExpired:
         swallowed("the shared ssh connection's probe timed out")
     try:
-        fresh = subprocess.run(_without_connection_sharing(base) + ["true"],
+        fresh = run_bounded(_without_connection_sharing(base) + ["true"],
                                capture_output=True, timeout=_MASTER_PROBE_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return False
     if fresh.returncode != 0:
         return False
     try:
-        subprocess.run([*base[:-1], "-O", "exit", base[-1]], capture_output=True,
+        run_bounded([*base[:-1], "-O", "exit", base[-1]], capture_output=True,
                        timeout=_MASTER_PROBE_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         swallowed("closing a shared ssh connection that stopped answering")
     _log.warning("the shared ssh connection to %s had stopped answering while a "
                  "fresh one worked; it was closed and the command retried", host.ssh_alias)
     return True
-
-
-#: How long a timed-out control command's output is waited for once the child has been killed.
-_AFTER_KILL_S = 2.0
-
-
-def _run_bounded(cmd: list[str], *, check: bool, timeout: float, input: bytes | None = None,
-                 **kw) -> subprocess.CompletedProcess:
-    """``subprocess.run(cmd, capture_output=True, check=check, timeout=timeout, input=input, **kw)``, except that a
-    timeout returns at the timeout on every platform.
-
-    On Windows, ``run`` kills a child that timed out and then calls ``communicate()`` with no timeout to collect its
-    output. That waits for the pipes to close, and a process the child started — ssh's ProxyJump hop, a
-    ProxyCommand — inherits them and keeps them open after the child is gone, so the call never returns. A heartbeat
-    thread went silent that way, for good and without a word, and the granted node it was keeping released itself
-    under a running step (``tests/test_a_control_command_returns_at_its_timeout_on_windows.py``). Here the output is
-    waited for :data:`_AFTER_KILL_S` after the kill and then abandoned: what a timed-out command printed is not worth
-    a thread.
-    """
-    # Not ``with Popen(...)``: its exit closes the pipes, and on Windows closing one blocks on the lock that a reader
-    # thread still stuck in ``read()`` holds. Pipes abandoned after a timeout close when the process holding them ends.
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else None,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kw)
-    try:
-        out, err = proc.communicate(input, timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        proc.kill()
-        try:
-            exc.stdout, exc.stderr = proc.communicate(timeout=_AFTER_KILL_S)
-        except subprocess.TimeoutExpired:
-            swallowed("a timed-out control command's pipes were held open after it was killed")
-            proc.wait()                    # the child itself is dead; only the pipes outlive it
-        raise
-    except BaseException:
-        proc.kill()
-        proc.wait()
-        raise
-    code = proc.returncode
-    if check and code:
-        raise subprocess.CalledProcessError(code, cmd, out, err)
-    return subprocess.CompletedProcess(cmd, code, out, err)
 
 
 def ssh_control(host: "RemoteHost", remote: list[str], *, check: bool,
@@ -854,7 +814,7 @@ def ssh_control(host: "RemoteHost", remote: list[str], *, check: bool,
     kw: dict = {"input": stdin} if stdin is not None else dict(TEXT_UTF8)
     for attempt in (1, 2):
         try:
-            raw = _run_bounded(cmd, check=check, timeout=timeout_s, **kw)
+            raw = run_bounded(cmd, capture_output=True, check=check, timeout=timeout_s, **kw)
             break
         except subprocess.CalledProcessError as exc:
             raise RemoteCommandError(exc.returncode, exc.cmd, _as_text(exc.stdout),

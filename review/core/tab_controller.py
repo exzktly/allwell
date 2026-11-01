@@ -39,33 +39,40 @@ split_visible_provider = None   # fn(ctx) -> set[str] of visible leaves | None
 split_nav_intercept = None      # fn(ctx, key) -> bool (True = consume nav)
 
 
-#: The per-tab sidebar sections, in the order they are stacked on the rail.
-#: Hidden together at the top of every tab change and shown again by whichever
-#: ``on_activate`` hooks run. ``_sidebar_cell_browser_frame`` is deliberately in
-#: the list even though it is designed to show *alongside* the main frame: it
-#: carries no plate, so it never competes for the picker.
-SIDEBAR_SECTION_FRAMES = (
-    "_sidebar_main_frame",
-    "_sidebar_preview_frame",
-    "_sidebar_image_table_frame",
-    "_sidebar_sample_frame",
-    "_sidebar_cell_browser_frame",
-)
-
-
 def _sidebar_section_frames(ctx) -> list:
-    """Every per-tab sidebar section that currently exists.
+    """Every per-tab rail frame that currently exists, in rail order.
 
-    Missing entries are skipped rather than assumed: several of these frames
-    belong to removable features, and a profile build without one registers no
-    widget for it.
+    The list is the registry's (``FeatureRegistry.rail_sections``): the frames
+    the present pages declare, which are exactly the frames the shell built.
+    Hidden together at the top of every tab change and shown again for the
+    pages on screen by :func:`show_rail_sections`. Cell Browser's frame is in it
+    even though it shows *alongside* the main frame: it carries no plate, so it
+    never competes for the picker.
     """
     out = []
-    for name in SIDEBAR_SECTION_FRAMES:
-        frame = ctx.widgets.get_or_none(name)
+    for sec in ctx.features.rail_sections():
+        frame = ctx.widgets.get_or_none(sec.key)
         if frame is not None:
             out.append(frame)
     return out
+
+
+def show_rail_sections(ctx, desc) -> None:
+    """Show the rail frames page *desc* declares, then repaint the rail plate
+    if the main frame is among them.
+
+    Runs before the page's own ``on_activate``, so a hook carries only what is
+    particular to its page. ``None`` — a page with no descriptor or no hook —
+    shares the main frame, the rail's default.
+    """
+    from review.core.feature_registry import MAIN_RAIL_SECTION
+    sections = desc.rail_sections if desc is not None else (MAIN_RAIL_SECTION,)
+    for sec in sections:
+        frame = ctx.widgets.get_or_none(sec.key)
+        if frame is not None:
+            frame.setVisible(True)
+    if any(sec.key == MAIN_RAIL_SECTION.key for sec in sections):
+        ctx.coordinator.refresh_sidebar_map()
 
 
 def _section_plates(ctx, frame) -> list:
@@ -155,11 +162,11 @@ def on_tab_change(ctx, _e=None) -> None:
     sync_heatmap_well_drag_mode(ctx, tab == "Heat Map")
 
     # Per-tab activation is dispatched through the feature registry: each
-    # descriptor's ``on_activate`` hook owns its sidebar-visibility + refresh
-    # (the bodies relocated from this ladder, see ``features/registry.py``). A
-    # tab with no descriptor / no hook falls back to the generic plot path
-    # (unified picker + redraw) — the same behaviour the old ``else`` gave Line
-    # Graphs and any unknown leaf.
+    # descriptor declares its rail frames (``rail_sections``), which
+    # ``show_rail_sections`` shows, and its ``on_activate`` hook does the rest
+    # (``features/registry.py``). A tab with no descriptor or no hook falls back to the
+    # generic plot path (main frame + redraw) — the same behaviour the old
+    # ``else`` gave Line Graphs and any unknown leaf.
     # The other visible pane first, so anything the two hooks both write —
     # the plate's mode, the rep-colour map — settles on the focused pane's
     # terms. Only the hook runs for it: the descriptor-less fallback below
@@ -170,23 +177,24 @@ def on_tab_change(ctx, _e=None) -> None:
     # showing that is all it needs here.
     for _other in _also_visible:
         _other_desc = ctx.features.get(_other)
-        if _other_desc is not None and _other_desc.on_activate is not None:
+        if _other_desc is None or _other_desc.on_activate is None:
+            show_rail_sections(ctx, None)
+        else:
+            show_rail_sections(ctx, _other_desc)
             try:
                 _other_desc.on_activate(ctx)
             except Exception:
                 swallowed(f"tab_controller: on_activate failed for {_other!r}")
-        else:
-            ctx.widgets.get("_sidebar_main_frame").setVisible(True)
     # Which frames the unfocused panes turned on. Everything was hidden a few
     # lines above, so "visible now" is exactly "shown by one of those hooks".
     _other_frames = [f for f in _frames if not f.isHidden()]
 
     desc = ctx.features.get(tab)
     if desc is not None and desc.on_activate is not None:
+        show_rail_sections(ctx, desc)
         desc.on_activate(ctx)
     else:
-        ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-        ctx.coordinator.refresh_sidebar_map()
+        show_rail_sections(ctx, None)
         redraw_app(ctx)
 
     # **One well picker on screen, and it belongs to the focused pane.** Three
@@ -531,7 +539,8 @@ def sync_section_nav_from_notebook(ctx) -> None:
         for title in nb.pageNames():
             if title in existing:
                 continue
-            nav.addItem(title, icon=app._SECTION_ICONS.get(title), key=title)
+            desc = ctx.features.get(title)
+            nav.addItem(title, icon=(desc.icon or None) if desc else None, key=title)
             app._section_nav_keys.append(title)
         cur = nb.currentName() if nb.count() else None
         if cur:

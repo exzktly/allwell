@@ -564,43 +564,25 @@ def build_ui(win) -> None:
         SLOT_KEY, build_rail_plate_slot(sidebar))
     sidebar_layout.addWidget(win._sidebar_plate_slot, 0)
 
-    win._sidebar_main_frame = win._ctx.widgets.register("_sidebar_main_frame", QWidget())
-    QVBoxLayout(win._sidebar_main_frame).setContentsMargins(0, 0, 0, 0)
-    sidebar_layout.addWidget(win._sidebar_main_frame, 1)
-
-    win._sidebar_line_frame = win._sidebar_main_frame
-    # Companion frames stacked in the sidebar and toggled by
-    # _on_tab_change.  All are hidden initially; the tab handler shows
-    # the relevant one.
-    win._sidebar_preview_frame = win._ctx.widgets.register("_sidebar_preview_frame", QWidget())
-    # The Image Table / Cell Browser sidebar frames are read back by the
-    # ctx-native Image Browser sub-tab controller, so register them (the registry
-    # stamps ``win._<name>`` too, keeping the win-native tab_controller /
-    # registry visibility readers resolving unchanged).
-    win._sidebar_image_table_frame = win._ctx.widgets.register(
-        "_sidebar_image_table_frame", QWidget())
-    win._sidebar_sample_frame = win._ctx.widgets.register("_sidebar_sample_frame", QWidget())
-    win._sidebar_cell_browser_frame = win._ctx.widgets.register(
-        "_sidebar_cell_browser_frame", QWidget())
-    # Statistics is deliberately absent: its comparison-group editor is part of
-    # the Statistics page, not of the rail, so the tab contributes no section
-    # and no well picker here.
-    for w in (win._sidebar_preview_frame, win._sidebar_image_table_frame,
-              win._sidebar_sample_frame):
-        QVBoxLayout(w).setContentsMargins(0, 0, 0, 0)
-        sidebar_layout.addWidget(w, 1)
-        w.hide()
-    # Cell Browser is the one sub-tab that shows ALONGSIDE the main well-plate
-    # frame (it has no plate of its own — it filters cells by criteria). Give it
-    # stretch 0 so the plate (stretch 1) owns the vertical slack and the Cell
-    # filters sit compact beneath it, instead of the rail splitting 50/50.
-    QVBoxLayout(win._sidebar_cell_browser_frame).setContentsMargins(0, 0, 0, 0)
-    sidebar_layout.addWidget(win._sidebar_cell_browser_frame, 0)
-    win._sidebar_cell_browser_frame.hide()
+    # The per-page frames, one per ``RailSection`` the present pages declare
+    # (``FeatureRegistry.rail_sections``): the main frame first, then each
+    # feature's own in declaration order. The tab switch hides them from the
+    # same list and shows the ones the pages on screen declare, so a frame
+    # exists only because a page declares it and a profile that drops the page
+    # drops its frame. Each registers under its key, which also stamps
+    # ``win.<key>`` for the readers that still reach it there. Statistics is
+    # deliberately absent: its comparison-group editor is part of the page, so
+    # the tab contributes no section and no well picker here.
+    for _sec in win._ctx.features.rail_sections():
+        _frame = win._ctx.widgets.register(_sec.key, QWidget())
+        QVBoxLayout(_frame).setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.addWidget(_frame, _sec.stretch)
+        _frame.hide()
+    win._ctx.widgets.get("_sidebar_main_frame").setVisible(True)
     # Somewhere for the surplus height to go when no per-page frame is showing.
     # The scroll area above is ``setWidgetResizable(True)``, so this column is
     # always stretched to the viewport; every frame in it is hidden on each page
-    # change and the active page's hook re-shows one, but Home deliberately shows
+    # change and the tab switch re-shows the active page's, but Home deliberately shows
     # none. Stretch **0**, not 1: a factor of 1 would compete with
     # ``_sidebar_main_frame``'s own stretch and halve the rail plate on every
     # other page. Measured — the main frame stays 527px on Plotting with and

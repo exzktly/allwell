@@ -181,7 +181,9 @@ def sync_home_sidebar(ctx) -> None:
     """Put the page's own chrome in the state the current tab warrants.
 
     **Home has no rail body**, which is what :func:`activate_home` has always
-    said and what the rail's sample frame used to contradict. That frame carried
+    said and what the rail's sample frame used to contradict. That frame is
+    gone — Home declares no ``rail_sections``, so the tab switch shows none. It
+    carried
     ``_rep_map_plate``, and two descriptor fields grew to manage it:
     ``reads_well_selection``, which greyed it on a tab that asked nothing of it,
     and ``owns_plate``, which hid it on a tab drawing a plate of its own —
@@ -208,9 +210,6 @@ def sync_home_sidebar(ctx) -> None:
     the indirection ``plot_members`` already uses for the bar tab's drag order.
     """
     name = current_subtab(ctx)
-    frame = ctx.widgets.get_or_none("_sidebar_sample_frame")
-    if frame is not None:
-        frame.setVisible(False)
     btn = ctx.widgets.get_or_none(IMPORT_KEY)
     if btn is not None:
         # Import brings in replicate groups and nothing else: a file's well

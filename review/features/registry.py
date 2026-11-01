@@ -26,10 +26,24 @@ import logging
 from dataclasses import replace
 
 from review.core.feature_registry import (
+    MAIN_RAIL_SECTION,
     FeatureDescriptor,
     FeatureRegistry,
+    RailSection,
     StateSpec,
 )
+
+#: The rail frames the pages declare (``FeatureDescriptor.rail_sections``).
+#: Core shows a page's frames, and repaints the rail plate when the main frame
+#: is among them, before the page's ``on_activate`` hook runs.
+_MAIN = (MAIN_RAIL_SECTION,)
+#: Segmentation's single-well picker and the preview beneath it.
+_PREVIEW = (RailSection("_sidebar_preview_frame"),)
+#: The Image Table's own multi-select picker, which ignores replicate sets.
+_IMAGE_TABLE = (RailSection("_sidebar_image_table_frame"),)
+#: Cell Browser's filters show *beside* the main frame, under the shared plate,
+#: so they take none of the rail's slack.
+_CELL_BROWSER = (MAIN_RAIL_SECTION, RailSection("_sidebar_cell_browser_frame", stretch=0))
 
 _logger = logging.getLogger("review.runtime_app")
 
@@ -204,7 +218,6 @@ def _activate_segmentation(ctx) -> None:
         refresh_review_image_ctx, update_preview_ctx,
     )
     sync_preview_well_for_image_tabs(ctx)
-    ctx.widgets.get("_sidebar_preview_frame").setVisible(True)
     refresh_preview_picker(ctx)
     update_preview_ctx(ctx, ctx.state.preview.selected_well)
     refresh_review_image_ctx(ctx)
@@ -218,9 +231,6 @@ def _activate_image_table(ctx) -> None:
         image_table_refresh_empty_state, image_table_refresh_picker,
         image_table_repopulate_dropdowns,
     )
-    frame = ctx.widgets.get_or_none("_sidebar_image_table_frame")
-    if frame is not None:
-        frame.setVisible(True)
     image_table_repopulate_dropdowns(ctx)
     image_table_refresh_picker(ctx)
     image_table_refresh_empty_state(ctx)
@@ -270,8 +280,6 @@ def _activate_statistics(ctx) -> None:
 
 def _activate_multivariate(ctx) -> None:
     from review.features.multivariate.controller import mv_on_activate
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
     mv_on_activate(ctx)
 
 
@@ -279,12 +287,9 @@ _NANOWELL = "review.features.nanowell.controller"
 
 
 def _activate_nanowell(ctx) -> None:
-    # The tab switch hides every sidebar section before the hook runs, so the
-    # hook has to put the rail plate back — Nanowells is a per-well page whose
-    # well comes from that plate, and a bare ``nw_on_activate`` left it hidden.
+    # Nanowells is a per-well page whose well comes from the rail plate; the
+    # descriptor declares the main rail section, so the tab switch shows it.
     from review.features.nanowell.controller import nw_on_activate
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
     nw_on_activate(ctx)
 
 
@@ -335,14 +340,10 @@ def _redraw_nanowell():
 
 def _activate_spatial(ctx) -> None:
     from review.features.spatial.controller import sp_on_activate
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
     sp_on_activate(ctx)
 
 
 def _activate_batch_export(ctx) -> None:
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
     state = ctx.runtime.batch_export.inline_state
     if state:
         from review.features.batch_export.tab_view import _show_batch_mode
@@ -350,8 +351,6 @@ def _activate_batch_export(ctx) -> None:
 
 
 def _activate_review_csv(ctx) -> None:
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
     # ``refresh_review_csv`` lives in ``image_browser.review_image``. Review CSV is
     # its own feature but borrows that hydration logic, so guard the cross-feature
     # call: when Image Browser has been removed the table just isn't hydrated
@@ -369,7 +368,6 @@ def _activate_review_csv(ctx) -> None:
 def _activate_smfish(ctx) -> None:
     from review.core.selection_controller import set_selected_wells
     from review.features.smfish.tab_view import smfish_sync_from_app
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
     sel = ctx.state.selection
     if len(sel.selected_wells) > 1:
         keep = (
@@ -381,19 +379,16 @@ def _activate_smfish(ctx) -> None:
         # properly -- bypassing it leaves the next selection diff
         # mis-attributing cross-tab additions / removals.
         set_selected_wells(ctx, {keep}, commit=False)
-    ctx.coordinator.refresh_sidebar_map()
+        # The tab switch repainted the plate before this hook narrowed the
+        # selection to one well; repaint it for the narrowed one.
+        ctx.coordinator.refresh_sidebar_map()
     smfish_sync_from_app(ctx)
 
 
 def _activate_cell_browser(ctx) -> None:
-    # Show the canonical well selector (plate) above the Cell Browser's own
-    # filter sidebar — its gallery is scoped to the selected wells, so it
-    # needs the same well picker every other tab has.
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
-    frame = ctx.widgets.get_or_none("_sidebar_cell_browser_frame")
-    if frame is not None:
-        frame.setVisible(True)
+    # The descriptor declares the main frame and Cell Browser's filter frame:
+    # its gallery is scoped to the selected wells, so it needs the same well
+    # picker every other tab has, with its filters compact beneath it.
     for _refresh in (ctx.runtime.cell_browser.refreshers or ()):
         _refresh(ctx)
 
@@ -405,9 +400,8 @@ def _activate_playground(ctx) -> None:
     )
     # Playground is a single-well tab: it picks its channel/timepoint/FOV via
     # in-tab dropdowns, but its well comes from the ever-present sidebar plate.
-    # Show that plate, then reconcile it with the frame's single well and render.
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
+    # The descriptor declares that plate's frame; this reconciles it with the
+    # frame's single well and renders.
     try:
         playground_activate(ctx)
     except Exception:
@@ -418,8 +412,6 @@ def _activate_saved_plots(ctx) -> None:
     from core.safe import swallowed
     # Gallery of previously saved plots — no plate selection needed; just
     # repaint from the (per-dataset) store on each visit.
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
     try:
         from review.features.saved_plots.controller import (
             refresh_saved_plots_gallery,
@@ -432,8 +424,6 @@ def _activate_saved_plots(ctx) -> None:
 def _activate_bar_plots(ctx) -> None:
     from review.features.barplot.controller import update_bar_tp_menu
     from review.features.barplot.renderer import redraw_bars
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
     update_bar_tp_menu(ctx)
     redraw_bars(ctx)
 
@@ -441,8 +431,6 @@ def _activate_bar_plots(ctx) -> None:
 def _activate_scatter(ctx) -> None:
     from review.features.scatter.controller import update_scatter_menus
     from review.features.scatter.tab_view import scatter_redraw_active
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
     update_scatter_menus(ctx)
     scatter_redraw_active(ctx)
 
@@ -452,8 +440,6 @@ def _activate_heatmap(ctx) -> None:
     # The timepoint menu is a plate scan (remembered per well); filled when the
     # tab is shown rather than on every channel change while it is hidden.
     _refresh_heatmap_timepoints(ctx, redraw=False)     # drawn below
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
     if ctx.widgets.has("_heatmap_sidebar_frame"):
         try:
             from review.features.heatmap.sidebar_view import (
@@ -479,10 +465,9 @@ def _activate_distribution(ctx) -> None:
 
 
 def _activate_default_plot(ctx) -> None:
-    # Line Graphs / Distribution — unified picker shown, generic redraw.
+    # Line Graphs / Distribution — the generic redraw (the descriptor declares
+    # the main rail section, which the tab switch shows).
     from review.core.plot_orchestrator import redraw_app
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
     redraw_app(ctx)
 
 
@@ -976,7 +961,8 @@ def _fold_change_scope_bar():
 
 
 def _activate_response(ctx) -> None:
-    """Show the shared sidebar and repaint, as the other plotting leaves do.
+    """Repaint, as the other plotting leaves do (the descriptor declares the
+    main rail section, which the tab switch shows).
 
     Without this the figure was whatever it was when the tab body was first
     built. A leaf that is built while the plate is empty and shown again after
@@ -984,8 +970,6 @@ def _activate_response(ctx) -> None:
     to suggest why — and the generic ``redraw_app`` fan-out reaches only
     Distribution and Heat Map, so nothing else was going to repaint it.
     """
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
     _response_redraw(ctx)
 
 
@@ -1071,7 +1055,7 @@ def _features() -> list[FeatureDescriptor]:
         # page: `centre_view.build_centre` adds pages in registry order and
         # calls `setCurrentIndex(0)`. No special case anywhere.
         FeatureDescriptor(
-            name="Home", group="Home", build=_build_home,
+            name="Home", group="Home", icon="home", build=_build_home,
             states=(StateSpec("home", _state_home),),
             # ``home.sync_sidebar``: the Sample Map tab's layer switch
             # repaints Home's chrome through this — **Import** writes
@@ -1096,15 +1080,18 @@ def _features() -> list[FeatureDescriptor]:
         ),
         # its builder from its local fallback map. Its plot sub-tabs are the
         # sub-leaf descriptors below.
-        FeatureDescriptor(name="Plotting", group="Analysis"),
+        FeatureDescriptor(name="Plotting", group="Analysis", icon="line-chart"),
         FeatureDescriptor(
-            name="Statistics", group="Analysis", build=_build_stats,
+            name="Statistics", group="Analysis", icon="sigma", build=_build_stats,
+            # No ``rail_sections``: Statistics shows the main frame itself, and
+            # only outside Split View — see ``_activate_statistics``.
             states=(StateSpec("stats", _state_stats),),
             on_activate=_activate_statistics,
             on_channel_changed=_channel_stats,
         ),
         FeatureDescriptor(
-            name="Multivariate", group="Analysis", build=_build_multivariate,
+            name="Multivariate", group="Analysis", icon="scatter-chart",
+            rail_sections=_MAIN, build=_build_multivariate,
             lazy_only=True,
             states=(StateSpec("multivariate", _state_multivariate),),
             on_activate=_activate_multivariate,
@@ -1114,7 +1101,8 @@ def _features() -> list[FeatureDescriptor]:
             per_well_selection=True,
         ),
         FeatureDescriptor(
-            name="Spatial", group="Analysis", build=_build_spatial,
+            name="Spatial", group="Analysis", icon="waypoints",
+            rail_sections=_MAIN, build=_build_spatial,
             lazy_only=True,
             states=(StateSpec("spatial", _state_spatial),),
             on_activate=_activate_spatial,
@@ -1124,7 +1112,8 @@ def _features() -> list[FeatureDescriptor]:
             per_well_selection=True,
         ),
         FeatureDescriptor(
-            name="Nanowells", group="Analysis", build=_build_nanowell,
+            name="Nanowells", group="Analysis", icon="hexagon",
+            rail_sections=_MAIN, build=_build_nanowell,
             lazy_only=True,
             states=(StateSpec("nanowell", _state_nanowell),),
             on_activate=_activate_nanowell,
@@ -1145,7 +1134,8 @@ def _features() -> list[FeatureDescriptor]:
         ),
         # ── Images ────────────────────────────────────────────────────────
         FeatureDescriptor(
-            name="Image Browser", group="Images", build=_build_image_browser,
+            name="Image Browser", group="Images", icon="layout-grid",
+            build=_build_image_browser,
             lazy_only=True,
             on_dataset_loaded=_loaded_image_browser,
             states=(
@@ -1168,7 +1158,8 @@ def _features() -> list[FeatureDescriptor]:
                       "image_browser.show_field": _svc_image_browser_show_field},
         ),
         FeatureDescriptor(
-            name="smFISH", group="Images", build=_build_smfish, lazy_only=True,
+            name="smFISH", group="Images", icon="dna", rail_sections=_MAIN,
+            build=_build_smfish, lazy_only=True,
             on_activate=_activate_smfish,
             on_selection_changed=_sel_smfish,
             on_dataset_loaded=_loaded_smfish,
@@ -1177,13 +1168,15 @@ def _features() -> list[FeatureDescriptor]:
         ),
         # ── Data ──────────────────────────────────────────────────────────
         FeatureDescriptor(
-            name="Review CSV", group="Data", build=_build_review_csv,
+            name="Review CSV", group="Data", icon="file-spreadsheet",
+            rail_sections=_MAIN, build=_build_review_csv,
             on_activate=_activate_review_csv,
             on_selection_changed=_sel_review_csv,
             per_well_selection=True,
         ),
         FeatureDescriptor(
-            name="Saved Plots", group="Data", build=_build_saved_plots,
+            name="Saved Plots", group="Data", icon="image",
+            rail_sections=_MAIN, build=_build_saved_plots,
             lazy_only=True,
             on_activate=_activate_saved_plots,
             plot_card_decorator=_saved_plots_card_decorator,
@@ -1194,13 +1187,15 @@ def _features() -> list[FeatureDescriptor]:
                       "saved_plots.report_pdf": _svc_saved_plots_report_pdf},
         ),
         FeatureDescriptor(
-            name="Batch Export", group="Data", build=_build_batch_export,
+            name="Batch Export", group="Data", icon="boxes",
+            rail_sections=_MAIN, build=_build_batch_export,
             on_activate=_activate_batch_export,
         ),
 
         # ── Plotting sub-leaves (no rail entry; dispatch hooks only) ───────
         FeatureDescriptor(
             name="Bar Plots", parent="Plotting", build=_build_barplot,
+            rail_sections=_MAIN,
             states=(StateSpec("bar", _state_bar),),
             on_activate=_activate_bar_plots,
             on_selection_changed=_sel_bar_plots,
@@ -1211,11 +1206,13 @@ def _features() -> list[FeatureDescriptor]:
             observations=("cells", "nanowells"),
         ),
         FeatureDescriptor(name="Line Graphs", parent="Plotting", build=_build_lineplot,
+                          rail_sections=_MAIN,
                           on_activate=_activate_default_plot,
                           redraw=_redraw_line_graphs,
                           # Well medians over time under Observations: Nanowells (lineplot/_observations.py).
                           observations=("cells", "nanowells")),
         FeatureDescriptor(name="Response Curves", parent="Plotting",
+                          rail_sections=_MAIN,
                           build=_build_response, redraw=_redraw_response,
                           on_activate=_activate_response,
                           on_selection_changed=_sel_response,
@@ -1225,6 +1222,7 @@ def _features() -> list[FeatureDescriptor]:
                           view_state_io=_response_view_state_io),
         FeatureDescriptor(
             name="Scatter Plot", parent="Plotting", build=_build_scatter,
+            rail_sections=_MAIN,
             on_activate=_activate_scatter,
             on_selection_changed=_sel_scatter,
             on_channel_changed=_channel_scatter,
@@ -1235,6 +1233,7 @@ def _features() -> list[FeatureDescriptor]:
         ),
         FeatureDescriptor(
             name="Distribution", parent="Plotting", build=_build_distribution,
+            rail_sections=_MAIN,
             on_activate=_activate_distribution,
             on_channel_changed=_channel_distribution,
             redraw=_redraw_distribution,
@@ -1244,6 +1243,7 @@ def _features() -> list[FeatureDescriptor]:
         ),
         FeatureDescriptor(
             name="Heat Map", parent="Plotting", build=_build_heatmap,
+            rail_sections=_MAIN,
             on_activate=_activate_heatmap,
             on_channel_changed=_channel_heatmap,
             redraw=_redraw_heatmap,
@@ -1265,6 +1265,7 @@ def _features() -> list[FeatureDescriptor]:
         # line says. `thin` still lists it, which is now a no-op it can keep or
         # drop freely.
         FeatureDescriptor(name="Segmentation", parent="Image Browser",
+                          rail_sections=_PREVIEW,
                           on_activate=_activate_segmentation, removable=False,
                           services={
                               "review_image.refresh": _svc_review_image_refresh,
@@ -1272,14 +1273,17 @@ def _features() -> list[FeatureDescriptor]:
                                   _svc_review_image_update_preview,
                           }),
         FeatureDescriptor(name="Image Table", parent="Image Browser",
+                          rail_sections=_IMAGE_TABLE,
                           on_activate=_activate_image_table,
                           on_dataset_loaded=_loaded_image_table,
                           view_state_io=_image_table_view_state_io),
         FeatureDescriptor(name="Cell Browser", parent="Image Browser",
+                          rail_sections=_CELL_BROWSER,
                           on_activate=_activate_cell_browser,
                           on_selection_changed=_sel_cell_browser,
                           per_well_selection=True),
         FeatureDescriptor(name="Playground", parent="Image Browser",
+                          rail_sections=_MAIN,
                           on_activate=_activate_playground,
                           on_selection_changed=_sel_playground,
                           on_dataset_loaded=_loaded_playground,

@@ -206,16 +206,23 @@ class EmptyReason:
     ``busy=True`` marks a reason that is work in progress rather than something
     the user must do: the placeholder hides the button and entries its site gave
     it (``EmptyState.setBusy``) for as long as the reason stands.
+
+    ``progress=(done, total)`` puts a progress bar under the words
+    (``EmptyState.setProgress``) for work that can count itself; ``(0, 0)`` is a
+    bar with no known end, for work that is running but cannot say how far it
+    has got. ``None`` — the usual case — shows no bar.
     """
 
-    __slots__ = ("title", "hint", "icon", "busy")
+    __slots__ = ("title", "hint", "icon", "busy", "progress")
 
     def __init__(self, title: str, hint: str = "", icon: str | None = None,
-                 *, busy: bool = False) -> None:
+                 *, busy: bool = False,
+                 progress: tuple[int, int] | None = None) -> None:
         self.title = title
         self.hint = hint
         self.icon = icon
         self.busy = busy
+        self.progress = progress
 
 
 #: The default reason. Every wrapped tab needs a dataset, so this is what a wrap
@@ -321,6 +328,8 @@ def _apply_reason(stack: QStackedWidget, reason: EmptyReason) -> None:
         placeholder.setHint(reason.hint)
         if hasattr(placeholder, "setBusy"):
             placeholder.setBusy(reason.busy)
+        if hasattr(placeholder, "setProgress"):
+            placeholder.setProgress(reason.progress)
         icon = reason.icon or getattr(stack, "_empty_default_icon", None)
         if icon:
             placeholder.setIconName(icon)

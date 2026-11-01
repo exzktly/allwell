@@ -236,6 +236,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_plate_rigid.py": "Plate transforms tested against an independently evaluated screen rotation",
     "test_nanowell_preview_job.py": "Test detection runs in a child process, so a segmenter that kills its process cannot kill the app",
     "test_nanowell_reads_selected_wells.py": "The Nanowells page reads only the wells it draws",
+    "test_nanowell_load_progress.py": "The Nanowells page shows a progress bar while it reads the nanowell tables",
     "test_nanowell_responding_threshold.py": "Fraction responding is counted above a cut the user sets, one per metric, with no default …",
     "test_nanowell_review_data.py": "Review's nanowell data and calculations (tracker Section D), on tables written in the …",
     "test_nanowell_review_load.py": "Review reads what a real nanowell run wrote (tracker D1), and the well loader never reads …",

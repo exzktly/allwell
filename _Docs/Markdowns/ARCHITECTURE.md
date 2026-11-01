@@ -2278,6 +2278,14 @@ and the entries column and shows the hint in their place; any other reason calls
 replaced while busy. Neither is cleared, because Home repaints its recents during
 a load and the list must reappear when it ends.
 
+**A reason may carry a progress bar.** `EmptyReason(progress=(done, total))`
+makes `_apply_reason` call `EmptyState.setProgress`, which shows a token-styled
+`QProgressBar` under the hint (about forty characters wide, centred, shrinking
+with the page); `(0, 0)` is a bar with no known end, and every reason without
+one calls `setProgress(None)`, which hides it. The bar sits in a row widget that
+is hidden with it, so a placeholder without a bar keeps exactly its old
+geometry. The Nanowells page's load is the one site that sets it.
+
 The suppression lives in the widget rather than at the call site because the
 refresher rewrites every placeholder's text, hint and icon on each pass (an
 action set once at build time survives it): a site that blanked its own hint at
@@ -12365,6 +12373,12 @@ included), so a well selected again reads nothing and a deselection neither read
 reads into its own copy of the parts, which `done` adopts. A selection change on the shown page asks for the new
 wells at once (`nw_on_selection_changed`); a hidden page reads on its next show. With nothing selected nothing is
 read, and `_metrics_of` gives an empty table so the page counts as loaded and says what to select.
+While a load runs, its placeholder (*Reading the nanowell tables…*, `_reading_reason`) draws a progress bar: the
+worker counts the wells of each of its two passes — `collect.load_nanowell_data(on_well=…)` over the tables it reads
+now (wells already in `well_parts` cost nothing and are not counted), then `gate_tally(on_well=…)` over their cells
+— and hands each count to the GUI thread through the bridge's `stage` / `progress` signals into
+`state.load_progress`, `(stage, done, total)`. The hint names the pass, since the bar starts again for the second.
+A count from an older request is dropped like its result; before the first count the bar has no known end.
 `tableless_wells` names a drawn well with no usable table — none in the folder, or one read and left out — but
 never a well whose table is still being read. Each load request is numbered and a result for an older one is
 discarded, so a slow load can never replace a newer baseline's figure — including when the baseline goes back to the one

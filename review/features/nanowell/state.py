@@ -208,6 +208,10 @@ class NanowellState:
     hits: object = None                     # renderer.HitMap of the figure on screen
     model: object = None                    # distribution_compute.DistributionModel on screen
     pending_for: object = None              # the (data_dir, baseline) of the request running
+    #: How far the running load has got, as ``(stage, done, total)`` — stage ``"tables"`` while the wells' tables
+    #: are read, ``"gating"`` while Cell Gating is tallied over them — or ``None`` before it has counted anything.
+    #: The page's placeholder draws it as a progress bar (``controller.nanowell_empty_reason``).
+    load_progress: object = None
     bridge: object = None                   # core.worker_bridge.WorkerBridge of the running request
     config_for: object = None               # the data dir whose saved choices are on the state
     crops: dict = field(default_factory=dict)            # (well, q, r) -> {timepoint: image_compute.Crop}

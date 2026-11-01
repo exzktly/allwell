@@ -5992,7 +5992,10 @@ Selecting nanowells does not change the plate selection.
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
 is selected and kept, so selecting it again is instant. While a newly selected well is read, or the figures are
-recomputed, the page dims the figure and shows *Computing…* across it.
+recomputed, the page dims the figure and shows *Computing…* across it. Before the first figure is drawn the page
+says *Reading the nanowell tables…* with a progress bar under it: it counts the wells as their tables are read
+(*Reading the tables: 12 of 40 wells.*), then starts again as their cells are counted for Cell Gating (*Counting
+the gated cells: …*).
 
 **Excluding a well.** On the views that show a **Well** box (Array, Identity, Extremes), **Exclude** beside it
 leaves that well out of every figure on the Nanowells page and out of *Save nanowell data*; each figure then says

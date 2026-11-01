@@ -125,6 +125,9 @@ DEFINITION = {
 #: Sites that list ``<well>_out.zip`` for something other than deciding whether a well is finished. Each names what
 #: it does instead; an entry that stops matching anything fails :func:`test_every_allowlisted_site_still_lists`.
 NOT_A_COMPLETION_DECISION = {
+    "review/features/nanowell/qc_compute.py::signature": (
+        "fingerprints the files the Nanowells QC view read (the identity check's digest covers each well's montages "
+        "in its archive), so the plate is read again when one changes; it decides nothing about completion"),
     "services/remote_listing.py::list_completed_wells": (
         "verify's backstop: every well the remote holds an archive for is one verification must find here — sealed "
         "or not, since an unsealed archive is still output this run may have produced. It decides what to check "

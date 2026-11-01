@@ -18,8 +18,10 @@ from review.features.nanowell.statistics_compute import UNITS as STATS_UNITS
 from review.features.nanowell.subset_compute import Subset
 from review.features.nanowell.subset_compute import restore as restore_subset
 
-AXES = ("time", "wells")            # what the Distribution view's x-axis carries
-VIEWS = ("distribution", "trajectories", "array", "position", "extremes", "identity", "statistics")
+AXES = ("time", "wells")
+#: The QC view's *Wells*: a row for each well with a timepoint needing a look, or for every well with a grid record.
+QC_WELLS = ("needing", "all")            # what the Distribution view's x-axis carries
+VIEWS = ("distribution", "qc", "trajectories", "array", "position", "extremes", "identity", "statistics")
 #: The Identity view's modes (``identity_compute``): the distance map, the two montages blinked in one frame, the two
 #: side by side with a linked cursor, and the registration's correlation surface.
 IDENTITY_MODES = ("distance", "blink", "sides", "diagnostics")
@@ -48,7 +50,7 @@ POSITIONS = ("measured", "lattice")
 #: What a nanowell's fill says: the page's metric, or the state the run recorded for it.
 COLOURINGS = ("metric", "state")
 #: The layers that are on or off, as :class:`ArrayLayers` names them.
-LAYER_SWITCHES = ("nanowells", "addresses", "values", "cells", "tiles", "anchor", "record")
+LAYER_SWITCHES = ("nanowells", "addresses", "values", "cells", "tiles", "anchor", "record", "notes")
 #: The layers drawn in colour over the image, which the page's one *Overlays* button takes off and puts back
 #: together (:meth:`ArrayLayers.without_overlays`). The labels are text, not colour, and keep their own switches.
 OVERLAY_SWITCHES = ("nanowells", "cells", "tiles", "anchor")
@@ -68,6 +70,7 @@ class ArrayLayers:
     tiles: bool = False                     # each tile's placement, coloured by how the run placed it
     anchor: bool = True                     # the anchor set by hand, and the grid status that says whether to set one
     record: bool = False                    # the grid record of every timepoint, beside the figure
+    notes: bool = False                     # the footer's full notes; off, only its counts and what went wrong
 
     PRESETS = ("map", "qc", "full")
 
@@ -179,6 +182,8 @@ class NanowellState:
     stats_unit: str = "nanowells"
     #: The Statistics view's test (``statistics_compute.TEST_KEYS``).
     stats_test: str = "welch"
+    #: The QC view's *Wells* (:data:`QC_WELLS`).
+    qc_wells: str = "needing"
     # ── computed from the dataset (never persisted) ─────────────────────────
     data: object = None                     # collect.NanowellData, or None for a dataset with no nanowells
     metrics: object = None                  # series_compute.site_metrics(data, baseline, focus=rim_focus_rule())
@@ -264,6 +269,20 @@ class NanowellState:
     #: The Statistics view's last result and what it was computed from (``controller.statistics_result``), so a redraw
     #: that changes nothing it depends on — a theme flip, a resize — does not re-run the tests and the bootstrap.
     stats_cache: object = None
+    # The QC view (``_qc_controller``), never persisted: the plate's records as last read (``qc_compute.PlateRecords``)
+    # and the signature of the files they were read from, the signature a read on its way is for and its bridge, the
+    # matrix built from them, what the last draw put on screen, and the last anchor walk's result with the cells it
+    # anchored, ringed until the next click.
+    qc_records: object = None
+    qc_signature: object = None
+    qc_reading: object = None
+    qc_bridge: object = None
+    qc_matrix: object = None
+    qc_matrix_for: object = None
+    qc_drawn: object = None
+    qc_message: str = ""
+    qc_highlight: frozenset = frozenset()
+    qc_error: str = ""                       # why the last read of the plate's records failed, said on the figure
 
     def release_tiles(self) -> None:
         """Stop the reads of the tiles held so far and let their pixels go: another well, timepoint or dataset."""
@@ -301,7 +320,7 @@ class NanowellState:
                 "subset": self.subset.to_config(), "layers": self.layers.to_config(),
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
                 "excluded_wells": list(self.excluded_wells),
-                "stats_unit": self.stats_unit, "stats_test": self.stats_test,
+                "stats_unit": self.stats_unit, "stats_test": self.stats_test, "qc_wells": self.qc_wells,
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -327,6 +346,7 @@ class NanowellState:
         unit, test = config.get("stats_unit"), config.get("stats_test")
         self.stats_unit = unit if unit in STATS_UNITS else fresh.stats_unit
         self.stats_test = test if test in STATS_TESTS else fresh.stats_test
+        self.qc_wells = config.get("qc_wells") if config.get("qc_wells") in QC_WELLS else fresh.qc_wells
         self.subset = _subset_from(config)
         wells = config.get("excluded_wells")
         self.excluded_wells = sorted({w for w in wells if isinstance(w, str) and w}) if isinstance(wells, list) else []

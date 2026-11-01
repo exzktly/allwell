@@ -478,6 +478,123 @@ def test_a_percentage_typed_into_the_rim_focus_box_is_taken(qtbot, page):
                     and not getattr(canvas, "_draw_pending", False), timeout=5000)
 
 
+def test_a_rim_focus_percentage_being_typed_survives_a_redraw_and_a_click_on_the_figure_applies_it(qtbot, page):
+    """Reported: "changes to focus threshold in array do not have an effect". The box commits on Enter or focus-out,
+    and every redraw refreshed the band, whose ``setValue`` rewrote the field with the rule in force — so on the Array
+    view, which redraws as each tile arrives, the number typed was put back before it was ever committed. And a click
+    on the figure did not end the edit either: the canvas took no focus, so the box kept it, uncommitted."""
+    from PySide6.QtCore import QPoint, Qt
+
+    st = _loaded(qtbot, page)
+    spin, canvas = page.widgets.get("_nw_rim_focus_spin"), page.widgets.get("_nw_canvas")
+    edit = spin.lineEdit()
+    qtbot.mouseClick(edit, Qt.LeftButton)
+    edit.selectAll()
+    qtbot.keyClicks(edit, "60")
+    nwc.redraw(page)                                    # a tile arriving, a refit: anything that redraws
+    assert edit.text() == "60"                          # what was typed is still there
+    qtbot.mouseClick(canvas, Qt.LeftButton, pos=QPoint(40, 40))
+    assert page.state.qc.params.nanowell_focus_fraction == 0.6
+    qtbot.waitUntil(lambda: st.focus_for == (True, 0.6) and not st.computing, timeout=20000)
+    timer = page.widgets.get("_nw_refit_timer")
+    qtbot.waitUntil(lambda: not (timer is not None and timer.isActive())
+                    and not getattr(canvas, "_draw_pending", False), timeout=5000)
+
+
+def test_every_rim_focus_change_applies_however_the_box_is_left(qtbot, page):
+    """Reported: "The first change to the field worked. Subsequent changes did not." The box commits on Enter or
+    focus-out, and a click on a canvas, a tool button or a tab bar ends no edit — nor does anything in a window that
+    is not the active one, which is where the first change's application-modal progress popup can leave it. So a
+    number typed and then left was never applied. It now also commits after a pause in typing. Here, as for the
+    reporter, the first change's popup leaves the window inactive (measured under the offscreen platform), so the
+    later changes have no focus-out to commit them."""
+    from PySide6.QtCore import Qt
+
+    from widgets.spin_box import TYPING_PAUSE_MS
+
+    st = _loaded(qtbot, page)
+    spin = page.widgets.get("_nw_rim_focus_spin")
+    edit = spin.lineEdit()
+    edit.selectAll()
+    qtbot.keyClicks(edit, "60")
+    qtbot.keyClick(edit, Qt.Key_Return)                               # the first change, with Enter
+    qtbot.waitUntil(lambda: st.focus_for == (True, 0.6) and not st.computing, timeout=20000)
+    for typed, fraction in (("50", 0.5), ("80", 0.8)):               # then typed and left: no Enter, no focus-out
+        edit.selectAll()
+        qtbot.keyClicks(edit, typed)
+        qtbot.wait(TYPING_PAUSE_MS // 2)
+        assert page.state.qc.params.nanowell_focus_fraction != fraction      # not while still typing
+        qtbot.waitUntil(lambda: page.state.qc.params.nanowell_focus_fraction == fraction, timeout=5000)
+        qtbot.waitUntil(lambda: st.focus_for == (True, fraction) and not st.computing, timeout=20000)
+    canvas, timer = page.widgets.get("_nw_canvas"), page.widgets.get("_nw_refit_timer")
+    qtbot.waitUntil(lambda: not (timer is not None and timer.isActive())
+                    and not getattr(canvas, "_draw_pending", False), timeout=5000)
+
+
+def _key_texts(ctx):
+    fig = ctx.widgets.get("_nw_fig")
+    return [t.get_text() for ax in fig.axes for a in ax.artists if a.get_gid() == "nw-array-key"
+            for t in a.get_texts()]
+
+
+def test_the_array_footer_is_short_until_notes_is_turned_on(qtbot, page):
+    """Reported: "The text at the bottom of the array tab take up way too much space". With *Notes* off (the default)
+    the footer is the page's note, the counts — in the key's own groups, adding up to the roster (UX review N1) — and
+    what went wrong. Notes, on the band beside Overlays as well as in the Layers menu (N6), writes how to read the figure
+    between the array and the footer, in room kept for it either way, so the array neither moves, shrinks nor is
+    covered (N3), and says only what applies to
+    what is drawn: no fused sentence with no fused nanowell, no plain "ok" grid status (N4)."""
+    _loaded(qtbot, page)
+    nwc.set_view(page, "array")
+    st = page.state.feature_slice("nanowell")
+    assert not st.layers.notes and not _texts(page, "nw-array-notes")
+    short = _texts(page, "nw-array-footer")
+    assert "4 nanowells: 3 with a value · 1 occluded" in short
+    assert not any(t.startswith(("Measured positions", "Filled by")) or t.endswith(": ok.") for t in short)
+    where = tuple(st.drawn.ax.get_position().bounds)
+    fig = page.widgets.get("_nw_fig")
+    placed = [t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-array-footer"]
+    button = page.widgets.get("_nw_notes_btn")
+    button.click()                                                     # the band's button
+    assert st.layers.notes and page.widgets.get("_nw_layer_notes").isChecked()
+    assert _texts(page, "nw-array-footer") == short                    # the footer itself is unchanged
+    assert tuple(st.drawn.ax.get_position().bounds) == pytest.approx(where)
+    # The footer's lines stay where they were, the notes going under them (UX review, round 3: a guide between the
+    # array and the counts it explains put the alert line in the middle, and moved it).
+    assert [t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-array-footer"] == pytest.approx(placed)
+    assert max(t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-array-notes") < min(placed)
+    assert _texts(page, "nw-array-notes") == [
+        "Measured positions in the well frame (the square is the central nanowell).",
+        "Fill: Cell count. Grey outline: no value — the words inside say why; hatches and dashes mark states (see key)."]
+    # Written under the array, not over it (UX review round 2: a box over its foot hid the bottom row).
+    renderer = st.drawn.ax.figure.canvas.get_renderer()
+    under = st.drawn.ax.get_window_extent(renderer).y0
+    assert all(t.get_window_extent(renderer).y1 <= under for t in page.widgets.get("_nw_fig").texts
+               if t.get_gid() == "nw-array-notes")
+    nwc.apply_array_preset(page, "qc")                                 # a preset keeps the reader's choice
+    assert st.layers.notes and button.isChecked()
+    page.widgets.get("_nw_layer_notes").trigger()                      # and the menu entry turns both off
+    assert not st.layers.notes and not button.isChecked() and not _texts(page, "nw-array-notes")
+
+
+def test_a_nanowell_with_cells_and_no_fold_change_says_why_on_the_array(qtbot, page):
+    """Asked: "what is the meaning of the nanowell status no value? I see clearly identifiable cells in them". At t_a,
+    A01's nanowell (2, 0) holds 3 cells and (3, 0) holds 1, but at the baseline t_c (2, 0) held none and (3, 0) was
+    occluded: both count fold changes are undefined. Each says which inside itself, and the key names both (UX
+    review B1: the two could not be told apart on the array)."""
+    _loaded(qtbot, page)
+    nwc.set_view(page, "array")
+    nwc._set(page, "metric", "count_fc")
+    nwc.set_timepoint(page, "t_a")
+    st = page.state.feature_slice("nanowell")
+    assert nwc.page_well(page) == "A01" and st.metric == "count_fc"
+    keyed = _key_texts(page)
+    assert 'no value: baseline occluded ("base occl.") · 1' in keyed
+    assert 'no value: no cells at baseline ("0 at base") · 1' in keyed
+    labels = dict(zip([s[1:] for s in st.drawn.sites.sites], _texts(page, "nw-array-address")))
+    assert (labels[(2, 0)].splitlines()[-1], labels[(3, 0)].splitlines()[-1]) == ("0 at base", "base occl.")
+
+
 def test_the_rim_focus_control_on_the_band_changes_the_qc_layer_s_rule_and_the_metrics_follow(qtbot, page):
     """The band's *Rim focus* box and percentage are a mirror of the QC layer's switch: they change the dataset's
     QC parameters, and the page recomputes with the rule: the metrics on hand are stamped with the rule they were

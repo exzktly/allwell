@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from review.features.nanowell._array_key import draw_key, key_entries
+from review.features.nanowell._array_key import KEY_COLUMNS, draw_key, key_entries, reason_tag, state_word
 from review.features.nanowell.array_compute import padded
 from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
@@ -323,7 +323,7 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
     for swarm in panel.swarms:
         rows_here = 0
         if density:
-            _draw_density(ax, swarm, half, ink)
+            _draw_density(ax, swarm, half, ink, fill=model.decoration.inks.get(swarm.group))
         else:
             layout = _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink)
             hidden += layout.n_hidden
@@ -345,10 +345,12 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
             rows_here += 1
         lines_used = max(lines_used, rows_here)
         if subwells and sum(1 for s in panel.swarms if round(s.x) == round(swarm.x)) > 1:
+            # The bare well: the group's own name is on the tick above, and the slot is one well wide.
             _ink(ax.text(swarm.x, 0, swarm.well, transform=_below(ax, 4), ha="center", va="top",
                          fontsize=ANNOTATION_PT, color=muted, gid="nw-subwell"), muted=True)
-    # The axis label goes under whatever the swarms wrote below the ticks.
+    # The axis label goes under whatever the swarms wrote below the ticks, and under the bands' headers.
     ax._aw_gutter_pt = lines_used * line + (ANNOTATION_PT + 4 if subwells else 0) + 4
+    ax._aw_gutter_pt += _draw_bands(ax, panel, gutter + lines_used * line, ink, muted)
     marks = model.identity_marks if model.axis == TIME else {}
     for swarm in panel.swarms:
         if (swarm.well, swarm.label) in marks:
@@ -357,6 +359,35 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
     _draw_centres(ax, model, panel, ink)
     ax.grid(axis="y", alpha=0.3)
     return (len(panel.swarms) if density else 0), hidden
+
+
+#: The depth one row of band headers takes under the axis, in points.
+_BAND_ROW_PT = ANNOTATION_PT + 5
+
+
+def _draw_bands(ax, panel, below_pt: float, ink, muted) -> float:
+    """*Split by*'s bands (and *Then by*'s sub-bands) along the wells axis: each a header centred under its groups,
+    *below_pt* under the axis, with a faint divider between neighbouring bands. Returns the depth drawn, in points.
+
+    Under the group names rather than above the swarms, so a header can never sit on a dot, and the sub-bands
+    first (nearer their groups) with the bands beneath them, which reads outward the way the nesting does.
+    """
+    if not panel.bands:
+        return 0.0
+    depth = 2.0
+    rows = [(panel.sub_bands, "nw-subband", muted, False)] if panel.sub_bands else []
+    rows.append((panel.bands, "nw-band", ink, True))
+    for spans, gid, colour, bold in rows:
+        for first, last, label in spans:
+            _ink(ax.text((first + last) / 2, 0, label, transform=_below(ax, below_pt + depth), ha="center",
+                         va="top", fontsize=ANNOTATION_PT + (0.5 if bold else 0),
+                         fontweight="bold" if bold else "normal", color=colour, gid=gid),
+                 muted=not bold)
+        depth += _BAND_ROW_PT
+    for first, _last, _label in panel.bands[1:]:
+        _ink(ax.axvline(first - 0.5, color=muted, lw=0.8, ls="-", alpha=0.6, zorder=0.4, gid="nw-band-divider"),
+             muted=True)
+    return depth
 
 
 def _draw_centres(ax, model, panel, ink) -> None:
@@ -395,7 +426,14 @@ def _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink):
     idx = layout.index
     x = layout.x + swarm.x
     occupancy = [swarm.occupancy[i] for i in idx]
-    screen, publication = _occupancy_colours(occupancy)
+    value_ink = model.decoration.inks.get(swarm.group)
+    if value_ink is not None:
+        # *Colour by*: the group's value is the dot's colour, the same ink on either ground (data ink does not
+        # follow the theme). Solid for every class — a hollow dot would be decoding occupancy with no key for it.
+        pair = ([value_ink] * len(idx), [value_ink] * len(idx))
+        screen = publication = pair
+    else:
+        screen, publication = _occupancy_colours(occupancy)
     faces, edges = publication if _is_publication(ax) else screen
     coll = ax.scatter(x, layout.y, s=(DOT_PT * 0.9) ** 2, facecolors=faces, edgecolors=edges, linewidths=0.6,
                       zorder=3)
@@ -411,12 +449,13 @@ def _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink):
     return layout
 
 
-def _draw_density(ax, swarm, half, ink) -> None:
-    """A set of more than four wells: each well's nanowells as a density with its median, not dots (U2)."""
+def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:
+    """A set of more than four wells: each well's nanowells as a density with its median, not dots (U2). *fill* is
+    the group's *Colour by* ink, which the density takes in place of the plot's ink."""
     if len(swarm.values) >= 2 and np.ptp(swarm.values) > 0:
         parts = ax.violinplot([swarm.values], positions=[swarm.x], widths=[2 * half], showextrema=False)
         for body in parts["bodies"]:
-            body.set_facecolor(ink)
+            body.set_facecolor(fill or ink)
             body.set_alpha(0.35)
             body.set_edgecolor("none")
             body.set_gid("nw-density")
@@ -467,10 +506,37 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     for i, text in enumerate(reversed(lines)):
         _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=ink if text is line1 else muted,
                       gid="nw-footer-used" if text is line1 else "nw-footer"), muted=text is not line1)
+    if model.decoration.colours:
+        # Coloured by a sample variable: the dots decode by its values, and the occupancy key would decode colours
+        # the figure no longer contains.
+        _value_key(fig, model.decoration)
+        return
     # The occupancy key (U5): the colours decode only with it, and its title names the baseline in use.
     _occupancy_key(fig, "Cells at baseline",
                    baseline=baseline_text(model.baseline),
                    starting=model.starting)
+
+
+def _value_key(fig, decoration) -> None:
+    """*Colour by*'s key at the figure's top right, where the occupancy key otherwise sits: one dot per value
+    drawn, in the variable's order, titled with the variable's name. Only the values drawn — the reader counts the
+    key (``variable_series.legend_entries``)."""
+    from matplotlib.lines import Line2D
+
+    if not decoration.legend:
+        return
+    handles = [Line2D([], [], linestyle="none", marker="o", markersize=DOT_PT * 1.3, markerfacecolor=colour,
+                      markeredgecolor=colour, label=label) for label, colour in decoration.legend]
+    legend = fig.legend(handles=handles, loc="upper right", bbox_to_anchor=(0.98, 0.995), frameon=False,
+                        ncol=min(len(handles), 6), fontsize=ANNOTATION_PT + 0.5, handletextpad=0.3,
+                        columnspacing=1.0, borderaxespad=0.0, title=f"{decoration.colour_name}:" if decoration.colour_name else None,
+                        title_fontsize=ANNOTATION_PT + 0.5, alignment="right")
+    legend.set_gid("nw-value-legend")
+    muted = _inks(fig.axes[0])[2] if fig.axes else None
+    for text in [*legend.get_texts(), legend.get_title()]:
+        if muted is not None:
+            text.set_color(muted)
+        _ink(text, muted=True)
 
 
 def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None)) -> None:
@@ -899,7 +965,7 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
                 if numbers:
                     draw.crop_text(ax, row, tp)
     _ink(fig.text(0.02, 1 - 0.2 / draw.h_in,
-                  f"{model.well} · the nanowells with the largest and smallest {label.lower()}",
+                  f"{model.name or model.well} · the nanowells with the largest and smallest {label.lower()}",
                   fontsize=10, color=ink, va="top", gid="nw-extremes-title"))
     _ink(fig.text(0.02, 0.012, draw.caption(label, columns, note, image_channel), fontsize=7, color=faint,
                   gid="nw-extremes-caption", wrap=True), muted=True)
@@ -1051,9 +1117,15 @@ def _state_text(row: dict) -> str:
 MAP_CMAP = "viridis"
 #: How a nanowell without a value is outlined, by its state (fill colouring by the metric).
 _STATE_STYLE = {"occluded": ("////", "solid"), "clipped": ("", "dashed"), "absent": ("", "dotted"),
-                "not_located": ("", "dotted"), "unaddressed": ("", "dotted"),
+                "not_located": ("", "dashdot"), "unaddressed": ("--", "dotted"),
                 "identity_contradicted": ("xx", "solid"), "field_excluded": ("++", "solid"),
                 "out_of_focus": ("....", "solid")}
+#: The height of one row of the Array view's key, as a share of the figure: the axes give up one per row past the first.
+_KEY_ROW = 0.035
+#: The rule ``_STATE_STYLE`` keeps: every state a nanowell can have without a value draws a mark no other state
+#: draws, under either colouring (filled by the metric, it is the mark alone in grey; outlined by state, the mark in
+#: the state's colour), so each cause of a nanowell's exclusion can be read off the array.
+#: ``tests/test_nanowell_array_marks_are_distinct.py`` renders every state and holds the marks apart.
 #: How each tile was placed (``pipeline/tile_register.py``), as the ``Colors`` token it is drawn in: on the lattice
 #: phase, by overlap correlation, or where the acquisition record put it when neither could be measured.
 _SOURCE_TOKENS = {"lattice": "success", "overlap": "accent", "recorded": "warn"}
@@ -1097,44 +1169,84 @@ def _union(a, b):
     return min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])
 
 
-def array_footer(scene, layers, *, label: str, image_note: str = "", note: str = "") -> list[str]:
-    """The lines under the Array view: what is drawn, how to read it, and what could not be drawn and why."""
+def _head(scene, layers, dimmed: int = 0) -> str:
+    """The counts line, in the key's own groups so it adds up to the roster: ``19 nanowells: 13 with a value · 4 no
+    value · 2 rim out of focus``, one without a measured position as not placed. A fused nanowell is counted under its
+    state like any other, and the fused and the ones outside the *Subset* (*dimmed*) are said after it, since they are
+    marks over a state rather than states: ``…; 1 fused (on a tile seam); 3 outside the Subset``."""
+    sites = scene.sites
+    states = np.array([str(s) for s in sites.state], dtype=object)
+    parts: list[tuple[str, int]] = []
+    if layers.colour == "metric":
+        has = np.isfinite(np.asarray(sites.values, dtype=float))
+        measurable = np.isin(states, ["measured", "empty"])
+        parts += [("with a value", int(has.sum())), ("no value", int((~has & measurable).sum()))]
+        rest = ~has & ~measurable
+    else:
+        rest = np.ones(len(states), dtype=bool)
+    tally: dict[str, int] = {}
+    for state in states[rest]:
+        tally[state] = tally.get(state, 0) + 1
+    parts += [(state_word(k), v) for k, v in sorted(tally.items(), key=lambda kv: -kv[1])]
+    parts.append(("not placed (no measured position)", int(scene.unplaced)))
+    undrawn = int(scene.roster) - len(sites) - int(scene.unplaced)
+    parts.append(("not drawn", max(undrawn, 0)))
+    said = " · ".join(f"{n:,} {what}" for what, n in parts if n)
+    head = f"{scene.roster:,} nanowells: {said}" if said else f"{scene.roster:,} nanowells"
+    fused = int(np.asarray(sites.fused, dtype=bool).sum())
+    return head + (f"; {fused:,} fused (on a tile seam)" if fused else "") + (
+        f"; {dimmed:,} outside the Subset" if dimmed else "")
+
+
+def array_footer(scene, layers, *, label: str, image_note: str = "", note: str = "", dimmed: int = 0) -> list[str]:
+    """The lines under the Array view: the page's note, the counts, and what went wrong or is missing — no
+    addresses, nothing placed, the image's state, what the Cells layer could not draw, and the anchor's status when it
+    is not a plain ``ok`` (``_anchor_owed``). How to read the figure is :func:`array_notes`, drawn only with *Notes*
+    on and over the foot of the array rather than here, so turning it on never moves or shrinks the array."""
     sites, in_well = scene.sites, scene.frame == "well"
     lines = [note] if note else []
     if scene.reason:
         lines.append(f"No addresses at this timepoint: {scene.reason}")
     if not len(sites):
         lines.append(f"{scene.well} at {scene.timepoint}: {scene.no_places}, so no nanowell is drawn.")
-    counts = " · ".join(f"{k.replace('_', ' ')} {v:,}" for k, v in sorted(scene.counts.items(), key=lambda kv: -kv[1]))
-    head = f"{scene.roster:,} nanowells in the roster"
-    if layers.colour == "metric":
-        head += f" · with a value {int(np.isfinite(sites.values).sum()):,}"
-    head += (f" · {counts}" if counts else "")
-    if scene.unplaced:
-        head += f" · {scene.unplaced:,} without a measured position, not drawn"
-    lines.append(head)
-    lines.append(f"Lattice positions at the measured pitch {scene.pitch_um:.1f} µm, so a nanowell keeps its place from "
-                 "one timepoint to the next (the square is the central nanowell)." if not in_well and scene.pitch_um
-                 else "Measured positions in the well frame (the square is the central nanowell).")
-    if layers.nanowells and len(sites):
-        lines.append(f"Filled by {label}; a grey outline has no value, its hatch or dash naming why (the key above "
-                     "the array). Fused: on a tile seam, measured from a blended crop."
-                     if layers.colour == "metric" else
-                     "Outlined by state, as the key above the array shows. Fused: on a tile seam, measured from a "
-                     "blended crop.")
+    lines.append(_head(scene, layers, dimmed))
     if layers.cells and scene.cells_note:
         lines.append(scene.cells_note)
+    if in_well and layers.image != "off" and image_note:
+        lines.append(image_note)
+    if in_well and layers.anchor and scene.anchor_text and _anchor_owed(scene):
+        lines += scene.anchor_text.split("\n")
+    return lines
+
+
+def array_notes(scene, layers, *, label: str) -> list[str]:
+    """How to read what the Array view draws (the *Notes* layer): each line only when what it explains is on
+    screen — the fused sentence only with a fused nanowell drawn, the tile colours only with tiles drawn."""
+    sites, in_well = scene.sites, scene.frame == "well"
+    lines = [f"Lattice positions at the measured pitch {scene.pitch_um:.1f} µm, so a nanowell keeps its place from "
+             "one timepoint to the next (the square is the central nanowell)." if not in_well and scene.pitch_um
+             else "Measured positions in the well frame (the square is the central nanowell)."]
+    if layers.nanowells and len(sites):
+        fused = " Fused (dashed purple): on a tile seam, measured from a blended crop." \
+            if np.asarray(sites.fused, dtype=bool).any() else ""
+        lines.append(f"Fill: {label}. Grey outline: no value — the words inside say why; hatches and dashes mark "
+                     "states (see key)." + fused
+                     if layers.colour == "metric" else
+                     "Outlined by state, as the key above the array shows." + fused)
     if in_well and layers.tiles and scene.tiles:
         lines.append("Tiles: green placed on the lattice, blue by overlap correlation, amber where the acquisition "
                      "record put them; each labelled with its registration residual.")
-    if in_well and layers.image != "off" and image_note:
-        lines.append(image_note)
-    if in_well and layers.anchor and scene.anchor_text:
-        lines += scene.anchor_text.split("\n")
     if not in_well and (layers.image != "off" or layers.tiles or layers.anchor):
         lines.append("The image, the tiles and the anchor are in the well frame, not on the lattice: switch Positions "
                      "to Measured to draw them.")
     return lines
+
+
+def _anchor_owed(scene) -> bool:
+    """Whether the anchor's lines say something the reader must see with *Notes* off: a grid status other than
+    ``ok``, or a second line (an anchor set by hand, a file that cannot be used, how to set one). A plain
+    "A01 at t_c: ok." says only that nothing is wrong."""
+    return scene.status != "ok" or "\n" in scene.anchor_text
 
 
 def render_array(fig, scene, layers, *, label: str, image=None, image_note: str = "", selected=(),
@@ -1152,11 +1264,20 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     fig.clear()
     in_well = scene.frame == "well"
     image = image if in_well and layers.image != "off" else None
-    lines = array_footer(scene, layers, label=label, image_note=image_note, note=note)
+    veiled = sum(1 for site in scene.sites.sites if tuple(site) in dimmed) if dimmed else 0
+    lines = array_footer(scene, layers, label=label, image_note=image_note, note=note, dimmed=veiled)
+    # The Notes lines' room is reserved whether Notes is on or off, so turning it on writes into space that was
+    # already there and the array neither moves nor shrinks (nor is covered: a box over its foot hid a row).
+    notes = array_notes(scene, layers, label=label)
     right = 0.62 if layers.record else 0.86
-    drawn = _array_axes(fig, scene, image, region, right=right,
-                        bottom=_FOOTER_BASE + (len(lines) + (1 if layers.addresses or layers.values else 0) + 0.5)
-                        * _LINE)
+    # The key sits above the axes, one row per KEY_COLUMNS entries: the axes start lower for each row past the first,
+    # or a key naming many causes ran off the top of the figure.
+    entries = (key_entries(scene.sites, colour=layers.colour, styles=_STATE_STYLE, why=scene.why, dimmed=veiled)
+               if layers.nanowells and len(scene.sites) else [])
+    key_rows = -(-len(entries) // KEY_COLUMNS)
+    drawn = _array_axes(fig, scene, image, region, right=right, top=0.92 - max(key_rows - 1, 0) * _KEY_ROW,
+                        bottom=_FOOTER_BASE + (len(lines) + len(notes)
+                                               + (1 if layers.addresses or layers.values else 0) + 0.5) * _LINE)
     ax = drawn.ax
     drawn.sites = scene.sites
     _bg, ink, muted = _inks(ax)
@@ -1167,27 +1288,35 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     if layers.nanowells and len(scene.sites):
         _draw_nanowells(fig, ax, drawn, scene, layers, label=label, selected=selected)
         _dim_nanowells(ax, scene.sites, dimmed)
-        draw_key(ax, key_entries(scene.sites, colour=layers.colour, styles=_STATE_STYLE), linewidth=1.4,
-                 fontsize=7.0)
+        draw_key(ax, entries, linewidth=1.4, fontsize=7.0, ink=_inks(ax)[1])
     if layers.cells and scene.cells is not None and len(scene.cells[0]):
         _draw_cells(ax, *scene.cells)
     if (layers.addresses or layers.values) and len(scene.sites):
-        lines += _draw_labels(fig, ax, drawn, scene.sites, addresses=layers.addresses, values=layers.values)
+        filled = (np.isfinite(np.asarray(scene.sites.values, dtype=float))     # as _fill_by_metric fills them
+                  if layers.nanowells and layers.colour == "metric" else None)
+        lines += _draw_labels(fig, ax, drawn, scene.sites, addresses=layers.addresses, values=layers.values,
+                              why=scene.why, filled=filled)
     if in_well and layers.anchor and scene.anchor is not None:
         _draw_anchor(ax, drawn, scene.anchor)
-    _ink(ax.set_title(f"{scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
+    _ink(ax.set_title(f"{scene.name or scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
+    # The footer's lines start straight under the array, where they are with Notes off; the notes go under them, in
+    # the reserved room at the foot, so turning Notes on never moves a line being read (UX review, round 3).
+    top = len(lines) + len(notes) - 1
     for i, text in enumerate(lines):
-        y = _FOOTER_BASE + (len(lines) - 1 - i) * _LINE
-        _ink(fig.text(0.03, y, text, fontsize=7.5, color=ink if i == 0 else muted, gid="nw-array-footer"),
-             muted=i != 0)
+        _ink(fig.text(0.03, _FOOTER_BASE + (top - i) * _LINE, text, fontsize=7.5, color=ink if i == 0 else muted,
+                      gid="nw-array-footer"), muted=i != 0)
+    if layers.notes:
+        for j, text in enumerate(notes):
+            _ink(fig.text(0.03, _FOOTER_BASE + (top - len(lines) - j) * _LINE, text, fontsize=7.5, color=muted,
+                          gid="nw-array-notes"), muted=True)
     if layers.record:
         _draw_record(fig, scene.record, right + 0.08, ink, muted)
     return drawn
 
 
-def _array_axes(fig, scene, image, region, *, right: float, bottom: float) -> ArrayDrawn:
+def _array_axes(fig, scene, image, region, *, right: float, bottom: float, top: float = 0.92) -> ArrayDrawn:
     """The axes, looking at *region* (or at everything drawn) widened to their shape, so pixels stay square."""
-    ax = fig.add_axes([0.03, bottom, right - 0.03, 0.92 - bottom])
+    ax = fig.add_axes([0.03, bottom, right - 0.03, top - bottom])
     ax.set_axis_off()
     # A map in the well frame, with its own zoom: an axis range, log scale or tick choice typed in Properties is the
     # Distribution's (the page's views share one figure, and its typed prefs with it), and applied here it squeezed
@@ -1343,26 +1472,36 @@ def _fill_by_metric(fig, ax, sites, fused, outline: float, label: str) -> None:
         _ink(bar.ax.set_ylabel(label, fontsize=_PREF_PT * GRID_TYPE_SCALE, color=ink))
         bar.ax.tick_params(labelsize=_PREF_PT * GRID_TYPE_SCALE, colors=muted)
     states = np.array(sites.state, dtype=object)
-    groups = [(~has & np.isin(states, ["measured", "empty"]), "", "solid")] + [
-        (~has & (states == s), hatch, style) for s, (hatch, style) in _STATE_STYLE.items()]
-    for mask, hatch, style in groups:
-        mask = mask & ~fused
-        if mask.any():
-            coll = _ellipses(ax, sites, mask, facecolors="none", edgecolors=Colors.plot_undefined_ink,
-                             linewidths=outline, zorder=3)
-            coll.set_linestyle(style)
-            if hatch:
-                coll.set_hatch(hatch)
+    grey = Colors.plot_undefined_ink
+    _state_marks(ax, sites, fused, outline, ~has & np.isin(states, ["measured", "empty"]), "", "solid", grey)
+    for state, (hatch, style) in _STATE_STYLE.items():
+        _state_marks(ax, sites, fused, outline, ~has & (states == state), hatch, style, grey)
+
+
+def _state_marks(ax, sites, fused, outline: float, mask, hatch: str, style: str, colour) -> None:
+    """The nanowells in *mask* drawn with one state's mark: a ring in *style* with *hatch* inside, in *colour*. A fused nanowell's ring is the fused one, dashed in purple, drawn by the
+    caller; it still carries its state's hatch here, so a fused nanowell excluded as out of focus, occluded or in an
+    excluded field still says so."""
+    for part, ring in ((mask & ~fused, True), (mask & fused, False)):
+        if not part.any() or (not ring and not hatch):
+            continue
+        coll = _ellipses(ax, sites, part, facecolors="none", edgecolors=colour, linewidths=outline if ring else 0.0,
+                         zorder=3)
+        coll.set_linestyle(style)
+        if hatch:
+            coll.set_hatch(hatch)
 
 
 def _outline_by_state(ax, sites, fused, outline: float) -> None:
+    """Each nanowell outlined in its state's colour, with its state's mark (``_STATE_STYLE``) — so two states that
+    share the muted colour (absent, not located, unaddressed, identity contradicted, field excluded, rim out of
+    focus) are still told apart."""
     from ui.nanowell_sites import state_colour
 
-    plain = ~fused
-    if plain.any():
-        _ellipses(ax, sites, plain, facecolors="none", linewidths=outline, zorder=3,
-                  edgecolors=[state_colour(s) for s, p in zip(sites.state, plain) if p])
-
+    states = np.array([str(s) for s in sites.state], dtype=object)
+    for state in sorted(set(states)):
+        hatch, style = _STATE_STYLE.get(state, ("", "solid"))
+        _state_marks(ax, sites, fused, outline, states == state, hatch, style, state_colour(state))
 
 def _draw_cells(ax, x, y) -> None:
     """A dot at each counted cell's centre, a fixed size on screen whatever the zoom, over the nanowells and under
@@ -1379,24 +1518,40 @@ def value_text(value) -> str:
     return f"{value:.3g}" if value is not None and np.isfinite(value) else ""
 
 
-def site_label_texts(sites, *, addresses: bool, values: bool) -> list[str]:
+def site_label_texts(sites, *, addresses: bool, values: bool, why: dict | None = None) -> list[str]:
     """What each nanowell's label says: its ``q,r`` (the *Addresses* layer) over its value of the page's metric
-    (the *Values* layer), whichever of the two it has; ``""`` where it has neither."""
+    (the *Values* layer), whichever of the two it has; ``""`` where it has neither. A nanowell without a value writes,
+    with *Values* on, the tag of why it has none (*why*, ``array_compute.no_value_reasons``; ``_array_key.reason_tag``)
+    — never a number — so two no-value nanowells for different reasons can be told apart on the array."""
+    why = why or {}
     out = []
-    for address, value in zip(sites.labels, sites.values):
-        parts = ([address] if addresses and address else []) + ([value_text(value)] if values else [])
+    for site, address, value in zip(sites.sites, sites.labels, sites.values):
+        said = value_text(value) or reason_tag(why.get((site[1], site[2]), ""))
+        parts = ([address] if addresses and address else []) + ([said] if values else [])
         out.append("\n".join(p for p in parts if p))
     return out
 
 
-def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool) -> list[str]:
+def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool, why: dict | None = None,
+                 filled=None) -> list[str]:
     """Each nanowell's label (its address, its value, or both) in view inside a nanowell drawn large enough to
     hold it; a footer line when none is, or when too many are to write."""
     from ui.nanowell_sites import LABEL_COLOUR, MIN_LABEL_DIAMETER_PX
 
     x0, y0, x1, y1 = drawn.region
     diameter = 2 * sites.radius * drawn.size_px[0] / max(x1 - x0, 1e-9)
-    labels = np.array(site_label_texts(sites, addresses=addresses, values=values), dtype=object)
+    from matplotlib import patheffects
+
+    labels = np.array(site_label_texts(sites, addresses=addresses, values=values, why=why), dtype=object)
+    # A halo of the ground under a label in a nanowell drawn without a fill: over its hatch (the out-of-focus dots, the
+    # occluded lines) the bare label could not be read. *filled* (one bool per site) marks the nanowells filled by the
+    # metric, whose labels read on the fill and are left plain — a dark stroke there only roughened them.
+    halo = [patheffects.withStroke(linewidth=3.5, foreground=_inks(ax)[0])]
+    filled = np.zeros(len(labels), dtype=bool) if filled is None else np.asarray(filled, dtype=bool)
+    # Over a hatch a halo still loses to the pattern (UX review, round 3): a hatched nanowell's label sits on a small
+    # solid patch of the ground instead.
+    hatched = np.array([bool(_STATE_STYLE.get(str(state), ("", ""))[0]) for state in sites.state], dtype=bool)
+    backing = {"boxstyle": "round,pad=0.15", "facecolor": _inks(ax)[0], "edgecolor": "none", "alpha": 0.9}
     show = ((labels != "") & (diameter >= MIN_LABEL_DIAMETER_PX) & (sites.x >= x0) & (sites.x <= x1)
             & (sites.y >= y0) & (sites.y <= y1))
     what = "addresses and values" if addresses and values else "addresses" if addresses else "values"
@@ -1412,8 +1567,10 @@ def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool) -> lis
         lines = labels[k].count("\n") + 1
         # Two lines share the height one line had, so each is a little smaller.
         size = diameter[k] * (0.22 if lines == 1 else 0.17) * 72.0 / fig.dpi
+        backed = hatched[k] and not filled[k]
         ax.text(sites.x[k], sites.y[k], labels[k], ha="center", va="center", clip_on=True, zorder=6,
-                fontsize=max(5.0, min(8.0, size)), color=LABEL_COLOUR, linespacing=1.0, gid="nw-array-address")
+                fontsize=max(5.0, min(8.0, size)), color=LABEL_COLOUR, linespacing=1.0, gid="nw-array-address",
+                path_effects=[] if filled[k] or backed else halo, bbox=backing if backed else None)
     return []
 
 
@@ -1454,6 +1611,11 @@ def _ring(x, y, radius, colour):
 
 
 # ── trajectories (V4) ────────────────────────────────────────────────────────
+def _named(item) -> str:
+    """What a figure calls a panel's or a line's well: the name the page gave it, else the well itself."""
+    return item.name or item.well
+
+
 def render_trajectories(fig, panels, *, label: str, time_source: str | None = None, note: str = "",
                         cohort: bool = False) -> None:
     """One panel per well: a thin line per nanowell, a thick median per occupancy class at baseline.
@@ -1521,7 +1683,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
                         fontsize=ANNOTATION_PT, ground=inks[0])
         _trajectory_ticks(ax, panel)
         _no_offset(ax)
-        _ink(ax.set_title(panel.well, fontsize=10, fontweight="bold", loc="left", color=ink))
+        _ink(ax.set_title(_named(panel), fontsize=10, fontweight="bold", loc="left", color=ink))
         ax.grid(alpha=0.3)
         drawn += len(panel.lines)
         without += panel.n_without_value
@@ -1625,7 +1787,7 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
         # well's place in this list, A03 drawn alone took A01's colour and no well matched its swatch on the plate.
         colour = color_for_well(s.well)
         ax.fill_between(s.rings, s.q1, s.q3, color=colour, alpha=0.18, linewidth=0)
-        ax.plot(s.rings, s.median, color=colour, marker="o", markersize=3, linewidth=1.4, label=s.well)
+        ax.plot(s.rings, s.median, color=colour, marker="o", markersize=3, linewidth=1.4, label=_named(s))
         share.bar(s.rings + (k - (len(series) - 1) / 2) * width, s.excluded_share, width=width, color=colour)
     ax.set_ylabel(label, color=ink)
     _no_offset(ax)

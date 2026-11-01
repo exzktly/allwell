@@ -267,11 +267,31 @@ class TileStore:
         no larger than one output pixel (so a zoomed-out view averages, and a zoomed-in one shows image pixels
         as blocks). The region's aspect is the caller's to match to the output's.
         """
+        canvas, out, stretch = self._sample(region_um, width, height)
+        covered = out.covered
+        if stretch is None and covered.any():
+            stretch = (float(np.percentile(canvas[covered], STRETCH_PERCENTILES[0])),
+                       float(np.percentile(canvas[covered], STRETCH_PERCENTILES[1])))
+        if stretch is not None:
+            lo, hi = stretch
+            scaled = np.clip((canvas - lo) / max(hi - lo, 1e-9), 0.0, 1.0) * 255.0
+            out.image = np.where(covered, scaled, 0).astype(np.uint8)
+        return out
+
+    def values(self, region_um: tuple[float, float, float, float], width: int, height: int) -> tuple[np.ndarray, Rendered]:
+        """:meth:`render`'s pixels in the tiles' own units, unstretched — float32, NaN where no tile was drawn —
+        for a viewer that applies its own display window (the Image Table's LUT), with the :class:`Rendered`
+        bookkeeping (its *image* left blank)."""
+        canvas, out, _stretch = self._sample(region_um, width, height)
+        return np.where(out.covered, canvas, np.float32(np.nan)).astype(np.float32, copy=False), out
+
+    def _sample(self, region_um, width: int, height: int) -> tuple[np.ndarray, Rendered, tuple | None]:
+        """``(canvas, bookkeeping, stretch)``: every tile in view sampled into *width* × *height* (see :meth:`render`)."""
         left, top, right, bottom = region_um
         um_x, um_y = (right - left) / width, (bottom - top) / height
         px = self.source.pixel_size_um
         factor = min(um_x, um_y) / px                     # image pixels under one output pixel
-        wanted = max(0, int(math.floor(math.log2(factor)))) if factor >= 1 else 0
+        wanted = level_for(factor)
         canvas = np.zeros((height, width), dtype=np.float32)
         covered = np.zeros((height, width), dtype=bool)
         out = Rendered(np.zeros((height, width), dtype=np.uint8), covered)
@@ -302,14 +322,12 @@ class TileStore:
                 canvas[np.ix_(rows, cols)] = image[np.ix_(sy, sx)]
                 covered[np.ix_(rows, cols)] = True
             self._in_view = in_view
-        if stretch is None and covered.any():
-            stretch = (float(np.percentile(canvas[covered], STRETCH_PERCENTILES[0])),
-                       float(np.percentile(canvas[covered], STRETCH_PERCENTILES[1])))
-        if stretch is not None:
-            lo, hi = stretch
-            scaled = np.clip((canvas - lo) / max(hi - lo, 1e-9), 0.0, 1.0) * 255.0
-            out.image = np.where(covered, scaled, 0).astype(np.uint8)
-        return out
+        return canvas, out, stretch
+
+
+def level_for(factor: float) -> int:
+    """The pyramid level whose pixels are no larger than one output pixel, *factor* image pixels across."""
+    return max(0, int(math.floor(math.log2(factor)))) if factor >= 1 else 0
 
 
 def fit_region(extent, width: int, height: int, *, margin: float = 0.02) -> tuple[float, float, float, float]:

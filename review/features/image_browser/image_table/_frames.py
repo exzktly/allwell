@@ -35,8 +35,8 @@ from review.domain.image_frames import (
 )
 from review.features.image_browser.image_table import renderer as _renderer
 from review.features.image_browser.image_table.image_compose import (
-    _chrome_rgb, bar_ink_rgb, bar_rect_px, chrome_fits, label_font_px_for,
-    label_margin_px,
+    _chrome_rgb, bar_ink_rgb, bar_label_font_px, bar_rect_px, bar_text_rect_px,
+    chrome_fits, label_font_px_for, label_margin_px,
 )
 
 logger = logging.getLogger(__name__)
@@ -259,6 +259,28 @@ def _bar_mark(chrome: dict, rgb, *, image: Rect, px_w: int, px_h: int) -> BarMar
     )
 
 
+def _bar_text_mark(chrome: dict, rgb, *, image: Rect, px_w: int, px_h: int) -> TextMark | None:
+    """The bar's length ("50 µm") as a text box where the picture writes it, or ``None`` without one."""
+    text = str(chrome.get("bar_text") or "")
+    bar_px = int(chrome.get("bar_px") or 0)
+    if not text or bar_px <= 0 or px_w <= 0 or px_h <= 0 or image.w <= 0:
+        return None
+    rect_px = bar_rect_px(px_w, px_h, bar_px=bar_px, bar_corner=chrome.get("bar_corner", "br"),
+                          bar_thickness_px=int(chrome.get("bar_thickness_px", 0) or 0))
+    if rect_px is None:
+        return None
+    font_px = bar_label_font_px(px_h)
+    x0, y0, x1, y1 = bar_text_rect_px(px_w, px_h, rect_px, text, font_px=font_px)
+    in_per_px = image.w / float(px_w)
+    ink = bar_ink_rgb(rgb, rect_px, chrome.get("bar_color", "white"))
+    return TextMark(
+        text=text, rect=Rect(image.x + x0 * in_per_px, image.y + y0 * in_per_px,
+                             (x1 - x0) * in_per_px, (y1 - y0) * in_per_px),
+        size_pt=max(1.0, font_px * in_per_px * _PT_PER_IN), color=_hex(ink),
+        align="ctr", anchor="ctr", plate=True, name="Scale bar length",
+    )
+
+
 @dataclass
 class _Cell:
     """One recorded cell, before the grid's geometry is known."""
@@ -284,6 +306,8 @@ class FrameCollector:
 
     def __init__(self) -> None:
         self._cells: list[_Cell] = []
+        #: ``(rgb, height_in)`` of the colour key under the grid, when the figure drew one.
+        self._key: tuple | None = None
         #: The assembled grid, once :meth:`finish` has been called. ``None``
         #: until then — an empty grid and a grid never built are different
         #: things, and the caller has to be able to tell them apart.
@@ -316,6 +340,10 @@ class FrameCollector:
                                  title_pt=float(title_pt),
                                  title_h_in=float(title_h_in)))
 
+    def add_key(self, rgb, height_in: float) -> None:
+        """Place the colour key (``_colour_key``) under the grid, *height_in* tall across its whole width."""
+        self._key = (rgb, float(height_in))
+
     def finish(self, fig, gs, plan) -> FramedGrid:
         """Assemble the grid and keep it on :attr:`grid` for the caller.
 
@@ -336,6 +364,12 @@ class FrameCollector:
         frames = [f for f in (self._frame(cell, gs, fig) for cell in self._cells)
                   if f is not None]
         labels = self._labels(gs, fig, plan) if plan is not None else ()
+        key = self._key
+        if key is not None:
+            png = _encode_png(key[0])
+            if png:
+                frames.append(ImageFrame(name="Colour key", rect=Rect(0.0, fig_h, fig_w, key[1]), png=png))
+                fig_h += key[1]
         return FramedGrid(width_in=fig_w, height_in=fig_h,
                           frames=tuple(frames), labels=labels)
 
@@ -377,6 +411,9 @@ class FrameCollector:
             bar = _bar_mark(chrome, cell.rgb, image=image, px_w=px_w, px_h=px_h)
             if bar is not None:
                 bars.append(bar)
+                length = _bar_text_mark(chrome, cell.rgb, image=image, px_w=px_w, px_h=px_h)
+                if length is not None:
+                    texts.append(length)
         png = _encode_png(cell.png_rgb)
         if not png:
             # The same placeholder the figure draws into a cell it could not

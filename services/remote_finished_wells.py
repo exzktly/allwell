@@ -119,9 +119,12 @@ def _read_against_the_reference(output_dir: Path, args, wells: Iterable[str], fi
     reference = nref.reference_well(settings_from_kwargs(template))
     if reference is None:
         return finished
-    if reference in {canonical_well_label(w) or w for w in wells} and reference not in finished:
+    current = [w for w in finished if confluence_reference_current(output_dir, w, template)]
+    # Asked of the reference after its own currency check: a reference whose saved timepoints are to be measured
+    # again (``nanowell_reference.own``) is not finished, and every well read against it is then sent too.
+    if reference in {canonical_well_label(w) or w for w in wells} and reference not in current:
         return []
-    return [w for w in finished if confluence_reference_current(output_dir, w, template)]
+    return current
 
 
 #: The one keyed option that cannot change a well's own output: it only switches the plate-level cell-gating pass

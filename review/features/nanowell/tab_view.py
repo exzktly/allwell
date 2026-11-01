@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
 )
 
 from review.features.export.service import export_cell_data_from
-from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import controller as nwc
 from review.features.nanowell.cell_scope_compute import cell_scope
 from review.features.nanowell.distribution_compute import (
@@ -28,11 +27,13 @@ from review.features.nanowell.distribution_compute import (
 )
 from review.features.nanowell.identity_compute import worst_verdict
 from review.features.nanowell.anchor_queue_view import (
-    QUEUE_TIP as _QUEUE_TIP, build_queue_controls, refresh_queue_controls,
+    build_queue_controls, refresh_queue_controls,
 )
 from review.features.nanowell.exclude_view import build_exclude_controls
 from review.features.nanowell.rim_focus_view import build_rim_focus_controls
+from review.features.nanowell.variables_view import build_variable_controls
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
+from review.features.nanowell.qc_view import build_qc_controls, refresh_qc_controls
 from review.features.nanowell.display_range_view import (
     build_display_range_button,
     refresh_display_range_buttons,
@@ -51,7 +52,7 @@ from widgets.owned_action import owned_action
 from widgets.spin_box import SpinBox
 
 #: The views the page draws, in the order the switch lists them.
-VIEWS = (("distribution", "Distribution"), ("array", "Array"), ("trajectories", "Trajectories"),
+VIEWS = (("distribution", "Distribution"), ("qc", "QC"), ("array", "Array"), ("trajectories", "Trajectories"),
          ("position", "Position"), ("extremes", "Extremes"), ("identity", "Identity"), ("statistics", "Statistics"))
 #: The views that show one well, and so offer the well picker and the timepoint slider.
 ONE_WELL_VIEWS = ("array", "identity")
@@ -63,6 +64,9 @@ _OVER_TIME_VIEWS = ("trajectories", "extremes")
 _IMAGES = (("off", "Off"), ("montage", "Run montage"), ("tiles", "Full resolution"))
 _POSITIONS = (("measured", "Measured"), ("lattice", "Lattice"))
 #: The Array view's switchable layers, in the order its Layers menu lists them, with what each draws.
+#: The band's *Notes* button: the Layers menu's *Notes*, where it can be found.
+_NOTES_TIP = ("How to read the array — the positions, the fill and outlines, the tile colours — under the array, in room kept for it so the array never moves. "
+              "Off, the footer keeps the counts and anything that went wrong. The same switch as Layers → Notes.")
 _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or outlined by its state."),
            ("addresses", "Addresses", "Each nanowell's q,r, wherever it is drawn large enough to hold it."),
            ("values", "Values", "Each nanowell's value of the Metric, written inside it (under its q,r when "
@@ -72,7 +76,10 @@ _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or ou
            ("tiles", "Tiles", "Each tile's placement, coloured by how the run placed it, with its residual."),
            ("anchor", "Anchor", "The anchor set by hand, and what the grid record says about addressing this "
                                 "timepoint; with it on, Set anchor is offered."),
-           ("record", "Run record", "The grid record of this timepoint and a line for every other, beside the figure."))
+           ("record", "Run record", "The grid record of this timepoint and a line for every other, beside the figure."),
+           ("notes", "Notes", "The footer in full: how the positions, fills, outlines and tiles are drawn, and the "
+                              "grid status of this timepoint. Off, the footer keeps the counts and anything that "
+                              "went wrong."))
 #: The Layers menu's presets: every layer at once, as the views this one replaced drew them.
 _PRESETS = (("map", "Array map — lattice places, filled by the metric"),
             ("qc", "Array QC — montage, tiles and nanowell states, run record"),
@@ -88,6 +95,9 @@ _METRIC_CB_MIN_W = 220
 #: Each view's tab tooltip, keyed as :data:`VIEWS` keys them.
 _VIEW_TIPS = {
     "distribution": "One dot per nanowell, per well and timepoint.",
+    "qc": ("Every well and timepoint of the plate at once: which the run could not address, which have an anchor\n"
+           "waiting for a re-run, and what the identity check said about the rest. Click a cell to open it on\n"
+           "Identity, or on Array to set its anchor. The Anchor queue starts here."),
     "array": ("One well's nanowells over its montage or at their lattice places — every element a layer\n"
               "you turn on or off (Image, Positions, Layers)."),
     "trajectories": "Each nanowell's metric over time, with the median of each occupancy class.",
@@ -158,7 +168,9 @@ _REFIT_MS = 60
 LOAD_DEBOUNCE_MS = 250
 _CROP_METRICS_TIP = ("Write each crop's numbers on it: its fold change in the corner and a line of its metrics along "
                      "its foot. Off leaves the crops bare; the row labels still give each nanowell's rank and value.")
-_POPOUT_METRICS_TIP = ("Write each crop's measurements under it — the same setting as the Extremes view's Metrics.")
+_POPOUT_METRICS_TIP = ("Write each crop's measurements under it — the same setting as the Extremes view's Metrics. "
+                       "Here they end with the rim's focus as a percentage of its well's sharpest rims at that "
+                       "timepoint, on the same scale as the Rim focus threshold.")
 _POPOUT_LABELS_TIP = ("Write each crop's timepoint over it and the line under the figure saying where the crops were "
                       "cut from and on what brightness scale. Off leaves the crops bare; the title still names the "
                       "nanowell and channel.")
@@ -186,7 +198,8 @@ _OVERLAYS_TIP = ("Show or hide every coloured overlay at once — the nanowells,
 _ZOOM_TIP = ("How far the view is zoomed against Fit. The wheel zooms about the pointer (over VNC from a phone, a "
              "two-finger swipe); − and + zoom about the centre.")
 _ANCHOR_TIP = ("On: click the central square to anchor this well at this timepoint. Drag still pans. Offered where "
-               "an anchor can change the result: a timepoint addressed or left unaddressed.")
+               "an anchor can change the result: a timepoint addressed or left unaddressed. To walk every timepoint "
+               "waiting for an anchor, use Anchor queue on the QC view.")
 _CONTROL_TIP = "Compare each group's centre with this group's, computed the same way (× ratio, or a difference on log₂)."
 
 
@@ -280,6 +293,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     band = ControlBand(plot_area)
 
     view_bar = build_view_bar(ctx, st.view)
+    # The anchor walk's controls first: the band's left edge is the one place that never wraps away.
+    queue = build_queue_controls(ctx, band)
 
     metric_cb = _combo([(k, label) for k, (label, _ch) in METRICS.items()], _METRIC_TIP)
     metric_cb.setMinimumWidth(_METRIC_CB_MIN_W)
@@ -345,6 +360,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     array_controls = _build_array_controls(ctx, band)
     identity = build_identity_controls(ctx, band)
     statistics = build_statistics_controls(ctx, band)
+    qc_controls = build_qc_controls(ctx, band)
 
     # The Plotting tabs' timepoint control (Distribution, Heat Map): a LabeledComboBox painting its own
     # "Timepoint:" prefix, the timepoints in time order and named by their hours. One control for every view that
@@ -387,6 +403,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_control_cb", control_cb)
     grp_control = band.add_scope("vs", control_cb)
 
+    variables = build_variable_controls(ctx, band)
+
     export_btn, _menu, _act = build_plot_save_menu(
         ctx, band, card_key="_nw_card", data_label="Save nanowell data…",
         data_cb=lambda: nwc.export_page_csv(ctx),
@@ -405,6 +423,10 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_card", card)
     reg.register("_nw_fig", card.figure)
     reg.register("_nw_canvas", card.canvas)
+    # A click on the figure takes the keyboard focus, so a number still being typed in a band box (Rim focus, whose
+    # boxes commit on Enter or focus-out) is committed by the click rather than left uncommitted under a figure
+    # that never changes.
+    card.canvas.setFocusPolicy(Qt.ClickFocus)
     apply_plot_card_decorators(ctx, card, "Nanowells")
     card.plotThemeChanged.connect(lambda _m: nwc.redraw(ctx))
     card.canvas.mpl_connect("button_press_event", lambda event: nwc.on_click(ctx, event))
@@ -476,7 +498,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     controls = (view_bar, metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, moving_spin,
                 baseline_moving_spin,
                 responding_edit, extremes_spin, extremes_cells, extremes_numbers, *identity.signalling, *start.signalling,
-                *array_controls.signalling, *statistics.signalling, *rim_focus.signalling)
+                *array_controls.signalling, *statistics.signalling, *rim_focus.signalling,
+                *qc_controls.signalling)
 
     def refresh_controls() -> None:
         channel = nwc.page_channel(ctx)
@@ -507,7 +530,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             for well in nwc.page_wells(ctx) if st.data else []:
                 # On the Identity view each well says its worst verdict, so a contradicted one is found at a glance.
                 worst = worst_verdict(st.data, well) if view == "identity" else None
-                well_cb.addItem(f"{well} · {worst.replace('_', ' ')}" if worst else well, well)
+                name = nwc.well_caption(ctx, well)        # its label as the plot tabs name it, and the well
+                well_cb.addItem(f"{name} · {worst.replace('_', ' ')}" if worst else name, well)
             _select(well_cb, nwc.page_well(ctx))
             stats_view = view == "statistics"
             fill_control_combo(ctx, st, control_cb, on_statistics=stats_view, tip=_CONTROL_TIP)
@@ -529,6 +553,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             start.refresh(st)
             _refresh_array_controls(ctx, st, array, array_controls)
             refresh_identity_controls(st, identity, view == "identity")
+            refresh_qc_controls(ctx, st, view == "qc", qc_controls)
+            refresh_queue_controls(ctx, array, queue)
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
             # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
             # applies to what it draws, so its box stays where it can be turned off.
@@ -557,6 +583,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             extremes_tps.refresh()
             _sync_crop_boxes(ctx, st)
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
+            variables.refresh(view)
         finally:
             for w, b in zip(controls, blocked):
                 w.blockSignals(b)
@@ -935,7 +962,7 @@ def _metric_reaches_figure(st, view: str) -> bool:
     """Whether the Metric and Baseline controls change what *view* draws: on the Array view only through the
     nanowells' fill or their written values, so not when neither is drawn; never on the Identity view, which draws
     the identity check's distances and the montages, no metric."""
-    if view == "identity":
+    if view in ("identity", "qc"):
         return False
     layers = nwc.drawn_layers(st)
     return view != "array" or (layers.nanowells and layers.colour == "metric") or layers.values
@@ -961,6 +988,7 @@ def _refresh_array_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
     for group in c.groups:
         group.setVisible(on_view)
     c.overlays_btn.setChecked(not st.overlays_hidden)
+    c.notes_btn.setChecked(layers.notes)
     can_set, can_clear, can_rerun = nwc.anchor_controls(ctx)
     # On the view whatever the layers say, its buttons greyed where they cannot act, so turning a layer on or off
     # never moves the controls beside it.
@@ -970,7 +998,6 @@ def _refresh_array_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
     c.anchor_btn.setChecked(st.anchor_mode and can_set)
     c.clear_anchor_btn.setEnabled(can_clear)
     c.rerun_btn.setEnabled(can_rerun)
-    refresh_queue_controls(ctx, st, on_view, c)
     canvas = ctx.widgets.get_or_none("_nw_canvas")
     if canvas is not None:
         canvas.setCursor(Qt.CrossCursor if on_view and st.anchor_mode and can_set else Qt.ArrowCursor)
@@ -1002,7 +1029,14 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
     overlays_btn.setChecked(True)
     overlays_btn.toggled.connect(lambda on: nwc.set_overlays(ctx, on))
     reg.register("_nw_overlays_btn", overlays_btn)
-    grp_layers = band.add_scope("", layers_btn, overlays_btn)
+    # The footer's Notes, also on the band: the Layers menu's entry alone was hard to find (UX review N6). Not drawn in
+    # the figure, where a click selects a nanowell and anything drawn is exported with it.
+    notes_btn = _button("Notes", _NOTES_TIP, None)
+    notes_btn.setCheckable(True)
+    notes_btn.setProperty("variant", "toggle")
+    notes_btn.toggled.connect(lambda on: nwc.set_layer(ctx, "notes", on))
+    reg.register("_nw_notes_btn", notes_btn)
+    grp_layers = band.add_scope("", layers_btn, overlays_btn, notes_btn)
 
     out_btn = _button("−", "Zoom out, about the centre of the view.", lambda: nwc.array_zoom(ctx, 1 / nwc.BUTTON_STEP))
     zoom_lbl = QLabel("")
@@ -1040,14 +1074,11 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
     reg.register("_nw_anchor_btn", anchor_btn)
     reg.register("_nw_clear_anchor_btn", clear_anchor_btn)
     reg.register("_nw_rerun_btn", rerun_btn)
-    queue_btn = _button("Anchor queue", _QUEUE_TIP, lambda: aq.start(ctx))
-    reg.register("_nw_queue_btn", queue_btn)
-    grp_anchor = band.add_scope("Anchor", anchor_btn, clear_anchor_btn, rerun_btn, queue_btn)
-    queue = build_queue_controls(ctx, band)
+    grp_anchor = band.add_scope("Anchor", anchor_btn, clear_anchor_btn, rerun_btn)
     return SimpleNamespace(
         image_cb=image_cb, positions_seg=positions_seg, layer_actions=layer_actions, colour_actions=colour_actions,
         groups=(grp_image, grp_positions, grp_layers, grp_zoom), grp_anchor=grp_anchor, one_btn=one_btn,
         anchor_btn=anchor_btn, clear_anchor_btn=clear_anchor_btn, rerun_btn=rerun_btn, overlays_btn=overlays_btn,
-        queue_btn=queue_btn, queue=queue,
-        signalling=(image_cb, positions_seg, anchor_btn, overlays_btn, *layer_actions.values(),
+        notes_btn=notes_btn,
+        signalling=(image_cb, positions_seg, anchor_btn, overlays_btn, notes_btn, *layer_actions.values(),
                     *colour_actions.values()))

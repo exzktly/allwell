@@ -491,16 +491,22 @@ before — a well this plate does not have, or a typo — is warned about in the
 analysed before the other
 wells, and at every timepoint each well's confluence is read against that well's empty nanowells imaged at the same
 timepoint, which also corrects for exposure or medium changing over the time course. Without one — none named, or a
-timepoint where more than 5 % of its nanowells hold a counted cell, or a timepoint it does not have — **no well has a
-confluence** there (blank, never 0); the timepoint's notes in `<well>_grid.json` and the run log say why, and the
-reference well's grid record holds its verdict (`confluence_reference`). The reference well also measures how many
+timepoint it does not have — **no well has a confluence** there (blank, never 0); the timepoint's notes in
+`<well>_grid.json` and the run log say why. **The well you name is believed to be empty**, whatever the cell count
+finds in it: debris and floor texture in an empty well are often counted as cells, sometimes in most of its
+nanowells, and they never stop the well being used as the reference. Filter debris afterwards in QC. When more than
+5 % of its nanowells hold a counted object, its own timepoint's notes and the run log say so, with the share, in case
+the well was mistyped; the reference well's grid record holds what was counted (`confluence_reference`). An output
+folder whose reference an earlier version refused (`"status": "loaded"` in
+`nanowells/_confluence_reference/reference.json`) re-analyses the reference well at those timepoints, and every well
+read against it, on the next run — locally or remotely — without Force. The reference well also measures how many
 cells the model finds where there are none: its cells counted per nanowell are saved with its verdict
 (`false_cells_per_nanowell`) and written on every other well's timepoint (`template` →
 `reference_false_cells_per_nanowell`), the baseline that well's counts sit on. Counts on the rim-removed image use the
 reference too (see **Segment on**); counts on the raw image, and fluorescence, do not depend on it. **Test detection**
 divides by the well's own picture, because it has no reference to read, and says so when one is named. A remote run
 that does not include the reference well — re-running a few wells, or resuming a plate whose reference finished
-earlier — is sent the reference this computer already holds, so its wells keep their confluence. A well is kept as up to date only beside the reference it was read against: when the reference well is analysed for the first time after them, analysed again on other images (re-exported, forced), or judged empty at a timepoint where it was not before, every well read against it before is analysed again, locally or sent again to a remote, and the run log says which and why. Running the reference again on the same images changes nothing and re-runs no other well. Results measured this way carry a measurement version: adding timepoints to a dataset
+earlier — is sent the reference this computer already holds, so its wells keep their confluence. A well is kept as up to date only beside the reference it was read against: when the reference well is analysed for the first time after them, analysed again on other images (re-exported, forced), or given a template at a timepoint where it had none before, every well read against it before is analysed again, locally or sent again to a remote, and the run log says which and why. Running the reference again on the same images changes nothing and re-runs no other well. Results measured this way carry a measurement version: adding timepoints to a dataset
 measured by an earlier version analyses the well again in full, and Merge Plates refuses to combine two datasets
 measured by different versions. The nanowells of a circular array are the
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image
@@ -543,14 +549,15 @@ Review, open the Nanowells page, choose the *Array* view, pick the well and time
 *Full resolution* (or choose *Layers → Show as → Full montage*). Zoom to the square, turn on **Set anchor**, and
 click it. The click is saved in `in/nanowell_anchors.json`
 beside the acquisition record; the run snaps it to the nearest nanowell, so it only has to land on the square.
-When several wells and timepoints need an anchor — the usual state after a run — press **Anchor queue**
-instead of picking each one: it shows the first timepoint on the plate left unaddressed, with **Set anchor**
-already on, and each click on a central square saves the anchor and, after a moment, opens the next. Each
+When several wells and timepoints need an anchor — the usual state after a run — open the Nanowells page's
+**QC** view, which shows every timepoint not addressed at a glance, and press **Anchor queue** there instead of
+picking each one: it switches to the Array view on the first timepoint on the plate left unaddressed, with **Set
+anchor** already on, and each click on a central square saves the anchor and, after a moment, opens the next. Each
 timepoint opens zoomed to 10× on the centre of the whole-well montage, where the central square usually is;
 press **Fit** to see the whole well when it is not there. A *Queue*
-group beside it says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous timepoint; a
-click there replaces its anchor), **Skip**, **One per well** and **Stop** — or press **←** for Back, **→** for
-Skip and **Esc** for Stop while the queue runs. When **Set anchor** cannot be turned on for a timepoint, the figure
+group at the left end of the band says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous
+timepoint; a click there replaces its anchor), **Skip**, **One per well** and **Stop** — or press **←** for Back,
+**→** for Skip and **Esc** for Stop while the queue runs. Choosing another view while it runs stops it. When **Set anchor** cannot be turned on for a timepoint, the figure
 says why; press Skip to go on. The queue holds every unaddressed
 timepoint without an anchor, plate order then time order, and also any timepoint whose anchor the last run could
 not use; an anchor you set that no run has used yet is not asked for again. Turn on **One per well** to be shown
@@ -558,8 +565,9 @@ only each well's first such timepoint, and no well that already has an anchor wa
 well is usually enough (see above), and any timepoint the re-run still cannot address shows up in the next
 queue. The choice is remembered until you close the app. If One per well leaves nothing to walk (every well
 waiting already has an anchor for a re-run), **Anchor queue** says so and turns One per well off, so pressing it
-again walks those timepoints too. When it ends it says how many it anchored and how many
-were skipped, and puts your plate selection back as it was.
+again walks those timepoints too. When it ends — after the last one, or when you stop it — it goes back to the QC
+view, says how many it anchored and how many were skipped, rings the cells it anchored (now *anchor waiting*), and
+puts your plate selection back as it was.
 Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
 run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
 addressed from it at the end of the run, through the plate's other wells. A timepoint that still cannot be
@@ -2353,6 +2361,14 @@ folder in use is the app staying connected.
   Pipeline Output header if you would rather watch the dashboard alone; the
   app re-opens it on its own only when a run fails with an explanation you
   would otherwise not see, and hands the toggle back at the next run.
+- **The log is saved with the results.** Everything the log shows for a run,
+  local or remote, is also written to the output folder as
+  `logs/analyze-<date>-<time>.log`, one file per run, and the log's last line
+  names the file. It keeps every line, including ones the on-screen log has
+  scrolled away, so a plate can be checked days later after the window is
+  closed. A nanowell plate writes about 2 KB per well per timepoint (about 2 MB
+  for 96 wells at 10 timepoints). If the output folder cannot be written to,
+  the log says so once and the run carries on.
 - During a remote transfer the **status line** beside the progress bar carries
   the live figure (how much has come across, how long it has taken) and updates
   in place. The log gets the events — each well starting, each one landing, the
@@ -4001,9 +4017,13 @@ These affordances are global — set them once and every tab honours them.
 #### Typing a number
 
 A number you type into a box — bins, a cluster count, a moving-average
-window, ε, an axis limit — takes effect when you press **Enter** or click out
-of the box, not as you type each digit. Typing `200` redraws once, at 200,
-rather than at 2, then 20, then 200. The box's up/down arrows and the mouse
+window, ε, an axis limit — takes effect when you press **Enter**, click into
+another box, or stop typing for a second — not as you type each digit. Typing
+`200` redraws once, at 200, rather than at 2, then 20, then 200. Clicking a plot
+or a tab after typing is fine: the number applies a second after your last
+keystroke either way. Until it applies, the number is shown in *italics*; it
+turns upright once it is in force — so if you pause mid-number, the upright text
+is what was applied. The box's up/down arrows and the mouse
 wheel still apply each step straight away.
 
 #### Channel selector
@@ -5863,15 +5883,41 @@ A nanowell dataset also opens in every other Review tab, which read it like this
   A plot that cannot draw nanowells (Response Curves) says so in the row. On a standard plate the toggle is not
   shown.
 - **Multivariate** lists a **Nanowell** feature family: each cell's own nanowell's metrics.
-- **Image Table** offers **MONTAGE** — the stitched picture the run analysed, one per well and timepoint (its FOV
-  setting does not apply) — and does not offer NUC+SEG, which a nanowell run never writes. The raw tiles stay
-  available as PHASE / GFP. Opening the `out` folder directly finds the `in` folder beside it.
+- **Image Table** lays nanowell wells side by side with its usual crop, zoom, LUT and export. Each picture is one
+  whole well at one timepoint (the FOV setting does not apply), and three kinds are offered as channels:
+  - **MONTAGE** — the stitched phase picture the run analysed, in grey.
+  - **MONTAGE GFP** (one per fluorescence channel) — the same stitch built from that channel's raw tiles, which needs
+    the `in` folder beside the results. The run keeps no fluorescence montage, so the first Generate reads every
+    tile of each well shown and can take a few seconds per well. Leave the row's LUT on **Auto** to give every well
+    one brightness window; tick **per cell** in its LUT row to scale each well to its own range instead, which shows
+    a dim well at the cost of comparing wells.
+  - **NW: *metric name*** (one per nanowell metric: cell count, confluence, brightness, fold changes, growth rate,
+    occupied) — each nanowell drawn as a disc in its metric's colour, *viridis* by default. A fold change is drawn
+    blue below 1, red above and grey at 1, on a log scale, so a doubling and a halving are equally strong. The values
+    follow the Nanowells page's **Baseline** and the Cell Gating rules, so they match the page and the plots.
+    Outside the nanowells is dark grey, so even the lowest values stand out; a nanowell with no value (no cells for
+    a brightness, out of focus, gated out) is an **empty ring**, never a coloured disc.
+
+  The metrics sit behind **Nanowell metrics** in the Channels tray (click it to show them), and a new table starts
+  with MONTAGE and the raw channels only. Under the grid a **colour key** names each metric as its row does and
+  then in full, shows its colours with the values at each end ("1 = no change" for a fold change), says whether
+  every well shares one window (and, while a crop is set, that Auto fitted it to the cropped region — so a cropped
+  export's colours can differ from a whole one's), and shows the empty ring; the saved figure and the PowerPoint slide carry the same key. The status line
+  sums, per metric, how many nanowells have no value and why.
+
+  All three line up pixel for pixel, so one crop shows the same part of the well in every row, and a cropped metric
+  map is redrawn finer so its discs stay round (the montages show their real pixels). The scale bar is measured at
+  the montage's own scale, not at **Pixel µm/px**, and every scale bar writes its length beside it (untick
+  **Label the bar** under Scale bar to hide it). Labels and titles leave out the FOV, since each picture is a whole
+  well. NUC+SEG is not offered, because a nanowell run never writes it. The raw tiles stay available as PHASE / GFP.
+  Opening the `out` folder directly finds the `in` folder beside it.
 - **Segmentation** shows the tile with each counted cell as a dot and each nanowell as a ring. A nanowell run
   records cells as points, not outlines, so Delete Cell, Crop cells and Edit are greyed out, and the line above the
   image says why.
 
 A build of All-Well without the Nanowells feature still opens a nanowell dataset, plots its cells and shows its
-montages, and says on every cell figure and in Segmentation that the nanowell views are not in this build.
+phase montages (without a scale bar, and without the fluorescence montages and metric maps), and says on every cell
+figure and in Segmentation that the nanowell views are not in this build.
 
 Pick wells on the plate at the left. Replicate sets from Sample Definitions are used exactly as the plot tabs
 use them.
@@ -5973,6 +6019,22 @@ the sentence names it.
   *Earliest* baseline: a count taken later — at a first measurable or a named timepoint — may follow a division,
   and the figure counts those nanowells.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
+- **Names.** Wells and groups are called what every other tab calls them: a replicate group by its name, a well by
+  the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two
+  wells drawn side by side share a name, each gets its well added (`HeLa · 1 µM (A01)`); the views of one well and
+  the **Well** list always show both. Under a group of several wells, each well's own swarm is marked with its well.
+- **Group by** and **Decorate** (once the plate has a variable, Home → Sample Map → Variables) — the same
+  controls as on the Plotting row, and the same settings: choosing one here changes it on every plot, and one chosen
+  on a Plotting tab shows here. **Group by** pools the page's wells by a variable's values instead of by your
+  replicate groups, one group per value, on every view; wells with no value are not drawn. **Decorate** (on
+  *Distribution*) holds **Colour by**, **Split by** and **Then by**, which change how the groups look, never a
+  value. *Colour by* colours each group's dots by its value, with a key naming the values at the top right, in
+  place of the occupancy colours — those come back when *Colour by* is set to *Occupancy* again, and the
+  footer says so while they are off. *Split by* arranges the groups into one labelled band per value: on *Along x:
+  Wells* the band names sit under the group names with a line between bands, and *Then by* adds a second row of
+  bands inside them; on *Along x: Time* each panel's title starts with its band. A group whose wells hold
+  different values is coloured and banded as `—mixed—`, and one with a well you have not filled as `no value`.
+  Batch Export's Nanowells mode draws its figures without them.
 - **Fixed cohort** (on *Distribution*, *Trajectories* and *Statistics*) — use only the nanowells with a value at every
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
   measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
@@ -6012,7 +6074,10 @@ the sentence names it.
   footer counts the nanowells left out. Two things it cannot see, and the footer counts both: a timepoint
   blurred evenly across the whole well (there is nothing sharp to compare with), and a nanowell whose rim could
   not be fitted (it has no rim focus, so it is kept unchecked). A well with fewer than ten rims at a timepoint
-  is not judged. It is the same switch as **Exclude out-of-focus nanowells** on the Cell Gating tab — ticking
+  is not judged. The footer says it briefly — *Out of focus, left out: 12 nanowell-timepoints (6 nanowells; rim
+  under 75% of its well's sharpest)* and *Focus unchecked: 3 rim not fitted* — where "the well's sharpest" is the
+  sharpest tenth described above. A percentage typed into the box takes effect as any typed number does (see
+  *Typing a number*): on Enter, on Tab, or a second after you stop typing; the page redrawing meanwhile (tiles arriving on the Array view) never puts the old number back. It is the same switch as **Exclude out-of-focus nanowells** on the Cell Gating tab — ticking
   either ticks both — so the cells of an out-of-focus nanowell also leave Plotting, Scatter, histograms and
   exports, not only this page. Turning it on changes the numbers a figure draws, so a figure saved before it
   existed redraws with it applied; untick it to see the run's own counts. Batch Export's Nanowells mode uses the
@@ -6056,7 +6121,7 @@ the sentence names it.
   select fewer wells to see (and click) single nanowells.
 - **Nothing without a number is drawn, and nothing is dropped silently.** Under each swarm, "excl. N" counts
   the nanowells that have no value there, and the footer lists them by reason: occluded, clipped, no address,
-  not located, fused (no count), empty at baseline, seeded later (empty at baseline, cells later), and so on.
+  not located, fused (no count), empty at baseline, no cells at baseline (none at the baseline, cells later), and so on.
   "Nanowells used U of R" (on *Along x: Time*, "Nanowell × timepoint values", since a nanowell is counted at
   each timepoint) adds up the panels drawn, and the number of wells; past twelve panels the rest are named,
   not counted. A selected well with no nanowell table is named in the footer, not drawn.
@@ -6070,6 +6135,29 @@ the sentence names it.
 
 **The other views**
 
+- **QC** — the whole plate at a glance: every well down the side, every timepoint across the top, and each cell
+  saying what, if anything, needs doing about that timepoint. It reads every well's records itself, so it works
+  with nothing selected on the plate. Each cell is one of:
+  - **not addressed** (solid amber, `!`) — the run could not number the nanowells, usually because it could not
+    find the central square; an anchor fixes it. If the last run already tried the anchor set there and could not
+    use it, the hover text says so;
+  - **anchor waiting** (blue, horizontal lines, `A`) — an anchor is set and no run has used it yet: **Re-run
+    anchored wells…** addresses it;
+  - **not located** (grey, vertical lines, `–`) — the run could not place the array at all (no lattice, a refused
+    orientation, …); an anchor cannot change that;
+  - **contradicted** (`xx`, `X`), **inconclusive** (`//`, `?`), **partial** (`\\`, with how many nanowells it leaves
+    out) and **not checked** (`..`) — what the identity check said (see *Is each nanowell the same
+    nanowell at every timepoint?* below), with the same hatches the line plots use;
+  - **reference** (`R`) and **confirmed** — nothing to do.
+
+  A timepoint that was not addressed is shown as such even when the identity check calls it inconclusive: the
+  anchor is what fixes it. The title says how many timepoints need a look and in how many wells, and the legend
+  counts every state on the plate. **Wells** chooses the rows: *Needing a look* (the default) shows only wells with
+  something to look at and says how many it left out; *All* shows every well. On a large plate the rows are banded
+  by plate row and labelled by its letter; pointing at a cell names it in the readout, and its tooltip says what
+  the state means. **Click a cell** to open it where it is dealt with: a verdict opens on **Identity**, a timepoint
+  not addressed (or waiting, or not located) opens on **Array** with **Set anchor** on. The **Anchor** group here
+  holds **Anchor queue**, **One per well** and **Re-run anchored wells…** (see *Setting the anchor by hand*).
 - **Trajectories** — one panel per well: a thin line per nanowell through its values over time, coloured by
   its occupancy at baseline, and a thick line for each occupancy class's median. A gap is a timepoint without
   a value. Growth rate and occupancy have one value per nanowell, so they are greyed here.
@@ -6092,7 +6180,7 @@ the sentence names it.
   ranking timepoint is always shown. Crops too small to hold a line of measurements show the fold change only, and
   the caption says so. All crops share one brightness scale, so a nanowell that filled
   with cells reads brighter than one that emptied. Nanowells without a fold change at the ranking timepoint
-  (occluded, seeded later, and so on) are not ranked and are counted by reason in the caption; a well with
+  (occluded, no cells at baseline, and so on) are not ranked and are counted by reason in the caption; a well with
   fewer nanowells than both blocks need splits them between the two and never shows one twice. Click any crop
   to open that nanowell's site detail. The crops are cut from the run's raw images as for the site detail, in
   one pass for the whole montage, so it fills in a moment after the ranking is drawn.
@@ -6140,15 +6228,29 @@ the sentence names it.
     place on the lattice, so they are greyed there, and the figure says so. A well whose grid record has no
     pitch says so instead of drawing a lattice.
   - **Layers** — *Nanowells*, either *filled by the metric* (the colour bar names it; a nanowell without a
-    value is a grey outline, never a colour: hatched where it was occluded, dashed where clipped, dotted where
-    it was not seen) or *outlined by state* in the colours Test detection uses (blue measured, green empty,
-    amber occluded, red clipped, grey for the other states). A key along the top of the array shows each
+    value is a grey outline, never a colour) or *outlined by state* in the colours Test detection uses (blue
+    measured, green empty, amber occluded, red clipped, grey for the other states). Either way every reason a
+    nanowell has no value draws its own mark, so no two can be confused: occluded is hatched with diagonal lines,
+    clipped dashed, absent from the roster dotted, not located dash-dotted, unaddressed (no address) dotted with
+    horizontal lines inside, identity contradicted cross-hatched, in an excluded field gridded, rim out of focus
+    filled with dots; a measured nanowell without a value is a plain ring with its reason written inside it. A
+    fused nanowell keeps its state's hatch inside its purple dashed ring, and one outside the **Subset** is dimmed
+    under a veil. A key along the top of the array shows each
     outline the view holds as a small ring drawn the same way — colour, dash and hatch — with how many
-    nanowells it covers, and lists only what is on screen. The outline's width follows the nanowell's size on screen (about
+    nanowells it covers, and lists only what is on screen. Its words are in the figure's own ink, so they read on
+    the dark screen theme and on publication white alike. A plain grey ring keyed *no value* is a nanowell that
+    was measured — cells may be plainly visible in it — but has no value of the chosen **Metric**. For a fold change
+    that is almost always its baseline: *no cells at baseline* when it held none at the baseline timepoint, or
+    *baseline occluded* / *baseline rim out of focus* when the baseline could not be measured. The key has one entry
+    per reason (the commonest three, then *other reasons*), each with a short tag in quotes — *no value: no cells
+    at baseline ("0 at base") · 3* — and with **Values** on each such nanowell writes that tag inside itself, so you
+    can read the reason of the one you are looking at. Every key entry ends with its count. The outline's width follows the nanowell's size on screen (about
     6 % of its diameter, never under 2.5 or over 8 screen pixels), so it stays visible zoomed out and on a phone. Either way a nanowell on a tile seam is dashed in purple and
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the
-    `q,r` when both are on). A nanowell without a value has no number written, never a 0. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
+    `q,r` when both are on). A nanowell without a value never has a number written (never a 0): it writes why instead, as above. A label
+    in a nanowell without a fill has a thin outline of the background colour, and one in a hatched nanowell sits on a
+    small patch of it, so it reads over the hatch. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
     from the run's cell table, so you can see where cells were found and where none were; the run does not
     keep cell outlines, so the dot is the cell's centre, not its shape. The dots are the cells the counts hold:
     a cell Home's Cell Gating leaves out, or one in a field excluded in QC triage, by the field-quality flag or by
@@ -6159,16 +6261,22 @@ the sentence names it.
     overlap, amber where the acquisition record put it), with its registration residual; a tile whose size the
     record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
     hand and says how the timepoint was addressed (and, where it was not, how to anchor it), and offers **Set
-    anchor**, **Clear anchor**, **Re-run anchored wells…** and **Anchor queue** (see *Setting the anchor by
-    hand* above). *Run
+    anchor**, **Clear anchor** and **Re-run anchored wells…** (see *Setting the anchor by hand* above; the
+    **Anchor queue** is on the QC view). *Run
     record* lists beside the figure the grid record of this timepoint (status, how the origin was found,
     pitch, angle, overlap, nanowells detected of the roster), the empty-nanowell template the counts were
     divided by, and the status of every other timepoint; a template the run found far from the well's
     earliest one is shown in amber: most nanowells there may hold cells, and that timepoint's counts and
-    confluence may be biased.
+    confluence may be biased. *Notes* (off until you turn it on; also the **Notes** button beside **Overlays**)
+    explains how to read the figure — how the positions are drawn, what the fill and outlines mean, what the tile
+    colours mean — under the footer's lines, which stay exactly where they are, saying only what applies to what is on screen. That space is kept whether Notes is on or off, so the array never moves, shrinks or is covered
+    when you turn it on. The footer under the figure is the same either way: the page's
+    notes, one line of counts that adds up to the roster in the key's own groups (*19 nanowells: 13 with a value ·
+    4 no value · 2 rim out of focus*), and anything that went wrong or is missing — no addresses, nothing placed,
+    no montage, a grid status other than *ok*.
   - **Layers → Show as** sets every layer at once: *Array map* (lattice places filled by the metric), *Array
     QC* (the run montage, the tiles and the nanowells by state, with the run record) or *Full montage* (full
-    resolution, nanowells by state with their addresses and values, and the anchor).
+    resolution, nanowells by state with their addresses and values, and the anchor). *Notes* stays as you set it.
   - **Overlays** — one button that takes every coloured layer (the nanowells, the tiles, the anchor and the cells) off
     the image and puts them back, for a quick look at what is underneath. The Layers menu's choices are kept,
     so pressing it again restores exactly what was on; while they are hidden the footer says so, and Set
@@ -6187,7 +6295,7 @@ the sentence names it.
 
   Click a nanowell to open its site detail, as on the beeswarm (with **Set anchor** on, a click sets the anchor
   instead). Double-click a nanowell to centre it, zoom until it fills the view and open its site detail —
-  anywhere inside its rim counts, and it works with the overlays hidden. The footer counts the nanowells by state. The page remembers the layers with its
+  anywhere inside its rim counts, and it works with the overlays hidden. The footer counts the nanowells in the key's groups. The page remembers the layers with its
   other settings; a page saved on the old *Array map* or *Array QC* view opens on the Array view with the
   layers that view drew.
 
@@ -6204,7 +6312,10 @@ timepoint with no crop says why. **Pop out**, above the strip, opens the crops l
 one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a change
 between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
 it like any window. Its own row of controls sets the crops where you look at them: the image channel, **Range**
-(the display range), **Cells**, **Metrics** (the measurements under each crop), **Labels** (each crop's timepoint
+(the display range), **Cells**, **Metrics** (the measurements under each crop, ending with the rim's focus — *rim 88% of sharpest* — as a
+percentage of its well's sharpest rims at that timepoint, the same scale as the **Rim focus** threshold, so a crop
+reading below the threshold is the one left out as out of focus; *not judged* where the well had too few rims, *rim
+not fitted* where the rim was not found), **Labels** (each crop's timepoint
 and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
 Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted in the
 crop's own nanowell, on every crop — the strip, the pop-out and the Extremes montage (the run keeps no cell
@@ -6332,6 +6443,9 @@ What the check cannot see: a turn of the array by a symmetry it shares with the 
 (180°), or on a square lattice a quarter turn (90°). The array looks the same either way, so such a turn would be
 confirmed. A keyed plate is put back within a few degrees, so this matters only if the array itself can turn in its
 well. The check expects the plate to turn less than 30° between timepoints (45° on a square lattice).
+
+To see every well's verdicts at once, open the **QC** view: each timepoint is a cell hatched by its verdict, and a
+click opens it here.
 
 **The Identity view** shows the check for one well at one timepoint against the well's reference timepoint; the
 Well list says each well's worst verdict, and it opens on the first timepoint that is not confirmed. *Compare*
@@ -6690,8 +6804,9 @@ channel for every well).
   size isn't stored by the pipeline, so you supply it). Choose which cell(s) show it
   (**every cell**, or a single grid corner), where in the image it sits, its
   **thickness**, and its colour (**Auto** picks black or white for contrast against
-  the pixels underneath). The bar is drawn into the pixels, so the live grid and the
-  exported figure match exactly.
+  the pixels underneath). The bar's length is written beside it ("50 µm") on a
+  small plate behind both; untick **Label the bar** to leave it unlabelled. The bar is drawn
+  into the pixels, so the live grid and the exported figure match exactly.
 
   **If the box is ticked and no bar appears, the status line says why.** There are
   four reasons a bar is asked for and not drawn, and each names the control that
@@ -7251,6 +7366,31 @@ the group that owns it; the wells of the group you are **currently editing** als
 ring, so "which group is this well in" and "which group am I editing" stay
 readable at the same time. Wells the dataset doesn't have are drawn as empty
 sockets and ignore the drag.
+
+Groups can also be built **by sample variable** — what the
+[Variables](#variables) tab says the wells *are*, rather than where they
+sit. The **Select by variable:** row above the plate takes a variable and one
+of its values; **Add wells** puts every loaded well holding that value into the
+selected group (or into a new group, if none is selected), and **Remove wells**
+takes them out. Pick *(not set)* to find the wells never given a value. A new
+group filled this way is named after the value — `HeLa`, then `HeLa + U2OS` if
+you add a second — and keeps that name when you later drag wells on or off;
+renaming it yourself replaces it for good. **Quick Setup → One group per value
+of…** replaces every group with one per value of the chosen variable, named by
+the value (with its unit) and in the variable's own value order, after asking
+first if you already have groups; a value no well holds makes no group. Either
+way the selection is taken **when you make it**: the groups hold wells and
+samples exactly as hand-built ones do, and do not follow later edits to the
+variables. On a plate with no variables the row says where to define them.
+
+A sample definition whose wells all hold the value joins as a whole sample, as
+on the plate. One whose wells hold *different* values is not pulled in whole —
+that would export wells under a value they do not hold — so only its matching
+wells join, as single wells, and a warning line under the row names the
+sample that was split and the wells that joined. Removing a value keeps a
+sample that also holds other values and says so; use its − button on the group
+card to remove it. Wells with no value for the variable are listed after a
+Quick Setup rather than left out silently.
 
 Batch figures are drawn through the **same renderers as the on-screen plots**, so
 a group's figure matches what the plotting tab shows for that selection: each

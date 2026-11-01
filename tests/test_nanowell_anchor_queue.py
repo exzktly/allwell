@@ -1,4 +1,4 @@
-"""The Array view's Anchor queue: every timepoint the run left unaddressed, shown one montage after another.
+"""The QC view's Anchor queue: every timepoint the run left unaddressed, shown one montage after another.
 
 Requested: "After a nanowell run, there are usually a set of wells and timepoints that need manual fiducial
 labeling. Build a tool that automatically shows the user the array view for all montages that need anchor
@@ -7,7 +7,7 @@ labeling, one after the other for faster labeling."
 The first half pins which timepoints the queue holds and in what order, on fixtures built so the wrong rule
 gives a different answer: grid records written in a non-plate order, timepoint labels whose alphabetical order is
 the reverse of their time order, an anchor set and not yet used (not waiting), and an anchor the last run tried
-and refused (waiting again). The second half drives the real page — ``build_nanowell_tab``, the band's buttons, a
+and refused (waiting again). The second half drives the real page — ``build_nanowell_tab``, the QC view's buttons, a
 real mouse click on the canvas — through a whole walk, ending with the selection it started with restored.
 """
 
@@ -167,6 +167,15 @@ def _dataset_with_unaddressed(tmp_path):
     return out
 
 
+def _on_qc(qtbot, ctx, st):
+    """Show the QC view, where the walk starts, once its plate records are read: the button is greyed until then."""
+    from review.features.nanowell import controller as nwc
+
+    nwc.set_view(ctx, "qc")
+    qtbot.waitUntil(lambda: st.qc_records is not None and st.qc_reading is None, timeout=20000)
+    nwc._call(ctx, "_nw_refresh_controls")
+
+
 def _assert_opened_zoomed_on_the_montage_centre(st):
     """Requested: "by default zoom to the center of the registered whole-well montage at 10x bc the anchor will
     likely be visible there". The readout's own factor, and the centre of what the axes show."""
@@ -205,9 +214,11 @@ def test_the_queue_walks_every_unaddressed_montage_and_a_click_moves_it_on(qtbot
         canvas, at = _widget_point(ctx, st, *AT)
         QTest.mouseClick(canvas, Qt.LeftButton, Qt.NoModifier, at)
 
+    _on_qc(qtbot, ctx, st)
     queue_btn = ctx.widgets.get("_nw_queue_btn")
-    assert queue_btn.isEnabled()
+    assert queue_btn.isEnabled() and queue_btn.isVisibleTo(queue_btn.window())
     queue_btn.click()
+    assert st.view == "array" and ctx.widgets.get("_nw_queue_lbl").isVisibleTo(queue_btn.window())
     assert shown() == ("A01", "t_a")
     _assert_opened_zoomed_on_the_montage_centre(st)
     assert set(ctx.state.selection.selected_wells) == {"A02", "A01"}
@@ -234,8 +245,11 @@ def test_the_queue_walks_every_unaddressed_montage_and_a_click_moves_it_on(qtbot
     ctx.widgets.get("_nw_queue_stop_btn").click()
     assert st.anchor_queue is None and not st.anchor_mode
     assert set(ctx.state.selection.selected_wells) == {"A02"}
-    assert st.array_message == ("Anchor queue finished: 2 of 3 timepoint(s) anchored, 1 skipped. "
-                                "Re-run anchored wells… to address them from the anchors.")
+    # Back where it started, saying what it did and ringing the cells it anchored.
+    assert st.view == "qc" and not st.array_message
+    assert st.qc_message == ("Anchor queue finished: 2 of 3 timepoint(s) anchored, 1 skipped. "
+                             "Re-run anchored wells… to address them from the anchors.")
+    assert st.qc_highlight == {("A01", "t_a"), ("B01", "t_c")}
     anchors = read_anchors(anchors_path(out.parent / "in"))
     assert sorted(anchors) == [("A01", "t_a"), ("B01", "t_c")]
     assert anchors[("B01", "t_c")].position() == pytest.approx(AT, abs=1.0)
@@ -253,9 +267,13 @@ def test_with_nothing_waiting_the_queue_says_so_and_changes_nothing(qtbot, tmp_p
     st = ctx.state.feature_slice("nanowell")
     nwc.nw_on_activate(ctx)
     qtbot.waitUntil(lambda: st.metrics is not None and not st.computing, timeout=20000)
+    _on_qc(qtbot, ctx, st)
+    queue_btn = ctx.widgets.get("_nw_queue_btn")
+    assert not queue_btn.isEnabled()
+    assert queue_btn.toolTip().endswith("\n\nNo timepoint is waiting for an anchor.")
     assert aq.start(ctx) is False
     assert st.anchor_queue is None
-    assert st.array_message == "No nanowell timepoint is waiting for an anchor."
+    assert st.qc_message == "No nanowell timepoint is waiting for an anchor."
     assert set(ctx.state.selection.selected_wells) == {"A02"}
 
 
@@ -263,6 +281,7 @@ def test_one_per_well_walks_each_well_s_first_timepoint_and_ends_by_itself(qtbot
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
 
+    from review.features.nanowell import _anchor_queue as aq
     from review.features.nanowell import controller as nwc
     from tests.test_an_unaddressed_nanowell_timepoint_offers_its_anchor import _Rail
     from tests.test_nanowell_full_montage import _widget_point
@@ -286,6 +305,7 @@ def test_one_per_well_walks_each_well_s_first_timepoint_and_ends_by_itself(qtbot
         canvas, at = _widget_point(ctx, st, *AT)
         QTest.mouseClick(canvas, Qt.LeftButton, Qt.NoModifier, at)
 
+    _on_qc(qtbot, ctx, st)
     ctx.widgets.get("_nw_queue_btn").click()
     assert shown() == ("A01", "t_a")
     per_well = ctx.widgets.get("_nw_queue_per_well_btn")
@@ -299,18 +319,21 @@ def test_one_per_well_walks_each_well_s_first_timepoint_and_ends_by_itself(qtbot
     click()
     qtbot.waitUntil(lambda: st.anchor_queue is None, timeout=5000)   # past the last well, the walk ends itself
     assert set(ctx.state.selection.selected_wells) == {"A02"}
-    assert st.array_message == ("Anchor queue finished: 2 of 2 timepoint(s) anchored. "
-                                "Re-run anchored wells… to address them from the anchors.")
+    assert st.view == "qc" and st.qc_message == ("Anchor queue finished: 2 of 2 timepoint(s) anchored. "
+                                                 "Re-run anchored wells… to address them from the anchors.")
     assert sorted(read_anchors(anchors_path(out.parent / "in"))) == [("A01", "t_a"), ("B01", "t_c")]
+    _on_qc(qtbot, ctx, st)                                           # the anchors file changed: read again
 
-    ctx.widgets.get("_nw_queue_btn").click()                         # the next walk starts one per well too
-    assert st.anchor_queue is None and st.array_message == (
+    aq.start(ctx)                                                    # the next walk starts one per well too
+    assert st.anchor_queue is None and st.qc_message == (
         "No nanowell timepoint is waiting for an anchor with One per well: 1 more wait in wells that already have "
         "one. One per well is now off, so Anchor queue walks them all. 2 timepoint(s) have an anchor that no run has "
         "used yet: Re-run anchored wells… addresses them.")
-    # One per well's toggle is shown only during a walk, so the refusal turned it off: the next press is not
-    # refused the same way for ever, and walks the timepoint one per well left out.
+    # The refusal turned One per well off, and the QC view's toggle says so: the next press is not refused the same
+    # way for ever, and walks the timepoint one per well left out.
     assert not st.anchor_queue_per_well
+    nwc._call(ctx, "_nw_refresh_controls")
+    assert not ctx.widgets.get("_nw_qc_per_well_btn").isChecked()
     ctx.widgets.get("_nw_queue_btn").click()
     assert shown() == ("B01", "t_a")
     assert not ctx.widgets.get("_nw_queue_per_well_btn").isChecked()
@@ -345,6 +368,7 @@ def test_the_walk_s_keys_skip_go_back_and_stop_only_while_it_runs(qtbot, tmp_pat
 
     QTest.keyClick(window, Qt.Key_Right)                             # no walk: the key does nothing
     assert st.anchor_queue is None
+    _on_qc(qtbot, ctx, st)
     ctx.widgets.get("_nw_queue_btn").click()
     assert shown() == (0, "A01", "t_a")
     QTest.keyClick(window, Qt.Key_Left)                              # Back at the first item: nothing before it
@@ -367,7 +391,7 @@ def test_every_on_off_button_on_the_array_band_shows_when_it_is_on(qtbot, tmp_pa
     from tests.test_nanowell_page import _page, _write_nanowell_dataset
 
     ctx = _page(qtbot, _write_nanowell_dataset(tmp_path))
-    names = ("_nw_anchor_btn", "_nw_overlays_btn", "_nw_queue_per_well_btn")
+    names = ("_nw_anchor_btn", "_nw_overlays_btn", "_nw_queue_per_well_btn", "_nw_qc_per_well_btn")
     buttons = {name: ctx.widgets.get_or_none(name) for name in names}
     assert all(isinstance(b, QPushButton) and b.isCheckable() for b in buttons.values()), buttons
     assert {name: b.property("variant") for name, b in buttons.items()} == dict.fromkeys(names, "toggle")

@@ -13,17 +13,29 @@ widest value needs — after every polish and whenever their range or decimals c
 app puts a unit in the label beside the box, ``tests/test_entry_fields_hold_only_the_value.py``.) A row short of room then wraps, scrolls or squeezes something else, never the number. They are the only
 spin boxes the application constructs (``tests/test_spin_boxes_keep_their_number.py`` holds every site to that).
 
-They also commit a typed value only when it is finished — on Enter or when the box loses focus — rather than on every
-keystroke (``setKeyboardTracking(False)``). Qt's default emits ``valueChanged`` for each digit, so typing "100" into a
-box wired to a recompute ran it for 1, then 10, then 100: a two-bin histogram drawn on the way to two hundred, a
-DBSCAN pass per digit. The arrows, the wheel and ``setValue`` still emit at once; only typing waits.
+They also commit a typed value only when it is finished rather than on every keystroke
+(``setKeyboardTracking(False)``). Qt's default emits ``valueChanged`` for each digit, so typing "100" into a box wired
+to a recompute ran it for 1, then 10, then 100: a two-bin histogram drawn on the way to two hundred, a DBSCAN pass per
+digit. "Finished" is Enter, the box losing focus, or a pause of :data:`TYPING_PAUSE_MS` in typing. The pause is not
+optional: a click on a plot canvas, a tool button or a tab bar ends no edit, and a window that is not the active one
+has no focus to lose, so without it a number typed and then left was silently dropped — reported on the Nanowells
+page's Rim focus box, whose first change (made with Enter) applied and whose later ones (ended by a click) did not.
+The arrows, the wheel and ``setValue`` still emit at once; only typing waits. While typed text is not yet the value in
+force it is shown in italics (:meth:`_HoldsItsNumber.pending`), so a number waiting for its pause is never mistaken
+for one already applied — a pause in the middle of a number commits what is there, and the change of style says so.
 ``tests/test_spin_boxes_commit_typed_values_once.py`` holds it.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, QTimer
+from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
+
+#: How long a pause in typing commits the number typed (module docstring): long enough that typing "60" at an
+#: ordinary pace commits 60 and not 6 first — the Cell Gating panel's text bounds use the same second
+#: (``qc/tab_view._TYPING_PAUSE_MS``).
+TYPING_PAUSE_MS = 1000
 
 #: The events after which the stylesheet may have set the explicit minimum width again, or the widest value's width
 #: may have changed with the font.
@@ -36,6 +48,32 @@ class _HoldsItsNumber:
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.setKeyboardTracking(False)          # one valueChanged per typed value, not per keystroke (docstring)
+        # ...committed on Enter, on focus-out, or after a pause in typing. ``textEdited`` is the user's typing only, so
+        # a refresh from state (``setValue``, :meth:`show_value`) never starts the pause.
+        self._commit_pause = QTimer(self)
+        self._commit_pause.setSingleShot(True)
+        self._commit_pause.setInterval(TYPING_PAUSE_MS)
+        self._commit_pause.timeout.connect(self.interpretText)
+        self.lineEdit().textEdited.connect(lambda _text: self._commit_pause.start())
+        # Typed but not yet in force: italics until it commits or is put back.
+        self.lineEdit().textChanged.connect(lambda _text: self._show_pending())
+        self.valueChanged.connect(lambda _value: self._show_pending())
+
+    def pending(self) -> bool:
+        """Whether the text in the field is not the value in force: typed and not yet committed."""
+        text = self.lineEdit().text().strip()
+        if text == self.textFromValue(self.value()).strip():
+            return False
+        if self.validate(text, 0)[0] != QValidator.Acceptable:
+            return True
+        return self.valueFromText(text) != self.value()
+
+    def _show_pending(self) -> None:
+        font = self.lineEdit().font()
+        pending = self.pending()
+        if font.italic() != pending:
+            font.setItalic(pending)
+            self.lineEdit().setFont(font)
 
     def _hold(self) -> None:
         width = self.sizeHint().width()
@@ -47,6 +85,16 @@ class _HoldsItsNumber:
         if event.type() in _REHOLD:
             self._hold()
         return handled
+
+    def show_value(self, value) -> None:
+        """Show *value* as a refresh from state would: set it only when the box does not already hold it.
+
+        ``setValue`` rewrites the text field even when the value is unchanged, so a refresh that ran while the user
+        was typing — a redraw, a tile arriving — threw the typed number away before Enter could commit it. With
+        keyboard tracking off the box's value stays the committed one until Enter or focus-out, so an equal value
+        here means the state has not moved and the field is left as the user has it."""
+        if self.value() != value:
+            self.setValue(value)
 
     def setRange(self, low, high) -> None:  # Qt naming
         super().setRange(low, high)

@@ -788,7 +788,7 @@ def qc_gate_refresh_widgets(win) -> None:
         w["exclude_soft_cells"].setChecked(bool(p.exclude_soft_cells))
         w["exclude_border_cells"].setChecked(bool(p.exclude_border_cells))
         w["exclude_soft_nanowells"].setChecked(bool(p.exclude_soft_nanowells))
-        w["nanowell_focus_fraction"].setValue(int(round(100 * p.nanowell_focus_fraction)))
+        w["nanowell_focus_fraction"].show_value(int(round(100 * p.nanowell_focus_fraction)))
         w["focus_min"].setText(_fmt(p.focus_min))
         w["min_area"].setText(_fmt(p.min_area))
         w["max_area"].setText(_fmt(p.max_area))

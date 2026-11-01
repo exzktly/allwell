@@ -1389,6 +1389,9 @@ class PipelineRunner:
         # from the previous run would then be closed in this run's name.
         self._journal_dir = None
         self._journal_token = None
+        # The same for the output folder: this run's is resolved on its own thread, and until then the previous
+        # run's would be read as this one's — by the run log file (``analyze.domain.run_log``) among others.
+        self._last_output_dir = None
         self._thread = threading.Thread(
             target=self._run_pipeline_thread,
             args=(pipeline, opts, resolve_dirs),

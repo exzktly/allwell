@@ -31,7 +31,7 @@ from review.features.nanowell.state import NanowellState  # noqa: E402
 from tests.test_nanowell_page import _loaded, _page, _write_nanowell_dataset  # noqa: E402
 
 #: A01's eight nanowells (q = 0..7, r = 0). At t_d the count fold changes over t_c are
-#: q0 4, q1 0.5, q2 2, q3 1, q4 3, q5 1.5 — out of address order — q6 is seeded later (0 at baseline) and q7 was
+#: q0 4, q1 0.5, q2 2, q3 1, q4 3, q5 1.5 — out of address order — q6 is no cells at baseline and q7 was
 #: occluded at baseline. At t_a only q2 has grown (3×), the rest are at 1×, so ranking there picks other nanowells.
 COUNTS = {"A01": {"t_c": [2, 2, 2, 2, 2, 2, 0, None], "t_a": [2, 2, 6, 2, 2, 2, 1, 1],
                   "t_d": [8, 1, 4, 2, 6, 3, 5, 1]},
@@ -57,7 +57,7 @@ def test_the_largest_and_smallest_fold_changes_are_picked_in_rank_order_not_addr
     assert model.timepoints == ["t_c", "t_a", "t_d"]
     assert model.largest[0].values == {"t_c": 1.0, "t_a": 1.0, "t_d": 4.0}       # its fold change over time
     assert (model.roster, model.ranked) == (8, 6)
-    assert model.excluded == {"seeded later (0 at baseline)": 1, "baseline occluded": 1}
+    assert model.excluded == {"no cells at baseline": 1, "baseline occluded": 1}
 
 
 def test_a_well_with_fewer_than_twice_n_shares_them_and_never_shows_one_twice(metrics):
@@ -188,11 +188,11 @@ def test_the_view_draws_the_ranked_rows_at_the_latest_timepoint_with_their_crops
     assert _texts(page, "nw-extremes-value")[:3] == ["1×", "1×", "4×"]
     caption = _texts(page, "nw-extremes-caption")[0]
     # The fixture's wells hold fewer nanowells than rim focus needs to judge one, and the caption says so first.
-    unjudged = re.match(r"\d+ in a well with under 10 rims at that timepoint were kept unchecked\. ", caption)
+    unjudged = re.match(r"Focus unchecked: \d+ under 10 rims in the well\. ", caption)
     assert unjudged
     caption = caption[unjudged.end():]
     assert caption.startswith("6 of 8 nanowells in A01 have a count fold change at t_d; not ranked: "
-                              "1 baseline occluded, 1 seeded later (0 at baseline)")
+                              "1 baseline occluded, 1 no cells at baseline")
     assert "split between the two blocks" in caption
 
 

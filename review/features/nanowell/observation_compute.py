@@ -24,7 +24,7 @@ import pandas as pd
 
 from review.domain.observation import NANOWELLS, ObservationMetric, ObservationTable
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
-from review.features.nanowell.controller import gate_tally, gate_version
+from review.features.nanowell.controller import gate_tally, gate_version, sync_focus_rule
 from review.features.nanowell.distribution_compute import METRICS
 from review.features.nanowell.series_compute import exclusion_reason, metric_kinds, site_metrics
 
@@ -56,6 +56,9 @@ def _frame(metrics: pd.DataFrame) -> pd.DataFrame:
     from pipeline.nanowell_task import timepoint_hours
 
     frame = metrics.copy()
+    # A run whose filenames carry no timepoint writes a blank label, which the table reader reads as NaN and the
+    # cell rows as "" (and as 0 h): one spelling, so the two join and select the same rows.
+    frame["timepoint"] = frame["timepoint"].where(frame["timepoint"].notna(), "")
     frame["occupied"] = (pd.to_numeric(frame["n"], errors="coerce") >= 1).astype(float).where(frame["n"].notna())
     # The timepoint as the cell rows' ``timepoint_hours`` reads it, so a plot's timepoint choices (built from the
     # cell rows) select the same rows here. ``time_h`` stays the acquisition record's clock, which may differ.
@@ -71,6 +74,9 @@ def nanowell_observations(ctx, wells) -> ObservationTable | None:
     if st is None or not data_dir:
         return None
     wells = tuple(sorted(set(wells or ())))
+    # The rule in force now (Cell Gating's QC parameters), not whatever the page last copied: a plot may be drawn
+    # before the page was ever opened, or after the rule changed while it was hidden.
+    sync_focus_rule(ctx, st)
     focus = st.rim_focus_rule()
     key = (str(data_dir), wells, st.baseline, focus.key(), gate_version(ctx))
     memo = st.observation_memo

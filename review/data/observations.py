@@ -113,7 +113,11 @@ def with_nanowell_columns(ctx, df, well: str, columns):
     out = df.copy()
     for column in wanted:
         out[column] = np.nan
-    table = nanowell_observations(ctx, [well])
+    # Asked for the plotted members' wells together, not one well at a time: one table, one memo entry, shared
+    # by every well of the plot and by the pickers listing the metrics, instead of a read and a gating tally per
+    # well per redraw that evicts its own memo on any plot of more than a few wells.
+    plotted = [w for _l, ws, _c in observation_groups(ctx) for w in ws]
+    table = nanowell_observations(ctx, sorted(set(plotted) | {well}) if well in plotted else [well])
     if table is None or table.frame.empty or not {"nw_q", "nw_r", "timepoint"} <= set(df.columns):
         return out
     keys = [c[len(NANOWELL_CELL_PREFIX):] for c in wanted]

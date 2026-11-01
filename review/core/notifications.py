@@ -21,8 +21,9 @@ class NotificationService:
 
     def __init__(self, ctx) -> None:
         self._ctx = ctx
-        #: The centre tab (leaf) that wrote the line now showing, ``None`` when nothing does.
+        #: The centre tab (leaf) that wrote the line now showing, ``None`` when nothing does, and the line it wrote.
         self.status_owner: str | None = None
+        self._owned_text: str = ""
 
     def set_status(self, message: str) -> None:
         """Show *message* in the main-window status bar (no-op if unavailable), owned by the tab on screen.
@@ -34,10 +35,17 @@ class NotificationService:
         if callable(fn):
             fn(message)
             self.status_owner = self._current_tab() if message else None
+            self._owned_text = message
 
     def clear_unless_owned_by(self, tab: str) -> bool:
         """Clear the status line when another tab wrote it; returns whether it was cleared."""
         if self.status_owner is None or self.status_owner == tab:
+            return False
+        # A line written past this service (the loader's "Loaded N well(s)", a worker's progress) belongs to no tab:
+        # leave it, and forget the owner of the line it replaced.
+        label = getattr(self._ctx.window, "_status_lbl", None)
+        if label is not None and hasattr(label, "text") and label.text() != self._owned_text:
+            self.status_owner = None
             return False
         fn = getattr(self._ctx.window, "_set_status", None)
         if callable(fn):

@@ -692,8 +692,7 @@ def _draw_heatmap(ctx) -> None:
     ctx.runtime.heatmap.array = arr
     ctx.runtime.heatmap.spread = err
     _err_kind, _ci_scale, _draw_err = error_bar_settings(ctx)
-    ctx.runtime.heatmap.spread_label = spread_kind_label(
-        _err_kind, bool(getattr(ctx.state.plot, "use_sem", True)))
+    ctx.runtime.heatmap.spread_label = _spread_label(ctx, _err_kind, nw)
     ctx.runtime.heatmap.layout_active = layout
 
     # Pool min/max across every timepoint so the colormap stays consistent
@@ -1017,6 +1016,14 @@ def _grid_values(ctx, layout, tp, metric, val_col, threshold, fluor_gates, nw):
     return arr, err, cell_well_index
 
 
+def _spread_label(ctx, err_kind, nw) -> str:
+    """What the grid's ``±`` is: the user's choice for cells; always the SEM over wells for the nanowell grid,
+    which computes no other spread — naming the choice there would label an SEM as an SD or a CI."""
+    if nw is not None:
+        return "SEM over wells"
+    return spread_kind_label(err_kind, bool(getattr(ctx.state.plot, "use_sem", True)))
+
+
 def _grid_metric_label(metric: str, nw) -> str:
     return metric if nw is None else nw.label
 
@@ -1046,7 +1053,8 @@ def _stamp_grid_footer(ctx, fig, nw, muted) -> None:
         follows_theme(fig.text(0.01, 0.002, nw.footer, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID), muted=True)
     else:
         from review.core.observation_band import stamp_cells_footer
-        stamp_cells_footer(ctx, fig)
+        layout = getattr(ctx.runtime.heatmap, "layout_active", None)
+        stamp_cells_footer(ctx, fig, sorted({w for ws in getattr(layout, "cells", {}).values() for w in ws}))
 
 
 def _format_cell_value(v: float, metric: str, fmt: str = "") -> str:

@@ -94,3 +94,20 @@ def test_without_the_nanowells_feature_there_are_no_nanowell_observations(nw_ctx
     monkeypatch.setattr(nw_ctx.features, "service", lambda key: None)   # what a build without the feature answers
     assert observations.available_observations(nw_ctx) == (CELLS,)
     assert observations.nanowell_observations(nw_ctx, ["A01"]) is None
+
+
+def test_the_rows_follow_the_rim_focus_rule_in_force_without_the_page_ever_opening(nw_ctx):
+    """Cell Gating's rim-focus rule is the one the page and every other tab apply; the plots must too, though the
+    page — which used to be the only thing copying the rule onto its state — was never opened."""
+    from review.data.observations import nanowell_observations
+
+    import dataclasses
+
+    params = nw_ctx.features.query("qc.get_params", nw_ctx, default=None)
+    assert params is not None
+    nw_ctx.state.qc.params = dataclasses.replace(params, exclude_soft_nanowells=True)
+    on = nanowell_observations(nw_ctx, ["A01"])
+    nw_ctx.state.qc.params = dataclasses.replace(params, exclude_soft_nanowells=False)
+    off = nanowell_observations(nw_ctx, ["A01"])
+    # Fewer than ten rims a timepoint: the rule on cannot judge them and says so; off, it says nothing.
+    assert on.notes and not off.notes

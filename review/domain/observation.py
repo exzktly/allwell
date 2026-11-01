@@ -198,3 +198,36 @@ def group_points(medians: pd.DataFrame, groups) -> list[GroupPoint]:
             sem = (math.sqrt(sum((v - mean) ** 2 for v in vals) / (n - 1)) / math.sqrt(n)) if n >= 2 else float("nan")
             out.append(GroupPoint(label, float(hours), mean, sem, n, vals))
     return out
+
+
+def scoped_counts(table: ObservationTable, key: str, wells, timepoints_h=None) -> tuple[int, int, dict[str, int]]:
+    """``(used, total, excluded by reason)`` of metric *key* over the rows a figure draws — *wells* at
+    *timepoints_h* — so a footer's numbers add up: ``used + sum(excluded) == total``."""
+    from domain.tp_match import tp_close
+
+    frame = table.frame
+    if frame.empty:
+        return 0, 0, {}
+    scope = frame["well"].isin(list(wells))
+    if timepoints_h is not None:
+        wanted = [float(t) for t in timepoints_h]
+        hours = pd.to_numeric(frame["timepoint_hours"], errors="coerce")
+        scope &= hours.map(lambda h: h == h and any(tp_close(h, t) for t in wanted))
+    values = table.values(key)[scope]
+    defined = values.notna()
+    excluded: dict[str, int] = {}
+    if (~defined).any():
+        why = (table.why_missing(key)[scope] if table.why_missing is not None
+               else pd.Series("", index=values.index))
+        for text, n in why[~defined].replace("", "no value").fillna("no value").value_counts().items():
+            excluded[str(text)] = int(n)
+    return int(defined.sum()), int(scope.sum()), excluded
+
+
+def wells_without_value(medians: pd.DataFrame) -> list[str]:
+    """``"<well> (t=<h>h)"`` for each well-timepoint whose median is undefined — a well that fell out of its
+    member's mean and spread, which a figure must name rather than drop silently."""
+    if medians.empty:
+        return []
+    gone = medians[medians["median"].isna()]
+    return [f"{w} (t={h:g}h)" for w, h in zip(gone["well"], gone["timepoint_hours"])]

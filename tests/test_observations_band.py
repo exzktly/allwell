@@ -107,3 +107,30 @@ def test_the_band_shows_the_toggle_or_its_text_and_the_toggle_records_the_choice
     toggle = ctx.widgets.get("_plotting_observations_toggle")
     toggle.setCurrentByData(NANOWELLS)
     assert ctx.state.plot.observations == NANOWELLS and redrawn == [ctx]
+
+
+def test_the_toggle_swaps_the_cell_controls_for_the_metric_picker_and_back(shell, monkeypatch):
+    """Both directions, driven through the toggle a user clicks (review finding: the band once hid the cell
+    controls under Nanowells and never showed them again)."""
+    from PySide6.QtWidgets import QLabel
+
+    from widgets.control_band import ControlBand
+    from widgets.page_stack import NamedPageStack
+
+    ctx = _nanowell(shell)
+    band = ControlBand()
+    ob.build_observation_controls(ctx, band)
+    cell_groups = {n: ctx.widgets.register(n, band.add_scope("", QLabel(n)))
+                   for n in ("_plotting_channel_grp", "_plotting_metric_grp", "_plotting_thresh_frac_grp")}
+    stack = ctx.widgets.register("_plotting_notebook", NamedPageStack())
+    stack.addPage("Bar Plots", QLabel())
+    stack.setCurrentByName("Bar Plots")
+    monkeypatch.setattr("review.core.plot_orchestrator.redraw_every_scope", lambda c: None)
+    ob.refresh(ctx, "Bar Plots")
+    metric = ctx.widgets.get("_plotting_nw_metric_grp")
+    assert metric.isHidden() and not any(g.isHidden() for g in cell_groups.values())
+    toggle = ctx.widgets.get("_plotting_observations_toggle")
+    toggle.setCurrentByData(NANOWELLS)
+    assert not metric.isHidden() and all(g.isHidden() for g in cell_groups.values())
+    toggle.setCurrentByData(CELLS)
+    assert metric.isHidden() and not any(g.isHidden() for g in cell_groups.values())

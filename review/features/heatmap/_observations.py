@@ -33,7 +33,7 @@ def nanowell_grid(ctx, layout, tp: float, expand) -> NanowellGrid | None:
     """The grid's values under Nanowells, or ``None`` when the Heat Map draws cells. *expand* maps a cell's wells to
     the wells they stand for (a replicate set's members)."""
     from review.core.observation_band import chosen_metric, effective_observations, nanowell_table_for
-    from review.domain.observation import footer_line, group_points, well_medians
+    from review.domain.observation import footer_line, group_points, scoped_counts, well_medians, wells_without_value
 
     if effective_observations(ctx, LEAF) != NANOWELLS:
         return None
@@ -56,6 +56,9 @@ def nanowell_grid(ctx, layout, tp: float, expand) -> NanowellGrid | None:
             arr[r, c], err[r, c] = points[0].mean, points[0].sem
     finite = all_medians["median"].dropna()
     vmin, vmax = (float(finite.min()), float(finite.max())) if len(finite) else (None, None)
-    used, total = int(here["n"].sum()) if len(here) else 0, int(here["total"].sum()) if len(here) else 0
-    footer = footer_line(NANOWELLS, used, total) + " · a cell is the mean over its wells of each well's median"
+    used, total, excluded = scoped_counts(table, key, every, [tp])
+    footer = footer_line(NANOWELLS, used, total, excluded) + " · a cell is the mean over its wells of each well's median"
+    missing = wells_without_value(here)
+    if missing:
+        footer += "\nNo value, so not in their cell's mean or spread: " + ", ".join(missing)
     return NanowellGrid(arr, err, metric.label if metric else key, vmin, vmax, footer)

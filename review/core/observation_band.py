@@ -101,6 +101,7 @@ def set_observations(ctx, observations: str) -> None:
     if observations not in (CELLS, NANOWELLS) or getattr(ctx.state.plot, "observations", CELLS) == observations:
         return
     ctx.state.plot.observations = observations
+    refresh_current(ctx)                      # the band's controls follow the choice before anything redraws
     from review.core.plot_orchestrator import redraw_every_scope
 
     redraw_every_scope(ctx)
@@ -137,11 +138,17 @@ def _refresh(ctx, title: str) -> None:
     metric_group = ctx.widgets.get_or_none("_plotting_nw_metric_grp")
     if metric_group is not None:
         metric_group.setVisible(band_metric)
+    # The cell controls show exactly when the band's own scope drives this leaf's cells: not under the Metric
+    # picker, and not on a leaf that picks its own channels (OWN_CHANNEL_LEAVES). Both directions are set here,
+    # so a toggle, a dataset load or a leaf switch can never leave the wrong set on screen.
+    from review.core.ui_helpers import OWN_CHANNEL_LEAVES
+
+    cells_scope = not band_metric and title not in OWN_CHANNEL_LEAVES
+    for name in ("_plotting_channel_grp", "_plotting_metric_grp", "_plotting_thresh_frac_grp"):
+        grp = ctx.widgets.get_or_none(name)
+        if grp is not None:
+            grp.setVisible(cells_scope)
     if band_metric:
-        for name in ("_plotting_channel_grp", "_plotting_metric_grp", "_plotting_thresh_frac_grp"):
-            grp = ctx.widgets.get_or_none(name)
-            if grp is not None:
-                grp.setVisible(False)
         populate_metric_picker(ctx)
 
 

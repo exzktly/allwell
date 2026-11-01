@@ -26,7 +26,7 @@ def draw(ctx, ax_mean, ax_frac, ax_n, ax_cdf, legend_kw: dict) -> bool:
     from review.core.plot_style import tokens_for
     from review.data.observations import observation_groups
     from review.domain import fold_change as _fc
-    from review.domain.observation import footer_line, group_points, well_medians
+    from review.domain.observation import footer_line, group_points, scoped_counts, well_medians, wells_without_value
 
     if effective_observations(ctx, LEAF) != NANOWELLS:
         return False
@@ -74,9 +74,14 @@ def draw(ctx, ax_mean, ax_frac, ax_n, ax_cdf, legend_kw: dict) -> bool:
     for ax in (ax_mean, ax_frac, ax_n, ax_cdf):
         if ax.get_legend_handles_labels()[0]:
             ax.legend(**legend_kw)
-    lines = [footer_line(NANOWELLS, int(medians["n"].sum()) if len(medians) else 0,
-                         int(medians["total"].sum()) if len(medians) else 0, table.exclusions(key)),
-             *table.notes]
+    used, total, excluded = scoped_counts(table, key, wells)
+    lines = [footer_line(NANOWELLS, used, total, excluded), *table.notes]
+    missing = wells_without_value(medians)
+    if missing:
+        lines.append("No value, so not in their member's mean or spread: " + ", ".join(missing))
+    # The tab's status line spoke of cells; say what this figure is.
+    if getattr(ctx, "notify", None) is not None:
+        ctx.notify.set_status(f"Observations: nanowells · {used:,} of {total:,} nanowell values used")
     if _fc.fold_change_state(ctx).active:
         lines.append(FOLD_CHANGE_NOT_APPLIED)
     follows_theme(fig.text(0.01, 0.002, "\n".join(lines), ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID), muted=True)

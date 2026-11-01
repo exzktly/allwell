@@ -29,7 +29,7 @@ def draw(ctx, ax_mean, ax_frac, ax_n, target_ts, tp_label: str) -> bool:
     from review.core.plot_style import tokens_for
     from review.data.observations import observation_groups
     from review.domain import fold_change as _fc
-    from review.domain.observation import footer_line, group_points, well_medians
+    from review.domain.observation import footer_line, group_points, scoped_counts, well_medians, wells_without_value
 
     if effective_observations(ctx, LEAF) != NANOWELLS:
         return False
@@ -47,27 +47,28 @@ def draw(ctx, ax_mean, ax_frac, ax_n, target_ts, tp_label: str) -> bool:
     key = chosen_metric(ctx, table)
     label = table.metric(key).label if table.metric(key) else key
     medians = well_medians(table, key, wells, target_ts)
-    occupied = well_medians(table, "occupied", wells, target_ts, how="mean")
+    occupied = well_medians(table, "occupied", wells, target_ts)
     pairs = [(lbl, ws) for lbl, ws, _c in groups]
     colors = {lbl: c for lbl, _ws, c in groups}
-    metric_pts = group_points(medians, pairs)
-    occ_pts = group_points(occupied, pairs)
-    ticks = []
-    for i, point in enumerate(metric_pts):
-        ticks.append(point.label if len(target_ts) == 1 else f"{point.label}\nt={point.timepoint_hours:g}h")
-        ax_mean.bar(i, point.mean, color=colors.get(point.label), alpha=0.85)
-        if point.n_wells >= 2:
-            ax_mean.errorbar(i, point.mean, yerr=point.sem, color=title_fg, capsize=3, lw=1)
-        ax_mean.scatter([i] * point.n_wells, point.well_values, s=14, color=title_fg, zorder=3, linewidths=0)
-    for i, point in enumerate(occ_pts):
-        ax_frac.bar(i, point.mean, color=colors.get(point.label), alpha=0.85)
-        if point.n_wells >= 2:
-            ax_frac.errorbar(i, point.mean, yerr=point.sem, color=title_fg, capsize=3, lw=1)
+    # One slot per member and timepoint, fixed before anything is drawn, so each panel's bar for a member sits under
+    # that member's label even when another panel has no value for it (an empty control has a share, no brightness).
+    hours = sorted({float(h) for h in medians["timepoint_hours"].dropna()}) if len(medians) else []
+    slots = [(lbl, h) for lbl, _ws in pairs for h in hours]
+    at = {slot: i for i, slot in enumerate(slots)}
+    for ax, points in ((ax_mean, group_points(medians, pairs)), (ax_frac, group_points(occupied, pairs))):
+        for point in points:
+            i = at[(point.label, point.timepoint_hours)]
+            ax.bar(i, point.mean, color=colors.get(point.label), alpha=0.85)
+            if point.n_wells >= 2:
+                ax.errorbar(i, point.mean, yerr=point.sem, color=title_fg, capsize=3, lw=1)
+            if ax is ax_mean:
+                ax.scatter([i] * point.n_wells, point.well_values, s=14, color=title_fg, zorder=3, linewidths=0)
     if ax_n is not None:
-        for i, point in enumerate(metric_pts):
-            here = medians[medians["well"].isin([w for lbl, ws in pairs if lbl == point.label for w in ws])
-                           & (medians["timepoint_hours"] == point.timepoint_hours)]
-            ax_n.bar(i, float(here["n"].sum()), color=colors.get(point.label), alpha=0.85)
+        for (lbl, h), i in at.items():
+            ws = dict(pairs)[lbl]
+            here = medians[medians["well"].isin(ws) & (medians["timepoint_hours"] == h)]
+            ax_n.bar(i, float(here["n"].sum()), color=colors.get(lbl), alpha=0.85)
+    ticks = [lbl if len(hours) == 1 else f"{lbl}\nt={h:g}h" for lbl, h in slots]
     for ax in (ax_mean, ax_frac, ax_n):
         if ax is not None:
             ax.set_xticks(range(len(ticks)))
@@ -82,10 +83,13 @@ def draw(ctx, ax_mean, ax_frac, ax_n, target_ts, tp_label: str) -> bool:
     if ax_n is not None:
         ax_n.set_title(f"Nanowells with a value (N) — {tp_label}", color=title_fg, fontsize=9, fontweight="bold")
         ax_n.set_ylabel("N nanowells")
-    lines = [footer_line(NANOWELLS, int(medians["n"].sum()) if len(medians) else 0,
-                         int(medians["total"].sum()) if len(medians) else 0, table.exclusions(key)),
-             *table.notes]
+    used, total, excluded = scoped_counts(table, key, wells, target_ts)
+    lines = [footer_line(NANOWELLS, used, total, excluded), *table.notes]
+    missing = wells_without_value(medians)
+    if missing:
+        lines.append("No value, so not in their member's mean or spread: " + ", ".join(missing))
     if _fc.fold_change_state(ctx).active:
         lines.append(FOLD_CHANGE_NOT_APPLIED)
-    follows_theme(fig.text(0.01, 0.002, "\n".join(lines), ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID), muted=True)
+    follows_theme(fig.text(0.01, 0.002, "\n".join(lines), ha="left", va="bottom", fontsize=7, color=muted,
+                           gid=FOOTER_GID), muted=True)
     return True

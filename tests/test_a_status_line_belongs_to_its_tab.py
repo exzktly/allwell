@@ -44,3 +44,23 @@ def test_the_tab_change_handler_clears_it(monkeypatch):
     except AttributeError:
         calls.append("stopped after the clear")       # the rest of the handler needs a real window
     assert shown[-1] == "" and svc.status_owner is None
+
+
+def test_a_line_written_past_the_service_belongs_to_no_tab_and_stays(monkeypatch):
+    """Review finding: the loader writes "Loaded N well(s)" straight to the label; the next tab change cleared it
+    because the previous tab's ownership was still recorded."""
+    tab = ["Image Table"]
+    shown: list[str] = []
+    label = SimpleNamespace(value="", text=lambda: label.value)
+
+    def write(message):
+        shown.append(message)
+        label.value = message
+
+    ctx = SimpleNamespace(window=SimpleNamespace(_set_status=write, _status_lbl=label))
+    monkeypatch.setattr(tab_controller, "current_centre_tab", lambda _ctx: tab[0])
+    svc = notifications.NotificationService(ctx)
+    svc.set_status("Image Table: generated 8 of 12 cell(s).")
+    write("Loaded 2 well(s)")                       # the loader, past the service
+    assert not svc.clear_unless_owned_by("Segmentation")
+    assert label.value == "Loaded 2 well(s)" and svc.status_owner is None

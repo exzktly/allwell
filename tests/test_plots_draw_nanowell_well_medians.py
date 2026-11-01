@@ -19,7 +19,7 @@ pytest.importorskip("PySide6")
 from review.domain.observation import NANOWELLS  # noqa: E402
 
 
-def _shell(qtbot, tmp_path, builder_path: str, name: str):
+def _shell(qtbot, tmp_path, builder_path: str, name: str, counts=None):
     import importlib
 
     from PySide6.QtWidgets import QHBoxLayout, QWidget
@@ -29,7 +29,7 @@ def _shell(qtbot, tmp_path, builder_path: str, name: str):
     from tests.fixtures.nanowell_dataset import build_nanowell_dataset
     from widgets.control_band import ControlBand
 
-    root = build_nanowell_dataset(tmp_path / name)
+    root = build_nanowell_dataset(tmp_path / name, counts=counts)
     ctx, window = minimal_shell(qtbot)
     window._ctx, window._app_state, window._features = ctx, ctx.state, ctx.features
     load_dataset(ctx, root / "out")
@@ -128,3 +128,48 @@ def test_under_cells_the_distribution_says_its_cells_are_a_nanowell_plate_s(qtbo
     redraw_distribution(ctx)
     assert _footer(ctx.widgets.get("_distribution_fig")) == (
         "Observations: cells · pooled from 3–4 occupied nanowells per well")
+
+
+def test_a_member_with_no_value_keeps_its_slot_and_is_named_and_the_footer_adds_up(qtbot, tmp_path):
+    """Review finding: Occupied bars were placed by list position, so a member missing from the metric panel shifted
+    every Occupied bar after it under another member's label. B01 is empty at 24 h — no brightness, a 0.0 share."""
+    import re
+
+    from review.features.barplot.collect import bar_well_display_label
+    from review.features.barplot.controller import ordered_bar_keys, update_bar_tp_menu
+    from review.features.barplot.renderer import redraw_bars
+    from tests.fixtures.nanowell_dataset import COUNTS
+
+    counts = {"A01": COUNTS["A01"], "B01": {"0h": COUNTS["B01"]["0h"], "24h": [0, 0, 0, 0, 0]}}
+    ctx = _shell(qtbot, tmp_path, "review.features.barplot.tab_view.build_bar_plots_tab", "empty_b01", counts)
+    ctx.state.plot.nanowell_metric = "brightness_GFP"
+    ctx.runtime.barplot.current_keys = lambda: ordered_bar_keys(ctx)
+    ctx.runtime.barplot.well_display_label = lambda label: bar_well_display_label(ctx, label)
+    update_bar_tp_menu(ctx)
+    ctx.state.bar.tp_selections = {k: float(k) == 24.0 for k in ctx.state.bar.tp_selections}
+    redraw_bars(ctx)
+
+    def bars(name):
+        return {round(p.get_x() + p.get_width() / 2): p.get_height() for p in ctx.widgets.get(name).patches}
+
+    assert set(bars("_ax_bar_mean")) == {0}                     # B01 has no brightness: no bar, slot kept
+    assert bars("_ax_bar_frac") == {0: 0.8, 1: 0.0}             # B01's 0.0 share under B01, not under A01
+    labels = [t.get_text() for t in ctx.widgets.get("_ax_bar_frac").get_xticklabels()]
+    assert labels == ["A01", "B01"]
+    footer = _footer(ctx.runtime.barplot.fig)
+    assert "No value, so not in their member's mean or spread: B01 (t=24h)" in footer
+    used, total = map(int, re.search(r"(\d+) of (\d+) used", footer).groups())
+    excluded = sum(int(n) for n in re.findall(r" (\d+)(?:,|$| ·)", footer.split("excluded: ")[1].split("\n")[0]))
+    assert (used, total) == (4, 10) and used + excluded == total
+
+
+def test_the_nanowell_grid_s_spread_is_named_sem_over_wells_whatever_the_error_choice(qtbot, tmp_path):
+    """Review finding: the grid always computes the SEM over wells, but its ± caption followed the user's
+    SD / SEM / CI choice — an SEM labelled as an SD."""
+    from review.features.heatmap.controller import _spread_label
+
+    ctx = _shell(qtbot, tmp_path, "review.features.lineplot.tab_view.build_line_graphs_tab", "spread")
+    grid = types.SimpleNamespace()                     # any nanowell grid
+    for choice in ("sd", "sem", "ci95"):
+        assert _spread_label(ctx, choice, grid) == "SEM over wells"
+    assert _spread_label(ctx, "sem", None) != "SEM over wells"     # cells keep the user's own choice

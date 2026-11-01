@@ -616,8 +616,8 @@ class AnalyzeNanowellSectionMixin:
 
             problems.append(NANOWELL_REMOTE_INCREMENTAL_REFUSAL)
         if remote and str(opts.get(REGISTRATION_FROM_KEY) or "").strip():
-            self._nanowell_log_once("Reuse registration names a folder on this computer, which a remote host "
-                                    "cannot read: the host registers every tile itself (the positions are the same).")
+            self._nanowell_log_once("Reuse registration names a folder on this computer: its wells' grid records "
+                                    "are sent to the host, which reuses each placement whose images still match.")
         if not problems and check_input:
             from analyze.nanowell_preflight import nanowell_input_report
 

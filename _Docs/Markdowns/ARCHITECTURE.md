@@ -11145,9 +11145,14 @@ remote run digest (`services.remote_run_id._DIGEST_SKIP_VALUE`) and the sidecar'
 Plates compares those blocks). `nanowell_task.stored_placements` gathers the candidates per timepoint from the
 folder named by `--nanowell_registration_from` (the form's *Reuse registration*, key
 `nanowell_registration_from`, refused unless it holds `nanowells/`) and then the output folder itself, read
-before the run rewrites its grid record; `_log_reused_registration` logs one line per well that took any. The
-remote argv drops the flag (`RemoteRunner._build_remote_argv`): the host cannot read the folder and registers
-anew. Grid records written before the key existed carry no `registration` block and are never reused.
+before the run rewrites its grid record; `_log_reused_registration` logs one line per well that took any. A
+remote run cannot read either folder (its output folder on the host is a fresh one), so
+`services.remote_registration.send_registration`, called once the run's address is fixed (`RemoteRunner`'s single-shot
+preparation and `_BatchedRemoteProcess.__init__`), uploads each sent well's grid record from the first local folder
+holding one — the Reuse registration folder, then the local output folder — into `<run_dir>/reg/nanowells/` and
+records `_RemoteRun.registration_dir`; `RemoteRunner._build_remote_argv` drops the local folder's flag and appends
+`--nanowell_registration_from <run_dir>/reg` instead. Nothing is trusted for having been sent: the host applies the
+same key, and a failed upload costs only the reuse. Grid records written before the key existed carry no `registration` block and are never reused.
 `tests/test_reuse_is_keyed_completely.py` mutates each key input alone; `tests/test_nanowell_registration_reuse.py`
 drives the reuse through `process_microscopy.main`.
 
@@ -11562,7 +11567,7 @@ pipeline's 15 µm) and puts a dataset that was no nanowell run back on the prefi
 (`tests/test_nanowell_count_settings_sit_with_segmentation.py`). *Reuse registration* (a path
 and a Browse button, key `nanowell_registration_from`) sends `--nanowell_registration_from` when filled; a folder
 without `nanowells/` is refused (`registration_from_error`), and with a remote host chosen the run goes on and the log
-says once that the host registers every tile (`_nanowell_log_once`). Its option keys are
+says once that its wells' grid records are sent to the host (`_nanowell_log_once`, `services.remote_registration`). Its option keys are
 the pipeline's destinations (`nanowell_format` and so on), so a job's `opts`, the argv, and a sidecar's
 `execution_options` all name the same things and the edit-a-queued-job round trip and the sidecar restore
 need no translation; a sidecar that states `nanowell_format: null` switches the mode off, and one that

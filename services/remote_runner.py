@@ -76,6 +76,7 @@ from services.remote_staging import (  # noqa: F401 — facade re-exports
 # as a process the GUI can read, wait on and stop, the scheduler jobs it holds,
 # and bringing its output home.
 from services.remote_upload import DatasetCache
+from services.remote_registration import send_registration
 from services.remote_process import (
     _BatchedRemoteProcess,
     _RemoteProcess,
@@ -624,6 +625,8 @@ class RemoteRunner:
         # rewritten upload does not.
         _run_prepared(self._cache, self._run, zipped, log, host_alias=self.host.ssh_alias,
                       argv_digest=argv_digest, source_key=source_key)
+        self._run.registration_dir = send_registration(
+            self._cache, own.run_dir, pipeline_argv, [z.stem for z in zipped.well_zips], log)
         return _PreparedRun(key=key, run_id=run_id, remote_input=remote_input,
                             remote_output=remote_output, paths=own)
 
@@ -1069,7 +1072,7 @@ class RemoteRunner:
                 # Incremental is client-side on remote runs: the client uploads only the
                 # new-FOV files and merges the partial outputs back on fetch, so the flag
                 # and its prior-dir are dropped here; so is a local folder to reuse nanowell
-                # registration from (the host registers anew, to the same positions).
+                # registration from (`services.remote_registration` sends its records and names them below).
                 i += 1
             elif arg in ("--incremental_prior_dir", "--nanowell_registration_from"):
                 i += 2
@@ -1078,6 +1081,10 @@ class RemoteRunner:
                 i += 1
         if suppress_run_check:
             out.append("--no_run_check")
+        # The wells' stored registration, sent from this computer (``services.remote_registration``).
+        registration = getattr(getattr(self, "_run", None), "registration_dir", "")
+        if registration:
+            out += ["--nanowell_registration_from", registration]
         # Batched mode stages one batch at a time, so the empty-well blank is
         # not in most batches' input. It is uploaded once to its own directory
         # and named here, which is what lets every batch build the same

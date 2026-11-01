@@ -170,3 +170,35 @@ def test_a_folder_that_is_not_a_nanowell_run_is_refused_by_name(tmp_path, monkey
     with pytest.raises(SystemExit):
         _run(monkeypatch, plate, "out", "--nanowell_registration_from", str(tmp_path / "elsewhere"))
     assert not (plate / "out" / "nanowells").exists()
+
+
+def test_a_host_given_only_the_sent_grid_record_reuses_the_registration(tmp_path, monkeypatch, rendered_well):
+    """What a remote re-run gets (``services.remote_registration``): the well's grid record alone, in a folder of
+    its own, named by ``--nanowell_registration_from``, with a fresh output folder. Registration does not run again,
+    and the positions are the first run's."""
+    import shutil
+    from pathlib import Path
+    import types
+
+    from services.remote_registration import send_registration
+
+    rendered, record = rendered_well
+    plate = _write_plate(tmp_path, rendered, record)
+    counter = _CountingRegister(monkeypatch)
+    first = _run(monkeypatch, plate, "out1")
+    host = tmp_path / "host_run"
+
+    def upload_subset(files, dest, **kw):                  # rsync, as a copy into the host's folder
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        for f in files:
+            shutil.copy(f, Path(dest) / Path(f).name)
+        return (1, 0.0, 0)
+
+    cache = types.SimpleNamespace(_ssh_run=lambda *a, **k: None, upload_subset=upload_subset)
+    argv = ["py", "pm.py", "--output_dir", str(first), "--nanowell_format", "100um"]
+    reg = send_registration(cache, str(host), argv, [WELL], lambda _m: None)
+    assert sorted(p.name for p in Path(reg).rglob("*") if p.is_file()) == [f"{WELL}_grid.json"]
+    second = _run(monkeypatch, plate, "fresh_out", "--nanowell_registration_from", reg)
+    assert counter.calls == 1, "the host registered the tiles again"
+    assert _block(second)["registration"]["reused_from"] == reg
+    assert _block(second)["tiles"] == _block(first)["tiles"]

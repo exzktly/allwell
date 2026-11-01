@@ -35,6 +35,7 @@ from services.remote_config import (
 )
 from util.channel_roles import LABELFREE_METHODS, quantified_channel_tokens
 from util.aw_safe import swallow, swallowed
+from services.remote_registration import send_registration
 from services.remote_run_state import (
     OutputFilter,
     _RemoteRun,
@@ -507,6 +508,8 @@ class _BatchedRemoteProcess:
         # own — and in the other direction, after a batched run on a host with
         # overrides, the two never matched and re-attach silently never fired.
         _run_prepared(runner._cache, runner._run, zipped, self._log, **self._journal_keys)
+        runner._run.registration_dir = send_registration(
+            runner._cache, own.run_dir, pipeline_argv, [z.stem for z in zipped.well_zips], self._log)
 
         # One Fetcher persisting across batches. Pre-set the total well
         # count: each batch's pipeline banner reports just THAT

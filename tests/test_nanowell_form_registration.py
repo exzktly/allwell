@@ -58,7 +58,7 @@ def test_a_sidecar_restores_the_folder_and_a_dataset_without_one_clears_it(tab):
     assert tab._collect_run_spec().opts["nanowell_registration_from"] == ""
 
 
-def test_on_a_remote_host_the_run_goes_and_the_log_says_the_host_registers_every_tile(  # noqa: F811
+def test_on_a_remote_host_the_run_goes_and_the_log_says_the_records_are_sent(  # noqa: F811
         tab, refused, tmp_path):  # noqa: F811
     root, _ = _plate(tmp_path)
     _use_nanowell_schema(tab)
@@ -70,8 +70,8 @@ def test_on_a_remote_host_the_run_goes_and_the_log_says_the_host_registers_every
     tab._remote_cb.addItem("bench-box", userData="bench-box")
     tab._remote_cb.setCurrentIndex(tab._remote_cb.findData("bench-box"))
     assert tab._validate_run_request() is not None
-    assert ("Nanowells: Reuse registration names a folder on this computer, which a remote host cannot read: the "
-            "host registers every tile itself (the positions are the same).", "WARNING") in logged
+    assert ("Nanowells: Reuse registration names a folder on this computer: its wells' grid records are sent to the "
+            "host, which reuses each placement whose images still match.", "WARNING") in logged
 
 
 def test_the_remote_argv_drops_the_folder_and_the_run_address_ignores_it():

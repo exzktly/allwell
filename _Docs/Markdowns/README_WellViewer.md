@@ -383,8 +383,10 @@ folder's own earlier registration is reused the same way, so re-running a plate 
 into keeps its registration too. Registration is only stored this way by runs from this version on: a folder
 analysed by an earlier version has nothing to reuse, and its first re-run registers every tile. The run log says
 `registration reused from <folder>` for each well that took it, and each timepoint's grid record names the folder
-(`registration.reused_from`). Run refuses to start when the folder is not a nanowell run's output folder. A
-remote host cannot read a folder on this computer: the log says so, and the host registers every tile.
+(`registration.reused_from`). Run refuses to start when the folder is not a nanowell run's output folder. On a
+**remote host** the same reuse happens: before the run starts, each well's grid record on this computer — from this
+folder, else from the output folder — is sent to the host (`stored registration sent for N well(s)` in the log), and
+the host takes each placement under the same rule, so re-running a well remotely does not register it again.
 
 **Test detection…** runs registration and detection on one well at one timepoint, in the background, and opens a
 window with the montage: every nanowell outlined (green empty, blue holding cells, amber occluded, red

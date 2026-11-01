@@ -67,10 +67,15 @@ Derived from the rows below — recount them rather than editing a number here.
 | C1 | `_sidebar_sample_frame` is built, registered and hidden, and never filled or shown. | `app_shell_view.py:582`, `tab_controller.py:51`, `home/controller.py:211` | done | Frame, roster entry and Home's hide call deleted. `test_one_plate_on_the_sample_map.py::test_home_never_shows_a_rail_plate_frame` and `test_home_page.py::test_home_shows_no_rail_body_on_any_tab` rewritten to the declared model; mutation (Home declares the sample frame) → 3 failed in `test_rail_sections_are_declared.py`. |
 | C2 | About 400 of `sidebar_view.py`'s 525 lines are the Saved selections feature inside the rail's builder. Move them to `review/core/saved_selections.py`; `build_sidebar` keeps the plate, the footer and the hint. | `review/core/sidebar_view.py` | done | Moved to `review/core/saved_selections.py` (406 lines); `sidebar_view.py` 525 → 145. Callers and four test files import the new module. `tests/test_saved_selections_live_in_their_own_module.py`; mutation (a `_plot_groups_delete` re-defined in `sidebar_view.py`) → 1 failed. |
 
-## Raised by the reviews, outside the five steps
+## Step 6 — the review items first left out, now asked for (2026-11-01)
 
-| Id | Finding | State | Reason |
-|---|---|---|---|
-| X1 | `tab_controller.on_tab_change` names `"Heat Map"` and `_heatmap_sidebar_frame`; `image_browser/controller.py` branches on sub-tab names to fill frames. | declined | Not among the five steps chosen. The heat-map frame lives *inside* the main frame and drives the plate's drag mode by focus, so it does not fit R2's frame model without changing the one-picker rule; it needs its own design. |
-| X2 | `features/export/sidebar_view.py` is the right-hand Properties panel, not the rail; the shared name misleads. | declined | Not among the five steps chosen; a rename touching the feature-naming guard. |
-| X3 | Output pages (Review CSV, Saved Plots, Batch Export) sit among analysis pages. | declined | Not among the five steps chosen. G1's **Data** caption already separates them visually; moving them is a navigation change for the user to decide. |
+The reporter asked for these after the first five steps landed, and pointed out
+that moving smFISH (G1a) left **Images** a group of one — which is a question
+of information architecture, so it goes to a UX review before any code.
+
+| Id | Finding | Place | State | Evidence |
+|---|---|---|---|---|
+| X1 | `tab_controller.on_tab_change` names `"Heat Map"` and `_heatmap_sidebar_frame`; `sidebar_view.build_sidebar` builds the heat-map frame; `image_browser/controller.py` branches on sub-tab names to fill its sub-tabs and rail frames. | `review/core/tab_controller.py`, `review/core/sidebar_view.py`, `review/features/image_browser/controller.py` | todo | |
+| X2 | `features/export/sidebar_view.py` is the right-hand Properties panel, not the rail; the shared name misleads. | `review/features/export/sidebar_view.py` | todo | |
+| X3 | Output pages (Review CSV, Saved Plots, Batch Export) sit among the analysis pages. Where they belong is a UX decision. | `review/features/registry.py` | todo | |
+| G3 | After G1a, **Images** holds only Image Browser. The reporter notes smFISH, like Nanowells, is defined by a distinct kind of input data. Decide the group structure (names, membership, order) with a UX review, then declare it. | `review/features/registry.py` | todo | |

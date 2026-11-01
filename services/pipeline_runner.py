@@ -53,7 +53,7 @@ from util.well_token import blank_wells_for_run, canonical_well_label
 from pipeline.well_skip import _canonical_force_wells, skip_wells_scope
 from services.input_resolution_service import iter_well_tokens
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
-from services.remote_config import RemoteHost
+from services.remote_config import RemoteHost, ssh_binary_lines
 from services.remote_batch_auto import RESOLVED_KEY, resolve_batch_size
 from services.remote_hold import GrantedRun
 from services.remote_runner import (
@@ -1070,6 +1070,9 @@ class PipelineRunner:
         # request seen (`pipeline.suspend.LOG_MARKER`), slurmstepd's
         # cancellation, the driver's time budget, ssh's reason for a drop.
         self._evidence = RunEvidence()
+        # The run's claim on the host's granted node (`services.remote_hold.GrantedRun`), set by the remote run's
+        # thread; `_external_end` asks it why the node ended when slurmstepd cancelled the run's step with no cause.
+        self._granted_run: GrantedRun | None = None
         # What the run log says about the batch size a remote run resolved its Batch size of 0 to (`start`).
         self._batch_note = ""
         # Whether this run asked to suspend. `_suspend_requested` cannot say:
@@ -1362,6 +1365,7 @@ class PipelineRunner:
         self._stop_requested.clear()
         self._suspend_requested.clear()
         self._evidence = RunEvidence()
+        self._granted_run = None
         self._suspend_asked = False
         self._job_settled = False
         self._job_liveness = None
@@ -1570,7 +1574,8 @@ class PipelineRunner:
         theirs, and are reported as such."""
         if self._stop_requested.is_set() or self._suspend_requested.is_set():
             return None
-        said = self._evidence.termination(where)
+        granted = self._granted_run
+        said = self._evidence.termination(where, node_ended=granted.why_ended if granted is not None else None)
         if said is not None:
             return said
         if rc == 255 and self._remote_runner is not None:
@@ -2458,6 +2463,7 @@ class PipelineRunner:
         # A node the host keeps granted (Manage Remotes) is used instead, and the early job below is not asked for.
         granted = GrantedRun(self._remote_runner, batch_size=batch_size, nanowell="--nanowell_format" in args,
                              log_fn=lambda m: self._enqueue(("line", m)), stop_event=self._stop_requested)
+        self._granted_run = granted         # read by `_external_end`, before the `finally` below releases it
         early = _EarlyAllocation(self._remote_runner, batch_size=batch_size, nanowell="--nanowell_format" in args,
                                  log_fn=lambda m: self._enqueue(("line", m), early=True),
                                  stop_event=self._stop_requested, granted=granted)
@@ -2467,6 +2473,9 @@ class PipelineRunner:
         awake.start()
         try:
             self._enqueue(("line", f"[remote] target: {self._remote.name}\n"))
+            with swallow("naming the ssh this run uses"):
+                for said in ssh_binary_lines():
+                    self._enqueue(("line", said))
             batch_note = getattr(self, "_batch_note", "")     # a runner built without `start` has none
             if batch_note:
                 self._enqueue(("line", batch_note))

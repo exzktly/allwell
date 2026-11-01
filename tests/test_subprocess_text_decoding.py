@@ -51,7 +51,7 @@ def _call_violates(node: ast.Call) -> bool:
     """A subprocess call that turns on text mode without naming a codec."""
     func = node.func
     name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-    if name not in {"run", "Popen", "check_output", "call", "check_call"}:
+    if name not in {"run", "run_bounded", "Popen", "check_output", "call", "check_call"}:
         return False
     kwargs = {kw.arg for kw in node.keywords if kw.arg}
     if not (kwargs & _TEXT_FLAGS):

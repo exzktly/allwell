@@ -39,6 +39,7 @@ from services.remote_config import (
     unattended_options,
 )
 from util.aw_safe import swallow, swallowed
+from util.bounded_run import run_bounded
 from services.subprocess_kill import own_process_group_kwargs
 from services.subprocess_text import TEXT_UTF8
 
@@ -113,7 +114,7 @@ def _rsync_version() -> tuple[int, int]:
     ``_rsync_supports_append_verify`` (≥ 3.0) so we don't fork+exec
     ``rsync --version`` twice on startup."""
     try:
-        result = subprocess.run(
+        result = run_bounded(
             [resolve_rsync_binary(), "--version"],
             capture_output=True, timeout=5, **TEXT_UTF8,
         )
@@ -593,7 +594,7 @@ def _rsync_run_cancellable(
     killed mid-flight (the bug that made the final per-well fetch retry-loop
     and fail on big zips / slow links)."""
     if stop_event is None:
-        return subprocess.run(
+        return run_bounded(
             cmd, capture_output=capture_output,
             timeout=timeout, cwd=cwd, **TEXT_UTF8,
         )
@@ -767,20 +768,20 @@ def recover_dead_master(host: "RemoteHost") -> bool:
     if not any(a.startswith("ControlMaster=") for a in base):
         return False
     try:
-        if subprocess.run(base + ["true"], capture_output=True,
+        if run_bounded(base + ["true"], capture_output=True,
                           timeout=_MASTER_PROBE_TIMEOUT_S).returncode == 0:
             return False
     except subprocess.TimeoutExpired:
         swallowed("the shared ssh connection's probe timed out")
     try:
-        fresh = subprocess.run(_without_connection_sharing(base) + ["true"],
+        fresh = run_bounded(_without_connection_sharing(base) + ["true"],
                                capture_output=True, timeout=_MASTER_PROBE_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return False
     if fresh.returncode != 0:
         return False
     try:
-        subprocess.run([*base[:-1], "-O", "exit", base[-1]], capture_output=True,
+        run_bounded([*base[:-1], "-O", "exit", base[-1]], capture_output=True,
                        timeout=_MASTER_PROBE_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         swallowed("closing a shared ssh connection that stopped answering")
@@ -813,8 +814,7 @@ def ssh_control(host: "RemoteHost", remote: list[str], *, check: bool,
     kw: dict = {"input": stdin} if stdin is not None else dict(TEXT_UTF8)
     for attempt in (1, 2):
         try:
-            raw = subprocess.run(cmd, capture_output=True, check=check,
-                                 timeout=timeout_s, **kw)
+            raw = run_bounded(cmd, capture_output=True, check=check, timeout=timeout_s, **kw)
             break
         except subprocess.CalledProcessError as exc:
             raise RemoteCommandError(exc.returncode, exc.cmd, _as_text(exc.stdout),

@@ -16,8 +16,15 @@ name: Slow lane
 # six shards of up to 75 minutes every day whether or not anything had changed,
 # which is real money for a signal nobody was reading on most mornings — the
 # repository had gone quiet for days at a time while the matrix kept billing. It
-# is dispatched by hand instead, from the Actions tab, and `scripts/test_slow.sh`
-# runs the same lane locally.
+# is started deliberately instead, in one of two ways, and `scripts/test_slow.sh`
+# runs the same lane locally:
+#
+#   * by hand, from the Actions tab (`workflow_dispatch`), with its inputs;
+#   * by pushing a commit to a branch named `slow-lane/<anything>`, which runs
+#     the lane on that commit with the default batch and no coverage. This is
+#     the route for an assistant session whose GitHub integration may push but
+#     may not dispatch workflows: `git push origin <commit>:refs/heads/slow-lane/<name>`.
+#     No ordinary branch matches, so it adds no runs to normal pushes or PRs.
 #
 # The cost of that trade is the thing the lane was added to prevent: a
 # permanently-failing full-app test can now sit unnoticed again, as
@@ -36,6 +43,9 @@ on:
         required: false
         type: boolean
         default: false
+  push:
+    branches:
+      - "slow-lane/**"
 
 concurrency:
   group: slow-lane-${{ github.ref }}

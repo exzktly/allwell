@@ -635,6 +635,13 @@ You'll need:
 - **Git for Windows** — already required if you also want to drive a
   remote Linux host. Install
   from <https://git-scm.com/download/win> with the default options.
+  All-Well runs its ssh commands with Git's `ssh.exe`. Without Git it
+  takes any other `ssh.exe` on PATH ahead of Windows' built-in one
+  (`C:\Windows\System32\OpenSSH\ssh.exe`), which is known to hang when
+  a program runs it in the background; it uses the built-in one only
+  when nothing else is there, and the run log then says so in a
+  WARNING. Every remote run's log names the ssh it used
+  (`[remote] ssh: …` and `[remote] ssh for transfers: …`).
 - **Python 3.10 or 3.11.** TensorFlow 2.13.0 has Windows wheels for
   those two versions only; 3.12+ will fail at the pip step. The
   `mamba create` line below pins 3.10.14 so you don't have to think
@@ -1638,10 +1645,16 @@ archives and outputs are always written as per-well `.zip` archives. See
     for a nanowell run unless you are measuring: each worker sizes how many
     network tiles it runs at once to its share of the GPU's memory, so more
     workers on one GPU each run smaller batches rather than running out of
-    memory, but whether a third worker is faster than two has not been
+    memory. The share counts only the memory that is actually free on that GPU
+    when the worker starts, so a GPU partly held by something else — another
+    run, a process left behind by an earlier one, another user's job — gives
+    smaller batches instead of an out-of-memory error. Whether a third worker is faster than two has not been
     measured. Compare the count's `s each` in the log with each setting on one
     well before changing it for a plate. Each worker's log says the batch it
-    chose (`Cellpose cpsam network batch: 32 tiles a pass …`); if a pass still
+    chose and how much of the GPU was free (`Cellpose cpsam network batch: 32
+    tiles a pass (… 3 worker(s) share cuda:0's 22.0 GB, 21.1 GB of it free …)`);
+    a free figure well below the total means something else holds that GPU's
+    memory, which `nvidia-smi` names. If a pass still
     runs out of GPU memory, the worker halves its batch, says so in the log,
     and carries on.
     If a worker cannot even load its model because the other workers have
@@ -1925,6 +1938,15 @@ none depends on All-Well still running:
 | All-Well is gone (crashed, asleep, offline) and no run is using the node | within 2 minutes of its last sign of life (a run whose window crashed mid-run still counts as using it for up to 10 more minutes) |
 | All-Well is open and no run is using the node | after *Release when idle after* (30 minutes by default) |
 | The time limit is reached (24 hours by default) | at the limit, even if a run is going |
+
+A run on the node ends with it. In particular, a computer that sleeps or loses
+its network for 10 minutes or more during a run (closing a laptop's lid sleeps
+it, even though All-Well keeps the machine awake otherwise) stops the run: the
+node hears nothing from All-Well and releases itself, and Slurm cancels the
+run's step. The run's headline then names the granted node and the reason it
+wrote — *All-Well stopped answering … and the run using it had not been heard
+from for 10 min either* — rather than an `scancel`, and **Resume** continues
+from the wells that finished.
 
 Quitting releases the nodes that window asked for. A node it only *found* — one
 another window asked for — is not its to cancel: this window stops keeping it

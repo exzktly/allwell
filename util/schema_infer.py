@@ -279,7 +279,7 @@ def _zip_stems_in(root: Path, limit: int) -> list[str]:
     # handler below, so nothing downstream ever saw it. Asked the same way in
     # both modules, it is simply never a candidate.
     zips = [p for p in files_in(root)
-            if p.match("*.zip")] if root.is_dir() else []
+            if p.suffix.lower() == ".zip"] if root.is_dir() else []
     per_zip = max(4, (limit // max(1, len(zips))) if zips else limit)
     for phase, z in enumerate(zips):
         try:

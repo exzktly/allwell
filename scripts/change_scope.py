@@ -132,16 +132,23 @@ def names_a_doc(tree: ast.Module, tokens: set[str]) -> bool:
     return False
 
 
-def docs_lane(root: Path = REPO) -> list[str]:
+def docs_lane(root: Path = REPO, parsed=None) -> list[str]:
     """The test files (``tests/test_*.py``, repository-relative) that read a docs-only file, directly or through
-    a first-party module they import directly."""
+    a first-party module they import directly. *parsed*, when given, maps a repository-relative path to its
+    ``(text, tree)`` or ``None``: ``scripts/lane_needed.py`` passes the parses it has already made."""
     tokens = docs_tokens(root)
     reads: dict[str, bool] = {}
+
+    def mentions(text: str) -> bool:
+        # A string constant can only name a document if the text does somewhere: most files never do, and need
+        # not be parsed to say so.
+        return any(token in text for token in tokens)
 
     def module_reads(rel: str) -> bool:
         if rel not in reads:
             try:
-                reads[rel] = names_a_doc(ast.parse((root / rel).read_text(encoding="utf-8")), tokens)
+                text = (root / rel).read_text(encoding="utf-8")
+                reads[rel] = mentions(text) and names_a_doc(ast.parse(text), tokens)
             except (OSError, SyntaxError, UnicodeDecodeError):
                 reads[rel] = False
         return reads[rel]
@@ -149,12 +156,17 @@ def docs_lane(root: Path = REPO) -> list[str]:
     lane = []
     for test in sorted((root / "tests").glob("test_*.py")):
         rel = test.relative_to(root).as_posix()
-        try:
-            tree = ast.parse(test.read_text(encoding="utf-8"))
-        except (OSError, SyntaxError, UnicodeDecodeError):
-            lane.append(rel)  # cannot tell what it reads: run it
-            continue
-        if names_a_doc(tree, tokens):
+        got = parsed(rel) if parsed is not None else None
+        if got is not None:
+            text, tree = got
+        else:
+            try:
+                text = test.read_text(encoding="utf-8")
+                tree = ast.parse(text)
+            except (OSError, SyntaxError, UnicodeDecodeError):
+                lane.append(rel)  # cannot tell what it reads: run it
+                continue
+        if mentions(text) and names_a_doc(tree, tokens):
             lane.append(rel)
             continue
         for name in _imported_names(tree):

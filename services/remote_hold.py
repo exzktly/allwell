@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from services.remote_config import RemoteHost, parse_slurm_time, render_slurm_time
+from services.node_log import NodeLog
 from services.remote_heartbeat import _UploadHeartbeat
 from services.remote_jobs import _only_my_job
 from services.slurm_ids import HOLDS_DIRNAME
@@ -474,6 +475,9 @@ class GrantedNode:
         self.paths = hold_paths(host)
         self._cache = cache
         self._log = log_fn
+        #: Every line this handle has said this session, for Manage Remotes' Granted node log
+        #: (``services.node_log``). It outlives the dialog, which the listener does not.
+        self.log = NodeLog()
         #: Told each state the request sees, from the thread that is polling; assign to listen after construction.
         self.on_state: Callable[[HoldState], None] = on_state or (lambda _s: None)
         self._sleep = sleep
@@ -497,6 +501,17 @@ class GrantedNode:
             self._log = log_fn
         if on_state is not None:
             self.on_state = on_state
+
+    def _note(self, message: str) -> None:
+        """Keep *message* in :attr:`log`, then hand it to the current listener. The heartbeat is given this bound
+        method rather than the listener itself, so its warnings follow :meth:`listen` to a dialog opened later
+        instead of going on to the one that was open when it started."""
+        self.log.record(message)
+        self._log(message)
+
+    def note(self, message: str) -> None:
+        """Say *message* as this node: a caller's own line about it (a request that failed) joins the same log."""
+        self._note(message)
 
     # ── talking to the host ──────────────────────────────────────────────────────────────────────────────────────
     def _script(self, script: str, *, check: bool = False):
@@ -528,7 +543,7 @@ class GrantedNode:
                 self.job_id = state.job_id
             with self._lock:
                 if self._heartbeat is None:
-                    self._heartbeat = _UploadHeartbeat(self._cache, self.paths.heartbeat, log_fn=self._log)
+                    self._heartbeat = _UploadHeartbeat(self._cache, self.paths.heartbeat, log_fn=self._note)
                     self._heartbeat.beat()
                     self._heartbeat.start()
         return state
@@ -560,10 +575,10 @@ class GrantedNode:
         cap = self._partition_cap(partition)
         limit_s = hold_time_limit_s(self.host, cap)
         if cap and limit_s < int(self.host.granted_time_limit_h) * 3600:
-            self._log(f"[remote] granted node: time limit {self.host.granted_time_limit_h} h, lowered to "
+            self._note(f"[remote] granted node: time limit {self.host.granted_time_limit_h} h, lowered to "
                       f"{_duration(limit_s)} by the partition's limit.\n")
         self._script(prepare_script(self.paths), check=True)
-        self._heartbeat = _UploadHeartbeat(self._cache, self.paths.heartbeat, log_fn=self._log)
+        self._heartbeat = _UploadHeartbeat(self._cache, self.paths.heartbeat, log_fn=self._note)
         self._heartbeat.beat()           # before the job can look, so the first thing it sees is a heartbeat
         self._heartbeat.start()
         try:
@@ -586,14 +601,14 @@ class GrantedNode:
                 raise HoldError("the scheduler refused the request: "
                                 f"{(submitted.stderr or submitted.stdout or '').strip() or 'no reason given'}")
             self.job_id = submitted.stdout.strip()
-            self._log(f"[remote] granted node: asked the scheduler for a node (job {self.job_id}, "
+            self._note(f"[remote] granted node: asked the scheduler for a node (job {self.job_id}, "
                       f"time limit {_duration(limit_s)}).\n")
             boot_failed = self._wait(began, queue_wait)
             if boot_failed is None:
                 return self.state()
             if boot_failed != "?":                         # a failure that named no node cannot be excluded
                 failed_nodes.append(boot_failed)
-            self._log(f"[remote] granted node: node {boot_failed} failed to boot; asking for another.\n")
+            self._note(f"[remote] granted node: node {boot_failed} failed to boot; asking for another.\n")
             self._nap(BOOT_RETRY_PAUSE_S)
 
     def _nap(self, seconds: float) -> None:
@@ -609,7 +624,7 @@ class GrantedNode:
             state = self.state()
             self.on_state(state)
             if state.phase in ("granted", "busy"):
-                self._log(f"[remote] granted node: {state.node} (job {state.job_id}) is granted"
+                self._note(f"[remote] granted node: {state.node} (job {state.job_id}) is granted"
                           f"{' — ' + state.gpus if state.gpus else ''}.\n")
                 return None
             if state.slurm_state in _BOOT_FAILED_STATES and not state.granted_at:
@@ -644,19 +659,19 @@ class GrantedNode:
         try:
             result = self._script(cancel_script(self.paths, self.job_id))
         except Exception as exc:
-            self._log(f"[remote] granted node: WARN could not reach the host to release it ({exc}); it releases "
+            self._note(f"[remote] granted node: WARN could not reach the host to release it ({exc}); it releases "
                       "itself within two minutes of the app's last heartbeat.\n")
             return
         out = result.stdout or ""
         if "AW_MOVED" in out:
-            self._log("[remote] granted node: the node on this host is no longer the one this window asked for — "
+            self._note("[remote] granted node: the node on this host is no longer the one this window asked for — "
                       "left alone.\n")
         elif "AW_NOTMINE" in out:
-            self._log("[remote] granted node: the hold's job belongs to another user — left running.\n")
+            self._note("[remote] granted node: the hold's job belongs to another user — left running.\n")
         elif "AW_SCANCELLED" in out:
-            self._log(f"[remote] granted node: released — {reason}.\n")
+            self._note(f"[remote] granted node: released — {reason}.\n")
         elif result.returncode != 0:
-            self._log(f"[remote] granted node: WARN could not release it (ssh exit {result.returncode}); it "
+            self._note(f"[remote] granted node: WARN could not release it (ssh exit {result.returncode}); it "
                       "releases itself within two minutes of the app's last heartbeat.\n")
         self.owned, self.job_id = False, ""
 
@@ -756,14 +771,20 @@ class NodeLease:
     def __init__(self, node: GrantedNode, state: HoldState, *, log_fn: Callable[[str], None]) -> None:
         self.node = node
         self.state = state
-        self._log = log_fn
-        self._beater: _UploadHeartbeat | None = _UploadHeartbeat(node._cache, node.paths.busy, log_fn=log_fn)
+        self._run_log = log_fn
+        self._beater: _UploadHeartbeat | None = _UploadHeartbeat(node._cache, node.paths.busy, log_fn=self._log)
         try:
             self._beater.beat()
             self._beater.start()
         except BaseException:
             self.release()          # the marker was created by the claim; a lease that never formed must not keep it
             raise
+
+    def _log(self, message: str) -> None:
+        """The run's log, and the node's own (``GrantedNode.log``): a lease's warnings are about the node, and the
+        Granted node log in Manage Remotes is where they are read once the run's log has moved on."""
+        self.node.log.record(message)
+        self._run_log(message)
 
     def refresh(self) -> None:
         """Read the node's state again (the time left is the node's at this moment, not at the claim, which can be

@@ -66,6 +66,9 @@ def test_without_the_feature_a_nanowell_plate_loads_says_so_and_offers_no_nanowe
         overlays=rr.OVERLAYS_NOT_IN_BUILD)
     from review.data.dataset_dims import channel_options
     assert channel_options(ctx)[0] == "MONTAGE"
+    # Batch Export's Nanowells mode reaches the feature's modules lazily; it is not offered, so they are never called.
+    from review.features.batch_export.tab_view import _offered_modes
+    assert "nanowell" not in [key for _label, key in _offered_modes(ctx)]
 
 
 @pytest.mark.slow
@@ -80,3 +83,5 @@ def test_with_the_feature_out_opened_directly_finds_in_and_offers_nanowell_obser
     assert ctx.state.dataset.in_dir == root / "in"
     assert ob.band_mode(ctx, "Scatter Plot") == "toggle"
     assert _bar_footer(app) == ["Observations: cells · pooled from 3–4 occupied nanowells per well"]
+    from review.features.batch_export.tab_view import _offered_modes
+    assert "nanowell" in [key for _label, key in _offered_modes(ctx)]

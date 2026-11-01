@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from review.features.nanowell import moving_compute
+from review.features.nanowell.decorate_compute import Decoration, band_spans, order_groups, sub_band_spans
 from review.features.nanowell.series_compute import exclusion_reason
 from review.features.nanowell.summary_compute import LOG_METRICS, group_summary, well_summary
 
@@ -134,6 +135,7 @@ class Swarm:
     occupancy: list                  # occupancy class for each value ("0" / "1" / "2" / "3+" / None)
     n_roster: int
     excluded: dict = field(default_factory=dict)       # label -> count
+    group: str = ""                  # the group (replicate set or lone well) the swarm is drawn for
 
     @property
     def n_excluded(self) -> int:
@@ -160,6 +162,10 @@ class Panel:
     ticks: list                      # (x, label)
     medians: dict = field(default_factory=dict)        # well -> [(x, median)], joined over time
     stats: list = field(default_factory=list)          # GroupStat, wells axis only
+    #: ``(x first, x last, label)`` per *Split by* band along the wells axis, and per *Then by* sub-band
+    #: (``decorate_compute.band_spans``); empty when not split, and always along time, where each group is a panel.
+    bands: list = field(default_factory=list)
+    sub_bands: list = field(default_factory=list)
 
 
 @dataclass
@@ -186,6 +192,12 @@ class DistributionModel:
     #: ``(well, timepoint) -> verdict`` for the timepoints whose nanowell identity is not confirmed, which the time
     #: axis hatches (``identity_compute.timepoint_marks``); empty along wells.
     identity_marks: dict = field(default_factory=dict)
+    #: *Colour by* / *Split by* / *Then by* (``decorate_compute``): the dots' inks and the bands. Undecorated by default.
+    decoration: Decoration = field(default_factory=Decoration)
+    #: ``well -> what the figure calls it`` (``controller.well_names``), for the Statistics samples of the
+    #: ``nanowells`` unit; a well missing from it prints itself. (A sub-swarm under a group prints the bare well:
+    #: the group's name is on the tick above it.)
+    well_names: dict = field(default_factory=dict)
 
     def swarms(self):
         return [s for p in self.panels for s in p.swarms]
@@ -212,7 +224,8 @@ def _values(rows: pd.DataFrame, column: str) -> pd.Series:
     return pd.to_numeric(rows[column], errors="coerce")
 
 
-def _swarm(rows: pd.DataFrame, column: str, reasons: pd.Series, *, label: str, well: str, x: float) -> Swarm:
+def _swarm(rows: pd.DataFrame, column: str, reasons: pd.Series, *, label: str, well: str, x: float,
+           group: str = "") -> Swarm:
     values = _values(rows, column)
     has = values.notna()
     excluded: dict[str, int] = {}
@@ -221,7 +234,7 @@ def _swarm(rows: pd.DataFrame, column: str, reasons: pd.Series, *, label: str, w
     kept = rows[has]
     occupancy = [None if pd.isna(v) else str(v) for v in kept["occupancy_class"]]
     sites = list(zip(kept["well"], kept["nw_q"].astype(int), kept["nw_r"].astype(int)))
-    return Swarm(label, well, x, values[has].to_numpy(dtype=float), sites, occupancy, len(rows), excluded)
+    return Swarm(label, well, x, values[has].to_numpy(dtype=float), sites, occupancy, len(rows), excluded, group)
 
 
 def fixed_cohort(frame: pd.DataFrame, column: str, reasons: pd.Series) -> tuple[pd.DataFrame, pd.Series, int, int]:
@@ -281,7 +294,8 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
                        axis: str = TIME, groups: dict, timepoint: str = "", control: str = "",
                        time_source: str | None = None, baseline: str = "earliest",
                        cohort: bool = False, responding_above: float | None = None,
-                       moving: int = 0, baseline_moving: int = 0) -> DistributionModel:
+                       moving: int = 0, baseline_moving: int = 0,
+                       decoration: Decoration | None = None) -> DistributionModel:
     """The Distribution view for *groups* (``name -> wells``, as ``controller.replicate_groups`` gives).
 
     A group of one well is that well; a group of several is a replicate set. Only the wells named in
@@ -291,7 +305,14 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
     no values over time and ignores it. *baseline_moving* gives a fold change's baseline a window of its own
     (``moving_compute.rebase``, as ``moving_compute.baseline_window_for`` allows it), applied first, so the cohort
     is decided on the fold changes from that baseline and the endpoint's average is taken over them.
+
+    *decoration* is the page's *Colour by* / *Split by* / *Then by* (``decorate_compute.decoration_for``). Splitting
+    re-orders *groups* so each band is contiguous; along wells each band becomes a labelled span
+    (``Panel.bands``), along time each group's panel title is prefixed with its band. Colouring is carried on the
+    model for the renderer and named in the footer, since it replaces the occupancy colours. No value changes.
     """
+    decoration = decoration or Decoration()
+    groups = order_groups(groups, decoration)
     column = metric_column(metric, channel)
     label = METRICS[metric][0] + (f" · {channel}" if METRICS[metric][1] else "")
     wells = [w for members in groups.values() for w in members]
@@ -304,7 +325,7 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
         first = frame["tp_order"] == 0
         frame, reasons = frame[first].assign(timepoint=PER_NANOWELL_LABEL), reasons[first]
     model = DistributionModel(metric, column, label, axis, metric in INTEGER_METRICS, [], control=control,
-                              baseline=baseline, responding_above=responding_above)
+                              baseline=baseline, responding_above=responding_above, decoration=decoration)
     if metric not in PER_NANOWELL:
         frame, reasons = _rebased(frame, column, reasons, moving, baseline_moving)
     if cohort and metric not in PER_NANOWELL:
@@ -359,7 +380,8 @@ def _time_panels(model, frame, column, reasons, groups, channels) -> None:
         tps = _order(rows)
         k = len(members)
         width = 1.0 / k
-        panel = Panel(title=name if k == 1 else f"{name} ({k} wells)", swarms=[],
+        panel = Panel(title=model.decoration.title_prefix(name) + (name if k == 1 else f"{name} ({k} wells)"),
+                      swarms=[],
                       ticks=[(float(i), labels.get(tp, str(tp))) for i, tp in enumerate(tps)])
         for i, tp in enumerate(tps):
             for j, well in enumerate(members):
@@ -367,7 +389,8 @@ def _time_panels(model, frame, column, reasons, groups, channels) -> None:
                 if not sel.any():
                     continue
                 x = i + (j - (k - 1) / 2) * width
-                panel.swarms.append(_swarm(rows[sel], column, reasons[rows.index[sel]], label=tp, well=well, x=x))
+                panel.swarms.append(_swarm(rows[sel], column, reasons[rows.index[sel]], label=tp, well=well, x=x,
+                                           group=name))
         if summary is not None:
             for j, well in enumerate(members):
                 mine = summary[summary["well"] == well].set_index("timepoint")
@@ -413,7 +436,8 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
             if not sel.any():
                 continue
             x = i + (j - (k - 1) / 2) * width
-            panel.swarms.append(_swarm(frame[sel], column, reasons[frame.index[sel]], label=well, well=well, x=x))
+            panel.swarms.append(_swarm(frame[sel], column, reasons[frame.index[sel]], label=well, well=well, x=x,
+                                       group=name))
         row = stats[stats["group"] == name]
         if len(row):
             r = row.iloc[0]
@@ -421,6 +445,11 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
                                          int(r["n_wells"]), int(r["n_wells"]) - 1 if r["n_wells"] >= 2 else None,
                                          float(r["vs_control"]), list(r["wells_without_value"])))
             model.responding.append((name, float(r["fraction_responding"]), model.timepoint or PER_NANOWELL_LABEL))
+    names = list(groups)
+    # The groups sit at x = 0, 1, 2… in order, so a run of indices is a run of x.
+    panel.bands = [(float(a), float(b), lbl) for a, b, lbl in band_spans(names, model.decoration.bands)]
+    panel.sub_bands = [(float(a), float(b), lbl) for a, b, lbl in sub_band_spans(
+        names, model.decoration.bands, model.decoration.sub_bands)]
     model.panels.append(panel)
 
 
@@ -437,6 +466,9 @@ def _notes(model: DistributionModel, metric: str, time_source: str | None) -> No
     else:
         model.notes.append("The line joins each well's median over the nanowells with a value at that timepoint.")
     model.notes.append(responding_note(model))
+    if model.decoration.colours:
+        model.notes.append(f"Dots coloured by {model.decoration.colour_name or 'a sample variable'} (Decorate); "
+                           "the occupancy colours return when Colour by is off.")
     if model.time_note:
         model.notes.append(model.time_note)
     if time_source == "label":

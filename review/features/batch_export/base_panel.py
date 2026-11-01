@@ -62,6 +62,7 @@ from review.features.batch_export.service import (
 )
 from review.features.batch_export._cell_rows import write_cell_rows
 from review.features.batch_export._destinations import DestinationSpool
+from review.features.batch_export.variable_select_panel import VariableSelectMixin
 from review.features.batch_export._panels import (
     AxesSpec, Panel, PanelAxis, figure_height, panel_axes, pin_scales,
 )
@@ -287,7 +288,7 @@ class SkippedJob(str):
     """
 
 
-class BatchExportPanel(QWidget):
+class BatchExportPanel(VariableSelectMixin, QWidget):
     """Batch export panel — defines export groups and runs the export."""
 
     #: Line & bar exports carry the Error-band (SEM/SD) + per-FOV-points spread
@@ -584,6 +585,7 @@ class BatchExportPanel(QWidget):
         qs_menu = QMenu(qs_btn)
         qs_menu.addAction("One group per row  (Row A = all A wells, \u2026)", self._quick_by_row)
         qs_menu.addAction("One group per column  (Col 01 = all col-01 wells, \u2026)", self._quick_by_col)
+        self._vsel_add_quick_setup_menu(qs_menu)
         qs_btn.setMenu(qs_menu)
         hdr1.addWidget(qs_btn)
         layout.addLayout(hdr1)
@@ -600,10 +602,12 @@ class BatchExportPanel(QWidget):
 
         layout.addWidget(build_hline_separator(None))
 
-        hint = QLabel("Left-drag wells onto the plate map to add them to the selected group.")
+        hint = QLabel("Left-drag wells onto the plate map to add them to the "
+                      "selected group, or add every well holding a sample-variable value.")
         hint.setWordWrap(True)
         hint.setContentsMargins(6, 2, 6, 2)
         layout.addWidget(hint)
+        self._build_variable_select_row(layout)
 
         # The app's plate control, in its "paint" selection model: the plate
         # reports the press/drag/release gesture and this panel applies it to
@@ -677,6 +681,9 @@ class BatchExportPanel(QWidget):
 
     def _plate_release(self) -> None:
         if self._drag_visited:
+            # The variable row's last message described the group before this
+            # drag; leaving it would describe a group that no longer exists.
+            self._vsel_say("")
             self._refresh_map()
             self._refresh_group_list()
         self._drag_visited = set()
@@ -1097,6 +1104,8 @@ class BatchExportPanel(QWidget):
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
         self._refresh_channel_combos()
+        # Variables arrive with a dataset, often opened after this panel was built.
+        self._vsel_refresh_variables()
         if hasattr(self, "_fc_ctrl_combo"):
             self._repopulate_fc_control_combo()
 
@@ -2548,6 +2557,7 @@ class BatchExportPanel(QWidget):
                 grp = self._groups[idx]
                 grp.name = name
                 self._auto_named_group_ids.discard(id(grp))
+                self._vsel_forget_name(grp)
                 self._refresh_group_list()
 
     def _grp_clear(self, idx: int) -> None:
@@ -2562,6 +2572,7 @@ class BatchExportPanel(QWidget):
         if 0 <= idx < len(self._groups):
             grp = self._groups.pop(idx)
             self._auto_named_group_ids.discard(id(grp))
+            self._vsel_forget_name(grp)
             self._active_grp = min(self._active_grp, len(self._groups) - 1)
             self._refresh_group_list()
 
@@ -2576,7 +2587,9 @@ class BatchExportPanel(QWidget):
         if ret == QMessageBox.Yes:
             self._groups.clear()
             self._auto_named_group_ids.clear()
+            self._vsel_value_names().clear()
             self._active_grp = -1
+            self._vsel_say("")
             self._refresh_group_list()
 
     def _grp_remove_member(self, grp_idx: int, rset) -> None:
@@ -2598,6 +2611,8 @@ class BatchExportPanel(QWidget):
     def _quick_by_row(self) -> None:
         self._groups.clear()
         self._auto_named_group_ids.clear()
+        self._vsel_value_names().clear()
+        self._vsel_say("")
         self._active_grp = -1
         for row_ltr in _PLATE_ROWS:
             row_rsets = [r for r in _rep_sets_loaded(self._ctx)
@@ -2616,6 +2631,8 @@ class BatchExportPanel(QWidget):
     def _quick_by_col(self) -> None:
         self._groups.clear()
         self._auto_named_group_ids.clear()
+        self._vsel_value_names().clear()
+        self._vsel_say("")
         self._active_grp = -1
         for col in _PLATE_COLS:
             col_rsets = [r for r in _rep_sets_loaded(self._ctx)
@@ -2634,6 +2651,7 @@ class BatchExportPanel(QWidget):
     def _sync_from_app(self) -> None:
         self._groups = self._groups_from_rep_sets()
         self._auto_named_group_ids.clear()
+        self._vsel_value_names().clear()
         self._active_grp = 0 if self._groups else -1
         # In sidebar-groups mode there is no local group editor list to refresh
         # (the left panel is skipped in _build_ui); groups are resolved live
@@ -2744,6 +2762,8 @@ class BatchExportPanel(QWidget):
         try:
             self._groups = self._groups_from_persistence()
             self._auto_named_group_ids.clear()
+            self._vsel_value_names().clear()
+            self._vsel_say("")
             self._active_grp = 0 if self._groups else -1
             if not self._use_sidebar_groups:
                 self._refresh_group_list()

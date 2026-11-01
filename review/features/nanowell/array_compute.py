@@ -68,6 +68,8 @@ class ArrayScene:
     tiles: list = field(default_factory=list)          # image_compute.TileBox, well frame
     status: str = ""                    # the grid record's status at this timepoint
     anchor: tuple | None = None         # the anchor set by hand, well-frame µm
+    #: What the figure calls the well (``controller.well_name``); ``""`` prints the well itself.
+    name: str = ""
     anchor_text: str = ""               # how the timepoint was addressed and what its anchor does
     anchorable: bool = False            # an anchor can change this timepoint's result (``ANCHORABLE``)
     record: list = field(default_factory=list)         # (text, kind): the grid record, kind head / flag / plain

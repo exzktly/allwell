@@ -491,16 +491,22 @@ before — a well this plate does not have, or a typo — is warned about in the
 analysed before the other
 wells, and at every timepoint each well's confluence is read against that well's empty nanowells imaged at the same
 timepoint, which also corrects for exposure or medium changing over the time course. Without one — none named, or a
-timepoint where more than 5 % of its nanowells hold a counted cell, or a timepoint it does not have — **no well has a
-confluence** there (blank, never 0); the timepoint's notes in `<well>_grid.json` and the run log say why, and the
-reference well's grid record holds its verdict (`confluence_reference`). The reference well also measures how many
+timepoint it does not have — **no well has a confluence** there (blank, never 0); the timepoint's notes in
+`<well>_grid.json` and the run log say why. **The well you name is believed to be empty**, whatever the cell count
+finds in it: debris and floor texture in an empty well are often counted as cells, sometimes in most of its
+nanowells, and they never stop the well being used as the reference. Filter debris afterwards in QC. When more than
+5 % of its nanowells hold a counted object, its own timepoint's notes and the run log say so, with the share, in case
+the well was mistyped; the reference well's grid record holds what was counted (`confluence_reference`). An output
+folder whose reference an earlier version refused (`"status": "loaded"` in
+`nanowells/_confluence_reference/reference.json`) re-analyses the reference well at those timepoints, and every well
+read against it, on the next run — locally or remotely — without Force. The reference well also measures how many
 cells the model finds where there are none: its cells counted per nanowell are saved with its verdict
 (`false_cells_per_nanowell`) and written on every other well's timepoint (`template` →
 `reference_false_cells_per_nanowell`), the baseline that well's counts sit on. Counts on the rim-removed image use the
 reference too (see **Segment on**); counts on the raw image, and fluorescence, do not depend on it. **Test detection**
 divides by the well's own picture, because it has no reference to read, and says so when one is named. A remote run
 that does not include the reference well — re-running a few wells, or resuming a plate whose reference finished
-earlier — is sent the reference this computer already holds, so its wells keep their confluence. A well is kept as up to date only beside the reference it was read against: when the reference well is analysed for the first time after them, analysed again on other images (re-exported, forced), or judged empty at a timepoint where it was not before, every well read against it before is analysed again, locally or sent again to a remote, and the run log says which and why. Running the reference again on the same images changes nothing and re-runs no other well. Results measured this way carry a measurement version: adding timepoints to a dataset
+earlier — is sent the reference this computer already holds, so its wells keep their confluence. A well is kept as up to date only beside the reference it was read against: when the reference well is analysed for the first time after them, analysed again on other images (re-exported, forced), or given a template at a timepoint where it had none before, every well read against it before is analysed again, locally or sent again to a remote, and the run log says which and why. Running the reference again on the same images changes nothing and re-runs no other well. Results measured this way carry a measurement version: adding timepoints to a dataset
 measured by an earlier version analyses the well again in full, and Merge Plates refuses to combine two datasets
 measured by different versions. The nanowells of a circular array are the
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image
@@ -2355,6 +2361,14 @@ folder in use is the app staying connected.
   Pipeline Output header if you would rather watch the dashboard alone; the
   app re-opens it on its own only when a run fails with an explanation you
   would otherwise not see, and hands the toggle back at the next run.
+- **The log is saved with the results.** Everything the log shows for a run,
+  local or remote, is also written to the output folder as
+  `logs/analyze-<date>-<time>.log`, one file per run, and the log's last line
+  names the file. It keeps every line, including ones the on-screen log has
+  scrolled away, so a plate can be checked days later after the window is
+  closed. A nanowell plate writes about 2 KB per well per timepoint (about 2 MB
+  for 96 wells at 10 timepoints). If the output folder cannot be written to,
+  the log says so once and the run carries on.
 - During a remote transfer the **status line** beside the progress bar carries
   the live figure (how much has come across, how long it has taken) and updates
   in place. The log gets the events — each well starting, each one landing, the
@@ -5958,6 +5972,22 @@ the sentence names it.
   *Earliest* baseline: a count taken later — at a first measurable or a named timepoint — may follow a division,
   and the figure counts those nanowells.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
+- **Names.** Wells and groups are called what every other tab calls them: a replicate group by its name, a well by
+  the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two
+  wells drawn side by side share a name, each gets its well added (`HeLa · 1 µM (A01)`); the views of one well and
+  the **Well** list always show both. Under a group of several wells, each well's own swarm is marked with its well.
+- **Group by** and **Decorate** (once the plate has a variable, Home → Sample Map → Variables) — the same
+  controls as on the Plotting row, and the same settings: choosing one here changes it on every plot, and one chosen
+  on a Plotting tab shows here. **Group by** pools the page's wells by a variable's values instead of by your
+  replicate groups, one group per value, on every view; wells with no value are not drawn. **Decorate** (on
+  *Distribution*) holds **Colour by**, **Split by** and **Then by**, which change how the groups look, never a
+  value. *Colour by* colours each group's dots by its value, with a key naming the values at the top right, in
+  place of the occupancy colours — those come back when *Colour by* is set to *Occupancy* again, and the
+  footer says so while they are off. *Split by* arranges the groups into one labelled band per value: on *Along x:
+  Wells* the band names sit under the group names with a line between bands, and *Then by* adds a second row of
+  bands inside them; on *Along x: Time* each panel's title starts with its band. A group whose wells hold
+  different values is coloured and banded as `—mixed—`, and one with a well you have not filled as `no value`.
+  Batch Export's Nanowells mode draws its figures without them.
 - **Fixed cohort** (on *Distribution*, *Trajectories* and *Statistics*) — use only the nanowells with a value at every
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
   measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
@@ -7262,6 +7292,31 @@ the group that owns it; the wells of the group you are **currently editing** als
 ring, so "which group is this well in" and "which group am I editing" stay
 readable at the same time. Wells the dataset doesn't have are drawn as empty
 sockets and ignore the drag.
+
+Groups can also be built **by sample variable** — what the
+[Variables](#variables) tab says the wells *are*, rather than where they
+sit. The **Select by variable:** row above the plate takes a variable and one
+of its values; **Add wells** puts every loaded well holding that value into the
+selected group (or into a new group, if none is selected), and **Remove wells**
+takes them out. Pick *(not set)* to find the wells never given a value. A new
+group filled this way is named after the value — `HeLa`, then `HeLa + U2OS` if
+you add a second — and keeps that name when you later drag wells on or off;
+renaming it yourself replaces it for good. **Quick Setup → One group per value
+of…** replaces every group with one per value of the chosen variable, named by
+the value (with its unit) and in the variable's own value order, after asking
+first if you already have groups; a value no well holds makes no group. Either
+way the selection is taken **when you make it**: the groups hold wells and
+samples exactly as hand-built ones do, and do not follow later edits to the
+variables. On a plate with no variables the row says where to define them.
+
+A sample definition whose wells all hold the value joins as a whole sample, as
+on the plate. One whose wells hold *different* values is not pulled in whole —
+that would export wells under a value they do not hold — so only its matching
+wells join, as single wells, and a warning line under the row names the
+sample that was split and the wells that joined. Removing a value keeps a
+sample that also holds other values and says so; use its − button on the group
+card to remove it. Wells with no value for the variable are listed after a
+Quick Setup rather than left out silently.
 
 Batch figures are drawn through the **same renderers as the on-screen plots**, so
 a group's figure matches what the plotting tab shows for that selection: each

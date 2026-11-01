@@ -2931,7 +2931,13 @@ What is on it:
   complete (green), partial (amber, with an arc showing how much of it landed),
   failures recorded (red), images with no measurements behind them (blue — the
   same colour the Datasets tools use to flag an odd well), measurements whose
-  output archive is gone (cyan), staged but never processed (grey). A nanowell
+  output archive is gone (cyan), staged but never processed (grey). If the run
+  ended early — you stopped or suspended it, the remote host lost its node or
+  its connection to the app, or the pipeline exited with an error — the grey
+  wells are called *Not reached — run ended early* instead, because the run
+  never got to them rather than skipping them; **Finish this run** processes
+  them. (After Datasets → Validate rescans the folder, they go back to "staged,
+  never processed": Validate cannot know how the run ended.) A nanowell
   well whose timepoints ran but could not be addressed (no central square found)
   is partial, not "never processed", and the health card lists it under
   *Nanowell timepoints not addressed* — and only there, not among the partial

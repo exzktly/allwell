@@ -78,9 +78,9 @@ class RimFocusRule:
         return (True, float(self.fraction)) if self.active() else (False,)
 
     def text(self) -> str:
-        """The rule in words, as a figure's note states it."""
-        return (f"rim under {self.fraction:.0%} as sharp as the sharpest tenth of its well's rims at that timepoint"
-                if self.active() else "off")
+        """The rule in words, as a figure's note states it: short, because it is said on every figure of the page
+        (the tooltips on the two switches say what "the well's sharpest" means — its 90th percentile)."""
+        return f"rim under {self.fraction:.0%} of its well's sharpest" if self.active() else "off"
 
 
 def clamp_fraction(value) -> float | None:
@@ -158,14 +158,12 @@ def note(metrics: pd.DataFrame | None, rule: RimFocusRule | None, wells=None) ->
         return "Rim focus was not recorded in this run, so no nanowell was checked for focus."
     parts = []
     if t.flagged:
-        parts.append(f"{t.flagged:,} nanowell-timepoint{'s' if t.flagged != 1 else ''} "
-                     f"({t.nanowells:,} nanowell{'s' if t.nanowells != 1 else ''}) left out as out of focus "
-                     f"({rule.text()}): no counts, confluence or fluorescence there.")
-    if t.unjudged:
-        parts.append(f"{t.unjudged:,} with no rim focus (rim not fitted) were kept unchecked.")
-    if t.unreferenced:
-        parts.append(f"{t.unreferenced:,} in a well with under {MIN_SITES} rims at that timepoint were kept "
-                     "unchecked.")
+        parts.append(f"Out of focus, left out: {t.flagged:,} nanowell-timepoint{'s' if t.flagged != 1 else ''} "
+                     f"({t.nanowells:,} nanowell{'s' if t.nanowells != 1 else ''}; {rule.text()}).")
+    unchecked = [f"{t.unjudged:,} rim not fitted" if t.unjudged else "",
+                 f"{t.unreferenced:,} under {MIN_SITES} rims in the well" if t.unreferenced else ""]
+    if t.unjudged or t.unreferenced:
+        parts.append("Focus unchecked: " + ", ".join(filter(None, unchecked)) + ".")
     return " ".join(parts)
 
 

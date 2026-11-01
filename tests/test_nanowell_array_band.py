@@ -53,7 +53,8 @@ def test_the_zoom_and_overlays_sit_under_the_figure_on_the_array_view_only(qc_pa
 
     ctx = qc_page
     toolbar = ctx.widgets.get("_nw_card").toolbar
-    names = ("_nw_zoom_out_btn", "_nw_zoom_lbl", "_nw_zoom_in_btn", "_nw_fit_btn", "_nw_one_btn", "_nw_overlays_btn")
+    names = ("_nw_zoom_out_btn", "_nw_zoom_lbl", "_nw_zoom_in_btn", "_nw_fit_btn", "_nw_one_btn", "_nw_overlays_btn",
+             "_nw_notes_btn")
     assert all(toolbar.isAncestorOf(ctx.widgets.get(n)) for n in names)
     assert all(_shown(ctx, n) for n in names)
     nwc.set_view(ctx, "distribution")

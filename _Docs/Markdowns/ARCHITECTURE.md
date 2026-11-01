@@ -1099,8 +1099,10 @@ allwell/
 │                                  and notice_badge.py (the "!" unread pip on the log button)
 │                                  and spin_box.py (SpinBox / DoubleSpinBox, the only spin
 │                                  boxes the app builds: no layout squeezes their number, and a
-│                                  typed value commits once, on Enter or focus-out;
-│                                  test_spin_boxes_keep_their_number.py)
+│                                  typed value commits once, on Enter, focus-out or a
+│                                  second's pause in typing;
+│                                  test_spin_boxes_keep_their_number.py; show_value, the
+│                                  refresh that never overwrites a number being typed)
 │                                  and progress_popup.py (ProgressPopup, the application-modal
 │                                  progress bar the Cell Gating panel's jobs run behind)
 ├── startup/                     ← what runs before the application exists (§4)
@@ -1225,7 +1227,8 @@ review/
 │   ├── frame_load.py, dataset_dims.py   ← the layer under every image grid:
 │   │   an address → its pixels, and what a dataset offers per dimension
 │   ├── dataset_layout.py           ← where in/ and out/ are, given the folder opened
-│   ├── nanowell_images.py          ← a nanowell run's stitched montage as a frame (MONTAGE)
+│   ├── nanowell_images.py          ← the nanowell frames' tokens (MONTAGE, MONTAGE <CH>, NW: <metric>),
+│   │   the NanowellFrame type, and the stored phase montage's reader (§6.2l)
 │   ├── observations.py             ← cells, or the Nanowells feature's nanowell rows through its
 │   │   registry service; a cell's own nanowell's metric joined onto its row (§6.2l)
 ├── domain/                        ← Qt-free models + pure logic
@@ -1276,6 +1279,12 @@ review/
 │   │   │                 renderer.py, build_layout.py, export.py,
 │   │   │                 _frames.py (the per-field frame plan the PowerPoint
 │   │   │                 export places, built in the export figure's own pass),
+│   │   │                 _colour_key.py (the key under a grid of nanowell
+│   │   │                 metric maps and montages, as pixels, and the
+│   │   │                 fold-change window centring: §6.2l),
+│   │   │                 colour_key_view.py (that key as a label under the
+│   │   │                 live grid), _auto_lut.py (the pooled Auto window,
+│   │   │                 one pass, re-exported by controller),
 │   │   │                 _phone_fit.py (phone layout: cells sized to the
 │   │   │                 screen's width, redrawn when the layout changes)
 │   │   │                 (controller = orchestration; the compose/layout/export
@@ -1347,10 +1356,11 @@ review/
 │   │                 and site detail [removable]; variables_view.py and
 │   │                 decorate_compute.py ← the page's Group by and Decorate
 │   │                 (the band's settings, drawn on its Distribution view);
-│   │                 observation_compute.py and
-│   │                 overlay_compute.py answer the observations.nanowell,
-│   │                 observations.nanowell_metrics and
-│   │                 segmentation.nanowell_overlay services (§6.2l)
+│   │                 observation_compute.py, overlay_compute.py and
+│   │                 table_frame_compute.py answer the observations.nanowell,
+│   │                 observations.nanowell_metrics,
+│   │                 segmentation.nanowell_overlay and
+│   │                 image_table.nanowell_frame services (§6.2l)
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
 │   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
 │   │                 + _svg_shapes.py (the PowerPoint export),
@@ -5540,9 +5550,9 @@ The relevant modules:
 | `data/image_discovery.py` | Scans zips / loose directories for masks, overlays, tophat images. Classifies by suffix + schema. **The loose-file fallback walks three levels and no further.** When no layout yields a channel's images, `_scan_raw_disk_files` lists the input and output trees through `_walk_capped`, which returns what `sorted(rglob('*'))` filtered to depth 3 returned, in the same (first-hit-wins) order, but never enters a directory whose entries would be deeper — `rglob` listed the whole tree and discarded the deep part afterwards. Like `rglob`, it lists a symlinked directory and does not descend into it (`os.walk(followlinks=False)`): following links walked linked trees and loops the old scan never saw, and surfaced files that could change which one the first-hit merge used (`tests/test_image_table_rerender_rescans_nothing.py`). **A scan logs a summary, not its members.** An inventory covers every timepoint and FOV of the well whatever the view selects (it is cached per well, channel and variant for the session), so `zip_members.scan_zip_members` writes `Scanning <zip> (N members)` and `Result: …` and nothing per image; the per-member classification lines (`+ FLUOR fov=… tp=…`, `SKIP non-image`) print only when `core.debug_flags.review_image_load_debug_enabled()` — the log drawer shows DEBUG, so ungated they put thousands of lines about undisplayed frames in front of the user (`tests/test_zip_scan_logs_a_summary.py`). **An inventory carries its own provenance.** The scanners must not lose a whole archive to one unreadable member, so a mid-scan failure returns the entries gathered so far — right behaviour, wrong shape, because a short dict of real images is byte-for-byte the same object as a complete inventory of a well that genuinely holds that many frames, and Review draws the two identically: fewer timepoints, no gap, nothing to click on. `data/zip_members.ScanResult` is a `dict` subclass carrying `partial` and `reason`, so every existing consumer keeps working unchanged and only the ones that want to say "incomplete" out loud have to ask. Every abort path marks it (an unreadable nested member, an archive that will not open, an exception mid-scan); `merge_partial` carries the flag from each source scan onto the accumulator a well is assembled from, since an inventory built from one complete and one truncated scan is truncated; and `find_well_images_and_masks` returns through `ScanResult.derive` rather than `dict(sorted(...))`, which would silently drop the flag. `scan_folder_members` is the folder-side twin, with the same treatment and the partial-count warning its zip sibling already had. **The per-well filter over loose raw files asks "could this be someone else's?", never "is this mine?".** The latter is unanswerable for a well label the resolver cannot parse, and guarding the whole filter behind a parsed token meant an unparseable label admitted every file in the directory — which, because such files collide on `(fov, tp)` and the merge is first-hit-wins, showed one arbitrary *other* well's frame under that label rather than a visible mix. `_raw_file_names_some_well` asks the three vocabularies in the open (the pipeline schema, the legacy five-field regex, then `image_resolver`'s shared free-text token pattern, imported rather than re-spelled), and `_raw_file_passes_unknown_well` admits only the files that name no well at all: a file naming any well cannot be claimed by a well we cannot name, and a file naming none contradicts nothing, which keeps working the single-well directory this fallback exists for. |
 | `data/image_resolver.py` | Filename → kind classifier (`mask` / `overlay` / `fluor_processed` / `smfish` / `phase`), and the frame-precedence resolver over it. The classifier is a **vocabulary wrapper**, not a second implementation: `classify_filename_kind` calls `image_identity.classify_filename_role` and renames the result into the legacy `kind` strings, and `OUTPUT_SUFFIXES` is generated from `ROLE_CATALOG`. Two independently written classifiers over two copies of the suffix table is what the module used to be, and they drifted exactly as far as an unshared table lets them — the copy here had no `phase` entry, so a processed phase image classified as a raw fluorescence frame and was served as one. Also the single home for `normalize_numeric_token`, the FOV/timepoint token normaliser that collapses `1`, `01` and `1.0` to one key — and which treats only `None` as absent, because FOV and timepoint tokens are legitimately `0`. Every site that compares such a token routes through it: `review_image/collect.review_norm_fov` (the review side's public name, kept because the image-table and review-image call sites are written against it), `core/dataset_state._norm_fov` and `data/frame_load.norm_token` are aliases of it. Tokens reach the viewer from filenames, CSV columns and combo text, so a second copy that formats differently silently strands a filter. **The free-text well-token pattern reads a row letter case-insensitively for every row except F.** A lower-case `f` followed by one or two digits is how this codebase spells a *field*: `pipeline/ome_explode` writes `{experiment}_{channel}_{well}_f{fov}_{tp}`, and the well in that same template comes from `canonical_well_label`, which upper-cases. Matching `f1` as the well `F01` therefore made every plate using the standard convention answer "yes, this is well F01" for every well's first field — selecting F01 in Review drew A01's image and F02 drew B02's, each well rendering another well's frame with nothing on screen to say so — and claimed a file naming no well at all (`sample_f3_t0.tif`) for F03. `well_token_matches_text`'s substring fallback, which answers the same question for a name that glues the well to its neighbours (`plateA01run.tif`), carries the same rule: converting one and not the other would leave two definitions of the same word inside one function. The cost is narrow and deliberate — a plate whose filenames spell a row-F well in lower case (`f01_GFP_…`) is no longer found by the free-text scan, those names being genuinely ambiguous, while the two parsers ahead of this one read such a well by *position*, which is not ambiguous at all. Legacy three-digit fields (`F001`) never matched and still do not. |
 | `data/frame_load.py` | An address — `(well, channel-token, timepoint, fov)` — resolved to the float32 array it names, or to the int32 segmentation mask beside it, plus the channel-token vocabulary that decoding one needs (`base_channel`, the ` (binary)` / ` (mask)` / ` (raw)` suffixes, `NUC_SEG_TOKEN`). Three separate tabs ask this question — the Image Table composes a grid of them, the Cell Browser crops per-cell thumbnails out of them, the Playground corrects a single one — and each is independently removable, so the answer cannot live in any of them. **Resolving a render variant is addressing, not rendering:** `"GFP (binary)"` loads exactly the pixels `"GFP"` does, and only what the caller then draws with them differs, which is why the suffix vocabulary is here and the rendering it selects is not. **Two shortfalls are reported rather than absorbed**, through sets the caller owns and passes in: `scan_misses` (a well/channel scan that came up empty and might be momentary, so a pass says it once instead of once per cell and the next pass retries it; an empty scan of folders that exist, walked to the end, is kept in the cache instead) and `raw_fallbacks` (a cell that asked for the corrected top-hat image and was served the raw one — common, since a pipeline often corrects only some of a well's frames, and a grid silently mixing the two would look uniformly corrected). There is a third, `partial_scans`: a well/channel whose image inventory came back truncated (`ScanResult.partial`), recorded once per key by `_record_partial_scan` so a grid of ninety cells over one truncated well says so once rather than ninety times. It is the shortfall a caller cannot infer from what it received — the frames are real and the grid is simply short — and it survives a cache hit, because the truncated inventory is what was written into the session-long image cache. They are parameters, not something read off `ctx`, because they belong to the *caller's* render pass; the Image Table binds its own through thin wrappers in `image_compose` (`partial_scan_report` is the public reader, and `reset_scan_misses` clears the set per pass) and holds them on `state.image_table.partial_scans`, cleared on dataset load beside `scan_misses`; a caller with no pass simply gets its pixels. **An unspecified axis refuses rather than guesses:** an empty FOV or an empty timepoint (an empty dropdown) matches every key, so when more than one distinct value on that axis would satisfy the request, `match_image_ref` returns `(None, "ambiguous_fov")` / `(None, "ambiguous_tp")` instead of whichever entry the dict happened to yield first. Both axes, not just FOV — a rule written for one of two symmetric axes leaves the other returning an arbitrary frame under a successful-looking `"normalized"` status. A genuinely single-FOV or single-timepoint dataset still resolves, and the top-hat-to-raw fallback treats an `ambiguous_*` kind as a deliberate refusal rather than a gap to retry. |
-| `data/dataset_dims.py` | The four option lists every image grid starts from — which wells are loaded, which channel tokens can be shown (including each channel's binary variant, `NUC+SEG` when a nuclear token is known and the run writes overlays — never on a nanowell run, which offers its stitched montage as `MONTAGE`, first, instead (§6.2l) — and the user's ratio metrics as virtual channels), which timepoints and which FOVs exist. Each has the same two-tier shape: prefer what the run recorded in `pipeline_info.json`, fall back to scanning the loaded CSVs when it recorded nothing (older runs, custom schemas). The fallback is what keeps a thin-sidecar dataset usable and is deliberately second — the sidecar names every value the run produced, the cache only the ones whose rows happen to be loaded. The Image Table fills its axis dropdowns from these and the Playground fills its single-frame selectors from the same lists, so the two cannot disagree about what a dataset contains. |
+| `data/dataset_dims.py` | The four option lists every image grid starts from — which wells are loaded, which channel tokens can be shown (including each channel's binary variant, `NUC+SEG` when a nuclear token is known and the run writes overlays — never on a nanowell run, which offers its nanowell frames instead: `MONTAGE` and each fluorescence channel's `MONTAGE <CH>` first, the `NW: <metric>` maps last (§6.2l) — and the user's ratio metrics as virtual channels), which timepoints and which FOVs exist. Each has the same two-tier shape: prefer what the run recorded in `pipeline_info.json`, fall back to scanning the loaded CSVs when it recorded nothing (older runs, custom schemas). The fallback is what keeps a thin-sidecar dataset usable and is deliberately second — the sidecar names every value the run produced, the cache only the ones whose rows happen to be loaded. The Image Table fills its axis dropdowns from these and the Playground fills its single-frame selectors from the same lists, so the two cannot disagree about what a dataset contains. |
 | `data/dataset_layout.py` | Where a dataset's input images are, given the folder opened: `<root>` of an `in/` + `out/` pair, or `out/` itself with `in/` beside it — the one answer for the loader and the in-place-append recovery, which had answered it differently, so opening `out/` left `in_dir` unset and every input-frame reader reported its image missing with `in/` beside it. |
-| `data/nanowell_images.py` | A nanowell run's stitched montage (`<well>_<tp>_montage.png` in `out.zip`) read as an 8-bit frame, matched by timepoint label or hours. Needs no nanowell semantics, so it sits below every feature and a build without the Nanowells feature still shows it (§6.2l). |
+| `data/nanowell_images.py` | The tokens of the Image Table's nanowell frames (`MONTAGE`, `MONTAGE <CH>`, `NW: <metric>`) and their parsers, the `NanowellFrame` the Nanowells feature's `image_table.nanowell_frame` service answers, and the reader of a nanowell run's stored phase montage (`<well>_<tp>_montage.png` in `out.zip`), matched by timepoint label or hours. Needs no nanowell semantics, so it sits below every feature and a build without the Nanowells feature still shows the phase montage (§6.2l). |
 | `data/observations.py` | What a plot's points are on this dataset and the rows behind them: cells, or nanowell rows asked of the Nanowells feature's `observations.nanowell` service; the members every plot draws; a cell's own nanowell's metric joined onto its row (§6.2l). |
 | `data/inclusion.py` | The inclusion chokepoint's answer, keyed for an image view: `excluded_nids_for_frame` gives the nucleus ids in one frame that `df_included_mask` rejects, and `drop_excluded_labels` zeroes them out of a label image. An image view that draws straight off a segmentation mask shows curated-away cells as segmented, counted cells — the plots disagree with the picture and nothing on screen says which is right — and filtering the labels once fixes every render that reads them. In the app the well is read through `narrow_rows` (the identity columns and every verdict layer's declared inputs, projected), not `get_rows` — a whole-frame read cost about a second on a 1.5M-cell well and pushed the frame into the row cache, evicting a well a plot was using — and the map is remembered in `StatsCacheState.populations` under `(well, ReviewImageState.override_version, rows_version)`: the counter `invalidate_stats_cache` bumps on every manual delete, crop, QC and gating change, which also clears that store, and the tick a gating pass makes. Remembered by the context rather than on the frame, it survives the row cache evicting the well, so the next rendered cell does not read the well again. A context without that store (the pure-logic tests) falls back to memoising on the row frame's own `attrs`, keyed by the counter **and the frame's identity**, so it cannot be inherited by a derived frame — `attrs` propagates through `df.copy()`, where the counter alone would call another frame's map fresh; a build with no Review-Image slice has no counter to key on and simply recomputes. The map (`FrameExclusions`) groups only the dropped rows and holds one id array per frame, making a frame's `frozenset` the first time that frame is drawn — a gated well can drop a million cells and a render asks for a few frames. The all-included case — the common one — short-circuits before the frame-token normalisation, and `drop_excluded_labels` returns the array untouched, so a dataset with no curation pays nothing at all. The filter's query is built at 64-bit width and narrowed to the ids the frame actually holds rather than cast to the label array's dtype — casting wrapped an id larger than `int32` into a negative one, and a wrapped value colliding with a live label blanks the wrong cell. A non-integer label array is returned untouched and a read-only one is copied. **An already-rendered grid is not repainted** when an inclusion layer changes: `invalidate_stats_cache` fires `ctx.runtime.image_table.inclusion_changed_cb`, which marks the table stale so the header cues a Generate. Re-rendering would be seconds of decoding per edit, and an edit comes in runs of ten; the cue is what keeps a stale grid from quietly disagreeing with every plot. |
 | `core/app_settings.py` | `app_settings()` — the one door onto this user's `QSettings`: an INI file, `settings.ini` in the app's folder (`util.state_dir`), on every platform rather than the native store (a plist on macOS, the registry on Windows, `~/.config/AllWell` on Linux). Settings an earlier version left in the native store — keyed on the organisation/application pair named here — are copied over once per process when `settings.ini` does not exist yet, and the native store is cleared only after the INI file wrote without error (`_adopt_native_settings`; never while `ALLWELL_STATE_DIR` is set; `tests/test_one_app_folder.py`). A module function rather than a method on any object, because reaching the handle used to mean reaching for `_qsettings` on whatever object a caller happened to hold, and the object a feature has is not the one that defines it: `ctx.window` is the `ReviewApp` review widget while `_qsettings` belongs to the `AllWellApp` main window containing it, with no forwarding. A guarded `getattr(ctx.window, "_qsettings", None)` therefore reads `None` in the shipped app and every setting reads as absent — which is exactly how the recent-datasets list came to write nothing and read nothing while its tests passed. Five construction sites across three modules now go through here. There is no object to have the wrong one of. Tests never reach the real store: `tests/conftest.py` patches this function to a scratch INI file once per session (`_session_settings_go_to_a_scratch_file`, for windows a test file builds before its first test) and again per test (`_settings_go_to_a_scratch_file`); `PhoneShell` keeps the function it is handed at construction, so the session-level patch is what isolates a per-file window (`tests/test_settings_never_reach_the_real_store.py`). |
@@ -11795,7 +11805,8 @@ are undefined with the reason `identity_contradicted`, a fold change from a base
 identity_contradicted`, the growth rate skips it, the occupancy class is not taken at it, Trajectories draw it as a
 point joined to nothing (`TrajectoryPanel.line_ok`) and in no class median, and the export carries `identity` and
 `identity_ok` beside its values. Every figure `controller.draw_view` composes says in its footer which
-timepoints were contradicted and which wells are not confirmed or not checked (`identity_compute.identity_note`):
+timepoints were contradicted and which wells are not confirmed or not yet verified, as a statement about the
+addresses (`identity_compute.identity_note`: `Nanowell addresses: A01 not yet verified — see the Identity view.`):
 a dataset analysed before the check existed reads `not_checked` until the audit command is run over it. The line plots
 mark it where it is (`identity_compute.timepoint_marks`, drawn by `_identity_marks`): Trajectories (through
 `TrajectoryPanel.marks`) and the Distribution view over time (`DistributionModel.identity_marks`) draw a light hatched
@@ -12100,7 +12111,11 @@ foot one line of the nanowell's metrics there (`series_compute.crop_metric_lines
 percentage, the shared channel's nanowell fluorescence and brightness as `fluor.` and `bright`, in that order of
 importance, `compact_number` for thousands; a state without numbers by name; a missing measurement left out, never zero) — as many as fit the
 crop's width (`renderer._one_line`), the caption saying when some were left for the pop-out, which writes each
-panel's full metrics under it (`render_crop_grid(…, metrics=…)`, `controller.crop_metrics`). Text under or beside
+panel's full metrics under it (`render_crop_grid(…, metrics=…)`, `controller.crop_metrics(…, focus=True)`), ending
+with the rim focus on the rim focus rule's own scale (`series_compute.rim_focus_text`: `focus / rim_focus_ref` as
+`rim 88% of sharpest`, written whether the rule is on or off and on an out-of-focus timepoint too; `rim 0.95 (not
+judged)` under `MIN_SITES` rims; `rim not fitted` for a measurable timepoint with no rim focus). The Extremes
+montage's crops share the Metrics setting but not that line: they have room for one. Text under or beside
 each crop took more of the figure than the crops did, and three lines over a crop covered the lower third of the
 nanowell, where the cells are. **The layout is computed in inches** (`_extremes_layout`), the panels placed with
 `fig.add_axes`: the Largest and Smallest blocks side by side or one above the other, whichever gives the larger
@@ -12299,7 +12314,14 @@ selected well is excluded. *Excluded (n) ▾* (`exclude_view`), shown only while
 one or all (`set_well_excluded`, `restore_every_well`).
 
 **Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a bare percentage spin box, 30–95, with no suffix (Qt refuses typing with the cursor inside one)) is a mirror of
-the Cell Gating panel's *Exclude out-of-focus nanowells*, never a setting of its own. `controller.set_rim_focus`
+the Cell Gating panel's *Exclude out-of-focus nanowells*, never a setting of its own. Like every `SpinBox` it commits a typed number on
+Enter, on focus-out, or after a second's pause in typing (`TYPING_PAUSE_MS`). The pause is what this box needed: a
+click on the figure ends no edit, and a window the first change's application-modal progress popup left inactive has
+no focus to lose, so every change after the first was dropped. Two things keep a typed number alive until then: `RimFocusControls.refresh`
+and the Cell Gating panel's refresh write it through `SpinBox.show_value`, which leaves a box already holding the
+rule's value untouched (a plain `setValue` rewrote the field on every redraw, and the Array view redraws as each
+tile arrives, so the typed number was put back before it was committed); and the page's canvas takes
+`Qt.ClickFocus`, so a click on the figure ends the edit and commits it. `controller.set_rim_focus`
 refuses a fraction outside `nanowell_rim_focus.MIN_FRACTION`–`MAX_FRACTION` by name, and otherwise changes the QC
 parameters through the registry's `qc.set_params_with_progress` service — the one route a QC edit takes, so every
 verdict layer is re-projected, the panel repainted (`qc.refresh_gate_widgets`) and the page recomputed (see
@@ -12326,7 +12348,10 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   `montage_um_per_px`, read on a worker, the last `MONTAGES_KEPT` kept) or `tiles` (full resolution, below);
   `positions` — `measured` (the well frame, where the run found each nanowell) or `lattice` (`map_model`'s
   places, U4); `colour` — `metric` or `state`; and the switches `nanowells`, `addresses`, `values`, `cells`,
-  `tiles`, `anchor`, `record`. The *Overlays* button (`state.overlays_hidden`, not persisted) hides the coloured layers
+  `tiles`, `anchor`, `record`, `notes`. `notes` is how the figure is explained (below), not something drawn on the
+  array, so `controller.apply_array_preset` carries it across a preset rather than resetting it; it has a checkable
+  *Notes* button on the band beside *Overlays* (`_nw_notes_btn`) as well as its Layers entry, both refreshed from the
+  one switch. The *Overlays* button (`state.overlays_hidden`, not persisted) hides the coloured layers
   (`OVERLAY_SWITCHES`: nanowells, cells, tiles, anchor) without touching the switches: the controller draws
   `controller.drawn_layers(st)` — `ArrayLayers.without_overlays()` while hidden — so showing them again restores
   exactly what was on, and the footer carries `OVERLAYS_HIDDEN_NOTE` meanwhile; `anchor_controls` reads the drawn
@@ -12371,21 +12396,45 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   its figure is no longer the size it was laid out for) (without it a resize squashed every
   nanowell into an oval, and a draw made while the canvas was still being laid out showed one flattened row). It leaves a canvas that is no longer visible alone: the timer can fire after the page closes, and a redraw then queues matplotlib's deferred draw onto a canvas about to be deleted; the image is drawn for exactly that region and those pixels; the nanowells are filled by the
   metric (`MAP_CMAP`, with a colour bar; a nanowell without a value is a grey outline styled by its state,
-  `_STATE_STYLE`, never a colour of the scale) or outlined in `ui/nanowell_sites.state_colour`, a fused one
-  dashed in `FUSED_COLOUR` either way, at `outline_width_px` of the median drawn diameter (6 % of it, 2.5–8 px), the central nanowell boxed; a key
+  `_STATE_STYLE`, never a colour of the scale) or outlined in `ui/nanowell_sites.state_colour` with the same
+  `_STATE_STYLE` mark (`_outline_by_state`, both through `_state_marks`). `_STATE_STYLE` gives every state a nanowell
+  can have without a value a mark — dash pattern and hatch — no other state has, under either colouring, so every
+  cause of an exclusion can be read off the array; `tests/test_nanowell_array_marks_are_distinct.py` renders one of
+  each and holds the drawn marks apart. A fused one is ringed dashed in `FUSED_COLOUR` either way and keeps its
+  state's hatch inside the ring (`_state_marks` draws the hatch with no ring), and one outside the *Subset* is under
+  the `_dim_nanowells` veil; at `outline_width_px` of the median drawn diameter (6 % of it, 2.5–8 px), the central nanowell boxed; a key
   along the top edge of the axes (`_array_key.py`: `key_entries` decides it, pure, `draw_key` draws it) with one
   ring swatch per way a nanowell in view is outlined — the state's colour, or the grey no-value outline with its
   dash or hatch, and the fused dash — each with how many drawn nanowells it covers, so it names only what is on
-  screen; the states with no colour of their own share one swatch that names them all. It is a standalone legend
-  (`ax.add_artist`), so the export-style pass sizes its text but never moves it; labels in
+  screen; one entry per state, never one swatch for several (each counts the nanowells carrying its mark: a fused
+  one under its state only where the state has a hatch), the fused ring, and `outside the Subset (veiled)` when the
+  Subset dims any; every entry ends with its count, and the axes start one `_KEY_ROW` lower for each row of
+  `KEY_COLUMNS` entries past the first so a long key stays on the figure. A plain no-value nanowell (measured or empty, no value of the metric) has an entry per reason —
+  `no value: no cells at baseline ("0 at base") · 3`, the commonest three and then `other reasons` — from
+  `ArrayScene.why` (`array_compute.no_value_reasons`, `(q, r) -> label` from `series_compute.exclusion_reason` worded
+  by `distribution_compute.reason_label`, so the key and the Distribution footer give the same cause), and the
+  quoted tag (`_array_key.reason_tag`) is what each such nanowell writes inside itself with *Values* on, so the
+  reason of any one nanowell can be read off the array: a fold change on a nanowell full of cells is undefined
+  whenever its baseline had none or was not measurable, and a bare "no value" read as "not measured". It is a
+  standalone legend (`ax.add_artist`), so the export-style pass sizes its text but never moves it. The Array
+  axes are an image panel, which that pass skips entirely, so `draw_key` writes the words in the figure's ink
+  (`renderer._inks`) itself and tags them `follows_theme` for a capture's flip — left to matplotlib's default
+  they were black on the screen theme's near-black ground; labels in
   `LABEL_COLOUR` (`_draw_labels`: the `q,r` with *Addresses*, the metric value to three significant figures with
-  *Values*, one under the other when both are on, `site_label_texts`; a nanowell without a value writes no number)
-  only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
+  *Values*, one under the other when both are on, `site_label_texts`; a nanowell without a value writes its reason's
+  tag, never a number) — in a nanowell drawn without a fill, with a stroke of the figure's ground around it
+  (`patheffects.withStroke`, 3.5 pt) — or, in a hatched nanowell (one whose state has a `_STATE_STYLE` hatch), on a small solid patch of the ground instead, since a halo loses to a hatch —; on the metric's fill, plain — only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
   (beyond, the footer asks for a zoom); tiles coloured by their placement `source`
   (lattice, overlap, recorded) with the residual, or — with no tile size in the acquisition record — their corner
   marked and the figure saying the outline is unknown, never a guessed rectangle; the anchor as a crosshair;
-  the run record beside the axes, a suspect template in amber. `array_footer` writes what is drawn and how to
-  read it, the image's state and the anchor's status. It returns an `ArrayDrawn` (the hit map, the axes, the
+  the run record beside the axes, a suspect template in amber. `array_footer` writes the page's note, one counts
+  line in the key's own groups that adds up to the roster (`_head`: `19 nanowells: 13 with a value · 4 no value · 2
+  rim out of focus`, a fused nanowell counted under its state and one without a measured position as not placed,
+  then the marks laid over a state — `; 1 fused (on a tile seam); 3 outside the Subset`), and
+  whatever went wrong or is missing (no addresses, nothing placed, the image's state, the Cells layer's tally, and
+  the anchor's status when it is not a plain `ok` — `_anchor_owed`; a plain `ok` is never written). How to read the
+  figure is `array_notes`, each line only when it applies to what is drawn (the fused sentence only with a fused
+  nanowell, the tile colours only with tiles), and is written only with `notes` on, under the footer's lines (which stay where they are with Notes off, straight under the array), in room `render_array` reserves for it whether `notes` is on or off: turning Notes on never moves, shrinks or covers the array (a box drawn over the array's foot was tried and hid its bottom row). It returns an `ArrayDrawn` (the hit map, the axes, the
   region shown and its size in pixels, and the tiles' `Rendered`), which the page keeps on `state.drawn`.
 - **Full resolution** (`full_montage_compute`, Qt-free): every tile from `in/<well>.zip` (the member
   `image_compute._member_for` finds) at the grid record's `left_um`/`top_um`, at the x pixel size, in the
@@ -12409,8 +12458,8 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   flow item so they never wrap apart; `tab_view._show_where` shows either part per view and measures the item
   again), Positions (before Image, because Lattice is what greys it), Image with its channel and Range, Layers, and
   Set anchor / Clear anchor / *Re-run wells…* with no caption (the QC view's copy keeps the long label). *Excluded
-  (n)* is a trailing item, so its coming and going moves nothing. The zoom (−, readout, +, *Fit*, *1:1*) and
-  *Overlays* are viewing actions rather than settings, so they sit under the figure in the card's own toolbar,
+  (n)* is a trailing item, so its coming and going moves nothing. The zoom (−, readout, +, *Fit*, *1:1*),
+  *Overlays* and *Notes* are viewing actions rather than settings, so they sit under the figure in the card's own toolbar,
   after its navigation buttons (`mount_array_canvas_tools`, through `MplToolbar.add_group`, each group behind its
   own separator and shown with the view's other controls); on the Array view that toolbar's *Reset view* is *Fit*
   (`MplToolbar.setHomeHandler`), because matplotlib's home returns to the limits of a first draw the view's own
@@ -13758,8 +13807,96 @@ reads as an ordinary one. The per-cell Scatter's axis pickers and Multivariate's
 nanowell's metrics ("Nanowell ▸ …", the Nanowell family) through `with_nanowell_columns`.
 
 **Images.** A nanowell run's `out.zip` holds no masks or overlays, only one stitched phase montage per well and
-timepoint. The Image Table offers it as the virtual channel `MONTAGE` (first on a nanowell run, which offers no
-`NUC+SEG`; `data/nanowell_images.py`, `frame_load`); a montage has no field, so a cell's FOV is ignored. Segmentation
+timepoint. The Image Table draws a nanowell well as three kinds of *nanowell frame*, virtual channels named in
+`data/nanowell_images.py` and loaded through `frame_load` like any other (a frame has no field, so a cell's FOV is
+ignored):
+
+| Token | What it draws | Drawn by |
+|---|---|---|
+| `MONTAGE` | the run's stored phase montage | the Nanowells feature; without it, `nanowell_images.read_montage_array` (no known scale) |
+| `MONTAGE <CH>` | the same stitch from channel *CH*'s raw tiles in `in/<well>.zip`, each tile where the grid record placed it, in the tiles' own units (the run keeps no fluorescence montage) | the Nanowells feature only |
+| `NW: <metric label>` | each nanowell's disc, at its measured position and radius, filled with its value of a per-nanowell metric | the Nanowells feature only |
+
+A nanowell run offers `MONTAGE` first, then `MONTAGE <CH>` for each fluorescence channel the run read (never the
+phase channel, whose montage is `MONTAGE`), then the raw channels, and the metric maps last
+(`dataset_dims.channel_options`, from the tables' header rows only); it offers no `NUC+SEG`. A build without the
+Nanowells feature offers `MONTAGE` alone. The feature answers every kind through the registry service
+`image_table.nanowell_frame` (`features/nanowell/table_frame_compute.table_frame`) with a `NanowellFrame`: float32
+values, NaN wherever nothing was imaged or no nanowell is; a mask of the nanowells that are there and have no value of
+the metric; the frame's own µm/px; and a note of what it leaves out.
+
+- **One geometry.** Every frame of a (well, timepoint) is drawn on the grid record's `montage_origin_um` /
+  `montage_um_per_px` over the stored montage's size (`table_frame_compute.frame_geometry`, read from the PNG header).
+  The Image Table's crop is in pixels, so this is what makes one crop one region of the well in every row, and a
+  metric map sit pixel for pixel over the montage beneath it. Wells whose montages were stored at different scales
+  still crop the same pixels, which are then different areas; the scale bar, which reads each frame's scale, stays true.
+- **Montage pixels are not tile pixels.** A frame's scale bar is measured at the frame's µm/px
+  (`image_compose._nanowell_frame_bar_px`), never at **Pixel µm/px**: the montage is the well downsampled to fit one
+  picture, and the tiles' pixel size draws a bar several times too short. A frame whose scale is unknown carries no bar.
+  Every Image Table bar, a frame's or not, writes its length beside it ("50 µm", **Label the bar**,
+  `ImageTableState.scale_bar_label`; `draw_cell_chrome`'s `bar_text`, placed by `bar_text_rect_px`, which the
+  PowerPoint plan's "Scale bar length" text box shares), and a labelled bar and its length sit on one translucent
+  plate (`image_compose._bar_plate`) so neither is read off the data beneath.
+- **Fluorescence montages** are stitched with the Array view's own reader (`full_montage_compute.TileStore`, its
+  `values` method: the sampled pixels unstretched, NaN off every tile) at the pyramid level the frame's scale needs,
+  so the row's LUT — pooled across the grid by Auto — sets the brightness of every well alike. Reading a well's tiles
+  is the slow part; it runs in the Image Table's prefetch pool, and a montage is memoised in the image cache like any
+  frame.
+- **Metric maps** are painted from `observation_compute.nanowell_observations`, the plot tools' own rows (the page's
+  Baseline, rim-focus rule and Cell Gating), so a value on the map is the value a plot draws. Because those settings
+  change the values and no image-cache key could see them, a metric map is never memoised by the Image Table; the
+  observations memo is keyed on all of them, so asking again repaints discs and reads nothing.
+- **Nothing drawn as something else.** The composer (`image_compose._compose_image_table_rgb`) draws a NaN pixel in
+  its `blank_rgb` — black for a montage, where it is the absence of light; `Colors.panel_elevated` for a metric map
+  (`_colour_key.metric_map_background_rgb`), because every colormap's darkest end, viridis' deep purple included,
+  all but vanishes on black and the lowest values with it — and the frame's `undefined` pixels in
+  `Colors.plot_undefined_ink`, after the LUT, and the LUT window is the finite
+  pixels' (`ui_helpers.lut_colormap_to_rgb`; the Auto pool skips NaN too). A nanowell with no value of the metric is
+  drawn as its **rim only** — an empty ring, its middle black (`table_frame_compute.metric_map`) — so it differs from
+  every value by shape, not just by a colour a colormap could also hold. An empty nanowell's count is 0 and drawn as
+  0; its brightness has no value and is a ring.
+- **Colormaps.** A metric map defaults to `viridis` (`builder_view._default_colormap_for`) whatever channel its name
+  carries, because a black-based ramp would draw its lowest values in the background's black. A fold change
+  (`observations.fold_change_scale`) defaults to the diverging `coolwarm`, and `builder_view.new_channel_spec` turns
+  on log scale for a ratio; the pooled Auto window is then centred on "no change" (`_colour_key.centred_window`, called by `_auto_lut._compute_auto_luts`):
+  `(1/k, k)` for a ratio, `(-m, m)` for a fold change already on a log scale. Transmitted light — `MONTAGE`, the
+  run's phase channel, or a channel named phase / BF / DIC / TL as a whole word — defaults to `Greys`
+  (`builder_view._is_transmitted`); a tint made the phase montage read as fluorescence. `viridis` and `coolwarm` are
+  in `LUT_COLOR_NAMES`, so the LUT editor shows them, and a ramp's chip swatch is the ramp
+  (`builder_view._cmap_swatch`).
+- **The colour key.** Under a grid holding any metric map or fluorescence montage, one row per such channel
+  (`image_compose.colour_keys` decides, `_colour_key.key_rgb` draws, Qt-free): its name as its row is labelled
+  (`NW: …`, `MONTAGE GFP`) and then in full, so a key is matched to its row by its first words; a strip of the row's
+  colormap with the window's ends (and "1 = no change" for a fold change, at the place the cells' colouring puts it,
+  `_colour_key.key_ticks`); what the window is — one shared by every well shown, a fixed one, or each cell's own —
+  and, because Auto pools over the pixels shown, "fitted to the cropped region" while a crop is set, so a whole and a
+  cropped export that colour one nanowell differently say why; and for a metric map the "no value" ring. The live grid adds it as a label under the cells
+  (`colour_key_view.add_colour_key`), the saved figure as an axes below the grid in the publication palette
+  (`export._draw_colour_key`), and the PowerPoint plan as a "Colour key" picture of its own (`FrameCollector.add_key`).
+  A LUT row's **per cell** (`ChannelSpec.auto_per_cell`) keeps that channel out of the pooled window, so each cell is
+  scaled to its own range; the key then says the colours are not comparable between cells.
+- **Labels.** `nanowell_images.display_token` names a frame on axes, chips, titles and the hover line: a metric by its
+  short label (`short_label`, cut at its explanation, `NW: GFP Brightness`) in its own case — `ChannelSpec.axis_token`
+  keeps a nanowell frame's case, since upper-casing broke `log₂` and `n₀` — while the key and the chip's tooltip give
+  the full label. A frame shows the whole well, so neither the corner of a grid made only of frames
+  (`facet_view.plan_facets`) nor a frame's identity label names a field.
+- **The builder.** The Channels tray folds the metric maps behind one **Nanowell metrics** toggle
+  (`builder_view._build_tray`), and the starting table (`_default_spec`) holds `MONTAGE` and the raw channels but no
+  fluorescence montage or metric map: each montage reads every tile of every well shown.
+- **A crop re-paints a metric map.** Its discs are geometry, so when a crop would enlarge them into stair steps,
+  `image_compose._finer_metric_map` asks the service for just the cropped window, up to 8 × finer, until its longer
+  side reaches 640 px (`table_frame`'s `window` / `oversample`, `table_frame_compute.window_geometry`). The factor is
+  recorded per cell (`ImageTableState.nanowell_display_scale`) and the scale bar is measured on the pixels drawn. A
+  montage is never re-drawn finer: its pixels are the measurement.
+- **What is left out.** What each frame leaves out is recorded per pass in `ImageTableState.nanowell_frame_notes`:
+  a metric map's nanowells with no value by reason (`NanowellFrame.missing`, out of `NanowellFrame.total`), and any
+  frame's own sentence (a tile with no image, a frame of unknown scale, nanowells with no position).
+  `image_compose.nanowell_frame_clause`, which `partial_scan_clause` carries so the Generate line and every saved
+  figure's line say it, sums the first across the wells shown into one sentence per metric ("NW: Count fold change:
+  180 of 412 nanowells in 4 wells have no value (104 seeded later, …), drawn as empty rings") and lists the first two
+  sentences, counting and logging the rest.
+
+Segmentation
 draws a frame that has no label map rather than aborting: the image without outlines, a status line saying why, and
 Delete / Crop / Edit disabled with that reason (`review_image/renderer.set_cell_editing`). On a nanowell run the
 Nanowells feature's `segmentation.nanowell_overlay` service (`features/nanowell/overlay_compute.py`) adds each counted
@@ -21847,7 +21984,7 @@ The map (each rule links to the test that holds it):
 | A well token is judged by `util.well_token`, never a local whole-token regex (§15) | `tests/test_well_token_single_parser.py` |
 | A removable feature's state slice is reached from outside that feature through `state.feature_slice(name)`, never by attribute. `AppState.__getattr__` **raises** for a slice whose feature is not in `FEATURES`, so a profile build without it fails at the access — and `getattr(ctx.state.stats, "pairwise", [])` does not help, because the default covers a missing *attribute* on an object that already exists and reaching the object is what raises. Removability is read from `profiles/full.toml`, so a slice whose feature is kept forever (`bar`, `preview`, `review_image`) is not the subject; `features/registry.py` is exempt because every access there sits inside that feature's own activation hook, and the guard fails if that exemption stops describing a real access | `tests/test_disabled_feature_slices.py`, with bite cases in `tests/test_guards_bite.py` |
 | Every spin box the application builds is `widgets.spin_box.SpinBox` / `DoubleSpinBox`. The stylesheet's `min-width` floor becomes an explicit 60 px minimum on a bare `QSpinBox`, and a row short of room squeezes the box to it — a 14 px text area, which clipped the QC panel's and the Nanowells band's focus percentages; the subclasses hold their minimum at their whole size hint | `tests/test_spin_boxes_keep_their_number.py` (an AST guard over every package, the reported QC row in a 330 px panel, and the squeezed row with each class) |
-| A typed number is applied once, when it is finished. `SpinBox` / `DoubleSpinBox` set `setKeyboardTracking(False)`, so `valueChanged` fires on Enter or focus-out rather than per keystroke (the arrows, the wheel and `setValue` still fire at once) — typing "200" into a box wired to a recompute no longer runs it for 2 and 20 first. The Properties panel's bound `QLineEdit`s (the axis limits) apply on `editingFinished`; their setters emit it themselves, so a programmatic set still applies immediately | `tests/test_spin_boxes_commit_typed_values_once.py` (types into each class and the panel's real binding keystroke by keystroke) |
+| A typed number is applied once, when it is finished. `SpinBox` / `DoubleSpinBox` set `setKeyboardTracking(False)`, so `valueChanged` fires on Enter, on focus-out, or after `TYPING_PAUSE_MS` (one second) without typing, rather than per keystroke (the arrows, the wheel and `setValue` still fire at once) — typing "200" into a box wired to a recompute no longer runs it for 2 and 20 first. The pause is started by `textEdited` alone, so a refresh from state never commits anything; while the field holds typed text that is not the value in force (`pending()`) it is drawn in italics, so a number waiting for its pause — or a partial one a mid-number pause is about to commit — never looks applied; it exists because Enter and focus-out are not always reachable — a click on a plot canvas, a tool button or a tab bar ends no edit, and a window left inactive has no focus to lose — and a number typed and then left was silently dropped. The Properties panel's bound `QLineEdit`s (the axis limits) apply on `editingFinished`; their setters emit it themselves, so a programmatic set still applies immediately | `tests/test_spin_boxes_commit_typed_values_once.py` (types into each class and the panel's real binding keystroke by keystroke) |
 | `swallow` and `swallowed` are not swapped. They are near-identical names with opposite call shapes — a context manager and a call for inside an `except` block — and swapping them fails only when the line runs. `with swallowed():` raises **before** the body, so the work it was meant to guard never happens; `swallowed()` outside a handler logs a suppression with no exception in flight, which reads as a failure that did not occur | `tests/test_safe_helpers_used_right.py`, with bite cases in `tests/test_guards_bite.py` |
 | A text-mode subprocess names its codec. `text=True` alone decodes the pipe with `locale.getpreferredencoding(False)` — UTF-8 here, the ANSI codepage on a user's Windows box — so a stream that reads correctly for the developer mojibakes the remote's `✓` / `→` markers for them and raises `UnicodeDecodeError` out of a reader thread on the first byte the codepage has no character for, skipping the `proc.wait()` behind it | `tests/test_subprocess_text_decoding.py`, with bite cases in `tests/test_guards_bite.py` |
 | A captured subprocess's timeout holds on Windows. `subprocess.run`'s Windows branch waits, after killing a child that timed out, with no timeout for pipes that a process the child started can hold open for ever; `util.bounded_run.run_bounded` is the one spelling | `tests/test_subprocess_timeouts_return_on_windows.py`, with bite cases in `tests/test_guards_bite.py` |

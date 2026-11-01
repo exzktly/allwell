@@ -11,7 +11,8 @@ Imports no feature.
 from __future__ import annotations
 
 from review.domain.observation import (
-    CELLS, NANOWELL_CELL_PREFIX, NANOWELL_SERVICE, NANOWELLS, ObservationTable, is_nanowell_cell_column,
+    CELLS, NANOWELL_CELL_PREFIX, NANOWELL_SERVICE, NANOWELLS, ObservationMetric, ObservationTable,
+    is_nanowell_cell_column,
 )
 
 
@@ -49,6 +50,28 @@ def nanowell_metric_specs(ctx, wells) -> tuple | None:
     if not is_nanowell_dataset(ctx):
         return None
     return ctx.features.query("observations.nanowell_metrics", ctx, list(wells), default=None)  # NANOWELL_METRICS_SERVICE
+
+
+def nanowell_metric_for_token(ctx, token) -> ObservationMetric | None:
+    """The ``ObservationMetric`` an Image Table ``NW: <label>`` token names (``data/nanowell_images``), matched by
+    label case-insensitively, or ``None`` — not a metric token, or not a metric of this dataset or build."""
+    from review.data.nanowell_images import metric_label
+
+    label = metric_label(token)
+    if label is None:
+        return None
+    wells = list(getattr(getattr(ctx.state, "dataset", None), "well_paths", {}) or {})
+    specs = nanowell_metric_specs(ctx, wells) or ()
+    return next((m for m in specs if m.label.lower() == label.lower() or m.key.lower() == label.lower()), None)
+
+
+def fold_change_scale(metric) -> str:
+    """How a nanowell metric's values sit around "no change": ``"ratio"`` for a fold change (1 is no change, and
+    ×2 and ×½ are the same distance from it, so it is drawn on a log scale centred at 1), ``"log"`` for one already
+    on a log scale (0 is no change), ``""`` for anything that is not a fold change."""
+    if metric is None or getattr(metric, "kind", "") != "fc":
+        return ""
+    return "log" if str(metric.key).startswith("log") else "ratio"
 
 
 def occupied_nanowells_by_well(ctx, wells) -> dict[str, int]:

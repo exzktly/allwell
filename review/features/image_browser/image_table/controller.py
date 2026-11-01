@@ -49,6 +49,8 @@ from review.core.channel_state_controller import (
 # loading, mask/threshold rendering, RGB composer, overlay) lives in
 # ``image_compose``. Re-exported so call sites + external importers
 # (playground, grid_view) are unchanged.
+from review.features.image_browser.image_table._auto_lut import _compute_auto_luts  # noqa: F401
+from review.features.image_browser.image_table.colour_key_view import add_colour_key
 from review.features.image_browser.image_table.image_compose import (  # noqa: F401
     LUT_COLORS,
     LUT_COLOR_NAMES,
@@ -370,7 +372,7 @@ _DISPLAY_INT_KEYS = ("label_font_px",)
 _DISPLAY_INT_MIN1_KEYS = ("scale_bar_thickness_px",)
 _DISPLAY_STR_KEYS = ("scale_bar_cells", "scale_bar_img_corner", "scale_bar_color",
                      "label_mode", "label_cells", "label_img_corner", "label_color")
-_DISPLAY_BOOL_KEYS = ("label_bg", "scale_bar_show")
+_DISPLAY_BOOL_KEYS = ("label_bg", "scale_bar_show", "scale_bar_label")
 
 
 def image_table_set_display(ctx, key: str, value) -> None:
@@ -626,11 +628,13 @@ def _install_cell_events(
         # An overlay cell shows a blend but can only quote ONE channel's pixel, so
         # the readout names the channel the number came from beside the cell's own
         # label — a value with no channel on it is not a measurement.
-        chan_lbl = chan.upper()
+        from review.data.nanowell_images import display_token, is_nanowell_frame
+
+        chan_lbl = display_token(chan)
         if readout != chan:
-            chan_lbl = f"{chan_lbl} ({readout.upper()})"
+            chan_lbl = f"{chan_lbl} ({display_token(readout)})"
         prefix = f"{well_display_label(ctx, well)} {chan_lbl} T:{tp}"
-        if fov:
+        if fov and not is_nanowell_frame(chan):
             prefix += f" FOV:{fov}"
         mfi = _cell_mfi(ctx, _lbl, readout, well, tp, fov, x, y)
         return f"{prefix}  ({x}, {y}) = {intensity}{_mfi_suffix(mfi)}"
@@ -856,76 +860,6 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
     # live thumbnail then disagreed with the exported cell.
     pix = make_overlay_thumb(rgb, sz, sz, 0.0, 255.0) if rgb is not None else None
     return pix, arr, True, note
-
-
-def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
-    """Pool ONE Auto-LUT window per channel across the whole grid.
-
-    A channel left on Auto otherwise auto-fits each cell to its own min/max, so the
-    same channel's brightness isn't comparable cell-to-cell. Here we compute a single
-    (min, max) per base channel over every Auto cell of that channel and stash it on
-    ``auto_lut_by_channel``; ``_parse_lut`` then returns it for those cells (live +
-    export). The map is cleared first, so ``_parse_lut`` still reports the
-    pre-pooling (Auto) state while we decide which cells qualify. Binary / mask /
-    NUC+SEG / overlay / pre-rendered-RGB cells carry no LUT and are skipped."""
-    import numpy as _np
-
-    st = ctx.state.image_table
-    st.auto_lut_by_channel = {}
-    pooled: dict[str, list] = {}  # base_chan_lower -> [min, max]
-    for r, row in enumerate(cells):
-        for cell in row:
-            chan = cell["chan"]
-            well, tp, fov = cell["well"], cell["tp"], cell["fov"]
-            if not (well and chan and tp):
-                continue
-            if chan == OVERLAY_CHAN or _is_nuc_seg(chan) or _is_binary_variant(chan):
-                continue
-            use_tophat, _bnd, binary_mode = _row_display_opts(ctx, r, chan)
-            if binary_mode in ("mask", "threshold"):
-                continue
-            # Only pool channels actually on Auto (no explicit / shared window). The
-            # map is empty here, so _parse_lut gives the pre-pooling answer.
-            if _parse_lut(ctx, r, chan) != (None, None):
-                continue
-            # Per cell, so one unreadable frame costs the pooling that cell's
-            # contribution and nothing more — pooling the rest still beats
-            # dropping every channel back to per-cell auto-fit.
-            try:
-                ratio = _find_ratio_for_channel(ctx, chan)
-                if ratio is not None:
-                    arr = _load_ratio_array(ctx, cache, well, ratio, tp, fov,
-                                            use_tophat=use_tophat)
-                else:
-                    arr = _load_array(ctx, cache, well, chan, tp, fov,
-                                      use_tophat=use_tophat)
-            except Exception:
-                swallowed()  # the render loop reports this cell
-                continue
-            if arr is None or getattr(arr, "ndim", 2) >= 3:
-                continue
-            # A cell served the raw frame is not on the corrected population's
-            # scale — it still carries the camera offset and the background the
-            # top-hat would have removed. Pooling it in stretches the window by
-            # that offset and renders every genuinely corrected cell of the
-            # channel near-black. Pool the corrected population only; a raw cell
-            # falls through to its own auto-fit, which is the honest answer for a
-            # measurement that is not comparable to the rest of the grid.
-            if is_raw_fallback(ctx, cell):
-                continue
-            a = crop_tool.apply_to_array(arr) if crop_tool is not None else arr
-            a = _np.asarray(a, dtype=_np.float32)
-            if a.size == 0:
-                continue
-            lo, hi = float(a.min()), float(a.max())
-            base = _binary_base(chan).strip().lower()
-            cur = pooled.get(base)
-            if cur is None:
-                pooled[base] = [lo, hi]
-            else:
-                cur[0] = min(cur[0], lo)
-                cur[1] = max(cur[1], hi)
-    st.auto_lut_by_channel = {k: (v[0], v[1]) for k, v in pooled.items()}
 
 
 def generate_status_message(ctx, cells, n, rendered, unrendered, failed,
@@ -1156,6 +1090,8 @@ def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
     # Axis labels + inter-group spacing that mirror the builder's nesting.
     if plan is not None:
         _facet.render_facet_chrome(grid, plan)
+    with swallow("image table: colour key"):
+        add_colour_key(ctx, cells, grid, sz)
 
     ctx.state.image_table.last_render = rendered
     ctx.state.image_table.image_cache = cache

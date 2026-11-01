@@ -36,17 +36,21 @@ def _key(sites, colour):
     return [(e.label, e.colour, e.linestyle, e.hatch) for e in key_entries(sites, colour=colour, styles=_STATE_STYLE)]
 
 
-def test_by_state_each_state_in_view_is_keyed_once_in_its_own_colour_with_its_count():
+def test_by_state_each_state_in_view_is_keyed_once_in_its_own_colour_and_mark_with_its_count():
+    """Each state has its own entry in its colour and its mark (``_STATE_STYLE``): the states that share the muted
+    colour used to be one swatch naming them all, and drawn identically (``test_nanowell_array_marks_are_distinct``).
+    The fused measured nanowell is counted as fused only: a measured nanowell's mark is a plain ring, which the fused
+    dashed ring replaces."""
     from ui.nanowell_sites import FUSED_COLOUR, STATE_COLOURS, state_colour
 
-    # The fused nanowell is measured: it is drawn dashed in the fused colour, so it is keyed there, not as measured.
     sites = _sites(["empty", "measured", "measured", "clipped", "measured", "field_excluded", "out_of_focus",
                     "field_excluded"], fused=[4])
     assert _key(sites, "state") == [
         ("measured · 2", STATE_COLOURS["measured"], "solid", ""),
         ("empty · 1", STATE_COLOURS["empty"], "solid", ""),
-        ("clipped · 1", STATE_COLOURS["clipped"], "solid", ""),
-        ("field excluded / rim out of focus · 3", state_colour("field_excluded"), "solid", ""),
+        ("clipped · 1", STATE_COLOURS["clipped"], "dashed", ""),
+        ("field excluded · 2", state_colour("field_excluded"), "solid", "++"),
+        ("rim out of focus · 1", state_colour("out_of_focus"), "solid", "...."),
         ("fused: on a tile seam · 1", FUSED_COLOUR, "dashed", ""),
     ]
 
@@ -98,3 +102,52 @@ def test_the_key_is_drawn_as_ring_swatches_above_the_array_and_a_view_without_na
         assert box.y0 >= top - 1 and box.width > 5                     # above the axes, and drawn at a size
     render_array(fig, scene, ArrayLayers(image="off", colour="state", nanowells=False), label="Cell count")
     assert not [a for a in fig.axes[0].artists if a.get_gid() == "nw-array-key"]
+
+
+def test_the_key_s_words_are_in_the_figure_s_ink_not_matplotlib_s_black():
+    """Reported: "legends for nanowell borders are black text on black background". The key sits above the axes on
+    the figure's ground, and the Array view's axes are an image panel the export-style pass leaves alone, so its
+    words kept matplotlib's default black — on the screen theme's near-black ground."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.colors import to_hex
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.array_compute import ArrayScene
+    from review.features.nanowell.renderer import render_array
+    from review.features.nanowell.state import ArrayLayers
+    from widgets.plot_card import plot_tokens
+
+    for theme in ("screen", "publication"):
+        ground, ink = plot_tokens(theme)[:2]
+        sites = _sites(["measured", "empty"])
+        scene = ArrayScene("A01", "0h", "lattice", sites, 2, 0, {"measured": 1, "empty": 1}, 100.0)
+        fig = Figure(figsize=(8.0, 6.0), dpi=100, facecolor=ground)
+        FigureCanvasAgg(fig)
+        drawn = render_array(fig, scene, ArrayLayers(image="off", colour="state"), label="Cell count")
+        (key,) = [a for a in drawn.ax.artists if a.get_gid() == "nw-array-key"]
+        assert [to_hex(t.get_color()) for t in key.get_texts()] == [to_hex(ink)] * 2, theme
+
+
+def test_a_nanowell_with_no_value_is_keyed_with_why():
+    """Asked: "what is the meaning of the nanowell status no value? I see clearly identifiable cells in them". A
+    measured nanowell has no value of a fold change when its baseline had no cells or was not measurable, however
+    many cells it holds now. The key has one entry per reason, most common first, each ending with its count and
+    naming the tag the nanowells carry inside them (UX review B1, N2)."""
+    from review.features.nanowell._array_key import key_entries, reason_tag
+    from review.features.nanowell.renderer import _STATE_STYLE
+
+    sites = _sites(["measured"] * 6, values=[2.0, np.nan, np.nan, np.nan, np.nan, np.nan])
+    one = {(k, 0): "no cells at baseline" for k in range(1, 6)}
+    assert [e.label for e in key_entries(sites, colour="metric", styles=_STATE_STYLE, why=one)] == [
+        'no value: no cells at baseline ("0 at base") · 5']
+    mixed = {**one, (4, 0): "baseline occluded", (5, 0): "baseline occluded", (3, 0): "no count"}
+    assert [e.label for e in key_entries(sites, colour="metric", styles=_STATE_STYLE, why=mixed)] == [
+        'no value: baseline occluded ("base occl.") · 2', 'no value: no cells at baseline ("0 at base") · 2',
+        "no value: no count · 1"]
+    many = {(1, 0): "baseline occluded", (2, 0): "no count", (3, 0): "no cells at baseline", (4, 0): "baseline clipped",
+            (5, 0): "baseline rim out of focus"}
+    assert [e.label for e in key_entries(sites, colour="metric", styles=_STATE_STYLE, why=many)][-1] == (
+        "no value: other reasons · 2")
+    assert [e.label for e in key_entries(sites, colour="metric", styles=_STATE_STYLE)] == ["no value · 5"]
+    assert (reason_tag("baseline rim out of focus"), reason_tag("baseline: no count"), reason_tag("")) == (
+        "base soft", "base: no count", "")

@@ -268,7 +268,7 @@ def test_the_distribution_the_summary_and_trajectories_agree_on_the_baseline_s_w
     swarms = {s.label: s for s in model.panels[0].swarms}
     assert list(swarms["t4"].values) == pytest.approx([1.8]) and list(swarms["t5"].values) == pytest.approx([2.2])
     assert swarms["t4"].excluded == {"baseline window has a gap": 1, "baseline occluded": 1,
-                                     "seeded later (0 at baseline)": 1}
+                                     "no cells at baseline": 1}
     assert any("measured values at the baseline timepoint and the 1 before it" in n for n in model.notes)
     table = wells_summary(metrics, ["A01"], "count_fc", channels=data.channels, moving=2,
                           baseline_moving=2).set_index("timepoint")

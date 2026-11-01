@@ -27,6 +27,7 @@ class KeyEntry:
     colour: str
     linestyle: str = "solid"
     hatch: str = ""
+    alpha: float = 1.0
 
 
 #: The state words as the key writes them.
@@ -37,6 +38,10 @@ _WORDS = {"out_of_focus": "rim out of focus", "not_located": "not located", "ide
 #: The order the coloured states are keyed in: the nanowells a result is made of first, then the reasons a
 #: nanowell has none.
 _ORDER = ("measured", "empty", "occluded", "clipped")
+
+
+#: Entries per row of the key; the renderer lowers the array by a row's height for each row past the first.
+KEY_COLUMNS = 4
 
 
 def _row_major(items: list, ncol: int) -> list:
@@ -55,47 +60,117 @@ def _count(label: str, n: int) -> str:
     return f"{label} · {n:,}"
 
 
-def key_entries(sites, *, colour: str, styles: dict) -> list[KeyEntry]:
-    """The key for the nanowells in *sites* drawn with *colour* (``"state"`` or ``"metric"``).
+def _why(sites, bare, why: dict) -> list[tuple[str, int]]:
+    """Why the *bare* nanowells (measured, no value) have none, most common first, at most three and the rest as
+    ``other``; a nanowell whose reason is unknown is counted under ``""``: ``[("no cells at baseline", 12), …]``."""
+    tally: dict[str, int] = {}
+    for k in np.flatnonzero(bare):
+        _w, q, r = sites.sites[k]
+        reason = why.get((q, r)) or ""
+        tally[reason] = tally.get(reason, 0) + 1
+    ranked = sorted(tally.items(), key=lambda kv: (-kv[1], kv[0]))
+    if len(ranked) > 3:
+        ranked = ranked[:3] + [("other", sum(n for _r, n in ranked[3:]))]
+    return ranked
 
-    *styles* is the renderer's ``state -> (hatch, linestyle)`` for a nanowell without a value. A fused nanowell is
-    drawn dashed in the fused colour whatever else it is, so it is counted there and nowhere else, as it is drawn.
+
+#: The short words a no-value nanowell writes inside itself, where its value would be (:func:`reason_tag`): the key
+#: lists the same reasons in full, each beside the tag the nanowells carry.
+_TAGS = {"no cells at baseline": "0 at base", "empty at baseline": "0 at base", "no count": "no count",
+         "fused, no count": "fused", "no confluence": "no conf.", "no cells": "no cells",
+         "no fluorescence": "no fluor.", "< 3 timepoints with cells": "< 3 tps", "no count at baseline": "base: no n",
+         "no confluence at baseline": "base: no conf.", "no signal at baseline": "base: no sig.",
+         "occluded": "occl.", "clipped": "clipped", "rim out of focus": "soft", "no address": "no addr.",
+         "not located": "not found", "not in roster": "absent", "never measured": "never",
+         "identity contradicted": "id. wrong", "field excluded": "field excl.", "outside the fixed cohort": "cohort"}
+
+
+def reason_tag(reason: str) -> str:
+    """*reason* (a ``distribution_compute.reason_label``) as the few words a nanowell has room for:
+    ``no cells at baseline`` → ``0 at base``, ``baseline occluded`` → ``base occl.``; ``""`` for no reason."""
+    if not reason:
+        return ""
+    if reason in _TAGS:
+        return _TAGS[reason]
+    for head, joined in (("baseline: ", "base: "), ("baseline ", "base ")):
+        if reason.startswith(head):
+            rest = reason[len(head):]
+            return joined + _TAGS.get(rest, rest)
+    return reason if len(reason) <= 10 else reason[:9] + "…"
+
+
+def _no_value_entries(sites, bare, why: dict) -> list[str]:
+    """One "no value" label per reason, each ending with its count: ``no value: no cells at baseline ("0 at base") · 3``
+    — the reason in full, then in quotes the tag the nanowells carry inside them (``reason_tag``) — so the reason
+    of any one nanowell on the array can be read off it. Without reasons, one ``no value · N``."""
+    out = []
+    for reason, n in _why(sites, bare, why):
+        if not reason:
+            out.append(_count("no value", n))
+        elif reason == "other":
+            out.append(_count("no value: other reasons", n))
+        else:
+            tag = reason_tag(reason)
+            out.append(_count(f"no value: {reason}" + (f' ("{tag}")' if tag != reason else ""), n))
+    return out
+
+
+def key_entries(sites, *, colour: str, styles: dict, why: dict | None = None, dimmed: int = 0) -> list[KeyEntry]:
+    """The key for the nanowells in *sites* drawn with *colour* (``"state"`` or ``"metric"``): one entry per mark the
+    view draws, each counting every nanowell that carries it, so every cause of a nanowell's exclusion is named.
+
+    *styles* is the renderer's ``state -> (hatch, linestyle)``, one distinct mark per state, used under both
+    colourings: filled by the metric, a nanowell without a value is that mark in grey; outlined by state, it is that
+    mark in the state's colour. A fused nanowell is ringed dashed in the fused colour whatever else it is, and keeps
+    its state's hatch inside — so it is counted as fused, and under its state too where the state has a hatch.
+    *why* (``array_compute.no_value_reasons``) names why a measured nanowell has no value: one entry per reason, since
+    a fold change is undefined on a nanowell full of cells whenever its baseline had none, and each such nanowell
+    writes its reason's tag inside itself. *dimmed* counts the nanowells outside the page's *Subset*, drawn under a
+    veil of the ground.
     """
-    from ui.nanowell_sites import FUSED_COLOUR, STATE_COLOURS, state_colour
+    from ui.nanowell_sites import FUSED_COLOUR, state_colour
     from ui.theme import Colors
 
     states = np.array([str(s) for s in sites.state], dtype=object)
     fused = np.asarray(sites.fused, dtype=bool)
     plain = ~fused
+
+    def carrying(mask, hatch: str):
+        """The nanowells of *mask* that show the mark: every unfused one, and a fused one only through its hatch."""
+        return mask & (plain | bool(hatch))
+
     entries: list[KeyEntry] = []
     if colour == "metric":
         has = np.isfinite(np.asarray(sites.values, dtype=float))
-        bare = plain & ~has & np.isin(states, ["measured", "empty"])
+        bare = ~has & np.isin(states, ["measured", "empty"])
         if bare.any():
-            entries.append(KeyEntry(_count("no value", int(bare.sum())), Colors.plot_undefined_ink))
+            entries += [KeyEntry(label, Colors.plot_undefined_ink) for label in _no_value_entries(sites, bare, why or {})]
         for state, (hatch, style) in styles.items():
-            n = int((plain & ~has & (states == state)).sum())
+            n = int(carrying(~has & (states == state), hatch).sum())
             if n:
                 entries.append(KeyEntry(_count(f"no value: {state_word(state)}", n), Colors.plot_undefined_ink,
                                         style, hatch))
     else:
-        for state in sorted(STATE_COLOURS, key=lambda k: _ORDER.index(k) if k in _ORDER else len(_ORDER)):
-            n = int((plain & (states == state)).sum())
+        present = sorted(set(states), key=lambda k: (_ORDER.index(k) if k in _ORDER else len(_ORDER), k))
+        for state in present:
+            hatch, style = styles.get(state, ("", "solid"))
+            n = int(carrying(states == state, hatch).sum())
             if n:
-                entries.append(KeyEntry(_count(state_word(state), n), STATE_COLOURS[state]))
-        # Every state without a colour of its own is drawn in the one muted colour, so it is one swatch naming them.
-        rest = sorted({s for s, p in zip(states, plain) if p and s not in STATE_COLOURS})
-        if rest:
-            n = int((plain & np.isin(states, rest)).sum())
-            entries.append(KeyEntry(_count(" / ".join(state_word(s) for s in rest), n), state_colour(rest[0])))
+                entries.append(KeyEntry(_count(state_word(state), n), state_colour(state), style, hatch))
     if fused.any():
         entries.append(KeyEntry(_count("fused: on a tile seam", int(fused.sum())), FUSED_COLOUR, "dashed"))
+    if dimmed:
+        entries.append(KeyEntry(_count("outside the Subset (veiled)", int(dimmed)), Colors.text_muted, alpha=0.35))
     return entries
 
 
-def draw_key(ax, entries: list[KeyEntry], *, linewidth: float, fontsize: float) -> object | None:
+def draw_key(ax, entries: list[KeyEntry], *, linewidth: float, fontsize: float, ink: str) -> object | None:
     """The key as a row of ring swatches along the top edge of *ax*, right-aligned clear of the title; ``None``
-    when there is nothing to key."""
+    when there is nothing to key.
+
+    Its words are written in *ink*, the figure's own (``renderer._inks``). The Array view's axes are an image
+    panel, which the export-style pass leaves alone, so nothing recolours the key after this: left at matplotlib's
+    default black it was black words on the screen theme's near-black ground."""
     from matplotlib.legend import Legend
     from matplotlib.legend_handler import HandlerPatch
     from matplotlib.patches import Circle, Patch
@@ -116,16 +191,17 @@ def draw_key(ax, entries: list[KeyEntry], *, linewidth: float, fontsize: float) 
             ring.set_transform(trans)               # after update_prop, which copies the handle's own transform over
             return [ring]
 
-    ncol = min(len(entries), 4)
+    ncol = min(len(entries), KEY_COLUMNS)
     entries = _row_major(entries, ncol)
     handles = [Patch(facecolor="none", edgecolor=e.colour, linestyle=e.linestyle, hatch=e.hatch or None,
-                     linewidth=linewidth, label=e.label) for e in entries]
+                     linewidth=linewidth, label=e.label, alpha=e.alpha) for e in entries]
     key = Legend(ax, handles, [e.label for e in entries], loc="lower right", bbox_to_anchor=(1.0, 1.0),
                  ncol=ncol, frameon=False, fontsize=fontsize, handlelength=1.6, handleheight=1.6,
                  columnspacing=1.2, handletextpad=0.5, borderaxespad=0.2, borderpad=0.1,
                  handler_map={Patch: _Ring()})
     key.set_gid("nw-array-key")
     for text in key.get_texts():
+        text.set_color(ink)
         follows_theme(text)
     ax.add_artist(key)
     return key

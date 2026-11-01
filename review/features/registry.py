@@ -311,6 +311,12 @@ def _svc_nanowell_segmentation_overlay():
     return nanowell_overlay
 
 
+def _svc_nanowell_table_frame():
+    # The Image Table's nanowell frames: a channel's montage and a metric map (nanowell/table_frame_compute.py).
+    from review.features.nanowell.table_frame_compute import table_frame
+    return table_frame
+
+
 def _svc_nanowell_observations():
     # The plot tools' nanowell observations (review/domain/observation.py); a build without this feature has none.
     from review.features.nanowell.observation_compute import nanowell_observations
@@ -1141,7 +1147,8 @@ def _features() -> list[FeatureDescriptor]:
                       "nanowell.follow_qc_params": _svc_nanowell_follow_qc_params,
                       "observations.nanowell": _svc_nanowell_observations,
                       "observations.nanowell_metrics": _svc_nanowell_metric_specs,
-                      "segmentation.nanowell_overlay": _svc_nanowell_segmentation_overlay},
+                      "segmentation.nanowell_overlay": _svc_nanowell_segmentation_overlay,
+                      "image_table.nanowell_frame": _svc_nanowell_table_frame},
         ),
         # ── Images ────────────────────────────────────────────────────────
         FeatureDescriptor(

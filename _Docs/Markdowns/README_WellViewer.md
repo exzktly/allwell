@@ -2163,6 +2163,77 @@ deleted when the cache is over `cache_budget_gb`, but never one a run has used
 in the last seven days — another window's, or another person's, run may be
 reading it. The log names any it kept over budget for that reason.
 
+**See and clean up what a host holds — Manage… → Storage….** Cancelled
+jobs, abandoned or failed runs, and every change to a plate's images leave
+folders behind in the host's staging directory (`datasets/` for uploaded
+plates, `runs/` for each run's working folder). Select a host and press
+**Storage…** to list them all: the project each came from (the name of the
+folder that holds your `in` folder), whether it is a run or a dataset, its
+size, when it was created and last used, when it expires, and the local output
+folder it belongs to. Hover over a row for the full paths on the server and on
+your computer. Folders made by an older version of All-Well have no label, so
+their project shows as "—".
+
+**It only ever deletes All-Well's own run and dataset folders, and only yours.**
+Every deletion is checked twice, once in All-Well and again on the server at the
+moment it happens. All-Well acts only inside the `runs/` and `datasets/` folders
+of the host's staging folder. It never acts through a symbolic link, never on a
+mount point or a folder with something mounted inside it, and never on a folder
+another user owns. It acts only on folders whose names have the shape All-Well
+gives them, or on run folders from older versions of All-Well that still hold
+the files All-Well writes while a run uploads (`.aw_beat`, `.aw_upload_complete`
+or `.aw_upload_alive`). Such
+folders are listed as *Not All-Well's* or *Another user's* and cannot be deleted
+or given an expiry from here. If the staging folder is set to `/` or to your home
+folder, or turns out to be a link to one of them, nothing is listed or deleted,
+and the window says why.
+
+**A folder something still needs is left alone, even when you select it.** A run
+folder counts as in use when:
+
+- its app is still connected;
+- its Slurm job is still running, or `squeue` cannot be asked about it;
+- its process is still alive;
+- it holds nanowell wells waiting for re-anchoring;
+- another run re-attached to it and is still going;
+- or something in it was written in the last 15 minutes.
+
+A dataset counts as in use while a run is reading it, or if it was used in the
+last 15 minutes. While a job is only waiting in the Slurm queue, what keeps its
+folder in use is the app staying connected.
+
+- **Delete…** removes the selected folders after asking you. The confirmation
+  says how many of the run folders hold results All-Well never confirmed as
+  downloaded. Deleting a run folder does not touch results already on your
+  computer, but anything it had not yet sent back is lost, and a later resume of
+  that plate starts over. Deleting a dataset only means the next run of that
+  plate uploads it again.
+- **Keep forever** protects folders from the expiry rule, the automatic cache
+  clean-up, the clean-up of a plate's earlier attempts and a run's own
+  *Auto-delete* setting. **Delete…** can still remove them.
+- **Expire in N days** removes the selected folders automatically once that time
+  has passed. Starting a new run in a folder clears that date, because the folder
+  holds new work. **Use host rule** drops a folder's own setting.
+- **Remove folders left untouched for N days** (then **Save**) is the host-wide
+  rule; 0, the default, means never. Changing the host's address or staging folder
+  in **Edit…** resets this rule to never. Nothing runs on the server by itself, so
+  All-Well removes expired folders in the background each time a run on that host
+  starts, at most 25 per run, and **Remove expired now** does it on request. The
+  server makes the final decision for each folder.
+
+  Automatic removal only ever takes a folder that:
+
+  - carries the label All-Well writes for it, so folders from older versions are
+    only ever removed by you, with **Delete…**;
+  - holds results that were downloaded and verified, with nothing written
+    there since, if it is a run folder. A run downloaded as *CSV only* leaves
+    its masks and images on the server, so it never counts as downloaded and
+    only **Delete…** removes it;
+  - is not kept and is due;
+  - and, if it is a dataset, has not been used in the last seven days.
+
+  It never takes the folders of the plate being run.
+
 ### 11. Run / Suspend / Stop / Log
 
 - Click **Run** (in the footer under the form). While the run is going,

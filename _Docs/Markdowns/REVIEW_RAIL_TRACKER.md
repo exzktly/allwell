@@ -28,10 +28,10 @@ Derived from the rows below — recount them rather than editing a number here.
 
 | Id | Finding | Place | State | Evidence |
 |---|---|---|---|---|
-| D1 | The manual says the section list is "grouped into Analysis, Images and Data"; nothing on screen grouped it. | `README_WellViewer.md`, *Section rail* bullet | todo | |
-| D2 | The manual says the plate map and Saved selections are "pinned to the bottom of the left rail"; the plate sits directly under the section list. | `README_WellViewer.md`, *Plate map + Saved selections* bullet | todo | |
-| D3 | The manual promises **Select all** / **Select none** under the plate; the rail offered "Deselect all" on plot pages and "Select All" / "Clear" on Image Table. | `README_WellViewer.md`, *Plate-map well picker* | todo | |
-| D4 | ARCHITECTURE describes the rail's assembly (section icons, frame roster, sidebar_view) and must follow every structural row below. | `ARCHITECTURE.md` | todo | |
+| D1 | The manual says the section list is "grouped into Analysis, Images and Data"; nothing on screen grouped it. | `README_WellViewer.md`, *Section rail* bullet | done | *Section rail* bullet rewritten: Home, then the **Analysis** / **Images** / **Data** captions — true since G1 (`test_rail_nav_groups.py` pins the order). |
+| D2 | The manual says the plate map and Saved selections are "pinned to the bottom of the left rail"; the plate sits directly under the section list. | `README_WellViewer.md`, *Plate map + Saved selections* bullet | done | Bullet rewritten: plate, selection footer, Saved selections, directly under the section list — true since S1/S4 (`test_selection_footer.py` pins the order). Checked against an offscreen render of the rail at eade09f. |
+| D3 | The manual promises **Select all** / **Select none** under the plate; the rail offered "Deselect all" on plot pages and "Select All" / "Clear" on Image Table. | `README_WellViewer.md`, *Plate-map well picker* | done | *Plate-map well picker* rewritten around the footer's count, **All** and **None**, group mode, and the single-well pages; *Saved selections* bullet gains the header count. |
+| D4 | ARCHITECTURE describes the rail's assembly (section icons, frame roster, sidebar_view) and must follow every structural row below. | `ARCHITECTURE.md` | done | §5.4 rewritten (rail assembly, `rail_sections`, footer, `saved_selections.py`); directory tree, §11.1 step 5, §11.2 and two stale mentions (`section_icons.py`, `_sidebar_sample_frame`) corrected. `grep` for `SIDEBAR_SECTION_FRAMES`, `_sidebar_sample_frame`, `section_icons`, `_SECTION_ICONS`, `Deselect all`, `wells active` over `_Docs/Markdowns/` finds nothing outside the trackers. |
 
 ## Step 2 — the section list shows its groups
 

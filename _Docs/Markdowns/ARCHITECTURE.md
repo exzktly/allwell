@@ -1181,7 +1181,9 @@ review/
 │   ├── channel_state.py, dataset_state.py, plot_state.py, selection_state.py,
 │   │   cell_gating_state.py, export_prefs_state.py, image_view_state.py,
 │   │   qc_state.py, stats_cache_state.py   ← cross-cutting typed state slices
-│   ├── app_shell_view.py, centre_view.py, sidebar_view.py, status_view.py
+│   ├── app_shell_view.py, centre_view.py, status_view.py
+│   ├── sidebar_view.py               ← the rail's main frame: plate, selection footer, hint (§5.4)
+│   ├── saved_selections.py           ← the Saved selections drawer and its add / load / delete (§5.4)
 │   ├── split_view.py                 ← optional side-by-side double-pane view (one-line removable; §5.10)
 │   ├── phone_panel_sheet.py          ← phone layout's Properties sheet: lends a plot's right dock to a
 │   │                                    full-width Drawer over the page and gives it back (§2)
@@ -1200,7 +1202,6 @@ review/
 │   ├── progress_jobs.py              ← run a panel edit's work on a QThread behind a
 │   │                                    ProgressPopup, one job at a time (§5.3, Cell Gating)
 │   ├── rail_plate.py                 ← the sidebar's one well-picker slot
-│   ├── section_icons.py              ← the glyph beside each rail entry
 │   ├── observation_band.py           ← the Plotting band's Observations: Cells | Nanowells toggle,
 │   │                                    its nanowell Metric picker and the cell plots' footer (§6.2l)
 │   ├── threshold_note.py             ← the sentence an unset, cut-nothing ON cutoff draws instead of bars
@@ -2757,7 +2758,7 @@ Cell Gating's CDFs and Add Prefix's fallback — both of which read the app-wide
 selection — were running off a selection only Overview's plate could set.
 
 So the plate is a layer of Sample Map, in the page body at `role="editor"`, and
-`sync_home_sidebar` keeps `_sidebar_sample_frame` hidden. Sample Map publishes
+Home declares no rail frame (§5.4). Sample Map publishes
 its Variables and Well Labels layers' selection to `selected_wells`, which gives
 those two tabs the picker they were described as having.
 
@@ -5223,19 +5224,58 @@ those combos on a data change need no build-state guard.
 
 ### 5.4 The left sidebar
 
-`core/sidebar_view.build_sidebar(app, parent)` builds the well picker
-(`widgets/well_plate_selector.WellPlateSelector`, sized by the shared
-`widgets/plate_geometry.apply_plate_geometry` — see §7) plus the **Select all /
-Select none** buttons, the selection-count chip, and the group hint label.
-Selection signals route through `review/core/selection_controller.py`
+The rail, top to bottom: the dataset control, the section list (`RailNav`), the
+rail plate slot (`core/rail_plate.py`), then the per-page frames. Everything on
+it that varies by page is declared on the feature descriptors rather than
+written in a core roster:
+
+- **Section list.** `tab_controller.sync_section_nav_from_notebook` adds one row
+  per notebook page with the descriptor's `icon` (an icon key `widgets.icons`
+  can draw), and opens each registry group (`FeatureDescriptor.group`) with a
+  `RailNav.addCaption` heading — **Analysis**, **Images**, **Data**; Home is the
+  landing page and is not captioned. A caption is not an item: it has no key,
+  is never current, and hides itself while every row in its group is hidden
+  (phone layout hides two Data pages). In phone layout's two-column grid
+  (`RailNav.setColumns(2)`) a caption takes a grid row of its own across both
+  columns.
+- **Per-page frames.** A descriptor's `rail_sections` names the frames its page
+  shows (`RailSection(key, stretch)`; `MAIN_RAIL_SECTION` is the shared main
+  frame). `FeatureRegistry.rail_sections()` lists every declared frame, main
+  first; the shell (`app_shell_view`) builds exactly those, and
+  `tab_controller.on_tab_change` hides them all from the same list, then calls
+  `show_rail_sections` for each page on screen — which shows its declared frames
+  and repaints the rail plate when the main frame is among them — before running
+  the page's `on_activate`. So a frame exists only because a page declares it, a
+  profile that drops the page drops its frame, and a hook carries only what is
+  particular to its page. A page with no descriptor or no hook gets the main
+  frame. Two exemptions, each a row in `tests/test_rail_sections_are_declared.py`
+  with its reason: Home has no rail body, and Statistics shows the main frame
+  from its own hook because it does so only outside Split View.
+
+`core/sidebar_view.build_sidebar(app, parent)` fills the main frame: the well
+picker (`widgets/well_plate_selector.WellPlateSelector`, sized by the shared
+`widgets/plate_geometry.apply_plate_geometry` — see §7, mounted in the rail
+plate slot), then the **selection footer** (`widgets/selection_footer.py`: the
+count, **All**, **None**), the group hint label, the Saved selections drawer and
+the Heat Map layout configurator. The footer is registered as `_sel_count_lbl`,
+the label `selection_controller.refresh_sidebar_map_now` writes — "3 wells
+selected" in per-well mode, "2/3 sets visible" in group mode — and that repaint
+hides **All** on a single-select plate (smFISH, Playground). **All** and
+**None** call `select_all` / `select_none`, which share one group-mode rule:
+groups or a variable grouping exist *and* the current tab is not a per-well tab.
+The Image Table's picker ends in the same footer widget, so a selection reads
+and changes the same way on both multi-select pickers. Selection signals route
+through `review/core/selection_controller.py`
 functions (`on_sidebar_plate_selection_changed`, `…_drag_finished`,
 `…_well_activated`, `…_row_activated`, `…_col_activated`,
 `…_well_dropped`); `ReviewApp._on_sidebar_plate_*` are 1-line proxies
 to those functions, kept so the sidebar's `signal.connect(app._on_…)` wires
 still resolve.
 
-The same module builds the **Saved selections** drawer. Both halves of the
-drawer — capturing a selection and loading one — branch on which mode the
+The **Saved selections** drawer is `core/saved_selections.py`; the main frame
+and the Image Table's picker each place one directly under their footer, and
+its header carries the count ("Saved selections (3)",
+`saved_selections_title`). Both halves of the drawer — capturing a selection and loading one — branch on which mode the
 sidebar plate is in, because the two modes keep "the current selection" in
 different stores.
 
@@ -5294,14 +5334,12 @@ load. The Sample definitions reset scope writes both (§5.7).
 
 Other sidebar bodies live with their feature: the preview picker is
 `features/preview/preview_view.py` and the image-table picker is
-`features/image_browser/image_table/picker_view.py`. Statistics has no sidebar
-body at all — its comparison-group editor is part of the Statistics page (see
-the Split View section above for why) — and Home has none either: its
-`_sidebar_sample_frame` is registered and stays empty and hidden, because the
-plate that used to fill it is a layer of the Sample Map tab. They're stacked
-inside the same sidebar QWidget
-and shown/hidden by `core/tab_controller.on_tab_change` based on the
-active tab.
+`features/image_browser/image_table/picker_view.py`, filling the frames their
+descriptors declare. Statistics has no sidebar body at all — its
+comparison-group editor is part of the Statistics page (see the Split View
+section above for why) — and Home has none either: the plate that used to sit
+in a Home rail frame is a layer of the Sample Map tab, and Home declares no
+`rail_sections`.
 
 The collapse toggle (`Ctrl+B` / the button floating on the rail's edge) routes through
 `tab_controller.apply_sidebar_visibility`, which drives **whichever** sidebar
@@ -12528,8 +12566,8 @@ the page's card, the site detail's and the crop strip's (the pop-out window's ca
 included. *Save nanowell data…* writes `long_format` for the wells the page draws (`export_long_csv(…, wells)`:
 other wells may be loaded from an earlier selection), and is refused with a status while the metrics on hand
 were computed for another baseline than the one chosen (`loaded_for[1] != baseline`, or a load in flight) or before a gating, curation or QC edit moved `population_version` (`gated_for != gate_version`, which also starts the recompute); *Save cell data…* exports the per-cell rows of the drawn
-wells that carry a nanowell address (`cell_scope_compute`), filtered by `df_included_mask` with the scatter gates applied — the same rule `gate_tally` takes out of each count — so the file holds exactly the cells the counts count (`test_nanowell_counts_follow_cell_gating.py::test_save_cell_data_exports_exactly_the_cells_the_page_s_counts_count`). The rail glyph map lives in
-`review/core/section_icons.py`. The Properties panel's Lines & Markers controls restyle the median line and
+wells that carry a nanowell address (`cell_scope_compute`), filtered by `df_included_mask` with the scatter gates applied — the same rule `gate_tally` takes out of each count — so the file holds exactly the cells the counts count (`test_nanowell_counts_follow_cell_gating.py::test_save_cell_data_exports_exactly_the_cells_the_page_s_counts_count`). Its rail glyph is the descriptor's
+`icon` (§5.4). The Properties panel's Lines & Markers controls restyle the median line and
 the statistic marks; the beeswarm dots are deliberately not tagged `_aw_marker_collection`, because a dot's
 size is the unit the layout packs by, and a larger dot from the panel would overlap its neighbours.
 
@@ -21150,8 +21188,10 @@ named `ssh` or `rsync`.
 4. Register the tab in `core/centre_view.py`'s `groups` list (it sits
    under "Analysis" / "Images" / "Data" sections) and create a
    `_build_<name>()` closure that calls your `build_<name>_tab`.
-5. Add an icon to `_SECTION_ICONS` in `runtime_app.py` if you want it to
-   appear in the rail nav.
+5. Give a top-level descriptor its rail glyph (`icon=`, an icon key
+   `widgets.icons` can draw) and every page with an `on_activate` hook its
+   rail frames (`rail_sections=`, usually the main frame);
+   `tests/test_rail_sections_are_declared.py` fails on either missing.
 6. End your redraw with
    `core.plot_style.apply_export_style_to_current(ctx, fig, canvas)` so the
    Properties sidebar's toggles apply.
@@ -21162,18 +21202,13 @@ named `ssh` or `rsync`.
    feature package — `review/features/<feature>/` — with a
    `build_<name>(app, parent)` function. Pure cross-cutting sidebar bodies
    (e.g. the main plate picker) live in `review/core/sidebar_view.py`.
-2. In `runtime_app._build_ui`, allocate a `QWidget` for it and hide it by
-   default:
-   ```python
-   self._sidebar_<name>_frame = QWidget()
-   QVBoxLayout(self._sidebar_<name>_frame).setContentsMargins(0, 0, 0, 0)
-   sidebar_layout.addWidget(self._sidebar_<name>_frame, 1)
-   self._sidebar_<name>_frame.hide()
-   ```
-3. In `core/tab_controller.on_tab_change`, show your frame on the relevant
-   tab and hide every other sibling frame.
-4. Build the frame body lazily — usually called from the tab's
-   `_build_<tab>()` closure in `core/centre_view.py`.
+2. Declare the frame on the page's descriptor:
+   `rail_sections=(RailSection("_sidebar_<name>_frame"),)` — stretch `0` if it
+   shows beside the main frame and should stay compact under it. The shell
+   builds it, and the tab switch hides it on every change and shows it while
+   the page is on screen (§5.4); nothing else needs editing.
+3. Build the frame body lazily into `ctx.widgets.get("_sidebar_<name>_frame")`
+   — usually from the tab's own builder.
 
 ### 11.3 Persist some state to disk
 

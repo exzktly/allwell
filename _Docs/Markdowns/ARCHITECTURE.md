@@ -12082,8 +12082,11 @@ title counts the timepoints needing a look and the legend counts every state on 
 the canvas readout (`ax._aw_hover_label`) and its sentence is the tooltip (`qc_compute.hover_text`). A click opens
 the cell where it is dealt with: a verdict on the Identity view (`_qc_controller.open_identity`, which adds the well
 to the selection as `open_for_anchor` does), an anchor's business on the Array view through `open_for_anchor`. The
-view's band carries *Wells* and the *Anchor* group: *Anchor queue*, *One per well* and *Re-run anchored wells…*
-(`qc_view`), *Anchor queue* greyed with `qc_compute.queue_tip`'s reason when nothing waits. The export style pass
+view's band carries *Wells* and the *Anchor* group (`qc_view`): *Anchor queue*, the page's primary action, whose
+text says what it walks (`qc_compute.queue_label`, counted by `queue_size` with `one_per_well`'s rule) and which is
+greyed with `qc_compute.queue_tip`'s reason when nothing waits; *One per well*, a checkbox because it is an option of
+the walk rather than an action, whose toggling changes that count; and *Re-run anchored wells…*. While any timepoint
+is not addressed the figure says what to press (`qc_compute.action_line`), since a tooltip is not seen over VNC. The export style pass
 sets every tick label to the Properties size, so `QcDrawn.relabel` puts the matrix's own label sizes back after it.
 `tests/test_nanowell_qc_view.py` pins the precedence on records where the wrong rule answers differently, and drives
 the real page with nothing selected: the view bar, a real click on a cell, and leaving Array mid-walk.

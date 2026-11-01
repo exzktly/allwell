@@ -138,7 +138,9 @@ def _title(fig, matrix, which, out_dir, message, ink, muted) -> None:
     _ink(fig.text(_LEFT, 0.965, qc.summary(matrix), ha="left", va="top", fontsize=10, fontweight="bold", color=ink,
                   gid="nw-qc-summary"))
     y = 0.925
-    lines = ([(message, ink)] if message else []) + [(n, muted) for n in qc.notes(matrix, which, out_dir)]
+    action = qc.action_line(matrix)
+    lines = ([(message, ink)] if message else []) + ([(action, ink)] if action and not message else []) \
+        + [(n, muted) for n in qc.notes(matrix, which, out_dir)]
     for text, colour in lines:
         _ink(fig.text(_LEFT, y, text, ha="left", va="top", fontsize=7.5, color=colour, wrap=True,
                       gid="nw-qc-message" if colour is ink else "nw-qc-note"), muted=colour is muted)

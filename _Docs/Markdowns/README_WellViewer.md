@@ -560,7 +560,7 @@ timepoint; a click there replaces its anchor), **Skip**, **One per well** and **
 **→** for Skip and **Esc** for Stop while the queue runs. Choosing another view while it runs stops it. When **Set anchor** cannot be turned on for a timepoint, the figure
 says why; press Skip to go on. The queue holds every unaddressed
 timepoint without an anchor, plate order then time order, and also any timepoint whose anchor the last run could
-not use; an anchor you set that no run has used yet is not asked for again. Turn on **One per well** to be shown
+not use; an anchor you set that no run has used yet is not asked for again. Tick **One per well** (before pressing Anchor queue, or during the walk) to be shown
 only each well's first such timepoint, and no well that already has an anchor waiting for a re-run: one click per
 well is usually enough (see above), and any timepoint the re-run still cannot address shows up in the next
 queue. The choice is remembered until you close the app. If One per well leaves nothing to walk (every well
@@ -6140,7 +6140,10 @@ the sentence names it.
   by plate row and labelled by its letter; pointing at a cell names it in the readout, and its tooltip says what
   the state means. **Click a cell** to open it where it is dealt with: a verdict opens on **Identity**, a timepoint
   not addressed (or waiting, or not located) opens on **Array** with **Set anchor** on. The **Anchor** group here
-  holds **Anchor queue**, **One per well** and **Re-run anchored wells…** (see *Setting the anchor by hand*).
+  holds **Anchor queue** — the highlighted button, which says what it will walk (*Anchor queue: 17 timepoints*) —
+  the **One per well** box, which narrows that to each well's first (*Anchor queue: 5 wells*), and **Re-run anchored
+  wells…** (see *Setting the anchor by hand*). While any timepoint is not addressed, the figure says to press
+  Anchor queue or click an orange cell.
 - **Trajectories** — one panel per well: a thin line per nanowell through its values over time, coloured by
   its occupancy at baseline, and a thick line for each occupancy class's median. A gap is a timepoint without
   a value. Growth rate and occupancy have one value per nanowell, so they are greyed here.

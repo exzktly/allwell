@@ -391,7 +391,7 @@ def test_every_on_off_button_on_the_array_band_shows_when_it_is_on(qtbot, tmp_pa
     from tests.test_nanowell_page import _page, _write_nanowell_dataset
 
     ctx = _page(qtbot, _write_nanowell_dataset(tmp_path))
-    names = ("_nw_anchor_btn", "_nw_overlays_btn", "_nw_queue_per_well_btn", "_nw_qc_per_well_btn")
+    names = ("_nw_anchor_btn", "_nw_overlays_btn", "_nw_queue_per_well_btn")
     buttons = {name: ctx.widgets.get_or_none(name) for name in names}
     assert all(isinstance(b, QPushButton) and b.isCheckable() for b in buttons.values()), buttons
     assert {name: b.property("variant") for name, b in buttons.items()} == dict.fromkeys(names, "toggle")

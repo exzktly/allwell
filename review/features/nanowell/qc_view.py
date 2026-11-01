@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QCheckBox, QPushButton
 
 from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import _qc_controller as qcc
@@ -46,10 +46,12 @@ def build_qc_controls(ctx, band) -> SimpleNamespace:
     reg.register("_nw_qc_wells_seg", wells_seg)
     grp_wells = band.add_scope("Wells", wells_seg)
 
-    queue_btn = _button("Anchor queue", QUEUE_TIP, lambda: aq.start(ctx))
-    per_well = _button("One per well", PER_WELL_TIP, None, variant="toggle")   # "secondary" paints both states alike
-    per_well.setCheckable(True)
-    per_well.toggled.connect(lambda on: aq.set_per_well(ctx, on))
+    # The page's one action: primary, and saying what it walks, so the option beside it visibly changes something.
+    queue_btn = _button("Anchor queue", QUEUE_TIP, lambda: aq.start(ctx), variant="primary")
+    # An option of the walk, not an action: a checkbox, which no one presses expecting a walk to start.
+    per_well = QCheckBox("One per well")
+    per_well.setToolTip(PER_WELL_TIP)
+    per_well.toggled.connect(lambda on: _set_per_well(ctx, on))
     rerun_btn = _button("Re-run anchored wells…", RERUN_TIP, lambda: nwc.rerun_anchored(ctx))
     for name, widget in (("_nw_queue_btn", queue_btn), ("_nw_qc_per_well_btn", per_well),
                          ("_nw_qc_rerun_btn", rerun_btn)):
@@ -57,6 +59,11 @@ def build_qc_controls(ctx, band) -> SimpleNamespace:
     grp_anchor = band.add_scope("Anchor", queue_btn, per_well, rerun_btn)
     return SimpleNamespace(wells_seg=wells_seg, queue_btn=queue_btn, per_well=per_well, rerun_btn=rerun_btn,
                            groups=(grp_wells, grp_anchor), signalling=(wells_seg, per_well))
+
+
+def _set_per_well(ctx, on: bool) -> None:
+    aq.set_per_well(ctx, on)
+    nwc._call(ctx, "_nw_refresh_controls")             # the button's count follows the choice
 
 
 def refresh_qc_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
@@ -69,6 +76,7 @@ def refresh_qc_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
     c.per_well.setChecked(st.anchor_queue_per_well)
     matrix = qcc.matrix(ctx)
     why = qc.queue_tip(matrix)
+    c.queue_btn.setText(qc.queue_label(matrix, st.anchor_queue_per_well))
     c.queue_btn.setEnabled(not why and aq.active_queue(ctx) is None)
     c.queue_btn.setToolTip(QUEUE_TIP + (f"\n\n{why}" if why else ""))
     anchored = bool(fmc.anchored_wells(st.data)) if st.data is not None else False

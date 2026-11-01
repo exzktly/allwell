@@ -635,6 +635,13 @@ You'll need:
 - **Git for Windows** — already required if you also want to drive a
   remote Linux host. Install
   from <https://git-scm.com/download/win> with the default options.
+  All-Well runs its ssh commands with Git's `ssh.exe`. Without Git it
+  takes any other `ssh.exe` on PATH ahead of Windows' built-in one
+  (`C:\Windows\System32\OpenSSH\ssh.exe`), which is known to hang when
+  a program runs it in the background; it uses the built-in one only
+  when nothing else is there, and the run log then says so in a
+  WARNING. Every remote run's log names the ssh it used
+  (`[remote] ssh: …` and `[remote] ssh for transfers: …`).
 - **Python 3.10 or 3.11.** TensorFlow 2.13.0 has Windows wheels for
   those two versions only; 3.12+ will fail at the pip step. The
   `mamba create` line below pins 3.10.14 so you don't have to think

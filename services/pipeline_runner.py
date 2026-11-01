@@ -53,7 +53,7 @@ from util.well_token import blank_wells_for_run, canonical_well_label
 from pipeline.well_skip import _canonical_force_wells, skip_wells_scope
 from services.input_resolution_service import iter_well_tokens
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
-from services.remote_config import RemoteHost
+from services.remote_config import RemoteHost, ssh_binary_lines
 from services.remote_hold import GrantedRun
 from services.remote_runner import (
     OutputFilter,
@@ -2465,6 +2465,9 @@ class PipelineRunner:
         awake.start()
         try:
             self._enqueue(("line", f"[remote] target: {self._remote.name}\n"))
+            with swallow("naming the ssh this run uses"):
+                for said in ssh_binary_lines():
+                    self._enqueue(("line", said))
             incremental = self._recover_remote_outputs(output_dir, args, opts)
             if incremental is None:
                 return

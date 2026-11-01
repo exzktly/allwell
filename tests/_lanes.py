@@ -323,6 +323,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_force_reprocesses_a_remote_run.py": "Force reprocess all wells reprocesses all wells on a remote run",
     "test_jupyterhub_profiles.py": "Tests for JupyterHub compute-profile discovery in services.remote_config",
     "test_merge_into_gz_csv.py": "A downloaded partial merges straight into the well's ``.csv.gz`` — fast, never plain on disk",
+    "test_the_app_never_picks_windows_builtin_ssh.py": "Windows' built-in ssh is the last resort, never the choice while another exists, and the run log names the ssh used",
     "test_one_known_hosts_file_on_windows.py": "On Windows every ssh the app starts reads one known-hosts file, so a changed host key is …",
     "test_only_wells_remote.py": "``--only_wells`` on a remote run: only the subset is sent, and the host is",
     "test_reattach_makes_its_own_run_dir.py": "A re-attached run still needs the directory its *own* control files live in",

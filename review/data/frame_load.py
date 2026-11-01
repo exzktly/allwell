@@ -62,6 +62,7 @@ import logging
 from pathlib import Path
 
 from review.data.image_resolver import normalize_numeric_token
+from review.domain.channel_roles import phase_channel as _phase_channel
 from domain.tp_match import tp_close
 
 logger = logging.getLogger(__name__)
@@ -133,7 +134,7 @@ def phase_channel(pipeline_info: dict | None) -> str:
     wells. Since the raw frame is the corrected frame for every dataset, reading
     it wherever no ``_tophat`` was archived is right whatever any run asked for.
     """
-    return str((pipeline_info or {}).get("phase_token") or "").strip().lower()
+    return _phase_channel(pipeline_info)
 
 
 def missing_frame_note(ctx, chan: str) -> str:

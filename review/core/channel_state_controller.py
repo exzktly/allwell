@@ -31,6 +31,7 @@ from review.data.data_loading import (
     merge_fluor_channels,
     normalize_channel_tokens,
 )
+from review.domain.channel_roles import default_fluor_channel, order_fluor_channels
 from review.domain.gating_state import fluor_gate_for, resolve_gate_key
 from review.domain.heatmap_metrics import (
     METRIC_MEAN_ALL, METRICS_NEEDING_CUTOFF,
@@ -132,13 +133,16 @@ def _recalculate_threshold(ctx) -> None:
         seg_tok = str(ctx.state.dataset.pipeline_info.get("nuclear_token", "") or "").strip().lower()
     if not seg_tok:
         seg_tok = detect_nuclear_channel_token(sample_df)
-    fluor_channels = merge_fluor_channels(pipeline_fluor, detected, seg_tok)
+    info = ctx.state.dataset.pipeline_info
+    # The phase channel is listed, last, but is never the channel a plot opens on
+    # while any other exists (``review/domain/channel_roles``).
+    fluor_channels = order_fluor_channels(merge_fluor_channels(pipeline_fluor, detected, seg_tok), info)
     if fluor_channels:
         ctx.state.channel.fluor_channels = fluor_channels
         if not ctx.state.channel.active_channel:
-            ctx.state.channel.active_channel = fluor_channels[0]
+            ctx.state.channel.active_channel = default_fluor_channel(fluor_channels, info)
         if not ctx.state.channel.active_image_channel:
-            ctx.state.channel.active_image_channel = fluor_channels[0]
+            ctx.state.channel.active_image_channel = default_fluor_channel(fluor_channels, info)
     ctx.state.channel.seg_channel_token = seg_tok
     ctx.state.channel.review_image_channels = detect_review_image_channels(
         sample_df, ctx.state.channel.fluor_channels, seg_tok,

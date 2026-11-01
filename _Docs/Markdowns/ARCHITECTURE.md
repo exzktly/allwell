@@ -569,7 +569,11 @@ of a label line. The width it may take comes from
 `PlateProgress.plate_room_width`, not from the plate's own column, which a cap has
 already narrowed. A `_RefitOnLayout` filter on the run column refits (coalesced to
 the next event-loop pass) on every resize or re-layout, so a rotation, a run
-starting or the log being toggled refits too. Leaving phone layout hands the log
+starting or the log being toggled refits too. The fit's own final relayout posts
+the column a `LayoutRequest` of its own, delivered after the fit's guard is down;
+`_fit_progress` drops it (`QCoreApplication.removePostedEvents`), since the layout
+was just activated, and otherwise the page re-fitted on every event-loop pass at
+the same size. Leaving phone layout hands the log
 its minimum and the plate its desk caps back (`_release_fit`). It is deliberately
 not a scroll area: a page that scrolls as a whole puts its scroll bar beside the
 log's, where it reads as part of the log box, and the foot of the log sits under

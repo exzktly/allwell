@@ -12483,8 +12483,14 @@ footer names it; the run montage is drawn as saved, and its footer says the rang
 (`active_wells`) and computes the metrics on `core.worker_bridge.run_off_thread`. The wells read are kept
 (`state.well_parts`, for the data dir in `parts_for`; `loaded_wells` the wells asked for, a well without a table
 included), so a well selected again reads nothing and a deselection neither reads nor recomputes; the worker
-reads into its own copy of the parts, which `done` adopts. A selection change on the shown page asks for the new
-wells at once (`nw_on_selection_changed`); a hidden page reads on its next show. With nothing selected nothing is
+reads into its own copy of the parts, which `done` merges into `well_parts` whether or not its request is still the
+current one — a part is the well's files as read, valid for every baseline and gate, so a load overtaken by a newer
+selection still spares the next one its reads. A selection change on the shown page redraws at once from the wells
+already read and asks for the new ones once the selection has been still for `tab_view.LOAD_DEBOUNCE_MS` (250 ms;
+`queue_load` restarts the page's `_nw_load_timer`, whose timeout runs `run_queued_load`), so a run of clicks on the
+plate starts one load rather than one per click; while it waits, `load_queued` makes `nanowell_empty_reason` say
+the page is reading rather than that the selected wells' tables are unusable. Every other caller — activation, a
+dataset load, a baseline, gate or focus-rule change — loads at once. A hidden page reads on its next show. With nothing selected nothing is
 read, and `_metrics_of` gives an empty table so the page counts as loaded and says what to select.
 While a load runs, its placeholder (*Reading the nanowell tables…*, `_reading_reason`) draws a progress bar: the
 worker counts the wells of each of its two passes — `collect.load_nanowell_data(on_well=…)` over the tables it reads
@@ -12492,6 +12498,15 @@ now (wells already in `well_parts` cost nothing and are not counted), then `gate
 — and hands each count to the GUI thread through the bridge's `stage` / `progress` signals into
 `state.load_progress`, `(stage, done, total)`. The hint names the pass, since the bar starts again for the second.
 A count from an older request is dropped like its result; before the first count the bar has no known end.
+Once a figure is drawn, a running load covers it with the *Computing…* scrim (`_nw_computing_label`) only when
+`computing_shown` says the result can change what the current view draws. A site's metrics come from that site's
+rows alone, so a load that only reads wells added to the selection changes only the figures that draw one of them.
+`_page_groups_once_loaded` is `page_groups` as it will be when the load lands — the same rule over the active wells
+that have a table or may still have one (listed, not yet read), with tableless and page-excluded wells in neither —
+and the scrim shows when that differs from what is drawn now: for the single-well views (`SINGLE_WELL_VIEWS`: Array,
+Identity, Extremes) when the shown well (`page_well`'s rule over each) would change, for Distribution, Trajectories,
+Position and Statistics when the drawn wells or their grouping would. A load for another baseline, gate version or
+rim focus rule changes every drawn well's numbers and covers every view.
 `tableless_wells` names a drawn well with no usable table — none in the folder, or one read and left out — but
 never a well whose table is still being read. Each load request is numbered and a result for an older one is
 discarded, so a slow load can never replace a newer baseline's figure — including when the baseline goes back to the one

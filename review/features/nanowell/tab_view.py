@@ -121,8 +121,8 @@ _BASELINE_MOVING_TIP = (
 _BASELINE_MOVING_OFF = {
     "moving": "Turn on the Moving average first: the baseline's window refines it.",
     "metric": "Only a fold change has a baseline to average.",
-    "earliest": "The Earliest baseline has no timepoint before it to average. Choose First measurable or a "
-                "timepoint.",
+    "earliest": "The Earliest and First measurable baselines have no measured timepoint before them to average: "
+                "every timepoint before the first measurable one has no value. Choose a timepoint as the baseline.",
 }
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
 _GO_TO_TIP = ("Show this nanowell on Identity ▸ Blink: its well's two montages alternating, zoomed onto it, with its "

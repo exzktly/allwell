@@ -4359,7 +4359,7 @@ timepoint; for the others the baseline's own window, the fixed cohort when ticke
 set), with the exclusions spelled
 out by reason, the window each row used in its `moving_average` column (empty when off or for a per-nanowell
 metric, `distribution_compute.moving_window_for`), the baseline's own window in `baseline_moving_average` (empty
-unless a fold change was drawn with the moving average on and a baseline other than *Earliest*,
+unless a fold change was drawn with the moving average on and a named-timepoint baseline,
 `moving_compute.baseline_window_for`), and a row naming each of the group's wells with no nanowell
 table. A
 group's replicate sets stay sets and its solo wells stand alone, as the page
@@ -11767,7 +11767,8 @@ on top of that, both in `moving_compute`:
   itself unusable keeps the single baseline's reason, and a mean of zero is "seeded later" / "empty at baseline" as
   before. `moving_compute.baseline_window_for` is the one place that decides whether it applies: only while the
   endpoint's moving average is on (it refines it) and never with the *Earliest* baseline, which has nothing before
-  it. `draw_view` asks it, so the page and Batch Export cannot differ, and the page greys the spin box exactly where
+  it, or *First measurable*, whose earlier timepoints are by definition the ones with no value, so a complete window
+  could never exist and every fold change would go blank. `draw_view` asks it, so the page and Batch Export cannot differ, and the page greys the spin box exactly where
   it would not act (`tab_view.baseline_moving_greyed`, its tooltip naming the reason), so a value left in a greyed
   control never changes a figure. The rebase runs before the fixed cohort, so the cohort is chosen on the fold
   changes from the averaged baseline; `distribution_model`, `wells_summary` and `trajectory_panels` all take

@@ -5778,7 +5778,8 @@ the sentence names it.
   value; a nanowell whose baseline window is incomplete has no fold change, counted as "baseline window before
   the first timepoint", "baseline window has a gap" or "baseline window not joinable". It is greyed, with the
   reason in its tooltip, while the *Moving average* is off, for a metric that is not a fold change, and with the
-  *Earliest* baseline, which has nothing before it — choose *First measurable* or a timepoint. The footer states
+  *Earliest* and *First measurable* baselines — the first has nothing before it, and every timepoint before the
+  first measurable one has no value, so no window could ever be complete — choose a timepoint. The footer states
   the baseline's window.
 - **Rim focus** (on by default) and its percentage box beside it — leave out a nanowell at any timepoint where its own rim
   was out of focus. Every nanowell run measures each nanowell's rim sharpness (the `focus` column of

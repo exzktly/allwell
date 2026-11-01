@@ -88,7 +88,8 @@ def _choose_view(ctx, key, preset=None):
 def _visible_scopes(ctx):
     names = {"_nw_metric_cb": "Metric", "_nw_axis_seg": "Along x", "_nw_baseline_cb": "Baseline",
              "_nw_tp_cb": "Timepoint", "_nw_control_cb": "vs", "_nw_well_cb": "Well",
-             "_nw_extremes_spin": "Extremes"}
+             "_nw_extremes_spin": "Extremes", "_nw_qc_wells_seg": "Wells", "_nw_queue_btn": "Anchor queue",
+             "_nw_queue_lbl": "Queue"}
     return {label for name, label in names.items() if ctx.widgets.get(name).isVisibleTo(ctx.window)}
 
 
@@ -96,8 +97,8 @@ def _visible_scopes(ctx):
 def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(page, qtbot):
     _loaded(qtbot, page)
     seg = page.widgets.get("_nw_view_bar")
-    assert [seg.tabText(i) for i in range(seg.count())] == ["Distribution", "Array", "Trajectories", "Position",
-                                                                    "Extremes", "Identity", "Statistics"]
+    assert [seg.tabText(i) for i in range(seg.count())] == ["Distribution", "QC", "Array", "Trajectories",
+                                                                    "Position", "Extremes", "Identity", "Statistics"]
     assert _visible_scopes(page) == {"Metric", "Along x", "Baseline"}
     _choose_view(page, "array")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint"}
@@ -120,6 +121,10 @@ def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(pa
     # timepoint.
     _choose_view(page, "identity")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint"}
+    assert not page.widgets.get("_nw_metric_cb").isEnabled() and not page.widgets.get("_nw_baseline_cb").isEnabled()
+    # The QC view draws the plate's records, no metric: Metric and Baseline greyed, and the Anchor queue here alone.
+    _choose_view(page, "qc")
+    assert _visible_scopes(page) == {"Metric", "Baseline", "Wells", "Anchor queue"}
     assert not page.widgets.get("_nw_metric_cb").isEnabled() and not page.widgets.get("_nw_baseline_cb").isEnabled()
 
 

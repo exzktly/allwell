@@ -1,14 +1,16 @@
-"""The Array view's **Anchor queue**: walk every timepoint waiting for an anchor, one montage after another.
+"""The QC view's **Anchor queue**: walk every timepoint waiting for an anchor, one montage after another.
 
-*Anchor queue* (on the band's Anchor group) reads which timepoints are waiting (``anchor_queue_compute``) and opens
+*Anchor queue* (on the QC view's Anchor group) reads which timepoints are waiting (``anchor_queue_compute``) and opens
 the first exactly as QC Triage's *Set anchor…* does (``controller.open_for_anchor``): the Array view on that well
 and timepoint, the anchor layer on in the well frame, *Set anchor* on once the well's tables are loaded. A click on
 the central square writes the anchor as it always does (``controller.set_anchor_at``), which tells the queue
 (:func:`anchor_set`); after a short pause — long enough to see where the anchor landed — the next timepoint is
 shown. Each timepoint opens at :data:`OPEN_ZOOM` times *Fit* on the centre of the whole-well montage, where the
 central square usually is. *One per well* limits the walk to each well's first waiting timepoint. *Skip* moves on without an anchor, *Back* returns to the previous one (a click there replaces its anchor),
-and *Stop* ends the walk. The walk ends by itself after the last item, saying on the figure how many were anchored
-and pointing at *Re-run anchored wells…*, which is what puts the anchors to use.
+and *Stop* ends the walk; so does leaving the Array view for another (``controller.set_view``), since the walk's
+keys live on a band group shown only there. The walk ends by itself after the last item. Whichever way it ends, the
+page goes back to the view the walk started from — the QC view — which says how many were anchored, rings the cells
+anchored, and holds *Re-run anchored wells…*, which is what puts the anchors to use.
 
 Each step shows its well beside the selection the queue started with, never accumulating the wells walked past,
 and the end restores that selection: plate selections are app-wide, and a walk over thirty wells must not leave
@@ -91,12 +93,17 @@ def start(ctx) -> bool:
     st = _state(ctx)
     if st is None:
         return False
+    st.qc_message, st.qc_highlight = "", frozenset()
     queue, why = build_queue(ctx)
     if queue is None:
-        st.array_message = why
+        if st.view == "qc":
+            st.qc_message = why
+        else:
+            st.array_message = why
         nwc._call(ctx, "_nw_refresh_controls")
         nwc.redraw(ctx)
         return False
+    queue.return_view = st.view
     st.anchor_queue = queue
     return _open_current(ctx, queue)
 
@@ -169,9 +176,11 @@ def anchor_set(ctx, well: str, timepoint: str) -> None:
     QTimer.singleShot(ADVANCE_DELAY_MS, advance)
 
 
-def stop(ctx) -> bool:
-    """*Stop*, and the end of the walk past its last item: restore the starting selection and say on the figure
-    what the walk did (what it never reached counts as skipped)."""
+def stop(ctx, land_on: str | None = None) -> bool:
+    """*Stop*, the end of the walk past its last item, and leaving the Array view mid-walk: restore the starting
+    selection, go back to the view the walk started from (or *land_on*, the view chosen instead of Array), and say
+    what the walk did (what it never reached counts as skipped) — on the QC view's figure, ringing the cells it
+    anchored, and on the status line, which is seen whichever view the page lands on."""
 
     st = _state(ctx)
     queue = active_queue(ctx)
@@ -182,7 +191,17 @@ def stop(ctx) -> bool:
     if set(ctx.state.selection.selected_wells) != set(queue.selection_before):
         set_selected_wells(ctx, set(queue.selection_before))
     queue.index = len(queue.items)
-    st.array_message = queue.summary()
+    text = queue.summary()
+    st.view = land_on or queue.return_view or "qc"
+    if st.view == "array":
+        st.array_message = text
+    else:
+        st.array_message = ""
+        st.qc_message, st.qc_highlight = text, frozenset(queue.anchored)
+    nwc._save_soon(ctx)
+    notify = getattr(ctx, "notify", None)
+    if notify is not None:
+        notify.set_status(text)
     nwc._call(ctx, "_nw_refresh_controls")
     nwc.redraw(ctx)
     return True

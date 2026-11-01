@@ -882,22 +882,28 @@ def page_well(ctx) -> str:
     return st.well if st is not None and st.well in wells else (wells[0] if wells else "")
 
 
-#: The views that draw one well, :func:`page_well`. A site's metrics come from that site's rows alone
-#: (``series_compute.site_metrics``), so reading another well's tables changes nothing these views draw.
+#: The views that draw one well, :func:`page_well`; the others (Distribution, Trajectories, Position, Statistics)
+#: draw every well of :func:`page_groups`. A site's metrics come from that site's rows alone
+#: (``series_compute.site_metrics``), so reading a well's tables changes only the figures that draw that well.
 SINGLE_WELL_VIEWS = frozenset({"array", "identity", "extremes"})
 
 
-def _page_well_once_loaded(ctx) -> str:
-    """The well :func:`page_well` will name once the running load lands: as :func:`page_well`, over the active
-    wells that have a table or may still turn out to have one (listed, not yet read), rather than over the wells
-    read so far."""
+def _page_groups_once_loaded(ctx) -> dict:
+    """What :func:`page_groups` will be once the running load lands: the same rule, over the active wells that have
+    a table or may still turn out to have one (listed in the folder, not read yet), rather than over the wells read
+    so far. A well with no table, or one excluded on the page, is in neither."""
     st = _state(ctx)
     if st is None or st.data is None:
-        return ""
+        return {}
     have, listed, excluded = set(st.data.wells), set(st.data.available), set(st.excluded_wells)
     wells = [w for w in active_wells(ctx) if w not in excluded
              and (w in have or (w in listed and w not in st.loaded_wells))]
-    drawn = [w for members in (replicate_groups(ctx, wells) if wells else {}).values() for w in members]
+    return replicate_groups(ctx, wells) if wells else {}
+
+
+def _page_well_of(st, groups: dict) -> str:
+    """:func:`page_well`'s rule over *groups*: the page's choice if it is drawn, else the first drawn well."""
+    drawn = [w for members in groups.values() for w in members]
     return st.well if st.well in drawn else (drawn[0] if drawn else "")
 
 
@@ -905,19 +911,24 @@ def computing_shown(ctx) -> bool:
     """Whether the page covers its figure with the *Computing…* scrim: a load is running and its result can change
     what the current view draws.
 
-    A load that only reads wells just added to the selection cannot change a single-well view while the well it
-    shows stays the one shown, so that view stays live; a new baseline, gate version or rim focus rule changes the
-    shown well's numbers too, and covers it."""
+    A load for another baseline, gate version or rim focus rule changes every drawn well's numbers, so it covers
+    every view. A load that only reads wells added to the selection changes only the figures that will draw one of
+    them: on a single-well view, when the well shown is about to change; on the others, when the drawn wells or
+    their grouping are. An added well with no nanowell table, or excluded on the page, changes neither, and the
+    figure stays live while it is read."""
     st = _state(ctx)
     if st is None or not st.computing or st.metrics is None:
         return False
-    if st.view not in SINGLE_WELL_VIEWS or st.pending_for is None or st.loaded_for is None:
+    if st.pending_for is None or st.loaded_for is None:
         return True
     key, _wells, version = st.pending_for
     if key != st.loaded_for or version != (st.gated_for, st.focus_for):
         return True
-    well = page_well(ctx)
-    return not well or _page_well_once_loaded(ctx) != well
+    now, then = page_groups(ctx), _page_groups_once_loaded(ctx)
+    if st.view in SINGLE_WELL_VIEWS:
+        well = _page_well_of(st, now)
+        return not well or _page_well_of(st, then) != well
+    return {g: list(m) for g, m in now.items()} != {g: list(m) for g, m in then.items()}
 
 
 def page_timepoint(ctx, well: str) -> str:

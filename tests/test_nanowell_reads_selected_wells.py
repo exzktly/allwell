@@ -218,3 +218,38 @@ def test_a_new_baseline_covers_a_single_well_view(counted, qtbot):
     assert st.computing and _scrim_shown(ctx)
     qtbot.waitUntil(lambda: not st.computing, timeout=20000)
     assert not _scrim_shown(ctx)
+
+
+@pytest.mark.parametrize("view", ["distribution", "trajectories", "position", "statistics"])
+def test_adding_a_well_without_a_table_does_not_cover_a_view_of_every_well(qtbot, tmp_path, view):
+    """A well with no nanowell table is never drawn, so reading it changes no view's figure."""
+    out = _write_nanowell_dataset(tmp_path)
+    for name in ("A02.csv", "A02_grid.json"):
+        (out / "nanowells" / name).unlink()
+    ctx = _page(qtbot, out)
+    _on_view(qtbot, ctx, view, {"A01", "B01"})
+    st = _add_wells(ctx, {"A01", "A02", "B01"})
+    assert not _scrim_shown(ctx)
+    qtbot.waitUntil(lambda: not st.computing, timeout=20000)
+    assert not _scrim_shown(ctx)
+
+
+@pytest.mark.parametrize("view", ["distribution", "trajectories", "position", "statistics"])
+def test_adding_a_well_excluded_on_the_page_does_not_cover_a_view_of_every_well(counted, qtbot, view):
+    ctx, reads = counted
+    st = _on_view(qtbot, ctx, view, {"A01"})
+    st.excluded_wells = ["B01"]
+    st = _add_wells(ctx, {"A01", "B01"})
+    assert not _scrim_shown(ctx)
+    qtbot.waitUntil(lambda: not st.computing, timeout=20000)
+    assert reads == ["A01", "B01"] and not _scrim_shown(ctx)
+
+
+@pytest.mark.parametrize("view", ["trajectories", "position", "statistics"])
+def test_adding_a_drawn_well_covers_every_view_of_every_well(counted, qtbot, view):
+    ctx, _reads = counted
+    _on_view(qtbot, ctx, view, {"A01"})
+    st = _add_wells(ctx, {"A01", "B01"})
+    assert _scrim_shown(ctx)
+    qtbot.waitUntil(lambda: not st.computing, timeout=20000)
+    assert not _scrim_shown(ctx)

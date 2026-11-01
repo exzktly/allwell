@@ -12478,11 +12478,14 @@ now (wells already in `well_parts` cost nothing and are not counted), then `gate
 `state.load_progress`, `(stage, done, total)`. The hint names the pass, since the bar starts again for the second.
 A count from an older request is dropped like its result; before the first count the bar has no known end.
 Once a figure is drawn, a running load covers it with the *Computing…* scrim (`_nw_computing_label`) only when
-`computing_shown` says the result can change what the current view draws. The single-well views
-(`SINGLE_WELL_VIEWS`: Array, Identity, Extremes) draw `page_well` alone, and a site's metrics come from that site's
-rows alone, so a load that only reads wells just added to the selection leaves them uncovered — unless the added well
-is the one `page_well` will name once it lands (`_page_well_once_loaded`, the same rule over the wells that have or
-may still have a table). A load for another baseline, gate version or rim focus rule covers every view.
+`computing_shown` says the result can change what the current view draws. A site's metrics come from that site's
+rows alone, so a load that only reads wells added to the selection changes only the figures that draw one of them.
+`_page_groups_once_loaded` is `page_groups` as it will be when the load lands — the same rule over the active wells
+that have a table or may still have one (listed, not yet read), with tableless and page-excluded wells in neither —
+and the scrim shows when that differs from what is drawn now: for the single-well views (`SINGLE_WELL_VIEWS`: Array,
+Identity, Extremes) when the shown well (`page_well`'s rule over each) would change, for Distribution, Trajectories,
+Position and Statistics when the drawn wells or their grouping would. A load for another baseline, gate version or
+rim focus rule changes every drawn well's numbers and covers every view.
 `tableless_wells` names a drawn well with no usable table — none in the folder, or one read and left out — but
 never a well whose table is still being read. Each load request is numbered and a result for an older one is
 discarded, so a slow load can never replace a newer baseline's figure — including when the baseline goes back to the one

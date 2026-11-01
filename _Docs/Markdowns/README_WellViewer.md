@@ -6199,9 +6199,11 @@ Selecting nanowells does not change the plate selection.
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
 is selected and kept, so selecting it again is instant. While a newly selected well is read, or the figures are
 recomputed, the page dims the figure and shows *Computing…* across it — but only when the result can change what
-the figure shows. The views that show one well (Array, Identity, Extremes) stay live while wells added to the
-selection are read, since that well's numbers do not depend on the others; they dim when the baseline, Cell
-Gating or the rim focus rule changes, or when the added well is the one they will switch to. Before the first figure is drawn the page
+the figure shows. Each well's numbers depend on that well alone, so while wells added to the selection are read,
+the views that show one well (Array, Identity, Extremes) stay live unless the added well is the one they will
+switch to, and the views of every well (Distribution, Trajectories, Position, Statistics) stay live when the added
+well has no nanowell table or is excluded on the page. A change of baseline, Cell Gating or the rim focus rule
+dims every view. Before the first figure is drawn the page
 says *Reading the nanowell tables…* with a progress bar under it: it counts the wells as their tables are read
 (*Reading the tables: 12 of 40 wells.*), then starts again as their cells are counted for Cell Gating (*Counting
 the gated cells: …*).

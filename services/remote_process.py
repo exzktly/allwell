@@ -42,6 +42,7 @@ from services.remote_run_state import (
 from services.remote_staging import (
     ZippedInput,
 )
+from services.remote_storage import label_and_sweep
 from services.remote_plate_grids import seed_confluence_reference, seed_plate_grids
 from services.remote_fetch import (
     Fetcher,
@@ -122,8 +123,13 @@ def _record_remote_in_journal(
 def _run_prepared(cache, run: "_RemoteRun", zipped, log, **journal_keys) -> None:
     """What both run paths do once a run's remote directories exist: write down where it went
     (:func:`_record_remote_in_journal`), and give a nanowell host the rest of the plate's grid records
-    and its saved confluence reference (``services.remote_plate_grids``) before its pipeline starts."""
+    and its saved confluence reference (``services.remote_plate_grids``) before its pipeline starts. Then label
+    the run's remote folders and remove the host's expired ones (``services.remote_storage``), best-effort."""
     _record_remote_in_journal(run.local_output_dir, run=run, **journal_keys)
+    try:
+        label_and_sweep(cache, run, log)
+    except Exception:
+        swallowed("labelling this run's remote folders / removing expired ones")
     seed_plate_grids(cache, run, [Path(p).stem for p in zipped.well_zips], log)
     seed_confluence_reference(cache, run, [Path(p).stem for p in zipped.well_zips], log)
 

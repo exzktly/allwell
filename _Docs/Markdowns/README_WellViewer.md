@@ -2094,6 +2094,34 @@ deleted when the cache is over `cache_budget_gb`, but never one a run has used
 in the last seven days — another window's, or another person's, run may be
 reading it. The log names any it kept over budget for that reason.
 
+**See and clean up what a host holds — Manage… → Storage….** Cancelled
+jobs, abandoned or failed runs, and every change to a plate's images leave
+folders behind in the host's staging directory (`datasets/` for uploaded
+plates, `runs/` for each run's working folder). Select a host and press
+**Storage…** to list them all: the project each came from (the name of the
+folder that holds your `in` folder), whether it is a run or a dataset, its
+size, when it was created and last used, when it expires, and the local output
+folder it belongs to. Hover over a row for the full paths on the server and on
+your computer. Folders made by an older version of All-Well have no label, so
+their project shows as "—".
+
+- **Delete…** removes the selected folders after asking you. A folder a run is
+  using right now (its app is still connected, its Slurm job is still queued or
+  running, or it was written to in the last 15 minutes) is shown as *In use* and
+  left alone, even if it is selected. Deleting a run folder does not touch results
+  already downloaded, but anything it had not yet sent back is lost, and a later
+  resume of that plate starts over; deleting a dataset only means the next run of
+  that plate uploads it again.
+- **Keep forever** marks folders that should never be removed automatically.
+- **Expire in N days** removes the selected folders automatically once that time
+  has passed. **Use host rule** drops a folder's own setting.
+- **Remove folders left untouched for N days** (then **Save**) is the host-wide
+  rule; "never" (0) is the default. Nothing runs on the server by itself, so
+  All-Well removes expired folders at the start of each run on that host, and
+  **Remove expired now** does it on request. It never removes a folder in use, a
+  kept folder, the folders of the plate being run, or a dataset a run used in the
+  last seven days.
+
 ### 11. Run / Suspend / Stop / Log
 
 - Click **Run** (in the footer under the form). While the run is going,

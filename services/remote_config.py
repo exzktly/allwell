@@ -95,6 +95,8 @@ DEFAULT_CONDA_ENV = "allwell"
 #: on load, so it cannot ask Slurm for a nonsense time limit.
 GRANTED_TIME_LIMIT_H_RANGE = (1, 720)
 GRANTED_IDLE_RELEASE_MIN_RANGE = (0, 1440)
+#: The range the Storage browser offers for ``storage_expiry_days``; a hand-edited value is clamped to it on load.
+STORAGE_EXPIRY_DAYS_RANGE = (0, 3650)
 
 
 @dataclass(frozen=True)
@@ -142,6 +144,16 @@ class RemoteHost:
     toggle) to re-enable LRU eviction. ``cache_budget_gb`` is still
     the limit when auto_gc fires; without auto_gc the cache grows
     until the user manually clears it.
+    """
+    storage_expiry_days: int = 0
+    """Remove a run or dataset folder on this host once it has been left
+    untouched for this many days; 0 (the default) never removes anything.
+
+    Applied by the app, not the server: at the start of every run on this host,
+    and from the Storage browser in Manage Remotes
+    (``services.remote_storage``). A folder in use, a folder marked *keep*, and
+    a dataset a run used within the cache GC's in-use window are never removed.
+    Set from the Storage browser; written to ``remotes.toml`` only when non-zero.
     """
     ssh_key_path: str = ""
     """Optional path to an SSH private key (``~`` expanded at use time).
@@ -753,10 +765,11 @@ def _format_block(host: RemoteHost) -> str:
     # exclusive_node is only emitted when switched on: off is the default,
     # and loaders default the field to false when absent.
     exclusive_line = "exclusive_node = true\n" if host.exclusive_node else ""
-    # The granted-node settings are only emitted when they differ from the default, like exclusive_node.
+    # The granted-node settings and the storage expiry are only emitted when they differ from the default,
+    # like exclusive_node.
     granted_lines = "".join(
         f"{field} = {getattr(host, field)}\n"
-        for field in ("granted_time_limit_h", "granted_idle_release_min")
+        for field in ("granted_time_limit_h", "granted_idle_release_min", "storage_expiry_days")
         if getattr(host, field) != RemoteHost.__dataclass_fields__[field].default
     )
     jhub_line = (
@@ -970,6 +983,8 @@ def _parse_entry(name: str, entry: dict[str, Any]) -> RemoteHost:
         granted_idle_release_min=_clamped(
             entry.get("granted_idle_release_min"), defaults.granted_idle_release_min,
             GRANTED_IDLE_RELEASE_MIN_RANGE),
+        storage_expiry_days=_clamped(
+            entry.get("storage_expiry_days"), defaults.storage_expiry_days, STORAGE_EXPIRY_DAYS_RANGE),
     )
 
 

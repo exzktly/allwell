@@ -1,7 +1,8 @@
 """Manage Remotes GUI — v5.1.0.
 
 Three QDialog classes that let the user add, edit, delete, test, and
-bootstrap remote-execution hosts without leaving the AllWell GUI.
+bootstrap remote-execution hosts — and open the Storage browser
+(``analyze/remote_storage_dialog.py``) on one — without leaving the AllWell GUI.
 Driven by the existing ``services.remote_config`` persistence layer
 (``write_remote`` / ``delete_remote``) and reuses the v5.0.0 queue +
 QTimer event pattern for the live bootstrap log.
@@ -26,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer, Signal
@@ -207,6 +209,9 @@ class RemoteFormDialog(QDialog):
         self._existing_names = set(existing_names or set())
         if host is None:
             host = RemoteHost(name="", ssh_alias="")
+        # What ``result_host`` starts from, so a setting this form does not show
+        # (auto_gc, the measured bandwidth, the storage expiry) survives an Edit.
+        self._base_host = host
 
         self.setWindowTitle("Edit Remote" if self._editing else "Add Remote")
         self.setModal(True)
@@ -682,11 +687,17 @@ class RemoteFormDialog(QDialog):
         already defines — and the placeholders beside them are read from the
         dataclass, so changing a default would have moved the hint while the
         saved value kept the old path.
+
+        Built on the host being edited rather than from scratch, so the fields
+        this form has no control for — ``auto_gc``, ``measured_bandwidth_mbps``,
+        ``storage_expiry_days`` — keep their saved values. Built from scratch,
+        every Edit… → OK silently reset them to their defaults.
         """
         raw_extras = self._extra_args_edit.text().strip()
         extras: tuple[str, ...] = tuple(raw_extras.split()) if raw_extras else ()
         defaults = RemoteHost(name="_", ssh_alias="_")
-        return RemoteHost(
+        return replace(
+            self._base_host,
             name=self._name_edit.text().strip(),
             ssh_alias=self._ssh_alias_edit.text().strip(),
             remote_project_dir=(self._project_dir_edit.text().strip()
@@ -1608,6 +1619,13 @@ class ManageRemotesDialog(QDialog):
         self._bootstrap_btn.clicked.connect(self._on_bootstrap)
         right.addWidget(self._bootstrap_btn)
 
+        self._storage_btn = QPushButton("Storage…", self)
+        self._storage_btn.setToolTip(
+            "See the run and dataset folders this host holds, what project each came from, "
+            "and delete them or set them to expire.")
+        self._storage_btn.clicked.connect(self._on_storage)
+        right.addWidget(self._storage_btn)
+
         right.addStretch(1)
         self._close_btn = QPushButton("Close", self)
         self._close_btn.clicked.connect(self.accept)
@@ -1680,6 +1698,7 @@ class ManageRemotesDialog(QDialog):
         # commonest thing a user does while waiting for one.
         self._test_btn.setEnabled(has_sel and not probe_in_flight(self))
         self._bootstrap_btn.setEnabled(has_sel)
+        self._storage_btn.setEnabled(has_sel)
         self._node_panel.set_host(self._hosts.get(self._selected_name() or ""))
 
     # ── actions ─────────────────────────────────────────────────────────
@@ -1810,6 +1829,28 @@ class ManageRemotesDialog(QDialog):
             self.remotes_changed.emit()
 
         dlg.finished_ok.connect(_on_finish)
+        try:
+            dlg.exec()
+        finally:
+            dlg.deleteLater()
+
+    def _on_storage(self) -> None:
+        """Open the Storage browser (``analyze.remote_storage_dialog``) on the selected host."""
+        name = self._selected_name()
+        if name is None:
+            return
+        remotes = self._load_remotes_or_report()
+        if remotes is None:
+            return                      # already reported; the file is unreadable
+        host = remotes.get(name)
+        if host is None:
+            QMessageBox.warning(self, "Gone",
+                f"Remote '{name}' has been deleted from the file.")
+            self._reload()
+            return
+        from analyze.remote_storage_dialog import RemoteStorageDialog
+        dlg = RemoteStorageDialog(self, host)
+        dlg.host_changed.connect(lambda _host: (self._reload(), self.remotes_changed.emit()))
         try:
             dlg.exec()
         finally:

@@ -30,6 +30,7 @@ from services import remote_storage as rs
 from services.remote_config import RemoteHost
 
 DAY = 86400
+_CLOCK = int(time.time())
 GOOD_RUN = "run-00000000000000a1-00000000000000b2"
 GOOD_KEY = "000000000000000000000000000000c3"
 LINKED_RUN = "run-00000000000000d4-00000000000000e5"   # a link named like a run, pointing at the user's files
@@ -47,7 +48,9 @@ class _LocalCache:
 
 
 def _age(path: Path, days: float = 40) -> None:
-    t = time.time() - days * DAY
+    # One clock for the whole file: files aged a moment apart would otherwise differ
+    # by microseconds, and ``find -newer`` reads that as a write after the marker.
+    t = _CLOCK - days * DAY
     os.utime(path, (t, t), follow_symlinks=False)
 
 

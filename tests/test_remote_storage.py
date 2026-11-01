@@ -23,6 +23,7 @@ from services.remote_cache_gc import IN_USE_WINDOW_S
 from services.remote_config import RemoteHost, load_remotes, write_remote
 
 DAY = 86400
+_CLOCK = int(time.time())
 
 
 def _run_name(tag: int) -> str:
@@ -54,7 +55,9 @@ class _LocalCache:
 
 
 def _age(path: Path, days: float) -> None:
-    t = time.time() - days * DAY
+    # One clock for the whole file: files aged a moment apart would otherwise differ
+    # by microseconds, and ``find -newer`` reads that as a write after the marker.
+    t = _CLOCK - days * DAY
     os.utime(path, (t, t))
 
 

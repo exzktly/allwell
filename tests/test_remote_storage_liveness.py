@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import stat as stat_mod
 import subprocess
@@ -26,6 +27,7 @@ from services import remote_storage as rs
 from services.remote_config import RemoteHost, load_remotes
 
 DAY = 86400
+_CLOCK = int(time.time())
 BASH = shutil.which("bash") or "/bin/bash"
 RUN = "run-0000000000000aa1-0000000000000bb2"
 OWN = "run-0000000000000cc3-0000000000000dd4"
@@ -48,7 +50,9 @@ class _LocalCache:
 
 
 def _age(path: Path, days: float = 40) -> None:
-    t = time.time() - days * DAY
+    # One clock for the whole file: files aged a moment apart would otherwise differ
+    # by microseconds, and ``find -newer`` reads that as a write after the marker.
+    t = _CLOCK - days * DAY
     os.utime(path, (t, t), follow_symlinks=False)
 
 
@@ -317,27 +321,6 @@ def test_an_rm_without_one_file_system_refuses_to_delete(staging, bin_dir):
     assert d.exists()
 
 
-@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to bind-mount")
-def test_a_mount_point_in_runs_is_refused(staging, tmp_path):
-    precious = tmp_path / "precious"
-    precious.mkdir()
-    (precious / "thesis.txt").write_text("four years")
-    target = staging / "runs" / RUN
-    target.mkdir()
-    if subprocess.run(["mount", "--bind", str(precious), str(target)], capture_output=True).returncode != 0:
-        pytest.skip("bind mounts are not permitted here")
-    try:
-        cache = _LocalCache(staging)
-        # A bind mount on the same filesystem keeps its device number; the mount table is what tells.
-        assert RUN not in {i.name for i in rs.list_storage(cache)[0].items}
-        assert _delete(cache, "run", RUN) == "refused:outside"
-        rs.set_expiry(cache, [_item("run", RUN)], rs.KEEP)
-        assert sorted(p.name for p in precious.iterdir()) == ["thesis.txt"]
-        assert (precious / "thesis.txt").read_text() == "four years"
-    finally:
-        subprocess.run(["umount", str(target)], check=False)
-
-
 # ── M2: the staging filesystem's clock, not the login node's ────────────────
 
 def test_now_is_the_staging_filesystem_s_clock_not_the_login_node_s(staging, bin_dir):
@@ -477,23 +460,6 @@ def test_a_staging_folder_with_surrounding_spaces_is_refused_not_stripped(stagin
         rs.validate_staging_dir(staging_dir)
 
 
-@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to bind-mount")
-def test_a_run_folder_with_a_mount_inside_it_is_never_deleted(staging, tmp_path):
-    precious = tmp_path / "precious"
-    precious.mkdir()
-    (precious / "thesis.txt").write_text("four years")
-    d = _run(staging, RUN)
-    inner = d / "out" / "scratch"
-    inner.mkdir()
-    if subprocess.run(["mount", "--bind", str(precious), str(inner)], capture_output=True).returncode != 0:
-        pytest.skip("bind mounts are not permitted here")
-    try:
-        assert _delete(_LocalCache(staging), "run", RUN) == "refused:holds-a-mount"
-        assert (precious / "thesis.txt").read_text() == "four years"
-    finally:
-        subprocess.run(["umount", str(inner)], check=False)
-
-
 def test_the_earlier_attempt_clean_up_honours_keep(staging):
     """``remote_reuse.clean_earlier_attempts``'s per-folder script leaves a kept folder alone."""
     from services.remote_commands import HOLD_DIR
@@ -537,3 +503,233 @@ def test_a_run_written_to_in_the_last_quarter_hour_is_in_use(staging):
     (d / rs.RUN_EXPIRY).write_text("keep\n")          # this module's own files do not count
     _age(d / "out" / "B2_partial.csv")
     assert _delete(_LocalCache(staging), "run", RUN) == "gone"
+
+
+# ── mounts, in a private mount namespace (no root needed, nothing left mounted) ──
+
+def _unshare_ok() -> bool:
+    if not shutil.which("unshare"):
+        return False
+    return subprocess.run(["unshare", "-rm", BASH, "-c", "true"], capture_output=True).returncode == 0
+
+
+class _MountedCache(_LocalCache):
+    """Runs each script in a fresh user + mount namespace in which *src* is
+    bind-mounted on *dst*: the mount exists only for that script, as root or not."""
+
+    def __init__(self, staging: Path, src: Path, dst: Path):
+        super().__init__(staging)
+        self._prefix = f"mount --bind {shlex.quote(str(src))} {shlex.quote(str(dst))} || exit 97\n"
+
+    def _ssh_script(self, script, *, check, timeout_s=None):
+        return subprocess.run(["unshare", "-rm", BASH, "-s"], input=self._prefix + script,
+                              capture_output=True, text=True, timeout=60)
+
+
+needs_unshare = pytest.mark.skipif(not _unshare_ok(), reason="unprivileged mount namespaces are not available")
+
+
+@needs_unshare
+def test_a_mount_point_in_runs_is_refused(staging, tmp_path):
+    """A bind mount on the same filesystem keeps its device number; the mount table is what tells."""
+    precious = tmp_path / "precious"
+    precious.mkdir()
+    (precious / "thesis.txt").write_text("four years")
+    _age_tree(precious)
+    target = staging / "runs" / RUN
+    target.mkdir()
+    cache = _MountedCache(staging, precious, target)
+    assert RUN not in {i.name for i in rs.list_storage(cache)[0].items}
+    assert _delete(cache, "run", RUN) == "refused:outside"
+    rs.set_expiry(cache, [_item("run", RUN)], rs.KEEP)
+    assert sorted(p.name for p in precious.iterdir()) == ["thesis.txt"]
+    assert (precious / "thesis.txt").read_text() == "four years"
+
+
+@needs_unshare
+def test_a_run_folder_with_a_mount_inside_it_is_never_deleted(staging, tmp_path):
+    precious = tmp_path / "precious"
+    precious.mkdir()
+    (precious / "thesis.txt").write_text("four years")
+    _age_tree(precious)
+    d = _run(staging, RUN)
+    inner = d / "out" / "scratch"
+    inner.mkdir()
+    _age_tree(d)
+    assert _delete(_MountedCache(staging, precious, inner), "run", RUN) == "refused:holds-a-mount"
+    assert (precious / "thesis.txt").read_text() == "four years"
+
+
+@needs_unshare
+def test_the_cache_gc_will_not_empty_a_mounted_dataset(staging, tmp_path):
+    """The GC evicts through the Storage module's deletion, so it gets the mount check too."""
+    precious = tmp_path / "precious"
+    precious.mkdir()
+    (precious / "thesis.txt").write_text("four years")
+    _age_tree(precious)
+    ds = _dataset(staging, KEY)
+    lines: list[str] = []
+    gc.collect_garbage(_MountedCache(staging, precious, ds), 0, lines.append)
+    assert (precious / "thesis.txt").read_text() == "four years", lines
+
+
+# ── round 2 of the review ───────────────────────────────────────────────────
+
+def test_a_downloaded_marker_older_than_the_results_does_not_vouch_for_them(staging):
+    """A run that re-used the folder without clearing the marker (an older build, a
+    failed label call) left newer results; the marker no longer speaks for them."""
+    d = _run(staging, RUN)
+    newer = d / "out" / "B2_out.zip"
+    newer.write_bytes(b"new")
+    _age(newer, 30)                                     # written ten days after the marker
+    _age(d / "out", 30)
+    assert _delete(_LocalCache(staging), "run", RUN, automatic=True, host_days=1) == "refused:not-downloaded"
+    _age(newer, 40)
+    _age(d / "out", 40)
+    (d / ".aw_beat").mkdir()
+    (d / ".aw_beat" / "alive").touch()
+    _age(d / ".aw_beat" / "alive", 30)                  # bookkeeping written later does not count
+    assert _delete(_LocalCache(staging), "run", RUN, automatic=True, host_days=1) == "gone"
+
+
+def test_a_find_that_fails_reads_as_in_use(staging, bin_dir):
+    d = _run(staging, RUN)
+    real_find = shutil.which("find")
+    _shim(bin_dir, "find", 'for a in "$@"; do [ "$a" = -quit ] && { echo "find: unknown predicate" >&2; exit 1; }; done\n'
+                           f'exec {real_find} "$@"\n')
+    assert _delete(_LocalCache(staging), "run", RUN) == "busy"
+    assert d.exists()
+
+
+def test_the_cache_gc_parses_only_dataset_keys(staging):
+    listing = "\n".join(["10\t5\tmy-own-folder", "10\t5\tvictim\tx", f"10\t5\t{KEY}\tjunk", f"10\t5\t{OTHER_KEY}\tkeep",
+                          f"10\t6\t{KEY}", "now\t100"])
+    datasets, now = gc.parse_listing(listing)
+    assert [(d.key, d.last_used, d.kept) for d in datasets] == [(OTHER_KEY, 5, True), (KEY, 6, False)]
+
+
+def test_the_cache_gc_does_not_follow_a_linked_label_folder(staging, tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / f"{KEY}.json").write_text("not ours")
+    _dataset(staging, KEY)
+    shutil.rmtree(staging / "datasets" / rs.DATASET_LABEL_DIR)
+    (staging / "datasets" / rs.DATASET_LABEL_DIR).symlink_to(elsewhere)
+    gc.collect_garbage(_LocalCache(staging), 0, lambda _m: None)
+    assert not (staging / "datasets" / KEY).exists()
+    assert (elsewhere / f"{KEY}.json").read_text() == "not ours"
+
+
+@pytest.mark.parametrize("content, expected", [("keep\n", True), ("1700000000\n", False), (None, False)])
+def test_is_kept_reads_the_folder_s_expiry(staging, content, expected):
+    d = _run(staging, RUN)
+    if content is not None:
+        (d / rs.RUN_EXPIRY).write_text(content)
+    assert rs.is_kept(_LocalCache(staging), "run", RUN) is expected
+
+
+def test_is_kept_answers_kept_when_it_cannot_ask():
+    class _Down:
+        host = RemoteHost(name="h", ssh_alias="h")
+
+        def _ssh_script(self, script, *, check, timeout_s=None):
+            return subprocess.CompletedProcess([], 255, "", "")
+
+    assert rs.is_kept(_Down(), "run", RUN) is True
+
+
+def test_an_interrupted_removal_is_finished_by_the_next_deletion(staging, bin_dir):
+    d, other = _run(staging, RUN), _run(staging, OWN)
+    real_rm = shutil.which("rm")
+    _shim(bin_dir, "rm", f'for a in "$@"; do case "$a" in ./.aw_trash.*) exit 1;; esac; done; exec {real_rm} "$@"\n')
+    assert _delete(_LocalCache(staging), "run", RUN) == "fail:partly-removed"
+    trash = [p.name for p in (staging / "runs").iterdir() if p.name.startswith(".aw_trash.")]
+    assert not d.exists() and len(trash) == 1, "renamed out of the way, so a new run starts afresh"
+    assert RUN not in {i.name for i in rs.list_storage(_LocalCache(staging))[0].items}
+    (bin_dir / "rm").unlink()
+    assert _delete(_LocalCache(staging), "run", OWN) == "gone"
+    assert not other.exists()
+    assert [p.name for p in (staging / "runs").iterdir()] == [], "the leftover trash was finished"
+
+
+def test_the_clock_probe_does_not_write_through_a_hard_link(staging, tmp_path):
+    precious = tmp_path / "precious.txt"
+    precious.write_text("fifteen bytes!!")
+    os.link(precious, staging / rs.NOW_PROBE)
+    rs.list_storage(_LocalCache(staging))
+    assert precious.read_text() == "fifteen bytes!!"
+
+
+def test_an_expiry_target_that_is_a_folder_fails_rather_than_pretending(staging):
+    _dataset(staging, KEY)
+    blocker = staging / "datasets" / rs.DATASET_EXPIRY_DIR / KEY
+    blocker.mkdir(parents=True)
+    outcomes, _ = rs.set_expiry(_LocalCache(staging), [_item("dataset", KEY)], rs.KEEP)
+    assert outcomes[("dataset", KEY)] == "fail"
+    assert list(blocker.iterdir()) == []
+
+
+def test_a_staging_path_with_a_newline_is_refused_by_the_server(staging, tmp_path):
+    odd = tmp_path / "home" / "n\nl"
+    (odd / "runs").mkdir(parents=True)
+    _run(odd, RUN)
+    (tmp_path / "home" / "lnk").symlink_to(odd)
+    cache = _LocalCache(staging)
+    cache.host = RemoteHost(name="h", ssh_alias="h", remote_staging_dir="~/lnk")
+    listing, error = rs.list_storage(cache)
+    assert listing.items == () and "control character" in error
+    outcomes, error = rs.delete_items(cache, [_item("run", RUN)])
+    assert outcomes[("run", RUN)] == "refused" and (odd / "runs" / RUN).exists()
+
+
+def test_a_squeue_warning_on_stderr_is_not_read_as_a_job_state(staging, bin_dir):
+    _with_sidecar(staging)
+    _shim(bin_dir, "squeue", "echo 'squeue: warning: deprecated option' >&2; echo COMPLETED; exit 0\n")
+    assert _delete(_LocalCache(staging), "run", RUN) == "gone"
+
+
+def test_an_absent_folder_is_reported_absent_not_removed(staging):
+    assert _delete(_LocalCache(staging), "run", RUN) == "gone:absent"
+
+
+def test_a_borrower_on_a_last_line_without_a_newline_still_counts(staging):
+    old = _run(staging, RUN)
+    (old / rs.RUN_BORROWED_BY).write_text(OWN)          # no trailing newline
+    _age(old / rs.RUN_BORROWED_BY)
+    own = staging / "runs" / OWN
+    own.mkdir()
+    _beat(own)
+    assert _delete(_LocalCache(staging), "run", RUN) == "busy"
+
+
+def test_the_server_keeps_a_dataset_used_within_the_in_use_window(staging):
+    _dataset(staging, KEY, stamp_days=2)
+    (staging / "datasets" / rs.DATASET_EXPIRY_DIR).mkdir()
+    (staging / "datasets" / rs.DATASET_EXPIRY_DIR / KEY).write_text("1700000000\n")
+    assert _delete(_LocalCache(staging), "dataset", KEY, automatic=True, host_days=1) == "refused:not-due"
+
+
+def test_mark_fetched_marks_the_borrowed_folder_too(staging):
+    old, own = _run(staging, RUN, fetched=False), staging / "runs" / OWN
+    own.mkdir()
+    run = SimpleNamespace(run_id=OWN, remote_output_dir=f"{staging}/runs/{RUN}/out")
+    rs.mark_fetched(_LocalCache(staging), run, lambda _m: None)
+    assert (own / rs.RUN_FETCHED).is_file() and (old / rs.RUN_FETCHED).is_file()
+
+
+def test_the_sweep_protects_every_folder_labelled_with_the_plate_being_run(staging):
+    item = rs.StorageItem("run", RUN, 1, 1, label={"run_id": RUN, "output_dir": "/u/P/out"}, fetched=True)
+    run = SimpleNamespace(run_id=OWN, cache_key=KEY, remote_output_dir="", local_output_dir=Path("/u/P/out"))
+    assert rs.plan_expired([item], 100 * DAY, 1) == [item]
+    assert rs.plan_expired([item], 100 * DAY, 1, protect=rs.protect_for_run(run, str(staging))) == []
+
+
+def test_one_sweep_removes_at_most_its_limit(staging):
+    _run(staging, RUN)
+    _run(staging, OWN)
+    cache = _LocalCache(staging, expiry_days=1)
+    listing = rs.list_storage(cache)[0]
+    removed = rs.remove_expired(cache, listing, log=lambda _m: None, limit=1)
+    assert len(removed) == 1
+    assert len([p for p in (staging / "runs").iterdir()]) == 1
+

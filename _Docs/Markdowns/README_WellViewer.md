@@ -2129,8 +2129,11 @@ their project shows as "—".
 Every deletion is checked twice, once in All-Well and again on the server at the
 moment it happens. All-Well acts only inside the `runs/` and `datasets/` folders
 of the host's staging folder. It never acts through a symbolic link, never on a
-mount point or a folder with something mounted inside it, never on a folder whose
-name is not one All-Well creates, and never on a folder another user owns. Such
+mount point or a folder with something mounted inside it, and never on a folder
+another user owns. It acts only on folders whose names have the shape All-Well
+gives them, or on run folders from older versions of All-Well that still hold
+the files All-Well writes while a run uploads (`.aw_beat`, `.aw_upload_complete`
+or `.aw_upload_alive`). Such
 folders are listed as *Not All-Well's* or *Another user's* and cannot be deleted
 or given an expiry from here. If the staging folder is set to `/` or to your home
 folder, or turns out to be a link to one of them, nothing is listed or deleted,
@@ -2157,8 +2160,8 @@ folder in use is the app staying connected.
   that plate starts over. Deleting a dataset only means the next run of that
   plate uploads it again.
 - **Keep forever** protects folders from the expiry rule, the automatic cache
-  clean-up and the clean-up of a plate's earlier attempts. **Delete…** can still
-  remove them.
+  clean-up, the clean-up of a plate's earlier attempts and a run's own
+  *Auto-delete* setting. **Delete…** can still remove them.
 - **Expire in N days** removes the selected folders automatically once that time
   has passed. Starting a new run in a folder clears that date, because the folder
   holds new work. **Use host rule** drops a folder's own setting.
@@ -2173,7 +2176,10 @@ folder in use is the app staying connected.
 
   - carries the label All-Well writes for it, so folders from older versions are
     only ever removed by you, with **Delete…**;
-  - holds results that were downloaded and verified, if it is a run folder;
+  - holds results that were downloaded and verified, with nothing written
+    there since, if it is a run folder. A run downloaded as *CSV only* leaves
+    its masks and images on the server, so it never counts as downloaded and
+    only **Delete…** removes it;
   - is not kept and is due;
   - and, if it is a dataset, has not been used in the last seven days.
 

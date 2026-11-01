@@ -26,6 +26,7 @@ from services import remote_storage as rs  # noqa: E402
 from services.remote_config import RemoteHost, load_remotes, write_remote  # noqa: E402
 
 DAY = 86400
+_CLOCK = int(time.time())
 RUN_A = "run-00000000000000aa-0000000000000011"
 RUN_B = "run-00000000000000bb-0000000000000022"
 
@@ -39,7 +40,9 @@ class _LocalCache:
 
 
 def _age(path, days):
-    t = time.time() - days * DAY
+    # One clock for the whole file: files aged a moment apart would otherwise differ
+    # by microseconds, and ``find -newer`` reads that as a write after the marker.
+    t = _CLOCK - days * DAY
     os.utime(path, (t, t))
 
 

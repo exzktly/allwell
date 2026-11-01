@@ -176,8 +176,8 @@ class RemoteStorageDialog(QDialog):
         actions.addWidget(self._delete_btn)
         actions.addSpacing(12)
         self._keep_btn = QPushButton("Keep forever", self)
-        self._keep_btn.setToolTip("The expiry rule, the cache clean-up and the earlier-attempt clean-up never "
-                                  "remove the selected folders. Delete… still can.")
+        self._keep_btn.setToolTip("The expiry rule, the cache clean-up, the earlier-attempt clean-up and a run's "
+                                  "own Auto-delete never remove the selected folders. Delete… still can.")
         self._keep_btn.clicked.connect(lambda: self._apply_expiry(rs.expiry_value(keep=True), "kept"))
         actions.addWidget(self._keep_btn)
         self._expire_btn = QPushButton("Expire in", self)
@@ -425,7 +425,10 @@ class RemoteStorageDialog(QDialog):
         if not due:
             self._status.setText("Nothing has expired.")
             return
-        if not self._confirm("Remove expired folders", self.delete_prompt(due)):
+        rule = (f"Using the rule on screen: remove folders untouched for {days} days"
+                + ("" if days == self._host.storage_expiry_days else " (not saved yet)")
+                if days else "Using only each folder's own expiry date (the host rule is off)")
+        if not self._confirm("Remove expired folders", f"{rule}.\n\n" + self.delete_prompt(due)):
             return
         lines: list[str] = []
 

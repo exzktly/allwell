@@ -30,9 +30,12 @@ layer alone stands between a bug and somebody's data:
    non-link ``runs``/``datasets``, on the **same filesystem** as its parent (a
    mount point is refused), with a physical path of exactly
    ``<staging>/<top>/<name>``. The ``rm`` itself runs from inside the checked
-   ``runs``/``datasets`` (re-checked with ``pwd -P``) on ``./<name>``, with
+   ``runs``/``datasets`` (re-checked with ``pwd -P``) on ``./<name>``: renamed
+   first to a hidden ``.aw_trash.<name>.<pid>`` (atomic, so a run starting
+   mid-removal recreates the folder afresh), then removed with
    ``--one-file-system``; a server whose ``rm`` lacks that flag refuses to
-   delete at all. Links are never listed. A dataset's stamp, label and expiry
+   delete at all. A physical staging path holding a control character is
+   refused, since the mount table cannot be matched against it. Links are never listed. A dataset's stamp, label and expiry
    are removed only as plain files in non-link bookkeeping folders. Every file
    this module writes goes through a temporary file and ``mv``, so it never
    writes through a link or a hard link.
@@ -44,7 +47,8 @@ layer alone stands between a bug and somebody's data:
 4. *Automatic removal* (the sweep and *Remove expired now*) is decided by the
    server, not by the listing it started from: the folder must carry an
    All-Well label naming that very folder, a run folder must carry the marker
-   written once its results were downloaded and verified (``.aw_fetched``),
+   written once its results were downloaded and verified (``.aw_fetched``, only
+   after a full fetch) with nothing but bookkeeping written since,
    its expiry is re-read and re-evaluated against the server's own clock, and
    a dataset a run used within :data:`~services.remote_cache_gc.IN_USE_WINDOW_S`
    is kept.
@@ -62,8 +66,9 @@ it other than this module's own files was written in the last
 stamped or written in the last :data:`RECENT_WRITE_MIN` minutes, when a run in
 use names it in its label, or when any run in use carries no label to say
 which dataset it reads. "Now" is the staging filesystem's own clock (the mtime
-of a probe file it touches), so a skewed login-node clock cannot make a fresh
-heartbeat look stale. An mtime that cannot be read is never treated as epoch
+of a temporary probe file it creates and removes), so a skewed login-node clock
+cannot make a fresh heartbeat look stale. A check that cannot run — ``find``
+failing, ``squeue`` failing, an unreadable sidecar — answers *in use*. An mtime that cannot be read is never treated as epoch
 zero: such a folder is not due.
 
 **Labels.** Each run writes a small JSON label the first time it uses a
@@ -126,7 +131,7 @@ RUN_BORROWED_BY = ".aw_borrowed_by"
 #: named where the cache GC, which removes them with their dataset, defines them.
 DATASET_LABEL_DIR = LABEL_DIR
 DATASET_EXPIRY_DIR = USER_EXPIRY_DIR
-#: The probe file, in the staging folder, whose mtime is the filesystem's "now".
+#: The prefix of the temporary probe file, in the staging folder, whose mtime is the filesystem's "now".
 NOW_PROBE = ".aw_now"
 #: The expiry value that means "never remove this folder automatically".
 KEEP = "keep"
@@ -233,11 +238,18 @@ def _preamble(staging_dir: str, *, missing_ok: bool = False) -> str:
         "aw_home=$(cd ~ 2>/dev/null && pwd -P) || aw_home=/\n"
         "if [ \"$aw_root\" = / ] || [ \"$aw_root\" = \"$aw_home\" ]; then\n"
         f"  {clock}printf 'root\\trefused: the staging folder is / or the home folder (%s)\\n' \"$aw_root\"; exit 0; fi\n"
+        # A control character (a newline above all) in the physical path cannot be
+        # matched against the mount table, which escapes it; refuse rather than guess.
+        "case \"$aw_root\" in *[[:cntrl:]]*)\n"
+        f"  {clock}printf 'root\\trefused: the staging folder path contains a control character\\n'; exit 0;; esac\n"
         # The staging filesystem's clock, not the login node's: an NFS server's
-        # mtimes are its own, and a skewed client clock made fresh look stale.
+        # mtimes are its own, and a skewed client clock made fresh look stale. The
+        # probe is a fresh temporary file, so the write can never go through a link.
         "now=$(date +%s)\n"
-        f"if [ ! -L {NOW_PROBE} ] && {{ : > {NOW_PROBE}; }} 2>/dev/null; then "
-        f"t=$(_aw_mtime {NOW_PROBE}) && [ -n \"$t\" ] && now=$t; fi\n"
+        f"if aw_p=$(mktemp ./{NOW_PROBE}.XXXXXX 2>/dev/null); then t=$(_aw_mtime \"$aw_p\"); rm -f -- \"$aw_p\"; "
+        "[ -n \"$t\" ] && now=$t; fi\n"
+        # Where squeue's complaints go, read apart from its answer (see _aw_run_self_active).
+        "aw_err=$(mktemp 2>/dev/null) || aw_err=''; [ -z \"$aw_err\" ] || trap 'rm -f -- \"$aw_err\"' EXIT\n"
         + _guard_functions() + _liveness_functions()
     )
 
@@ -278,7 +290,7 @@ def _guard_functions() -> str:
         "  [ -f \"$l\" ] && [ ! -L \"$l\" ] && "
         "grep -qE \"\\\"$k\\\"[[:space:]]*:[[:space:]]*\\\"${2//./\\\\.}\\\"\" \"$l\"; }\n"
         "_aw_plain_dir() { [ -d \"$1\" ] && [ ! -L \"$1\" ]; }\n"
-        "_aw_put() { local dir t; dir=$(dirname -- \"$1\"); _aw_plain_dir \"$dir\" && [ ! -L \"$1\" ] || return 1\n"
+        "_aw_put() { local dir t; dir=$(dirname -- \"$1\"); _aw_plain_dir \"$dir\" && [ ! -L \"$1\" ] && [ ! -d \"$1\" ] || return 1\n"
         "  t=$(mktemp \"$dir/.aw_tmp.XXXXXX\") || return 1\n"
         "  if printf '%s\\n' \"$2\" > \"$t\" && mv -f -- \"$t\" \"$1\"; then return 0; fi; rm -f -- \"$t\"; return 1; }\n"
         "_aw_unput() { local dir; dir=$(dirname -- \"$1\"); [ -e \"$1\" ] || [ -L \"$1\" ] || return 0\n"
@@ -297,8 +309,15 @@ def _liveness_functions() -> str:
     return (
         "_aw_newest() { local m=0 p t; for p in \"$@\"; do [ -e \"$p\" ] || continue\n"
         "  t=$(_aw_mtime \"$p\") && [ -n \"$t\" ] && [ \"$t\" -gt \"$m\" ] && m=$t; done; echo \"$m\"; }\n"
-        f"_aw_recent() {{ [ -n \"$(find \"$1\" -mindepth 1 -type f -mmin -{RECENT_WRITE_MIN} {not_own} "
-        "-print -quit 2>/dev/null)\" ]; }\n"
+        # A find that fails (no -quit or -mmin, an unreadable folder) answers *in use*.
+        f"_aw_recent() {{ local o; o=$(find \"$1\" -xdev -mindepth 1 -type f -mmin -{RECENT_WRITE_MIN} {not_own} "
+        "-print -quit 2>/dev/null) || return 0; [ -n \"$o\" ]; }\n"
+        # Downloaded, and nothing but bookkeeping written since: a run that re-used the
+        # folder without clearing the marker (an older build, a failed label call)
+        # leaves newer files, so the marker no longer vouches for them.
+        f"_aw_fetched_current() {{ local o; [ -f \"$1/{RUN_FETCHED}\" ] && [ ! -L \"$1/{RUN_FETCHED}\" ] || return 1\n"
+        f"  o=$(find \"$1\" -xdev -mindepth 1 -type f -newer \"$1/{RUN_FETCHED}\" ! -name '.aw_*' ! -name 'run.pid*' "
+        f"! -path '*/{HEARTBEAT_DIR}/*' -print -quit 2>/dev/null) || return 1; [ -z \"$o\" ]; }}\n"
         "_aw_run_self_active() { local d=$1 h t z jid o r st p\n"
         f"  for h in \"$d/{HEARTBEAT_DIR}/alive\" \"$d/{LEGACY_UPLOAD_HEARTBEAT}\"; do\n"
         "    [ -e \"$h\" ] || continue; t=$(_aw_mtime \"$h\"); [ -n \"$t\" ] || return 0\n"
@@ -307,10 +326,12 @@ def _liveness_functions() -> str:
         "  if [ -e \"$d/run.pid.slurm\" ]; then\n"
         "    jid=$(head -c 64 \"$d/run.pid.slurm\" 2>/dev/null | tr -cd '0-9.'); [ -n \"$jid\" ] || return 0\n"
         "    command -v squeue >/dev/null 2>&1 || return 0\n"
-        "    o=$(" + squeue_listing("jid") + " 2>&1); r=$?\n"
+        # The answer from stdout only, so a warning squeue prints on every call cannot
+        # read as a job state; its complaints are read only to recognise a finished job.
+        "    o=$(" + squeue_listing("jid") + " 2>\"${aw_err:-/dev/null}\"); r=$?\n"
         "    if [ $r -eq 0 ]; then st=$(printf '%s\\n' \"$o\" | head -n 1)\n"
         f"      case \"$st\" in ''|{_ENDED_STATES}) ;; *) return 0;; esac\n"
-        "    else printf '%s' \"$o\" | grep -qi 'invalid job id' || return 0; fi\n"
+        "    else [ -n \"$aw_err\" ] && grep -qi 'invalid job id' \"$aw_err\" || return 0; fi\n"
         "  fi\n"
         "  if [ -s \"$d/run.pid\" ]; then p=$(head -c 32 \"$d/run.pid\" | tr -cd '0-9')\n"
         "    if [ -n \"$p\" ]; then kill -0 \"$p\" 2>/dev/null && return 0; ps -p \"$p\" >/dev/null 2>&1 && return 0; fi\n"
@@ -318,7 +339,7 @@ def _liveness_functions() -> str:
         "  _aw_recent \"$d\"; }\n"
         "_aw_run_active() { local b o; _aw_run_self_active \"$1\" && return 0\n"
         f"  b=\"$1/{RUN_BORROWED_BY}\"; [ -f \"$b\" ] && [ ! -L \"$b\" ] || return 1\n"
-        "  while IFS= read -r o; do\n"
+        "  while IFS= read -r o || [ -n \"$o\" ]; do\n"
         f"    [[ $o =~ {_RUN_NAME_RE} ]] && [ -d \"runs/$o\" ] && [ ! -L \"runs/$o\" ] && "
         "_aw_run_self_active \"runs/$o\" && return 0\n"
         "  done < \"$b\"; return 1; }\n"
@@ -498,8 +519,9 @@ def listing_script(staging_dir: str, *, detail: bool) -> str:
     are never listed. A staging folder the server refuses lists nothing and
     says why (``root`` line).
     """
-    size = ('sz=$(du -sb -- "$d" 2>/dev/null | cut -f1); [ -n "$sz" ] || sz=-'
+    size = ('sz=$(du -sbx -- "$d" 2>/dev/null | cut -f1); [ -n "$sz" ] || sz=-'
             if detail else "sz=-")
+    fetched = ('f=0; _aw_fetched_current "$d" && f=1' if detail else f'f=0; [ -f "$d/{RUN_FETCHED}" ] && f=1')
     run_act = ('if _aw_run_active "$d"; then a=1; else a=0; fi' if detail else "a=-")
     ds_act = ('if _aw_dataset_active "$d" "$stamp" "$n"; then a=1; else a=0; fi' if detail else "a=-")
     emit = ("if _aw_ours \"$top\" \"$n\"; then o=1; else o=0; fi; if _aw_mine \"$top\" \"$n\"; then m=1; else m=0; fi\n"
@@ -516,7 +538,7 @@ def listing_script(staging_dir: str, *, detail: bool) -> str:
         + loop.format(top="runs")
         + "  kind=run\n"
         f"  {size}; {run_act}\n"
-        f"  f=0; [ -f \"$d/{RUN_FETCHED}\" ] && f=1\n"
+        f"  {fetched}\n"
         f"  ef=\"$d/{RUN_EXPIRY}\"; lf=\"$d/{RUN_LABEL}\"\n"
         f"  {read_exp}  {read_lab}  {emit}"
         "done\n"
@@ -705,13 +727,25 @@ def delete_script(staging_dir: str, items: Iterable[StorageItem], *, automatic: 
     directly inside the staging folder on the same filesystem, All-Well's, yours,
     and not in use at that moment. *automatic* (the sweep, *Remove expired now*)
     also requires its label to name it, a run folder's ``.aw_fetched``, and that
-    it is due by its own expiry or *host_days*. The ``rm`` runs from inside the
-    re-checked ``runs``/``datasets`` with ``--one-file-system``. A dataset's
-    stamp, label and expiry — plain files in non-link folders — go with it.
+    it is due by its own expiry or *host_days*. The removal runs from inside the
+    re-checked ``runs``/``datasets``: the folder is first renamed to a hidden
+    ``.aw_trash.<name>.<pid>`` — atomic, so a run starting while a large folder is
+    being removed recreates it afresh rather than having its new files deleted —
+    and the trash is then removed with ``--one-file-system``. Trash an interrupted
+    deletion left behind is removed at the start of the next deletion script, under
+    the same checks. A dataset's stamp, label and expiry — plain files in non-link
+    folders — go with it. A folder already absent is ``gone:absent``.
     """
     lines = [_preamble(staging_dir).rstrip("\n"),
              # Refuse to delete at all where rm cannot be kept on one filesystem.
-             "aw_onefs=1; rm -rf --one-file-system -- ./.aw_rm_probe_absent 2>/dev/null || aw_onefs=0"]
+             "aw_onefs=1; rm -rf --one-file-system -- ./.aw_rm_probe_absent 2>/dev/null || aw_onefs=0",
+             # Finish what an interrupted deletion started: its trash was already chosen for removal.
+             "if [ $aw_onefs = 1 ]; then for aw_t in runs/.aw_trash.* datasets/.aw_trash.*; do\n"
+             "  [ -d \"$aw_t\" ] && [ ! -L \"$aw_t\" ] && [ -O \"$aw_t\" ] || continue\n"
+             "  aw_k=${aw_t%%/*}; aw_b=${aw_t#*/}; _aw_plain_dir \"$aw_k\" || continue\n"
+             "  [ \"$(_aw_dev \"$aw_t\")\" = \"$(_aw_dev \"$aw_k\")\" ] && ! _aw_mount under \"$aw_t\" || continue\n"
+             "  ( cd -- \"$aw_k\" && [ \"$(pwd -P)\" = \"$aw_root/$aw_k\" ] && rm -rf --one-file-system -- \"./$aw_b\" ) 2>/dev/null\n"
+             "done; fi"]
     for item in _checked(items):
         top, n = _TOP[item.kind], item.name
         nq, d = _q(n), _q(f"{top}/{n}")
@@ -720,7 +754,7 @@ def delete_script(staging_dir: str, items: Iterable[StorageItem], *, automatic: 
         if automatic:
             lines.append(_due_check(top, n, host_days).rstrip("\n"))
             auto = (f"elif ! _aw_labelled {top} {nq}; then printf 'refused:unlabelled\\t{tag}\\n'; "
-                    + (f"elif [ ! -f runs/{nq}/{RUN_FETCHED} ]; then printf 'refused:not-downloaded\\t{tag}\\n'; "
+                    + (f"elif ! _aw_fetched_current runs/{nq}; then printf 'refused:not-downloaded\\t{tag}\\n'; "
                        if item.kind == "run" else "")
                     + f"elif ! _aw_due; then printf 'refused:not-due\\t{tag}\\n'; ")
         if item.kind == "run":
@@ -733,10 +767,13 @@ def delete_script(staging_dir: str, items: Iterable[StorageItem], *, automatic: 
                 for folder, f in ((f"datasets/{IN_USE_STAMP_DIR}", stamp),
                                   (f"datasets/{DATASET_LABEL_DIR}", f"datasets/{DATASET_LABEL_DIR}/{n}.json"),
                                   (f"datasets/{DATASET_EXPIRY_DIR}", f"datasets/{DATASET_EXPIRY_DIR}/{n}")))
+        trash = _q(f".aw_trash.{n}") + ".$$"
+        # 0 removed; 2 renamed but not wholly removed (the trash is finished next time); else nothing moved.
         remove = (f"( cd -- {top} && [ \"$(pwd -P)\" = \"$aw_root/{top}\" ] && [ ! -L ./{nq} ] "
-                  f"&& rm -rf --one-file-system -- ./{nq} ) 2>/dev/null")
+                  f"&& [ ! -e ./{trash} ] && mv -- ./{nq} ./{trash} "
+                  f"&& {{ rm -rf --one-file-system -- ./{trash} || exit 2; }} ) 2>/dev/null")
         lines.append(
-            f"if [ ! -e {d} ] && [ ! -L {d} ]; then printf 'gone\\t{tag}\\n'; "
+            f"if [ ! -e {d} ] && [ ! -L {d} ]; then printf 'gone:absent\\t{tag}\\n'; "
             f"elif ! _aw_inside {top} {nq}; then printf 'refused:outside\\t{tag}\\n'; "
             f"elif ! _aw_ours {top} {nq}; then printf 'refused:not-all-well\\t{tag}\\n'; "
             f"elif ! _aw_mine {top} {nq}; then printf 'refused:not-yours\\t{tag}\\n'; "
@@ -744,8 +781,9 @@ def delete_script(staging_dir: str, items: Iterable[StorageItem], *, automatic: 
             f"{auto}"
             f"elif {busy}; then printf 'busy\\t{tag}\\n'; "
             f"elif [ $aw_onefs = 0 ]; then printf 'refused:rm-cannot-stay-on-one-filesystem\\t{tag}\\n'; "
-            f"elif {remove}; then {extra}printf 'gone\\t{tag}\\n'; "
-            f"else printf 'fail\\t{tag}\\n'; fi")
+            f"else {remove}; aw_r=$?; if [ $aw_r = 0 ]; then {extra}printf 'gone\\t{tag}\\n'; "
+            f"elif [ $aw_r = 2 ]; then printf 'fail:partly-removed\\t{tag}\\n'; "
+            f"else printf 'fail\\t{tag}\\n'; fi; fi")
     return "\n".join(lines) + "\nexit 0\n"
 
 
@@ -823,7 +861,9 @@ def remove_expired(cache, listing: Listing, *, log: Callable[[str], None], host_
     for item in due:
         outcome = outcomes.get((item.kind, item.name), "unknown")
         status = status_of(outcome)
-        if status == "gone":
+        if outcome == "gone:absent":
+            log(f"[remote] storage: expired {describe(item)} was already gone\n")
+        elif status == "gone":
             removed.append(item)
             idle = max(0, listing.now - item.last_used) // _DAY
             log(f"[remote] storage: removed expired {describe(item)}, untouched {idle} day(s)\n")
@@ -905,6 +945,32 @@ def label_and_sweep(cache, run, log: Callable[[str], None], *, background: bool 
         threading.Thread(target=sweep, name="allwell-storage-sweep", daemon=True).start()
     else:
         sweep()
+
+
+def is_kept(cache, kind: str, name: str) -> bool:
+    """Whether the folder is marked *Keep forever* — ``True`` also when that cannot
+    be read, so a caller that is about to delete it keeps it instead.
+
+    For the paths that delete without going through this module (a run's own
+    Auto-delete, ``cleanup_mode=all``): they honour Keep through this.
+    """
+    item = StorageItem(kind, name, 0, 0)
+    try:
+        _checked([item], require_actionable=False)
+        script = (_preamble(cache.host.remote_staging_dir)
+                  + f"e=''; f={_q(_expiry_file(item))}; [ -f \"$f\" ] && [ ! -L \"$f\" ] && e=$(head -c 8 \"$f\")\n"
+                  "printf 'expiry\\t%s\\n' \"$e\"\n")
+    except ValueError:
+        return True
+    try:
+        result = cache._ssh_script(script, check=False, timeout_s=RUN_START_TIMEOUT_S)
+    except Exception:
+        swallowed(f"reading whether {kind} {name} is kept")
+        return True
+    lines = [ln for ln in (result.stdout or "").splitlines() if ln.startswith("expiry\t")]
+    if result.returncode != 0 or not lines:
+        return True
+    return lines[-1].split("\t", 1)[1].strip() == KEEP
 
 
 def mark_fetched(cache, run, log: Callable[[str], None]) -> None:

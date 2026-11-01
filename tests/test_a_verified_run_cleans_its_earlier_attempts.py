@@ -51,7 +51,7 @@ def _remote(tmp_path, monkeypatch, *, squeue_lists: str | None = None):
         done = subprocess.run(["bash", "-s"], input=script, capture_output=True, text=True, timeout=20, env=env)
         return subprocess.CompletedProcess(["bash"], done.returncode, done.stdout, done.stderr)
 
-    monkeypatch.setattr(DatasetCache, "_ssh_script", lambda self, script, *, check: run(script))
+    monkeypatch.setattr(DatasetCache, "_ssh_script", lambda self, script, *, check, **k: run(script))
     monkeypatch.setattr(DatasetCache, "_ssh_run", lambda self, argv, *, check, **k: run(_remote_join(argv)))
     monkeypatch.setattr(FetchedOutputVerifier, "verify", lambda self, ok, *, log, **k: FetchVerification(passed=True))
     monkeypatch.setattr(J, "index_path", lambda: tmp_path / "idx.json")

@@ -26,7 +26,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from services import remote_fetch, remote_storage
+from services import remote_fetch, remote_reuse, remote_storage
+from services.remote_run_id import remote_run_dir
 from services.remote_config import RemoteHost
 from services.remote_runner import (
     LocalInputMode,
@@ -110,6 +111,7 @@ def test_verification_retries_a_missing_well_and_passes_once_it_lands(
     monkeypatch.setattr(FetchedOutputVerifier, "_retry_missing_wells", fake_retry)
     marked: list[str] = []
     monkeypatch.setattr(remote_storage, "mark_fetched", lambda cache, r, log: marked.append(r.run_id))
+    monkeypatch.setattr(remote_storage, "is_kept", lambda cache, kind, name: False)
 
     ok = runner.verify_and_cleanup(ok=True, cleanup_mode="run", log_fn=lambda _m: None)
 
@@ -119,18 +121,21 @@ def test_verification_retries_a_missing_well_and_passes_once_it_lands(
     assert marked == [run.run_id], "a verified run is marked downloaded, so the storage expiry may consider it"
 
 
-@pytest.mark.parametrize("passed, suspended, dry_run, expected", [
-    (True, False, False, True),
-    (False, False, False, False),       # verification failed: the results are not home
-    (True, True, False, False),         # suspended: its folder holds the work its resume continues
-    (True, False, True, False),         # a dry run changes nothing on the remote
+@pytest.mark.parametrize("passed, suspended, dry_run, csv_only, expected", [
+    (True, False, False, False, True),
+    (False, False, False, False, False),    # verification failed: the results are not home
+    (True, True, False, False, False),      # suspended: its folder holds the work its resume continues
+    (True, False, True, False, False),      # a dry run changes nothing on the remote
+    (True, False, False, True, False),      # CSV only: the masks it computed stay on the remote
 ])
 def test_only_a_verified_finished_run_is_marked_downloaded(host, tmp_path, monkeypatch,
-                                                          passed, suspended, dry_run, expected):
+                                                          passed, suspended, dry_run, csv_only, expected):
     """``remote_storage`` removes a run folder automatically only once it carries
     the marker, so writing it early would let the sweep take unfetched results."""
     runner = RemoteRunner(host)
     runner._run = _run(tmp_path)
+    if csv_only:
+        runner._run.output_filter = OutputFilter.CSV_ONLY
     monkeypatch.setattr(FetchedOutputVerifier, "verify",
                         lambda self, ok, *, log, suspended=False: SimpleNamespace(passed=passed))
     marked: list[str] = []
@@ -275,3 +280,21 @@ def test_a_fetched_gz_is_not_shadowed_by_the_previous_runs_plain_csv(host, tmp_p
     assert found == out / "plate_A01.csv.gz"
     with open_csv_text(found) as fh:
         assert fh.read().splitlines()[1] == "A01,NEW"
+
+
+@pytest.mark.parametrize("kept", [True, False])
+def test_auto_delete_honours_keep_forever(host, tmp_path, monkeypatch, kept):
+    """A plate re-run in a kept folder, with Auto-delete on, must not take the folder."""
+    runner = RemoteRunner(host)
+    runner._run = _run(tmp_path)
+    monkeypatch.setattr(FetchedOutputVerifier, "verify",
+                        lambda self, ok, *, log, suspended=False: SimpleNamespace(passed=True))
+    monkeypatch.setattr(remote_storage, "mark_fetched", lambda cache, r, log: None)
+    monkeypatch.setattr(remote_storage, "is_kept", lambda cache, kind, name: kept)
+    removed: list[str] = []
+    monkeypatch.setattr(RemoteRunner, "_remove_remote",
+                        lambda self, path, label, log: removed.append(path) or True)
+    monkeypatch.setattr(remote_reuse, "clean_earlier_attempts", lambda runner, *, log: None)
+    runner.verify_and_cleanup(ok=True, cleanup_mode="all", log_fn=lambda _m: None)
+    assert removed == ([] if kept else [remote_run_dir(host, runner._run.run_id),
+                                        runner._cache.remote_dataset_dir(runner._run.cache_key)])

@@ -803,8 +803,9 @@ class RemoteRunner:
             return False
         # Its results are home and verified: the folders it used may now be
         # removed by the storage expiry (``remote_storage``), never before. A
-        # suspended run's folder still holds the work its resume continues.
-        if not suspended and not dry_run:
+        # suspended run's folder still holds the work its resume continues, and a
+        # CSV-only fetch leaves the masks it computed on the remote alone.
+        if not suspended and not dry_run and run.output_filter == OutputFilter.FULL:
             try:
                 _storage.mark_fetched(self._cache, run, log)
             except Exception:
@@ -831,6 +832,9 @@ class RemoteRunner:
         # the branch that decides it, so a dry run never reads "removed" for what it left in place.
         if dry_run:
             self._log_would_delete(own_dir, label=f"run dir {run.run_id}", log=log)
+        elif _storage.is_kept(self._cache, "run", run.run_id):
+            log(f"[remote] kept {own_dir}: it is marked Keep forever in Manage Remotes → Storage "
+                f"(or that could not be checked), so Auto-delete leaves it.\n")
         elif self._remove_remote(own_dir, f"this run's own dir {own_dir}" if run.reattached
                                  else f"run dir {run.run_id}", log):
             _reuse.clean_earlier_attempts(self, log=log)
@@ -842,6 +846,9 @@ class RemoteRunner:
                     label=f"dataset cache {run.cache_key[:8]}",
                     log=log,
                 )
+            elif _storage.is_kept(self._cache, "dataset", run.cache_key):
+                log(f"[remote] kept dataset cache {run.cache_key[:8]}: it is marked Keep forever in "
+                    f"Manage Remotes → Storage (or that could not be checked).\n")
             else:
                 self._remove_remote(cache_dir, f"dataset cache {run.cache_key[:8]}", log)
         if dry_run:

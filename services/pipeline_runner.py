@@ -54,6 +54,7 @@ from pipeline.well_skip import _canonical_force_wells, skip_wells_scope
 from services.input_resolution_service import iter_well_tokens
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
 from services.remote_config import RemoteHost
+from services.remote_batch_auto import RESOLVED_KEY, resolve_batch_size
 from services.remote_hold import GrantedRun
 from services.remote_runner import (
     OutputFilter,
@@ -514,9 +515,11 @@ _STATE_PATTERNS: tuple[re.Pattern, ...] = (
 
 
 def _remote_batch_size(opts: dict) -> int:
-    """The run's ``remote_batch_size``: ``0`` (single-shot) when unset or unreadable."""
+    """The batch size the run uses: the one ``start`` resolved (``services.remote_batch_auto`` — a Batch size of 0 is
+    one well per worker), else the run's ``remote_batch_size``; ``0`` (single-shot) when unset or unreadable. Every
+    reader of the batch size asks here, so none can see the setting where the run uses the resolved size."""
     try:
-        return max(0, int(opts.get("remote_batch_size", 0) or 0))
+        return max(0, int(opts.get(RESOLVED_KEY, opts.get("remote_batch_size", 0)) or 0))
     except (ValueError, TypeError):
         return 0
 
@@ -1067,6 +1070,8 @@ class PipelineRunner:
         # request seen (`pipeline.suspend.LOG_MARKER`), slurmstepd's
         # cancellation, the driver's time budget, ssh's reason for a drop.
         self._evidence = RunEvidence()
+        # What the run log says about the batch size a remote run resolved its Batch size of 0 to (`start`).
+        self._batch_note = ""
         # Whether this run asked to suspend. `_suspend_requested` cannot say:
         # a remote ask whose ssh failed clears it again. Without this a suspend
         # marker counted as the user's whoever had sent the signal (D1).
@@ -1333,6 +1338,13 @@ class PipelineRunner:
         self._remote_runner: RemoteRunner | None = (
             RemoteRunner(remote) if remote is not None else None
         )
+        # A remote run's Batch size of 0 is one well per worker, resolved here — before the journal names the run's
+        # mode — into a copy of the options, beside the setting, which stays as typed (services.remote_batch_auto).
+        self._batch_note = ""
+        if remote is not None:
+            opts = dict(opts)
+            with swallow("resolving the remote batch size"):
+                opts[RESOLVED_KEY], self._batch_note = resolve_batch_size(opts, remote)
         self._output_filter = output_filter
         self._cleanup_remote = cleanup_remote
         self._dry_run_cleanup = dry_run_cleanup
@@ -2035,11 +2047,7 @@ class PipelineRunner:
             # Read the batch size the same way ``_run_pipeline_remote`` does —
             # off ``opts``, not off the host — so the journal cannot name a
             # mode the run did not take.
-            try:
-                batched = int(opts.get("remote_batch_size", 0) or 0) > 0
-            except (ValueError, TypeError):
-                batched = False
-            mode = "remote-batched" if batched else "remote"
+            mode = "remote-batched" if _remote_batch_size(opts) > 0 else "remote"
         self._provenance_run = run_provenance.begin_run(
             output_dir, mode=mode, input_dir=input_dir, argv=argv, opts=opts)
         try:
@@ -2236,7 +2244,7 @@ class PipelineRunner:
         (``remote_process.run_local_auto_threshold``); this does the same for a
         single-shot run with wells left out (``up_to_date_wells``), an
         incremental split, or a ``--only_wells`` subset. ``None`` too when the user turned the pass off."""
-        if int(opts.get("remote_batch_size", 0) or 0) > 0 or "--no_auto_threshold" in args:
+        if _remote_batch_size(opts) > 0 or "--no_auto_threshold" in args:
             return None
         # A --only_wells subset is part of a plate too, whether or not any well of it is finished here (staging
         # narrows up_to_date_wells to the named wells, so that test alone missed it).
@@ -2385,7 +2393,7 @@ class PipelineRunner:
         """
         if opts.get("force", False):
             return False
-        if int(opts.get("remote_batch_size", 0) or 0) > 0:
+        if _remote_batch_size(opts) > 0:
             # A batched run takes what an earlier attempt finished as part of the run (remote_batch_resume): the
             # Fetcher downloads those wells while the batches upload and compute, instead of every one of them being
             # pulled here, one after another, before anything is staged or the scheduler is asked for a node — and
@@ -2459,6 +2467,8 @@ class PipelineRunner:
         awake.start()
         try:
             self._enqueue(("line", f"[remote] target: {self._remote.name}\n"))
+            if self._batch_note:
+                self._enqueue(("line", self._batch_note))
             incremental = self._recover_remote_outputs(output_dir, args, opts)
             if incremental is None:
                 return

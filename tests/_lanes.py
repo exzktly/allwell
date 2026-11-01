@@ -266,6 +266,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_batched_subset_run_finds_its_wells.py": "A remote run split into batches can be limited to named wells",
     "test_a_failed_remote_listing_keeps_the_data.py": "A remote command that failed is never read as nothing there: the fetch keeps the well, verify fails closed",
     "test_a_failing_heartbeat_is_reported.py": "A heartbeat that is not reaching the host says so, before the host acts on the silence",
+    "test_batch_size_follows_the_workers.py": "A remote Batch size of 0 is one well per worker, counted before the run the way the node counts it",
     "test_a_slow_heartbeat_is_measured_and_tolerated.py": "A heartbeat on a slow shared filesystem is measured, given time to land, and kept out of the busy folder",
     "test_a_run_stream_has_its_own_connection.py": "A run's output stream rides a connection of its own, never the shared master",
     "test_a_forced_well_keeps_the_plate_s_reuse.py": "Forcing one well redoes it; the run's address and re-attach stay the plate's",

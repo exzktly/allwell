@@ -55,6 +55,7 @@ from services.input_resolution_service import iter_well_tokens
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
 from services.remote_config import RemoteHost, ssh_binary_lines
 from services.remote_batch_auto import RESOLVED_KEY, resolve_batch_size
+from services.remote_batch_step import AHEAD_UP_MARK
 from services.remote_hold import GrantedRun
 from services.remote_runner import (
     OutputFilter,
@@ -401,7 +402,7 @@ _RE_JOB_UNKNOWN = re.compile(re.escape(JOB_UNKNOWN_PREFIX.strip()))
 # is only "downloaded" once BOTH have landed; the ``✓ materialised`` line fires
 # even when the CSV pull failed (it's retried later), so it must NOT be the
 # download trigger on its own.
-_RE_REMOTE_UP_WELL = re.compile(r"\[remote\] ↑.*?([A-Ha-h]\d{1,2})\.zip")
+_RE_REMOTE_UP_WELL = re.compile(r"\[remote\] [↑⇡].*?([A-Ha-h]\d{1,2})\.zip")
 _RE_FETCH_ZIP = re.compile(r"\[remote\] ↓ ([A-Ha-h]\d{1,2}): [\d.]+ MB zip")
 _RE_FETCH_CSV = re.compile(r"\[remote\] ↓ ([A-Ha-h]\d{1,2}): \d+ CSV file")
 # Auto-threshold pass completes each well: "completed well 3/12 (A01_out.zip)".
@@ -743,6 +744,12 @@ class ProgressTracker:
             events.append(("xfer_end", "up"))
         if "[remote] ↑" in line:
             events.append(("stage", "upload"))
+            mu = _RE_REMOTE_UP_WELL.search(line)
+            if mu:
+                events.append(("well_stage", (mu.group(1), "upload")))
+        elif AHEAD_UP_MARK in line:
+            # The next batch, uploading while this one computes (remote_batch_step): the well's own dial moves; the
+            # run's stage, headline and transfer label stay on the batch that is running.
             mu = _RE_REMOTE_UP_WELL.search(line)
             if mu:
                 events.append(("well_stage", (mu.group(1), "upload")))

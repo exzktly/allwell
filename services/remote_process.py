@@ -603,7 +603,8 @@ class _BatchedRemoteProcess:
             return False
         self._log(
             f"[remote] suspended — batch {batch_no}/{n_batches} and any after "
-            f"it were not sent; resume to process them\n")
+            f"it were not run (batch {batch_no} may already be on the remote, "
+            f"where a resume takes it up); resume to process them\n")
         return True
 
     # Internals ────────────────────────────────────────────────────────
@@ -1142,7 +1143,8 @@ class _BatchedRemoteProcess:
             self._log(
                 f"[remote] batched mode: {len(all_zips)} well(s) in "
                 f"{n_batches} batch(es) of up to {self._batch_size} "
-                f"(peak remote disk ≈ {self._batch_size + len(blanks)} "
+                # Two batches at the peak: the one running and the next, uploading meanwhile (remote_batch_step).
+                f"(peak remote disk ≈ {min(2, n_batches) * self._batch_size + len(blanks)} "
                 f"well-input)\n"
             )
 

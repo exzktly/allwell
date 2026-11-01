@@ -40,8 +40,9 @@ def _wait_for(cond, timeout=10.0):
 def test_the_next_batch_goes_up_before_the_one_running_has_finished(tmp_path, monkeypatch):
     sent: list[str] = []
 
-    def upload(zips, dest, **kw):
+    def upload(zips, dest, *, log_fn=None, **kw):
         sent.append(dest.rsplit("/", 1)[-1])
+        log_fn(f"[remote] ↑ (1) {zips[0].name}\n")           # what upload_subset says per archive
         return (len(zips) * 1024 * 1024, 0.0, 0)
 
     proc, p, ordering, worker = _start(tmp_path, monkeypatch, ["A01", "A02", "A03"], upload)
@@ -58,6 +59,9 @@ def test_the_next_batch_goes_up_before_the_one_running_has_finished(tmp_path, mo
     log = "".join(p._logged)
     assert "batch 2/3: uploading 1 well-zip(s) while batch 1 runs" in log
     assert "batch 3/3: uploading 1 well-zip(s) while batch 2 runs" in log
+    # Batch 1's upload is the run's; the ones sent ahead are marked so the progress view leaves the headline alone.
+    assert "[remote] ↑ (1) A01.zip" in log
+    assert "[remote] ⇡ (1) A02.zip" in log and "[remote] ⇡ (1) A03.zip" in log
 
 
 def test_an_upload_sent_ahead_that_fails_is_reported_after_the_batch_running_is_counted(tmp_path, monkeypatch):
@@ -121,3 +125,50 @@ def test_a_run_that_ends_without_the_next_batch_stops_its_upload(tmp_path, monke
     proc.finish()
     assert ended.is_set(), "the run ended and left batch 2 uploading"
     assert p._upload_ahead is None
+
+
+def test_a_suspend_during_a_batch_ends_the_upload_sent_ahead(tmp_path, monkeypatch):
+    """Batch 2 is uploading ahead while batch 1 runs; Suspend lands. The upload must end then — before batch 1 has
+    finished — not run to its end for a batch the loop will never send. Wrong implementation: an upload ahead that
+    watches only Stop (or nothing), which a stub returning at once could not tell apart."""
+    waiting = threading.Event()
+    ended = threading.Event()
+
+    def upload(zips, dest, *, stop_event=None, **kw):
+        if dest.endswith("/b1"):
+            return (0, 0.0, 0)
+        waiting.set()
+        stopped = stop_event.wait(timeout=30)
+        ended.set()
+        return (0, 0.0, 20 if stopped else 0)
+
+    proc, p, ordering, worker = _start(tmp_path, monkeypatch, ["A01", "A02", "A03"], upload)
+    assert waiting.wait(10), "batch 2 was not sent ahead"
+    p.note_suspend_requested()
+    assert ended.wait(5), "the upload sent ahead ran on after Suspend, with batch 1 still running"
+    proc._done = True
+    proc.batch_finished(p, 1)
+    proc.say("[remote] batch-driver: suspended — no further batches\n")
+    proc.finish()
+    worker.join(timeout=20)
+    assert not worker.is_alive() and p._returncode == 0
+    assert len([o for o in ordering if "ready" in o]) == 1, "a batch after the suspend was handed off"
+
+
+def test_the_progress_view_does_not_read_an_upload_sent_ahead_as_the_run_uploading():
+    """While batch 1 computes, batch 2's upload lines must move batch 2's wells' dials and nothing else: not the
+    run's stage (the headline would read "Uploading k / N wells"), not the transfer label, not the status line."""
+    from services.pipeline_runner import ProgressTracker
+    from services.remote_batch_step import AHEAD_UP_MARK, _ahead_log
+    from services.remote_wire import TRANSIENT_PREFIX
+
+    said: list[str] = []
+    log = _ahead_log(said.append)
+    log("[remote] ↑ (1) A03.zip\n")
+    log(f"{TRANSIENT_PREFIX}A03.zip 45% 12MB/s\n")
+    assert said == [f"{AHEAD_UP_MARK} (1) A03.zip\n"], "rsync's live progress reached the status line"
+    events = ProgressTracker().parse(said[0])
+    assert ("well_stage", ("A03", "upload")) in events
+    assert not [e for e in events if e[0] in ("stage", "status", "remote_xfer")], events
+    plain = ProgressTracker().parse("[remote] ↑ (1) A03.zip\n")
+    assert ("stage", "upload") in plain, "the upload the run waits for still drives the headline"

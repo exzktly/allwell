@@ -2067,7 +2067,8 @@ because none of it applies:
 - **Batch size (0 = one per worker).** Any positive `N` processes `N` wells at
   a time. While one batch runs on the node the next one is already uploading
   (`batch 2/5: uploading 7 well-zip(s) while batch 1 runs`), so after the first
-  batch the node does not wait for uploads; peak disk on the remote is roughly
+  batch the node waits only for whatever of an upload is still left when the
+  batch before it ends; peak disk on the remote is roughly
   two batches of input — the one running and the one waiting — plus about one
   well of output, at the cost of reloading the segmentation model once per
   batch (a few seconds each). `0`, the default, sends one well
@@ -2087,7 +2088,8 @@ because none of it applies:
   where the remote's disk allows it. A Suspend or Stop during a batch also ends
   the next batch's upload; a resume picks up what it had sent. A nanowell run holds a whole
   batch's input and output until that batch ends, and then frees them, so for
-  nanowells the peak is about `N` wells of input plus `N` wells of output —
+  nanowells the peak is about `2N` wells of input (the batch running and the
+  next) plus `N` wells of output —
   plus every well kept for the end-of-run re-anchoring: a well with a
   timepoint whose nanowells could not be numbered keeps its input and output
   on the remote until the last batch is done, when every such well is re-run

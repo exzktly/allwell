@@ -44,16 +44,18 @@ class AnalyzeRunFooterMixin:
         self._remote_params_widget = sec.parentWidget()
 
         # Batched mode. Any positive integer processes that many wells at a
-        # time: peak remote disk ≈ batch_size wells of input + ~1 well of output
-        # (per-well Fetcher cleanup), at the cost of one model reload per batch.
+        # time, the next batch uploading while one runs: peak remote disk ≈ two
+        # batches of input + ~1 well of output (per-well Fetcher cleanup), at the
+        # cost of one model reload per batch.
         # ``0`` (default) is one well per worker the pipeline will start
         # (services.remote_batch_auto), so the first upload is only as big as
         # the workers need; the whole plate when the worker count cannot be
         # known before the run, and the run log says why.
         bs_row = self._row(
             sec, "Batch size",
-            tooltip="Process this many wells at a time on the remote, which "
-                    "bounds its peak disk to about that many wells of input. "
+            tooltip="Process this many wells at a time on the remote, the next "
+                    "batch uploading while one runs, which bounds its peak disk "
+                    "to about two batches of input. "
                     "0 sends one well per worker, worked out from the Workers "
                     "field or the CPUs and GPUs in the scheduler command; the "
                     "run log says what it chose.")

@@ -353,10 +353,11 @@ class RemoteRunner:
           before fetch)``.
         * ``> 0`` — split into batches of this many wells, fed one at a
           time to a driver that holds a single allocation for the whole
-          run: upload → hand it to the driver → wait for its exit code →
-          next batch. The Fetcher deletes each well's input + output zip
-          on the remote as soon as the local download lands, so peak disk
-          ≈ ``batch_size`` wells of input + ~1 well of output. Tradeoff:
+          run: upload → hand it to the driver → wait for its exit code,
+          the next batch uploading meanwhile (``remote_batch_step``). The
+          Fetcher deletes each well's input + output zip on the remote as
+          soon as the local download lands, so peak disk ≈ two batches of
+          input + ~1 well of output. Tradeoff:
           the pipeline starts once per batch, so StarDist reloads each
           time (~5–10 s per batch). Pick ``batch_size`` based on your
           remote's free disk; the smaller it is, the more loads and the

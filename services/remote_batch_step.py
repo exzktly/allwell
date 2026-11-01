@@ -13,6 +13,7 @@ has said why).
 from __future__ import annotations
 
 import enum
+import logging
 import threading
 from collections.abc import Callable
 
@@ -21,6 +22,22 @@ from services.remote_batch_resume import download_adopted
 from services.remote_batch_staging import prune_staged
 from services.remote_handoff import hand_off_and_wait
 from services.remote_suspend import _AnySet
+from services.remote_wire import TRANSIENT_PREFIX
+
+#: What an upload sent ahead logs in place of the ``[remote] ↑`` of an upload the run is waiting for. The Analyze
+#: progress view (``pipeline_runner.ProgressTracker``) reads ``↑`` as "the run is uploading" and puts the headline and
+#: the transfer label on it; while a batch computes, that is not what is happening. ``⇡`` moves only the well's own dial.
+AHEAD_UP_MARK = "[remote] ⇡"
+
+
+def _ahead_log(log: Callable[[str], None]) -> Callable[[str], None]:
+    """*log* for an upload sent ahead: ``↑`` lines marked :data:`AHEAD_UP_MARK`, rsync's live progress (for the status
+    line) dropped."""
+    def say(line: str) -> None:
+        if line.startswith(TRANSIENT_PREFIX):
+            return
+        log(line.replace("[remote] ↑", AHEAD_UP_MARK, 1))
+    return say
 
 
 class Step(enum.Enum):
@@ -53,14 +70,15 @@ def _send(proc, index: int, n_batches: int, batch_zips, *, ahead_of: int = 0,
     while_running = f" while batch {ahead_of} runs" if ahead_of else ""
     proc._log(f"[remote] batch {index}/{n_batches}: uploading {len(batch_zips)} well-zip(s){while_running}\n")
     # Each batch's rsync reports 0 → 1; scaled so the "Transferring…" label advances across the whole run instead
-    # of resetting once per batch.
-    outer = proc._progress
+    # of resetting once per batch. An upload sent ahead drives no label: the run is computing, not transferring.
+    outer = None if ahead_of else proc._progress
     progress: Callable[[float], None] | None = (
         None if outer is None else (lambda pct: outer((index - 1 + pct) / n_batches)))
-    prune_staged(proc._runner._cache, proc._batch_staging_dir(index), batch_zips, f"batch {index}", proc._log)
+    log = _ahead_log(proc._log) if ahead_of else proc._log
+    prune_staged(proc._runner._cache, proc._batch_staging_dir(index), batch_zips, f"batch {index}", log)
     events = [proc._stop, proc._suspending, proc._driver_lost] + ([cancel] if cancel is not None else [])
     sent_bytes, _elapsed, rc = proc._runner._cache.upload_subset(
-        batch_zips, proc._batch_staging_dir(index), log_fn=proc._log, acquisition_input=proc._zipped,
+        batch_zips, proc._batch_staging_dir(index), log_fn=log, acquisition_input=proc._zipped,
         progress_fn=progress,
         # A suspend ends the upload too — a batch sent after the user asked for the machine back is thrown away
         # unrun — and so does a driver that went away: there is no node left to send it to; and an upload sent
@@ -126,9 +144,13 @@ class _Ahead:
         return self._result
 
     def abandon(self, wait_s: float = 30.0) -> None:
-        """The loop ended without this batch: stop its rsync and wait a little for the thread."""
+        """The loop ended without this batch: stop its rsync and wait a little for the thread. An error the thread
+        raised is logged here, since nothing will ask for its result."""
         self.cancel.set()
         self._thread.join(wait_s)
+        if self._error is not None:
+            logging.getLogger(__name__).warning("the upload of batch %d, sent ahead and not needed, failed",
+                                                self.index, exc_info=self._error)
 
 
 def abandon_upload_ahead(proc) -> None:

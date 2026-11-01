@@ -756,7 +756,7 @@ def test_a_suspend_finishes_the_batch_in_flight_and_sends_no_more(
     assert p._returncode == 0
     assert not p._driver_lost.is_set()
     assert p._cancelled == [], "the downloads of the finished batch were cancelled"
-    assert "not sent" in "".join(p._logged)
+    assert "not run" in "".join(p._logged)
     assert not proc.terminated, "a driver that ended on its own was killed"
     assert closed == [], "a job that ended on its own was cancelled"
 
@@ -798,7 +798,7 @@ def test_a_suspend_during_a_batch_upload_ends_the_upload(tmp_path, monkeypatch):
     assert uploads == ["b1", "b2"]
     assert p._returncode == 0
     assert not any("upload failed" in m for m in p._logged)
-    assert "not sent" in "".join(p._logged)
+    assert "not run" in "".join(p._logged)
     assert not any("b2_ready" in o or "_2_ready" in o for o in ordering), ordering
 
 

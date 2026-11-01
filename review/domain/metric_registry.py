@@ -91,6 +91,9 @@ def column_gating_exempt(col: str) -> bool:
     """
     if not isinstance(col, str):
         return False
+    from review.domain.observation import is_nanowell_cell_column
+    if is_nanowell_cell_column(col):
+        return True                     # a cell's own nanowell's metric is not a fluorescence intensity
     for m in METRICS:
         if m.gating_exempt and col.endswith(f"_{m.key}"):
             return True
@@ -173,6 +176,9 @@ def cutoff_kind_for_column(col: str) -> str:
     """
     if not isinstance(col, str):
         return CUTOFF_INTENSITY
+    from review.domain.observation import is_nanowell_cell_column
+    if is_nanowell_cell_column(col):
+        return CUTOFF_NONE              # a nanowell metric has no ON cutoff
     for m in METRICS:
         if m.kind == "count" and col.endswith(f"_{m.key}"):
             return CUTOFF_COUNT

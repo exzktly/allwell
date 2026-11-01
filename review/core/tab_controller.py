@@ -104,6 +104,10 @@ def on_tab_change(ctx, _e=None) -> None:
     tab = current_centre_tab(ctx)
     if not tab:
         return
+    # A status line another tab wrote describes what is no longer on screen; the new tab writes its own.
+    notify = getattr(ctx, "notify", None)
+    if notify is not None and hasattr(notify, "clear_unless_owned_by"):
+        notify.clear_unless_owned_by(tab)
     prev_tab = ctx.runtime.tab.last_tab_name
     prev_selected = set(ctx.state.selection.selected_wells)
 

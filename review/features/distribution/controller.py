@@ -23,6 +23,8 @@ from review.core.plot_style import (
 from review.core.channel_state_controller import (
     active_channel_label, get_all_fluor_gates, on_cutoff_for_column,
 )
+from review.core.observation_band import stamp_cells_footer
+from review.features.distribution import _observations as _nw_dist
 
 
 # Reached when the selection *is* non-empty and still produced no values — a
@@ -374,12 +376,20 @@ def redraw_distribution(ctx) -> None:
     layout_choice = layout_cb.currentText() if layout_cb is not None else "Overlay"
 
     tp_filter = tp_h if math.isfinite(tp_h) else None
+    nanowell = _nw_dist.nanowell_groups(ctx, tp_filter)
+    if nanowell is not None:
+        nw_groups, nw_label, nw_footer = nanowell
+        _draw_distribution(ctx, canvas, nw_groups, mode, bins, log_x, log_y, tp_h, layout_choice, None)
+        _nw_dist.label_and_footer(fig, nw_label, nw_footer)
+        canvas.draw_idle()
+        return
     pooled = collect_distribution(ctx, val_col=val_col, fluor_gates=fluor_gates, ratios=ratios,
                                   tp_filter=tp_filter, display_label=_display_label_for)
     if pooled is not None:
         groups, exact, pool = pooled
         try:
             _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layout_choice, exact)
+            stamp_cells_footer(ctx, fig)
         finally:
             pool.close()
         return
@@ -397,6 +407,7 @@ def redraw_distribution(ctx) -> None:
             # iter_plot_groups, which the export path keys on).
             groups.append((_display_label_for(ctx, name), color, vals))
     _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layout_choice, None)
+    stamp_cells_footer(ctx, fig)
 
 
 def _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layout_choice, exact) -> None:

@@ -84,6 +84,11 @@ class PlotState:
     """
 
     use_sem: bool = True
+    #: What the Plotting leaves draw their points from: ``"cells"`` or ``"nanowells"`` (the band's Observations
+    #: toggle, ``review/core/observation_band.py``). A leaf that cannot draw nanowells draws cells whatever this says.
+    observations: str = "cells"
+    #: The nanowell metric the band's Metric picker chose (a key of the nanowell observations, e.g. ``"n"``).
+    nanowell_metric: str = "n"
     use_fov_replicates: bool = False
 
     # Group the plot's members by a sample variable instead of by the user's

@@ -308,17 +308,22 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
             _logger, "Review Image load attempt well=%s fov=%s tp=%s mask_path=%s",
             well, fov, tp, mask_path,
         )
-    if fluor_ref is None or mask_ref is None:
+    if fluor_ref is None:
         if status is not None:
             status.setText(
-                "Missing fluorescence image or label map for selected FOV/timepoint."
+                "No image for the selected FOV / timepoint"
+                + ("" if mask_ref is None else " (a label map exists, but nothing to draw it over)") + "."
             )
+        set_cell_editing(ctx, True)
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 6] refresh_review_image missing refs fluor_ref=%r mask_ref=%r",
                 fluor_ref, mask_ref,
             )
         return
+    # No label map is not "nothing to show": the image is drawn without outlines and the shortfall is said
+    # (NANOWELL_OBSERVATIONS_TRACKER #4). A nanowell run never writes one.
+    no_mask = mask_ref is None
     state.review_image.is_tif = str(getattr(fluor_ref, "name", "")).lower().endswith((".tif", ".tiff"))
     if not _NP_AVAILABLE:
         if status is not None:
@@ -340,7 +345,8 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
         boundary = cached["boundary"]
     else:
         fluor_raw = state.images.array(fluor_ref, greyscale=True)
-        mask_raw = state.images.array(mask_ref, greyscale=True)
+        mask_raw = (_np.zeros(_np.shape(fluor_raw)[:2], dtype=_np.int32) if no_mask and fluor_raw is not None
+                    else state.images.array(mask_ref, greyscale=True) if not no_mask else None)
         if fluor_raw is None or mask_raw is None:
             if status is not None:
                 status.setText("Could not render review image (image decode failed).")
@@ -430,6 +436,88 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
         fit_lut=False, preserve_view=preserve_view, boundary=boundary,
         above_by_nid=above_by_nid, exclusion_reasons=reasons_by_nid,
     )
+    set_cell_editing(ctx, not no_mask)
+    if no_mask:
+        _draw_without_label_map(ctx, status, well, fov_raw, tp_raw)
+
+
+#: Why a frame has no outlines and the cell tools are off. ``{overlays}`` is the sentence about nanowell overlays.
+NO_LABEL_MAP_NANOWELL = ("No label map: this nanowell run records cells as points, not outlines.{overlays} "
+                         "Delete / Crop / Edit are unavailable.")
+NO_LABEL_MAP = "No label map for this frame: the image is shown without outlines. Delete / Crop / Edit are unavailable."
+OVERLAYS_NOT_IN_BUILD = " Nanowell overlays are not in this build."
+
+
+def set_cell_editing(ctx, enabled: bool) -> None:
+    """Enable or disable Delete Cell, Crop cells and Edit ▾ — they act on outlined cells, and a frame with no
+    label map has none. A disabled one says why in its tooltip."""
+    why = "This frame has no label map, so there are no outlined cells to act on."
+    for name in ("_review_image_delete_btn", "_review_image_crop_btn", "_review_image_edit_btn"):
+        btn = ctx.widgets.get_or_none(name)
+        if btn is None:
+            continue
+        if not enabled and btn.isCheckable() and btn.isChecked():
+            btn.setChecked(False)
+        btn.setEnabled(enabled)
+        base = btn.property("enabledToolTip")
+        if base is None:
+            btn.setProperty("enabledToolTip", btn.toolTip())
+            base = btn.toolTip()
+        btn.setToolTip(base if enabled else why)
+
+
+def _draw_without_label_map(ctx, status, well, fov_raw, tp_raw) -> None:
+    """Say why there are no outlines, and on a nanowell run draw its cells as points and its nanowells' rims —
+    through the Nanowells feature's service, never an import; a build without it says so."""
+    from review.data.observations import is_nanowell_dataset
+
+    if not is_nanowell_dataset(ctx):
+        if status is not None:
+            status.setText(NO_LABEL_MAP)
+        return
+    from review.data.observations import nanowell_views_available
+
+    in_build = nanowell_views_available(ctx)
+    overlay = ctx.features.query("segmentation.nanowell_overlay", ctx, well, fov_raw, tp_raw, default=None)
+    text = NO_LABEL_MAP_NANOWELL.format(overlays="" if in_build else OVERLAYS_NOT_IN_BUILD)
+    if overlay is not None and overlay.note:
+        text += " " + overlay.note
+    if status is not None:
+        status.setText(text)
+    if overlay is None:
+        return
+    rgb = getattr(ctx.runtime.review_image, "base_rgb", None)
+    if rgb is None:
+        return
+    painted = paint_nanowell_overlay(rgb, overlay)
+    ctx.runtime.review_image.base_rgb = painted
+    ctx.state.review_image.base_pil = _PILImage.fromarray(painted, mode="RGB") if _PIL_AVAILABLE else None
+    render_review_image_display(ctx)
+
+
+def paint_nanowell_overlay(rgb, overlay):
+    """*rgb* with each nanowell's rim as a one-pixel circle and each counted cell as a small dot.
+
+    Rims in the border token, cells in the accent token: points read as points, never as outlines."""
+    from matplotlib.colors import to_rgb
+
+    from ui import theme
+
+    out = _np.array(rgb, copy=True)
+    h, w = out.shape[:2]
+    rim = _np.array([int(round(255 * c)) for c in to_rgb(theme.Colors.border)], dtype=_np.uint8)
+    dot = _np.array([int(round(255 * c)) for c in to_rgb(theme.Colors.accent)], dtype=_np.uint8)
+    for x, y, r, _state in overlay.rims:
+        n = max(32, int(2 * _np.pi * r))
+        t = _np.linspace(0.0, 2 * _np.pi, n, endpoint=False)
+        cols = _np.rint(x + r * _np.cos(t)).astype(int)
+        rows = _np.rint(y + r * _np.sin(t)).astype(int)
+        keep = (cols >= 0) & (cols < w) & (rows >= 0) & (rows < h)
+        out[rows[keep], cols[keep]] = rim
+    for x, y in _np.asarray(overlay.points, dtype=float).reshape(-1, 2):
+        c0, r0 = int(round(x)), int(round(y))
+        out[max(0, r0 - 1):min(h, r0 + 2), max(0, c0 - 1):min(w, c0 + 2)] = dot
+    return out
 
 
 def _scan_shortfall_suffix(ctx) -> str:

@@ -116,6 +116,10 @@ ROSTER: dict[str, list[tuple]] = {
         [((W, "ValueError", "x"), "E", "reanchor", "")],
     "Well {} — re-anchored. {} timepoint(s), {} without rows.": [((W, 4, 0), "I", "reanchor", "")],
     "Well {} — re-anchoring placed none of {}; its earlier result stands.": [((W, "T03"), "I", "reanchor", "")],
+    # a well the pass measures again because the reference changed under it: the re-run's own "re-anchored" line
+    # (above) is what the plate reads; this one only says why the well is in the pass
+    "Well %s — its confluence is measured again against the empty reference this pass saved.":
+        [((W,), "I", "note", "")],
     # notes: true, worth reading in the log, and no change to what the well is
     "Well %-12s -> %s  (%d rows)": [((W, "m_A01.csv", 10), "I", "note", "")],          # the CSV it wrote
     "Well %-12s -> %s  (+%d row(s), merged)": [((W, "m_A01.csv", 10), "I", "note", "")],

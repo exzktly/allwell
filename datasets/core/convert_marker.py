@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from util.aw_safe import swallow
+from util.dir_scan import zip_files_in
 from util.json_write import write_json_atomic
 
 
@@ -217,7 +218,7 @@ def converted_wells(dest: Path | str) -> list[str]:
     in_dir = Path(dest) / "in"
     if not in_dir.is_dir():
         return []
-    return sorted(p.stem for p in in_dir.glob("*.zip"))
+    return sorted(p.stem for p in zip_files_in(in_dir))
 
 
 @dataclass(frozen=True)
@@ -289,7 +290,7 @@ def destination_problem(dest: Path | str, marker: str,
     if (root / "out" / "pipeline_info.json").exists():
         return "Already holds a finished dataset — choose an empty folder."
     in_dir = root / "in"
-    if in_dir.is_dir() and any(in_dir.glob("*.zip")):
+    if zip_files_in(in_dir):
         # A dataset this converter built with *these* settings is not a
         # stranger's plate: it is a subset conversion being topped up, which
         # is the workflow converting part of a plate implies. Compared on the

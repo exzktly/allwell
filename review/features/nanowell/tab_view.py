@@ -121,8 +121,8 @@ _BASELINE_MOVING_TIP = (
 _BASELINE_MOVING_OFF = {
     "moving": "Turn on the Moving average first: the baseline's window refines it.",
     "metric": "Only a fold change has a baseline to average.",
-    "earliest": "The Earliest baseline has no timepoint before it to average. Choose First measurable or a "
-                "timepoint.",
+    "earliest": "The Earliest and First measurable baselines have no measured timepoint before them to average: "
+                "every timepoint before the first measurable one has no value. Choose a timepoint as the baseline.",
 }
 _WELL_TIP = "The well the Array view shows (one of the wells the page draws)."
 _GO_TO_TIP = ("Show this nanowell on Identity ▸ Blink: its well's two montages alternating, zoomed onto it, with its "
@@ -858,7 +858,9 @@ class _PopoutWindow(QDialog):
     def __init__(self, parent) -> None:
         super().__init__(parent)
         self.setModal(False)
-        self.setWindowFlag(Qt.Window, True)          # keep the title bar's minimise and maximise buttons
+        # The title bar's minimise and maximise buttons. ``Qt.Dialog`` already holds the ``Qt.Window`` bit, so setting
+        # that flag changed nothing and a dialog's title bar has neither: the hints themselves are what add them.
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)
 
     def show_raised(self) -> None:
         self.show()

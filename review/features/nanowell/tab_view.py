@@ -456,7 +456,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         detail.setVisible(on)
 
     def show_computing() -> None:
-        computing.setVisible(bool(st.computing) and st.metrics is not None)
+        computing.setVisible(nwc.computing_shown(ctx))
         computing.resize(card.size())
         computing.raise_()
 

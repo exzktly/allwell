@@ -12477,6 +12477,12 @@ now (wells already in `well_parts` cost nothing and are not counted), then `gate
 — and hands each count to the GUI thread through the bridge's `stage` / `progress` signals into
 `state.load_progress`, `(stage, done, total)`. The hint names the pass, since the bar starts again for the second.
 A count from an older request is dropped like its result; before the first count the bar has no known end.
+Once a figure is drawn, a running load covers it with the *Computing…* scrim (`_nw_computing_label`) only when
+`computing_shown` says the result can change what the current view draws. The single-well views
+(`SINGLE_WELL_VIEWS`: Array, Identity, Extremes) draw `page_well` alone, and a site's metrics come from that site's
+rows alone, so a load that only reads wells just added to the selection leaves them uncovered — unless the added well
+is the one `page_well` will name once it lands (`_page_well_once_loaded`, the same rule over the wells that have or
+may still have a table). A load for another baseline, gate version or rim focus rule covers every view.
 `tableless_wells` names a drawn well with no usable table — none in the folder, or one read and left out — but
 never a well whose table is still being read. Each load request is numbered and a result for an older one is
 discarded, so a slow load can never replace a newer baseline's figure — including when the baseline goes back to the one

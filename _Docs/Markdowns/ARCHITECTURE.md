@@ -6144,7 +6144,7 @@ it; `tests/test_app_wide_style_is_read_only.py` holds every other module to
 the real panel and checks a second plot, a second view and a Batch Export run.
 
 **A figure that draws several views keys its prefs per view.** The Nanowells
-page draws Distribution, Array, Trajectories, Position and Extremes on one
+page draws Distribution, QC, Array, Trajectories, Position and Extremes on one
 figure. Its `redraw` calls `set_pref_scope(ctx, fig, view)` ("" for
 Distribution, which keeps the figure's own key and the settings saved under it),
 and `_FigurePrefs` resolves `<key>:<scope>` from the figure on every access, so
@@ -11984,6 +11984,40 @@ palette — so a capture, which flips the theme without a redraw, puts the publi
 against recorded time, a timepoint without a number as a gap and a hatched band, with each timepoint's state
 written above, the rows sharing one time axis labelled under the bottom row. The first selected nanowell's crops (`controller.crops_site`) are drawn on a figure of their own under the detail, `renderer.render_crop_strip` on `_nw_strip_fig`, below a row holding **Pop out** (`_nw_popout_btn`, `tab_view._crops_header`). **Pop out** (`controller.pop_out_crops`) opens a non-modal `QDialog` owned by the app's window (`tab_view._PopoutWindow`, built on first use by `tab_view._popout_window` and kept; `_nw_popout`, `_nw_popout_fig`) — a dialog rather than a `QWidget` with the `Qt.Window` flag, because Windows keeps a dialog above its owner and let the plain window drop behind the app and draws the same crops large there (`renderer.render_crop_grid`): one panel per timepoint, all on one brightness scale (the 1st–99th percentile of every crop together) so a change between timepoints reads as a change, with the source and scale in the caption. `redraw_detail` redraws it whenever it is open (`controller.draw_popout`), so it follows the selection, and says a nanowell has to be selected when none is; the page's own figure and every control beside it are untouched by it. The window carries its own row of controls (`tab_view._popout_controls`): the image channel (`_nw_popout_image_channel_cb`, one of `_IMAGE_CHANNEL_COMBOS`), **Range** (`_nw_popout_range_btn`, one of `DISPLAY_RANGE_BUTTONS`), **Cells** (`_nw_popout_cells_box`), **Metrics** (`_nw_popout_metrics_box`, `crop_metrics`: the measurement lines under each crop), **Labels** (`_nw_popout_labels_box`, `NanowellState.popout_labels`, persisted: `render_crop_grid(labels=)` leaves out each panel's timepoint and the caption, keeping the title) and **Go to nanowell**. Each is the page's one setting; `refresh_controls` runs once when the window is built and keeps every crop checkbox on its state (`_CROP_BOXES`, `_sync_crop_boxes`). The crops arrive by the site detail's own worker fetch. **Cells on the crops.** Every crop carries the cells the run counted in its own nanowell (`image_compute.Crop.cells`, ``(column, row)`` pixels, `None` when the well has no cell table so "no table" never reads as "no cell"): `_cut_well` reads the well's cell table once per timepoint (`collect.cell_positions`) and `_cells_in` keeps only the cells whose `nw_q` / `nw_r` is the crop's nanowell — the crop is cut `pad` times the nanowell's radius, so its margin takes in parts of the neighbours, and their cells are left out so every dot is one the selected nanowell's count is made of — and places each cell from the well frame using the crop's own corner — `_cut_at` returns the tile or montage pixel the crop starts at, clipped at the image's edge, so a crop cut at a tile's border measures from that border — at the tile's or the montage's scale. One switch, `NanowellState.crop_cells` (persisted; `controller.set_crop_cells`), offered as **Cells** beside *Pop out* (`_nw_strip_cells_box`), in the pop-out (`_nw_popout_cells_box`) and on the Extremes view (`_nw_extremes_cells_box`, all kept on it by `refresh_controls`), has `render_crop_strip`, `render_crop_grid` and `render_extremes` draw them through `renderer._draw_crop_cells` in the Array view's Cells colours, each caption counting the dots and naming crops of a well with no cell table (`_cells_clause`). `tests/test_nanowell_crop_cells.py` pins the pixel placement (a tile crop, one clipped at the tile's edge, a montage crop), that a neighbour's or an unassigned cell inside the crop's rectangle is left out, and drives both boxes. The detail's title row (`tab_view._detail_header`) carries a close button, `_nw_detail_close_btn` (✕), which calls `controller.clear_selection`; a click on empty space clears the selection the same way on every view, and with nothing selected `redraw_detail` hides the pane. The crop panels carry `_aw_image_panel`, so a style pass never puts a typed axis range on a crop.
 
+**The QC view** (`qc_compute`, `_qc_render`, `_qc_controller`, `qc_view`) is the plate's wells down and its
+timepoints across, each cell holding the one state that says what needs doing about that timepoint. It is the
+second view on the bar, beside Array, because the anchor walk it starts moves between the two. Its records are read
+for **every** well with a grid record, never only the selected ones, so it draws with nothing selected:
+`controller.redraw` takes its branch before any check of the selection or the metrics, and `nanowell_empty_reason`
+returns `None` for it once a dataset is loaded (the view draws its own empty states). `qc_compute.read_plate` reads
+each well's grid record (`anchor_queue_compute.grid_statuses`), its identity verdicts and partial exclusions
+(`pipeline.nanowell_identity.verdicts` / `exclusions`, the calls `collect.read_well_part` makes, so the matrix and
+the line plots cannot disagree), the anchors file, and the timepoints' hours (`collect.timepoint_hours`, the
+acquisition record or the labels — the page's time order whether or not any table has been read). Telling a current
+identity result from a stale one hashes each well's sites table, so the read runs on a worker
+(`_qc_controller.ensure_read`); the result is held on `state.qc_records` against `qc_compute.signature` — the name,
+time and size of every file it read — and read again only when one changes (a run, the identity check, an anchor
+set or cleared). `qc_compute.plate_qc` decides each cell's state with the grid status first: `unaddressed` with an
+anchor set and not yet used is *anchor waiting*, `unaddressed` otherwise *not addressed* (with `refused` when the
+last run tried the anchor set there), any other status but `ok` *not located* (an anchor cannot change it), and only
+an `ok` timepoint takes the identity verdict — an unaddressed timepoint has no addresses for the check to confirm,
+and reading it as *inconclusive* would hide the remedy. Which timepoints are *not addressed* and *anchor waiting* is
+`anchor_queue_compute.waiting_items`'s answer, the function the queue walks, so the two cannot disagree.
+`_qc_render.draw_qc` fills each state with its own ink and texture — solid for *not addressed*, the line plots'
+hatches for the identity verdicts (`_identity_marks.HATCH`), horizontal and vertical lines for *anchor waiting* and
+*not located* — so it reads without colour; cells tall enough carry a glyph too (a partial cell its left-out count),
+plate rows are banded apart over 12 rows, and rows too short to name are labelled by their plate-row letter. The
+title counts the timepoints needing a look and the legend counts every state on the plate. *Wells*
+(`state.qc_wells`, persisted) shows a row for each well needing a look or for every well. A cell's short form leads
+the canvas readout (`ax._aw_hover_label`) and its sentence is the tooltip (`qc_compute.hover_text`). A click opens
+the cell where it is dealt with: a verdict on the Identity view (`_qc_controller.open_identity`, which adds the well
+to the selection as `open_for_anchor` does), an anchor's business on the Array view through `open_for_anchor`. The
+view's band carries *Wells* and the *Anchor* group: *Anchor queue*, *One per well* and *Re-run anchored wells…*
+(`qc_view`), *Anchor queue* greyed with `qc_compute.queue_tip`'s reason when nothing waits. The export style pass
+sets every tick label to the Properties size, so `QcDrawn.relabel` puts the matrix's own label sizes back after it.
+`tests/test_nanowell_qc_view.py` pins the precedence on records where the wrong rule answers differently, and drives
+the real page with nothing selected: the view bar, a real click on a cell, and leaving Array mid-walk.
+
 **The Extremes view** (`extremes_compute`, `renderer.render_extremes`, `controller._draw_extremes`) is a montage
 of one well's nanowells with the largest and the smallest fold change of the Metric. `extremes_compute.extremes`
 ranks the page well's nanowells by one metrics column at one timepoint — `shown_timepoint` gives the well's
@@ -12334,7 +12368,7 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   Incremental, and forcing makes it moot), through `review/core/analyze_handoff.open_in_analyze` — Review's one
   door into Analyze, shared by Home's *Finish this run*, QC triage and this view. A file that cannot be written
   is said on the figure (`state.array_message`).
-- **The anchor queue.** *Anchor queue* (the Anchor group's fourth button) walks every timepoint on the plate that
+- **The anchor queue.** *Anchor queue* (on the QC view's Anchor group, not the Array view's) walks every timepoint on the plate that
   is waiting for an anchor, one montage after another. `anchor_queue_compute` (Qt-free) decides what waits: it
   reads every grid record under `nanowells/` — not `state.data.grids`, which holds only the wells the page has
   loaded — and takes each `unaddressed` timepoint with no anchor set, or with the very anchor the last run tried
@@ -12347,8 +12381,8 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   the session on `state.anchor_queue_per_well`; switching mid-walk keeps the shown item when the new list holds it
   and otherwise goes on at the first item after it, never back over wells already passed.
   When *One per well* leaves nothing to walk, `build_queue` refuses (the remedy is a re-run, which the message
-  names) and turns `anchor_queue_per_well` off, because its toggle sits in the group shown only during a walk and
-  nothing else could ever reach it; the next press walks every waiting timepoint.
+  names) and turns `anchor_queue_per_well` off, so the next press walks every waiting timepoint; the QC view's
+  *One per well* toggle shows it turned off.
   `_anchor_queue` walks it: each step sets the selection to the one the queue started with plus the step's well
   (so the wells walked past do not accumulate on every other tab) and calls `open_for_anchor`, the same service
   QC Triage and Home use, with `zoom=OPEN_ZOOM` (10): the view opens at that many times *Fit* on the centre of the
@@ -12359,14 +12393,20 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   refits. A pan or zoom replaces it with the tuple it lands on; the next step opens at 10× again. When *Set anchor*
   cannot be turned on for a step, the figure's reason is followed by a pointer to Skip. `set_anchor_at` tells the queue when an anchor is saved (`_anchor_change` returns the
   `(well, timepoint)` it changed); when it is the current item, the queue records it and moves on after
-  `ADVANCE_DELAY_MS`, dropping the move if Back, Skip or Stop changed the position meanwhile. While it runs a
-  *Queue* group (`anchor_queue_view`) shows `3 of 17 · B04 at 24h`, *Back*, *Skip*, *One per well* and *Stop*,
-  with keys for three of them (`anchor_queue_view.KEYS`: ← Back, → Skip, Esc Stop) as `QShortcut`s parented on the
-  group with a window context, so they act only while the group is shown. The page's checkable buttons (*Set
+  `ADVANCE_DELAY_MS`, dropping the move if Back, Skip or Stop changed the position meanwhile. While it runs, on the
+  Array view, a *Queue* group (`anchor_queue_view`) shows `3 of 17 · B04 at 24h`, *Back*, *Skip*, *One per well*
+  and *Stop*, with keys for three of them (`anchor_queue_view.KEYS`: ← Back, → Skip, Esc Stop) as `QShortcut`s
+  parented on the group with a window context, so they act only while the group is shown. It is the band's first
+  group, so it sits at the band's left edge however the Array view's own groups wrap. Because its keys die with the
+  group, leaving the Array view mid-walk ends the walk (`controller.set_view` calls `_anchor_queue.stop` with the
+  view chosen). The page's checkable buttons (*Set
   anchor*, *Overlays*, *One per well*) take the theme's `toggle` variant: `secondary` overrides the `:checked`
-  fill, so on and off painted the same. Stop, or stepping
-  past the last item, restores the starting selection and writes the summary (anchored, skipped, and the pointer
-  to *Re-run anchored wells…*) to `state.array_message`. `state.anchor_queue` is never persisted, and a queue
+  fill, so on and off painted the same. Stop, stepping
+  past the last item, or leaving the Array view restores the starting selection and returns to the view the walk
+  started from (`AnchorQueue.return_view`, the QC view) or to the view chosen instead; the summary (anchored,
+  skipped, and the pointer to *Re-run anchored wells…*) goes to the QC view's `state.qc_message` — with the cells
+  anchored ringed (`state.qc_highlight`), each now *anchor waiting* beside the *Re-run anchored wells…* button —
+  and to the status line, which is seen whichever view the page lands on. `state.anchor_queue` is never persisted, and a queue
   built for another dataset is dropped by `active_queue`.
 
 `tests/test_nanowell_page_array_layers.py` turns each layer off and on through the real controls and reads the

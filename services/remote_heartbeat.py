@@ -10,8 +10,10 @@ driver's wait between batches and its watchdog beside each batch — is
 from __future__ import annotations
 
 import posixpath
+import sys
 import threading
 import time
+import traceback
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -49,6 +51,28 @@ BEAT_TIMEOUT_S = 75
 #: A beat that took at least this long is logged with its duration, landed or not,
 #: so a run on a stalling filesystem leaves a record of how long the stalls were.
 SLOW_BEAT_S = 10
+
+
+#: A beat still in progress this long after it began is stuck: one ``ssh_control`` call is bounded by its own timeout,
+#: plus, after a timeout, the connection-sharing master's probes and one retry — about 210 s at most. Past this the
+#: watchdog logs it, with where the beat's thread is waiting, before the remote acts on the silence
+#: (``MID_BATCH_HEARTBEAT_STALE_S``, 10 min, for a run's claim on a granted node).
+STUCK_BEAT_S = 4 * BEAT_TIMEOUT_S
+
+#: How often the watchdog looks, and how late its own wake-up may be before it says this app was not running. A
+#: thread that sleeps 15 s and wakes a minute or more late did not lose the time to anything inside this process: the
+#: whole process was paused (a computer asleep, a virtual machine suspended, the process frozen), and every beat with it.
+WATCH_POLL_S = 15
+PAUSED_S = 60
+
+
+def _stack_words(thread: threading.Thread | None) -> str:
+    """Where *thread* is, innermost call last, as a few ``file:line in function`` steps for one log line."""
+    frame = sys._current_frames().get(thread.ident) if thread is not None and thread.ident else None
+    if frame is None:
+        return "its thread is no longer running"
+    steps = traceback.extract_stack(frame)[-6:]
+    return " → ".join(f"{posixpath.basename(f.filename.replace(chr(92), '/'))}:{f.lineno} in {f.name}" for f in steps)
 
 
 def _reason(stderr) -> str:
@@ -104,8 +128,23 @@ class _UploadHeartbeat:
         self._clock = clock
         self._failures = 0
         self._last_ok: float | None = None
+        # The watchdog (`_watch_once`): when the beat in progress began (`None` between beats), whether that beat has
+        # been reported stuck, and when the watchdog last looked, by the wall clock, so a pause shows as a late wake.
+        self._beat_began: float | None = None
+        self._stuck_said = False
+        self._watched_at: float | None = None
+        self._watcher: threading.Thread | None = None
+        self._beater: threading.Thread | None = None
 
     def beat(self) -> None:
+        """One touch, now, timed for the watchdog; see :meth:`_beat`."""
+        self._beat_began, self._stuck_said = self._monotonic(), False
+        try:
+            self._beat()
+        finally:
+            self._beat_began = None
+
+    def _beat(self) -> None:
         """One touch, now. Called once before the job starts waiting, so the
         first thing it looks at is a heartbeat that already exists.
 
@@ -174,9 +213,12 @@ class _UploadHeartbeat:
         """Begin beating. Paired with :meth:`stop` — see the class docstring."""
         if self._thread is not None:
             return
-        self._thread = threading.Thread(
+        self._thread = self._beater = threading.Thread(
             target=self._run, name="aw-upload-heartbeat", daemon=True)
         self._thread.start()
+        self._watched_at = self._clock()
+        self._watcher = threading.Thread(target=self._watch, name="aw-heartbeat-watchdog", daemon=True)
+        self._watcher.start()
 
     def stop(self, *, wait_s: float = 2.0) -> None:
         """Stop beating, and wait up to *wait_s* for the thread to notice.
@@ -190,6 +232,9 @@ class _UploadHeartbeat:
         thread, self._thread = self._thread, None
         if thread is not None:
             thread.join(timeout=wait_s)
+        watcher, self._watcher = self._watcher, None
+        if watcher is not None:
+            watcher.join(timeout=wait_s)
 
     def __enter__(self) -> "_UploadHeartbeat":
         self.beat()
@@ -205,6 +250,36 @@ class _UploadHeartbeat:
                 # `UPLOAD_HEARTBEAT_STALE_S` of silence — and an ssh blip must
                 # not take down an upload that is otherwise fine.
                 swallowed("upload heartbeat")
+
+    def _watch(self) -> None:
+        while not self._stop.wait(WATCH_POLL_S):
+            try:
+                self._watch_once()
+            except Exception:
+                swallowed("heartbeat watchdog")
+
+    def _watch_once(self) -> None:
+        """One look: say so if the beat in progress is stuck, or if this whole process was not running.
+
+        Both used to leave nothing at all: a beat that never returns never reaches the miss counter that prints the
+        WARNING and ERROR lines, and a paused process prints nothing by definition. The remote then gave the node
+        back, and the run log could not say which of the two had happened — or that either had."""
+        now = self._clock()
+        last, self._watched_at = self._watched_at, now
+        if last is not None and now - last > WATCH_POLL_S + PAUSED_S:
+            self._log(f"[remote] WARNING this app was not running for about {now - last - WATCH_POLL_S:.0f} s "
+                      f"(the heartbeat's watchdog woke {now - last:.0f} s after it went to sleep for {WATCH_POLL_S} s) "
+                      "— the computer slept, the virtual machine was paused, or the process was frozen; no heartbeat "
+                      "was sent meanwhile\n")
+        began = self._beat_began
+        if began is None or self._stuck_said:
+            return
+        stuck_for = self._monotonic() - began
+        if stuck_for >= STUCK_BEAT_S:
+            self._stuck_said = True
+            self._log(f"[remote] ERROR the heartbeat is stuck: one beat has not returned in {stuck_for:.0f} s, "
+                      f"against its {self._beat_timeout:.0f} s limit, so none has been sent since. "
+                      f"It is waiting at: {_stack_words(self._beater)}\n")
 
     def __exit__(self, *_exc) -> None:
         self.stop()

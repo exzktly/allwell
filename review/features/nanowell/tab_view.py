@@ -64,6 +64,9 @@ _OVER_TIME_VIEWS = ("trajectories", "extremes")
 _IMAGES = (("off", "Off"), ("montage", "Run montage"), ("tiles", "Full resolution"))
 _POSITIONS = (("measured", "Measured"), ("lattice", "Lattice"))
 #: The Array view's switchable layers, in the order its Layers menu lists them, with what each draws.
+#: The band's *Notes* button: the Layers menu's *Notes*, where it can be found.
+_NOTES_TIP = ("How to read the array — the positions, the fill and outlines, the tile colours — under the array, in room kept for it so the array never moves. "
+              "Off, the footer keeps the counts and anything that went wrong. The same switch as Layers → Notes.")
 _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or outlined by its state."),
            ("addresses", "Addresses", "Each nanowell's q,r, wherever it is drawn large enough to hold it."),
            ("values", "Values", "Each nanowell's value of the Metric, written inside it (under its q,r when "
@@ -73,7 +76,10 @@ _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or ou
            ("tiles", "Tiles", "Each tile's placement, coloured by how the run placed it, with its residual."),
            ("anchor", "Anchor", "The anchor set by hand, and what the grid record says about addressing this "
                                 "timepoint; with it on, Set anchor is offered."),
-           ("record", "Run record", "The grid record of this timepoint and a line for every other, beside the figure."))
+           ("record", "Run record", "The grid record of this timepoint and a line for every other, beside the figure."),
+           ("notes", "Notes", "The footer in full: how the positions, fills, outlines and tiles are drawn, and the "
+                              "grid status of this timepoint. Off, the footer keeps the counts and anything that "
+                              "went wrong."))
 #: The Layers menu's presets: every layer at once, as the views this one replaced drew them.
 _PRESETS = (("map", "Array map — lattice places, filled by the metric"),
             ("qc", "Array QC — montage, tiles and nanowell states, run record"),
@@ -162,7 +168,9 @@ _REFIT_MS = 60
 LOAD_DEBOUNCE_MS = 250
 _CROP_METRICS_TIP = ("Write each crop's numbers on it: its fold change in the corner and a line of its metrics along "
                      "its foot. Off leaves the crops bare; the row labels still give each nanowell's rank and value.")
-_POPOUT_METRICS_TIP = ("Write each crop's measurements under it — the same setting as the Extremes view's Metrics.")
+_POPOUT_METRICS_TIP = ("Write each crop's measurements under it — the same setting as the Extremes view's Metrics. "
+                       "Here they end with the rim's focus as a percentage of its well's sharpest rims at that "
+                       "timepoint, on the same scale as the Rim focus threshold.")
 _POPOUT_LABELS_TIP = ("Write each crop's timepoint over it and the line under the figure saying where the crops were "
                       "cut from and on what brightness scale. Off leaves the crops bare; the title still names the "
                       "nanowell and channel.")
@@ -415,6 +423,10 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_card", card)
     reg.register("_nw_fig", card.figure)
     reg.register("_nw_canvas", card.canvas)
+    # A click on the figure takes the keyboard focus, so a number still being typed in a band box (Rim focus, whose
+    # boxes commit on Enter or focus-out) is committed by the click rather than left uncommitted under a figure
+    # that never changes.
+    card.canvas.setFocusPolicy(Qt.ClickFocus)
     apply_plot_card_decorators(ctx, card, "Nanowells")
     card.plotThemeChanged.connect(lambda _m: nwc.redraw(ctx))
     card.canvas.mpl_connect("button_press_event", lambda event: nwc.on_click(ctx, event))
@@ -976,6 +988,7 @@ def _refresh_array_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
     for group in c.groups:
         group.setVisible(on_view)
     c.overlays_btn.setChecked(not st.overlays_hidden)
+    c.notes_btn.setChecked(layers.notes)
     can_set, can_clear, can_rerun = nwc.anchor_controls(ctx)
     # On the view whatever the layers say, its buttons greyed where they cannot act, so turning a layer on or off
     # never moves the controls beside it.
@@ -1016,7 +1029,14 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
     overlays_btn.setChecked(True)
     overlays_btn.toggled.connect(lambda on: nwc.set_overlays(ctx, on))
     reg.register("_nw_overlays_btn", overlays_btn)
-    grp_layers = band.add_scope("", layers_btn, overlays_btn)
+    # The footer's Notes, also on the band: the Layers menu's entry alone was hard to find (UX review N6). Not drawn in
+    # the figure, where a click selects a nanowell and anything drawn is exported with it.
+    notes_btn = _button("Notes", _NOTES_TIP, None)
+    notes_btn.setCheckable(True)
+    notes_btn.setProperty("variant", "toggle")
+    notes_btn.toggled.connect(lambda on: nwc.set_layer(ctx, "notes", on))
+    reg.register("_nw_notes_btn", notes_btn)
+    grp_layers = band.add_scope("", layers_btn, overlays_btn, notes_btn)
 
     out_btn = _button("−", "Zoom out, about the centre of the view.", lambda: nwc.array_zoom(ctx, 1 / nwc.BUTTON_STEP))
     zoom_lbl = QLabel("")
@@ -1059,5 +1079,6 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
         image_cb=image_cb, positions_seg=positions_seg, layer_actions=layer_actions, colour_actions=colour_actions,
         groups=(grp_image, grp_positions, grp_layers, grp_zoom), grp_anchor=grp_anchor, one_btn=one_btn,
         anchor_btn=anchor_btn, clear_anchor_btn=clear_anchor_btn, rerun_btn=rerun_btn, overlays_btn=overlays_btn,
-        signalling=(image_cb, positions_seg, anchor_btn, overlays_btn, *layer_actions.values(),
+        notes_btn=notes_btn,
+        signalling=(image_cb, positions_seg, anchor_btn, overlays_btn, notes_btn, *layer_actions.values(),
                     *colour_actions.values()))

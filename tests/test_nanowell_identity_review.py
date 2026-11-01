@@ -93,7 +93,7 @@ def test_without_a_sidecar_every_timepoint_reads_not_checked_and_the_figure_says
     assert set(data.identity["A01"].values()) == {(ni.NOT_CHECKED,
                                                    "the identity check has not been run on these tables")}
     assert at_count(metrics, "t_a") == 4.0 / 2.0                        # nothing left out: unverified, not refuted
-    assert identity_note(data, ["A01"]).startswith("Nanowell identity — A01 not checked")
+    assert identity_note(data, ["A01"]).startswith("Nanowell addresses: A01 not yet verified")
 
 
 def at_count(metrics, tp):
@@ -102,8 +102,8 @@ def at_count(metrics, tp):
 
 @pytest.mark.parametrize("verdicts, note", [
     ({"t_c": ni.REFERENCE, "t_a": ni.CONFIRMED, "t_d": ni.CONFIRMED}, ""),
-    ({"t_c": ni.REFERENCE, "t_a": ni.INCONCLUSIVE, "t_d": ni.CONFIRMED}, "Nanowell identity — A01 not confirmed"),
-    ({"t_c": ni.REFERENCE, "t_a": ni.CONTRADICTED, "t_d": ni.CONFIRMED}, "Nanowell identity — A01 t_a contradicted (left out of joins)"),
+    ({"t_c": ni.REFERENCE, "t_a": ni.INCONCLUSIVE, "t_d": ni.CONFIRMED}, "Nanowell addresses: A01 not confirmed"),
+    ({"t_c": ni.REFERENCE, "t_a": ni.CONTRADICTED, "t_d": ni.CONFIRMED}, "Nanowell addresses: A01 t_a contradicted (left out of joins)"),
 ])
 def test_the_footer_note_follows_the_verdicts(tmp_path, verdicts, note):
     _, data = _metrics(_out(tmp_path, verdicts))
@@ -132,7 +132,7 @@ def test_the_page_s_figures_carry_the_note(tmp_path):
               axis="groups", timepoint="t_d", control="", baseline="earliest", cohort=False, well="A01",
               well_timepoint="t_d")
     texts = " ".join(t.get_text() for t in fig.texts)
-    assert "Nanowell identity — A01 t_a contradicted" in texts
+    assert "Nanowell addresses: A01 t_a contradicted" in texts
 
 
 def test_the_export_says_which_rows_join_nothing(tmp_path):
@@ -208,7 +208,7 @@ def test_a_well_never_checked_is_said_once_not_hatched_everywhere(tmp_path):
     fig = _figure(_out(tmp_path, None), "trajectories")
     assert _bands(fig) == [] and _segments(fig, "--") == []
     footer = " ".join(t.get_text() for t in fig.texts if t.get_gid() == "nw-traj-footer")
-    assert "Nanowell identity — A01 not checked" in footer
+    assert "Nanowell addresses: A01 not yet verified" in footer
 
 
 def test_the_distribution_over_time_hatches_the_swarm_and_dashes_the_median(tmp_path):

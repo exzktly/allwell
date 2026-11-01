@@ -2931,7 +2931,13 @@ What is on it:
   complete (green), partial (amber, with an arc showing how much of it landed),
   failures recorded (red), images with no measurements behind them (blue — the
   same colour the Datasets tools use to flag an odd well), measurements whose
-  output archive is gone (cyan), staged but never processed (grey). A nanowell
+  output archive is gone (cyan), staged but never processed (grey). If the run
+  ended early — you stopped or suspended it, the remote host lost its node or
+  its connection to the app, or the pipeline exited with an error — the grey
+  wells are called *Not reached — run ended early* instead, because the run
+  never got to them rather than skipping them; **Finish this run** processes
+  them. (After Datasets → Validate rescans the folder, they go back to "staged,
+  never processed": Validate cannot know how the run ended.) A nanowell
   well whose timepoints ran but could not be addressed (no central square found)
   is partial, not "never processed", and the health card lists it under
   *Nanowell timepoints not addressed* — and only there, not among the partial
@@ -3270,7 +3276,10 @@ choice applies once, when the menu closes.
   is **on by default** for a nanowell dataset. The line beneath it says, across
   the whole plate, how many nanowell-timepoints were out of focus, how many
   cells that excludes, and how many nanowells it could not check (a rim that
-  could not be fitted, or a well with too few rims at that timepoint). The
+  could not be fitted, or a well with too few rims at that timepoint). That
+  line is counted in the background, so it reads *Checking each nanowell's rim
+  focus across the plate…* for a moment after a dataset opens or the setting
+  changes; the rest of the app is usable meanwhile. The
   Segmentation overlay's **Why removed** outlines those cells in pink as
   *nanowell rim out of focus*, and the inclusion funnel lists them as
   *Nanowell out of focus*. The same switch is mirrored as **Rim focus** on the
@@ -3982,6 +3991,14 @@ offered yet.
 ### Controls shared by every tab
 
 These affordances are global — set them once and every tab honours them.
+
+#### Typing a number
+
+A number you type into a box — bins, a cluster count, a moving-average
+window, ε, an axis limit — takes effect when you press **Enter** or click out
+of the box, not as you type each digit. Typing `200` redraws once, at 200,
+rather than at 2, then 20, then 200. The box's up/down arrows and the mouse
+wheel still apply each step straight away.
 
 #### Channel selector
 

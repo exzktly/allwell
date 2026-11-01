@@ -74,8 +74,7 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
     # A bare number, no suffix: Qt's spin box refuses typing and Backspace while the cursor sits in a suffix, so a
     # click after the number ignored every digit typed. The labels either side say what the number is.
     spin.setValue(int(round(100 * params.nanowell_focus_fraction)))
-    spin.setKeyboardTracking(False)          # one recompute on Enter or focus-out, not one per digit
-    spin.commit_after_pause()                # ...or a pause in typing: a click on a canvas or a tab ends no edit
+    spin.commit_after_pause()                # Enter and focus-out commit; so does a pause: a click on a canvas ends no edit
     spin.setToolTip(TOOLTIP)
     head_layout.addWidget(spin)
     of = QLabel("of the well's sharpest rims", head)
@@ -94,10 +93,19 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
                  "nanowell_focus_status": status, "nanowell_focus_row": row}
 
 
+#: What the status line says while :func:`refresh` counts on its worker.
+COUNTING = "Checking each nanowell's rim focus across the plate…"
+
+
 def refresh(ctx, w: dict) -> None:
     """Show the row on a nanowell dataset only, hide the per-cell focus row where it has nothing to judge, and
     re-read the plate-wide sentence. Shared by the builder and ``qc_gate_refresh_widgets``, so the panel says the
-    same thing built and refilled."""
+    same thing built and refilled.
+
+    The sentence is counted on a worker thread (:func:`_count_off_thread`): it judges every well's site table and
+    reads every well's cells, and this runs inside the dataset load (``load_controller`` refreshes the panel after
+    hydrating the QC parameters), where doing it on the GUI thread froze the window for a minute on a large plate.
+    Until it arrives the line says :data:`COUNTING` rather than keeping the previous dataset's numbers."""
     row, label = w.get("nanowell_focus_row"), w.get("nanowell_focus_status")
     nanowell = is_nanowell_dataset(ctx)
     if row is not None:
@@ -110,8 +118,43 @@ def refresh(ctx, w: dict) -> None:
         spin.setEnabled(box.isChecked())
     if label is None or not nanowell:
         return
-    text, is_problem = nanowell_focus_status(ctx)
+    _count_off_thread(ctx, label)
+
+
+def _show(label, text: str, is_problem: bool) -> None:
     label.setText(text)
     label.setObjectName("Notice" if is_problem else "Muted")
     label.style().unpolish(label)
     label.style().polish(label)
+
+
+def _count_off_thread(ctx, label) -> None:
+    """Count :func:`nanowell_focus_status` on a worker and write it onto *label* on the GUI thread.
+
+    Each call supersedes the one before: only the newest request's answer is written, so a refresh made while an
+    older count runs (a second refresh in the same load, a fraction typed while counting) is never overwritten by
+    the stale one. Nothing is written once the label is gone. The bridge is kept on the label, as
+    ``run_off_thread`` requires a reference for as long as the call runs."""
+    import shiboken6
+
+    from core.safe import swallow
+    from core.worker_bridge import run_off_thread
+
+    request = getattr(label, "_aw_count_request", 0) + 1
+    label._aw_count_request = request
+    _show(label, COUNTING, False)
+
+    def current() -> bool:
+        return shiboken6.isValid(label) and getattr(label, "_aw_count_request", None) == request
+
+    def done(result) -> None:
+        if current():
+            with swallow("Cell Gating: show the nanowell focus sentence"):
+                _show(label, *result)
+
+    def failed(message: str) -> None:
+        if current():
+            with swallow("Cell Gating: show that the nanowell focus count failed"):
+                _show(label, f"The nanowell focus check could not be counted: {message}", True)
+
+    label._aw_count_bridge = run_off_thread(lambda: nanowell_focus_status(ctx), on_done=done, on_failed=failed)

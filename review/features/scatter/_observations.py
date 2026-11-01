@@ -165,16 +165,19 @@ CELL_NANOWELL_PREFIX = "Nanowell ▸ "
 def cell_nanowell_entries(ctx) -> dict[str, str]:
     """``label -> metric key`` for the per-cell pickers' "Nanowell ▸" entries: each cell takes its own nanowell's
     value at its timepoint (``review/data/observations.with_nanowell_columns``). Empty where nanowell observations
-    are not available (a standard plate, or a build without the Nanowells feature)."""
-    from review.data.observations import available_observations, nanowell_observations, observation_groups
+    are not available (a standard plate, or a build without the Nanowells feature).
+
+    Only the metric names are needed, so they are read from the tables' header rows (``nanowell_metric_specs``)
+    rather than by computing the nanowell table: this runs while the Scatter tab builds, inside the dataset load."""
+    from review.data.observations import available_observations, nanowell_metric_specs, observation_groups
 
     if NANOWELLS not in available_observations(ctx):
         return {}
     wells = [w for _l, ws, _c in observation_groups(ctx) for w in ws] or list(ctx.state.dataset.well_paths)[:1]
-    table = nanowell_observations(ctx, wells) if wells else None
-    if table is None:
+    metrics = nanowell_metric_specs(ctx, wells) if wells else None
+    if metrics is None:
         return {}
-    return {f"{CELL_NANOWELL_PREFIX}{m.label}": m.key for m in table.metrics}
+    return {f"{CELL_NANOWELL_PREFIX}{m.label}": m.key for m in metrics}
 
 
 def cell_axis_column(ctx, entry: str) -> str | None:

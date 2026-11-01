@@ -1096,7 +1096,8 @@ allwell/
 │                                  (a combo read and written by value, showing labels)
 │                                  and notice_badge.py (the "!" unread pip on the log button)
 │                                  and spin_box.py (SpinBox / DoubleSpinBox, the only spin
-│                                  boxes the app builds: no layout squeezes their number;
+│                                  boxes the app builds: no layout squeezes their number, and a
+│                                  typed value commits once, on Enter or focus-out;
 │                                  test_spin_boxes_keep_their_number.py; show_value, the
 │                                  refresh that never overwrites a number being typed;
 │                                  commit_after_pause, a typed number applied after a pause)
@@ -1344,7 +1345,8 @@ review/
 │   │                 cell_scope_compute.py, moving_compute.py  ← the Nanowells page: nanowell
 │   │                 tables, per-nanowell metrics, the Distribution beeswarm
 │   │                 and site detail [removable]; observation_compute.py and
-│   │                 overlay_compute.py answer the observations.nanowell and
+│   │                 overlay_compute.py answer the observations.nanowell,
+│   │                 observations.nanowell_metrics and
 │   │                 segmentation.nanowell_overlay services (§6.2l)
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
 │   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
@@ -4028,7 +4030,8 @@ Three rules the page is built around:
   `success` = complete, `warn` = partial, `danger` = an errored well, and
   `accent` = the anomalous one, which here is *images with no measurements* —
   Concatenate paints the identical condition (merged with no measurements CSV on
-  one side) in the same token. `text_muted` carries *staged, never processed*,
+  one side) in the same token. `text_muted` carries *staged, never processed*
+  (worded *not reached* after a run that ended early — §9.6's `ended_early`),
   the token the Datasets dashboards use for pending and for Validate's "no
   output yet". `accent2` is unused: it means "the other of two normal groups"
   (Merge Plates), which no state here is. The rule is one colour per state and
@@ -5160,10 +5163,18 @@ Segmentation overlay (*nanowell rim out of focus*, `Colors.exclusion_nanowell_fo
 other nine inks) and the inclusion funnel (*Nanowell out of focus*) each name the rule that left a cell out. The
 rule and its domain constants live in `review/domain/` because the layer is registered unconditionally, like
 every inclusion layer: a build without the Nanowells page must still leave out the same cells, and
-`review/data` may not import a feature. The site table is read through `nanowell_focus_gate.site_table` —
-only `SITE_COLUMNS`, memoised on the file's path, modification time and size, with the rule applied after the
-lookup — and `nanowell_dir` there is the one answer to where a dataset's nanowell tables are (the Nanowells
-feature's `collect` imports it). The switch is `QCParams.exclude_soft_nanowells`, with
+`review/data` may not import a feature. **Its cost is paid once per well, not once per projection.** The
+projector runs on every well at every dataset load (`load_controller` calls `qc.recompute_all`), every QC edit and
+every plate-wide narrow read, all on the calling thread, so `nanowell_focus_gate.flagged_sites` memoises the
+*judged* site table on the file's path, modification time and size **and** the rule's key
+(`_judged_site_table`, over `_read_site_table`, which reads only `SITE_COLUMNS`): a change of fraction re-judges
+without re-reading, and a repeat projection judges nothing. The judged frame is shared between callers and must
+not be mutated. `cell_pass` packs each cell's well, timepoint, `nw_q` and `nw_r` into one int64 and looks it up
+with `np.isin`, converting the well and timepoint to text once per distinct value — the same comparison as a
+four-level `MultiIndex` of every cell, which cost about a second per million-cell well and made a nanowell plate
+slow to open; `tests/test_nanowell_rim_focus.py` pins the comparison on the edge cases (text timepoints, rounded
+and negative axial coordinates, categorical columns, unaddressed cells). `nanowell_dir` there is the one answer
+to where a dataset's nanowell tables are (the Nanowells feature's `collect` imports it). The switch is `QCParams.exclude_soft_nanowells`, with
 `nanowell_focus_fraction`; `from_pipeline_info` seeds it on for a nanowell run
 (`default_exclude_soft_nanowells`), because the rule is relative and needs no number from the user, and
 `load_from_data_dir` applies that default to a section saved before the key existed, as it does for the border
@@ -5173,7 +5184,11 @@ with nanowell tables, where the per-cell focus row is hidden unless the plate al
 (`mixed_with_ordinary_plate`): a nanowell run records no per-cell focus, so that row could only have sent the
 user to re-run for a measurement a nanowell run never makes. Its sentence (`nanowell_focus_status`) counts from
 the site tables — what the rule would do before it is ticked — and the cells it is excluding, plate-wide
-(`plate_scan.every_well`), and names what it kept unchecked. The panel builds its parameters from the ones in
+(`plate_scan.every_well`), and names what it kept unchecked. Because that reads every well, the row counts
+it on a worker (`nanowell_focus_view._count_off_thread`, through `run_off_thread`): the panel is refreshed inside
+the dataset load, and counting there on the GUI thread froze a large plate's load. Until the answer arrives the
+line reads `COUNTING`; each refresh supersedes the one before, so an older count finishing later is dropped
+rather than written over a newer one, and nothing is written once the label is gone. The panel builds its parameters from the ones in
 force (`get_qc_params(ctx).with_updates(...)`) rather than from the constructor, so a field it holds no box for
 survives an edit of one it does.
 
@@ -12194,7 +12209,7 @@ one or all (`set_well_excluded`, `restore_every_well`).
 
 **Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a bare percentage spin box, 30–95, with no suffix (Qt refuses typing with the cursor inside one)) is a mirror of
 the Cell Gating panel's *Exclude out-of-focus nanowells*, never a setting of its own. The box commits on Enter or
-focus-out (keyboard tracking off) and, because neither can be relied on — a click on a canvas, a tool button or a
+focus-out (keyboard tracking off, as for every `SpinBox`) and, because neither can be relied on — a click on a canvas, a tool button or a
 tab bar ends no edit, and a window the first change's application-modal progress popup left inactive has no focus to
 lose, which dropped every change after the first — also after a second's pause in typing
 (`SpinBox.commit_after_pause`, `TYPING_PAUSE_MS`; the Cell Gating panel's copy of the box does the same). Two
@@ -13543,10 +13558,15 @@ Baseline, rim-focus rule and Cell Gating tally — so a fold change on a plot an
 `occupied` flag and `timepoint_hours` read the way the cell rows read it, so a plot's timepoint choices select the same
 rows. Wells are read once into the page's `well_parts`; the table is memoised on `(folder, wells, baseline, focus rule,
 gating version)`, every input that changes a row. The page's Fixed cohort and Moving average are figure transforms,
-not row properties, and are not applied.
+not row properties, and are not applied. A second service, `observations.nanowell_metrics`
+(`nanowell_metric_specs`), names the same metrics with no rows read: the channels come from the site tables' header
+rows (`collect.site_channels`, the same derivation `load_nanowell_data` applies to the columns it reads). The
+per-cell Scatter's "Nanowell ▸" picker entries (`scatter/_observations.cell_nanowell_entries`) use it, because they
+are built while the Scatter tab builds inside the dataset load, where computing the table only to name its metrics
+cost seconds.
 
 **The asker** (`review/data/observations.py`). `nanowell_observations(ctx, wells)` asks the registry
-(`ctx.features.query`) and gets `None` from a build without the feature; `available_observations` is `(cells,)` or
+(`ctx.features.query`) and gets `None` from a build without the feature, as does `nanowell_metric_specs`; `available_observations` is `(cells,)` or
 `(cells, nanowells)` from the dataset (`is_nanowell_run`) and the build. `observation_groups` is the members every
 plot draws (replicate sets, else selected wells). `with_nanowell_columns` joins a cell's own nanowell's metric onto its
 row as a `nw::<key>` column, on `(timepoint, nw_q, nw_r)`; a cell with no address gets no value. `nw::` columns are
@@ -20132,6 +20152,24 @@ run still reaches the check and writes a record: suspend exits through the
 normal end-of-well path, so the block carries a `suspended` flag and the
 shortfall is reported as a stop rather than shouted at as a fault.
 
+The block also carries `ended_early`: the run did not reach its own end. A
+suspend sets it (so `suspended` implies it, and a record that predates the field
+is read through `suspended`). A remote run sets it from the pipeline's exit
+status: the record there is written on the client after the fetch
+(`remote_fetch.run_client_side_completeness_check`, called from
+`FetchedOutputVerifier.verify` with `ended_early=not ok`), so a Stop, a lost
+node or heartbeat, a driver that went away mid-batch, or a pipeline that exited
+non-zero all record it. It exists because on disk a well the run never got to
+and a well it was given and wrote nothing for are identical (input present, no
+output), and only the run knows which it was. Home keeps both in the same
+painted state (`CELL_INPUT_ONLY`, grey) and changes the words: *Not reached —
+run ended early* in the tooltip, legend, health row and next-step line, and in
+QC triage's row detail, against *Staged, never processed* after a run that
+ended cleanly (`review/features/home/collect.py::run_ended_early`,
+`plate_panel.state_label`; `tests/test_a_well_the_run_never_reached_is_named_so.py`).
+A record Validate writes carries `False`, since Validate describes the folder
+as it stands and cannot know how the run that wrote it ended.
+
 `--no_run_check` turns it off, spelled negative-sense like `--no_auto_threshold`
 because the GUI checkbox is the positive. Turning it off still writes a stub
 recording that it was turned off: "the check was off" and "this dataset predates
@@ -21584,6 +21622,7 @@ The map (each rule links to the test that holds it):
 | A well token is judged by `util.well_token`, never a local whole-token regex (§15) | `tests/test_well_token_single_parser.py` |
 | A removable feature's state slice is reached from outside that feature through `state.feature_slice(name)`, never by attribute. `AppState.__getattr__` **raises** for a slice whose feature is not in `FEATURES`, so a profile build without it fails at the access — and `getattr(ctx.state.stats, "pairwise", [])` does not help, because the default covers a missing *attribute* on an object that already exists and reaching the object is what raises. Removability is read from `profiles/full.toml`, so a slice whose feature is kept forever (`bar`, `preview`, `review_image`) is not the subject; `features/registry.py` is exempt because every access there sits inside that feature's own activation hook, and the guard fails if that exemption stops describing a real access | `tests/test_disabled_feature_slices.py`, with bite cases in `tests/test_guards_bite.py` |
 | Every spin box the application builds is `widgets.spin_box.SpinBox` / `DoubleSpinBox`. The stylesheet's `min-width` floor becomes an explicit 60 px minimum on a bare `QSpinBox`, and a row short of room squeezes the box to it — a 14 px text area, which clipped the QC panel's and the Nanowells band's focus percentages; the subclasses hold their minimum at their whole size hint | `tests/test_spin_boxes_keep_their_number.py` (an AST guard over every package, the reported QC row in a 330 px panel, and the squeezed row with each class) |
+| A typed number is applied once, when it is finished. `SpinBox` / `DoubleSpinBox` set `setKeyboardTracking(False)`, so `valueChanged` fires on Enter or focus-out rather than per keystroke (the arrows, the wheel and `setValue` still fire at once) — typing "200" into a box wired to a recompute no longer runs it for 2 and 20 first. Enter and focus-out are not always reachable — a click on a plot canvas, a tool button or a tab bar ends no edit, and a window left inactive has no focus to lose — so a box whose value must not be dropped also calls `commit_after_pause()`, which commits after `TYPING_PAUSE_MS` without typing (both rim focus boxes do). The Properties panel's bound `QLineEdit`s (the axis limits) apply on `editingFinished`; their setters emit it themselves, so a programmatic set still applies immediately | `tests/test_spin_boxes_commit_typed_values_once.py` (types into each class and the panel's real binding keystroke by keystroke) |
 | `swallow` and `swallowed` are not swapped. They are near-identical names with opposite call shapes — a context manager and a call for inside an `except` block — and swapping them fails only when the line runs. `with swallowed():` raises **before** the body, so the work it was meant to guard never happens; `swallowed()` outside a handler logs a suppression with no exception in flight, which reads as a failure that did not occur | `tests/test_safe_helpers_used_right.py`, with bite cases in `tests/test_guards_bite.py` |
 | A text-mode subprocess names its codec. `text=True` alone decodes the pipe with `locale.getpreferredencoding(False)` — UTF-8 here, the ANSI codepage on a user's Windows box — so a stream that reads correctly for the developer mojibakes the remote's `✓` / `→` markers for them and raises `UnicodeDecodeError` out of a reader thread on the first byte the codepage has no character for, skipping the `proc.wait()` behind it | `tests/test_subprocess_text_decoding.py`, with bite cases in `tests/test_guards_bite.py` |
 | A captured subprocess's timeout holds on Windows. `subprocess.run`'s Windows branch waits, after killing a child that timed out, with no timeout for pipes that a process the child started can hold open for ever; `util.bounded_run.run_bounded` is the one spelling | `tests/test_subprocess_timeouts_return_on_windows.py`, with bite cases in `tests/test_guards_bite.py` |

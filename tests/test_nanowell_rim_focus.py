@@ -223,3 +223,24 @@ def test_the_cell_gating_panel_s_nanowell_focus_box_commits_after_a_pause_in_typ
     qtbot.keyClicks(spin.lineEdit(), "60")
     assert seen == []                                                  # not per digit
     qtbot.waitUntil(lambda: seen == [60], timeout=TYPING_PAUSE_MS * 3)
+
+
+def test_cell_pass_matches_on_text_timepoints_rounded_coordinates_and_negative_axial_addresses():
+    """``cell_pass`` packs each address into one integer for speed (it runs on every well at every load). The
+    packing must keep the old comparison exactly: the well and timepoint as text (``24.0`` is not ``24``), the
+    coordinates rounded, negative axial coordinates distinct from positive ones, a categorical timepoint read by
+    its text, and a cell with no address passing."""
+    import pandas as pd
+
+    flagged = pd.DataFrame({"well": ["A01", "A01", "B01"], "timepoint": ["24.0", "t1", "t1"],
+                            "nw_q": [-3.0, 2.0, 0.0], "nw_r": [1.0, -2.0, 0.0],
+                            "rim_focus_ok": [False, False, True]})
+    cells = pd.DataFrame({
+        "well": ["A01", "A01", "A01", "A01", "A01", "B01", None, "A01", "A01"],
+        "timepoint": pd.Categorical(["24.0", "24", "t1", "t1", "t1", "t1", "t1", "t1", "24.0"]),
+        "nw_q": [-3.0, -3.0, 2.4, -2.0, None, 0.0, 2.0, 1.6, 3.0],
+        "nw_r": [1, 1, -2, 2, -2, 0, -2, -2, 1],
+    }, index=[10, 11, 12, 13, 14, 15, 16, 17, 18])
+    assert rfc.cell_pass(cells, flagged).tolist() == [0, 1, 0, 1, 1, 1, 1, 0, 1]
+    floats = cells.assign(timepoint=[24.0, 24, 1, 1, 1, 1, 1, 1, 24.0])
+    assert rfc.cell_pass(floats, flagged).tolist() == [0, 0, 1, 1, 1, 1, 1, 1, 1]

@@ -57,8 +57,7 @@ def build_rim_focus_controls(ctx) -> RimFocusControls:
     # A bare number, no suffix: Qt's spin box refuses typing and Backspace while the cursor sits in a suffix,
     # and a long one (" % of sharp") filled most of the field, so a click there ignored every digit typed.
     spin.setToolTip(RIM_FOCUS_TIP)
-    spin.setKeyboardTracking(False)          # recompute once on Enter or focus-out, not on every digit typed
-    spin.commit_after_pause()                # ...or a pause in typing: a click on the figure ends no edit
+    spin.commit_after_pause()                # Enter and focus-out commit; so does a pause: a click on the figure ends no edit
     box.toggled.connect(lambda on: nwc.set_rim_focus(ctx, on=on))
     spin.valueChanged.connect(lambda value: nwc.set_rim_focus(ctx, fraction=value / 100.0))
     reg = ctx.widgets

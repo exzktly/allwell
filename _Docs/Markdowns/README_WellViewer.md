@@ -1943,11 +1943,15 @@ none depends on All-Well still running:
 of the two middle rows, the node asks Slurm whether a run's step is still
 running on it, and if one is, keeps the node until that step ends and says so
 once in the node's log (*step 14428.0 is still running, so the node is kept
-until it ends*). So a computer that sleeps or loses its network for a while, or
-a node too busy to read All-Well's signals in time, no longer cancels a run that
-is working; a batched run whose app has gone quiet suspends itself after 10
-minutes, and the node is released after that. If Slurm cannot be asked, the
-node goes by All-Well's signals alone, as the table says.
+until it ends (at most 2 h)*). So a computer that sleeps or loses its network
+for a while, or a node too busy to read All-Well's signals in time, no longer
+cancels a run that is working. A batched run whose app has gone quiet suspends
+itself after 10 minutes, and the node is released after that; a single-shot run
+carries on to its end. Either way a step keeps the node for at most 2 hours
+past the point it would otherwise have been released, so a run that has hung
+cannot hold it until the time limit; the reason then names the step. If Slurm
+cannot be asked, the node goes by All-Well's signals alone, as the table says.
+Slurm is only asked at those moments, never while the node is in plain use.
 
 A run on the node still ends with it at the time limit. When the node does
 release itself, its log and the run's headline say what it measured, not only

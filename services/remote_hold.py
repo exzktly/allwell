@@ -124,9 +124,20 @@ def _duration_words(seconds: int) -> str:
     return f"{seconds} s"
 
 
+#: How long a run step still running keeps a node the app's files say nobody is using, from the first time it did:
+#: past this the node is released anyway, naming the step. A batched run whose app is gone suspends itself within
+#: ``MID_BATCH_HEARTBEAT_STALE_S``, but a single-shot run has no such watchdog, and a hung pipeline would otherwise hold
+#: the node until ``--time``.
+STEP_KEEP_S = 2 * 3600
+#: How long one answer from ``squeue`` about the job's steps is reused. It is asked only when the node would otherwise
+#: be released; this bounds how often while a step keeps it.
+STEP_CHECK_S = 60
+
+
 def compose_hold_script(paths: HoldPaths, *, limit_s: int, idle_release_s: int, poll_s: int = HOLD_POLL_S,
                         heartbeat_stale_s: int = UPLOAD_HEARTBEAT_STALE_S,
-                        busy_stale_s: int = MID_BATCH_HEARTBEAT_STALE_S) -> str:
+                        busy_stale_s: int = MID_BATCH_HEARTBEAT_STALE_S,
+                        step_keep_s: int = STEP_KEEP_S, step_check_s: int = STEP_CHECK_S) -> str:
     """The POSIX ``sh`` script the hold job runs on its node.
 
     *limit_s* is the job's ``--time`` in seconds (it tells a time-limit SIGTERM from a ``scancel``),
@@ -148,18 +159,19 @@ def compose_hold_script(paths: HoldPaths, *, limit_s: int, idle_release_s: int, 
     idle_label = _duration_words(idle_release_s) if idle_release_s else ""
     busy_label = _duration_words(busy_stale_s)
     limit_label = _duration_words(limit_s)
+    step_keep_label = _duration_words(step_keep_s)
 
     # The app gone: the message the check prints, and what it does. `_aw_end` writes the reason and exits.
     # `$_aw_who` says whether a run had claimed the node and gone quiet too, or there was none: a node released
     # from under a running step must not read as one that nothing was using (the run's step ends with the node).
     # `$_aw_evidence` is the snippet's measurement (how long ago the heartbeat was touched, and by which clock), so
     # the reason the node ended carries what it saw and not only its conclusion.
+    # No message of its own: `_aw_release` either keeps the node for a running step (and says so once) or ends it, and
+    # `_aw_end` prints the reason — a line on every poll while a step keeps the node would say the opposite.
     _, gone_check = _heartbeat_stale_snippet(
-        paths.heartbeat,
-        f"[remote] granted node: {APP_SILENT_RELEASE} ({_duration_words(heartbeat_stale_s)} without a "
-        "heartbeat: $_aw_evidence) and $_aw_who",
+        paths.heartbeat, "",
         stale_s=heartbeat_stale_s, poll_s=poll_s,
-        on_stale=f'_aw_end "{APP_SILENT_RELEASE} ({_duration_words(heartbeat_stale_s)} without a heartbeat: '
+        on_stale=f'_aw_release "{APP_SILENT_RELEASE} ({_duration_words(heartbeat_stale_s)} without a heartbeat: '
                  '$_aw_evidence) and $_aw_who"')
     # A run's marker that its own heartbeat has stopped refreshing is a run whose app died mid-run: not busy.
     # The check prints each time it judges, which would be a line every poll, so its output is dropped.
@@ -188,11 +200,52 @@ _aw_end() {{
 _aw_run_step() {{
     [ -n "${{SLURM_JOB_ID:-}}" ] || return 2
     command -v squeue >/dev/null 2>&1 || return 2
-    _aw_steps=$(squeue -h -s -j "$SLURM_JOB_ID" -o %i 2>/dev/null) || return 2
+    _aw_steps=$(squeue -h --steps --jobs="$SLURM_JOB_ID" -o %i 2>/dev/null) || return 2
     _aw_step=$(printf '%s\\n' "$_aw_steps" | grep -E "^${{SLURM_JOB_ID}}\\.[0-9]+$" | head -n1)
     [ -n "$_aw_step" ]
 }}
 _aw_kept_for=""
+_aw_kept_since=""
+_aw_asked_at=0
+_aw_asked_rc=1
+
+# Whether a run step of this job is still running and may keep the node: Slurm is asked at most every {step_check_s} s,
+# and a step keeps it for at most {step_keep_label} from the first time it did. Says once, per step, that it keeps it.
+# Returns 1 (and forgets the keep) when no step is running or the scheduler cannot say, and 1 with $_aw_over set when
+# the step has had its time.
+_aw_step_keeps() {{
+    _aw_over=""
+    _aw_t=$(date +%s)
+    if [ $((_aw_t - _aw_asked_at)) -ge {step_check_s} ]; then
+        _aw_run_step; _aw_asked_rc=$?; _aw_asked_at=$_aw_t
+    fi
+    if [ "$_aw_asked_rc" -ne 0 ]; then
+        _aw_kept_for=""; _aw_kept_since=""
+        return 1
+    fi
+    [ -n "$_aw_kept_since" ] || _aw_kept_since=$_aw_t
+    if [ $((_aw_t - _aw_kept_since)) -ge {step_keep_s} ]; then
+        _aw_over="; step $_aw_step was still running, and had kept the node for {step_keep_label}"
+        return 1
+    fi
+    if [ "$_aw_kept_for" != "$_aw_step" ]; then
+        _aw_kept_for=$_aw_step
+        echo "[remote] granted node: the app's files say no run is using the node, but step $_aw_step is still \
+running, so the node is kept until it ends (at most {step_keep_label})"
+    fi
+    return 0
+}}
+
+# Release the node with reason $1 — unless a run step keeps it. Slurm is asked only here, at the moment the files say
+# the node would go, and then, while a step keeps it, every {step_check_s} s until the step ends — so a healthy node
+# never asks, and the idle clock restarts when the step ends rather than when it was last seen.
+_aw_release() {{
+    if _aw_step_keeps; then
+        _aw_kept=1
+        return 0
+    fi
+    _aw_end "$1$_aw_over"
+}}
 
 # Slurm's own end of the job: SIGTERM at --time, or from a scancel (the app's Release/quit, or anyone's).
 _aw_term() {{
@@ -227,29 +280,23 @@ while :; do
         [ "$_aw_busy" = 1 ] || _aw_who="the run using it had not been heard from for {busy_label} either (its claim \
 $_aw_evidence)"
     fi
-    # The files say nothing is using the node; Slurm has the last word. A run step still running keeps the node — it
-    # is doing work, and ending the job would cancel it — whatever the files say: the app may only have stopped
-    # reaching the host, or a starved node may be reading the files late. The run ends on its own (a batch whose app
-    # is gone suspends itself), and the rules below apply once it has.
-    if [ "$_aw_busy" = 0 ] && _aw_run_step; then
-        _aw_busy=1
-        if [ "$_aw_kept_for" != "$_aw_step" ]; then
-            _aw_kept_for=$_aw_step
-            echo "[remote] granted node: the app's files say no run is using the node, but step $_aw_step is still \
-running, so the node is kept until it ends"
-        fi
-    elif [ "$_aw_busy" = 0 ]; then
-        _aw_kept_for=""
-    fi
+    _aw_kept=0
     _aw_tick=$(date +%s)      # this node's clock; the heartbeat check below assigns _aw_now from the file server's
     if [ "$_aw_busy" = 1 ]; then
+        _aw_kept_for=""; _aw_kept_since=""       # the files speak for a run again: a later keep starts afresh
+    else
+        # A step that kept the node goes on keeping it until Slurm no longer lists it (or its time is up).
+        if [ -n "$_aw_kept_since" ] && _aw_step_keeps; then _aw_kept=1; fi
+        {gone_check}
+        _aw_idle=$(( _aw_tick - _aw_last_used ))
+        {f'if [ "$_aw_kept" = 0 ] && [ "$_aw_idle" -ge {idle_release_s} ]; then _aw_release "idle {idle_label}"; fi' if idle_release_s else ":"}
+    fi
+    # A run step that kept the node is using it: its idle clock does not run.
+    if [ "$_aw_busy" = 1 ] || [ "$_aw_kept" = 1 ]; then
         _aw_last_used=$_aw_tick
         _aw_write {q["status"]} "state=busy
 idle_s=0"
     else
-        {gone_check}
-        _aw_idle=$(( _aw_tick - _aw_last_used ))
-        {f'if [ "$_aw_idle" -ge {idle_release_s} ]; then _aw_end "idle {idle_label}"; fi' if idle_release_s else ":"}
         _aw_write {q["status"]} "state=idle
 idle_s=$_aw_idle"
     fi

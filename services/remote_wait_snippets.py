@@ -140,17 +140,19 @@ def _heartbeat_stale_snippet(heartbeat: str, message: str, *,
     *stale_s* and *poll_s* time the check (the loop around it sleeps *poll_s*
     between calls), and *on_stale* is the shell run once the app is judged gone
     — by default the exit that hands the node back. Each check leaves
-    ``$_aw_evidence`` is set just before the file is judged gone — how long ago it was last touched and by which
-    clock (the file server's, read from a probe beside it, or this node's when the probe could not be written), or
-    how many looks found no file — so *message* and *on_stale* can carry the measurement and not only the verdict.
     ``$_aw_fresh`` at ``1`` when a heartbeat it could read vouched for the app,
     which is what lets the waits' deadline stand aside for a healthy slow upload.
+
+    Just before a file is judged gone the check sets ``$_aw_evidence``: how long ago it was last touched and by which
+    clock (``$_aw_clock`` — the file server's, read from a probe beside it, or this node's when the probe could not be
+    written), or how many looks found no file. *message* and *on_stale* can carry the measurement, not only the
+    verdict. An empty *message* prints nothing: the caller's *on_stale* says what happened, when it happens.
     """
     if not heartbeat:
         return "", ""
     hb_q = _remote_quote(heartbeat)
     misses = max(1, int(stale_s // poll_s))
-    gone = f'echo "{message}"; {on_stale or f"exit {_UPLOAD_WAIT_EXIT}"}; '
+    gone = (f'echo "{message}"; ' if message else "") + f'{on_stale or f"exit {_UPLOAD_WAIT_EXIT}"}; '
     probe = hb_q + '".now.${BASHPID:-$$}"'
     mtime = 'stat -c %Y "$_aw_p" 2>/dev/null || stat -f %m "$_aw_p" 2>/dev/null'
     init = "_aw_miss=0; _aw_warn=0; _aw_fresh=0; "

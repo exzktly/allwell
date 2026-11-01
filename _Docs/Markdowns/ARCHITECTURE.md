@@ -20398,28 +20398,79 @@ you're in before you type the command.
     dialogs; about 100 s. Marked `remote_lane`; **`scripts/test.sh --remote`**.
 
   `GATES` in the same module names two gates, `nanowell` (both nanowell lanes)
-  and `remote`, each with its rosters and path patterns.
+  and `remote`, each with its rosters and the harness paths that trigger it
+  (`scripts/test.sh`, `tests/requirements-dev.txt`, `.github/workflows/ci.yml`).
   `scripts/lane_needed.py <gate> [--base REF]` answers whether a change needs
-  them: a changed path matching the patterns, or a first-party module one of the
-  gate's roster files imports **directly** (read from the files' syntax trees on
-  each run, so a new test extends its trigger by joining the roster), means run
-  it; a diff that cannot be computed means run it. The import closure cannot be
-  the trigger — one `import analyze.tab` reaches most of the application — so a
-  module two imports away can still move a gated test without triggering its
-  lane. CI's `nanowell` job (the end-to-end lane) and `gated` job (the feature
-  and remote lanes, one gate step each) therefore ask the script on a pull
-  request and run unconditionally on a push to `main`; every run is gated on its
-  JUnit report (`scripts/junit_gate.py`). `scripts/preflight.sh` asks the same
-  question before running each lane. Measured over the 52 merges before the
-  split, the nanowell gate would have fired on 46 (that stretch was mostly
-  nanowell work) and the remote gate on 27; even when a gate fires, moving its
-  tests into a parallel job takes about five minutes off CI's fast-lane job.
+  them, and every other trigger is computed rather than listed:
+  - **A roster file, or a file one names by path.** The script reads the
+    roster files' string constants (and `ROOT / "dir" / "file"` chains) for
+    tracked paths: `process_microscopy.py`, which the stand-in cluster runs;
+    `requirements-remote.txt`, which the bootstrap tests parse;
+    `all_well_launcher.py` and `_Docs/_Installation/all_well.spec`, whose source
+    the dispatch tests read. A change to any of them runs the lane. A file used
+    only as something read (`.read_text()`, `.open()`, `open()`) is not *run*,
+    so a change that merely reaches it through its imports does not.
+  - **Python, followed through its importers.** For each changed `.py` file the
+    script compares its syntax tree where the branch left the base with the tree
+    now and names the definitions that changed: top-level functions, classes,
+    assignments and imports (an import by the name it binds), each class's own
+    members, and an `if __name__ == "__main__":` block as a definition of its
+    own; docstrings and comments are ignored. It widens that set to every
+    definition in the module that refers to one, then follows it outwards. In
+    each module that imports the changed one, a definition is affected when it
+    takes an affected name from it — `from m import f`, `m.f` on an alias of
+    `m`, `from m import *`, a string naming `m` with the attribute as another
+    string (the feature registry), or `Class.attr`; a changed method also
+    counts as a change to its class, since an importer calls it on an instance
+    it made. Matching is by qualified name, so `other.f()` on an unrelated
+    object is not a use of `m.f`. The graph covers application code, every
+    test helper under `tests/`, and any test module a roster file borrows from,
+    so `tests/_fake_remote.py` (nine remote test files) reaches the remote lane.
+    The lane runs when the change reaches a roster file or a file one runs.
+    Files are read up front and parsed only when the change reaches a module
+    whose name they contain: a change that reaches nothing parses a few
+    hundred files in a few seconds, and one that reaches far parses about a
+    thousand in up to twenty.
+  - **What cannot be narrowed runs the lane:** a new, deleted or unparseable
+    file, a change to a module-level statement that defines nothing (a
+    conditional block, a call), an importer that uses such a module only for
+    the side effects of importing it, and a diff that cannot be computed.
+  - **Harness files compared, not matched.** `tests/_lanes.py` reaches a gate
+    only when that gate's rosters (as sets of files) or trigger patterns
+    differ, both versions loaded. `pyproject.toml` reaches it only when its
+    `[tool.pytest]` table differs. `tests/conftest.py` reaches it when a hook or
+    an autouse fixture changes, or a fixture one of its tests asks for by
+    parameter or by string. A change to `version.py`'s `__version__` alone
+    reaches nothing. `scripts/lane_needed.py` and `scripts/change_scope.py`
+    reach no gate: they decide which lanes run and no lane runs them.
+
+  The firing rate follows from what the lanes test, not from the rule. Replayed
+  over 61 merges to `main`, the nanowell gate fires on 52 and the remote gate
+  on 39 — about as often as a path-pattern rule did (51 and 41), but not on the
+  same merges. It runs a lane on five merges the patterns skipped, each with a
+  path to a lane test (a `services/remote_hold.py` change reaching the nanowell
+  form tests through `PipelineRunner`, a `pipeline/` change reaching
+  `process_microscopy.py`, which the remote stand-in tests run), and skips six
+  the patterns ran: four `tests/_lanes.py` edits that changed only the other
+  gate's rosters, a test file in no roster, and a CZI converter no lane test
+  reaches. The end-to-end tests run the whole pipeline and several remote
+  tests build `AnalyzeTab` or read `AllWellApp`, so most pipeline and Analyze
+  changes can break them; making the gates fire less means moving tests, not
+  loosening the trigger. What the script cannot follow — a module named by a
+  computed string, a data file an application module reads at run time, a test
+  that builds a path at run time — is why CI's `nanowell` job (the end-to-end
+  lane) and `gated` job (the feature and remote lanes, one gate step each) ask
+  the script on a pull request and run unconditionally on a push to `main`;
+  every run is gated on its JUnit report (`scripts/junit_gate.py`).
+  `scripts/preflight.sh` asks the same question before running each lane.
+  `tests/test_a_gated_lane_runs_on_what_changed.py` holds each part on
+  synthetic trees, and the files the real rosters must be found naming.
   No file is in two rosters and no whole-tree guard is in any. Naming test files
   on the command line selects them whichever lane they belong to.
   `tests/test_the_fast_lane_stays_fast.py` holds every roster to real files in
   one roster, the hook to marking each with its own mark, `scripts/test.sh` to
   keeping each out of the fast lane, CI and preflight to running each lane behind
-  its gate, and each gate to seeing both its patterns and its tests' imports.
+  its gate, and each gate to seeing its tests' helpers and the files they name.
 - **Change scope** (`scripts/change_scope.py`). Before the fast lane runs, the
   change is classified against its base (`origin/main`, or
   `$ALLWELL_SCOPE_BASE`; committed, uncommitted and untracked paths, through

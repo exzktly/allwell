@@ -1349,11 +1349,14 @@ def _reanchor_well(job, *, output_dir, shared_kwargs_template, nuclear_token, fl
     well's re-run must not cost the rest, nor the finished run's records.
     """
     well, zip_path, by_tp = job
-    log.info("Well %s — re-anchoring %s from the plate's other wells.", well, ", ".join(sorted(by_tp)))
+    if by_tp:
+        log.info("Well %s — re-anchoring %s from the plate's other wells.", well, ", ".join(sorted(by_tp)))
+    else:
+        log.info("Well %s — its confluence is measured again against the empty reference this pass saved.", well)
     try:
         run_zip_task(well, zip_path, output_dir, shared_kwargs_template, nuclear_token, fluor_tokens,
                      csv_prefix, schema, sep, settings_key, grouper=grouper, parse=parse, segmenter=segmenter,
-                     incremental=True, incremental_prior_dir=output_dir, plate_rigid=by_tp, reanchoring=True)
+                     incremental=True, incremental_prior_dir=output_dir, plate_rigid=by_tp or None, reanchoring=True)
     except Exception as exc:
         log.error("Well %s — re-anchoring failed (%s: %s); its timepoints stay unaddressed.", well,
                   type(exc).__name__, exc, exc_info=True)
@@ -1416,11 +1419,21 @@ def reanchor_plate(output_dir, well_zips, shared_kwargs_template, nuclear_token,
                     sep=sep, settings_key=settings_key, grouper=grouper, parse=parse, segmenter=segmenter)
     # The empty reference well first, alone: every other well's confluence is read against the templates it saves,
     # and run beside them in the pool a well could read the reference while it was being rewritten (review tracker
-    # L8). A well that is not re-run here keeps what it read; its timepoints' reference keys say so to the next run.
+    # L8). Its re-run can save a template for a timepoint it has only now been addressed at, which the other wells
+    # measured earlier in the run with no reference there: each of those is measured again in this pass, as an
+    # incremental re-run (which keeps every timepoint whose reference key still matches), rather than left saying
+    # "the reference has no timepoint" for this run to report as success.
     reference = nref.reference_well(settings_from_kwargs(shared_kwargs_template))
     first = [job for job in jobs if nref.same_well(job[0], reference)]
     rest = [job for job in jobs if job not in first]
-    for well, by_tp, error in _each_reanchored(rerun, first, None) + _each_reanchored(rerun, rest, pool):
+    results = _each_reanchored(rerun, first, None)
+    if first:
+        queued = {job[0] for job in rest}
+        rest += [(well, zips[well], {}) for well in sorted(zips)
+                 if well not in queued and not nref.same_well(well, reference)
+                 and (output_dir / NANOWELL_DIR / f"{well}_grid.json").is_file()
+                 and not confluence_reference_current(output_dir, well, shared_kwargs_template)]
+    for well, by_tp, error in results + _each_reanchored(rerun, rest, pool):
         if error:
             reasons.update({(well, tp): f"the re-run failed: {error}" for tp in by_tp})
     after = _read_grids(output_dir, here)

@@ -32,8 +32,10 @@ value (the count, the confluence, the brightness or the fluorescence — not a f
 and the timepoints before it, never after it, since a later timepoint may already carry the treatment. It follows
 the endpoint's rule: complete or nothing, every timepoint joinable, its shortfalls counted with
 :data:`BASE_EARLY_REASON`, :data:`BASE_GAP_REASON` or :data:`BASE_IDENTITY_REASON`. The Earliest baseline has
-nothing before it, so :func:`baseline_window_for` turns the baseline's window off there rather than leaving every
-fold change undefined; it is also off whenever the endpoint's moving average is off.
+nothing before it, and the First measurable baseline is by definition the first timepoint with a value, so every
+timepoint before it has none: under either a complete window can never exist, and :func:`baseline_window_for` turns
+the baseline's window off there rather than leaving every fold change undefined. Only a named timepoint can have one.
+It is also off whenever the endpoint's moving average is off.
 
 A count's ratio over a constant baseline averages the same whichever is divided first. ``log2_count_fc`` is
 averaged as logs — the mean of log₂((n + 1) / (n₀ + 1)), a geometric mean of the ratios, not the log of their
@@ -48,7 +50,7 @@ import numpy as np
 import pandas as pd
 
 from review.features.nanowell.collect import MEASURABLE as _MEASURABLE
-from review.features.nanowell.series_compute import EARLIEST
+from review.features.nanowell.series_compute import EARLIEST, FIRST_MEASURABLE
 
 #: The largest window the page offers. The longest series seen so far are about a dozen timepoints.
 MAX_WINDOW = 9
@@ -86,8 +88,10 @@ def is_on(window) -> bool:
 def baseline_window_for(window, baseline_window, baseline) -> int:
     """The baseline's window a figure uses: *baseline_window* clamped, and 0 when the endpoint's moving average
     (*window*) is off — the baseline's window is a refinement of it, not a control of its own — or when *baseline*
-    is the Earliest, which has no timepoint before it to average."""
-    if not is_on(window) or baseline == EARLIEST:
+    is the Earliest, which has no timepoint before it to average, or First measurable, whose earlier timepoints are
+    by definition the ones without a value, so its window could never be complete and would blank every fold
+    change."""
+    if not is_on(window) or baseline in (EARLIEST, FIRST_MEASURABLE):
         return 0
     return clamp_window(baseline_window)
 

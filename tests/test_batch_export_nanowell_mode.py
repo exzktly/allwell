@@ -298,8 +298,9 @@ def test_a_well_excluded_on_the_page_is_still_drawn_by_its_batch_group(panel, tm
 def test_the_baseline_s_window_reaches_the_figure_and_the_csv_says_which_window_each_row_used(panel, tmp_path,
                                                                                              monkeypatch):
     """The panel's baseline window goes to the page's composition and into the summary, which is the page's
-    summary at that window. Under First measurable it is used; the CSV's column names it per row, and a metric
-    that is not a fold change says none."""
+    summary at that window. Under a named later timepoint it is used (under Earliest and First measurable there is
+    no measured timepoint before the baseline, so it is off); the CSV's column names it per row, and a metric that
+    is not a fold change says none."""
     from review.features.nanowell.collect import load_nanowell_data
     from review.features.nanowell.distribution_compute import wells_summary
     from PySide6.QtCore import Qt
@@ -317,7 +318,11 @@ def test_the_baseline_s_window_reaches_the_figure_and_the_csv_says_which_window_
         item = p._metric_list.item(i)
         item.setCheckState(Qt.Checked if item.data(Qt.UserRole) in ("n", "count_fc") else Qt.Unchecked)
     p._threshold_edits["count_fc"].setText("1")
-    p._baseline_cb.setCurrentIndex(p._baseline_cb.findData("first_measurable"))
+    # The combo lists the dataset's own timepoints once the Nanowells page has read them; this fixture's page has
+    # not, so the run's one timepoint is offered as the page would offer it.
+    later = nanowell_panel._baseline_at("0h")
+    p._baseline_cb.addItem("Timepoint 0h", later)
+    p._baseline_cb.setCurrentIndex(p._baseline_cb.findData(later))
     p._moving_spin.setValue(2)
     p._baseline_moving_spin.setValue(2)
     assert p._run_settings()["baseline_moving"] == 2
@@ -329,7 +334,7 @@ def test_the_baseline_s_window_reaches_the_figure_and_the_csv_says_which_window_
     assert fold and {r["baseline_moving_average"] for r in fold} == {"2"}
     assert counts and {r["baseline_moving_average"] for r in counts} == {""}
     data = load_nanowell_data(ctx.state.dataset.data_dir)
-    metrics = site_metrics(data, "first_measurable")
+    metrics = site_metrics(data, later)
     expected = wells_summary(metrics, ["A01"], "count_fc", channels=data.channels, moving=2, baseline_moving=2)
     single = wells_summary(metrics, ["A01"], "count_fc", channels=data.channels, moving=2)
     assert list(expected["excluded"]) != list(single["excluded"])       # the fixture can tell the two apart

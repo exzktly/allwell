@@ -90,6 +90,11 @@ def run_batch(proc, index: int, n_batches: int, batch_zips) -> int | Step:
     sent = _upload(proc, index, n_batches, batch_zips)
     if isinstance(sent, Step):
         return sent
+    # Batch 1 went up while the run's granted node was still being granted: the driver is launched now it is on the
+    # host (`_BatchedRemoteProcess.launch_deferred_driver`), once the node is granted.
+    launch = getattr(proc, "launch_deferred_driver", None)
+    if launch is not None and not launch():
+        return Step.ENDED
     # The pipeline for this batch runs inside the allocation the driver already holds — no second queue wait, no
     # second argv. One hand-off that cannot be made ends the run (`remote_handoff`).
     rc = hand_off_and_wait(proc, index, n_batches,

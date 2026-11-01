@@ -314,7 +314,11 @@ kept in a small module-level registry keyed by host name (acceptable in
   removes it. The lease is taken **at the start of the run, before staging and
   upload**, not when the pipeline starts: a large plate can take longer than the
   idle limit to prepare and upload, and the idle clock must not run during that.
-  It is released in the run's `finally`, on every exit path.
+  It is released in the run's `finally`, on every exit path. A hold still queued
+  is claimed the same way and not waited for there: the marker needs only the
+  hold's directory and the hold script reads it on its first look, so the run
+  stages and uploads while the hold queues and waits for the grant at launch
+  (row H19).
 
 ### 5.2 A run on a granted node is a job step (row H3)
 
@@ -650,3 +654,15 @@ the panel showed only the latest state. Added: a per-node record (`GrantedNode.t
 | ID | Item | State | Where | Evidence |
 |---|---|---|---|---|
 | H18 | **Show log**: this app's record (the sbatch, each state/reason change, non-ok answers, failures, release) live, plus the hold job's output and `scontrol show job` read from the host; refresh, copy; an unreadable host is said, not shown as an empty log | done | `services/remote_hold.py` (`HoldLog`, `remote_log_script`, `GrantedNode.read_remote_log`), `analyze/granted_node_log_dialog.py`, `analyze/granted_node_panel.py` | `tests/test_remote_hold_request.py` (7 new) and `tests/test_manage_remotes_granted_node.py` (6 new, the real panel and window against the stand-in cluster). Mutated on HEAD, each fails its own test: Show log connected to nothing (4 tests); the sbatch not recorded (4); state changes not recorded (2); the window never stopping listening; the cluster side without the scheduler's record (3); an unreadable host shown as an empty log. Also found: the shared fake `scontrol` only understood `show job -o ID`; it now takes the last argument as the real one does |
+
+## 14. Follow-up: a run started while the node is still queued
+
+Reported after the feature merged: with a node requested and still queued, an Analyze run sat on "the granted node
+is still being granted; waiting for it" and neither checked nor started its uploads. `claim_node` waited for the
+grant before staging, so the queue wait and the plate's preparation and upload ran end to end, where a run with a job
+of its own overlaps them (`services.remote_reservation`). The idle-clock reason for claiming before staging does not
+apply to a node that has not started.
+
+| ID | Item | State | Where | Evidence |
+|---|---|---|---|---|
+| H19 | A queued hold is claimed at once (a `pending` `NodeLease`); the run stages and uploads meanwhile and waits for the grant at launch — single-shot after the upload, batched after batch 1's — through `RemoteRunner.await_granted_node` → `GrantedRun.await_node`; `launcher()` refuses while the wait is owed; a hold that ends before it is granted hands the run back to a node of its own; a boot failure is waited through while the request resubmits | done | `services/remote_hold.py`, `services/remote_runner.py`, `services/remote_process.py`, `services/remote_batch_step.py` | `tests/test_a_queued_granted_node_overlaps_the_upload.py` (7 tests, two through a real `PipelineRunner`, single-shot and batched, asserting the upload happened while the job was `PENDING` and before the step launch), `test_a_run_claims_the_granted_node.py::test_a_node_that_is_still_being_granted_is_claimed_at_once_and_not_waited_for` (rewritten: it had pinned the reported wait), `test_remote_hold_script.py::test_a_node_claimed_while_it_was_queued_starts_busy_and_its_idle_clock_never_runs`. Mutated on HEAD, each fails a test: claiming only a granted node (8 tests); dropping the single-shot wait (`launcher()` refuses); dropping batch 1's deferred launch; no boot-failure grace; a queue wait counted from the launch; a hold that ended leaving the marker set. |

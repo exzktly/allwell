@@ -30,14 +30,25 @@ ORIGIN_RANK = {"manual": 0, "fiducial": 1, "array_centre": 2, "plate_rigid": 3}
 AGREE, SHIFT, TIE, KEPT_OUTRANKED = "agree", "shift", "tie", "kept_outranked"
 
 
+#: How many more of a timepoint's detected addresses a lattice step must match than step ``(0, 0)`` does before the
+#: timepoint is read as a step off — the same floor ``datasets.core.nanowell_rim.MIN_CRESCENT`` puts on the roster's
+#: own step test. A dense reference that missed one nanowell (debris, a bubble) near the open side of a sparser
+#: timepoint let a shifted overlay win by that one site, and the run then renamed every nanowell of the timepoint
+#: after its neighbour (or, on a tie, left the well unaddressed). A step off moves a whole edge row of the array out of
+#: the overlay, many sites, never one or two.
+MIN_STEP_GAIN = 3
+
+
 def best_step(mine, others) -> tuple[int, int]:
     """The lattice step ``(dq, dr)`` that moves the addresses *mine* onto *others* best: ``(0, 0)`` unless some step
-    within :data:`STEP_REACH` overlaps them strictly more than they already do."""
-    others = set(others)
+    within :data:`STEP_REACH` overlaps them more than they already do by at least :data:`MIN_STEP_GAIN` sites and by
+    half of the addresses step ``(0, 0)`` leaves unmatched — a step that explains the mismatch, not noise in it."""
+    mine, others = set(mine), set(others)
     steps = [(dq, dr) for dq in range(-STEP_REACH, STEP_REACH + 1) for dr in range(-STEP_REACH, STEP_REACH + 1)]
     overlap = {s: len({(q + s[0], r + s[1]) for q, r in mine} & others) for s in steps}
     best = max(steps, key=lambda s: (overlap[s], s == (0, 0)))
-    return best if overlap[best] > overlap[(0, 0)] else (0, 0)
+    gain, unmatched = overlap[best] - overlap[(0, 0)], len(mine) - overlap[(0, 0)]
+    return best if best != (0, 0) and gain >= max(MIN_STEP_GAIN, unmatched / 2) else (0, 0)
 
 
 def rank_of(method) -> int:

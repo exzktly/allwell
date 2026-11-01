@@ -501,3 +501,22 @@ def test_an_only_wells_subset_leaves_the_plate_s_gating_to_this_computer(tmp_pat
     argv: list = []
     sent, _lines = _run(inp, out, _opts(only_wells=["A01"]), argv_sent=argv)
     assert sent == ["A01"] and "--no_auto_threshold" in argv[-1] and len(regated) == 1
+
+
+def test_a_well_with_a_field_that_found_no_nuclei_is_finished(tmp_path):
+    """A field whose segmentation found no nuclei writes no CSV rows, but its images are in the well's output
+    archive. Read from the CSV alone, the well looked short of that field and was uploaded and computed again on
+    every re-run; Validate and the local planner both count the archive too, and so does this check now."""
+    inp, out = _plate(tmp_path)
+    with open(out / "measurements_A01.csv", "w", newline="") as fh:        # field 2 had no cells
+        w = csv.DictWriter(fh, fieldnames=["well", "fov", "timepoint"])
+        w.writeheader()
+        w.writerow({"well": "A01", "fov": "1", "timepoint": "T01"})
+    with zipfile.ZipFile(out / "A01_out.zip", "w") as zf:
+        for fov in (1, 2):
+            zf.writestr(f"e_DAPI_A01_{fov}_T01.tif", b"x")
+    for well in ("A01", "B02"):
+        _record(out, well, _opts())
+    sent, lines = _run(inp, out, _opts())
+    assert sent is None, f"sent {sent} although every well is finished"
+    assert any("2 well(s) already finished here" in ln for ln in lines)

@@ -41,6 +41,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
+from pipeline.nanowell_reference import DIR_NAME as _REFERENCE_DIR
 from pipeline.run_report import COMPLETE_DIRNAME, cross_build_note, finished_wells, well_of_out_zip, well_of_seal
 from services.remote_transport import _remote_quote
 from util.well_token import canonical_well_label
@@ -199,6 +200,15 @@ def adopt_finished(cache, wells: Iterable[str], found: Leftovers, *, own_output_
         pairs.append((f"{src}/{COMPLETE_DIRNAME}", f"{well}.json", f"{own_output_dir}/{COMPLETE_DIRNAME}"))
         if nanowell:
             pairs += [(f"{src}/nanowells", g.format(w=well), f"{own_output_dir}/nanowells") for g in _NANOWELL_FILES]
+            # The plate's empty reference lives beside the wells' tables, not in any one well's files. When the well
+            # adopted is the one it was measured from, it comes too: left behind, every well this attempt computes
+            # in its fresh directory read "the empty reference well has not been measured in this output folder" and
+            # came back with no confluence, and the adopted well was downloaded without it.
+            ref, mine = f"{src}/nanowells/{_REFERENCE_DIR}", f"{own_output_dir}/nanowells/{_REFERENCE_DIR}"
+            lines.append(
+                f"if [ -f {_remote_quote(ref + '/reference.json')} ] && [ ! -e {_remote_quote(mine)} ] && "
+                f"grep -Eq '\"well\": *\"{well}\"' {_remote_quote(ref + '/reference.json')}; then "
+                f"cp -Rp {_remote_quote(ref)} {_remote_quote(mine)} || echo 'allwell-adopt-failed: {well}'; fi")
         for folder, glob, dest in pairs:
             lines.append(
                 f"for f in {_remote_quote(folder)}/{glob}; do [ -f \"$f\" ] || continue; "

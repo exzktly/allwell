@@ -56,7 +56,7 @@ from pipeline.field_quality_record import (
     read_field_quality_block,
 )
 # Stdlib-only: the failure records in errors/ (pipeline.io is imported lazily, by its writers alone).
-from pipeline.error_records import mirror_retirements
+from pipeline.error_records import mirror_retirements, retire_force_notes
 from pipeline.run_report import (
     merge_fetched_run_report,
     read_run_report_block,
@@ -1605,7 +1605,20 @@ class FetchedOutputVerifier:
                 f"{len(missing)} problem(s), listed above.\n"
             )
             return FetchVerification(False, reason="incomplete", missing=tuple(missing))
+        self._retire_answered_force_notes(scope, log=log)
         return FetchVerification(True)
+
+    def _retire_answered_force_notes(self, scope, *, log: Callable[[str], None]) -> None:
+        """Archive the local ``Remedy: force`` notes of the wells this run re-ran from scratch and that verified
+        whole, since the worker host never had those notes to retire (``error_records.retire_force_notes``). Only
+        a forced, non-incremental run answers such a note: an incremental one adds to the well and leaves the gap."""
+        run = self._run
+        if run is None or run.incremental:
+            return
+        forced = set(scope) if run.force else set(run.force_wells)
+        for path in retire_force_notes(run.local_output_dir, forced):
+            log(f"[remote] {path.name}: the forced re-run this note asked for has rebuilt the well; archived in "
+                "errors/superseded/.\n")
 
 
     def _rsync_optional(

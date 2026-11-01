@@ -24,12 +24,14 @@ from services.remote_batch_step import well_removed
 from tests.test_batch_driver import _batched, _FakeProc, _stub_runner
 
 
-def _start(tmp_path, monkeypatch, wells, upload, batch_size=1):
+def _start(tmp_path, monkeypatch, wells, upload, batch_size=1, before=None):
     proc = _FakeProc()
     ordering: list[str] = []
     p = _batched(tmp_path, wells, batch_size=batch_size)
     _stub_runner(p, proc, ordering)
     p._runner._cache.upload_subset = upload
+    if before is not None:
+        before(p)
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: proc)
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
@@ -260,3 +262,40 @@ def test_a_stop_ends_an_upload_still_waiting_for_room(tmp_path, monkeypatch):
     worker.join(timeout=20)
     assert not worker.is_alive() and _up(sent, "b2") == []
 
+
+
+def test_the_record_sent_with_each_well_describes_the_whole_batch(tmp_path, monkeypatch):
+    """Each rsync rewrites the acquisition record and anchors beside the archives, scoped to what it is told; the
+    driver hands the pipeline the last one. Sent a well at a time, the record must still name the whole batch, or
+    the batch's earlier wells run with no recorded tile positions. Through the real ``carry_subset_record``."""
+    import json
+    from pathlib import Path
+
+    import services.acquisition_transport as at
+
+    monkeypatch.setattr(at, "_payload", lambda zipped, paths: {"wells": sorted(Path(p).stem for p in paths)})
+    monkeypatch.setattr(at, "write_record_file", lambda path, record: Path(path).write_text(json.dumps(record)))
+    records: list = []
+
+    @at.carry_subset_record
+    def upload_subset(cache, zips, dest, *, extra_sources=(), log_fn=None, **kw):
+        for f in extra_sources:
+            if f.name == at.RECORD_FILENAME:
+                records.append((dest.rsplit("/", 1)[-1], [z.stem for z in zips], json.loads(f.read_text())["wells"]))
+        return (1, 0.0, 0)
+
+    def with_record(p):
+        p._zipped = types.SimpleNamespace(**vars(p._zipped), nanowell_anchors=None)
+
+    proc, p, ordering, worker = _start(tmp_path, monkeypatch, ["A01", "A02", "A03", "A04"],
+                                       lambda zips, dest, **kw: upload_subset(None, zips, dest, **kw), batch_size=2,
+                                       before=with_record)
+    _make_room(p, "A01")
+    assert _wait_for(lambda: any(d == "b2" for d, _z, _w in records))
+    proc.batch_finished(p, 1)
+    assert _wait_for(lambda: sum(1 for d, _z, _w in records if d == "b2") == 2)
+    proc.batch_finished(p, 2)
+    proc.finish()
+    worker.join(timeout=20)
+    b2 = [(sent, named) for d, sent, named in records if d == "b2"]
+    assert b2 == [(["A03"], ["A03", "A04"]), (["A04"], ["A03", "A04"])]

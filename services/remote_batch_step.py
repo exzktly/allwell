@@ -72,7 +72,7 @@ def _send(proc, index: int, n_batches: int, batch_zips, *, ahead_of: int = 0,
 
 
 def _rsync(proc, index: int, n_batches: int, zips, *, ahead: bool,
-           cancel: threading.Event | None = None) -> tuple[int, int]:
+           cancel: threading.Event | None = None, batch_zips=None) -> tuple[int, int]:
     """One rsync of *zips* into batch *index*'s staging directory. Nothing is decided here, so it can run on a thread
     of its own while the batch before it runs (*ahead*), and :func:`_judge_upload` reads the code on the loop's thread
     afterwards — a failure it reports must not land while the batch before it is still being counted."""
@@ -85,6 +85,9 @@ def _rsync(proc, index: int, n_batches: int, zips, *, ahead: bool,
     events = [proc._stop, proc._suspending, proc._driver_lost] + ([cancel] if cancel is not None else [])
     sent_bytes, _elapsed, rc = proc._runner._cache.upload_subset(
         list(zips), proc._batch_staging_dir(index), log_fn=log, acquisition_input=proc._zipped,
+        # The record and anchors beside the archives describe the whole batch (*batch_zips*), however few of its
+        # wells this rsync sends: each rsync rewrites them, and the driver hands the pipeline the last one.
+        record_paths=list(batch_zips) if batch_zips is not None else None,
         progress_fn=progress,
         # A suspend ends the upload too — a batch sent after the user asked for the machine back is thrown away
         # unrun — and so does a driver that went away: there is no node left to send it to; and an upload sent
@@ -163,7 +166,8 @@ class _Ahead:
             allowed = self._wait_for_room(done)
             if allowed is None:
                 return sent_bytes, 20                         # ended by Stop, suspend, a lost driver or the cancel
-            some, rc = _rsync(proc, self.index, n_batches, self.zips[done:allowed], ahead=True, cancel=self.cancel)
+            some, rc = _rsync(proc, self.index, n_batches, self.zips[done:allowed], ahead=True, cancel=self.cancel,
+                              batch_zips=self.zips)
             sent_bytes += some
             if rc != 0:
                 return sent_bytes, rc

@@ -1115,9 +1115,10 @@ class Fetcher:
         output. Non-fatal; ``verify_and_cleanup`` is the backstop."""
         paths = well_files_to_delete(self.run, well)      # none for a nanowell run: see remote_fetch_nanowells
         if paths and delete_remote_paths(self.host, paths, what=f"per-well files of {well}", log_fn=self._log):
-            if self.on_well_removed is not None:
+            removed = getattr(self, "on_well_removed", None)
+            if removed is not None:
                 with swallow(f"telling the batch upload {well} left the remote"):
-                    self.on_well_removed(well)
+                    removed(well)
 
     def _merge_fetched_csvs(self, tmp_csv_dir: Path) -> list[str]:
         """Merge each partial per-well CSV pulled into *tmp_csv_dir* into the

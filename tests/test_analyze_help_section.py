@@ -125,14 +125,15 @@ def test_focus_reaches_every_single_section(qapp, analyze_tab):
     screen at once there — so if focus did not reach them, the four manual
     subsections this feature exists to open would be unreachable and a
     subset-style assertion would have called that a pass."""
-    # Remote options is on screen only while a remote is chosen, and Nanowell
-    # array only for a nanowell plate.
-    analyze_tab._nanowell_cb.setChecked(True)
+    # Remote options is on screen only while a remote is chosen, Nanowell
+    # array only for a nanowell plate, and Image correction only for a
+    # standard one: each section is visited with the plate type that shows it.
     analyze_tab._remote_cb.addItem("gpu-box", userData="gpu-box")
     analyze_tab._remote_cb.setCurrentIndex(analyze_tab._remote_cb.count() - 1)
-    _expand_every_section(qapp, analyze_tab)
     reached = {}
     for title, section in analyze_tab._section_widgets.items():
+        analyze_tab._nanowell_cb.setChecked(title == "Nanowell array")
+        _expand_every_section(qapp, analyze_tab)
         target = _focusable_in(section)
         assert target is not None, f"{title} has no focusable control to test with"
         target.setFocus()

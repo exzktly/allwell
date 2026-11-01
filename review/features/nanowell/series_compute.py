@@ -39,7 +39,7 @@ one undefined case this table adds to §3.10.1's ("no signal above background at
 
 Both fluorescence metrics stand on one background, the one the run chose (``background_compute``): nanowell
 fluorescence is taken over it in the pipeline, and :func:`site_metrics` takes the site's ``<channel>_background``
-off the cells' mean, after Cell Gating. Below the empty well's floor a cell brightness can be negative too, and
+off the cells' mean, after Cell Gating. Below the empty well's floor a cell fluorescence can be negative too, and
 its fold change over such a baseline is undefined for the same reason.
 
 **Baseline** (§3.10.1): ``"earliest"`` — the well's earliest timepoint, so a site unmeasurable there has no
@@ -334,7 +334,7 @@ def crop_metric_lines(row, channel: str | None = None) -> list[str]:
         if sig is not None:
             items.append(f"fluor. {compact_number(sig)}")       # Nanowell fluorescence, as the metric is named
         if b is not None:
-            items.append(f"bright {compact_number(b)}")
+            items.append(f"per cell {compact_number(b)}")    # Cell fluorescence (mean per cell)
     return items
 
 

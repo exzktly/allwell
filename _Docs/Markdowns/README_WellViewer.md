@@ -483,7 +483,7 @@ nanowells hold a cell at the **same** place (cells gathered at the lowest point 
 becomes part of the empty-nanowell picture there and is not counted. One texture threshold serves every tile of a
 timepoint.
 
-**Fluorescence background.** Every fluorescence number of a nanowell — the cells' brightness and the nanowell's
+**Fluorescence background.** Every fluorescence number of a nanowell — the cells' fluorescence and the nanowell's
 fluorescence alike — is measured above one background, chosen in the Nanowell section's **Fluorescence background**
 (on the command line `--nanowell_fluor_background`):
 
@@ -5852,7 +5852,7 @@ A nanowell dataset also opens in every other Review tab, which read it like this
 - **Observations: Cells | Nanowells** is the first control on the Plotting row. *Cells* plots the cells, pooled per
   well as on any plate; every figure then ends with "Observations: cells · pooled from N occupied nanowells per
   well" (only nanowells holding a cell have cell rows, so N counts those). *Nanowells* plots the nanowell metrics —
-  cell count, confluence, brightness, nanowell fluorescence, their fold changes, growth rate and **Occupied** (holds
+  cell count, confluence, cell fluorescence, nanowell fluorescence, their fold changes, growth rate and **Occupied** (holds
   at least one cell) — computed exactly as this page computes them, with this page's Baseline and Rim focus:
   - **Scatter** sets any nanowell metric against any other, one point per nanowell and timepoint, or per well (the
     median over its nanowells) with *Points: Per well*;
@@ -5885,13 +5885,13 @@ use them.
 - **Views** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
   *Extremes*, *Identity* and *Statistics*, chosen from the tabs in the top bar, where the Plotting and Home
   pages show their sub-tabs. Hover a tab for what it shows. Each view shows only the controls it uses.
-- **Metric** — what each dot is: cell count, confluence, **cell brightness** and **nanowell fluorescence** (both
-  explained under *Cell brightness and nanowell fluorescence* below), their fold changes against the baseline,
+- **Metric** — what each dot is: cell count, confluence, **cell fluorescence** and **nanowell fluorescence** (both
+  explained under *Cell fluorescence and nanowell fluorescence* below), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
   ln count against time, per hour, over at least three timepoints with cells) and occupancy at baseline.
-  Cell brightness and nanowell fluorescence, and their fold changes, are of the fluorescence channel chosen in **Channel**.
+  Cell fluorescence and nanowell fluorescence, and their fold changes, are of the fluorescence channel chosen in **Channel**.
 
-**Cell brightness and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
+**Cell fluorescence and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
 but they answer different questions. Both are measured above the same background, the one the run was set up
 with (*Fluorescence background*, in the Analyze section), and every axis says which:
 
@@ -5899,18 +5899,18 @@ with (*Fluorescence background*, in the Analyze section), and every axis says wh
 |---|---|---|
 | this well's nanowell floor (the default) | *own-well background subtracted* | *minus own well* |
 | the empty reference well's floor | *empty-well background subtracted* | *minus empty well* |
-| — a run from before the choice existed | cell brightness: *background included*; nanowell fluorescence: *own-well background subtracted* | *with background* / *minus own well* |
+| — a run from before the choice existed | cell fluorescence: *background included*; nanowell fluorescence: *own-well background subtracted* | *with background* / *minus own well* |
 
-For example *Cell brightness (mean per cell, empty-well background subtracted) · GFP*. Wells measured differently
+For example *Cell fluorescence (mean per cell, empty-well background subtracted) · GFP*. Wells measured differently
 drawn together say *background differs between wells*. A run from before the choice left the background in its
-cell brightness, which pulls a cell brightness fold change toward 1 (a steady floor sits in both halves of the
+cell fluorescence, which pulls a cell fluorescence fold change toward 1 (a steady floor sits in both halves of the
 ratio); analysing it again removes it. The Metric menu names the metrics alone, since it is built before a dataset
 is read.
 
-- **Cell brightness** (of the chosen channel, e.g. *Cell brightness … · DAPI*) is *how bright the cells are*. It is the average, over the cells counted in the
+- **Cell fluorescence** (of the chosen channel, e.g. *Cell fluorescence … · DAPI*) is *how bright the cells are*. It is the average, over the cells counted in the
   nanowell, of each cell's mean pixel intensity inside its segmented outline. It does not change with how many cells
   there are: one cell at 800 or ten cells at 800 both give 800. The run's fluorescence background is taken off it,
-  the same level as off nanowell fluorescence (see *Fluorescence background* in the Analyze section). It needs segmented cells: a nanowell with no counted cell has no brightness (blank,
+  the same level as off nanowell fluorescence (see *Fluorescence background* in the Analyze section). It needs segmented cells: a nanowell with no counted cell has no cell fluorescence (blank,
   not zero).
 - **Nanowell fluorescence** (e.g. *Nanowell fluorescence … · DAPI*) is *how much light the whole nanowell gives off above its empty floor*. It
   is the sum of every pixel inside the nanowell (within 90 % of its radius, clear of the rim) minus the background
@@ -5920,24 +5920,24 @@ is read.
   segmentation, so it counts light from cells the segmentation missed too. An empty nanowell reads near zero and
   can come out slightly negative.
 
-So nanowell fluorescence grows with *both* the number of cells and how bright each one is; brightness follows only
+So nanowell fluorescence grows with *both* the number of cells and how bright each one is; cell fluorescence follows only
 the second. Ten cells as bright as one cell give about ten times the nanowell fluorescence and the same
-brightness. With a nuclear stain such as DAPI, nanowell fluorescence tracks the amount of nuclear material — close
-to cell number — and brightness tracks staining or DNA content per nucleus (a dividing or condensing nucleus is
-brighter). Use brightness to ask whether the cells changed; use nanowell fluorescence to ask how much stained
+cell fluorescence. With a nuclear stain such as DAPI, nanowell fluorescence tracks the amount of nuclear material — close
+to cell number — and cell fluorescence tracks staining or DNA content per nucleus (a dividing or condensing nucleus is
+brighter). Use cell fluorescence to ask whether the cells changed; use nanowell fluorescence to ask how much stained
 material is in the nanowell, including when cells clump and the count is unreliable.
 
 Their fold changes divide each timepoint by the baseline. A nanowell fluorescence at or below zero at the baseline
 gives no fold change ("no signal above background at baseline"), since a ratio over nothing has no meaning; a
-cell brightness fold change needs counted cells at both timepoints. Below the empty well's floor a value can be
+cell fluorescence fold change needs counted cells at both timepoints. Below the empty well's floor a value can be
 negative, and a fold change over a baseline at or below zero has no meaning, so it is left blank.
 
-**Cell Gating applies here too.** A nanowell's cell count, and its brightness, use only the cells the rest of
+**Cell Gating applies here too.** A nanowell's cell count, and its cell fluorescence, use only the cells the rest of
 Review counts: the size and shape gate, cells excluded by hand and the scatter gates set on Home ▸
 [Cell Gating](#cell-gating). So to drop objects by size from the nanowells, set *min area* / *max area* there. A
 field left out as a whole — excluded in QC triage, flagged by the run while *exclude flagged fields* is on, or not
 among the FOVs chosen on Cell Gating — is a tile at one timepoint here, and every nanowell it holds is left out with
-the reason *field excluded*, empty ones included, rather than counted as emptied. Each nanowell's count is the run's count less the cells gated out of it, and brightness is
+the reason *field excluded*, empty ones included, rather than counted as emptied. Each nanowell's count is the run's count less the cells gated out of it, and cell fluorescence is
 averaged over the cells kept; everything computed from the count follows — fold changes, growth rate, occupancy,
 *Starting cells* and the *Subset* conditions. Confluence and nanowell fluorescence are measured from the
 nanowell's pixels rather than from its segmented cells, so a gate cannot change them. While a gate leaves any cell
@@ -5945,7 +5945,7 @@ out, every figure says how many (*Cell Gating leaves out N of M cells …*), and
 the same numbers with the same sentence. A well whose per-cell table cannot be read keeps the run's own counts, and
 the sentence names it.
 
-- **Channel** — beside Metric, on every view: the fluorescence channel Brightness and Nanowell fluorescence are drawn for,
+- **Channel** — beside Metric, on every view: the fluorescence channel Cell fluorescence and Nanowell fluorescence are drawn for,
   in the figures, the site detail and the crop captions. It starts on the channel the Plotting tabs use when the
   run measured it, else on the first channel it measured. A channel the run read but did not measure in the
   nanowells is listed greyed, as *(not measured)*; its tooltip says to re-run the wells with it among the
@@ -5966,7 +5966,7 @@ the sentence names it.
   *Custom subset…* or **Edit…** opens the subset editor under the controls, where you can combine any number of
   conditions and choose whether a nanowell must meet *all* of them or *any*. Each condition tests one of:
   - **Starting cells** — the count at the Baseline;
-  - **a metric** — cell count, confluence, brightness and nanowell fluorescence (per channel), any fold change or the growth
+  - **a metric** — cell count, confluence, cell fluorescence and nanowell fluorescence (per channel), any fold change or the growth
     rate. A metric with a value per timepoint is read *at baseline*, at the well's *earliest* or *latest*
     timepoint, at a timepoint you name, or *at any* / *at every* timepoint (*every*: the nanowell needs a passing
     value at each of its well's timepoints);
@@ -6013,7 +6013,7 @@ the sentence names it.
   baseline timepoint — only the endpoint is averaged — and the footer says so. log₂ count fold changes are
   averaged as logs, which is a geometric mean of the ratios.
 - **Baseline average** (beside *Moving average*, for a fold change) — a number of timepoints, 1 (off) or 2 to 9: the baseline
-  becomes the mean of the nanowell's measured values (its count, confluence, brightness or fluorescence) at the
+  becomes the mean of the nanowell's measured values (its count, confluence, cell fluorescence or fluorescence) at the
   baseline timepoint and the ones before it, that many in all — never after it, since a later timepoint may
   already show the treatment. Like the moving average it is used only when every timepoint of its window has a
   value; a nanowell whose baseline window is incomplete has no fold change, counted as "baseline window before
@@ -6039,7 +6039,7 @@ the sentence names it.
   same setting.
 - **Responding above** (on *Distribution*) — the number a nanowell's value must be above to count as
   responding, for the metric shown. Set one for each metric you use (a fold change, a count, a confluence, an
-  intensity); each is remembered separately, and a channel's brightness separately from another's. The figure
+  intensity); each is remembered separately, and a channel's cell fluorescence separately from another's. The figure
   draws it as a dashed line and states each group's fraction responding — the mean of its wells' fractions —
   at the latest timepoint, or at the timepoint drawn along wells. With the field empty no fraction is
   computed, and the footer says so: there is no default.
@@ -6106,7 +6106,7 @@ the sentence names it.
   rank, address and the fold change it was ranked by, and the ranking timepoint's column is outlined. Each crop
   carries its own numbers inside it, so they take no room from the crops: the fold change at that timepoint in its
   top-left corner, and along its foot as many of the nanowell's measurements there as fit one line — cell count,
-  confluence, then the channel's nanowell fluorescence and brightness. The pop-out writes all of them under each panel. The
+  confluence, then the channel's nanowell fluorescence and cell fluorescence. The pop-out writes all of them under each panel. The
   montage fills the figure: the Largest and Smallest blocks sit side by side whenever that gives bigger crops, and
   **Timepoints** (beside *Largest & smallest*) chooses which timepoints are shown — fewer give bigger crops; the
   ranking timepoint is always shown. Crops too small to hold a line of measurements show the fold change only, and
@@ -6212,7 +6212,7 @@ the sentence names it.
   layers that view drew.
 
 **Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
-brightness and nanowell fluorescence against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
+cell fluorescence and nanowell fluorescence against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
 six nanowells to compare; the **✕** at the top of the site detail closes it and clears them, as does clicking empty
 space on the plot. A timepoint where the
 nanowell has no number is a gap and a hatched band, with its state written above the plot — never a zero.
@@ -6251,7 +6251,7 @@ A crop cut from the run montage, which is an 8-bit picture rather than the raw i
 the caption says so, as does the Array view's *Run montage* image.
 Selecting nanowells does not change the plate selection.
 
-**What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it
+**What is read.** The page reads the nanowell tables (and the per-cell CSVs behind cell fluorescence) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
 is selected and kept, so selecting it again is instant. Wells clicked one after another on the plate are read
 together, a quarter of a second after the last click, rather than one load per click. While a newly selected well is read, or the figures are
@@ -6271,7 +6271,7 @@ which wells are left out. It applies only to this page — the well stays in the
 the page's settings. **Excluded (n) ▾** on the band brings back one well or all of them.
 
 **Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the wells the page
-draws as one long CSV, with the baseline and where the times came from. Its `n_cells` and brightness are the
+draws as one long CSV, with the baseline and where the times came from. Its `n_cells` and cell fluorescence are the
 page's, so they leave out the cells Home's Cell Gating leaves out; beside them `n_cells_run` is the run's own
 count, `cells_left_out` how many cells the gating took from it, and `cell_gating` says what the gating left out
 (empty when nothing). With a Subset set, every

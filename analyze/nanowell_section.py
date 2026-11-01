@@ -28,7 +28,7 @@ from analyze.domain.nanowell_fields import (
 from analyze.domain.well_list import incremental_is_moot
 
 _FLUOR_BACKGROUND_TIP = (
-    "What every fluorescence number of a nanowell is measured above — cell brightness and nanowell fluorescence "
+    "What every fluorescence number of a nanowell is measured above — cell fluorescence (mean per cell) and nanowell fluorescence "
     "alike.\n"
     "This well's nanowell floor: the bare floor between and under the cells of the same tile. It needs nothing "
     "else, but nanowells crowded with cells leave little bare floor to read it from.\n"

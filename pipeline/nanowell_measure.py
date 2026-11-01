@@ -112,7 +112,7 @@ MIN_LEVEL_CONTRAST = 0.05
 #: 9: a site row records each fluorescence channel's background (``<channel>_background``), the level its numbers
 #: are taken over, so Review takes the same level off the cells' mean intensity; and that level may be the empty
 #: reference well's floor at the same timepoint (``fluor_background``) instead of the tile's own. Rows without the
-#: column cannot have their cell brightness corrected, so they are measured again.
+#: column cannot have their cell fluorescence corrected, so they are measured again.
 MEASURE_VERSION = 9
 #: Below this a departure from the template is division noise, not texture (a flat noise-free tile has a spread of 0).
 MIN_TEXTURE_THRESHOLD = 0.02

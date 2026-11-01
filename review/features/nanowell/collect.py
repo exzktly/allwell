@@ -95,7 +95,7 @@ class NanowellData:
     #: and the full-resolution montage can be drawn from besides the phase image.
     image_channels: list = field(default_factory=list)
     #: ``channel -> why`` for each of :attr:`image_channels` with no site intensities, so the page can say why a
-    #: channel the run read offers no Brightness or Nanowell fluorescence rather than leaving it out without a word.
+    #: channel the run read offers no Cell fluorescence or Nanowell fluorescence rather than leaving it out without a word.
     unmeasured_channels: dict = field(default_factory=dict)
     #: Wells left out and why, as sentences.
     problems: list = field(default_factory=list)
@@ -412,7 +412,7 @@ def _image_channels(sidecar: dict, phase: str, channels: list, *, read_any: bool
         for token in out:
             if token.lower() not in by_lower:
                 unmeasured[token] = (f"The run read {token} images, but the nanowell tables of the wells shown carry "
-                                     f"no {token}_integrated column, so there is no {token} brightness or nanowell fluorescence "
+                                     f"no {token}_integrated column, so there is no {token} cell or nanowell fluorescence "
                                      f"to draw. Re-run the wells with {token} among the fluorescence channels to "
                                      f"measure it.")
     return out, unmeasured

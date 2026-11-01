@@ -6,9 +6,9 @@ Each well of a run records it (``pipeline.nanowell_run.NanowellSettings.fluor_ba
 ``floor``       the bare nanowell floor of the same tile of the same well (the default)
 ``empty_well``  the named empty reference well's floor at the same timepoint
 ``none``        a run from before the column existed: its nanowell fluorescence is above the tile's floor, as
-                ``floor``, but its cell brightness is the cells' raw mean, the background still in it
+                ``floor``, but its cell fluorescence is the cells' raw mean, the background still in it
 
-Both fluorescence metrics take the same level off: nanowell fluorescence in the pipeline, cell brightness in
+Both fluorescence metrics take the same level off: nanowell fluorescence in the pipeline, cell fluorescence (the ``brightness`` metric) in
 ``series_compute.site_metrics`` (the mean of the cells' means less the site's ``<channel>_background``, after Cell
 Gating has chosen the cells). A label names which, because the two metrics are otherwise the same kind of number in
 the same channel and a reader cannot tell from the values whose light was taken away.
@@ -36,7 +36,7 @@ def well_mode(table_columns, settings) -> str:
 
 def effective(metric: str, mode: str) -> str:
     """What *metric*'s numbers were measured above under *mode*: a run without the column took the tile's floor off
-    its nanowell fluorescence all the same, and nothing off its cell brightness."""
+    its nanowell fluorescence all the same, and nothing off its cell fluorescence."""
     if metric in SIGNAL_METRICS and mode == NONE:
         return FLOOR
     return mode
@@ -67,7 +67,7 @@ def describe(modes, empty_well: str | None = None) -> str:
         return ""
     parts = []
     if NONE in found:
-        parts.append("some wells come from a run whose cell brightness still includes the background (re-run "
+        parts.append("some wells come from a run whose cell fluorescence still includes the background (re-run "
                      "them to subtract it)")
     if FLOOR in found and EMPTY_WELL in found:
         parts.append("some wells were measured above their own floor and others above the empty well"

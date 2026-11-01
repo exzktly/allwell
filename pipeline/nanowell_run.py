@@ -1454,7 +1454,7 @@ def _site_row(timepoint, i, address, g, v, c, got, state, owner, detected, fused
         row[f"{channel}_integrated"] = None if f is None else f.integrated
         row[f"{channel}_mean_bg"] = None if f is None else f.mean_minus_background
         # The level both numbers above are taken over, which Review subtracts from the cells' mean intensity too, so
-        # cell brightness and nanowell fluorescence have the same background (``--nanowell_fluor_background``).
+        # cell fluorescence and nanowell fluorescence have the same background (``--nanowell_fluor_background``).
         row[f"{channel}_background"] = None if f is None else f.background
     return row
 

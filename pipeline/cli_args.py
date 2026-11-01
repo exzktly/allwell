@@ -596,7 +596,7 @@ def build_parser() -> argparse.ArgumentParser:
                          "confluence at a timepoint is read against its empty nanowells at that timepoint. Without "
                          "one, or at a timepoint where it holds cells, no well has a confluence (blank, never 0)."))
     p.add_argument("--nanowell_fluor_background", choices=("floor", "empty_well"), default=None,
-                   help=("What every nanowell fluorescence number is measured above, cell brightness and nanowell "
+                   help=("What every nanowell fluorescence number is measured above, cell fluorescence (mean per cell) and nanowell "
                          "fluorescence alike. floor (the default): the level of the bare nanowell floor on the same "
                          "tile of the same well. empty_well: the floor level of --nanowell_empty_well at the same "
                          "timepoint, which cells in the measured well cannot raise; at a timepoint where that well "

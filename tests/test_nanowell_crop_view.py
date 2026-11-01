@@ -176,7 +176,7 @@ def test_the_crop_numbers_name_nanowell_fluorescence_as_the_metric_is_named(page
     _press_pop_out(qtbot, page)
     qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
     numbers = " · ".join(_popout_texts(page, "nw-crop-grid-metrics"))
-    assert "fluor. " in numbers and "bright " in numbers, numbers
+    assert "fluor. " in numbers and "per cell " in numbers, numbers
     assert "signal" not in numbers, numbers
 
 

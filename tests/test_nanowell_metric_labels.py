@@ -1,9 +1,9 @@
 """The Nanowells page's two fluorescence metrics say on every axis what their background was.
 
-Cell brightness (the mean of each counted cell's intensity) and Nanowell fluorescence (the nanowell's interior sum)
+Cell fluorescence (the mean of each counted cell's intensity) and Nanowell fluorescence (the nanowell's interior sum)
 are measured above one background, chosen when the run is set up: the well's own nanowell floor, or the empty well's
 (``review/features/nanowell/background_compute``). A run from before that choice left the background in its cell
-brightness. A reader cannot tell any of that from the values, so the label says it; and a two-row grid of panels
+fluorescence. A reader cannot tell any of that from the values, so the label says it; and a two-row grid of panels
 once cut each label after two lines, which dropped exactly those words and the channel.
 """
 from __future__ import annotations
@@ -17,10 +17,10 @@ from review.features.nanowell.distribution_compute import METRICS, metric_label
 
 
 @pytest.mark.parametrize(("metric", "mode", "label"), [
-    ("brightness", bc.FLOOR, "Cell brightness (mean per cell, own-well background subtracted) · GFP"),
-    ("brightness", bc.EMPTY_WELL, "Cell brightness (mean per cell, empty-well background subtracted) · GFP"),
-    ("brightness", bc.NONE, "Cell brightness (mean per cell, background included) · GFP"),
-    ("brightness_fc", bc.NONE, "Cell brightness fold change (background included) · GFP"),
+    ("brightness", bc.FLOOR, "Cell fluorescence (mean per cell, own-well background subtracted) · GFP"),
+    ("brightness", bc.EMPTY_WELL, "Cell fluorescence (mean per cell, empty-well background subtracted) · GFP"),
+    ("brightness", bc.NONE, "Cell fluorescence (mean per cell, background included) · GFP"),
+    ("brightness_fc", bc.NONE, "Cell fluorescence fold change (background included) · GFP"),
     ("signal", bc.EMPTY_WELL, "Nanowell fluorescence (total, empty-well background subtracted) · GFP"),
     # A run from before the choice took the tile's floor off its nanowell fluorescence all the same.
     ("signal", bc.NONE, "Nanowell fluorescence (total, own-well background subtracted) · GFP"),
@@ -32,7 +32,7 @@ def test_a_fluorescence_label_names_its_background(metric, mode, label):
 
 def test_wells_measured_differently_say_so_and_other_metrics_say_nothing():
     assert metric_label("brightness", "GFP", [bc.FLOOR, bc.EMPTY_WELL]) == (
-        "Cell brightness (mean per cell, background differs between wells) · GFP")
+        "Cell fluorescence (mean per cell, background differs between wells) · GFP")
     # Both old and new runs took the floor off nanowell fluorescence, so a mix of the two still agrees there.
     assert metric_label("signal", "GFP", [bc.NONE, bc.FLOOR]) == (
         "Nanowell fluorescence (total, own-well background subtracted) · GFP")
@@ -43,7 +43,7 @@ def test_wells_measured_differently_say_so_and_other_metrics_say_nothing():
 def test_the_menu_names_are_the_bare_metrics():
     # The Metric menu is built before any dataset is read, so it names the metric and leaves the background to
     # the axis, which knows it.
-    assert METRICS["brightness"][0] == "Cell brightness (mean per cell)"
+    assert METRICS["brightness"][0] == "Cell fluorescence (mean per cell)"
     assert METRICS["signal_fc"][0] == "Nanowell fluorescence fold change"
 
 
@@ -63,8 +63,8 @@ def test_a_short_label_or_a_single_row_is_not_wrapped():
 
 
 @pytest.mark.parametrize(("modes", "brightness", "signal"), [
-    ([bc.EMPTY_WELL], "Cell brightness\nminus empty well\nGFP", "Nanowell fluor.\nminus empty well\nGFP"),
-    ([bc.NONE], "Cell brightness\nwith background\nGFP", "Nanowell fluor.\nminus own well\nGFP"),
+    ([bc.EMPTY_WELL], "Cell fluor.\nminus empty well\nGFP", "Nanowell fluor.\nminus empty well\nGFP"),
+    ([bc.NONE], "Cell fluor.\nwith background\nGFP", "Nanowell fluor.\nminus own well\nGFP"),
 ])
 def test_the_site_detail_rows_say_what_was_subtracted(modes, brightness, signal):
     from matplotlib.figure import Figure

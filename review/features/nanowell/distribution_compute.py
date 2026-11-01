@@ -35,19 +35,19 @@ TIME, WELLS = "time", "wells"
 METRICS = {
     "n": ("Cell count", False),
     "c": ("Confluence", False),
-    "brightness": ("Cell brightness (mean per cell)", True),
+    "brightness": ("Cell fluorescence (mean per cell)", True),
     "signal": ("Nanowell fluorescence (total)", True),
     "count_fc": ("Count fold change", False),
     "log2_count_fc": ("log₂ count fold change, (n + 1) / (n₀ + 1)", False),
     "confluence_fc": ("Confluence fold change", False),
-    "brightness_fc": ("Cell brightness fold change", True),
+    "brightness_fc": ("Cell fluorescence fold change", True),
     "signal_fc": ("Nanowell fluorescence fold change", True),
     "growth_rate": ("Growth rate (per hour, from ln n)", False),
     "occupancy_class": ("Occupancy at baseline (cells)", False),
 }
 def metric_label(metric: str, channel: str | None = None, modes=()) -> str:
     """*metric*'s axis label for wells whose fluorescence was measured under *modes* (``background_compute``, one per
-    well): a fluorescence metric names what its background was — "Cell brightness (mean per cell, empty-well
+    well): a fluorescence metric names what its background was — "Cell fluorescence (mean per cell, empty-well
     background subtracted) · GFP" — and a channel metric names its channel."""
     label, needs = METRICS[metric]
     words = background_compute.clause(metric, modes)

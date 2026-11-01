@@ -202,7 +202,7 @@ def test_choosing_a_channel_on_the_page_draws_that_channel_s_brightness(page, qt
     gfp = _drawn_values(page)
     assert gfp and max(gfp) < 20                                  # GFP's cells read 10 + q
     _choose(page.widgets.get("_nw_channel_cb"), "RFP")
-    assert page.widgets.get("_nw_fig").axes[0].get_ylabel() == "Cell brightness (mean per cell, own-well background subtracted) · RFP"
+    assert page.widgets.get("_nw_fig").axes[0].get_ylabel() == "Cell fluorescence (mean per cell, own-well background subtracted) · RFP"
     assert _drawn_values(page) == pytest.approx([v + 40 for v in gfp])
     assert page.state.feature_slice("nanowell").channel == "RFP"
 

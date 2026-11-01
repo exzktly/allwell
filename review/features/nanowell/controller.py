@@ -642,7 +642,7 @@ def resolve_metric(view: str, metric: str, active_channel, channels) -> tuple[st
 
 
 def page_channel_name(ctx) -> str:
-    """The channel the page's Brightness and Nanowell fluorescence are for, as the user named it: the page's own *Channel*
+    """The channel the page's Cell fluorescence and Nanowell fluorescence are for, as the user named it: the page's own *Channel*
     choice when it is set; else the app's shared channel selector when the tables carry that channel; else the
     tables' first fluorescence channel. The shared selector lives on the Plotting band, which this page does not
     show, so a shared channel the tables lack (the phase channel, a ratio) must not leave every fluorescence metric
@@ -2056,7 +2056,7 @@ def set_crop_cells(ctx, on: bool) -> None:
 
 
 def set_channel(ctx, channel: str) -> None:
-    """The fluorescence channel the page's Brightness and Nanowell fluorescence are drawn for."""
+    """The fluorescence channel the page's Cell fluorescence and Nanowell fluorescence are drawn for."""
     _set(ctx, "channel", channel or "")
 
 

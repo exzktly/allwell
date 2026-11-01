@@ -1,8 +1,8 @@
-"""Cell brightness is measured above the same background as nanowell fluorescence.
+"""Cell fluorescence (mean per cell) is measured above the same background as nanowell fluorescence.
 
 The run writes the level it took off each nanowell's fluorescence as ``<channel>_background``; Review takes the same
 level off the mean of the cells' mean intensities (``series_compute.site_metrics``), after Cell Gating has chosen the
-cells. A run from before the column existed left the background in its cell brightness, and Review leaves it there
+cells. A run from before the column existed left the background in its cell fluorescence, and Review leaves it there
 and says so on the axis (``background_compute``). The fixture's cells read 10 and 30, so the raw brightness is 20 and
 any background other than 0 separates the subtracted number from the raw one.
 """

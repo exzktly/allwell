@@ -143,7 +143,7 @@ class NanowellState:
     #: The counted cells drawn as dots on every crop the page shows — the site detail's strip, the pop-out and the
     #: Extremes montage — as the Array view's Cells layer draws them on the array.
     crop_cells: bool = False
-    #: The fluorescence channel Brightness and Nanowell fluorescence are drawn for, as the page's *Channel* control names it;
+    #: The fluorescence channel Cell fluorescence and Nanowell fluorescence are drawn for, as the page's *Channel* control names it;
     #: ``""`` follows the app's shared channel selector, as the page did before it had a control of its own.
     channel: str = ""
     #: The channel every picture on the page is of — the crop strip, the pop-out, the Extremes montage and the Array

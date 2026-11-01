@@ -532,7 +532,7 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
     fig.clear()
     outside = outside or {}
     # Each fluorescence row's second line says what its background was (*backgrounds*: the wells' modes).
-    rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", f"Cell brightness\n{short_clause('brightness', backgrounds)}"),
+    rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", f"Cell fluor.\n{short_clause('brightness', backgrounds)}"),
                                 (f"signal_{channel}", f"Nanowell fluor.\n{short_clause('signal', backgrounds)}")]
                                 if channel else [])
     if not series:

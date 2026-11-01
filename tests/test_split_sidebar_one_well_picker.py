@@ -57,18 +57,11 @@ def _park_on_segmentation(app):
     assert show_image_browser_subtab(app._ctx, "Segmentation")
 
 
-#: The per-tab sidebar sections, named here rather than imported from
-#: ``tab_controller``. The fix under test adds helpers there, and a test that
-#: reached for them would fail on the pre-fix tree with an ``ImportError`` —
-#: which looks like the guard biting and measures nothing at all. Counting the
-#: pickers has to work identically on both sides of the fix.
-_SECTION_FRAMES = (
-    "_sidebar_main_frame",
-    "_sidebar_preview_frame",
-    "_sidebar_image_table_frame",
-    "_sidebar_sample_frame",
-    "_sidebar_cell_browser_frame",
-)
+def _section_frames(app):
+    """The rail frames, as the shell built them: the registry's declared list
+    (``FeatureRegistry.rail_sections``), which the tab switch also hides from.
+    One source, so this count cannot drift from the frames that exist."""
+    return [s.key for s in app._ctx.features.rail_sections()]
 
 
 def _plates_in(app, frame):
@@ -91,7 +84,7 @@ def _plates_in(app, frame):
 def _shown_plates(app):
     """Every well picker actually on the rail, with the frame that owns it."""
     out = []
-    for name in _SECTION_FRAMES:
+    for name in _section_frames(app):
         frame = app._ctx.widgets.get_or_none(name)
         if frame is None or frame.isHidden():
             continue

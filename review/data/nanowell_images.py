@@ -102,8 +102,8 @@ def is_metric_map(token) -> bool:
 
 
 def short_label(label: str) -> str:
-    """A metric label without its explanation — ``"GFP Brightness (mean per-cell intensity)"`` →
-    ``"GFP Brightness"``, ``"log₂ count fold change, (n + 1) / (n₀ + 1)"`` → ``"log₂ count fold change"`` — for a
+    """A metric label without its explanation — ``"GFP Cell fluorescence (mean per cell, own-well background
+    subtracted)"`` → ``"GFP Cell fluorescence"``, ``"log₂ count fold change, (n + 1) / (n₀ + 1)"`` → ``"log₂ count fold change"`` — for a
     row label or a chip, where the full label (kept for the tooltip and the colour key) took a quarter of a figure's
     width."""
     text = str(label or "").strip()

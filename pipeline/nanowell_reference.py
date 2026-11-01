@@ -60,6 +60,8 @@ EMPTY, LOADED, UNVERIFIED = "empty", "loaded", "unverified"
 NOTE_PREFIX = "No confluence at this timepoint"
 #: The note on the reference well's own timepoint when many of its nanowells hold a counted object.
 LOOKS_LOADED_PREFIX = "Named empty reference well holds counted objects"
+#: The note a timepoint carries for a channel with no empty-well fluorescence background (``fluor_background``).
+FLUOR_NOTE_PREFIX = "No fluorescence background from the empty well at this timepoint for"
 #: The grid block field a measured timepoint records :meth:`Reference.key_at` in.
 KEY_FIELD = "confluence_reference_key"
 OWN_KEY = "own"
@@ -81,6 +83,17 @@ class Reference:
     #: timepoint -> cells the segmenter counted per nanowell in the reference well there (:func:`verdict`): its rate
     #: of counting a cell where there is none, under the same imaging and settings as every other well.
     false_cells: dict = field(default_factory=dict)
+    #: timepoint -> ``{channel: floor level}`` of the reference at each timepoint it was empty, loaded only for a run
+    #: whose fluorescence is measured above it (``NanowellSettings.fluor_background == "empty_well"``).
+    fluor_levels: dict = field(default_factory=dict)
+
+    def fluor_at(self, timepoint) -> tuple:
+        """``({channel: level}, why there is none)`` at *timepoint*: the empty reference's floor level per channel,
+        and, when it has none at all there, the same reason confluence gives."""
+        levels = self.fluor_levels.get(timepoint)
+        if levels:
+            return dict(levels), ""
+        return {}, self.at(timepoint)[1] if self.templates.get(timepoint) is None else ""
 
     def at(self, timepoint) -> tuple:
         """``(template or None, why there is none)`` at *timepoint*."""
@@ -98,9 +111,12 @@ class Reference:
         if self.own:
             return OWN_KEY
         template = self.templates.get(timepoint)
-        if template is not None:
-            return template_key(template)
-        return f"none:{self.codes.get(timepoint, self.default_code)}"
+        if template is None:
+            return f"none:{self.codes.get(timepoint, self.default_code)}"
+        levels = self.fluor_levels.get(timepoint)
+        # A well's fluorescence measured above the reference's floor is stale when that floor moves, even if the
+        # template did not: a re-exported reference with a new fluorescence channel exposure, say.
+        return template_key(template) + (f"|fluor:{sorted(levels.items())!r}" if levels else "")
 
 
 def template_key(template) -> str:
@@ -210,20 +226,23 @@ def _template_path(root: Path, index: int) -> Path:
 
 
 def save(output_dir, well: str, settings, entries: dict) -> None:
-    """Write the reference: *entries* maps each timepoint to ``(template or None, verdict)``; a template is saved
-    only for an ``empty`` timepoint. Replaces whatever was there, the index last, so a reader never pairs a new
+    """Write the reference: *entries* maps each timepoint to ``(template or None, verdict)`` or ``(template or None,
+    verdict, {channel: floor level})``; a template, and the floor levels, are saved only for an ``empty`` timepoint. Replaces whatever was there, the index last, so a reader never pairs a new
     index with old templates it does not name."""
     from pipeline import nanowell_measure as nm
 
     root = directory(output_dir)
     root.mkdir(parents=True, exist_ok=True)
     timepoints = {}
-    for k, (tp, (template, found)) in enumerate(entries.items()):
+    for k, (tp, (template, found, *rest)) in enumerate(entries.items()):
         entry = dict(found)
         if template is not None and found["status"] == EMPTY and template.texture_cut is not None:
             path = _template_path(root, k)
             nm.save_template(path, template, str(tp))
             entry["template"] = path.name
+            levels = {str(c): float(v) for c, v in (rest[0] if rest else {}).items() if v is not None}
+            if levels:
+                entry["fluorescence_floor"] = levels
         timepoints[str(tp)] = entry
     index = {"well": well, "measure_version": nm.MEASURE_VERSION, "settings": settings.key(),
              "timepoints": timepoints}
@@ -260,17 +279,20 @@ def load(output_dir, settings) -> Reference:
             json.dumps(settings.key(), default=str)):
         return Reference(default=f"the empty reference well {well} was measured under other settings; run it "
                                  "again with these", default_code="other_settings")
-    templates, reasons, codes, false_cells = {}, {}, {}, {}
+    templates, reasons, codes, false_cells, fluor = {}, {}, {}, {}, {}
+    wants_fluor = getattr(settings, "fluor_background", None) == "empty_well"
     for tp, found in index.get("timepoints", {}).items():
         loaded = nm.load_template(directory(output_dir) / found["template"]) if found.get("template") else None
         if loaded is not None and found["status"] == EMPTY:
             templates[tp] = loaded[0]
             if found.get("false_cells_per_nanowell") is not None:
                 false_cells[tp] = float(found["false_cells_per_nanowell"])
+            if wants_fluor and found.get("fluorescence_floor"):
+                fluor[tp] = {str(c): float(v) for c, v in found["fluorescence_floor"].items()}
         else:
             reasons[tp] = reason(well, tp, found)
             codes[tp] = found["status"] if found.get("status") != EMPTY else "untemplated"
-    return Reference(templates=templates, reasons=reasons, codes=codes, false_cells=false_cells,
+    return Reference(templates=templates, reasons=reasons, codes=codes, false_cells=false_cells, fluor_levels=fluor,
                      default=f"the empty reference well {well} has no such timepoint")
 
 

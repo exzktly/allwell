@@ -24,7 +24,7 @@ from review.domain import nanowell_rim_focus as rfc
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
-    METRICS, PER_NANOWELL, TIME, WELLS, distribution_model, match_channel, metric_column,
+    METRICS, PER_NANOWELL, TIME, WELLS, distribution_model, match_channel, metric_column, metric_label,
 )
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, field_sites, one_to_one
@@ -742,7 +742,7 @@ def resolve_metric(view: str, metric: str, active_channel, channels) -> tuple[st
 
 
 def page_channel_name(ctx) -> str:
-    """The channel the page's Brightness and Nanowell fluorescence are for, as the user named it: the page's own *Channel*
+    """The channel the page's Cell fluorescence and Nanowell fluorescence are for, as the user named it: the page's own *Channel*
     choice when it is set; else the app's shared channel selector when the tables carry that channel; else the
     tables' first fluorescence channel. The shared selector lives on the Plotting band, which this page does not
     show, so a shared channel the tables lack (the phase channel, a ratio) must not leave every fluorescence metric
@@ -903,7 +903,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         for panel in panels:
             panel.name = names.get(panel.well, "")
         render_trajectories(fig, panels,
-                            cohort=cohort, label=_label(metric, channel), time_source=data.time_source,
+                            cohort=cohort, label=_label(metric, channel, data), time_source=data.time_source,
                             note=" ".join(filter(None, [mvc.describe(moving, column, baseline_moving), note])))
         return None, None
     if view == "position":
@@ -916,11 +916,11 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                                 f"{', '.join(missing)}."]))
         for line in series:
             line.name = names.get(line.well, "")
-        render_position(fig, series, label=_label(metric, channel), timepoint=timepoint, note=note)
+        render_position(fig, series, label=_label(metric, channel, data), timepoint=timepoint, note=note)
         return None, None
     if view == "statistics":
         # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).
-        model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=WELLS,
+        model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=WELLS,
                                    groups=groups, timepoint=timepoint, time_source=data.time_source,
                                    baseline=baseline, cohort=cohort, moving=moving,
                                    baseline_moving=baseline_moving)
@@ -932,7 +932,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                           f"{', '.join(tableless)}.", note]))
         render_statistics(fig, result, note=note)
         return None, result
-    model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
+    model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
                                moving=moving, baseline_moving=baseline_moving, decoration=decoration)
@@ -988,8 +988,9 @@ def _stats_cache(st) -> dict:
     return st.stats_cache
 
 
-def _label(metric: str, channel: str | None) -> str:
-    return METRICS[metric][0] + (f" · {channel}" if METRICS[metric][1] and channel else "")
+def _label(metric: str, channel: str | None, data=None) -> str:
+    """*metric*'s axis label, naming what the shown wells' fluorescence was measured above (``background_compute``)."""
+    return metric_label(metric, channel, list(getattr(data, "fluor_backgrounds", {}).values()))
 
 
 def page_wells(ctx) -> list[str]:
@@ -1129,7 +1130,7 @@ def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, ch
                      "Positions to Measured to draw them.")
         render_message(fig, says, gid="nw-array-missing")
         return None
-    return render_array(fig, scene, layers, label=_label(metric, channel), image=image, image_note=image_note,
+    return render_array(fig, scene, layers, label=_label(metric, channel, data), image=image, image_note=image_note,
                         selected=selected, region=region, note=note, dimmed=dimmed)
 
 
@@ -1541,6 +1542,26 @@ def anchor_controls(ctx) -> tuple[bool, bool, bool]:
     return can, can and anchor is not None, bool(fmc.anchored_wells(st.data))
 
 
+def anchor_unavailable_reason(ctx) -> str | None:
+    """Why *Set anchor* is greyed, as its tooltip says it — the first clause of :func:`anchor_controls`'s
+    predicate that fails — or ``None`` when an anchor can be set here."""
+    st = _state(ctx)
+    if st is None or st.data is None or st.view != "array" or not page_well(ctx):
+        return "No well is drawn."
+    if st.layers.lattice():
+        return "Choose Positions ▸ Measured: an anchor is set in the well frame."
+    if not drawn_layers(st).anchor:
+        return "Turn on Layers ▸ Anchor and show Overlays."
+    if fmc.anchors_file(st.data) is None:
+        return "This dataset has no in/ folder to save an anchor beside."
+    well = page_well(ctx)
+    status = ((st.data.grids.get(well) or {}).get(page_timepoint(ctx, well)) or {}).get("status")
+    if status not in fmc.ANCHORABLE:
+        return ("An anchor cannot change this timepoint: the run found no lattice to address "
+                f"({status or 'no status'}).")
+    return None
+
+
 def set_anchor_mode(ctx, on: bool) -> None:
     """*Set anchor*: while on, a click on the Array view anchors the well there; a drag still pans."""
     st = _state(ctx)
@@ -1707,7 +1728,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
                deliver=deliver)
     st.extreme_axes = render_extremes(fig, model, {site: gated_crops(st, site, st.crops[site]) for site in model.sites()
                                                    if site in st.crops},
-                                      label=_label(metric, channel), note=note, cells=st.crop_cells,
+                                      label=_label(metric, channel, st.data), note=note, cells=st.crop_cells,
                                       image_channel=image_channel, numbers=st.crop_metrics,
                                       display_range=display_range(ctx),
                                       timepoints=extremes_columns(model.timepoints, model.timepoint, st.extremes_tps),
@@ -1838,6 +1859,8 @@ def redraw_detail(ctx) -> None:
         _fetch(ctx, "crops", first, lambda: site_crops(data, metrics, first, channel=image_channel),
                failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
     render_site_detail(fig, series, channel=channel, time_source=st.data.time_source,
+                       backgrounds=[st.data.fluor_backgrounds.get(w) for w in {s[0] for s, _f in series}
+                                    if w in st.data.fluor_backgrounds],
                        outside=_outside_badges(st, [site for site, _frame in series]))
     canvas.draw_idle()
     strip_fig, strip_canvas = ctx.widgets.get_or_none("_nw_strip_fig"), ctx.widgets.get_or_none("_nw_strip_canvas")
@@ -2192,7 +2215,7 @@ def set_crop_cells(ctx, on: bool) -> None:
 
 
 def set_channel(ctx, channel: str) -> None:
-    """The fluorescence channel the page's Brightness and Nanowell fluorescence are drawn for."""
+    """The fluorescence channel the page's Cell fluorescence and Nanowell fluorescence are drawn for."""
     _set(ctx, "channel", channel or "")
 
 

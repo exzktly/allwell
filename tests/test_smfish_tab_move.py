@@ -16,7 +16,7 @@ def test_smfish_is_top_level_tab(viewer_app):
     assert "Image Browser" in names
     assert "Segmentation" not in names
     # Its own rail icon.
-    assert app._SECTION_ICONS.get("smFISH") == "dna"
+    assert app._ctx.features.get("smFISH").icon == "dna"
     # Heavy deps → lazy-only (builds on first click, not during the drain).
     assert "smFISH" in app._centre_lazy_only_titles
     # The old Segmentation sub-stack is gone.

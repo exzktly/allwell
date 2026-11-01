@@ -24,7 +24,7 @@ from ui import theme
 #: ``_IMAGE_CHANNEL_COMBOS``): refreshed together by :func:`refresh_display_range_buttons`.
 DISPLAY_RANGE_BUTTONS = ("_nw_strip_range_btn", "_nw_extremes_range_btn", "_nw_array_range_btn", "_nw_popout_range_btn")
 
-_TIP = ("The brightness window the crops, the pop-out, the Extremes montage and the Array view's full-resolution "
+RANGE_TIP = ("The brightness window the crops, the pop-out, the Extremes montage and the Array view's full-resolution "
         "image of this channel are drawn with, in the image's own units, kept until you change it. Blank is Auto: "
         "each picture is stretched from the 1st to the 99th percentile of its pixels.")
 
@@ -50,7 +50,7 @@ def build_display_range_button(ctx, name: str) -> QPushButton:
     """One of the :data:`DISPLAY_RANGE_BUTTONS`; a click opens the *min* / *max* / **Auto** row under it."""
     button = QPushButton(button_text(ctx))
     button.setProperty("variant", "secondary")
-    button.setToolTip(_TIP)
+    button.setToolTip(RANGE_TIP)
     button.clicked.connect(lambda _=False: open_display_range(ctx, button))
     ctx.widgets.register(name, button)
     return button

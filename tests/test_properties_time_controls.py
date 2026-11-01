@@ -90,7 +90,7 @@ def _build_sidebar(qtbot, monkeypatch, timepoints=None):
     """
     from matplotlib.figure import Figure
 
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     fig = Figure(figsize=(4, 3))
     fig.add_subplot(1, 1, 1)

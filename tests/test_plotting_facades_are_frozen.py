@@ -62,7 +62,7 @@ FACADES: dict[str, dict[str, str]] = {
     "review/features/barplot/controller.py": {},
     "review/features/barplot/collect.py": {},
     "review/features/export/style.py": {},
-    "review/features/export/sidebar_view.py": {},
+    "review/features/export/properties_view.py": {},
 }
 
 RUNNER = "services/remote_runner.py"

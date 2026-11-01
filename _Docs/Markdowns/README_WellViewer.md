@@ -483,6 +483,27 @@ nanowells hold a cell at the **same** place (cells gathered at the lowest point 
 becomes part of the empty-nanowell picture there and is not counted. One texture threshold serves every tile of a
 timepoint.
 
+**Fluorescence background.** Every fluorescence number of a nanowell — the cells' fluorescence and the nanowell's
+fluorescence alike — is measured above one background, chosen in the Nanowell section's **Fluorescence background**
+(on the command line `--nanowell_fluor_background`):
+
+- **This well's nanowell floor** (the default) — the typical level of the bare nanowell floor on the same imaging
+  tile of the same well. It needs nothing else, but nanowells crowded with cells leave little bare floor to read it
+  from.
+- **Empty reference well** (`--nanowell_fluor_background empty_well`) — the floor level of the **Empty reference
+  well**'s nanowells at the same timepoint, one level per channel for the whole well. No cell of the measured well
+  can raise it, and like confluence it follows exposure or medium changing over the time course. It needs an Empty
+  reference well; the form refuses to start without one. Like confluence, it believes the well you name is empty.
+  Where that well has no level for a channel — no image in it, or it was not measured in this output folder — every
+  fluorescence number of that channel is **blank** there, never measured above something else, and the timepoint's
+  notes say why.
+
+The level taken off is written beside each nanowell as `<channel>_background` in `nanowells/<well>.csv`, so a
+number can always be traced to what it was measured above. A nanowell run applies **no Image correction**: the
+flat-field and the background subtraction of the standard pipeline (rolling disk, robust mesh and the rest) are
+local filters that would treat a nanowell full of cells as background, and the form hides that section while
+**Nanowell array** is chosen.
+
 **Confluence needs an empty reference well.** Confluence is read as texture against an empty nanowell, and a loaded
 well has none: calibrated on its own cells, a nanowell half covered read 1-3 %. So name a plate well that holds no
 cells in **Empty reference well** (on the command line `--nanowell_empty_well H12`); left blank, the field reads
@@ -503,7 +524,8 @@ read against it, on the next run — locally or remotely — without Force. The 
 cells the model finds where there are none: its cells counted per nanowell are saved with its verdict
 (`false_cells_per_nanowell`) and written on every other well's timepoint (`template` →
 `reference_false_cells_per_nanowell`), the baseline that well's counts sit on. Counts on the rim-removed image use the
-reference too (see **Segment on**); counts on the raw image, and fluorescence, do not depend on it. **Test detection**
+reference too (see **Segment on**); counts on the raw image do not depend on it, and fluorescence does only when
+**Fluorescence background** says so (below). **Test detection**
 divides by the well's own picture, because it has no reference to read, and says so when one is named. A remote run
 that does not include the reference well — re-running a few wells, or resuming a plate whose reference finished
 earlier — is sent the reference this computer already holds, so its wells keep their confluence. A well is kept as up to date only beside the reference it was read against: when the reference well is analysed for the first time after them, analysed again on other images (re-exported, forced), or given a template at a timepoint where it had none before, every well read against it before is analysed again, locally or sent again to a remote, and the run log says which and why. Running the reference again on the same images changes nothing and re-runs no other well. Results measured this way carry a measurement version: adding timepoints to a dataset
@@ -554,13 +576,13 @@ When several wells and timepoints need an anchor — the usual state after a run
 picking each one: it switches to the Array view on the first timepoint on the plate left unaddressed, with **Set
 anchor** already on, and each click on a central square saves the anchor and, after a moment, opens the next. Each
 timepoint opens zoomed to 10× on the centre of the whole-well montage, where the central square usually is;
-press **Fit** to see the whole well when it is not there. A *Queue*
-group at the left end of the band says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous
+press **Fit** (under the figure) to see the whole well when it is not there. A *Queue*
+group in place of Well and Timepoint (they come back when the walk ends) says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous
 timepoint; a click there replaces its anchor), **Skip**, **One per well** and **Stop** — or press **←** for Back,
 **→** for Skip and **Esc** for Stop while the queue runs. Choosing another view while it runs stops it. When **Set anchor** cannot be turned on for a timepoint, the figure
 says why; press Skip to go on. The queue holds every unaddressed
 timepoint without an anchor, plate order then time order, and also any timepoint whose anchor the last run could
-not use; an anchor you set that no run has used yet is not asked for again. Turn on **One per well** to be shown
+not use; an anchor you set that no run has used yet is not asked for again. Tick **One per well** (before pressing Anchor queue, or during the walk) to be shown
 only each well's first such timepoint, and no well that already has an anchor waiting for a re-run: one click per
 well is usually enough (see above), and any timepoint the re-run still cannot address shows up in the next
 queue. The choice is remembered until you close the app. If One per well leaves nothing to walk (every well
@@ -1159,10 +1181,11 @@ segments the channel marked Phase; then only the chosen method's own settings.
 ### 5. Image correction — field flatness & background
 
 **Hidden for a nanowell plate.** With **Plate type: Nanowell array** the
-section disappears: a nanowell run applies neither correction (each nanowell's
-signal is measured against its own tile's floor level), so nothing here would
-change its numbers, and a correction set to need a blank well no longer blocks
-Run. Switching back to Standard plate shows it again with the choices as left.
+section disappears and the run is sent no correction: a nanowell run applies
+neither (its fluorescence background is the Nanowell section's own
+**Fluorescence background**), and a correction set to need a blank well no
+longer blocks Run. Switching back to Standard plate shows it again with the
+choices as left.
 
 Two independent corrections that run **per channel at quantification time**,
 so they change the pixel values that get measured and can only be changed by
@@ -3994,17 +4017,23 @@ offered yet.
   the manual to match, so the drawer describes only what that build has; if the
   trim cannot be applied it says so at the top of the manual rather than
   quietly showing you the full one.
-- **Section rail** — the left navigator lists every centre tab (Plotting, etc.),
-  grouped into **Analysis**, **Images**, and **Data**, under the dataset control
-  at its head. Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
+- **Section rail** — the left navigator lists every centre tab (Plotting, etc.)
+  under the dataset control at its head: **Home** first, then four groups —
+  **Analysis** (Plotting, Statistics, Multivariate, Spatial: methods that work
+  on any plate), **Assays** (Nanowells, smFISH: pages that need that kind of
+  input data, and say so when a dataset has none), **Inspect** (Image Browser,
+  Review CSV: the images and per-cell rows behind a number) and **Output**
+  (Saved Plots, Batch Export). Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
   beside the mode selector. `Ctrl+B` collapses the rail, as does the small
   button floating on the rail's right edge — it stays put when the rail hides,
   so it is also how you bring the rail back. The mode selector is the top of
   that same column and collapses with it, so while the rail is hidden the
   sub-tabs run to the window's left edge; bring the rail back to switch between
   Review, Analyze, and Datasets.
-- **Plate map + Saved selections** — pinned to the bottom of the left rail; the
-  well selection they drive is what every tab plots (see below).
+- **Plate map, selection footer and Saved selections** — directly under the
+  section list, in that order: the plate, a line with the selection count and
+  **All** / **None**, then the Saved selections drawer. The well selection they
+  drive is what every tab plots (see below).
 - **Controls band** — the row directly above the plot canvas: what is shown on
   the left (channel, property, timepoint, threshold), what to do with it on the
   right (`Display ▾`, `Save ▾`, Properties).
@@ -4041,9 +4070,18 @@ Home → Ratios editor appear here as virtual channels.
 
 The 8×12 plate map in the left sidebar drives every plot and table. Click
 a well to toggle it; drag across wells to multi-toggle; click a row letter
-or column number to toggle the whole row / column; **Select all** /
-**Select none** clear or fill in one click. The selection survives across
-tabs and is what every plot / aggregate / export consumes.
+or column number to toggle the whole row / column. Under the plate, the
+**selection footer** says how many wells are selected ("3 wells selected"), and
+its **All** and **None** buttons fill or clear the selection in one click. With
+replicate groups defined, the plate on a plotting tab shows groups rather than
+wells: the footer then counts the groups shown ("2/3 sets visible"), and **All**
+/ **None** show or hide every group. On Home and Review CSV, which edit wells
+one at a time, the plate always selects wells and **All** / **None** select and
+clear them. On a page that shows one well at a time (smFISH, Playground) the
+plate picks a single well and **All** is not offered — unless groups are
+defined, when the plate shows groups as it does elsewhere. The Image Table's own picker ends in
+the same footer. The selection survives across tabs and is what every plot /
+aggregate / export consumes.
 
 Every plate map in the app — this one, the pickers on the Statistics, Image
 Browser, Preview and Home panels, the Datasets tools' own well
@@ -4054,8 +4092,10 @@ the next.
 
 #### Saved selections and Split View
 
-- **Saved selections** — the collapsible drawer under the plate map saves the
-  current well selection under a name so you can reload it in one click. A
+- **Saved selections** — the collapsible drawer directly under the selection
+  footer saves the current well selection under a name so you can reload it in
+  one click. Its header shows how many you have saved — "Saved selections (3)" —
+  so you can tell it holds something without opening it. A
   saved selection only restores which wells are lit: it pools nothing, so it is
   neither a group nor a replicate set. Loading one drives both the plate
   selection and, where a tab keeps its
@@ -5759,7 +5799,7 @@ scatter and the phenotype-composition bars.
 
 ### Spatial analysis
 
-The **Spatial** tab (Analysis rail, next to Multivariate) analyses per-cell
+The **Spatial** tab (under **Analysis** on the rail, next to Multivariate) analyses per-cell
 positions in the well plane — the pipeline emits `shape_centroid_row` /
 `shape_centroid_col` for every segmented cell (in pixels of its field), and a
 nanowell run also each cell's position across the whole well in µm, which the
@@ -5849,7 +5889,7 @@ level — timepoints are already the X-axis.
 
 ### Nanowells
 
-The **Nanowells** page (Analysis rail, after Spatial) draws a dataset analysed in nanowell mode (Analyze ▸
+The **Nanowells** page (under **Assays** on the rail, beside smFISH) draws a dataset analysed in nanowell mode (Analyze ▸
 Nanowells): one dot per nanowell, so you see how the nanowells of a well spread, how that spread changes over
 time, and how wells and replicate groups compare. A dataset without nanowell tables shows a page saying so.
 
@@ -5860,7 +5900,7 @@ A nanowell dataset also opens in every other Review tab, which read it like this
 - **Observations: Cells | Nanowells** is the first control on the Plotting row. *Cells* plots the cells, pooled per
   well as on any plate; every figure then ends with "Observations: cells · pooled from N occupied nanowells per
   well" (only nanowells holding a cell have cell rows, so N counts those). *Nanowells* plots the nanowell metrics —
-  cell count, confluence, brightness, nanowell fluorescence, their fold changes, growth rate and **Occupied** (holds
+  cell count, confluence, cell fluorescence, nanowell fluorescence, their fold changes, growth rate and **Occupied** (holds
   at least one cell) — computed exactly as this page computes them, with this page's Baseline and Rim focus:
   - **Scatter** sets any nanowell metric against any other, one point per nanowell and timepoint, or per well (the
     median over its nanowells) with *Points: Per well*;
@@ -5883,12 +5923,12 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     tile of each well shown and can take a few seconds per well. Leave the row's LUT on **Auto** to give every well
     one brightness window; tick **per cell** in its LUT row to scale each well to its own range instead, which shows
     a dim well at the cost of comparing wells.
-  - **NW: *metric name*** (one per nanowell metric: cell count, confluence, brightness, fold changes, growth rate,
+  - **NW: *metric name*** (one per nanowell metric: cell count, confluence, cell and nanowell fluorescence, fold changes, growth rate,
     occupied) — each nanowell drawn as a disc in its metric's colour, *viridis* by default. A fold change is drawn
     blue below 1, red above and grey at 1, on a log scale, so a doubling and a halving are equally strong. The values
     follow the Nanowells page's **Baseline** and the Cell Gating rules, so they match the page and the plots.
     Outside the nanowells is dark grey, so even the lowest values stand out; a nanowell with no value (no cells for
-    a brightness, out of focus, gated out) is an **empty ring**, never a coloured disc.
+    a cell fluorescence, out of focus, gated out) is an **empty ring**, never a coloured disc.
 
   The metrics sit behind **Nanowell metrics** in the Channels tray (click it to show them), and a new table starts
   with MONTAGE and the raw channels only. Under the grid a **colour key** names each metric as its row does and
@@ -5919,43 +5959,59 @@ use them.
 - **Views** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
   *Extremes*, *Identity* and *Statistics*, chosen from the tabs in the top bar, where the Plotting and Home
   pages show their sub-tabs. Hover a tab for what it shows. Each view shows only the controls it uses.
-- **Metric** — what each dot is: cell count, confluence, **brightness** and **nanowell fluorescence** (both
-  explained under *Brightness and nanowell fluorescence* below), their fold changes against the baseline,
+- **Metric** — what each dot is: cell count, confluence, **cell fluorescence** and **nanowell fluorescence** (both
+  explained under *Cell fluorescence and nanowell fluorescence* below), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
   ln count against time, per hour, over at least three timepoints with cells) and occupancy at baseline.
-  Brightness and nanowell fluorescence, and their fold changes, are of the fluorescence channel chosen in **Channel**.
-**Brightness and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
-but they answer different questions.
+  Cell fluorescence and nanowell fluorescence, and their fold changes, are of the fluorescence channel chosen in **Channel**.
 
-- **Brightness** (of the chosen channel, e.g. *Brightness DAPI*) is *how bright the cells are*. It is the average, over the cells counted in the
+**Cell fluorescence and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
+but they answer different questions. Both are measured above the same background, the one the run was set up
+with (*Fluorescence background*, in the Analyze section), and every axis says which:
+
+| The run measured above | Axis label says | Site detail row says |
+|---|---|---|
+| this well's nanowell floor (the default) | *own-well background subtracted* | *minus own well* |
+| the empty reference well's floor | *empty-well background subtracted* | *minus empty well* |
+| — a run from before the choice existed | cell fluorescence: *background included*; nanowell fluorescence: *own-well background subtracted* | *with background* / *minus own well* |
+
+For example *Cell fluorescence (mean per cell, empty-well background subtracted) · GFP*. Wells measured differently
+drawn together say *background differs between wells*. A run from before the choice left the background in its
+cell fluorescence, which pulls a cell fluorescence fold change toward 1 (a steady floor sits in both halves of the
+ratio); analysing it again removes it. The Metric menu names the metrics alone, since it is built before a dataset
+is read.
+
+- **Cell fluorescence** (of the chosen channel, e.g. *Cell fluorescence … · DAPI*) is *how bright the cells are*. It is the average, over the cells counted in the
   nanowell, of each cell's mean pixel intensity inside its segmented outline. It does not change with how many cells
-  there are: one cell at 800 or ten cells at 800 both give 800. Nothing is subtracted, so it is in the image's own
-  units, background included. It needs segmented cells: a nanowell with no counted cell has no brightness (blank,
+  there are: one cell at 800 or ten cells at 800 both give 800. The run's fluorescence background is taken off it,
+  the same level as off nanowell fluorescence (see *Fluorescence background* in the Analyze section). It needs segmented cells: a nanowell with no counted cell has no cell fluorescence (blank,
   not zero).
-- **Nanowell fluorescence** (e.g. *Nanowell fluorescence DAPI*) is *how much light the whole nanowell gives off above its empty floor*. It
-  is the sum of every pixel inside the nanowell (within 90 % of its radius, clear of the rim) minus the floor's level times
-  the number of pixels. The floor's level is read from the same imaging tile — the typical level of the nanowells'
-  bare floor in that channel, with or without cells on it — so no empty nanowell is needed. It uses no
+- **Nanowell fluorescence** (e.g. *Nanowell fluorescence … · DAPI*) is *how much light the whole nanowell gives off above its empty floor*. It
+  is the sum of every pixel inside the nanowell (within 90 % of its radius, clear of the rim) minus the background
+  level times the number of pixels. By default that level is read from the same imaging tile — the typical level of
+  the nanowells' bare floor in that channel, with or without cells on it — so no empty nanowell is needed; a run set
+  to the empty reference well takes that well's floor at the same timepoint instead. It uses no
   segmentation, so it counts light from cells the segmentation missed too. An empty nanowell reads near zero and
   can come out slightly negative.
 
-So nanowell fluorescence grows with *both* the number of cells and how bright each one is; brightness follows only
+So nanowell fluorescence grows with *both* the number of cells and how bright each one is; cell fluorescence follows only
 the second. Ten cells as bright as one cell give about ten times the nanowell fluorescence and the same
-brightness. With a nuclear stain such as DAPI, nanowell fluorescence tracks the amount of nuclear material — close
-to cell number — and brightness tracks staining or DNA content per nucleus (a dividing or condensing nucleus is
-brighter). Use brightness to ask whether the cells changed; use nanowell fluorescence to ask how much stained
+cell fluorescence. With a nuclear stain such as DAPI, nanowell fluorescence tracks the amount of nuclear material — close
+to cell number — and cell fluorescence tracks staining or DNA content per nucleus (a dividing or condensing nucleus is
+brighter). Use cell fluorescence to ask whether the cells changed; use nanowell fluorescence to ask how much stained
 material is in the nanowell, including when cells clump and the count is unreliable.
 
 Their fold changes divide each timepoint by the baseline. A nanowell fluorescence at or below zero at the baseline
 gives no fold change ("no signal above background at baseline"), since a ratio over nothing has no meaning; a
-brightness fold change needs counted cells at both timepoints.
+cell fluorescence fold change needs counted cells at both timepoints. Below the empty well's floor a value can be
+negative, and a fold change over a baseline at or below zero has no meaning, so it is left blank.
 
-**Cell Gating applies here too.** A nanowell's cell count, and its brightness, use only the cells the rest of
+**Cell Gating applies here too.** A nanowell's cell count, and its cell fluorescence, use only the cells the rest of
 Review counts: the size and shape gate, cells excluded by hand and the scatter gates set on Home ▸
 [Cell Gating](#cell-gating). So to drop objects by size from the nanowells, set *min area* / *max area* there. A
 field left out as a whole — excluded in QC triage, flagged by the run while *exclude flagged fields* is on, or not
 among the FOVs chosen on Cell Gating — is a tile at one timepoint here, and every nanowell it holds is left out with
-the reason *field excluded*, empty ones included, rather than counted as emptied. Each nanowell's count is the run's count less the cells gated out of it, and brightness is
+the reason *field excluded*, empty ones included, rather than counted as emptied. Each nanowell's count is the run's count less the cells gated out of it, and cell fluorescence is
 averaged over the cells kept; everything computed from the count follows — fold changes, growth rate, occupancy,
 *Starting cells* and the *Subset* conditions. Confluence and nanowell fluorescence are measured from the
 nanowell's pixels rather than from its segmented cells, so a gate cannot change them. While a gate leaves any cell
@@ -5963,7 +6019,7 @@ out, every figure says how many (*Cell Gating leaves out N of M cells …*), and
 the same numbers with the same sentence. A well whose per-cell table cannot be read keeps the run's own counts, and
 the sentence names it.
 
-- **Channel** — beside Metric, on every view: the fluorescence channel Brightness and Nanowell fluorescence are drawn for,
+- **Channel** — beside Metric, on every view: the fluorescence channel Cell fluorescence and Nanowell fluorescence are drawn for,
   in the figures, the site detail and the crop captions. It starts on the channel the Plotting tabs use when the
   run measured it, else on the first channel it measured. A channel the run read but did not measure in the
   nanowells is listed greyed, as *(not measured)*; its tooltip says to re-run the wells with it among the
@@ -5984,7 +6040,7 @@ the sentence names it.
   *Custom subset…* or **Edit…** opens the subset editor under the controls, where you can combine any number of
   conditions and choose whether a nanowell must meet *all* of them or *any*. Each condition tests one of:
   - **Starting cells** — the count at the Baseline;
-  - **a metric** — cell count, confluence, brightness and nanowell fluorescence (per channel), any fold change or the growth
+  - **a metric** — cell count, confluence, cell fluorescence and nanowell fluorescence (per channel), any fold change or the growth
     rate. A metric with a value per timepoint is read *at baseline*, at the well's *earliest* or *latest*
     timepoint, at a timepoint you name, or *at any* / *at every* timepoint (*every*: the nanowell needs a passing
     value at each of its well's timepoints);
@@ -6047,7 +6103,7 @@ the sentence names it.
   baseline timepoint — only the endpoint is averaged — and the footer says so. log₂ count fold changes are
   averaged as logs, which is a geometric mean of the ratios.
 - **Baseline average** (beside *Moving average*, for a fold change) — a number of timepoints, 1 (off) or 2 to 9: the baseline
-  becomes the mean of the nanowell's measured values (its count, confluence, brightness or fluorescence) at the
+  becomes the mean of the nanowell's measured values (its count, confluence, cell fluorescence or fluorescence) at the
   baseline timepoint and the ones before it, that many in all — never after it, since a later timepoint may
   already show the treatment. Like the moving average it is used only when every timepoint of its window has a
   value; a nanowell whose baseline window is incomplete has no fold change, counted as "baseline window before
@@ -6076,7 +6132,7 @@ the sentence names it.
   same setting.
 - **Responding above** (on *Distribution*) — the number a nanowell's value must be above to count as
   responding, for the metric shown. Set one for each metric you use (a fold change, a count, a confluence, an
-  intensity); each is remembered separately, and a channel's brightness separately from another's. The figure
+  intensity); each is remembered separately, and a channel's cell fluorescence separately from another's. The figure
   draws it as a dashed line and states each group's fraction responding — the mean of its wells' fractions —
   at the latest timepoint, or at the timepoint drawn along wells. With the field empty no fraction is
   computed, and the footer says so: there is no default.
@@ -6149,7 +6205,10 @@ the sentence names it.
   by plate row and labelled by its letter; pointing at a cell names it in the readout, and its tooltip says what
   the state means. **Click a cell** to open it where it is dealt with: a verdict opens on **Identity**, a timepoint
   not addressed (or waiting, or not located) opens on **Array** with **Set anchor** on. The **Anchor** group here
-  holds **Anchor queue**, **One per well** and **Re-run anchored wells…** (see *Setting the anchor by hand*).
+  holds **Anchor queue** — the highlighted button, which says what it will walk (*Anchor queue: 17 timepoints*) —
+  the **One per well** box, which narrows that to each well's first (*Anchor queue: 5 wells*), and **Re-run anchored
+  wells…** (see *Setting the anchor by hand*). While any timepoint is not addressed, the figure says to press
+  Anchor queue or click an orange cell.
 - **Trajectories** — one panel per well: a thin line per nanowell through its values over time, coloured by
   its occupancy at baseline, and a thick line for each occupancy class's median. A gap is a timepoint without
   a value. Growth rate and occupancy have one value per nanowell, so they are greyed here.
@@ -6166,7 +6225,7 @@ the sentence names it.
   rank, address and the fold change it was ranked by, and the ranking timepoint's column is outlined. Each crop
   carries its own numbers inside it, so they take no room from the crops: the fold change at that timepoint in its
   top-left corner, and along its foot as many of the nanowell's measurements there as fit one line — cell count,
-  confluence, then the channel's nanowell fluorescence and brightness. The pop-out writes all of them under each panel. The
+  confluence, then the channel's nanowell fluorescence and cell fluorescence. The pop-out writes all of them under each panel. The
   montage fills the figure: the Largest and Smallest blocks sit side by side whenever that gives bigger crops, and
   **Timepoints** (beside *Largest & smallest*) chooses which timepoints are shown — fewer give bigger crops; the
   ranking timepoint is always shown. Crops too small to hold a line of measurements show the fold change only, and
@@ -6205,7 +6264,11 @@ the sentence names it.
   values, two samples holding the same constant), never a number. More than 15 comparisons are not run: choose
   a control under **vs** or exclude wells. *Save figure* saves the figure and its report together.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
-  a QC picture and a full-resolution montage each did:
+  a QC picture and a full-resolution montage each did. The band's first row holds the page's data controls
+  (Metric, Channel, Baseline, Subset, Rim focus); its second holds the view's own, in the order you use them:
+  **Well** and **Timepoint** together, then **Positions**, **Image**, **Layers**, and **Set anchor**, **Clear
+  anchor** and **Re-run wells…** (*Re-run anchored wells…* on the QC view). The zoom and **Overlays** sit under
+  the figure, beside its navigation buttons:
   - **Image** — what is drawn under the nanowells: *Off*; *Run montage*, the downsampled stitched phase
     montage the run kept (read in the background: the footer says *Reading the montage…* meanwhile); or *Full
     resolution*, drawn from the raw images in `in/` where the run placed each tile — of the channel chosen in the
@@ -6252,14 +6315,14 @@ the sentence names it.
     analysed before this setting existed show their cells too: nothing needs re-running. *Tiles* outlines each tile, coloured by how it was placed (green on the lattice, blue by
     overlap, amber where the acquisition record put it), with its registration residual; a tile whose size the
     record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
-    hand and says how the timepoint was addressed (and, where it was not, how to anchor it), and offers **Set
-    anchor**, **Clear anchor** and **Re-run anchored wells…** (see *Setting the anchor by hand* above; the
+    hand and says how the timepoint was addressed (and, where it was not, how to anchor it), which is what lets
+    **Set anchor**, **Clear anchor** and **Re-run wells…** act (see *Setting the anchor by hand* above; the
     **Anchor queue** is on the QC view). *Run
     record* lists beside the figure the grid record of this timepoint (status, how the origin was found,
     pitch, angle, overlap, nanowells detected of the roster), the empty-nanowell template the counts were
     divided by, and the status of every other timepoint; a template the run found far from the well's
     earliest one is shown in amber: most nanowells there may hold cells, and that timepoint's counts and
-    confluence may be biased. *Notes* (off until you turn it on; also the **Notes** button beside **Overlays**)
+    confluence may be biased. *Notes* (off until you turn it on; also the **Notes** button beside **Overlays**, under the figure)
     explains how to read the figure — how the positions are drawn, what the fill and outlines mean, what the tile
     colours mean — under the footer's lines, which stay exactly where they are, saying only what applies to what is on screen. That space is kept whether Notes is on or off, so the array never moves, shrinks or is covered
     when you turn it on. The footer under the figure is the same either way: the page's
@@ -6269,17 +6332,21 @@ the sentence names it.
   - **Layers → Show as** sets every layer at once: *Array map* (lattice places filled by the metric), *Array
     QC* (the run montage, the tiles and the nanowells by state, with the run record) or *Full montage* (full
     resolution, nanowells by state with their addresses and values, and the anchor). *Notes* stays as you set it.
-  - **Overlays** — one button that takes every coloured layer (the nanowells, the tiles, the anchor and the cells) off
-    the image and puts them back, for a quick look at what is underneath. The Layers menu's choices are kept,
+  - **Overlays** (under the figure) — one button that takes every coloured layer (the nanowells, the tiles, the
+    anchor and the cells) off the image and puts them back, for a quick look at what is underneath. The Layers menu's choices are kept,
     so pressing it again restores exactly what was on; while they are hidden the footer says so, and Set
     anchor is greyed.
 
-  The controls on the band stay where they are whatever the layers say: a control a layer makes useless —
-  **Metric** and **Baseline** with nothing drawn by the metric, the anchor's buttons with the anchor layer off
-  — is greyed rather than hidden.
+  The controls on the band stay where they are whatever the layers say: a control a layer makes useless is
+  greyed rather than hidden, and its tooltip says why — **Metric** and **Baseline** with nothing drawn by the
+  metric; **Image** on *Lattice* positions; the image's channel and **Range** unless Image is *Full resolution*
+  (the run montage is phase only and drawn as the run saved it); **Set anchor** naming what is missing (measured
+  positions, the anchor layer and Overlays, an `in/` folder, or a timepoint an anchor can change); **Clear
+  anchor** with no anchor set; **Re-run wells…** with no anchor anywhere.
 
-  Drag to pan, scroll to zoom about the pointer, **−** and **+** to zoom about the centre, **Fit** for the
-  whole well, **1:1** for one image pixel per screen pixel; the readout between − and + says how far the view
+  Drag to pan, scroll to zoom about the pointer; under the figure, **−** and **+** zoom about the centre,
+  **Fit** (or the home button beside it) shows the whole well, and **1:1** shows one image pixel per screen
+  pixel; the readout between − and + says how far the view
   is zoomed against Fit (from a quarter of it out to 500×). On a phone over RealVNC a two-finger swipe up or
   down is sent as the scroll wheel, so it zooms the view; a pinch is the viewer zooming its own picture of the
   desktop and never reaches All-Well. The swipe zooms about the pointer when the pointer is on the image, and
@@ -6292,7 +6359,7 @@ the sentence names it.
   layers that view drew.
 
 **Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
-brightness and nanowell fluorescence against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
+cell fluorescence and nanowell fluorescence against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
 six nanowells to compare; the **✕** at the top of the site detail closes it and clears them, as does clicking empty
 space on the plot. A timepoint where the
 nanowell has no number is a gap and a hatched band, with its state written above the plot — never a zero.
@@ -6334,7 +6401,7 @@ A crop cut from the run montage, which is an 8-bit picture rather than the raw i
 the caption says so, as does the Array view's *Run montage* image.
 Selecting nanowells does not change the plate selection.
 
-**What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it
+**What is read.** The page reads the nanowell tables (and the per-cell CSVs behind cell fluorescence) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
 is selected and kept, so selecting it again is instant. Wells clicked one after another on the plate are read
 together, a quarter of a second after the last click, rather than one load per click. While a newly selected well is read, or the figures are
@@ -6354,7 +6421,7 @@ which wells are left out. It applies only to this page — the well stays in the
 the page's settings. **Excluded (n) ▾** on the band brings back one well or all of them.
 
 **Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the wells the page
-draws as one long CSV, with the baseline and where the times came from. Its `n_cells` and brightness are the
+draws as one long CSV, with the baseline and where the times came from. Its `n_cells` and cell fluorescence are the
 page's, so they leave out the cells Home's Cell Gating leaves out; beside them `n_cells_run` is the run's own
 count, `cells_left_out` how many cells the gating took from it, and `cell_gating` says what the gating left out
 (empty when nothing). With a Subset set, every
@@ -6510,7 +6577,7 @@ run the check on its output folder.
 
 ### Image Browser
 
-The **Image Browser** rail entry (Images group) hosts four image-review
+The **Image Browser** rail entry (under **Inspect**, beside Review CSV) hosts four image-review
 sub-tabs on a sub-tab bar: **Segmentation**, **Image Table**, **Cell Browser**,
 and **Playground**. All read the per-well processed-image ZIPs, loaded on
 demand — if a sub-tab reports "No images found", confirm the results folder

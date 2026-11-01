@@ -437,21 +437,6 @@ def test_the_nanowell_section_sits_directly_below_segmentation(tab):
     assert not tab._nanowell_cb.isChecked() and section.isHidden()
 
 
-def test_image_correction_is_hidden_for_a_nanowell_plate_and_its_blank_well_blocks_nothing(tab):
-    """A nanowell run applies no flat-field or background subtraction (``nanowell_task.run_zip_task`` reads
-    neither), so the Image correction section is hidden while the Plate type is Nanowell array, and a correction
-    that would need a blank well does not block the run from a section the user cannot see."""
-    section = tab._section_widgets["Image correction"]
-    assert not section.isHidden()
-    tab._flatfield_cb.setValue("empty_well")              # needs a Background well, and none is named
-    assert tab._background_well_validation_error(check_input=False)
-    tab._plate_type_seg.setCurrentIndex(1)                # the control a user presses
-    assert tab._nanowell_cb.isChecked() and section.isHidden()
-    assert tab._background_well_validation_error(check_input=False) is None
-    tab._plate_type_seg.setCurrentIndex(0)
-    assert not section.isHidden() and tab._background_well_validation_error(check_input=False)
-
-
 def test_a_nanowell_run_builds_and_plans_no_correction_left_set_in_the_hidden_section(tmp_path):
     """The pipeline's half: a nanowell run given ``--flatfield empty_well`` (left set in the section the form now
     hides) builds no model and plans no blank, so it neither reads a blank nor refuses a run for a missing one; the

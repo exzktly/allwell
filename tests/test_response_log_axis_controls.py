@@ -225,7 +225,7 @@ def _stub_app(fig):
 def _sidebar(qtbot, monkeypatch, *, drawn_log: bool = False):
     """A real ``ExportStyleSidebar`` over a real, already-drawn Response figure,
     with this tab's redraw recorded at the module the registry imports it from."""
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     fig, ax = _figure()
     draw_response(SimpleNamespace(), ax, _data(), log_x=drawn_log)

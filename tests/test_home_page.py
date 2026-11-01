@@ -432,16 +432,18 @@ def test_every_definition_tab_is_built_after_a_load(loaded_app):
 def test_home_shows_no_rail_body_on_any_tab(loaded_app, qtbot):
     """``activate_home``'s docstring has always said Home shows no rail frame,
     and the sample frame contradicted it: it carried the plate that composed a
-    group, so the Sample Map tab would show that plate in the rail *and*
-    whichever plate its layer carried in the page. The plate is a layer of the
-    tab now and the frame holds nothing."""
+    group. The frame is gone — Home declares no ``rail_sections`` — so no rail
+    frame may be showing on any of Home's tabs."""
     ctx = loaded_app._ctx
-    frame = ctx.widgets.get("_sidebar_sample_frame")
+    assert ctx.widgets.get_or_none("_sidebar_sample_frame") is None
+    frames = [ctx.widgets.get(s.key) for s in ctx.features.rail_sections()]
 
     for name in ("Overview", "Cell Gating", "Sample Map", "Ratios",
                  "Pipeline Info"):
         _goto_subtab(loaded_app, qtbot, name)
-        assert not frame.isVisibleTo(loaded_app), f"{name}: a rail body appeared"
+        shown = [f.objectName() or repr(f) for f in frames
+                 if f.isVisibleTo(loaded_app)]
+        assert not shown, f"{name}: a rail body appeared"
 
 
 def test_import_is_offered_only_where_it_means_something(loaded_app, qtbot):

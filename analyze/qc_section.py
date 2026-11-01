@@ -68,7 +68,7 @@ class AnalyzeQCSectionMixin:
     """The Image correction & QC section's builders. Binds to the ``AnalyzeTab``."""
 
     def _build_image_correction_section(self, parent: QWidget) -> None:
-        sec = self._section(
+        sec = self._image_correction_body = self._section(
             parent, "Image correction",
             collapsible=True, collapsed=False,
             summary=self._image_correction_summary,
@@ -203,10 +203,6 @@ class AnalyzeQCSectionMixin:
         self._background_well_needed_lbl.setWordWrap(True)
         sec.layout().addWidget(self._background_well_needed_lbl)
         self._build_background_map_row(sec)
-        # Hidden for a nanowell plate, whose run applies none of it (``analyze.nanowell_section``).
-        sync = getattr(self, "_sync_image_correction_to_plate_type", None)
-        if callable(sync):
-            sync()
 
         def _sync_bg(_=None) -> None:
             bg_method = self._background_cb.value()
@@ -237,6 +233,29 @@ class AnalyzeQCSectionMixin:
         _sync_bg()
 
         self._refresh_section_summary("Image correction")
+
+    def _corrections_unused(self) -> bool:
+        """Whether this run applies no Image correction: a nanowell run, whose fluorescence background is the
+        Nanowell section's own (``--nanowell_fluor_background``) and which never reads the flat-field or the
+        background method."""
+        box = getattr(self, "_nanowell_cb", None)
+        return box is not None and box.isChecked()
+
+    def _correction_options(self) -> dict:
+        """The run options of the Image correction section. A nanowell run sends none of them: it would not apply
+        them, and a hidden "From blank well(s)" left over from a standard run would otherwise still ask for a
+        Background well before the run could start."""
+        if self._corrections_unused():
+            return {"flatfield": "none", "background": "none", "background_well": "", "background_well_map": ""}
+        return {"flatfield": self._flatfield_cb.value(), "background": self._background_cb.value(),
+                "background_well": self._background_well_edit.text().strip(),
+                "background_well_map": self._background_map_value()}
+
+    def _hide_corrections_for_nanowells(self, on: bool) -> None:
+        """Hide the Image correction section while Nanowell array is chosen: none of it applies to such a run."""
+        body = getattr(self, "_image_correction_body", None)
+        if body is not None and body.parentWidget() is not None:
+            body.parentWidget().setVisible(not on)
 
     def _image_correction_summary(self) -> str:
         """The folded header's line: the two corrections, by their labels."""

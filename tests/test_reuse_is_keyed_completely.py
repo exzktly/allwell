@@ -303,6 +303,10 @@ REUSE_CONTRACTS = {
                     "template and every well read against the old one must be read again. By content rather than by "
                     "file, because each save of the reference rewrites its .npz files with a new timestamp; the "
                     "incremental path (`nanowell_task._prior_state`) takes the same key per timepoint",
+        "fluor_floor": "the reference's fluorescence floor level at the timepoint, for a run measuring its fluorescence "
+                       "above it (`--nanowell_fluor_background empty_well`): a reference re-imaged with another "
+                       "exposure in a fluorescence channel moves the level while its phase template stays the same, and "
+                       "every well's fluorescence taken over the old level is then wrong",
         "measured": "whether the reference was measured in this folder at all: a well read before it was (a missing or "
                     "failed reference) has no confluence and must be read again once it is",
         "verdict": "the reference's verdict at the timepoint: one judged loaded gives no template, so every well's "
@@ -1620,15 +1624,15 @@ def _reference_template(texture_cut: float = 0.1, level: float = 1.0):
     return nm.Template(np.full((5, 5), level), 2, "own", 10, 12, texture_cut, (0, 1))
 
 
-def _save_reference(out, template, status: str = "empty"):
+def _save_reference(out, template, status: str = "empty", spec=None, floor=None):
     """Save H12 as the empty reference in *out*, its 0h and T01 judged *status*, the way the reference well's run
-    does (``nanowell_reference.save``)."""
+    does (``nanowell_reference.save``); *floor* is its fluorescence floor level per channel."""
     from pipeline import nanowell_reference as nref
     from pipeline.nanowell_task import settings_from_kwargs
 
     verdict = {"status": status, "loaded_share": 0.0, "nanowells_counted": 50, "max_loaded_share": 0.05}
-    nref.save(out, "H12", settings_from_kwargs({"_nanowell": _REFERENCE_SPEC}),
-              {tp: (template, verdict) for tp in ("0h", "T01")})
+    nref.save(out, "H12", settings_from_kwargs({"_nanowell": spec or _REFERENCE_SPEC}),
+              {tp: (template, verdict, floor or {}) for tp in ("0h", "T01")})
 
 
 def _stamp_reference_key(out, key: str, timepoint: str = "T01") -> None:
@@ -1644,7 +1648,7 @@ def _stamp_reference_key(out, key: str, timepoint: str = "T01") -> None:
 def _reference_current_case(tmp_path, key: str):
     """``(baseline, mutated)`` of ``confluence_reference_current`` for A01, read at 0h against the saved H12."""
     from pipeline import nanowell_reference as nref
-    from pipeline.nanowell_task import confluence_reference_current
+    from pipeline.nanowell_task import confluence_reference_current, settings_from_kwargs
 
     out = tmp_path / "out"
     out.mkdir()
@@ -1666,6 +1670,13 @@ def _reference_current_case(tmp_path, key: str):
         baseline = confluence_reference_current(out, "A01", template)
         _save_reference(out, _reference_template(level=1.01))     # re-exported: another template
         return baseline, confluence_reference_current(out, "A01", template)
+    if key == "fluor_floor":
+        spec = {**_REFERENCE_SPEC, "fluor_background": "empty_well"}
+        _save_reference(out, _reference_template(), spec=spec, floor={"GFP": 30.0})
+        _stamp_reference_key(out, nref.load(out, settings_from_kwargs({"_nanowell": spec})).key_at("0h"), "0h")
+        baseline = confluence_reference_current(out, "A01", {"_nanowell": spec})
+        _save_reference(out, _reference_template(), spec=spec, floor={"GFP": 45.0})   # the same template
+        return baseline, confluence_reference_current(out, "A01", {"_nanowell": spec})
     raise AssertionError(f"no mutation written for {key!r}: add one beside its reason in REUSE_CONTRACTS")
 
 

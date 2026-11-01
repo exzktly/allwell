@@ -29,7 +29,7 @@ from tests.fixtures import nanowell_dataset as fx  # noqa: E402
 GFP_MONTAGE = montage_token("GFP")
 COUNT_MAP = metric_token("Cell count")
 #: The axis spells every channel token upper-case (``ChannelSpec.axis_token``); the readers must not care.
-BRIGHTNESS_MAP = metric_token("GFP Brightness (mean per-cell intensity)").upper()
+BRIGHTNESS_MAP = metric_token("GFP Cell fluorescence (mean per cell, own-well background subtracted)").upper()
 
 
 def _loaded(qtbot, tmp_path, **kw):
@@ -63,7 +63,7 @@ def test_a_nanowell_run_offers_each_fluorescence_montage_and_every_metric_map(qt
     options = channel_options(ctx)
     assert options[:2] == [MONTAGE_TOKEN, GFP_MONTAGE]
     assert montage_token("PHASE") not in options          # the phase channel's montage is MONTAGE itself
-    assert COUNT_MAP in options and metric_token("GFP Brightness (mean per-cell intensity)") in options
+    assert COUNT_MAP in options and metric_token("GFP Cell fluorescence (mean per cell, own-well background subtracted)") in options
 
 
 def test_a_standard_run_offers_no_nanowell_frame(qtbot, mini_dataset):
@@ -107,6 +107,19 @@ def test_a_metric_map_fills_each_nanowell_with_its_value_and_leaves_the_rest_emp
     assert np.isnan(got[0, 0]) and np.isnan(got[-1, -1])
     frame = nanowell_frame_of(cache, "B01", COUNT_MAP, "24h")
     assert not frame.undefined.any() and frame.um_per_px == fx.PX_UM
+
+
+def test_a_kept_metric_frame_names_the_same_metric_whatever_background_its_dataset_used(qtbot, tmp_path):
+    """A frame kept in a view carries its metric's label, which names the background the fluorescence was measured
+    above. The same view on a dataset measured above another background still draws the same metric, and a label
+    naming another metric is not taken for it."""
+    ctx, _out = _loaded(qtbot, tmp_path)               # measured above each well's own floor
+    own = load_frame_array(ctx, {}, "A01", BRIGHTNESS_MAP, "24", "F0")
+    other = metric_token("GFP Cell fluorescence (mean per cell, empty-well background subtracted)")
+    kept = load_frame_array(ctx, {}, "A01", other, "24", "F0")
+    assert own is not None and kept is not None and np.array_equal(own, kept, equal_nan=True)
+    signal = metric_token("GFP Nanowell fluorescence (total, empty-well background subtracted)")
+    assert not np.array_equal(load_frame_array(ctx, {}, "A01", signal, "24", "F0"), own, equal_nan=True)
 
 
 def test_a_nanowell_with_no_value_is_an_empty_ring_never_background_a_disc_or_zero(qtbot, tmp_path):
@@ -205,10 +218,10 @@ def test_what_the_frames_leave_out_is_one_sentence_per_metric_summed_over_the_we
     ctx, _out = _loaded(qtbot, tmp_path)
     reset_scan_misses(ctx)
     for well in ("A01", "B01"):           # the token as the axis now carries it: the metric's own spelling
-        _load_array(ctx, {}, well, metric_token("GFP Brightness (mean per-cell intensity)"), "24", "F0")
+        _load_array(ctx, {}, well, metric_token("GFP Cell fluorescence (mean per cell, own-well background subtracted)"), "24", "F0")
     empty = sum(1 for well in ("A01", "B01") for n in fx.COUNTS[well]["24h"] if not n)
     clause = partial_scan_clause(ctx)
-    assert (f"NW: GFP Brightness: {empty} of 10 nanowells in 2 wells have no value ({empty} no cells), "
+    assert (f"NW: GFP Cell fluorescence: {empty} of 10 nanowells in 2 wells have no value ({empty} no cells), "
             "drawn as empty rings") in clause
     assert "A01" not in clause and "B01" not in clause              # summed, not listed well by well
     reset_scan_misses(ctx)

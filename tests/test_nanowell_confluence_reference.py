@@ -228,3 +228,85 @@ def test_a_well_is_given_the_reference_the_run_names(tmp_path, reference):
     assert nt._confluence_reference_for("A01", settings, path).at("0h")[0] is not None
     unnamed = nt._confluence_reference_for("A01", _settings(), path)
     assert unnamed.at("0h")[0] is None and "no empty reference well was named" in unnamed.at("0h")[1]
+
+
+# ── the empty well's fluorescence floor (``--nanowell_fluor_background empty_well``) ─────────────────────────────
+def test_the_reference_saves_its_floor_level_and_a_well_measured_above_it_reads_it_back(tmp_path, reference):
+    _, template = reference
+    settings = _settings(empty_well="H12", fluor_background="empty_well")
+    # The named well is believed even when its count finds objects (debris): 12h keeps its level all the same. 18h
+    # had no fluorescence image, so it has a template and no level. 24h is an output folder written by the earlier
+    # count-based rule, which refused the timepoint and saved no template: no level there, and the reason why.
+    old_rule = {"status": nref.LOADED, "loaded_share": 0.72, "nanowells_counted": 100, "max_loaded_share": 0.05}
+    nref.save(tmp_path, "H12", settings, {"0h": (template, nref.verdict(_rows([0] * 10)), {"GFP": 30.0}),
+                                          "12h": (template, nref.verdict(_rows([3] * 10)), {"GFP": 31.0}),
+                                          "18h": (template, nref.verdict(_rows([0] * 10)), {}),
+                                          "24h": (template, old_rule, {"GFP": 32.0})})
+    back = nref.load(tmp_path, settings)
+    assert back.fluor_at("0h") == ({"GFP": 30.0}, "")
+    assert back.fluor_at("12h") == ({"GFP": 31.0}, "")
+    assert back.fluor_at("18h") == ({}, "")                  # _empty_well_backgrounds names the channel
+    levels, why = back.fluor_at("24h")
+    assert levels == {} and "not empty" in why
+    # A run measuring above its own floor does not read them, so a change in them re-runs none of its wells.
+    assert nref.load(tmp_path, _settings(empty_well="H12")).fluor_levels == {}
+
+
+def test_a_well_measured_above_the_empty_well_is_stale_when_its_floor_moves(tmp_path, reference):
+    """``key_at`` decides whether a well's kept timepoint may be reused; the floor its fluorescence was taken over
+    is part of what that timepoint measured, so a moved floor with the same template must not reuse it."""
+    _, template = reference
+    settings = _settings(empty_well="H12", fluor_background="empty_well")
+    keys = []
+    for level in (30.0, 45.0):
+        nref.save(tmp_path, "H12", settings, {"0h": (template, nref.verdict(_rows([0] * 10)), {"GFP": level})})
+        keys.append(nref.load(tmp_path, settings).key_at("0h"))
+    assert keys[0] != keys[1]
+
+
+def test_a_well_measured_above_the_empty_well_takes_its_level_or_none(reference):
+    reference_well = nref.Reference(templates={"0h": reference[1]}, fluor_levels={"0h": {"GFP": 30.0}},
+                                    reasons={"6h": "the empty reference well H12 is not empty there"})
+    norm = nr.Normalisation(backgrounds={"GFP": 10.0, "RFP": 5.0},
+                            tile_backgrounds={"GFP": {"F0": 9.0}, "RFP": {"F0": 5.0}})
+    notes = nr._empty_well_backgrounds(norm, reference_well, "0h", {"GFP": None, "RFP": None})
+    assert norm.backgrounds == {"GFP": 30.0, "RFP": None} and norm.tile_backgrounds == {}
+    assert notes == [f"{nref.FLUOR_NOTE_PREFIX} RFP: the empty reference well has no RFP floor level there"]
+    later = nr.Normalisation(backgrounds={"GFP": 10.0}, tile_backgrounds={"GFP": {"F0": 9.0}})
+    notes = nr._empty_well_backgrounds(later, reference_well, "6h", {"GFP": None})
+    assert later.backgrounds == {"GFP": None}
+    assert notes == [f"{nref.FLUOR_NOTE_PREFIX} GFP: the empty reference well H12 is not empty there"]
+    # The reference itself keeps its own well-wide level, the one it saves for the others.
+    own = nr.Normalisation(backgrounds={"GFP": 30.0}, tile_backgrounds={"GFP": {"F0": 29.0}})
+    assert nr._empty_well_backgrounds(own, nref.OWN, "0h", {"GFP": None}) == []
+    assert own.backgrounds == {"GFP": 30.0} and own.tile_backgrounds == {}
+
+
+def test_the_empty_well_background_needs_an_empty_well_and_joins_the_reuse_key():
+    with pytest.raises(ValueError, match="needs an empty reference well"):
+        _settings(fluor_background="empty_well")
+    with pytest.raises(ValueError, match="Unknown nanowell fluorescence background"):
+        _settings(fluor_background="rolling_ball")
+    assert "fluor_background" not in _settings(empty_well="H12").key()        # the floor: every earlier run's key
+    assert _settings(empty_well="H12", fluor_background="empty_well").key()["fluor_background"] == "empty_well"
+
+
+def test_the_command_line_refuses_the_empty_well_background_without_an_empty_well():
+    from pipeline.cli_args import build_parser, nanowell_options_from_args
+
+    parser = build_parser()
+    base = ["--input_dir", "x", "--output_dir", "y", "--nanowell_format", "100um", "--phase_token", "PHASE",
+            "--nanowell_fluor_background", "empty_well"]
+    errors = []
+
+    def error(message):
+        errors.append(message)
+        raise SystemExit(2)
+
+    with pytest.raises(SystemExit):
+        nanowell_options_from_args(parser.parse_args(base), error)
+    assert "needs --nanowell_empty_well" in errors[0]
+    options = nanowell_options_from_args(parser.parse_args(base + ["--nanowell_empty_well", "H12"]), error)
+    assert options["fluor_background"] == "empty_well" and options["empty_well"] == "H12"
+    assert "fluor_background" not in nanowell_options_from_args(
+        parser.parse_args(base[:-2] + ["--nanowell_empty_well", "H12"]), error)

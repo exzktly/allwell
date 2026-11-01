@@ -64,6 +64,39 @@ class StateSpec:
 
 
 @dataclass(frozen=True)
+class RailSection:
+    """One frame on Review's left rail that a page shows while it is on screen.
+
+    ``key`` is the frame's widget-registry key. ``stretch`` is its share of the
+    rail's spare height: ``1`` for a frame that is the page's whole rail body,
+    ``0`` for one that shows *beside* the main frame and should stay compact
+    under it (Cell Browser's filters).
+
+    The rail's frames are built from these declarations and hidden together
+    from them on every tab change (``review/core/tab_controller.py``), so a
+    frame exists only because a page declares it and cannot be left on screen
+    by a hide-all list somebody forgot to extend.
+    """
+
+    key: str
+    stretch: int = 1
+    #: For a frame the page builds *inside the main frame*, under Saved
+    #: selections, rather than one the shell builds on the rail: a lazy factory
+    #: ``() -> ((ctx, parent) -> QWidget)``. ``core/sidebar_view.build_sidebar``
+    #: calls it, registers the widget under ``key`` and hides it; from then on
+    #: it is hidden and shown with every other rail frame. Heat Map's layout
+    #: configurator is one — it sits under the plate it takes wells from.
+    build: Callable | None = field(default=None, compare=False)
+
+
+#: The rail frame every plate-reading page shares: under the rail plate, it
+#: holds the selection footer, the group hint and Saved selections. Core builds
+#: it whether or not any page declares it, because the rail plate's own widgets
+#: live in it.
+MAIN_RAIL_SECTION = RailSection("_sidebar_main_frame")
+
+
+@dataclass(frozen=True)
 class FeatureDescriptor:
     """One Review-side feature's full declaration.
 
@@ -81,7 +114,24 @@ class FeatureDescriptor:
     """
 
     name: str
-    group: str = ""                      # "Analysis" | "Images" | "Data"; "" = sub-leaf
+    group: str = ""                      # the rail caption it sits under ("Analysis",
+                                         # "Assays", "Inspect", "Output"); "Home" for
+                                         # the landing page; "" = sub-leaf
+    # The rail glyph beside a top-level entry: an icon key ``widgets.icons``
+    # can draw. Required in effect for every descriptor with a ``group``;
+    # ``tests/test_rail_sections_are_declared.py`` holds them to it.
+    icon: str = ""
+    # The rail frames this page shows while it is on screen. Core shows them —
+    # and repaints the rail plate when the main frame is among them — before the
+    # page's ``on_activate`` runs, so a hook carries only what is particular
+    # to its page.
+    rail_sections: tuple[RailSection, ...] = ()
+    # While this page is focused the rail plate is a drag source: dragging a
+    # well exports it (``review.core.dnd.WELL_MIME``) instead of selecting, and
+    # a well dropped back on the plate is handed to the page. Focus, not
+    # visibility, because it changes what a plate click does and the plate is
+    # shared with the other pane in Split View.
+    plate_drag_source: bool = False
     parent: str = ""                     # composite container a sub-leaf lives in
                                          # (e.g. "Plotting"); "" for top-level entries
     build: Callable | None = None     # build(ctx, frame) -> None
@@ -260,6 +310,14 @@ class FeatureRegistry:
         """
         return [d for d in self._ordered if d.group]
 
+    def groups(self) -> list[str]:
+        """The top-level groups in declaration order, each once.
+
+        The page stack adds pages group by group in this order, so a group is
+        declared by naming it on a descriptor and nowhere else.
+        """
+        return list(dict.fromkeys(d.group for d in self.top_level()))
+
     def in_group(self, group: str) -> list[FeatureDescriptor]:
         return [d for d in self.top_level() if d.group == group]
 
@@ -279,6 +337,27 @@ class FeatureRegistry:
             return False
         d.redraw()(ctx)
         return True
+
+    def rail_sections(self) -> list[RailSection]:
+        """Every rail frame the present pages declare, the main frame first and
+        the rest in declaration order, each key once.
+
+        The shell builds the rail's frames from this list and the tab switch
+        hides them all from it, so the two cannot disagree. Two pages declaring
+        one key with different stretches is a contradiction about one widget,
+        and raises.
+        """
+        out: dict[str, RailSection] = {MAIN_RAIL_SECTION.key: MAIN_RAIL_SECTION}
+        for d in self._ordered:
+            for sec in d.rail_sections:
+                prior = out.get(sec.key)
+                if prior is not None and prior != sec:
+                    raise ValueError(
+                        f"rail section {sec.key!r} declared as {prior!r} and "
+                        f"as {sec!r} (by {d.name!r}); one frame has one stretch."
+                    )
+                out.setdefault(sec.key, sec)
+        return list(out.values())
 
     def sub_leaves(self, parent: str) -> list[str]:
         """Names of the sub-leaf descriptors under composite *parent*

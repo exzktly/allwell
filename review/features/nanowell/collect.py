@@ -37,6 +37,7 @@ import numpy as np
 import pandas as pd
 
 from domain.nanowell_roster import roster_rule
+from review.features.nanowell.background_compute import well_mode
 # A measurable timepoint at which the nanowell's own rim was out of focus: named by the rule's module, because the
 # app-wide inclusion layer reaches the same verdict and may not import this feature.
 from review.domain.nanowell_rim_focus import OUT_OF_FOCUS  # noqa: F401 — re-exported for the page's modules
@@ -94,10 +95,15 @@ class NanowellData:
     #: and the full-resolution montage can be drawn from besides the phase image.
     image_channels: list = field(default_factory=list)
     #: ``channel -> why`` for each of :attr:`image_channels` with no site intensities, so the page can say why a
-    #: channel the run read offers no Brightness or Nanowell fluorescence rather than leaving it out without a word.
+    #: channel the run read offers no Cell fluorescence or Nanowell fluorescence rather than leaving it out without a word.
     unmeasured_channels: dict = field(default_factory=dict)
     #: Wells left out and why, as sentences.
     problems: list = field(default_factory=list)
+    #: ``well -> what its fluorescence was measured above`` (``background_compute``: ``floor``, ``empty_well``, or
+    #: ``none`` for a run whose site table has no ``<channel>_background`` column).
+    fluor_backgrounds: dict = field(default_factory=dict)
+    #: The empty reference well the run named, for a sentence that names it ("" when none was).
+    empty_well: str = ""
     #: ``well -> the rule its roster was decided by`` (``domain.nanowell_roster``): a dataset can mix them.
     roster_rules: dict = field(default_factory=dict)
     #: ``well -> why`` for a well an incremental run analysed again over every timepoint (tracker X35a-R8).
@@ -170,7 +176,7 @@ def _read_well_table(path: Path, well: str) -> pd.DataFrame:
         if column in frame:
             frame[column] = _bool(frame[column])
     for column in frame.columns:
-        if column.endswith("_integrated") or column.endswith("_mean_bg"):
+        if column.endswith(("_integrated", "_mean_bg", "_background")):
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
     frame.insert(0, "well", well)
     return frame
@@ -338,6 +344,8 @@ class WellPart:
     roster_rule: object = None
     reanalysed: str = ""
     problem: str = ""
+    #: What its fluorescence was measured above (``background_compute.well_mode``).
+    background: str = "floor"
     brightness: pd.DataFrame | None = None
     cell_table: Path | None = None          # the CSV holding its cells, for the Cells layer
     #: ``timepoint -> (verdict, reason)`` from the identity check's sidecar (``pipeline.nanowell_identity.verdicts``):
@@ -378,6 +386,7 @@ def read_well_part(folder: Path, well: str, cell_files, wells) -> WellPart:
     from pipeline.nanowell_identity import exclusions, verdicts
 
     return WellPart(well, table=table, grid=grid.get("timepoints") or {},
+                    background=well_mode(table.columns, grid.get("settings")),
                     roster_rule=roster_rule(grid.get("array_radius")),
                     reanalysed=(grid.get("array_radius") or {}).get("reanalysed_because") or "",
                     brightness=brightness, cell_table=tables.get(well),
@@ -414,7 +423,7 @@ def _image_channels(sidecar: dict, phase: str, channels: list, *, read_any: bool
         for token in out:
             if token.lower() not in by_lower:
                 unmeasured[token] = (f"The run read {token} images, but the nanowell tables of the wells shown carry "
-                                     f"no {token}_integrated column, so there is no {token} brightness or nanowell fluorescence "
+                                     f"no {token}_integrated column, so there is no {token} cell or nanowell fluorescence "
                                      f"to draw. Re-run the wells with {token} among the fluorescence channels to "
                                      f"measure it.")
     return out, unmeasured
@@ -435,6 +444,32 @@ def site_channels(data_dir, wells) -> list[str] | None:
     cost seconds. The one difference: a well whose table :func:`read_well_part` would refuse (no grid record,
     repeated addresses) still contributes its columns here, so a channel only such a well carries is offered and
     then draws no rows, which its plot's footer explains."""
+    found = _site_headers(data_dir, wells)
+    if found is None:
+        return None
+    sidecar, headers = found
+    columns = {c for header in headers.values() for c in header}
+    phase = _phase_token(sidecar)
+    return sorted({c[: -len("_integrated")] for c in columns if c.endswith("_integrated")}
+                  - {c for c in (c[: -len("_integrated")] for c in columns) if c.lower() == phase})
+
+
+def site_backgrounds(data_dir, wells) -> dict:
+    """``well -> what its fluorescence was measured above`` (``background_compute.well_mode``) for *wells*, from the
+    site tables' header rows and the run's settings, as :func:`site_channels` reads them; ``{}`` where it would
+    return ``None``. :func:`load_nanowell_data` reads each well's own grid record instead, which a merged plate
+    can make differ from the dataset's settings."""
+    found = _site_headers(data_dir, wells)
+    if found is None:
+        return {}
+    sidecar, headers = found
+    settings = (sidecar.get("nanowell") or {}).get("settings") if isinstance(sidecar.get("nanowell"), dict) else None
+    return {well: well_mode(header, settings) for well, header in headers.items()}
+
+
+def _site_headers(data_dir, wells) -> tuple[dict, dict] | None:
+    """``(sidecar, {well: its site table's columns})`` for the readable tables of *wells*, or ``None`` for a dataset
+    with no nanowell tables or a scheme this version does not read."""
     data_dir = Path(data_dir)
     folder = nanowell_dir(data_dir)
     if folder is None:
@@ -444,17 +479,15 @@ def site_channels(data_dir, wells) -> list[str] | None:
     if isinstance(block, dict) and block.get("scheme_version") not in SUPPORTED_SCHEMES:
         return None
     wanted = set(wells)
-    columns: set[str] = set()
+    headers: dict = {}
     for well in nanowell_wells(folder):
         if well not in wanted:
             continue
         try:
-            columns.update(pd.read_csv(folder / f"{well}.csv", nrows=0).columns)
+            headers[well] = list(pd.read_csv(folder / f"{well}.csv", nrows=0).columns)
         except (OSError, ValueError, pd.errors.ParserError):
             continue                                  # unreadable: load_nanowell_data leaves the well out too
-    phase = _phase_token(sidecar)
-    return sorted({c[: -len("_integrated")] for c in columns if c.endswith("_integrated")}
-                  - {c for c in (c[: -len("_integrated")] for c in columns) if c.lower() == phase})
+    return sidecar, headers
 
 
 def load_nanowell_data(data_dir, wells=None, parts: dict | None = None, on_well=None) -> NanowellData | None:
@@ -505,6 +538,7 @@ def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, availabl
     frames = [p.table for p in parts if p.table is not None]
     grids = {p.well: p.grid for p in parts if p.table is not None}
     roster_rules = {p.well: p.roster_rule for p in parts if p.table is not None}
+    backgrounds = {p.well: p.background for p in parts if p.table is not None}
     reanalysed = {p.well: p.reanalysed for p in parts if p.table is not None and p.reanalysed}
     identity = {p.well: dict(p.identity) for p in parts if p.table is not None}
     identity_excluded = {p.well: dict(p.identity_excluded) for p in parts
@@ -538,7 +572,9 @@ def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, availabl
                         separator=str(options.get("filename_sep") or sidecar.get("separator") or ""),
                         phase_token=str(options.get("phase_token") or sidecar.get("phase_token") or ""),
                         channels=channels, image_channels=image_channels, unmeasured_channels=unmeasured,
-                        problems=problems, roster_rules=roster_rules,
+                        problems=problems, roster_rules=roster_rules, fluor_backgrounds=backgrounds,
+                        empty_well=str(((sidecar.get("nanowell") or {}).get("settings") or {}).get("empty_well")
+                                       or ""),
                         reanalysed=reanalysed, available=available, cell_tables=cell_tables, identity=identity,
                         identity_excluded=identity_excluded)
 

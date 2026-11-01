@@ -54,7 +54,7 @@ def test_add_current_prefers_the_triggering_drawers_name_field(qapp, monkeypatch
     """
     from types import SimpleNamespace
     from PySide6.QtWidgets import QLineEdit
-    from review.core import sidebar_view as SV
+    from review.core import saved_selections as SV
 
     # The "registry" (main sidebar) name field vs. the drawer that was clicked.
     registry_edit = QLineEdit(); registry_edit.setText("MAIN")

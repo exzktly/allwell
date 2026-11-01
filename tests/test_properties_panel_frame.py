@@ -41,7 +41,7 @@ def _button(sidebar, text: str):
     ("Export…", "_export"),
 ])
 def test_each_footer_button_reaches_its_action(qtbot, monkeypatch, text, method):
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     calls: list[str] = []
     monkeypatch.setattr(ExportStyleSidebar, method,
@@ -52,7 +52,7 @@ def test_each_footer_button_reaches_its_action(qtbot, monkeypatch, text, method)
 
 
 def test_the_header_close_button_closes_the_panel(qtbot, monkeypatch):
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
     from widgets.icon_button import IconButton
 
     calls: list[str] = []

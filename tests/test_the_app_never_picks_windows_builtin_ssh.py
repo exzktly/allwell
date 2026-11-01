@@ -8,20 +8,18 @@ the first on PATH — the built-in one on a stock machine, ahead of an MSYS2 or 
 said so.
 
 Wrong implementations these reject: the bare-``ssh`` fallback (System32 first on PATH wins); preferring a PATH ssh
-over a Git install that was found; a run log that names no ssh, or does not warn for the built-in one; a new spawn
-site that starts ``ssh`` by name and so bypasses the resolver altogether.
+over a Git install that was found; a run log that names no ssh, or does not warn for the built-in one; (and, in
+``tests/test_no_ssh_is_started_by_name.py``, a spawn site that starts ``ssh`` by name and so bypasses the resolver).
 """
 
 from __future__ import annotations
 
-import ast
 import os
 from pathlib import Path
 
 import pytest
 
 import services.remote_config as rc
-from tests._repo_scan import parse_source, python_sources, rel
 
 
 def _exe(root: Path, *parts: str) -> Path:
@@ -97,34 +95,3 @@ def test_the_run_log_names_the_ssh_through_the_real_runner():
     assert pr.ssh_binary_lines is rc.ssh_binary_lines
     source = Path(pr.__file__).read_text(encoding="utf-8")
     assert "for said in ssh_binary_lines():" in source
-
-
-# ── guard: nothing starts ssh by name ──────────────────────────────────────────────────────────────────────────────
-
-_SSH_NAMES = {"ssh", "ssh.exe"}
-
-
-def violations_in(tree: ast.Module, name: str) -> list[str]:
-    """Argument lists (``[...]``, the shape every argv here takes) that start ``ssh`` by name — a PATH lookup that
-    bypasses ``resolve_ssh_binary``. Tuples are not read: ``("ssh", path)`` is a label pair, not a command."""
-    out = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.List) and node.elts:
-            first = node.elts[0]
-            if isinstance(first, ast.Constant) and first.value in _SSH_NAMES:
-                out.append(f"{name}:{node.lineno}")
-    return out
-
-
-def test_no_ssh_is_started_by_name():
-    bad = sorted(v for path in python_sources() for v in violations_in(parse_source(path), rel(path)))
-    assert not bad, (
-        "ssh started by name, which lets Windows pick its built-in OpenSSH from PATH:\n  " + "\n  ".join(bad)
-        + "\n\nStart it from services.remote_config.resolve_ssh_binary() (or RemoteHost.ssh_argv()).")
-
-
-def test_the_guard_catches_ssh_started_by_name():
-    for bad in ('import subprocess\nsubprocess.run(["ssh", "host", "true"])\n',
-                'cmd = ["ssh.exe", "-o", "BatchMode=yes"] + rest\n'):
-        assert violations_in(ast.parse(bad), "bad.py"), bad
-    assert not violations_in(ast.parse('argv = [resolve_ssh_binary(), "host"]\nlabel = ("ssh", x)\n'), "good.py")

@@ -1504,11 +1504,12 @@ def explode_ome_tiff(
         with lock:
             done += 1
             d = done
-        if progress_fn:
-            progress_fn(d, total)
-        # Outside the lock: each call names its own well, so interleaving is
-        # harmless, and taking the lock per plane would serialise the parallel
-        # per-well conversion this reports on.
+            if progress_fn:
+                progress_fn(d, total)
+        # The plane count is reported under the lock, so the counts arrive in order and the last one is the total:
+        # reported after it, a thread holding count 2 could report after another had reported 3 and 4, and the page,
+        # which keeps the last count, ended a four-image run on "2 of 4". The per-well report stays outside: each
+        # call names its own well, so interleaving is harmless.
         if well_progress_fn and well is not None:
             well_progress_fn(well, well_done, well_total)
 

@@ -31,7 +31,7 @@ echo "$id"
 '''
 _SCONTROL = r'''#!/bin/bash
 # scontrol show job -o ID
-id="$4"
+id="${@: -1}"
 [ -e "$FAKE/jobs/$id" ] || { echo "slurm_load_jobs error: Invalid job id specified" >&2; exit 1; }
 [ -e "$FAKE/scontrol.down" ] && { echo "slurm_load_jobs error: Socket timed out on send/recv operation" >&2; exit 1; }
 IFS='|' read -r state reason node < "$FAKE/jobs/$id"

@@ -137,7 +137,8 @@ def test_the_mark_survives_alongside_the_identity_label():
 def test_pooled_auto_lut_ignores_a_raw_fallback_cell(monkeypatch):
     """The whole point: a raw cell's offset must not stretch the window every
     corrected cell of that channel then shares."""
-    from review.features.image_browser.image_table import controller as CT
+    # The pooled pass lives in ``_auto_lut`` (re-exported by the controller); its lookups are patched there.
+    from review.features.image_browser.image_table import _auto_lut as CT
 
     corrected = np.full((8, 8), 100.0, dtype=np.float32)
     raw = np.full((8, 8), 9000.0, dtype=np.float32)   # camera offset + background
@@ -162,7 +163,8 @@ def test_pooled_auto_lut_ignores_a_raw_fallback_cell(monkeypatch):
 
 
 def test_pooled_auto_lut_still_pools_when_nothing_fell_back(monkeypatch):
-    from review.features.image_browser.image_table import controller as CT
+    # The pooled pass lives in ``_auto_lut`` (re-exported by the controller); its lookups are patched there.
+    from review.features.image_browser.image_table import _auto_lut as CT
 
     arrays = {"A01": np.full((8, 8), 100.0, dtype=np.float32),
               "A02": np.full((8, 8), 300.0, dtype=np.float32)}

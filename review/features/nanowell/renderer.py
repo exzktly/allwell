@@ -1476,6 +1476,10 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
     _bg, ink, muted = inks
     scale = GRID_TYPE_SCALE if len(shown) > 1 else SINGLE_TYPE_SCALE
     in_hours = bool(shown) and all(p.in_hours for p in shown)
+    # Hours or order is decided per well (from that well's own timepoints), so a page can hold both: each panel is
+    # then ticked and labelled by its own axis, and the x range is shared only among panels on the same one — one
+    # range over both squeezed the order panel into a few per cent of its width.
+    mixed = len({p.in_hours for p in shown}) > 1
     drawn = without = 0
     marked_kinds: set = set()
     for ax, panel in zip(axes, shown):
@@ -1516,7 +1520,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
         marked_kinds.update(panel.marks.values())
         mark_timepoints(ax, panel.times, panel.marks, _mark_colours(muted), width=0.04 * span or 0.3,
                         fontsize=ANNOTATION_PT, ground=inks[0])
-        if in_hours:
+        if panel.in_hours:
             ax.xaxis.set_major_locator(MaxNLocator(nbins=6, integer=True, min_n_ticks=3))
         else:
             ax.set_xticks(panel.times)
@@ -1526,14 +1530,14 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
         ax.grid(alpha=0.3)
         drawn += len(panel.lines)
         without += panel.n_without_value
-    _share_limits(axes)
-    for i, ax in enumerate(axes):
+    _share_limits(axes, x_groups=[[ax for ax, p in zip(axes, shown) if p.in_hours == kind] for kind in (True, False)])
+    for i, (ax, panel) in enumerate(zip(axes, shown)):
         if i % cols:
             ax.tick_params(labelleft=False)
         else:
             _ink(ax.set_ylabel(_wrap_label(label, rows), color=ink))
-        if i + cols >= len(axes):
-            _ink(ax.set_xlabel("Time (h)" if in_hours else "Timepoint (order; times unknown)", color=ink))
+        if i + cols >= len(axes) or mixed:
+            _ink(ax.set_xlabel("Time (h)" if panel.in_hours else "Timepoint (order; times unknown)", color=ink))
     if axes:
         _occupancy_key(fig, "Thick lines · cells at baseline")
     lines = [(f"Fixed cohort: {drawn:,} nanowells with a value at every timepoint drawn, one line each; {without:,} "
@@ -1575,16 +1579,19 @@ def _unjoined_points(ax, panel, oks) -> None:
         ax.scatter(xs, ys, s=6, c=colours, alpha=0.6, linewidths=0, zorder=3, gid="nw-traj-unjoined")
 
 
-def _share_limits(axes) -> None:
-    """One x and one y range over *axes*, each the union of what their data asked for."""
+def _share_limits(axes, x_groups=None) -> None:
+    """One y range over *axes*, and one x range over each of *x_groups* (lists of those axes; all of them when
+    ``None``), each the union of what their data asked for."""
     if not axes:
         return
     for ax in axes:
         ax.autoscale_view()
-    xs = [ax.get_xlim() for ax in axes]
     ys = [ax.get_ylim() for ax in axes]
+    for group in (x_groups if x_groups is not None else [axes]):
+        xs = [ax.get_xlim() for ax in group]
+        for ax in group:
+            ax.set_xlim(min(x[0] for x in xs), max(x[1] for x in xs))
     for ax in axes:
-        ax.set_xlim(min(x[0] for x in xs), max(x[1] for x in xs))
         ax.set_ylim(min(y[0] for y in ys), max(y[1] for y in ys))
 
 

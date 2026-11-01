@@ -185,7 +185,11 @@ def _settle_reference(folder: Path, kept: Path | None, pulled: bool, run, log) -
         if kept is not None:
             remove_tree(kept)
         return
-    if index is not None or (current.exists() and kept is not None):
+    # A run that does not measure the reference well is sent this computer's reference, and the pull brings that
+    # same copy back: nothing was refused, so nothing is said. Saying it was "not taken" on every such run was a
+    # false alarm on the ordinary path.
+    same = index is not None and not ours and kept is not None and _same_reference(current, kept)
+    if (index is not None or (current.exists() and kept is not None)) and not same:
         why = ("it arrived incomplete" if pulled and ours else
                f"this run did not measure {well or 'its well'}" if index is not None else "the pull failed")
         log(f"[remote] the empty reference fetched back was not taken ({why}); the one here is kept.\n")
@@ -193,6 +197,18 @@ def _settle_reference(folder: Path, kept: Path | None, pulled: bool, run, log) -
         remove_tree(current)
     if kept is not None:
         kept.rename(current)
+
+
+def _same_reference(a: Path, b: Path) -> bool:
+    """Whether the reference folders *a* and *b* hold the same files with the same bytes."""
+    def files(folder: Path) -> dict:
+        return {p.relative_to(folder).as_posix(): p for p in folder.rglob("*") if p.is_file()}
+
+    try:
+        fa, fb = files(a), files(b)
+        return fa.keys() == fb.keys() and all(fa[k].read_bytes() == fb[k].read_bytes() for k in fa)
+    except OSError:
+        return False
 
 
 def _this_runs(run, well: str) -> bool:

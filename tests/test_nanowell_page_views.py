@@ -331,3 +331,26 @@ def test_a_figure_of_wells_whose_rosters_two_versions_decided_says_so(tmp_path):
         controller.render_position = real
     assert "Wells A01 keep an earlier version's nanowell roster" in notes[0]
     assert "B01: analysed again over every timepoint when a timepoint was added" in notes[0]       # X35a-R8
+
+
+def test_trajectory_panels_in_hours_and_in_order_each_keep_their_own_axis():
+    """Hours or order is decided per well, so a page can hold one of each. One shared x range squeezed the order
+    panel into a few per cent of its width, and every panel was labelled by whether *all* were in hours."""
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.renderer import render_trajectories
+    from review.features.nanowell.views_compute import TrajectoryPanel
+
+    timed = TrajectoryPanel("A01", np.array([0.0, 24.0, 48.0]), ["T0", "T1", "T2"],
+                            [(("A01", 0, 0), "1", np.array([1.0, 2.0, 3.0]))], {}, 0, in_hours=True)
+    ordered = TrajectoryPanel("A02", np.array([0.0, 1.0, 2.0, 3.0]), ["T0", "T1", "T2", "T3"],
+                              [(("A02", 0, 0), "1", np.array([1.0, 2.0, 3.0, 4.0]))], {}, 0, in_hours=False)
+    fig = Figure(figsize=(8, 6))
+    render_trajectories(fig, [timed, ordered], label="Count")
+    hours_ax, order_ax = fig.axes[:2]
+    assert hours_ax.get_xlabel() == "Time (h)"
+    assert order_ax.get_xlabel() == "Timepoint (order; times unknown)"
+    assert order_ax.get_xlim()[1] < 4, order_ax.get_xlim()                    # its own 0..3, not 0..48 h
+    assert hours_ax.get_xlim()[1] > 40
+    assert [t.get_text() for t in order_ax.get_xticklabels()] == ["T0", "T1", "T2", "T3"]
+    assert hours_ax.get_ylim() == order_ax.get_ylim()                         # the y range is still shared

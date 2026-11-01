@@ -163,6 +163,12 @@ def _build_model(cp_models, key: str, major: int | None, device):
 #: finishes a well (:func:`release_cached_gpu_memory`) — at the latest when the plate runs out of wells for them.
 LOAD_OOM_FIRST_WAIT_S = 10.0
 LOAD_OOM_MAX_WAIT_S = 300.0
+#: Seconds of waiting, in all, after which a load that still does not fit is given up and raised as
+#: ``CellposeUnavailable``, so the well fails with the reason in ``errors/`` instead of being held for ever. Nothing
+#: frees the memory in a run with one worker, on a GPU another process holds, or on a GPU too small for the model,
+#: and an unbounded wait then held the well until a Slurm allocation's time limit with only a warning every five
+#: minutes. Two hours is longer than the run's other workers take to finish a well and hand their cache back.
+LOAD_OOM_GIVE_UP_S = 7200.0
 
 
 def _free_gpu_memory() -> None:
@@ -202,11 +208,12 @@ def _load_with_gpu_room(build, device, where: str, key: str):
     halving (``_eval_halving_on_oom``), which applies to a model that has loaded: there is no batch yet to make
     smaller. Before this, such a load raised ``CellposeUnavailable``, nothing was cached, and the worker tried again
     on its next well and failed it the same way, so one worker of the run failed every well it was given while the
-    others carried on. It never falls back to the CPU (``LOAD_OOM_FIRST_WAIT_S`` says why). A failure that is not
-    out-of-memory, or one on the CPU, is raised as before."""
+    others carried on. It never falls back to the CPU (``LOAD_OOM_FIRST_WAIT_S`` says why). After
+    ``LOAD_OOM_GIVE_UP_S`` of waiting in all it raises ``CellposeUnavailable``, naming the tries and the wait. A
+    failure that is not out-of-memory, or one on the CPU, is raised as before."""
     import time
 
-    tries, wait = 0, LOAD_OOM_FIRST_WAIT_S
+    tries, wait, waited = 0, LOAD_OOM_FIRST_WAIT_S, 0.0
     while True:
         try:
             model, suffix = build(device)
@@ -221,11 +228,17 @@ def _load_with_gpu_room(build, device, where: str, key: str):
         # Freed outside the handler: the exception's traceback holds the frames that hold the half-built model.
         _free_gpu_memory()
         tries += 1
+        if waited + wait > LOAD_OOM_GIVE_UP_S:
+            raise CellposeUnavailable(
+                f"Cellpose {key} could not be loaded on {where}: the GPU was still out of memory after {tries} tries "
+                f"over {waited / 60:.0f} min ({reason}). Nothing freed it — another process may hold the GPU, or it "
+                f"is too small for the model; run fewer workers (--workers) or on a GPU with more memory.")
         log.warning("Cellpose %s ran out of GPU memory loading on %s (%s), most likely because the run's other "
                     "workers hold it; trying again in %.0f s (try %d, worker %d). This worker waits on the GPU "
                     "rather than running on the CPU; fewer workers (--workers) would leave each one room.",
                     key, where, reason, wait, tries, os.getpid())
         time.sleep(wait)
+        waited += wait
         wait = min(wait * 2, LOAD_OOM_MAX_WAIT_S)
 
 

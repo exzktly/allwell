@@ -476,7 +476,7 @@ class SubsetPage(LogPanelMixin, QWidget):
             if in_dir.is_dir():
                 from util.well_token import canonical_well_label
                 for entry in sorted(in_dir.iterdir()):
-                    name = entry.stem if entry.suffix == ".zip" else entry.name
+                    name = entry.stem if entry.suffix.lower() == ".zip" else entry.name
                     token = canonical_well_label(name)
                     if token:
                         wells.append(token)

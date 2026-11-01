@@ -65,7 +65,13 @@ def code_digest(*modules) -> str:
     image is normalised, padded or batched — retires every mask made before it without anyone having to remember a
     version number. Compiled code (``marshal`` of each code object) works in a frozen build, where the source may not
     be there; it also changes with the Python version and with line numbers, which costs a cache miss, never a
-    wrong mask."""
+    wrong mask.
+
+    A code object holds neither its function's default arguments nor the values of the module globals it reads —
+    only their names — so those are digested too: each function's ``__defaults__`` and ``__kwdefaults__``, and every
+    module-level constant of a plain type. Without them, editing ``cellpose_segmenter``'s default
+    ``flow_threshold`` (which the run leaves at its default) or a module constant changed every mask the code would
+    make and retired none of the stored ones."""
     import inspect
     import marshal
 
@@ -73,17 +79,50 @@ def code_digest(*modules) -> str:
     for module in modules:
         h.update(module.__name__.encode())
         for name, obj in sorted(vars(module).items()):
+            constant = _plain_value(obj)
+            if constant is not None and not name.startswith("__"):
+                h.update(f"const {name}={constant}".encode())
+                continue
             if getattr(obj, "__module__", None) != module.__name__:
                 continue
             members = [(name, obj)]
             if inspect.isclass(obj):
                 members = [(f"{name}.{k}", v) for k, v in sorted(vars(obj).items())]
             for label, member in members:
-                code = getattr(getattr(member, "__func__", member), "__code__", None)
+                func = getattr(member, "__func__", member)
+                code = getattr(func, "__code__", None)
                 if code is not None:
                     h.update(label.encode())
                     h.update(marshal.dumps(code))
+                    for part in ("__defaults__", "__kwdefaults__"):
+                        h.update(f"{part}={_defaults_text(getattr(func, part, None))}".encode())
+                elif not label.startswith("__") and (value := _plain_value(member)) is not None:
+                    h.update(f"const {label}={value}".encode())
     return h.hexdigest()
+
+
+_PLAIN = (bool, int, float, complex, str, bytes, type(None))
+
+
+def _plain_value(value) -> str | None:
+    """*value*'s ``repr`` when it is a constant of a plain type (a number, a string, ``None``, or a tuple or
+    frozenset of those), whose ``repr`` is the same in every process; ``None`` for anything else, whose ``repr``
+    may carry a memory address and would make every digest differ."""
+    if isinstance(value, _PLAIN):
+        return repr(value)
+    if isinstance(value, (tuple, frozenset)):
+        parts = [_plain_value(v) for v in value]
+        if all(p is not None for p in parts):
+            return f"{type(value).__name__}({', '.join(sorted(parts) if isinstance(value, frozenset) else parts)})"
+    return None
+
+
+def _defaults_text(defaults) -> str:
+    """A process-stable text of a function's defaults: plain values by ``repr``, anything else by its type."""
+    if defaults is None:
+        return "None"
+    items = defaults.items() if isinstance(defaults, dict) else enumerate(defaults)
+    return ";".join(f"{k}:{_plain_value(v) or type(v).__qualname__}" for k, v in sorted(items, key=lambda kv: str(kv[0])))
 
 
 def mask_key(identity: str, image, lowhigh, max_size_fraction) -> str:

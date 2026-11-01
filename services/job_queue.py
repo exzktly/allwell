@@ -504,13 +504,23 @@ class JobQueue:
             return False
         self._reset(job)
         self._cascade_unblock(job_id)
+        reset_downstream: list[str] = []
         for later in self.downstream(job_id):
             if later.state not in JobState.CLEARABLE:
                 continue
             if with_downstream:
                 self._reset(later)
+                reset_downstream.append(later.id)
             elif later.state == JobState.SUCCEEDED:
                 later.stale_because = job.label or job.id
+        # A downstream job that had failed or been cancelled is pending again
+        # now, so whatever *it* stranded is no longer stopped by it. The one
+        # cascade above ran before these resets and saw them still failed, so
+        # each reset job unblocks its own successors here — otherwise a chain
+        # A -> B -> C retried from A with B failed left C blocked for ever,
+        # naming a failure that no longer existed.
+        for later_id in reset_downstream:
+            self._cascade_unblock(later_id)
         return True
 
     @staticmethod

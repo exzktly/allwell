@@ -110,7 +110,9 @@ def sample_image_bytes(input_dir: Path, image_exts) -> int:
             continue
     if loose:
         return loose
-    for zip_path in sorted(input_dir.glob("*.zip")):
+    # Any case of `.zip`, as `input_layout.find_well_zips` reads them: `A01.ZIP` is a well the run processes.
+    for zip_path in sorted(p for p in (input_dir.iterdir() if input_dir.is_dir() else ())
+                           if p.suffix.lower() == ".zip" and p.is_file()):
         try:
             with zipfile.ZipFile(zip_path) as zf:
                 # The same filter as the loose branch. A zip written on a Mac

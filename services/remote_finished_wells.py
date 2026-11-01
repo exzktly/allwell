@@ -241,14 +241,17 @@ def _nanowell_coverage(output_dir: Path, args):
 
 
 def _field_coverage(output_dir: Path, args):
-    """``covered(well)`` for a field-mode run: whether the well's CSV holds every ``(fov, timepoint)`` its input
-    holds now (``pipeline.completeness.coverage_for_well``, from the CSV alone, as the CSV is what this check reads).
-    A well whose archive gained a field or a timepoint since — a re-export, a Concatenate in place — is not
+    """``covered(well)`` for a field-mode run: whether the well's output holds every ``(fov, timepoint)`` its input
+    holds now (``pipeline.completeness.coverage_for_well``, from the CSV and the well's output archive or folder,
+    the union Validate's ``done_keys`` and the incremental planner take). A field that segmented no nuclei writes no
+    CSV rows but its images are in the output; read from the CSV alone, every well with one such field looked
+    unfinished and was uploaded and computed again on every re-run. A well whose archive gained a field or a timepoint since — a re-export, a Concatenate in place — is not
     finished, and is sent. A well whose input cannot be listed per well (loose images at the input's top level) is
     decided by the other checks alone, as before; images replaced under the same names are not seen here, as a
     local run does not see them either."""
     from pipeline.completeness import coverage_for_well
     from pipeline.incremental_keys import read_done_fov_keys
+    from pipeline.well_skip import out_folder_path, out_zip_path
     from util.csv_gz import existing_csv
     from util.well_token import well_archives
 
@@ -280,8 +283,10 @@ def _field_coverage(output_dir: Path, args):
             return False
         csv = existing_csv(out / f"{prefix}_{well}.csv")
         keys = read_done_fov_keys(csv) if csv is not None else set()
-        cov = coverage_for_well(well, in_members=members, csv_keys=keys, csv_state="ok", out_zip=None,
-                                out_folder=None, schema=schema, sep=sep, fov_field_present="fov" in fields,
+        out_zip, out_folder = out_zip_path(out, well), out_folder_path(out, well)
+        cov = coverage_for_well(well, in_members=members, csv_keys=keys, csv_state="ok",
+                                out_zip=out_zip if out_zip.exists() else None,
+                                out_folder=out_folder if out_folder.is_dir() else None, schema=schema, sep=sep, fov_field_present="fov" in fields,
                                 skip_hidden=True)
         return cov.intent > 0 and not cov.missing
 

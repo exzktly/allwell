@@ -292,6 +292,31 @@ def test_an_unreadable_local_zip_is_set_aside_and_fails_the_run(standin, tmp_pat
     assert any(m.startswith("A01: the local A01_out.zip could not be read") for m in verdict.missing)
 
 
+@pytest.mark.parametrize("forced", [True, False])
+def test_a_forced_remote_re_run_retires_the_local_note_that_asked_for_it(standin, tmp_path, forced):
+    """A local download that lost a well's earlier fields writes a ``Remedy: force`` note into the local
+    ``errors/``. The worker host never had it, so its own retirement archived nothing and nothing mirrored it back:
+    the note stood for ever after the forced re-run it asked for, and the rebuilt well was listed as failed. A
+    forced run that verifies whole archives it; a run that was not forced leaves it standing."""
+    import pipeline.error_records as er
+
+    out = tmp_path / "out"
+    out.mkdir()
+    _local_old_well(out)
+    er.write_note(out, "A01", "A01_local_zip_unreadable.txt", "images lost; re-run well A01 with --force")
+    _remote_well(standin)
+    run = _run(out, force_wells=frozenset({"A01"}) if forced else frozenset(), expected_wells={"A01"})
+    _fetch(standin, run, "A01")
+    verdict = _verify(standin, run)
+    assert verdict.passed, verdict.missing
+    standing = [r.path.name for r in er.current_records(out)]
+    if forced:
+        assert standing == []
+        assert (out / "errors" / er.SUPERSEDED_DIRNAME / "A01_local_zip_unreadable.txt").exists()
+    else:
+        assert standing == ["A01_local_zip_unreadable.txt"]
+
+
 # ── A8: this run's sidecar must arrive ───────────────────────────────────────
 
 def test_a_failed_sidecar_pull_fails_verification(standin, tmp_path):

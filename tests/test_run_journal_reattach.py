@@ -359,6 +359,10 @@ def _cleanup_deletions(tmp_path, monkeypatch, *, reattached: bool) -> list[str]:
         return subprocess.CompletedProcess(list(argv), 0, "", "")
 
     monkeypatch.setattr(remote_upload.DatasetCache, "_ssh_run", _ssh_run)
+    # Nothing here is marked Keep forever (that path has its own tests in
+    # tests/test_remote_storage_liveness.py); this cache has no host to ask.
+    from services import remote_storage
+    monkeypatch.setattr(remote_storage, "is_kept", lambda cache, kind, name: False)
 
     runner = rr.RemoteRunner.__new__(rr.RemoteRunner)
     runner._run = run

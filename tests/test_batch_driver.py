@@ -714,7 +714,10 @@ def test_a_well_the_pipeline_skipped_is_accounted_for(tmp_path, monkeypatch):
 
 def test_a_suspend_finishes_the_batch_in_flight_and_sends_no_more(
         tmp_path, monkeypatch):
-    """Batch 1 is running when Suspend lands; batches 2 and 3 are never uploaded.
+    """Batch 1 is running when Suspend lands; batches 2 and 3 are never run, and batch 3 is never uploaded.
+
+    Batch 2 is uploaded while batch 1 runs (``remote_batch_step._Ahead``), before the suspend, so it may be on the
+    remote — where a resume adopts it — but it is never handed to the driver.
 
     The driver stops of its own accord once it sees the request file
     (`_batch_driver_snippet`), so its stream ends with batches unreported — the
@@ -748,11 +751,12 @@ def test_a_suspend_finishes_the_batch_in_flight_and_sends_no_more(
     worker.join(timeout=20)
 
     assert not worker.is_alive()
-    assert [o for o in ordering if o.startswith("upload:")] == ["upload:b1"]
+    assert [o for o in ordering if o.startswith("upload:")] in (["upload:b1"], ["upload:b1", "upload:b2"])
+    assert len([o for o in ordering if "ready" in o]) == 1, f"a batch after the suspend was handed off: {ordering}"
     assert p._returncode == 0
     assert not p._driver_lost.is_set()
     assert p._cancelled == [], "the downloads of the finished batch were cancelled"
-    assert "not sent" in "".join(p._logged)
+    assert "not run" in "".join(p._logged)
     assert not proc.terminated, "a driver that ended on its own was killed"
     assert closed == [], "a job that ended on its own was cancelled"
 
@@ -794,7 +798,7 @@ def test_a_suspend_during_a_batch_upload_ends_the_upload(tmp_path, monkeypatch):
     assert uploads == ["b1", "b2"]
     assert p._returncode == 0
     assert not any("upload failed" in m for m in p._logged)
-    assert "not sent" in "".join(p._logged)
+    assert "not run" in "".join(p._logged)
     assert not any("b2_ready" in o or "_2_ready" in o for o in ordering), ordering
 
 

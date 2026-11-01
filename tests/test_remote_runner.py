@@ -7,6 +7,8 @@ verify step). Anything that would touch real ssh/rsync is mocked.
 
 from __future__ import annotations
 
+from services import remote_storage
+
 import os
 import subprocess
 import zipfile
@@ -1781,6 +1783,9 @@ def test_required_files_list_is_what_we_promised():
         # parsing, timepoint parsing, logged-swallow).
         "util/__init__.py",
         "util/aw_safe.py",
+        # subprocess.run whose timeout holds on Windows; the pipeline's nvidia-smi
+        # and Slurm probes go through it.
+        "util/bounded_run.py",
         "util/acquisition_record.py",
         "util/nanowell_address.py",
         "util/nanowell_anchors.py",
@@ -2235,6 +2240,9 @@ def test_verify_and_cleanup_run_mode_removes_run_dir_only(runner_with_run, monke
         return MagicMock(stdout="", returncode=0)
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    # Nothing here is marked Keep forever; that path is tested in
+    # tests/test_remote_fetch_verification.py::test_auto_delete_honours_keep_forever.
+    monkeypatch.setattr(remote_storage, "is_kept", lambda cache, kind, name: False)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: True,
@@ -2256,6 +2264,9 @@ def test_verify_and_cleanup_all_mode_removes_both(runner_with_run, monkeypatch):
         return MagicMock(stdout="", returncode=0)
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    # Nothing here is marked Keep forever; that path is tested in
+    # tests/test_remote_fetch_verification.py::test_auto_delete_honours_keep_forever.
+    monkeypatch.setattr(remote_storage, "is_kept", lambda cache, kind, name: False)
     monkeypatch.setattr(
         FetchedOutputVerifier, "_rsync_optional",
         lambda self, src, dest, log_fn, **kw: True,

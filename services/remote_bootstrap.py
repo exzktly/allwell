@@ -1193,6 +1193,7 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
     # → rsync exit 12 / ``connection unexpectedly closed``.
     sys.path.insert(0, str(REPO_ROOT))
     from services.remote_config import keepalive_options, known_hosts_options, resolve_ssh_for_rsync
+    from util.bounded_run import run_bounded
     rsync_argv = [_rsync_binary(), "-a"]
     ssh_inner = [
         resolve_ssh_for_rsync(),
@@ -1226,7 +1227,7 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
     ]
     try:
         start = time.monotonic()
-        subprocess.run(
+        run_bounded(
             rsync_argv,
             check=True,
             capture_output=True,

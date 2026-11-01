@@ -28,6 +28,9 @@ from services.remote_upload import DatasetCache
 from tests._fake_remote import FakeRemote
 
 DAY = 86400
+# Dataset keys of the shape the app gives them (a 32-hex content fingerprint): the
+# GC evicts nothing else.
+INUSE, STALE, A, B, OLD = (f"{n:032x}" for n in (0xa1, 0xa2, 0xa3, 0xa4, 0xa5))
 
 
 @pytest.fixture
@@ -66,33 +69,33 @@ def test_gc_never_evicts_a_dataset_a_run_is_using(host, remote):
     was read yesterday by someone browsing, and no run has used it for ten
     days. Over budget by one dataset: the one to go is ``stale``. Ordered by
     access time, the old GC deleted ``inuse`` — the dataset a run was reading."""
-    _dataset(remote, "inuse", size=600_000, accessed_days_ago=30, stamped_days_ago=1 / 24)
-    _dataset(remote, "stale", size=600_000, accessed_days_ago=1, stamped_days_ago=10)
+    _dataset(remote, INUSE, size=600_000, accessed_days_ago=30, stamped_days_ago=1 / 24)
+    _dataset(remote, STALE, size=600_000, accessed_days_ago=1, stamped_days_ago=10)
     log: list[str] = []
     DatasetCache(host).gc(1_000_000, log_fn=log.append)
-    assert (remote.exists("~/.s/datasets/inuse"), remote.exists("~/.s/datasets/stale")) \
+    assert (remote.exists(f"~/.s/datasets/{INUSE}"), remote.exists(f"~/.s/datasets/{STALE}")) \
         == (True, False), "".join(log)
 
 
 def test_gc_keeps_every_in_use_dataset_even_over_budget(host, remote):
     """Two datasets both in use: the cache stays over budget, and says so."""
-    _dataset(remote, "a", size=600_000, accessed_days_ago=30, stamped_days_ago=0.5)
-    _dataset(remote, "b", size=600_000, accessed_days_ago=20, stamped_days_ago=2)
+    _dataset(remote, A, size=600_000, accessed_days_ago=30, stamped_days_ago=0.5)
+    _dataset(remote, B, size=600_000, accessed_days_ago=20, stamped_days_ago=2)
     log: list[str] = []
     DatasetCache(host).gc(100_000, log_fn=log.append)
-    assert remote.exists("~/.s/datasets/a") and remote.exists("~/.s/datasets/b")
+    assert remote.exists(f"~/.s/datasets/{A}") and remote.exists(f"~/.s/datasets/{B}")
     assert any("kept 2 dataset(s) over budget" in line for line in log), log
 
 
 def test_a_failed_listing_evicts_nothing(host, remote, monkeypatch):
     """A listing that fails says nothing about what is there."""
-    _dataset(remote, "old", size=600_000, accessed_days_ago=90, stamped_days_ago=90)
+    _dataset(remote, OLD, size=600_000, accessed_days_ago=90, stamped_days_ago=90)
     import subprocess
     monkeypatch.setattr(DatasetCache, "_ssh_script",
                         lambda self, script, **k: subprocess.CompletedProcess([], 124, "", "timed out"))
     log: list[str] = []
     DatasetCache(host).gc(1, log_fn=log.append)
-    assert remote.exists("~/.s/datasets/old")
+    assert remote.exists(f"~/.s/datasets/{OLD}")
     assert any("nothing evicted" in line for line in log), log
 
 

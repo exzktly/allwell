@@ -43,19 +43,24 @@ class AnalyzeRunFooterMixin:
         sec = self._section(parent, "Remote options")
         self._remote_params_widget = sec.parentWidget()
 
-        # Batched mode. ``0`` (default) uploads every well-zip up front and runs
-        # the pipeline once across the whole plate — lowest total runtime. Any
-        # positive integer processes that many wells at a time: peak remote disk
-        # ≈ batch_size wells of input + ~1 well of output (per-well Fetcher
-        # cleanup), at the cost of one StarDist reload per batch (~5–10 s
-        # overhead each). Pick based on the remote's free disk.
+        # Batched mode. Any positive integer processes that many wells at a
+        # time, the next batch uploading while one runs: peak remote disk ≈ two
+        # batches of input + ~1 well of output (per-well Fetcher cleanup), at the
+        # cost of one model reload per batch.
+        # ``0`` (default) is one well per worker the pipeline will start
+        # (services.remote_batch_auto), so the first upload is only as big as
+        # the workers need; the whole plate when the worker count cannot be
+        # known before the run, and the run log says why.
         bs_row = self._row(
             sec, "Batch size",
-            tooltip="Process this many wells at a time on the remote, which "
-                    "bounds its peak disk to about that many wells of input. "
-                    "0 uploads the whole plate and runs it once.")
+            tooltip="Process this many wells at a time on the remote, the next "
+                    "batch uploading while one runs, which bounds its peak disk "
+                    "to about two batches of input. "
+                    "0 sends one well per worker, worked out from the Workers "
+                    "field or the CPUs and GPUs in the scheduler command; the "
+                    "run log says what it chose.")
         self._remote_batch_size_edit = self._entry(bs_row, "0", width=40)
-        self._field_note(bs_row, "wells · 0 = all")
+        self._field_note(bs_row, "wells · 0 = one per worker")
         bs_row.layout().addStretch(1)
 
         # ON by default: a remote that accumulates every run fills up, and a full

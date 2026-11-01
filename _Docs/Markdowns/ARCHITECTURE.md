@@ -4026,7 +4026,8 @@ Three rules the page is built around:
   `success` = complete, `warn` = partial, `danger` = an errored well, and
   `accent` = the anomalous one, which here is *images with no measurements* —
   Concatenate paints the identical condition (merged with no measurements CSV on
-  one side) in the same token. `text_muted` carries *staged, never processed*,
+  one side) in the same token. `text_muted` carries *staged, never processed*
+  (worded *not reached* after a run that ended early — §9.6's `ended_early`),
   the token the Datasets dashboards use for pending and for Validate's "no
   output yet". `accent2` is unused: it means "the other of two normal groups"
   (Merge Plates), which no state here is. The rule is one colour per state and
@@ -20106,6 +20107,24 @@ last-run card reads the block for exactly that reason. Note that a **suspended**
 run still reaches the check and writes a record: suspend exits through the
 normal end-of-well path, so the block carries a `suspended` flag and the
 shortfall is reported as a stop rather than shouted at as a fault.
+
+The block also carries `ended_early`: the run did not reach its own end. A
+suspend sets it (so `suspended` implies it, and a record that predates the field
+is read through `suspended`). A remote run sets it from the pipeline's exit
+status: the record there is written on the client after the fetch
+(`remote_fetch.run_client_side_completeness_check`, called from
+`FetchedOutputVerifier.verify` with `ended_early=not ok`), so a Stop, a lost
+node or heartbeat, a driver that went away mid-batch, or a pipeline that exited
+non-zero all record it. It exists because on disk a well the run never got to
+and a well it was given and wrote nothing for are identical (input present, no
+output), and only the run knows which it was. Home keeps both in the same
+painted state (`CELL_INPUT_ONLY`, grey) and changes the words: *Not reached —
+run ended early* in the tooltip, legend, health row and next-step line, and in
+QC triage's row detail, against *Staged, never processed* after a run that
+ended cleanly (`review/features/home/collect.py::run_ended_early`,
+`plate_panel.state_label`; `tests/test_a_well_the_run_never_reached_is_named_so.py`).
+A record Validate writes carries `False`, since Validate describes the folder
+as it stands and cannot know how the run that wrote it ended.
 
 `--no_run_check` turns it off, spelled negative-sense like `--no_auto_threshold`
 because the GUI checkbox is the positive. Turning it off still writes a stub

@@ -1365,6 +1365,8 @@ review/
 │   │                 _destinations.py (gallery + PowerPoint),
 │   │                 _panels.py (which panels, what axes),
 │   │                 _cell_rows.py (the raw rows behind a figure)
+│   │                 variable_select_panel.py + _variable_groups.py
+│   │                   (group members chosen by sample variable)
 │   └── registry.py   ← the FEATURES list: the sole importer of features/* (§5.3)
 └── persistence/                   ← JSON read/write, debounced save registry
 ```
@@ -4100,6 +4102,46 @@ rather than one that builds and then raises on Run. The
 list is derived rather than written twice, and `_show_batch_mode` falls back to
 the default mode for a key this build does not offer — a saved view naming
 `response` in such a build lands on Line rather than on nothing.
+
+**Group members come from the plate or from a sample variable.** The editor's
+plate map paints wells (a well in a replicate set pulls in its whole set); the
+**Select by variable** row beside it (`variable_select_panel.VariableSelectMixin`,
+mixed into `BatchExportPanel`) adds or removes every loaded well holding one
+value, and Quick Setup's *One group per value of…* rebuilds the groups one per
+value, behind the same Yes/No question Clear All asks once groups exist. Both
+resolve, in the Qt-free `_variable_groups`, to the same members and solo wells
+a drag builds, so persistence, export and editing need nothing new — and the
+selection is resolved when it is made, not tracked against later variable
+edits. Two rules make a value selection exact rather than approximate. A
+replicate set joins whole only when **every loaded well** of it holds the
+value; a set whose wells disagree contributes just its matching wells, as solo
+wells, and is named on a warning line under the row (`split_sets`), because
+pulling the set in would export wells under a value they do not hold. Removal
+is the mirror: a set wholly inside the value leaves, one that also holds other
+values is kept and named. Wells with no value join no Quick Setup group and are
+listed rather than dropped.
+
+A group's name is its exported figure's title, and the member-derived
+auto-name (`_default_group_name`) of a group filled by one value is a list of
+twenty wells. So an auto-named group that receives a value leaves
+`_auto_named_group_ids` and is named by its values instead
+(`_vsel_named_groups`: `HeLa`, `HeLa + U2OS`); leaving that set is what stops a
+later drag renaming it back to wells. Removing the last value hands it back to
+auto-naming, and a hand rename (`_grp_rename` → `_vsel_forget_name`) ends value
+naming for good. The map is keyed by `id(group)`, so every path that drops or
+replaces groups clears it, as it clears `_auto_named_group_ids`. The row's
+status line is cleared whenever it would describe something no longer on
+screen: a new variable set, a dataset reload, a plate drag, a row/column Quick
+Setup or Clear All. With no variables the combos and buttons are hidden and
+one sentence names where variables are defined. Combos hold variable and value
+**ids** as item data and refresh on `showEvent`, since a rename or a new
+variable would otherwise re-point the row while it read the same word. The
+value submenu is a Python-built `QMenu` handed to `addMenu(menu)`: one made by
+`addMenu(str)` has a wrapper that is not told of its deletion with the parent,
+and the fast lane's widget reaper then deleted it a second time and crashed
+the worker. `tests/test_batch_export_groups_by_variable.py` holds the rules,
+with a fixture whose value order runs against plate order and which carries a
+mixed set, an unassigned well and a value no well holds.
 
 **One capture point.** Every panel writes its figure through
 `base_panel._save_figure`, which resolves the export-style prefs and hands the

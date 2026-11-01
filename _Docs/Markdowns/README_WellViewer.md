@@ -7265,6 +7265,31 @@ ring, so "which group is this well in" and "which group am I editing" stay
 readable at the same time. Wells the dataset doesn't have are drawn as empty
 sockets and ignore the drag.
 
+Groups can also be built **by sample variable** — what the
+[Variables](#variables) tab says the wells *are*, rather than where they
+sit. The **Select by variable:** row above the plate takes a variable and one
+of its values; **Add wells** puts every loaded well holding that value into the
+selected group (or into a new group, if none is selected), and **Remove wells**
+takes them out. Pick *(not set)* to find the wells never given a value. A new
+group filled this way is named after the value — `HeLa`, then `HeLa + U2OS` if
+you add a second — and keeps that name when you later drag wells on or off;
+renaming it yourself replaces it for good. **Quick Setup → One group per value
+of…** replaces every group with one per value of the chosen variable, named by
+the value (with its unit) and in the variable's own value order, after asking
+first if you already have groups; a value no well holds makes no group. Either
+way the selection is taken **when you make it**: the groups hold wells and
+samples exactly as hand-built ones do, and do not follow later edits to the
+variables. On a plate with no variables the row says where to define them.
+
+A sample definition whose wells all hold the value joins as a whole sample, as
+on the plate. One whose wells hold *different* values is not pulled in whole —
+that would export wells under a value they do not hold — so only its matching
+wells join, as single wells, and a warning line under the row names the
+sample that was split and the wells that joined. Removing a value keeps a
+sample that also holds other values and says so; use its − button on the group
+card to remove it. Wells with no value for the variable are listed after a
+Quick Setup rather than left out silently.
+
 Batch figures are drawn through the **same renderers as the on-screen plots**, so
 a group's figure matches what the plotting tab shows for that selection: each
 group is drawn in its own **distinct colour**, **solo wells are labelled by their

@@ -75,6 +75,7 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
     # click after the number ignored every digit typed. The labels either side say what the number is.
     spin.setValue(int(round(100 * params.nanowell_focus_fraction)))
     spin.setKeyboardTracking(False)          # one recompute on Enter or focus-out, not one per digit
+    spin.commit_after_pause()                # ...or a pause in typing: a click on a canvas or a tab ends no edit
     spin.setToolTip(TOOLTIP)
     head_layout.addWidget(spin)
     of = QLabel("of the well's sharpest rims", head)

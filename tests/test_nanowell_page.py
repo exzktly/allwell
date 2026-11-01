@@ -501,6 +501,36 @@ def test_a_rim_focus_percentage_being_typed_survives_a_redraw_and_a_click_on_the
                     and not getattr(canvas, "_draw_pending", False), timeout=5000)
 
 
+def test_every_rim_focus_change_applies_however_the_box_is_left(qtbot, page):
+    """Reported: "The first change to the field worked. Subsequent changes did not." The box commits on Enter or
+    focus-out, and a click on a canvas, a tool button or a tab bar ends no edit — nor does anything in a window that
+    is not the active one, which is where the first change's application-modal progress popup can leave it. So a
+    number typed and then left was never applied. It now also commits after a pause in typing. Here, as for the
+    reporter, the first change's popup leaves the window inactive (measured under the offscreen platform), so the
+    later changes have no focus-out to commit them."""
+    from PySide6.QtCore import Qt
+
+    from widgets.spin_box import TYPING_PAUSE_MS
+
+    st = _loaded(qtbot, page)
+    spin = page.widgets.get("_nw_rim_focus_spin")
+    edit = spin.lineEdit()
+    edit.selectAll()
+    qtbot.keyClicks(edit, "60")
+    qtbot.keyClick(edit, Qt.Key_Return)                               # the first change, with Enter
+    qtbot.waitUntil(lambda: st.focus_for == (True, 0.6) and not st.computing, timeout=20000)
+    for typed, fraction in (("50", 0.5), ("80", 0.8)):               # then typed and left: no Enter, no focus-out
+        edit.selectAll()
+        qtbot.keyClicks(edit, typed)
+        qtbot.wait(TYPING_PAUSE_MS // 2)
+        assert page.state.qc.params.nanowell_focus_fraction != fraction      # not while still typing
+        qtbot.waitUntil(lambda: page.state.qc.params.nanowell_focus_fraction == fraction, timeout=5000)
+        qtbot.waitUntil(lambda: st.focus_for == (True, fraction) and not st.computing, timeout=20000)
+    canvas, timer = page.widgets.get("_nw_canvas"), page.widgets.get("_nw_refit_timer")
+    qtbot.waitUntil(lambda: not (timer is not None and timer.isActive())
+                    and not getattr(canvas, "_draw_pending", False), timeout=5000)
+
+
 def _key_texts(ctx):
     fig = ctx.widgets.get("_nw_fig")
     return [t.get_text() for ax in fig.axes for a in ax.artists if a.get_gid() == "nw-array-key"

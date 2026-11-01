@@ -202,3 +202,24 @@ def test_a_percentage_typed_into_cell_gating_s_nanowell_focus_box_is_taken(qtbot
     qtbot.keyClicks(edit, "60")
     qtbot.keyClick(edit, Qt.Key_Return)
     assert (edit.text(), spin.value(), seen) == ("60", 60, [60])
+
+
+def test_the_cell_gating_panel_s_nanowell_focus_box_commits_after_a_pause_in_typing(qtbot):
+    """The Cell Gating panel's copy of the Rim focus box has the same keyboard tracking off and the same need: a
+    number typed and left (a click on a canvas or a tab ends no edit) is applied after a pause in typing."""
+    from PySide6.QtWidgets import QWidget
+
+    from review.domain.qc_params import QCParams
+    from review.features.qc.nanowell_focus_view import build_row
+    from widgets.spin_box import TYPING_PAUSE_MS
+
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    _row, widgets = build_row(parent, QCParams(exclude_soft_nanowells=True), 0, 200)
+    spin = widgets["nanowell_focus_fraction"]
+    seen = []
+    spin.valueChanged.connect(seen.append)
+    spin.lineEdit().selectAll()
+    qtbot.keyClicks(spin.lineEdit(), "60")
+    assert seen == []                                                  # not per digit
+    qtbot.waitUntil(lambda: seen == [60], timeout=TYPING_PAUSE_MS * 3)

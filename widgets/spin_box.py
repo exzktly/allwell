@@ -16,8 +16,13 @@ spin boxes the application constructs (``tests/test_spin_boxes_keep_their_number
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, QTimer
 from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
+
+#: How long a pause in typing commits the number typed (:meth:`_HoldsItsNumber.commit_after_pause`): long enough
+#: that typing "60" at an ordinary pace commits 60 and not 6 first — the Cell Gating panel's bounds use the same
+#: second (``qc/tab_view._TYPING_PAUSE_MS``).
+TYPING_PAUSE_MS = 1000
 
 #: The events after which the stylesheet may have set the explicit minimum width again, or the widest value's width
 #: may have changed with the font.
@@ -37,6 +42,21 @@ class _HoldsItsNumber:
         if event.type() in _REHOLD:
             self._hold()
         return handled
+
+    def commit_after_pause(self, ms: int = TYPING_PAUSE_MS) -> None:
+        """Also commit a number typed into a box without keyboard tracking once typing has paused for *ms*.
+
+        Such a box commits on Enter or on losing the focus, and losing the focus is not something a click can be
+        relied on to do: a plot canvas, a tool button or a tab bar takes no focus, and a window that is not the
+        active one has no focus to lose. Reported on the Nanowells page's Rim focus box: the first change, made
+        with Enter, applied; later ones, ended by a click, were dropped. ``textEdited`` is the user's typing only,
+        so a refresh from state never starts the pause."""
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(int(ms))
+        timer.timeout.connect(self.interpretText)
+        self.lineEdit().textEdited.connect(lambda _text: timer.start())
+        self._commit_pause = timer
 
     def show_value(self, value) -> None:
         """Show *value* as a refresh from state would: set it only when the box does not already hold it.

@@ -1098,7 +1098,8 @@ allwell/
 │                                  and spin_box.py (SpinBox / DoubleSpinBox, the only spin
 │                                  boxes the app builds: no layout squeezes their number;
 │                                  test_spin_boxes_keep_their_number.py; show_value, the
-│                                  refresh that never overwrites a number being typed)
+│                                  refresh that never overwrites a number being typed;
+│                                  commit_after_pause, a typed number applied after a pause)
 │                                  and progress_popup.py (ProgressPopup, the application-modal
 │                                  progress bar the Cell Gating panel's jobs run behind)
 ├── startup/                     ← what runs before the application exists (§4)
@@ -12193,7 +12194,11 @@ one or all (`set_well_excluded`, `restore_every_well`).
 
 **Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a bare percentage spin box, 30–95, with no suffix (Qt refuses typing with the cursor inside one)) is a mirror of
 the Cell Gating panel's *Exclude out-of-focus nanowells*, never a setting of its own. The box commits on Enter or
-focus-out (keyboard tracking off), so two things keep a typed number alive until then: `RimFocusControls.refresh`
+focus-out (keyboard tracking off) and, because neither can be relied on — a click on a canvas, a tool button or a
+tab bar ends no edit, and a window the first change's application-modal progress popup left inactive has no focus to
+lose, which dropped every change after the first — also after a second's pause in typing
+(`SpinBox.commit_after_pause`, `TYPING_PAUSE_MS`; the Cell Gating panel's copy of the box does the same). Two
+things keep a typed number alive until then: `RimFocusControls.refresh`
 and the Cell Gating panel's refresh write it through `SpinBox.show_value`, which leaves a box already holding the
 rule's value untouched (a plain `setValue` rewrote the field on every redraw, and the Array view redraws as each
 tile arrives, so the typed number was put back before it was committed); and the page's canvas takes

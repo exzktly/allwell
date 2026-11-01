@@ -377,8 +377,9 @@ def _input_archive_for(input_dir: Path, well: str) -> Path | None:
     want = canonical_well_label(well)
     if not want or not input_dir.is_dir():
         return None
-    for p in sorted(input_dir.glob("*.zip")):
-        if not p.name.startswith(".") and canonical_well_label(p.stem) == want:
+    for p in sorted(input_dir.iterdir()):                 # any case of `.zip`, as the run reads them
+        if (p.suffix.lower() == ".zip" and p.is_file() and not p.name.startswith(".")
+                and canonical_well_label(p.stem) == want):
             return p
     return None
 

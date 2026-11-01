@@ -420,6 +420,9 @@ DECISION_SITES = {
     "process_microscopy.py::process_well_zip_task": "settings_record.well_settings_allow_reuse",
     "pipeline/well_skip.py::finished_output": "well_skip.finished_output",
     "process_microscopy.py::process_well_zips": "nanowell_task.confluence_reference_current",
+    # The end-of-run pass asks the same question the other way round: a well whose reference keys no longer match
+    # (the reference's own re-run changed them) is measured again in the pass rather than kept (review row R18).
+    "pipeline/nanowell_task.py::reanchor_plate": "nanowell_task.confluence_reference_current",
     "services/remote_finished_wells.py::_read_against_the_reference": "remote_finished_wells.finished_here",
     "pipeline/run_report.py::finished_on_this_host": "well_skip.finished_output",
     "services/remote_finished_wells.py::finished_here": "remote_finished_wells.finished_here",

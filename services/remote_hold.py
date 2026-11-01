@@ -679,12 +679,15 @@ class GrantedNode:
             excluded = [*user_excluded, *failed_nodes]
             extra = [f"--exclude={','.join(excluded)}"] if excluded else []
             submitted = self._script(submit_script(self.paths, script_text, [*options, *extra], limit_s=limit_s))
+            sent = (f"sbatch {' '.join(shlex.quote(o) for o in [*options, *extra])} "
+                    f"--time={render_slurm_time(limit_s)}")
             if submitted.returncode != 0:
+                # Recorded with the options it carried: a refused request is where they matter most.
+                self.transcript.add(f"{sent}  →  refused")
                 raise HoldError("the scheduler refused the request: "
                                 f"{(submitted.stderr or submitted.stdout or '').strip() or 'no reason given'}")
             self.job_id = submitted.stdout.strip()
-            self.transcript.add(f"sbatch {' '.join(shlex.quote(o) for o in [*options, *extra])} "
-                                f"--time={render_slurm_time(limit_s)}  →  job {self.job_id}")
+            self.transcript.add(f"{sent}  →  job {self.job_id}")
             self._log(f"[remote] granted node: asked the scheduler for a node (job {self.job_id}, "
                       f"time limit {_duration(limit_s)}).\n")
             boot_failed = self._wait(began, queue_wait)

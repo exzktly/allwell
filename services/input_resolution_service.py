@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 from util.dir_scan import files_in
-from util.well_token import canonical_well_label
+from util.well_token import canonical_well_label, is_well_archive
 from pipeline.input_layout import NonZipInput, ZIP_LOOSE_FOLDER_REMEDY, non_zip_input
 
 
@@ -215,7 +215,7 @@ def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool) -> Input
     except OSError as exc:
         return _unreadable_plan(root, exc)
     well_zips = [(canonical_well_label(p.stem), p) for p in entries
-                 if p.match("*.zip") and _is_well_named(p)]
+                 if is_well_archive(p) and _is_well_named(p)]
     found = non_zip_input(root, well_zips)
     if found.refused:
         return _needs_zipping_plan(found, f"{root.name}/")
@@ -345,7 +345,7 @@ def well_present_in_input(input_dir: Path, well: str) -> bool:
             files = files_in(root)
         except OSError:
             continue
-        if any(p.match("*.zip") and canonical_well_label(p.stem) == target for p in files):
+        if any(is_well_archive(p) and canonical_well_label(p.stem) == target for p in files):
             return True
     return False
 

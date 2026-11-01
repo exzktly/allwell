@@ -40,7 +40,7 @@ pane).
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, QTimer
 from PySide6.QtWidgets import QSizePolicy, QSplitter, QWidget
 
 from core import phone_layout
@@ -308,6 +308,11 @@ class AnalyzePhoneView:
                 plate.setMaximumSize(width, height)
                 plate.setMinimumHeight(min(plate.minimumHeight(), height))
             self._relayout(plate, right)
+            # `_relayout` invalidates the column's layout, which posts the column a LayoutRequest that is delivered
+            # after `_fitting` is down. The layout has just been activated, so the request asks for nothing, but
+            # `_RefitOnLayout` read it as a re-layout and scheduled the next fit, which posted the next request: the
+            # page re-fitted on every event-loop pass, at the same size, for as long as Progress was on screen.
+            QCoreApplication.removePostedEvents(right, QEvent.LayoutRequest)
         finally:
             self._fitting = False
 

@@ -224,3 +224,36 @@ def test_a_folder_holding_only_sidecars_and_archives_runs(tmp_path):
     _tif(grouped / "._exp_NIR_A01_1_T01.tif")
     (grouped / ".DS_Store").write_bytes(b"x")
     assert plan_input_layout(grouped).action == GROUPED
+
+
+def test_an_upper_case_zip_is_a_well_archive_to_the_planner_as_to_the_run(tmp_path):
+    """The pipeline reads ``A01.ZIP`` (``input_layout.find_well_zips`` compares the suffix in any case); the
+    planner matched ``*.zip`` case-sensitively, so a plate of upper-case archives planned as nothing to process, an
+    empty-well background naming one was blocked, and a folder beside one was reported as a stranded well folder."""
+    from pipeline.input_layout import find_well_zips
+    from services.input_resolution_service import well_present_in_input
+
+    grouped = tmp_path / "plate" / "in"
+    _zip(grouped / "A01.ZIP")
+    _zip(grouped / "A02.Zip", ("exp_NIR_A02_1_T01.tif",))
+    assert [w for w, _p in find_well_zips(grouped)] == ["A01", "A02"]          # what the run reads
+    assert plan_input_layout(grouped).action == GROUPED
+    assert well_present_in_input(grouped, "A01")
+    _zip(grouped / "A03.ZIP", ("exp_NIR_A03_1_T01.tif",))
+    _tif(grouped / "A03" / "exp_NIR_A03_1_T01.tif")                        # its folder beside its archive
+    assert plan_input_layout(grouped).action == GROUPED
+
+
+def test_the_pipeline_s_own_archive_lookups_read_an_upper_case_zip(tmp_path):
+    """The empty-well background's archive lookup and the scratch-space sizing read the same archives the run
+    does, in any case of ``.zip``: sized from nothing, the scratch pre-flight checked a plate of ``A01.ZIP`` against
+    zero bytes."""
+    from pipeline.auto_threshold import _input_archive_for
+    from pipeline.capacity import sample_image_bytes
+
+    grouped = tmp_path / "plate" / "in"
+    grouped.mkdir(parents=True)
+    with zipfile.ZipFile(grouped / "A01.ZIP", "w") as zf:
+        zf.writestr("exp_NIR_A01_1_T01.tif", b"\x00" * 5000)
+    assert _input_archive_for(grouped, "A01") == grouped / "A01.ZIP"
+    assert sample_image_bytes(grouped, (".tif",)) == 5000

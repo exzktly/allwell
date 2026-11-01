@@ -291,3 +291,40 @@ def test_the_reference_this_run_measured_replaces_the_one_here(tmp_path):
     _save_reference(remote, 2.0, timepoints=("0h",))
     pull_nanowell_results(_CopyingVerifier(local, remote, fetched=("A01", "H12")), log=lambda line: None)
     assert _levels(local) == {"0h": 2.0, "24h": None}
+
+
+def _reference_folder(nanowells, well: str = "B02"):
+    import json  # noqa: F811 — the module imports it too; kept local to the helper
+
+    ref = nanowells / "_confluence_reference"
+    ref.mkdir(parents=True)
+    (ref / "reference.json").write_text(json.dumps(
+        {"well": well, "timepoints": {"t1": {"status": "empty", "template": "tp0000.npz"}}}))
+    (ref / "tp0000.npz").write_bytes(b"template")
+    return ref
+
+
+def test_the_reference_this_computer_sent_coming_back_unchanged_is_not_reported_refused(tmp_path):
+    """A run that does not measure the reference well is sent this computer's reference, and the pull brings the
+    same copy back. That was logged on every such run as "the empty reference fetched back was not taken" — a
+    refusal of nothing. A different copy from a run that did not measure the well is still refused, and said."""
+    import shutil
+    import types
+
+    from services import remote_fetch_nanowells as m
+
+    nanowells = tmp_path / "out" / "nanowells"
+    ref = _reference_folder(nanowells)
+    run = types.SimpleNamespace(fetched_wells={"A01"})
+    lines: list[str] = []
+    kept = m._set_reference_aside(nanowells)
+    shutil.copytree(kept, ref)                              # the pull brings back the copy that was sent
+    m._settle_reference(nanowells, kept, True, run, lines.append)
+    assert lines == [] and (ref / "tp0000.npz").read_bytes() == b"template"
+
+    kept = m._set_reference_aside(nanowells)
+    shutil.copytree(kept, ref)
+    (ref / "tp0000.npz").write_bytes(b"another run's template")
+    m._settle_reference(nanowells, kept, True, run, lines.append)
+    assert len(lines) == 1 and "this run did not measure B02" in lines[0]
+    assert (ref / "tp0000.npz").read_bytes() == b"template"           # the one here is kept

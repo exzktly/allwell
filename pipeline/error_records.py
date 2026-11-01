@@ -278,6 +278,33 @@ def retire_superseded(output_dir: Path | str, well_label: str, *, rewritten: boo
     return retired
 
 
+def retire_force_notes(output_dir: Path | str, wells) -> list[Path]:
+    """Move the ``Remedy: force`` notes of *wells* into ``errors/superseded/``; the archived paths.
+
+    For a remote run, after the fetch has placed and verified a whole, forced re-run of each of *wells*. The notes
+    that ask for that re-run (``<well>_local_csv_cut_short.txt``, ``<well>_local_zip_unreadable.txt``) are written
+    by a *local* download, so the worker host never had them: its own :func:`retire_superseded` archives nothing for
+    them and :func:`mirror_retirements` finds no copy to mirror, and they stood for ever after the re-run they asked
+    for, listing a rebuilt well as failed. Only force notes move: any other record is retired by the host's seal and
+    mirrored. Never raises; a note that cannot be moved is logged and left standing.
+    """
+    wanted = {_canonical(w) for w in wells} - {""}
+    retired: list[Path] = []
+    if not wanted:
+        return retired
+    archive = errors_dir(output_dir) / SUPERSEDED_DIRNAME
+    for rec in standing_records(output_dir):
+        if rec.well not in wanted or not rec.needs_force:
+            continue
+        with swallow(f"could not archive {rec.path.name}, a note well {rec.well}'s forced re-run has answered",
+                     level=logging.WARNING):
+            archive.mkdir(parents=True, exist_ok=True)
+            target = _archive_path(archive, rec.path.name)
+            os.replace(rec.path, target)
+            retired.append(target)
+    return retired
+
+
 def _digest(path: Path) -> str | None:
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()

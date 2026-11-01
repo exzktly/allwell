@@ -74,7 +74,8 @@ def _image_table_ctx(groups=()):
                                     selection_rebuild_cb=None),
         plot_groups=SimpleNamespace(drawers=None),
     )
-    ctx.features = SimpleNamespace(query=lambda *a, default=None, **k: default)
+    ctx.features = SimpleNamespace(query=lambda *a, default=None, **k: default,
+                                   rail_sections=lambda: [])
     ctx.notify = SimpleNamespace(set_status=lambda *_a, **_k: None)
     return ctx
 
@@ -169,3 +170,43 @@ def test_the_main_frame_puts_saved_selections_under_the_footer(main_frame):
     assert items[i + 2].objectName() == "PlotGroupsDrawer", (
         "Saved selections is not directly under the footer and hint")
     assert items[-1] == "stretch" and items.count("stretch") == 1
+
+
+def test_a_page_built_frame_is_built_into_the_main_frame_and_hidden(qtbot, monkeypatch):
+    """A ``RailSection`` with ``build`` (Heat Map's configurator) is built by
+    ``build_sidebar`` inside the main frame, under Saved selections and above
+    the slack, registered under its key and hidden until its page shows it."""
+    import review.core.selection_controller as sc
+    from review.core.feature_registry import MAIN_RAIL_SECTION, RailSection
+    from review.core.sidebar_view import build_sidebar
+
+    monkeypatch.setattr(sc, "select_all", lambda c: None)
+    monkeypatch.setattr(sc, "select_none", lambda c: None)
+    made = []
+
+    def _factory():
+        def _build(ctx, parent):
+            w = QWidget(parent)
+            parent.layout().addWidget(w)
+            made.append(w)
+            return w
+        return _build
+
+    win = SimpleNamespace()
+    ctx = _image_table_ctx()
+    ctx.widgets = WidgetRegistry(app=win)
+    ctx.state.dataset.well_labels = {}
+    ctx.features.rail_sections = lambda: [MAIN_RAIL_SECTION,
+                                          RailSection("_page_frame", build=_factory)]
+    win._ctx = ctx
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    build_sidebar(win, parent)
+
+    (frame,) = made
+    assert ctx.widgets.get("_page_frame") is frame
+    assert frame.isHidden()
+    items = _layout_widgets(parent)
+    assert items.index(frame) == items.index(
+        parent.findChild(QWidget, "PlotGroupsDrawer")) + 1
+    assert items[-1] == "stretch"

@@ -40,6 +40,10 @@ from pathlib import Path
 import numpy as np
 
 from review.data.nanowell_images import NanowellFrame, metric_label, montage_channel
+from review.features.nanowell import full_montage_compute as fmc
+from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
+from review.features.nanowell.image_compute import read_montage, tile_boxes
+from review.features.nanowell.observation_compute import nanowell_observations
 
 log = logging.getLogger("review")
 
@@ -71,8 +75,6 @@ def _timepoint(data, well: str, tp) -> str | None:
 
 def _data(ctx, well: str):
     """``(NanowellData, "")`` holding *well*, or ``(None, why not)``; the page's read-wells cache is shared."""
-    from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
-
     st = ctx.state.feature_slice("nanowell")
     data_dir = getattr(ctx.state.dataset, "data_dir", None)
     if st is None or not data_dir:
@@ -105,8 +107,6 @@ def frame_geometry(data, well: str, timepoint: str) -> tuple[tuple[float, float,
     left, top, scale = float(origin[0]), float(origin[1]), float(scale)
     shape = _stored_shape(data, well, timepoint)
     if shape is None:
-        from review.features.nanowell.image_compute import tile_boxes
-
         boxes = [b for b in tile_boxes(data, well, timepoint) if b.width_um and b.height_um]
         if not boxes:
             return None, f"{well} at {timepoint} has neither a stored montage nor tile placements to size a frame."
@@ -154,8 +154,6 @@ def table_frame(ctx, well: str, tp, token: str) -> NanowellFrame | None:
 
 
 def _phase_frame(data, well: str, timepoint: str, geometry) -> NanowellFrame:
-    from review.features.nanowell.image_compute import read_montage
-
     montage, why = read_montage(data, well, timepoint)
     if montage is None:
         return NanowellFrame(None, geometry[2], note=why)
@@ -164,8 +162,6 @@ def _phase_frame(data, well: str, timepoint: str, geometry) -> NanowellFrame:
 
 def channel_frame(data, well: str, timepoint: str, channel: str, geometry) -> NanowellFrame:
     """*channel*'s montage of *well* at *timepoint*, stitched from its raw tiles onto *geometry*."""
-    from review.features.nanowell import full_montage_compute as fmc
-
     left, top, scale, rows, cols = geometry
     spelled = next((c for c in data.image_channels if c.lower() == channel.lower()), None)
     if spelled is None:
@@ -197,8 +193,6 @@ def channel_frame(data, well: str, timepoint: str, channel: str, geometry) -> Na
 
 
 def _metric_frame(ctx, well: str, timepoint: str, label: str, geometry) -> NanowellFrame:
-    from review.features.nanowell.observation_compute import nanowell_observations
-
     with _LOCK:
         table = nanowell_observations(ctx, [well])
     if table is None:

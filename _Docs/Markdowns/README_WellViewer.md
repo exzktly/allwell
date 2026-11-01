@@ -5839,7 +5839,7 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     the `in` folder beside the results. The run keeps no fluorescence montage, so the first Generate reads every
     tile of each well shown and can take a few seconds per well. Leave the row's LUT on **Auto** to give every well
     one brightness window.
-  - **NW: <metric>** (one per nanowell metric: cell count, confluence, brightness, fold changes, growth rate,
+  - **NW: *metric name*** (one per nanowell metric: cell count, confluence, brightness, fold changes, growth rate,
     occupied) — each nanowell drawn as a disc in its metric's colour, *viridis* by default. The values follow the
     Nanowells page's **Baseline** and the Cell Gating rules, so they match the page and the plots. Outside the
     nanowells is black; a nanowell with no value (no cells for a brightness, out of focus, gated out) is drawn

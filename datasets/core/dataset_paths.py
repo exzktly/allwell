@@ -27,6 +27,7 @@ from pathlib import Path
 
 from util.aw_safe import swallow
 from util.csv_gz import csv_stem, glob_csvs
+from util.dir_scan import zip_files_in
 from util.image_exts import is_run_input_member
 from util.well_token import canonical_well_label
 from util.zip_append import pending_journals
@@ -232,7 +233,7 @@ def in_containers(paths: DatasetPaths) -> dict[str, Path]:
     layouts have a settled precedence and this map follows it.
     """
     containers: dict[str, Path] = {}
-    for zip_path in sorted(paths.in_dir.glob("*.zip")):
+    for zip_path in zip_files_in(paths.in_dir):
         well = canonical_well_label(zip_path.stem)
         if well and (well not in containers or zip_path.stem == well):
             containers[well] = zip_path
@@ -287,7 +288,7 @@ def well_spelling_collisions(paths: DatasetPaths) -> dict[str, list[Path]]:
 
     _collect(
         (canonical_well_label(z.stem), z)
-        for z in paths.in_dir.glob("*.zip") if canonical_well_label(z.stem)
+        for z in zip_files_in(paths.in_dir) if canonical_well_label(z.stem)
     )
     _collect(
         (canonical_well_label(z.stem[:-4]), z)
@@ -476,7 +477,7 @@ def collect_input_image_stems(
             if is_run_input_member(member):
                 stems.add(Path(member.rsplit("/", 1)[-1]).stem)
 
-    for zip_path in in_dir.glob("*.zip"):
+    for zip_path in zip_files_in(in_dir):
         known = (known_zip_members or {}).get(zip_path)
         if known:
             _add_member_stems(known)

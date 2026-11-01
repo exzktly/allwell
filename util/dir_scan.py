@@ -131,3 +131,15 @@ def files_in(folder: Path | str) -> list[Path]:
 def subdirs_in(folder: Path | str) -> list[Path]:
     """The sub-directories directly in *folder*, in path order."""
     return files_and_subdirs(folder)[1]
+
+
+def zip_files_in(folder: Path | str) -> list[Path]:
+    """The ``.zip`` archives directly inside *folder*, in any case of the suffix (``A01.zip``, ``A01.ZIP``), hidden
+    files left out (a macOS ``._A01.zip`` sidecar is not an archive), sorted; ``[]`` when *folder* is not a
+    directory. The pipeline reads ``A01.ZIP`` as a well (``pipeline.input_layout.find_well_zips``), so every tool
+    asking which archives a dataset holds asks it this way — ``glob("*.zip")`` is case-sensitive on Linux and
+    passed them over."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        return []
+    return sorted(p for p in files_in(folder) if p.suffix.lower() == ".zip" and not p.name.startswith("."))

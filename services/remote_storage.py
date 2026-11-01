@@ -61,7 +61,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from services.remote_cache_gc import IN_USE_STAMP_DIR, IN_USE_WINDOW_S
-from services.remote_run_id import HEARTBEAT_DIR, LEGACY_UPLOAD_HEARTBEAT
+from services.remote_run_id import HEARTBEAT_DIR, LEGACY_UPLOAD_HEARTBEAT, remote_run_dir
 from services.remote_transport import _remote_quote
 from services.remote_wait_snippets import MID_BATCH_HEARTBEAT_STALE_S
 from services.slurm_ids import squeue_listing
@@ -90,6 +90,17 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 #: ``squeue %T`` states of a job that has ended (``services.remote_sweep``).
 _ENDED_STATES = "COMPLETED|CANCELLED*|FAILED|TIMEOUT|NODE_FAIL|PREEMPTED|BOOT_FAIL|DEADLINE|OUT_OF_MEMORY"
 _DAY = 86400
+
+
+@dataclass(frozen=True)
+class _Staging:
+    """The one field :func:`remote_run_dir` reads, so a run folder here is spelled by the funnel."""
+
+    remote_staging_dir: str
+
+
+def _run_dir(staging_dir: str, run_id: str) -> str:
+    return remote_run_dir(_Staging(staging_dir), run_id)
 
 
 # ── labels ──────────────────────────────────────────────────────────────────
@@ -136,9 +147,9 @@ def label_script(staging_dir: str, *, run_id: str, dataset_key: str, label: dict
     text = json.dumps(label, separators=(",", ":"), sort_keys=True)
     out = ""
     if run_id and _NAME_RE.match(run_id):
-        run_dir = _remote_quote(f"{staging_dir}/runs/{run_id}")
-        out += (f"if [ -d {run_dir} ]; then "
-                + _write_if_absent(_remote_quote(f"{staging_dir}/runs/{run_id}/{RUN_LABEL}"), text).rstrip("\n")
+        run_dir = _run_dir(staging_dir, run_id)
+        out += (f"if [ -d {_remote_quote(run_dir)} ]; then "
+                + _write_if_absent(_remote_quote(f"{run_dir}/{RUN_LABEL}"), text).rstrip("\n")
                 + "; fi\n")
     if dataset_key and _NAME_RE.match(dataset_key):
         ds = _remote_quote(f"{staging_dir}/datasets/{dataset_key}")
@@ -180,7 +191,9 @@ class StorageItem:
         return str(self.label.get("output_dir") or "")
 
     def path(self, staging_dir: str) -> str:
-        return f"{staging_dir}/{self.kind}s/{self.name}"
+        if self.kind == "run":
+            return _run_dir(staging_dir, self.name)
+        return f"{staging_dir}/datasets/{self.name}"
 
 
 def _shell_functions() -> str:
@@ -359,7 +372,7 @@ def expiry_value(*, keep: bool = False, days: int | None = None, now: int | None
 
 def _expiry_path(staging_dir: str, item: StorageItem) -> str:
     if item.kind == "run":
-        return f"{staging_dir}/runs/{item.name}/{RUN_EXPIRY}"
+        return f"{_run_dir(staging_dir, item.name)}/{RUN_EXPIRY}"
     return f"{staging_dir}/datasets/{DATASET_EXPIRY_DIR}/{item.name}"
 
 
@@ -495,7 +508,7 @@ def remove_expired(cache, listing: Listing, *, log: Callable[[str], None], host_
 
 def _run_name_of(remote_dir: str, staging_dir: str) -> str:
     """``run-xyz`` when *remote_dir* is (inside) ``<staging>/runs/run-xyz``, else ``""``."""
-    prefix = f"{staging_dir}/runs/"
+    prefix = _run_dir(staging_dir, "")
     if not remote_dir.startswith(prefix):
         return ""
     return remote_dir[len(prefix):].split("/", 1)[0]

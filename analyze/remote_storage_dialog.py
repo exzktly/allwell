@@ -178,8 +178,8 @@ class RemoteStorageDialog(QDialog):
         self._expire_days = QSpinBox(self)
         self._expire_days.setRange(1, STORAGE_EXPIRY_DAYS_RANGE[1])
         self._expire_days.setValue(14)
-        self._expire_days.setSuffix(" days")
         actions.addWidget(self._expire_days)
+        actions.addWidget(QLabel("days", self))
         self._clear_btn = QPushButton("Use host rule", self)
         self._clear_btn.setToolTip("Drop the selected folders' own setting; the host-wide rule applies again.")
         self._clear_btn.clicked.connect(lambda: self._apply_expiry(rs.expiry_value(), "reset to the host rule"))
@@ -191,11 +191,10 @@ class RemoteStorageDialog(QDialog):
         rule.addWidget(QLabel("Remove folders left untouched for", self))
         self._host_days = QSpinBox(self)
         self._host_days.setRange(*STORAGE_EXPIRY_DAYS_RANGE)
-        self._host_days.setSpecialValueText("never")
-        self._host_days.setSuffix(" days")
         self._host_days.setValue(host.storage_expiry_days)
         self._host_days.valueChanged.connect(self._refresh_buttons)
         rule.addWidget(self._host_days)
+        rule.addWidget(QLabel("days (0 = never)", self))
         self._save_rule_btn = QPushButton("Save", self)
         self._save_rule_btn.setToolTip(
             "Applied at the start of every run on this host. Folders in use, kept folders, and "

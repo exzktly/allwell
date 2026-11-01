@@ -169,7 +169,7 @@ def table_frame(ctx, well: str, tp, token: str, *, window=None, oversample: int 
     return _metric_frame(ctx, well, timepoint, label, geometry)
 
 
-def window_geometry(geometry, window, oversample: int):
+def window_geometry(geometry, window, oversample: int) -> tuple | None:
     """*geometry*'s pixels ``window`` ``(y0, x0, y1, x1)`` as a geometry of its own, *oversample* × finer; ``None``
     when the window holds no pixel of the frame."""
     left, top, scale, height, width = geometry

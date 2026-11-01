@@ -49,13 +49,14 @@ from review.core.channel_state_controller import (
 # loading, mask/threshold rendering, RGB composer, overlay) lives in
 # ``image_compose``. Re-exported so call sites + external importers
 # (playground, grid_view) are unchanged.
+from review.features.image_browser.image_table._auto_lut import _compute_auto_luts  # noqa: F401
+from review.features.image_browser.image_table.colour_key_view import add_colour_key
 from review.features.image_browser.image_table.image_compose import (  # noqa: F401
     LUT_COLORS,
     LUT_COLOR_NAMES,
     NUC_SEG_TOKEN,
     OVERLAY_CHAN,
     _binary_base,
-    _channel_opts_for,
     _is_binary_variant,
     _is_mask_variant,
     _compose_image_table_rgb,
@@ -861,131 +862,6 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
     return pix, arr, True, note
 
 
-def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
-    """Pool ONE Auto-LUT window per channel across the whole grid.
-
-    A channel left on Auto otherwise auto-fits each cell to its own min/max, so the
-    same channel's brightness isn't comparable cell-to-cell. Here we compute a single
-    (min, max) per base channel over every Auto cell of that channel and stash it on
-    ``auto_lut_by_channel``; ``_parse_lut`` then returns it for those cells (live +
-    export). The map is cleared first, so ``_parse_lut`` still reports the
-    pre-pooling (Auto) state while we decide which cells qualify. Binary / mask /
-    NUC+SEG / overlay / pre-rendered-RGB cells carry no LUT and are skipped."""
-    import numpy as _np
-
-    st = ctx.state.image_table
-    st.auto_lut_by_channel = {}
-    pooled: dict[str, list] = {}  # base_chan_lower -> [min, max]
-    for r, row in enumerate(cells):
-        for cell in row:
-            chan = cell["chan"]
-            well, tp, fov = cell["well"], cell["tp"], cell["fov"]
-            if not (well and chan and tp):
-                continue
-            if chan == OVERLAY_CHAN or _is_nuc_seg(chan) or _is_binary_variant(chan):
-                continue
-            use_tophat, _bnd, binary_mode = _row_display_opts(ctx, r, chan)
-            if binary_mode in ("mask", "threshold"):
-                continue
-            # Only pool channels actually on Auto (no explicit / shared window). The
-            # map is empty here, so _parse_lut gives the pre-pooling answer.
-            if _parse_lut(ctx, r, chan) != (None, None):
-                continue
-            # "per cell" on the channel's LUT row: each cell keeps its own auto-fit.
-            if (_channel_opts_for(ctx, chan) or {}).get("auto_per_cell"):
-                continue
-            # Per cell, so one unreadable frame costs the pooling that cell's
-            # contribution and nothing more — pooling the rest still beats
-            # dropping every channel back to per-cell auto-fit.
-            try:
-                ratio = _find_ratio_for_channel(ctx, chan)
-                if ratio is not None:
-                    arr = _load_ratio_array(ctx, cache, well, ratio, tp, fov,
-                                            use_tophat=use_tophat)
-                else:
-                    arr = _load_array(ctx, cache, well, chan, tp, fov,
-                                      use_tophat=use_tophat)
-            except Exception:
-                swallowed()  # the render loop reports this cell
-                continue
-            if arr is None or getattr(arr, "ndim", 2) >= 3:
-                continue
-            # A cell served the raw frame is not on the corrected population's
-            # scale — it still carries the camera offset and the background the
-            # top-hat would have removed. Pooling it in stretches the window by
-            # that offset and renders every genuinely corrected cell of the
-            # channel near-black. Pool the corrected population only; a raw cell
-            # falls through to its own auto-fit, which is the honest answer for a
-            # measurement that is not comparable to the rest of the grid.
-            if is_raw_fallback(ctx, cell):
-                continue
-            a = crop_tool.apply_to_array(arr) if crop_tool is not None else arr
-            a = _np.asarray(a, dtype=_np.float32)
-            a = a[_np.isfinite(a)]          # a nanowell frame's NaN is "nothing here", not a value
-            if a.size == 0:
-                continue
-            lo, hi = float(a.min()), float(a.max())
-            positive = a[a > 0]
-            low_pos = float(positive.min()) if positive.size else None
-            base = _binary_base(chan).strip().lower()
-            cur = pooled.get(base)
-            if cur is None:
-                pooled[base] = [lo, hi, low_pos, chan]
-            else:
-                cur[0] = min(cur[0], lo)
-                cur[1] = max(cur[1], hi)
-                if low_pos is not None:
-                    cur[2] = low_pos if cur[2] is None else min(cur[2], low_pos)
-    st.auto_lut_by_channel = {k: _centred_window(ctx, v) for k, v in pooled.items()}
-
-
-def _centred_window(ctx, pooled: list) -> tuple[float, float]:
-    """The pooled ``(lo, hi)``, centred on "no change" for a nanowell fold change.
-
-    A fold change pooled to its own min and max puts 1 wherever the data happen to
-    fall, so no colour means "unchanged" and a gain and a loss of the same size
-    look different. A ratio (log-scaled on its row) gets ``(1/k, k)``, a fold
-    change already on a log scale ``(-m, m)``, so the diverging map's midpoint is
-    no change. A zero ratio has no logarithm; it sits at the bottom of the window.
-    """
-    from review.data.observations import fold_change_scale, nanowell_metric_for_token
-
-    lo, hi, low_pos, chan = pooled
-    scale = fold_change_scale(nanowell_metric_for_token(ctx, chan))
-    if scale == "log":
-        m = max(abs(lo), abs(hi)) or 1.0
-        return -m, m
-    if scale == "ratio" and low_pos is not None and hi > 0:
-        k = max(hi, 1.0 / low_pos, 1.0 + 1e-6)
-        return 1.0 / k, k
-    return lo, hi
-
-
-def _add_colour_key(ctx, cells, grid, sz: int) -> None:
-    """Put the colour key (``image_compose.colour_keys``) under the grid when it holds a nanowell metric map or
-    fluorescence montage: a metric drawn as colours is unreadable without one."""
-    from PySide6.QtGui import QImage, QPixmap
-
-    from review.features.image_browser.image_table._colour_key import key_rgb
-    from review.features.image_browser.image_table.image_compose import colour_keys
-
-    cols = max((len(row) for row in cells), default=1)
-    rgb = key_rgb(colour_keys(ctx, cells), width_px=max(_KEY_MIN_PX, sz * cols))
-    if rgb is None:
-        return
-    h, w = rgb.shape[:2]
-    image = QImage(rgb.tobytes(), w, h, 3 * w, QImage.Format_RGB888).copy()
-    label = QLabel()
-    label.setObjectName("ImageTableColourKey")
-    label.setPixmap(QPixmap.fromImage(image))
-    label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-    grid.addWidget(label, grid.rowCount(), 0, 1, max(1, grid.columnCount()))
-
-
-#: The colour key is at least this wide, so a one-column grid's key is not squeezed.
-_KEY_MIN_PX = 520
-
-
 def generate_status_message(ctx, cells, n, rendered, unrendered, failed,
                             overlay_chans) -> str:
     """The Generate status line: how much was drawn, and every way it fell short.
@@ -1215,7 +1091,7 @@ def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
     if plan is not None:
         _facet.render_facet_chrome(grid, plan)
     with swallow("image table: colour key"):
-        _add_colour_key(ctx, cells, grid, sz)
+        add_colour_key(ctx, cells, grid, sz)
 
     ctx.state.image_table.last_render = rendered
     ctx.state.image_table.image_cache = cache

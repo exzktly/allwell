@@ -46,6 +46,7 @@ from review.data.frame_load import (  # noqa: F401
     nanowell_frame_of,
 )
 from review.data.nanowell_images import display_token, is_metric_map, is_nanowell_frame
+from review.features.image_browser.image_table._colour_key import ColourKey, metric_map_background_rgb  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -405,16 +406,6 @@ def _compose_image_table_rgb(
 
     return rgb
 
-def metric_map_background_rgb() -> tuple[int, int, int]:
-    """What a metric map draws where no nanowell is: a neutral dark grey, not black, because every colormap's
-    darkest end — viridis' deep purple included — all but vanishes on black, and the lowest values with it. A
-    montage keeps black: there it is the absence of light, and a stretch puts nothing below it."""
-    from ui import theme
-
-    ink = str(theme.Colors.panel_elevated).lstrip("#")
-    return int(ink[0:2], 16), int(ink[2:4], 16), int(ink[4:6], 16)
-
-
 def _undefined_rgb() -> tuple[int, int, int]:
     from ui import theme
 
@@ -465,7 +456,7 @@ def _parse_lut(ctx, row_idx: int, chan=None) -> tuple[float | None, float | None
     Image) for *chan* — or, only when the caller named no channel at all, for the
     row's representative channel — then the pooled Auto window, else auto-fits. The
     pooled window is what makes Auto comparable cell-to-cell (see
-    ``controller._compute_auto_luts``)."""
+    ``_auto_lut._compute_auto_luts``)."""
     spec = _channel_opts_for(ctx, chan)
     if spec is not None:
         lo = spec.get("lut_min")
@@ -989,8 +980,6 @@ def colour_keys(ctx, cells) -> list:
     Not the phase montage: it is the run's 8-bit picture, with no quantity to read off a colour."""
     from review.data.nanowell_images import metric_label, montage_channel
     from review.data.observations import fold_change_scale, nanowell_metric_for_token
-    from review.features.image_browser.image_table._colour_key import ColourKey
-
     order: dict[str, int] = {}
     wells: dict[str, set] = {}
     for r, row in enumerate(cells or []):
@@ -1038,7 +1027,7 @@ _METRIC_MAP_MIN_PX = 640
 _MAX_OVERSAMPLE = 8
 
 
-def _finer_metric_map(ctx, cell, crop_tool, arr):
+def _finer_metric_map(ctx, cell, crop_tool, arr) -> tuple | None:
     """``(frame, k)``: the cropped window of a metric map re-painted *k* × finer by the Nanowells feature, or
     ``None`` — not a metric map, no crop, a crop already large enough, or the window misses the frame.
 

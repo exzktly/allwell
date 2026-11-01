@@ -11,7 +11,8 @@ Imports no feature.
 from __future__ import annotations
 
 from review.domain.observation import (
-    CELLS, NANOWELL_CELL_PREFIX, NANOWELL_SERVICE, NANOWELLS, ObservationTable, is_nanowell_cell_column,
+    CELLS, NANOWELL_CELL_PREFIX, NANOWELL_SERVICE, NANOWELLS, ObservationMetric, ObservationTable,
+    is_nanowell_cell_column,
 )
 
 
@@ -51,7 +52,7 @@ def nanowell_metric_specs(ctx, wells) -> tuple | None:
     return ctx.features.query("observations.nanowell_metrics", ctx, list(wells), default=None)  # NANOWELL_METRICS_SERVICE
 
 
-def nanowell_metric_for_token(ctx, token):
+def nanowell_metric_for_token(ctx, token) -> ObservationMetric | None:
     """The ``ObservationMetric`` an Image Table ``NW: <label>`` token names (``data/nanowell_images``), matched by
     label case-insensitively, or ``None`` — not a metric token, or not a metric of this dataset or build."""
     from review.data.nanowell_images import metric_label

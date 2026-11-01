@@ -29,8 +29,11 @@ from core.safe import swallowed
 from review.features.image_browser.image_table import facet_view as _facet
 from review.features.image_browser.image_table import renderer as _renderer
 from review.features.image_browser.image_table._frames import FrameCollector
+from review.features.image_browser.image_table._colour_key import key_rgb
 from review.features.image_browser.image_table.image_compose import (
     OVERLAY_CHAN,
+    _load_chrome_font,
+    colour_keys,
     _load_array,
     _load_mask_array,
     _load_ratio_array,
@@ -589,15 +592,12 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None,
 def _draw_colour_key(ctx, fig, cells, dpi: int, frames) -> None:
     """The live grid's colour key (``_colour_key``), in the publication palette, under the figure — and as a
     picture of its own on the PowerPoint slide. Saved without it, a metric map is colours with no values."""
-    from review.features.image_browser.image_table._colour_key import key_rgb
-    from review.features.image_browser.image_table.image_compose import colour_keys
-
     keys = colour_keys(ctx, cells)
     if not keys:
         return
     fig_w, fig_h = (float(v) for v in fig.get_size_inches())
     scale = max(1.0, dpi / 100.0)
-    rgb = key_rgb(keys, width_px=int(fig_w * 100 * scale), scale=scale, on_screen=False)
+    rgb = key_rgb(keys, width_px=int(fig_w * 100 * scale), font=_load_chrome_font, scale=scale, on_screen=False)
     if rgb is None:
         return
     key_h_in = fig_w * rgb.shape[0] / rgb.shape[1]

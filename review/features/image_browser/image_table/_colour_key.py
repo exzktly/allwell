@@ -6,7 +6,7 @@ one scale at all. So for every nanowell metric map and fluorescence montage in t
 
 * the metric's full name (the row labels carry a short one);
 * a strip of its colormap with the window's ends written under it — and for a fold change, "no change" marked in
-  the middle, where the pooled window centres it (``controller._centred_window``);
+  the middle, where the pooled window centres it (``centred_window`` below);
 * what the window is: one shared by every well shown (Auto, pooled), a fixed one the user typed, or each cell's
   own (**per cell**), which says in so many words that colours are then not comparable;
 * for a metric map, the empty ring a nanowell with no value is drawn as.
@@ -44,10 +44,35 @@ _PAD = 8
 _FONT_PX = 12
 
 
-def _font(px: int):
-    from review.features.image_browser.image_table.image_compose import _load_chrome_font
+def metric_map_background_rgb() -> tuple[int, int, int]:
+    """What a metric map draws where no nanowell is: a neutral dark grey, not black, because every colormap's
+    darkest end — viridis' deep purple included — all but vanishes on black, and the lowest values with it. A
+    montage keeps black: there it is the absence of light, and a stretch puts nothing below it."""
+    from ui import theme
 
-    return _load_chrome_font(px)
+    return _rgb(theme.Colors.panel_elevated)
+
+
+def centred_window(ctx, pooled: list) -> tuple[float, float]:
+    """The pooled ``(lo, hi)``, centred on "no change" for a nanowell fold change.
+
+    A fold change pooled to its own min and max puts 1 wherever the data happen to
+    fall, so no colour means "unchanged" and a gain and a loss of the same size
+    look different. A ratio (log-scaled on its row) gets ``(1/k, k)``, a fold
+    change already on a log scale ``(-m, m)``, so the diverging map's midpoint is
+    no change. A zero ratio has no logarithm; it sits at the bottom of the window.
+    """
+    from review.data.observations import fold_change_scale, nanowell_metric_for_token
+
+    lo, hi, low_pos, chan = pooled
+    scale = fold_change_scale(nanowell_metric_for_token(ctx, chan))
+    if scale == "log":
+        m = max(abs(lo), abs(hi)) or 1.0
+        return -m, m
+    if scale == "ratio" and low_pos is not None and hi > 0:
+        k = max(hi, 1.0 / low_pos, 1.0 + 1e-6)
+        return 1.0 / k, k
+    return lo, hi
 
 
 def _ramp(cmap: str, n: int) -> np.ndarray:
@@ -99,10 +124,11 @@ def _rgb(hex_colour: str) -> tuple[int, int, int]:
     return int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
 
 
-def key_rgb(keys, *, width_px: int, scale: float = 1.0, on_screen: bool = True) -> np.ndarray | None:
+def key_rgb(keys, *, width_px: int, font, scale: float = 1.0, on_screen: bool = True) -> np.ndarray | None:
     """The key for *keys* as an ``(H, W, 3)`` uint8 image *width_px* wide, or ``None`` with no keys.
 
-    *on_screen* draws it in the app's own panel and text colours, under the live grid; off, in the publication
+    *font* is ``font(px)`` → a PIL font (the Image Table's own chrome face). *on_screen* draws it in the app's own
+    panel and text colours, under the live grid; off, in the publication
     palette (``CPub``), for a saved figure on a white page."""
     from PIL import Image, ImageDraw
 
@@ -116,8 +142,6 @@ def key_rgb(keys, *, width_px: int, scale: float = 1.0, on_screen: bool = True) 
     else:
         bg, ink = _rgb(theme.CPub.bg), _rgb(theme.CPub.text)
     undefined_ink = _rgb(theme.Colors.plot_undefined_ink)
-    from review.features.image_browser.image_table.image_compose import metric_map_background_rgb
-
     black = metric_map_background_rgb()             # the ring swatch sits on what a metric map's background is
     s = max(0.5, float(scale))
     row, pad, font_px = int(_ROW_PX * s), int(_PAD * s), max(6, int(_FONT_PX * s))
@@ -125,7 +149,7 @@ def key_rgb(keys, *, width_px: int, scale: float = 1.0, on_screen: bool = True) 
     width = max(int(width_px), strip_w + 2 * pad)
     img = Image.new("RGB", (width, row * len(keys) + pad), tuple(bg))
     draw = ImageDraw.Draw(img)
-    font, small = _font(font_px), _font(max(6, int(font_px * 0.85)))
+    font, small = font(font_px), font(max(6, int(font_px * 0.85)))
     for i, key in enumerate(keys):
         y = pad + i * row
         title = key.title + (f" — {key.scope}" if key.scope else "")

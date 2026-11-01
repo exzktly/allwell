@@ -1276,7 +1276,11 @@ review/
 │   │   │                 _frames.py (the per-field frame plan the PowerPoint
 │   │   │                 export places, built in the export figure's own pass),
 │   │   │                 _colour_key.py (the key under a grid of nanowell
-│   │   │                 metric maps and montages, as pixels: §6.2l),
+│   │   │                 metric maps and montages, as pixels, and the
+│   │   │                 fold-change window centring: §6.2l),
+│   │   │                 colour_key_view.py (that key as a label under the
+│   │   │                 live grid), _auto_lut.py (the pooled Auto window,
+│   │   │                 one pass, re-exported by controller),
 │   │   │                 _phone_fit.py (phone layout: cells sized to the
 │   │   │                 screen's width, redrawn when the layout changes)
 │   │   │                 (controller = orchestration; the compose/layout/export
@@ -13640,7 +13644,7 @@ the metric; the frame's own µm/px; and a note of what it leaves out.
   observations memo is keyed on all of them, so asking again repaints discs and reads nothing.
 - **Nothing drawn as something else.** The composer (`image_compose._compose_image_table_rgb`) draws a NaN pixel in
   its `blank_rgb` — black for a montage, where it is the absence of light; `Colors.panel_elevated` for a metric map
-  (`image_compose.metric_map_background_rgb`), because every colormap's darkest end, viridis' deep purple included,
+  (`_colour_key.metric_map_background_rgb`), because every colormap's darkest end, viridis' deep purple included,
   all but vanishes on black and the lowest values with it — and the frame's `undefined` pixels in
   `Colors.plot_undefined_ink`, after the LUT, and the LUT window is the finite
   pixels' (`ui_helpers.lut_colormap_to_rgb`; the Auto pool skips NaN too). A nanowell with no value of the metric is
@@ -13650,7 +13654,7 @@ the metric; the frame's own µm/px; and a note of what it leaves out.
 - **Colormaps.** A metric map defaults to `viridis` (`builder_view._default_colormap_for`) whatever channel its name
   carries, because a black-based ramp would draw its lowest values in the background's black. A fold change
   (`observations.fold_change_scale`) defaults to the diverging `coolwarm`, and `builder_view.new_channel_spec` turns
-  on log scale for a ratio; the pooled Auto window is then centred on "no change" (`controller._centred_window`):
+  on log scale for a ratio; the pooled Auto window is then centred on "no change" (`_colour_key.centred_window`, called by `_auto_lut._compute_auto_luts`):
   `(1/k, k)` for a ratio, `(-m, m)` for a fold change already on a log scale. Transmitted light — `MONTAGE`, the
   run's phase channel, or a channel named phase / BF / DIC / TL as a whole word — defaults to `Greys`
   (`builder_view._is_transmitted`); a tint made the phase montage read as fluorescence. `viridis` and `coolwarm` are
@@ -13663,7 +13667,7 @@ the metric; the frame's own µm/px; and a note of what it leaves out.
   `_colour_key.key_ticks`); what the window is — one shared by every well shown, a fixed one, or each cell's own —
   and, because Auto pools over the pixels shown, "fitted to the cropped region" while a crop is set, so a whole and a
   cropped export that colour one nanowell differently say why; and for a metric map the "no value" ring. The live grid adds it as a label under the cells
-  (`controller._add_colour_key`), the saved figure as an axes below the grid in the publication palette
+  (`colour_key_view.add_colour_key`), the saved figure as an axes below the grid in the publication palette
   (`export._draw_colour_key`), and the PowerPoint plan as a "Colour key" picture of its own (`FrameCollector.add_key`).
   A LUT row's **per cell** (`ChannelSpec.auto_per_cell`) keeps that channel out of the pooled window, so each cell is
   scaled to its own range; the key then says the colours are not comparable between cells.

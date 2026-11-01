@@ -80,7 +80,7 @@ def test_a_fold_change_map_is_diverging_log_scaled_and_its_window_centred_on_no_
 
 
 def test_a_fold_change_already_on_a_log_scale_is_centred_on_zero(qtbot, tmp_path):
-    from review.features.image_browser.image_table.controller import _centred_window
+    from review.features.image_browser.image_table._colour_key import centred_window as _centred_window
 
     ctx = _loaded(qtbot, tmp_path)
     assert _centred_window(ctx, [-0.5, 2.0, None, LOG2_FC]) == (-2.0, 2.0)
@@ -133,7 +133,9 @@ def test_the_key_names_each_metric_in_full_with_the_window_its_cells_are_drawn_i
     # A ratio window of (1/4, 4) on a log scale puts "no change" at the strip's middle, and nowhere else.
     assert key_ticks(keys[2]) == [(0.0, "0.25"), (1.0, "4"), (pytest.approx(0.5), "1 = no change")]
     assert key_ticks(keys[1]) == [(0.0, f"{min(measured):.3g}"), (1.0, f"{max(measured):.3g}")]
-    rgb = key_rgb(keys, width_px=520)
+    from review.features.image_browser.image_table.image_compose import _load_chrome_font
+
+    rgb = key_rgb(keys, width_px=520, font=_load_chrome_font)
     assert rgb.shape[1] == 520 and rgb.shape[0] > 3 * 40
     assert keys[1].scope == "one window shared by all 2 wells"
 

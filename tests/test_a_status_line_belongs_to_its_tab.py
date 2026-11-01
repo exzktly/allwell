@@ -1,4 +1,4 @@
-"""A status line belongs to the tab that wrote it (NANOWELL_OBSERVATIONS_TRACKER #19).
+"""A status line belongs to the tab that wrote it (ARCHITECTURE §6.2l).
 
 Opening Segmentation after generating an Image Table left "Image Table: generated 0 of 12 cells…" in the status
 bar, and every Image Browser tab showed the Line plot's "36 of 36 nuclei included": the line describes a tab that is

@@ -1,5 +1,5 @@
 """Heat Map under **Observations: Nanowells**: the plate grid coloured by each cell's wells' nanowell medians
-(NANOWELL_OBSERVATIONS_TRACKER #15).
+(ARCHITECTURE §6.2l).
 
 A grid cell holds one well or a replicate set's wells; its value is the mean over those wells of each well's median
 of the band's nanowell metric at the heat map's timepoint, and its ``±`` is the SEM over wells (none for one well) —

@@ -31,6 +31,9 @@ NANOWELLS = "nanowells"
 OBSERVATION_LABELS = {CELLS: "Cells", NANOWELLS: "Nanowells"}
 #: The registry service the Nanowells feature answers with an :class:`ObservationTable`.
 NANOWELL_SERVICE = "observations.nanowell"
+#: The registry service the same feature answers with those observations' metrics alone (no rows read), for a
+#: picker that lists them while a plate opens.
+NANOWELL_METRICS_SERVICE = "observations.nanowell_metrics"
 
 #: A per-cell column holding the cell's own nanowell's metric: ``nw::<metric key>``. A nanowell metric is not a
 #: fluorescence intensity, so no ON cutoff or fluorescence gate applies to it (``metric_registry``).

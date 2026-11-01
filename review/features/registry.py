@@ -317,6 +317,12 @@ def _svc_nanowell_observations():
     return nanowell_observations
 
 
+def _svc_nanowell_metric_specs():
+    # The same observations' metric names alone, read from the tables' header rows (review/domain/observation.py).
+    from review.features.nanowell.observation_compute import nanowell_metric_specs
+    return nanowell_metric_specs
+
+
 def _svc_nanowell_follow_qc_params():
     from review.features.nanowell.controller import nw_on_qc_params_changed
     return nw_on_qc_params_changed
@@ -1134,6 +1140,7 @@ def _features() -> list[FeatureDescriptor]:
             services={"nanowell.open_anchor": _svc_nanowell_open_anchor,
                       "nanowell.follow_qc_params": _svc_nanowell_follow_qc_params,
                       "observations.nanowell": _svc_nanowell_observations,
+                      "observations.nanowell_metrics": _svc_nanowell_metric_specs,
                       "segmentation.nanowell_overlay": _svc_nanowell_segmentation_overlay},
         ),
         # ── Images ────────────────────────────────────────────────────────

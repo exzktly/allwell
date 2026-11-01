@@ -414,6 +414,38 @@ def nanowell_wells(folder: Path) -> list[str]:
     return [path.stem for path in sorted(folder.glob("*.csv"))]
 
 
+def site_channels(data_dir, wells) -> list[str] | None:
+    """The fluorescence channels :func:`load_nanowell_data` would report for *wells* (``NanowellData.channels``),
+    read from the site tables' header rows alone; ``None`` for a dataset with no nanowell tables or a scheme this
+    version does not read (where :func:`load_nanowell_data` returns nothing or raises).
+
+    For a caller that needs only the metric *names* — the per-cell Scatter's "Nanowell ▸" picker entries — and must
+    not read and compute whole tables to get them: building those pickers on the GUI thread while a plate opened
+    cost seconds. The one difference: a well whose table :func:`read_well_part` would refuse (no grid record,
+    repeated addresses) still contributes its columns here, so a channel only such a well carries is offered and
+    then draws no rows, which its plot's footer explains."""
+    data_dir = Path(data_dir)
+    folder = nanowell_dir(data_dir)
+    if folder is None:
+        return None
+    sidecar = _sidecar(data_dir)
+    block = sidecar.get("nanowell")
+    if isinstance(block, dict) and block.get("scheme_version") not in SUPPORTED_SCHEMES:
+        return None
+    wanted = set(wells)
+    columns: set[str] = set()
+    for well in nanowell_wells(folder):
+        if well not in wanted:
+            continue
+        try:
+            columns.update(pd.read_csv(folder / f"{well}.csv", nrows=0).columns)
+        except (OSError, ValueError, pd.errors.ParserError):
+            continue                                  # unreadable: load_nanowell_data leaves the well out too
+    phase = _phase_token(sidecar)
+    return sorted({c[: -len("_integrated")] for c in columns if c.endswith("_integrated")}
+                  - {c for c in (c[: -len("_integrated")] for c in columns) if c.lower() == phase})
+
+
 def load_nanowell_data(data_dir, wells=None, parts: dict | None = None, on_well=None) -> NanowellData | None:
     """The dataset's nanowell tables, or ``None`` for a dataset that was not run in nanowell mode.
 

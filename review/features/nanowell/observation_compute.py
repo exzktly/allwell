@@ -23,7 +23,7 @@ from pathlib import Path
 import pandas as pd
 
 from review.domain.observation import NANOWELLS, ObservationMetric, ObservationTable
-from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
+from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data, site_channels
 from review.features.nanowell.controller import gate_tally, gate_version, sync_focus_rule
 from review.features.nanowell.distribution_compute import METRICS
 from review.features.nanowell.series_compute import exclusion_reason, metric_kinds, site_metrics
@@ -64,6 +64,18 @@ def _frame(metrics: pd.DataFrame) -> pd.DataFrame:
     # cell rows) select the same rows here. ``time_h`` stays the acquisition record's clock, which may differ.
     frame["timepoint_hours"] = frame["timepoint"].map(timepoint_hours)
     return frame.reset_index(drop=True)
+
+
+def nanowell_metric_specs(ctx, wells) -> tuple[ObservationMetric, ...] | None:
+    """The metrics :func:`nanowell_observations` would offer for *wells*, without reading or computing any rows
+    (``collect.site_channels`` reads the header rows only); ``None`` when the dataset holds no nanowell tables.
+    The registry service ``observations.nanowell_metrics``, for a picker that lists the metrics while a plate
+    opens."""
+    data_dir = getattr(ctx.state.dataset, "data_dir", None)
+    if not data_dir:
+        return None
+    channels = site_channels(Path(data_dir), sorted(set(wells or ())))
+    return None if channels is None else _metric_specs(channels)
 
 
 def nanowell_observations(ctx, wells) -> ObservationTable | None:

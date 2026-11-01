@@ -1,5 +1,5 @@
 """Bar, Line and Heat Map under Observations: Nanowells draw each well's median over its nanowells, and wells are
-the replicates (NANOWELL_OBSERVATIONS_TRACKER #13, #14, #15).
+the replicates (ARCHITECTURE §6.2l).
 
 The fixture is chosen so the plausible wrong answers differ (CLAUDE.md §7.8 #2). At 24 h A01's five nanowells hold
 3, 2, 0, 4, 5 cells and B01's 2, 4, 1, 0, 0: the well medians are 3 and 1, the well means 2.8 and 1.4, and the

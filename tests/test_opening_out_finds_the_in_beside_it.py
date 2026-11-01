@@ -1,4 +1,4 @@
-"""Opening ``out/`` directly finds the ``in/`` beside it (NANOWELL_OBSERVATIONS_TRACKER #2).
+"""Opening ``out/`` directly finds the ``in/`` beside it (ARCHITECTURE §6.2l).
 
 The loader recognised only ``<root>`` holding ``in/`` + ``out/``; opening ``out/`` left ``in_dir`` unset and every
 input-frame reader said its image was missing, naming ``in/`` as the remedy while it sat beside the folder.

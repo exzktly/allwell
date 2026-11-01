@@ -138,6 +138,14 @@ def _walk(node):
 ast.walk = _walk
 
 
+def parse_text(source: str, filename: str = "<unknown>") -> ast.Module:
+    """The parsed module for repository *source* text, from the same per-process cache as :func:`parse_source`.
+
+    For a guard that is handed a file's text rather than its path — usually because its own bite test hands it
+    synthetic text too. The tree is shared: read it, never mutate it."""
+    return _parse_text(source, filename)
+
+
 def parse_source(path: Path | str) -> ast.Module:
     """The parsed module at ``path``, from a per-process cache.
 

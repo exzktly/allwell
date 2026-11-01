@@ -39,7 +39,7 @@ import ast
 import builtins
 import symtable
 
-from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_text, python_sources, rel
 
 #: Names the runtime injects into a module without any binding appearing in it.
 #: ``__file__`` and friends are the whole list; anything else here would be a
@@ -95,7 +95,7 @@ def annotation_offenders_in(source: str, path: str) -> list[str]:
     neither ``symtable`` above nor ruff can see them; they surface only when
     something calls ``typing.get_type_hints``.
     """
-    tree = ast.parse(source, path)
+    tree = parse_text(source, path)
     bound: set[str] = set(_RUNTIME_GLOBALS)
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):

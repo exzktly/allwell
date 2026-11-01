@@ -36,4 +36,4 @@ States: `open`, `done` (with the evidence), `declined` (with the reason).
 | F3 | Fast-lane selection in `scripts/test.sh` and CI, with the docs lane folded in | open | |
 | F4 | Tests, docs, measurement after | open | |
 | G1 | Profile the always-run files (587 s, 45% of the fast lane): where the time goes, by phase and by shared cost | done | serial profile of the 170 always-run files: 538 s, 485 s of it in test bodies; `ast.walk` (a Python generator) re-walking the shared trees is the largest single cost in the guards profiled. The 60,744 `rmdir` calls seen once are pytest clearing earlier sessions' temp dirs, local only |
-| G2 | Cut the shared costs G1 finds, without weakening any guard | open | |
+| G2 | Cut the shared costs G1 finds, without weakening any guard | done | the walk replay (`d531b24`): fast lane 6 min 11 s → 5 min 00 s wall, always-run files 587 s → 346 s; four guards that re-parsed every file now share the parse (`parse_text`): 37 s → 24 s serially. A flattened `ast.walk` was tried and reverted: 16% faster on its own, no measurable gain in the lane. What remains is a long tail of guards at a few seconds each |

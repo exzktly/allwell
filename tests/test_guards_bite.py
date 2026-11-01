@@ -5811,3 +5811,4 @@ def test_a_replayed_walk_of_a_shared_tree_is_the_walk_it_replaces(tmp_path):
     other.write_text(source.replace("x = f(1)", "x = f(1)\n    y = 2"), encoding="utf-8")
     second = parse_source(other)
     assert len(list(ast.walk(second))) == len(list(_repo_scan._ast_walk(second))) > len(expected)
+

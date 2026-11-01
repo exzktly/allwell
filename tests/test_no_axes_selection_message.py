@@ -28,7 +28,7 @@ from __future__ import annotations
 import ast
 import re
 
-from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_text, python_sources, rel
 
 #: Files allowed to paint a selection *prompt* onto axes, with the reason.
 #: Empty, and that is the point: the export renderers write
@@ -118,7 +118,7 @@ def _text_of(arg, consts: dict[str, str]) -> str | None:
 
 def _offenders_in(path, source: str) -> list[str]:
     try:
-        tree = ast.parse(source)
+        tree = parse_text(source)
     except SyntaxError:  # pragma: no cover - a syntax error is another test's job
         return []
     consts = _string_constants(tree)

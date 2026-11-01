@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import ast
 
-from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_text, python_sources, rel
 
 #: The six columns ``load_well_csv`` may store as categories. Restated here
 #: rather than imported so this guard can be run against a base branch that
@@ -98,7 +98,7 @@ def _receiver_column(node: ast.AST) -> str | None:
 def offenders_in(source: str, path: str) -> list[str]:
     """Every direct fill of a text column in *source*."""
     try:
-        tree = ast.parse(source, path)
+        tree = parse_text(source, path)
     except SyntaxError:  # pragma: no cover - a file we cannot parse
         return []
     out: list[str] = []

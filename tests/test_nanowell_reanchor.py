@@ -89,9 +89,10 @@ def test_an_anchor_that_itself_came_from_the_plate_is_not_evidence_for_another_w
 
 
 # ── end to end ───────────────────────────────────────────────────────────────
-def _write_plate(tmp_path, dark_rim=()):
+def _write_plate(tmp_path, dark_rim=(), cells=0):
     """Four 1-tile wells imaged twice; between the timepoints the plate turns by THETA and shifts. *dark_rim* are
-    sites of B02 drawn dark at 0h (a bubble along its rim)."""
+    sites of B02 drawn dark at 0h (a bubble along its rim); *cells* are drawn in every well at each timepoint (drawn
+    after the array, so they move no nanowell)."""
     plate = tmp_path / "plate"
     (plate / "in").mkdir(parents=True)
     rotation = _screen_rotation(THETA)
@@ -103,9 +104,10 @@ def _write_plate(tmp_path, dark_rim=()):
         s1 = rotation @ (s0 - CENTRE) + CENTRE + SHIFT
         camera1 = np.array(q) + (20.0, -10.0)             # the camera revisits each well roughly where it was
         first, rec0 = build_well(rows=1, cols=1, tile=TILE, well=well, timepoint="0h", seed=11, radius_fraction=0.26,
-                                 dark_sites=dark_rim if well == "B02" else ())
+                                 dark_sites=dark_rim if well == "B02" else (), cells=cells)
         second, rec1 = build_well(rows=1, cols=1, tile=TILE, well=well, timepoint="24h", seed=12,
-                                  rotation=7.0 + THETA, array_shift_um=tuple(s1 - camera1 - UNION), radius_fraction=0.26)
+                                  rotation=7.0 + THETA, array_shift_um=tuple(s1 - camera1 - UNION), radius_fraction=0.26,
+                                  cells=cells)
         for rec, camera in ((rec0, np.array(q)), (rec1, camera1)):
             for tile in rec["tiles"]:
                 tile["stage_xy_um"] = list(camera + np.array(tile["mosaic_xy_px"]) * PX)

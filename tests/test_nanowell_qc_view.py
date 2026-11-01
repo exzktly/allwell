@@ -121,8 +121,9 @@ def _write_sidecar(out, well, verdicts, excluded=()):
     for tp, sites in excluded:
         entries[tp]["excluded"] = [[q, r, "landed on a neighbour"] for q, r in sites]
     path = sidecar_path(out, well)
+    reference = next(tp for tp, v in verdicts.items() if v == "reference")
     path.write_text(json.dumps({"version": IDENTITY_VERSION, "well": well, "inputs": inputs_digest(out, well),
-                                "timepoints": entries}))
+                                "reference": reference, "reference_reason": "", "timepoints": entries}))
 
 
 @pytest.fixture

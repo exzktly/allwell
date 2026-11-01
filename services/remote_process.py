@@ -75,6 +75,7 @@ from services.remote_run_id import (
 )
 from services.remote_batch_staging import prune_staged, _empty_well_blanks, nanowell_reference_first
 from services.remote_reservation import QueueWaitSpent
+from services.remote_hold import HoldError, HoldQueueWaitSpent
 from services.remote_srun_retry import QUEUE_WAIT_EXIT, queue_wait_seconds
 from services.slurm_ids import is_step_launcher, launcher_job_id
 from services.remote_fetch_nanowells import held_wells, release_batch
@@ -715,6 +716,39 @@ class _BatchedRemoteProcess:
                                            if blanks else ()),
                                        suspend_request=paths.suspend_request,
                                        final_pass=self._final_pass)
+        if getattr(self._runner, "node_pending", lambda: False)():
+            # The granted node this run claimed is still being granted: the blanks and batch 1 go up while it queues,
+            # and the driver is launched once it is granted, after batch 1's upload (`launch_deferred_driver`).
+            self._deferred_driver = (host, run, driver, total, heartbeat)
+            return self._upload_blanks()
+        if not self._launch(host, run, driver, total, heartbeat):
+            return False
+        return self._upload_blanks()        # now the node request is in, not before it
+
+    def launch_deferred_driver(self) -> bool:
+        """Launch the driver `_start_driver` left for a granted node still being granted, once it is; ``True`` when
+        there is nothing left to launch or it launched. Called after each batch's upload; only batch 1's finds one."""
+        deferred, self._deferred_driver = getattr(self, "_deferred_driver", None), None
+        if deferred is None:
+            return True
+        try:
+            self._runner.await_granted_node()
+        except HoldQueueWaitSpent as spent:
+            fail(self, f"[remote] ERROR {spent}\n")
+            self._returncode = QUEUE_WAIT_EXIT
+            return False
+        except HoldError as exc:
+            if self._stop.is_set():
+                self._log("[remote] stopped before the first batch\n")
+                self._returncode = 130
+            else:
+                fail(self, f"[remote] ERROR {exc}\n")
+                self._returncode = 1
+            return False
+        return self._launch(*deferred)
+
+    def _launch(self, host, run, driver: str, total: int, heartbeat: str) -> bool:
+        """Start the driver — handed to the job queued before staging, or asked for now — and its reader."""
         # The job queued before staging, sized then for every batch the plate could hold, takes the driver when it
         # still can; otherwise one is asked for now.
         proc = None
@@ -750,7 +784,7 @@ class _BatchedRemoteProcess:
             target=self._read_driver, args=(proc,), daemon=True,
             name="aw-batch-driver-reader")
         self._reader.start()
-        return self._upload_blanks()        # now the node request is in, not before it
+        return True
 
     def _launch_driver(self, host, run, driver: str, total: int) -> subprocess.Popen:
         """Ask the scheduler for the node the driver holds for the whole run, and start the ssh that waits on it."""

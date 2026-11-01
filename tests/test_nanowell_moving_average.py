@@ -222,7 +222,9 @@ def test_every_value_the_baseline_s_window_leaves_out_says_why(tmp_path):
 
 def test_the_baseline_s_window_needs_the_endpoint_s_and_a_baseline_with_something_before_it():
     assert mvc.baseline_window_for(2, 3, "tp:t2") == 3
-    assert mvc.baseline_window_for(2, 3, "first_measurable") == 3
+    # First measurable is the first timepoint with a value, so every earlier one has none: a complete window can
+    # never exist there, and leaving it on blanked every fold change of every nanowell.
+    assert mvc.baseline_window_for(2, 3, "first_measurable") == 0
     assert mvc.baseline_window_for(0, 3, "tp:t2") == 0                # the endpoint's average is off
     assert mvc.baseline_window_for(2, 3, "earliest") == 0             # nothing before the earliest timepoint
     assert mvc.baseline_window_for(2, 1, "tp:t2") == 0
@@ -416,11 +418,13 @@ def test_the_baseline_s_window_control_is_greyed_until_it_can_reach_the_figure(p
     assert "Turn on the Moving average first" in spin.toolTip()
     nwc.set_metric(page, "count_fc")
     page.widgets.get("_nw_moving_spin").setValue(2)
-    assert not spin.isEnabled() and "Earliest baseline has no timepoint before it" in spin.toolTip()
+    assert not spin.isEnabled() and "no measured timepoint before them" in spin.toolTip()
     st.baseline_moving = 2                                   # left in the control from an earlier baseline
     nwc.redraw(page)
     assert any("its one measured value, not averaged" in t for t in _texts(page))
     _rebaselined(qtbot, page, st, "first_measurable")
+    assert not spin.isEnabled() and "no measured timepoint before them" in spin.toolTip()
+    _rebaselined(qtbot, page, st, "tp:t_a")
     assert spin.isEnabled() and "\n\n(" not in spin.toolTip()
     spin.setValue(3)
     assert st.baseline_moving == 3

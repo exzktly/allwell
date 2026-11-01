@@ -186,6 +186,39 @@ def test_the_empty_reference_well_is_re_anchored_before_the_wells_read_against_i
     assert sorted(w for kind, w in events[2:] if kind == "start") == ["B03", "D07"]
 
 
+def test_a_well_the_pass_does_not_re_anchor_is_measured_again_when_the_reference_changes_under_it(tmp_path,
+                                                                                                   monkeypatch):
+    """The reference well's re-run can save a template for a timepoint it has only now been addressed at. D07 was
+    measured there earlier in the run, with no reference, and the pass re-runs only unaddressed timepoints, so D07
+    kept "the empty reference well has no timepoint" — now false — and the run reported success. D07 is measured
+    again in the same pass (an incremental re-run, no plate prediction), after the reference and never beside it;
+    a well whose reference keys still match is not."""
+    kwargs = {"_nanowell": {"plate_format": "100um", "empty_well": "C05"}}
+    wells = {"B03": {"T01": ANCHORED, "T05": WAITING}, "C05": {"T01": ANCHORED, "T05": WAITING},
+             "D07": {"T01": ANCHORED, "T05": ANCHORED}, "E09": {"T01": ANCHORED, "T05": ANCHORED}}
+    out, zips = _plate(tmp_path, wells, kwargs)
+    monkeypatch.setattr(nt, "plan_reanchor", lambda members: ({"B03": {"T05": 1}, "C05": {"T05": 1}}, {}))
+    saved = {"reference": False}
+    calls: list = []
+
+    def rerun(well, *a, **k):
+        calls.append((well, k.get("plate_rigid"), saved["reference"]))
+        if well == "C05":
+            saved["reference"] = True              # the reference's re-run saves a template for T05
+
+    monkeypatch.setattr(nt, "run_zip_task", rerun)
+    # D07's recorded key at T05 no longer matches once the reference has changed; E09 measured nothing there that
+    # the change touches.
+    monkeypatch.setattr(nt, "confluence_reference_current",
+                        lambda output_dir, well, template: not (saved["reference"] and well == "D07"))
+    nt.reanchor_plate(out, zips, kwargs, "P", [], "m", ["experiment"], "_", "k", grouper=None, parse=None)
+    assert calls[0] == ("C05", {"T05": 1}, False)
+    assert ("D07", None, True) in calls, calls
+    assert ("B03", {"T05": 1}, True) in calls
+    assert not any(well == "E09" for well, *_ in calls)
+    assert len(calls) == 3
+
+
 # ── the driver runs the final pass (F4) ──────────────────────────────────────
 
 def _drive(tmp_path, flag):

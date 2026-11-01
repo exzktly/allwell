@@ -279,6 +279,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_remote_run_over_a_failing_link.py": "The same pair over a link whose nth ssh fails or one call hangs: correct or visibly failed (tracker P1)",
     "test_a_run_on_a_granted_node_is_a_step.py": "While a node is granted a run launches as a step of it: plainly, with a job.step sidecar, announcing no queue wait",
     "test_a_run_claims_the_granted_node.py": "A run claims the granted node one at a time, waits for it and asks for none of its own, and gets a fresh one when it would outlast the limit",
+    "test_a_queued_granted_node_overlaps_the_upload.py": "A run claims a granted node that is still queued at once, uploads the plate meanwhile, and waits for the grant only at launch",
     "test_quitting_gives_back_the_granted_node.py": "Quitting releases the nodes this window asked for, only stops beating for one it found, and cannot hang on a silent host",
     "test_manage_remotes_granted_node.py": "Manage Remotes' Granted node panel: Request, Release (asking first while a run uses the node), Test the node, and finding a node already granted",
     "test_a_failed_run_is_rerun_on_the_same_granted_node.py": "Request a node, run, fail, run again: the same node, no second allocation, and the end of a run never cancels the node",

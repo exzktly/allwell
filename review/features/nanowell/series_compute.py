@@ -326,11 +326,15 @@ def crop_metric_lines(row, channel: str | None = None) -> list[str]:
 
 def compact_number(value: float) -> str:
     """*value* to three significant figures, thousands and millions as ``k`` and ``M`` (``5.79k``), so a caption
-    under a crop stays as narrow as the crop."""
+    under a crop stays as narrow as the crop.
+
+    The value is rounded before the suffix is chosen: chosen from the unrounded value, 999.7 rounded up to 1000
+    with no suffix and was written ``1e+03``, and 999,800 became ``1e+03k``."""
+    rounded = float(f"{value:.3g}")
     for scale, suffix in ((1e9, "G"), (1e6, "M"), (1e3, "k")):
-        if abs(value) >= scale:
-            return f"{value / scale:.3g}{suffix}"
-    return f"{value:.3g}"
+        if abs(rounded) >= scale:
+            return f"{rounded / scale:.3g}{suffix}"
+    return f"{rounded:.3g}"
 
 
 # ── why a value is missing ───────────────────────────────────────────────────

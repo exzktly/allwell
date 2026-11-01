@@ -329,3 +329,17 @@ def test_a_swarm_too_full_for_its_slot_says_how_many_dots_are_hidden_under_it():
     hidden = int(texts["nw-hidden"].split(" ")[0].lstrip("+").replace(",", ""))
     assert texts["nw-used"] == "n = 3,040" and texts["nw-excluded"] == "excl. 10"
     assert texts["nw-hidden"].endswith("at 0") and drawn + hidden == 3040 and hidden > 0
+
+
+def test_the_wells_panel_s_title_gives_the_hours_unless_the_name_is_them(tmp_path):
+    """The title left the hours out whenever their digits occurred in the timepoint's name: ``T12`` imaged at 2 h was
+    titled "At T12", since ``"2" in "T12"``. Only a name that *is* its hours leaves them out."""
+    metrics, data = _plate(tmp_path, {"A01": {"t_c": [1, 1], "t_a": [2, 2]}})
+    for name, hours, title in (("T12", 2.0, "At T12 · 2 h"), ("24 h", 24.0, "At 24 h"), ("24h", 24.0, "At 24h")):
+        frame = metrics.copy()
+        frame.loc[frame["timepoint"] == "t_a", "time_h"] = hours
+        frame["timepoint"] = frame["timepoint"].replace({"t_a": name})
+        model = dc.distribution_model(frame, "count_fc", channels=data.channels, axis=dc.WELLS,
+                                      groups={"treated": ["A01"]}, timepoint=name)
+        assert model.panels[0].title == title
+    assert dc.names_its_hours("24", 24.0) and not dc.names_its_hours("T12", 2.0)

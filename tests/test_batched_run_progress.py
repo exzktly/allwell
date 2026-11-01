@@ -435,11 +435,15 @@ def test_both_launch_paths_announce_the_handoff():
     src = inspect.getsource(rr) + inspect.getsource(rp)
     # Once as the definition, once per launch site.
     assert src.count("_scheduler_handoff_lines") >= 3
-    # The driver is launched by `_launch_driver`, which `_start_driver` falls back to when no job was queued
-    # before staging (a job that was says so itself: `services.remote_reservation`).
-    batched = inspect.getsource(remote_process._BatchedRemoteProcess._launch_driver)
+    # The driver is launched by `_launch_driver`, which `_launch` falls back to when no job was queued before
+    # staging (a job that was says so itself: `services.remote_reservation`). `_start_driver` calls `_launch` at
+    # once, or leaves it to `launch_deferred_driver` after batch 1's upload while a claimed granted node is queued.
+    cls = remote_process._BatchedRemoteProcess
+    batched = inspect.getsource(cls._launch_driver)
     assert "_scheduler_handoff_lines" in batched, "the batched path went quiet"
-    assert "self._launch_driver(" in inspect.getsource(remote_process._BatchedRemoteProcess._start_driver)
+    assert "self._launch_driver(" in inspect.getsource(cls._launch)
+    assert "self._launch(" in inspect.getsource(cls._start_driver)
+    assert "self._launch(" in inspect.getsource(cls.launch_deferred_driver)
     loop = inspect.getsource(remote_process._BatchedRemoteProcess._run_batches)
     assert "_scheduler_handoff_lines" not in loop, (
         "one allocation for the run means one hand-off announcement")

@@ -400,6 +400,9 @@ def test_a_refused_request_is_in_the_record_with_the_schedulers_words(cluster, n
     record = "\n".join(node.transcript.lines())
     assert "Requested node configuration is not available" in record
     assert "the request did not complete" in record
+    # The sbatch that was refused, with what it asked for: the record promises "the sbatch that was sent".
+    sent = [line for line in node.transcript.lines() if "sbatch " in line and "refused" in line]
+    assert sent and "--time=" in sent[0], record
 
 
 def test_release_and_the_runs_own_lines_are_in_the_record_too(cluster, nodes):

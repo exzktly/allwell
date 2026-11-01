@@ -35,7 +35,10 @@ def test_a_missing_measurement_is_left_out_and_a_state_without_numbers_is_named(
 
 
 @pytest.mark.parametrize("value, text", [(5790.0, "5.79k"), (812.0, "812"), (2.5e6, "2.5M"), (-1234.0, "-1.23k"),
-                                         (0.0123, "0.0123")])
+                                         (0.0123, "0.0123"),
+                                         # just below a unit boundary the rounded value takes the next suffix,
+                                         # rather than being written 1e+03 / 1e+03k
+                                         (999.7, "1k"), (999_800.0, "1M"), (-999.7, "-1k"), (999.4, "999")])
 def test_big_numbers_are_written_short(value, text):
     assert compact_number(value) == text
 

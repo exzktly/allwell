@@ -146,6 +146,28 @@ def test_a_nanowell_on_a_seam_is_counted_from_a_blended_crop():
     assert len(measured.cells["label"]) == 1 and measured.cells["fov"][0] in {"F0", "F1", "F2", "F3"}
 
 
+def test_a_cell_counted_on_a_seam_does_not_share_its_identity_with_a_cell_of_the_tile_it_is_reported_under():
+    """A seam tile is its own image, so its segmentation numbers its cells from 1 again; its cells are reported under
+    the real tile their nanowell's row names. With the seam image's labels kept, a seam cell answered to the same
+    ``(fov, nucleus_id)`` as that tile's own cell of the same number — two cells, one identity in Review. Cells are
+    painted on the seam and inside the tiles, so both kinds are counted under the same reported tiles."""
+    import collections
+
+    rendered, record = build_well(overlap=0.03)
+    seam_x = rendered.true_left_top_um["F1"][0] + 0.5 * 0.03 * rendered.plan.extent_um[0]
+    sites = np.asarray(rendered.sites_um)
+    for i in np.argsort(np.abs(sites[:, 0] - seam_x))[:6]:
+        paint_cell(rendered, sites[i])
+    for i in range(0, len(sites), 7):
+        paint_cell(rendered, sites[i])
+    located = nr.locate_timepoint("T0", record, "A01", rendered.images, SETTINGS)
+    measured = nr.measure_timepoint(located, rendered.images, SETTINGS, located.boundary["radius_um"],
+                                    segmenter=threshold_segmenter())
+    keys = collections.Counter(zip(measured.cells["fov"], measured.cells["label"]))
+    assert len(keys) > 10 and all(str(f).startswith("F") for f, _label in keys)
+    assert {k: n for k, n in keys.items() if n > 1} == {}, "two cells answer to one (fov, nucleus_id)"
+
+
 def _loader(rendered):
     return lambda tp, tile: rendered.images.get(tile)
 

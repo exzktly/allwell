@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from services.remote_transport import _remote_quote
 from services.slurm_ids import hold_check_shell, is_step, squeue_listing
 from services.subprocess_text import TEXT_UTF8
+from util.bounded_run import run_bounded
 
 #: How long one probe may take. It runs on a thread of its own, but a probe that
 #: hangs is a probe that says nothing, so it is cut off and reported as such.
@@ -89,7 +90,7 @@ def probe(host, pidfile: str, *, scheduler: bool, job_hint: str = "",
     """
     name = getattr(host, "name", "") or getattr(host, "ssh_alias", "the host")
     try:
-        result = subprocess.run(host.ssh_argv(allocate_tty=False) + [
+        result = run_bounded(host.ssh_argv(allocate_tty=False) + [
             _script(pidfile, job_hint, getattr(host, "remote_staging_dir", "~/.allwell-staging"))],
                                 capture_output=True, timeout=timeout_s, **TEXT_UTF8)
     except subprocess.TimeoutExpired:
@@ -149,7 +150,7 @@ def cancel_pending(host, job_id: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> 
               '[ "$(squeue -h -j "$_jid" -o %T 2>/dev/null | head -n1)" = PENDING ] && '
               'scancel -u "$_aw_me" "$_jid" 2>/dev/null; echo AW_END')
     try:
-        result = subprocess.run(host.ssh_argv(allocate_tty=False) + [script],
+        result = run_bounded(host.ssh_argv(allocate_tty=False) + [script],
                                 capture_output=True, timeout=timeout_s, **TEXT_UTF8)
     except (subprocess.TimeoutExpired, OSError):
         return False

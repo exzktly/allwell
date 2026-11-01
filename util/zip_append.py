@@ -80,6 +80,7 @@ from pathlib import Path
 
 from util.aw_safe import swallow
 from util.zip_write import fsync_path
+from util.bounded_run import run_bounded
 
 __all__ = [
     "JOURNAL_SUFFIX",
@@ -259,7 +260,7 @@ def _machine_id() -> str | None:
         return None
     if sys.platform == "darwin":  # pragma: no cover - exercised on macOS only
         try:
-            out = subprocess.run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+            out = run_bounded(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
                                  capture_output=True, text=True, encoding="utf-8",
                                  errors="replace", timeout=5).stdout
         except (OSError, subprocess.SubprocessError):
@@ -300,7 +301,7 @@ def _process_started(pid: int) -> str | None:
     # text for the same process. Fixed here, the token is the same everywhere.
     env = {"PATH": os.environ.get("PATH", "/bin:/usr/bin"), "LC_ALL": "C", "TZ": "UTC0"}
     try:
-        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], env=env,
+        out = run_bounded(["ps", "-o", "lstart=", "-p", str(pid)], env=env,
                              capture_output=True, text=True, encoding="utf-8",
                              errors="replace", timeout=5).stdout.strip()
     except (OSError, subprocess.SubprocessError):

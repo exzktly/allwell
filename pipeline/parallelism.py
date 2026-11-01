@@ -49,6 +49,7 @@ import sys
 from dataclasses import dataclass
 
 from pipeline.slurm_node import node_specs_line
+from util.bounded_run import run_bounded
 
 #: The segmentation methods that run Cellpose (mirrors ``_CELLPOSE_METHODS`` in
 #: ``process_microscopy``, restated so this module imports nothing from it).
@@ -95,7 +96,7 @@ def visible_gpu_count() -> int:
     try:
         # Explicit UTF-8: the pipeline cannot import services.subprocess_text,
         # and a GPU name must not be decoded with a Windows code page.
-        out = subprocess.run(["nvidia-smi", "-L"], capture_output=True,
+        out = run_bounded(["nvidia-smi", "-L"], capture_output=True,
                              text=True, encoding="utf-8", errors="replace",
                              timeout=10, check=False)
     except (OSError, subprocess.SubprocessError):
@@ -132,6 +133,27 @@ def _cellpose_plan(method: str, workers: int, available: int,
         f"GPU — {n_gpu} visible; workers capped at {cap} "
         f"({CELLPOSE_WORKERS_PER_GPU} per GPU) so they do not all hold a CUDA "
         f"context on one device; each worker logs the device its model loaded on")
+
+
+def expected_workers(cpu_count: int, n_gpu: int, method: str, *, workers: int = 0, tf_threads: int = 0) -> int:
+    """How many workers :func:`plan_parallelism` will start on a Linux node with *cpu_count* CPUs and *n_gpu* visible
+    GPUs, for a run asking for *workers* / *tf_threads* (``0`` = the default) — worked out before the run, by the app,
+    which has neither the node nor its ``args``.
+
+    The same arithmetic as :func:`plan_parallelism` and :func:`_cellpose_plan` (one core kept back, ``tf_threads``
+    threads a worker, an explicit ``--workers`` clamped to the core budget, Cellpose capped at
+    :data:`CELLPOSE_WORKERS_PER_GPU` a GPU unless ``--workers`` was given);
+    ``tests/test_batch_size_follows_the_workers.py`` holds the two to the same answer. The remote batch size uses it
+    when the Analyze tab's Batch size is 0 (``services.remote_batch_auto``)."""
+    available = max(1, cpu_count - 1)
+    threads = min(tf_threads, available) if tf_threads > 0 else min(4, available)
+    count = max(1, available // threads)
+    override = workers > 0
+    if override:
+        count = max(1, min(workers, available))
+    if method in CELLPOSE_METHODS and n_gpu > 0 and not override:
+        count = min(count, n_gpu * CELLPOSE_WORKERS_PER_GPU)
+    return count
 
 
 def slurm_cpu_shortfall(cpu_count: int, *, node_cpus: int | None = None,

@@ -27,6 +27,7 @@ import os
 import re
 import socket
 import subprocess
+from util.bounded_run import run_bounded
 
 NODE_SPECS_PREFIX = "Slurm node specs — "
 
@@ -43,7 +44,7 @@ _PROBE_TIMEOUT_S = 10
 def _run(argv: list[str]) -> str:
     """A tool's stdout, or ``""`` when it is missing, fails or hangs."""
     try:
-        out = subprocess.run(argv, capture_output=True, text=True,
+        out = run_bounded(argv, capture_output=True, text=True,
                              encoding="utf-8", errors="replace",
                              timeout=_PROBE_TIMEOUT_S, check=False)
     except (OSError, subprocess.SubprocessError):

@@ -76,6 +76,9 @@ class _Remote:
         self.commands: list[str] = []
         self.exit_codes = [1, 0]          # the first run fails, the rerun succeeds
         self.steps = 0
+        #: What a step's stream says, and what happens on the host while it runs (both for the step launch only).
+        self.step_output: list[str] = []
+        self.during_step = None
 
         def launched(argv):
             script = unpack_login_shell_command(argv[-1])
@@ -87,8 +90,10 @@ class _Remote:
                 recorded = f"{HOLD}.{self.steps + 2}" if sidecar == "step" else HOLD      # "bare": an inner script that
                 self.fake.path("~" + match.group(1) + ".slurm").write_text(recorded + "\n")   # wrote $SLURM_JOB_ID only
                 self.cluster.add_step(f"{HOLD}.{self.steps + 2}")
+                if self.during_step is not None:
+                    self.during_step()
             proc = MagicMock()
-            proc.stdout = iter([])
+            proc.stdout = iter(list(self.step_output) if "--jobid" in script else [])
             # A job queued early, in a directory of its own, is not a run: it must not use up the scripted failure.
             code = 0 if "/reservations/" in script else (self.exit_codes.pop(0) if self.exit_codes else 0)
             proc.wait.return_value = code
@@ -211,3 +216,49 @@ def test_a_launched_command_that_recorded_only_the_job_id_still_cannot_cancel_th
     assert (remote.cluster.fake / "jobs" / HOLD).read_text().startswith("RUNNING")
     assert "the granted node's own job" in text and "left granted" in text
     assert not (remote.cluster.hold_dir(host) / "busy").exists()
+
+
+def test_a_step_ended_by_the_node_releasing_itself_is_not_blamed_on_an_scancel(
+        tmp_path, monkeypatch, plate, host, stop_fetchers):
+    """The reported case: the node's script stopped hearing from the app, released the node, and Slurm cancelled the
+    run's step with it — slurmstepd's line names no cause. The headline said "cancelled outside this app (an scancel by
+    you or an administrator)", which nobody had done.
+
+    Wrong implementations this rejects: reading the cancellation from slurmstepd's line alone (the scancel wording);
+    asking the node after the run has released its claim (the lease is gone, so nothing is asked); and naming the
+    release without the reason the node wrote."""
+    remote = _Remote(tmp_path, monkeypatch, host)
+    remote.request_the_node(host)
+    hold_dir = remote.cluster.hold_dir(host)
+    reason = ("All-Well stopped answering (2 min without a heartbeat) and the run using it had not been heard from "
+              "for 10 min either")
+
+    def node_releases_itself():
+        (hold_dir / "ended").write_text(reason + "\n", encoding="utf-8")
+        remote.cluster.set_job(int(HOLD), "COMPLETED", "None", "gpu-node-1")
+
+    remote.during_step = node_releases_itself
+    remote.step_output = [
+        "srun: Job step aborted: Waiting up to 32 seconds for job step to finish.\n",
+        f"slurmstepd: error: *** STEP {HOLD}.3 ON gpu-node-1 CANCELLED AT 2026-11-01T10:00:00 ***\n",
+    ]
+    r, text = _run_once(plate, host, stop_fetchers)
+    errors = [e for e in text.splitlines() if "was terminated" in e]
+    assert errors, text
+    headline = errors[-1]
+    assert "scancel by you or an administrator" not in headline, headline
+    assert f"the granted node gpu-node-1 ended, and step {HOLD}.3 with it: {reason}" in headline, headline
+    assert "slept" in headline, "the likeliest cause of the app going quiet is not named"
+
+
+def test_a_step_cancelled_while_the_node_is_still_granted_is_still_an_scancel(
+        tmp_path, monkeypatch, plate, host, stop_fetchers):
+    """The control: the node is alive, so whoever cancelled the step did it from outside, and the old words stand."""
+    remote = _Remote(tmp_path, monkeypatch, host)
+    remote.request_the_node(host)
+    remote.step_output = [
+        f"slurmstepd: error: *** STEP {HOLD}.3 ON gpu-node-1 CANCELLED AT 2026-11-01T10:00:00 ***\n",
+    ]
+    r, text = _run_once(plate, host, stop_fetchers)
+    assert "scancel by you or an administrator" in text, text
+    assert "the granted node gpu-node-1 ended" not in text

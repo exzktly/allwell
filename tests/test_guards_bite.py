@@ -3019,6 +3019,78 @@ TEXT_DECODE_VIOLATIONS = {
 }
 
 
+def test_text_decode_guard_sees_a_call_through_run_bounded(tmp_path, monkeypatch):
+    """``run_bounded`` takes ``subprocess.run``'s arguments, so a locale decode through it is the same defect."""
+    bad = _write(tmp_path, "bad_decode.py", 'from util.bounded_run import run_bounded\n\n'
+                                            'def probe(cmd):\n'
+                                            '    return run_bounded(cmd, capture_output=True, text=True, timeout=5)\n')
+    exc = _run_scan(monkeypatch, _DECODE_GUARD, _DECODE_TEST, [bad])
+    assert exc is not None and "bad_decode.py" in str(exc)
+
+
+# ── a captured subprocess's timeout holds on Windows ────────────────────────
+
+_TIMEOUT_GUARD = "tests.test_subprocess_timeouts_return_on_windows"
+_TIMEOUT_TEST = "test_no_captured_subprocess_can_outlive_its_timeout"
+
+TIMEOUT_VIOLATIONS = {
+    # The heartbeat's own shape before the fix (remote_transport.ssh_control).
+    "capture_output": 'import subprocess\n\n'
+                      'def beat(cmd):\n'
+                      '    return subprocess.run(cmd, capture_output=True, timeout=75)\n',
+    "stdout_pipe": 'import subprocess\n\n'
+                   'def probe(cmd):\n'
+                   '    return subprocess.run(cmd, stdout=subprocess.PIPE, timeout=5)\n',
+    "check_output": 'import subprocess\n\n'
+                    'def probe(cmd):\n'
+                    '    return subprocess.check_output(cmd, timeout=5)\n',
+    "aliased_module": 'import subprocess as sp\n\n'
+                      'def probe(cmd):\n'
+                      '    return sp.run(cmd, capture_output=True, timeout=5)\n',
+    "imported_run": 'from subprocess import run\n\n'
+                    'def probe(cmd):\n'
+                    '    return run(cmd, capture_output=True, timeout=5)\n',
+    # What ``subprocess.run`` does on Windows, written out by hand.
+    "hand_rolled": 'import subprocess\n\n'
+                   'def probe(cmd):\n'
+                   '    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)\n'
+                   '    try:\n'
+                   '        return p.communicate(timeout=5)\n'
+                   '    except subprocess.TimeoutExpired:\n'
+                   '        p.kill()\n'
+                   '        return p.communicate()\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(TIMEOUT_VIOLATIONS))
+def test_timeout_guard_catches_a_capture_that_can_outlive_its_timeout(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_timeout.py", TIMEOUT_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, _TIMEOUT_GUARD, _TIMEOUT_TEST, [bad])
+    assert exc is not None, f"the {shape} timeout violation went uncaught"
+    assert "bad_timeout.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", [
+    'from util.bounded_run import run_bounded\n\n'
+    'def beat(cmd):\n'
+    '    return run_bounded(cmd, capture_output=True, timeout=75)\n',
+    # Nothing captured: the pipes a grandchild could hold do not exist.
+    'import subprocess\n\n'
+    'def probe(cmd):\n'
+    '    return subprocess.run(cmd, stdout=subprocess.DEVNULL, timeout=5)\n',
+    # No timeout: nothing to outlive.
+    'import subprocess\n\n'
+    'def probe(cmd):\n'
+    '    return subprocess.run(cmd, capture_output=True)\n',
+    'import subprocess\n\n'
+    'def probe(cmd):\n'
+    '    return subprocess.run(cmd, capture_output=True, timeout=None)\n',
+])
+def test_timeout_guard_clears_a_bounded_or_uncaptured_call(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_timeout.py", shape)
+    assert _run_scan(monkeypatch, _TIMEOUT_GUARD, _TIMEOUT_TEST, [good]) is None
+
+
 @pytest.mark.parametrize("shape", sorted(TEXT_DECODE_VIOLATIONS))
 def test_text_decode_guard_catches_a_locale_decode(tmp_path, monkeypatch, shape):
     bad = _write(tmp_path, "bad_decode.py", TEXT_DECODE_VIOLATIONS[shape])

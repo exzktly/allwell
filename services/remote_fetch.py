@@ -114,6 +114,7 @@ from services.remote_scratch import (
     _transit_dir,
     _zip_is_complete,
 )
+from util.bounded_run import run_bounded
 
 
 #: Which well a ``_verify_local_manifest`` message is about. That method emits
@@ -625,7 +626,7 @@ class Fetcher:
             f"ls -ln -- {remote_path} 2>/dev/null | awk '{{print $5}}'\n"
         )
         try:
-            result = subprocess.run(
+            result = run_bounded(
                 self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
                 input=script.encode("utf-8"),
                 capture_output=True,

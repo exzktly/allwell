@@ -49,6 +49,7 @@ import sys
 from dataclasses import dataclass
 
 from pipeline.slurm_node import node_specs_line
+from util.bounded_run import run_bounded
 
 #: The segmentation methods that run Cellpose (mirrors ``_CELLPOSE_METHODS`` in
 #: ``process_microscopy``, restated so this module imports nothing from it).
@@ -95,7 +96,7 @@ def visible_gpu_count() -> int:
     try:
         # Explicit UTF-8: the pipeline cannot import services.subprocess_text,
         # and a GPU name must not be decoded with a Windows code page.
-        out = subprocess.run(["nvidia-smi", "-L"], capture_output=True,
+        out = run_bounded(["nvidia-smi", "-L"], capture_output=True,
                              text=True, encoding="utf-8", errors="replace",
                              timeout=10, check=False)
     except (OSError, subprocess.SubprocessError):

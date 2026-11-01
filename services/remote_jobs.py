@@ -22,6 +22,7 @@ from services.remote_run_state import _RemoteRun
 from services.remote_transport import _remote_quote
 from services.slurm_ids import closed_words, hold_check_shell
 from services.subprocess_text import TEXT_UTF8
+from util.bounded_run import run_bounded
 
 
 def _only_my_job(jid_var: str, marker: str) -> str:
@@ -57,7 +58,7 @@ def kill_remote_pipeline(host: RemoteHost, run: _RemoteRun) -> None:
     """
     pidfile_q = _remote_quote(run.remote_pidfile)
     try:
-        subprocess.run(
+        run_bounded(
             host.ssh_argv(allocate_tty=False) + [
                 f"kill -TERM $(cat {pidfile_q} 2>/dev/null) 2>/dev/null || true"
             ],
@@ -117,7 +118,7 @@ def close_remote_job(
         f'&& {{ rm -f {heartbeat_q}; echo "AW_SCANCELLED $_jid"; }} || true'
     )
     try:
-        result = subprocess.run(
+        result = run_bounded(
             host.ssh_argv(allocate_tty=False) + [cmd],
             capture_output=True, timeout=10, **TEXT_UTF8,
         )

@@ -37,6 +37,7 @@ from services.remote_transport import _remote_quote
 from services.slurm_ids import hold_check_shell, squeue_listing
 from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
 from services.subprocess_text import TEXT_UTF8
+from util.bounded_run import run_bounded
 
 #: ``squeue %T`` states of a job that has ended. Anything else it lists —
 #: ``PENDING``, ``RUNNING``, ``COMPLETING``, ``SUSPENDED`` … — is still alive:
@@ -172,7 +173,7 @@ def _sweep(host: RemoteHost, targets, log: Callable[[str], None]) -> list[tuple[
     script = "; ".join(_target_script(i, pidfile, hb, host.remote_staging_dir)
                        for i, (pidfile, hb, _where) in enumerate(targets))
     try:
-        result = subprocess.run(
+        result = run_bounded(
             host.ssh_argv(allocate_tty=False) + [script],
             capture_output=True, timeout=30 + CANCEL_SETTLE_S, **TEXT_UTF8,
         )

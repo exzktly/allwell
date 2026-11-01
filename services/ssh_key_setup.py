@@ -35,6 +35,7 @@ from pathlib import Path
 
 from services.remote_config import keepalive_options, known_hosts_options, resolve_ssh_binary
 from services.subprocess_text import TEXT_UTF8
+from util.bounded_run import run_bounded
 
 
 def default_key_path(alias: str) -> Path:
@@ -107,7 +108,7 @@ def generate_keypair(
         "-C", comment or f"allwell-{path.name}",
     ]
     try:
-        result = subprocess.run(
+        result = run_bounded(
             cmd, capture_output=True, timeout=30, **TEXT_UTF8,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
@@ -156,7 +157,7 @@ def key_has_passphrase(path: Path) -> bool:
     if not path.is_file():
         return False
     try:
-        result = subprocess.run(
+        result = run_bounded(
             ["ssh-keygen", "-y", "-P", "", "-f", str(path)],
             capture_output=True, timeout=10, **TEXT_UTF8,
         )
@@ -315,7 +316,7 @@ def probe_ssh_connection(
     cmd += [ssh_alias, "echo", "ok"]
 
     try:
-        result = subprocess.run(
+        result = run_bounded(
             cmd, capture_output=True, timeout=timeout, **TEXT_UTF8,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:

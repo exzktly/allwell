@@ -27,6 +27,7 @@ without one.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 from pipeline.suspend import LOG_MARKER as SUSPEND_MARKER
 from services.remote_srun_retry import REFUSAL_RETRIED_BOOT_EXCLUSIONS, REFUSAL_RETRIED_POWERED_ON
@@ -94,6 +95,10 @@ _RE_NODE_REQUESTED = re.compile(
     re.IGNORECASE)
 _RE_NODE_GRANTED = re.compile(
     r"\[remote\] scheduler: allocation granted|Well \S+\s+\S+\s+starting", re.IGNORECASE)
+
+#: The start of the reason a granted node's script writes when it stops hearing from the app
+#: (``services.remote_hold.compose_hold_script``).
+APP_SILENT_RELEASE = "All-Well stopped answering"
 
 #: What each slurmstepd cause means, said for the person reading the headline.
 _CAUSE_WORDS = {
@@ -185,13 +190,20 @@ class RunEvidence:
         self.ssh_reason = self.ssh_reason or early["ssh_reason"]
         self.no_node_fits = self.no_node_fits or early["no_node_fits"]
 
-    def termination(self, where: str = "Remote pipeline") -> str | None:
+    def termination(self, where: str = "Remote pipeline", *,
+                    node_ended: Callable[[str], str] | None = None) -> str | None:
         """The failure text for a run something other than the user ended, or
         ``None`` when the stream holds no such evidence.
 
         Asked only of a run the user neither stopped nor suspended: a suspend
         marker on such a run is a signal this app did not send, whatever its
         source, and the cause is named when the scheduler or the driver said it.
+
+        *node_ended* is asked, with the cancelled job's id, when slurmstepd named
+        no cause: it returns why the granted node that job is a step of ended
+        (``services.remote_hold.GrantedRun.why_ended``), or ``""``. A step is
+        cancelled without a cause whenever the node's own job ends, and that is
+        then the reason, not an ``scancel``.
         """
         resume = ("The wells that finished are kept; resume from the Analyze banner, or re-run "
                   "with 'incremental', to run the rest")
@@ -203,8 +215,15 @@ class RunEvidence:
         if self.cancelled is not None:
             job, node = self.cancelled.group("job"), self.cancelled.group("node")
             cause = (self.cancelled.group("cause") or "").strip()
-            said = _CAUSE_WORDS.get(cause, "job {job} was cancelled outside this app "
-                                    "(an scancel by you or an administrator)").format(job=job, node=node)
+            released = node_ended(job) if node_ended is not None and not cause else ""
+            if released:
+                said = f"the granted node {node} ended, and step {job} with it: {released}"
+                if APP_SILENT_RELEASE in released:
+                    said += (" — the node could not hear from this app, which usually means this computer slept "
+                             "(closing a laptop's lid sleeps it even during a run) or lost its network")
+            else:
+                said = _CAUSE_WORDS.get(cause, "job {job} was cancelled outside this app "
+                                        "(an scancel by you or an administrator)").format(job=job, node=node)
             hint = " — with a longer --time in the host's launcher, or a smaller batch" \
                 if cause == "TIME LIMIT" else ""
             return (f"{where} was terminated: {said}. {resume}{hint}. "

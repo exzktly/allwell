@@ -51,6 +51,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # process_microscopy at module top level, so the remote needs the package.
     "util/__init__.py",
     "util/aw_safe.py",
+    # Every captured subprocess with a timeout goes through it (the pipeline's nvidia-smi and Slurm probes among
+    # them), so that a timeout returns at the timeout on Windows too.
+    "util/bounded_run.py",
     # Versioned acquisition metadata is stdlib-only and shared by input readers.
     "util/acquisition_record.py",
     # Nanowell addressing and geometry are Qt-free; the manifest mirrors

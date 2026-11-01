@@ -36,14 +36,17 @@ ORDER = ["t_c", "t_a", "t_d", "t_b"]
 HOURS = [0.0, 5.0, 10.0, 30.0]
 
 
-def _row(tp, q, r, state="measured", n=None, c=None, gfp=None, fused=False):
+def _row(tp, q, r, state="measured", n=None, c=None, gfp=None, fused=False, bg=0.0):
+    """One site row as the pipeline writes it; *bg* is the GFP background the run took off (``GFP_background``),
+    written wherever the row has a GFP number, as a run always writes it."""
     measured = state in ("measured", "empty")
     return {"timepoint": tp, "nw_q": q, "nw_r": r, "nw_ring": max(abs(q), abs(r)) if q is not None else None,
             "well_x_um": 100.0, "well_y_um": 100.0, "owner": "F0", "radius_um": 50.0, "geometry": "fitted",
             "detected": True, "fused": fused, "imaged_fraction": 1.0, "visible_fraction": 1.0, "state": state,
             "partially_visible": False, "focus": 1.0, "n_cells": n if measured else None,
             "confluence": c if measured else None, "area_est_cells": n, "count_disagreement": False,
-            "consistency": None, "GFP_integrated": gfp, "GFP_mean_bg": None if gfp is None else gfp / 100}
+            "consistency": None, "GFP_integrated": gfp, "GFP_mean_bg": None if gfp is None else gfp / 100,
+            "GFP_background": None if gfp is None else bg}
 
 
 def _dataset(tmp_path, wells: dict, *, starts=STARTS, grids=None, scheme=SCHEME_VERSION, cells=None) -> Path:

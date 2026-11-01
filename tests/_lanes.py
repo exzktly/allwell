@@ -136,6 +136,7 @@ UI_LANE_FILES: dict[str, str] = {
 #: and the CI workflow to running this lane.
 NANOWELL_E2E_FILES = {
     "test_nanowell_run.py": "the (well, timepoint) task body on rendered tiles; 475 s",
+    "test_nanowell_empty_well_background_run.py": "fluorescence above the empty well's floor, through the real run; 200 s",
     "test_nanowell_confluence_reference_run.py": "confluence read against a named empty well, through the real run",
     "test_nanowell_threads_change_nothing.py": "a rendered well serial against threaded, and through the task",
     "test_nanowell_timepoint_frames.py": "a nanowell keeps its address across timepoints, on rendered tiles; 120 s",
@@ -212,6 +213,8 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_figures_read.py": "The Nanowells page's figures read at the size they are drawn: type scaled to the panel, …",
     "test_nanowell_fixed_cohort.py": "The fixed-cohort option (tracker I8): every line over time follows one set of nanowells",
     "test_nanowell_moving_average.py": "The moving average over time on Distribution and Trajectories (moving_compute)",
+    "test_nanowell_brightness_background.py": "Cell brightness is measured above the same background as nanowell …",
+    "test_nanowell_form_fluor_background.py": "The Analyze form's nanowell fluorescence background, and the Image …",
     "test_nanowell_metric_labels.py": "The Nanowells page's two fluorescence metrics say on every axis whether the …",
     "test_nanowell_fluorescence_channel.py": "Fluorescence on the Nanowells page: the page's own *Channel* control for Brightness and …",
     "test_nanowell_form.py": "The Nanowells section, driven through the real ``AnalyzeTab`` (tracker A1, A2, A3, A5; …",

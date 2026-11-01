@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from review.features.nanowell import moving_compute
+from review.features.nanowell import background_compute, moving_compute
 from review.features.nanowell.series_compute import exclusion_reason
 from review.features.nanowell.summary_compute import LOG_METRICS, group_summary, well_summary
 
@@ -35,16 +35,27 @@ TIME, WELLS = "time", "wells"
 METRICS = {
     "n": ("Cell count", False),
     "c": ("Confluence", False),
-    "brightness": ("Cell brightness (mean per cell, background included)", True),
-    "signal": ("Nanowell fluorescence (total, background subtracted)", True),
+    "brightness": ("Cell brightness (mean per cell)", True),
+    "signal": ("Nanowell fluorescence (total)", True),
     "count_fc": ("Count fold change", False),
     "log2_count_fc": ("log₂ count fold change, (n + 1) / (n₀ + 1)", False),
     "confluence_fc": ("Confluence fold change", False),
-    "brightness_fc": ("Cell brightness fold change (background included)", True),
-    "signal_fc": ("Nanowell fluorescence fold change (background subtracted)", True),
+    "brightness_fc": ("Cell brightness fold change", True),
+    "signal_fc": ("Nanowell fluorescence fold change", True),
     "growth_rate": ("Growth rate (per hour, from ln n)", False),
     "occupancy_class": ("Occupancy at baseline (cells)", False),
 }
+def metric_label(metric: str, channel: str | None = None, modes=()) -> str:
+    """*metric*'s axis label for wells whose fluorescence was measured under *modes* (``background_compute``, one per
+    well): a fluorescence metric names what its background was — "Cell brightness (mean per cell, empty-well
+    background subtracted) · GFP" — and a channel metric names its channel."""
+    label, needs = METRICS[metric]
+    words = background_compute.clause(metric, modes)
+    if words:
+        label = f"{label[:-1]}, {words})" if label.endswith(")") else f"{label} ({words})"
+    return label + (f" · {channel}" if needs and channel else "")
+
+
 def metric_labels() -> dict:
     """``metric -> label``, in the page's order — for a caller outside this feature (Batch Export) that reaches
     it through a lazy proxy, which can only call."""
@@ -281,7 +292,7 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
                        axis: str = TIME, groups: dict, timepoint: str = "", control: str = "",
                        time_source: str | None = None, baseline: str = "earliest",
                        cohort: bool = False, responding_above: float | None = None,
-                       moving: int = 0, baseline_moving: int = 0) -> DistributionModel:
+                       moving: int = 0, baseline_moving: int = 0, backgrounds: dict | None = None) -> DistributionModel:
     """The Distribution view for *groups* (``name -> wells``, as ``controller.replicate_groups`` gives).
 
     A group of one well is that well; a group of several is a replicate set. Only the wells named in
@@ -291,10 +302,12 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
     no values over time and ignores it. *baseline_moving* gives a fold change's baseline a window of its own
     (``moving_compute.rebase``, as ``moving_compute.baseline_window_for`` allows it), applied first, so the cohort
     is decided on the fold changes from that baseline and the endpoint's average is taken over them.
+    *backgrounds* (``well -> background_compute`` mode, ``NanowellData.fluor_backgrounds``) decides what the label says
+    the fluorescence was measured above.
     """
     column = metric_column(metric, channel)
-    label = METRICS[metric][0] + (f" · {channel}" if METRICS[metric][1] else "")
     wells = [w for members in groups.values() for w in members]
+    label = metric_label(metric, channel, [(backgrounds or {}).get(w, background_compute.FLOOR) for w in wells])
     frame = metrics[metrics["well"].isin(wells)]
     reasons = exclusion_reason(frame, column, channels)
     if metric in PER_NANOWELL:

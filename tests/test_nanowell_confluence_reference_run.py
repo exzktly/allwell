@@ -46,8 +46,9 @@ def _cells(rendered, per_site, seed):
             paint_cell(rendered, site, dx_um=reach * np.cos(angle), dy_um=reach * np.sin(angle))
 
 
-def _plate(root, wells: dict):
-    """``in/`` with one archive per well; *wells* maps a well to its cells per nanowell."""
+def _plate(root, wells: dict, gfp: dict | None = None):
+    """``in/`` with one archive per well; *wells* maps a well to its cells per nanowell, *gfp* a well to its GFP
+    level everywhere (10 when not named)."""
     plate = root / "plate"
     (plate / "in").mkdir(parents=True)
     record = None
@@ -63,7 +64,7 @@ def _plate(root, wells: dict):
         with zipfile.ZipFile(plate / "in" / f"{well}.zip", "w") as zf:
             for fov, image in rendered.images.items():
                 for channel, pixels in (("PHASE", np.array(image, dtype="float32")),
-                                        ("GFP", np.full(image.shape, 10.0, dtype="float32"))):
+                                        ("GFP", np.full(image.shape, (gfp or {}).get(well, 10.0), dtype="float32"))):
                     imwrite(str(tif), pixels)
                     zf.write(tif, f"exp_{channel}_{well}_{fov}_0h.tif")
     write_record_file(plate / "in" / "acquisition.json", record)

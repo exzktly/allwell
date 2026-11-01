@@ -202,7 +202,7 @@ def test_choosing_a_channel_on_the_page_draws_that_channel_s_brightness(page, qt
     gfp = _drawn_values(page)
     assert gfp and max(gfp) < 20                                  # GFP's cells read 10 + q
     _choose(page.widgets.get("_nw_channel_cb"), "RFP")
-    assert page.widgets.get("_nw_fig").axes[0].get_ylabel() == "Cell brightness (mean per cell, background included) · RFP"
+    assert page.widgets.get("_nw_fig").axes[0].get_ylabel() == "Cell brightness (mean per cell, own-well background subtracted) · RFP"
     assert _drawn_values(page) == pytest.approx([v + 40 for v in gfp])
     assert page.state.feature_slice("nanowell").channel == "RFP"
 
@@ -210,7 +210,7 @@ def test_choosing_a_channel_on_the_page_draws_that_channel_s_brightness(page, qt
 def test_a_fold_change_of_a_fluorescence_channel_is_drawn_for_the_page_s_channel(page):
     _choose(page.widgets.get("_nw_channel_cb"), "RFP")
     _choose(page.widgets.get("_nw_metric_cb"), "signal_fc")
-    assert page.widgets.get("_nw_fig").axes[0].get_ylabel() == "Nanowell fluorescence fold change (background subtracted) · RFP"
+    assert page.widgets.get("_nw_fig").axes[0].get_ylabel() == "Nanowell fluorescence fold change (own-well background subtracted) · RFP"
     from review.features.nanowell import controller as nwc
 
     assert nwc.drawn_metric_column(page) == "signal_fc_RFP"

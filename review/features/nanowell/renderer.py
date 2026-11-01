@@ -273,7 +273,10 @@ def _wrap_label(label: str, rows: int) -> str:
 
     if rows < 2 or len(label) <= 26:
         return label
-    return "\n".join(textwrap.wrap(label, max(26, -(-len(label) // 3))))
+    width = max(26, -(-len(label) // 3))
+    while len(lines := textwrap.wrap(label, width)) > 3:      # words break unevenly: widen until three lines hold it
+        width += 2
+    return "\n".join(lines)
 
 
 def _members_per_tick(model, panel) -> int:
@@ -515,7 +518,7 @@ DETAIL_ROWS = (("n", "Cell count"), ("c", "Confluence"))
 
 
 def render_site_detail(fig, series: list, *, channel: str | None = None, time_source: str | None = None,
-                       outside: dict | None = None) -> None:
+                       outside: dict | None = None, backgrounds=()) -> None:
     """One row per measurement, one line per selected nanowell, against recorded time (tracker V3).
 
     *series* is ``[(site, frame)]`` with ``frame`` from :func:`series_compute.site_series`. A timepoint
@@ -527,8 +530,11 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
     """
     fig.clear()
     outside = outside or {}
-    rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", "Cell brightness\nwith background"),
-                                (f"signal_{channel}", "Nanowell fluor.\nminus background")]
+    from review.features.nanowell.background_compute import short_clause
+
+    # Each fluorescence row's second line says what its background was (*backgrounds*: the wells' modes).
+    rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", f"Cell brightness\n{short_clause('brightness', backgrounds)}"),
+                                (f"signal_{channel}", f"Nanowell fluor.\n{short_clause('signal', backgrounds)}")]
                                 if channel else [])
     if not series:
         return

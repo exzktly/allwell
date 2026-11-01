@@ -109,7 +109,11 @@ MIN_LEVEL_CONTRAST = 0.05
 #: it covers every nanowell of the tile, instead of the well's own (``nanowell_run._segmenter_rim``): on a loaded plate
 #: the own template is built from nanowells that all hold cells, so dividing by it takes part of the cells away. Counts
 #: on that input move; the reference's saved verdict also carries its false-count baseline.
-MEASURE_VERSION = 8
+#: 9: a site row records each fluorescence channel's background (``<channel>_background``), the level its numbers
+#: are taken over, so Review takes the same level off the cells' mean intensity; and that level may be the empty
+#: reference well's floor at the same timepoint (``fluor_background``) instead of the tile's own. Rows without the
+#: column cannot have their cell brightness corrected, so they are measured again.
+MEASURE_VERSION = 9
 #: Below this a departure from the template is division noise, not texture (a flat noise-free tile has a spread of 0).
 MIN_TEXTURE_THRESHOLD = 0.02
 #: A timepoint's template whose floor-to-surround ratio (:func:`floor_ratio`) has moved by more than a factor of two

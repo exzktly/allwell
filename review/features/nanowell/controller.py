@@ -784,7 +784,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         column = metric_column(metric, channel)
         render_trajectories(fig, vc.trajectory_panels(metrics, wells, column, cohort=cohort, marks=marks,
                                                       moving=moving, baseline_moving=baseline_moving),
-                            cohort=cohort, label=_label(metric, channel), time_source=data.time_source,
+                            cohort=cohort, label=_label(metric, channel, data), time_source=data.time_source,
                             note=" ".join(filter(None, [mvc.describe(moving, column, baseline_moving), note])))
         return None, None
     if view == "position":
@@ -795,11 +795,11 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         if missing:
             note = " ".join(filter(None, [note, f"No addressed nanowells at {timepoint}, so not drawn: "
                                                 f"{', '.join(missing)}."]))
-        render_position(fig, series, label=_label(metric, channel), timepoint=timepoint, note=note)
+        render_position(fig, series, label=_label(metric, channel, data), timepoint=timepoint, note=note)
         return None, None
     if view == "statistics":
         # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).
-        model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=WELLS,
+        model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=WELLS,
                                    groups=groups, timepoint=timepoint, time_source=data.time_source,
                                    baseline=baseline, cohort=cohort, moving=moving,
                                    baseline_moving=baseline_moving)
@@ -810,7 +810,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                           f"{', '.join(tableless)}.", note]))
         render_statistics(fig, result, note=note)
         return None, result
-    model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
+    model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
                                moving=moving, baseline_moving=baseline_moving)
@@ -866,8 +866,11 @@ def _stats_cache(st) -> dict:
     return st.stats_cache
 
 
-def _label(metric: str, channel: str | None) -> str:
-    return METRICS[metric][0] + (f" · {channel}" if METRICS[metric][1] and channel else "")
+def _label(metric: str, channel: str | None, data=None) -> str:
+    """*metric*'s axis label, naming what the shown wells' fluorescence was measured above (``background_compute``)."""
+    from review.features.nanowell.distribution_compute import metric_label
+
+    return metric_label(metric, channel, list(getattr(data, "fluor_backgrounds", {}).values()))
 
 
 def page_wells(ctx) -> list[str]:
@@ -957,7 +960,7 @@ def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, ch
                      "Positions to Measured to draw them.")
         render_message(fig, says, gid="nw-array-missing")
         return None
-    return render_array(fig, scene, layers, label=_label(metric, channel), image=image, image_note=image_note,
+    return render_array(fig, scene, layers, label=_label(metric, channel, data), image=image, image_note=image_note,
                         selected=selected, region=region, note=note, dimmed=dimmed)
 
 
@@ -1526,7 +1529,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
                deliver=deliver)
     st.extreme_axes = render_extremes(fig, model, {site: gated_crops(st, site, st.crops[site]) for site in model.sites()
                                                    if site in st.crops},
-                                      label=_label(metric, channel), note=note, cells=st.crop_cells,
+                                      label=_label(metric, channel, st.data), note=note, cells=st.crop_cells,
                                       image_channel=image_channel, numbers=st.crop_metrics,
                                       display_range=display_range(ctx),
                                       timepoints=extremes_columns(model.timepoints, model.timepoint, st.extremes_tps),
@@ -1654,6 +1657,8 @@ def redraw_detail(ctx) -> None:
         _fetch(ctx, "crops", first, lambda: site_crops(data, metrics, first, channel=image_channel),
                failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
     render_site_detail(fig, series, channel=channel, time_source=st.data.time_source,
+                       backgrounds=[st.data.fluor_backgrounds.get(w) for w in {s[0] for s, _f in series}
+                                    if w in st.data.fluor_backgrounds],
                        outside=_outside_badges(st, [site for site, _frame in series]))
     canvas.draw_idle()
     strip_fig, strip_canvas = ctx.widgets.get_or_none("_nw_strip_fig"), ctx.widgets.get_or_none("_nw_strip_canvas")

@@ -483,6 +483,26 @@ nanowells hold a cell at the **same** place (cells gathered at the lowest point 
 becomes part of the empty-nanowell picture there and is not counted. One texture threshold serves every tile of a
 timepoint.
 
+**Fluorescence background.** Every fluorescence number of a nanowell — the cells' brightness and the nanowell's
+fluorescence alike — is measured above one background, chosen in the Nanowell section's **Fluorescence background**
+(on the command line `--nanowell_fluor_background`):
+
+- **This well's nanowell floor** (the default) — the typical level of the bare nanowell floor on the same imaging
+  tile of the same well. It needs nothing else, but nanowells crowded with cells leave little bare floor to read it
+  from.
+- **Empty reference well** (`--nanowell_fluor_background empty_well`) — the floor level of the **Empty reference
+  well**'s nanowells at the same timepoint, one level per channel for the whole well. No cell of the measured well
+  can raise it, and like confluence it follows exposure or medium changing over the time course. It needs an Empty
+  reference well; the form refuses to start without one. At a timepoint where that well holds cells, or has no image
+  in the channel, every fluorescence number of that channel is **blank** there, never measured above something else,
+  and the timepoint's notes say why.
+
+The level taken off is written beside each nanowell as `<channel>_background` in `nanowells/<well>.csv`, so a
+number can always be traced to what it was measured above. A nanowell run applies **no Image correction**: the
+flat-field and the background subtraction of the standard pipeline (rolling disk, robust mesh and the rest) are
+local filters that would treat a nanowell full of cells as background, and the form hides that section while
+**Nanowell array** is chosen.
+
 **Confluence needs an empty reference well.** Confluence is read as texture against an empty nanowell, and a loaded
 well has none: calibrated on its own cells, a nanowell half covered read 1-3 %. So name a plate well that holds no
 cells in **Empty reference well** (on the command line `--nanowell_empty_well H12`); left blank, the field reads
@@ -497,7 +517,8 @@ reference well's grid record holds its verdict (`confluence_reference`). The ref
 cells the model finds where there are none: its cells counted per nanowell are saved with its verdict
 (`false_cells_per_nanowell`) and written on every other well's timepoint (`template` →
 `reference_false_cells_per_nanowell`), the baseline that well's counts sit on. Counts on the rim-removed image use the
-reference too (see **Segment on**); counts on the raw image, and fluorescence, do not depend on it. **Test detection**
+reference too (see **Segment on**); counts on the raw image do not depend on it, and fluorescence does only when
+**Fluorescence background** says so (below). **Test detection**
 divides by the well's own picture, because it has no reference to read, and says so when one is named. A remote run
 that does not include the reference well — re-running a few wells, or resuming a plate whose reference finished
 earlier — is sent the reference this computer already holds, so its wells keep their confluence. A well is kept as up to date only beside the reference it was read against: when the reference well is analysed for the first time after them, analysed again on other images (re-exported, forced), or judged empty at a timepoint where it was not before, every well read against it before is analysed again, locally or sent again to a remote, and the run log says which and why. Running the reference again on the same images changes nothing and re-runs no other well. Results measured this way carry a measurement version: adding timepoints to a dataset
@@ -5871,27 +5892,31 @@ use them.
   Cell brightness and nanowell fluorescence, and their fold changes, are of the fluorescence channel chosen in **Channel**.
 
 **Cell brightness and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
-but they answer different questions, and only one of them has the background taken out. Every label says which:
+but they answer different questions. Both are measured above the same background, the one the run was set up
+with (*Fluorescence background*, in the Analyze section), and every axis says which:
 
-| Metric menu | Site detail row | Background |
+| The run measured above | Axis label says | Site detail row says |
 |---|---|---|
-| *Cell brightness (mean per cell, background included)* | *Cell brightness / with background* | included |
-| *Cell brightness fold change (background included)* | — | included |
-| *Nanowell fluorescence (total, background subtracted)* | *Nanowell fluor. / minus background* | subtracted |
-| *Nanowell fluorescence fold change (background subtracted)* | — | subtracted |
+| this well's nanowell floor (the default) | *own-well background subtracted* | *minus own well* |
+| the empty reference well's floor | *empty-well background subtracted* | *minus empty well* |
+| — a run from before the choice existed | cell brightness: *background included*; nanowell fluorescence: *own-well background subtracted* | *with background* / *minus own well* |
 
-The Analyze pane's **Background** and **Flat-field** corrections are not applied to a nanowell run, so neither
-metric changes with them; the nanowell floor described below is the only background either one involves.
+For example *Cell brightness (mean per cell, empty-well background subtracted) · GFP*. Wells measured differently
+drawn together say *background differs between wells*. A run from before the choice left the background in its
+cell brightness, which pulls a cell brightness fold change toward 1 (a steady floor sits in both halves of the
+ratio); analysing it again removes it. The Metric menu names the metrics alone, since it is built before a dataset
+is read.
 
 - **Cell brightness** (of the chosen channel, e.g. *Cell brightness … · DAPI*) is *how bright the cells are*. It is the average, over the cells counted in the
   nanowell, of each cell's mean pixel intensity inside its segmented outline. It does not change with how many cells
-  there are: one cell at 800 or ten cells at 800 both give 800. Nothing is subtracted, so it is in the image's own
-  units, background included. It needs segmented cells: a nanowell with no counted cell has no brightness (blank,
+  there are: one cell at 800 or ten cells at 800 both give 800. The run's fluorescence background is taken off it,
+  the same level as off nanowell fluorescence (see *Fluorescence background* in the Analyze section). It needs segmented cells: a nanowell with no counted cell has no brightness (blank,
   not zero).
 - **Nanowell fluorescence** (e.g. *Nanowell fluorescence … · DAPI*) is *how much light the whole nanowell gives off above its empty floor*. It
-  is the sum of every pixel inside the nanowell (within 90 % of its radius, clear of the rim) minus the floor's level times
-  the number of pixels. The floor's level is read from the same imaging tile — the typical level of the nanowells'
-  bare floor in that channel, with or without cells on it — so no empty nanowell is needed. It uses no
+  is the sum of every pixel inside the nanowell (within 90 % of its radius, clear of the rim) minus the background
+  level times the number of pixels. By default that level is read from the same imaging tile — the typical level of
+  the nanowells' bare floor in that channel, with or without cells on it — so no empty nanowell is needed; a run set
+  to the empty reference well takes that well's floor at the same timepoint instead. It uses no
   segmentation, so it counts light from cells the segmentation missed too. An empty nanowell reads near zero and
   can come out slightly negative.
 
@@ -5904,9 +5929,8 @@ material is in the nanowell, including when cells clump and the count is unrelia
 
 Their fold changes divide each timepoint by the baseline. A nanowell fluorescence at or below zero at the baseline
 gives no fold change ("no signal above background at baseline"), since a ratio over nothing has no meaning; a
-cell brightness fold change needs counted cells at both timepoints. Because cell brightness keeps the background,
-a steady floor level sits in both halves of its ratio and pulls its fold change toward 1: a cell that doubles its
-stain above a bright floor reads well under 2. Nanowell fluorescence's fold change has no such bias.
+cell brightness fold change needs counted cells at both timepoints. Below the empty well's floor a value can be
+negative, and a fold change over a baseline at or below zero has no meaning, so it is left blank.
 
 **Cell Gating applies here too.** A nanowell's cell count, and its brightness, use only the cells the rest of
 Review counts: the size and shape gate, cells excluded by hand and the scatter gates set on Home ▸

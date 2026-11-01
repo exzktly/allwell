@@ -595,6 +595,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help=("A plate well that holds no cells, e.g. H12. It is measured first, and every well's "
                          "confluence at a timepoint is read against its empty nanowells at that timepoint. Without "
                          "one, or at a timepoint where it holds cells, no well has a confluence (blank, never 0)."))
+    p.add_argument("--nanowell_fluor_background", choices=("floor", "empty_well"), default=None,
+                   help=("What every nanowell fluorescence number is measured above, cell brightness and nanowell "
+                         "fluorescence alike. floor (the default): the level of the bare nanowell floor on the same "
+                         "tile of the same well. empty_well: the floor level of --nanowell_empty_well at the same "
+                         "timepoint, which cells in the measured well cannot raise; at a timepoint where that well "
+                         "holds cells or lacks the channel, the fluorescence is blank, never borrowed from the floor. "
+                         "The Background and Flat-field corrections are not applied in nanowell mode."))
     p.add_argument("--nanowell_segment_scope", choices=("nanowells", "tile"), default="nanowells",
                    help=("How much of each tile the cell count's segmenter is given. nanowells (the default): a crop "
                          "around each nanowell, scaled as the whole tile is, so the lattice between them costs "
@@ -679,6 +686,11 @@ def nanowell_options_from_args(args, error) -> dict | None:
         if well is None:
             error(f"--nanowell_empty_well {args.nanowell_empty_well!r} is not a plate well (e.g. H12).")
         options["empty_well"] = well
+    if args.nanowell_fluor_background == "empty_well":       # the floor is what every earlier run's options mean
+        if not args.nanowell_empty_well:
+            error("--nanowell_fluor_background empty_well needs --nanowell_empty_well: the well whose floor is "
+                  "subtracted.")
+        options["fluor_background"] = "empty_well"
     pattern = _grid_pattern(args, error)
     if pattern:
         options["pattern"] = pattern

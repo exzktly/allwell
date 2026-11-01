@@ -43,7 +43,8 @@ TEMPLATE_SUFFIX = "_template.npz"
 SCHEME_VERSION = 1
 
 #: The columns of ``nanowells/<well>.csv`` in the order they are written (§3.7). Per-channel site
-#: intensities follow, as ``<token>_integrated`` and ``<token>_mean_bg``. ``level_offset`` / ``level_gain`` are the
+#: intensities follow, as ``<token>_integrated``, ``<token>_mean_bg`` and ``<token>_background`` (the level
+#: both are taken over, ``--nanowell_fluor_background``). ``level_offset`` / ``level_gain`` are the
 #: ``(offset, gain)`` a site's pixels were levelled by before the template division; ``segmenter_floor`` /
 #: ``segmenter_contrast`` are its interior's median and 1st-99th percentile spread on the 0-1 scale the segmenter
 #: normalises its tile to (``nanowell_measure.segmenter_view``). All four are blank for a site not measured.
@@ -92,7 +93,8 @@ def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:
                                spec.get("segment_on") or nr.LEGACY_SEGMENT_ON,
                                spec.get("segment_scope") or nr.LEGACY_SEGMENT_SCOPE,
                                spec.get("segment_scale") or nr.LEGACY_SEGMENT_SCALE,
-                               spec.get("resize") or nr.LEGACY_RESIZE, spec.get("empty_well") or None)
+                               spec.get("resize") or nr.LEGACY_RESIZE, spec.get("empty_well") or None,
+                               fluor_background=spec.get("fluor_background") or nr.FLUOR_BACKGROUND_FLOOR)
 
 
 def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:
@@ -468,7 +470,8 @@ def write_empty_cells_csv(path: Path, fluor_tokens) -> None:
 
 
 def write_sites_csv(path: Path, rows: list[dict], fluor_tokens) -> None:
-    columns = list(SITE_COLUMNS) + [f"{t}_{kind}" for t in fluor_tokens for kind in ("integrated", "mean_bg")]
+    columns = list(SITE_COLUMNS) + [f"{t}_{kind}" for t in fluor_tokens
+                                     for kind in ("integrated", "mean_bg", "background")]
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".csv.part")
     with tmp.open("w", newline="", encoding="utf-8") as fh:
@@ -849,6 +852,12 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         _save_masks(well_label, masks)
 
 
+def _fluorescence_floor(block) -> dict:
+    """``{channel: floor level}`` a timepoint's grid block recorded (``nanowell_run._normalise``), or ``{}``."""
+    normalisation = ((block or {}).get("template") or {}).get("normalisation") if isinstance(block, dict) else None
+    return dict((normalisation or {}).get("fluorescence_floor") or {})
+
+
 def _save_confluence_reference(output_dir, well_label, settings, outcome, sites, timepoints) -> None:
     """The empty reference well's part, once its counts are known: judge each timepoint empty or not by them, record
     the verdict on its blocks (and blank its own confluence where it was not empty), and save its templates for the
@@ -860,7 +869,9 @@ def _save_confluence_reference(output_dir, well_label, settings, outcome, sites,
         rows.setdefault(row["timepoint"], []).append(row)
     verdicts = {tp: nref.verdict(rows[tp]) for tp in timepoints if tp in rows}
     nref.apply(sites, outcome.timepoints, well_label, verdicts)
-    nref.save(output_dir, well_label, settings, {tp: (templates.get(tp), v) for tp, v in verdicts.items()})
+    nref.save(output_dir, well_label, settings,
+              {tp: (templates.get(tp), v, _fluorescence_floor(outcome.timepoints.get(tp)))
+               for tp, v in verdicts.items()})
     refused = {tp: v["status"] for tp, v in verdicts.items() if v["status"] != nref.EMPTY}
     if refused:
         log.warning("Well %s is the empty reference well, but it is not empty at %s: no well has a confluence there",

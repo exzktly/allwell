@@ -30,6 +30,7 @@ from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, field_sites, one_to_one
 from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
+from review.features.nanowell.decorate_compute import Decoration, decoration_for
 from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
@@ -154,6 +155,13 @@ def export_long_csv(state, path, wells=None) -> int:
 # ── the page ─────────────────────────────────────────────────────────────────
 # Everything below takes the ViewerContext. Widgets resolve through ``ctx.widgets`` and are absent until the
 # page is first shown (it builds lazily), so every entry point is self-guarding.
+
+#: The page's views that draw *Colour by* / *Split by* / *Then by* (``decorate_compute``), and so the views the
+#: page's Decorate button shows on. Only Distribution: it is the one view whose dots and groups are the figure.
+#: Statistics compares the same groups but draws a table of tests; Trajectories, Position and the one-well views
+#: draw wells or nanowells, never a group with a value. A button shown there would write the state, redraw, and
+#: change nothing on screen (CLAUDE.md §7.6) — the reason the plotting band gates its own button by tab.
+DECORATED_VIEWS = frozenset({"distribution"})
 
 #: How many nanowells can be compared in the site detail at once (decision U7: one colour each).
 MAX_SELECTED = 6
@@ -575,8 +583,9 @@ def redraw(ctx) -> None:
         array = {"layers": drawn_layers(st), "image": image, "image_note": image_note, "region": st.region}
         hidden = OVERLAYS_HIDDEN_NOTE if st.overlays_hidden else ""
         note = " ".join(filter(None, [hidden, st.array_message, note]))
+    groups = page_groups(ctx)
     st.hits, model = draw_view(
-        fig, st.view, st.metrics, st.data, groups=page_groups(ctx), metric=metric, channel=channel,
+        fig, st.view, st.metrics, st.data, groups=groups, metric=metric, channel=channel,
         axis=st.axis, timepoint=shown_timepoint(ctx)[1] if st.view == "position" else st.timepoint,
         control=st.control, baseline=st.baseline, cohort=st.cohort, moving=st.moving,
         baseline_moving=st.baseline_moving, well=well,
@@ -584,7 +593,7 @@ def redraw(ctx) -> None:
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
         subset=st.subset, stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
-        gate=st.gate, **array)
+        gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None, **array)
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
@@ -720,7 +729,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               baseline_moving: int = 0, layers: ArrayLayers | None = None, image=None, image_note: str = "",
               region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
-              stats_cache: dict | None = None, gate=None) -> tuple[object, object]:
+              stats_cache: dict | None = None, gate=None,
+              decoration: Decoration | None = None) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -752,6 +762,10 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
 
     *gate* (``cell_gate_compute.GateTally``, the one *metrics* were computed with) keeps the Array view's Cells
     layer to the cells the counts hold.
+
+    *decoration* is *Colour by* / *Split by* / *Then by* resolved over *groups* (``decorate_compute.decoration_for``);
+    only the Distribution view draws it (:data:`DECORATED_VIEWS`). ``None`` draws the figure undecorated, which is
+    what Batch Export's Nanowells mode passes.
     """
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
@@ -818,7 +832,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
-                               moving=moving, baseline_moving=baseline_moving)
+                               moving=moving, baseline_moving=baseline_moving, decoration=decoration)
     model.starting = subset.start_bounds()
     if model.axis == TIME:
         model.identity_marks = {(w, tp): v for w in wells for tp, v in timepoint_marks(data, w).items()}

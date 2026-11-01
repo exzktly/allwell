@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from review.features.nanowell import qc_compute as qc
 from review.features.nanowell._identity_marks import HATCH as _LINE_HATCH
-from review.features.nanowell.renderer import _ink, _inks, _mark_colours, render_message
+from review.features.nanowell.renderer import _ink, _inks, _mark_colours, _theme_axes, render_message
 
 #: Each state's hatch: the line plots' for the identity verdicts, and one of its own for each grid state.
 HATCH = {qc.NOT_ADDRESSED: "", qc.ANCHOR_WAITING: "----", qc.NOT_LOCATED: "||||",
@@ -102,8 +102,6 @@ def draw_qc(fig, matrix, *, which: str, out_dir, message: str = "", highlight=fr
     wells, tps = matrix.shown_wells(which), list(matrix.timepoints)
     fig.clear()
     ax = fig.add_axes((_LEFT, _BOTTOM, _RIGHT - _LEFT, _TOP - _BOTTOM))
-    from review.features.nanowell.renderer import _theme_axes
-
     _theme_axes(ax)
     ground, ink, muted = _inks(ax)
     _title(fig, matrix, which, out_dir, message, ink, muted)

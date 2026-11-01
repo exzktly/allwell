@@ -17,7 +17,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from review.features.nanowell import controller as _controller
+from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell import qc_compute as qc
+from review.features.nanowell._qc_render import draw_qc
+from review.features.nanowell.collect import in_dir_for
 
 log = logging.getLogger(__name__)
 
@@ -27,19 +31,15 @@ def _state(ctx):
 
 
 def _nwc():
-    from review.features.nanowell import controller
-
-    return controller
+    return _controller
 
 
 def anchors_path(st, data_dir) -> Path | None:
     """The anchors file, whether or not the page has read any well's tables yet."""
-    from review.features.nanowell import full_montage_compute as fmc
+    from util.nanowell_anchors import anchors_path as path_in
 
     if st.data is not None:
         return fmc.anchors_file(st.data)
-    from review.features.nanowell.collect import in_dir_for
-    from util.nanowell_anchors import anchors_path as path_in
 
     in_dir = in_dir_for(Path(data_dir))
     return None if in_dir is None else path_in(in_dir)
@@ -105,7 +105,6 @@ def _after_read(ctx) -> None:
 def draw(ctx, st, fig, canvas) -> None:
     """Draw the QC view (``controller.redraw``'s branch, taken before any check of the selection)."""
     from review.core.plot_style import apply_export_style_to_current
-    from review.features.nanowell._qc_render import draw_qc
 
     st.hits, st.drawn = None, None
     data_dir = ctx.state.dataset.data_dir

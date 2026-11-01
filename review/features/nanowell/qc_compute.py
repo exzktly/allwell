@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from review.features.nanowell import anchor_queue_compute as aqc
+from review.features.nanowell.collect import timepoint_hours
+from review.features.nanowell.identity_compute import audit_command
 
 NOT_ADDRESSED, ANCHOR_WAITING, NOT_LOCATED = "not_addressed", "anchor_waiting", "not_located"
 CONTRADICTED, INCONCLUSIVE, PARTIAL = "contradicted", "inconclusive", "partial"
@@ -134,7 +136,6 @@ def read_plate(data_dir, anchors_path) -> PlateRecords:
     identity check's verdicts hash each well's sites table to tell a current result from a stale one."""
     from pipeline.nanowell_identity import exclusions, sidecar_path, verdicts
     from review.data.nanowell_focus_gate import nanowell_dir
-    from review.features.nanowell.collect import timepoint_hours
     from util.nanowell_anchors import AnchorsFileError, read_anchors
 
     folder = nanowell_dir(data_dir)
@@ -267,8 +268,6 @@ def notes(matrix: QcMatrix, which: str, out_dir) -> list[str]:
     elif hidden:
         out.append("Wells: All shows them.")
     if not matrix.checked_any and any(c.state == NOT_CHECKED for c in matrix.cells.values()):
-        from review.features.nanowell.identity_compute import audit_command
-
         out.append("The identity check has not been run on these tables, so no addressed timepoint is confirmed. "
                    f"Run it from a terminal: {audit_command(out_dir)}")
     if matrix.anchors_problem:

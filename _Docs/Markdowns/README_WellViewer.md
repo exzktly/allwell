@@ -383,8 +383,10 @@ folder's own earlier registration is reused the same way, so re-running a plate 
 into keeps its registration too. Registration is only stored this way by runs from this version on: a folder
 analysed by an earlier version has nothing to reuse, and its first re-run registers every tile. The run log says
 `registration reused from <folder>` for each well that took it, and each timepoint's grid record names the folder
-(`registration.reused_from`). Run refuses to start when the folder is not a nanowell run's output folder. A
-remote host cannot read a folder on this computer: the log says so, and the host registers every tile.
+(`registration.reused_from`). Run refuses to start when the folder is not a nanowell run's output folder. On a
+**remote host** the same reuse happens: before the run starts, each well's grid record on this computer — from this
+folder, else from the output folder — is sent to the host (`stored registration sent for N well(s)` in the log), and
+the host takes each placement under the same rule, so re-running a well remotely does not register it again.
 
 **Test detection…** runs registration and detection on one well at one timepoint, in the background, and opens a
 window with the montage: every nanowell outlined (green empty, blue holding cells, amber occluded, red
@@ -456,7 +458,9 @@ In `nanowells/`, per well:
 - `<well>_masks.npz`: the cell masks Cellpose returned, kept so a re-run of the well — after an anchor is set, or
   with settings that do not change what Cellpose is shown — segments only what it has not seen. Each is taken back
   only for the exact pixels, scaling and model it was made from; anything else is segmented again. Deleting the file
-  costs nothing but time. A remote run leaves it on the cluster: it is not fetched back. The per-cell Scatter selects cells by `timepoint_hours`, so a nanowell plate
+  costs nothing but time. A remote run fetches it back with the well's tables, and a remote re-run is sent it (with
+  the well's registration, from the Reuse registration folder or else the output folder), so a well re-run on a
+  host is not segmented again either. The per-cell Scatter selects cells by `timepoint_hours`, so a nanowell plate
 analysed before the per-cell CSV carried that column shows no points there (the line and bar plots are
 unaffected); re-analyse it with **Redo it** (`--force`) to rewrite its tables.
 
@@ -1179,6 +1183,13 @@ segments the channel marked Phase; then only the chosen method's own settings.
     that is a different statement from measuring zero.
 
 ### 5. Image correction — field flatness & background
+
+**Hidden for a nanowell plate.** With **Plate type: Nanowell array** the
+section disappears and the run is sent no correction: a nanowell run applies
+neither (its fluorescence background is the Nanowell section's own
+**Fluorescence background**), and a correction set to need a blank well no
+longer blocks Run. Switching back to Standard plate shows it again with the
+choices as left.
 
 Two independent corrections that run **per channel at quantification time**,
 so they change the pixel values that get measured and can only be changed by
@@ -2107,13 +2118,16 @@ Choosing a remote reveals a **Remote options** group, hidden for a local run
 because none of it applies:
 
 - **Batch size (0 = one per worker).** Any positive `N` processes `N` wells at
-  a time. While one batch runs on the node the next one is already uploading
-  (`batch 2/5: uploading 7 well-zip(s) while batch 1 runs`), so after the first
-  batch the node waits only for whatever of an upload is still left when the
-  batch before it ends; peak disk on the remote is roughly
-  two batches of input — the one running and the one waiting — plus about one
-  well of output, at the cost of reloading the segmentation model once per
-  batch (a few seconds each). `0`, the default, sends one well
+  a time. While one batch runs on the node, the next one goes up a well at a
+  time: each time a finished well is downloaded and removed from the remote,
+  one well of the next batch is uploaded in its place
+  (`batch 2/5: 7 well-zip(s) to upload while batch 1 runs, one as each of its
+  wells leaves the remote`). So peak disk on the remote is roughly one batch of
+  input plus about one well of output, and when a batch ends the node waits
+  only for the wells of the next one that had no room yet. A nanowell run keeps
+  each batch's wells on the remote until the batch ends, so its next batch goes
+  up then. The cost is reloading the segmentation model once per batch (a few
+  seconds each). `0`, the default, sends one well
   for each worker the pipeline will start, so the first upload is only as big
   as the workers need and the run starts after that many wells rather than the
   whole plate. The workers are counted before the run the way the node counts
@@ -2130,8 +2144,8 @@ because none of it applies:
   where the remote's disk allows it. A Suspend or Stop during a batch also ends
   the next batch's upload; a resume picks up what it had sent. A nanowell run holds a whole
   batch's input and output until that batch ends, and then frees them, so for
-  nanowells the peak is about `2N` wells of input (the batch running and the
-  next) plus `N` wells of output —
+  nanowells the peak is about `N` wells of input (the next batch goes up once
+  the running one has ended) plus `N` wells of output —
   plus every well kept for the end-of-run re-anchoring: a well with a
   timepoint whose nanowells could not be numbered keeps its input and output
   on the remote until the last batch is done, when every such well is re-run

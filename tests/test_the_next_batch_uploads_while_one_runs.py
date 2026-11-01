@@ -1,29 +1,37 @@
-"""A batched remote run uploads batch *i + 1* while batch *i* runs on the node.
+"""A batched remote run uploads batch *i + 1* while batch *i* runs — one well in place of each well of batch *i*
+that leaves the remote, never more.
 
 Batches used to go strictly one after another — upload, run, upload, run — so every upload but the first was time
-the node sat waiting. The driver only takes batch *i* once its ``b<i>`` directory is moved into ``in/``, so ``b<i+1>``
-can fill meanwhile (``remote_batch_step._Ahead``).
+the node sat waiting. Sending the whole next batch ahead fixed that and doubled the remote's input, which is what the
+batch size exists to bound; the user asked instead for each finished well removed from the server to be replaced by a
+well of the next batch (``remote_batch_step._Ahead``, fed by ``Fetcher.on_well_removed``).
 
-Wrong implementations these reject: a loop that still uploads only after the batch before has finished (the first
-test deadlocks against it and fails at its deadline); an upload failure sent ahead that is reported over the batch
-still running, or that loses that batch's result; an upload sent ahead and left running after a Stop, a suspend or a
-hand-off that ends the run; and one sent after the last batch.
+Wrong implementations these reject: a loop that still uploads only after the batch before has finished (the slot
+test deadlocks against it and fails at its deadline); one that sends the whole next batch at once, or before any well
+has left (the bound); one that counts a removal of a well from outside the running batch; a removal the batched
+constructor never wires to the upload; an upload failure sent ahead that is reported over the batch still running,
+or that loses that batch's result; an upload sent ahead and left running after a Stop, a suspend or a hand-off that
+ends the run; and one sent after the last batch.
 """
 
 from __future__ import annotations
 
 import threading
 import time
+import types
 
+from services.remote_batch_step import well_removed
 from tests.test_batch_driver import _batched, _FakeProc, _stub_runner
 
 
-def _start(tmp_path, monkeypatch, wells, upload):
+def _start(tmp_path, monkeypatch, wells, upload, batch_size=1, before=None):
     proc = _FakeProc()
     ordering: list[str] = []
-    p = _batched(tmp_path, wells)
+    p = _batched(tmp_path, wells, batch_size=batch_size)
     _stub_runner(p, proc, ordering)
     p._runner._cache.upload_subset = upload
+    if before is not None:
+        before(p)
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: proc)
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
@@ -37,31 +45,93 @@ def _wait_for(cond, timeout=10.0):
     return cond()
 
 
-def test_the_next_batch_goes_up_before_the_one_running_has_finished(tmp_path, monkeypatch):
-    sent: list[str] = []
-
+def _recording_upload(sent):
     def upload(zips, dest, *, log_fn=None, **kw):
-        sent.append(dest.rsplit("/", 1)[-1])
-        log_fn(f"[remote] ↑ (1) {zips[0].name}\n")           # what upload_subset says per archive
+        sent.append((dest.rsplit("/", 1)[-1], [z.stem for z in zips]))
+        for z in zips:
+            log_fn(f"[remote] ↑ (1) {z.name}\n")           # what upload_subset says per archive
         return (len(zips) * 1024 * 1024, 0.0, 0)
+    return upload
 
-    proc, p, ordering, worker = _start(tmp_path, monkeypatch, ["A01", "A02", "A03"], upload)
-    assert _wait_for(lambda: "b2" in sent), f"batch 2 was not sent while batch 1 ran: {sent}"
-    assert "b3" not in sent, "only one batch is sent ahead: the remote holds two batches' input, not the plate"
-    proc.batch_finished(p, 1)
-    assert _wait_for(lambda: "b3" in sent), f"batch 3 was not sent while batch 2 ran: {sent}"
+
+def _make_room(p, well):
+    """Batch 1's *well* leaves the remote once the next batch's upload is waiting for room."""
+    assert _wait_for(lambda: getattr(p, "_upload_ahead", None) is not None), "batch 2's upload never started"
+    well_removed(p, well)
+
+
+def _up(sent, staging):
+    return [w for dest, wells in sent if dest == staging for w in wells]
+
+
+def test_each_well_that_leaves_the_remote_makes_room_for_one_of_the_next_batch(tmp_path, monkeypatch):
+    """Batch size 3, six wells. Nothing of batch 2 goes up until a well of batch 1 has left the remote; then exactly
+    one per well removed, in order; a removal of a well outside the running batch frees nothing; and when batch 1
+    ends, what is left of batch 2 goes up at once."""
+    sent: list = []
+    wells = ["A01", "A02", "A03", "A04", "A05", "A06"]
+    proc, p, ordering, worker = _start(tmp_path, monkeypatch, wells, _recording_upload(sent), batch_size=3)
+    assert _wait_for(lambda: getattr(p, "_upload_ahead", None) is not None), "batch 2's upload never started"
+    time.sleep(0.3)
+    assert _up(sent, "b2") == [], f"batch 2 went up before any well of batch 1 left the remote: {sent}"
+    well_removed(p, "H12")                                 # not one of batch 1's: no room is made on the remote
+    time.sleep(0.3)
+    assert _up(sent, "b2") == []
+    well_removed(p, "A02")
+    assert _wait_for(lambda: _up(sent, "b2") == ["A04"]), f"one well up in place of A02: {sent}"
+    well_removed(p, "A02")                                 # the same well again: still one slot
+    time.sleep(0.3)
+    assert _up(sent, "b2") == ["A04"]
+    well_removed(p, "a01")
+    assert _wait_for(lambda: _up(sent, "b2") == ["A04", "A05"]), sent
+    proc.batch_finished(p, 1)                              # A03 never left; batch 1's end makes room for the rest
+    assert _wait_for(lambda: _up(sent, "b2") == ["A04", "A05", "A06"]), sent
     proc.batch_finished(p, 2)
-    proc.batch_finished(p, 3)
     proc.finish()
     worker.join(timeout=20)
     assert not worker.is_alive() and p._returncode == 0
-    assert sent == ["b1", "b2", "b3"], "one upload per batch, the last with nothing sent after it"
+    assert [d for d, _w in sent] == ["b1", "b2", "b2", "b2"], "nothing is sent after the last batch"
     log = "".join(p._logged)
-    assert "batch 2/3: uploading 1 well-zip(s) while batch 1 runs" in log
-    assert "batch 3/3: uploading 1 well-zip(s) while batch 2 runs" in log
+    assert "batch 2/2: 3 well-zip(s) to upload while batch 1 runs, one as each of its wells leaves the remote" in log
     # Batch 1's upload is the run's; the ones sent ahead are marked so the progress view leaves the headline alone.
     assert "[remote] ↑ (1) A01.zip" in log
-    assert "[remote] ⇡ (1) A02.zip" in log and "[remote] ⇡ (1) A03.zip" in log
+    assert "[remote] ⇡ (1) A04.zip" in log and "[remote] ⇡ (1) A06.zip" in log
+
+
+def test_the_batched_constructor_wires_the_fetcher_s_removals_to_the_next_batch(tmp_path, monkeypatch):
+    """The real ``_BatchedRemoteProcess.__init__`` and the real ``Fetcher._delete_well_files_on_remote``: a well
+    whose remote files were deleted reaches the upload waiting for room, and one whose ``rm`` failed does not."""
+    import services.remote_fetch as rf
+    import services.remote_process as rp
+
+    built = {}
+
+    class _Fetcher:
+        def __init__(self, host, run, **kw):
+            built["fetcher"] = self
+            self.host, self.run, self._log = host, run, (lambda _m: None)
+            self.on_well_removed = None
+
+        _delete_well_files_on_remote = rf.Fetcher._delete_well_files_on_remote
+
+    monkeypatch.setattr(rp, "reattach_output_dir", lambda *a, fresh, **k: fresh)
+    monkeypatch.setattr(rp, "_run_prepared", lambda *a, **k: None)
+    monkeypatch.setattr(rp, "Fetcher", _Fetcher)
+    monkeypatch.setattr(rp._BatchedRemoteProcess, "_run_batches", lambda self: None)
+    runner = types.SimpleNamespace(
+        _cache=types.SimpleNamespace(cache_key=lambda zipped: "k" * 32, _ssh_run=lambda *a, **k: None),
+        _host_argv_extras=lambda _f: [],
+        host=types.SimpleNamespace(remote_staging_dir="~/.allwell-staging", ssh_alias="h"))
+    p = rp._BatchedRemoteProcess(runner, types.SimpleNamespace(well_zips=(), mode=None, incremental=False),
+                                 tmp_path, ["--csv_prefix", "m"], 2, output_filter=None)
+    freed: list[str] = []
+    p._upload_ahead = types.SimpleNamespace(free=freed.append)
+    fetcher = built["fetcher"]
+    monkeypatch.setattr(rf, "delete_remote_paths", lambda *a, **k: True)
+    fetcher._delete_well_files_on_remote("A01")
+    monkeypatch.setattr(rf, "delete_remote_paths", lambda *a, **k: False)
+    fetcher._delete_well_files_on_remote("A02")
+    assert freed == ["A01"]
 
 
 def test_an_upload_sent_ahead_that_fails_is_reported_after_the_batch_running_is_counted(tmp_path, monkeypatch):
@@ -95,6 +165,7 @@ def test_a_stop_ends_the_upload_sent_ahead(tmp_path, monkeypatch):
         return (0, 0.0, 20 if stopped else 0)
 
     proc, p, ordering, worker = _start(tmp_path, monkeypatch, ["A01", "A02"], upload)
+    _make_room(p, "A01")
     assert waiting.wait(10), "batch 2 was not sent ahead"
     p._stop.set()
     assert ended.wait(5), "the upload sent ahead did not end on Stop"
@@ -119,7 +190,11 @@ def test_a_run_that_ends_without_the_next_batch_stops_its_upload(tmp_path, monke
 
     import services.remote_batch_step as step
 
-    monkeypatch.setattr(step, "hand_off_and_wait", lambda proc, *a, **k: (waiting.wait(10), None)[1])
+    def lost(proc, *a, **k):                       # batch 1's well leaves, its upload starts, and the hand-off is lost
+        well_removed(proc, "A01")
+        waiting.wait(10)
+
+    monkeypatch.setattr(step, "hand_off_and_wait", lost)
     proc, p, ordering, worker = _start(tmp_path, monkeypatch, ["A01", "A02"], upload)
     worker.join(timeout=20)
     proc.finish()
@@ -143,6 +218,7 @@ def test_a_suspend_during_a_batch_ends_the_upload_sent_ahead(tmp_path, monkeypat
         return (0, 0.0, 20 if stopped else 0)
 
     proc, p, ordering, worker = _start(tmp_path, monkeypatch, ["A01", "A02", "A03"], upload)
+    _make_room(p, "A01")
     assert waiting.wait(10), "batch 2 was not sent ahead"
     p.note_suspend_requested()
     assert ended.wait(5), "the upload sent ahead ran on after Suspend, with batch 1 still running"
@@ -172,3 +248,54 @@ def test_the_progress_view_does_not_read_an_upload_sent_ahead_as_the_run_uploadi
     assert not [e for e in events if e[0] in ("stage", "status", "remote_xfer")], events
     plain = ProgressTracker().parse("[remote] ↑ (1) A03.zip\n")
     assert ("stage", "upload") in plain, "the upload the run waits for still drives the headline"
+
+
+def test_a_stop_ends_an_upload_still_waiting_for_room(tmp_path, monkeypatch):
+    """No well of batch 1 has left, so batch 2 has sent nothing and waits; Stop must end that wait too."""
+    sent: list = []
+    proc, p, ordering, worker = _start(tmp_path, monkeypatch, ["A01", "A02"], _recording_upload(sent))
+    assert _wait_for(lambda: getattr(p, "_upload_ahead", None) is not None)
+    ahead = p._upload_ahead
+    p._stop.set()
+    assert _wait_for(lambda: not ahead._thread.is_alive(), timeout=5), "the wait for room outlived Stop"
+    proc.finish()
+    worker.join(timeout=20)
+    assert not worker.is_alive() and _up(sent, "b2") == []
+
+
+
+def test_the_record_sent_with_each_well_describes_the_whole_batch(tmp_path, monkeypatch):
+    """Each rsync rewrites the acquisition record and anchors beside the archives, scoped to what it is told; the
+    driver hands the pipeline the last one. Sent a well at a time, the record must still name the whole batch, or
+    the batch's earlier wells run with no recorded tile positions. Through the real ``carry_subset_record``."""
+    import json
+    from pathlib import Path
+
+    import services.acquisition_transport as at
+
+    monkeypatch.setattr(at, "_payload", lambda zipped, paths: {"wells": sorted(Path(p).stem for p in paths)})
+    monkeypatch.setattr(at, "write_record_file", lambda path, record: Path(path).write_text(json.dumps(record)))
+    records: list = []
+
+    @at.carry_subset_record
+    def upload_subset(cache, zips, dest, *, extra_sources=(), log_fn=None, **kw):
+        for f in extra_sources:
+            if f.name == at.RECORD_FILENAME:
+                records.append((dest.rsplit("/", 1)[-1], [z.stem for z in zips], json.loads(f.read_text())["wells"]))
+        return (1, 0.0, 0)
+
+    def with_record(p):
+        p._zipped = types.SimpleNamespace(**vars(p._zipped), nanowell_anchors=None)
+
+    proc, p, ordering, worker = _start(tmp_path, monkeypatch, ["A01", "A02", "A03", "A04"],
+                                       lambda zips, dest, **kw: upload_subset(None, zips, dest, **kw), batch_size=2,
+                                       before=with_record)
+    _make_room(p, "A01")
+    assert _wait_for(lambda: any(d == "b2" for d, _z, _w in records))
+    proc.batch_finished(p, 1)
+    assert _wait_for(lambda: sum(1 for d, _z, _w in records if d == "b2") == 2)
+    proc.batch_finished(p, 2)
+    proc.finish()
+    worker.join(timeout=20)
+    b2 = [(sent, named) for d, sent, named in records if d == "b2"]
+    assert b2 == [(["A03"], ["A03", "A04"]), (["A04"], ["A03", "A04"])]

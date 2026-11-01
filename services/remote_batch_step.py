@@ -23,6 +23,7 @@ from services.remote_batch_staging import prune_staged
 from services.remote_handoff import hand_off_and_wait
 from services.remote_suspend import _AnySet
 from services.remote_wire import TRANSIENT_PREFIX
+from util.well_token import canonical_well_label
 
 #: What an upload sent ahead logs in place of the ``[remote] ↑`` of an upload the run is waiting for. The Analyze
 #: progress view (``pipeline_runner.ProgressTracker``) reads ``↑`` as "the run is uploading" and puts the headline and
@@ -63,22 +64,30 @@ def _halted(proc, index: int, n_batches: int, when: str) -> bool:
 
 def _send(proc, index: int, n_batches: int, batch_zips, *, ahead_of: int = 0,
           cancel: threading.Event | None = None) -> tuple[int, int]:
-    """rsync batch *index* into its staging directory: ``(bytes sent, rsync's code)``. Nothing is decided here, so it can
-    run on a thread of its own while the batch before it runs (*ahead_of*), and :func:`_judge_upload` reads the code on
-    the loop's thread afterwards — a failure it reports must not land while the batch before it is still being counted.
-    """
-    while_running = f" while batch {ahead_of} runs" if ahead_of else ""
-    proc._log(f"[remote] batch {index}/{n_batches}: uploading {len(batch_zips)} well-zip(s){while_running}\n")
+    """rsync batch *index* into its staging directory: ``(bytes sent, rsync's code)``. The loop's own upload, for a
+    batch nothing was sent ahead of (the first, or one whose trickle was abandoned); :class:`_Ahead` sends the rest."""
+    proc._log(f"[remote] batch {index}/{n_batches}: uploading {len(batch_zips)} well-zip(s)\n")
+    prune_staged(proc._runner._cache, proc._batch_staging_dir(index), batch_zips, f"batch {index}", proc._log)
+    return _rsync(proc, index, n_batches, batch_zips, ahead=False, cancel=cancel)
+
+
+def _rsync(proc, index: int, n_batches: int, zips, *, ahead: bool,
+           cancel: threading.Event | None = None, batch_zips=None) -> tuple[int, int]:
+    """One rsync of *zips* into batch *index*'s staging directory. Nothing is decided here, so it can run on a thread
+    of its own while the batch before it runs (*ahead*), and :func:`_judge_upload` reads the code on the loop's thread
+    afterwards — a failure it reports must not land while the batch before it is still being counted."""
     # Each batch's rsync reports 0 → 1; scaled so the "Transferring…" label advances across the whole run instead
     # of resetting once per batch. An upload sent ahead drives no label: the run is computing, not transferring.
-    outer = None if ahead_of else proc._progress
+    outer = None if ahead else proc._progress
     progress: Callable[[float], None] | None = (
         None if outer is None else (lambda pct: outer((index - 1 + pct) / n_batches)))
-    log = _ahead_log(proc._log) if ahead_of else proc._log
-    prune_staged(proc._runner._cache, proc._batch_staging_dir(index), batch_zips, f"batch {index}", log)
+    log = _ahead_log(proc._log) if ahead else proc._log
     events = [proc._stop, proc._suspending, proc._driver_lost] + ([cancel] if cancel is not None else [])
     sent_bytes, _elapsed, rc = proc._runner._cache.upload_subset(
-        batch_zips, proc._batch_staging_dir(index), log_fn=log, acquisition_input=proc._zipped,
+        list(zips), proc._batch_staging_dir(index), log_fn=log, acquisition_input=proc._zipped,
+        # The record and anchors beside the archives describe the whole batch (*batch_zips*), however few of its
+        # wells this rsync sends: each rsync rewrites them, and the driver hands the pipeline the last one.
+        record_paths=list(batch_zips) if batch_zips is not None else None,
         progress_fn=progress,
         # A suspend ends the upload too — a batch sent after the user asked for the machine back is thrown away
         # unrun — and so does a driver that went away: there is no node left to send it to; and an upload sent
@@ -113,30 +122,87 @@ def _judge_upload(proc, index: int, n_batches: int, sent_bytes: int, rc: int) ->
 
 
 class _Ahead:
-    """The next batch's upload, running on its own thread while the current batch runs on the node.
+    """The next batch, uploaded one well in place of each well of the running batch that leaves the remote.
 
     Batches used to go strictly one after another — upload batch *i*, run it, then upload batch *i + 1* — so every
-    upload but the first was time the node sat waiting. The driver takes batch *i* only once its ``b<i>`` directory is
-    moved into ``in/`` (``remote_commands``), so ``b<i + 1>`` can fill meanwhile without the running batch seeing it;
-    the remote then holds two batches' input at the peak instead of one."""
+    upload but the first was time the node sat waiting. Sending the whole next batch while one ran fixed that but
+    doubled the remote's input at the peak, which is what a batch size exists to bound. So batch *i + 1* is sent into
+    ``b<i + 1>`` a well at a time: each well of batch *i* whose remote files the Fetcher deletes once it has landed
+    here (:func:`well_removed`) frees one slot, and one well of the next batch takes it. The remote therefore never
+    holds more than one batch's input. The driver takes ``b<i + 1>`` only once it is moved into ``in/``
+    (``remote_commands``), so the running batch never sees it. When batch *i* ends, its input goes with it (the
+    driver's ``rm -rf in``), so :meth:`release_all` sends whatever is left in one rsync — which is all of it for a
+    nanowell run, whose wells stay on the remote until their batch's end (``remote_fetch_nanowells``)."""
 
-    def __init__(self, proc, index: int, n_batches: int, batch_zips, ahead_of: int) -> None:
+    def __init__(self, proc, index: int, n_batches: int, batch_zips, ahead_of: int, running_zips=()) -> None:
         self.index = index
         self.zips = list(batch_zips)
         self.cancel = threading.Event()
+        # The running batch's wells, by label: only their removal frees a slot here.
+        self._running = {_label(z) for z in running_zips}
+        self._freed: set[str] = set()
+        self._all = False
+        self._wake = threading.Condition()
         self._result: tuple[int, int] | None = None
         self._error: BaseException | None = None
+        self._stops = (proc._stop, proc._suspending, proc._driver_lost, self.cancel)
 
         def send() -> None:
             try:
-                self._result = _send(proc, index, n_batches, self.zips, ahead_of=ahead_of, cancel=self.cancel)
+                self._result = self._trickle(proc, n_batches, ahead_of)
             except BaseException as exc:          # handed to the loop's thread, which raises it there
                 self._error = exc
 
         self._thread = threading.Thread(target=send, name=f"aw-batch-{index}-upload", daemon=True)
         self._thread.start()
 
+    def _trickle(self, proc, n_batches: int, ahead_of: int) -> tuple[int, int]:
+        proc._log(f"[remote] batch {self.index}/{n_batches}: {len(self.zips)} well-zip(s) to upload while batch "
+                  f"{ahead_of} runs, one as each of its wells leaves the remote\n")
+        prune_staged(proc._runner._cache, proc._batch_staging_dir(self.index), self.zips, f"batch {self.index}",
+                     _ahead_log(proc._log))
+        sent_bytes, done = 0, 0
+        while done < len(self.zips):
+            allowed = self._wait_for_room(done)
+            if allowed is None:
+                return sent_bytes, 20                         # ended by Stop, suspend, a lost driver or the cancel
+            some, rc = _rsync(proc, self.index, n_batches, self.zips[done:allowed], ahead=True, cancel=self.cancel,
+                              batch_zips=self.zips)
+            sent_bytes += some
+            if rc != 0:
+                return sent_bytes, rc
+            done = allowed
+        return sent_bytes, 0
+
+    def _room(self) -> int:
+        return len(self.zips) if self._all else min(len(self.zips), len(self._freed))
+
+    def _wait_for_room(self, done: int) -> int | None:
+        """How many of the batch's wells may be on the remote, once that is more than *done*; ``None`` when the upload
+        is to end instead."""
+        with self._wake:
+            while self._room() <= done:
+                if any(e.is_set() for e in self._stops):
+                    return None
+                self._wake.wait(0.5)                          # the stop events are not ours to notify on
+            return None if any(e.is_set() for e in self._stops) else self._room()
+
+    def free(self, well: str) -> None:
+        """*well* has left the remote: if it was one of the running batch's, one more of this batch may go up."""
+        label = _label(well)
+        with self._wake:
+            if label in self._running and label not in self._freed:
+                self._freed.add(label)
+                self._wake.notify_all()
+
+    def release_all(self) -> None:
+        """The running batch has ended, and its input leaves with it: send whatever of this batch is left."""
+        with self._wake:
+            self._all = True
+            self._wake.notify_all()
+
     def result(self) -> tuple[int, int]:
+        self.release_all()
         self._thread.join()
         if self._error is not None:
             raise self._error
@@ -147,10 +213,25 @@ class _Ahead:
         """The loop ended without this batch: stop its rsync and wait a little for the thread. An error the thread
         raised is logged here, since nothing will ask for its result."""
         self.cancel.set()
+        with self._wake:
+            self._wake.notify_all()
         self._thread.join(wait_s)
         if self._error is not None:
             logging.getLogger(__name__).warning("the upload of batch %d, sent ahead and not needed, failed",
                                                 self.index, exc_info=self._error)
+
+
+def _label(well_or_zip) -> str:
+    name = getattr(well_or_zip, "stem", None) or str(well_or_zip)
+    return canonical_well_label(name) or name.upper()
+
+
+def well_removed(proc, well: str) -> None:
+    """The Fetcher has deleted *well*'s files from the remote (``Fetcher.on_well_removed``): the next batch's upload,
+    if one is waiting for room, may send a well in its place. Called on the Fetcher's thread."""
+    ahead = getattr(proc, "_upload_ahead", None)
+    if ahead is not None:
+        ahead.free(well)
 
 
 def abandon_upload_ahead(proc) -> None:
@@ -164,8 +245,8 @@ def abandon_upload_ahead(proc) -> None:
 def run_batch(proc, index: int, n_batches: int, batch_zips, next_zips=None) -> int | Step:
     """Send data batch *index* of *n_batches* and wait for it: the code it counts for, or a :class:`Step`.
 
-    *next_zips*, the batch after this one, starts uploading as soon as this batch is handed to the node, so it is
-    on the remote when this one ends (:class:`_Ahead`); the call for it then finds its upload done or under way."""
+    *next_zips*, the batch after this one, goes up a well at a time as this batch's wells finish and leave the
+    remote (:class:`_Ahead`); the call for it sends what is left and finds the rest already there."""
     result = _run_batch(proc, index, n_batches, batch_zips, next_zips)
     if isinstance(result, Step):
         abandon_upload_ahead(proc)
@@ -196,7 +277,7 @@ def _run_batch(proc, index: int, n_batches: int, batch_zips, next_zips) -> int |
     if launch is not None and not launch():
         return Step.ENDED
     if next_zips:
-        proc._upload_ahead = _Ahead(proc, index + 1, n_batches, next_zips, ahead_of=index)
+        proc._upload_ahead = _Ahead(proc, index + 1, n_batches, next_zips, ahead_of=index, running_zips=batch_zips)
     # The pipeline for this batch runs inside the allocation the driver already holds — no second queue wait, no
     # second argv. One hand-off that cannot be made ends the run (`remote_handoff`).
     rc = hand_off_and_wait(proc, index, n_batches,

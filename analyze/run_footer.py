@@ -53,9 +53,10 @@ class AnalyzeRunFooterMixin:
         # known before the run, and the run log says why.
         bs_row = self._row(
             sec, "Batch size",
-            tooltip="Process this many wells at a time on the remote, the next "
-                    "batch uploading while one runs, which bounds its peak disk "
-                    "to about two batches of input. "
+            tooltip="Process this many wells at a time on the remote, which "
+                    "bounds its peak disk to about one batch of input: as each "
+                    "finished well is removed from the remote, one well of the "
+                    "next batch is uploaded in its place. "
                     "0 sends one well per worker, worked out from the Workers "
                     "field or the CPUs and GPUs in the scheduler command; the "
                     "run log says what it chose.")

@@ -797,3 +797,22 @@ def test_a_reference_measured_from_a_well_not_adopted_stays_behind(tmp_path, mon
 
     assert p._returncode == 0, p._logged
     assert not (run_dir / "out" / "nanowells" / "_confluence_reference").exists()
+
+
+def test_an_adopted_nanowell_well_brings_its_cell_masks(tmp_path, monkeypatch):
+    """A finished well taken from an earlier attempt brings its cell masks with its tables, so the Fetcher can bring
+    them home (``remote_fetch_nanowells._fetch_masks``) for the next run to reuse. Left behind, a resumed run lost
+    every adopted well's masks. A well without them (an attempt from before they were kept) adopts all the same."""
+    old = tmp_path / "remote" / "runs" / "run-old"
+    earlier = [{"remote_output_dir": str(old / "out"), "remote_input_dir": str(old / "in")}]
+    p, plate, run_dir, sent, observed, _ = _harness(tmp_path, monkeypatch, earlier=earlier, nanowell=True)
+    _finished_on(old / "out", "A01")
+    _finished_on(old / "out", "A02")
+    (old / "out" / "nanowells").mkdir(parents=True, exist_ok=True)
+    (old / "out" / "nanowells" / "A01_masks.npz").write_bytes(b"masks")
+
+    _run(p, monkeypatch)
+
+    assert p._returncode == 0, p._logged
+    assert (run_dir / "out" / "nanowells" / "A01_masks.npz").read_bytes() == b"masks"
+    assert not (run_dir / "out" / "nanowells" / "A02_masks.npz").exists()

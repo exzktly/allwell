@@ -131,7 +131,10 @@ def resolve_batch_size(opts: dict, host) -> tuple[int, str]:
     res = launcher_resources(launcher) if launcher.strip() else LauncherResources()
     exclusive = res.exclusive or bool(getattr(host, "exclusive_node", False))
     cpus = None if exclusive else res.cpus
-    gpus = 0 if opts.get("cpu_only") else (res.gpus or 0)
+    # ``cpu_only`` is StarDist's switch and never keeps Cellpose off a GPU (``pipeline.parallelism``'s docstring), so
+    # the GPUs the scheduler command asks for count whatever it says: zeroing them planned a Cellpose run — every
+    # nanowell run among them — as a CPU run, with batches larger than the workers the node then starts.
+    gpus = res.gpus or 0
     head = "[remote] batch size 0 → "
     if cpus is not None:
         n = expected_workers(cpus, gpus, method, workers=workers, tf_threads=tf_threads)

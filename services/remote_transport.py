@@ -659,10 +659,11 @@ def pull_small_file(host: "RemoteHost", remote_path: str, dest: Path, *,
 
 
 def delete_remote_paths(host: "RemoteHost", paths: Iterable[str], *,
-                        what: str, log_fn: Callable[[str], None]) -> None:
+                        what: str, log_fn: Callable[[str], None]) -> bool:
     """``rm -f`` *paths* (globs allowed) on *host*; *what* names them in the log.
+    Whether the ``rm`` succeeded.
 
-    Non-fatal: a failure is logged and returns, because every caller has a
+    Non-fatal: a failure is logged and returns False, because every caller has a
     backstop (the end-of-run ``verify_and_cleanup``).
 
     The script is piped to ``bash -s`` on stdin rather than passed as
@@ -680,8 +681,11 @@ def delete_remote_paths(host: "RemoteHost", paths: Iterable[str], *,
         if result.returncode != 0:
             log_fn(f"[remote] warn: cleanup of {what} on remote "
                    f"returned {result.returncode}: {(result.stderr or '').strip()}\n")
+            return False
     except OSError as exc:
         log_fn(f"[remote] warn: cleanup of {what} on remote failed: {exc}\n")
+        return False
+    return True
 
 
 # ── Control commands: one short ssh, bounded, failing in its own words ──────

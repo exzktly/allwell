@@ -170,3 +170,42 @@ def test_a_folder_that_is_not_a_nanowell_run_is_refused_by_name(tmp_path, monkey
     with pytest.raises(SystemExit):
         _run(monkeypatch, plate, "out", "--nanowell_registration_from", str(tmp_path / "elsewhere"))
     assert not (plate / "out" / "nanowells").exists()
+
+
+def test_a_host_given_only_the_sent_grid_record_reuses_the_registration(tmp_path, monkeypatch, rendered_well):
+    """What a remote re-run gets (``services.remote_registration``): the well's grid record and cell masks alone, in a
+    folder of their own, named by ``--nanowell_registration_from``, with a fresh output folder. Neither registration
+    nor the segmenter runs again, and the positions and rows are the first run's."""
+    import shutil
+    import types
+    from pathlib import Path
+
+    from services.remote_registration import send_registration
+    from tests.test_nanowell_mask_reuse_run import _counting_segmenter
+
+    calls: list = []
+    monkeypatch.setitem(globals(), "threshold_segmenter", lambda: _counting_segmenter(calls))
+    rendered, record = rendered_well
+    plate = _write_plate(tmp_path, rendered, record)
+    counter = _CountingRegister(monkeypatch)
+    first = _run(monkeypatch, plate, "out1")
+    segmented = len(calls)
+    assert segmented > 0
+    host = tmp_path / "host_run"
+
+    def upload_subset(files, dest, **kw):                  # rsync, as a copy into the host's folder
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        for f in files:
+            shutil.copy(f, Path(dest) / Path(f).name)
+        return (1, 0.0, 0)
+
+    cache = types.SimpleNamespace(_ssh_run=lambda *a, **k: None, upload_subset=upload_subset)
+    argv = ["py", "pm.py", "--output_dir", str(first), "--nanowell_format", "100um"]
+    reg = send_registration(cache, str(host), argv, [WELL], lambda _m: None)
+    assert sorted(p.name for p in Path(reg).rglob("*") if p.is_file()) == [f"{WELL}_grid.json", f"{WELL}_masks.npz"]
+    second = _run(monkeypatch, plate, "fresh_out", "--nanowell_registration_from", reg)
+    assert counter.calls == 1, "the host registered the tiles again"
+    assert len(calls) == segmented, "the host segmented crops whose masks it was sent"
+    assert _block(second)["registration"]["reused_from"] == reg
+    assert _block(second)["tiles"] == _block(first)["tiles"]
+    assert _sites(second) == _sites(first)

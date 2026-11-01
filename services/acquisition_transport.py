@@ -166,11 +166,14 @@ def carry_upload_record(function):
 
 
 def carry_subset_record(function):
+    """*record_paths*, when given, is what the record beside the archives is scoped to instead of the archives sent:
+    a batch uploaded a few wells at a time (``remote_batch_step._Ahead``) rewrites the record with every rsync, and
+    the last one must still describe the whole batch, not only the wells it sent."""
     @wraps(function)
-    def wrapped(cache, paths, remote_path, *, acquisition_input=None, **options):
+    def wrapped(cache, paths, remote_path, *, acquisition_input=None, record_paths=None, **options):
         if acquisition_input is None or not paths:
             return function(cache, paths, remote_path, **options)
-        with _carried_files(acquisition_input, paths, options.get('log_fn')) as files:
+        with _carried_files(acquisition_input, list(record_paths or paths), options.get('log_fn')) as files:
             if not files:
                 return function(cache, paths, remote_path, **options)
             return function(cache, paths, remote_path, extra_sources=files, **options)

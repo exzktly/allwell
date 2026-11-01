@@ -134,6 +134,9 @@ class _RemoteRun:
     # directory it *did* delete belongs to a run this one only borrowed a name
     # from.
     reattached: bool = False
+    #: The host folder holding this run's wells' stored registration (``services.remote_registration``), passed to
+    #: the host's pipeline as ``--nanowell_registration_from``; ``""`` when none was sent.
+    registration_dir: str = ""
     #: Set once this run has launched the ssh that asks the scheduler for its
     #: own allocation. Until then the job named by ``<pidfile>.slurm`` — and the
     #: PID in ``<pidfile>`` — can only be somebody else's: ``run_id`` is

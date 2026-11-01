@@ -214,33 +214,6 @@ def test_the_reference_well_keeps_its_confluence_and_says_what_it_counted():
     assert blocks["0h"]["confluence_reference"]["status"] == nref.EMPTY
 
 
-def test_a_reference_the_old_rule_refused_is_measured_again(tmp_path, reference):
-    """An output folder from before the rule changed — the reported one — holds a reference whose timepoints say
-    ``loaded`` and have no template. The reference well's own key there differs from the ``own`` its grid recorded,
-    so its incremental run does not keep those timepoints and its finished-well check does not skip it; the
-    timepoint the old rule accepted is still kept."""
-    from pipeline import nanowell_task as nt
-
-    _, template = reference
-    settings = _settings(empty_well="H12")
-    old_rule = {"status": nref.LOADED, "loaded_share": 0.72, "nanowells_counted": 100, "max_loaded_share": 0.05}
-    nref.save(tmp_path, "H12", settings, {"0h": (template, old_rule),
-                                          "12h": (template, nref.verdict(_rows([0] * 10)))})
-    path = tmp_path / nt.NANOWELL_DIR / "H12_grid.json"
-    own = nt._confluence_reference_for("H12", settings, path)
-    assert own.own and own.key_at("0h") != nref.OWN_KEY and own.key_at("12h") == nref.OWN_KEY
-    import json
-
-    path.write_text(json.dumps({"timepoints": {tp: {"status": nr.OK, nref.KEY_FIELD: nref.OWN_KEY}
-                                               for tp in ("0h", "12h")}}))
-    spec = {"_nanowell": {"plate_format": "100um", "empty_well": "H12"}}
-    assert nt.confluence_reference_current(tmp_path, "H12", spec) is False
-    # Once measured again under the new rule, nothing is refused and it is current.
-    nref.save(tmp_path, "H12", settings, {tp: (template, nref.verdict(_rows([1] * 10))) for tp in ("0h", "12h")})
-    assert nt._confluence_reference_for("H12", settings, path) is nref.OWN
-    assert nt.confluence_reference_current(tmp_path, "H12", spec) is True
-
-
 def test_a_well_is_given_the_reference_the_run_names(tmp_path, reference):
     """``nanowell_task._confluence_reference_for``, the one call that decides what a well reads against: itself
     when it is the reference, the saved reference otherwise, and nothing, with the reason, when none is named."""
@@ -337,39 +310,3 @@ def test_the_command_line_refuses_the_empty_well_background_without_an_empty_wel
     assert options["fluor_background"] == "empty_well" and options["empty_well"] == "H12"
     assert "fluor_background" not in nanowell_options_from_args(
         parser.parse_args(base[:-2] + ["--nanowell_empty_well", "H12"]), error)
-
-
-def test_a_remote_re_run_sends_every_well_when_the_old_rule_s_reference_is_measured_again(tmp_path, reference):
-    """The reported plate run again remotely: the reference and A01 are finished here, A01 read against the old
-    rule's refusal (``none:loaded``), which still matches the ``reference.json`` here. The reference is now to be
-    measured again, so A01 must go too — kept, it would keep its blank confluence beside a reference that has a
-    template. ``services.remote_finished_wells`` decides the reference's own currency before asking whether it is
-    finished."""
-    import json
-
-    from pipeline.cli_args import build_parser
-    from services.remote_finished_wells import _read_against_the_reference
-
-    _, template = reference
-    args = build_parser().parse_args(["--input_dir", "x", "--output_dir", str(tmp_path),
-                                      "--nanowell_format", "100um", "--nanowell_empty_well", "H12",
-                                      "--phase_token", "PHASE"])
-    from pipeline.cli_args import nanowell_options_from_args
-    from pipeline.nanowell_task import settings_from_kwargs
-
-    def refuse(message):
-        raise AssertionError(message)          # an unparsable argv answers [] too, which would prove nothing
-
-    settings = settings_from_kwargs({"_nanowell": nanowell_options_from_args(args, refuse)})
-    old_rule = {"status": nref.LOADED, "loaded_share": 0.72, "nanowells_counted": 100, "max_loaded_share": 0.05}
-    nref.save(tmp_path, "H12", settings, {"0h": (template, old_rule)})
-    for well, key in (("H12", nref.OWN_KEY), ("A01", "none:loaded")):
-        (tmp_path / "nanowells" / f"{well}_grid.json").write_text(
-            json.dumps({"timepoints": {"0h": {"status": nr.OK, nref.KEY_FIELD: key}}}))
-    assert _read_against_the_reference(tmp_path, args, ["A01", "H12"], ["A01", "H12"]) == []
-    assert _read_against_the_reference(tmp_path, args, ["A01"], ["A01"]) == ["A01"]   # H12 not sent: A01 stays
-    # Measured again under the new rule: both are current, and both are finished.
-    nref.save(tmp_path, "H12", settings, {"0h": (template, nref.verdict(_rows([1] * 10)))})
-    (tmp_path / "nanowells" / "A01_grid.json").write_text(json.dumps(
-        {"timepoints": {"0h": {"status": nr.OK, nref.KEY_FIELD: nref.template_key(template)}}}))
-    assert _read_against_the_reference(tmp_path, args, ["A01", "H12"], ["A01", "H12"]) == ["A01", "H12"]

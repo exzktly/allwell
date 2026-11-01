@@ -110,7 +110,8 @@ def test_cpu_only_does_not_keep_cellpose_off_the_gpu(monkeypatch, linux_17_cores
     plan = _plan(monkeypatch, 1, cpu_only=True)
     assert plan.workers == 2
     assert plan.cellpose_note.startswith("GPU")
-    assert plan.device_str == "CPU only (--cpu_only)"
+    assert plan.device_str == ("Cellpose — the GPU when one is visible (see the Cellpose line); --cpu_only is "
+                               "StarDist's and does not apply")
 
 
 def test_a_stardist_run_is_untouched_by_the_gpu(monkeypatch, linux_17_cores):

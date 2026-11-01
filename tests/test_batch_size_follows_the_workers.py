@@ -81,10 +81,27 @@ def test_the_workers_field_wins_within_the_cpus():
     assert n == 31                                   # clamped to the core budget, as the pipeline clamps it
 
 
-def test_cpu_only_ignores_the_gpus():
-    n, _ = resolve_batch_size({"remote_batch_size": "0", "segmentation_method": "cellpose", "cpu_only": True},
+@pytest.mark.parametrize("method", ["cellpose", "cellpose_labelfree"])
+def test_cpu_only_does_not_plan_a_cellpose_run_for_the_cpus(monkeypatch, method):
+    """``cpu_only`` is StarDist's switch: the pipeline still puts Cellpose on the GPU and caps it at two workers a
+    GPU (``test_cellpose_uses_the_gpu``), so the batch is sized to those workers, not to 32 // 4 = 8 CPU workers.
+    ``cellpose_labelfree`` is what every nanowell run is pinned to. Held against ``plan_parallelism`` on the node the
+    scheduler command describes, with ``cpu_only`` set on both sides."""
+    n, said = resolve_batch_size({"remote_batch_size": "0", "segmentation_method": method, "cpu_only": True},
+                                 _host("srun --gres=gpu:1 -c 33"))
+    assert n == 2 and "1 GPU(s)" in said
+    monkeypatch.setattr(par, "_cpu_count", lambda: 33)
+    monkeypatch.setattr(par, "visible_gpu_count", lambda: 1)
+    monkeypatch.setattr(par, "node_specs_line", lambda: "")
+    monkeypatch.setattr(sys, "platform", "linux")
+    args = SimpleNamespace(workers=0, tf_threads=0, cpu_only=True, segmentation_method=method)
+    assert par.plan_parallelism(args, logging.getLogger("t")).workers == n
+
+
+def test_cpu_only_changes_nothing_for_a_stardist_run():
+    n, _ = resolve_batch_size({"remote_batch_size": "0", "segmentation_method": "stardist_nuclei", "cpu_only": True},
                               _host("srun --gres=gpu:1 -c 33"))
-    assert n == 8                                    # 32 // 4, no GPU cap
+    assert n == 8                                    # 32 // 4: StarDist is never capped by the GPUs
 
 
 def test_a_positive_batch_size_is_the_users():

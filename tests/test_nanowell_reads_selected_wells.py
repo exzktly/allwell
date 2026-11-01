@@ -42,6 +42,7 @@ def _select(qtbot, ctx, wells):
 
     ctx.state.selection.selected_wells = set(wells)
     nwc.nw_on_selection_changed(ctx)
+    nwc.run_queued_load(ctx)                                           # not waiting out the debounce
     st = ctx.state.feature_slice("nanowell")
     qtbot.waitUntil(lambda: not st.computing, timeout=20000)
     return st
@@ -152,6 +153,7 @@ def _add_wells(ctx, wells):
 
     ctx.state.selection.selected_wells = set(wells)
     nwc.nw_on_selection_changed(ctx)
+    nwc.run_queued_load(ctx)
     st = ctx.state.feature_slice("nanowell")
     assert st.computing, "adding an unread well starts a read"
     return st
@@ -253,3 +255,58 @@ def test_adding_a_drawn_well_covers_every_view_of_every_well(counted, qtbot, vie
     assert _scrim_shown(ctx)
     qtbot.waitUntil(lambda: not st.computing, timeout=20000)
     assert not _scrim_shown(ctx)
+
+
+# ── a run of selection changes starts one load ─────────────────────────────────────────────────────────
+def test_quick_selection_changes_start_one_load_once_the_selection_settles(counted, qtbot):
+    """Clicking wells on the plate one after another used to start a load per click, each superseding the last."""
+    from review.features.nanowell import controller as nwc
+
+    ctx, reads = counted
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    request = st.request
+    for wells in ({"A01", "A02"}, {"A01", "A02", "B01"}):
+        ctx.state.selection.selected_wells = wells
+        nwc.nw_on_selection_changed(ctx)
+        assert nwc.load_queued(ctx) and not st.computing and st.request == request
+    qtbot.waitUntil(lambda: not nwc.load_queued(ctx) and not st.computing, timeout=20000)
+    assert st.request == request + 1
+    assert reads == ["A01", "A02", "B01"] and nwc.page_wells(ctx) == ["A01", "A02", "B01"]
+
+
+def test_a_well_selected_first_reads_as_reading_while_the_load_waits(counted, qtbot):
+    """During the debounce nothing is computing yet, but the selected well's table is on its way: the page says
+    it is reading, never that the well's table could not be used."""
+    from review.features.nanowell import controller as nwc
+
+    ctx, _reads = counted
+    st = _loaded(qtbot, ctx)
+    ctx.state.selection.selected_wells = {"A01"}
+    nwc.nw_on_selection_changed(ctx)
+    assert nwc.load_queued(ctx) and not st.computing
+    assert nwc.nanowell_empty_reason(ctx).title == "Reading the nanowell tables…"
+    qtbot.waitUntil(lambda: st.metrics is not None and not st.computing and not nwc.load_queued(ctx),
+                    timeout=20000)
+    assert nwc.nanowell_empty_reason(ctx) is None
+
+
+def test_a_superseded_load_keeps_the_wells_it_read(counted, qtbot):
+    """A load overtaken by a newer selection still read its wells' files; they are kept, so selecting the well
+    again does not read it a second time."""
+    from review.features.nanowell import controller as nwc
+
+    ctx, reads = counted
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    ctx.state.selection.selected_wells = {"A01", "B01"}
+    nwc.nw_on_selection_changed(ctx)
+    nwc.run_queued_load(ctx)
+    assert st.computing
+    ctx.state.selection.selected_wells = {"A01"}                       # deselected before its read lands
+    nwc.nw_on_selection_changed(ctx)
+    nwc.run_queued_load(ctx)
+    assert not st.computing                                            # A01 is current: the B01 load is stale
+    qtbot.waitUntil(lambda: "B01" in st.well_parts, timeout=20000)
+    _select(qtbot, ctx, {"A01", "B01"})
+    assert reads == ["A01", "B01"] and nwc.page_wells(ctx) == ["A01", "B01"]

@@ -12468,8 +12468,14 @@ footer names it; the run montage is drawn as saved, and its footer says the rang
 (`active_wells`) and computes the metrics on `core.worker_bridge.run_off_thread`. The wells read are kept
 (`state.well_parts`, for the data dir in `parts_for`; `loaded_wells` the wells asked for, a well without a table
 included), so a well selected again reads nothing and a deselection neither reads nor recomputes; the worker
-reads into its own copy of the parts, which `done` adopts. A selection change on the shown page asks for the new
-wells at once (`nw_on_selection_changed`); a hidden page reads on its next show. With nothing selected nothing is
+reads into its own copy of the parts, which `done` merges into `well_parts` whether or not its request is still the
+current one — a part is the well's files as read, valid for every baseline and gate, so a load overtaken by a newer
+selection still spares the next one its reads. A selection change on the shown page redraws at once from the wells
+already read and asks for the new ones once the selection has been still for `tab_view.LOAD_DEBOUNCE_MS` (250 ms;
+`queue_load` restarts the page's `_nw_load_timer`, whose timeout runs `run_queued_load`), so a run of clicks on the
+plate starts one load rather than one per click; while it waits, `load_queued` makes `nanowell_empty_reason` say
+the page is reading rather than that the selected wells' tables are unusable. Every other caller — activation, a
+dataset load, a baseline, gate or focus-rule change — loads at once. A hidden page reads on its next show. With nothing selected nothing is
 read, and `_metrics_of` gives an empty table so the page counts as loaded and says what to select.
 While a load runs, its placeholder (*Reading the nanowell tables…*, `_reading_reason`) draws a progress bar: the
 worker counts the wells of each of its two passes — `collect.load_nanowell_data(on_well=…)` over the tables it reads

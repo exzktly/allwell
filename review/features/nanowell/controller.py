@@ -277,7 +277,7 @@ def nanowell_empty_reason(ctx) -> EmptyReason | None:
 
     if not has_plottable_selection(ctx) or not page_groups(ctx):
         chosen = [w for w in active_wells(ctx) if w in set(available)]
-        if chosen and st.computing:
+        if chosen and (st.computing or load_queued(ctx)):
             return _reading_reason(st)
         if chosen and set(chosen) <= set(st.excluded_wells):
             return _empty("Every selected well is excluded on this page.",
@@ -489,14 +489,19 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         _refresh_empty(ctx)
 
     def done(result):
+        data, metrics, error, read, gate = result
+        if st.parts_for == key[0]:
+            # The wells read are kept whichever request read them: a part is the well's files as read, valid for
+            # every baseline and gate, so a superseded load's reads spare the next load reading them again. Merged
+            # rather than replaced, so a part another load (or the overlay's read) added meanwhile is kept too.
+            st.well_parts = {**read, **st.well_parts}
         if request != st.request:
             return                                       # a newer request has been made; this one is stale
-        data, metrics, error, read, gate = result
         st.data, st.metrics, st.load_error = data, metrics, error
         st.gate, (st.gated_for, st.focus_for) = gate, version
         st.loaded_for, st.computing, st.load_progress = key, False, None
         if st.parts_for == key[0]:
-            st.well_parts, st.loaded_wells = read, wells
+            st.loaded_wells = wells
         for problem in (data.problems if data is not None else []):
             log.warning("Nanowells: %s", problem)
         _apply_pending_anchor(ctx)
@@ -1925,12 +1930,46 @@ def nw_on_dataset_loaded(ctx) -> None:
 
 
 def nw_on_selection_changed(ctx) -> None:
+    """Redraw for the new selection at once, from the wells already read, and read the wells it adds once the
+    selection has settled (:func:`queue_load`): a run of clicks on the plate starts one load, not one per click."""
     if ctx.widgets.get_or_none("_nw_canvas") is not None:
         visible = ctx.widgets.get_or_none("_nw_page_visible")
         if callable(visible) and visible():
-            ensure_loaded(ctx)                   # a well selected now is read now; a hidden page reads on show
+            queue_load(ctx)                      # a well selected now is read soon; a hidden page reads on show
         _call(ctx, "_nw_refresh_controls")
         redraw(ctx)
+
+
+def queue_load(ctx) -> None:
+    """Ask for :func:`ensure_loaded` once the selection has been still for the page's debounce interval
+    (``tab_view.LOAD_DEBOUNCE_MS``); each call restarts the wait. Without the page's timer, load now."""
+    timer = ctx.widgets.get_or_none("_nw_load_timer")
+    if timer is None:
+        ensure_loaded(ctx)
+        return
+    timer.start()
+    _refresh_empty(ctx)
+
+
+def load_queued(ctx) -> bool:
+    """Whether a load asked for by :func:`queue_load` is still waiting for the selection to settle."""
+    import shiboken6
+
+    timer = ctx.widgets.get_or_none("_nw_load_timer")
+    return timer is not None and shiboken6.isValid(timer) and timer.isActive()
+
+
+def run_queued_load(ctx) -> None:
+    """Start the load :func:`queue_load` asked for now, if one is waiting (the timer's own timeout, and a test
+    that does not want to wait)."""
+    timer = ctx.widgets.get_or_none("_nw_load_timer")
+    if timer is not None:
+        timer.stop()
+    visible = ctx.widgets.get_or_none("_nw_page_visible")
+    if _page_deleted(ctx) or not (callable(visible) and visible()):
+        return                                   # a page hidden meanwhile reads on its next show
+    ensure_loaded(ctx)
+    _refresh_empty(ctx)
 
 
 def nw_on_qc_params_changed(ctx) -> None:

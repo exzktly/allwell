@@ -6197,7 +6197,8 @@ Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
-is selected and kept, so selecting it again is instant. While a newly selected well is read, or the figures are
+is selected and kept, so selecting it again is instant. Wells clicked one after another on the plate are read
+together, a quarter of a second after the last click, rather than one load per click. While a newly selected well is read, or the figures are
 recomputed, the page dims the figure and shows *Computing…* across it — but only when the result can change what
 the figure shows. Each well's numbers depend on that well alone, so while wells added to the selection are read,
 the views that show one well (Array, Identity, Extremes) stay live unless the added well is the one they will

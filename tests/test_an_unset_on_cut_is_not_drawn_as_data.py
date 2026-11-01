@@ -1,4 +1,4 @@
-"""An ON cutoff nobody set, which cuts nothing, is said rather than drawn (NANOWELL_OBSERVATIONS_TRACKER #3).
+"""An ON cutoff nobody set, which cuts nothing, is said rather than drawn (ARCHITECTURE §6.2l).
 
 The segmentation channel's default ThreshFracOn is 0.0, so "Fraction of Cells Above Threshold" is 1.0 and
 "Events above threshold (N)" is the cell count for every well — bars that look like a measurement. A nanowell run

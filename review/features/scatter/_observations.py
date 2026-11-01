@@ -1,4 +1,4 @@
-"""Scatter under **Observations: Nanowells** — the axis pickers and the redraw (NANOWELL_OBSERVATIONS_TRACKER #9).
+"""Scatter under **Observations: Nanowells** — the axis pickers and the redraw (ARCHITECTURE §6.2l).
 
 The Cells and Wells pages each get an X / Y metric picker for nanowell observations beside their per-cell channel
 and property pickers; :func:`sync_controls` shows one set or the other, so the band only ever carries controls

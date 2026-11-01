@@ -1,4 +1,4 @@
-"""Bar Plots under **Observations: Nanowells** (NANOWELL_OBSERVATIONS_TRACKER #13).
+"""Bar Plots under **Observations: Nanowells** (ARCHITECTURE §6.2l).
 
 Three panels, as for cells, each saying what it is:
 

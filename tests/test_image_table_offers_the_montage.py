@@ -1,5 +1,5 @@
 """The Image Table offers a nanowell run's montage and stops offering an overlay it never wrote
-(NANOWELL_OBSERVATIONS_TRACKER #6).
+(ARCHITECTURE §6.2l).
 
 A nanowell run's ``out.zip`` holds one stitched montage per well and timepoint and no segmentation overlay, so the
 Image Table's NUC+SEG row was "(no image)" in every cell and the picture the run analysed was never offered. The

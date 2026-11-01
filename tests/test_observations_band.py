@@ -1,5 +1,5 @@
 """The Plotting band's Observations toggle: when it is offered, what a leaf draws, and its words
-(NANOWELL_OBSERVATIONS_TRACKER #8).
+(ARCHITECTURE §6.2l).
 
 When the toggle shows is derived from three facts — the dataset is a nanowell run, the build has the Nanowells
 feature (its ``observations.nanowell`` service), and the leaf's registry descriptor declares nanowells — never

@@ -1,5 +1,5 @@
 """Segmentation draws a frame that has no label map, says why, and turns off the tools that need outlines
-(NANOWELL_OBSERVATIONS_TRACKER #4, #5).
+(ARCHITECTURE §6.2l).
 
 A nanowell run writes no label map, and Segmentation used to abort on a missing one — "Missing fluorescence image
 or label map", nothing drawn, Delete / Crop / Edit still enabled. Now the image is drawn without outlines, the

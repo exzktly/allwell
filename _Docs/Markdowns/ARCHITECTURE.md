@@ -13552,8 +13552,9 @@ The band's Fold change menu normalises cell plots; a nanowell figure does not ap
 (`FOLD_CHANGE_NOT_APPLIED`) — the per-nanowell fold changes are metrics of their own, against the page's Baseline.
 
 **Cells on a nanowell plate** keep drawing as before, and every cell figure of such a plate (Bar, Line, Scatter,
-Distribution, Heat Map, Response) ends with "Observations: cells · pooled from N occupied nanowells per well"
-(`stamp_cells_footer`); N counts distinct addresses in the cell rows, which name only nanowells holding a cell. In a
+Distribution, Heat Map, Response, and Batch Export's Bar and Line exports) ends with "Observations: cells · pooled
+from N occupied nanowells per well" (`stamp_cells_footer`; Batch Export through `finish_cell_figure`, which also draws
+the unset-cutoff sentence below); N counts distinct addresses in the cell rows, which name only nanowells holding a cell. In a
 build without the Nanowells feature the line adds "nanowell views are not in this build", so a nanowell plate never
 reads as an ordinary one. The per-cell Scatter's axis pickers and Multivariate's feature picker offer each cell's own
 nanowell's metrics ("Nanowell ▸ …", the Nanowell family) through `with_nanowell_columns`.
@@ -13584,7 +13585,8 @@ import and checks every one of those surfaces, and the inverse with it present.
 - *An ON cutoff nobody set that cuts nothing is said, not drawn.* The segmentation channel's default ThreshFracOn is
   0.0, so its Fraction-above panel is 1.0 and its Events-above panel the cell count for every well.
   `channel_state_controller.on_cut_not_set` names that case (no stored cutoff, and a default of 0.0); the Bar and Line
-  tabs replace those two panels' contents with `core/threshold_note.ON_CUT_NOT_SET_NOTE`. A stored cutoff, including
+  tabs, and Batch Export's Bar and Line exports (`observation_band.finish_cell_figure`), replace those two panels'
+  contents with `core/threshold_note.ON_CUT_NOT_SET_NOTE`. A stored cutoff, including
   a deliberate 0, and a readout channel's non-zero default are drawn as before.
 - *A status line belongs to the tab that wrote it.* `NotificationService.set_status` records the tab on screen as the
   line's owner and `tab_controller.on_tab_change` clears a line another tab wrote (`clear_unless_owned_by`), so an

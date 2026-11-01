@@ -3581,5 +3581,8 @@ class BatchExportPanel(QWidget):
             # beside a screen figure in greys, drawn from one setting.
             color_mode=_line_color_mode(self._ctx.state.plot),
         )
+        # The unset-cutoff sentence and a nanowell plate's cells footer, as the Line Graphs tab draws them.
+        from review.core.observation_band import finish_cell_figure
+        finish_cell_figure(self._ctx, fig, ax_frac, ax_n, _val_col, grp.wells)
         return fig
 

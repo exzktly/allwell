@@ -180,6 +180,30 @@ def test_a_shared_attribute_name_on_another_object_is_not_a_use(lane, monkeypatc
     assert "uses unused" in _reach(lane, tree, "pkg/core.py", {"unused"})
 
 
+def test_every_reached_lane_test_is_reported_and_no_other(lane, monkeypatch, tmp_path):
+    """Selection runs exactly the files reached: one that uses the change, one that reaches it through another
+    module, and not the one that takes only an unchanged name."""
+    tree = _tree(lane, monkeypatch, tmp_path, {
+        **APP,
+        "tests/test_direct.py": "from pkg.core import used\n\ndef test_it():\n    assert used()\n",
+        "tests/test_through.py": "from pkg import middle\n\ndef test_it():\n    assert middle.wraps()\n",
+        "tests/test_other.py": "from pkg.core import unused\n\ndef test_it():\n    assert unused()\n",
+    }, roster=("test_direct.py", "test_through.py", "test_other.py"))
+    found = lane.reach_all("g", {"pkg/core.py": {"used"}}, tree)
+    assert set(found) == {"tests/test_direct.py", "tests/test_through.py"}, found
+    assert set(lane.reach_all("g", {"pkg/core.py": {"unused"}}, tree)) == {"tests/test_other.py"}
+
+
+def test_an_autouse_fixture_or_hook_runs_the_whole_lane(lane, monkeypatch, tmp_path):
+    tree = _tree(lane, monkeypatch, tmp_path, {
+        "tests/conftest.py": "import pytest\n\n@pytest.fixture(autouse=True)\ndef _guard():\n    yield\n\n"
+                             "def pytest_collection_modifyitems(items):\n    pass\n",
+        "tests/test_lane.py": "def test_it():\n    assert True\n",
+    })
+    assert set(lane.reach_all("g", {"tests/conftest.py": {"_guard"}}, tree)) == {lane.ALL}
+    assert set(lane.reach_all("g", {"tests/conftest.py": {"pytest_collection_modifyitems"}}, tree)) == {lane.ALL}
+
+
 @pytest.mark.parametrize("helper", ["tests/_fake.py", "tests/test_borrowed.py"])
 def test_a_test_helper_or_a_borrowed_test_module_reaches_the_lane_test(lane, monkeypatch, tmp_path, helper):
     """The recall gap the rework was for: ``tests/_fake_remote.py`` is imported by nine remote test files and
@@ -238,8 +262,8 @@ def test_a_file_a_lane_test_names_by_path_runs_the_lane_when_anything_reaches_it
             runner.start(ROOT / "process_microscopy.py")
         """}
     tree = _tree(lane, monkeypatch, tmp_path, files)
-    named = lane.named_files("g", sorted(files), tmp_path)
-    assert named == {"process_microscopy.py": ("tests/test_lane.py", True)}
+    assert lane.named_files("g", sorted(files), tmp_path) == {"process_microscopy.py": ("tests/test_lane.py", True)}
+    named = lane.namers("g", sorted(files), tmp_path)
     why = _reach(lane, tree, "pkg/core.py", {"used"}, named)
     assert "process_microscopy.py, which the lane test tests/test_lane.py runs" in why, why
     assert _reach(lane, tree, "pkg/core.py", {"unused"}, named) == ""
@@ -262,8 +286,8 @@ def test_a_file_a_lane_test_only_reads_is_reached_only_by_changing_it(lane, monk
             assert "main" in (ROOT / "launcher.py").read_text()
         """}
     tree = _tree(lane, monkeypatch, tmp_path, files)
-    named = lane.named_files("g", sorted(files), tmp_path)
-    assert named == {"launcher.py": ("tests/test_lane.py", False)}
+    assert lane.named_files("g", sorted(files), tmp_path) == {"launcher.py": ("tests/test_lane.py", False)}
+    named = lane.namers("g", sorted(files), tmp_path)
     assert _reach(lane, tree, "pkg/core.py", {"used"}, named) == ""
 
 
@@ -306,7 +330,7 @@ def test_the_real_rosters_name_the_files_they_run_or_read(lane):
     """What ``named_files`` must find in the real roster files, or a change to these files would reach no lane."""
     tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True,
                              check=True).stdout.split()
-    nanowell = lane.named_files("nanowell", tracked)
+    nanowell = {**lane.named_files("nanowell-e2e", tracked), **lane.named_files("nanowell-features", tracked)}
     remote = lane.named_files("remote", tracked)
     assert {"process_microscopy.py", "all_well_launcher.py"} <= nanowell.keys(), nanowell
     assert {"process_microscopy.py", "all_well_launcher.py", "requirements-remote.txt",
@@ -319,14 +343,14 @@ def test_the_real_rosters_name_the_files_they_run_or_read(lane):
 def test_the_rosters_import_their_test_helpers(lane):
     assert "tests/_fake_remote.py" in lane.roster_imports("remote")
     assert "tests/_hold_cluster.py" in lane.roster_imports("remote")
-    assert "tests/_nanowell_synth.py" in lane.roster_imports("nanowell")
+    assert "tests/_nanowell_synth.py" in lane.roster_imports("nanowell-e2e")
 
 
 def test_a_lane_test_borrowing_another_test_module_keeps_it_in_the_tree(lane):
     """``_relevant_files`` drops test files nothing gated imports; one a roster file borrows must stay."""
     paths = ["tests/test_nanowell_final_pass.py", "tests/test_batch_driver.py", "tests/test_bar_geometry.py",
              "pkg/core.py"]
-    kept = lane._relevant_files("nanowell", paths, ROOT)
+    kept = lane._relevant_files("nanowell-features", paths, ROOT)
     assert "tests/test_batch_driver.py" in kept and "pkg/core.py" in kept
     assert "tests/test_bar_geometry.py" not in kept
 
@@ -342,8 +366,9 @@ def test_a_ui_roster_row_reaches_neither_gate(lane):
     after = src.replace("UI_LANE_FILES: dict[str, str] = {",
                         'UI_LANE_FILES: dict[str, str] = {\n    "test_zz_new_ui.py": "a new UI test",', 1)
     assert after != src
-    for gate in ("nanowell", "remote"):
+    for gate in lane.GATES:
         assert lane.lanes_change_reaches(gate, src, after) == "", gate
+        assert lane.lanes_change_selects(gate, src, after) == {}, gate
 
 
 def test_a_remote_roster_row_reaches_the_remote_gate_only(lane):
@@ -352,13 +377,26 @@ def test_a_remote_roster_row_reaches_the_remote_gate_only(lane):
                         'REMOTE_FILES: dict[str, str] = {\n    "test_zz_new_remote.py": "a new remote test",', 1)
     assert after != src
     assert "changes this lane's rosters" in lane.lanes_change_reaches("remote", src, after)
-    assert lane.lanes_change_reaches("nanowell", src, after) == ""
+    assert lane.lanes_change_selects("remote", src, after) == {
+        "tests/test_zz_new_remote.py": "tests/_lanes.py adds it to this lane"}
+    for gate in ("nanowell-e2e", "nanowell-features"):
+        assert lane.lanes_change_reaches(gate, src, after) == ""
+        assert lane.lanes_change_selects(gate, src, after) == {}
+
+
+def test_a_changed_lane_trigger_runs_the_whole_lane(lane):
+    src = _lanes_source()
+    after = src.replace('r"^scripts/test\\.sh$",', 'r"^scripts/test\\.sh$",\n    r"^scripts/other\\.sh$",', 1)
+    assert after != src
+    for gate in lane.GATES:
+        assert set(lane.lanes_change_selects(gate, src, after)) == {lane.ALL}, gate
 
 
 def test_a_lanes_file_that_does_not_load_runs_the_lane(lane):
     src = _lanes_source()
     assert "cannot be compared" in lane.lanes_change_reaches("remote", src, "GATES = {")
     assert "cannot be compared" in lane.lanes_change_reaches("remote", None, src)
+    assert set(lane.lanes_change_selects("remote", src, "GATES = {")) == {lane.ALL}
 
 
 def test_only_the_pytest_table_of_pyproject_reaches_a_gate(lane):
@@ -390,8 +428,96 @@ def test_the_scripts_that_choose_the_lanes_start_none_of_them(tmp_path, script):
     _git(root, "commit", "-q", "-m", "base")
     with (root / script).open("a", encoding="utf-8") as fh:
         fh.write("\n# a change\nCHANGED = True\n")
-    for gate in ("nanowell", "remote"):
+    for gate in ("nanowell-e2e", "nanowell-features", "remote"):
         done = subprocess.run(["python", "scripts/lane_needed.py", gate, "--base", "main"], cwd=root,
                               capture_output=True, text=True)
         assert done.returncode == 1, (gate, done.stdout, done.stderr)
         assert "not needed" in done.stdout
+
+
+# ── selection through the real commands ──────────────────────────────────────
+
+_SCRATCH_LANES = """
+REMOTE_FILES = {"test_a.py": "uses app.a", "test_b.py": "uses app.b"}
+GATES = {"remote": ((REMOTE_FILES,), (r"^scripts/test\\.sh$",))}
+"""
+
+_SCRATCH_CONFTEST = """
+import pytest
+from tests._lanes import REMOTE_FILES
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        if item.fspath.basename in REMOTE_FILES:
+            item.add_marker(pytest.mark.remote_lane)
+"""
+
+
+def _scratch_lane_repo(tmp_path: Path) -> Path:
+    """A repository with two remote-lane tests, each importing its own module; ``test_b`` fails if it runs, so a
+    run that should have left it out says so."""
+    root = tmp_path / "repo"
+    for rel in ("scripts/test.sh", "scripts/lane_needed.py", "scripts/change_scope.py"):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / rel, root / rel)
+    files = {
+        "tests/__init__.py": "",
+        "tests/_lanes.py": _SCRATCH_LANES,
+        "tests/conftest.py": _SCRATCH_CONFTEST,
+        "app/__init__.py": "",
+        "app/a.py": "def value():\n    return 1\n",
+        "app/b.py": "def value():\n    return 2\n",
+        "tests/test_a.py": "from app.a import value\n\ndef test_a():\n    assert value() == 1\n",
+        "tests/test_b.py": "from app.b import value\n\ndef test_b():\n    assert False, 'test_b ran'\n",
+        "pyproject.toml": "[tool.pytest.ini_options]\nmarkers = ['remote_lane: x', 'slow: x']\n",
+        ".gitignore": "__pycache__/\n",
+    }
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    _git(root, "checkout", "-q", "-b", "work")
+    return root
+
+
+def _run_lane(root: Path, **env: str) -> subprocess.CompletedProcess:
+    full = {**os.environ, "ALLWELL_SCOPE_BASE": "main", "ALLWELL_TEST_WORKERS": "0", **env}
+    full.pop("ALLWELL_FULL_LANE", None) if "ALLWELL_FULL_LANE" not in env else None
+    return subprocess.run(["bash", "scripts/test.sh", "--remote", "-p", "no:cacheprovider"], cwd=root,
+                          capture_output=True, text=True, env=full)
+
+
+def test_the_remote_lane_runs_only_the_test_a_change_reaches(tmp_path):
+    root = _scratch_lane_repo(tmp_path)
+    (root / "app/a.py").write_text("def value():\n    return 2 - 1\n", encoding="utf-8")
+    _git(root, "commit", "-qam", "change a")
+    done = _run_lane(root)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "1 passed" in done.stdout and "test_b ran" not in done.stdout, done.stdout
+    assert "running the 1 remote test files this change can reach" in done.stderr
+
+
+def test_a_change_no_lane_test_reaches_runs_nothing(tmp_path):
+    root = _scratch_lane_repo(tmp_path)
+    (root / "app/c.py").write_text("X = 1\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "unrelated")
+    done = _run_lane(root)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "no tests to run" in done.stderr and "passed" not in done.stdout
+
+
+@pytest.mark.parametrize("how", ["full-lane", "harness"])
+def test_the_whole_lane_runs_when_asked_or_when_the_harness_changes(tmp_path, how):
+    root = _scratch_lane_repo(tmp_path)
+    (root / "app/c.py").write_text("X = 1\n", encoding="utf-8")
+    if how == "harness":
+        with (root / "scripts/test.sh").open("a", encoding="utf-8") as fh:
+            fh.write("\n# a harness change\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "change")
+    done = _run_lane(root, **({"ALLWELL_FULL_LANE": "1"} if how == "full-lane" else {}))
+    assert "test_b ran" in done.stdout, done.stdout + done.stderr

@@ -19,15 +19,18 @@ Four rosters, each a lane of its own and each marked by the collection hook:
     GUI layout and appearance. Part of the *local* fast lane; CI leaves them
     out with ``--no-ui`` and never runs them.
 
-**When the gated lanes run.** The first three run only when a change can reach
-them. ``scripts/lane_needed.py <gate>`` answers that for a gate in ``GATES``. A
-changed roster file, a harness path in ``GATES``, or a file a roster file names
-by path (``process_microscopy.py``, ``requirements-remote.txt``) runs it. A
-changed Python file runs it when the definitions that changed reach a roster
-file through the names each importer takes from the module before it, test
-helpers and borrowed test modules included, or reach a file a roster file runs.
-A diff that cannot be computed runs it. ``scripts/preflight.sh`` and CI both
-ask; CI also runs every gated lane on each push to ``main``, where what the
+**When the gated lanes run.** Each of the first three has its own gate in
+``GATES`` and, on a branch, runs only the test files the change can reach.
+``scripts/lane_needed.py <gate> --files`` names them: a changed roster file, a
+roster file that names a changed file by path (``process_microscopy.py``,
+``requirements-remote.txt``), or one a changed definition reaches through the
+names each importer takes, test helpers and borrowed test modules included. It
+answers ``ALL`` — run the whole lane — when the change touches what every test
+in the lane receives (a harness path in ``GATES``, the gate's own triggers here,
+``pyproject.toml``'s ``[tool.pytest]``, a conftest hook or autouse fixture, a
+diff that cannot be computed), and nothing when nothing is reached.
+``scripts/test.sh``, ``scripts/preflight.sh`` and CI all follow it; CI runs every
+lane whole on each push to ``main`` and under a ``full-ci`` label, where what the
 script cannot follow (a module named by a computed string, a data file an
 application module reads) is caught on the merge rather than never.
 
@@ -421,8 +424,12 @@ _HARNESS = (
 #: launcher source they check, the requirements they parse). A pattern added here must be anchored: an unanchored
 #: word (``ssh``, ``bootstrap``) also names files that have nothing to do with the gate.
 GATES: dict[str, tuple[tuple[dict[str, str], ...], tuple[str, ...]]] = {
-    "nanowell": (
-        (NANOWELL_E2E_FILES, NANOWELL_FEATURE_FILES),
+    "nanowell-e2e": (
+        (NANOWELL_E2E_FILES,),
+        _HARNESS,
+    ),
+    "nanowell-features": (
+        (NANOWELL_FEATURE_FILES,),
         _HARNESS,
     ),
     "remote": (

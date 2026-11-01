@@ -10692,15 +10692,22 @@ worker at half of `PROBE_TILES` with a warning, and the halving goes on from the
 
 **Running out of GPU memory while the model loads** (`pipeline.cellpose._load_with_gpu_room`). The halving needs a
 loaded model; building one, or Cellpose 4's bfloat16 test pass inside `_bfloat16_or_float32`, can run out first on
-a GPU the run's other workers already fill. That load is tried `LOAD_OOM_RETRIES` (3) more times, `LOAD_OOM_WAIT_S`
-(10 s) apart, after a `gc.collect` and `empty_cache` run outside the `except` block (the exception's traceback holds
-the half-built model). If the GPU still has no room the worker builds the model on the CPU, says so in a warning that
-names the worker and suggests fewer workers, and carries on: its description reads `CPU — <the GPU> had no room for
-the model (out of GPU memory)`, and `ON_GPU_ATTR` is false, so the nanowell count's threads follow it off the GPU.
-The alternative it replaces was worse than slow: the load raised `CellposeUnavailable`, nothing was cached, and the
-worker failed every well it took the same way while the others carried on. Any other load failure, or one on the
-CPU, still raises `CellposeUnavailable`. A CPU worker runs float32 where its GPU neighbours may run bfloat16, so its
-wells' masks can differ from theirs in the last pixels. `tests/test_cellpose_load_oom.py`.
+a GPU the run's other workers already fill. That load is tried again until it fits, after a `gc.collect` and
+`empty_cache` run outside the `except` block (the exception's traceback holds the half-built model), waiting
+`LOAD_OOM_FIRST_WAIT_S` (10 s) and then twice as long each time up to `LOAD_OOM_MAX_WAIT_S` (300 s), each wait a
+warning that names the worker and suggests fewer workers. It never falls back to the CPU: on a GPU node a CPU worker can be
+slow enough that its last well ends the run later than one worker fewer would have. The waiting worker holds
+the well it was given; the others go on with the rest. Any other load failure, or one on the CPU, still raises
+`CellposeUnavailable`, as every out-of-memory load used to — which cached nothing, so the worker failed every well it
+took the same way while the others carried on.
+
+The wait can end only if the memory comes back, and the run's other workers keep what their passes used in Torch's
+allocator cache, which an idle worker never empties. So a worker hands its cache back when it finishes a well:
+`pipeline.nanowell_parallel.release_cellpose_gpu_cache`, called from the `finally` of
+`process_microscopy.process_well_zip_task` and of the re-anchoring pass's
+`nanowell_task._reanchor_well`. It does nothing unless a Cellpose model of the process is on a GPU, read from the
+model cache through `sys.modules` so a StarDist worker never imports Cellpose or Torch. At the latest, the waiting
+worker loads once the others run out of wells. `tests/test_cellpose_load_oom.py`.
 
 For its first measured timepoint `run_well` also keeps a sample of what the segmenter was given (`_Steps.inspect` → `measure_timepoint(inspect=…)` → `_tile_contents(keep=…)` → `_keep_crops`): `pipeline/nanowell_inspect.inspection_sites` picks the `PER_GROUP` (8) nanowells nearest the array's centre and the 8 farthest, and each is cut from the image the segmenter received, on the scale it was given it at (`segmenter_scale`), with the labels it returned, the counting circle (`circle`: the fitted centre and `INTERIOR_FRACTION` of the fitted radius, in the crop's pixels) and the labels `count_cells` counted (`counted`), so `_keep_crops` runs after the count. The sheet outlines counted labels green and the rest red, and draws the circle yellow. `WellOutcome.inspection` carries them to `nanowell_task`, which writes `nanowells/<well>_segmenter_input.png` (`nanowell_inspect.write_sheet`; the PNG is encoded with `zlib`, nothing else, because it runs on the remote worker), and `remote_fetch_nanowells.fetch_nanowell_tables` pulls it with the tables. It exists because Test detection runs on the app's own machine, where a Torch that cannot load stops it. `tile` is one call on the whole tile (`segment_tile`), and
 is what options that name no scope mean (`LEGACY_SEGMENT_SCOPE`), with the same key and digest-alias treatment as

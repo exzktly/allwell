@@ -163,6 +163,20 @@ def prune_superseded_staging(output_dir: Path, settings_key: str) -> int:
             removed += 1
     return removed
 
+def prepare_staging_dir(tmp_images: Path, well_label: str) -> None:
+    """Keep a staging dir that holds per-FOV checkpoints (resume where the last attempt stopped); wipe any other."""
+    if not tmp_images.exists():
+        return
+    if any(tmp_images.glob(".fov_*.done")):
+        log.info(
+            "Well %s: resuming from %d FOV checkpoint(s) in %s",
+            well_label, sum(1 for _ in tmp_images.glob(".fov_*.done")), tmp_images.name,
+        )
+    else:
+        log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_images.name)
+        remove_directory(tmp_images)
+
+
 def release_staging(output_dir: Path, well_label: str, tmp_images: Path) -> None:
     """End-of-well cleanup of *tmp_images* — unless a suspend left the well part way.
 

@@ -20796,11 +20796,13 @@ you're in before you type the command.
     rsync, the remote runner and its batches, Slurm, the bootstrap, the Remotes
     dialogs; about 100 s. Marked `remote_lane`; **`scripts/test.sh --remote`**.
 
-  `GATES` in the same module names two gates, `nanowell` (both nanowell lanes)
-  and `remote`, each with its rosters and the harness paths that trigger it
-  (`scripts/test.sh`, `tests/requirements-dev.txt`, `.github/workflows/ci.yml`).
-  `scripts/lane_needed.py <gate> [--base REF]` answers whether a change needs
-  them, and every other trigger is computed rather than listed:
+  `GATES` in the same module names one gate per lane — `nanowell-e2e`,
+  `nanowell-features` and `remote` — each with its roster and the harness paths
+  that run it whole (`scripts/test.sh`, `tests/requirements-dev.txt`,
+  `.github/workflows/ci.yml`). `scripts/lane_needed.py <gate> [--base REF]`
+  answers which of the lane's test files a change reaches — `--files` prints
+  them one per line, or `ALL`, for `scripts/test.sh` to run — and every trigger
+  but the harness is computed rather than listed:
   - **A roster file, or a file one names by path.** The script reads the
     roster files' string constants (and `ROOT / "dir" / "file"` chains) for
     tracked paths: `process_microscopy.py`, which the stand-in cluster runs;
@@ -20843,7 +20845,24 @@ you're in before you type the command.
     reaches nothing. `scripts/lane_needed.py` and `scripts/change_scope.py`
     reach no gate: they decide which lanes run and no lane runs them.
 
-  The firing rate follows from what the lanes test, not from the rule. Replayed
+  - **What the lane then runs.** The reached files and no others: a test file
+    is selected when it changed, when it names a changed file (or one a change
+    reaches and it runs), when a changed definition reaches it, or when it asks
+    for a changed conftest fixture. The whole lane runs when the change touches
+    what every test in it receives — a harness path, the gate's triggers in
+    `tests/_lanes.py`, the pytest configuration, a conftest hook or autouse
+    fixture, a conftest change that cannot be narrowed, a diff that cannot be
+    computed; a file joining the lane's roster selects that file. Nothing
+    reached runs nothing. `scripts/test.sh --nanowell`, `--nanowell-features`
+    and `--remote` ask the gate themselves and say on stderr how many files
+    they run and why; `ALLWELL_FULL_LANE=1`, or naming test files, runs exactly
+    what was asked. `scripts/preflight.sh` computes each lane's selection once
+    and hands the files to `scripts/test.sh`. In CI each gate step asks its own
+    gate on a pull request (`ALLWELL_SCOPE_BASE` carries the base to
+    `scripts/test.sh`), and sets `ALLWELL_FULL_LANE` on a push to `main` and on
+    a pull request labelled `full-ci`.
+
+  How often each lane runs follows from what it tests, not from the rule. Replayed
   over 61 merges to `main`, the nanowell gate fires on 52 and the remote gate
   on 39 — about as often as a path-pattern rule did (51 and 41), but not on the
   same merges. It runs a lane on five merges the patterns skipped, each with a
@@ -20859,7 +20878,7 @@ you're in before you type the command.
   computed string, a data file an application module reads at run time, a test
   that builds a path at run time — is why CI's `nanowell` job (the end-to-end
   lane) and `gated` job (the feature and remote lanes, one gate step each) ask
-  the script on a pull request and run unconditionally on a push to `main`;
+  their gates on a pull request and run every lane whole on a push to `main`;
   every run is gated on its JUnit report (`scripts/junit_gate.py`).
   `scripts/preflight.sh` asks the same question before running each lane.
   `tests/test_a_gated_lane_runs_on_what_changed.py` holds each part on

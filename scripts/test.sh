@@ -103,6 +103,44 @@ case "${1:-}" in
         done ;;
 esac
 
+# Narrow a gated lane to the test files the change can reach (scripts/lane_needed.py <gate> --files):
+# the files a changed definition reaches through its importers, or the whole lane when the change
+# touches what every test receives (a harness file, the pytest configuration, a conftest hook). A
+# lane nothing can reach runs nothing. Naming test files, or ALLWELL_FULL_LANE=1, runs exactly what
+# was asked; CI sets ALLWELL_FULL_LANE on a push to main and on a pull request labelled full-ci.
+GATE=""
+case "$MARK" in
+    "nanowell_e2e and not slow")     GATE=nanowell-e2e ;;
+    "nanowell_feature and not slow") GATE=nanowell-features ;;
+    "remote_lane and not slow")      GATE=remote ;;
+esac
+if [[ -n "$GATE" && -z "${ALLWELL_FULL_LANE:-}" ]]; then
+    NAMED=""
+    for arg in "$@"; do
+        if [[ "$arg" == tests/* || "$arg" == *.py || "$arg" == *.py::* ]]; then NAMED=1; break; fi
+    done
+    if [[ -z "$NAMED" ]]; then
+        SELECTED=()   # read line by line, not with mapfile: macOS still ships bash 3.2
+        status=0
+        while IFS= read -r f; do [[ -n "$f" ]] && SELECTED+=("$f"); done \
+            < <(python scripts/lane_needed.py "$GATE" --files && echo "__status=0" || echo "__status=$?")
+        last=$(( ${#SELECTED[@]} - 1 ))
+        status="${SELECTED[$last]#__status=}"
+        unset "SELECTED[$last]"
+        if [[ "$status" == "1" ]]; then
+            echo "scripts/test.sh: nothing this change touches reaches the $GATE lane — no tests to run" \
+                 "(ALLWELL_FULL_LANE=1 runs it anyway)" >&2
+            exit 0
+        elif [[ "$status" != "0" || "${SELECTED[*]:-}" == "ALL" || ${#SELECTED[@]} -eq 0 ]]; then
+            echo "scripts/test.sh: running the whole $GATE lane" >&2
+        else
+            echo "scripts/test.sh: running the ${#SELECTED[@]} $GATE test files this change can reach" \
+                 "(ALLWELL_FULL_LANE=1 runs the whole lane; scripts/lane_needed.py $GATE says why)" >&2
+            set -- "${SELECTED[@]}" "$@"
+        fi
+    fi
+fi
+
 # Narrow the fast lane to what the change can reach (scripts/change_scope.py). Only the default lane
 # and --no-ui are narrowed, and only when no test files were named: a run that names its files, or
 # asks for another lane, gets exactly what it asked for.

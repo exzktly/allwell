@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import os
 import re
 import subprocess
 import sys
@@ -158,16 +159,16 @@ def _path_strings(tree: ast.AST) -> tuple[set[str], set[str]]:
     return read, other
 
 
-def named_files(gate: str, tracked: list[str], root: Path = REPO) -> dict[str, tuple[str, bool]]:
-    """The tracked files *gate*'s roster files name by path, each with the first roster file that does and whether
-    any of them does more than read it. A lane test that names ``process_microscopy.py`` runs it; one that names
-    ``all_well_launcher.py`` only reads its source. A change to either file runs the lane; a change that merely
-    *reaches* the file through its imports runs it only for a file that is run, since text that was read did not
-    change. A string names a file when it is the file's repository path, ends with ``/`` and that path, or is the
-    bare name of a file at the repository root."""
+def namers(gate: str, tracked: list[str], root: Path = REPO) -> dict[str, dict[str, bool]]:
+    """The tracked files *gate*'s roster files name by path, each mapped to every roster file that names it and
+    whether that file does more than read it. A lane test that names ``process_microscopy.py`` runs it; one that
+    names ``all_well_launcher.py`` only reads its source. A change to either file runs the tests that name it; a
+    change that merely *reaches* the file through its imports runs them only for a file that is run, since text
+    that was read did not change. A string names a file when it is the file's repository path, ends with ``/``
+    and that path, or is the bare name of a file at the repository root."""
     by_path = set(tracked)
     rosters = roster_files(gate)
-    out: dict[str, tuple[str, bool]] = {}
+    out: dict[str, dict[str, bool]] = {}
     for rel in sorted(rosters):
         try:
             read, other = _path_strings(ast.parse((root / rel).read_text(encoding="utf-8")))
@@ -187,9 +188,15 @@ def named_files(gate: str, tracked: list[str], root: Path = REPO) -> dict[str, t
                     hit = None
                 if hit is None or hit in rosters:
                     continue
-                first, ran = out.get(hit, (rel, False))
-                out[hit] = (first, ran or runs)
+                by = out.setdefault(hit, {})
+                by[rel] = by.get(rel, False) or runs
     return out
+
+
+def named_files(gate: str, tracked: list[str], root: Path = REPO) -> dict[str, tuple[str, bool]]:
+    """:func:`namers` folded to one roster file per named file (the first by name) and whether any of them runs
+    it."""
+    return {path: (sorted(by)[0], any(by.values())) for path, by in namers(gate, tracked, root).items()}
 
 
 def roster_imports(gate: str, root: Path = REPO) -> set[str]:
@@ -692,16 +699,23 @@ def _python_files(root: Path) -> list[str]:
     return sorted(p for p in set(out) if (root / p).is_file())
 
 
-def code_reaches(gate: str, changes: dict[str, set[str] | None], tree: Tree,
-                 named: dict[str, str] | None = None) -> tuple[str, str] | None:
-    """The first of the Python *changes* (path -> affected names, ``None`` for undecidable) that reaches one of
-    *gate*'s tests or a file one of them names (*named*, from :func:`named_files`), with the path it took;
-    ``None`` when none does."""
+#: What :func:`reach_all` and :func:`select` report when a change cannot be narrowed to particular test files: the
+#: whole lane runs.
+ALL = "*"
+
+
+def reach_all(gate: str, changes: dict[str, set[str] | None], tree: Tree,
+              named: dict[str, dict[str, bool]] | None = None) -> dict[str, tuple[str, str]]:
+    """Every roster file of *gate* that the Python *changes* (path -> affected names, ``None`` for undecidable)
+    reach, each with the changed path it came from and the way it took; the key :data:`ALL` when the change reaches
+    something every test receives (a conftest hook or autouse fixture, a conftest change that cannot be narrowed).
+    *named* is :func:`namers`: a file a roster file runs is reached by any change that reaches the file."""
     rosters = roster_files(gate)
-    entries = {path: who for path, (who, runs) in (named or {}).items() if runs}
+    runners = {path: sorted(r for r, runs in by.items() if runs) for path, by in (named or {}).items()}
     affected: dict[str, set[str] | None] = {}
     came_from: dict[str, str] = {}
     todo: list[str] = []
+    out: dict[str, tuple[str, str]] = {}
 
     def _merge(path: str, names: set[str] | None, source: str | None) -> None:
         if path in affected:
@@ -720,53 +734,58 @@ def code_reaches(gate: str, changes: dict[str, set[str] | None], tree: Tree,
         if names is None or names:
             _merge(path, names, None)
 
-    def _chain(path: str) -> list[str]:
+    def _hit(test: str, path: str, why: str) -> None:
         steps = [path]
         while steps[-1] in came_from and steps[-1] not in changes and len(steps) < 12:
             steps.append(came_from[steps[-1]])
-        return steps
-
-    def _hit(path: str, why: str) -> tuple[str, str]:
-        steps = _chain(path)
         route = " → ".join(reversed(steps))
-        return steps[-1], f"{why} (via {route})" if len(steps) > 1 else why
+        out.setdefault(test, (steps[-1], f"{why} (via {route})" if len(steps) > 1 else why))
 
-    while todo:
+    while todo and len(out) < len(rosters):
         path = todo.pop(0)
         names = affected[path]
-        if path in entries:
-            return _hit(path, f"reaches {path}, which the lane test {entries[path]} runs")
+        for test in runners.get(path, []):
+            _hit(test, path, f"reaches {path}, which the lane test {test} runs")
         if path == CONFTEST:
-            why = _conftest_reaches(names, tree, rosters)
-            if why:
-                return _hit(path, why)
+            whole, asked = _conftest_reaches(names, tree, rosters)
+            if whole:
+                _hit(ALL, path, whole)
+                return {ALL: out[ALL]}
+            for test, why in asked.items():
+                _hit(test, path, why)
             continue
         for importer in sorted(tree.importers_of(path)):
             if importer in rosters:
                 found = tree.uses(importer, path, names)
-                if found is None:
-                    return _hit(path, f"the lane test {importer} imports it whole")
-                if found[1] == {"<the module>"}:
-                    return _hit(path, f"the lane test {importer} imports it whole")
-                if found[1]:
-                    return _hit(path, f"the lane test {importer} uses "
-                                      f"{', '.join(sorted(found[1] - {'<the module>'})[:3])}")
+                if found is None or found[1] == {"<the module>"}:
+                    _hit(importer, path, f"the lane test {importer} imports it whole")
+                elif found[1]:
+                    _hit(importer, path, f"the lane test {importer} uses "
+                                         f"{', '.join(sorted(found[1] - {'<the module>'})[:3])}")
                 continue
             reaction = tree.reaction(importer, path, names)
             if reaction is None or reaction:
                 _merge(importer, reaction, path)
-    return None
+    return out
+
+
+def code_reaches(gate: str, changes: dict[str, set[str] | None], tree: Tree,
+                 named: dict[str, dict[str, bool]] | None = None) -> tuple[str, str] | None:
+    """One reached roster file's (changed path, reason) from :func:`reach_all`, or ``None`` when none is reached."""
+    found = reach_all(gate, changes, tree, named)
+    return found[sorted(found)[0]] if found else None
 
 
 CONFTEST = "tests/conftest.py"
 
 
-def _conftest_reaches(names: set[str] | None, tree: Tree, rosters: set[str]) -> str:
-    """Why a change to *names* in ``tests/conftest.py`` reaches the lane: it cannot be narrowed, it touches a hook
-    or an autouse fixture (every test receives those), or a lane test asks for a changed fixture by name — as a
-    parameter, or as a string (``usefixtures``, ``getfixturevalue``). ``""`` when none of these holds."""
+def _conftest_reaches(names: set[str] | None, tree: Tree, rosters: set[str]) -> tuple[str, dict[str, str]]:
+    """How a change to *names* in ``tests/conftest.py`` reaches the lane: the whole of it when the change cannot be
+    narrowed or touches a hook or an autouse fixture (every test receives those) — the first element names why —
+    and otherwise each lane test that asks for a changed fixture by name, as a parameter or as a string
+    (``usefixtures``, ``getfixturevalue``)."""
     if names is None:
-        return "tests/conftest.py changes in a way that cannot be narrowed"
+        return "tests/conftest.py changes in a way that cannot be narrowed", {}
     conftest = tree.file(CONFTEST)
     defined = conftest.defined if conftest is not None else {}
     automatic = {name for name in names if name.startswith("pytest_")}
@@ -778,12 +797,13 @@ def _conftest_reaches(names: set[str] | None, tree: Tree, rosters: set[str]) -> 
                 for d in node.decorator_list):
             automatic.add(name)
     if automatic:
-        return f"tests/conftest.py changes {', '.join(sorted(automatic)[:3])}, which every test receives"
+        return f"tests/conftest.py changes {', '.join(sorted(automatic)[:3])}, which every test receives", {}
+    asked: dict[str, str] = {}
     for roster in sorted(rosters):
-        asked = tree.mentions(roster) & names
-        if asked:
-            return f"the lane test {roster} asks for the conftest fixture {', '.join(sorted(asked)[:3])}"
-    return ""
+        wanted = tree.mentions(roster) & names
+        if wanted:
+            asked[roster] = f"the lane test {roster} asks for the conftest fixture {', '.join(sorted(wanted)[:3])}"
+    return "", asked
 
 
 # ── what changed in tests/_lanes.py and pyproject.toml ───────────────────────
@@ -804,6 +824,18 @@ def _gate_definition(source: str | None, gate: str) -> tuple | None:
     except Exception:  # noqa: BLE001 — any failure to load means "cannot say", which runs the lane
         return None
     return tuple(frozenset(r) for r in rosters), tuple(patterns)
+
+
+def lanes_change_selects(gate: str, old_source: str | None, new_source: str | None) -> dict[str, str]:
+    """Which of *gate*'s tests a change to ``tests/_lanes.py`` reaches: :data:`ALL` when the gate's patterns differ
+    or either version cannot be loaded, otherwise each file that joined the gate's rosters."""
+    old, new = _gate_definition(old_source, gate), _gate_definition(new_source, gate)
+    if old is None or new is None:
+        return {ALL: "tests/_lanes.py: this lane's definition cannot be compared"}
+    if old[1] != new[1]:
+        return {ALL: "tests/_lanes.py changes this lane's triggers"}
+    joined = set().union(set(), *new[0]) - set().union(set(), *old[0])
+    return {f"tests/{name}": "tests/_lanes.py adds it to this lane" for name in sorted(joined)}
 
 
 def lanes_change_reaches(gate: str, old_source: str | None, new_source: str | None) -> str:
@@ -883,37 +915,52 @@ def _tracked_files(root: Path) -> list[str]:
     return sorted(set(out))
 
 
-def decide(gate: str, base: str, root: Path = REPO) -> list[tuple[str, str]] | None:
-    """Every changed path that reaches *gate*, with the reason; ``None`` when the change cannot be computed."""
+def select(gate: str, base: str, root: Path = REPO) -> dict[str, str]:
+    """The roster files of *gate* this change can reach, each with why; ``{ALL: why}`` when the whole lane must run
+    (a harness file, the pytest configuration, the lane's own triggers, a conftest hook or autouse fixture, a diff
+    that cannot be computed); empty when nothing is reached."""
     paths = changed_paths(base, root)
     if paths is None:
-        return None
-    named = named_files(gate, _tracked_files(root), root)
-    hits: list[tuple[str, str]] = []
+        return {ALL: f"could not diff against {base}"}
+    rosters = roster_files(gate)
+    named = namers(gate, _tracked_files(root), root)
+    out: dict[str, str] = {}
     python: dict[str, set[str] | None] = {}
     for path in paths:
         if path == LANES_FILE:
-            why = lanes_change_reaches(gate, _source_at(base, path, root), _read(root, path))
+            for test, why in lanes_change_selects(gate, _source_at(base, path, root), _read(root, path)).items():
+                out.setdefault(test, why)
         elif path == PYPROJECT:
             why = pytest_config_change(_source_at(base, path, root), _read(root, path))
-        elif path in named:
-            why = f"the lane test {named[path][0]} names it by path"
+            if why:
+                out[ALL] = why
+        elif path in rosters:
+            out.setdefault(path, "a test file in this lane that changed")
+        elif any(re.search(pattern, path) for pattern in GATES[gate][1]):
+            out[ALL] = f"{path} is part of the harness that runs the lane"
         else:
-            why = path_reason(gate, path)
-        if why:
-            hits.append((path, why))
-        elif path.endswith(".py") and path not in _HARNESS_DECIDERS and path != LANES_FILE:
-            names = affected_names(_source_at(base, path, root), _read(root, path))
-            if path == VERSION_FILE and names is not None:
-                # The number itself reaches no test; a gated test that read it would read whatever it is.
-                names -= {"__version__"}
-            python[path] = names
-    if python and not hits:
+            for test in sorted(named.get(path, {})):
+                out.setdefault(test, f"names {path}, which changed")
+            if path.endswith(".py") and path not in _HARNESS_DECIDERS:
+                names = affected_names(_source_at(base, path, root), _read(root, path))
+                if path == VERSION_FILE and names is not None:
+                    # The number itself reaches no test; a gated test that read it would read whatever it is.
+                    names -= {"__version__"}
+                python[path] = names
+        if ALL in out:
+            return {ALL: out[ALL]}
+    if python and len(out) < len(rosters):
         tree = Tree(root, _relevant_files(gate, _python_files(root), root))
-        found = code_reaches(gate, python, tree, named)
-        if found:
-            hits.append(found)
-    return hits
+        for test, (path, why) in reach_all(gate, python, tree, named).items():
+            if test == ALL:
+                return {ALL: f"{path}: {why}"}
+            out.setdefault(test, f"{path}: {why}")
+    return out
+
+
+def decide(gate: str, base: str, root: Path = REPO) -> list[tuple[str, str]] | None:
+    """:func:`select` as (test file, reason) pairs, the whole lane as one ``(ALL, reason)`` pair."""
+    return sorted(select(gate, base, root).items())
 
 
 #: The scripts that decide which lanes run. No gated test runs them, so a change to one cannot change a gated
@@ -925,7 +972,9 @@ _HARNESS_DECIDERS = {"scripts/lane_needed.py", "scripts/change_scope.py"}
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("gate", choices=sorted(GATES))
-    parser.add_argument("--base", default="origin/main")
+    parser.add_argument("--base", default=os.environ.get("ALLWELL_SCOPE_BASE") or "origin/main")
+    parser.add_argument("--files", action="store_true",
+                        help="print the test files to run, one per line, or ALL for the whole lane")
     parser.add_argument("--surface", action="store_true",
                         help="print the modules the roster imports directly, and exit")
     args = parser.parse_args(argv)
@@ -934,19 +983,33 @@ def main(argv: list[str]) -> int:
         print("\n".join(sorted(roster_imports(args.gate))))
         return 0
 
-    label = f"{args.gate} lanes"
-    hits = decide(args.gate, args.base)
-    if hits is None:
-        print(f"{label}: needed (could not diff against {args.base})")
+    chosen = select(args.gate, args.base)
+    if args.files:
+        # The files go to stdout for scripts/test.sh and preflight to read; the account of why goes to stderr.
+        _report(args.gate, chosen, sys.stderr)
+        print("ALL" if ALL in chosen else "\n".join(sorted(chosen)))
+        return 0 if chosen else 1
+    return _report(args.gate, chosen, sys.stdout)
+
+
+def _report(gate: str, chosen: dict[str, str], stream) -> int:
+    """Say what *chosen* means for the lane on *stream*; the exit status: 0 to run it, 1 to skip it."""
+    def say(line: str) -> None:
+        print(line, file=stream)
+
+    label = f"{gate} lane"
+    if ALL in chosen:
+        say(f"{label}: needed, whole — {chosen[ALL]}")
         return 0
-    if hits:
-        print(f"{label}: needed — {len(hits)} changed path(s) can reach them:")
-        for path, why in hits[:15]:
-            print(f"   {path}  [{why}]")
-        if len(hits) > 15:
-            print(f"   … and {len(hits) - 15} more")
+    if chosen:
+        total = len(roster_files(gate))
+        say(f"{label}: needed — {len(chosen)} of its {total} test files can be reached:")
+        for test, why in sorted(chosen.items())[:15]:
+            say(f"   {test}  [{why}]")
+        if len(chosen) > 15:
+            say(f"   … and {len(chosen) - 15} more")
         return 0
-    print(f"{label}: not needed — no changed path can reach them")
+    say(f"{label}: not needed — no changed path can reach it")
     return 1
 
 

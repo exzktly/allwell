@@ -490,8 +490,9 @@ def test_ci_runs_every_gated_lane_behind_its_gate_and_never_the_ui_tests():
     assert "scripts/test.sh --ui" not in workflow, "a CI job runs the UI tests"
     for flag in ("--nanowell", "--nanowell-features", "--remote"):
         assert f"scripts/test.sh {flag} --junitxml=" in workflow, f"CI no longer runs {flag}"
-    for gate in ("nanowell", "remote"):
+    for gate in ("nanowell-e2e", "nanowell-features", "remote"):
         assert f"python scripts/lane_needed.py {gate} --base" in workflow, f"CI skips the {gate} gate"
+    assert workflow.count("full-ci") >= 4, "a job no longer runs whole under the full-ci label"
     assert workflow.count("python scripts/junit_gate.py") >= 4, \
         "a CI test run is not gated on its JUnit report"
 
@@ -501,10 +502,9 @@ def test_preflight_runs_every_gated_lane_behind_its_gate():
 
     root = Path(__file__).resolve().parents[1]
     preflight = (root / "scripts" / "preflight.sh").read_text()
-    for flag in ("--nanowell", "--nanowell-features", "--remote"):
-        assert re.search(rf'run_lane "[^"]+" {flag}\n', preflight), f"preflight skips {flag}"
-    for gate in ("nanowell", "remote"):
-        assert f"python scripts/lane_needed.py {gate}" in preflight
+    for flag, gate in (("--nanowell", "nanowell-e2e"), ("--nanowell-features", "nanowell-features"),
+                       ("--remote", "remote")):
+        assert re.search(rf'gated_lane "[^"]+" {flag} {gate}\n', preflight), f"preflight skips {flag}"
 
 
 def test_each_gate_sees_its_tests_helpers_and_the_files_its_tests_name():
@@ -517,15 +517,16 @@ def test_each_gate_sees_its_tests_helpers_and_the_files_its_tests_name():
     root = Path(__file__).resolve().parents[1]
     tracked = subprocess.run(["git", "ls-files"], cwd=root, capture_output=True, text=True,
                              check=True).stdout.split()
-    nanowell = lane.roster_imports("nanowell")
+    nanowell = lane.roster_imports("nanowell-e2e") | lane.roster_imports("nanowell-features")
     for path in ("analyze/tab.py", "review/features/nanowell/controller.py", "tests/_nanowell_synth.py"):
         assert path in nanowell, path
     remote = lane.roster_imports("remote")
     for path in ("services/remote_runner.py", "tests/_fake_remote.py", "tests/_hold_cluster.py"):
         assert path in remote, path
-    assert lane.path_reason("nanowell", "tests/test_nanowell_form.py") == "a test file in this lane"
+    assert lane.path_reason("nanowell-features", "tests/test_nanowell_form.py") == "a test file in this lane"
+    assert lane.path_reason("nanowell-e2e", "tests/test_nanowell_form.py") == ""
     assert lane.path_reason("remote", "tests/test_nanowell_form.py") == ""
-    for gate in ("nanowell", "remote"):
+    for gate in ("nanowell-e2e", "nanowell-features", "remote"):
         assert lane.path_reason(gate, "scripts/test.sh").startswith("lane surface"), gate
         assert "process_microscopy.py" in lane.named_files(gate, tracked), gate
         for path in ("startup/mpl_bootstrap.py", "services/acquisition_transport.py", "pipeline/czi_read.py",

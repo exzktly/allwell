@@ -173,9 +173,11 @@ def _load_path_announced(ctx, app, path: Path) -> None:
     # Visible "Opening dataset…" guard so a slow-network open never looks frozen.
     _make_opening_dialog(ctx, "Opening dataset…")
     try:
-        in_dir = path / "in"
-        out_dir = path / "out"
-        if in_dir.is_dir() and out_dir.is_dir():
+        from review.data.dataset_layout import resolve as resolve_layout
+
+        layout = resolve_layout(path)
+        in_dir, out_dir = layout.in_dir, layout.out_dir
+        if layout.opened_root:
             logger = logging.getLogger("review")
             logger.info("Detected in/out layout: in=%s  out=%s", in_dir, out_dir)
             logger.info("Fluor images from: %s  |  masks/overlays from: %s", in_dir, out_dir)
@@ -186,7 +188,10 @@ def _load_path_announced(ctx, app, path: Path) -> None:
             app._app_state.channel.smfish_channels = _smfish_tokens
             app._load_directory(out_dir, label=f"{path.name}/out")
         else:
-            app._app_state.dataset.in_dir = None
+            # ``out/`` opened directly still has its ``in/`` beside it (``dataset_layout``).
+            app._app_state.dataset.in_dir = in_dir
+            if in_dir is not None:
+                logging.getLogger("review").info("Detected in/ beside the opened out/: in=%s", in_dir)
             _opening_set_phase(ctx, "Reading dataset info…")
             app._app_state.dataset.fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._app_state.dataset.pipeline_info = app._read_pipeline_info(path)
             app._app_state.dataset.fov_tp_extractor = _resolve_fov_tp_extractor(app._app_state.dataset.fov_tp_extractor, app._app_state.dataset.pipeline_info)
@@ -217,11 +222,11 @@ def _recover_in_place_append(path: Path) -> None:
     """
     from util.zip_append import recover
 
-    if (path / "in").is_dir():
-        in_dir = path / "in"
-    elif path.name.lower() == "out" and (path.parent / "in").is_dir():
-        in_dir = path.parent / "in"
-    else:
+    from review.data.dataset_layout import resolve as resolve_layout
+
+    # An ``in/`` with no ``out/`` beside it is still an input folder an append may have been writing.
+    in_dir = resolve_layout(path).in_dir or (path / "in" if (path / "in").is_dir() else None)
+    if in_dir is None:
         return
     logger = logging.getLogger("review")
     with swallow(f"undoing an unfinished in-place append in {in_dir}", level=logging.WARNING):
@@ -859,6 +864,9 @@ def _load_directory_held(ctx, d: Path, label=None) -> None:
     except Exception:
         logging.getLogger("review").exception(
             "post-load active-tab refresh failed")
+    # Whether the Plotting band offers Observations: Cells | Nanowells depends on the dataset just loaded.
+    from review.core.observation_band import refresh_current
+    refresh_current(ctx)
     progress.__exit__(None, None, None)
     _say_loaded(ctx, app, n, display, gating_started)
 

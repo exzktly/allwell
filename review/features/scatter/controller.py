@@ -48,11 +48,13 @@ from review.features.scatter._annotations import (
     draw_scatter_agg_legends,
     note_sampled,
     note_value_labels_unavailable,
+    whiskers_or_none,  # re-exported: Batch Export and a test reach it here
 )
 from review.features.scatter._pooled import SCATTER_MAX_POINTS
 from review.features.scatter._layout import (
     _render_scatter_faceted, _scatter_col_label, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix,
 )
+from review.features.scatter import _observations
 
 
 #: Written onto an otherwise-empty figure so an *exported* copy states its
@@ -232,30 +234,8 @@ def redraw_scatter(
     # ax.clear() at the top of this redraw voids any live RectangleSelector;
     # rebuild it against the fresh axes when gate-draw mode is armed.
     refresh_gate_selector(ctx)
+    _observations.stamp_cells_footer(ctx, scatter_fig)
     scatter_canvas.draw()
-
-
-def _finite_positive(v) -> bool:
-    """True iff *v* is a real number strictly greater than 0."""
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return False
-    return 0.0 < f < float("inf")  # finite & positive (NaN/inf compare False)
-
-
-def whiskers_or_none(errs):
-    """The sequence to hand ``errorbar``, or ``None`` when it would draw noise.
-
-    ``capsize`` draws a cap at every point even where the bar has zero length,
-    so a group with no computable spread came out wearing a cross at the centre
-    of its marker that reads as a measured error of zero. The tab has always
-    passed ``None`` in that case; the Batch Export twin of this figure passed
-    the raw sequence, so the same points that carry no whisker on screen carried
-    phantom caps in the exported file.
-    """
-    seq = list(errs or [])
-    return seq if any(_finite_positive(e) for e in seq) else None
 
 
 def redraw_scatter_agg(
@@ -401,6 +381,8 @@ def redraw_scatter_orchestrate(ctx) -> None:
     timepoints available -> "No timepoints available." placeholder;
     none selected -> "Please select timepoints to plot."
     """
+    if _observations.drew_nanowells(ctx, "cells"):
+        return
     # Scatter Plot: Cells tab body is built lazily -- bail out if the
     # user triggers a redraw before that builder has run.
     ch_x_var = ctx.widgets.get_or_none("_scatter_ch_x_var")
@@ -470,8 +452,8 @@ def redraw_scatter_orchestrate(ctx) -> None:
 
     metric_x = scatter_axis_metric_key(ctx, "x")
     metric_y = scatter_axis_metric_key(ctx, "y")
-    col_x = col_for_scatter_axis(ctx, ch_x_entry, metric_x)
-    col_y = col_for_scatter_axis(ctx, ch_y_entry, metric_y)
+    col_x = _observations.cell_axis_column(ctx, ch_x_entry) or col_for_scatter_axis(ctx, ch_x_entry, metric_x)
+    col_y = _observations.cell_axis_column(ctx, ch_y_entry) or col_for_scatter_axis(ctx, ch_y_entry, metric_y)
 
     from review.domain.plate_layout import WELL_COLORS
     redraw_scatter(
@@ -491,6 +473,8 @@ def redraw_scatter_agg_orchestrate(ctx) -> None:
     """Redraw the aggregate scatter plot with current selections."""
     stat_x_var = ctx.widgets.get_or_none("_scatter_agg_stat_x_var")
     if stat_x_var is None:
+        return
+    if _observations.drew_nanowells(ctx, "aggregate"):
         return
     clear_cut_status(ctx)   # before every exit below, not only the drawn one
     # Sync the hidden stat-string combos with the new per-axis
@@ -592,6 +576,7 @@ def update_scatter_menus(ctx) -> None:
     cells_sections = [("", list(scatter_ch_options))]
     if shape_labels:
         cells_sections.append(("Shape Features", shape_labels))
+    cells_ch_options = _observations.add_cell_nanowell_section(ctx, cells_sections, cells_ch_options)
 
     ch_x_cb = ctx.widgets.get_or_none("_scatter_ch_x_cb")
     ch_y_cb = ctx.widgets.get_or_none("_scatter_ch_y_cb")

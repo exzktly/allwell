@@ -217,7 +217,9 @@ IMAGE_TABLE_CONTROLLER_BUDGET = 1230
 # down to the new size. 831 -> 823: the axis-label closure, a word-for-word copy
 # of ``_layout._scatter_col_label``, was replaced by that function, which paid
 # for the sampled-figure note and the drawing cap.
-SCATTER_CONTROLLER_BUDGET = 823
+# 823 -> 808: the whisker helpers moved to scatter/_annotations.py, beside the agg annotations they serve,
+# and the nanowell branches sit in scatter/_observations.py behind one call each.
+SCATTER_CONTROLLER_BUDGET = 808
 # The drag-to-reorder handlers (press / motion / release, the Reset Order
 # button, and the event-to-data-x helper) moved into
 # ``barplot/_drag_reorder.py``. A clean seam: nothing there draws a bar or

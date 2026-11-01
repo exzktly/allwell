@@ -62,6 +62,7 @@ import logging
 from pathlib import Path
 
 from review.data.image_resolver import normalize_numeric_token
+from review.domain.channel_roles import phase_channel as _phase_channel
 from domain.tp_match import tp_close
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,9 @@ logger = logging.getLogger(__name__)
 # ── Channel-token vocabulary ─────────────────────────────────────────────────
 
 NUC_SEG_TOKEN = "NUC+SEG"
+#: A nanowell run's stitched phase montage (``review/data/nanowell_images``), offered as a channel: one picture per
+#: well and timepoint, so the cell's FOV does not apply.
+MONTAGE_TOKEN = "MONTAGE"
 
 # A "binary" channel variant — e.g. ``"GFP (binary)"`` — is a virtual channel that
 # renders its base channel as the ThreshFracOn threshold-binary (positive cells
@@ -133,7 +137,7 @@ def phase_channel(pipeline_info: dict | None) -> str:
     wells. Since the raw frame is the corrected frame for every dataset, reading
     it wherever no ``_tophat`` was archived is right whatever any run asked for.
     """
-    return str((pipeline_info or {}).get("phase_token") or "").strip().lower()
+    return _phase_channel(pipeline_info)
 
 
 def missing_frame_note(ctx, chan: str) -> str:
@@ -476,6 +480,8 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
     # "GFP" — the render is applied downstream (cell_display_rgb); here we just
     # resolve the base channel.
     chan_lower = base_channel(chan_upper).strip().lower()
+    if chan_lower == MONTAGE_TOKEN.lower():
+        return _load_montage(ctx, cache, well, tp, scan_misses)
     is_overlay = chan_lower == NUC_SEG_TOKEN.lower()
     fluor = load_well_channel(ctx, cache, well, chan_lower,
                               use_tophat=use_tophat, scan_misses=scan_misses,
@@ -539,6 +545,23 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
         # so it's diagnosable rather than silently blank (audit E15).
         logger.debug("frame_load: failed to load %r: skipping tile", ref, exc_info=True)
         return None
+
+
+def _load_montage(ctx, cache: dict, well: str, tp: str, scan_misses: set | None) -> np.ndarray | None:
+    """The montage of *well* at *tp* as float32, memoised in the caller's *cache*; a miss is logged once."""
+    import numpy as np
+
+    from review.data.nanowell_images import read_montage_array
+
+    key = (well, MONTAGE_TOKEN.lower(), "montage", str(tp))
+    if key not in cache:
+        image, why = read_montage_array(ctx.state.dataset.data_dir, well, tp)
+        cache[key] = None if image is None else image.astype(np.float32)
+        if image is None:
+            logger.info("frame_load: no montage for well=%r tp=%r: %s", well, tp, why)
+            if scan_misses is not None:
+                scan_misses.add((well, MONTAGE_TOKEN.lower(), "montage"))
+    return cache[key]
 
 
 def load_mask_array(ctx, cache, well, tp, fov) -> np.ndarray | None:

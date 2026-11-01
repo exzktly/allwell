@@ -143,6 +143,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     from PySide6.QtWidgets import QPushButton
     delete_btn = QPushButton("Delete Cell", ctrl)
     rt.delete_btn = delete_btn
+    reg.register("_review_image_delete_btn", delete_btn)
     delete_btn.setProperty("variant", "toggle")
     delete_btn.setCheckable(True)
     delete_btn.setChecked(False)
@@ -173,6 +174,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # excludes cells from every downstream number.
     crop_btn = QPushButton("Crop cells", ctrl)
     rt.crop_btn = crop_btn
+    reg.register("_review_image_crop_btn", crop_btn)
     crop_btn.setProperty("variant", "toggle")
     crop_btn.setCheckable(True)
     crop_btn.setChecked(False)
@@ -204,6 +206,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # analysis checklist — one action a user can find from either place.
     add_menu_action(edit_menu, "Reset crop + curation",
                     lambda: reset_crop_and_overrides(ctx))
+    reg.register("_review_image_edit_btn", edit_btn)
     ctrl.add_action(edit_btn)
 
     # ── View ▾ popover — image stage · zoom · overlay toggles ───────────

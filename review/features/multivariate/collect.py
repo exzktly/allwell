@@ -19,6 +19,7 @@ from typing import Any
 
 import numpy as np
 
+from review.data.observations import is_nanowell_cell_column, with_nanowell_columns
 from review.data.data_loading import df_included_mask, resolve_value_series, get_rows
 from review.data.narrow_rows import narrow_rows, value_inputs
 from review.domain.metric_registry import METRIC_BY_KEY
@@ -41,6 +42,9 @@ def column_display_label(ctx, col: str) -> str:
     from pipeline.shape_features import is_shape_column, label_for as shape_label
     if is_shape_column(col):
         return shape_label(col) or col
+    if is_nanowell_cell_column(col):
+        from review.data.observations import nanowell_cell_label
+        return nanowell_cell_label(col)
     ratio_index = getattr(ctx.state.channel, "ratio_index", None) or {}
     if col in ratio_index:
         rm = ratio_index[col]
@@ -95,6 +99,10 @@ def collect_feature_matrix(
     # and what the verdicts read — not whole frames through the row cache.
     want: set[str] | None = {"timepoint_hours"}
     for col in feature_cols:
+        if is_nanowell_cell_column(col):
+            # The cell's own nanowell's metric, joined on its address (``with_nanowell_columns``).
+            want = None if want is None else want | {"timepoint", "nw_q", "nw_r"}
+            continue
         inputs = value_inputs(col, ratios)
         want = None if inputs is None or want is None else want | inputs
     group_colors: dict[str, Any] = {}
@@ -107,6 +115,7 @@ def collect_feature_matrix(
     def _collect_well(well_label: str, group_name: str):
         nonlocal dropped
         df = narrow_rows(ctx, well_label, want) if want is not None else get_rows(ctx, well_label)
+        df = with_nanowell_columns(ctx, df, well_label, feature_cols)
         if df is None or df.empty or "timepoint_hours" not in df.columns:
             return
         mask = df_included_mask(df, include_gate=include_gate).to_numpy(copy=True)
@@ -235,5 +244,15 @@ def available_feature_columns(ctx, well_label: str | None = None) -> dict[str, l
 
     ratio_index = getattr(ctx.state.channel, "ratio_index", None) or {}
     families["Ratios"] = list(ratio_index.keys())
+
+    # On a nanowell plate, each cell's own nanowell's metrics (in a build with the Nanowells feature).
+    from review.data.observations import nanowell_cell_column, nanowell_observations
+    from review.data.observations import available_observations as _available
+    from review.domain.observation import NANOWELLS
+    if NANOWELLS in _available(ctx):
+        sample = label or next(iter(ctx.state.dataset.well_paths), None)
+        table = nanowell_observations(ctx, [sample]) if sample else None
+        if table is not None:
+            families["Nanowell"] = [nanowell_cell_column(m.key) for m in table.metrics]
 
     return {k: v for k, v in families.items() if v}

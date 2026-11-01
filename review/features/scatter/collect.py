@@ -25,6 +25,7 @@ import numpy as np
 from core import debug_flags as debug_flags
 from review.data.cell_pool import cells_upper_bound
 from review.data.data_loading import get_rows
+from review.data.observations import with_nanowell_columns
 from review.domain.stats_compute import group_replicate_stats, _reduce_reps
 from review.features.scatter._cells import well_cloud
 from review.features.scatter._pooled import close_previous_pools, collect_scatter_pooled
@@ -242,7 +243,8 @@ def collect_scatter_data(
                 gates=gates, ratios=ratios, max_points=max_points)
 
     def _collect_well(well_label: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, list] | None:
-        cloud = well_cloud(get_rows(ctx, well_label), col_x=col_x, col_y=col_y, target_tps=target_arr,
+        rows = with_nanowell_columns(ctx, get_rows(ctx, well_label), well_label, (col_x, col_y))
+        cloud = well_cloud(rows, col_x=col_x, col_y=col_y, target_tps=target_arr,
                            fluor_gate_x=fluor_gate_x, fluor_gate_y=fluor_gate_y, gates=gates, ratios=ratios)
         if cloud is None:
             return None

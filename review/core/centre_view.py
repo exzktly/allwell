@@ -210,6 +210,9 @@ def build_centre(win, parent: QWidget) -> None:
         from widgets.control_band import ControlBand
         band = ControlBand(plotting_container)
         win._plotting_band = win._ctx.widgets.register("_plotting_band", band)
+        # First in the row: Observations (cells | nanowells) changes what every other control lists.
+        from review.core.observation_band import build_observation_controls
+        build_observation_controls(win._ctx, band)
 
         # The Scatter sub-tab's two modes. It lives in the band's scope zone
         # rather than as a tab bar inside the Scatter page: the page then holds
@@ -219,8 +222,10 @@ def build_centre(win, parent: QWidget) -> None:
         # feature; the group is shown only while a Scatter sub-tab is current.
         from widgets.segmented_control import SegmentedControl as _Segmented
         scatter_view = _Segmented()
-        scatter_view.addSegment("Cells", data="cells")
-        scatter_view.addSegment("Wells", data="aggregate")
+        # "Points": each observation (a cell, or a nanowell under Observations: Nanowells) or one per well.
+        # The band's Observations toggle says what a point is; this one says whether points are summarised.
+        scatter_view.addSegment("Each observation", data="cells")
+        scatter_view.addSegment("Per well", data="aggregate")
 
         def _on_scatter_view(_idx: int) -> None:
             set_mode = getattr(getattr(win._ctx.runtime, "scatter", None),
@@ -235,7 +240,7 @@ def build_centre(win, parent: QWidget) -> None:
         scatter_view.currentChanged.connect(_on_scatter_view)
         win._plotting_scatter_view = win._ctx.widgets.register(
             "_plotting_scatter_view", scatter_view)
-        win._plotting_scatter_grp = band.add_scope("View", scatter_view)
+        win._plotting_scatter_grp = band.add_scope("Points", scatter_view)
         win._plotting_scatter_grp.setVisible(False)
 
         # Phase 11b (A4): the channel selector is now a single global combo
@@ -271,7 +276,8 @@ def build_centre(win, parent: QWidget) -> None:
         # The combo paints its own "Channel: " prefix (LabeledComboBox), so
         # it needs no separate ControlBand label — pass "" so add_scope adds
         # the combo alone rather than pairing it with a QLabel.
-        win._plotting_channel_grp = band.add_scope("", win._plotting_channel_cb)
+        win._plotting_channel_grp = win._ctx.widgets.register(
+            "_plotting_channel_grp", band.add_scope("", win._plotting_channel_cb))
         # Legacy display-only chip remains as an attribute for code that
         # still pokes at ``_plotting_channel_chip`` — point it at the new
         # combo so callers that read its text still work.
@@ -304,7 +310,8 @@ def build_centre(win, parent: QWidget) -> None:
                 swallowed()  # was: pass (silent except)
 
         win._plotting_metric_cb.currentIndexChanged.connect(_on_global_metric)
-        win._plotting_metric_grp = band.add_scope("", win._plotting_metric_cb)
+        win._plotting_metric_grp = win._ctx.widgets.register(
+            "_plotting_metric_grp", band.add_scope("", win._plotting_metric_cb))
 
         # Group the plot's members by a sample variable instead of by the user's
         # replicate sets. In the scope zone because that is exactly what it does
@@ -426,8 +433,8 @@ def build_centre(win, parent: QWidget) -> None:
         # rather than handing it back, so it is fished out and registered here —
         # two of three captions switching and the third not would be worse than
         # either consistent choice.
-        win._plotting_thresh_frac_grp = band.add_scope(
-            "ON threshold", win._plotting_thresh_frac_stepper, trailing=True)
+        win._plotting_thresh_frac_grp = win._ctx.widgets.register("_plotting_thresh_frac_grp", band.add_scope(
+            "ON threshold", win._plotting_thresh_frac_stepper, trailing=True))
         _thr_cap = win._plotting_thresh_frac_grp.findChild(QLabel)
         if _thr_cap is not None:
             win._ctx.widgets.register("_plotting_thresh_frac_lbl", _thr_cap)
@@ -450,7 +457,7 @@ def build_centre(win, parent: QWidget) -> None:
         plotting_nb = NamedPageStack(plotting_container)
         plotting_nb.setObjectName("PlottingSubTabs")
         plotting_container.layout().addWidget(plotting_nb, 1)
-        win._plotting_notebook = plotting_nb
+        win._plotting_notebook = win._ctx.widgets.register("_plotting_notebook", plotting_nb)
 
         # Register all pages BEFORE wiring currentChanged so the first emit
         # always sees a valid currentName().
@@ -466,6 +473,8 @@ def build_centre(win, parent: QWidget) -> None:
                 _build_pending(sub_title)
             on_tab_change(win._ctx, None)
             _refresh_channel_chip(sub_title)
+            from review.core.observation_band import refresh as _refresh_observations
+            _refresh_observations(win._ctx, sub_title)
             # Properties rail retired — its scope picker followed the
             # active sub-tab. Per-plot styling now happens through the
             # floating Export Style sidebar.

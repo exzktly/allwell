@@ -71,6 +71,7 @@ from review.features.barplot.collect import (
     cluster_x_for_group_keys,
     clustered_x_positions as _clustered_x_positions,
 )
+from review.features.barplot import _observations as _nw_bars
 
 
 def _annotate_group_key_headers(axes, xs, group_keys) -> int:
@@ -1153,6 +1154,12 @@ def redraw_bars(ctx) -> None:
     threshold = on_cutoff_for_column(
         ctx, ctx.state.channel.active_val_col,
         channel=ctx.state.channel.active_channel)
+    from review.core.channel_state_controller import on_cut_not_set
+    from review.core.threshold_note import blank_for_unset_cut
+    # A cutoff nobody set that cuts nothing draws a 1.0 / N panel for every well;
+    # it is replaced by a sentence saying so, after the panels are drawn.
+    cut_not_set = on_cut_not_set(ctx, ctx.state.channel.active_val_col,
+                                 channel=ctx.state.channel.active_channel)
 
     active_rsets = plot_replicate_sets(ctx)
     # Keep the Display-popover toggles (notably "Pool Replicates", hidden until
@@ -1223,6 +1230,9 @@ def redraw_bars(ctx) -> None:
     tp_strs = [_rescale_tp(t, _tp_rescale) for t in target_ts]
     tp_str_combined = ", ".join(tp_strs)
 
+    if _nw_bars.draw(ctx, ax_mean, ax_frac, ax_n, target_ts, timepoint_title(target_ts, tp_str_combined)):
+        apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
+        return
     if draw_per_cell_bar_mode(
         ctx,
         ax_mean=ax_mean,
@@ -1251,6 +1261,10 @@ def redraw_bars(ctx) -> None:
                 ctx, ax_mean,
                 f"{_per_cell_mode_name(ctx)} draws per-cell points rather than "
                 f"bars, and the brackets need bars to sit on.")
+        if cut_not_set:
+            blank_for_unset_cut(ax_frac, ax_n)
+        from review.core.observation_band import stamp_cells_footer
+        stamp_cells_footer(ctx, ctx.runtime.barplot.fig)
         apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
         return
     draw_grouped_bar_mode(
@@ -1265,6 +1279,10 @@ def redraw_bars(ctx) -> None:
         band_lbl=band_lbl,
         use_sem=use_sem,
     )
+    if cut_not_set:
+        blank_for_unset_cut(ax_frac, ax_n)
+    from review.core.observation_band import stamp_cells_footer
+    stamp_cells_footer(ctx, ctx.runtime.barplot.fig)
     apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
 
 

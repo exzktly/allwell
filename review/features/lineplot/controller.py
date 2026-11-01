@@ -55,6 +55,7 @@ from review.core.plot_style import apply_export_style_to_current
 from review.core.plot_style import apply_time_rescale
 from review.domain.time_rescale import axis_label as time_axis_label
 from review.domain.time_rescale import rescale_for as time_rescale_for
+from review.features.lineplot import _observations as _nw_lines
 
 
 #: Written onto an otherwise-empty figure so an *exported* copy states its
@@ -1091,6 +1092,10 @@ def redraw_line_plots(
         canvas.draw_idle()
         return
 
+    if _nw_lines.draw(ctx, ax_mean, ax_frac, ax_n, ax_cdf, legend_kw):
+        apply_export_style_to_current(ctx, fig, canvas)
+        canvas.draw_idle()
+        return
     # Single source of truth: ask ``collect_line_series`` for the
     # fully-normalized series in legend order, then paint via the shared
     # renderer (also used by the batch export, so the panel set never drifts).
@@ -1138,6 +1143,15 @@ def redraw_line_plots(
         # line figure resolves it from, so the two cannot disagree.
         color_mode=line_color_mode(ctx.state.plot),
     )
+
+    from review.core.channel_state_controller import on_cut_not_set
+    if on_cut_not_set(ctx, ctx.state.channel.active_val_col, channel=ctx.state.channel.active_channel):
+        # The Fraction / Events panels of a cutoff that cuts nothing are 1.0 and the cell count by construction.
+        from review.core.threshold_note import blank_for_unset_cut
+        blank_for_unset_cut(ax_frac, ax_n)
+
+    from review.core.observation_band import stamp_cells_footer
+    stamp_cells_footer(ctx, fig, selected)
 
     ctx.notify.set_status(line_status_text(
         ctx, series_list, fc_misses, active_rsets, selected))

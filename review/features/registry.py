@@ -305,6 +305,18 @@ def _svc_nanowell_open_anchor():
     return open_for_anchor
 
 
+def _svc_nanowell_segmentation_overlay():
+    # Segmentation's points-and-rims overlay for a nanowell tile (nanowell/overlay_compute.py).
+    from review.features.nanowell.overlay_compute import nanowell_overlay
+    return nanowell_overlay
+
+
+def _svc_nanowell_observations():
+    # The plot tools' nanowell observations (review/domain/observation.py); a build without this feature has none.
+    from review.features.nanowell.observation_compute import nanowell_observations
+    return nanowell_observations
+
+
 def _svc_nanowell_follow_qc_params():
     from review.features.nanowell.controller import nw_on_qc_params_changed
     return nw_on_qc_params_changed
@@ -1120,7 +1132,9 @@ def _features() -> list[FeatureDescriptor]:
             # *nanowell.follow_qc_params*: the QC layer's after-apply step, so a Cell Gating change reaches the page
             # while it is on screen (Split View) rather than only when it is next shown.
             services={"nanowell.open_anchor": _svc_nanowell_open_anchor,
-                      "nanowell.follow_qc_params": _svc_nanowell_follow_qc_params},
+                      "nanowell.follow_qc_params": _svc_nanowell_follow_qc_params,
+                      "observations.nanowell": _svc_nanowell_observations,
+                      "segmentation.nanowell_overlay": _svc_nanowell_segmentation_overlay},
         ),
         # ── Images ────────────────────────────────────────────────────────
         FeatureDescriptor(
@@ -1186,10 +1200,14 @@ def _features() -> list[FeatureDescriptor]:
             on_channel_changed=_channel_bar,
             redraw=_redraw_bar_plots,
             fold_change_scope_factory=_fold_change_scope_bar,
+            # Well medians over nanowells under Observations: Nanowells (<feature>/_observations.py).
+            observations=("cells", "nanowells"),
         ),
         FeatureDescriptor(name="Line Graphs", parent="Plotting", build=_build_lineplot,
                           on_activate=_activate_default_plot,
-                          redraw=_redraw_line_graphs),
+                          redraw=_redraw_line_graphs,
+                          # Well medians over time under Observations: Nanowells (lineplot/_observations.py).
+                          observations=("cells", "nanowells")),
         FeatureDescriptor(name="Response Curves", parent="Plotting",
                           build=_build_response, redraw=_redraw_response,
                           on_activate=_activate_response,
@@ -1205,6 +1223,8 @@ def _features() -> list[FeatureDescriptor]:
             on_channel_changed=_channel_scatter,
             redraw=_redraw_scatter,
             states=(StateSpec("scatter", _state_scatter),),
+            # Any nanowell metric against any other, per nanowell or as well medians (scatter/_observations.py).
+            observations=("cells", "nanowells"),
         ),
         FeatureDescriptor(
             name="Distribution", parent="Plotting", build=_build_distribution,
@@ -1212,6 +1232,8 @@ def _features() -> list[FeatureDescriptor]:
             on_channel_changed=_channel_distribution,
             redraw=_redraw_distribution,
             states=(StateSpec("distribution", _state_distribution),),
+            # Each nanowell's value of the band's metric under Observations: Nanowells (distribution/_observations.py).
+            observations=("cells", "nanowells"),
         ),
         FeatureDescriptor(
             name="Heat Map", parent="Plotting", build=_build_heatmap,
@@ -1226,6 +1248,8 @@ def _features() -> list[FeatureDescriptor]:
                     _svc_heatmap_refresh_layout_sidebar,
                 "heatmap.well_dropped": _svc_heatmap_well_dropped,
             },
+            # Well medians over nanowells under Observations: Nanowells (<feature>/_observations.py).
+            observations=("cells", "nanowells"),
         ),
 
         # ── Image Browser sub-leaves (dispatch hooks only) ─────────────────

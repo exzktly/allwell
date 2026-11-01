@@ -31,6 +31,7 @@ from review.data.data_loading import (
     merge_fluor_channels,
     normalize_channel_tokens,
 )
+from review.domain.channel_roles import default_fluor_channel, order_fluor_channels
 from review.domain.gating_state import fluor_gate_for, resolve_gate_key
 from review.domain.heatmap_metrics import (
     METRIC_MEAN_ALL, METRICS_NEEDING_CUTOFF,
@@ -132,13 +133,16 @@ def _recalculate_threshold(ctx) -> None:
         seg_tok = str(ctx.state.dataset.pipeline_info.get("nuclear_token", "") or "").strip().lower()
     if not seg_tok:
         seg_tok = detect_nuclear_channel_token(sample_df)
-    fluor_channels = merge_fluor_channels(pipeline_fluor, detected, seg_tok)
+    info = ctx.state.dataset.pipeline_info
+    # The phase channel is listed, last, but is never the channel a plot opens on
+    # while any other exists (``review/domain/channel_roles``).
+    fluor_channels = order_fluor_channels(merge_fluor_channels(pipeline_fluor, detected, seg_tok), info)
     if fluor_channels:
         ctx.state.channel.fluor_channels = fluor_channels
         if not ctx.state.channel.active_channel:
-            ctx.state.channel.active_channel = fluor_channels[0]
+            ctx.state.channel.active_channel = default_fluor_channel(fluor_channels, info)
         if not ctx.state.channel.active_image_channel:
-            ctx.state.channel.active_image_channel = fluor_channels[0]
+            ctx.state.channel.active_image_channel = default_fluor_channel(fluor_channels, info)
     ctx.state.channel.seg_channel_token = seg_tok
     ctx.state.channel.review_image_channels = detect_review_image_channels(
         sample_df, ctx.state.channel.fluor_channels, seg_tok,
@@ -1121,6 +1125,36 @@ def on_cutoff_for_column(ctx, val_col: str, *, channel: str | None = None) -> fl
     if kind == CUTOFF_COUNT:
         return get_thresh_count_on(ctx, channel)
     return get_thresh_frac_on(ctx, channel)
+
+
+def on_cut_not_set(ctx, val_col: str, *, channel: str | None = None) -> bool:
+    """Whether *val_col*'s ON cutoff is one nobody set **and** that cuts nothing.
+
+    A channel with no stored ThreshFracOn falls back to its default. For the
+    segmentation channel that default is 0.0 — no cut — so "fraction of cells
+    above threshold" is 1.0 and "events above threshold" is the cell count, for
+    every well, by construction. Drawn as bars they look like a measurement. A
+    nanowell run hits this on its first plot: its segmentation channel is the
+    phase channel, and every intensity column is above 0.
+
+    A cutoff the user stored is data, including a deliberate 0. A readout
+    channel's non-zero default (50.0) is a real cut and keeps drawing. Counts
+    and shape columns are not intensity cuts and never qualify.
+    """
+    from review.domain.gating_state import default_thresh_frac_on
+    from review.domain.metric_registry import CUTOFF_INTENSITY, cutoff_kind_for_column
+
+    if cutoff_kind_for_column(val_col) != CUTOFF_INTENSITY:
+        return False
+    if channel is None:
+        from review.data.metric_labels import split_metric_col
+        parts = split_metric_col(val_col) if isinstance(val_col, str) else None
+        channel = parts[0] if parts else ctx.state.channel.active_channel
+    # Read defensively, as ``get_thresh_count_on`` is: unit tests stand the state up as a bare namespace.
+    stored = getattr(getattr(ctx.state, "cell_gating", None), "thresh_frac_on", None)
+    if stored is None or _gating_row_key(ctx, channel) in stored:
+        return False
+    return default_thresh_frac_on(channel, seg_channel_token_of(ctx)) == 0.0
 
 
 def ensure_cell_gating_tab_built(ctx) -> bool:

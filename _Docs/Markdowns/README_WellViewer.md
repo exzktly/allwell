@@ -4713,6 +4713,14 @@ of individual cells. This is the default Plotting sub-tab.
 - **Needs** — at least one selected well and a channel. The **Timepoints**
   button (reads e.g. `Timepoints: 3/8 selected`) fills from the selected wells'
   `timepoint_hours`; tick any set.
+- **Channel** opens on the first fluorescence channel. A run that segmented on a
+  phase (brightfield) image lists that channel last: its "mean intensity" is the
+  brightness of a brightfield image, not a fluorescence measurement.
+- **An ON threshold nobody set** on the segmentation channel cuts nothing (it
+  starts at 0), so *Fraction of Cells Above Threshold* would be 1.0 and *Events
+  above threshold* the cell count for every well. Those two panels then say
+  "ON threshold not set — every cell counts as above it" instead of drawing bars
+  (Line Graphs does the same). Set a threshold — even 0, on purpose — and they draw.
 - **Controls** (the **Display ▾** menu gathers the view options):
   - **Grouping** — how bars are grouped (default *Well*; a replicate set groups
     its members).
@@ -5254,13 +5262,20 @@ either to explain why.
 
 ### Scatter Plot
 
-**What it shows.** Two views, chosen with the **View** toggle at the left of the
-controls row — **Cells** (one point per cell, X vs Y feature) and **Wells** (one
-point per well/timepoint). Cells can be coloured **by well** or, via **Color by
-time**, by timepoint.
+**What it shows.** Two views, chosen with the **Points** toggle at the left of the
+controls row — **Each observation** (one point per cell, X vs Y feature; one per
+nanowell under *Observations: Nanowells*, below) and **Per well** (one point per
+well/timepoint). Cells can be coloured **by well** or, via **Color by time**, by
+timepoint.
+
+On a nanowell plate the X-axis and Y-axis pickers also list **Nanowell (of this
+cell)** — *Nanowell ▸ Cell count*, *Nanowell ▸ Confluence* and the rest: each cell
+takes its own nanowell's value at its timepoint, so you can plot a cell's GFP
+against how crowded its nanowell is. A cell with no nanowell address has no value
+there and is not drawn.
 
 The Channel, Property and ON cutoff controls that the other plot tabs share
-disappear from the controls row here, and the View toggle takes their place.
+disappear from the controls row here, and the Points toggle takes their place.
 That is because this tab picks its channels per axis, from the X-axis and
 Y-axis dropdowns below — the shared controls have nothing to act on. Each axis
 still uses its own channel's cutoff from Cell Gating; since the quick-edit is
@@ -5789,6 +5804,38 @@ level — timepoints are already the X-axis.
 The **Nanowells** page (Analysis rail, after Spatial) draws a dataset analysed in nanowell mode (Analyze ▸
 Nanowells): one dot per nanowell, so you see how the nanowells of a well spread, how that spread changes over
 time, and how wells and replicate groups compare. A dataset without nanowell tables shows a page saying so.
+
+#### Nanowell plates in the other tabs
+
+A nanowell dataset also opens in every other Review tab, which read it like this:
+
+- **Observations: Cells | Nanowells** is the first control on the Plotting row. *Cells* plots the cells, pooled per
+  well as on any plate; every figure then ends with "Observations: cells · pooled from N occupied nanowells per
+  well" (only nanowells holding a cell have cell rows, so N counts those). *Nanowells* plots the nanowell metrics —
+  cell count, confluence, brightness, nanowell fluorescence, their fold changes, growth rate and **Occupied** (holds
+  at least one cell) — computed exactly as this page computes them, with this page's Baseline and Rim focus:
+  - **Scatter** sets any nanowell metric against any other, one point per nanowell and timepoint, or per well (the
+    median over its nanowells) with *Points: Per well*;
+  - **Bar Plots**, **Line Graphs** and **Heat Map** draw each well's median over its nanowells, and a replicate set
+    as the mean of its wells' medians with error bars over **wells** — nanowells are never treated as replicates.
+    Bar and Line add the **occupied share** and how many nanowells had a value;
+  - **Distribution** draws every nanowell's value.
+
+  Under *Nanowells* the Channel, Property and ON threshold controls give way to one **Metric** picker. The Fold
+  change menu applies to cell plots; for nanowells pick a fold-change metric, which uses this page's Baseline. Every
+  nanowell figure's footer begins "Observations: nanowells" and counts the nanowells used and left out, with why.
+  A plot that cannot draw nanowells (Response Curves) says so in the row. On a standard plate the toggle is not
+  shown.
+- **Multivariate** lists a **Nanowell** feature family: each cell's own nanowell's metrics.
+- **Image Table** offers **MONTAGE** — the stitched picture the run analysed, one per well and timepoint (its FOV
+  setting does not apply) — and does not offer NUC+SEG, which a nanowell run never writes. The raw tiles stay
+  available as PHASE / GFP. Opening the `out` folder directly finds the `in` folder beside it.
+- **Segmentation** shows the tile with each counted cell as a dot and each nanowell as a ring. A nanowell run
+  records cells as points, not outlines, so Delete Cell, Crop cells and Edit are greyed out, and the line above the
+  image says why.
+
+A build of All-Well without the Nanowells feature still opens a nanowell dataset, plots its cells and shows its
+montages, and says on every cell figure and in Segmentation that the nanowell views are not in this build.
 
 Pick wells on the plate at the left. Replicate sets from Sample Definitions are used exactly as the plot tabs
 use them.

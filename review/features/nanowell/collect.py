@@ -380,9 +380,9 @@ def _phase_token(sidecar: dict) -> str:
     The pipeline writes site intensities for every channel it loads, the phase channel included; a phase
     image's "brightness" is not fluorescence, so it is not offered as a fluorescence channel.
     """
-    options = sidecar.get("execution_options") if isinstance(sidecar.get("execution_options"), dict) else {}
-    token = options.get("phase_token") or sidecar.get("phase_token") or ""
-    return str(token).strip().lower()
+    from review.domain.channel_roles import phase_channel
+
+    return phase_channel(sidecar)
 
 
 def _image_channels(sidecar: dict, phase: str, channels: list, *, read_any: bool) -> tuple[list, dict]:

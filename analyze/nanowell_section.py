@@ -33,8 +33,8 @@ _FLUOR_BACKGROUND_TIP = (
     "This well's nanowell floor: the bare floor between and under the cells of the same tile. It needs nothing "
     "else, but nanowells crowded with cells leave little bare floor to read it from.\n"
     "Empty reference well: the floor of the Empty reference well's nanowells at the same timepoint, which no cell "
-    "of the measured well can raise. At a timepoint where that well holds cells, the fluorescence is left blank "
-    "with the reason, never measured above something else.\n"
+    "of the measured well can raise. Where that well has no level for a channel (no image in it, or it was not "
+    "measured), that channel's fluorescence is left blank with the reason, never measured above something else.\n"
     "A nanowell run applies no Image correction (flat-field or background subtraction); that section is hidden "
     "while Nanowell array is chosen.")
 _REGISTRATION_TIP = (
@@ -65,7 +65,8 @@ _FIELDS = (
     ("nanowell_empty_well", "Empty reference well", "_nanowell_empty_well_edit",
      "A plate well that holds no cells (e.g. H12). Confluence is texture against an empty nanowell, so it is read, "
      "at every timepoint, against this well's empty nanowells imaged at that timepoint; it is measured before the "
-     "other wells. Blank, or at a timepoint where this well holds cells, no well has a confluence (blank, never 0)."),
+     "other wells. It is believed empty whatever the cell count finds in it: debris counted as cells is noted, "
+     "never a reason to drop it. Blank: no well has a confluence (blank, never 0)."),
 )
 
 

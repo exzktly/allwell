@@ -148,13 +148,21 @@ def _rows(counts) -> list:
             for n in counts]
 
 
-def test_the_verdict_counts_loaded_nanowells():
-    assert nref.verdict(_rows([0] * 39 + [1]))["status"] == nref.EMPTY        # 2.5 %: debris
-    assert nref.verdict(_rows([0] * 18 + [1, 1]))["status"] == nref.LOADED    # 10 %
-    found = nref.verdict(_rows([58, 55, 47, 0]))                                # the reported well
-    assert found["status"] == nref.LOADED and found["loaded_share"] == 0.75
-    assert nref.verdict(_rows([None, None]))["status"] == nref.UNVERIFIED
-    assert nref.verdict([])["status"] == nref.UNVERIFIED
+def test_the_named_empty_well_is_believed_whatever_the_segmenter_counted_in_it():
+    """Reported: a remote run given a blank well came back with no confluence anywhere. Its ``reference.json`` said
+    ``loaded`` at every timepoint, with more than 70 % of the blank well's nanowells holding an object the segmenter
+    counted — debris, in nanowells the user had confirmed empty. The count-based rule refused the well the user named,
+    and with it the whole plate's confluence. The well named empty is now believed: the status is ``empty`` at any
+    share, and the share is kept, with ``looks_loaded`` above ``MAX_LOADED_SHARE`` for the note and the warning."""
+    quiet = nref.verdict(_rows([0] * 39 + [1]))                                # 2.5 %
+    assert quiet["status"] == nref.EMPTY and quiet["looks_loaded"] is False
+    reported = nref.verdict(_rows([1] * 72 + [0] * 28))                       # the reported blank: 72 % debris
+    assert reported["status"] == nref.EMPTY and reported["looks_loaded"] is True
+    assert reported["loaded_share"] == 0.72 and reported["false_cells_per_nanowell"] == 0.72
+    assert nref.verdict(_rows([0] * 18 + [1, 1]))["status"] == nref.EMPTY     # 10 %, the old rule's "loaded"
+    for uncounted in (_rows([None, None]), []):                                # nothing counted: still as named
+        found = nref.verdict(uncounted)
+        assert found["status"] == nref.EMPTY and found["loaded_share"] is None and found["looks_loaded"] is False
 
 
 def _settings(**kw):
@@ -164,10 +172,12 @@ def _settings(**kw):
 def test_a_saved_reference_is_read_back_only_under_the_same_settings(tmp_path, reference):
     _, template = reference
     settings = _settings(empty_well="H12")
-    nref.save(tmp_path, "H12", settings, {"0h": (template, nref.verdict(_rows([0] * 10))),
-                                          "12h": (template, nref.verdict(_rows([3] * 10)))})
+    # 12h as the earlier count-based rule saved it: refused, so no template. Still read back as no confluence there.
+    old_rule = {"status": nref.LOADED, "loaded_share": 1.0, "nanowells_counted": 10, "max_loaded_share": 0.05}
+    nref.save(tmp_path, "H12", settings, {"0h": (template, nref.verdict(_rows([3] * 10))),
+                                          "12h": (template, old_rule)})
     back = nref.load(tmp_path, settings)
-    got, why = back.at("0h")
+    got, why = back.at("0h")                       # every nanowell held a counted object, and it is believed empty
     assert why == "" and got.texture_cut == template.texture_cut
     np.testing.assert_array_equal(got.array, template.array)
     assert back.at("12h")[0] is None and "not empty" in back.at("12h")[1]
@@ -189,15 +199,46 @@ def test_the_reference_well_goes_first():
     assert nref.reference_well_first(_settings(), items) == ([], items)
 
 
-def test_the_reference_well_s_own_loaded_timepoints_lose_their_confluence():
+def test_the_reference_well_keeps_its_confluence_and_says_what_it_counted():
+    """Its own timepoints keep their confluence however many objects were counted, and one with many carries one
+    note naming the share — passed through ``apply`` twice, as kept rows are, it still carries one."""
     sites = _rows([4, 4]) + [dict(r, timepoint="12h") for r in _rows([0, 0])]
     blocks = {"0h": {"notes": []}, "12h": {"notes": []}}
     verdicts = {"0h": nref.verdict(sites[:2]), "12h": nref.verdict(sites[2:])}
     for _ in range(2):                                    # idempotent: kept rows pass through it again
         nref.apply(sites, blocks, "H12", verdicts)
-    assert [r["confluence"] for r in sites] == [None, None, 0.0, 0.0]
-    assert len(blocks["0h"]["notes"]) == 1 and blocks["12h"]["notes"] == []
-    assert blocks["0h"]["confluence_reference"]["status"] == nref.LOADED
+    assert [r["confluence"] for r in sites] == [0.0, 0.0, 0.0, 0.0]
+    assert blocks["0h"]["notes"] == [nref.looks_loaded_note(verdicts["0h"])] and blocks["12h"]["notes"] == []
+    assert blocks["0h"]["notes"][0].startswith(nref.LOOKS_LOADED_PREFIX) and "100%" in blocks["0h"]["notes"][0]
+    assert not blocks["0h"]["notes"][0].startswith(nref.NOTE_PREFIX)         # it is not a missing confluence
+    assert blocks["0h"]["confluence_reference"]["status"] == nref.EMPTY
+
+
+def test_a_reference_the_old_rule_refused_is_measured_again(tmp_path, reference):
+    """An output folder from before the rule changed — the reported one — holds a reference whose timepoints say
+    ``loaded`` and have no template. The reference well's own key there differs from the ``own`` its grid recorded,
+    so its incremental run does not keep those timepoints and its finished-well check does not skip it; the
+    timepoint the old rule accepted is still kept."""
+    from pipeline import nanowell_task as nt
+
+    _, template = reference
+    settings = _settings(empty_well="H12")
+    old_rule = {"status": nref.LOADED, "loaded_share": 0.72, "nanowells_counted": 100, "max_loaded_share": 0.05}
+    nref.save(tmp_path, "H12", settings, {"0h": (template, old_rule),
+                                          "12h": (template, nref.verdict(_rows([0] * 10)))})
+    path = tmp_path / nt.NANOWELL_DIR / "H12_grid.json"
+    own = nt._confluence_reference_for("H12", settings, path)
+    assert own.own and own.key_at("0h") != nref.OWN_KEY and own.key_at("12h") == nref.OWN_KEY
+    import json
+
+    path.write_text(json.dumps({"timepoints": {tp: {"status": nr.OK, nref.KEY_FIELD: nref.OWN_KEY}
+                                               for tp in ("0h", "12h")}}))
+    spec = {"_nanowell": {"plate_format": "100um", "empty_well": "H12"}}
+    assert nt.confluence_reference_current(tmp_path, "H12", spec) is False
+    # Once measured again under the new rule, nothing is refused and it is current.
+    nref.save(tmp_path, "H12", settings, {tp: (template, nref.verdict(_rows([1] * 10))) for tp in ("0h", "12h")})
+    assert nt._confluence_reference_for("H12", settings, path) is nref.OWN
+    assert nt.confluence_reference_current(tmp_path, "H12", spec) is True
 
 
 def test_a_well_is_given_the_reference_the_run_names(tmp_path, reference):
@@ -220,11 +261,19 @@ def test_a_well_is_given_the_reference_the_run_names(tmp_path, reference):
 def test_the_reference_saves_its_floor_level_and_a_well_measured_above_it_reads_it_back(tmp_path, reference):
     _, template = reference
     settings = _settings(empty_well="H12", fluor_background="empty_well")
+    # The named well is believed even when its count finds objects (debris): 12h keeps its level all the same. 18h
+    # had no fluorescence image, so it has a template and no level. 24h is an output folder written by the earlier
+    # count-based rule, which refused the timepoint and saved no template: no level there, and the reason why.
+    old_rule = {"status": nref.LOADED, "loaded_share": 0.72, "nanowells_counted": 100, "max_loaded_share": 0.05}
     nref.save(tmp_path, "H12", settings, {"0h": (template, nref.verdict(_rows([0] * 10)), {"GFP": 30.0}),
-                                          "12h": (template, nref.verdict(_rows([3] * 10)), {"GFP": 31.0})})
+                                          "12h": (template, nref.verdict(_rows([3] * 10)), {"GFP": 31.0}),
+                                          "18h": (template, nref.verdict(_rows([0] * 10)), {}),
+                                          "24h": (template, old_rule, {"GFP": 32.0})})
     back = nref.load(tmp_path, settings)
     assert back.fluor_at("0h") == ({"GFP": 30.0}, "")
-    levels, why = back.fluor_at("12h")                      # held cells there: no level, and the reason why
+    assert back.fluor_at("12h") == ({"GFP": 31.0}, "")
+    assert back.fluor_at("18h") == ({}, "")                  # _empty_well_backgrounds names the channel
+    levels, why = back.fluor_at("24h")
     assert levels == {} and "not empty" in why
     # A run measuring above its own floor does not read them, so a change in them re-runs none of its wells.
     assert nref.load(tmp_path, _settings(empty_well="H12")).fluor_levels == {}
@@ -288,3 +337,39 @@ def test_the_command_line_refuses_the_empty_well_background_without_an_empty_wel
     assert options["fluor_background"] == "empty_well" and options["empty_well"] == "H12"
     assert "fluor_background" not in nanowell_options_from_args(
         parser.parse_args(base[:-2] + ["--nanowell_empty_well", "H12"]), error)
+
+
+def test_a_remote_re_run_sends_every_well_when_the_old_rule_s_reference_is_measured_again(tmp_path, reference):
+    """The reported plate run again remotely: the reference and A01 are finished here, A01 read against the old
+    rule's refusal (``none:loaded``), which still matches the ``reference.json`` here. The reference is now to be
+    measured again, so A01 must go too — kept, it would keep its blank confluence beside a reference that has a
+    template. ``services.remote_finished_wells`` decides the reference's own currency before asking whether it is
+    finished."""
+    import json
+
+    from pipeline.cli_args import build_parser
+    from services.remote_finished_wells import _read_against_the_reference
+
+    _, template = reference
+    args = build_parser().parse_args(["--input_dir", "x", "--output_dir", str(tmp_path),
+                                      "--nanowell_format", "100um", "--nanowell_empty_well", "H12",
+                                      "--phase_token", "PHASE"])
+    from pipeline.cli_args import nanowell_options_from_args
+    from pipeline.nanowell_task import settings_from_kwargs
+
+    def refuse(message):
+        raise AssertionError(message)          # an unparsable argv answers [] too, which would prove nothing
+
+    settings = settings_from_kwargs({"_nanowell": nanowell_options_from_args(args, refuse)})
+    old_rule = {"status": nref.LOADED, "loaded_share": 0.72, "nanowells_counted": 100, "max_loaded_share": 0.05}
+    nref.save(tmp_path, "H12", settings, {"0h": (template, old_rule)})
+    for well, key in (("H12", nref.OWN_KEY), ("A01", "none:loaded")):
+        (tmp_path / "nanowells" / f"{well}_grid.json").write_text(
+            json.dumps({"timepoints": {"0h": {"status": nr.OK, nref.KEY_FIELD: key}}}))
+    assert _read_against_the_reference(tmp_path, args, ["A01", "H12"], ["A01", "H12"]) == []
+    assert _read_against_the_reference(tmp_path, args, ["A01"], ["A01"]) == ["A01"]   # H12 not sent: A01 stays
+    # Measured again under the new rule: both are current, and both are finished.
+    nref.save(tmp_path, "H12", settings, {"0h": (template, nref.verdict(_rows([1] * 10)))})
+    (tmp_path / "nanowells" / "A01_grid.json").write_text(json.dumps(
+        {"timepoints": {"0h": {"status": nr.OK, nref.KEY_FIELD: nref.template_key(template)}}}))
+    assert _read_against_the_reference(tmp_path, args, ["A01", "H12"], ["A01", "H12"]) == ["A01", "H12"]

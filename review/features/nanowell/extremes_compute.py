@@ -62,6 +62,8 @@ class ExtremesModel:
     roster: int = 0             # the well's nanowells at the ranking timepoint
     ranked: int = 0             # those with a fold change there
     excluded: dict = field(default_factory=dict)     # reason label -> count
+    #: What the figure calls the well (``controller.well_name``); ``""`` prints the well itself.
+    name: str = ""
 
     def sites(self) -> list:
         """Every nanowell the figure draws, the largest first."""

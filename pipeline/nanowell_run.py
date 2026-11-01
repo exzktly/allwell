@@ -1606,7 +1606,7 @@ def _empty_well_backgrounds(norm: Normalisation, reference, timepoint, channels)
     per channel for every tile, and return the notes saying where there is none.
 
     The reference well itself keeps its own well-wide level, which is the one it saves for the others. A channel the
-    reference has no level for at this timepoint (it was not empty there, was not measured, or lacks the channel) gets
+    reference has no level for at this timepoint (it lacks the channel, was not measured, or was refused by the earlier count-based rule) gets
     no background, so every fluorescence number of it is blank rather than measured above the well's own floor: the
     run asked for the empty well, and a silent substitute would read as the number asked for."""
     from pipeline import nanowell_reference as nref

@@ -48,13 +48,14 @@ def test_the_default_measures_each_well_above_its_own_floor(tmp_path, monkeypatc
     assert _all(loaded["GFP_mean_bg"], 0.0)
 
 
-def test_a_reference_that_holds_cells_leaves_the_fluorescence_blank_with_the_reason(tmp_path, monkeypatch):
+def test_a_named_empty_well_whose_count_finds_objects_is_still_the_background(tmp_path, monkeypatch):
+    """The named well is believed (``nanowell_reference.verdict``): objects its count finds are taken for debris
+    and only noted, so its floor is still what every well's fluorescence is measured above."""
     out, _order = _run(monkeypatch, _plate(tmp_path, {LOADED: DENSE, EMPTY: 2}, gfp=GFP), "--nanowell_empty_well",
                        EMPTY, "--nanowell_fluor_background", "empty_well")
-    assert nref.read_index(out)["timepoints"]["0h"]["status"] == nref.LOADED
+    found = nref.read_index(out)["timepoints"]["0h"]
+    assert found["status"] == nref.EMPTY and found["fluorescence_floor"]["GFP"] == pytest.approx(30.0)
     loaded, block = _well(out, LOADED)
-    assert len(loaded)
-    for column in ("GFP_background", "GFP_mean_bg", "GFP_integrated"):
-        assert loaded[column].isna().all(), column                         # blank, never the own floor's numbers
-    assert any(str(n).startswith(f"{nref.FLUOR_NOTE_PREFIX} GFP") and "not empty" in str(n) for n in block["notes"])
-    assert pd.notna(loaded["n_cells"]).all()                                # the count does not depend on it
+    assert len(loaded) and _all(loaded["GFP_background"], 30.0)
+    assert not any(str(n).startswith(nref.FLUOR_NOTE_PREFIX) for n in block["notes"])
+    assert pd.notna(loaded["n_cells"]).all()

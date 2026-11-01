@@ -110,6 +110,27 @@ def refresh_group_by_combo(ctx) -> None:
     combo = _combo(ctx)
     if combo is None:
         return
+    has_variables = fill_group_by_combo(ctx, combo)
+    group = ctx.widgets.get_or_none("_plotting_groupby_grp")
+    if group is not None:
+        group.setVisible(has_variables)
+    refresh_decoration_combos(ctx)
+    refresh_grouping_readouts(ctx)
+
+
+def fill_group_by_combo(ctx, combo) -> bool:
+    """Fill one *Group by* combo from the plate's variables; whether there are any.
+
+    The fill the band's control and the Nanowells page's share. Both write the
+    one ``PlotState.group_by_variable`` every plot pools through, so they list
+    the same entries in the same order and fall back the same way — two
+    combos over one setting that listed differently would show the user two
+    answers to which grouping is in force.
+
+    A choice whose variable is gone falls back to the first entry and is
+    cleared from the state as well, or the next redraw reads a variable no
+    combo offers.
+    """
     vset = getattr(ctx.state.selection, "variables", None)
     variables = list(getattr(vset, "variables", ()) or ())
     keep = str(getattr(ctx.state.plot, "group_by_variable", "") or "")
@@ -129,16 +150,36 @@ def refresh_group_by_combo(ctx) -> None:
         # plots.
         ctx.state.plot.group_by_variable = ""
         ctx.state.plot.group_by_hidden_values = set()
-
-    group = ctx.widgets.get_or_none("_plotting_groupby_grp")
-    if group is not None:
-        group.setVisible(bool(variables))
-    refresh_decoration_combos(ctx)
-    refresh_grouping_readouts(ctx)
+    return bool(variables)
 
 
 def refresh_decoration_combos(ctx) -> None:
-    """Fill the three decoration combos, and hide the popover with no variables.
+    """Fill the band's three decoration combos, and hide its popover with no variables.
+
+    The rules each combo follows are :func:`fill_decoration_combos`'; this adds
+    only the band's own button, which shows on the tabs whose renderer reads
+    the controls (:data:`DECORATED_TABS`).
+    """
+    fill_decoration_combos(ctx, {field: ctx.widgets.get_or_none(name)
+                                 for field, name, _label in DECORATION_CONTROLS})
+
+    button = ctx.widgets.get_or_none("_plotting_decorate_btn")
+    if button is not None:
+        vset = getattr(ctx.state.selection, "variables", None)
+        has_variables = bool(getattr(vset, "variables", ()) or ())
+        button.setVisible(has_variables and _current_tab_decorates(ctx))
+
+
+def fill_decoration_combos(ctx, combos: dict, no_labels: dict | None = None) -> None:
+    """Fill one surface's decoration combos (*combos*: state field -> combo, or ``None``).
+
+    *no_labels* overrides what a combo calls "do not do this", by state field, where the surface's undecorated
+    figure is not the band's: the Nanowells page's dots are coloured by occupancy, not by plate position, so its
+    *Colour by* cannot offer "Plate colours" as the way back.
+
+    The fill the band's popover and the Nanowells page's share: both write the
+    same three ``PlotState`` fields, so they must list the same entries and
+    clear a vanished choice the same way.
 
     Each lists every variable, including the one *Group by* holds. Colouring a
     dose series by dose is redundant rather than wrong, and splitting by the
@@ -153,29 +194,24 @@ def refresh_decoration_combos(ctx) -> None:
     :func:`_gate_sub_split`, which runs last so it sees the first split's
     final value.
     """
-    for field, name, no_label in DECORATION_CONTROLS:
+    no_labels = no_labels or {}
+    for field, _name, no_label in DECORATION_CONTROLS:
         if field != "sub_split_by_variable":
-            _fill_decoration_combo(ctx, field, name, no_label)
+            _fill_decoration_combo(ctx, field, combos.get(field), no_labels.get(field, no_label))
 
-    _gate_sub_split(ctx)
-
-    button = ctx.widgets.get_or_none("_plotting_decorate_btn")
-    if button is not None:
-        vset = getattr(ctx.state.selection, "variables", None)
-        has_variables = bool(getattr(vset, "variables", ()) or ())
-        button.setVisible(has_variables and _current_tab_decorates(ctx))
+    _gate_sub_split(ctx, combos.get("sub_split_by_variable"))
 
 
-def _fill_decoration_combo(ctx, field: str, name: str, no_label: str,
+def _fill_decoration_combo(ctx, field: str, combo, no_label: str,
                            exclude: str = "") -> None:
     """List the plate's variables in one decoration combo, keeping its choice.
 
-    *exclude* is a variable id left off the list. A choice that is gone — the
-    variable deleted, or now excluded — falls back to the first entry and is
-    cleared from the state too, or the next redraw decorates by a variable
-    nothing offers.
+    *combo* may be ``None`` (a surface not built yet); the state is still
+    checked. *exclude* is a variable id left off the list. A choice that is
+    gone — the variable deleted, or now excluded — falls back to the first
+    entry and is cleared from the state too, or the next redraw decorates by a
+    variable nothing offers.
     """
-    combo = ctx.widgets.get_or_none(name)
     keep = str(getattr(ctx.state.plot, field, "") or "")
     vset = getattr(ctx.state.selection, "variables", None)
     variables = [v for v in (getattr(vset, "variables", ()) or ())
@@ -193,7 +229,10 @@ def _fill_decoration_combo(ctx, field: str, name: str, no_label: str,
         setattr(ctx.state.plot, field, "")
 
 
-def _gate_sub_split(ctx) -> None:
+_SUBSPLIT_WIDGET = "_plotting_subsplitby_cb"
+
+
+def _gate_sub_split(ctx, combo=_SUBSPLIT_WIDGET) -> None:
     """Keep the second split level inside a first one, and off the first's variable.
 
     With no first split there is nothing to nest bands inside, so the setting
@@ -204,21 +243,20 @@ def _gate_sub_split(ctx) -> None:
     With one, the combo is refilled without the first split's variable, so the
     list follows *Split by* as it changes; a *Then by* that now names the same
     variable is cleared by the refill.
+
+    *combo* is the surface's *Then by* combo, ``None`` for none, or by default
+    the band's.
     """
+    if isinstance(combo, str):
+        combo = ctx.widgets.get_or_none(combo)
     plot = ctx.state.plot
     split = str(getattr(plot, "split_by_variable", "") or "")
     if not split and getattr(plot, "sub_split_by_variable", ""):
         plot.sub_split_by_variable = ""
-    if split:
-        _fill_decoration_combo(ctx, "sub_split_by_variable",
-                               "_plotting_subsplitby_cb", NO_SUBSPLIT_LABEL,
-                               exclude=split)
-    combo = ctx.widgets.get_or_none("_plotting_subsplitby_cb")
+    _fill_decoration_combo(ctx, "sub_split_by_variable", combo,
+                           NO_SUBSPLIT_LABEL, exclude=split)
     if combo is None:
         return
-    if not split:
-        _fill_decoration_combo(ctx, "sub_split_by_variable",
-                               "_plotting_subsplitby_cb", NO_SUBSPLIT_LABEL)
     combo.setEnabled(bool(split))
     combo.setToolTip("" if split else "Choose a Split by variable first — "
                      "these bands are drawn inside its bands.")

@@ -135,11 +135,14 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
 
 
 def _confluence_reference_for(well_label, settings, template_path):
-    """What *well_label*'s confluence is read against: itself when it is the empty reference well, else the
-    reference saved in this output folder (``pipeline.nanowell_reference.load``), else nothing, with the reason."""
+    """What *well_label*'s confluence is read against: itself when it is the empty reference well
+    (``pipeline.nanowell_reference.own``, which keys apart any timepoint an earlier rule refused, so it is measured
+    again), else the reference saved in this output folder (``pipeline.nanowell_reference.load``), else nothing,
+    with the reason."""
+    output_dir = Path(template_path).parent.parent
     if nref.same_well(well_label, nref.reference_well(settings)):
-        return nref.OWN
-    return nref.load(Path(template_path).parent.parent, settings)
+        return nref.own(output_dir, well_label)
+    return nref.load(output_dir, settings)
 
 
 def confluence_reference_current(output_dir, well_label, shared_kwargs_template) -> bool:
@@ -859,10 +862,10 @@ def _fluorescence_floor(block) -> dict:
 
 
 def _save_confluence_reference(output_dir, well_label, settings, outcome, sites, timepoints) -> None:
-    """The empty reference well's part, once its counts are known: judge each timepoint empty or not by them, record
-    the verdict on its blocks (and blank its own confluence where it was not empty), and save its templates for the
-    wells measured after it (``pipeline.nanowell_reference``). A kept timepoint of an incremental run brings no
-    template of its own, so the one saved before is carried over."""
+    """The empty reference well's part, once its counts are known: record what the segmenter counted in it at each
+    timepoint on its blocks (with a note where many of its nanowells hold counted objects — it is believed empty all
+    the same, as named), and save its templates for the wells measured after it (``pipeline.nanowell_reference``).
+    A kept timepoint of an incremental run brings no template of its own, so the one saved before is carried over."""
     templates = {**nref.kept_templates(output_dir, well_label), **outcome.templates}
     rows: dict = {}
     for row in sites:
@@ -872,12 +875,16 @@ def _save_confluence_reference(output_dir, well_label, settings, outcome, sites,
     nref.save(output_dir, well_label, settings,
               {tp: (templates.get(tp), v, _fluorescence_floor(outcome.timepoints.get(tp)))
                for tp, v in verdicts.items()})
-    refused = {tp: v["status"] for tp, v in verdicts.items() if v["status"] != nref.EMPTY}
-    if refused:
-        log.warning("Well %s is the empty reference well, but it is not empty at %s: no well has a confluence there",
-                    well_label, ", ".join(f"{tp} ({status})" for tp, status in refused.items()))
+    crowded = {tp: v["loaded_share"] for tp, v in verdicts.items() if v.get("looks_loaded")}
+    if crowded:
+        # Believed, as named (``nanowell_reference`` docstring): said, so a mistyped well is not silent.
+        log.warning("Well %s is the named empty reference well; at %s more than %.0f%% of its nanowells hold an "
+                    "object the segmenter counted. It is used as the empty reference anyway, so those are the "
+                    "segmenter's false counts (debris); if the well does hold cells, name another.", well_label,
+                    ", ".join(f"{tp} ({share:.0%})" for tp, share in crowded.items()), 100 * nref.MAX_LOADED_SHARE)
+    saved = sum(1 for tp in verdicts if templates.get(tp) is not None)
     log.info("Well %s — empty reference saved for %d timepoint(s); every other well's confluence is read against it.",
-             well_label, len(verdicts) - len(refused))
+             well_label, saved)
 
 
 def _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, record, timepoints, digest,

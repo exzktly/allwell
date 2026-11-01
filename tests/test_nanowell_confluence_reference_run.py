@@ -142,12 +142,17 @@ def test_a_loaded_well_is_read_against_the_empty_well_measured_before_it(tmp_pat
     assert block["template"]["reference_false_cells_per_nanowell"] == pytest.approx(baseline)
 
 
-def test_a_reference_well_that_holds_cells_gives_no_confluence(tmp_path, monkeypatch):
-    """The reference alone, loaded: its own verdict says so, and its confluence is blank with the reason. That every
-    other well then reads none is ``nanowell_reference.load``'s, covered without a plate run."""
+def test_a_named_empty_well_with_counted_objects_is_still_the_reference(tmp_path, monkeypatch):
+    """Reported: a remote run given a blank well had no confluence anywhere, because more than 70 % of the blank's
+    nanowells held an object the segmenter counted (debris), and the count-based rule refused the reference. The
+    well named empty is believed: painted here with two objects in every nanowell, it is saved ``empty`` with a
+    template, keeps its own confluence, and says what was counted in a note that is not a missing-confluence one."""
     out, _order = _run(monkeypatch, _plate(tmp_path, {EMPTY: 2}), "--nanowell_empty_well", EMPTY)
-    assert nref.read_index(out)["timepoints"]["0h"]["status"] == nref.LOADED
+    saved = nref.read_index(out)["timepoints"]["0h"]
+    assert saved["status"] == nref.EMPTY and saved.get("template")      # a template the other wells can read
+    assert saved["looks_loaded"] is True and saved["loaded_share"] > nref.MAX_LOADED_SHARE
     seen, block = _well(out, EMPTY)
-    assert len(seen) and seen["confluence"].isna().all()                # blank, never 0
-    assert seen["n_cells"].notna().all()                                # the count does not depend on it
-    assert any(str(n).startswith(nref.NOTE_PREFIX) and "not empty" in str(n) for n in block["notes"])
+    assert len(seen) and seen["confluence"].notna().all()
+    assert seen["n_cells"].notna().all()
+    assert not any(str(n).startswith(nref.NOTE_PREFIX) for n in block["notes"])
+    assert any(str(n).startswith(nref.LOOKS_LOADED_PREFIX) for n in block["notes"])

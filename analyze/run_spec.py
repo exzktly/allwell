@@ -105,6 +105,8 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         except RunSpecError as exc:
             return str(exc)
         spec, resume_note = _nanowell_remote_resume_by_well(spec, remote)
+        # From here every line the pane shows belongs to this run, and goes to its log file too.
+        self._run_log.begin()
         if resume_note:
             self._log_line(resume_note, "INFO")
         self._run_ok = False
@@ -147,6 +149,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
             # concurrently, into one output directory.
             queued=bool(getattr(self, "_starting_from_queue", False)),
         )
+        self._run_log.runner_started()
         self.runStarted.emit(spec.to_json())
         return None
 

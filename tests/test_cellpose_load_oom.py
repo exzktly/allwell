@@ -126,6 +126,19 @@ def test_a_load_that_runs_out_of_gpu_memory_waits_longer_each_time_and_never_lea
     assert any(m.startswith("Cellpose cyto3 on GPU cuda:0 (NVIDIA T4), TF32 (worker ") for m in messages)
 
 
+def test_a_load_that_never_fits_is_given_up_after_a_bounded_wait(gpu):
+    """With one worker, a GPU another process holds, or a GPU too small for the model, nothing frees the memory.
+    The wait was unbounded: the well was held, the run never finished or failed, and a Slurm allocation burned to its
+    time limit. It now gives up after ``LOAD_OOM_GIVE_UP_S`` of waiting and the well fails with the reason."""
+    gpu["gpu_full_for"] = 10_000
+    with pytest.raises(cp.CellposeUnavailable, match="still out of memory after .* tries"):
+        cp._cellpose_model("cyto3")
+    assert gpu["slept"] and sum(gpu["slept"]) <= cp.LOAD_OOM_GIVE_UP_S
+    assert sum(gpu["slept"]) + cp.LOAD_OOM_MAX_WAIT_S > cp.LOAD_OOM_GIVE_UP_S     # it did wait to the bound
+    assert all(spec == "cuda:0" for spec, _bf16 in gpu["built"])                 # and never on the CPU
+    assert "cyto3" not in cp._CELLPOSE_MODELS
+
+
 def test_running_out_in_the_bfloat16_test_pass_is_tried_again_too(gpu, monkeypatch, caplog):
     """On Cellpose 4 the model's first pass runs inside the load (``_bfloat16_or_float32``), on a GPU already
     holding the weights — the likelier place for a crowded GPU to run out."""

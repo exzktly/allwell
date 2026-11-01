@@ -1650,7 +1650,10 @@ archives and outputs are always written as per-well `.zip` archives. See
     The other workers carry on with the rest of the plate meanwhile, and each
     gives back its spare GPU memory when it finishes a well. The log says so
     on every try (`Cellpose cpsam ran out of GPU memory loading on GPU
-    cuda:0 …`); fewer workers is the fix for the next run.
+    cuda:0 …`); fewer workers is the fix for the next run. If after two
+    hours of waiting there is still no room — one worker on a GPU another
+    program holds, or a GPU too small for the model — the worker gives up
+    and the well fails, with the reason in the run's `errors/` folder.
   - The remote options' **Batch size** is a different thing: how many wells
     go to the remote at a time, which bounds its disk. It has no effect on
     the GPU.

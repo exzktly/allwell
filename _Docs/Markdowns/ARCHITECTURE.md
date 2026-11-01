@@ -10705,7 +10705,10 @@ a GPU the run's other workers already fill. That load is tried again until it fi
 `LOAD_OOM_FIRST_WAIT_S` (10 s) and then twice as long each time up to `LOAD_OOM_MAX_WAIT_S` (300 s), each wait a
 warning that names the worker and suggests fewer workers. It never falls back to the CPU: on a GPU node a CPU worker can be
 slow enough that its last well ends the run later than one worker fewer would have. The waiting worker holds
-the well it was given; the others go on with the rest. Any other load failure, or one on the CPU, still raises
+the well it was given; the others go on with the rest. The wait is bounded: after `LOAD_OOM_GIVE_UP_S` (two hours)
+of waiting in all the load raises `CellposeUnavailable` naming the tries and the wait, so a run with one worker, a GPU
+another process holds, or one too small for the model fails the well with its reason rather than holding it until a
+Slurm allocation's time limit. Any other load failure, or one on the CPU, still raises
 `CellposeUnavailable`, as every out-of-memory load used to — which cached nothing, so the worker failed every well it
 took the same way while the others carried on.
 

@@ -148,20 +148,18 @@ class NanowellBatchExportPanel(BatchExportPanel):
         self._cohort_box.setToolTip("Distribution and Trajectories: only the nanowells with a value at every "
                                     "timepoint of their well, as the page's Fixed cohort box.")
         row.addWidget(self._cohort_box)
+        # The fields hold the bare number; the label beside each says what it counts (no text inside the box,
+        # which Qt's spin box refuses to type over).
+        row.addWidget(QLabel("Moving average (timepoints, 1 = off)"))
         self._moving_spin = QSpinBox()
         self._moving_spin.setRange(1, _moving_max())       # 1 is off, as on the page
-        self._moving_spin.setSpecialValueText("Moving average: off")
-        self._moving_spin.setPrefix("Moving average: ")
-        self._moving_spin.setSuffix(" timepoints")
         self._moving_spin.setToolTip("Distribution and Trajectories: each nanowell's value as the mean over this "
                                      "many timepoints ending at it, as the page's Moving average control. The "
                                      "summary CSV's moving_average column says the window each row used.")
         row.addWidget(self._moving_spin)
+        row.addWidget(QLabel("Baseline average (timepoints, 1 = off)"))
         self._baseline_moving_spin = QSpinBox()
         self._baseline_moving_spin.setRange(1, _moving_max())
-        self._baseline_moving_spin.setSpecialValueText("Baseline average: off")
-        self._baseline_moving_spin.setPrefix("Baseline average: ")
-        self._baseline_moving_spin.setSuffix(" timepoints")
         self._baseline_moving_spin.setToolTip(
             "With the moving average on, a fold change's baseline as the mean over this many timepoints ending at "
             "the baseline timepoint, as the page's Baseline average control. Not used with the Earliest baseline, "

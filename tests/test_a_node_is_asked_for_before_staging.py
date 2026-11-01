@@ -416,8 +416,8 @@ def test_stale_reservation_directories_are_cleared_and_live_ones_kept(host, remo
 # ── an early job that waited out Max queue wait (tracker M2) ───────────────────
 
 _QUEUE_WAIT_OUT = ("[remote] scheduler: ERROR no node was granted within 30 min, this host's Max queue wait — "
-                   "cancelled job 77 and stopped. Raise Max queue wait for this host in Remotes (Wait indefinitely "
-                   "never gives up), or start the run again when the cluster is less busy")
+                   "cancelled job 77 and stopped. Raise Max queue wait for this host in Remotes (0 never gives up), "
+                   "or start the run again when the cluster is less busy")
 
 
 def _waits_out_max_queue_wait() -> subprocess.Popen:

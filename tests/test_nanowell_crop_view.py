@@ -205,6 +205,9 @@ def test_the_pop_out_is_a_non_modal_dialog_owned_by_the_app_s_window(page, qtbot
     window = _press_pop_out(qtbot, page)
     assert isinstance(window, QDialog)
     assert window.windowType() == Qt.Dialog
+    # Its title bar keeps minimise and maximise, as the PR that made it a dialog promised: setting ``Qt.Window`` on a
+    # dialog changes nothing (``Qt.Dialog`` holds that bit), so only the hints add them.
+    assert window.windowFlags() & Qt.WindowMinimizeButtonHint and window.windowFlags() & Qt.WindowMaximizeButtonHint
     assert window.parentWidget() is page.window
     assert not window.isModal()
     box = page.widgets.get("_nw_popout_cells_box")

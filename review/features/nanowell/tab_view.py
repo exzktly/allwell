@@ -858,7 +858,9 @@ class _PopoutWindow(QDialog):
     def __init__(self, parent) -> None:
         super().__init__(parent)
         self.setModal(False)
-        self.setWindowFlag(Qt.Window, True)          # keep the title bar's minimise and maximise buttons
+        # The title bar's minimise and maximise buttons. ``Qt.Dialog`` already holds the ``Qt.Window`` bit, so setting
+        # that flag changed nothing and a dialog's title bar has neither: the hints themselves are what add them.
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)
 
     def show_raised(self) -> None:
         self.show()

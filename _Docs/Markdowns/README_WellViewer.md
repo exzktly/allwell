@@ -5866,15 +5866,41 @@ A nanowell dataset also opens in every other Review tab, which read it like this
   A plot that cannot draw nanowells (Response Curves) says so in the row. On a standard plate the toggle is not
   shown.
 - **Multivariate** lists a **Nanowell** feature family: each cell's own nanowell's metrics.
-- **Image Table** offers **MONTAGE** — the stitched picture the run analysed, one per well and timepoint (its FOV
-  setting does not apply) — and does not offer NUC+SEG, which a nanowell run never writes. The raw tiles stay
-  available as PHASE / GFP. Opening the `out` folder directly finds the `in` folder beside it.
+- **Image Table** lays nanowell wells side by side with its usual crop, zoom, LUT and export. Each picture is one
+  whole well at one timepoint (the FOV setting does not apply), and three kinds are offered as channels:
+  - **MONTAGE** — the stitched phase picture the run analysed, in grey.
+  - **MONTAGE GFP** (one per fluorescence channel) — the same stitch built from that channel's raw tiles, which needs
+    the `in` folder beside the results. The run keeps no fluorescence montage, so the first Generate reads every
+    tile of each well shown and can take a few seconds per well. Leave the row's LUT on **Auto** to give every well
+    one brightness window; tick **per cell** in its LUT row to scale each well to its own range instead, which shows
+    a dim well at the cost of comparing wells.
+  - **NW: *metric name*** (one per nanowell metric: cell count, confluence, brightness, fold changes, growth rate,
+    occupied) — each nanowell drawn as a disc in its metric's colour, *viridis* by default. A fold change is drawn
+    blue below 1, red above and grey at 1, on a log scale, so a doubling and a halving are equally strong. The values
+    follow the Nanowells page's **Baseline** and the Cell Gating rules, so they match the page and the plots.
+    Outside the nanowells is dark grey, so even the lowest values stand out; a nanowell with no value (no cells for
+    a brightness, out of focus, gated out) is an **empty ring**, never a coloured disc.
+
+  The metrics sit behind **Nanowell metrics** in the Channels tray (click it to show them), and a new table starts
+  with MONTAGE and the raw channels only. Under the grid a **colour key** names each metric as its row does and
+  then in full, shows its colours with the values at each end ("1 = no change" for a fold change), says whether
+  every well shares one window (and, while a crop is set, that Auto fitted it to the cropped region — so a cropped
+  export's colours can differ from a whole one's), and shows the empty ring; the saved figure and the PowerPoint slide carry the same key. The status line
+  sums, per metric, how many nanowells have no value and why.
+
+  All three line up pixel for pixel, so one crop shows the same part of the well in every row, and a cropped metric
+  map is redrawn finer so its discs stay round (the montages show their real pixels). The scale bar is measured at
+  the montage's own scale, not at **Pixel µm/px**, and every scale bar writes its length beside it (untick
+  **Label the bar** under Scale bar to hide it). Labels and titles leave out the FOV, since each picture is a whole
+  well. NUC+SEG is not offered, because a nanowell run never writes it. The raw tiles stay available as PHASE / GFP.
+  Opening the `out` folder directly finds the `in` folder beside it.
 - **Segmentation** shows the tile with each counted cell as a dot and each nanowell as a ring. A nanowell run
   records cells as points, not outlines, so Delete Cell, Crop cells and Edit are greyed out, and the line above the
   image says why.
 
 A build of All-Well without the Nanowells feature still opens a nanowell dataset, plots its cells and shows its
-montages, and says on every cell figure and in Segmentation that the nanowell views are not in this build.
+phase montages (without a scale bar, and without the fluorescence montages and metric maps), and says on every cell
+figure and in Segmentation that the nanowell views are not in this build.
 
 Pick wells on the plate at the left. Replicate sets from Sample Definitions are used exactly as the plot tabs
 use them.
@@ -6761,8 +6787,9 @@ channel for every well).
   size isn't stored by the pipeline, so you supply it). Choose which cell(s) show it
   (**every cell**, or a single grid corner), where in the image it sits, its
   **thickness**, and its colour (**Auto** picks black or white for contrast against
-  the pixels underneath). The bar is drawn into the pixels, so the live grid and the
-  exported figure match exactly.
+  the pixels underneath). The bar's length is written beside it ("50 µm") on a
+  small plate behind both; untick **Label the bar** to leave it unlabelled. The bar is drawn
+  into the pixels, so the live grid and the exported figure match exactly.
 
   **If the box is ticked and no bar appears, the status line says why.** There are
   four reasons a bar is asked for and not drawn, and each names the control that

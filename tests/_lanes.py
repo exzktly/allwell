@@ -168,6 +168,7 @@ NANOWELL_E2E_FILES = {
 #: above. ``scripts/test.sh --nanowell-features``. The description is each file's
 #: own docstring; membership is by subject, so no further reason is owed.
 NANOWELL_FEATURE_FILES: dict[str, str] = {
+    "test_nanowell_observations_service.py": "the plot tools' nanowell observations, from the Nanowells service",
     "test_nanowell_confluence_reference.py": "confluence against the empty reference well, on a painted scene",
     "test_nanowell_segmenter_reference.py": "the rim-removed count input divided by the empty reference well's template",
     "test_nanowell_masks.py": "the kept cell masks: answered only for the same segmenter input",

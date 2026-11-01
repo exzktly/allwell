@@ -203,6 +203,8 @@ class NanowellState:
     loaded_wells: frozenset = frozenset()
     well_parts: dict = field(default_factory=dict)
     parts_for: object = None
+    #: ``observation_compute.nanowell_observations``'s memo: (folder, wells, baseline, focus, gating) -> ObservationTable.
+    observation_memo: dict = field(default_factory=dict)
     computing: bool = False                 # a load or recompute is running on a worker
     request: int = 0                        # the latest load request; an older result is discarded
     hits: object = None                     # renderer.HitMap of the figure on screen
@@ -274,6 +276,7 @@ class NanowellState:
         self.data, self.metrics, self.load_error, self.loaded_for = None, None, "", None
         self.gate, self.gated_for, self.focus_for = None, None, None
         self.loaded_wells, self.well_parts, self.parts_for = frozenset(), {}, None
+        self.observation_memo = {}
         self.crops, self.montages, self.fetching, self.fetch_bridges = {}, {}, set(), []
         self.region = self.region_for = self.press = self.drawn = None
         self.anchor_mode, self.array_message = False, ""

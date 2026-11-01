@@ -305,6 +305,12 @@ def _svc_nanowell_open_anchor():
     return open_for_anchor
 
 
+def _svc_nanowell_observations():
+    # The plot tools' nanowell observations (review/domain/observation.py); a build without this feature has none.
+    from review.features.nanowell.observation_compute import nanowell_observations
+    return nanowell_observations
+
+
 def _svc_nanowell_follow_qc_params():
     from review.features.nanowell.controller import nw_on_qc_params_changed
     return nw_on_qc_params_changed
@@ -1120,7 +1126,8 @@ def _features() -> list[FeatureDescriptor]:
             # *nanowell.follow_qc_params*: the QC layer's after-apply step, so a Cell Gating change reaches the page
             # while it is on screen (Split View) rather than only when it is next shown.
             services={"nanowell.open_anchor": _svc_nanowell_open_anchor,
-                      "nanowell.follow_qc_params": _svc_nanowell_follow_qc_params},
+                      "nanowell.follow_qc_params": _svc_nanowell_follow_qc_params,
+                      "observations.nanowell": _svc_nanowell_observations},
         ),
         # ── Images ────────────────────────────────────────────────────────
         FeatureDescriptor(

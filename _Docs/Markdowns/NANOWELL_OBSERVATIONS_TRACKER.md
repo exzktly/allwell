@@ -26,7 +26,7 @@ States: `todo`, `doing`, `done` (with the test that fails without the fix), `dec
 | 4 | Segmentation without a label map draws the image, says why, disables Delete / Crop / Edit | todo | |
 | 5 | Segmentation draws a nanowell run's cell points and rims through a Nanowells service | todo | |
 | 6 | Montage reader in `review/data`; Image Table "Source: Montage \| Raw tile"; NUC+SEG only with label maps; scale bar from the acquisition pixel size | todo | |
-| 7 | Observation contract (`review/domain/observation.py`) and `review/data/observations.get_observations` through the `observations.nanowell` service | todo | |
+| 7 | Observation contract (`review/domain/observation.py`) and `review/data/observations` through the `observations.nanowell` service | done | `review/features/nanowell/observation_compute.py` (the page's `site_metrics` with its Baseline, rim-focus rule and Cell Gating tally; memoised on all of them); `tests/test_nanowell_observations_service.py` asserts exact per-nanowell values a cell-row implementation cannot produce. The page's Fixed cohort and Moving average are figure transforms and are not applied to rows (written in the module) |
 | 8 | `FeatureDescriptor.observation_units` and the band's "Observations: Cells \| Nanowells" toggle, derived from the registry | todo | |
 | 9 | Scatter reads observations: nanowell points, any metric per axis, "Points: each observation \| per well", X ≠ Y by default | todo | |
 | 10 | Multivariate reads observations | todo | |

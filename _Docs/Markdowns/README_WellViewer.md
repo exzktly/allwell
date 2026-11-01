@@ -2064,12 +2064,24 @@ and says so in the log rather than doing it quietly.
 Choosing a remote reveals a **Remote options** group, hidden for a local run
 because none of it applies:
 
-- **Batch size (0=off).** `0` uploads the whole plate up front and runs the
-  pipeline once across it — the lowest total runtime. Any positive `N` processes
-  `N` wells at a time, which bounds peak disk on the remote to roughly `N` wells
-  of input plus about one well of output, at the cost of reloading the
-  segmentation model once per batch (a few seconds each). Set it from the
-  remote's free disk, not from its core count. A nanowell run holds a whole
+- **Batch size (0 = one per worker).** Any positive `N` processes `N` wells at
+  a time, which bounds peak disk on the remote to roughly `N` wells of input
+  plus about one well of output, at the cost of reloading the segmentation
+  model once per batch (a few seconds each). `0`, the default, sends one well
+  for each worker the pipeline will start, so the first upload is only as big
+  as the workers need and the run starts after that many wells rather than the
+  whole plate. The workers are counted before the run the way the node counts
+  them: from the **Workers** field when it is set, otherwise from the CPUs and
+  GPUs the host's scheduler command asks for (`--cpus-per-task`, and
+  `--gres=gpu:N` or `--gpus`), with one core kept back, four threads a worker
+  and, for Cellpose, at most two workers a GPU — `--cpus-per-task=32` with four
+  GPUs is 7 wells a batch. The run log says what it chose
+  (`[remote] batch size 0 → 7 well(s) a batch, one per worker (…)`). When the
+  count cannot be known before the run — a host with no scheduler command, a
+  command that names no CPUs, or one that reserves the whole node — `0` uploads
+  the whole plate in one batch, and the log says so and what to set. Each batch
+  ends when its slowest well does, and batches upload one after another, so a
+  larger batch can finish a plate sooner where the remote's disk allows it. A nanowell run holds a whole
   batch's input and output until that batch ends, and then frees them, so for
   nanowells the peak is about `N` wells of input plus `N` wells of output —
   plus every well kept for the end-of-run re-anchoring: a well with a
@@ -2077,7 +2089,8 @@ because none of it applies:
   on the remote until the last batch is done, when every such well is re-run
   at once, in parallel, against the whole plate.
   The batch size a remote run used is saved in its `pipeline_info.json`, so
-  **Load previous run** puts it back. Loading a local run's settings leaves
+  **Load previous run** puts it back — `0` stays `0`, not the size one node
+  resolved it to. Loading a local run's settings leaves
   the field as it is.
 - **Auto-delete remote files when done.** On by default. After a run the app
   verifies succeeded, it deletes both the per-run output directory and the

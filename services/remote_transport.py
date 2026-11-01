@@ -789,6 +789,47 @@ def recover_dead_master(host: "RemoteHost") -> bool:
     return True
 
 
+#: How long a timed-out control command's output is waited for once the child has been killed.
+_AFTER_KILL_S = 2.0
+
+
+def _run_bounded(cmd: list[str], *, check: bool, timeout: float, input: bytes | None = None,
+                 **kw) -> subprocess.CompletedProcess:
+    """``subprocess.run(cmd, capture_output=True, check=check, timeout=timeout, input=input, **kw)``, except that a
+    timeout returns at the timeout on every platform.
+
+    On Windows, ``run`` kills a child that timed out and then calls ``communicate()`` with no timeout to collect its
+    output. That waits for the pipes to close, and a process the child started — ssh's ProxyJump hop, a
+    ProxyCommand — inherits them and keeps them open after the child is gone, so the call never returns. A heartbeat
+    thread went silent that way, for good and without a word, and the granted node it was keeping released itself
+    under a running step (``tests/test_a_control_command_returns_at_its_timeout_on_windows.py``). Here the output is
+    waited for :data:`_AFTER_KILL_S` after the kill and then abandoned: what a timed-out command printed is not worth
+    a thread.
+    """
+    # Not ``with Popen(...)``: its exit closes the pipes, and on Windows closing one blocks on the lock that a reader
+    # thread still stuck in ``read()`` holds. Pipes abandoned after a timeout close when the process holding them ends.
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else None,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kw)
+    try:
+        out, err = proc.communicate(input, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        proc.kill()
+        try:
+            exc.stdout, exc.stderr = proc.communicate(timeout=_AFTER_KILL_S)
+        except subprocess.TimeoutExpired:
+            swallowed("a timed-out control command's pipes were held open after it was killed")
+            proc.wait()                    # the child itself is dead; only the pipes outlive it
+        raise
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        raise
+    code = proc.returncode
+    if check and code:
+        raise subprocess.CalledProcessError(code, cmd, out, err)
+    return subprocess.CompletedProcess(cmd, code, out, err)
+
+
 def ssh_control(host: "RemoteHost", remote: list[str], *, check: bool,
                 timeout_s: float, stdin: bytes | None = None,
                 what: str = "") -> subprocess.CompletedProcess[str]:
@@ -813,8 +854,7 @@ def ssh_control(host: "RemoteHost", remote: list[str], *, check: bool,
     kw: dict = {"input": stdin} if stdin is not None else dict(TEXT_UTF8)
     for attempt in (1, 2):
         try:
-            raw = subprocess.run(cmd, capture_output=True, check=check,
-                                 timeout=timeout_s, **kw)
+            raw = _run_bounded(cmd, check=check, timeout=timeout_s, **kw)
             break
         except subprocess.CalledProcessError as exc:
             raise RemoteCommandError(exc.returncode, exc.cmd, _as_text(exc.stdout),

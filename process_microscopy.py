@@ -490,6 +490,7 @@ from pipeline.empty_well import (  # noqa: E402
     _empty_well_tp_key,
     build_background_models,
     build_flatfield_models,
+    corrections_built,
     plan_blank_groups,
     prepare_models,
     refuse_uncovered_wells,
@@ -2832,11 +2833,10 @@ def main() -> None:
                                     log=log, absent_ok=args.only_wells_absent_ok)
     ran_wells = replaced_wells(nanowell, args, [w for w, _p in well_zips])
 
-    # Precompute per-channel flat-field models once (basic / empty_well). The
-    # gaussian mode needs no precompute (estimated per image in the worker), and
-    # 'none' is a no-op. A nanowell run corrects nothing this way — each well goes to
-    # ``nanowell_task.run_zip_task``, which reads neither model — so it builds neither.
-    if args.flatfield in ("basic", "empty_well") and not nanowell:
+    # Precompute per-channel flat-field models once (basic / empty_well); gaussian is per image, 'none' a no-op, and a
+    # nanowell run builds neither model (``empty_well.corrections_built``).
+    flat_mode, background_mode = corrections_built(args)
+    if flat_mode in ("basic", "empty_well"):
         prepare_models(
             shared_kwargs, what="Flat-field", mode=args.flatfield,
             input_dir=input_dir, groups=blank_groups,
@@ -2845,9 +2845,8 @@ def main() -> None:
             grouped_key=GROUPED_FLATFIELD_KEY, tokens=fluor_tokens_for_quant,
             schema=schema, sep=sep)
 
-    # Precompute per-channel additive background fields once (--background
-    # empty_well). top_hat / sliding_disk estimate per image in the worker.
-    if args.background == "empty_well" and not nanowell:
+    # Per-channel additive background fields, once (--background empty_well); top_hat / sliding_disk are per image.
+    if background_mode == "empty_well":
         prepare_models(
             shared_kwargs, what="Background", mode=args.background,
             input_dir=input_dir, groups=blank_groups,

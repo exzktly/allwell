@@ -704,6 +704,19 @@ def refuse_uncovered_wells(groups: BlankGroups, *well_lists) -> None:
     )
 
 
+def corrections_built(args) -> tuple[str, str]:
+    """``(flat-field mode, background method)`` whose models this run builds and whose blanks it plans.
+
+    The requested pair, except for a nanowell run (``--nanowell_format``), which applies neither: each well goes to
+    ``nanowell_task.run_zip_task``, which measures against its own tiles' floor levels and reads no model, so a
+    correction left set in the Analyze form (where the section is hidden in nanowell mode) builds nothing and refuses
+    nothing. The requested values still reach the settings key unchanged, so an existing dataset's key does not move.
+    """
+    if getattr(args, "nanowell_format", None):
+        return "none", "none"
+    return args.flatfield, args.background
+
+
 def plan_blank_groups(args, input_dir: Path) -> tuple[BlankGroups, Path]:
     """The run's blank pairing, and the directory its blanks are read from.
 
@@ -718,7 +731,7 @@ def plan_blank_groups(args, input_dir: Path) -> tuple[BlankGroups, Path]:
     reference from it.
     """
     groups = BlankGroups(args.background_well, args.background_well_map,
-                         corrections=(args.flatfield, args.background))
+                         corrections=corrections_built(args))
     source = (Path(args.background_dir).expanduser()
               if args.background_dir else input_dir)
     if groups.paired:

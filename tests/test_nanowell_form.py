@@ -452,6 +452,23 @@ def test_image_correction_is_hidden_for_a_nanowell_plate_and_its_blank_well_bloc
     assert not section.isHidden() and tab._background_well_validation_error(check_input=False)
 
 
+def test_a_nanowell_run_builds_and_plans_no_correction_left_set_in_the_hidden_section(tmp_path):
+    """The pipeline's half: a nanowell run given ``--flatfield empty_well`` (left set in the section the form now
+    hides) builds no model and plans no blank, so it neither reads a blank nor refuses a run for a missing one; the
+    same flags on a standard plate still do both."""
+    from pipeline.cli_args import build_parser
+    from pipeline.empty_well import corrections_built, plan_blank_groups
+
+    base = ["--input_dir", str(tmp_path), "--output_dir", str(tmp_path), "--flatfield", "empty_well",
+            "--background", "empty_well", "--background_well", "H12", "--background_well_map", "H12=A01:A06"]
+    nanowell = build_parser().parse_args([*base, "--nanowell_format", "100um"])
+    standard = build_parser().parse_args(base)
+    assert corrections_built(nanowell) == ("none", "none")
+    assert corrections_built(standard) == ("empty_well", "empty_well")
+    assert not plan_blank_groups(nanowell, tmp_path)[0].in_force
+    assert plan_blank_groups(standard, tmp_path)[0].in_force
+
+
 def test_an_uncounted_preview_draws_its_seen_sites_as_not_counted_rather_than_as_holding_cells():
     """Without Cellpose every seen site is "measured" with no count; drawn in the "cells" colour, the whole array
     would read as full. They take their own colour and legend entry; occluded and clipped keep theirs."""

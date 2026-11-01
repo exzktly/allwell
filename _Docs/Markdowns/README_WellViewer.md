@@ -2359,6 +2359,14 @@ folder in use is the app staying connected.
   Pipeline Output header if you would rather watch the dashboard alone; the
   app re-opens it on its own only when a run fails with an explanation you
   would otherwise not see, and hands the toggle back at the next run.
+- **The log is saved with the results.** Everything the log shows for a run,
+  local or remote, is also written to the output folder as
+  `logs/analyze-<date>-<time>.log`, one file per run, and the log's last line
+  names the file. It keeps every line, including ones the on-screen log has
+  scrolled away, so a plate can be checked days later after the window is
+  closed. A nanowell plate writes about 2 KB per well per timepoint (about 2 MB
+  for 96 wells at 10 timepoints). If the output folder cannot be written to,
+  the log says so once and the run carries on.
 - During a remote transfer the **status line** beside the progress bar carries
   the live figure (how much has come across, how long it has taken) and updates
   in place. The log gets the events — each well starting, each one landing, the

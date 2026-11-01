@@ -772,6 +772,8 @@ allwell/
 │   │   │                          (_refresh_output) the scan and a pending input feed
 │   │   ├── job_edit.py         ← the inverse of collect_spec, for the queue's edit flow
 │   │   ├── nanowell_fields.py  ← the Nanowells fields' meaning, bounds and errors, Qt-free
+│   │   ├── run_log.py          ← RunLogFile: every line the log pane is given, also written to
+│   │   │                          <output>/logs/analyze-<stamp>.log, one file per run
 │   │   ├── well_list.py        ← the one parse of a typed well list, and the sentence a
 │   │   │                          --only_wells run announces itself with
 │   │   └── slurm_job.py        ← the run's Slurm job as none / queued / open, folded
@@ -20277,6 +20279,25 @@ remote UTF-8 stream is decoded on a cp1252 Windows client).
   Review's bottom status log, which is Review's own diary. Nothing in the app
   log is fed back into either pane, so the mirror cannot loop. Ordinary INFO
   lines stay in their pane only — a run says tens of thousands of them.
+- **The Analyze pane's whole text is also saved with the run.** The same
+  `_log_lines` entry point hands every batch to `analyze.domain.run_log.RunLogFile`,
+  which appends it verbatim to `<output>/logs/analyze-<YYYYmmdd-HHMMSS>.log` — one
+  file per run (`-2`, `-3` for runs started within one second), every line the
+  pane was given, including the ones its 10,000-line cap later trims from view;
+  transient progress lines the pane never shows are not in it either. The output
+  folder is resolved on the runner's thread, so `PipelineRunner.start` resets
+  `last_output_dir` to `None` (it otherwise named the previous run's folder until
+  this one resolved — the suspend record and the run journal's well states read
+  it too), and `start_run` calls `RunLogFile.begin` before its first note and
+  `runner_started` once `PipelineRunner.start` has returned; only after that is
+  the folder the runner names taken as this run's. Lines before it is known are
+  held (`MAX_HELD`, with the shortfall written if exceeded) and written first; a
+  run that never resolves a folder writes nothing. On the run's `finished` event
+  `AnalyzeTab._close_run_log` writes the file's path into the pane, so it is the
+  file's last line, and closes it. A folder that cannot be written is said once in
+  the pane and the run goes on. Measured on a synthetic nanowell well, about 2 KB
+  per well per timepoint. `tests/test_the_run_log_is_saved.py` drives it through
+  the real `start_run` and the runner's own thread.
 - **What no pane reports reaches it too.** `startup.boot_diag.install_excepthook`
   writes an uncaught exception to `allwell.uncaught` as well as the boot log,
   and installs a `threading.excepthook` that does the same for an exception

@@ -28,7 +28,8 @@ def build_sidebar(win, parent: QWidget) -> None:
       - the selection footer: count, **All**, **None**
       - the group-mode hint
       - the Saved selections drawer
-      - the Heat Map layout configurator (shown on Heat Map only)
+      - frames pages build here (``RailSection.build``): Heat Map's layout
+        configurator, shown while Heat Map is on screen
     """
     from review.domain.plate_layout import PLATE_ROWS as _PLATE_ROWS, PLATE_COLS as _PLATE_COLS
     from review.core.rail_plate import mount_rail_plate
@@ -122,12 +123,17 @@ def build_sidebar(win, parent: QWidget) -> None:
     win._plot_groups_sidebar_section = plot_groups_section
     win._plot_groups_refresh = lambda: refresh_plot_groups_sidebar(win._ctx)
 
-    # Heat-map layout configurator (sidebar variant). Hidden by default;
-    # ``_on_tab_change`` reveals it when the Heat Map tab is active.
-    heatmap_frame = win._ctx.features.query(
-        "heatmap.build_layout_sidebar", win._ctx, parent, default=None)
-    if heatmap_frame is not None:
-        heatmap_frame.setVisible(False)
+    # Frames a page builds inside this one (a ``RailSection`` with ``build``):
+    # Heat Map's layout configurator. Each is registered under its key and
+    # hidden; the tab switch shows it while its page is on screen, with every
+    # other rail frame.
+    for sec in win._ctx.features.rail_sections():
+        if sec.build is None:
+            continue
+        frame = sec.build()(win._ctx, parent)
+        if frame is not None:
+            win._ctx.widgets.register(sec.key, frame)
+            frame.setVisible(False)
 
     # Absorb leftover vertical space so everything above stays pinned to the
     # plate rather than spreading down the rail.

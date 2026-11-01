@@ -574,6 +574,8 @@ def build_ui(win) -> None:
     # deliberately absent: its comparison-group editor is part of the page, so
     # the tab contributes no section and no well picker here.
     for _sec in win._ctx.features.rail_sections():
+        if _sec.build is not None:
+            continue    # built by its page inside the main frame (sidebar_view)
         _frame = win._ctx.widgets.register(_sec.key, QWidget())
         QVBoxLayout(_frame).setContentsMargins(0, 0, 0, 0)
         sidebar_layout.addWidget(_frame, _sec.stretch)

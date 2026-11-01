@@ -167,7 +167,7 @@ col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_sc
 from review.core.selection_controller import sel_by_id, sel_add, sel_set_hidden, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, invalidate_stats_cache
 stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change = _lazy_names("review.features.stats.controller", "stats_active_group", "stats_collect_group_values_shim", "stats_active_channel_entry", "stats_active_val_col", "stats_active_threshold", "stats_active_statistic", "stats_run_shim", "stats_draw_ks_cdf_shim", "on_stats_property_change")
 from review.core import tab_controller as _tabctl
-from review.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, toggle_sidebar, visible_centre_tabs, is_tab_visible, pane_mode
+from review.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, toggle_sidebar, visible_centre_tabs, is_tab_visible, pane_mode
 from review.core.ui_helpers import apply_theme, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
 from review.core.centre_view import drain_pending_centre_builders
 from review.core.plot_toggles import toggle_sem, toggle_fov_replicates, refresh_fov_btn_state
@@ -681,7 +681,6 @@ class ReviewApp(QWidget):
 
     def _is_tab_visible(self, name: str) -> bool: return is_tab_visible(self._ctx, name)
 
-    def _sync_heatmap_well_drag_mode(self, enable: bool) -> None: return sync_heatmap_well_drag_mode(self._ctx, enable)
             # Don't force-disable wells here — the per-tab branch in
             # ``_on_tab_change`` either hides the sidebar (preview / image
             # table tabs) or calls ``_refresh_sidebar_map`` which restores the

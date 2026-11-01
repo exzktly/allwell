@@ -80,6 +80,13 @@ class RailSection:
 
     key: str
     stretch: int = 1
+    #: For a frame the page builds *inside the main frame*, under Saved
+    #: selections, rather than one the shell builds on the rail: a lazy factory
+    #: ``() -> ((ctx, parent) -> QWidget)``. ``core/sidebar_view.build_sidebar``
+    #: calls it, registers the widget under ``key`` and hides it; from then on
+    #: it is hidden and shown with every other rail frame. Heat Map's layout
+    #: configurator is one — it sits under the plate it takes wells from.
+    build: Callable | None = field(default=None, compare=False)
 
 
 #: The rail frame every plate-reading page shares: under the rail plate, it
@@ -119,6 +126,12 @@ class FeatureDescriptor:
     # page's ``on_activate`` runs, so a hook carries only what is particular
     # to its page.
     rail_sections: tuple[RailSection, ...] = ()
+    # While this page is focused the rail plate is a drag source: dragging a
+    # well exports it (``review.core.dnd.WELL_MIME``) instead of selecting, and
+    # a well dropped back on the plate is handed to the page. Focus, not
+    # visibility, because it changes what a plate click does and the plate is
+    # shared with the other pane in Split View.
+    plate_drag_source: bool = False
     parent: str = ""                     # composite container a sub-leaf lives in
                                          # (e.g. "Plotting"); "" for top-level entries
     build: Callable | None = None     # build(ctx, frame) -> None

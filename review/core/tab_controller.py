@@ -163,18 +163,15 @@ def on_tab_change(ctx, _e=None) -> None:
     _visible_tabs = visible_centre_tabs(ctx)
     _also_visible = [t for t in sorted(_visible_tabs) if t and t != tab]
 
-    # Heat-map layout configurator lives inside the standard sidebar but is
-    # only relevant on the Heat Map tab — in either pane.
-    _hm_frame = ctx.widgets.get_or_none("_heatmap_sidebar_frame")
-    if _hm_frame is not None:
-        _hm_frame.setVisible("Heat Map" in _visible_tabs)
-    # The sidebar plate-map doubles as the heat-map drag source on the
-    # Heat Map tab -- flip each WellButton into drag-source mode while
-    # that tab is active. Focused tab only, unlike the frame above: drag mode
-    # changes what a plate *click* does, and the plate is shared, so following
-    # an unfocused Heat Map would rewire the clicks of the pane the user is
-    # actually working in.
-    sync_heatmap_well_drag_mode(ctx, tab == "Heat Map")
+    # The rail plate doubles as a drag source on a page that declares it
+    # (``FeatureDescriptor.plate_drag_source`` — Heat Map's layout configurator
+    # takes its wells by drag). Focused page only, unlike the rail frames below,
+    # which follow visibility: drag mode changes what a plate *click* does, and
+    # the plate is shared, so following an unfocused page would rewire the
+    # clicks of the pane the user is actually working in.
+    _focused_desc = ctx.features.get(tab)
+    sync_rail_plate_drag_mode(
+        ctx, bool(_focused_desc is not None and _focused_desc.plate_drag_source))
 
     # Per-tab activation is dispatched through the feature registry: each
     # descriptor declares its rail frames (``rail_sections``), which
@@ -516,14 +513,14 @@ def is_tab_visible(ctx, name: str) -> bool:
     return name in visible_centre_tabs(ctx)
 
 
-def sync_heatmap_well_drag_mode(ctx, enable: bool) -> None:
-    """Toggle WELL_MIME drag/drop on the sidebar plate widget.
+def sync_rail_plate_drag_mode(ctx, enable: bool) -> None:
+    """Toggle WELL_MIME drag/drop on the rail plate.
 
     When *enable* is True, the plate exports the well under the pointer via
     the WELL_MIME format on left-button drag (clicks stop toggling
-    selection) and accepts dropped tokens as a "return to palette" action
-    that unassigns the well from the active heat-map layout (handled by
-    ``_on_sidebar_plate_well_dropped``). When False, drag/drop is disabled
+    selection) and accepts dropped tokens, which
+    ``selection_controller.on_sidebar_plate_well_dropped`` hands to the page —
+    on Heat Map, a "return to palette" that unassigns the well from the layout. When False, drag/drop is disabled
     and the plate reverts to plain selection behaviour.
     """
     plate = ctx.widgets.get_or_none("_sidebar_plate")
@@ -543,12 +540,13 @@ def _rail_group_caption(ctx, nav, desc) -> str:
     """The group caption to put before *desc*'s rail row, or ``""``.
 
     A caption opens each registry group (``FeatureDescriptor.group``) where the
-    previous row belongs to a different one. Home is the landing page rather
-    than a group of pages, so it is never captioned; a page with no descriptor
-    joins whatever group is open.
+    previous row belongs to a different one. The first group is the landing
+    page's (Home) rather than a group of pages, so it is never captioned; a
+    page with no descriptor joins whatever group is open.
     """
     group = desc.group if desc is not None else ""
-    if not group or group == "Home":
+    groups = ctx.features.groups()
+    if not group or (groups and group == groups[0]):
         return ""
     keys = nav.items()
     prev = ctx.features.get(keys[-1]) if keys else None

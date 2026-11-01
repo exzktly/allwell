@@ -440,14 +440,14 @@ def _activate_heatmap(ctx) -> None:
     # The timepoint menu is a plate scan (remembered per well); filled when the
     # tab is shown rather than on every channel change while it is hidden.
     _refresh_heatmap_timepoints(ctx, redraw=False)     # drawn below
-    if ctx.widgets.has("_heatmap_sidebar_frame"):
-        try:
-            from review.features.heatmap.sidebar_view import (
-                refresh_heatmap_layout_sidebar,
-            )
-            refresh_heatmap_layout_sidebar(ctx)
-        except Exception:
-            _logger.exception("Heatmap sidebar refresh failed")
+    # The configurator's own refresh no-ops until it is built.
+    try:
+        from review.features.heatmap.sidebar_view import (
+            refresh_heatmap_layout_sidebar,
+        )
+        refresh_heatmap_layout_sidebar(ctx)
+    except Exception:
+        _logger.exception("Heatmap sidebar refresh failed")
     redraw_app(ctx)
 
 
@@ -476,6 +476,43 @@ def _activate_default_plot(ctx) -> None:
 # the registry so plot orchestration (redraw_app / tab activation) never imports
 # the feature renderer (terminal-goal cond. 3). Lazy: ``() -> ((ctx) -> None)``.
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ── Image Browser sub-tab builders ──────────────────────────────────────────
+# Each builds its sub-tab body and, where it has one, the rail frame its
+# descriptor declares. ``image_browser/controller.build_image_browser_subtab``
+# calls the leaf's ``build`` as Home's container does, rather than branching on
+# sub-tab names. Imports stay inside each builder so a profile that strips a
+# sub-tab's module never imports it.
+
+def _build_segmentation_subtab(ctx, frame) -> None:
+    # The review-image build is a god-method reached through core's one bridge.
+    from review.core.tab_controller import image_browser_subtab_app_bridge
+    image_browser_subtab_app_bridge(ctx, segmentation_frame=frame)
+
+
+def _build_image_table_subtab(ctx, frame) -> None:
+    from review.features.image_browser.image_table.picker_view import build_image_table_picker
+    from review.features.image_browser.image_table.tab_view import build_image_table_tab
+    build_image_table_tab(ctx, frame)
+    build_image_table_picker(ctx, ctx.widgets.get("_sidebar_image_table_frame"))
+
+
+def _build_cell_browser_subtab(ctx, frame) -> None:
+    from review.features.image_browser.cell_browser.tab_view import (
+        build_cell_browser_sidebar, build_cell_browser_tab,
+    )
+    build_cell_browser_tab(ctx, frame)
+    build_cell_browser_sidebar(ctx, ctx.widgets.get("_sidebar_cell_browser_frame"))
+
+
+def _build_playground_subtab(ctx, frame) -> None:
+    # No layout pre-set here: the builder lays the frame out through
+    # ``widgets.page_body.build_page_body``, which owns the page's top edge (an
+    # inset applied here is what used to push this sub-tab's content 12px below
+    # every other page's).
+    from review.features.image_browser.playground.tab_view import build_playground_tab
+    build_playground_tab(ctx, frame)
+
 
 def _svc_heatmap_build_layout_sidebar():
     from review.features.heatmap.sidebar_view import (
@@ -1251,14 +1288,18 @@ def _features() -> list[FeatureDescriptor]:
         ),
         FeatureDescriptor(
             name="Heat Map", parent="Plotting", build=_build_heatmap,
-            rail_sections=_MAIN,
+            # The layout configurator sits in the main frame under the plate,
+            # which is its drag source while the page is focused.
+            rail_sections=(MAIN_RAIL_SECTION,
+                           RailSection("_heatmap_sidebar_frame",
+                                       build=_svc_heatmap_build_layout_sidebar)),
+            plate_drag_source=True,
             on_activate=_activate_heatmap,
             on_channel_changed=_channel_heatmap,
             redraw=_redraw_heatmap,
             view_state_io=_heatmap_view_state_io,
             states=(StateSpec("heatmap", _state_heatmap),),
             services={
-                "heatmap.build_layout_sidebar": _svc_heatmap_build_layout_sidebar,
                 "heatmap.refresh_layout_sidebar":
                     _svc_heatmap_refresh_layout_sidebar,
                 "heatmap.well_dropped": _svc_heatmap_well_dropped,
@@ -1273,6 +1314,7 @@ def _features() -> list[FeatureDescriptor]:
         # line says. `thin` still lists it, which is now a no-op it can keep or
         # drop freely.
         FeatureDescriptor(name="Segmentation", parent="Image Browser",
+                          build=_build_segmentation_subtab,
                           rail_sections=_PREVIEW,
                           on_activate=_activate_segmentation, removable=False,
                           services={
@@ -1281,16 +1323,19 @@ def _features() -> list[FeatureDescriptor]:
                                   _svc_review_image_update_preview,
                           }),
         FeatureDescriptor(name="Image Table", parent="Image Browser",
+                          build=_build_image_table_subtab,
                           rail_sections=_IMAGE_TABLE,
                           on_activate=_activate_image_table,
                           on_dataset_loaded=_loaded_image_table,
                           view_state_io=_image_table_view_state_io),
         FeatureDescriptor(name="Cell Browser", parent="Image Browser",
+                          build=_build_cell_browser_subtab,
                           rail_sections=_CELL_BROWSER,
                           on_activate=_activate_cell_browser,
                           on_selection_changed=_sel_cell_browser,
                           per_well_selection=True),
         FeatureDescriptor(name="Playground", parent="Image Browser",
+                          build=_build_playground_subtab,
                           rail_sections=_MAIN,
                           on_activate=_activate_playground,
                           on_selection_changed=_sel_playground,

@@ -82,6 +82,7 @@ def test_the_rail_frames_are_the_declared_ones_main_first(features):
     keys = [s.key for s in features.rail_sections()]
     assert keys == [
         "_sidebar_main_frame",
+        "_heatmap_sidebar_frame",
         "_sidebar_preview_frame",
         "_sidebar_image_table_frame",
         "_sidebar_cell_browser_frame",
@@ -130,7 +131,7 @@ def _ctx(features):
     # The reported defect behind the old per-hook copies: Nanowells' hook was a
     # bare ``nw_on_activate`` and the page opened with no plate.
     ("Nanowells", {"_sidebar_main_frame"}, 1),
-    ("Heat Map", {"_sidebar_main_frame"}, 1),
+    ("Heat Map", {"_sidebar_main_frame", "_heatmap_sidebar_frame"}, 1),
     ("Cell Browser", {"_sidebar_main_frame", "_sidebar_cell_browser_frame"}, 1),
     ("Segmentation", {"_sidebar_preview_frame"}, 0),
     ("Image Table", {"_sidebar_image_table_frame"}, 0),
@@ -177,3 +178,61 @@ def test_hooks_leave_the_rail_frames_to_the_tab_switch():
             if isinstance(node, ast.Constant) and node.value in keys:
                 offenders.append((fn.name, node.value))
     assert not offenders, f"hooks still showing rail frames themselves: {offenders}"
+
+
+# ── no page is named in core ────────────────────────────────────────────────
+
+def test_core_rail_code_names_no_page():
+    """The rail's core modules decide by declaration, never by a page's name:
+    ``tab_controller`` used to show Heat Map's configurator with
+    ``"Heat Map" in visible`` and set plate drag mode with
+    ``tab == "Heat Map"``; ``sidebar_view`` built the configurator through a
+    Heat-Map-named service. A name check is a roster of one — a second page with
+    a configurator or a drag source would be silently missed."""
+    import ast as _ast
+
+    pages = {d.name for d in registry.build_feature_registry().all()}
+    # tab_controller also owns restore, history and smoke checks, which name
+    # pages for their own reasons; the rail is these functions of it.
+    rail_fns = {"on_tab_change", "show_rail_sections", "rail_descriptor",
+                "_sidebar_section_frames", "sync_rail_plate_drag_mode",
+                "_rail_group_caption", "sync_section_nav_from_notebook"}
+    scopes = []
+    for rel in ("review/core/tab_controller.py", "review/core/sidebar_view.py",
+                "review/core/app_shell_view.py"):
+        tree = parse_source(REPO / rel)
+        if rel.endswith("tab_controller.py"):
+            fns = [n for n in tree.body if isinstance(n, _ast.FunctionDef) and n.name in rail_fns]
+            assert {f.name for f in fns} == rail_fns, "a rail function was renamed"
+            scopes += [(rel, f) for f in fns]
+        else:
+            scopes.append((rel, tree))
+    offenders = []
+    for rel, scope in scopes:
+        for node in _ast.walk(scope):
+            if isinstance(node, _ast.Constant) and node.value in pages:
+                offenders.append((rel, node.lineno, node.value))
+            if (isinstance(node, _ast.Constant) and isinstance(node.value, str)
+                    and node.value.startswith("heatmap.")):
+                offenders.append((rel, node.lineno, node.value))
+    assert not offenders, f"core rail code names pages: {offenders}"
+
+
+def test_heat_map_declares_its_configurator_and_its_drag_source(features):
+    hm = features.get("Heat Map")
+    assert hm.plate_drag_source is True
+    built = [s for s in hm.rail_sections if s.build is not None]
+    assert [s.key for s in built] == ["_heatmap_sidebar_frame"]
+    others = [d.name for d in features.all() if d.plate_drag_source]
+    assert others == ["Heat Map"]
+
+
+def test_image_browser_sub_tabs_build_from_their_descriptors(features):
+    """``image_browser/controller`` used to branch on the four sub-tab names;
+    it calls each leaf's ``build`` now, so every leaf must declare one."""
+    leaves = features.sub_leaves("Image Browser")
+    assert leaves and all(features.get(n).build is not None for n in leaves), (
+        [n for n in leaves if features.get(n).build is None])
+    src = parse_source(REPO / "review" / "features" / "image_browser" / "controller.py")
+    named = {n.value for n in ast.walk(src) if isinstance(n, ast.Constant)} & set(leaves)
+    assert not named, f"the controller still branches on sub-tab names: {named}"

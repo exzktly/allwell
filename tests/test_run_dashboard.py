@@ -435,7 +435,7 @@ def test_a_download_repaints_the_well_green_not_just_the_dial(qapp):
 
     d.set_well_transfer("A01", "down", 0.45)
     assert pushed, "a transfer must repaint the well, not only fill its dial"
-    assert pushed[-1] == theme.Colors.success
+    assert pushed[-1] == theme.Colors.run_done
     assert d._plate._grid._fractions[(0, 0)] == pytest.approx(0.45)
 
 
@@ -469,11 +469,11 @@ def test_a_finished_zip_freezes_the_ring_instead_of_reverting_to_blue(qapp):
     d.set_well_transfer("A01", "down", 0.97)
     d.set_well_transfer("A01", "down", 1.0)       # the heartbeat closing its window
 
-    assert d._well_color("A01") == theme.Colors.success
+    assert d._well_color("A01") == theme.Colors.run_done
     assert d._well_fraction("A01") == pytest.approx(0.97), "the ring must not fill"
 
     d.set_well_stage("A01", "download")           # CSVs landed: now it is fetched
-    assert d._well_color("A01") == theme.Colors.success
+    assert d._well_color("A01") == theme.Colors.run_done
     assert d._well_fraction("A01") == 1.0
     assert "A01" not in d._xfer, "the frozen ring should be dropped once fetched"
 

@@ -2141,11 +2141,12 @@ reading it. The log names any it kept over budget for that reason.
   running. The log streams the pipeline's stdout/stderr live.
 - The **plate map** above the log colours each well by the stage it has reached.
   The colours are grey (pending), pale lavender (uploaded, remote runs only),
-  amber (processing), blue (processed, or on the server for a remote run),
-  green (complete or downloaded), dark red with a `✕` (failed) and near-white
-  with a `!` (partial or unfinished). They are chosen to stay distinguishable
-  with red/green colour blindness: complete and failed differ in lightness as
-  well as hue, so they never read as the same colour.
+  yellow (processing), blue (processed, or on the server for a remote run),
+  green (complete or downloaded), red with a `✕` (failed) and near-white with a
+  `!` (partial or unfinished). They are chosen to stay distinguishable with
+  red/green colour blindness: the states also differ in lightness, not only in
+  hue — processing is a light yellow and complete a darker green — so no two
+  of them read as the same colour.
 - The **Stages** list beside the plate shows each stage's progress as a bar and
   a count (`12/40`), with the running stage in bold. It has no coloured dots, so
   the only coloured things on the progress view are the wells and their legend.

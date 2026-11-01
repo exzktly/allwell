@@ -1700,8 +1700,9 @@ and registers every centre page. The current page-list:
 | Analysis | **Statistics** | — |
 | Analysis | **Multivariate** | — (higher-dimensional analysis: correlation / PCA·UMAP·t-SNE / clustering / faceting) |
 | Analysis | **Spatial** | — (neighbourhood / colony-level spatial analysis; §5.11) |
+| Analysis | **Nanowells** | — (per-nanowell analysis of nanowell-array plates) |
+| Analysis | **smFISH** | — (spot-count threshold sweep and Apply to All, which writes `smFISH_Thresh` into the CSVs; its frame view exists to validate that cut, which is why it is an analysis page and not under Images) |
 | Images | **Image Browser** | Segmentation / Image Table / Cell Browser / Playground |
-| Images | **smFISH** | — |
 | Data | **Review CSV** | — |
 | Data | **Saved Plots** | — (the plot gallery; decorates every plot card with a "save to gallery" button, and exports the gallery as a PDF report or a PowerPoint deck — each chart as editable shapes, each Image Table grid as one editable group per field of view) |
 | Data | **Batch Export** | — (one figure + CSV per export group, in six modes — Line, Bar, Scatter cells, Scatter aggregate, Response, Nanowells — and optionally into the Saved Plots gallery and a PowerPoint deck as well as into files) |

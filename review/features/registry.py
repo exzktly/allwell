@@ -1132,6 +1132,18 @@ def _features() -> list[FeatureDescriptor]:
                       "observations.nanowell_metrics": _svc_nanowell_metric_specs,
                       "segmentation.nanowell_overlay": _svc_nanowell_segmentation_overlay},
         ),
+        # smFISH is an analysis step, not an image viewer: it sweeps and sets
+        # the spot-count threshold that Apply to All writes into the CSVs
+        # (``smFISH_Thresh``), and its frame view exists to validate that cut.
+        FeatureDescriptor(
+            name="smFISH", group="Analysis", icon="dna", rail_sections=_MAIN,
+            build=_build_smfish, lazy_only=True,
+            on_activate=_activate_smfish,
+            on_selection_changed=_sel_smfish,
+            on_dataset_loaded=_loaded_smfish,
+            single_well_selection=True,
+            states=(StateSpec("smfish", _state_smfish),),
+        ),
         # ── Images ────────────────────────────────────────────────────────
         FeatureDescriptor(
             name="Image Browser", group="Images", icon="layout-grid",
@@ -1156,15 +1168,6 @@ def _features() -> list[FeatureDescriptor]:
                       # sub-tab no profile removes, so the service survives
                       # every build that ships Image Browser at all.
                       "image_browser.show_field": _svc_image_browser_show_field},
-        ),
-        FeatureDescriptor(
-            name="smFISH", group="Images", icon="dna", rail_sections=_MAIN,
-            build=_build_smfish, lazy_only=True,
-            on_activate=_activate_smfish,
-            on_selection_changed=_sel_smfish,
-            on_dataset_loaded=_loaded_smfish,
-            single_well_selection=True,
-            states=(StateSpec("smfish", _state_smfish),),
         ),
         # ── Data ──────────────────────────────────────────────────────────
         FeatureDescriptor(

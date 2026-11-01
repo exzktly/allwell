@@ -58,8 +58,11 @@ def test_each_group_after_home_opens_with_its_caption(qtbot):
     assert nav.items() == pages, "captions must not become items"
     assert _entries(nav) == [
         "Home",
+        # smFISH is an analysis step — it sets the spot-count threshold written
+        # into the CSVs — not an image viewer.
         "# Analysis", "Plotting", "Statistics", "Multivariate", "Spatial", "Nanowells",
-        "# Images", "Image Browser", "smFISH",
+        "smFISH",
+        "# Images", "Image Browser",
         "# Data", "Review CSV", "Saved Plots", "Batch Export",
     ]
 

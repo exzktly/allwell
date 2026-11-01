@@ -12399,9 +12399,11 @@ range set on the page holds for every render until it is changed there. It is on
 opening a *min* / *max* / **Auto** row in a `widgets.popover.Popover`; `refresh_display_range_buttons` runs from
 `_nw_refresh_controls`. Blank or **Auto** clears the entry, a high not above its low is refused, and
 `set_display_range` saves the page's settings (`_save_soon`) and redraws. The three crop renderers take `display_range` and build a
-`renderer.CropScale` with `crop_scale`: without a range one percentile scale (1st–99th) over every crop, as before;
-with one, that range for the crops cut from an owner tile (raw units) while crops cut from the run montage — an
-8-bit picture — keep a percentile scale of their own, which `CropScale.said` puts in the caption. The full-resolution
+`renderer.CropScale` with `crop_scale`: without a range one percentile scale (1st–99th) over the crops; with one,
+that range for the crops cut from an owner tile (raw units). Either way, crops cut from the run montage — an 8-bit
+picture — keep a percentile scale of their own whenever crops of another source sit beside them, which
+`CropScale.said` puts in the caption: on the tiles' scale an 8-bit crop filled the bottom few percent of a 12- or
+16-bit ramp and read as an empty nanowell. The full-resolution
 montage takes it as `TileStore.display`, drawn in place of the well-wide 1st–99.5th percentile stretch, and the
 footer names it; the run montage is drawn as saved, and its footer says the range applies to Full resolution. `ensure_loaded` reads the tables of the wells the page draws
 (`active_wells`) and computes the metrics on `core.worker_bridge.run_off_thread`. The wells read are kept

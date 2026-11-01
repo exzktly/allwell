@@ -730,7 +730,10 @@ class CropScale:
     Without a chosen range the scale is the 1st to 99th percentile of every crop together (:func:`_one_scale`). With
     the page's **Display range** (``chosen``) it is that range, in the raw image's units — which the crops cut from an
     owner tile are in. A crop cut from the run's montage is an 8-bit picture whose numbers mean something else, so
-    under a chosen range those crops keep a percentile scale of their own (``montage``), and :meth:`said` says so."""
+    whenever montage crops sit beside crops of another source — under a chosen range, and under the percentile scale
+    too — those crops keep a percentile scale of their own (``montage``), and :meth:`said` says so. Put on the tiles'
+    percentile scale, an 8-bit crop beside 12- or 16-bit tile crops filled the bottom few percent of the ramp and
+    read as a dark, empty nanowell."""
 
     lo: float
     hi: float
@@ -739,15 +742,16 @@ class CropScale:
 
     def of(self, crop) -> tuple[float, float]:
         """The ``(vmin, vmax)`` *crop* is drawn with."""
-        if self.chosen and self.montage is not None and getattr(crop, "source", "") == "montage":
+        if self.montage is not None and getattr(crop, "source", "") == "montage":
             return self.montage
         return self.lo, self.hi
 
     def said(self, numbers: bool = True) -> str:
         """The scale as a caption names it."""
         if not self.chosen:
-            return f"one brightness scale ({self.lo:.4g} to {self.hi:.4g})" if numbers else "one brightness scale"
-        out = f"the display range {self.lo:.4g} to {self.hi:.4g}"
+            out = f"one brightness scale ({self.lo:.4g} to {self.hi:.4g})" if numbers else "one brightness scale"
+        else:
+            out = f"the display range {self.lo:.4g} to {self.hi:.4g}"
         if self.montage is not None:
             out += (f" (the crops cut from the montage, an 8-bit picture, on a scale of their own: "
                     f"{self.montage[0]:.4g} to {self.montage[1]:.4g})")
@@ -756,12 +760,16 @@ class CropScale:
 
 def crop_scale(crops, display_range=None) -> CropScale:
     """The :class:`CropScale` for *crops* (``image_compute.Crop`` objects; one without an image is skipped):
-    *display_range* ``(low, high)`` when the page has one, else one percentile scale over them all."""
+    *display_range* ``(low, high)`` when the page has one, else one percentile scale over them all — except that
+    crops cut from the 8-bit montage beside crops of another source get a percentile scale of their own."""
     crops = [c for c in crops if c is not None and c.image is not None]
+    montage = [c.image for c in crops if c.source == "montage"]
     if display_range is None:
+        others = [c.image for c in crops if c.source != "montage"]
+        if montage and others:
+            return CropScale(*_one_scale(others), False, _one_scale(montage))
         return CropScale(*_one_scale(c.image for c in crops))
     lo, hi = (float(v) for v in display_range)
-    montage = [c.image for c in crops if c.source == "montage"]
     return CropScale(lo, hi, True, _one_scale(montage) if montage else None)
 
 

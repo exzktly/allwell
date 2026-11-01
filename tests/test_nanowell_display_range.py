@@ -133,8 +133,23 @@ def test_a_montage_crop_keeps_a_scale_of_its_own_under_a_chosen_range():
     lo, hi = np.percentile(montage.image, [1, 99])
     assert scale.of(montage) == pytest.approx((lo, hi))
     assert "the crops cut from the montage, an 8-bit picture, on a scale of their own" in scale.said()
-    auto = crop_scale([tile, montage], None)                           # Auto: one scale over both, as before
-    assert auto.of(tile) == auto.of(montage) and not auto.chosen
+
+
+def test_a_montage_crop_keeps_a_scale_of_its_own_under_auto_too():
+    """Under Auto the tile crops share one percentile scale, but a crop cut from the 8-bit montage beside them must
+    not be put on it: its whole 0-255 range would fill the bottom few percent of a 12- or 16-bit ramp and read as a
+    dark, empty nanowell. It gets the montage's own percentiles, and the caption says so."""
+    tiles = [Crop(np.linspace(500 + 100 * k, 4000, 400).reshape(20, 20), "tile", "") for k in range(3)]
+    montage = Crop(np.linspace(0, 255, 400).reshape(20, 20), "montage", "from the montage")
+    auto = crop_scale([*tiles, montage], None)
+    assert not auto.chosen
+    t_lo, t_hi = np.percentile(np.concatenate([t.image.ravel() for t in tiles]), [1, 99])
+    assert auto.of(tiles[0]) == pytest.approx((t_lo, t_hi))
+    m_lo, m_hi = np.percentile(montage.image, [1, 99])
+    assert auto.of(montage) == pytest.approx((m_lo, m_hi))
+    assert "the crops cut from the montage, an 8-bit picture, on a scale of their own" in auto.said()
+    only_montage = crop_scale([montage], None)                         # nothing to keep apart: one scale
+    assert only_montage.montage is None and only_montage.of(montage) == pytest.approx((m_lo, m_hi))
 
 
 # ── the Extremes montage ─────────────────────────────────────────────────────

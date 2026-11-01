@@ -26,6 +26,7 @@ import numpy as np
 
 from pipeline import nanowell_measure as nm
 from pipeline import nanowell_reference as nref
+from pipeline.nanowell_masks import MaskStore, masks_path
 from pipeline import nanowell_run as nr
 from pipeline.nanowell_parallel import release_cellpose_gpu_cache
 from pipeline.run_report import withdraw_seal
@@ -105,12 +106,13 @@ def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:
 
 def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
                     template_path, staging_dir, settings_key, scratch_dir, expected_shape, stored_placements=None,
-                    manual_anchors=MappingProxyType({}), release=None, confluence_reference=None):
+                    manual_anchors=MappingProxyType({}), release=None, confluence_reference=None, mask_store=None):
     """``run_well`` over *todo* on what an earlier run kept (*prior*, or ``None``): ``(outcome, fixed radius,
     fixed roster, kept template)``. *expected_shape* is a described grid's shape: a well short of a whole row or
     column is incomplete, which a record's positions alone could not show. *confluence_reference* is what the well's
     confluence is read against (:func:`_confluence_reference_for` when not given): the one its kept timepoints were
-    checked against, so the timepoints it measures are read against the same."""
+    checked against, so the timepoints it measures are read against the same. *mask_store* is the well's kept cell
+    masks (``pipeline.nanowell_masks``)."""
     if confluence_reference is None:
         confluence_reference = _confluence_reference_for(well_label, settings, template_path)
     fixed, fixed_roster = _prior_array(prior)
@@ -126,7 +128,7 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
                           manual_anchors=manual_anchors, progress=lambda done, total: _log_steps(well_label, done, total),
                           site_progress=lambda tp, done, total: _log_sites(well_label, tp, done, total),
                           note=lambda text: log.info("Well %s — %s", well_label, text), release=release,
-                          confluence_reference=confluence_reference)
+                          confluence_reference=confluence_reference, mask_store=mask_store)
     return outcome, fixed, fixed_roster, saved
 
 
@@ -734,6 +736,17 @@ def _well_manual_anchors(input_dir: Path, well_label: str) -> tuple[dict, str]:
     return found, digest
 
 
+def _save_masks(well_label: str, masks: MaskStore) -> None:
+    """Keep the well's masks — after a failure too, since each is keyed on its own input and is as good as the run
+    that made it — and say in the log how many of this run's segmenter calls they answered."""
+    log.info("Well %s — %s.", well_label, masks.summary())
+    try:
+        masks.save()
+    except OSError as exc:
+        log.warning("Well %s — its cell masks could not be kept in %s (%s: %s); a re-run segments them again.",
+                    well_label, masks.target, type(exc).__name__, exc)
+
+
 def _stamp_anchors(outcome, todo, digest: str) -> None:
     """Record on each timepoint this run located the plate's anchors as they were (``_prior_state`` keeps a
     ``plate_rigid`` timepoint only under the same digest)."""
@@ -800,7 +813,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         return _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
                                Path(prior_dir or output_dir) / NANOWELL_DIR / template_path.name, staging_dir,
                                settings_key, scratch_dir, tuple(pattern["grid"]) if described else None, placements,
-                               manual, tiles.release, reference)
+                               manual, tiles.release, reference, masks)
 
     def load_phase(tp, tile) -> np.ndarray | None:
         found = index.get((tp, tile))
@@ -822,6 +835,10 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     wanted = set(todo)
     tiles = WellTiles(zip_path, well_label, [name for (tp, _fov), (nuclear, fluors) in index.items() if tp in wanted
                                              for name in (nuclear, *fluors)])
+    # The masks the segmenter made of these pixels before, under any settings and anchors: keyed on its input, so a
+    # well re-run after a click segments only what the click changed (``pipeline.nanowell_masks``).
+    masks = MaskStore(masks_path(Path(prior_dir or output_dir) / NANOWELL_DIR, well_label),
+                      masks_path(output_dir / NANOWELL_DIR, well_label))
     try:
         return _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, record, timepoints,
                             digest, prior, todo, run, staging_dir, write_csv, template_path,
@@ -829,6 +846,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     finally:
         log.info("Well %s — %s.", well_label, tiles.summary())
         tiles.close()
+        _save_masks(well_label, masks)
 
 
 def _save_confluence_reference(output_dir, well_label, settings, outcome, sites, timepoints) -> None:

@@ -20,6 +20,8 @@ from pathlib import Path
 
 import numpy as np
 
+from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
+
 
 @dataclass
 class NanowellOverlay:
@@ -50,7 +52,6 @@ def _same_timepoint(label, tp) -> bool:
 def nanowell_overlay(ctx, well: str, fov: str, tp) -> NanowellOverlay | None:
     """The overlay of *well*'s tile *fov* at timepoint *tp*, or ``None`` when the dataset has no nanowell tables."""
     from review.data.data_loading import get_rows
-    from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 
     st = ctx.state.feature_slice("nanowell")
     data_dir = getattr(ctx.state.dataset, "data_dir", None)

@@ -55,6 +55,7 @@ from review.core.plot_style import apply_export_style_to_current
 from review.core.plot_style import apply_time_rescale
 from review.domain.time_rescale import axis_label as time_axis_label
 from review.domain.time_rescale import rescale_for as time_rescale_for
+from review.features.lineplot import _observations as _nw_lines
 
 
 #: Written onto an otherwise-empty figure so an *exported* copy states its
@@ -1091,7 +1092,6 @@ def redraw_line_plots(
         canvas.draw_idle()
         return
 
-    from review.features.lineplot import _observations as _nw_lines
     if _nw_lines.draw(ctx, ax_mean, ax_frac, ax_n, ax_cdf, legend_kw):
         apply_export_style_to_current(ctx, fig, canvas)
         canvas.draw_idle()

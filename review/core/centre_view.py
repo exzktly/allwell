@@ -474,8 +474,7 @@ def build_centre(win, parent: QWidget) -> None:
             on_tab_change(win._ctx, None)
             _refresh_channel_chip(sub_title)
             from review.core.observation_band import refresh as _refresh_observations
-            with swallow("show the Observations toggle for this plot"):
-                _refresh_observations(win._ctx, sub_title)
+            _refresh_observations(win._ctx, sub_title)
             # Properties rail retired — its scope picker followed the
             # active sub-tab. Per-plot styling now happens through the
             # floating Export Style sidebar.

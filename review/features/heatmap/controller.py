@@ -64,6 +64,7 @@ from review.domain.heatmap_metrics import (  # noqa: F401
     METRIC_OPTIONS,
     METRIC_RATIO,
 )
+from review.features.heatmap._observations import nanowell_grid
 
 # Selection-rectangle outline. Deliberately its own colour, not
 # ``theme.Colors.danger`` — ``danger`` already marks the drag-reorder
@@ -677,28 +678,9 @@ def _draw_heatmap(ctx) -> None:
     ratios = ctx.state.channel.ratio_index
     cmap_name = _selected_cmap(ctx)
 
-    arr = np.full((layout.rows, layout.cols), np.nan, dtype=float)
-    err = np.full((layout.rows, layout.cols), np.nan, dtype=float)
-    cell_well_index: dict[tuple[int, int], list[str]] = {}
-
-    from review.features.heatmap._observations import nanowell_grid
     nw = nanowell_grid(ctx, layout, tp, lambda ws: _expand_repset_wells(ctx, ws))
-    for (r, c), wells in layout.cells.items():
-        if not (0 <= r < layout.rows and 0 <= c < layout.cols):
-            continue
-        cell_well_index[(r, c)] = list(wells)
-        if nw is not None:
-            continue                       # under Observations: Nanowells the values are the wells' medians
-        try:
-            arr[r, c], err[r, c] = _cell_stat(
-                ctx, wells, tp, metric, val_col,
-                threshold, fluor_gates,
-            )
-        except Exception:
-            arr[r, c] = float("nan")
-            err[r, c] = float("nan")
-    if nw is not None:
-        arr, err, metric = nw.arr, nw.err, nw.label
+    arr, err, cell_well_index = _grid_values(ctx, layout, tp, metric, val_col, threshold, fluor_gates, nw)
+    metric = _grid_metric_label(metric, nw)
 
     # Cache for click/hover handlers (stamped onto ``app._heatmap_*`` by the
     # runtime namespace so the app-native mouse handlers keep resolving).
@@ -715,10 +697,7 @@ def _draw_heatmap(ctx) -> None:
     # Pool min/max across every timepoint so the colormap stays consistent
     # while the user scrubs the timepoint slider. Cached so this only
     # recomputes when an input changes.
-    g_vmin, g_vmax = (nw.vmin, nw.vmax) if nw is not None else _compute_global_range(
-        ctx, layout, metric, val_col,
-        threshold, fluor_gates, ratios,
-    )
+    g_vmin, g_vmax = _grid_range(ctx, layout, metric, val_col, threshold, fluor_gates, ratios, nw)
     ctx.runtime.heatmap.global_vmin = g_vmin
     ctx.runtime.heatmap.global_vmax = g_vmax
 
@@ -935,7 +914,7 @@ def _draw_heatmap(ctx) -> None:
             # would otherwise reset the log ticks it just installed. ``cla()``
             # drops the attribute, so re-stamp it on every redraw.
             setattr(cax, "_aw_colorbar", True)
-            ctx.runtime.heatmap.colorbar.set_label(metric if nw is not None else _metric_axis_label(metric, ctx),
+            ctx.runtime.heatmap.colorbar.set_label(_colorbar_label(metric, ctx, nw),
                                                    fontsize=8, color=_muted_fg)
             cax.tick_params(colors=_muted_fg, labelsize=7)
             for _spi in cax.spines.values():
@@ -951,7 +930,7 @@ def _draw_heatmap(ctx) -> None:
         try:
             ctx.runtime.heatmap.colorbar = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.03)
             setattr(ctx.runtime.heatmap.colorbar.ax, "_aw_colorbar", True)
-            ctx.runtime.heatmap.colorbar.set_label(metric if nw is not None else _metric_axis_label(metric, ctx),
+            ctx.runtime.heatmap.colorbar.set_label(_colorbar_label(metric, ctx, nw),
                                                    fontsize=8, color=_muted_fg)
             ctx.runtime.heatmap.colorbar.ax.tick_params(colors=_muted_fg, labelsize=7)
             for _spi in ctx.runtime.heatmap.colorbar.ax.spines.values():
@@ -972,14 +951,10 @@ def _draw_heatmap(ctx) -> None:
         rescale_for as _rescale_for,
     )
     title = (
-        f"{active_channel_label(ctx)}"
+        f"{_grid_subject(ctx, nw)}"
         f" — {metric} — {_tp_label(tp, _rescale_for(ctx.state.plot))}"
-    ) if nw is None else f"Nanowells — {metric} — {_tp_label(tp, _rescale_for(ctx.state.plot))}"
-    from review.core.observation_band import FOOTER_GID
-    for _t in [t for t in fig.texts if t.get_gid() == FOOTER_GID]:
-        _t.remove()
-    if nw is not None:
-        fig.text(0.01, 0.002, nw.footer, ha="left", va="bottom", fontsize=7, color=_muted_fg, gid=FOOTER_GID)
+    )
+    _stamp_grid_footer(fig, nw, _muted_fg)
     if show_error and np.isfinite(err).any():
         # Which spread the ``±`` under each value is, in the same two words
         # every other error-bearing figure in the app uses. A grid whose cells
@@ -1013,6 +988,60 @@ def _draw_heatmap(ctx) -> None:
         refresh_empty_state_pages(ctx.window)
     except Exception:
         swallowed()
+
+
+def _grid_values(ctx, layout, tp, metric, val_col, threshold, fluor_gates, nw):
+    """``(values, spreads, cell -> wells)`` of the grid: the nanowell grid's under Observations: Nanowells (*nw*),
+    else each cell's :func:`_cell_stat`."""
+    arr = np.full((layout.rows, layout.cols), np.nan, dtype=float)
+    err = np.full((layout.rows, layout.cols), np.nan, dtype=float)
+    cell_well_index: dict[tuple[int, int], list[str]] = {}
+    for (r, c), wells in layout.cells.items():
+        if not (0 <= r < layout.rows and 0 <= c < layout.cols):
+            continue
+        cell_well_index[(r, c)] = list(wells)
+        if nw is not None:
+            continue                       # the values are the wells' nanowell medians, below
+        try:
+            arr[r, c], err[r, c] = _cell_stat(
+                ctx, wells, tp, metric, val_col,
+                threshold, fluor_gates,
+            )
+        except Exception:
+            arr[r, c] = float("nan")
+            err[r, c] = float("nan")
+    if nw is not None:
+        arr, err = nw.arr, nw.err
+    return arr, err, cell_well_index
+
+
+def _grid_metric_label(metric: str, nw) -> str:
+    return metric if nw is None else nw.label
+
+
+def _grid_range(ctx, layout, metric, val_col, threshold, fluor_gates, ratios, nw):
+    """The colour scale's pooled range: the nanowell grid's own over every timepoint, else the cell sweep."""
+    if nw is not None:
+        return nw.vmin, nw.vmax
+    return _compute_global_range(ctx, layout, metric, val_col, threshold, fluor_gates, ratios)
+
+
+def _colorbar_label(metric: str, ctx, nw) -> str:
+    return metric if nw is not None else _metric_axis_label(metric, ctx)
+
+
+def _grid_subject(ctx, nw) -> str:
+    return "Nanowells" if nw is not None else active_channel_label(ctx)
+
+
+def _stamp_grid_footer(fig, nw, muted) -> None:
+    """Replace the grid's observations footer: the nanowell grid's, or none for cells."""
+    from review.core.observation_band import FOOTER_GID
+
+    for text in [t for t in fig.texts if t.get_gid() == FOOTER_GID]:
+        text.remove()
+    if nw is not None:
+        fig.text(0.01, 0.002, nw.footer, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID)
 
 
 def _format_cell_value(v: float, metric: str, fmt: str = "") -> str:

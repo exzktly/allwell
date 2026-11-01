@@ -12,6 +12,8 @@ imports that feature (``review/data/observations``).
 from __future__ import annotations
 
 from review.domain.observation import NANOWELLS
+from review.features.scatter.collect import scatter_groups
+from review.features.scatter.observation_compute import default_axes, nanowell_scatter
 
 #: The leaf this module serves (its registry name).
 LEAF = "Scatter Plot"
@@ -71,8 +73,6 @@ def sync_controls(ctx) -> str:
 
 def _populate(ctx, page: str, table) -> tuple[str, str]:
     """Fill the page's pickers from *table*'s metrics, keeping a choice still offered; returns ``(x key, y key)``."""
-    from review.features.scatter.observation_compute import default_axes
-
     keys = [m.key for m in table.metrics]
     labels = [m.label for m in table.metrics]
     defaults = default_axes(table)
@@ -112,8 +112,6 @@ def redraw(ctx, page: str) -> None:
     """Draw the nanowell scatter on *page* (``"cells"``: one point per nanowell; ``"aggregate"``: per well)."""
     from review.core.plot_style import apply_export_style_to_current, tokens_for
     from review.data.observations import nanowell_observations
-    from review.features.scatter.collect import scatter_groups
-    from review.features.scatter.observation_compute import nanowell_scatter
 
     ax_name, fig_name, canvas_name = _FIGURE[page]
     ax, fig, canvas = (ctx.widgets.get_or_none(n) for n in (ax_name, fig_name, canvas_name))

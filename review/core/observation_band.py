@@ -105,7 +105,16 @@ def set_observations(ctx, observations: str) -> None:
 
 
 def refresh(ctx, title: str) -> None:
-    """Show the toggle, its static text, or neither, for the Plotting leaf *title*; mirror the recorded choice."""
+    """Show the toggle, its static text, or neither, for the Plotting leaf *title*; mirror the recorded choice.
+
+    Never raises: the band is chrome, and a failure here must not stop a tab switch or a load (it is logged)."""
+    from core.safe import swallow
+
+    with swallow("show the Observations toggle for this plot"):
+        _refresh(ctx, title)
+
+
+def _refresh(ctx, title: str) -> None:
     mode = band_mode(ctx, title)
     group = ctx.widgets.get_or_none("_plotting_observations_grp")
     static = ctx.widgets.get_or_none("_plotting_observations_static")

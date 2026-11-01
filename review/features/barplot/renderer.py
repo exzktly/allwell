@@ -71,6 +71,7 @@ from review.features.barplot.collect import (
     cluster_x_for_group_keys,
     clustered_x_positions as _clustered_x_positions,
 )
+from review.features.barplot import _observations as _nw_bars
 
 
 def _annotate_group_key_headers(axes, xs, group_keys) -> int:
@@ -1229,7 +1230,6 @@ def redraw_bars(ctx) -> None:
     tp_strs = [_rescale_tp(t, _tp_rescale) for t in target_ts]
     tp_str_combined = ", ".join(tp_strs)
 
-    from review.features.barplot import _observations as _nw_bars
     if _nw_bars.draw(ctx, ax_mean, ax_frac, ax_n, target_ts, f"t = {tp_str_combined} h"):
         apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
         return

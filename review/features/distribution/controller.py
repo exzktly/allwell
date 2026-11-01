@@ -23,6 +23,7 @@ from review.core.plot_style import (
 from review.core.channel_state_controller import (
     active_channel_label, get_all_fluor_gates, on_cutoff_for_column,
 )
+from review.features.distribution import _observations as _nw_dist
 
 
 # Reached when the selection *is* non-empty and still produced no values — a
@@ -374,7 +375,6 @@ def redraw_distribution(ctx) -> None:
     layout_choice = layout_cb.currentText() if layout_cb is not None else "Overlay"
 
     tp_filter = tp_h if math.isfinite(tp_h) else None
-    from review.features.distribution import _observations as _nw_dist
     nanowell = _nw_dist.nanowell_groups(ctx, tp_filter)
     if nanowell is not None:
         nw_groups, nw_label, nw_footer = nanowell

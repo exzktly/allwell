@@ -23,6 +23,10 @@ from pathlib import Path
 import pandas as pd
 
 from review.domain.observation import NANOWELLS, ObservationMetric, ObservationTable
+from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
+from review.features.nanowell.controller import gate_tally, gate_version
+from review.features.nanowell.distribution_compute import METRICS
+from review.features.nanowell.series_compute import exclusion_reason, metric_kinds, site_metrics
 
 log = logging.getLogger("review")
 
@@ -31,9 +35,6 @@ _MEMO_MAX = 8
 
 
 def _metric_specs(channels) -> tuple[ObservationMetric, ...]:
-    from review.features.nanowell.distribution_compute import METRICS
-    from review.features.nanowell.series_compute import metric_kinds
-
     kinds = metric_kinds(channels)
     specs = []
     for key, (label, needs_channel) in METRICS.items():
@@ -65,10 +66,6 @@ def _frame(metrics: pd.DataFrame) -> pd.DataFrame:
 def nanowell_observations(ctx, wells) -> ObservationTable | None:
     """The nanowell rows of *wells* (an iterable of well labels), or ``None`` when the dataset holds no nanowell
     tables. Reads on the calling thread; a well already read by the page or an earlier call is not read again."""
-    from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
-    from review.features.nanowell.controller import gate_tally, gate_version
-    from review.features.nanowell.series_compute import exclusion_reason, site_metrics
-
     st = ctx.state.feature_slice("nanowell")
     data_dir = getattr(ctx.state.dataset, "data_dir", None)
     if st is None or not data_dir:

@@ -25,6 +25,7 @@ from review.features.scatter.callbacks import on_scatter_motion
 from review.features.scatter.gating import (
     on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
 )
+from review.features.scatter._observations import build_axis_controls
 
 
 def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
@@ -77,7 +78,6 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctrl.add_scope("property", metric_y_cb)
     reg.register("_scatter_metric_y_var", metric_y_cb)
     # Under Observations: Nanowells these four give way to an X / Y nanowell-metric pair.
-    from review.features.scatter._observations import build_axis_controls
     build_axis_controls(ctx, ctrl, "cells")
 
     # Self-describing — the button's own text carries the "Timepoints: …

@@ -21,12 +21,38 @@ class NotificationService:
 
     def __init__(self, ctx) -> None:
         self._ctx = ctx
+        #: The centre tab (leaf) that wrote the line now showing, ``None`` when nothing does.
+        self.status_owner: str | None = None
 
     def set_status(self, message: str) -> None:
-        """Show *message* in the main-window status bar (no-op if unavailable)."""
+        """Show *message* in the main-window status bar (no-op if unavailable), owned by the tab on screen.
+
+        A status line describes the tab that wrote it — "Image Table: generated 8 of 12 cells", "36 of 36 nuclei
+        included" — and read on another tab it describes something not on screen. The owner is recorded so a tab
+        change can clear a line that is not the new tab's (:meth:`clear_unless_owned_by`)."""
         fn = getattr(self._ctx.window, "_set_status", None)
         if callable(fn):
             fn(message)
+            self.status_owner = self._current_tab() if message else None
+
+    def clear_unless_owned_by(self, tab: str) -> bool:
+        """Clear the status line when another tab wrote it; returns whether it was cleared."""
+        if self.status_owner is None or self.status_owner == tab:
+            return False
+        fn = getattr(self._ctx.window, "_set_status", None)
+        if callable(fn):
+            fn("")
+        self.status_owner = None
+        return True
+
+    def _current_tab(self) -> str | None:
+        try:
+            from review.core.tab_controller import current_centre_tab
+
+            return current_centre_tab(self._ctx) or None
+        except (AttributeError, RuntimeError):
+            # No notebook yet (a message during construction or a load): owned by nobody, cleared by nothing.
+            return None
 
     def toast(self, message: str, *, kind: str = "info", msec: int = 3500) -> None:
         """Show a transient notification toast (no-op if unavailable).

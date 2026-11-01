@@ -19,6 +19,7 @@ from review.features.scatter.controller import update_tp_selection_display
 from review.features.export.service import (
     export_cell_data_from, export_scatter_agg_data)
 from review.features.scatter.cell_scope_compute import agg_cell_scope
+from review.features.scatter._observations import build_axis_controls
 
 
 def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
@@ -75,7 +76,6 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     agg_metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx))
     ctrl.add_scope("property", agg_metric_y_cb)
     # Under Observations: Nanowells these four give way to an X / Y nanowell-metric pair (well medians).
-    from review.features.scatter._observations import build_axis_controls
     build_axis_controls(ctx, ctrl, "aggregate")
 
     # Legacy stat combos — hidden, kept in sync for back-compat. Export

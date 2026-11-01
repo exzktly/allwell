@@ -53,6 +53,8 @@ from review.features.scatter._pooled import SCATTER_MAX_POINTS
 from review.features.scatter._layout import (
     _render_scatter_faceted, _scatter_col_label, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix,
 )
+from review.domain.observation import NANOWELLS
+from review.features.scatter import _observations
 
 
 #: Written onto an otherwise-empty figure so an *exported* copy states its
@@ -403,8 +405,6 @@ def redraw_scatter_orchestrate(ctx) -> None:
     timepoints available -> "No timepoints available." placeholder;
     none selected -> "Please select timepoints to plot."
     """
-    from review.domain.observation import NANOWELLS
-    from review.features.scatter import _observations
     if _observations.sync_controls(ctx) == NANOWELLS:
         _observations.redraw(ctx, "cells")
         return
@@ -499,8 +499,6 @@ def redraw_scatter_agg_orchestrate(ctx) -> None:
     stat_x_var = ctx.widgets.get_or_none("_scatter_agg_stat_x_var")
     if stat_x_var is None:
         return
-    from review.domain.observation import NANOWELLS
-    from review.features.scatter import _observations
     if _observations.sync_controls(ctx) == NANOWELLS:
         _observations.redraw(ctx, "aggregate")
         return

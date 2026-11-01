@@ -342,8 +342,17 @@ def test_the_spin_box_sets_the_window_and_the_figure_says_so(page, qtbot):  # no
     page.state.selection.selected_wells = {"A01"}
     nwc.nw_on_selection_changed(page)
     spin = page.widgets.get("_nw_moving_spin")
-    assert spin.text() == "Off" and st.moving == 0
-    spin.setValue(2)
+    # The box holds the bare number (1 is off; its band label says so): an "Off" or a unit inside the box would
+    # refuse the keystrokes below, which is how the typed value used to be ignored.
+    assert spin.text() == "1" and st.moving == 0
+    from PySide6.QtCore import Qt
+
+    edit = spin.lineEdit()
+    edit.setFocus()
+    edit.setCursorPosition(len(edit.text()))
+    qtbot.keyClick(edit, Qt.Key_Backspace)
+    qtbot.keyClicks(edit, "2")
+    qtbot.keyClick(edit, Qt.Key_Return)
     assert st.moving == 2
     assert any(t.startswith("Moving average over 2 timepoints:") for t in _texts(page))
     assert isinstance(st.model, type(_a01(st)[0]))
@@ -402,7 +411,7 @@ def test_the_baseline_s_window_control_is_greyed_until_it_can_reach_the_figure(p
     page.state.selection.selected_wells = {"A01"}
     nwc.nw_on_selection_changed(page)
     spin = page.widgets.get("_nw_baseline_moving_spin")
-    assert spin.text() == "Off" and st.baseline_moving == 0
+    assert spin.text() == "1" and st.baseline_moving == 0
     assert spin.isVisibleTo(spin.window()) and not spin.isEnabled()
     assert "Turn on the Moving average first" in spin.toolTip()
     nwc.set_metric(page, "count_fc")

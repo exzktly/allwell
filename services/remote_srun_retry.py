@@ -62,7 +62,7 @@ retried: the app saw the stream end and reported the allocation lost.
    granted, than the cluster's ``ResumeTimeout`` allows, and a run that gave up
    after a fixed number of tries failed on exactly those clusters. The one bound
    is the host's **Max queue wait** (below), which a user who wants no bound
-   sets to *Wait indefinitely*. Each retry waits :data:`BOOT_RETRY_PAUSE_S`
+   sets to 0 (no limit). Each retry waits :data:`BOOT_RETRY_PAUSE_S`
    first, so a node that fails at once does not turn the loop into a stream of
    requests to the controller, and prints a line saying which node failed and
    every node that has failed so far (the list for the cluster's admins), then a
@@ -634,7 +634,7 @@ def _queue_deadline_passed(queue_wait_s: int) -> str:
         'rm -f "$_aw_err" "$_aw_rcf" "$_aw_pend" "$_aw_qto"; '
         f'echo "[remote] scheduler: ERROR no node was granted within {_max_wait_words(queue_wait_s)}, this host\'s '
         'Max queue wait${_aw_failed:+ (failed to boot: $_aw_failed)} — stopped. Raise Max queue wait for this host '
-        'in Remotes (Wait indefinitely never gives up), or start the run again when the cluster is less busy"; '
+        'in Remotes (0 never gives up), or start the run again when the cluster is less busy"; '
         f'exit {QUEUE_WAIT_EXIT}; fi; '
     )
 
@@ -650,6 +650,6 @@ def _queue_deadline_reached(queue_wait_s: int) -> str:
         'rm -f "$_aw_err" "$_aw_rcf" "$_aw_pend" "$_aw_qto"; '
         f'echo "[remote] scheduler: ERROR no node was granted within {wait}, this host\'s Max queue wait — '
         'cancelled job ${_aw_qj:-?} and stopped. Raise Max queue wait for this host in Remotes '
-        '(Wait indefinitely never gives up), or start the run again when the cluster is less busy"; '
+        '(0 never gives up), or start the run again when the cluster is less busy"; '
         f'exit {QUEUE_WAIT_EXIT}; fi; '
     )

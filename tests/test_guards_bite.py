@@ -5660,3 +5660,35 @@ def test_seam_guard_clears_the_seam_and_the_definition(tmp_path, monkeypatch):
                   "class Runner:\n    def go(self):\n        return self.launcher()\n\n\n"
                   "class Host:\n    @property\n    def launch_command(self):\n        return self.compute_launcher\n")
     assert _run_scan(monkeypatch, _LAUNCHER_SEAM_GUARD, _LAUNCHER_SEAM_TEST, [good]) is None
+
+
+# ── text inside an entry field ──────────────────────────────────────────────
+
+ENTRY_TEXT_VIOLATIONS = {
+    # The two that shipped: the rim focus boxes on the Nanowells band and in Cell Gating.
+    "suffix": 'def build(spin):\n    spin.setSuffix(" % of sharp")\n',
+    # Batch Export's moving-average boxes carried a prefix and an "off" word as well.
+    "prefix": 'def build(spin):\n    spin.setPrefix("Moving average: ")\n',
+    "special_value": 'def build(spin):\n    spin.setSpecialValueText("Off")\n',
+    # An affix held in a name rather than a literal is the same act.
+    "named_suffix": 'UNIT = " GB"\ndef build(spin):\n    spin.setSuffix(UNIT)\n',
+    "stepper_keyword": 'def build(p):\n    return Stepper(p, value=1.0, suffix=" px")\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(ENTRY_TEXT_VIOLATIONS))
+def test_entry_text_guard_catches_text_inside_a_field(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_entry.py", ENTRY_TEXT_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_entry_fields_hold_only_the_value",
+                    "test_no_entry_field_carries_a_unit_or_placeholder_word", [bad])
+    assert exc is not None, f"the {shape} entry-text violation went uncaught"
+    assert "bad_entry.py" in str(exc)
+
+
+def test_entry_text_guard_clears_a_bare_field_and_a_cleared_affix(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_entry.py",
+                  'def build(form, spin, stepper):\n'
+                  '    form.addRow("Cache budget (GB)", spin)\n'
+                  '    stepper.setSuffix("")\n')
+    assert _run_scan(monkeypatch, "tests.test_entry_fields_hold_only_the_value",
+                     "test_no_entry_field_carries_a_unit_or_placeholder_word", [good]) is None

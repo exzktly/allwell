@@ -12121,7 +12121,13 @@ the Cell Gating panel's *Exclude out-of-focus nanowells*, never a setting of its
 refuses a fraction outside `nanowell_rim_focus.MIN_FRACTION`–`MAX_FRACTION` by name, and otherwise changes the QC
 parameters through the registry's `qc.set_params_with_progress` service — the one route a QC edit takes, so every
 verdict layer is re-projected, the panel repainted (`qc.refresh_gate_widgets`) and the page recomputed (see
-*Joining* above for what the rule does).
+*Joining* above for what the rule does). The other direction runs through the page's own
+`nanowell.follow_qc_params` service (`controller.nw_on_qc_params_changed`), which
+`qc.controller._after_qc_params_applied` calls at the end of every QC apply, whichever control made it: a page on
+screen — beside Cell Gating in Split View — redraws, so `redraw`'s staleness check fetches metrics for the rule and
+gate now in force and the band's box is refilled; a hidden page only refills its controls, and computes when it is
+shown (`nw_on_activate`). `redraw_app`, the rest of that after-apply step, reaches Line, Distribution and Heat Map
+only, so without the service the page beside Cell Gating went on drawing under the previous rule.
 
 **The Array view** is one well at one timepoint, every element of it a layer that is on or off, drawn by one
 renderer whatever is on, so a nanowell reads the same — and is clickable, pannable and zoomable — under every

@@ -1829,6 +1829,26 @@ def nw_on_selection_changed(ctx) -> None:
         redraw(ctx)
 
 
+def nw_on_qc_params_changed(ctx) -> None:
+    """Follow a change to the QC parameters made anywhere — Cell Gating's panel or this page's own band — once the
+    QC layer has re-projected every verdict (``qc.controller._after_qc_params_applied`` calls it as the
+    ``nanowell.follow_qc_params`` service).
+
+    The QC parameters carry two things this page draws from: the nanowell focus rule and, through Cell Gating, which
+    cells count. While the page is on screen — beside Cell Gating in Split View is the case that needs it — the
+    redraw sees that its metrics were computed for another rule or gate and fetches the right ones
+    (:func:`redraw`'s staleness check), and the band's *Rim focus* box is refilled from the parameters. A hidden
+    page only refills its controls: showing it runs the same check (:func:`nw_on_activate`), so nothing is computed
+    for a page nobody is looking at."""
+    if ctx.widgets.get_or_none("_nw_canvas") is None or _page_deleted(ctx):
+        return
+    visible = ctx.widgets.get_or_none("_nw_page_visible")
+    if callable(visible) and visible():
+        redraw(ctx)
+    else:
+        _call(ctx, "_nw_refresh_controls")
+
+
 def nw_on_channel_changed(ctx) -> None:
     nw_on_selection_changed(ctx)
 

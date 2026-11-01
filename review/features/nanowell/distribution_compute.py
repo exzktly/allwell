@@ -35,13 +35,13 @@ TIME, WELLS = "time", "wells"
 METRICS = {
     "n": ("Cell count", False),
     "c": ("Confluence", False),
-    "brightness": ("Brightness (mean per-cell intensity)", True),
-    "signal": ("Nanowell fluorescence (total, above empty nanowells)", True),
+    "brightness": ("Cell brightness (mean per cell, background included)", True),
+    "signal": ("Nanowell fluorescence (total, background subtracted)", True),
     "count_fc": ("Count fold change", False),
     "log2_count_fc": ("log₂ count fold change, (n + 1) / (n₀ + 1)", False),
     "confluence_fc": ("Confluence fold change", False),
-    "brightness_fc": ("Brightness fold change", True),
-    "signal_fc": ("Nanowell fluorescence fold change", True),
+    "brightness_fc": ("Cell brightness fold change (background included)", True),
+    "signal_fc": ("Nanowell fluorescence fold change (background subtracted)", True),
     "growth_rate": ("Growth rate (per hour, from ln n)", False),
     "occupancy_class": ("Occupancy at baseline (cells)", False),
 }

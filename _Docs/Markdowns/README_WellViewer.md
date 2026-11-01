@@ -5864,20 +5864,31 @@ use them.
 - **Views** — *Distribution* (the beeswarm, described below), *Array*, *Trajectories*, *Position*,
   *Extremes*, *Identity* and *Statistics*, chosen from the tabs in the top bar, where the Plotting and Home
   pages show their sub-tabs. Hover a tab for what it shows. Each view shows only the controls it uses.
-- **Metric** — what each dot is: cell count, confluence, **brightness** and **nanowell fluorescence** (both
-  explained under *Brightness and nanowell fluorescence* below), their fold changes against the baseline,
+- **Metric** — what each dot is: cell count, confluence, **cell brightness** and **nanowell fluorescence** (both
+  explained under *Cell brightness and nanowell fluorescence* below), their fold changes against the baseline,
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
   ln count against time, per hour, over at least three timepoints with cells) and occupancy at baseline.
-  Brightness and nanowell fluorescence, and their fold changes, are of the fluorescence channel chosen in **Channel**.
-**Brightness and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
-but they answer different questions.
+  Cell brightness and nanowell fluorescence, and their fold changes, are of the fluorescence channel chosen in **Channel**.
 
-- **Brightness** (of the chosen channel, e.g. *Brightness DAPI*) is *how bright the cells are*. It is the average, over the cells counted in the
+**Cell brightness and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
+but they answer different questions, and only one of them has the background taken out. Every label says which:
+
+| Metric menu | Site detail row | Background |
+|---|---|---|
+| *Cell brightness (mean per cell, background included)* | *Cell brightness / with background* | included |
+| *Cell brightness fold change (background included)* | — | included |
+| *Nanowell fluorescence (total, background subtracted)* | *Nanowell fluor. / minus background* | subtracted |
+| *Nanowell fluorescence fold change (background subtracted)* | — | subtracted |
+
+The Analyze pane's **Background** and **Flat-field** corrections are not applied to a nanowell run, so neither
+metric changes with them; the nanowell floor described below is the only background either one involves.
+
+- **Cell brightness** (of the chosen channel, e.g. *Cell brightness … · DAPI*) is *how bright the cells are*. It is the average, over the cells counted in the
   nanowell, of each cell's mean pixel intensity inside its segmented outline. It does not change with how many cells
   there are: one cell at 800 or ten cells at 800 both give 800. Nothing is subtracted, so it is in the image's own
   units, background included. It needs segmented cells: a nanowell with no counted cell has no brightness (blank,
   not zero).
-- **Nanowell fluorescence** (e.g. *Nanowell fluorescence DAPI*) is *how much light the whole nanowell gives off above its empty floor*. It
+- **Nanowell fluorescence** (e.g. *Nanowell fluorescence … · DAPI*) is *how much light the whole nanowell gives off above its empty floor*. It
   is the sum of every pixel inside the nanowell (within 90 % of its radius, clear of the rim) minus the floor's level times
   the number of pixels. The floor's level is read from the same imaging tile — the typical level of the nanowells'
   bare floor in that channel, with or without cells on it — so no empty nanowell is needed. It uses no
@@ -5893,7 +5904,9 @@ material is in the nanowell, including when cells clump and the count is unrelia
 
 Their fold changes divide each timepoint by the baseline. A nanowell fluorescence at or below zero at the baseline
 gives no fold change ("no signal above background at baseline"), since a ratio over nothing has no meaning; a
-brightness fold change needs counted cells at both timepoints.
+cell brightness fold change needs counted cells at both timepoints. Because cell brightness keeps the background,
+a steady floor level sits in both halves of its ratio and pulls its fold change toward 1: a cell that doubles its
+stain above a bright floor reads well under 2. Nanowell fluorescence's fold change has no such bias.
 
 **Cell Gating applies here too.** A nanowell's cell count, and its brightness, use only the cells the rest of
 Review counts: the size and shape gate, cells excluded by hand and the scatter gates set on Home ▸

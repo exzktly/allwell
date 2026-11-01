@@ -265,10 +265,15 @@ def render_distribution(fig, model: DistributionModel, *, selected=()) -> HitMap
 
 
 def _wrap_label(label: str, rows: int) -> str:
-    """A y label short enough for its panel: on a grid of more than one row it is broken onto two lines."""
+    """A y label short enough for its panel: on a grid of more than one row it is broken onto at most three lines.
+
+    Every word is kept. Cutting the label after two lines dropped its end, which is where the channel and whether
+    the background was subtracted are written, so two different metrics could read the same on the axis."""
     import textwrap
 
-    return label if rows < 2 or len(label) <= 26 else "\n".join(textwrap.wrap(label, 26)[:2])
+    if rows < 2 or len(label) <= 26:
+        return label
+    return "\n".join(textwrap.wrap(label, max(26, -(-len(label) // 3))))
 
 
 def _members_per_tick(model, panel) -> int:
@@ -522,7 +527,8 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
     """
     fig.clear()
     outside = outside or {}
-    rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", "Brightness"), (f"signal_{channel}", "Nanowell fluorescence")]
+    rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", "Cell brightness\nwith background"),
+                                (f"signal_{channel}", "Nanowell fluor.\nminus background")]
                                 if channel else [])
     if not series:
         return

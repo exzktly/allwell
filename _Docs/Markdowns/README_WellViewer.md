@@ -1813,7 +1813,7 @@ share a node that is already up, so on a cluster that powers idle nodes down
 every run boots a node of its own, and when that kind of node cannot start (a
 cloud cluster out of capacity for its instance type, say) no run starts at all —
 the log shows the node failing to boot on every retry until the host's Max queue
-wait runs out, or for ever with Wait indefinitely. When ticked, the app adds
+wait runs out, or for ever with it set to 0. When ticked, the app adds
 `--exclusive` to the `srun` command when a run is sent, and the run log's
 hand-off line shows the command as sent. The scheduler command you typed is not
 changed, and one that already says `--exclusive` or `--oversubscribe` is used as
@@ -1821,7 +1821,8 @@ written. Whether ticked or not, it is the scheduler command's `--cpus-per-task`
 that decides how many of the node's CPUs the run uses; the run log warns when
 Slurm gave it only one or two of a bigger node's.
 
-**A run is always one task on one node.** The app adds `--nodes=1 --ntasks=1`
+**A run is always one task on one node.** (While you keep a node granted — *Keeping a
+node between runs*, below — the run is one task of that node.) The app adds `--nodes=1 --ntasks=1`
 to the `srun` command it sends, because Slurm runs the whole job once per task
 and the run is a single process that spreads its own workers over the CPUs it is
 given. A task count can come from the cluster's environment as well as from the
@@ -1844,10 +1845,68 @@ start the wait over. If it runs out during the upload, a batched run stops its
 upload and a single run finishes sending first; what reached the cluster is kept
 for the next attempt. When it runs out the job is cancelled and the run stops with
 `no node was granted within 30 min, this host's Max queue wait — cancelled job
-…`; raise the setting for a busy cluster, or set it to **Wait indefinitely**
-(0), which never gives up. A run that has started on its node is never cut
+…`; raise the setting for a busy cluster, or set it to **0**
+(no limit), which never gives up. A run that has started on its node is never cut
 short by it, however long it runs. It applies when the scheduler command is an
-`srun` command.
+`srun` command. It also bounds *Request a node* (below), and a run that is
+waiting for a granted node another run is using.
+
+### Keeping a node between runs
+
+On a cluster where the node you need is slow to get — a GPU node that has to
+boot, say — a run that fails after its node was granted used to give the node
+back, and running it again queued for a new one. **Request a node** in
+*Manage…* keeps one for you instead.
+
+Select a host in *Manage…* whose *Run compute* is *On a node it schedules* with
+an `srun` scheduler command, and press **Request a node** in the *Granted node*
+box under the list. The app asks the scheduler for a node with that host's
+scheduler command (partition, GPUs, CPUs, memory, and `--exclusive` if ticked),
+waits for it like any job (*Queued…*, *Node starting…*), and shows the node, its
+GPUs, how long it has been granted and has left, and what will release it. From
+then on **every remote run on that host goes to the node** — runs from the Analyze
+form, Resume, and every job in the Datasets job queue — and none of them
+queues. A run that fails or is stopped ends only itself; run it again and it lands
+on the same node.
+
+A granted node runs **one run at a time**. A second run on the same host waits
+for it (bounded by *Max queue wait*) rather than asking for a node of its own,
+because two runs on one GPU is how a model fails to load for want of memory.
+
+A run is told which node it is on in its log (*running on the granted node … — no
+queue wait*). A run that would outlast the node's time limit — its scheduler
+command's `--time`, scaled by its batches — gets a fresh node, with a fresh limit,
+instead of being cut off part-way; the log says so.
+
+**Test the node** sends the scheduler Test's job to the node as a run would be
+sent, to see the CPUs and GPUs a run on it gets. **Release** gives the node back
+at once; if a run is using it you are asked first, because releasing stops the run.
+
+**What ends a granted node.** All of these are enforced on the node itself, so
+none depends on All-Well still running:
+
+| What happens | The node is released |
+|---|---|
+| You press **Release**, or quit All-Well | at once |
+| All-Well is gone (crashed, asleep, offline) and no run is using the node | within 2 minutes of its last sign of life (a run whose window crashed mid-run still counts as using it for up to 10 more minutes) |
+| All-Well is open and no run is using the node | after *Release when idle after* (30 minutes by default) |
+| The time limit is reached (24 hours by default) | at the limit, even if a run is going |
+
+Quitting releases the nodes that window asked for. A node it only *found* — one
+another window asked for — is not its to cancel: this window stops keeping it
+alive and, if nobody else is, it ends two minutes later.
+
+The two settings are per host, in *Add…* / *Edit…* under the scheduler command,
+in **Granted node**: **Time limit** (hours; default 24) and **Release when idle
+after** (minutes; default 30, `0` to turn that rule off). The time limit is
+the granted node's own; it is separate from the `--time` in the scheduler command,
+which still sizes each run and is not given to the node. A partition that allows
+less than the time limit caps it, and the log says so.
+
+A released node is powered down by the cluster on its own schedule (on AWS
+ParallelCluster, after its scale-down idle time), and a node that is always kept
+up is never powered down. **A granted node is billed while it is idle**, which is
+what the idle release and the app-gone rule are for.
 
 **A scheduler command that sends the run's output elsewhere is refused**, when
 you save the host and when a run starts: `-o` / `--output`, `-e` / `--error`
@@ -1862,7 +1921,8 @@ look hung. Leave them out; the run's own log keeps all of it.
 that fails to start is replaced automatically (see *A node that fails to boot is
 retried* below), but once the run has started on a node, asking again would
 start it from the beginning. The run stops and the log says which node failed;
-**Resume** continues from where it stopped.
+**Resume** continues from where it stopped. (A granted node is the exception to
+"asked for": a rerun goes to the node you are keeping, if it is still granted.)
 
 **Fetch** next to *Compute profile* reads the cluster's JupyterHub
 configuration and lists the compute options its web page offers; picking one
@@ -2171,7 +2231,7 @@ reading it. The log names any it kept over budget for that reason.
   upload already did; a batched run asks for enough time for every batch the
   plate could hold. **Max queue wait** in the remote host dialog is how
   long a job may wait in the scheduler queue before the run gives up and
-  cancels it (*Wait indefinitely* turns that off); it has nothing to do with how
+  cancels it (0 turns that off); it has nothing to do with how
   quickly a broken connection is noticed, which is fixed at about two minutes.
   - **Use the job number.** It is the one you would pass to `squeue -j 4812345`
     on the cluster to see why the job is pending. `Priority` or `Resources`
@@ -5676,7 +5736,7 @@ the sentence names it.
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
   measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
   the footer gives the cohort's size.
-- **Moving average** (on *Distribution*, *Trajectories* and *Statistics*) — *Off*, or 2 to 9 timepoints: each nanowell's
+- **Moving average** (on *Distribution*, *Trajectories* and *Statistics*) — a number of timepoints, 1 (off) or 2 to 9: each nanowell's
   value at a timepoint becomes the mean of its values at that timepoint and the ones before it, that many in
   all. The window counts timepoints, not hours, so with unevenly spaced acquisitions it covers a different
   stretch of time at each step. A value is averaged only when the nanowell has a value at every timepoint of
@@ -5691,7 +5751,7 @@ the sentence names it.
   "moving window reaches the baseline". By default the baseline itself is the single value measured at the
   baseline timepoint — only the endpoint is averaged — and the footer says so. log₂ count fold changes are
   averaged as logs, which is a geometric mean of the ratios.
-- **Baseline average** (beside *Moving average*, for a fold change) — *Off*, or 2 to 9 timepoints: the baseline
+- **Baseline average** (beside *Moving average*, for a fold change) — a number of timepoints, 1 (off) or 2 to 9: the baseline
   becomes the mean of the nanowell's measured values (its count, confluence, brightness or fluorescence) at the
   baseline timepoint and the ones before it, that many in all — never after it, since a later timepoint may
   already show the treatment. Like the moving average it is used only when every timepoint of its window has a
@@ -5891,7 +5951,8 @@ the sentence names it.
 
 **Site detail.** Click a dot to open that nanowell's history beside the figure: cell count, confluence,
 brightness and nanowell fluorescence against time, one line per nanowell. Shift-click (⌘ or Ctrl also work) adds up to
-six nanowells to compare; clicking empty space on the plot clears them. A timepoint where the
+six nanowells to compare; the **✕** at the top of the site detail closes it and clears them, as does clicking empty
+space on the plot. A timepoint where the
 nanowell has no number is a gap and a hatched band, with its state written above the plot — never a zero.
 Under the plots, a strip of crops shows the first selected nanowell at each timepoint, cut at full resolution
 from the image the run segmented (the well's archive in `in/`). When that archive is not beside the dataset
@@ -7574,7 +7635,7 @@ records the unit of its coordinates the converter recovers from that by itself;
 when it does not, enter the grid and FOVs per well and the plate map follows what
 you typed.
 
-**A batched remote run queues once, not once per batch.** With **Remote batch size** set, the plate is uploaded and processed in slices so the cluster never holds all of it at once. The compute node is now requested a single time and held for the whole run, so on a busy cluster you wait in the queue once instead of once per batch. Two consequences worth knowing: the `--time` in your host's launcher is scaled up automatically (it sized one batch and now covers the plate, plus one batch's worth again for the transfers that happen while the node is held, capped at 24 hours — the log says what it asked for), and a batch that fails no longer ends the run. The remaining batches still process, and the summary names which ones failed so you can re-run just those. **If the node itself goes away part way** — the walltime runs out, the node fails, the cluster cancels the job — the run is reported as failed with that reason (`the allocation ended during batch 3/5 — no more batches will run`), not as stopped: the wells already finished keep downloading, a Job Queue goes on to its next job rather than pausing, and Resume continues from the finished wells. Each batch is handed to the node by one small file; if the host stops answering at that moment the log says it could not confirm the hand-off, and the run goes by what the node itself reports — a batch the node says it started is not given up on. **A batch that runs past its time** — the `--time` your launcher gives one batch — is stopped and the log says `batch N exceeded its time budget`; its finished wells are kept and the remaining batches still run. While a batch is running the log says `batch N still running (Xm)` every five minutes, so a long batch is never mistaken for a connection that has gone quiet. The node waits for each batch's upload for as long as All-Well keeps signalling that it is still there; it gives the node back after two minutes without that signal, or after two hours when the host cannot see it at all. If that signal itself stops reaching the host — the connection is failing — the log warns after two missed beats and, after three, says at what time the host will give the node back (and, mid-batch, suspend the batch) unless it recovers. **A node that fails to boot is retried automatically.** On a cluster that powers idle nodes down, Slurm can give a run a sleeping node; if that node does not start within the cluster's own limit, `srun` reports `srun: error: Nodes … are still not ready` and then `Something is wrong with the boot of the nodes`. All-Well then waits 30 seconds and asks for another node with the failed one excluded, and keeps doing so for as long as it takes — there is no limit on the number of retries, because on some clusters nodes routinely take longer to boot or to be granted than the cluster's own limit allows. Each retry says so in the log and names every node that has failed so far, which is the list to send your cluster's admins (`node(s) n01 failed to boot — requesting another node in 30 s (retry 1; failed to boot so far: n01)`). If every node that can take the request has failed once, it tries them all again rather than stopping. The only thing that ends the wait is the host's **Max queue wait** in Remotes, which counts booting as waiting; set it to *Wait indefinitely* and the run never gives up on its own (Stop still ends it at any point, including between two retries). Before each attempt it also checks which nodes are powered on (`idle`, `mix`, or busy but running) and steers the job away from the ones that are asleep, booting or out of service; when none of the powered-on nodes can take the request — they are a different instance type from the one the command asks for, say — it finds that out first, without queuing anything, says `no powered-on node matches this request — Slurm will start one`, and lets Slurm boot one. Starting a node can take several minutes. It also stops avoiding them when every powered-on node is already running a job: the log then says `no free powered-on node in … — Slurm will boot one`, and Slurm starts a powered-down node instead of keeping the job queued behind other people's jobs. On a cluster that does not power nodes down there is nothing to start, and the log says so instead: `every powered-on node in … is busy and none is powered down to boot — the job waits in the queue for one to free`. A run that does end before its node starts keeps the wells it had already uploaded, so retrying the same plate with the same settings does not send them again. This applies when the host's launcher is an `srun` command. **A word left on its own in that command is refused**, both when you save the host and when a run starts: `srun` would take it for the program to run and the job would fail with `execve(): … No such file or directory` only after a node had started. An instance or node type belongs in a constraint, for example `--constraint=g4dn.12xlarge`.
+**A batched remote run queues once, not once per batch.** With **Remote batch size** set, the plate is uploaded and processed in slices so the cluster never holds all of it at once. The compute node is now requested a single time and held for the whole run, so on a busy cluster you wait in the queue once instead of once per batch. Two consequences worth knowing: the `--time` in your host's launcher is scaled up automatically (it sized one batch and now covers the plate, plus one batch's worth again for the transfers that happen while the node is held, capped at 24 hours — the log says what it asked for), and a batch that fails no longer ends the run. The remaining batches still process, and the summary names which ones failed so you can re-run just those. **If the node itself goes away part way** — the walltime runs out, the node fails, the cluster cancels the job — the run is reported as failed with that reason (`the allocation ended during batch 3/5 — no more batches will run`), not as stopped: the wells already finished keep downloading, a Job Queue goes on to its next job rather than pausing, and Resume continues from the finished wells. Each batch is handed to the node by one small file; if the host stops answering at that moment the log says it could not confirm the hand-off, and the run goes by what the node itself reports — a batch the node says it started is not given up on. **A batch that runs past its time** — the `--time` your launcher gives one batch — is stopped and the log says `batch N exceeded its time budget`; its finished wells are kept and the remaining batches still run. While a batch is running the log says `batch N still running (Xm)` every five minutes, so a long batch is never mistaken for a connection that has gone quiet. The node waits for each batch's upload for as long as All-Well keeps signalling that it is still there; it gives the node back after two minutes without that signal, or after two hours when the host cannot see it at all. If that signal itself stops reaching the host — the connection is failing — the log warns after two missed beats and, after three, says at what time the host will give the node back (and, mid-batch, suspend the batch) unless it recovers. **A node that fails to boot is retried automatically.** On a cluster that powers idle nodes down, Slurm can give a run a sleeping node; if that node does not start within the cluster's own limit, `srun` reports `srun: error: Nodes … are still not ready` and then `Something is wrong with the boot of the nodes`. All-Well then waits 30 seconds and asks for another node with the failed one excluded, and keeps doing so for as long as it takes — there is no limit on the number of retries, because on some clusters nodes routinely take longer to boot or to be granted than the cluster's own limit allows. Each retry says so in the log and names every node that has failed so far, which is the list to send your cluster's admins (`node(s) n01 failed to boot — requesting another node in 30 s (retry 1; failed to boot so far: n01)`). If every node that can take the request has failed once, it tries them all again rather than stopping. The only thing that ends the wait is the host's **Max queue wait** in Remotes, which counts booting as waiting; set it to 0 and the run never gives up on its own (Stop still ends it at any point, including between two retries). Before each attempt it also checks which nodes are powered on (`idle`, `mix`, or busy but running) and steers the job away from the ones that are asleep, booting or out of service; when none of the powered-on nodes can take the request — they are a different instance type from the one the command asks for, say — it finds that out first, without queuing anything, says `no powered-on node matches this request — Slurm will start one`, and lets Slurm boot one. Starting a node can take several minutes. It also stops avoiding them when every powered-on node is already running a job: the log then says `no free powered-on node in … — Slurm will boot one`, and Slurm starts a powered-down node instead of keeping the job queued behind other people's jobs. On a cluster that does not power nodes down there is nothing to start, and the log says so instead: `every powered-on node in … is busy and none is powered down to boot — the job waits in the queue for one to free`. A run that does end before its node starts keeps the wells it had already uploaded, so retrying the same plate with the same settings does not send them again. This applies when the host's launcher is an `srun` command. **A word left on its own in that command is refused**, both when you save the host and when a run starts: `srun` would take it for the program to run and the job would fail with `execve(): … No such file or directory` only after a node had started. An instance or node type belongs in a constraint, for example `--constraint=g4dn.12xlarge`.
 
 If you start the same plate with the same settings from a second window while the first is still running, the second one stops and says so rather than starting (`another session is already running this exact dataset and configuration on this host (job …, in …)`): both would use the same folder on the cluster, and the second would clear the first's input out from under it. The first run is left exactly as it was — the refused one cancels nothing. Wait for the first to finish, or change something about the run. A **Resume** is checked the same way against every earlier attempt of the plate the output folder's journal remembers, because it writes into the attempt it resumes: if that attempt's job is still running on the cluster and an app is still feeding it, the resume stops with the same message; if no app has fed it for a few minutes — the window that ran it was closed or crashed — it is your own abandoned attempt, and it is cancelled (`cancelled a job left over from an earlier run of this dataset (…, in an earlier attempt's run directory, …)`) before the resume starts. Only a job the scheduler still lists as running counts: **Resume straight after Stop works**, because a stopped run's job has ended. If a Stop could not reach the cluster (the network was down), the job may still be running; the message then tells you to wait two minutes or cancel it yourself with `scancel <job>`.
 

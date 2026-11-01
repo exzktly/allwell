@@ -609,7 +609,8 @@ def test_selecting_another_remote_does_not_re_enable_test_mid_probe(
         f"a second probe was started against {started[1:]!r} while the first "
         "was still in flight"
     )
-    live = [t for t in dlg.findChildren(QTimer) if t.isActive()]
+    # The probe pollers are the dialog's own children; the granted-node panel keeps a timer of its own below it.
+    live = [t for t in dlg.findChildren(QTimer, options=Qt.FindDirectChildrenOnly) if t.isActive()]
     assert len(live) == 1, f"{len(live)} pollers running on one dialog"
 
 

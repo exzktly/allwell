@@ -356,6 +356,7 @@ def _batched(tmp_path, wells, batch_size=1):
 
 def _stub_runner(p, proc, upload_subset):
     p._runner = types.SimpleNamespace(
+        launcher=lambda: p._runner.host.launch_command,       # RemoteRunner.launcher(): the host's command, no node granted
         _cache=types.SimpleNamespace(
             _ssh_run=lambda argv, *, check, **kw: types.SimpleNamespace(
                 stdout="", returncode=0),

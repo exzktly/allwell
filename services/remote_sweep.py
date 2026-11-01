@@ -34,6 +34,7 @@ from services.remote_run_id import (
 )
 from services.remote_scratch import source_fingerprint
 from services.remote_transport import _remote_quote
+from services.slurm_ids import hold_check_shell, squeue_listing
 from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
 from services.subprocess_text import TEXT_UTF8
 
@@ -93,7 +94,7 @@ def sweep_orphaned_allocation(
         log_fn=log_fn)[0]
 
 
-def _target_script(index: int, pidfile: str, heartbeat: str) -> str:
+def _target_script(index: int, pidfile: str, heartbeat: str, host_staging_dir: str = "~/.allwell-staging") -> str:
     """The sweep of one run directory, as a subshell printing one verdict line,
     ``AW_<VERDICT> <index> <job id> [detail]`` — or nothing, for no sidecar."""
     sidecar_q = _remote_quote(f"{pidfile}.slurm")
@@ -102,14 +103,19 @@ def _target_script(index: int, pidfile: str, heartbeat: str) -> str:
     stale = UPLOAD_HEARTBEAT_STALE_S
     ended = "|".join(_ENDED_STATES)
     state = "awk 'NF {print $1; exit}'"
+    # `_aw_is_hold` first: a sidecar that names a granted node's own job is not a run's allocation to sweep (the
+    # node outlives the run, and cancelling it would release the node the user is keeping). A step id
+    # (`<job>.<step>`) is asked about, and cancelled, as a step (services/slurm_ids.py).
     return (
-        f'( _jid=$(cat {sidecar_q} 2>/dev/null); '
+        f'( {hold_check_shell(host_staging_dir)}'
+        f'_jid=$(cat {sidecar_q} 2>/dev/null); '
         f'[ -z "$_jid" ] && exit 0; '
+        f'if _aw_is_hold "$_jid"; then echo "AW_HOLDID {index} $_jid"; exit 0; fi; '
         # Alive at all? Asked before anything is read off a file's age. A
         # purged job is "Invalid job id" with exit 1; any other failure is a
         # scheduler that could not be asked, which proves nothing either way.
         f'_aw_sq=0; if command -v squeue >/dev/null 2>&1; then _aw_sq=1; '
-        f'_st=$(squeue -h -j "$_jid" -o %T 2>&1); '
+        f'_st=$({squeue_listing("_jid")} 2>&1); '
         f'if [ $? -ne 0 ]; then case "$_st" in *"nvalid job id"*) _st="";; '
         f'*) echo "AW_UNKNOWN {index} $_jid squeue"; exit 0;; esac; fi; '
         f"_st=$(printf '%s\\n' \"$_st\" | {state}); "
@@ -139,7 +145,7 @@ def _target_script(index: int, pidfile: str, heartbeat: str) -> str:
         # Cancelled: wait for it to be gone before the caller writes where it
         # wrote, then forget it. Still listed at the deadline: say so.
         f'_w=0; while [ "$_aw_sq" = 1 ] && [ "$_w" -lt {CANCEL_SETTLE_S} ]; do '
-        f'_st=$(squeue -h -j "$_jid" -o %T 2>/dev/null | {state}); '
+        f'_st=$({squeue_listing("_jid")} 2>/dev/null | {state}); '
         f'case "$_st" in ""|{ended}) break;; esac; sleep 1; _w=$((_w+1)); done; '
         f'if [ "$_w" -ge {CANCEL_SETTLE_S} ]; then echo "AW_DYING {index} $_jid"; exit 0; fi; '
         f'rm -f {sidecar_q} {hb_q}; echo "AW_SWEPT {index} $_jid" )'
@@ -163,7 +169,7 @@ def _sweep(host: RemoteHost, targets, log: Callable[[str], None]) -> list[tuple[
     targets = list(targets)
     if not host.compute_launcher.strip() or not targets:
         return [([], where) for _p, _h, where in targets]
-    script = "; ".join(_target_script(i, pidfile, hb)
+    script = "; ".join(_target_script(i, pidfile, hb, host.remote_staging_dir)
                        for i, (pidfile, hb, _where) in enumerate(targets))
     try:
         result = subprocess.run(
@@ -187,6 +193,11 @@ def _verdict(found: list[str] | None, where: str, log: Callable[[str], None]) ->
     if not found or found[0] == "gone":
         return "none"
     kind, jid, rest = found[0], found[1], found[2:]
+    if kind == "holdid":
+        # The run directory's sidecar names a granted node's own job: nothing of the run's to sweep.
+        log(f"[remote] scheduler: the job in {where} ({jid}) is a granted node, not an allocation left by a run — "
+            "not touching it.\n")
+        return "none"
     if kind == "swept":
         log(f"[remote] scheduler: cancelled a job left over from an earlier run of this "
             f"dataset ({jid}, in {where}) — the app it belonged to is gone.\n")

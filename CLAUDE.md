@@ -105,7 +105,7 @@ the container**:
 - **Scoped by the change.** `scripts/change_scope.py` classifies the branch
   against `origin/main`, and `scripts/test.sh`, `scripts/preflight.sh` and CI
   all follow it. **Version-only** (only the `__version__` line of `version.py`
-  moved): no tests, no lint; CI's version-bump job is the one check left.
+  moved, which only a deliberate hand-set version does now): no tests, no lint.
   **Docs-only** (that, plus `_Docs/Markdowns/*.md`, `CLAUDE.md`,
   `tests/FAST_LANE.md`): no lint, and the fast lane becomes the **docs lane**,
   the ~25 test files that read those documents, computed on each run.
@@ -574,7 +574,7 @@ edits elsewhere in it. If you do use it, re-apply and verify what it dropped.
 **Keep the PR summary current.** The body describes the branch as it stands
 now, not what you set out to do. Every push that adds, drops, or changes scope
 means editing the description in the same breath — new commits, a reverted
-approach, a follow-up fix, a fresh test, a version bump. Treat a stale summary
+approach, a follow-up fix, a fresh test, a `minor` label. Treat a stale summary
 as a broken build: a reviewer who reads it and finds different code in the diff
 has lost the ability to trust any of it. Same voice rule as the docs — normal
 prose, written for someone who has not read this conversation. Rewrite the
@@ -596,29 +596,25 @@ Project settings only apply once the harness trusts them; a remote session that
 still prompts is loading none of the file. The fix there is the same allowlist in
 the user-level `~/.claude/settings.json`, which needs no trust step.
 
-**Every PR bumps the version.** No exceptions — a PR that ships anything ships
-a new version. Patch (`8.8.24` → `8.8.25`) for fixes, docs, tooling, and small
-features; minor for a new tab or a workflow change users must relearn; major is
-a human's call, never yours. Bump once per PR, not once per commit: if the
-branch already carries a bump that isn't on the default branch yet, edit that
-number instead of adding another. Check with
-`git diff origin/main -- version.py` before bumping. A second body of planned
-work that stacks onto a branch whose PR is still open shares that PR, and
-therefore that one bump — the failure mode is holding a two-PR model in your
-head while the branch carries one. `scripts/preflight.sh` fails when the net
-delta against `origin/main` is anything other than a single increment: more
-than one, or none at all. None is the failure that actually ships. Two PRs open
-at once each bump to the same next number; the first merges, the second's bump
-now matches `main`, the merge is clean, and the second PR lands with no
-increment of its own — six consecutive releases each name two
-PRs that way, and seven of the 34 PRs merged between 2026-10-28 and 2026-10-31.
-So when `main` moves under an open PR, merge it in and re-bump
-before the push, not after the merge. CI's `version` job
-(`scripts/version_bump_ci.sh`) makes the same check against the base as it stands
-when the job runs, so a PR whose sibling took its number first goes red — but only
-if its job runs after that merge; it cannot replace re-checking before you merge.
+**Pull requests do not bump the version; `main` does, after each merge.**
+`.github/workflows/version-bump.yml` runs on every push to `main`, bumps
+`version.py` by one increment (`scripts/bump_version.py`) and commits it back as
+`github-actions[bot]`. The increment comes from the merged PR's labels: patch by
+default (fixes, docs, tooling, small features), `minor` for a new tab or a
+workflow change users must relearn, `major` only when a human applies it —
+never yours to choose. So leave `version.py` out of the diff, and label the PR
+`minor` when it warrants one.
 
-Bumping means **one line** — `version.py::__version__`, which the title-bar pill
+The reason is cost. When every PR carried its own bump, any two PRs open at once
+edited the same line: the second to merge either conflicted or landed with no
+increment of its own (seven of the 34 PRs merged between 2026-10-28 and
+2026-10-31), and each repair re-ran the whole of CI for a one-line change. After
+the merge there is nothing for two branches to disagree about. A push that moved
+`version.py` itself — a deliberate hand-set version — is left as set and not
+bumped again. The bot's commit is pushed with the workflow's own token, which
+starts no further workflow, so it neither loops nor re-runs CI.
+
+The version is **one line** — `version.py::__version__`, which the title-bar pill
 and the PyInstaller spec read. The docs state no version at all; they write
 `<version>` and point at `version.py`, and
 `tests/test_doc_version_sync.py` fails on any version literal outside a short
@@ -636,9 +632,7 @@ CI then went red on *semantics*, not conflicts: the other change made an
 uploaded well hold a full dial, and a test written here asserted the previous
 empty one. Fetch `main` and read `git log origin/main -- <the files you are
 about to touch>` when you start **and** again before you push. A clean automatic
-merge is not evidence that two changes agree. The version number collides the
-same way — that is what the `git diff origin/main -- version.py` check above is
-for, and it belongs immediately before the push, not at the start of the work.
+merge is not evidence that two changes agree.
 
 **Never `checkout -B` a branch whose PR is still open.** Restarting the branch
 from `main` is the right move only once its PR has *merged*. Doing it with the
@@ -666,12 +660,9 @@ the diff includes the branch below.
 Two things that make the failure quiet, both worth checking directly. The merge
 event says "merged" either way, so the notification is no evidence the work
 arrived; verify with `git cat-file -e origin/main:<a file the PR added>` rather
-than trusting the event. And `scripts/preflight.sh` compares `version.py`
-against `origin/main` unconditionally, so on any stacked branch it reports more
-increments than the PR contains and fails — which is a property of the check,
-not of the branch. Measured against its real base the bump is one. Do not
-"correct" a stacked version to satisfy it; doing so collides with the number
-the PR below already took.
+than trusting the event. A stacked PR that merges into an intermediate branch
+also gets no version bump, because the bump workflow runs on pushes to `main`
+only; it gets one when the intermediate branch reaches `main`.
 
 **A failing test may be asserting the bug.** Two tests broke in one session
 because the behaviour they pinned *was* the defect being reported — a dial that

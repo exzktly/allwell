@@ -1,0 +1,88 @@
+# Bumps version.py once for every push to main, after the merge rather than inside the pull request.
+#
+# Pull requests leave version.py alone. When every pull request carried its own bump, any two open at the same
+# time edited the same line: the second to merge either conflicted or arrived with no increment of its own, and
+# each repair re-ran the whole of CI for a one-line change. Here the bump happens on main, one push at a time.
+#
+# Increment: the merged pull request's `major` or `minor` label selects that part; anything else is a patch
+# (scripts/bump_version.py). A push that already moved version.py itself (a deliberate hand-set version) is left
+# as it is, so it is never bumped twice.
+#
+# The bump is pushed with the workflow's own GITHUB_TOKEN. GitHub starts no workflow for a push made with that
+# token, so the bump commit neither re-triggers this workflow nor re-runs ci.yml; the merge it follows already
+# ran the full push-to-main CI.
+
+name: version bump
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+# One bump at a time, and none dropped: two merges in quick succession queue rather than cancel each other.
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: bump version.py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Did this push set the version itself?
+        id: manual
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if git cat-file -e "$BEFORE^{commit}" 2>/dev/null && ! git diff --quiet "$BEFORE" "$AFTER" -- version.py; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "version.py already moved in $BEFORE..$AFTER; leaving it as set"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Which pull request merged, and with what labels?
+        if: steps.manual.outputs.skip != 'true'
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          # The pull request this commit belongs to; none for a direct push, which is a patch.
+          json=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '[.[] | select(.merged_at != null)][0] // {}' || echo '{}')
+          echo "number=$(jq -r '.number // empty' <<<"$json")" >> "$GITHUB_OUTPUT"
+          echo "labels=$(jq -r '[.labels[]?.name] | join(",")' <<<"$json")" >> "$GITHUB_OUTPUT"
+      - name: Bump, commit and push
+        if: steps.manual.outputs.skip != 'true'
+        env:
+          LABELS: ${{ steps.pr.outputs.labels }}
+          NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          new=$(python scripts/bump_version.py --labels "$LABELS")
+          message="Version $new"
+          [[ -n "$NUMBER" ]] && message="$message (#$NUMBER)"
+          git commit -qam "$message"
+          # Someone may push to main between the checkout and here; replay the bump on top and try again.
+          for delay in 0 2 4 8 16; do
+            sleep "$delay"
+            if git push origin HEAD:main; then
+              echo "::notice::version.py -> $new"
+              exit 0
+            fi
+            git pull --rebase -q origin main
+          done
+          echo "::error::could not push the version bump to main"
+          exit 1

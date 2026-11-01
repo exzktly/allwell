@@ -38,6 +38,8 @@ from PySide6.QtWidgets import (
 )
 
 from services.remote_config import (
+    GRANTED_IDLE_RELEASE_MIN_RANGE,
+    GRANTED_TIME_LIMIT_H_RANGE,
     RemoteHost,
     delete_remote,
     load_remotes,
@@ -48,6 +50,7 @@ from services import ssh_key_setup
 from services.subprocess_kill import signal_subprocess
 from services.remote_srun_retry import redirect_words_message, stray_words_message
 from services.scheduler_probe import ProbeRun
+from analyze.granted_node_panel import GrantedNodePanel
 from analyze.scheduler_test_dialog import SchedulerTestDialog
 from services.subprocess_text import TEXT_UTF8
 from ui import theme
@@ -398,11 +401,11 @@ class RemoteFormDialog(QDialog):
         # touch ssh's keepalive, which is fixed (remote_config.keepalive_options).
         wait_row = QHBoxLayout()
         wait_row.setSpacing(6)
-        wait_row.addWidget(QLabel("Max queue wait", self._scheduled_box))
+        wait_row.addWidget(QLabel("Max queue wait (min, 0 = no limit)", self._scheduled_box))
         self._queue_wait_spin = QSpinBox(self._scheduled_box)
         self._queue_wait_spin.setRange(0, 1440)  # up to 24h; 0 = unlimited
-        self._queue_wait_spin.setSuffix(" min")
-        self._queue_wait_spin.setSpecialValueText("Wait indefinitely")
+        # The bare number: the label says the unit and what 0 means, since Qt's spin box refuses typing over
+        # any text inside the box.
         self._queue_wait_spin.setValue(host.queue_wait_timeout_min)
         self._queue_wait_spin.setToolTip(
             "How long a job may wait in the scheduler queue before the run "
@@ -412,6 +415,41 @@ class RemoteFormDialog(QDialog):
         wait_row.addWidget(self._queue_wait_spin)
         wait_row.addStretch(1)
         sched_layout.addLayout(wait_row)
+
+        # The node "Request a node" keeps granted between runs (services.remote_hold): how long it stays at most,
+        # and how long it may sit unused. Both are per host (RemoteHost.granted_time_limit_h / granted_idle_release_min).
+        # The scheduler command's own --time is a different thing: it is one run's.
+        sched_layout.addWidget(QLabel("Granted node (Request a node in Manage Remotes)", self._scheduled_box))
+        limit_row = QHBoxLayout()
+        limit_row.setSpacing(6)
+        limit_row.addWidget(QLabel("Time limit (hours)", self._scheduled_box))
+        self._granted_limit_spin = QSpinBox(self._scheduled_box)
+        self._granted_limit_spin.setRange(*GRANTED_TIME_LIMIT_H_RANGE)
+        self._granted_limit_spin.setValue(host.granted_time_limit_h)
+        self._granted_limit_spin.setToolTip(
+            "How long a node from \"Request a node\" stays granted at most. Slurm ends the node at this limit "
+            "even if a run is still going; a run that would not fit in the time left gets a fresh node instead. "
+            "If your cluster's partition allows less, its limit is used."
+        )
+        limit_row.addWidget(self._granted_limit_spin)
+        limit_row.addWidget(QLabel("Release when idle after (min, 0 = never)", self._scheduled_box))
+        self._granted_idle_spin = QSpinBox(self._scheduled_box)
+        self._granted_idle_spin.setRange(*GRANTED_IDLE_RELEASE_MIN_RANGE)
+        # Bare numbers: the labels say the unit and what 0 means (Qt refuses typing over text inside the box).
+        self._granted_idle_spin.setValue(host.granted_idle_release_min)
+        self._granted_idle_spin.setToolTip(
+            "A granted node that no run has used for this long is released. 0 keeps it until you press "
+            "Release, quit All-Well, or the time limit runs out."
+        )
+        limit_row.addWidget(self._granted_idle_spin)
+        limit_row.addStretch(1)
+        sched_layout.addLayout(limit_row)
+        granted_hint = QLabel(
+            "A released node is powered down by the cluster on its own schedule (on AWS ParallelCluster, after its "
+            "scale-down idle time). A granted node is billed while idle.", self._scheduled_box)
+        granted_hint.setObjectName("Muted")
+        granted_hint.setWordWrap(True)
+        sched_layout.addWidget(granted_hint)
         main_form.addRow(self._scheduled_box)
 
         # Restore the last-fetched profiles for this host (cached locally) so
@@ -430,9 +468,8 @@ class RemoteFormDialog(QDialog):
 
         self._cache_budget_spin = QSpinBox(self)
         self._cache_budget_spin.setRange(1, 10000)
-        self._cache_budget_spin.setSuffix(" GB")
         self._cache_budget_spin.setValue(host.cache_budget_gb)
-        main_form.addRow("Cache budget", self._cache_budget_spin)
+        main_form.addRow("Cache budget (GB)", self._cache_budget_spin)
 
         self._extra_args_edit = QLineEdit(" ".join(host.extra_args), self)
         self._extra_args_edit.setPlaceholderText("--workers 16 --tf_threads 8")
@@ -670,6 +707,8 @@ class RemoteFormDialog(QDialog):
             exclusive_node=self._exclusive_cb.isChecked(),
             jupyterhub_config_path=self._jhub_path_edit.text().strip(),
             queue_wait_timeout_min=self._queue_wait_spin.value(),
+            granted_time_limit_h=self._granted_limit_spin.value(),
+            granted_idle_release_min=self._granted_idle_spin.value(),
         )
 
     # ── compute-location toggle ────────────────────────────────────────────
@@ -1513,6 +1552,7 @@ class ManageRemotesDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._hosts: dict[str, RemoteHost] = {}       # as last read from remotes.toml; the granted-node panel shows one
         self.setWindowTitle("Manage Remote Servers")
         self.setModal(True)
         self.resize(640, 420)
@@ -1537,6 +1577,9 @@ class ManageRemotesDialog(QDialog):
         self._empty_hint.setObjectName("Muted")
         self._empty_hint.setWordWrap(True)
         left.addWidget(self._empty_hint)
+        # The node this host keeps granted between runs (Request a node / Release / Test the node).
+        self._node_panel = GrantedNodePanel(self)
+        left.addWidget(self._node_panel)
         layout.addLayout(left, 1)
 
         # ── Buttons ─────────────────────────────────────────────────────
@@ -1613,6 +1656,7 @@ class ManageRemotesDialog(QDialog):
         for name, host in remotes.items():
             item = QListWidgetItem(f"{name}    (ssh:{host.ssh_alias})", self._list)
             item.setData(Qt.UserRole, name)
+        self._hosts = remotes
         self._empty_hint.setVisible(self._list.count() == 0)
         if prev:
             for i in range(self._list.count()):
@@ -1636,6 +1680,7 @@ class ManageRemotesDialog(QDialog):
         # commonest thing a user does while waiting for one.
         self._test_btn.setEnabled(has_sel and not probe_in_flight(self))
         self._bootstrap_btn.setEnabled(has_sel)
+        self._node_panel.set_host(self._hosts.get(self._selected_name() or ""))
 
     # ── actions ─────────────────────────────────────────────────────────
 

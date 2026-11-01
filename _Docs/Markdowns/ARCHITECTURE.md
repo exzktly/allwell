@@ -20862,16 +20862,22 @@ you're in before you type the command.
     `scripts/test.sh`), and sets `ALLWELL_FULL_LANE` on a push to `main` and on
     a pull request labelled `full-ci`.
 
-  How often each lane runs follows from what it tests, not from the rule. Replayed
-  over 61 merges to `main`, the nanowell gate fires on 52 and the remote gate
-  on 39 — about as often as a path-pattern rule did (51 and 41), but not on the
-  same merges. It runs a lane on five merges the patterns skipped, each with a
-  path to a lane test (a `services/remote_hold.py` change reaching the nanowell
-  form tests through `PipelineRunner`, a `pipeline/` change reaching
-  `process_microscopy.py`, which the remote stand-in tests run), and skips six
-  the patterns ran: four `tests/_lanes.py` edits that changed only the other
-  gate's rosters, a test file in no roster, and a CZI converter no lane test
-  reaches. The end-to-end tests run the whole pipeline and several remote
+  How often each lane runs follows from what it tests, not from the rule, and
+  selection is what keeps that affordable. Replayed over 61 merges to `main`
+  with per-file timings from a 4-CPU container, the end-to-end lane runs on 34
+  merges (8 of them whole), the feature lane on 53 (8 whole) and the remote
+  lane on 40 (8 whole); the worker time the three cost per merge falls from
+  5,518 s, when one gate started both nanowell lanes and each ran whole, to
+  2,328 s. Six of the eight whole-lane merges touched `ci.yml`,
+  `scripts/test.sh` or a lane's triggers; one changed `services/remote_config.py`,
+  which reaches an autouse fixture in `tests/conftest.py`, and one had no merge
+  base to diff against. Against the path patterns this rule
+  replaced, it runs a lane on merges they skipped that had a path to a lane test
+  (a `services/remote_hold.py` change reaching the nanowell form tests through
+  `PipelineRunner`, a `pipeline/` change reaching `process_microscopy.py`, which
+  the remote stand-in tests run), and skips merges they ran that had none (a
+  `tests/_lanes.py` edit to another lane's roster, a test file in no roster, a
+  CZI converter no lane test reaches). The end-to-end tests run the whole pipeline and several remote
   tests build `AnalyzeTab` or read `AllWellApp`, so most pipeline and Analyze
   changes can break them; making the gates fire less means moving tests, not
   loosening the trigger. What the script cannot follow — a module named by a

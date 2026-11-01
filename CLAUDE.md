@@ -113,8 +113,9 @@ the container**:
   (a module named by a computed string, a data file read at run time, one test
   disturbed by another it shared a worker with). `scripts/preflight.sh` and CI
   ask the same question. **If you skip preflight, run the lanes yourself before
-  pushing** — `scripts/test.sh --remote` selects on its own. Building the import
-  graph takes up to ~20 s when a change reaches far.
+  pushing** — `scripts/test.sh --remote` selects on its own. Replayed over 61
+  merges, selection cut the gated lanes' worker time per merge from 5,518 s to
+  2,328 s. Building the import graph takes up to ~20 s when a change reaches far.
   A new nanowell or remote test joins its roster. Naming files (`scripts/test.sh tests/test_nanowell_run.py`) runs
   them whichever lane they belong to.
 - **Scoped by the change.** `scripts/change_scope.py` classifies the branch

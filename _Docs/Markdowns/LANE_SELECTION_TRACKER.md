@@ -24,8 +24,8 @@ States: `open`, `done` (with the evidence), `declined` (with the reason).
 | P4 | CI: each gated step asks its own gate and selects files on a pull request; a push to `main` and a `full-ci` label run every lane whole | done | gate steps set `ALLWELL_FULL_LANE` on a push or a `full-ci` label and `ALLWELL_SCOPE_BASE` on a pull request; the workflow parses as YAML |
 | P5 | `scripts/preflight.sh` follows the same selection | done | `gated_lane` in preflight computes the selection once and hands the files to `scripts/test.sh`; driven with a stub `run_lane` in a scratch repository through all three outcomes (whole, skipped, one file) |
 | P6 | Tests: per-file reach on synthetic trees, the real command selecting in a scratch repository, the escape hatches; mutations bite | done | 4 mutations, each turning a named test red (first-hit-only propagation, test.sh ignoring the selection, any `_lanes.py` change running the whole lane, autouse changes not running the whole lane) |
-| P7 | Docs: CLAUDE.md §1/§2, ARCHITECTURE lanes section, `tests/_lanes.py` docstring, `ci.yml` comments | open | |
-| P8 | Measure after: replay selected-file cost per lane against the table above | open | |
+| P7 | Docs: CLAUDE.md §1/§2, ARCHITECTURE lanes section, `tests/_lanes.py` docstring, `ci.yml` comments | done | CLAUDE.md §1 and §2, ARCHITECTURE's lanes section, the `tests/_lanes.py` docstring and the `ci.yml` comments describe the per-lane gates and the selection |
+| P8 | Measure after: replay selected-file cost per lane against the table above | done | 61 merges replayed through `select()` with each lane's own roster: e2e 4,008 → 1,572 s per merge (runs on 34, 8 whole), features 1,247 → 613 s (53, 8 whole), remote 263 → 144 s (40, 8 whole); 5,518 → 2,328 s in all. Historical `_lanes.py` files name the old gates, so the replay compares each lane's roster directly for them |
 
 ## Phase 2 — fast lane (second pull request)
 

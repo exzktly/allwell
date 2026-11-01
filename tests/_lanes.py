@@ -346,6 +346,10 @@ REMOTE_FILES: dict[str, str] = {
     "test_remote_scratch_dir.py": "The pipeline's scratch volume on the remote is a per-host setting",
     "test_remote_spawn_phases.py": "What ``RemoteRunner.spawn`` leaves behind for the rest of the run",
     "test_remote_staging.py": "Local input staging cleans up after itself, on success and on failure",
+    "test_remote_storage.py": "The remote staging folders: labels, the listing, deletion and expiry, run in real bash",
+    "test_remote_storage_liveness.py": "A folder something still needs is never deleted: each in-use and integrity rule, with stand-in squeue/stat/date/rm",
+    "test_remote_storage_is_confined.py": "The storage scripts delete nothing but a run or dataset folder, against a sandbox of decoys",
+    "test_remote_storage_dialog.py": "The Manage Remotes Storage browser, driven through its buttons against a local staging tree",
     "test_remote_transit_volume.py": "A remote run must not write to the home volume",
     "test_remote_write_retry.py": "The remote client's own writes survive a transient storage fault",
     "test_rsync_retry.py": "Tests for the v5.1.1 rsync retry helper",
@@ -409,7 +413,7 @@ GATES: dict[str, tuple[tuple[dict[str, str], ...], tuple[str, ...]]] = {
     "remote": (
         (REMOTE_FILES,),
         (r"^services/remote", r"ssh", r"slurm", r"srun", r"rsync", r"scheduler",
-         r"bootstrap", r"transport", r"^scripts/allwell_remote", r"^analyze/remote_dialog",
+         r"bootstrap", r"transport", r"^scripts/allwell_remote", r"^analyze/remote_dialog", r"^analyze/remote_storage",
          r"^services/run_journal", r"^services/pipeline_runner", *_HARNESS),
     ),
 }

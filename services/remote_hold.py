@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING
 from services.remote_config import RemoteHost, parse_slurm_time, render_slurm_time
 from services.remote_heartbeat import _UploadHeartbeat
 from services.remote_jobs import _only_my_job
+from services.run_evidence import APP_SILENT_RELEASE
 from services.slurm_ids import HOLDS_DIRNAME
 from services.remote_srun_retry import (
     ALLOCATION_GRANTED,
@@ -145,16 +146,19 @@ def compose_hold_script(paths: HoldPaths, *, limit_s: int, idle_release_s: int, 
     """
     q = {name: _remote_quote(getattr(paths, name)) for name in HoldPaths.__dataclass_fields__}
     idle_label = _duration_words(idle_release_s) if idle_release_s else ""
+    busy_label = _duration_words(busy_stale_s)
     limit_label = _duration_words(limit_s)
 
     # The app gone: the message the check prints, and what it does. `_aw_end` writes the reason and exits.
+    # `$_aw_who` says whether a run had claimed the node and gone quiet too, or there was none: a node released
+    # from under a running step must not read as one that nothing was using (the run's step ends with the node).
     _, gone_check = _heartbeat_stale_snippet(
         paths.heartbeat,
-        f"[remote] granted node: All-Well stopped answering ({_duration_words(heartbeat_stale_s)} without a "
-        "heartbeat) and no run is using the node",
+        f"[remote] granted node: {APP_SILENT_RELEASE} ({_duration_words(heartbeat_stale_s)} without a "
+        "heartbeat) and $_aw_who",
         stale_s=heartbeat_stale_s, poll_s=poll_s,
-        on_stale=f"_aw_end 'All-Well stopped answering ({_duration_words(heartbeat_stale_s)} without a heartbeat) "
-                 "and no run was using it'")
+        on_stale=f'_aw_end "{APP_SILENT_RELEASE} ({_duration_words(heartbeat_stale_s)} without a heartbeat) '
+                 'and $_aw_who"')
     # A run's marker that its own heartbeat has stopped refreshing is a run whose app died mid-run: not busy.
     # The check prints each time it judges, which would be a line every poll, so its output is dropped.
     _, busy_check = _heartbeat_stale_snippet(
@@ -202,9 +206,11 @@ echo "{ALLOCATION_GRANTED} — job ${{SLURM_JOB_ID:-?}} on $_aw_node (partition 
 while :; do
     if [ -e {q["release"]} ]; then _aw_end "released on request"; fi
     _aw_busy=0
+    _aw_who="no run was using it"
     if [ -e {q["busy"]} ]; then
         _aw_busy=1
         {{ {busy_check} }} >/dev/null 2>&1
+        [ "$_aw_busy" = 1 ] || _aw_who="the run using it had not been heard from for {busy_label} either"
     fi
     _aw_tick=$(date +%s)      # this node's clock; the heartbeat check below assigns _aw_now from the file server's
     if [ "$_aw_busy" = 1 ]; then
@@ -1016,6 +1022,23 @@ class GrantedRun:
                 raise HoldError("the granted node was asked to release and is still listed after "
                                 f"{int(timeout_s)} s; a fresh one was not requested.")
             self._sleep(2)
+
+    def why_ended(self, job: str) -> str:
+        """Why the granted node ended, when *job* (a job or step id from slurmstepd's line) is a step of it and the
+        node's script says it has ended; ``""`` otherwise, including when the host cannot be read.
+
+        A step of the granted node is cancelled whenever the node's own job ends, and slurmstepd then names no cause:
+        without this the run's headline read as an ``scancel`` by the user or an administrator, when the node had
+        released itself (most often because this app had stopped reaching the host). Asked before :meth:`release`,
+        while the lease still names the node."""
+        lease = self.lease
+        if lease is None or not job or job.split(".", 1)[0] != lease.target.job_id:
+            return ""
+        try:
+            state = lease.node.state()
+        except HoldError:
+            return ""
+        return state.ended_reason if state.phase == "ended" else ""
 
     def release(self) -> None:
         lease, self.lease = self.lease, None

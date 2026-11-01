@@ -169,6 +169,20 @@ def test_an_app_that_stopped_beating_releases_a_node_no_run_is_using(hold):
     assert "released: All-Well stopped answering" in out
 
 
+def test_a_node_released_from_under_a_run_that_went_quiet_says_a_run_had_it(hold):
+    """The app and the run's own marker both silent: the node is released, and the reason must not say nothing was
+    using it — a step was running on it, and Slurm ends that step with the node. Wrong implementation: one message for
+    both cases (it read "no run was using it" while a run's step was being cancelled)."""
+    h = hold(beating=False)
+    busy = h.dir / "busy"
+    busy.touch()
+    _age(busy, 3600)
+    out = h.wait()
+    assert h.ended() == ("All-Well stopped answering (2 s without a heartbeat) and the run using it had not been "
+                         "heard from for 2 s either")
+    assert "released: All-Well stopped answering" in out
+
+
 def test_an_app_that_was_already_gone_when_the_node_was_granted_releases_it_at_once(hold):
     """A hold queued, then abandoned: the app's last beat is an hour old by the time the node is granted."""
     h = hold(beating=False)

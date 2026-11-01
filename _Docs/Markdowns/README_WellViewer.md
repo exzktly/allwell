@@ -1912,6 +1912,15 @@ none depends on All-Well still running:
 | All-Well is open and no run is using the node | after *Release when idle after* (30 minutes by default) |
 | The time limit is reached (24 hours by default) | at the limit, even if a run is going |
 
+A run on the node ends with it. In particular, a computer that sleeps or loses
+its network for 10 minutes or more during a run (closing a laptop's lid sleeps
+it, even though All-Well keeps the machine awake otherwise) stops the run: the
+node hears nothing from All-Well and releases itself, and Slurm cancels the
+run's step. The run's headline then names the granted node and the reason it
+wrote — *All-Well stopped answering … and the run using it had not been heard
+from for 10 min either* — rather than an `scancel`, and **Resume** continues
+from the wells that finished.
+
 Quitting releases the nodes that window asked for. A node it only *found* — one
 another window asked for — is not its to cancel: this window stops keeping it
 alive and, if nobody else is, it ends two minutes later.

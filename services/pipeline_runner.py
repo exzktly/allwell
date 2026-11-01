@@ -1067,6 +1067,9 @@ class PipelineRunner:
         # request seen (`pipeline.suspend.LOG_MARKER`), slurmstepd's
         # cancellation, the driver's time budget, ssh's reason for a drop.
         self._evidence = RunEvidence()
+        # The run's claim on the host's granted node (`services.remote_hold.GrantedRun`), set by the remote run's
+        # thread; `_external_end` asks it why the node ended when slurmstepd cancelled the run's step with no cause.
+        self._granted_run: GrantedRun | None = None
         # Whether this run asked to suspend. `_suspend_requested` cannot say:
         # a remote ask whose ssh failed clears it again. Without this a suspend
         # marker counted as the user's whoever had sent the signal (D1).
@@ -1350,6 +1353,7 @@ class PipelineRunner:
         self._stop_requested.clear()
         self._suspend_requested.clear()
         self._evidence = RunEvidence()
+        self._granted_run = None
         self._suspend_asked = False
         self._job_settled = False
         self._job_liveness = None
@@ -1558,7 +1562,8 @@ class PipelineRunner:
         theirs, and are reported as such."""
         if self._stop_requested.is_set() or self._suspend_requested.is_set():
             return None
-        said = self._evidence.termination(where)
+        granted = self._granted_run
+        said = self._evidence.termination(where, node_ended=granted.why_ended if granted is not None else None)
         if said is not None:
             return said
         if rc == 255 and self._remote_runner is not None:
@@ -2450,6 +2455,7 @@ class PipelineRunner:
         # A node the host keeps granted (Manage Remotes) is used instead, and the early job below is not asked for.
         granted = GrantedRun(self._remote_runner, batch_size=batch_size, nanowell="--nanowell_format" in args,
                              log_fn=lambda m: self._enqueue(("line", m)), stop_event=self._stop_requested)
+        self._granted_run = granted         # read by `_external_end`, before the `finally` below releases it
         early = _EarlyAllocation(self._remote_runner, batch_size=batch_size, nanowell="--nanowell_format" in args,
                                  log_fn=lambda m: self._enqueue(("line", m), early=True),
                                  stop_event=self._stop_requested, granted=granted)

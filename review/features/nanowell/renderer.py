@@ -1210,8 +1210,10 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     if layers.cells and scene.cells is not None and len(scene.cells[0]):
         _draw_cells(ax, *scene.cells)
     if (layers.addresses or layers.values) and len(scene.sites):
+        filled = (np.isfinite(np.asarray(scene.sites.values, dtype=float))     # as _fill_by_metric fills them
+                  if layers.nanowells and layers.colour == "metric" else None)
         lines += _draw_labels(fig, ax, drawn, scene.sites, addresses=layers.addresses, values=layers.values,
-                              why=scene.why)
+                              why=scene.why, filled=filled)
     if in_well and layers.anchor and scene.anchor is not None:
         _draw_anchor(ax, drawn, scene.anchor)
     _ink(ax.set_title(f"{scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
@@ -1445,7 +1447,8 @@ def site_label_texts(sites, *, addresses: bool, values: bool, why: dict | None =
     return out
 
 
-def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool, why: dict | None = None) -> list[str]:
+def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool, why: dict | None = None,
+                 filled=None) -> list[str]:
     """Each nanowell's label (its address, its value, or both) in view inside a nanowell drawn large enough to
     hold it; a footer line when none is, or when too many are to write."""
     from ui.nanowell_sites import LABEL_COLOUR, MIN_LABEL_DIAMETER_PX
@@ -1455,9 +1458,11 @@ def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool, why: d
     from matplotlib import patheffects
 
     labels = np.array(site_label_texts(sites, addresses=addresses, values=values, why=why), dtype=object)
-    # A halo of the ground under every label: over a hatched nanowell (the out-of-focus dots, the occluded lines) the
-    # bare label could not be read.
+    # A halo of the ground under a label in a nanowell drawn without a fill: over its hatch (the out-of-focus dots, the
+    # occluded lines) the bare label could not be read. *filled* (one bool per site) marks the nanowells filled by the
+    # metric, whose labels read on the fill and are left plain — a dark stroke there only roughened them.
     halo = [patheffects.withStroke(linewidth=2.0, foreground=_inks(ax)[0])]
+    filled = np.zeros(len(labels), dtype=bool) if filled is None else np.asarray(filled, dtype=bool)
     show = ((labels != "") & (diameter >= MIN_LABEL_DIAMETER_PX) & (sites.x >= x0) & (sites.x <= x1)
             & (sites.y >= y0) & (sites.y <= y1))
     what = "addresses and values" if addresses and values else "addresses" if addresses else "values"
@@ -1475,7 +1480,7 @@ def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool, why: d
         size = diameter[k] * (0.22 if lines == 1 else 0.17) * 72.0 / fig.dpi
         ax.text(sites.x[k], sites.y[k], labels[k], ha="center", va="center", clip_on=True, zorder=6,
                 fontsize=max(5.0, min(8.0, size)), color=LABEL_COLOUR, linespacing=1.0, gid="nw-array-address",
-                path_effects=halo)
+                path_effects=[] if filled[k] else halo)
     return []
 
 

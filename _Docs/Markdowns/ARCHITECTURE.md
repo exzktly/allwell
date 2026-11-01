@@ -12310,8 +12310,8 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   they were black on the screen theme's near-black ground; labels in
   `LABEL_COLOUR` (`_draw_labels`: the `q,r` with *Addresses*, the metric value to three significant figures with
   *Values*, one under the other when both are on, `site_label_texts`; a nanowell without a value writes its reason's
-  tag, never a number), each with a stroke of the figure's ground around it (`patheffects.withStroke`) so it reads
-  over a hatch, only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
+  tag, never a number) — in a nanowell drawn without a fill, with a stroke of the figure's ground around it
+  (`patheffects.withStroke`) so it reads over a hatch; on the metric's fill, plain — only inside a nanowell drawn at least `MIN_LABEL_DIAMETER_PX` across and at most `MAX_ADDRESSES` of them
   (beyond, the footer asks for a zoom); tiles coloured by their placement `source`
   (lattice, overlap, recorded) with the residual, or — with no tile size in the acquisition record — their corner
   marked and the figure saying the outline is unknown, never a guessed rectangle; the anchor as a crosshair;

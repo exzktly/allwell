@@ -149,8 +149,9 @@ def test_each_nanowell_is_labelled_with_its_address_and_its_value_of_the_chosen_
 
 
 def test_every_label_has_a_halo_of_the_ground_so_it_reads_over_a_hatch(qc_page):
-    """The addresses on the out-of-focus nanowells could not be read over the dot hatch (UX review N7): each label
-    is drawn with a stroke of the figure's ground around it."""
+    """The addresses on the out-of-focus nanowells could not be read over the dot hatch (UX review N7): a label in a
+    nanowell drawn without a fill — here every one, outlined by state — has a stroke of the figure's ground around
+    it. A label on a metric fill is left plain (``test_a_label_on_a_metric_fill_has_no_halo``)."""
     from matplotlib.colors import to_hex
     from matplotlib.patheffects import withStroke
 
@@ -166,6 +167,27 @@ def test_every_label_has_a_halo_of_the_ground_so_it_reads_over_a_hatch(qc_page):
         effects = label.get_path_effects()
         assert [type(e) for e in effects] == [withStroke], label.get_text()
         assert to_hex(effects[0]._gc["foreground"]) == ground
+
+
+def test_a_label_on_a_metric_fill_has_no_halo(qc_page):
+    """A dark stroke roughened the labels on the metric's fill, which read on it unaided: only the nanowells without a
+    fill (no value, hatched or not) get the halo."""
+    from review.features.nanowell import controller as nwc
+
+    ctx = qc_page
+    st = ctx.state.feature_slice("nanowell")
+    rows = (st.metrics["well"] == "A01") & (st.metrics["timepoint"] == "t_a")
+    st.metrics.loc[rows, "c"] = [0.125, 0.5, 1.75, np.nan]             # one nanowell without a value
+    nwc.set_layer(ctx, "colour", "metric")
+    metric_cb = ctx.widgets.get("_nw_metric_cb")
+    metric_cb.setCurrentIndex(metric_cb.findData("c"))
+    _toggle(ctx, "addresses")
+    labels = {t.get_text().splitlines()[0]: t for t in st.drawn.ax.texts if t.get_gid() == "nw-array-address"}
+    sites = st.drawn.sites
+    has = np.isfinite(np.asarray(sites.values, dtype=float))
+    assert has.any() and (~has).any()
+    for k, address in enumerate(sites.labels):
+        assert bool(labels[address].get_path_effects()) is not bool(has[k]), address
 
 
 def test_a_label_writes_three_significant_figures_and_never_a_missing_value_as_a_number():

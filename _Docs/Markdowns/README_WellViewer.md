@@ -6145,8 +6145,8 @@ the sentence names it.
     6 % of its diameter, never under 2.5 or over 8 screen pixels), so it stays visible zoomed out and on a phone. Either way a nanowell on a tile seam is dashed in purple and
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the
-    `q,r` when both are on). A nanowell without a value never has a number written (never a 0): it writes why instead, as above. Every
-    label has a thin outline of the background colour, so it reads over a hatched nanowell. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
+    `q,r` when both are on). A nanowell without a value never has a number written (never a 0): it writes why instead, as above. A label
+    in a nanowell without a fill has a thin outline of the background colour, so it reads over a hatch. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
     from the run's cell table, so you can see where cells were found and where none were; the run does not
     keep cell outlines, so the dot is the cell's centre, not its shape. The dots are the cells the counts hold:
     a cell Home's Cell Gating leaves out, or one in a field excluded in QC triage, by the field-quality flag or by

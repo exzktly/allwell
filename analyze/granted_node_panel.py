@@ -69,6 +69,7 @@ class GrantedNodePanel(QWidget):
         self._notes: dict[str, str] = {}
         self._working: set[str] = set()            # hosts with a request or a release in flight
         self._probe_dialog = None
+        self._log_dialog = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -89,7 +90,11 @@ class GrantedNodePanel(QWidget):
         self._release_btn.clicked.connect(self._on_release)
         self._test_btn = QPushButton("Test the node", self)
         self._test_btn.clicked.connect(self._on_test)
-        for button in (self._request_btn, self._release_btn, self._test_btn):
+        self._log_btn = QPushButton("Show log", self)
+        self._log_btn.setToolTip("What was sent to the scheduler for this host's node and what it answered, and what "
+                                 "the cluster holds about the job.")
+        self._log_btn.clicked.connect(self._on_show_log)
+        for button in (self._request_btn, self._release_btn, self._test_btn, self._log_btn):
             row.addWidget(button)
         row.addStretch(1)
         layout.addLayout(row)
@@ -210,6 +215,21 @@ class GrantedNodePanel(QWidget):
         self._probe_dialog = SchedulerTestDialog(self, probe, f"{host.name or host.ssh_alias} (granted node)")
         self._probe_dialog.show()
 
+    # ── Show log ─────────────────────────────────────────────────────────────────────────────────────────────────
+    def _on_show_log(self) -> None:
+        """Open the log window for the selected host's node (a new one each time: a closed window has stopped listening)."""
+        host, node = self._host, self._node()
+        if host is None or node is None:
+            return
+        from analyze.granted_node_log_dialog import GrantedNodeLogDialog
+
+        previous, self._log_dialog = self._log_dialog, None
+        if previous is not None:
+            previous.close()
+            previous.deleteLater()
+        self._log_dialog = GrantedNodeLogDialog(self, node, host.name or host.ssh_alias)
+        self._log_dialog.show()
+
     # ── answers from the worker threads ──────────────────────────────────────────────────────────────────────────
     def _on_state(self, name: str, state: HoldState) -> None:
         self._states[name] = state
@@ -245,6 +265,7 @@ class GrantedNodePanel(QWidget):
         self._request_btn.setEnabled(ok and not live and not working)
         self._request_btn.setToolTip(why or "Ask the scheduler for a node and keep it for every run on this host.")
         self._release_btn.setEnabled(live or working)
+        self._log_btn.setEnabled(ok)
         self._test_btn.setEnabled(state is not None and state.phase in ("granted", "busy"))
         if not ok:
             lines = [why]

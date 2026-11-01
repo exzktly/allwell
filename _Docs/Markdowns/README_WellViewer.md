@@ -1882,6 +1882,18 @@ instead of being cut off part-way; the log says so.
 sent, to see the CPUs and GPUs a run on it gets. **Release** gives the node back
 at once; if a run is using it you are asked first, because releasing stops the run.
 
+**Show log** opens a window with the whole story of a request, which the readout
+(only the latest state) cannot give. *This app's record* lists, with the time of
+each, the `sbatch` that was sent, every change in the job's state and the reason
+the scheduler gave (`PENDING · reason Resources`, `ReqNodeNotAvail`, a node that
+failed to boot), every answer from the host that was not ok, and what ended the
+node; it fills in live and starts with everything since the app began. *On the
+cluster* is what the host holds about the job: the job script's own output, why it
+ended, and the scheduler's full record of it (`scontrol show job`). It is read when
+the window opens, on **Refresh**, and every few seconds while it is open; a host
+that does not answer is said so in place of the text. **Copy all** puts both parts
+on the clipboard, for a message to your cluster's administrators.
+
 **What ends a granted node.** All of these are enforced on the node itself, so
 none depends on All-Well still running:
 

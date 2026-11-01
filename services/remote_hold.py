@@ -29,6 +29,7 @@ import re
 import shlex
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -455,6 +456,65 @@ def _duration(seconds: float) -> str:
     return f"{h} h {m} min" if h else f"{m} min"
 
 
+class HoldLog:
+    """What this app did and heard about one host's granted node, a line at a time with the time it happened.
+
+    A request waits in the scheduler's queue for minutes and ends in one of a dozen ways (a refusal of the options, a
+    node that failed to boot, a time limit lowered, a release), and the panel's readout shows only the latest. This is
+    the rest of it: the ``sbatch`` that was sent, every change of the job's state and the scheduler's reason, every
+    answer that was not ``ok``, and what ended it. Kept in memory for the life of the process, on the handle the
+    registry hands to every caller, so a dialog opened later still shows what happened before it. Thread-safe: the
+    request writes from a worker thread."""
+
+    def __init__(self, limit: int = 2000) -> None:
+        self._lines: deque[str] = deque(maxlen=limit)
+        self._lock = threading.Lock()
+        self._listeners: list[Callable[[str], None]] = []
+
+    def add(self, text: str) -> None:
+        """Record *text* (each of its lines) with the time, and tell the listeners."""
+        stamp = time.strftime("%H:%M:%S")
+        with self._lock:
+            added = [f"{stamp}  {part.rstrip()}" for part in text.rstrip().splitlines() or [""]]
+            if len(added) == 1 and self._lines and self._lines[-1][10:] == added[0][10:]:
+                return                               # the same thing again (a poll failing the same way)
+            self._lines.extend(added)
+            listeners = list(self._listeners)
+        for listener in listeners:
+            for line in added:
+                listener(line)
+
+    def lines(self) -> list[str]:
+        with self._lock:
+            return list(self._lines)
+
+    def subscribe(self, listener: Callable[[str], None]) -> Callable[[], None]:
+        """Call *listener* with each line from now on; the returned function stops it."""
+        with self._lock:
+            self._listeners.append(listener)
+
+        def stop() -> None:
+            with self._lock:
+                if listener in self._listeners:
+                    self._listeners.remove(listener)
+        return stop
+
+
+def remote_log_script(paths: HoldPaths, *, tail: int = 300) -> str:
+    """Shell printing what the host holds about the hold job, section by section: the job script's own output (what
+    ``sbatch --output`` collected — the ``allocation granted`` line, its endings), why it ended, what it wrote when it was
+    granted, its status, and the scheduler's full record of the job. Always exits 0: a missing file is an answer."""
+    q = {n: _remote_quote(getattr(paths, n)) for n in ("log", "ended", "granted", "status", "job")}
+    return (f'echo "=== hold job output ({paths.log}) ==="; tail -n {int(tail)} {q["log"]} 2>/dev/null || echo "(none yet)"\n'
+            f'echo "=== why it ended ==="; cat {q["ended"]} 2>/dev/null || echo "(it has not ended)"\n'
+            f'echo "=== granted ==="; cat {q["granted"]} 2>/dev/null || echo "(not granted yet)"\n'
+            f'echo "=== status ==="; cat {q["status"]} 2>/dev/null || echo "(none)"\n'
+            f'_aw_job=$(cat {q["job"]} 2>/dev/null)\n'
+            'echo "=== the scheduler\'s record of job ${_aw_job:-?} ==="\n'
+            '[ -n "$_aw_job" ] && scontrol show job "$_aw_job" 2>&1 || echo "(no job recorded)"\n'
+            "exit 0\n")
+
+
 class GrantedNode:
     """One host's granted node: asking for it, reading it, giving it back.
 
@@ -473,7 +533,10 @@ class GrantedNode:
         self.host = host
         self.paths = hold_paths(host)
         self._cache = cache
-        self._log = log_fn
+        self._sink = log_fn
+        #: What this handle did and heard (see :class:`HoldLog`); the panel's *Show log* reads it.
+        self.transcript = HoldLog()
+        self._last_seen: tuple = ()
         #: Told each state the request sees, from the thread that is polling; assign to listen after construction.
         self.on_state: Callable[[HoldState], None] = on_state or (lambda _s: None)
         self._sleep = sleep
@@ -494,13 +557,33 @@ class GrantedNode:
         """Point this handle's log lines and state updates at a new listener. The registry hands the same handle to every
         caller in the process, so a dialog opened a second time would otherwise keep talking to the first one's."""
         if log_fn is not None:
-            self._log = log_fn
+            self._sink = log_fn
         if on_state is not None:
             self.on_state = on_state
 
+    def _log(self, text: str) -> None:
+        """A line for the run log (the sink) and for this node's own record."""
+        self.transcript.add(text)
+        self._sink(text)
+
+    def read_remote_log(self, tail: int = 300) -> str:
+        """What the host holds about the hold job (:func:`remote_log_script`). A host that does not answer is a
+        ``HoldError`` saying so, which the viewer shows in place of the text."""
+        result = self._script(remote_log_script(self.paths, tail=tail))
+        if result.returncode != 0:
+            said = (result.stderr or "").strip().splitlines()
+            raise HoldError(f"could not read the hold job's log (ssh exit {result.returncode}): "
+                            f"{said[-1] if said else 'no output'}")
+        return result.stdout or ""
+
     # ── talking to the host ──────────────────────────────────────────────────────────────────────────────────────
     def _script(self, script: str, *, check: bool = False):
-        return self._cache._ssh_script(script, check=check, timeout_s=CONTROL_TIMEOUT_S)
+        result = self._cache._ssh_script(script, check=check, timeout_s=CONTROL_TIMEOUT_S)
+        if getattr(result, "returncode", 0) != 0:
+            said = (getattr(result, "stderr", "") or "").strip().splitlines()
+            self.transcript.add(f"the host's answer was not ok (exit {result.returncode})"
+                                + (f": {said[-1]}" if said else ""))
+        return result
 
     def state(self) -> HoldState:
         """The hold as the host reports it now. A host that cannot be reached is a ``HoldError``: guessing "no
@@ -511,9 +594,22 @@ class GrantedNode:
             raise HoldError(f"could not read the granted node's state (ssh exit {result.returncode}): "
                             f"{said[-1] if said else 'no output'}")
         state = parse_state(result.stdout or "")
+        self._remember(state)
         if state.phase == "ended":
             self.stop_beating()                  # an idle release left this thread beating for a job that is gone
         return state
+
+    def _remember(self, state: HoldState) -> None:
+        """Put a change in what the scheduler says about the job in the record (not every poll that says the same)."""
+        seen = (state.phase, state.slurm_state, state.slurm_reason, state.node, state.ended_reason)
+        if seen == self._last_seen or state.phase == "none":
+            return
+        self._last_seen = seen
+        parts = [f"job {state.job_id}" if state.job_id else "", f"scheduler state {state.slurm_state}" if state.slurm_state
+                 else "scheduler did not answer", f"reason {state.slurm_reason}" if state.slurm_reason not in ("", "None") else "",
+                 f"node {state.node}" if state.node else "", f"→ {state.phase}",
+                 f"({state.ended_reason})" if state.ended_reason else ""]
+        self.transcript.add(" · ".join(p for p in parts if p))
 
     def attach(self) -> HoldState:
         """The hold's state, and a heartbeat for it if it is live and this process is not yet beating for it.
@@ -568,7 +664,8 @@ class GrantedNode:
         self._heartbeat.start()
         try:
             return self._ask(options, user_excluded, limit_s)
-        except BaseException:
+        except BaseException as exc:
+            self.transcript.add(f"the request did not complete: {exc}")
             self.release("the request did not complete")
             raise
 
@@ -586,6 +683,8 @@ class GrantedNode:
                 raise HoldError("the scheduler refused the request: "
                                 f"{(submitted.stderr or submitted.stdout or '').strip() or 'no reason given'}")
             self.job_id = submitted.stdout.strip()
+            self.transcript.add(f"sbatch {' '.join(shlex.quote(o) for o in [*options, *extra])} "
+                                f"--time={render_slurm_time(limit_s)}  →  job {self.job_id}")
             self._log(f"[remote] granted node: asked the scheduler for a node (job {self.job_id}, "
                       f"time limit {_duration(limit_s)}).\n")
             boot_failed = self._wait(began, queue_wait)

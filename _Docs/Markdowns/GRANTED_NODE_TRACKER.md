@@ -641,3 +641,12 @@ being worked; the fixes are in the commit that adds this section, each with a te
 | R12 | srun's `-u` (unbuffered) passed to sbatch means `--usage`; `--exclude=?` built for an unnamed node | done | both dropped (`…unbuffered_flag_is_not_passed…`; the `?` guard is read, not driven) |
 | R13 | Docs claimed two minutes though a run that crashed mid-run counts as using the node for up to ten more | done | README table and the module docstring say so |
 
+## 13. Follow-up: a way to see a request's log
+
+After the feature merged: there was no way to see the communication and status of a request started through *Request a node*;
+the panel showed only the latest state. Added: a per-node record (`GrantedNode.transcript`), a cluster-side reader
+(`read_remote_log`), and a **Show log** window.
+
+| ID | Item | State | Where | Evidence |
+|---|---|---|---|---|
+| H18 | **Show log**: this app's record (the sbatch, each state/reason change, non-ok answers, failures, release) live, plus the hold job's output and `scontrol show job` read from the host; refresh, copy; an unreadable host is said, not shown as an empty log | done | `services/remote_hold.py` (`HoldLog`, `remote_log_script`, `GrantedNode.read_remote_log`), `analyze/granted_node_log_dialog.py`, `analyze/granted_node_panel.py` | `tests/test_remote_hold_request.py` (7 new) and `tests/test_manage_remotes_granted_node.py` (6 new, the real panel and window against the stand-in cluster). Mutated on HEAD, each fails its own test: Show log connected to nothing (4 tests); the sbatch not recorded (4); state changes not recorded (2); the window never stopping listening; the cluster side without the scheduler's record (3); an unreadable host shown as an empty log. Also found: the shared fake `scontrol` only understood `show job -o ID`; it now takes the last argument as the real one does |

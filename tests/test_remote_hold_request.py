@@ -14,6 +14,7 @@ run out; forgetting to cancel the job when the request is abandoned.
 from __future__ import annotations
 
 import shutil
+import types
 
 import pytest
 
@@ -366,3 +367,106 @@ def test_a_node_found_after_one_was_released_is_not_owned(cluster, nodes):
     node.owned, node.job_id = True, "4001"
     node.attach()
     assert node.owned is False and node.job_id == "4009"
+
+
+# ── the record of what was sent and heard (Show log) ──────────────────────────────────────────────────────────────
+
+def test_a_request_leaves_a_record_of_the_sbatch_sent_and_each_change_the_scheduler_reported(cluster, nodes):
+    """Wrong implementation: no record, so a queued request that is slow or refused can only be diagnosed by logging
+    into the cluster."""
+    host = RemoteHost(**HOST)
+    sleep = _Script(cluster, [
+        ("PENDING", "Resources", ""),
+        ("PENDING", "Resources", ""),                              # the same again: one line, not two
+        ("PENDING", "ReqNodeNotAvail", ""),
+        lambda: (cluster.set_job(4001, "RUNNING", "None", "gpu-node-1"), _gf(cluster, host, "gpu-node-1", "NVIDIA A10G")),
+    ])
+    node, _, _ = _node(cluster, nodes, sleep)
+    node.request()
+    record = "\n".join(node.transcript.lines())
+    assert "sbatch --partition=gpu --gres=gpu:1 --cpus-per-task=8 --nodes=1 --ntasks=1 --time=1-00:00:00  →  job 4001" in record
+    assert record.count("scheduler state PENDING · reason Resources") == 1
+    assert "scheduler state PENDING · reason ReqNodeNotAvail" in record
+    assert "node gpu-node-1 · → granted" in record
+    # In the order it happened.
+    assert record.index("sbatch ") < record.index("Resources") < record.index("ReqNodeNotAvail") < record.index("→ granted")
+
+
+def test_a_refused_request_is_in_the_record_with_the_schedulers_words(cluster, nodes):
+    (cluster.fake / "sbatch.refuse").touch()
+    node, _, _ = _node(cluster, nodes, _Script(cluster, []))
+    with pytest.raises(HoldError):
+        node.request()
+    record = "\n".join(node.transcript.lines())
+    assert "Requested node configuration is not available" in record
+    assert "the request did not complete" in record
+
+
+def test_release_and_the_runs_own_lines_are_in_the_record_too(cluster, nodes):
+    host = RemoteHost(**HOST)
+    d = cluster.hold_dir(host)
+    d.mkdir(parents=True)
+    (d / "job").write_text("4001", encoding="utf-8")
+    cluster.set_job(4001, "RUNNING", "None", "n1")
+    node, _, _ = _node(cluster, nodes, _Script(cluster, []))
+    node.job_id = "4001"
+    node.release("released from Manage Remotes")
+    assert any("released — released from Manage Remotes" in line for line in node.transcript.lines())
+
+
+def test_an_answer_that_was_not_ok_is_recorded_once_however_often_the_poll_repeats_it(cluster, nodes, monkeypatch):
+    node, _, _ = _node(cluster, nodes, _Script(cluster, []))
+    monkeypatch.setattr(cluster, "_ssh_script", lambda script, *, check, timeout_s=60: types.SimpleNamespace(
+        returncode=255, stdout="", stderr="ssh: connect to host login port 22: Connection timed out\n"))
+    for _ in range(3):
+        with pytest.raises(HoldError):
+            node.state()
+    lines = [ln for ln in node.transcript.lines() if "not ok" in ln]
+    assert len(lines) == 1 and "exit 255" in lines[0] and "Connection timed out" in lines[0]
+
+
+def test_the_hold_log_keeps_the_newest_lines_and_tells_a_subscriber_until_it_stops():
+    from services.remote_hold import HoldLog
+
+    log = HoldLog(limit=3)
+    heard: list[str] = []
+    stop = log.subscribe(heard.append)
+    for word in ("a", "b", "c", "d"):
+        log.add(word)
+    assert [ln[10:] for ln in log.lines()] == ["b", "c", "d"]                 # (after the 8-char time and two spaces)
+    assert [ln[10:] for ln in heard] == ["a", "b", "c", "d"]
+    stop()
+    log.add("e")
+    assert len(heard) == 4
+    log.add("line one\nline two")
+    assert [ln[10:] for ln in log.lines()][-2:] == ["line one", "line two"]
+
+
+def test_the_cluster_side_log_shows_the_hold_jobs_output_why_it_ended_and_the_schedulers_record(cluster, nodes):
+    """Wrong implementation: reading only the file the job writes, which says nothing for a job that never started."""
+    host = RemoteHost(**HOST)
+    d = cluster.hold_dir(host)
+    d.mkdir(parents=True)
+    (d / "job").write_text("4001", encoding="utf-8")
+    (d / "log").write_text("[remote] scheduler: allocation granted — job 4001 on gpu-node-1\n", encoding="utf-8")
+    (d / "ended").write_text("idle 30 min\n", encoding="utf-8")
+    cluster.set_job(4001, "COMPLETED", "None", "gpu-node-1")
+    node, _, _ = _node(cluster, nodes, _Script(cluster, []))
+    text = node.read_remote_log()
+    assert "allocation granted — job 4001 on gpu-node-1" in text
+    assert "=== why it ended ===\nidle 30 min" in text
+    assert "JobState=COMPLETED" in text and "record of job 4001" in text
+
+
+def test_the_cluster_side_log_of_a_host_with_no_hold_says_so_instead_of_failing(cluster, nodes):
+    node, _, _ = _node(cluster, nodes, _Script(cluster, []))
+    text = node.read_remote_log()
+    assert "(none yet)" in text and "(it has not ended)" in text and "(no job recorded)" in text
+
+
+def test_a_host_that_does_not_answer_is_an_error_not_an_empty_log(cluster, nodes, monkeypatch):
+    node, _, _ = _node(cluster, nodes, _Script(cluster, []))
+    monkeypatch.setattr(cluster, "_ssh_script", lambda script, *, check, timeout_s=60: types.SimpleNamespace(
+        returncode=255, stdout="", stderr="ssh: connect to host login port 22: Connection timed out\n"))
+    with pytest.raises(HoldError, match="could not read the hold job's log.*Connection timed out"):
+        node.read_remote_log()

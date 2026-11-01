@@ -351,6 +351,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_remote_spawn_phases.py": "What ``RemoteRunner.spawn`` leaves behind for the rest of the run",
     "test_remote_staging.py": "Local input staging cleans up after itself, on success and on failure",
     "test_remote_scripts_parse_on_old_bash.py": "Remote scripts parse on bash before 5.2: no bare case pattern inside $( )",
+    "test_storage_through_a_real_remote_run.py": "The storage hooks through a real RemoteRunner.spawn / verify_and_cleanup against the fake host",
     "test_remote_storage.py": "The remote staging folders: labels, the listing, deletion and expiry, run in real bash",
     "test_remote_storage_liveness.py": "A folder something still needs is never deleted: each in-use and integrity rule, with stand-in squeue/stat/date/rm",
     "test_remote_storage_is_confined.py": "The storage scripts delete nothing but a run or dataset folder, against a sandbox of decoys",

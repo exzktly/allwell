@@ -91,6 +91,12 @@ DEFAULT_REMOTE_PYTHON = "~/miniforge3/envs/allwell/bin/python"
 DEFAULT_CONDA_ENV = "allwell"
 
 
+#: The ranges Manage Remotes offers for the granted-node settings; a hand-edited ``remotes.toml`` is clamped to them
+#: on load, so it cannot ask Slurm for a nonsense time limit.
+GRANTED_TIME_LIMIT_H_RANGE = (1, 720)
+GRANTED_IDLE_RELEASE_MIN_RANGE = (0, 1440)
+
+
 @dataclass(frozen=True)
 class RemoteHost:
     """One configured remote-execution target.
@@ -212,6 +218,18 @@ class RemoteHost:
     the default, never at ``0`` — to be noticed. Every ssh the app starts
     carries the same fixed keepalive instead (:func:`keepalive_options`).
     """
+    granted_time_limit_h: int = 24
+    """How long a node from Manage Remotes' "Request a node" stays granted at
+    most, in hours: the hold job's Slurm ``--time``, lowered to the partition's
+    limit when that is shorter. Separate from the scheduler command's own
+    ``--time``, which describes one run. Slurm ends the node at this limit even
+    mid-run, so a run that would not fit in the time left gets a fresh node
+    (:mod:`services.remote_hold`). Written to ``remotes.toml`` only when it
+    differs from the default."""
+    granted_idle_release_min: int = 30
+    """Minutes a granted node may go unused before the hold job releases it;
+    ``0`` never releases it for idleness (the other release rules still apply).
+    Written to ``remotes.toml`` only when it differs from the default."""
 
     @property
     def launch_command(self) -> str:
@@ -735,6 +753,12 @@ def _format_block(host: RemoteHost) -> str:
     # exclusive_node is only emitted when switched on: off is the default,
     # and loaders default the field to false when absent.
     exclusive_line = "exclusive_node = true\n" if host.exclusive_node else ""
+    # The granted-node settings are only emitted when they differ from the default, like exclusive_node.
+    granted_lines = "".join(
+        f"{field} = {getattr(host, field)}\n"
+        for field in ("granted_time_limit_h", "granted_idle_release_min")
+        if getattr(host, field) != RemoteHost.__dataclass_fields__[field].default
+    )
     jhub_line = (
         f"jupyterhub_config_path = {_toml_string(host.jupyterhub_config_path)}\n"
         if host.jupyterhub_config_path else ""
@@ -749,6 +773,7 @@ def _format_block(host: RemoteHost) -> str:
         f"{key_line}"
         f"{launcher_line}"
         f"{exclusive_line}"
+        f"{granted_lines}"
         f"{jhub_line}"
         f"remote_project_dir = {_toml_string(host.remote_project_dir)}\n"
         f"remote_staging_dir = {_toml_string(host.remote_staging_dir)}\n"
@@ -940,7 +965,23 @@ def _parse_entry(name: str, entry: dict[str, Any]) -> RemoteHost:
         queue_wait_timeout_min=int(
             entry.get("queue_wait_timeout_min", defaults.queue_wait_timeout_min)
         ),
+        granted_time_limit_h=_clamped(
+            entry.get("granted_time_limit_h"), defaults.granted_time_limit_h, GRANTED_TIME_LIMIT_H_RANGE),
+        granted_idle_release_min=_clamped(
+            entry.get("granted_idle_release_min"), defaults.granted_idle_release_min,
+            GRANTED_IDLE_RELEASE_MIN_RANGE),
     )
+
+
+def _clamped(value: Any, default: int, bounds: tuple[int, int]) -> int:
+    """*value* as an int inside *bounds*; *default* when it is absent or not a number."""
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(bounds[0], min(bounds[1], number))
 
 
 # ── JupyterHub profile discovery ────────────────────────────────────────────

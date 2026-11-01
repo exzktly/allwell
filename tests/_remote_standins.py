@@ -8,8 +8,10 @@ shell scripts sent over ``ssh`` (``services.remote_jobs``, ``services.remote_liv
   host's home — unless the host is *down* (:meth:`Host.go_down`), when it prints OpenSSH's own refusal and
   exits 255, the way a dropped network does.
 * ``squeue -h -j <id> -o %T|%u`` answers from :attr:`Host.jobs`, and is silent with exit 1 for a job it does
-  not list, as Slurm is for a finished one.
-* ``scancel -u <user> <id>`` removes the job and records it in :attr:`Host.cancelled`.
+  not list, as Slurm is for a finished one. Given a step id (``-j 4001.3``) it fails with "Invalid job id", as
+  Slurm does; a step is asked about as ``squeue -h -s4001.3 -o %i`` and answers from :attr:`Host.steps`.
+* ``scancel -u <user> <id>`` removes the job and records it in :attr:`Host.cancelled`; given a step id it removes
+  that step only and leaves the job.
 
 Installed by prepending a directory to ``PATH`` (``monkeypatch.setenv``). The ssh stand-in is not *named*
 ``ssh`` — ``conftest._no_real_network_tools`` refuses any spawn of a binary by that name — so
@@ -33,10 +35,18 @@ cd "$AW_STANDIN/home" && HOME="$AW_STANDIN/home" exec bash -c "$cmd"
 """
 
 _SQUEUE = r"""#!/bin/bash
-jid=""; fmt="%T"
+jid=""; fmt="%T"; step=""
 while [ $# -gt 0 ]; do
-  case "$1" in -j) jid="$2"; shift;; -o) fmt="$2"; shift;; esac; shift
+  case "$1" in -j) jid="$2"; shift;; -o) fmt="$2"; shift;; -s*) step="${1#-s}";; esac; shift
 done
+if [ -n "$step" ]; then
+  if ! grep -q "^${step%%.*} " "$AW_STANDIN/jobs" 2>/dev/null; then
+    echo "slurm_load_job_step error: Invalid job id specified" >&2; exit 1
+  fi
+  grep -qx "$step" "$AW_STANDIN/steps" 2>/dev/null && echo "$step"
+  exit 0
+fi
+case "$jid" in *.*) echo "slurm_load_jobs error: Invalid job id specified" >&2; exit 1;; esac
 line=$(grep "^$jid " "$AW_STANDIN/jobs" 2>/dev/null | head -n1)
 if [ -z "$line" ]; then echo "slurm_load_jobs error: Invalid job id specified" >&2; exit 1; fi
 set -- $line
@@ -45,6 +55,13 @@ case "$fmt" in %u) echo "$3";; *) echo "$2";; esac
 
 _SCANCEL = r"""#!/bin/bash
 jid="${@: -1}"
+case "$jid" in *.*)
+  if grep -qx "$jid" "$AW_STANDIN/steps" 2>/dev/null; then
+    grep -vx "$jid" "$AW_STANDIN/steps" > "$AW_STANDIN/steps.tmp"; mv "$AW_STANDIN/steps.tmp" "$AW_STANDIN/steps"
+    echo "$jid" >> "$AW_STANDIN/cancelled"; exit 0
+  fi
+  echo "scancel: error: Kill job error on job id $jid: Invalid job id specified" >&2; exit 1;;
+esac
 if grep -q "^$jid " "$AW_STANDIN/jobs" 2>/dev/null; then
   grep -v "^$jid " "$AW_STANDIN/jobs" > "$AW_STANDIN/jobs.tmp"; mv "$AW_STANDIN/jobs.tmp" "$AW_STANDIN/jobs"
   echo "$jid" >> "$AW_STANDIN/cancelled"; exit 0
@@ -71,6 +88,16 @@ class Host:
     def add_job(self, job_id: str, state: str = "RUNNING") -> None:
         with (self.root / "jobs").open("a") as f:
             f.write(f"{job_id} {state} {self.user}\n")
+
+    def add_step(self, step_id: str) -> None:
+        """A running step, ``<job>.<step>``, of a job already added."""
+        with (self.root / "steps").open("a") as f:
+            f.write(f"{step_id}\n")
+
+    @property
+    def steps(self) -> list[str]:
+        path = self.root / "steps"
+        return path.read_text().split() if path.exists() else []
 
     @property
     def jobs(self) -> dict[str, str]:

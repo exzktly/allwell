@@ -178,8 +178,8 @@ class _UploadHeartbeat:
             target=self._run, name="aw-upload-heartbeat", daemon=True)
         self._thread.start()
 
-    def stop(self) -> None:
-        """Stop beating, and wait for the thread to notice.
+    def stop(self, *, wait_s: float = 2.0) -> None:
+        """Stop beating, and wait up to *wait_s* for the thread to notice.
 
         The whole mechanism is "a beat that stops means the app is gone", so a
         beat that outlives its run is not a leak of one thread — it tells the
@@ -189,7 +189,7 @@ class _UploadHeartbeat:
         self._stop.set()
         thread, self._thread = self._thread, None
         if thread is not None:
-            thread.join(timeout=2.0)
+            thread.join(timeout=wait_s)
 
     def __enter__(self) -> "_UploadHeartbeat":
         self.beat()

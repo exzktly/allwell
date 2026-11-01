@@ -212,6 +212,50 @@ def test_write_remote_queue_wait_timeout_round_trip(tmp_path):
     assert load_remotes(legacy)["old"].queue_wait_timeout_min == 30
 
 
+def test_granted_node_settings_round_trip_and_are_written_only_when_changed(tmp_path):
+    """granted_time_limit_h (24) and granted_idle_release_min (30) survive a write cycle at values that differ
+    from the defaults, a block that omits them loads the defaults, and a host left at the defaults writes neither
+    key (so a file stays as tidy as before the settings existed)."""
+    cfg = tmp_path / "remotes.toml"
+    write_remote(_make_host("cluster", granted_time_limit_h=48, granted_idle_release_min=0), path=cfg)
+    loaded = load_remotes(cfg)["cluster"]
+    assert (loaded.granted_time_limit_h, loaded.granted_idle_release_min) == (48, 0)
+    text = cfg.read_text(encoding="utf-8")
+    assert "granted_time_limit_h = 48" in text and "granted_idle_release_min = 0" in text
+
+    plain = tmp_path / "plain.toml"
+    write_remote(_make_host("plain"), path=plain)
+    assert "granted_" not in plain.read_text(encoding="utf-8")
+    loaded = load_remotes(plain)["plain"]
+    assert (loaded.granted_time_limit_h, loaded.granted_idle_release_min) == (24, 30)
+
+    # One changed, one default: only the changed key is written.
+    one = tmp_path / "one.toml"
+    write_remote(_make_host("one", granted_idle_release_min=5), path=one)
+    text = one.read_text(encoding="utf-8")
+    assert "granted_idle_release_min = 5" in text and "granted_time_limit_h" not in text
+
+
+@pytest.mark.parametrize("written, expected", [
+    ("granted_time_limit_h = 0", 1),          # below the form's range: clamped up, not 0 hours
+    ("granted_time_limit_h = 100000", 720),   # above it: clamped down
+    ("granted_time_limit_h = \"soon\"", 24),  # not a number: the default
+    ("granted_time_limit_h = true", 24),      # a bool is not 1 hour
+])
+def test_a_hand_edited_granted_time_limit_is_clamped_on_load(tmp_path, written, expected):
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text(f'[remote.old]\nssh_alias = "old"\n{written}\n', encoding="utf-8")
+    assert load_remotes(cfg)["old"].granted_time_limit_h == expected
+
+
+def test_a_hand_edited_granted_idle_release_is_clamped_on_load(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text('[remote.old]\nssh_alias = "old"\ngranted_idle_release_min = -5\n', encoding="utf-8")
+    assert load_remotes(cfg)["old"].granted_idle_release_min == 0
+    cfg.write_text('[remote.old]\nssh_alias = "old"\ngranted_idle_release_min = 999999\n', encoding="utf-8")
+    assert load_remotes(cfg)["old"].granted_idle_release_min == 1440
+
+
 def test_compute_launcher_defaults_empty_when_absent(tmp_path):
     """A pre-existing block with no compute_launcher key loads with the
     field defaulted to '' (runs on the SSH host, legacy behaviour)."""

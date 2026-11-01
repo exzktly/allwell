@@ -176,12 +176,29 @@ def _stop_analyze_runner(analyze, notice=None) -> None:
         swallowed()
 
 
-def _wait_with_notice(wait, notice) -> None:
+#: What the window says while a close gives back the nodes the user kept granted (Manage Remotes → Request a node).
+GRANTED_CLOSE_NOTICE = "Releasing the granted node(s) before closing (up to 10 s)."
+
+
+def _release_granted_nodes(notice=None) -> None:
+    """Give back every node this window asked for (``services.remote_hold.release_all``), so a node kept granted is
+    never left billing after the app that asked for it has gone. Run after the Analyze run is stopped, so the run's own
+    step is closed first. Does nothing, and shows no notice, when there is no granted node."""
+    try:
+        from services.remote_hold import live_nodes, release_all
+
+        if any(n.active for n in live_nodes()):
+            _wait_with_notice(lambda: release_all("All-Well is closing"), notice, GRANTED_CLOSE_NOTICE)
+    except Exception:
+        swallowed()
+
+
+def _wait_with_notice(wait, notice, text: str = CLOSE_WAIT_NOTICE) -> None:
     """Run the blocking *wait* with *notice* shown for its duration (see :func:`_stop_analyze_runner`)."""
     dismiss = None
     if notice is not None:
         try:
-            dismiss = notice(CLOSE_WAIT_NOTICE)
+            dismiss = notice(text)
         except Exception:
             swallowed()
     try:
@@ -2188,6 +2205,8 @@ class AllWellApp(QMainWindow):
         # local subprocess / remote SLURM allocation + scratch (audit L1). Also
         # stops the log poller re-arming (L2).
         _stop_analyze_runner(self._analyze, notice=self._show_close_notice)
+        # A node the user kept granted (Manage Remotes) is given back, after the run on it has been stopped.
+        _release_granted_nodes(notice=self._show_close_notice)
         # Datasets pane is also a child widget: stop any in-flight concatenate
         # worker before teardown so a mid-run quit doesn't leave a live thread.
         datasets = getattr(self, "_datasets", None)

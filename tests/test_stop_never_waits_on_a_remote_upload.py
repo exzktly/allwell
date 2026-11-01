@@ -55,6 +55,7 @@ def _runner(monkeypatch, tmp_path, *, launches: list, cancels: list):
         return _Proc()
 
     remote = types.SimpleNamespace(
+        claim_granted_node=lambda **k: None,  # no granted node on this host
         estimate=lambda z: types.SimpleNamespace(format=lambda: "est"),
         spawn=spawn,
         verify_and_cleanup=lambda ok, **k: True,

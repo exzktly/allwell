@@ -291,7 +291,10 @@ def test_the_runner_refuses_an_incremental_nanowell_run_before_staging_anything(
     monkeypatch.setattr(pr, "stage_local_zips", lambda *a, **k: pytest.fail("staged before refusing"))
     runner = pr.PipelineRunner.__new__(pr.PipelineRunner)
     events = []
-    runner._remote_runner = SimpleNamespace(spawn=lambda *a, **k: pytest.fail("spawned before refusing"))
+    runner._remote_runner = SimpleNamespace(
+        spawn=lambda *a, **k: pytest.fail("spawned before refusing"),
+        # A refused run must not wait for a busy granted node just to be told it cannot run.
+        claim_granted_node=lambda **k: pytest.fail("claimed the granted node before refusing"))
     runner._output_filter = "full"
     runner._remote = SimpleNamespace(name="bench-box")
     runner._stop_requested = threading.Event()

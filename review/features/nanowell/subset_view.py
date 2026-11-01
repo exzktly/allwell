@@ -100,8 +100,6 @@ class _ConditionRow(QWidget):
         self.op_cb = QComboBox()
         self.op_cb.setToolTip(_OP_TIP)
         self.a_spin, self.b_spin = DoubleSpinBox(), DoubleSpinBox()
-        for spin in (self.a_spin, self.b_spin):
-            spin.setKeyboardTracking(False)              # one change per value typed, not per keystroke
         self.and_label = QLabel("and")
         self.tiles_btn = QToolButton()
         self.tiles_btn.setToolTip(_TILES_TIP)

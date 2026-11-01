@@ -24,13 +24,14 @@ from dataclasses import replace
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QDialog, QHBoxLayout, QHeaderView, QLabel, QMessageBox,
-    QPushButton, QSpinBox, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from analyze.remote_dialog import poll_queue_on
 from services import remote_storage as rs
 from services.remote_cache_gc import IN_USE_WINDOW_S
 from services.remote_config import STORAGE_EXPIRY_DAYS_RANGE, RemoteHost, write_remote
+from widgets.spin_box import SpinBox
 
 _DAY = 86400
 COLUMNS = ("Project", "Kind", "Folder", "Size", "Created", "Last used", "Expires", "Local output")
@@ -184,7 +185,7 @@ class RemoteStorageDialog(QDialog):
         self._expire_btn.setToolTip("Remove the selected folders automatically after this many days.")
         self._expire_btn.clicked.connect(self._on_expire)
         actions.addWidget(self._expire_btn)
-        self._expire_days = QSpinBox(self)
+        self._expire_days = SpinBox(self)
         self._expire_days.setRange(1, STORAGE_EXPIRY_DAYS_RANGE[1])
         self._expire_days.setValue(14)
         actions.addWidget(self._expire_days)
@@ -198,7 +199,7 @@ class RemoteStorageDialog(QDialog):
 
         rule = QHBoxLayout()
         rule.addWidget(QLabel("Remove folders left untouched for", self))
-        self._host_days = QSpinBox(self)
+        self._host_days = SpinBox(self)
         self._host_days.setRange(*STORAGE_EXPIRY_DAYS_RANGE)
         self._host_days.setValue(host.storage_expiry_days)
         self._host_days.valueChanged.connect(self._refresh_buttons)

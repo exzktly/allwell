@@ -5764,3 +5764,23 @@ def test_entry_text_guard_clears_a_bare_field_and_a_cleared_affix(tmp_path, monk
                   '    stepper.setSuffix("")\n')
     assert _run_scan(monkeypatch, "tests.test_entry_fields_hold_only_the_value",
                      "test_no_entry_field_carries_a_unit_or_placeholder_word", [good]) is None
+
+
+# ── a spin box the app builds is the subclass a layout cannot squeeze ───────────────
+
+@pytest.mark.parametrize("shape", [
+    "spin = QSpinBox()\n",
+    "from PySide6 import QtWidgets\nspin = QtWidgets.QDoubleSpinBox(parent)\n",
+])
+def test_spin_box_guard_catches_a_bare_qt_spin_box(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_spin.py", shape)
+    exc = _run_scan(monkeypatch, "tests.test_spin_boxes_keep_their_number",
+                    "test_the_application_builds_no_bare_qt_spin_box", [bad])
+    assert exc is not None and "bad_spin.py" in str(exc)
+
+
+def test_spin_box_guard_clears_the_subclass_and_a_type_check(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_spin.py",
+                  "spin = SpinBox()\nok = isinstance(spin, QSpinBox)\nnote: QSpinBox = None\n")
+    assert _run_scan(monkeypatch, "tests.test_spin_boxes_keep_their_number",
+                     "test_the_application_builds_no_bare_qt_spin_box", [good]) is None

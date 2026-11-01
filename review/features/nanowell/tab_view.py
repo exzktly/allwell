@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QSplitter, QToolButton,
+    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSplitter, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -48,6 +48,7 @@ from review.features.nanowell.statistics_view import (
 from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
 from widgets.owned_action import owned_action
+from widgets.spin_box import SpinBox
 
 #: The views the page draws, in the order the switch lists them.
 VIEWS = (("distribution", "Distribution"), ("array", "Array"), ("trajectories", "Trajectories"),
@@ -314,7 +315,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     rim_focus = build_rim_focus_controls(ctx)
     band.add_scope("", rim_focus.box, rim_focus.spin)
 
-    moving_spin = QSpinBox()
+    moving_spin = SpinBox()
     # 1 is off: a window of one timepoint averages nothing. The box holds the bare number and its label says what
     # it counts — no "Off" or unit inside the box, which Qt's spin box refuses to type over.
     moving_spin.setRange(1, MAX_WINDOW)
@@ -323,7 +324,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_moving_spin", moving_spin)
     grp_moving = band.add_scope("Moving average (timepoints, 1 = off)", moving_spin)
 
-    baseline_moving_spin = QSpinBox()
+    baseline_moving_spin = SpinBox()
     baseline_moving_spin.setRange(1, MAX_WINDOW)     # 1 is off, as on the endpoint's window
     baseline_moving_spin.setToolTip(_BASELINE_MOVING_TIP)
     baseline_moving_spin.valueChanged.connect(lambda value: nwc.set_baseline_moving(ctx, value))
@@ -351,7 +352,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_tp_cb", tp_cb)
     grp_tp = band.add_scope("", tp_cb)
 
-    extremes_spin = QSpinBox()
+    extremes_spin = SpinBox()
     extremes_spin.setRange(1, EXTREMES_MAX_N)
     extremes_spin.setValue(st.extremes_n)
     extremes_spin.setToolTip(_EXTREMES_TIP)

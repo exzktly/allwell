@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QPushButton, QSpinBox, QWidget,
+    QComboBox, QPushButton, QWidget,
 )
 
 from widgets.control_band import ControlBand
@@ -27,6 +27,7 @@ from review.features.spatial import state as sp_state
 from review.features.spatial import controller as sp_ctrl
 from review.features.spatial.collect import available_metric_columns, available_timepoints
 from domain.tp_match import tp_close
+from widgets.spin_box import SpinBox, DoubleSpinBox
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -277,7 +278,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
         "Larger ε → fewer, bigger colonies. Smaller ε → more, tighter "
         "colonies (and more noise cells under DBSCAN)."
     )
-    eps_spin = QDoubleSpinBox()
+    eps_spin = DoubleSpinBox()
     eps_spin.setRange(0.5, 20.0)
     eps_spin.setSingleStep(0.5)
     eps_spin.setDecimals(2)
@@ -294,7 +295,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
         "are marked noise (drawn grey on the spatial map).\n"
         "Ignored by Single-linkage (which never rejects a point)."
     )
-    ms_spin = QSpinBox()
+    ms_spin = SpinBox()
     ms_spin.setRange(1, 50)
     ms_spin.setValue(int(st.colony_min_samples))
     ms_spin.setToolTip(_MS_TIP)
@@ -308,7 +309,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
         "distance-to-hull-edge) tagged 'boundary'. Drives the "
         "Boundary-vs-Interior violin split; 20 % is a sensible default."
     )
-    bnd_spin = QDoubleSpinBox()
+    bnd_spin = DoubleSpinBox()
     bnd_spin.setRange(1.0, 50.0)
     bnd_spin.setSingleStep(1.0)
     bnd_spin.setDecimals(1)

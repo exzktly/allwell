@@ -97,15 +97,14 @@ _REANCHOR_LEFT_AS_IT_WAS = {
     "unfinished": "the run ended before its re-anchoring did; its unaddressed timepoints stay unaddressed",
 }
 
-#: A well that finished with less output than it had input — FOV-groups failed
-#: or never attempted, timepoints without rows, nothing measured at all — and a
-#: well the run ended under. Its own colour, because the plate's contract is
-#: that no two states share one and every other one is taken here:
-#: ``run_processing`` says it is still computing, ``run_done`` /
-#: ``run_on_server`` that it finished whole. ``run_partial`` is a near-white,
-#: chosen (with the rest of the ``run_*`` set in ``ui/theme.py``) to stay
-#: distinct from every other state under red/green colour vision deficiency.
-_PARTIAL_COLOR_TOKEN = "run_partial"
+#: A well with a problem — it failed, or it finished with less output than it
+#: had input (FOV-groups failed or never attempted, timepoints without rows,
+#: nothing measured at all), or the run ended under it — is white, and its
+#: glyph says which problem: a red ✕ for failed, a dark "!" for partial or
+#: unfinished. One fill for every well that needs a look, which no other state
+#: takes, and a glyph to tell the two apart. Failed used to have a red fill of
+#: its own, which a red/green deficient viewer saw as the same muted tone as
+#: the run's other wells, set apart by nothing but its ✕.
 #: The glyph a partial or unfinished well carries, beside the failed ✕.
 _PARTIAL_GLYPH = "!"
 _FAILED_GLYPH = "✕"
@@ -367,7 +366,8 @@ class RunDashboard(PlateProgress):
         every time, so no state change can update one and leave the others."""
         self._plate.setWellColor(w, self._well_color(w))
         self.set_well_fraction(w, self._well_fraction(w))
-        self._plate.setWellMarker(w, self._glyph(w))
+        glyph = self._glyph(w)
+        self._plate.setWellMarker(w, glyph, theme.Colors.run_failed_mark if glyph == _FAILED_GLYPH else None)
 
     def _glyph(self, w: str) -> str | None:
         if w in self._errored:
@@ -608,7 +608,7 @@ class RunDashboard(PlateProgress):
         is the *download*, not the (server-side) threshold; for a local run it is
         the threshold. Blue is "computed but the data isn't local yet"."""
         if w in self._errored:
-            return theme.Colors.run_failed
+            return theme.Colors.run_problem
         if w in self._reanchoring:
             return theme.Colors.run_processing                       # computing again
         if w in self._refetch:
@@ -617,7 +617,7 @@ class RunDashboard(PlateProgress):
             # Finished short of its input, or left unfinished — painted so,
             # never in the colour a whole well takes. A download in flight
             # still shows the download, which is what the well is doing.
-            return getattr(theme.Colors, _PARTIAL_COLOR_TOKEN)
+            return theme.Colors.run_problem
         if self._remote:
             # A transfer in flight is painted in the colour of the state it is
             # travelling TOWARD, not the one the well is leaving. The dial fills
@@ -748,8 +748,8 @@ class RunDashboard(PlateProgress):
         items.append((theme.Colors.run_processing, "processing"))
         items.append((theme.Colors.run_on_server, "on server" if self._remote else "processed"))
         items.append((theme.Colors.run_done, "downloaded" if self._remote else "complete"))
-        items.append((getattr(theme.Colors, _PARTIAL_COLOR_TOKEN), "partial / unfinished"))
-        items.append((theme.Colors.run_failed, "failed"))
+        items.append((theme.Colors.run_problem, "partial / unfinished", _PARTIAL_GLYPH, None))
+        items.append((theme.Colors.run_problem, "failed", _FAILED_GLYPH, theme.Colors.run_failed_mark))
         return "Wells", items
 
     def _detail(self, w: str) -> str:

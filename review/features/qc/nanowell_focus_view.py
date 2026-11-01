@@ -13,10 +13,11 @@ One live focus switch per kind of well, never two.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from review.data.nanowell_focus_gate import nanowell_dir, nanowell_focus_status
 from review.domain import nanowell_rim_focus as rfc
+from widgets.spin_box import SpinBox
 
 TOOLTIP = (
     "Drop the cells of a nanowell at any timepoint where its own rim was out of focus — its tile was soft while "
@@ -55,18 +56,20 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
     layout = QVBoxLayout(row)
     layout.setContentsMargins(0, 6, 0, 0)
     layout.setSpacing(2)
-    head = QWidget(row)
-    head_layout = QHBoxLayout(head)
-    head_layout.setContentsMargins(0, 0, 0, 0)
-    box = QCheckBox("Exclude out-of-focus nanowells", head)
+    # The switch on its own line and its percentage on the next, indented under the switch's text: on one line the
+    # row asked for about 510 px, and the Cell Gating panel is often narrower, so the layout squeezed every part of
+    # it — the checkbox's text, the sentence and the number in the box.
+    box = QCheckBox("Exclude out-of-focus nanowells", row)
     box.setChecked(bool(params.exclude_soft_nanowells))
     box.setToolTip(TOOLTIP)
-    head_layout.addWidget(box)
-    head_layout.addSpacing(8)
+    layout.addWidget(box)
+    head = QWidget(row)
+    head_layout = QHBoxLayout(head)
+    head_layout.setContentsMargins(indent, 0, 0, 0)
     below = QLabel("rim below", head)
     below.setObjectName("Muted")
     head_layout.addWidget(below)
-    spin = QSpinBox(head)
+    spin = SpinBox(head)
     spin.setRange(int(round(100 * rfc.MIN_FRACTION)), int(round(100 * rfc.MAX_FRACTION)))
     # A bare number, no suffix: Qt's spin box refuses typing and Backspace while the cursor sits in a suffix, so a
     # click after the number ignored every digit typed. The labels either side say what the number is.
@@ -76,7 +79,8 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
     head_layout.addWidget(spin)
     of = QLabel("of the well's sharpest rims", head)
     of.setObjectName("Muted")
-    head_layout.addWidget(of)
+    of.setWordWrap(True)                     # wraps under itself in a narrow panel, never squeezes the number
+    head_layout.addWidget(of, 1)
     head_layout.addStretch(1)
     layout.addWidget(head)
     status = QLabel("", row)

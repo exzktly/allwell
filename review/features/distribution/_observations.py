@@ -1,5 +1,5 @@
 """Distribution under **Observations: Nanowells**: how the band's nanowell metric varies over nanowells
-(NANOWELL_OBSERVATIONS_TRACKER #12).
+(ARCHITECTURE §6.2l).
 
 Each member (well or replicate set) contributes every nanowell value of the metric at the tab's timepoint — or
 every timepoint when none is chosen — to its histogram, KDE or violin, drawn by the tab's own renderer. This is

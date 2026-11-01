@@ -1,5 +1,5 @@
 """What Segmentation draws over a nanowell run's tile: its cells as points and its nanowells' rims
-(NANOWELL_OBSERVATIONS_TRACKER #5).
+(ARCHITECTURE §6.2l).
 
 A nanowell run writes no label map — its cells are counted per nanowell and recorded as positions in the well frame
 (``well_x_um``, ``well_y_um``), not as outlines — so Segmentation, which draws outlines from a label map, had nothing

@@ -1,5 +1,5 @@
 """Nanowell observations reach the plot tools through the registry, as the page computes them
-(NANOWELL_OBSERVATIONS_TRACKER #7).
+(ARCHITECTURE §6.2l).
 
 The rows are the Nanowells page's ``site_metrics`` — one per nanowell × timepoint — handed out by the Nanowells
 descriptor's ``observations.nanowell`` service, so a plot never imports the (removable) feature. The fixture's

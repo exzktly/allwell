@@ -1,4 +1,4 @@
-"""Scatter draws any nanowell metric against any other (NANOWELL_OBSERVATIONS_TRACKER #9).
+"""Scatter draws any nanowell metric against any other (ARCHITECTURE §6.2l).
 
 Through the real Scatter builder and orchestrated redraw in a minimal shell (CLAUDE.md §7.8 #3), on the synthetic
 nanowell dataset, reading the points the figure holds (§7.4 #1). The fixture is built so the right and wrong
@@ -116,7 +116,7 @@ def test_under_cells_the_scatter_draws_cells_as_before(scatter_ctx):
 
 
 def test_a_cell_can_be_set_against_its_own_nanowell_s_metric(scatter_ctx):
-    """Cells on X, each cell's own nanowell's count on Y (NANOWELL_OBSERVATIONS_TRACKER #11)."""
+    """Cells on X, each cell's own nanowell's count on Y (ARCHITECTURE §6.2l)."""
     from review.features.scatter.controller import redraw_scatter_orchestrate, update_scatter_menus
 
     update_scatter_menus(scatter_ctx)

@@ -1,4 +1,4 @@
-"""Batch Export's Bar and Line figures say what the tabs they mirror say (NANOWELL_OBSERVATIONS_TRACKER #3, #18).
+"""Batch Export's Bar and Line figures say what the tabs they mirror say (ARCHITECTURE §6.2l).
 
 An exported figure is the one most likely to leave the app, so the two sentences the tabs carry must survive the
 export: an ON cutoff nobody set that cuts nothing draws a sentence in place of the Fraction / Events panels, not

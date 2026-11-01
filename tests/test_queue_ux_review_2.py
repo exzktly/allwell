@@ -76,6 +76,26 @@ def test_k2_retrying_with_downstream_runs_the_chain_again():
     assert q.get("an").dataset_root is None
 
 
+def test_k2_retrying_with_downstream_unblocks_what_a_failed_middle_job_stranded():
+    # a -> mid -> an. a succeeded, mid failed, an cascaded to blocked. Retrying
+    # a with its downstream resets mid to pending, so an is no longer stopped by
+    # anything; it must become runnable rather than stay blocked naming mid.
+    q = JobQueue([_conv("a", "Convert"), _conv("mid", "Middle"), _an()])
+    q.set_link("an", "opts.raw", "mid", kind="dataset_root")
+    q.set_chain("mid", "a", chain_target="destination", chain_kind="dataset_root")
+    _succeed(q, "a")
+    _fail(q, "mid")
+    assert q.get("an").state == JobState.BLOCKED
+    assert q.retry("a", with_downstream=True)
+    assert q.get("mid").state == JobState.PENDING
+    assert q.get("an").state == JobState.PENDING, q.get("an").message
+    assert q.get("an").message == ""
+    _succeed(q, "a")
+    _succeed(q, "mid")
+    nxt = q.next_runnable()
+    assert nxt is not None and nxt.id == "an"
+
+
 def test_k2_retrying_alone_marks_the_rest_out_of_date():
     q = _linked()
     _succeed(q, "a")

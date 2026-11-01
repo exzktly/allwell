@@ -1645,10 +1645,12 @@ archives and outputs are always written as per-well `.zip` archives. See
     runs out of GPU memory, the worker halves its batch, says so in the log,
     and carries on.
     If a worker cannot even load its model because the other workers have
-    filled the GPU, it tries three more times, 10 s apart, and then loads on
-    the CPU instead and carries on, much more slowly. The log says so
-    (`Cellpose cpsam could not load on GPU cuda:0 …`); fewer workers is the
-    fix for the next run.
+    filled the GPU, it waits and tries again — 10 s, then twice as long each
+    time up to 5 minutes — until there is room, and never moves to the CPU.
+    The other workers carry on with the rest of the plate meanwhile, and each
+    gives back its spare GPU memory when it finishes a well. The log says so
+    on every try (`Cellpose cpsam ran out of GPU memory loading on GPU
+    cuda:0 …`); fewer workers is the fix for the next run.
   - The remote options' **Batch size** is a different thing: how many wells
     go to the remote at a time, which bounds its disk. It has no effect on
     the GPU.
@@ -1887,6 +1889,18 @@ instead of being cut off part-way; the log says so.
 **Test the node** sends the scheduler Test's job to the node as a run would be
 sent, to see the CPUs and GPUs a run on it gets. **Release** gives the node back
 at once; if a run is using it you are asked first, because releasing stops the run.
+
+**Show log** opens a window with the whole story of a request, which the readout
+(only the latest state) cannot give. *This app's record* lists, with the time of
+each, the `sbatch` that was sent, every change in the job's state and the reason
+the scheduler gave (`PENDING · reason Resources`, `ReqNodeNotAvail`, a node that
+failed to boot), every answer from the host that was not ok, and what ended the
+node; it fills in live and starts with everything since the app began. *On the
+cluster* is what the host holds about the job: the job script's own output, why it
+ended, and the scheduler's full record of it (`scontrol show job`). It is read when
+the window opens, on **Refresh**, and every few seconds while it is open; a host
+that does not answer is said so in place of the text. **Copy all** puts both parts
+on the clipboard, for a message to your cluster's administrators.
 
 **What ends a granted node.** All of these are enforced on the node itself, so
 none depends on All-Well still running:
@@ -6037,7 +6051,10 @@ Selecting nanowells does not change the plate selection.
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
 is selected and kept, so selecting it again is instant. While a newly selected well is read, or the figures are
-recomputed, the page dims the figure and shows *Computing…* across it.
+recomputed, the page dims the figure and shows *Computing…* across it. Before the first figure is drawn the page
+says *Reading the nanowell tables…* with a progress bar under it: it counts the wells as their tables are read
+(*Reading the tables: 12 of 40 wells.*), then starts again as their cells are counted for Cell Gating (*Counting
+the gated cells: …*).
 
 **Excluding a well.** On the views that show a **Well** box (Array, Identity, Extremes), **Exclude** beside it
 leaves that well out of every figure on the Nanowells page and out of *Save nanowell data*; each figure then says

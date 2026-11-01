@@ -1,11 +1,15 @@
-"""A Cellpose worker whose model load runs out of GPU memory keeps segmenting instead of failing every well.
+"""A Cellpose worker whose model load runs out of GPU memory waits for room instead of failing every well.
 
 Reported: a remote run's log showed ``CellposeUnavailable`` from CUDA running out of memory, and the run then went on
 as if it had one worker fewer. The out-of-memory halving (``_eval_halving_on_oom``) only covers passes of a model
 that has loaded; running out while the model loads — building it, or the small test pass that checks bfloat16 —
-raised ``CellposeUnavailable``, cached nothing, and the worker failed the same way on every well it took next. The
-load is now tried again, and after that the worker loads on the CPU. None of this needs a GPU: a stand-in ``torch``
-and ``cellpose`` decide when memory runs out.
+raised ``CellposeUnavailable``, cached nothing, and the worker failed the same way on every well it took next.
+
+The load is now tried again until it fits, with a wait that doubles each time up to a cap, and never falls back to
+the CPU. So that the wait can end, a worker whose Cellpose is on a GPU hands back Torch's cached GPU memory when it
+finishes a well; without that, an idle neighbour would hold its cache for ever after the last well, and the waiting
+worker would wait with it. None of this needs a GPU: a stand-in ``torch`` and ``cellpose`` decide when memory runs
+out.
 """
 
 from __future__ import annotations
@@ -19,6 +23,9 @@ import numpy as np
 import pytest
 
 import pipeline.cellpose as cp
+import pipeline.nanowell_parallel as npar
+import pipeline.nanowell_task as nt
+import process_microscopy as pm
 from pipeline.nanowell_parallel import ON_GPU_ATTR
 
 
@@ -92,43 +99,31 @@ def _warnings(caplog) -> list[str]:
     return [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
 
 
-def test_a_load_that_runs_out_of_gpu_memory_is_tried_again_and_stays_on_the_gpu(gpu, caplog):
-    gpu["gpu_full_for"] = 2
-    with caplog.at_level(logging.INFO, logger="process_microscopy"):
-        _segment()
-    assert gpu["built"] == [("cuda:0", None)] * 3                 # two loads out of memory, the third fits
-    assert gpu["slept"] == [cp.LOAD_OOM_WAIT_S] * 2 and gpu["emptied"] == 2
-    model = cp._CELLPOSE_MODELS["cyto3"]
-    assert model.device.spec == "cuda:0" and getattr(model, ON_GPU_ATTR) is True
-    warned = _warnings(caplog)
-    assert len(warned) == 2
-    assert warned[0].startswith("Cellpose cyto3 ran out of GPU memory loading on GPU cuda:0 (NVIDIA T4) "
-                                "(OutOfMemoryError: CUDA out of memory. Tried to allocate 20.00 MiB); "
-                                "trying again in 10 s, 1 of 3")
-    assert any(r.getMessage().startswith("Cellpose cyto3 on GPU cuda:0 (NVIDIA T4), TF32 (worker ")
-               for r in caplog.records)
+# ── the load waits for room on the GPU ───────────────────────────────────────
 
-
-def test_a_gpu_that_never_has_room_leaves_the_worker_segmenting_on_the_cpu(gpu, caplog):
-    """The reported case: before, every well this worker took raised CellposeUnavailable."""
-    gpu["gpu_full_for"] = 10 ** 6
+def test_a_load_that_runs_out_of_gpu_memory_waits_longer_each_time_and_never_leaves_the_gpu(gpu, caplog):
+    """Eight failed loads: waits of 10, 20, 40, 80, 160 s, then the 300 s cap three times; every try on the GPU,
+    none on the CPU, and the ninth load fits."""
+    gpu["gpu_full_for"] = 8
     with caplog.at_level(logging.INFO, logger="process_microscopy"):
         labels = _segment()
         _segment()                                                # the next field: loaded once, not again
     assert labels.shape == (8, 8)
-    tries = cp.LOAD_OOM_RETRIES + 1
-    assert gpu["built"] == [("cuda:0", None)] * tries + [("cpu", None)]
-    assert gpu["slept"] == [cp.LOAD_OOM_WAIT_S] * cp.LOAD_OOM_RETRIES
+    assert gpu["built"] == [("cuda:0", None)] * 9
+    assert gpu["slept"] == [10.0, 20.0, 40.0, 80.0, 160.0, 300.0, 300.0, 300.0]
+    assert gpu["emptied"] == 8
     model = cp._CELLPOSE_MODELS["cyto3"]
-    assert model.device.spec == "cpu"
-    assert getattr(model, ON_GPU_ATTR) is False                   # the nanowell count's threads follow it off the GPU
+    assert model.device.spec == "cuda:0" and getattr(model, ON_GPU_ATTR) is True
     warned = _warnings(caplog)
-    assert len(warned) == tries
-    assert warned[-1].startswith(f"Cellpose cyto3 could not load on GPU cuda:0 (NVIDIA T4): it ran out of GPU "
-                                 f"memory on all {tries} tries (OutOfMemoryError: CUDA out of memory.")
-    assert "runs Cellpose on the CPU for the rest of the run" in warned[-1]
-    assert any(r.getMessage().startswith("Cellpose cyto3 on CPU — GPU cuda:0 (NVIDIA T4) had no room for the model "
-                                         "(out of GPU memory) (worker ") for r in caplog.records)
+    assert len(warned) == 8
+    assert warned[0].startswith("Cellpose cyto3 ran out of GPU memory loading on GPU cuda:0 (NVIDIA T4) "
+                                "(OutOfMemoryError: CUDA out of memory. Tried to allocate 20.00 MiB), most likely "
+                                "because the run's other workers hold it; trying again in 10 s (try 1, worker ")
+    assert "trying again in 300 s (try 8, worker " in warned[-1]
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(m.startswith("Cellpose cyto3 loaded on GPU cuda:0 (NVIDIA T4) after 8 out-of-memory tries")
+               for m in messages)
+    assert any(m.startswith("Cellpose cyto3 on GPU cuda:0 (NVIDIA T4), TF32 (worker ") for m in messages)
 
 
 def test_running_out_in_the_bfloat16_test_pass_is_tried_again_too(gpu, monkeypatch, caplog):
@@ -139,6 +134,7 @@ def test_running_out_in_the_bfloat16_test_pass_is_tried_again_too(gpu, monkeypat
     with caplog.at_level(logging.INFO, logger="process_microscopy"):
         cp._cellpose_model("cpsam")
     assert gpu["built"] == [("cuda:0", True), ("cuda:0", True)]   # bfloat16 both times: not mistaken for no kernel
+    assert gpu["slept"] == [10.0]
     assert getattr(cp._CELLPOSE_MODELS["cpsam"], ON_GPU_ATTR) is True
     assert any("Cellpose cpsam on GPU cuda:0 (NVIDIA T4), TF32, bfloat16" in r.getMessage() for r in caplog.records)
 
@@ -152,3 +148,56 @@ def test_a_load_failure_that_is_not_out_of_memory_is_not_tried_again(gpu, monkey
     with pytest.raises(cp.CellposeUnavailable, match="weights could not be downloaded"):
         _segment()
     assert gpu["slept"] == [] and gpu["emptied"] == 0
+
+
+# ── a worker that finishes a well makes room for one still waiting ───────────
+
+def test_a_gpu_worker_hands_back_its_cache_at_the_end_of_a_well(gpu):
+    _segment()
+    before = gpu["emptied"]
+    npar.release_cellpose_gpu_cache()
+    assert gpu["emptied"] == before + 1
+
+
+def test_a_cpu_worker_releases_nothing(gpu, monkeypatch):
+    monkeypatch.setattr(sys.modules["torch"].cuda, "is_available", lambda: False)
+    _segment()
+    npar.release_cellpose_gpu_cache()
+    assert gpu["emptied"] == 0
+
+
+def test_a_worker_that_never_ran_cellpose_does_not_import_it_or_torch(monkeypatch):
+    """A StarDist worker: TensorFlow and Torch cannot always share a process."""
+    monkeypatch.delitem(sys.modules, "pipeline.cellpose")
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+    npar.release_cellpose_gpu_cache()
+    assert "pipeline.cellpose" not in sys.modules and "torch" not in sys.modules
+
+
+@pytest.fixture
+def released(monkeypatch):
+    calls = []
+    monkeypatch.setattr(pm, "release_cellpose_gpu_cache", lambda: calls.append(1))
+    monkeypatch.setattr(nt, "release_cellpose_gpu_cache", lambda: calls.append(1))
+    return calls
+
+
+def _boom(*a, **k):
+    raise RuntimeError("this well failed")
+
+
+def test_the_zip_well_task_releases_even_when_the_well_fails(released, monkeypatch, tmp_path):
+    monkeypatch.setattr(pm, "find_image_groups_in_zip", _boom)
+    with pytest.raises(RuntimeError, match="this well failed"):
+        pm.process_well_zip_task("A01", tmp_path / "A01.zip", tmp_path / "out", {}, "DAPI", [], "cells")
+    assert released == [1]
+
+
+def test_the_reanchoring_pass_releases_after_each_well(released, monkeypatch, tmp_path):
+    monkeypatch.setattr(nt, "run_zip_task", lambda *a, **k: None)
+    kw = dict(output_dir=tmp_path, shared_kwargs_template={}, nuclear_token="DAPI", fluor_tokens=[],
+              csv_prefix="cells", schema=None, sep="_", settings_key="", grouper=None, parse=None, segmenter=None)
+    assert nt._reanchor_well(("A01", tmp_path / "A01.zip", {"T0": None}), **kw) == ("A01", {"T0": None}, "")
+    monkeypatch.setattr(nt, "run_zip_task", _boom)
+    assert nt._reanchor_well(("A02", tmp_path / "A02.zip", {"T0": None}), **kw)[2] == "RuntimeError: this well failed"
+    assert released == [1, 1]

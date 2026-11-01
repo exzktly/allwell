@@ -20,6 +20,8 @@ import os
 
 import numpy as np
 
+from util.aw_safe import swallowed
+
 log = logging.getLogger("process_microscopy")
 
 class CellposeUnavailable(RuntimeError):
@@ -154,13 +156,13 @@ def _build_model(cp_models, key: str, major: int | None, device):
     return cp_models.CellposeModel(model_type=key, gpu=device.type == "cuda", device=device), suffix
 
 
-#: How many more times a worker tries to load its Cellpose model onto a GPU that ran out of memory during the load,
-#: and the seconds it waits before each try. The memory is usually held by the run's other workers, each of which
-#: has its own model on the same GPU and keeps what its passes used in Torch's cache, so it does not reliably come
-#: back; the tries cover a neighbour that was in the middle of a pass, and are kept short because each is paid once
-#: per worker.
-LOAD_OOM_RETRIES = 3
-LOAD_OOM_WAIT_S = 10.0
+#: Seconds a worker waits before trying again to load its Cellpose model onto a GPU that ran out of memory during
+#: the load: the first wait, doubled after each failed try up to the last. It keeps trying for as long as it takes and
+#: never loads on the CPU instead, which on a GPU node can be slow enough to make the run end later than it would have
+#: with one worker fewer. The memory is usually held by the run's other workers, and comes back when one of them
+#: finishes a well (:func:`release_cached_gpu_memory`) — at the latest when the plate runs out of wells for them.
+LOAD_OOM_FIRST_WAIT_S = 10.0
+LOAD_OOM_MAX_WAIT_S = 300.0
 
 
 def _free_gpu_memory() -> None:
@@ -174,23 +176,43 @@ def _free_gpu_memory() -> None:
     torch.cuda.empty_cache()
 
 
+def release_cached_gpu_memory() -> None:
+    """Hand back the GPU memory Torch's allocator keeps cached for this worker's next pass. Called, through
+    ``pipeline.nanowell_parallel.release_cellpose_gpu_cache``, when a worker whose Cellpose is on a GPU finishes a
+    well.
+
+    The cache is what the worker's passes used at their peak, and while it is held a worker still waiting to load its
+    model (:func:`_load_with_gpu_room`) can find no room — after the last well, for ever, since an idle worker never
+    empties it on its own. Once a well, it costs the next well's first pass a few allocations."""
+    import torch
+
+    try:
+        torch.cuda.empty_cache()
+    except RuntimeError:
+        swallowed("could not release this worker's cached GPU memory")
+
+
 def _load_with_gpu_room(build, device, where: str, key: str):
     """``(model, device, description)``: ``build(device)`` — which returns ``(model, description suffix)`` — on
-    *device*; when the GPU runs out of memory loading it, tried again ``LOAD_OOM_RETRIES`` times
-    ``LOAD_OOM_WAIT_S`` apart, and after that built on the CPU, with a warning, so the worker still segments its wells
-    rather than failing every one of them.
+    *device*; when the GPU runs out of memory loading it, tried again until it fits, after
+    ``LOAD_OOM_FIRST_WAIT_S`` and then twice as long each time up to ``LOAD_OOM_MAX_WAIT_S``, each wait said in the
+    log. The worker holds the well it was given while it waits, and the run's other workers go on with the rest.
 
     Running out of memory while the model loads — or in its first, test pass — is not covered by the network batch
     halving (``_eval_halving_on_oom``), which applies to a model that has loaded: there is no batch yet to make
     smaller. Before this, such a load raised ``CellposeUnavailable``, nothing was cached, and the worker tried again
     on its next well and failed it the same way, so one worker of the run failed every well it was given while the
-    others carried on. A failure that is not out-of-memory, or one on the CPU, is raised as before."""
+    others carried on. It never falls back to the CPU (``LOAD_OOM_FIRST_WAIT_S`` says why). A failure that is not
+    out-of-memory, or one on the CPU, is raised as before."""
     import time
 
-    tries = 0
+    tries, wait = 0, LOAD_OOM_FIRST_WAIT_S
     while True:
         try:
             model, suffix = build(device)
+            if tries:
+                log.info("Cellpose %s loaded on %s after %d out-of-memory tries (worker %d).", key, where, tries,
+                         os.getpid())
             return model, device, f"{where}{suffix}"
         except RuntimeError as exc:
             if getattr(device, "type", None) != "cuda" or not _is_out_of_memory(exc):
@@ -198,22 +220,13 @@ def _load_with_gpu_room(build, device, where: str, key: str):
             reason = f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
         # Freed outside the handler: the exception's traceback holds the frames that hold the half-built model.
         _free_gpu_memory()
-        if tries < LOAD_OOM_RETRIES:
-            tries += 1
-            log.warning("Cellpose %s ran out of GPU memory loading on %s (%s); trying again in %.0f s, %d of %d "
-                        "(worker %d).", key, where, reason, LOAD_OOM_WAIT_S, tries, LOAD_OOM_RETRIES, os.getpid())
-            time.sleep(LOAD_OOM_WAIT_S)
-            continue
-        import torch
-
-        cpu = torch.device("cpu")
-        log.warning("Cellpose %s could not load on %s: it ran out of GPU memory on all %d tries (%s), most likely "
-                    "because the run's other workers hold the GPU's memory. This worker (%d) runs Cellpose on the "
-                    "CPU for the rest of the run — far slower, and in float32 where the GPU workers may use "
-                    "bfloat16 — rather than failing its wells. Fewer workers (--workers) would leave each worker "
-                    "room on the GPU.", key, where, LOAD_OOM_RETRIES + 1, reason, os.getpid())
-        model, suffix = build(cpu)
-        return model, cpu, f"CPU — {where} had no room for the model (out of GPU memory){suffix}"
+        tries += 1
+        log.warning("Cellpose %s ran out of GPU memory loading on %s (%s), most likely because the run's other "
+                    "workers hold it; trying again in %.0f s (try %d, worker %d). This worker waits on the GPU "
+                    "rather than running on the CPU; fewer workers (--workers) would leave each one room.",
+                    key, where, reason, wait, tries, os.getpid())
+        time.sleep(wait)
+        wait = min(wait * 2, LOAD_OOM_MAX_WAIT_S)
 
 
 #: Seconds this process's Cellpose calls have spent, by Cellpose's own clock: running the network on the images

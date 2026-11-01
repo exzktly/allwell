@@ -236,6 +236,25 @@ def _empty(title: str, hint: str):
     return EmptyReason(title, hint)
 
 
+def _reading_reason(st) -> EmptyReason:
+    """The placeholder while the tables load: the words, and a progress bar counting the wells read so far.
+
+    Until the worker has counted anything the bar has no known end (``(0, 0)``). The load has two passes over
+    the wells — their nanowell tables, then their cells for Cell Gating's counts — and the hint names the one
+    running, since the bar starts again for the second and the second can take as long as the first.
+    """
+    from review.core.ui_helpers import EmptyReason
+
+    stage, done, total = st.load_progress or ("tables", 0, 0)
+    if total <= 0:
+        hint, progress = "The figure appears when they are loaded.", (0, 0)
+    elif stage == "gating":
+        hint, progress = f"Counting the gated cells: {done} of {total} wells.", (done, total)
+    else:
+        hint, progress = f"Reading the tables: {done} of {total} wells.", (done, total)
+    return EmptyReason("Reading the nanowell tables…", hint, busy=True, progress=progress)
+
+
 def nanowell_empty_reason(ctx) -> EmptyReason | None:
     """Why the page has nothing to draw, or ``None`` — each state of the interface plan's §4 by name."""
     st = _state(ctx)
@@ -247,7 +266,7 @@ def nanowell_empty_reason(ctx) -> EmptyReason | None:
         return _empty("This dataset's nanowell tables cannot be read.", st.load_error)
     if st.data is None:
         if st.computing or st.loaded_for is None:
-            return _empty("Reading the nanowell tables…", "The figure appears when they are loaded.")
+            return _reading_reason(st)
         return _empty("This dataset has no nanowell tables.",
                       "Nanowell tables are written by a run with Analyze ▸ Nanowells switched on "
                       "(nanowells/<well>.csv beside the per-well CSVs).")
@@ -259,7 +278,7 @@ def nanowell_empty_reason(ctx) -> EmptyReason | None:
     if not has_plottable_selection(ctx) or not page_groups(ctx):
         chosen = [w for w in active_wells(ctx) if w in set(available)]
         if chosen and st.computing:
-            return _empty("Reading the nanowell tables…", "The figure appears when they are loaded.")
+            return _reading_reason(st)
         if chosen and set(chosen) <= set(st.excluded_wells):
             return _empty("Every selected well is excluded on this page.",
                           f"Excluded: {', '.join(chosen)}. Restore them from Excluded on the band, or select "
@@ -341,17 +360,23 @@ def _cell_label(ctx, well: str, data) -> str | None:
     return next((label for label, path in paths.items() if Path(path).resolve() == wanted), None)
 
 
-def gate_tally(ctx, data) -> cg.GateTally | None:
+def gate_tally(ctx, data, on_well=None) -> cg.GateTally | None:
     """The cells Home's Cell Gating leaves out of *data*'s wells (``cell_gate_compute``), read from the row
     cache with the inclusion every other figure uses. Safe on a worker: the row cache is read there by the
-    gating pass too. ``None`` with no data."""
+    gating pass too. ``None`` with no data. *on_well(done, total)*, when given, is called before the first well
+    and after each one, so the page can show how far the pass has got."""
     from review.data.data_loading import df_included_mask, get_rows
 
     if data is None or not len(data.sites):
         return None
     fields = _excluded_fields(ctx, data)
     per_well, unread = [], []
-    for well in data.wells:
+    total = len(data.wells)
+    if on_well is not None:
+        on_well(0, total)
+    for k, well in enumerate(data.wells, start=1):
+        if on_well is not None and k > 1:
+            on_well(k - 1, total)                        # the well before this one is done (the loop `continue`s)
         label = _cell_label(ctx, well, data)
         if label is None:
             counted = pd.to_numeric(data.sites.loc[data.sites["well"] == well, "n_cells"], errors="coerce")
@@ -372,6 +397,8 @@ def gate_tally(ctx, data) -> cg.GateTally | None:
             # say Cell Gating left them out, which it did not.
             skipped = (*cg.FIELD_LAYERS, rfc.NW_FOCUS_PASS_COLUMN)
             per_well.append((well, frame, df_included_mask(frame, except_layers=skipped).to_numpy()))
+    if on_well is not None:
+        on_well(total, total)
     return cg.tally(per_well, unread, fields)
 
 
@@ -421,23 +448,45 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         return
     st.request += 1
     request, baseline, focus = st.request, st.baseline, st.rim_focus_rule()
-    st.computing, st.pending_for = True, (key, wells, version)
+    st.computing, st.pending_for, st.load_progress = True, (key, wells, version), None
     same_wells = wanted <= st.loaded_wells and st.loaded_for is not None and st.loaded_for[0] == key[0]
     previous = st.data if same_wells else None
     parts = dict(st.well_parts)                          # the worker's own copy: it adds the wells it reads
 
-    def job():
+    def job(reporter):
+        # Each phase counts its wells through the bridge's queued signal, so the page's placeholder can draw a
+        # progress bar rather than one unchanging sentence for the whole of a long read (``on_progress`` below).
+        def counter(stage):
+            def report(done_count, total):
+                reporter.stage(stage)                    # the same thread's signals arrive in the order sent
+                reporter.progress(done_count, total)
+            return report
+
         # The cells Home's Cell Gating leaves out are tallied here too, at the version asked for: an edit made
         # while this runs moves the version, and the next draw asks again (``redraw``).
         if previous is not None:
-            gate = gate_tally(ctx, previous)
+            gate = gate_tally(ctx, previous, on_well=counter("gating"))
             return previous, _metrics_of(previous, baseline, gate, focus), "", parts, gate
         try:
-            data = load_nanowell_data(Path(data_dir), wells=sorted(wells), parts=parts) if data_dir else None
+            data = (load_nanowell_data(Path(data_dir), wells=sorted(wells), parts=parts, on_well=counter("tables"))
+                    if data_dir else None)
         except NanowellSchemeError as exc:
             return None, None, str(exc), parts, None
-        gate = gate_tally(ctx, data)
+        gate = gate_tally(ctx, data, on_well=counter("gating"))
         return data, _metrics_of(data, baseline, gate, focus), "", parts, gate
+
+    stage_now = ["tables"]
+
+    def on_stage(stage: str):
+        stage_now[0] = stage
+
+    def on_progress(done_count: int, total: int):
+        # Delivered on the GUI thread, in order, ahead of ``done``. A stale request's count is dropped like its
+        # result, and so is anything once the page has gone.
+        if request != st.request or not st.computing or _page_deleted(ctx):
+            return
+        st.load_progress = (stage_now[0], int(done_count), int(total))
+        _refresh_empty(ctx)
 
     def done(result):
         if request != st.request:
@@ -445,7 +494,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         data, metrics, error, read, gate = result
         st.data, st.metrics, st.load_error = data, metrics, error
         st.gate, (st.gated_for, st.focus_for) = gate, version
-        st.loaded_for, st.computing = key, False
+        st.loaded_for, st.computing, st.load_progress = key, False, None
         if st.parts_for == key[0]:
             st.well_parts, st.loaded_wells = read, wells
         for problem in (data.problems if data is not None else []):
@@ -459,11 +508,13 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
             return
         st.reset_data()
         st.computing, st.load_error, st.loaded_for = False, f"Loading failed: {message}", key
+        st.load_progress = None
         st.gated_for, st.focus_for = version             # failed at this version: a redraw must not retry it
         _call(ctx, "_nw_refresh_controls")
         redraw(ctx)
 
-    st.bridge = run_off_thread(job, on_done=done, on_failed=failed)
+    st.bridge = run_off_thread(job, on_done=done, on_failed=failed, on_stage=on_stage,
+                               on_progress=on_progress)
     _call(ctx, "_nw_show_computing")
     _refresh_empty(ctx)
 
@@ -1827,6 +1878,26 @@ def nw_on_selection_changed(ctx) -> None:
             ensure_loaded(ctx)                   # a well selected now is read now; a hidden page reads on show
         _call(ctx, "_nw_refresh_controls")
         redraw(ctx)
+
+
+def nw_on_qc_params_changed(ctx) -> None:
+    """Follow a change to the QC parameters made anywhere — Cell Gating's panel or this page's own band — once the
+    QC layer has re-projected every verdict (``qc.controller._after_qc_params_applied`` calls it as the
+    ``nanowell.follow_qc_params`` service).
+
+    The QC parameters carry two things this page draws from: the nanowell focus rule and, through Cell Gating, which
+    cells count. While the page is on screen — beside Cell Gating in Split View is the case that needs it — the
+    redraw sees that its metrics were computed for another rule or gate and fetches the right ones
+    (:func:`redraw`'s staleness check), and the band's *Rim focus* box is refilled from the parameters. A hidden
+    page only refills its controls: showing it runs the same check (:func:`nw_on_activate`), so nothing is computed
+    for a page nobody is looking at."""
+    if ctx.widgets.get_or_none("_nw_canvas") is None or _page_deleted(ctx):
+        return
+    visible = ctx.widgets.get_or_none("_nw_page_visible")
+    if callable(visible) and visible():
+        redraw(ctx)
+    else:
+        _call(ctx, "_nw_refresh_controls")
 
 
 def nw_on_channel_changed(ctx) -> None:

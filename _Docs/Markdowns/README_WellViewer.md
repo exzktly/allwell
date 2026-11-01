@@ -4019,8 +4019,11 @@ or column number to toggle the whole row / column. Under the plate, the
 its **All** and **None** buttons fill or clear the selection in one click. With
 replicate groups defined, the plate on a plotting tab shows groups rather than
 wells: the footer then counts the groups shown ("2/3 sets visible"), and **All**
-/ **None** show or hide every group. On a page that plots one well at a time
-(smFISH, Playground) **All** is not offered. The Image Table's own picker ends in
+/ **None** show or hide every group. On Home and Review CSV, which edit wells
+one at a time, the plate always selects wells and **All** / **None** select and
+clear them. On a page that shows one well at a time (smFISH, Playground) the
+plate picks a single well and **All** is not offered — unless groups are
+defined, when the plate shows groups as it does elsewhere. The Image Table's own picker ends in
 the same footer. The selection survives across tabs and is what every plot /
 aggregate / export consumes.
 

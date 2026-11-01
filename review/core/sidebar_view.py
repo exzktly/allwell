@@ -95,8 +95,8 @@ def build_sidebar(win, parent: QWidget) -> None:
     from widgets.selection_footer import SelectionFooter
     footer = SelectionFooter(
         parent,
-        all_tooltip="Select every loaded well — or, with groups defined, show every group.",
-        none_tooltip="Clear the selection — or, with groups defined, hide every group.",
+        all_tooltip="Select every loaded well — or, where the plate shows groups, show every group.",
+        none_tooltip="Clear the selection — or, where the plate shows groups, hide every group.",
     )
     footer.selectAllRequested.connect(lambda: _select_all(win._ctx))
     footer.selectNoneRequested.connect(lambda: _select_none(win._ctx))

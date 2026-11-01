@@ -28,6 +28,7 @@ from review.core.feature_registry import (
     MAIN_RAIL_SECTION, FeatureDescriptor, FeatureRegistry, RailSection,
 )
 from review.features import registry
+from tests._repo_scan import parse_source
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -143,6 +144,16 @@ def test_the_tab_switch_shows_exactly_the_page_s_frames(features, page, shown, r
     assert len(refreshed) == repaints
 
 
+def test_a_page_declaring_frames_without_a_hook_still_gets_them():
+    from review.core.tab_controller import rail_descriptor
+    d = FeatureDescriptor(name="X", rail_sections=(RailSection("_x"),))
+    assert rail_descriptor(d) is d
+    assert rail_descriptor(FeatureDescriptor(name="Y")) is None
+    assert rail_descriptor(None) is None
+    home_like = FeatureDescriptor(name="Z", on_activate=lambda _c: None)
+    assert rail_descriptor(home_like) is home_like, "a hook with no frames shows none"
+
+
 def test_a_page_with_no_descriptor_gets_the_main_frame(features):
     from review.core.tab_controller import show_rail_sections
     ctx, frames, refreshed = _ctx(features)
@@ -154,7 +165,7 @@ def test_a_page_with_no_descriptor_gets_the_main_frame(features):
 def test_hooks_leave_the_rail_frames_to_the_tab_switch():
     """The fifteen copies stay gone: no activation hook names a rail frame,
     except the exempt Statistics, whose showing is conditional."""
-    tree = ast.parse((REPO / "review" / "features" / "registry.py").read_text())
+    tree = parse_source(REPO / "review" / "features" / "registry.py")
     keys = {s.key for s in registry.build_feature_registry().rail_sections()}
     offenders = []
     for fn in ast.walk(tree):

@@ -57,6 +57,21 @@ def _sidebar_section_frames(ctx) -> list:
     return out
 
 
+def rail_descriptor(desc):
+    """The descriptor whose ``rail_sections`` the tab switch should show for a
+    page, or ``None`` for the rail's default (the main frame).
+
+    A page speaks for its rail when it declares frames *or* has a hook — a hook
+    with no frames (Home, Statistics) means "this page shows none or decides for
+    itself". A page with neither is the generic plot fallback. Declaring frames
+    without a hook still gets those frames, rather than having them silently
+    replaced by the main frame.
+    """
+    if desc is None or (desc.on_activate is None and not desc.rail_sections):
+        return None
+    return desc
+
+
 def show_rail_sections(ctx, desc) -> None:
     """Show the rail frames page *desc* declares, then repaint the rail plate
     if the main frame is among them.
@@ -177,10 +192,8 @@ def on_tab_change(ctx, _e=None) -> None:
     # showing that is all it needs here.
     for _other in _also_visible:
         _other_desc = ctx.features.get(_other)
-        if _other_desc is None or _other_desc.on_activate is None:
-            show_rail_sections(ctx, None)
-        else:
-            show_rail_sections(ctx, _other_desc)
+        show_rail_sections(ctx, rail_descriptor(_other_desc))
+        if _other_desc is not None and _other_desc.on_activate is not None:
             try:
                 _other_desc.on_activate(ctx)
             except Exception:
@@ -190,11 +203,10 @@ def on_tab_change(ctx, _e=None) -> None:
     _other_frames = [f for f in _frames if not f.isHidden()]
 
     desc = ctx.features.get(tab)
+    show_rail_sections(ctx, rail_descriptor(desc))
     if desc is not None and desc.on_activate is not None:
-        show_rail_sections(ctx, desc)
         desc.on_activate(ctx)
     else:
-        show_rail_sections(ctx, None)
         redraw_app(ctx)
 
     # **One well picker on screen, and it belongs to the focused pane.** Three

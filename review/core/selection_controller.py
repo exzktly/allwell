@@ -428,22 +428,19 @@ def select_col(ctx, col: str) -> None:
 
 
 def select_all(ctx) -> None:
-    """Select every loaded well — or, in group mode, show every group.
+    """Select every loaded well — or, while the plate shows groups, show every group.
 
-    Group mode follows :func:`select_none`'s rule: groups or a variable
-    grouping exist **and** the current tab is not a per-well tab. On a per-well
-    tab (Cell Browser / Home / Review CSV) the plate selects wells even when
-    groups exist, so **All** selects wells there; asking only whether groups
-    exist showed every group instead and left the plate on that page unchanged.
+    Which of the two is the plate's own decision
+    (:func:`_plate_passive_in_group_mode`), shared with :func:`select_none` so
+    the footer's **All** and **None** act on whatever the plate is showing. On
+    a well-editing page (Home / Review CSV) the plate selects wells even when
+    groups exist, so **All** selects wells there; everywhere else a plate with
+    groups paints groups, and **All** shows them all.
     """
     app = ctx.window  # transitional bridge (A3)
     sel = app._app_state.selection
-    try:
-        _tab = app._current_centre_tab()
-    except Exception:
-        _tab = ""
     grouping = bool(_grouping_variable(ctx))
-    rep_mode = (bool(sel.selections) or grouping) and not _is_per_well_tab(ctx, _tab)
+    rep_mode = _plate_passive_in_group_mode(ctx)
     if rep_mode and grouping:  # grouped by a variable: show every value
         _set_values_hidden(ctx, [r.value_id for r in _value_sets(ctx)], target=False)
     elif rep_mode:  # group mode: show every group
@@ -463,19 +460,16 @@ def select_none(ctx) -> None:
     cleared_solo = bool(solo)
     if cleared_solo:
         solo.clear()
-    # Mirror the sidebar's mode decision: group ("rep") mode applies only when
-    # saved selections exist AND the current tab isn't a per-well tab. On a
-    # per-well tab (Cell Browser / Home / Review CSV) the plate
-    # selects individual wells, so "Deselect all" must clear ``selected_wells``
-    # — even when saved groups also exist. Branching on ``sel.selections`` alone
-    # (the old behaviour) only hid the groups and left the per-well selection,
-    # so the button looked broken on those tabs.
-    try:
-        _tab = app._current_centre_tab()
-    except Exception:
-        _tab = ""
+    # Act on what the plate shows: the plate's own mode decision
+    # (``_plate_passive_in_group_mode``), shared with ``select_all``. On a
+    # well-editing page (Home / Review CSV) the plate selects individual wells,
+    # so **None** must clear ``selected_wells`` even when groups exist —
+    # branching on ``sel.selections`` alone only hid the groups there and the
+    # button looked broken. Everywhere else a plate with groups paints groups
+    # (Cell Browser mirrors them), so **None** hides them; clearing
+    # ``selected_wells`` there changed nothing the plate drew.
     grouping = bool(_grouping_variable(ctx))
-    rep_mode = (bool(sel.selections) or grouping) and not _is_per_well_tab(ctx, _tab)
+    rep_mode = _plate_passive_in_group_mode(ctx)
     if rep_mode and grouping:  # grouped by a variable: hide every value
         _set_values_hidden(ctx, [r.value_id for r in _value_sets(ctx)], target=True)
         if cleared_solo:

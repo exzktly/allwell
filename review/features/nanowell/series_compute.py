@@ -338,6 +338,29 @@ def crop_metric_lines(row, channel: str | None = None) -> list[str]:
     return items
 
 
+def rim_focus_text(row) -> str:
+    """The rim focus of one nanowell at one timepoint, as the pop-out's crop caption writes it: its rim's sharpness as
+    a percentage of its well's sharp rims there (``rim_focus_ref``, the 90th percentile the rim focus rule judges
+    against), so it reads on the same scale as the *Rim focus* threshold — ``rim 83% of sharpest`` is in focus at the
+    default 75, ``rim 52% of sharpest`` is not. Written whether or not the rule is on, and on an out-of-focus timepoint
+    too, which is where it is wanted most.
+
+    ``rim 0.95 (not judged)`` when the well had too few rims there to judge against; ``rim not fitted`` for a
+    measurable timepoint with no rim focus (predicted geometry, off the image); ``""`` for a timepoint that has neither
+    a rim focus nor a measurement to judge (an unaddressed or absent nanowell). *row* is one row of
+    :func:`site_series`."""
+    def finite(key):
+        v = row.get(key)
+        return float(v) if isinstance(v, (int, float, np.floating, np.integer)) and math.isfinite(v) else None
+
+    focus, ref = finite("focus"), finite("rim_focus_ref")
+    if focus is None or focus <= 0:
+        return "rim not fitted" if str(row.get("state", "")) in ("measured", "empty", nanowell_rim_focus.OUT_OF_FOCUS) else ""
+    if ref is None or ref <= 0:
+        return f"rim {compact_number(focus)} (not judged)"
+    return f"rim {100 * focus / ref:.0f}% of sharpest"
+
+
 def compact_number(value: float) -> str:
     """*value* to three significant figures, thousands and millions as ``k`` and ``M`` (``5.79k``), so a caption
     under a crop stays as narrow as the crop.

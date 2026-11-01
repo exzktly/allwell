@@ -1213,11 +1213,23 @@ def lut_colormap_to_rgb(arr, lo: float | None = None,
     a = _np.asarray(arr, dtype=_np.float32)
     if log_scale:
         a, lo, hi = apply_log_scale(a, lo, hi)
-    alo = lo if lo is not None else float(a.min())
-    ahi = hi if hi is not None else float(a.max())
+    # A NaN pixel has no value (a nanowell frame's background); the window is the
+    # finite pixels' and NaN maps to the bottom, for the caller to paint over.
+    finite = _np.isfinite(a)
+    has_nan = not finite.all()
+    if has_nan and finite.any():
+        amin, amax = float(a[finite].min()), float(a[finite].max())
+    elif has_nan:
+        amin, amax = 0.0, 1.0
+    else:
+        amin, amax = (float(a.min()), float(a.max())) if a.size else (0.0, 1.0)
+    alo = lo if lo is not None else amin
+    ahi = hi if hi is not None else amax
     if ahi <= alo:
         ahi = alo + 1.0
     norm = _np.clip((a - alo) / (ahi - alo), 0.0, 1.0)
+    if has_nan:
+        norm = _np.where(finite, norm, 0.0)
     if cmap_name:
         try:
             from widgets.lut_cmaps import lut_cmap

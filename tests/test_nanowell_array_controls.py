@@ -143,9 +143,77 @@ def test_each_nanowell_is_labelled_with_its_address_and_its_value_of_the_chosen_
     metric_cb = ctx.widgets.get("_nw_metric_cb")
     metric_cb.setCurrentIndex(metric_cb.findData("c"))
     assert st.metric == "c"
-    # A nanowell without a value writes nothing: it is not a zero.
-    assert _labels(ctx) == ["0.125", "0.5", "1.75"]
+    # A nanowell without a value writes why it has none, never a number: it is not a zero.
+    assert _labels(ctx) == ["0.125", "0.5", "1.75", "no conf."]
     assert not any("zoom in" in t for t in _texts(ctx, "nw-array-footer"))
+
+
+def test_every_label_has_a_halo_of_the_ground_so_it_reads_over_a_hatch(qc_page):
+    """The addresses on the out-of-focus nanowells could not be read over the dot hatch (UX review N7): a label in a
+    nanowell drawn without a fill — here every one, outlined by state — has a stroke of the figure's ground around
+    it. A label on a metric fill is left plain (``test_a_label_on_a_metric_fill_has_no_halo``)."""
+    from matplotlib.colors import to_hex
+    from matplotlib.patheffects import withStroke
+
+    from review.features.nanowell.renderer import _inks
+
+    ctx = qc_page
+    _toggle(ctx, "addresses")
+    st = ctx.state.feature_slice("nanowell")
+    labels = [t for t in st.drawn.ax.texts if t.get_gid() == "nw-array-address"]
+    assert labels
+    ground = to_hex(_inks(st.drawn.ax)[0])
+    for label in labels:
+        effects = label.get_path_effects()
+        assert [type(e) for e in effects] == [withStroke], label.get_text()
+        assert to_hex(effects[0]._gc["foreground"]) == ground
+
+
+def test_a_hatched_nanowell_s_label_sits_on_a_patch_of_the_ground():
+    """Over the dot hatch of an out-of-focus nanowell a halo still lost to the pattern (UX review, round 3): its label
+    sits on a solid patch of the ground; a plain outlined nanowell's keeps the halo."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.colors import to_hex
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.array_compute import ArrayScene
+    from review.features.nanowell.renderer import _inks, render_array
+    from review.features.nanowell.state import ArrayLayers
+    from tests.test_nanowell_array_key import _sites
+
+    sites = _sites(["out_of_focus", "measured"])
+    sites.radius[:] = 45.0
+    scene = ArrayScene("A01", "0h", "lattice", sites, 2, 0, {"out_of_focus": 1, "measured": 1}, 100.0)
+    fig = Figure(figsize=(8.0, 6.0), dpi=100)
+    FigureCanvasAgg(fig)
+    drawn = render_array(fig, scene, ArrayLayers(image="off", colour="state", addresses=True, values=False),
+                         label="Cell count")
+    labels = {t.get_text(): t for t in drawn.ax.texts if t.get_gid() == "nw-array-address"}
+    soft, plain = labels["0,0"], labels["1,0"]
+    assert soft.get_bbox_patch() is not None and not soft.get_path_effects()
+    assert to_hex(soft.get_bbox_patch().get_facecolor()) == to_hex(_inks(drawn.ax)[0])
+    assert plain.get_bbox_patch() is None and plain.get_path_effects()
+
+
+def test_a_label_on_a_metric_fill_has_no_halo(qc_page):
+    """A dark stroke roughened the labels on the metric's fill, which read on it unaided: only the nanowells without a
+    fill (no value, hatched or not) get the halo."""
+    from review.features.nanowell import controller as nwc
+
+    ctx = qc_page
+    st = ctx.state.feature_slice("nanowell")
+    rows = (st.metrics["well"] == "A01") & (st.metrics["timepoint"] == "t_a")
+    st.metrics.loc[rows, "c"] = [0.125, 0.5, 1.75, np.nan]             # one nanowell without a value
+    nwc.set_layer(ctx, "colour", "metric")
+    metric_cb = ctx.widgets.get("_nw_metric_cb")
+    metric_cb.setCurrentIndex(metric_cb.findData("c"))
+    _toggle(ctx, "addresses")
+    labels = {t.get_text().splitlines()[0]: t for t in st.drawn.ax.texts if t.get_gid() == "nw-array-address"}
+    sites = st.drawn.sites
+    has = np.isfinite(np.asarray(sites.values, dtype=float))
+    assert has.any() and (~has).any()
+    for k, address in enumerate(sites.labels):
+        assert bool(labels[address].get_path_effects()) is not bool(has[k]), address
 
 
 def test_a_label_writes_three_significant_figures_and_never_a_missing_value_as_a_number():
@@ -153,10 +221,15 @@ def test_a_label_writes_three_significant_figures_and_never_a_missing_value_as_a
 
     from review.features.nanowell.renderer import site_label_texts
 
-    sites = SimpleNamespace(labels=["0,0", "1,-1", "", ""], values=np.array([12.3456, np.nan, 0.0, np.nan]))
+    sites = SimpleNamespace(labels=["0,0", "1,-1", "", ""], values=np.array([12.3456, np.nan, 0.0, np.nan]),
+                            sites=[("A01", 0, 0), ("A01", 1, -1), ("A01", 2, 0), ("A01", 3, 0)])
     assert site_label_texts(sites, addresses=True, values=True) == ["0,0\n12.3", "1,-1", "0", ""]
     assert site_label_texts(sites, addresses=False, values=True) == ["12.3", "", "0", ""]
     assert site_label_texts(sites, addresses=True, values=False) == ["0,0", "1,-1", "", ""]
+    # With the reasons known, a nanowell without a value writes its reason's tag where the value would be.
+    why = {(1, -1): "no cells at baseline", (3, 0): "baseline occluded"}
+    assert site_label_texts(sites, addresses=True, values=True, why=why) == [
+        "0,0\n12.3", "1,-1\n0 at base", "0", "base occl."]
 
 
 def test_values_are_on_by_default_and_the_saved_layers_keep_them():

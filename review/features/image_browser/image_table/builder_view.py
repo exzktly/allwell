@@ -31,7 +31,7 @@ from string import Template
 from PySide6.QtCore import QMimeData, Qt, QTimer
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
     QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -56,6 +56,7 @@ from review.features.image_browser.image_table.image_compose import (
     LUT_COLOR_NAMES, LUT_COLORS, _is_binary_variant, _is_nuc_seg,
 )
 from widgets.owned_action import owned_action
+from review.data.nanowell_images import display_token, is_metric_map as _is_metric_token
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -267,10 +268,15 @@ def _default_spec(ctx):
         return spec_from_state(st)
     chans = _base_channels(ctx)
     spec = spec_from_state(st)  # empty axes + current filters
+    # A nanowell plate offers a stitched montage per fluorescence channel and a
+    # map per metric — a dozen and more. Each montage reads every tile of every
+    # well shown, so none of them is in the starting table; the phase montage the
+    # run stored is, and the rest are a drag from the tray away.
+    from review.data.nanowell_images import is_nanowell_frame, montage_channel
+
+    chans = [c for c in chans if not is_nanowell_frame(c) or montage_channel(c) == ""]
     if chans:
-        spec.rows = Axis(root="well", channels=[
-            ChannelSpec(c, "corrected", colormap=_default_colormap_for(ctx, c))
-            for c in chans])
+        spec.rows = Axis(root="well", channels=[new_channel_spec(ctx, c) for c in chans])
         if _timepoint_options(ctx):
             spec.cols = Axis(root="timepoint")
     for dim in _ROOT_DIMS:
@@ -307,8 +313,7 @@ def _add_channel(ctx, spec, name: str, target: str, at: int | None = None) -> No
         ax.channels.extend(other.channels)
         other.channels = []
         other.overlay = False
-    cs = ChannelSpec(channel=name, render="corrected",
-                     colormap=_default_colormap_for(ctx, name))
+    cs = new_channel_spec(ctx, name)
     if at is None:
         ax.channels.append(cs)
     else:
@@ -694,7 +699,28 @@ def _x_btn(tip: str, on_click) -> QToolButton:
 
 
 def _cmap_swatch(cmap: str) -> str:
+    """The swatch's fill for *cmap*: its colour for a single-hue LUT, and for a ramp
+    (``viridis``, ``coolwarm``, …) the ramp itself, so a metric row's chip shows
+    the colours its cells are drawn in rather than one hue they never use."""
+    if cmap in LUT_COLORS and LUT_COLORS[cmap] is None and cmap != "Greys":
+        ramp = _ramp_gradient(cmap)
+        if ramp:
+            return ramp
     return _CMAP_SWATCH.get(cmap, "#C8CDD8")
+
+
+def _ramp_gradient(cmap: str) -> str:
+    """A QSS ``qlineargradient`` sampling *cmap* at five stops, or ``""``."""
+    with swallow("image table builder: ramp swatch"):
+        from widgets.lut_cmaps import lut_cmap
+
+        cm = lut_cmap(cmap)
+        stops = []
+        for i in range(5):
+            r, g, b = (int(round(255 * v)) for v in cm(i / 4)[:3])
+            stops.append(f"stop:{i / 4:g} rgb({r},{g},{b})")
+        return f"qlineargradient(x1:0, y1:0, x2:1, y2:0, {', '.join(stops)})"
+    return ""
 
 
 def _standard_cmap(name: str) -> str | None:
@@ -714,6 +740,18 @@ def _default_colormap_for(ctx, name: str) -> str:
     swatch shows *and* what the channel adopts when dragged in — so the colour
     carries through instead of resetting to grey — and it stays fully editable in
     the LUT box below."""
+    from review.data.nanowell_images import METRIC_MAP_COLORMAP, is_metric_map
+    from review.data.observations import fold_change_scale, nanowell_metric_for_token
+
+    if is_metric_map(name):
+        # A metric is not a fluorophore, even when its name carries one, and a black-based ramp would draw its
+        # lowest values in the black of the background (``nanowell_images``). A fold change diverges about "no
+        # change", so it gets a diverging map that the pooled window centres there.
+        if fold_change_scale(nanowell_metric_for_token(ctx, name)):
+            return FOLD_CHANGE_COLORMAP
+        return METRIC_MAP_COLORMAP
+    if _is_transmitted(ctx, name):
+        return "Greys"
     std = _standard_cmap(name)
     if std is not None:
         return std
@@ -730,6 +768,46 @@ def _default_colormap_for(ctx, name: str) -> str:
                 best, best_d = cname, d
         return best
     return "Greys"
+
+
+#: A nanowell fold-change map's default: blue below 1, red above, grey at 1.
+FOLD_CHANGE_COLORMAP = "coolwarm"
+
+#: Transmitted-light channel names, matched as a whole word of the token —
+#: never as a substring, which would take ``bfp`` for brightfield.
+_TRANSMITTED = frozenset({"phase", "ph", "bf", "brightfield", "dic", "tl", "trans", "transmitted"})
+
+
+def _is_transmitted(ctx, name: str) -> bool:
+    """Whether *name* is a transmitted-light image — the run's phase channel, its
+    stored montage, or a channel named like one — which is drawn in grey: a tint
+    makes it read as a fluorescence channel, and the phase montage drawn green
+    sat directly above the GFP montage looking like a second GFP image."""
+    from review.data.frame_load import phase_channel
+    from review.data.nanowell_images import montage_channel
+
+    text = str(name or "").strip().lower()
+    if montage_channel(text) == "":
+        return True
+    channel = montage_channel(text) or text
+    info = getattr(getattr(ctx.state, "dataset", None), "pipeline_info", None)
+    if channel and channel == phase_channel(info):
+        return True
+    import re
+
+    return any(word in _TRANSMITTED for word in re.split(r"[^a-z0-9]+", channel))
+
+
+def new_channel_spec(ctx, name: str) -> ChannelSpec:
+    """A fresh channel *name* as the builder adds it: its default colormap, and for
+    a nanowell fold change a log scale, so the pooled window can centre on 1 with
+    ×2 and ×½ the same distance from it."""
+    from review.data.observations import fold_change_scale, nanowell_metric_for_token
+
+    cs = ChannelSpec(channel=name, render="corrected", colormap=_default_colormap_for(ctx, name))
+    if fold_change_scale(nanowell_metric_for_token(ctx, name)) == "ratio":
+        cs.log = True
+    return cs
 
 
 # ── drop acceptance (so a zone never highlights for a token it ignores) ──────
@@ -1145,7 +1223,7 @@ def _chan_pill(ctx, spec, axis: str, idx: int, cs: ChannelSpec) -> QFrame:
     h.setSpacing(7)
     h.addWidget(_grip())
     h.addWidget(_swatch(_cmap_swatch(cs.colormap)))
-    h.addWidget(_text(str(cs.channel).upper(), "ITBChanLbl"))
+    h.addWidget(_text(display_token(cs.channel), "ITBChanLbl"))
     h.addStretch(1)
     gear = QToolButton(pill)
     gear.setObjectName("ITBOpt")
@@ -1399,7 +1477,7 @@ def _lut_row(ctx, token: str, specs: list) -> QFrame:
     h.setSpacing(7)
     sw = _swatch(_cmap_swatch(cs0.colormap))
     h.addWidget(sw)
-    h.addWidget(_text(str(cs0.channel).upper(), "ITBLutChan"))
+    h.addWidget(_text(display_token(cs0.channel), "ITBLutChan"))
     if len(specs) > 1:
         h.addWidget(_text(f"×{len(specs)}", "ITBLutTag"))
     h.addStretch(1)
@@ -1457,6 +1535,19 @@ def _lut_row(ctx, token: str, specs: list) -> QFrame:
         _schedule_apply(ctx)
     fit.clicked.connect(lambda: _auto())
     h.addWidget(fit)
+
+    per_cell = QCheckBox("per cell", row)
+    per_cell.setObjectName("ITBLutPerCell")
+    per_cell.setChecked(bool(cs0.auto_per_cell))
+    per_cell.setToolTip("Auto scales every cell to its own range: dim wells become visible, and brightness is no "
+                        "longer comparable from cell to cell. Off: one window shared by the whole grid.")
+
+    def _per_cell(on: bool):
+        for cs in specs:
+            cs.auto_per_cell = bool(on)
+        _lut_touched(ctx)
+    per_cell.toggled.connect(_per_cell)
+    h.addWidget(per_cell)
     return row
 
 
@@ -1476,6 +1567,9 @@ def _lut_touched(ctx) -> None:
 
 
 def _build_tray(ctx, spec) -> None:
+    """The Channels tray: one chip per channel, and on a nanowell plate the metric
+    maps folded behind one **Nanowell metrics** toggle — a dozen and more chips
+    that otherwise buried the channels themselves."""
     body = getattr(_rt(ctx), "channels_tray_body")
     _clear(body)
     lay = body.layout()
@@ -1484,18 +1578,42 @@ def _build_tray(ctx, spec) -> None:
         lay.addWidget(_text("load a dataset to see channels", "ITBHint"))
         lay.addStretch(1)
         return
-    for name in names:
-        chip = _Chip(f"newchan:{name}")
-        chip.setObjectName("ITBChip")
-        cl = QHBoxLayout(chip)
-        cl.setContentsMargins(9, 3, 10, 3)
-        cl.setSpacing(7)
-        cl.addWidget(_grip())
-        cl.addWidget(_swatch(_cmap_swatch(_default_colormap_for(ctx, name))))
-        cl.addWidget(_text(str(name).upper(), "ITBChanLbl"))
-        chip.setToolTip("Drag onto a root in Rows or Columns — it keeps this colour")
-        lay.addWidget(chip)
+    metrics = [n for n in names if _is_metric_token(n)]
+    for name in (n for n in names if not _is_metric_token(n)):
+        lay.addWidget(_tray_chip(ctx, name))
+    if metrics:
+        open_ = bool(getattr(_rt(ctx), "metric_tray_open", False))
+        toggle = QToolButton(body)
+        toggle.setObjectName("ITBOpt")
+        toggle.setText(f"{'▾' if open_ else '▸'} Nanowell metrics ({len(metrics)})")
+        toggle.setCursor(Qt.PointingHandCursor)
+        toggle.setToolTip("Each nanowell drawn as a disc in its metric's colour — show or hide the metrics")
+
+        def _flip(_c=False):
+            _rt(ctx).metric_tray_open = not bool(getattr(_rt(ctx), "metric_tray_open", False))
+            _build_tray(ctx, spec)
+        toggle.clicked.connect(_flip)
+        lay.addWidget(toggle)
+        if open_:
+            for name in metrics:
+                lay.addWidget(_tray_chip(ctx, name))
     lay.addStretch(1)
+
+
+def _tray_chip(ctx, name: str) -> QWidget:
+    chip = _Chip(f"newchan:{name}")
+    chip.setObjectName("ITBChip")
+    cl = QHBoxLayout(chip)
+    cl.setContentsMargins(9, 3, 10, 3)
+    cl.setSpacing(7)
+    cl.addWidget(_grip())
+    cl.addWidget(_swatch(_cmap_swatch(_default_colormap_for(ctx, name))))
+    cl.addWidget(_text(display_token(name), "ITBChanLbl"))
+    tip = "Drag onto a root in Rows or Columns — it keeps this colour"
+    if _is_metric_token(name):
+        tip = f"{name}\n{tip}"
+    chip.setToolTip(tip)
+    return chip
 
 
 # ── per-channel ⚙ menu + labels ─────────────────────────────────────────────

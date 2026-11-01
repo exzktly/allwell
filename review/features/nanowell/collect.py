@@ -202,6 +202,11 @@ def _record_candidates(data_dir: Path) -> list[Path]:
     return [data_dir / "in" / RECORD_FILENAME, data_dir.parent / "in" / RECORD_FILENAME]
 
 
+def in_dir_for(data_dir: Path) -> Path | None:
+    """The acquisition's ``in/`` folder beside the dataset (where the anchors file lives), or ``None``."""
+    return next((p.parent for p in _record_candidates(Path(data_dir)) if p.parent.is_dir()), None)
+
+
 def _start(text) -> datetime | None:
     if not isinstance(text, str) or not text.strip():
         return None
@@ -268,6 +273,12 @@ def _times(data_dir: Path, timepoints) -> tuple[dict, str | None, str]:
     # different series from the one shown.
     return {}, None, (f"Times are unknown because {reason} and not every timepoint label is a time; "
                       "nothing measured against time is defined.")
+
+
+def timepoint_hours(data_dir, timepoints) -> dict:
+    """``timepoint -> hours`` for *timepoints*, as the page's tables get them (the acquisition record, else the
+    labels), without reading any table: the QC view orders a plate's timepoints with it before any well is read."""
+    return _times(Path(data_dir), list(timepoints))[0]
 
 
 def _cell_brightness(paths, well: str | None = None, tables: dict | None = None) -> pd.DataFrame | None:
@@ -553,7 +564,7 @@ def _assemble(data_dir: Path, folder: Path, sidecar: dict, parts: list, availabl
     sites["time_h"] = sites["timepoint"].map(times_h).astype(float)
     acquisition = dict(sidecar.get("acquisition")) if isinstance(sidecar.get("acquisition"), dict) else {}
     acquisition = _with_pattern_calibration(acquisition, sidecar, timepoints)
-    in_dir = next((p.parent for p in _record_candidates(data_dir) if p.parent.is_dir()), None)
+    in_dir = in_dir_for(data_dir)
     options = sidecar.get("execution_options") if isinstance(sidecar.get("execution_options"), dict) else {}
     return NanowellData(sites=sites, grids=grids, times_h=times_h, time_source=source, time_note=note,
                         out_dir=folder.parent, in_dir=in_dir, acquisition=acquisition,

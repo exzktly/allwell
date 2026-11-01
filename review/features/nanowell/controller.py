@@ -32,6 +32,7 @@ from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell.decorate_compute import Decoration, decoration_for
 from review.features.nanowell import _anchor_queue as aq
+from review.features.nanowell import _qc_controller as qcc
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
 from review.features.nanowell import subset_compute as ss
@@ -45,7 +46,8 @@ from review.features.nanowell.renderer import (
 from review.features.nanowell.state import (
     IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS,
 )
-from review.features.nanowell.series_compute import crop_metric_lines, long_format, site_metrics, site_series
+from review.features.nanowell.series_compute import (crop_metric_lines, long_format, rim_focus_text, site_metrics,
+                                                     site_series)
 from review.features.nanowell.zoom_compute import (  # noqa: F401 — the band and its tests read them here
     BUTTON_STEP, WHEEL_STEP, ZOOM_IN_LIMIT, ZOOM_OUT_LIMIT, held_factor,
 )
@@ -352,6 +354,8 @@ def nanowell_empty_reason(ctx) -> EmptyReason | None:
         return None
     if not ctx.state.dataset.data_dir:
         return _empty("No dataset loaded.", "Open a dataset analysed in nanowell mode.")
+    if st.view == "qc":
+        return None                                      # it reads the plate's records itself and says what it found
     if st.load_error:
         return _empty("This dataset's nanowell tables cannot be read.", st.load_error)
     if st.data is None:
@@ -633,6 +637,10 @@ def redraw(ctx) -> None:
     _call(ctx, "_nw_refresh_controls")
     _call(ctx, "_nw_show_computing")
     _refresh_empty(ctx)
+    if st.view == "qc" and nanowell_empty_reason(ctx) is None:
+        idc.leave(ctx, st)
+        qcc.draw(ctx, st, fig, canvas)                   # the whole plate's records: no selection or metrics needed
+        return
     if st.metrics is None or nanowell_empty_reason(ctx) is not None:
         idc.leave(ctx, st)
         return
@@ -1273,7 +1281,8 @@ def apply_array_preset(ctx, name: str) -> None:
     st = _state(ctx)
     if st is None or name not in ArrayLayers.PRESETS:
         return
-    st.layers = ArrayLayers.preset(name)
+    # The footer's Notes switch is how much the reader wants to read, not part of what a preset draws: kept.
+    st.layers = replace(ArrayLayers.preset(name), notes=st.layers.notes)
     st.region, st.anchor_mode = None, False
     _save_soon(ctx)
     _call(ctx, "_nw_refresh_controls")
@@ -1455,6 +1464,9 @@ def on_motion(ctx, event) -> None:
     """A drag on the Array view pans it; the pixels follow at once and the image is drawn again on release. On the
     Identity view a drag pans the panel pressed, and on *Side by side* the pointer lights the address under it."""
     st = _state(ctx)
+    if st is not None and st.view == "qc":
+        qcc.on_motion(ctx, event)
+        return
     if st is not None and st.view == "identity":
         idc.on_motion(ctx, event)
         return
@@ -1650,7 +1662,11 @@ def rerun_anchored(ctx) -> bool:
     if wells and open_in_analyze(ctx, force_wells=wells, only_wells=wells, incremental=False):
         return True
     if st is not None:
-        st.array_message = "Analyze could not be opened on this dataset from here."
+        text = "Analyze could not be opened on this dataset from here."
+        if st.view == "qc":
+            st.qc_message = text
+        else:
+            st.array_message = text
         redraw(ctx)
     return False
 
@@ -1709,9 +1725,10 @@ def extremes_columns(timepoints, ranked: str, chosen) -> list:
     return [tp for tp in timepoints if not chosen or tp in chosen or tp == ranked]
 
 
-def crop_metrics(st, sites, channel) -> dict:
+def crop_metrics(st, sites, channel, *, focus: bool = False) -> dict:
     """``site -> {timepoint: [caption lines]}``: each nanowell's computed measurements at each timepoint, for the
-    captions under its crops (``series_compute.crop_metric_lines``)."""
+    captions under its crops (``series_compute.crop_metric_lines``); with *focus*, its rim focus as a share of the
+    well's sharpest at the end (``series_compute.rim_focus_text``) — the pop-out's, where a crop has the room."""
     out: dict = {}
     if st.metrics is None:
         return out
@@ -1719,6 +1736,7 @@ def crop_metrics(st, sites, channel) -> dict:
         well, q, r = site
         frame = site_series(st.metrics, well, q, r)
         out[tuple(site)] = {str(row["timepoint"]): crop_metric_lines(row, channel)
+                            + ([text] if focus and (text := rim_focus_text(row)) else [])
                             for row in frame.to_dict("records")}
     return out
 
@@ -1787,7 +1805,8 @@ def draw_popout(ctx) -> None:
             _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site, channel=image_channel),
                    failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
         render_crop_grid(fig, gated_crops(st, site, st.crops.get(site)), site, cells=st.crop_cells,
-                         metrics=crop_metrics(st, [site], page_channel(ctx)).get(site) if st.crop_metrics else None,
+                         metrics=(crop_metrics(st, [site], page_channel(ctx), focus=True).get(site)
+                                  if st.crop_metrics else None),
                          image_channel=image_channel, display_range=display_range(ctx), labels=st.popout_labels)
     canvas.draw_idle()
 
@@ -1930,6 +1949,9 @@ def on_click(ctx, event) -> None:
     ⌘/Ctrl), or clear the selection on empty space. On the Array view a press starts a drag or a click, which
     :func:`on_release` tells apart. The plate selection is never touched."""
     st = _state(ctx)
+    if st is not None and st.view == "qc":
+        qcc.on_click(ctx, event)
+        return
     if st is not None and st.view == "identity":
         idc.on_press(ctx, event)                 # a pan, or a double-click back to the whole view
         return
@@ -2111,6 +2133,12 @@ def nw_on_channel_changed(ctx) -> None:
 
 
 def set_view(ctx, view: str) -> None:
+    """Show *view*. Leaving the Array view while the *Anchor queue* walks ends the walk there: its keys live on a band
+    group shown only on Array, so a walk left running elsewhere would go on with nothing on screen to drive it."""
+    st = _state(ctx)
+    if st is not None and view != "array" and aq.active_queue(ctx) is not None:
+        aq.stop(ctx, land_on=view)
+        return
     _set(ctx, "view", view)
 
 

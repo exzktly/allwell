@@ -48,8 +48,8 @@ def identity_counts(data, wells) -> dict[str, dict[str, list[str]]]:
 def identity_note(data, wells) -> str:
     """The footer sentence for *wells*: which timepoints the identity check contradicted (left out) and which wells
     it could not confirm (inconclusive or not checked); ``""`` when every timepoint is confirmed or the reference.
-    Short, because a footer line is not wrapped: ``Nanowell identity — B02 T3 contradicted (left out); A01, C03 not
-    confirmed (see Identity).``"""
+    Short, because a footer line is not wrapped, and saying what is at stake — the addresses: ``Nanowell addresses:
+    B02 T3 contradicted (left out of joins); A01, C03 not yet verified — see the Identity view.``"""
     counts = identity_counts(data, wells)
     parts = []
     bad = counts.get(CONTRADICTED) or {}
@@ -64,8 +64,8 @@ def identity_note(data, wells) -> str:
     unsure = sorted(set(counts.get(INCONCLUSIVE) or {}) | set(counts.get(NOT_CHECKED) or {}))
     if unsure:
         unchecked = set(counts.get(NOT_CHECKED) or {})
-        parts.append(f"{_named(unsure)} " + ("not checked" if unchecked >= set(unsure) else "not confirmed"))
-    return f"Nanowell identity — {'; '.join(parts)} (see Identity)." if parts else ""
+        parts.append(f"{_named(unsure)} " + ("not yet verified" if unchecked >= set(unsure) else "not confirmed"))
+    return f"Nanowell addresses: {'; '.join(parts)} — see the Identity view." if parts else ""
 
 
 def all_good(data, wells) -> bool:

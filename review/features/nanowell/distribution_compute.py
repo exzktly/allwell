@@ -86,7 +86,7 @@ _REASON_LABELS = {
     "out_of_focus": "rim out of focus",
     "fused (no count)": "fused, no count", "no count": "no count", "no confluence": "no confluence",
     "no cells": "no cells", "no fluorescence": "no fluorescence",
-    "seeded later": "seeded later (0 at baseline)", "empty at baseline": "empty at baseline",
+    "seeded later": "no cells at baseline", "empty at baseline": "empty at baseline",
     "no confluence at baseline": "no confluence at baseline",
     "no signal above background at baseline": "no signal at baseline",
     "fewer than three timepoints with cells and a time": "< 3 timepoints with cells",

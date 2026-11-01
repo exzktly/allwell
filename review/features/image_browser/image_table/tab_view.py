@@ -285,6 +285,8 @@ def _build_properties_dock(ctx, dock) -> None:
     _propf("Bar thickness px", "scale_bar_thickness_px", 4, 1, 40, 1.0, 0,
            "Bar thickness (px, relative to a 240 px cell). Increase it if the bar "
            "is too thin to see once cells are downscaled.")
+    _check("Label the bar", "scale_bar_label",
+           "Write the bar's length (e.g. 50 µm) beside it, in the bar's colour.")
     _combo("Show on", "scale_bar_cells", _CELLS,
            "Which cell(s) show the scale bar: every cell, or one grid corner.")
     _combo("Position", "scale_bar_img_corner", _CORNERS,

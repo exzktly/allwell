@@ -88,7 +88,8 @@ def _choose_view(ctx, key, preset=None):
 def _visible_scopes(ctx):
     names = {"_nw_metric_cb": "Metric", "_nw_axis_seg": "Along x", "_nw_baseline_cb": "Baseline",
              "_nw_tp_cb": "Timepoint", "_nw_control_cb": "vs", "_nw_well_cb": "Well",
-             "_nw_extremes_spin": "Extremes"}
+             "_nw_extremes_spin": "Extremes", "_nw_qc_wells_seg": "Wells", "_nw_queue_btn": "Anchor queue",
+             "_nw_queue_lbl": "Queue"}
     return {label for name, label in names.items() if ctx.widgets.get(name).isVisibleTo(ctx.window)}
 
 
@@ -96,8 +97,8 @@ def _visible_scopes(ctx):
 def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(page, qtbot):
     _loaded(qtbot, page)
     seg = page.widgets.get("_nw_view_bar")
-    assert [seg.tabText(i) for i in range(seg.count())] == ["Distribution", "Array", "Trajectories", "Position",
-                                                                    "Extremes", "Identity", "Statistics"]
+    assert [seg.tabText(i) for i in range(seg.count())] == ["Distribution", "QC", "Array", "Trajectories",
+                                                                    "Position", "Extremes", "Identity", "Statistics"]
     assert _visible_scopes(page) == {"Metric", "Along x", "Baseline"}
     _choose_view(page, "array")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint"}
@@ -121,6 +122,10 @@ def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(pa
     _choose_view(page, "identity")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint"}
     assert not page.widgets.get("_nw_metric_cb").isEnabled() and not page.widgets.get("_nw_baseline_cb").isEnabled()
+    # The QC view draws the plate's records, no metric: Metric and Baseline greyed, and the Anchor queue here alone.
+    _choose_view(page, "qc")
+    assert _visible_scopes(page) == {"Metric", "Baseline", "Wells", "Anchor queue"}
+    assert not page.widgets.get("_nw_metric_cb").isEnabled() and not page.widgets.get("_nw_baseline_cb").isEnabled()
 
 
 # ── V2: the Array view as the lattice map ────────────────────────────────────
@@ -133,10 +138,10 @@ def test_the_map_draws_the_chosen_well_and_the_timepoint_control_steps_its_timep
     footer = _fig_texts(page, "nw-array-footer")
     # The fixture's dataset carries no identity check, and the figure must say its addresses are unverified.
     # Its wells hold fewer nanowells than rim focus needs to judge one, and the footer says so before the rest.
-    unjudged = re.match(r"\d+ in a well with under 10 rims at that timepoint were kept unchecked\. ", footer[0])
+    unjudged = re.match(r"Focus unchecked: \d+ under 10 rims in the well\. ", footer[0])
     assert unjudged
-    assert footer[0][unjudged.end():].startswith("Nanowell identity — A01 not checked")
-    assert footer[1] == "4 nanowells in the roster · with a value 3 · measured 2 · empty 1 · occluded 1"
+    assert footer[0][unjudged.end():].startswith("Nanowell addresses: A01 not yet verified")
+    assert footer[1] == "4 nanowells: 3 with a value · 1 occluded"
     tp_cb = page.widgets.get("_nw_tp_cb")
     # The Plotting tabs' control: the timepoints in time order, named by their hours, the first one shown.
     assert [tp_cb.itemText(i) for i in range(tp_cb.count())] == ["0 h", "5 h"]
@@ -146,7 +151,7 @@ def test_the_map_draws_the_chosen_well_and_the_timepoint_control_steps_its_timep
     assert st.timepoint == "t_a"
     title = [ax._left_title.get_text() for ax in page.widgets.get("_nw_fig").axes]
     assert "A01 · t_a" in title
-    assert _fig_texts(page, "nw-array-footer")[1].startswith("4 nanowells in the roster · with a value 4 ·")
+    assert _fig_texts(page, "nw-array-footer")[1] == "4 nanowells: 4 with a value"
     well_cb = page.widgets.get("_nw_well_cb")
     assert [well_cb.itemText(i) for i in range(well_cb.count())] == ["A01", "B01"]
     well_cb.setCurrentIndex(1)

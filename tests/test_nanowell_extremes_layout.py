@@ -17,7 +17,7 @@ import pytest
 from matplotlib.figure import Figure
 
 from review.features.nanowell import renderer
-from review.features.nanowell.series_compute import compact_number, crop_metric_lines
+from review.features.nanowell.series_compute import compact_number, crop_metric_lines, rim_focus_text
 
 ROW = {"state": "measured", "n": 6.0, "c": 0.24, "brightness_GFP": 10.0, "signal_GFP": 5790.0}
 
@@ -140,7 +140,8 @@ def test_the_pop_out_writes_the_metrics_under_each_panel(page, qtbot):  # noqa: 
     shown = [t.get_text().replace("\n", " · ") for ax in fig.axes for t in ax.texts
              if t.get_gid() == "nw-crop-grid-metrics"]
     channel = nwc.match_channel("gfp", st.data.channels)
-    expected = [" · ".join(crop_metric_lines(row, channel))
+    # The pop-out's captions end with the rim focus (``rim_focus_text``), which the Extremes montage's do not carry.
+    expected = [" · ".join(crop_metric_lines(row, channel) + [rim_focus_text(row)])
                 for row in site_series(st.metrics, "A01", 0, 0).to_dict("records")]
     assert shown == expected
 

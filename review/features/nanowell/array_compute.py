@@ -28,6 +28,8 @@ from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell import cell_gate_compute as cg
 from review.features.nanowell.collect import FIELD_EXCLUDED, MEASURABLE, OUT_OF_FOCUS, cell_positions
+from review.features.nanowell.distribution_compute import reason_label
+from review.features.nanowell.series_compute import exclusion_reason, metric_kinds
 from review.features.nanowell.image_compute import tile_boxes
 
 #: The states with a nanowell seen at its place, whatever its number: a timepoint with none of them has no
@@ -75,6 +77,7 @@ class ArrayScene:
     record: list = field(default_factory=list)         # (text, kind): the grid record, kind head / flag / plain
     cells: tuple | None = None          # (x, y) of each counted cell drawn, in the scene's frame; None = not read
     cells_note: str = ""                # what the Cells layer drew, and what it could not
+    why: dict = field(default_factory=dict)            # (q, r) -> why a measurable nanowell has no value, labelled
 
     def centre(self) -> int | None:
         """The index of the central nanowell, address ``(0, 0)``, among those drawn."""
@@ -155,6 +158,7 @@ def array_scene(metrics, data, well: str, timepoint: str, column: str, *, positi
             scene.no_places = ("no nanowell with a measured position at this timepoint" if len(rows)
                                else "no addressed nanowells")
         scene.tiles = tile_boxes(data, well, timepoint)
+    scene.why = no_value_reasons(metrics, data, well, timepoint, column)
     block = (data.grids.get(well) or {}).get(timepoint) or {}
     scene.status = str(block.get("status") or "")
     scene.record = record_lines(data.grids.get(well) or {}, timepoint)
@@ -163,6 +167,34 @@ def array_scene(metrics, data, well: str, timepoint: str, column: str, *, positi
     if cells:
         cells_into(scene, rows, data, gate)
     return scene
+
+
+def no_value_reasons(metrics, data, well: str, timepoint: str, column: str) -> dict:
+    """``(q, r) -> label`` for each nanowell of *well* at *timepoint* that was measured (or empty) and still has no
+    value of *column*, saying why — ``no cells at baseline``, ``baseline occluded``, ``no count`` — as the
+    Distribution view's footer words it (``series_compute.exclusion_reason``, ``distribution_compute.reason_label``).
+
+    The Array view's key used to say only "no value" for these, which reads as "nothing measured" on a nanowell whose
+    cells are plainly in the image: a fold change is undefined there because its *baseline* had no cells or was not
+    measurable, not because this timepoint was not counted. Empty for a column the reasons do not cover."""
+    channels = list(getattr(data, "channels", ()) or ())
+    if column not in metric_kinds(channels) or column not in metrics.columns:
+        return {}
+    frame = metrics[metrics["well"] == well]
+    at = frame[(frame["timepoint"] == timepoint) & frame["state"].isin(MEASURABLE)
+               & vc.numeric_values(frame, column).isna()]
+    if not len(at):
+        return {}
+    reasons = exclusion_reason(frame, column, channels).loc[at.index]
+    out = {}
+    for q, r, reason in zip(at["nw_q"], at["nw_r"], reasons):
+        if _int(q) is None or _int(r) is None or not reason:
+            continue
+        try:
+            out[(_int(q), _int(r))] = reason_label(reason)
+        except KeyError:
+            out[(_int(q), _int(r))] = str(reason)
+    return out
 
 
 def field_sites(rows) -> frozenset:

@@ -103,6 +103,7 @@ from services.remote_srun_retry import queue_wait_seconds
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
 from services import remote_reuse as _reuse
+from services import remote_storage as _storage
 from services.remote_run_id import (
     RemoteRunPaths,
     _compute_run_id,
@@ -838,6 +839,15 @@ class RemoteRunner:
         verdict = self._output_verifier().verify(ok, log=log, suspended=suspended)
         if not verdict.passed:
             return False
+        # Its results are home and verified: the folders it used may now be
+        # removed by the storage expiry (``remote_storage``), never before. A
+        # suspended run's folder still holds the work its resume continues, and a
+        # CSV-only fetch leaves the masks it computed on the remote alone.
+        if not suspended and not dry_run and run.output_filter == OutputFilter.FULL:
+            try:
+                _storage.mark_fetched(self._cache, run, log)
+            except Exception:
+                swallowed("marking this run's remote folders as downloaded")
 
         # Cleanup according to the user's flag. Fires only after verify
         # passes — there's no path that can lose remote state if a fetch
@@ -860,6 +870,9 @@ class RemoteRunner:
         # the branch that decides it, so a dry run never reads "removed" for what it left in place.
         if dry_run:
             self._log_would_delete(own_dir, label=f"run dir {run.run_id}", log=log)
+        elif _storage.is_kept(self._cache, "run", run.run_id):
+            log(f"[remote] kept {own_dir}: it is marked Keep forever in Manage Remotes → Storage "
+                f"(or that could not be checked), so Auto-delete leaves it.\n")
         elif self._remove_remote(own_dir, f"this run's own dir {own_dir}" if run.reattached
                                  else f"run dir {run.run_id}", log):
             _reuse.clean_earlier_attempts(self, log=log)
@@ -871,6 +884,9 @@ class RemoteRunner:
                     label=f"dataset cache {run.cache_key[:8]}",
                     log=log,
                 )
+            elif _storage.is_kept(self._cache, "dataset", run.cache_key):
+                log(f"[remote] kept dataset cache {run.cache_key[:8]}: it is marked Keep forever in "
+                    f"Manage Remotes → Storage (or that could not be checked).\n")
             else:
                 self._remove_remote(cache_dir, f"dataset cache {run.cache_key[:8]}", log)
         if dry_run:

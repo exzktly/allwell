@@ -142,12 +142,17 @@ def _heartbeat_stale_snippet(heartbeat: str, message: str, *,
     — by default the exit that hands the node back. Each check leaves
     ``$_aw_fresh`` at ``1`` when a heartbeat it could read vouched for the app,
     which is what lets the waits' deadline stand aside for a healthy slow upload.
+
+    Just before a file is judged gone the check sets ``$_aw_evidence``: how long ago it was last touched and by which
+    clock (``$_aw_clock`` — the file server's, read from a probe beside it, or this node's when the probe could not be
+    written), or how many looks found no file. *message* and *on_stale* can carry the measurement, not only the
+    verdict. An empty *message* prints nothing: the caller's *on_stale* says what happened, when it happens.
     """
     if not heartbeat:
         return "", ""
     hb_q = _remote_quote(heartbeat)
     misses = max(1, int(stale_s // poll_s))
-    gone = f'echo "{message}"; {on_stale or f"exit {_UPLOAD_WAIT_EXIT}"}; '
+    gone = (f'echo "{message}"; ' if message else "") + f'{on_stale or f"exit {_UPLOAD_WAIT_EXIT}"}; '
     probe = hb_q + '".now.${BASHPID:-$$}"'
     mtime = 'stat -c %Y "$_aw_p" 2>/dev/null || stat -f %m "$_aw_p" 2>/dev/null'
     init = "_aw_miss=0; _aw_warn=0; _aw_fresh=0; "
@@ -158,8 +163,9 @@ def _heartbeat_stale_snippet(heartbeat: str, message: str, *,
         # "Now" by the clock that stamped the heartbeat: a probe beside it (see UPLOAD_HEARTBEAT_STALE_S). Taken
         # before the heartbeat is read, so the age can only be under-stated (see this function's docstring).
         f'_aw_p={probe}; _aw_now=""; '
+        f'_aw_clock="this node\'s clock"; '
         f'if touch "$_aw_p" 2>/dev/null; then _aw_now=$({mtime} || echo ""); rm -f "$_aw_p" 2>/dev/null; fi; '
-        f'[ -n "$_aw_now" ] || _aw_now=$(date +%s); '
+        f'if [ -n "$_aw_now" ]; then _aw_clock="the file server\'s clock"; else _aw_now=$(date +%s); fi; '
         f'true 2>/dev/null <{hb_q} || :; '
         f'_aw_hb=$(stat -c %Y {hb_q} 2>/dev/null || '
         f'stat -f %m {hb_q} 2>/dev/null || echo ""); '
@@ -170,11 +176,12 @@ def _heartbeat_stale_snippet(heartbeat: str, message: str, *,
         f'will hold the node until the pipeline runs or the walltime ends"; '
         f'fi; '
         f'elif [ "$((_aw_now - $_aw_hb))" -gt {int(stale_s)} ]; '
-        f'then {gone}else _aw_fresh=1; fi; '
+        f'then _aw_evidence="last touched $((_aw_now - _aw_hb)) s ago by $_aw_clock"; {gone}'
+        f'else _aw_fresh=1; fi; '
         f'else '
         f'_aw_miss=$((_aw_miss+1)); '
         f'if [ "$_aw_miss" -gt {misses} ]; then '
-        f'{gone}fi; '
+        f'_aw_evidence="not found in $_aw_miss looks, {int(poll_s)} s apart"; {gone}fi; '
         f'fi; '
     )
     return init, check

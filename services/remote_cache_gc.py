@@ -21,6 +21,7 @@ clock cannot make a fresh stamp look old. A listing that fails evicts nothing.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -35,10 +36,21 @@ def in_use_stamp(staging_dir: str, key: str) -> str:
     return f"{staging_dir}/datasets/{IN_USE_STAMP_DIR}/{key}"
 
 
+#: Beside the datasets, the per-dataset expiry the Storage browser writes
+#: (``services.remote_storage``); a dataset whose file reads ``keep`` is never evicted.
+USER_EXPIRY_DIR = ".aw_expiry"
+#: Beside the datasets, each dataset's label (``services.remote_storage``).
+LABEL_DIR = ".aw_labels"
+#: The only names a dataset folder has: a hex content fingerprint. A listed name
+#: of any other shape is not a dataset this module may evict.
+_KEY_RE = re.compile(r"^[0-9a-f]{16,128}$")
+
+
 def listing_script(staging_dir: str) -> str:
-    """Remote bash printing ``<bytes>\\t<last used, epoch s>\\t<key>`` per
+    """Remote bash printing ``<bytes>\\t<last used, epoch s>\\t<key>[\\tkeep]`` per
     dataset, then ``now\\t<epoch s>``. A dataset never stamped (uploaded
-    before stamps existed) reports its directory's own mtime."""
+    before stamps existed) reports its directory's own mtime; one the user
+    marked *Keep forever* in the Storage browser carries a fourth ``keep`` field."""
     return (
         f"cd {staging_dir}/datasets 2>/dev/null || {{ echo 'now\t'\"$(date +%s)\"; exit 0; }}\n"
         "for d in */; do\n"
@@ -47,7 +59,8 @@ def listing_script(staging_dir: str) -> str:
         f"  stamp={IN_USE_STAMP_DIR}/\"$d\"\n"
         "  if [ -e \"$stamp\" ]; then used=$(stat -c %Y -- \"$stamp\"); "
         "else used=$(stat -c %Y -- \"$d\"); fi || exit 3\n"
-        "  printf '%s\\t%s\\t%s\\n' \"$size\" \"$used\" \"$d\"\n"
+        f"  k=''; [ -f {USER_EXPIRY_DIR}/\"$d\" ] && [ \"$(head -c 4 {USER_EXPIRY_DIR}/\"$d\")\" = keep ] && k='\\tkeep'\n"
+        "  printf '%s\\t%s\\t%s%b\\n' \"$size\" \"$used\" \"$d\" \"$k\"\n"
         "done\n"
         "echo 'now\t'\"$(date +%s)\"\n"
     )
@@ -58,6 +71,7 @@ class Dataset:
     key: str
     size: int
     last_used: int
+    kept: bool = False          # marked Keep forever in the Storage browser
 
 
 def parse_listing(text: str) -> tuple[list[Dataset], int] | None:
@@ -69,8 +83,12 @@ def parse_listing(text: str) -> tuple[list[Dataset], int] | None:
         parts = line.rstrip("\n").split("\t")
         if len(parts) == 2 and parts[0] == "now" and parts[1].strip().isdigit():
             now = int(parts[1])
-        elif len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit() and parts[2]:
-            datasets.append(Dataset(parts[2], int(parts[0]), int(parts[1])))
+        # A name that is not a dataset key is skipped, and so is a fourth field that
+        # is not exactly ``keep``: a folder named ``victim<TAB>x`` must not parse as
+        # dataset ``victim`` with another folder's age.
+        elif (len(parts) in (3, 4) and parts[0].isdigit() and parts[1].isdigit()
+              and _KEY_RE.match(parts[2]) and (len(parts) == 3 or parts[3] == "keep")):
+            datasets.append(Dataset(parts[2], int(parts[0]), int(parts[1]), kept=len(parts) == 4))
     return None if now is None else (datasets, now)
 
 
@@ -86,6 +104,8 @@ def plan_eviction(datasets: list[Dataset], now: int, max_bytes: int, *,
     for d in sorted(datasets, key=lambda d: d.last_used):
         if total <= max_bytes:
             break
+        if d.kept:
+            continue                    # the user asked to keep it; it still counts towards the budget
         if now - d.last_used < window_s:
             kept.append(d)
             continue
@@ -104,14 +124,23 @@ def collect_garbage(cache, max_bytes: int, log: Callable[[str], None]) -> None:
             f"{(listing.stderr or '').strip() or 'no listing'}); nothing evicted.\n")
         return
     evict, kept = plan_eviction(*parsed, max_bytes)
-    for d in evict:
-        result = cache._ssh_run(["rm", "-rf", f"{staging}/datasets/{d.key}",
-                                 in_use_stamp(staging, d.key)], check=False)
-        if result.returncode != 0:
-            log(f"[remote] gc: could not evict dataset {d.key} (exit {result.returncode}: "
-                f"{(result.stderr or '').strip()})\n")
-            continue
-        log(f"[remote] gc: evicted dataset {d.key} ({d.size // (1024**2)} MB)\n")
+    if evict:
+        # Through the Storage module's deletion, so an eviction gets every guard a
+        # person's Delete… gets: a real, unlinked folder of yours directly in
+        # ``datasets/``, nothing mounted in it, not in use at that moment, removed
+        # on one filesystem — and its stamp, label and expiry with it, through
+        # checks that refuse a linked bookkeeping folder. (Imported here: that
+        # module imports this one's constants.)
+        from services import remote_storage
+        items = [remote_storage.StorageItem("dataset", d.key, 0, d.last_used) for d in evict]
+        outcomes, error = remote_storage.delete_items(cache, items)
+        for d in evict:
+            outcome = outcomes.get(("dataset", d.key), "unknown")
+            if remote_storage.status_of(outcome) == "gone":
+                log(f"[remote] gc: evicted dataset {d.key} ({d.size // (1024**2)} MB)\n")
+            else:
+                log(f"[remote] gc: kept dataset {d.key} over budget: {outcome}"
+                    f"{'; ' + error if error else ''}\n")
     if kept:
         log(f"[remote] gc: kept {len(kept)} dataset(s) over budget because a run used "
             f"them in the last {IN_USE_WINDOW_S // 86400} days: "

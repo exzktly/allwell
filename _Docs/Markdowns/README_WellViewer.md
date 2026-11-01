@@ -1881,6 +1881,17 @@ A granted node runs **one run at a time**. A second run on the same host waits
 for it (bounded by *Max queue wait*) rather than asking for a node of its own,
 because two runs on one GPU is how a model fails to load for want of memory.
 
+A run started while the requested node is **still queued** does not wait for it
+to start: it takes the node at once, prepares and uploads the plate while the
+node queues, and waits for it only when it is ready to launch (single-shot, once
+the plate is uploaded; batched, once the first batch is). The log reads *this run
+has claimed it, and prepares and uploads the plate while it waits*, then *waiting
+for the granted node … to be granted* if the upload finishes first. The node
+counts as in use from the moment it starts, so its idle limit cannot release it
+while the upload is still going. If the node's job ends before it is ever granted,
+the run asks for a node of its own instead and says so; a node that fails to boot
+is waited on while the request asks for another.
+
 A run is told which node it is on in its log (*running on the granted node … — no
 queue wait*). A run that would outlast the node's time limit — its scheduler
 command's `--time`, scaled by its batches — gets a fresh node, with a fresh limit,

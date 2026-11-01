@@ -2464,7 +2464,8 @@ class PipelineRunner:
                 return
             refuse_remote_nanowell_incremental(args)       # before anything is staged or sent (X29)
             # After the refusals, which must not wait on a busy node, and before anything is staged: preparing and
-            # uploading a plate must not run the node's idle clock.
+            # uploading a plate must not run the node's idle clock. A node still being granted is claimed without
+            # waiting; the run stages and uploads meanwhile and waits for the grant at launch (GrantedRun.await_node).
             granted.claim()
             # What is finished here under these settings is not sent again, as a local run skips it
             # (services.remote_finished_wells); an incremental run's split decides per field instead.

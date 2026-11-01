@@ -98,7 +98,7 @@ from services.remote_suspend import request_suspend as _request_suspend
 from services.remote_code_sync import sync_pipeline_code
 from services.remote_commands import _compose_remote_cmd, _handover_job_body, pack_for_login_shell
 from services.remote_reservation import Reservation
-from services.remote_hold import NodeLease, StepTarget, claim_node, step_launcher
+from services.remote_hold import HoldError, NodeLease, StepTarget, claim_node, step_launcher
 from services.remote_srun_retry import queue_wait_seconds
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
@@ -232,11 +232,32 @@ class RemoteRunner:
         #: Set while the host has a granted node this run is going to use (services.remote_hold): the run is then a
         #: step of the node's job, and :meth:`launcher` says so. ``None`` is the ordinary run, one job of its own.
         self.step_target: StepTarget | None = None
+        #: Set while the run has claimed a granted node that is still being granted (``GrantedRun.await_node``): the
+        #: run stages and uploads meanwhile, and :meth:`await_granted_node` waits for the node before the launch.
+        self.node_wait: Callable[[], None] | None = None
 
     def launcher(self) -> str:
         """The scheduler command this run launches with: a step on the granted node when there is one, else the host's.
-        Every launch site asks here, so none can forget the node."""
+        Every launch site asks here, so none can forget the node.
+
+        Raises while a claimed node is still being granted: the host's own command then would ask for a second node
+        beside the one this run holds, so a launch site that did not call :meth:`await_granted_node` first fails
+        loudly rather than doing that."""
+        if self.node_wait is not None:
+            raise HoldError("the run reached its launch while its granted node was still being granted, without "
+                            "waiting for it (a launch site that does not call await_granted_node).")
         return step_launcher(self.step_target) if self.step_target is not None else self.host.launch_command
+
+    def node_pending(self) -> bool:
+        """Whether the run holds a claim on a granted node that is not granted yet."""
+        return self.node_wait is not None
+
+    def await_granted_node(self) -> None:
+        """Wait for a claimed node still being granted (``GrantedRun.await_node``); nothing when there is none. Every
+        launch site calls this before :meth:`launcher`."""
+        wait = self.node_wait
+        if wait is not None:
+            wait()
 
     def claim_granted_node(self, *, log_fn: Callable[[str], None], stop_event: threading.Event | None = None,
                            **timing) -> NodeLease | None:
@@ -244,7 +265,8 @@ class RemoteRunner:
         (and the host's own command) when there is none. The facade ``PipelineRunner`` calls, beside
         :meth:`reserve_allocation`. *timing* is ``sleep`` / ``clock``, for tests."""
         lease = claim_node(self.host, self._cache, log_fn=log_fn, stop_event=stop_event, **timing)
-        self.step_target = lease.target if lease is not None else None
+        # A node still being granted has no step target yet; `GrantedRun.await_node` sets it once it is.
+        self.step_target = lease.target if lease is not None and not lease.pending else None
         return lease
 
     @property
@@ -387,14 +409,25 @@ class RemoteRunner:
         # cannot take the run and that one is asked for now, when nothing is.
         reserved = reservation is not None and not cache_hit and reservation.usable()
         _refuse_after_stop(stop_event)
-        overlap, ssh_argv = self._compose_launch(
-            prep, zipped, pipeline_argv, output_filter, cache_hit, log, reserved=reserved)
-        remote_sentinel = prep.paths.sentinel
-        remote_heartbeat = prep.paths.heartbeat
 
         def upload() -> tuple[int, float]:
             return self._upload_input(zipped, prep.key, local_output_dir, log,
                                       progress_fn, stop_event)
+
+        # A granted node this run claimed while it was still queued: the plate goes up now, while it queues, and the
+        # step launched once it is granted finds its input in place — the queue wait and the upload overlap here
+        # just as a job of the run's own overlaps them below.
+        uploaded = False
+        if self.node_pending() and not cache_hit:
+            upload()
+            uploaded = True
+            _refuse_after_stop(stop_event)
+            self.await_granted_node()
+            _refuse_after_stop(stop_event)
+        overlap, ssh_argv = self._compose_launch(
+            prep, zipped, pipeline_argv, output_filter, cache_hit, log, reserved=reserved, uploaded=uploaded)
+        remote_sentinel = prep.paths.sentinel
+        remote_heartbeat = prep.paths.heartbeat
 
         heartbeat: _UploadHeartbeat | None = None
         if overlap:
@@ -442,7 +475,7 @@ class RemoteRunner:
                     swallowed("releasing the allocation after a failed sentinel")
                 raise
         else:
-            if not cache_hit:  # the remote already holds every well's output
+            if not cache_hit and not uploaded:  # a cache hit: the remote already holds every well's output
                 upload()
             popen = self._start_ssh(ssh_argv)
             self._run.owns_remote_job = True
@@ -602,11 +635,13 @@ class RemoteRunner:
                         pipeline_argv: list[str], output_filter: OutputFilter,
                         cache_hit: bool,
                         log: Callable[[str], None], *,
-                        reserved: bool = False) -> tuple[bool, list[str]]:
+                        reserved: bool = False, uploaded: bool = False) -> tuple[bool, list[str]]:
         """What the remote is sent, and whether to ask for the node before
         the upload. Returns ``(overlap, ssh_argv)``. *reserved*: a job queued
         before staging will take the run (:meth:`_hand_over`), so no request
-        is announced here."""
+        is announced here. *uploaded*: the input is on the host already (sent
+        while a granted node was still being granted), so the job is not told
+        to wait for an upload."""
         run_id, key = prep.run_id, prep.key
         remote_input, remote_output = prep.remote_input, prep.remote_output
         own = prep.paths
@@ -652,9 +687,11 @@ class RemoteRunner:
         # node the moment ssh connects, and a cache hit runs ``true``, so both
         # must keep the old order or the pipeline would start against an input
         # directory that is still filling.
-        overlap = bool(self.host.compute_launcher.strip()) and not cache_hit
+        overlap = bool(self.host.compute_launcher.strip()) and not cache_hit and not uploaded
         remote_cmd = _compose_remote_cmd(
-            self.launcher(),
+            # A cache hit runs `true` on the login node and uses no launcher, so it is not asked for one (which,
+            # while a claimed granted node is still being granted, would refuse).
+            "" if cache_hit else self.launcher(),
             remote_pidfile,
             remote_argv,
             cache_hit=cache_hit,

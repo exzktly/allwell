@@ -195,17 +195,24 @@ def test_a_marker_its_run_left_behind_is_not_a_reason_to_wait_for_ever(cluster):
     lease.release()
 
 
-def test_a_node_that_is_still_being_granted_is_waited_for(cluster):
+def test_a_node_that_is_still_being_granted_is_claimed_at_once_and_not_waited_for(cluster):
+    """The report: a run started while the requested node was still queued sat on "waiting for it" and did not stage
+    or upload anything. Wrong implementation: waiting here for the grant (a nap), which puts the queue wait in front of
+    the whole plate's preparation and upload. The wait is at launch (`GrantedRun.await_node`,
+    tests/test_a_queued_granted_node_overlaps_the_upload.py)."""
     host = RemoteHost(**HOST)
     cluster.set_job(4001, "PENDING", "Resources", "")
     d = cluster.hold_dir(host)
     d.mkdir(parents=True)
     (d / "job").write_text("4001", encoding="utf-8")
     lines: list[str] = []
-    sleep = Script(cluster, [lambda: (cluster.set_job(4001, "RUNNING", "None", "gpu-node-1"), granted_files(cluster, host))])
+    sleep = Script(cluster, [])
     lease = _claim(cluster, host, sleep, lines)
-    assert lease is not None and any("still being granted; waiting" in line for line in lines)
+    assert lease is not None and lease.pending and sleep.naps == []
+    assert (d / "busy").exists(), "the node's idle clock must be stopped from the moment it starts"
+    assert any("job 4001 is still being granted; this run has claimed it" in line for line in lines), lines
     lease.release()
+    assert not (d / "busy").exists()
 
 
 def test_a_released_node_sends_the_run_to_ask_for_its_own_and_says_why(cluster):

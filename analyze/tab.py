@@ -41,6 +41,7 @@ from core.safe import swallowed
 from analyze.bg_map import AnalyzeBackgroundMapMixin
 from analyze.channel_rows import AnalyzeChannelRowsMixin
 from analyze.domain.input import AnalyzeInputMixin
+from analyze.domain.run_log import RunLogFile
 from analyze.preflight import AnalyzePreflightMixin
 from analyze.progress import AnalyzeProgressMixin
 from analyze.run_spec import AnalyzeRunMixin
@@ -106,6 +107,8 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
         super().__init__(parent)
         self._runner = PipelineRunner()
         self._log_q: queue.Queue[tuple[str, object]] = self._runner.log_q
+        # Every line the log pane is given, written to the run's output folder too (analyze.domain.run_log).
+        self._run_log = RunLogFile()
         self._progress_tracker = ProgressTracker()
         self._running = False
         # Cleared on app close so the self-rescheduling log poller stops
@@ -449,6 +452,13 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
             except Exception as exc:
                 self._log_line(f"[warn] Could not open Review tab: {exc}\n", "WARNING")
 
+    def _close_run_log(self) -> None:
+        """The run has ended: name its log file, as the file's last line too, and close it."""
+        path = self._run_log.path
+        if path is not None:
+            self._log_line(f"[info] This run's log is saved as {path}\n", "INFO")
+        self._run_log.end()
+
     def _poll_log(self) -> None:
         """Drain what the run has said, in bounded slices.
 
@@ -506,6 +516,9 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
                         self._run_error = str(payload)
                         self._surface_run_failure(str(payload))
                 elif kind == "finished":
+                    self._log_lines(pending)
+                    pending = []
+                    self._close_run_log()
                     self._running = False
                     self._show_run_buttons(running=False)
                     self._on_run_settled()

@@ -156,8 +156,10 @@ ROSTER: dict[str, list[tuple]] = {
     # the empty reference well every confluence is read against (pipeline/nanowell_reference.py): notes, not states
     "Well %s — empty reference saved for %d timepoint(s); every other well's confluence is read against it.":
         [((W, 2), "I", "note", "")],
-    "Well %s is the empty reference well, but it is not empty at %s: no well has a confluence there":
-        [((W, "0h (loaded)"), "W", "note", "")],
+    # the named well is believed empty whatever was counted in it; this only says the count looked high
+    "Well %s is the named empty reference well; at %s more than %.0f%% of its nanowells hold an object the segmenter "
+    "counted. It is used as the empty reference anyway, so those are the segmenter's false counts (debris); if the "
+    "well does hold cells, name another.": [((W, "0h (72%)", 5.0), "W", "note", "")],
     # the identity check (pipeline/nanowell_identity.py): a verdict on whether each address names the same nanowell
     # at every timepoint, kept in nanowells/<well>_identity.json and shown by Review's figures and Identity view. It
     # does not change what the run wrote, so the well's own outcome is its "done." line, as for an unaddressed

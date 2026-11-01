@@ -1775,9 +1775,13 @@ def on_click(ctx, event) -> None:
             return
         _array_press(st, event)
         return
-    if st is None or st.hits is None or event.inaxes is None or event.button != 1:
+    if st is None or event.inaxes is None or event.button != 1:
         return
-    _select(ctx, st.hits.nearest(event.inaxes, event.x, event.y, CLICK_RADIUS_PX), _adding(event))
+    # A view that draws no clickable nanowells (Trajectories, Position) has no hit map: every click there is on empty
+    # space, and clears the selection as an empty-space click does on every other view. Returning here left a
+    # selection, and the site detail it opens, with no way to clear it from the figure.
+    site = st.hits.nearest(event.inaxes, event.x, event.y, CLICK_RADIUS_PX) if st.hits is not None else None
+    _select(ctx, site, _adding(event))
 
 
 def _select(ctx, site, adding: bool) -> None:

@@ -270,6 +270,27 @@ def test_clicking_empty_space_clears_the_selection_and_hides_the_detail(page, qt
     assert not page.widgets.get("_nw_detail_pane").isVisible()
 
 
+@pytest.mark.parametrize("view", ["trajectories", "position"])
+def test_a_click_on_a_view_with_no_dots_clears_the_selection(page, qtbot, view):
+    """Clear selection was removed on the promise that clicking empty space clears it "on every view". Trajectories
+    and Position draw no clickable nanowells, so the click returned before clearing, and a selection made on
+    Distribution — and the detail it opens — could not be cleared from those views' figures."""
+    _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    st = page.state.feature_slice("nanowell")
+    assert st.selected_sites
+    nwc.set_view(page, view)
+    qtbot.waitUntil(lambda: st.view == view and not st.computing, timeout=10000)
+    canvas = page.widgets.get("_nw_canvas")
+    ax = page.widgets.get("_nw_fig").axes[0]
+    px, py = ax.transAxes.transform((0.5, 0.5))
+    ratio = canvas.devicePixelRatioF()
+    QTest.mouseClick(canvas, Qt.LeftButton, Qt.NoModifier,
+                     QPoint(int(px / ratio), int(canvas.height() - py / ratio)))
+    assert st.selected_sites == []
+    assert not page.widgets.get("_nw_detail_pane").isVisible()
+
+
 def test_an_occluded_timepoint_is_a_gap_in_the_detail_not_a_zero(page, qtbot):
     _loaded(qtbot, page)
     _click_dot(qtbot, page, ("B01", 1, 0))                          # 0 cells, then occluded

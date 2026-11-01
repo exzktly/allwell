@@ -1371,6 +1371,27 @@ def _keep_crops(keep, seen, labels, px, fit_sites, addresses, lowhigh=None, coun
                              else frozenset()}
 
 
+def _renumber_seam_cells(cells: dict, seam_rows: list[int]) -> None:
+    """Give the cells counted on seam tiles labels no real tile's cell has, in place.
+
+    A seam tile is its own image, so its segmentation numbers its cells from 1 again; its cells are then reported
+    under the real tile their nanowell's row names (``fov``). Left with the seam image's labels, a seam cell answered
+    to the same ``(fov, nucleus_id)`` as that real tile's own cell of the same number, and every per-cell identity
+    Review keys on that pair — a hand exclusion, the smFISH write-back, a lookup — then reached two different cells.
+    Each seam cell is numbered on past the largest label any cell of its reported tile holds, in row order."""
+    if not seam_rows or "label" not in cells or "fov" not in cells:
+        return
+    seam = set(seam_rows)
+    labels, fovs = cells["label"], cells["fov"]
+    top: dict = {}
+    for k, (fov, label) in enumerate(zip(fovs, labels)):
+        if k not in seam and label is not None:
+            top[fov] = max(top.get(fov, 0), int(label))
+    for k in seam_rows:
+        top[fovs[k]] = top.get(fovs[k], 0) + 1
+        labels[k] = top[fovs[k]]
+
+
 def _cell_rows(labels, px, fit_sites, counts, addresses, owner, origin, channel_images, channels, kind) -> dict:
     """The cell table for the cells one tile's segmentation counted, in the well's columns."""
     from pipeline import nanowell_measure as nm
@@ -1611,13 +1632,19 @@ def _finish_timepoint(prep: _Prepared, *, on_segmented=None, inspect: dict | Non
             table["fov"] = [prep.reported.get(i, owner) for i in table["site_index"]]
         return got, table, notes, own_keep
 
-    for got, table, notes, own_keep in ordered_results(tile, imaged.items(), threads):
+    seam_rows: list[int] = []
+    for (owner, _indices), (got, table, notes, own_keep) in zip(imaged.items(),
+                                                                ordered_results(tile, imaged.items(), threads)):
         contents.update(got)
         out.notes += notes
+        if is_seam_tile(owner):
+            start = len(out.cells.get("label", ()))
+            seam_rows.extend(range(start, start + len(table.get("label", ()))))
         for name, values in table.items():
             out.cells.setdefault(name, []).extend(values)
         if own_keep is not None:
             keep[1].update(own_keep[1])
+    _renumber_seam_cells(out.cells, seam_rows)
     sites.close()
     if segment is not None and settings.segment_on == "rim":
         out.template["segmenter_template"] = _segmenter_template_block(contents)

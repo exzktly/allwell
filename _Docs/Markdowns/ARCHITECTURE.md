@@ -10752,7 +10752,10 @@ by `_tile_contents` exactly as a tile is; its fluorescence channels are blended 
 undefined count). Seam tiles are left out of the pooled template, which is built from the real tiles' sites alone.
 The row keeps `fused` set either way, so a nanowell counted from a blended crop is told apart from one counted on one
 tile, and its `owner` (and its cells' `fov`) names a real tile — the one covering most of its disk
-(`SeamTiles.reported`). A site with no owner at all is counted by no tile, so `site_state` sees an undefined count
+(`SeamTiles.reported`). The seam tile's segmentation numbers its cells from 1 again, so its cells are renumbered
+past the largest label any cell of the reported tile holds (`nanowell_run._renumber_seam_cells`): with the seam
+image's own labels a seam cell shared its `(fov, nucleus_id)` with the reported tile's cell of the same number, and
+every per-cell identity Review keys on that pair reached two cells. A site with no owner at all is counted by no tile, so `site_state` sees an undefined count
 for it. A cell in the overlap of two tiles
 is therefore counted by the one tile that owns the site, and a cell on a rim or between
 sites belongs to none. Beside each count the row records what the segmenter was given: `level_offset` and

@@ -554,13 +554,13 @@ When several wells and timepoints need an anchor — the usual state after a run
 picking each one: it switches to the Array view on the first timepoint on the plate left unaddressed, with **Set
 anchor** already on, and each click on a central square saves the anchor and, after a moment, opens the next. Each
 timepoint opens zoomed to 10× on the centre of the whole-well montage, where the central square usually is;
-press **Fit** to see the whole well when it is not there. A *Queue*
-group at the left end of the band says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous
+press **Fit** (under the figure) to see the whole well when it is not there. A *Queue*
+group in place of Well and Timepoint (they come back when the walk ends) says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous
 timepoint; a click there replaces its anchor), **Skip**, **One per well** and **Stop** — or press **←** for Back,
 **→** for Skip and **Esc** for Stop while the queue runs. Choosing another view while it runs stops it. When **Set anchor** cannot be turned on for a timepoint, the figure
 says why; press Skip to go on. The queue holds every unaddressed
 timepoint without an anchor, plate order then time order, and also any timepoint whose anchor the last run could
-not use; an anchor you set that no run has used yet is not asked for again. Turn on **One per well** to be shown
+not use; an anchor you set that no run has used yet is not asked for again. Tick **One per well** (before pressing Anchor queue, or during the walk) to be shown
 only each well's first such timepoint, and no well that already has an anchor waiting for a re-run: one click per
 well is usually enough (see above), and any timepoint the re-run still cannot address shows up in the next
 queue. The choice is remembered until you close the app. If One per well leaves nothing to walk (every well
@@ -6157,7 +6157,10 @@ the sentence names it.
   by plate row and labelled by its letter; pointing at a cell names it in the readout, and its tooltip says what
   the state means. **Click a cell** to open it where it is dealt with: a verdict opens on **Identity**, a timepoint
   not addressed (or waiting, or not located) opens on **Array** with **Set anchor** on. The **Anchor** group here
-  holds **Anchor queue**, **One per well** and **Re-run anchored wells…** (see *Setting the anchor by hand*).
+  holds **Anchor queue** — the highlighted button, which says what it will walk (*Anchor queue: 17 timepoints*) —
+  the **One per well** box, which narrows that to each well's first (*Anchor queue: 5 wells*), and **Re-run anchored
+  wells…** (see *Setting the anchor by hand*). While any timepoint is not addressed, the figure says to press
+  Anchor queue or click an orange cell.
 - **Trajectories** — one panel per well: a thin line per nanowell through its values over time, coloured by
   its occupancy at baseline, and a thick line for each occupancy class's median. A gap is a timepoint without
   a value. Growth rate and occupancy have one value per nanowell, so they are greyed here.
@@ -6213,7 +6216,11 @@ the sentence names it.
   values, two samples holding the same constant), never a number. More than 15 comparisons are not run: choose
   a control under **vs** or exclude wells. *Save figure* saves the figure and its report together.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
-  a QC picture and a full-resolution montage each did:
+  a QC picture and a full-resolution montage each did. The band's first row holds the page's data controls
+  (Metric, Channel, Baseline, Subset, Rim focus); its second holds the view's own, in the order you use them:
+  **Well** and **Timepoint** together, then **Positions**, **Image**, **Layers**, and **Set anchor**, **Clear
+  anchor** and **Re-run wells…** (*Re-run anchored wells…* on the QC view). The zoom and **Overlays** sit under
+  the figure, beside its navigation buttons:
   - **Image** — what is drawn under the nanowells: *Off*; *Run montage*, the downsampled stitched phase
     montage the run kept (read in the background: the footer says *Reading the montage…* meanwhile); or *Full
     resolution*, drawn from the raw images in `in/` where the run placed each tile — of the channel chosen in the
@@ -6260,14 +6267,14 @@ the sentence names it.
     analysed before this setting existed show their cells too: nothing needs re-running. *Tiles* outlines each tile, coloured by how it was placed (green on the lattice, blue by
     overlap, amber where the acquisition record put it), with its registration residual; a tile whose size the
     record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
-    hand and says how the timepoint was addressed (and, where it was not, how to anchor it), and offers **Set
-    anchor**, **Clear anchor** and **Re-run anchored wells…** (see *Setting the anchor by hand* above; the
+    hand and says how the timepoint was addressed (and, where it was not, how to anchor it), which is what lets
+    **Set anchor**, **Clear anchor** and **Re-run wells…** act (see *Setting the anchor by hand* above; the
     **Anchor queue** is on the QC view). *Run
     record* lists beside the figure the grid record of this timepoint (status, how the origin was found,
     pitch, angle, overlap, nanowells detected of the roster), the empty-nanowell template the counts were
     divided by, and the status of every other timepoint; a template the run found far from the well's
     earliest one is shown in amber: most nanowells there may hold cells, and that timepoint's counts and
-    confluence may be biased. *Notes* (off until you turn it on; also the **Notes** button beside **Overlays**)
+    confluence may be biased. *Notes* (off until you turn it on; also the **Notes** button beside **Overlays**, under the figure)
     explains how to read the figure — how the positions are drawn, what the fill and outlines mean, what the tile
     colours mean — under the footer's lines, which stay exactly where they are, saying only what applies to what is on screen. That space is kept whether Notes is on or off, so the array never moves, shrinks or is covered
     when you turn it on. The footer under the figure is the same either way: the page's
@@ -6277,17 +6284,21 @@ the sentence names it.
   - **Layers → Show as** sets every layer at once: *Array map* (lattice places filled by the metric), *Array
     QC* (the run montage, the tiles and the nanowells by state, with the run record) or *Full montage* (full
     resolution, nanowells by state with their addresses and values, and the anchor). *Notes* stays as you set it.
-  - **Overlays** — one button that takes every coloured layer (the nanowells, the tiles, the anchor and the cells) off
-    the image and puts them back, for a quick look at what is underneath. The Layers menu's choices are kept,
+  - **Overlays** (under the figure) — one button that takes every coloured layer (the nanowells, the tiles, the
+    anchor and the cells) off the image and puts them back, for a quick look at what is underneath. The Layers menu's choices are kept,
     so pressing it again restores exactly what was on; while they are hidden the footer says so, and Set
     anchor is greyed.
 
-  The controls on the band stay where they are whatever the layers say: a control a layer makes useless —
-  **Metric** and **Baseline** with nothing drawn by the metric, the anchor's buttons with the anchor layer off
-  — is greyed rather than hidden.
+  The controls on the band stay where they are whatever the layers say: a control a layer makes useless is
+  greyed rather than hidden, and its tooltip says why — **Metric** and **Baseline** with nothing drawn by the
+  metric; **Image** on *Lattice* positions; the image's channel and **Range** unless Image is *Full resolution*
+  (the run montage is phase only and drawn as the run saved it); **Set anchor** naming what is missing (measured
+  positions, the anchor layer and Overlays, an `in/` folder, or a timepoint an anchor can change); **Clear
+  anchor** with no anchor set; **Re-run wells…** with no anchor anywhere.
 
-  Drag to pan, scroll to zoom about the pointer, **−** and **+** to zoom about the centre, **Fit** for the
-  whole well, **1:1** for one image pixel per screen pixel; the readout between − and + says how far the view
+  Drag to pan, scroll to zoom about the pointer; under the figure, **−** and **+** zoom about the centre,
+  **Fit** (or the home button beside it) shows the whole well, and **1:1** shows one image pixel per screen
+  pixel; the readout between − and + says how far the view
   is zoomed against Fit (from a quarter of it out to 500×). On a phone over RealVNC a two-finger swipe up or
   down is sent as the scroll wheel, so it zooms the view; a pinch is the viewer zooming its own picture of the
   desktop and never reaches All-Well. The swipe zooms about the pointer when the pointer is on the image, and

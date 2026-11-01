@@ -19,6 +19,10 @@ API
   no-ops (the bottom-right coordinate label was removed).
 * ``home()`` / ``back()`` / ``forward()`` / ``save()`` — proxy the handlers (so the
   toolbar can be driven externally too).
+* ``setHomeHandler(fn)`` — make *Reset view* call ``fn()`` instead of matplotlib's home, for a figure
+  that keeps its own view region and redraws to it (``None`` restores matplotlib's).
+* ``add_group(*widgets)`` — append a group of the caller's widgets after the built-in buttons, behind
+  a separator of its own; returns the group's container, so the caller shows or hides the whole group.
 
 matplotlib is an existing project dependency; if it's missing the module still
 imports (``MplToolbar`` becomes ``None``) so ``import widgets.*`` doesn't explode.
@@ -152,6 +156,7 @@ if _HAVE_MPL:
             lay.addWidget(self._sep())
             lay.addWidget(self._save)
             lay.addStretch(1)
+            self._home_handler = None
 
             # Floating chip beside the cursor — lazily created on first show
             # so headless / pre-paint construction doesn't allocate it.
@@ -210,7 +215,32 @@ if _HAVE_MPL:
             return self._nav
 
         def home(self) -> None:
+            if callable(self._home_handler):
+                self._home_handler()
+                return
             self._nav.home()
+
+        def setHomeHandler(self, fn) -> None:  # Qt naming
+            """*Reset view* calls *fn* instead of matplotlib's home; ``None`` restores it. For a figure that
+            keeps its own view region: matplotlib's home returns to the limits of its first draw, which
+            such a figure has already replaced."""
+            self._home_handler = fn
+
+        def add_group(self, *widgets) -> QWidget:
+            """Append *widgets* after the built-in buttons (before the trailing stretch), behind a separator
+            of their own, and return their container: hiding it hides the separator too, and the built-in
+            buttons, to its left, never move."""
+            group = QWidget(self)
+            group.setObjectName("MplToolbarGroup")
+            row = QHBoxLayout(group)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(theme.Spacing.xs)
+            row.addWidget(self._sep())
+            for widget in widgets:
+                row.addWidget(widget)
+            lay = self.layout()
+            lay.insertWidget(lay.count() - 1, group)
+            return group
 
         def back(self) -> None:
             self._nav.back()

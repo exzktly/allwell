@@ -121,14 +121,16 @@ def test_a_retry_after_a_failed_boot_does_not_resend_batch_one(
 
     p1, sent1, run_dir = _attempt(inputs, monkeypatch, remote_root,
                                   node_boots=False)
-    assert sent1 == ["b1/A01.zip", "b1/A02.zip"], sent1
+    # Batch 2 may have gone up too, while batch 1 waited for the node (`remote_batch_step._Ahead`).
+    assert sent1[:2] == ["b1/A01.zip", "b1/A02.zip"] and set(sent1) <= {"b1/A01.zip", "b1/A02.zip", "b2/A03.zip"}, \
+        sent1
     assert p1._returncode not in (0, None), "the dead node must not read as success"
 
     p2, sent2, _ = _attempt(inputs, monkeypatch, remote_root, node_boots=True)
     assert p2._returncode == 0
-    assert sent2 == ["b2/A03.zip"], (
-        f"the retry re-sent wells the failed attempt had already uploaded: "
-        f"{sent2}")
+    assert not set(sent2) & set(sent1), (
+        f"the retry re-sent wells the failed attempt had already uploaded: {sent2}")
+    assert sorted(sent1 + sent2) == ["b1/A01.zip", "b1/A02.zip", "b2/A03.zip"], (sent1, sent2)
     assert any("2 of 2 well-zip(s) are already on the remote" in m
                for m in p2._logged), "the reuse must be visible in the log"
 

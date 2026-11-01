@@ -1700,12 +1700,12 @@ and registers every centre page. The current page-list:
 | Analysis | **Statistics** | — |
 | Analysis | **Multivariate** | — (higher-dimensional analysis: correlation / PCA·UMAP·t-SNE / clustering / faceting) |
 | Analysis | **Spatial** | — (neighbourhood / colony-level spatial analysis; §5.11) |
-| Analysis | **Nanowells** | — (per-nanowell analysis of nanowell-array plates) |
-| Analysis | **smFISH** | — (spot-count threshold sweep and Apply to All, which writes `smFISH_Thresh` into the CSVs; its frame view exists to validate that cut, which is why it is an analysis page and not under Images) |
-| Images | **Image Browser** | Segmentation / Image Table / Cell Browser / Playground |
-| Data | **Review CSV** | — |
-| Data | **Saved Plots** | — (the plot gallery; decorates every plot card with a "save to gallery" button, and exports the gallery as a PDF report or a PowerPoint deck — each chart as editable shapes, each Image Table grid as one editable group per field of view) |
-| Data | **Batch Export** | — (one figure + CSV per export group, in six modes — Line, Bar, Scatter cells, Scatter aggregate, Response, Nanowells — and optionally into the Saved Plots gallery and a PowerPoint deck as well as into files) |
+| Assays | **Nanowells** | — (per-nanowell analysis of nanowell-array plates) |
+| Assays | **smFISH** | — (spot-count threshold sweep and Apply to All, which writes `smFISH_Thresh` into the CSVs; its frame view exists to validate that cut, so it is not an image viewer. Like Nanowells it is defined by a distinct kind of input data) |
+| Inspect | **Image Browser** | Segmentation / Image Table / Cell Browser / Playground |
+| Inspect | **Review CSV** | — |
+| Output | **Saved Plots** | — (the plot gallery; decorates every plot card with a "save to gallery" button, and exports the gallery as a PDF report or a PowerPoint deck — each chart as editable shapes, each Image Table grid as one editable group per field of view) |
+| Output | **Batch Export** | — (one figure + CSV per export group, in six modes — Line, Bar, Scatter cells, Scatter aggregate, Response, Nanowells — and optionally into the Saved Plots gallery and a PowerPoint deck as well as into files) |
 
 **Plotting** is a `NamedPageStack`; **Image Browser** (`QTabWidget`: the unified
 home for the disparate image-review surfaces — the review-image **Segmentation**
@@ -5233,7 +5233,8 @@ written in a core roster:
 - **Section list.** `tab_controller.sync_section_nav_from_notebook` adds one row
   per notebook page with the descriptor's `icon` (an icon key `widgets.icons`
   can draw), and opens each registry group (`FeatureDescriptor.group`) with a
-  `RailNav.addCaption` heading — **Analysis**, **Images**, **Data**; Home is the
+  `RailNav.addCaption` heading — **Analysis**, **Assays**, **Inspect**,
+  **Output**; Home is the
   landing page and is not captioned. A caption is not an item: it has no key,
   is never current, and hides itself while every row in its group is hidden
   (phone layout hides two Data pages). In phone layout's two-column grid
@@ -21190,9 +21191,12 @@ named `ssh` or `rsync`.
    - Add an `app._redraw_<name>()` shim on `ReviewApp` and call it from
      the relevant tab-change / selection-change paths in
      `core/selection_controller`.
-4. Register the tab in `core/centre_view.py`'s `groups` list (it sits
-   under "Analysis" / "Images" / "Data" sections) and create a
-   `_build_<name>()` closure that calls your `build_<name>_tab`.
+4. Declare a top-level `FeatureDescriptor` in `features/registry.py` with
+   `build=` and `group=` — the rail caption it sits under. `centre_view`
+   builds pages group by group in `FeatureRegistry.groups()` order, which is
+   declaration order, so a new group needs no edit outside the descriptor; but
+   a group of one fails `tests/test_rail_nav_groups.py` (it looks orphaned and
+   costs a phone a whole grid row), so find the page a partner first.
 5. Give a top-level descriptor its rail glyph (`icon=`, an icon key
    `widgets.icons` can draw) and every page with an `on_activate` hook its
    rail frames (`rail_sections=`, usually the main frame);

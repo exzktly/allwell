@@ -107,7 +107,9 @@ class FeatureDescriptor:
     """
 
     name: str
-    group: str = ""                      # "Analysis" | "Images" | "Data"; "" = sub-leaf
+    group: str = ""                      # the rail caption it sits under ("Analysis",
+                                         # "Assays", "Inspect", "Output"); "Home" for
+                                         # the landing page; "" = sub-leaf
     # The rail glyph beside a top-level entry: an icon key ``widgets.icons``
     # can draw. Required in effect for every descriptor with a ``group``;
     # ``tests/test_rail_sections_are_declared.py`` holds them to it.
@@ -294,6 +296,14 @@ class FeatureRegistry:
         the page-stack's local fallback map.
         """
         return [d for d in self._ordered if d.group]
+
+    def groups(self) -> list[str]:
+        """The top-level groups in declaration order, each once.
+
+        The page stack adds pages group by group in this order, so a group is
+        declared by naming it on a descriptor and nowhere else.
+        """
+        return list(dict.fromkeys(d.group for d in self.top_level()))
 
     def in_group(self, group: str) -> list[FeatureDescriptor]:
         return [d for d in self.top_level() if d.group == group]

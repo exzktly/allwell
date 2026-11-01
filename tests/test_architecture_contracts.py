@@ -491,7 +491,7 @@ def test_disabling_a_leaf_feature_drops_it_everywhere():
     pruned = FeatureRegistry(d for d in full.all() if d.name != "Review CSV")
     # Gone from lookup, group enumeration, and every hook fan-out.
     assert pruned.get("Review CSV") is None
-    assert "Review CSV" not in {d.name for d in pruned.in_group("Data")}
+    assert "Review CSV" not in {d.name for d in pruned.in_group("Inspect")}
     assert "Review CSV" not in {d.name for d in pruned.with_hook("on_activate")}
     # State attach still works and contributes the same non-Review slices.
     state = AppState()

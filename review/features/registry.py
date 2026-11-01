@@ -1111,8 +1111,10 @@ def _features() -> list[FeatureDescriptor]:
             redraw=_redraw_spatial,
             per_well_selection=True,
         ),
+        # ── Assays: pages that mean something only on a dataset with that
+        # kind of input (nanowell-array plates; smFISH channels) ───────────
         FeatureDescriptor(
-            name="Nanowells", group="Analysis", icon="hexagon",
+            name="Nanowells", group="Assays", icon="hexagon",
             rail_sections=_MAIN, build=_build_nanowell,
             lazy_only=True,
             states=(StateSpec("nanowell", _state_nanowell),),
@@ -1132,11 +1134,12 @@ def _features() -> list[FeatureDescriptor]:
                       "observations.nanowell_metrics": _svc_nanowell_metric_specs,
                       "segmentation.nanowell_overlay": _svc_nanowell_segmentation_overlay},
         ),
-        # smFISH is an analysis step, not an image viewer: it sweeps and sets
-        # the spot-count threshold that Apply to All writes into the CSVs
-        # (``smFISH_Thresh``), and its frame view exists to validate that cut.
+        # smFISH is not an image viewer: it sweeps and sets the spot-count
+        # threshold that Apply to All writes into the CSVs (``smFISH_Thresh``),
+        # and its frame view exists to validate that cut. Like Nanowells it is
+        # defined by a distinct kind of input data, so the two share **Assays**.
         FeatureDescriptor(
-            name="smFISH", group="Analysis", icon="dna", rail_sections=_MAIN,
+            name="smFISH", group="Assays", icon="dna", rail_sections=_MAIN,
             build=_build_smfish, lazy_only=True,
             on_activate=_activate_smfish,
             on_selection_changed=_sel_smfish,
@@ -1144,9 +1147,11 @@ def _features() -> list[FeatureDescriptor]:
             single_well_selection=True,
             states=(StateSpec("smfish", _state_smfish),),
         ),
-        # ── Images ────────────────────────────────────────────────────────
+        # ── Inspect: the raw evidence behind a number — the images and the
+        # per-cell rows (a Review CSV row double-clicks to its cell in
+        # Segmentation) ───────────────────────────────────────────────────
         FeatureDescriptor(
-            name="Image Browser", group="Images", icon="layout-grid",
+            name="Image Browser", group="Inspect", icon="layout-grid",
             build=_build_image_browser,
             lazy_only=True,
             on_dataset_loaded=_loaded_image_browser,
@@ -1169,16 +1174,16 @@ def _features() -> list[FeatureDescriptor]:
                       # every build that ships Image Browser at all.
                       "image_browser.show_field": _svc_image_browser_show_field},
         ),
-        # ── Data ──────────────────────────────────────────────────────────
         FeatureDescriptor(
-            name="Review CSV", group="Data", icon="file-spreadsheet",
+            name="Review CSV", group="Inspect", icon="file-spreadsheet",
             rail_sections=_MAIN, build=_build_review_csv,
             on_activate=_activate_review_csv,
             on_selection_changed=_sel_review_csv,
             per_well_selection=True,
         ),
+        # ── Output: where work leaves the app ─────────────────────────────
         FeatureDescriptor(
-            name="Saved Plots", group="Data", icon="image",
+            name="Saved Plots", group="Output", icon="image",
             rail_sections=_MAIN, build=_build_saved_plots,
             lazy_only=True,
             on_activate=_activate_saved_plots,
@@ -1190,7 +1195,7 @@ def _features() -> list[FeatureDescriptor]:
                       "saved_plots.report_pdf": _svc_saved_plots_report_pdf},
         ),
         FeatureDescriptor(
-            name="Batch Export", group="Data", icon="boxes",
+            name="Batch Export", group="Output", icon="boxes",
             rail_sections=_MAIN, build=_build_batch_export,
             on_activate=_activate_batch_export,
         ),

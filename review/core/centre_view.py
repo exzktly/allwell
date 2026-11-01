@@ -669,7 +669,7 @@ def build_centre(win, parent: QWidget) -> None:
     groups: list[tuple[str, list[tuple[str, Callable[[], None]]]]] = [
         (group, [(d.name, _top_level_builder(d.name))
                  for d in win._features.in_group(group)])
-        for group in ("Home", "Analysis", "Images", "Data")
+        for group in win._features.groups()
     ]
 
     def _new_tab(title: str) -> QWidget:

@@ -3970,8 +3970,12 @@ offered yet.
   trim cannot be applied it says so at the top of the manual rather than
   quietly showing you the full one.
 - **Section rail** — the left navigator lists every centre tab (Plotting, etc.)
-  under the dataset control at its head: **Home** first, then the tabs grouped
-  under the captions **Analysis**, **Images** and **Data**. Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
+  under the dataset control at its head: **Home** first, then four groups —
+  **Analysis** (Plotting, Statistics, Multivariate, Spatial: methods that work
+  on any plate), **Assays** (Nanowells, smFISH: pages that need that kind of
+  input data, and say so when a dataset has none), **Inspect** (Image Browser,
+  Review CSV: the images and per-cell rows behind a number) and **Output**
+  (Saved Plots, Batch Export). Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
   beside the mode selector. `Ctrl+B` collapses the rail, as does the small
   button floating on the rail's right edge — it stays put when the rail hides,
   so it is also how you bring the rail back. The mode selector is the top of
@@ -5743,7 +5747,7 @@ scatter and the phenotype-composition bars.
 
 ### Spatial analysis
 
-The **Spatial** tab (Analysis rail, next to Multivariate) analyses per-cell
+The **Spatial** tab (under **Analysis** on the rail, next to Multivariate) analyses per-cell
 positions in the well plane — the pipeline emits `shape_centroid_row` /
 `shape_centroid_col` for every segmented cell (in pixels of its field), and a
 nanowell run also each cell's position across the whole well in µm, which the
@@ -5833,7 +5837,7 @@ level — timepoints are already the X-axis.
 
 ### Nanowells
 
-The **Nanowells** page (Analysis rail, after Spatial) draws a dataset analysed in nanowell mode (Analyze ▸
+The **Nanowells** page (under **Assays** on the rail, beside smFISH) draws a dataset analysed in nanowell mode (Analyze ▸
 Nanowells): one dot per nanowell, so you see how the nanowells of a well spread, how that spread changes over
 time, and how wells and replicate groups compare. A dataset without nanowell tables shows a page saying so.
 
@@ -6400,7 +6404,7 @@ run the check on its output folder.
 
 ### Image Browser
 
-The **Image Browser** rail entry (Images group) hosts four image-review
+The **Image Browser** rail entry (under **Inspect**, beside Review CSV) hosts four image-review
 sub-tabs on a sub-tab bar: **Segmentation**, **Image Table**, **Cell Browser**,
 and **Playground**. All read the per-well processed-image ZIPs, loaded on
 demand — if a sub-tab reports "No images found", confirm the results folder

@@ -632,7 +632,9 @@ def redraw_response(ctx) -> None:
                   timepoints_chosen=bool(timepoints_for(ctx)),
                   fits=response_fits(ctx, data))
 
+    from review.core.observation_band import stamp_cells_footer
     from review.core.plot_style import apply_export_style_to_current
+    stamp_cells_footer(ctx, ax.figure)        # a nanowell plate's cells: say they are pooled from its nanowells
     apply_export_style_to_current(ctx, ax.figure, canvas)
     canvas.draw_idle()
 

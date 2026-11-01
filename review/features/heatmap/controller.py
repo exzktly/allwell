@@ -954,7 +954,7 @@ def _draw_heatmap(ctx) -> None:
         f"{_grid_subject(ctx, nw)}"
         f" — {metric} — {_tp_label(tp, _rescale_for(ctx.state.plot))}"
     )
-    _stamp_grid_footer(fig, nw, _muted_fg)
+    _stamp_grid_footer(ctx, fig, nw, _muted_fg)
     if show_error and np.isfinite(err).any():
         # Which spread the ``±`` under each value is, in the same two words
         # every other error-bearing figure in the app uses. A grid whose cells
@@ -1034,7 +1034,7 @@ def _grid_subject(ctx, nw) -> str:
     return "Nanowells" if nw is not None else active_channel_label(ctx)
 
 
-def _stamp_grid_footer(fig, nw, muted) -> None:
+def _stamp_grid_footer(ctx, fig, nw, muted) -> None:
     """Replace the grid's observations footer: the nanowell grid's, or none for cells."""
     from review.core.observation_band import FOOTER_GID
 
@@ -1042,6 +1042,9 @@ def _stamp_grid_footer(fig, nw, muted) -> None:
         text.remove()
     if nw is not None:
         fig.text(0.01, 0.002, nw.footer, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID)
+    else:
+        from review.core.observation_band import stamp_cells_footer
+        stamp_cells_footer(ctx, fig)
 
 
 def _format_cell_value(v: float, metric: str, fmt: str = "") -> str:

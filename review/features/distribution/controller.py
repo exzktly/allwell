@@ -23,6 +23,7 @@ from review.core.plot_style import (
 from review.core.channel_state_controller import (
     active_channel_label, get_all_fluor_gates, on_cutoff_for_column,
 )
+from review.core.observation_band import stamp_cells_footer
 from review.features.distribution import _observations as _nw_dist
 
 
@@ -388,6 +389,7 @@ def redraw_distribution(ctx) -> None:
         groups, exact, pool = pooled
         try:
             _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layout_choice, exact)
+            stamp_cells_footer(ctx, fig)
         finally:
             pool.close()
         return
@@ -405,6 +407,7 @@ def redraw_distribution(ctx) -> None:
             # iter_plot_groups, which the export path keys on).
             groups.append((_display_label_for(ctx, name), color, vals))
     _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layout_choice, None)
+    stamp_cells_footer(ctx, fig)
 
 
 def _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layout_choice, exact) -> None:

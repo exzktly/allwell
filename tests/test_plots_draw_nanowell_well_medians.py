@@ -118,3 +118,13 @@ def test_the_distribution_tab_draws_them_through_its_own_renderer(qtbot, tmp_pat
     fig = ctx.widgets.get("_distribution_fig")
     assert _footer(fig).startswith("Observations: nanowells")
     assert any(ax.get_xlabel() == "Cell count" for ax in fig.axes)
+
+
+def test_under_cells_the_distribution_says_its_cells_are_a_nanowell_plate_s(qtbot, tmp_path):
+    from review.features.distribution.controller import redraw_distribution
+
+    ctx = _shell(qtbot, tmp_path, "review.features.distribution.tab_view.build_distribution_tab", "dist_cells")
+    ctx.state.plot.observations = "cells"
+    redraw_distribution(ctx)
+    assert _footer(ctx.widgets.get("_distribution_fig")) == (
+        "Observations: cells · pooled from 3–4 occupied nanowells per well")

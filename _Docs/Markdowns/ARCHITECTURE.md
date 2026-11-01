@@ -13,8 +13,9 @@ you know that — they're called out where relevant.
 **This map describes the app as it stands today**, at whatever version the
 repo-root `version.py` currently carries — the version string lives there and
 nowhere else (§3), so this file never has to be edited for a release. It is
-surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
-else carries the app version. This document is **not** a changelog: it never
+surfaced on the title-bar version pill. `version.py` is bumped on `main` after
+each merge by `.github/workflows/version-bump.yml` (§10) — nothing else carries
+the app version, and pull requests leave it alone. This document is **not** a changelog: it never
 records which release a feature landed in (see *Change history* at the end).
 
 ---
@@ -1094,7 +1095,7 @@ allwell/
 ├── services/                    ← Analyze-side service modules
 ├── assets/                      ← runtime resources: fonts/ (Inter, JetBrains Mono) + icons/ (SVG)
 ├── profiles/                    ← build profiles — the feature subsets ALLWELL_PROFILE selects
-├── scripts/                     ← build_executable.sh / .ps1, preflight.sh (+ version_delta.py), dev helpers
+├── scripts/                     ← build_executable.sh / .ps1, preflight.sh, bump_version.py, dev helpers
 ├── _Docs/                       ← everything that is not source
 │   ├── Markdowns/              ← live docs (this file, README_WellViewer.md, the roadmap)
 │   ├── _Installation/          ← the PyInstaller spec, its hooks, the build scripts
@@ -20149,8 +20150,8 @@ you're in before you type the command.
   lint follow it:
   - **version-only**: every changed path is `version.py`, and every changed
     line in it is the `__version__ = "..."` assignment. No test runs and lint is
-    skipped. CI's `version bump` job still runs, since it is the check that
-    reads that line and fails unless it is exactly one well-formed increment.
+    skipped. Pull requests no longer move that line, so in practice this scope
+    is a deliberate hand-set version.
   - **docs-only**: every other changed path matches
     `tests/_lanes.py::DOCS_ONLY_PATTERNS` (`_Docs/Markdowns/*.md`, `CLAUDE.md`,
     `tests/FAST_LANE.md`). Lint is skipped and the fast lane narrows to the
@@ -20168,8 +20169,7 @@ you're in before you type the command.
   test files are named; `--ui`, the gated lanes and a run that names its files
   are never narrowed, and `ALLWELL_FULL_LANE=1` turns narrowing off.
   `scripts/preflight.sh` prints the scope first, then skips lint and tests or
-  runs the docs lane accordingly; its working-tree and version checks always
-  run. In CI, the `ruff` and `pytest (fast lane)` jobs ask the script on a pull
+  runs the docs lane accordingly; its working-tree check always runs. In CI, the `ruff` and `pytest (fast lane)` jobs ask the script on a pull
   request (`fetch-depth: 0`, for the diff) and skip their steps, so the job still
   reports green; a push to `main` always lints and runs the whole lane with
   `ALLWELL_FULL_LANE=1`. That push is where a test that reaches a document two
@@ -20297,29 +20297,24 @@ well, for anyone who can fetch it.
 working-tree check in one pass (`--quick` skips the fast lane). The tree check is
 the non-obvious one: it fails on *untracked* files, because a hand-run job's
 scratch output is what `git add -A` sweeps into a commit — that is how a sweep's
-JUnit reports once reached `main`. Last, it compares `version.py` against
-`origin/main` and fails unless the net move is exactly one increment: none fails
-as surely as two, because a bump that collided with a PR merged first leaves the
-branch at the number `main` already ships. The verdict is
-`scripts/version_delta.py`, tested by `tests/test_version_delta.py`, which also
-runs the real script in a throwaway repository. On a stacked branch the
-comparison against `origin/main` counts the bump of the branch below as well and
-reports more than one; that is the comparison's limit, and the stacked number is
-left as it is (CLAUDE.md §6).
+JUnit reports once reached `main`.
 
-**CI makes the same check against the base as it stands** (`ci.yml`'s `version`
-job, `scripts/version_bump_ci.sh`): `version.py` at `HEAD` against its first
-parent, which on a pull request is GitHub's merge ref — the base branch at the
-moment the job runs, so a stacked PR is measured against its own base — and on a
-push to `main` is the main the merge landed on. Preflight reads the author's
-`origin/main`, which is stale exactly when two pull requests are open at once and
-each bumps to the same next number; both pass, and the second merges with no
-increment of its own. The pull-request half fails such a PR whenever its job runs
-after the sibling merged; the push half turns one that slipped past into a red
-`main` rather than a silent one. Requiring branches to be up to date before
-merging, a repository setting, closes the window between them by re-running the
-job after the merge-in. `tests/test_version_delta.py` replays the collision in a
-throwaway repository.
+**The version is bumped on `main`, after the merge** (`.github/workflows/version-bump.yml`,
+`scripts/bump_version.py`). Pull requests leave `version.py` alone; every push to
+`main` gets exactly one increment, committed back by `github-actions[bot]`. The
+increment is read from the merged pull request's labels — `major`, then `minor`,
+otherwise patch, and patch for a push that came from no pull request. A push whose
+own diff already moved `version.py` (a hand-set version) is left as set. Runs are
+serialised by a `concurrency` group that queues rather than cancels, so two merges
+in quick succession get two bumps, and the push retries on top of a `main` that
+moved in the meantime. The commit is pushed with the workflow's `GITHUB_TOKEN`,
+which GitHub never lets start another workflow, so the bump neither re-triggers
+itself nor re-runs `ci.yml`. This replaced a rule that every pull request carry its
+own bump: any two open at once then edited the same line, and the second to merge
+either conflicted or landed with no increment of its own, each repair costing a
+full CI run. `tests/test_bump_version.py` pins the script, the workflow's shape,
+runs its skip step in a scratch repository, and fails if a per-pull-request version
+check returns to `ci.yml` or `scripts/preflight.sh`.
 
 **No test may reach a modal dialog.** An `autouse` fixture in `conftest.py`
 replaces every `QMessageBox` / `QInputDialog` / `QFileDialog` / `QColorDialog` /

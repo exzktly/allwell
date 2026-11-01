@@ -15,7 +15,10 @@
 # What runs follows the change's scope (scripts/change_scope.py, the same
 # classifier CI and scripts/test.sh read): a version-only change runs no lint and
 # no tests; a docs-only change skips lint and runs the docs lane; anything else
-# runs everything above. The working-tree and version-bump checks always run.
+# runs everything above. The working-tree check always runs.
+#
+# There is no version check: pull requests leave version.py alone, and
+# .github/workflows/version-bump.yml bumps it on main after each merge.
 #
 # Exit status: 0 only when every check passes.
 set -uo pipefail
@@ -134,43 +137,6 @@ modified=$(git diff --name-only; git diff --cached --name-only)
 if [[ -n "$modified" ]]; then
     printf '   staged/modified:\n'
     echo "$modified" | sort -u | sed 's/^/     /'
-fi
-
-step "version bump"
-# CLAUDE.md §6: exactly one bump per pull request — not one per commit, and
-# not none. More than one comes from holding a mental model of two pull
-# requests while the branch carries one (a second body of work stacked onto a
-# branch whose PR is still open). None comes from a bump that collided with a
-# PR merged first, or from forgetting it. The verdict is decided by
-# scripts/version_delta.py, which tests/test_version_delta.py covers.
-#
-# A stacked branch measured against origin/main reports more than one
-# increment when the branch below carries its own bump. That is a property of
-# this comparison, not of the branch: do not "correct" the stacked number to
-# satisfy it (CLAUDE.md §6).
-base_ref="origin/main"
-if ! git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
-    echo "   skipped ($base_ref not fetched)"
-else
-    bump_commits=$(git rev-list --count "$base_ref..HEAD" -- version.py 2>/dev/null || echo 0)
-    base_version=$(git show "$base_ref:version.py" 2>/dev/null \
-                   | sed -n 's/^__version__ = "\(.*\)"/\1/p')
-    head_version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' version.py)
-    # The *net* delta is the rule, not how many commits touched the file: a
-    # branch that bumps, over-bumps and then corrects is fine, and that is
-    # exactly the history this check was written from.
-    verdict=$(python scripts/version_delta.py "$base_version" "$head_version")
-    case "$verdict" in
-        SAME)  fail "version.py is unchanged from $base_ref ($base_version). Every pull \
-request bumps the version once (CLAUDE.md §6) — patch for fixes, docs and tooling. \
-When another branch's merge took the number this branch bumped to, bump again" ;;
-        ONE)   echo "   $base_version → $head_version, one increment (in $bump_commits commit(s))" ;;
-        UNREADABLE) echo "   could not read a version on one side; skipped" ;;
-        *)     git log --oneline "$base_ref..HEAD" -- version.py | sed 's/^/     /'
-               fail "version.py moved $base_version → $head_version, which is more \
-than one increment. A branch is one pull request and takes one bump — edit the \
-number the branch already carries instead of adding another (CLAUDE.md §6)" ;;
-    esac
 fi
 
 printf '\n'

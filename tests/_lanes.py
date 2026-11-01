@@ -364,7 +364,7 @@ DOCS_ONLY_PATTERNS: tuple[str, ...] = (
 )
 
 #: The one file whose sole change is **version-only**: no test can be affected by
-#: the number, and the CI ``version bump`` job is the check that reads it.
+#: the number. Pull requests no longer move it; ``version-bump.yml`` does, on main.
 VERSION_FILE = "version.py"
 
 

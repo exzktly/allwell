@@ -267,6 +267,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_failed_remote_listing_keeps_the_data.py": "A remote command that failed is never read as nothing there: the fetch keeps the well, verify fails closed",
     "test_a_failing_heartbeat_is_reported.py": "A heartbeat that is not reaching the host says so, before the host acts on the silence",
     "test_batch_size_follows_the_workers.py": "A remote Batch size of 0 is one well per worker, counted before the run the way the node counts it",
+    "test_the_next_batch_uploads_while_one_runs.py": "A batched run uploads the next batch while the current one runs, and stops that upload when the run ends without it",
     "test_a_slow_heartbeat_is_measured_and_tolerated.py": "A heartbeat on a slow shared filesystem is measured, given time to land, and kept out of the busy folder",
     "test_a_stuck_heartbeat_says_where_it_is_stuck.py": "A beat that never returns, and an app that was not running, each leave a line in the run log",
     "test_a_control_command_returns_at_its_timeout_on_windows.py": "A timed-out ssh control command returns at its timeout on Windows, though a process it started holds its pipes",

@@ -2065,9 +2065,12 @@ Choosing a remote reveals a **Remote options** group, hidden for a local run
 because none of it applies:
 
 - **Batch size (0 = one per worker).** Any positive `N` processes `N` wells at
-  a time, which bounds peak disk on the remote to roughly `N` wells of input
-  plus about one well of output, at the cost of reloading the segmentation
-  model once per batch (a few seconds each). `0`, the default, sends one well
+  a time. While one batch runs on the node the next one is already uploading
+  (`batch 2/5: uploading 7 well-zip(s) while batch 1 runs`), so after the first
+  batch the node does not wait for uploads; peak disk on the remote is roughly
+  two batches of input — the one running and the one waiting — plus about one
+  well of output, at the cost of reloading the segmentation model once per
+  batch (a few seconds each). `0`, the default, sends one well
   for each worker the pipeline will start, so the first upload is only as big
   as the workers need and the run starts after that many wells rather than the
   whole plate. The workers are counted before the run the way the node counts
@@ -2080,8 +2083,9 @@ because none of it applies:
   count cannot be known before the run — a host with no scheduler command, a
   command that names no CPUs, or one that reserves the whole node — `0` uploads
   the whole plate in one batch, and the log says so and what to set. Each batch
-  ends when its slowest well does, and batches upload one after another, so a
-  larger batch can finish a plate sooner where the remote's disk allows it. A nanowell run holds a whole
+  ends when its slowest well does, so a larger batch can finish a plate sooner
+  where the remote's disk allows it. A Suspend or Stop during a batch also ends
+  the next batch's upload; a resume picks up what it had sent. A nanowell run holds a whole
   batch's input and output until that batch ends, and then frees them, so for
   nanowells the peak is about `N` wells of input plus `N` wells of output —
   plus every well kept for the end-of-run re-anchoring: a well with a

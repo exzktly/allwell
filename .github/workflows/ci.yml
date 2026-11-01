@@ -136,6 +136,13 @@ jobs:
     # the fast lane they took it from ~2.5 to ~9.5 min locally and to ~12 of its
     # 15-minute cap in CI, so they run here, beside it, distributed by test.
     #
+    # This job's own cap is 20 minutes, not the 15 the other jobs use. The lane
+    # itself measured 10m37s on main (8abde49) and 14m04s on another run of the
+    # same tests (399 passed), and with checkout and installs on top that second
+    # run was cancelled at 15 minutes after every test had passed. The cap is the
+    # backstop for a hang, not a budget: a lane that creeps toward 20 is a lane to
+    # split or speed up, not a number to raise again.
+    #
     # Gated, like the job below: on a pull request scripts/lane_needed.py decides
     # whether the change can reach a nanowell test (a nanowell, pipeline/ or
     # process_microscopy.py path, or a module a nanowell test imports directly),
@@ -144,7 +151,7 @@ jobs:
     # change two imports away gets caught.
     name: pytest (nanowell lane)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:

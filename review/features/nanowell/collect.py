@@ -414,13 +414,17 @@ def nanowell_wells(folder: Path) -> list[str]:
     return [path.stem for path in sorted(folder.glob("*.csv"))]
 
 
-def load_nanowell_data(data_dir, wells=None, parts: dict | None = None) -> NanowellData | None:
+def load_nanowell_data(data_dir, wells=None, parts: dict | None = None, on_well=None) -> NanowellData | None:
     """The dataset's nanowell tables, or ``None`` for a dataset that was not run in nanowell mode.
 
     Only the tables of *wells* are read (every well's when ``None``): a plate of a hundred wells is not read
     whole to draw the three selected. *parts* (``well -> WellPart``) holds wells already read, which are used
     as they are, and receives each well read now, so the caller can keep it and a well selected again is not
     read again. :attr:`NanowellData.available` lists every well with a table, read or not.
+
+    *on_well(done, total)*, when given, is called before the first table is read and after each one, counting
+    only the wells read now (those already in *parts* cost nothing), so a page can show how far a long read has
+    got. It is called on whatever thread runs the load.
 
     Raises :class:`NanowellSchemeError` when the sidecar states a scheme this version does not understand.
     """
@@ -444,8 +448,12 @@ def load_nanowell_data(data_dir, wells=None, parts: dict | None = None) -> Nanow
     if missing:
         # Listed once (a name glob, nothing opened) and shared by every well read now.
         cell_files = glob_csvs(folder.parent)
-        for well in missing:
+        if on_well is not None:
+            on_well(0, len(missing))
+        for k, well in enumerate(missing, start=1):
             parts[well] = read_well_part(folder, well, cell_files, available)
+            if on_well is not None:
+                on_well(k, len(missing))
     return _assemble(data_dir, folder, sidecar, [parts[w] for w in asked], available)
 
 

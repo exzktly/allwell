@@ -29,7 +29,7 @@ from analyze import granted_node_panel as gnp                                   
 from analyze.granted_node_panel import GrantedNodePanel                           # noqa: E402
 from analyze.remote_dialog import ManageRemotesDialog                             # noqa: E402
 from services.remote_config import RemoteHost, write_remote                       # noqa: E402
-from services.remote_hold import node_for                                         # noqa: E402
+from services.remote_hold import live_nodes, node_for                             # noqa: E402
 from tests._hold_cluster import HOST, Cluster, Script, granted_files             # noqa: E402
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
@@ -329,3 +329,31 @@ def test_show_log_is_offered_only_for_a_host_that_can_have_a_node(qtbot, panel, 
     assert panel._log_btn.isEnabled()
     panel.set_host(RemoteHost(**{**HOST, "name": "plain", "compute_launcher": ""}))
     assert not panel._log_btn.isEnabled()
+
+
+# ── teardown ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_a_read_still_running_when_the_test_ends_leaves_no_heartbeat(qtbot, panel, cluster, monkeypatch):
+    """A read the panel started is still answering when the test ends — the timer's, or the one a finished Request
+    asks for — and ``attach`` starts a heartbeat for the granted node after the ``cluster`` fixture stopped them.
+
+    Wrong implementation: a teardown that stops the heartbeats without waiting for the panel's threads, which the
+    autouse run-thread check then reports against whichever test happened to end mid-read (it did, in CI, on
+    ``test_request_sends_the_hosts_command_to_the_scheduler_and_shows_the_node``).
+    """
+    from services.remote_hold import GrantedNode
+
+    host = RemoteHost(**HOST)
+    _seed_granted(cluster, host)
+    panel.set_host(host)
+    qtbot.waitUntil(lambda: panel._release_btn.isEnabled(), timeout=10000)
+    for node in live_nodes():
+        node.stop_beating()                              # as if the node had been read, and its beat stopped since
+    real = GrantedNode.attach
+
+    def slow_attach(self):
+        time.sleep(0.5)                                  # still answering when the test body returns
+        return real(self)
+
+    monkeypatch.setattr(GrantedNode, "attach", slow_attach)
+    panel.refresh()

@@ -117,8 +117,8 @@ FREE_VALUES = frozenset({0, 16777215})
 EXPRESSION_ALLOWLIST = {
     "widgets/color_picker_popover.py:237",
     "widgets/color_picker_popover.py:242",
-    "widgets/empty_state.py:136",
-    "widgets/empty_state.py:137",
+    "widgets/empty_state.py:165",
+    "widgets/empty_state.py:166",
     "widgets/lut_selector.py:121",
     "widgets/lut_selector.py:126",
     "widgets/lut_selector.py:167",

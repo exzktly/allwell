@@ -168,7 +168,8 @@ one that is wedged:
 | | Measured |
 |---|---|
 | Fast lane, local, quiet container, 4 CPUs | ~4 min in parallel (12,333 tests); ~2.3 min at 11,031 tests, before the nanowell work |
-| Nanowell lane, local, 4 CPUs | ~4.8 min (250 tests) |
+| Nanowell lane, local, 4 CPUs | ~4.8 min (250 tests); 13 min 43 s at 398 tests in a container that had just run the other lanes |
+| Nanowell lane, CI | 10 min 37 s to 14 min 04 s for the same ~400 tests, plus ~1 min of setup. Its job cap is 20 min (`ci.yml`), the other jobs' 15 |
 | Fast lane, 2 workers (what CI's runner gets) | ~4.1 min |
 | Fast lane, local, under contention from other work in the same container | roughly 2–3× that |
 | Fast lane, CI job end to end | add ~2 min for checkout and installing the test stack. The job cap is 15 min (`ci.yml`) |

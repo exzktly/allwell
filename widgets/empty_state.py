@@ -15,6 +15,9 @@ API
   links *below* the action, each an ``(label, sublabel, on_click, enabled,
   tooltip)``. For a placeholder whose way out is not only "do this" but "or go
   back to one of these". Also absent unless asked for.
+* ``setProgress((done, total))`` / ``setProgress(None)`` — an optional progress
+  bar under the hint, for a placeholder that stands in while counted work runs.
+  ``(0, 0)`` shows a bar with no known end. Hidden unless asked for.
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ if _ROOT not in _sys.path:
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QProgressBar, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 
@@ -45,6 +48,10 @@ def entry_row_text(label: str, sublabel: str) -> str:
 
 from ui import theme
 from widgets import icons
+
+
+#: The progress bar's widest, in characters of the placeholder's font (``setProgress``).
+_PROGRESS_WIDTH_CHARS = 40
 
 
 class EmptyState(QWidget):
@@ -89,6 +96,28 @@ class EmptyState(QWidget):
         outer.addWidget(self._text, 0)
         outer.addSpacing(theme.Spacing.xs)
         outer.addWidget(self._hint, 0)
+        # How far the work the page is waiting on has got, when it can count
+        # itself (``setProgress``). Hidden, so it takes no room, until a site
+        # asks; the theme's global ``QProgressBar`` rule styles it like every
+        # other bar in the app.
+        self._progress = QProgressBar(self)
+        self._progress.setObjectName("EmptyStateProgress")
+        self._progress.setTextVisible(False)
+        self._progress.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # Between two stretches rather than ``Qt.AlignHCenter``: aligned, the
+        # bar would be sized to its small size hint; stretched, it would sit
+        # flush left once it reaches its maximum width. The row is a widget of
+        # its own and it is the row that is hidden, gap included, so a
+        # placeholder without a bar keeps exactly its old geometry.
+        self._progress_row = QWidget(self)
+        self._progress_row.setObjectName("EmptyStateProgressRow")
+        bar_row = QHBoxLayout(self._progress_row)
+        bar_row.setContentsMargins(0, theme.Spacing.sm, 0, 0)
+        bar_row.addStretch(1)
+        bar_row.addWidget(self._progress, 100)
+        bar_row.addStretch(1)
+        self._progress_row.setVisible(False)
+        outer.addWidget(self._progress_row, 0)
         # Horizontally centred like the glyph rather than stretched: a
         # full-width button on a page whose whole content is three centred
         # lines reads as a banner, not as the one thing to press.
@@ -135,6 +164,11 @@ class EmptyState(QWidget):
         _title_f.setPixelSize(theme.Typography.h3_size)
         self._text.setMinimumHeight(QFontMetrics(_title_f).height() * 2)
         self._hint.setMinimumHeight(self.fontMetrics().height() * 2)
+        # The bar is as wide as about forty characters of the hint, never the
+        # whole page: a full-width bar on a wide canvas reads as a banner. Its
+        # width shrinks with the page (the layout may give it less), so a
+        # phone-width placeholder still fits.
+        self._progress.setMaximumWidth(self.fontMetrics().horizontalAdvance("0") * _PROGRESS_WIDTH_CHARS)
 
     def _aw_rescale(self) -> None:
         """Re-measure after a UI scale (phone layout's rescale pass): the
@@ -315,6 +349,34 @@ class EmptyState(QWidget):
     def isBusy(self) -> bool:
         return self._busy
 
+    def setProgress(self, progress: tuple[int, int] | None) -> None:
+        """Show how far the work behind the page has got: ``(done, total)``, or ``None`` to hide the bar.
+
+        ``total`` of 0 (or less) is a bar with no known end — Qt's busy
+        indicator — for work that is running but has not counted itself yet.
+        """
+        if progress is None:
+            self._progress_row.setVisible(False)
+            return
+        done, total = (int(v) for v in progress)
+        if total <= 0:
+            self._progress.setRange(0, 0)
+        else:
+            self._progress.setRange(0, total)
+            self._progress.setValue(max(0, min(done, total)))
+        self._progress_row.setVisible(True)
+
+    def progress(self) -> tuple[int, int] | None:
+        """The ``(done, total)`` on the bar, or ``None`` while it is hidden.
+
+        Read off the widget's own state (not ``isVisible()``, which is ``False``
+        for any child of a page that has not been shown yet).
+        """
+        if self._progress_row.isHidden():
+            return None
+        return (self._progress.value() if self._progress.maximum() else 0,
+                self._progress.maximum())
+
     def _sync_controls_visibility(self) -> None:
         """Show the action and the entries when each is set and the page is not busy."""
         self._action.setVisible(bool(self._action.text()) and not self._busy)
@@ -377,6 +439,7 @@ class EmptyState(QWidget):
         c, t = theme.Colors, theme.Typography
         return f"""
         #EmptyState {{ background: transparent; }}
+        QWidget#EmptyStateProgressRow {{ background: transparent; }}
         QLabel#EmptyStateText {{
             color: {c.text_secondary};
             font-size: {t.h3_size}px;

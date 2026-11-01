@@ -44,7 +44,8 @@ from review.features.nanowell.renderer import (
 from review.features.nanowell.state import (
     IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS,
 )
-from review.features.nanowell.series_compute import crop_metric_lines, long_format, site_metrics, site_series
+from review.features.nanowell.series_compute import (crop_metric_lines, long_format, rim_focus_text, site_metrics,
+                                                     site_series)
 from review.features.nanowell.zoom_compute import (  # noqa: F401 — the band and its tests read them here
     BUTTON_STEP, WHEEL_STEP, ZOOM_IN_LIMIT, ZOOM_OUT_LIMIT, held_factor,
 )
@@ -1544,9 +1545,10 @@ def extremes_columns(timepoints, ranked: str, chosen) -> list:
     return [tp for tp in timepoints if not chosen or tp in chosen or tp == ranked]
 
 
-def crop_metrics(st, sites, channel) -> dict:
+def crop_metrics(st, sites, channel, *, focus: bool = False) -> dict:
     """``site -> {timepoint: [caption lines]}``: each nanowell's computed measurements at each timepoint, for the
-    captions under its crops (``series_compute.crop_metric_lines``)."""
+    captions under its crops (``series_compute.crop_metric_lines``); with *focus*, its rim focus as a share of the
+    well's sharpest at the end (``series_compute.rim_focus_text``) — the pop-out's, where a crop has the room."""
     out: dict = {}
     if st.metrics is None:
         return out
@@ -1554,6 +1556,7 @@ def crop_metrics(st, sites, channel) -> dict:
         well, q, r = site
         frame = site_series(st.metrics, well, q, r)
         out[tuple(site)] = {str(row["timepoint"]): crop_metric_lines(row, channel)
+                            + ([text] if focus and (text := rim_focus_text(row)) else [])
                             for row in frame.to_dict("records")}
     return out
 
@@ -1622,7 +1625,8 @@ def draw_popout(ctx) -> None:
             _fetch(ctx, "crops", site, lambda: site_crops(data, metrics, site, channel=image_channel),
                    failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
         render_crop_grid(fig, gated_crops(st, site, st.crops.get(site)), site, cells=st.crop_cells,
-                         metrics=crop_metrics(st, [site], page_channel(ctx)).get(site) if st.crop_metrics else None,
+                         metrics=(crop_metrics(st, [site], page_channel(ctx), focus=True).get(site)
+                                  if st.crop_metrics else None),
                          image_channel=image_channel, display_range=display_range(ctx), labels=st.popout_labels)
     canvas.draw_idle()
 

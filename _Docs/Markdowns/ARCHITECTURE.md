@@ -12010,7 +12010,11 @@ foot one line of the nanowell's metrics there (`series_compute.crop_metric_lines
 percentage, the shared channel's nanowell fluorescence and brightness as `fluor.` and `bright`, in that order of
 importance, `compact_number` for thousands; a state without numbers by name; a missing measurement left out, never zero) — as many as fit the
 crop's width (`renderer._one_line`), the caption saying when some were left for the pop-out, which writes each
-panel's full metrics under it (`render_crop_grid(…, metrics=…)`, `controller.crop_metrics`). Text under or beside
+panel's full metrics under it (`render_crop_grid(…, metrics=…)`, `controller.crop_metrics(…, focus=True)`), ending
+with the rim focus on the rim focus rule's own scale (`series_compute.rim_focus_text`: `focus / rim_focus_ref` as
+`rim 88% of sharpest`, written whether the rule is on or off and on an out-of-focus timepoint too; `rim 0.95 (not
+judged)` under `MIN_SITES` rims; `rim not fitted` for a measurable timepoint with no rim focus). The Extremes
+montage's crops share the Metrics setting but not that line: they have room for one. Text under or beside
 each crop took more of the figure than the crops did, and three lines over a crop covered the lower third of the
 nanowell, where the cells are. **The layout is computed in inches** (`_extremes_layout`), the panels placed with
 `fig.add_axes`: the Largest and Smallest blocks side by side or one above the other, whichever gives the larger

@@ -6208,7 +6208,10 @@ timepoint with no crop says why. **Pop out**, above the strip, opens the crops l
 one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a change
 between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
 it like any window. Its own row of controls sets the crops where you look at them: the image channel, **Range**
-(the display range), **Cells**, **Metrics** (the measurements under each crop), **Labels** (each crop's timepoint
+(the display range), **Cells**, **Metrics** (the measurements under each crop, ending with the rim's focus — *rim 88% of sharpest* — as a
+percentage of its well's sharpest rims at that timepoint, the same scale as the **Rim focus** threshold, so a crop
+reading below the threshold is the one left out as out of focus; *not judged* where the well had too few rims, *rim
+not fitted* where the rim was not found), **Labels** (each crop's timepoint
 and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
 Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted in the
 crop's own nanowell, on every crop — the strip, the pop-out and the Extremes montage (the run keeps no cell

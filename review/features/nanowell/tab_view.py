@@ -161,7 +161,9 @@ _EXTREMES_TPS_TIP = ("The timepoints the montage shows as columns. Fewer columns
 _REFIT_MS = 60
 _CROP_METRICS_TIP = ("Write each crop's numbers on it: its fold change in the corner and a line of its metrics along "
                      "its foot. Off leaves the crops bare; the row labels still give each nanowell's rank and value.")
-_POPOUT_METRICS_TIP = ("Write each crop's measurements under it — the same setting as the Extremes view's Metrics.")
+_POPOUT_METRICS_TIP = ("Write each crop's measurements under it — the same setting as the Extremes view's Metrics. "
+                       "Here they end with the rim's focus as a percentage of its well's sharpest rims at that "
+                       "timepoint, on the same scale as the Rim focus threshold.")
 _POPOUT_LABELS_TIP = ("Write each crop's timepoint over it and the line under the figure saying where the crops were "
                       "cut from and on what brightness scale. Off leaves the crops bare; the title still names the "
                       "nanowell and channel.")

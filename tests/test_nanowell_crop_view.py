@@ -214,3 +214,29 @@ def test_the_pop_out_is_a_non_modal_dialog_owned_by_the_app_s_window(page, qtbot
     qtbot.waitUntil(lambda: box.isVisible() and box.width() > 0, timeout=5000)
     qtbot.mouseClick(box, Qt.LeftButton)
     assert window.isVisible() and page.state.feature_slice("nanowell").crop_cells
+
+
+def test_the_rim_focus_is_written_as_a_share_of_the_well_s_sharpest_rims():
+    """Asked for: the focus metric in the pop-out's crop captions. It is written on the Rim focus threshold's own
+    scale — this rim's focus over the well's 90th-percentile rim at that timepoint — so it can be read against the
+    percentage in the box; on an out-of-focus timepoint too, where it matters most."""
+    from review.features.nanowell.series_compute import rim_focus_text
+
+    assert rim_focus_text({"state": "measured", "focus": 0.83, "rim_focus_ref": 1.0}) == "rim 83% of sharpest"
+    assert rim_focus_text({"state": "out_of_focus", "focus": 0.26, "rim_focus_ref": 0.5}) == "rim 52% of sharpest"
+    assert rim_focus_text({"state": "measured", "focus": 0.95, "rim_focus_ref": np.nan}) == "rim 0.95 (not judged)"
+    assert rim_focus_text({"state": "empty", "focus": np.nan, "rim_focus_ref": 1.0}) == "rim not fitted"
+    assert rim_focus_text({"state": "unaddressed", "focus": None}) == ""     # nothing measured, nothing to judge
+
+
+def test_the_pop_out_s_captions_end_with_the_rim_focus_and_the_extremes_montage_s_do_not(page, qtbot, known_crops):  # noqa: F811
+    """The pop-out has room for the focus line; the Extremes montage's crops, which share the Metrics setting, do not
+    get it. The fixture's wells hold four nanowells, under the ten the rule needs to judge one: so "not judged"."""
+    st = _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    _press_pop_out(qtbot, page)
+    qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
+    captions = _popout_texts(page, "nw-crop-grid-metrics")
+    assert len(captions) == 2 and all(c.splitlines()[-1].endswith("rim 1 (not judged)") for c in captions), captions
+    assert all("rim" not in line for lines in nwc.crop_metrics(st, [("A01", 1, 0)], None)[("A01", 1, 0)].values()
+               for line in lines)

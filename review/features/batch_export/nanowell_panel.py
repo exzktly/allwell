@@ -162,8 +162,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
         self._baseline_moving_spin.setRange(1, _moving_max())
         self._baseline_moving_spin.setToolTip(
             "With the moving average on, a fold change's baseline as the mean over this many timepoints ending at "
-            "the baseline timepoint, as the page's Baseline average control. Not used with the Earliest baseline, "
-            "which has nothing before it. The summary CSV's baseline_moving_average column says the window each "
+            "the baseline timepoint, as the page's Baseline average control. Not used with the Earliest or First "
+            "measurable baseline, which have no measured timepoint before them. The summary CSV's baseline_moving_average column says the window each "
             "row used.")
         row.addWidget(self._baseline_moving_spin)
         row.addStretch(1)

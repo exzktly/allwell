@@ -1462,7 +1462,6 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
     axis labelled once per column under the bottom row — the timepoint names at their true hours ran into each
     other wherever two were imaged close together — and the occupancy key at the top right."""
     from matplotlib.collections import LineCollection
-    from matplotlib.ticker import MaxNLocator
 
     from widgets.plot_card import theme_paired_colours
 
@@ -1520,11 +1519,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
         marked_kinds.update(panel.marks.values())
         mark_timepoints(ax, panel.times, panel.marks, _mark_colours(muted), width=0.04 * span or 0.3,
                         fontsize=ANNOTATION_PT, ground=inks[0])
-        if panel.in_hours:
-            ax.xaxis.set_major_locator(MaxNLocator(nbins=6, integer=True, min_n_ticks=3))
-        else:
-            ax.set_xticks(panel.times)
-            ax.set_xticklabels(panel.labels)
+        _trajectory_ticks(ax, panel)
         _no_offset(ax)
         _ink(ax.set_title(panel.well, fontsize=10, fontweight="bold", loc="left", color=ink))
         ax.grid(alpha=0.3)
@@ -1577,6 +1572,17 @@ def _unjoined_points(ax, panel, oks) -> None:
         screen, publication = _occupancy_colours(occupancy)
         colours = (publication if _is_publication(ax) else screen)[1]
         ax.scatter(xs, ys, s=6, c=colours, alpha=0.6, linewidths=0, zorder=3, gid="nw-traj-unjoined")
+
+
+def _trajectory_ticks(ax, panel) -> None:
+    """A Trajectories panel's x ticks: whole hours when the panel is drawn in hours, else one per timepoint, named."""
+    from matplotlib.ticker import MaxNLocator
+
+    if panel.in_hours:
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=6, integer=True, min_n_ticks=3))
+    else:
+        ax.set_xticks(panel.times)
+        ax.set_xticklabels(panel.labels)
 
 
 def _share_limits(axes, x_groups=None) -> None:

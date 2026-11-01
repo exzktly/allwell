@@ -202,3 +202,36 @@ def test_the_code_digest_moves_when_a_function_s_code_does(tmp_path, monkeypatch
             obj.__module__ = "probe"
         digests[name] = masks.code_digest(module)
     assert len(set(digests.values())) == 3, digests
+
+
+def test_the_code_digest_moves_when_a_default_or_a_module_constant_does():
+    """A code object holds neither its function's defaults nor the values of the globals it reads, only their
+    names. The run leaves Cellpose's ``flow_threshold`` and ``cellprob_threshold`` at their signature defaults, so
+    a digest of the code alone kept every stored mask when either was edited — labels the current code would not
+    produce, reported as a successful run."""
+    import types
+
+    def module(src):
+        m = types.ModuleType("probe")
+        exec(src, m.__dict__)
+        return m
+
+    base = "LIMIT = 0.4\ndef seg(x, *, flow_threshold=0.4, other=(1, 'a')):\n    return x > flow_threshold * LIMIT\n"
+    digests = {
+        "base": masks.code_digest(module(base)),
+        "again": masks.code_digest(module(base)),
+        "default": masks.code_digest(module(base.replace("flow_threshold=0.4", "flow_threshold=0.6"))),
+        "constant": masks.code_digest(module(base.replace("LIMIT = 0.4", "LIMIT = 0.9"))),
+        "positional": masks.code_digest(module(base.replace("*, flow", "flow"))),
+    }
+    assert digests["base"] == digests["again"], "the digest must be the same for the same code"
+    assert len({digests[k] for k in ("base", "default", "constant", "positional")}) == 4, digests
+
+
+def test_the_code_digest_is_stable_for_defaults_whose_repr_names_an_address():
+    import types
+
+    m1, m2 = types.ModuleType("probe"), types.ModuleType("probe")
+    for m in (m1, m2):
+        exec("class Marker:\n    pass\ndef f(x, sentinel=Marker()):\n    return x\n", m.__dict__)
+    assert masks.code_digest(m1) == masks.code_digest(m2)

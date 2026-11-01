@@ -11322,7 +11322,9 @@ when `mask_key` matches: the input's bytes, dtype and shape, `lowhigh`, `max_siz
 registration, images — changes the bytes and misses, so no reuse rests on an argument that the input should be
 the same. Cellpose's identity (`nanowell_measure.cellpose_segmenter`) is the diameter it resizes to, its options,
 the Cellpose and Torch versions, the device kind and `code_digest` of `pipeline.cellpose` and
-`pipeline.cellpose_masks` (the compiled code, so an edit there retires every mask without a version to remember); a
+`pipeline.cellpose_masks` (the compiled code, with each function's default arguments and every module constant of a
+plain type, since a code object holds neither — the run leaves Cellpose's `flow_threshold` and `cellprob_threshold`
+at their signature defaults — so an edit there retires every mask without a version to remember); a
 segmenter with no identity — every test stand-in — is never cached. What is stored is the segmenter's raw labels,
 before `segment_sites` drops a neighbour's objects or renumbers, so everything after it is recomputed. Each entry
 records its timepoint; a save keeps the entries this run used and those of timepoints it never segmented, and

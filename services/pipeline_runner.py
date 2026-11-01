@@ -2467,8 +2467,9 @@ class PipelineRunner:
         awake.start()
         try:
             self._enqueue(("line", f"[remote] target: {self._remote.name}\n"))
-            if self._batch_note:
-                self._enqueue(("line", self._batch_note))
+            batch_note = getattr(self, "_batch_note", "")     # a runner built without `start` has none
+            if batch_note:
+                self._enqueue(("line", batch_note))
             incremental = self._recover_remote_outputs(output_dir, args, opts)
             if incremental is None:
                 return

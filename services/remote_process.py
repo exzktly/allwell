@@ -82,7 +82,7 @@ from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_handoff import chase_handoff, watch_of
 from services.remote_batch_ledger import checked, fail, failed_batches_line, ledger_of
-from services.remote_batch_step import Step, run_batch
+from services.remote_batch_step import Step, abandon_upload_ahead, run_batch
 from services.remote_batch_resume import (
     _blank_argv, announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
     reattach_output_dir, stage_leftovers, take_from_remote)
@@ -403,6 +403,8 @@ class _BatchedRemoteProcess:
         self._log = log_fn or (lambda _m: None)
         self._progress = progress_fn
         self._stop = stop_event or threading.Event()
+        # The next batch's upload, sent while the current one runs (`remote_batch_step._Ahead`); `None` between.
+        self._upload_ahead = None
         # Set by `note_suspend_requested`: finish the batch in flight, send no
         # more. Separate from `_stop`, which tears the batch in flight down.
         self._suspending = threading.Event()
@@ -607,7 +609,8 @@ class _BatchedRemoteProcess:
             return False
         self._log(
             f"[remote] suspended — batch {batch_no}/{n_batches} and any after "
-            f"it were not sent; resume to process them\n")
+            f"it were not run (batch {batch_no} may already be on the remote, "
+            f"where a resume takes it up); resume to process them\n")
         return True
 
     # Internals ────────────────────────────────────────────────────────
@@ -1146,7 +1149,8 @@ class _BatchedRemoteProcess:
             self._log(
                 f"[remote] batched mode: {len(all_zips)} well(s) in "
                 f"{n_batches} batch(es) of up to {self._batch_size} "
-                f"(peak remote disk ≈ {self._batch_size + len(blanks)} "
+                # Two batches at the peak: the one running and the next, uploading meanwhile (remote_batch_step).
+                f"(peak remote disk ≈ {min(2, n_batches) * self._batch_size + len(blanks)} "
                 f"well-input)\n"
             )
 
@@ -1167,7 +1171,8 @@ class _BatchedRemoteProcess:
             final_rc = 0
 
             for batch_idx, batch_zips in enumerate(batches):
-                rc = run_batch(self, batch_idx + 1, n_batches, batch_zips)
+                rc = run_batch(self, batch_idx + 1, n_batches, batch_zips,
+                               batches[batch_idx + 1] if batch_idx + 1 < n_batches else None)
                 if rc is Step.SUSPENDED:
                     break
                 if rc is Step.ENDED:
@@ -1198,6 +1203,7 @@ class _BatchedRemoteProcess:
             self._log(f"[remote] batched run failed: {exc}\n")
             _logging.getLogger(__name__).exception("batched remote run crashed")
         finally:
+            abandon_upload_ahead(self)      # a next batch sent ahead and not wanted is not left uploading
             # Whatever ended the run, the beat has to end with it: the driver
             # reads a fresh heartbeat as "the app is alive and the next batch is
             # coming", so one left running holds the node for the full deadline

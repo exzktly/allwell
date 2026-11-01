@@ -152,13 +152,15 @@ def compose_hold_script(paths: HoldPaths, *, limit_s: int, idle_release_s: int, 
     # The app gone: the message the check prints, and what it does. `_aw_end` writes the reason and exits.
     # `$_aw_who` says whether a run had claimed the node and gone quiet too, or there was none: a node released
     # from under a running step must not read as one that nothing was using (the run's step ends with the node).
+    # `$_aw_evidence` is the snippet's measurement (how long ago the heartbeat was touched, and by which clock), so
+    # the reason the node ended carries what it saw and not only its conclusion.
     _, gone_check = _heartbeat_stale_snippet(
         paths.heartbeat,
         f"[remote] granted node: {APP_SILENT_RELEASE} ({_duration_words(heartbeat_stale_s)} without a "
-        "heartbeat) and $_aw_who",
+        "heartbeat: $_aw_evidence) and $_aw_who",
         stale_s=heartbeat_stale_s, poll_s=poll_s,
-        on_stale=f'_aw_end "{APP_SILENT_RELEASE} ({_duration_words(heartbeat_stale_s)} without a heartbeat) '
-                 'and $_aw_who"')
+        on_stale=f'_aw_end "{APP_SILENT_RELEASE} ({_duration_words(heartbeat_stale_s)} without a heartbeat: '
+                 '$_aw_evidence) and $_aw_who"')
     # A run's marker that its own heartbeat has stopped refreshing is a run whose app died mid-run: not busy.
     # The check prints each time it judges, which would be a line every poll, so its output is dropped.
     _, busy_check = _heartbeat_stale_snippet(
@@ -179,6 +181,18 @@ _aw_end() {{
     echo "[remote] granted node $_aw_node (job ${{SLURM_JOB_ID:-?}}) released: $1."
     exit 0
 }}
+
+# Whether Slurm lists a step of this job running — a run, which ends with the node. `squeue -s` also lists the
+# job's own `batch` and `extern` steps, which are this script and Slurm's; only numbered steps are runs. Exit 0 = a
+# run step is running (named in $_aw_step), 1 = none, 2 = the scheduler could not be asked (the files decide).
+_aw_run_step() {{
+    [ -n "${{SLURM_JOB_ID:-}}" ] || return 2
+    command -v squeue >/dev/null 2>&1 || return 2
+    _aw_steps=$(squeue -h -s -j "$SLURM_JOB_ID" -o %i 2>/dev/null) || return 2
+    _aw_step=$(printf '%s\\n' "$_aw_steps" | grep -E "^${{SLURM_JOB_ID}}\\.[0-9]+$" | head -n1)
+    [ -n "$_aw_step" ]
+}}
+_aw_kept_for=""
 
 # Slurm's own end of the job: SIGTERM at --time, or from a scancel (the app's Release/quit, or anyone's).
 _aw_term() {{
@@ -210,7 +224,22 @@ while :; do
     if [ -e {q["busy"]} ]; then
         _aw_busy=1
         {{ {busy_check} }} >/dev/null 2>&1
-        [ "$_aw_busy" = 1 ] || _aw_who="the run using it had not been heard from for {busy_label} either"
+        [ "$_aw_busy" = 1 ] || _aw_who="the run using it had not been heard from for {busy_label} either (its claim \
+$_aw_evidence)"
+    fi
+    # The files say nothing is using the node; Slurm has the last word. A run step still running keeps the node — it
+    # is doing work, and ending the job would cancel it — whatever the files say: the app may only have stopped
+    # reaching the host, or a starved node may be reading the files late. The run ends on its own (a batch whose app
+    # is gone suspends itself), and the rules below apply once it has.
+    if [ "$_aw_busy" = 0 ] && _aw_run_step; then
+        _aw_busy=1
+        if [ "$_aw_kept_for" != "$_aw_step" ]; then
+            _aw_kept_for=$_aw_step
+            echo "[remote] granted node: the app's files say no run is using the node, but step $_aw_step is still \
+running, so the node is kept until it ends"
+        fi
+    elif [ "$_aw_busy" = 0 ]; then
+        _aw_kept_for=""
     fi
     _aw_tick=$(date +%s)      # this node's clock; the heartbeat check below assigns _aw_now from the file server's
     if [ "$_aw_busy" = 1 ]; then

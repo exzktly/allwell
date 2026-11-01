@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import shutil
 import signal
+import re
 import subprocess
 import threading
 import time
@@ -195,8 +196,11 @@ def test_a_node_released_from_under_a_run_that_went_quiet_says_a_run_had_it(hold
     busy.touch()
     _age(busy, 3600)
     out = h.wait()
-    assert h.ended() == ("All-Well stopped answering (2 s without a heartbeat) and the run using it had not been "
-                         "heard from for 2 s either")
+    assert re.fullmatch(r"All-Well stopped answering \(2 s without a heartbeat: last touched \d+ s ago by the file "
+                        r"server's clock\) and the run using it had not been heard from for 2 s either \(its claim "
+                        r"last touched (\d+) s ago by the file server's clock\)", h.ended()), h.ended()
+    assert int(re.search(r"its claim last touched (\d+) s", h.ended()).group(1)) >= 3600, (
+        "the claim's age must be what the script measured: the marker was aged an hour")
     assert "released: All-Well stopped answering" in out
 
 
@@ -330,3 +334,79 @@ def test_hold_paths_are_under_the_staging_dir_and_one_per_host():
         assert getattr(pa, name).startswith(pa.dir + "/")
     # The same alias under another name is another host's node.
     assert host_key(a) != host_key(RemoteHost(name="a2", ssh_alias="login-a"))
+
+
+# ── Slurm's word on whether a run is still using the node ─────────────────────────────────────────────────────────
+
+def _squeue(tmp_path: Path, steps: list[str] | None) -> dict:
+    """A stand-in ``squeue`` on PATH that lists *steps* for ``squeue -h -s -j <job> -o %i`` (``None``: it fails, as a
+    scheduler that does not answer does), and the env that puts it there."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    listing = tmp_path / "steps"
+    if steps is None:
+        listing.write_text("FAIL\n")
+    else:
+        listing.write_text("".join(f"{s}\n" for s in steps))
+    (bin_dir / "squeue").write_text(
+        "#!/bin/sh\n"
+        f'[ "$(cat {listing})" = FAIL ] && exit 1\n'
+        f"cat {listing}\n")
+    (bin_dir / "squeue").chmod(0o755)
+    return {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+
+
+def test_a_running_step_keeps_the_node_though_the_app_and_its_claim_are_silent(hold, tmp_path):
+    """The reported loss: the app's heartbeat and the run's claim both stale (the app not reaching the host, or a
+    starved node reading them late) while the run's step was still working — and the node was released under it.
+    Wrong implementation: judging by the files alone."""
+    env = _squeue(tmp_path, ["4242.batch", "4242.extern", "4242.0"])
+    h = hold(beating=False, env=env)
+    busy = h.dir / "busy"
+    busy.touch()
+    _age(busy, 3600)
+    deadline = time.monotonic() + 6               # twice the ~3 s the files alone would allow
+    while time.monotonic() < deadline:
+        assert h.alive(), f"released under a running step: {h.ended() if (h.dir / 'ended').exists() else '?'}"
+        time.sleep(0.3)
+    assert (h.dir / "status").read_text().startswith("state=busy")
+    (tmp_path / "steps").write_text("4242.batch\n4242.extern\n")      # the run's step ends
+    out = h.wait()
+    assert h.ended().startswith("All-Well stopped answering"), h.ended()
+    assert out.count("step 4242.0 is still running, so the node is kept until it ends") == 1, out
+
+
+def test_only_numbered_steps_are_runs(hold, tmp_path):
+    """`squeue -s` lists the job's own batch and extern steps too: this script, and Slurm's. They keep nothing."""
+    h = hold(beating=False, env=_squeue(tmp_path, ["4242.batch", "4242.extern"]))
+    h.wait()
+    assert h.ended().endswith("and no run was using it")
+
+
+def test_a_scheduler_that_cannot_answer_leaves_the_files_to_decide(hold, tmp_path):
+    h = hold(beating=False, env=_squeue(tmp_path, None))
+    h.wait()
+    assert h.ended().startswith("All-Well stopped answering")
+
+
+def test_a_running_step_stops_the_idle_clock(hold, tmp_path):
+    env = _squeue(tmp_path, ["4242.3"])
+    h = hold(idle_release_s=2, env=env)
+    deadline = time.monotonic() + 4.5
+    while time.monotonic() < deadline:
+        assert h.alive(), "released for idleness while a run step was running"
+        time.sleep(0.3)
+    (tmp_path / "steps").write_text("")
+    h.wait()
+    assert h.ended() == "idle 2 s"
+
+
+def test_the_reason_names_what_was_measured(hold):
+    """The release's reason carries the heartbeat's age and the clock it was read by, not only the verdict."""
+    h = hold(beating=False)
+    _age(h.dir / "heartbeat", 600)
+    h.wait(timeout=8)
+    m = re.match(r"All-Well stopped answering \(2 s without a heartbeat: last touched (\d+) s ago by "
+                 r"(the file server's clock|this node's clock)\) and no run was using it$", h.ended())
+    assert m, h.ended()
+    assert 600 <= int(m.group(1)) < 700

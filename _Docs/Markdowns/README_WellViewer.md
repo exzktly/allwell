@@ -1939,14 +1939,22 @@ none depends on All-Well still running:
 | All-Well is open and no run is using the node | after *Release when idle after* (30 minutes by default) |
 | The time limit is reached (24 hours by default) | at the limit, even if a run is going |
 
-A run on the node ends with it. In particular, a computer that sleeps or loses
-its network for 10 minutes or more during a run (closing a laptop's lid sleeps
-it, even though All-Well keeps the machine awake otherwise) stops the run: the
-node hears nothing from All-Well and releases itself, and Slurm cancels the
-run's step. The run's headline then names the granted node and the reason it
-wrote — *All-Well stopped answering … and the run using it had not been heard
-from for 10 min either* — rather than an `scancel`, and **Resume** continues
-from the wells that finished.
+**A run that is still running keeps the node.** Before releasing it for either
+of the two middle rows, the node asks Slurm whether a run's step is still
+running on it, and if one is, keeps the node until that step ends and says so
+once in the node's log (*step 14428.0 is still running, so the node is kept
+until it ends*). So a computer that sleeps or loses its network for a while, or
+a node too busy to read All-Well's signals in time, no longer cancels a run that
+is working; a batched run whose app has gone quiet suspends itself after 10
+minutes, and the node is released after that. If Slurm cannot be asked, the
+node goes by All-Well's signals alone, as the table says.
+
+A run on the node still ends with it at the time limit. When the node does
+release itself, its log and the run's headline say what it measured, not only
+what it concluded — *All-Well stopped answering (2 min without a heartbeat:
+last touched 731 s ago by the file server's clock) and the run using it had not
+been heard from for 10 min either (its claim last touched 655 s ago by the file
+server's clock)* — and **Resume** continues from the wells that finished.
 
 Quitting releases the nodes that window asked for. A node it only *found* — one
 another window asked for — is not its to cancel: this window stops keeping it

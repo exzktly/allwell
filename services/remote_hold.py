@@ -850,7 +850,12 @@ class NodeLease:
 
     The marker is what stops the node's idle clock and its two-minute app-gone rule while this run uses the node, and
     what makes a second run wait. It is taken before the run stages anything, because preparing and uploading a large
-    plate can take longer than the idle limit."""
+    plate can take longer than the idle limit.
+
+    A lease can be taken while the hold job is still queued (:attr:`pending`): the marker needs only the hold's
+    directory, and the hold script reads it on its very first look, so the node starts busy and its idle clock never
+    runs while this run is still uploading. Such a lease has no :attr:`target` until :meth:`refresh` finds the node
+    granted — ``GrantedRun.await_node`` is what waits for that, at launch."""
 
     def __init__(self, node: GrantedNode, state: HoldState, *, log_fn: Callable[[str], None]) -> None:
         self.node = node
@@ -871,6 +876,11 @@ class NodeLease:
             self.state = self.node.state()
         except HoldError:
             pass
+
+    @property
+    def pending(self) -> bool:
+        """Whether the node is not granted yet (the hold job queued or starting, or unreadable since the claim)."""
+        return self.state.phase not in ("granted", "busy")
 
     @property
     def target(self) -> StepTarget:
@@ -900,14 +910,23 @@ class NodeLease:
                       f"busy for up to {MID_BATCH_HEARTBEAT_STALE_S // 60} min ({getattr(result, 'stderr', result)}).\n")
 
 
+def _node_words(state: HoldState) -> str:
+    """The node a run is using, as its log names it: ``gpu-node-1 (NVIDIA A10G)``."""
+    return f"{state.node}{' (' + state.gpus + ')' if state.gpus else ''}"
+
+
 def claim_node(host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str], None],
                stop_event: threading.Event | None = None, sleep: Callable[[float], None] = time.sleep,
                clock: Callable[[], float] = time.monotonic) -> NodeLease | None:
     """Take the host's granted node for a run, or ``None`` when the run should ask for a node of its own (no scheduler,
     no granted node, one that has been released, or a host that cannot be reached — the run's own ssh then says why).
 
-    A node that is still being granted, or is in use by another run, is waited for: never a second node beside it.
-    The wait is bounded by the host's Max queue wait (``0`` = no bound) and ends at once on Stop."""
+    A node that is in use by another run is waited for: never a second node beside it. The wait is bounded by the
+    host's Max queue wait (``0`` = no bound) and ends at once on Stop.
+
+    A node that is still being granted is claimed at once and returned as a :attr:`NodeLease.pending` lease, so the
+    run stages and uploads its plate while the hold job queues instead of after it; the run waits for the grant only
+    when it launches (``GrantedRun.await_node``)."""
     if not host.compute_launcher.strip():
         return None
     node = node_for(host, cache, log_fn=log_fn, sleep=sleep, clock=clock)
@@ -927,17 +946,18 @@ def claim_node(host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str],
                 log_fn(f"[remote] granted node {state.node or '?'} (job {state.job_id}) was released: "
                        f"{state.ended_reason}; this run asks for a node of its own.\n")
             return None
-        if state.phase in ("granted", "busy"):
+        if state.phase in ("granted", "busy", "queued", "starting"):
             answer = (node._script(claim_script(node.paths)).stdout or "").strip()
             if answer == "AW_LEASED":
-                log_fn(f"[remote] granted node: using {state.node}{' (' + state.gpus + ')' if state.gpus else ''}, "
-                       f"job {state.job_id}.\n")
+                if state.phase in ("queued", "starting"):
+                    log_fn(f"[remote] granted node: job {state.job_id} is still being granted; this run has claimed "
+                           "it, and prepares and uploads the plate while it waits.\n")
+                else:
+                    log_fn(f"[remote] granted node: using {_node_words(state)}, job {state.job_id}.\n")
                 return NodeLease(node, state, log_fn=log_fn)
             why = "busy with another run" if answer == "AW_BUSY" else "not claimable"
-        elif state.phase == "unknown":
-            why = "not readable just now"
         else:
-            why = "still being granted"
+            why = "not readable just now"
         if not said:
             log_fn(f"[remote] scheduler: the granted node is {why}; waiting for it.\n")
             said = True
@@ -955,7 +975,12 @@ class GrantedRun:
     left once the plate is staged, and give the claim back however the run ends. ``PipelineRunner`` holds one per run.
 
     While a node is claimed, :attr:`active` is true, the run's ``RemoteRunner.step_target`` names it, and the early
-    request for a node of the run's own is not made."""
+    request for a node of the run's own is not made.
+
+    A node still being granted is claimed too, and the run goes on to stage and upload while it queues. The run's
+    ``RemoteRunner.node_wait`` is then :meth:`await_node`, which each launch site calls (through
+    ``RemoteRunner.await_granted_node``) just before it reads the launcher: that is where the run waits for the
+    grant, so the queue wait overlaps the plate's preparation and upload rather than preceding them."""
 
     def __init__(self, runner, *, batch_size: int, nanowell: bool, log_fn: Callable[[str], None],
                  stop_event: threading.Event, sleep: Callable[[float], None] = time.sleep,
@@ -968,19 +993,75 @@ class GrantedRun:
         self._sleep = sleep
         self._clock = clock
         self.lease: NodeLease | None = None
+        #: The well count :meth:`check_fit` was given while the node was still being granted, checked once it is.
+        self._n_wells: int | None = None
+        self._claimed_at = 0.0
 
     @property
     def active(self) -> bool:
         return self.lease is not None
 
     def claim(self) -> None:
+        self._claimed_at = self._clock()
         self.lease = self._runner.claim_granted_node(log_fn=self._log, stop_event=self._stop, sleep=self._sleep,
                                                      clock=self._clock)
+        if self.lease is not None and self.lease.pending:
+            self._runner.node_wait = self.await_node
+
+    def await_node(self) -> None:
+        """Wait for a node claimed while it was still being granted, then make the run a step of it.
+
+        Called once, at launch, after the plate is staged (and, single-shot, uploaded). Returns with the run's
+        ``step_target`` naming the node, or with the claim given back and no step target when the hold job ended
+        before it was granted — the run then asks for a node of its own, as it would had there been no hold. A
+        node that failed to boot is waited on while Manage Remotes' request asks for another. Raises
+        :class:`HoldError` on Stop and :class:`HoldQueueWaitSpent` when the host's Max queue wait, counted from the
+        claim, runs out."""
+        self._runner.node_wait = None
+        wait_s, said, boot_failed_at = queue_wait_seconds(self._runner.host), False, None
+        while self.lease is not None and self.lease.pending:
+            lease = self.lease
+            lease.refresh()
+            state = lease.state
+            if state.phase in ("granted", "busy"):
+                self._runner.step_target = lease.target
+                self._log(f"[remote] granted node: using {_node_words(state)}, job {state.job_id}.\n")
+                if self._n_wells is not None:
+                    self.check_fit(self._n_wells)       # may replace the node; the loop then sees the new lease
+                continue
+            if state.phase in ("none", "ended"):
+                # A node that failed to boot ends its job, and the request in Manage Remotes submits another into the
+                # same directory, where this run's marker still is: wait a little for that before giving up on it.
+                boot_failed = state.slurm_state in _BOOT_FAILED_STATES and not state.granted_at
+                if boot_failed_at is None and boot_failed:
+                    boot_failed_at = self._clock()
+                if not (boot_failed and self._clock() - boot_failed_at < BOOT_RETRY_PAUSE_S + 3 * HOLD_POLL_S):
+                    self._log(f"[remote] granted node: job {state.job_id or '?'} ended before it was granted "
+                              f"({state.ended_reason or 'no reason given'}); this run asks for a node of its own.\n")
+                    self.release()
+                    return
+            else:
+                boot_failed_at = None
+            if not said:
+                self._log(f"[remote] scheduler: waiting for the granted node (job {state.job_id or '?'}) to be "
+                          "granted.\n")
+                said = True
+            if self._stop.is_set():
+                raise HoldError("the run was stopped while it waited for the granted node.")
+            if wait_s and self._clock() - self._claimed_at > wait_s:
+                raise HoldQueueWaitSpent(f"the granted node was not granted within {wait_s // 60} min, this host's "
+                                         "Max queue wait; no node of its own is asked for beside it.")
+            self._sleep(HOLD_POLL_S)
+        self._runner.node_wait = None      # a replacement claimed by `check_fit` is granted already
 
     def check_fit(self, n_wells: int) -> None:
         """Once the well count is known: a run that would outlast the node's time limit gets a fresh node, with a fresh
-        limit, rather than being killed by Slurm part-way."""
+        limit, rather than being killed by Slurm part-way. A node still being granted is checked when it is
+        (:meth:`await_node`)."""
+        self._n_wells = n_wells
         lease = self.lease
+        if lease is not None and lease.pending:
+            return
         needed = run_estimate_s(self._runner.host, n_wells, self._batch_size, self._nanowell)
         if lease is None or needed <= 0:
             return
@@ -1020,6 +1101,7 @@ class GrantedRun:
     def release(self) -> None:
         lease, self.lease = self.lease, None
         self._runner.step_target = None
+        self._runner.node_wait = None
         if lease is not None:
             lease.release()
 

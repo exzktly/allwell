@@ -48,11 +48,14 @@ def _paths(d: Path) -> HoldPaths:
 class Hold:
     """One running hold script, with a thread beating its heartbeat the way the app does."""
 
-    def __init__(self, tmp_path: Path, *, beating: bool = True, env: dict | None = None, **script_kw):
+    def __init__(self, tmp_path: Path, *, beating: bool = True, env: dict | None = None, busy_at_start: bool = False,
+                 **script_kw):
         self.dir = tmp_path / "hold"
         self.dir.mkdir(parents=True)
         self.paths = _paths(self.dir)
         (self.dir / "heartbeat").touch()
+        if busy_at_start:          # a run claimed the node while its job was still queued
+            (self.dir / "busy").touch()
         kw = {**FAST, "limit_s": 3600, "idle_release_s": 0, **script_kw}
         Path(self.paths.script).write_text(compose_hold_script(self.paths, **kw), encoding="utf-8")
         self._stop_beat = threading.Event()
@@ -148,6 +151,20 @@ def test_a_node_a_run_is_using_is_not_released_for_idleness(hold):
     h.wait()
     assert h.ended() == "idle 2 s"
     assert time.monotonic() - h.t0 >= 3.6, "the idle clock must start when the run ends, not when the node was granted"
+
+
+def test_a_node_claimed_while_it_was_queued_starts_busy_and_its_idle_clock_never_runs(hold):
+    """A run claims a granted node while its job is still queued and goes on uploading (``GrantedRun.await_node``).
+    Wrong implementation: a script that counts the node idle from its start until some later look at the marker,
+    which would release a node a run is about to use, mid-upload, after the idle limit."""
+    h = hold(idle_release_s=2, busy_at_start=True)
+    busy = h.dir / "busy"
+    deadline = time.monotonic() + 3.6
+    while time.monotonic() < deadline:
+        busy.touch()                            # the claiming run's heartbeat
+        time.sleep(0.3)
+        assert h.alive(), f"released a node claimed before it started: {h.ended() if (h.dir / 'ended').exists() else '?'}"
+    assert (h.dir / "status").read_text(encoding="utf-8").split() == ["state=busy", "idle_s=0"]
 
 
 def test_a_busy_marker_nobody_refreshes_counts_as_not_busy(hold):

@@ -652,6 +652,7 @@ class BarBatchExportPanel(BatchExportPanel):
                 display_mode=display_mode,
                 violin_bw=violin_bw,
             )
+            self._finish_cell_figure(fig, ax_frac, ax_n, grp)
             return fig
 
         draw_items = collect_bar_items_for_group(
@@ -739,7 +740,13 @@ class BarBatchExportPanel(BatchExportPanel):
         from review.domain.time_rescale import rescale_for as _tr_for
         mark_time_rescale(ax_mean, ax_frac, ax_n,
                           rescale=_tr_for(self._ctx.state.plot))
+        self._finish_cell_figure(fig, ax_frac, ax_n, grp)
         return fig
+
+    def _finish_cell_figure(self, fig, ax_frac, ax_n, grp) -> None:
+        """The unset-cutoff sentence and the nanowell plate's cells footer, as the Bar Plots tab draws them."""
+        from review.core.observation_band import finish_cell_figure
+        finish_cell_figure(self._ctx, fig, ax_frac, ax_n, self._export_val_col_for("_bar_channel_cb"), grp.wells)
 
     def _render_per_cell_panels(
         self, *, fig, ax_mean, ax_frac, ax_n,

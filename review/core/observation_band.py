@@ -232,3 +232,17 @@ def populate_metric_picker(ctx) -> None:
         combo.setCurrentIndex(keys.index(key) if key in keys else 0)
     finally:
         combo.blockSignals(blocked)
+
+
+def finish_cell_figure(ctx, fig, ax_frac, ax_n, val_col: str, wells) -> None:
+    """What every cell figure with Fraction / Events panels ends with, wherever it is drawn: the unset-cutoff
+    sentence in place of those panels (``threshold_note``), and on a nanowell plate the cells footer.
+
+    For the figures drawn outside the Plotting tabs — Batch Export's Bar and Line exports — so an exported figure
+    says what the tab it mirrors says."""
+    from review.core.channel_state_controller import on_cut_not_set
+    from review.core.threshold_note import blank_for_unset_cut
+
+    if on_cut_not_set(ctx, val_col):
+        blank_for_unset_cut(ax_frac, ax_n)
+    stamp_cells_footer(ctx, fig, list(wells or ()))

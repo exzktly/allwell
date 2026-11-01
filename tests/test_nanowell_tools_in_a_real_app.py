@@ -97,7 +97,8 @@ def test_the_anchor_queue_walks_with_the_real_rail_and_its_keys_reach_it_in_the_
     viewer_app.show()
     qtbot.waitExposed(viewer_app)
     ctx, st = _open(viewer_app, qtbot, {"A02"})
-    nwc.set_view(ctx, "array")
+    nwc.set_view(ctx, "qc")                                          # where the walk starts
+    qtbot.waitUntil(lambda: st.qc_records is not None and st.qc_reading is None, timeout=30000)
     _settle(qtbot, ctx, st)
     plate = ctx.widgets.get("_sidebar_plate")
     viewer_app.activateWindow()
@@ -128,6 +129,7 @@ def test_the_anchor_queue_walks_with_the_real_rail_and_its_keys_reach_it_in_the_
     assert shown() == (1, "B01", "t_c")
     QTest.keyClick(viewer_app.focusWidget() or viewer_app, Qt.Key_Escape)
     assert st.anchor_queue is None and not st.anchor_mode
+    assert st.view == "qc" and st.qc_highlight == {("A01", "t_a")}  # back where it started, the anchor ringed
     assert set(ctx.state.selection.selected_wells) == {"A02"}
     # The rail repaints from the selection on its own coalescing timer, a moment after the state changes.
     qtbot.waitUntil(lambda: set(plate.selectedWellIds()) == {"A02"}, timeout=5000)

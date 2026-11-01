@@ -549,14 +549,15 @@ Review, open the Nanowells page, choose the *Array* view, pick the well and time
 *Full resolution* (or choose *Layers → Show as → Full montage*). Zoom to the square, turn on **Set anchor**, and
 click it. The click is saved in `in/nanowell_anchors.json`
 beside the acquisition record; the run snaps it to the nearest nanowell, so it only has to land on the square.
-When several wells and timepoints need an anchor — the usual state after a run — press **Anchor queue**
-instead of picking each one: it shows the first timepoint on the plate left unaddressed, with **Set anchor**
-already on, and each click on a central square saves the anchor and, after a moment, opens the next. Each
+When several wells and timepoints need an anchor — the usual state after a run — open the Nanowells page's
+**QC** view, which shows every timepoint not addressed at a glance, and press **Anchor queue** there instead of
+picking each one: it switches to the Array view on the first timepoint on the plate left unaddressed, with **Set
+anchor** already on, and each click on a central square saves the anchor and, after a moment, opens the next. Each
 timepoint opens zoomed to 10× on the centre of the whole-well montage, where the central square usually is;
 press **Fit** to see the whole well when it is not there. A *Queue*
-group beside it says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous timepoint; a
-click there replaces its anchor), **Skip**, **One per well** and **Stop** — or press **←** for Back, **→** for
-Skip and **Esc** for Stop while the queue runs. When **Set anchor** cannot be turned on for a timepoint, the figure
+group at the left end of the band says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous
+timepoint; a click there replaces its anchor), **Skip**, **One per well** and **Stop** — or press **←** for Back,
+**→** for Skip and **Esc** for Stop while the queue runs. Choosing another view while it runs stops it. When **Set anchor** cannot be turned on for a timepoint, the figure
 says why; press Skip to go on. The queue holds every unaddressed
 timepoint without an anchor, plate order then time order, and also any timepoint whose anchor the last run could
 not use; an anchor you set that no run has used yet is not asked for again. Turn on **One per well** to be shown
@@ -564,8 +565,9 @@ only each well's first such timepoint, and no well that already has an anchor wa
 well is usually enough (see above), and any timepoint the re-run still cannot address shows up in the next
 queue. The choice is remembered until you close the app. If One per well leaves nothing to walk (every well
 waiting already has an anchor for a re-run), **Anchor queue** says so and turns One per well off, so pressing it
-again walks those timepoints too. When it ends it says how many it anchored and how many
-were skipped, and puts your plate selection back as it was.
+again walks those timepoints too. When it ends — after the last one, or when you stop it — it goes back to the QC
+view, says how many it anchored and how many were skipped, rings the cells it anchored (now *anchor waiting*), and
+puts your plate selection back as it was.
 Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
 run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
 addressed from it at the end of the run, through the plate's other wells. A timepoint that still cannot be
@@ -6090,6 +6092,29 @@ the sentence names it.
 
 **The other views**
 
+- **QC** — the whole plate at a glance: every well down the side, every timepoint across the top, and each cell
+  saying what, if anything, needs doing about that timepoint. It reads every well's records itself, so it works
+  with nothing selected on the plate. Each cell is one of:
+  - **not addressed** (solid amber, `!`) — the run could not number the nanowells, usually because it could not
+    find the central square; an anchor fixes it. If the last run already tried the anchor set there and could not
+    use it, the hover text says so;
+  - **anchor waiting** (blue, horizontal lines, `A`) — an anchor is set and no run has used it yet: **Re-run
+    anchored wells…** addresses it;
+  - **not located** (grey, vertical lines, `–`) — the run could not place the array at all (no lattice, a refused
+    orientation, …); an anchor cannot change that;
+  - **contradicted** (`xx`, `X`), **inconclusive** (`//`, `?`), **partial** (`\\`, with how many nanowells it leaves
+    out) and **not checked** (`..`) — what the identity check said (see *Is each nanowell the same
+    nanowell at every timepoint?* below), with the same hatches the line plots use;
+  - **reference** (`R`) and **confirmed** — nothing to do.
+
+  A timepoint that was not addressed is shown as such even when the identity check calls it inconclusive: the
+  anchor is what fixes it. The title says how many timepoints need a look and in how many wells, and the legend
+  counts every state on the plate. **Wells** chooses the rows: *Needing a look* (the default) shows only wells with
+  something to look at and says how many it left out; *All* shows every well. On a large plate the rows are banded
+  by plate row and labelled by its letter; pointing at a cell names it in the readout, and its tooltip says what
+  the state means. **Click a cell** to open it where it is dealt with: a verdict opens on **Identity**, a timepoint
+  not addressed (or waiting, or not located) opens on **Array** with **Set anchor** on. The **Anchor** group here
+  holds **Anchor queue**, **One per well** and **Re-run anchored wells…** (see *Setting the anchor by hand*).
 - **Trajectories** — one panel per well: a thin line per nanowell through its values over time, coloured by
   its occupancy at baseline, and a thick line for each occupancy class's median. A gap is a timepoint without
   a value. Growth rate and occupancy have one value per nanowell, so they are greyed here.
@@ -6193,8 +6218,8 @@ the sentence names it.
     overlap, amber where the acquisition record put it), with its registration residual; a tile whose size the
     record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
     hand and says how the timepoint was addressed (and, where it was not, how to anchor it), and offers **Set
-    anchor**, **Clear anchor**, **Re-run anchored wells…** and **Anchor queue** (see *Setting the anchor by
-    hand* above). *Run
+    anchor**, **Clear anchor** and **Re-run anchored wells…** (see *Setting the anchor by hand* above; the
+    **Anchor queue** is on the QC view). *Run
     record* lists beside the figure the grid record of this timepoint (status, how the origin was found,
     pitch, angle, overlap, nanowells detected of the roster), the empty-nanowell template the counts were
     divided by, and the status of every other timepoint; a template the run found far from the well's
@@ -6375,6 +6400,9 @@ What the check cannot see: a turn of the array by a symmetry it shares with the 
 (180°), or on a square lattice a quarter turn (90°). The array looks the same either way, so such a turn would be
 confirmed. A keyed plate is put back within a few degrees, so this matters only if the array itself can turn in its
 well. The check expects the plate to turn less than 30° between timepoints (45° on a square lattice).
+
+To see every well's verdicts at once, open the **QC** view: each timepoint is a cell hatched by its verdict, and a
+click opens it here.
 
 **The Identity view** shows the check for one well at one timepoint against the well's reference timepoint; the
 Well list says each well's worst verdict, and it opens on the first timepoint that is not confirmed. *Compare*
@@ -7294,6 +7322,31 @@ the group that owns it; the wells of the group you are **currently editing** als
 ring, so "which group is this well in" and "which group am I editing" stay
 readable at the same time. Wells the dataset doesn't have are drawn as empty
 sockets and ignore the drag.
+
+Groups can also be built **by sample variable** — what the
+[Variables](#variables) tab says the wells *are*, rather than where they
+sit. The **Select by variable:** row above the plate takes a variable and one
+of its values; **Add wells** puts every loaded well holding that value into the
+selected group (or into a new group, if none is selected), and **Remove wells**
+takes them out. Pick *(not set)* to find the wells never given a value. A new
+group filled this way is named after the value — `HeLa`, then `HeLa + U2OS` if
+you add a second — and keeps that name when you later drag wells on or off;
+renaming it yourself replaces it for good. **Quick Setup → One group per value
+of…** replaces every group with one per value of the chosen variable, named by
+the value (with its unit) and in the variable's own value order, after asking
+first if you already have groups; a value no well holds makes no group. Either
+way the selection is taken **when you make it**: the groups hold wells and
+samples exactly as hand-built ones do, and do not follow later edits to the
+variables. On a plate with no variables the row says where to define them.
+
+A sample definition whose wells all hold the value joins as a whole sample, as
+on the plate. One whose wells hold *different* values is not pulled in whole —
+that would export wells under a value they do not hold — so only its matching
+wells join, as single wells, and a warning line under the row names the
+sample that was split and the wells that joined. Removing a value keeps a
+sample that also holds other values and says so; use its − button on the group
+card to remove it. Wells with no value for the variable are listed after a
+Quick Setup rather than left out silently.
 
 Batch figures are drawn through the **same renderers as the on-screen plots**, so
 a group's figure matches what the plotting tab shows for that selection: each

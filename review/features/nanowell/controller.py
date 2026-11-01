@@ -32,6 +32,7 @@ from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell.decorate_compute import Decoration, decoration_for
 from review.features.nanowell import _anchor_queue as aq
+from review.features.nanowell import _qc_controller as qcc
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
 from review.features.nanowell import subset_compute as ss
@@ -353,6 +354,8 @@ def nanowell_empty_reason(ctx) -> EmptyReason | None:
         return None
     if not ctx.state.dataset.data_dir:
         return _empty("No dataset loaded.", "Open a dataset analysed in nanowell mode.")
+    if st.view == "qc":
+        return None                                      # it reads the plate's records itself and says what it found
     if st.load_error:
         return _empty("This dataset's nanowell tables cannot be read.", st.load_error)
     if st.data is None:
@@ -634,6 +637,10 @@ def redraw(ctx) -> None:
     _call(ctx, "_nw_refresh_controls")
     _call(ctx, "_nw_show_computing")
     _refresh_empty(ctx)
+    if st.view == "qc" and nanowell_empty_reason(ctx) is None:
+        idc.leave(ctx, st)
+        qcc.draw(ctx, st, fig, canvas)                   # the whole plate's records: no selection or metrics needed
+        return
     if st.metrics is None or nanowell_empty_reason(ctx) is not None:
         idc.leave(ctx, st)
         return
@@ -1456,6 +1463,9 @@ def on_motion(ctx, event) -> None:
     """A drag on the Array view pans it; the pixels follow at once and the image is drawn again on release. On the
     Identity view a drag pans the panel pressed, and on *Side by side* the pointer lights the address under it."""
     st = _state(ctx)
+    if st is not None and st.view == "qc":
+        qcc.on_motion(ctx, event)
+        return
     if st is not None and st.view == "identity":
         idc.on_motion(ctx, event)
         return
@@ -1651,7 +1661,11 @@ def rerun_anchored(ctx) -> bool:
     if wells and open_in_analyze(ctx, force_wells=wells, only_wells=wells, incremental=False):
         return True
     if st is not None:
-        st.array_message = "Analyze could not be opened on this dataset from here."
+        text = "Analyze could not be opened on this dataset from here."
+        if st.view == "qc":
+            st.qc_message = text
+        else:
+            st.array_message = text
         redraw(ctx)
     return False
 
@@ -1932,6 +1946,9 @@ def on_click(ctx, event) -> None:
     ⌘/Ctrl), or clear the selection on empty space. On the Array view a press starts a drag or a click, which
     :func:`on_release` tells apart. The plate selection is never touched."""
     st = _state(ctx)
+    if st is not None and st.view == "qc":
+        qcc.on_click(ctx, event)
+        return
     if st is not None and st.view == "identity":
         idc.on_press(ctx, event)                 # a pan, or a double-click back to the whole view
         return
@@ -2113,6 +2130,12 @@ def nw_on_channel_changed(ctx) -> None:
 
 
 def set_view(ctx, view: str) -> None:
+    """Show *view*. Leaving the Array view while the *Anchor queue* walks ends the walk there: its keys live on a band
+    group shown only on Array, so a walk left running elsewhere would go on with nothing on screen to drive it."""
+    st = _state(ctx)
+    if st is not None and view != "array" and aq.active_queue(ctx) is not None:
+        aq.stop(ctx, land_on=view)
+        return
     _set(ctx, "view", view)
 
 

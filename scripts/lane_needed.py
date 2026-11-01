@@ -517,34 +517,8 @@ class Tree:
                         if fn in _DYNAMIC_CALLS or (fn == "getattr" and not (
                                 len(sub.args) > 1 and isinstance(sub.args[1], ast.Constant))):
                             info.whole_reads.add(key)
-                elif kind is ast.Import:
-                    for alias in sub.names:
-                        local.add(alias.asname or alias.name.split(".")[0])
-                        if alias.asname:
-                            bindings[alias.asname] = alias.name
-                        else:
-                            bindings.setdefault(alias.name.split(".")[0], alias.name.split(".")[0])
-                        raw.append(alias.name.split("."))
-                        target = self.resolve(alias.name)
-                        if target and target != path:
-                            self.importers.setdefault(target, set()).add(path)
-                elif kind is ast.ImportFrom:
-                    if sub.level:
-                        base = package[: len(package) - (sub.level - 1)] if sub.level > 1 else package
-                        module = ".".join(base + ([sub.module] if sub.module else []))
-                    else:
-                        module = sub.module or ""
-                    for alias in sub.names:
-                        if alias.name == "*":
-                            star.add(module)
-                            continue
-                        local.add(alias.asname or alias.name)
-                        full = f"{module}.{alias.name}" if module else alias.name
-                        bindings[alias.asname or alias.name] = full
-                        raw.append(["", *full.split(".")])      # already qualified
-                    for target in {self.resolve(module), *(self.resolve(f"{module}.{a.name}") for a in sub.names)}:
-                        if target and target != path:
-                            self.importers.setdefault(target, set()).add(path)
+                elif kind is ast.Import or kind is ast.ImportFrom:
+                    self._note_import(sub, path, package, local, bindings, raw, star)
             info.local[key] = local
             info.strings[key] = strings
             chains[key] = raw
@@ -563,6 +537,39 @@ class Tree:
             info.qualified[key] = qualified
         info.star = {c for m in star if (c := self.canonical(m))}
         self._files[path] = info
+
+    def _note_import(self, node: ast.Import | ast.ImportFrom, path: str, package: list[str], local: set[str],
+                     bindings: dict[str, str], raw: list[list[str]], star: set[str]) -> None:
+        """Record what an import statement in *path* binds, the qualified names it takes, and the edge it adds."""
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local.add(alias.asname or alias.name.split(".")[0])
+                if alias.asname:
+                    bindings[alias.asname] = alias.name
+                else:
+                    bindings.setdefault(alias.name.split(".")[0], alias.name.split(".")[0])
+                raw.append(alias.name.split("."))
+                self._edge(self.resolve(alias.name), path)
+            return
+        if node.level:
+            base = package[: len(package) - (node.level - 1)] if node.level > 1 else package
+            module = ".".join(base + ([node.module] if node.module else []))
+        else:
+            module = node.module or ""
+        for alias in node.names:
+            if alias.name == "*":
+                star.add(module)
+                continue
+            local.add(alias.asname or alias.name)
+            full = f"{module}.{alias.name}" if module else alias.name
+            bindings[alias.asname or alias.name] = full
+            raw.append(["", *full.split(".")])      # already qualified
+        for target in {self.resolve(module), *(self.resolve(f"{module}.{a.name}") for a in node.names)}:
+            self._edge(target, path)
+
+    def _edge(self, target: str | None, path: str) -> None:
+        if target and target != path:
+            self.importers.setdefault(target, set()).add(path)
 
     # -- following a change -------------------------------------------------------------------------------------
     def uses(self, importer: str, module: str, names: set[str] | None) -> tuple[set[str], set[str]] | None:
@@ -814,7 +821,7 @@ def pytest_config_change(old_source: str | None, new_source: str | None) -> str:
     """Why changing ``pyproject.toml`` reaches every gate — its ``[tool.pytest]`` table differs — or ``""``."""
     import tomllib
 
-    def _table(source: str | None):
+    def _table(source: str | None) -> dict | None:
         if source is None:
             return None
         try:

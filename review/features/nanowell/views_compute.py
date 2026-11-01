@@ -124,6 +124,8 @@ class TrajectoryPanel:
     #: contradicted timepoint and for a nanowell a partial one leaves out (``series_compute`` ``identity_ok``). Such a
     #: value is drawn as a point of its own, joined to nothing, and is in no class median.
     line_ok: list = field(default_factory=list)
+    #: What the figure calls the well (``controller.well_name``); ``""`` prints the well itself.
+    name: str = ""
 
 
 def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool = False,
@@ -210,6 +212,8 @@ class PositionSeries:
     q3: np.ndarray
     n_used: np.ndarray
     excluded_share: np.ndarray            # fraction of the ring's nanowells with no value
+    #: What the figure calls the well (``controller.well_name``); ``""`` prints the well itself.
+    name: str = ""
 
 
 def position_series(metrics: pd.DataFrame, wells, timepoint: str, column: str,

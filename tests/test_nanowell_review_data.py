@@ -340,7 +340,12 @@ def test_replicate_groups_come_from_the_plot_tabs_sets_and_loose_wells_stand_alo
 
     monkeypatch.setattr(plot_members, "plot_replicate_sets",
                         lambda ctx: [ReplicateSet("dose 1", ["A01", "A02", "Z99"]), ReplicateSet("empty", ["Z98"])])
-    assert nwc.replicate_groups(object(), ["A01", "A02", "B05"]) == {"dose 1": ["A01", "A02"], "B05": ["B05"]}
+    from types import SimpleNamespace
+
+    # A plate with no Well Labels and no sample variables: each group is named by its set or its well.
+    ctx = SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(well_labels={}, well_paths={}),
+                                                selection=SimpleNamespace(variables=None)))
+    assert nwc.replicate_groups(ctx, ["A01", "A02", "B05"]) == {"dose 1": ["A01", "A02"], "B05": ["B05"]}
 
 
 # ── D8: export ───────────────────────────────────────────────────────────────

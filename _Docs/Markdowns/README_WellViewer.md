@@ -5960,6 +5960,22 @@ the sentence names it.
   *Earliest* baseline: a count taken later — at a first measurable or a named timepoint — may follow a division,
   and the figure counts those nanowells.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
+- **Names.** Wells and groups are called what every other tab calls them: a replicate group by its name, a well by
+  the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two
+  wells drawn side by side share a name, each gets its well added (`HeLa · 1 µM (A01)`); the views of one well and
+  the **Well** list always show both. Under a group of several wells, each well's own swarm is marked with its well.
+- **Group by** and **Decorate** (once the plate has a variable, Home → Sample Map → Variables) — the same
+  controls as on the Plotting row, and the same settings: choosing one here changes it on every plot, and one chosen
+  on a Plotting tab shows here. **Group by** pools the page's wells by a variable's values instead of by your
+  replicate groups, one group per value, on every view; wells with no value are not drawn. **Decorate** (on
+  *Distribution*) holds **Colour by**, **Split by** and **Then by**, which change how the groups look, never a
+  value. *Colour by* colours each group's dots by its value, with a key naming the values at the top right, in
+  place of the occupancy colours — those come back when *Colour by* is set to *Occupancy* again, and the
+  footer says so while they are off. *Split by* arranges the groups into one labelled band per value: on *Along x:
+  Wells* the band names sit under the group names with a line between bands, and *Then by* adds a second row of
+  bands inside them; on *Along x: Time* each panel's title starts with its band. A group whose wells hold
+  different values is coloured and banded as `—mixed—`, and one with a well you have not filled as `no value`.
+  Batch Export's Nanowells mode draws its figures without them.
 - **Fixed cohort** (on *Distribution*, *Trajectories* and *Statistics*) — use only the nanowells with a value at every
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
   measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
@@ -6241,8 +6257,14 @@ Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
-is selected and kept, so selecting it again is instant. While a newly selected well is read, or the figures are
-recomputed, the page dims the figure and shows *Computing…* across it. Before the first figure is drawn the page
+is selected and kept, so selecting it again is instant. Wells clicked one after another on the plate are read
+together, a quarter of a second after the last click, rather than one load per click. While a newly selected well is read, or the figures are
+recomputed, the page dims the figure and shows *Computing…* across it — but only when the result can change what
+the figure shows. Each well's numbers depend on that well alone, so while wells added to the selection are read,
+the views that show one well (Array, Identity, Extremes) stay live unless the added well is the one they will
+switch to, and the views of every well (Distribution, Trajectories, Position, Statistics) stay live when the added
+well has no nanowell table or is excluded on the page. A change of baseline, Cell Gating or the rim focus rule
+dims every view. Before the first figure is drawn the page
 says *Reading the nanowell tables…* with a progress bar under it: it counts the wells as their tables are read
 (*Reading the tables: 12 of 40 wells.*), then starts again as their cells are counted for Cell Gating (*Counting
 the gated cells: …*).

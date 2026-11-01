@@ -733,3 +733,15 @@ def test_one_sweep_removes_at_most_its_limit(staging):
     assert len(removed) == 1
     assert len([p for p in (staging / "runs").iterdir()]) == 1
 
+
+def test_sizes_and_free_space_are_read_where_du_and_df_lack_the_gnu_flags(staging, bin_dir):
+    """macOS's du has no -b and its df no -B; the listing falls back to KiB rather than showing nothing."""
+    _run(staging, RUN)
+    real_du, real_df = shutil.which("du"), shutil.which("df")
+    _shim(bin_dir, "du", f'case "$1" in *b*) echo "du: illegal option -- b" >&2; exit 1;; esac; exec {real_du} "$@"\n')
+    _shim(bin_dir, "df", f'case "$1" in *B*) echo "df: illegal option -- B" >&2; exit 1;; esac; exec {real_df} "$@"\n')
+    listing, _ = rs.list_storage(_LocalCache(staging))
+    item = {i.name: i for i in listing.items}[RUN]
+    assert item.size is not None and item.size % 1024 == 0 and item.size > 0
+    assert listing.free_bytes is not None and listing.free_bytes % 1024 == 0
+

@@ -30,6 +30,7 @@ from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, field_sites, one_to_one
 from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
+from review.features.nanowell.decorate_compute import Decoration, decoration_for
 from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
@@ -100,19 +101,101 @@ def replicate_groups(ctx, wells) -> dict:
 
     Wells in no set stand as their own group, so a plate with no definitions compares well against well.
     Only wells with nanowell data are kept; a set left with none is dropped.
+
+    **Each group is keyed by what the figures call it** — :func:`named_groups`: a set by
+    ``replicate_display_label``, a well standing alone by its label (:func:`well_names`) — because the key is what
+    the ticks, the panel titles, the *vs* combo and the Statistics samples print.
     """
     from review.domain.plot_members import plot_replicate_sets
 
     have = set(wells)
-    groups, placed = {}, set()
+    sets = []
     for rset in plot_replicate_sets(ctx) or []:
         members = [w for w in rset.wells if w in have]
         if members:
-            groups[rset.name] = members
-            placed.update(members)
-    for well in sorted(have - placed):
-        groups[well] = [well]
+            sets.append((rset, members))
+    placed = {w for _rset, members in sets for w in members}
+    return named_groups(ctx, sets, sorted(have - placed))
+
+
+def _page_names(ctx, view: str, well: str) -> dict:
+    """The *names* :func:`draw_view` is given: the drawn wells' (:func:`well_names`), and on the Array view the
+    shown well's caption (:func:`well_caption`), which is a one-well title."""
+    names = well_names(ctx, page_wells(ctx))
+    if view == "array" and well:
+        names[well] = well_caption(ctx, well)
+    return names
+
+
+def well_names(ctx, wells) -> dict:
+    """``well -> what the page's figures call it``, for wells drawn side by side.
+
+    Each well's label as every plot tab names it — ``selections_model.well_display_label``: the Well Labels tab's
+    name, else the sample variables it holds (``HeLa · 10 µM``), else the well itself — so the page reads as the
+    rest of Review does. Two wells drawn together under one label (replicates left unpooled) are told apart by
+    their wells, ``HeLa · 10 µM (A01)``: here a label is also a key, and two panels or ticks reading the same with
+    nothing to say which well each is would be a figure no one could check against the plate. A label alone is
+    never given a well it does not need — ``sample_variables.label_for_well`` keeps tokens off ticks for the same
+    reason, and already adds them to a partial description.
+    """
+    from collections import Counter
+
+    from review.domain.selections_model import well_display_label
+
+    labels = {w: str(well_display_label(ctx, w) or "").strip() or w for w in wells}
+    shared = Counter(labels.values())
+    return {w: _with_well(label, w) if shared[label] > 1 else label for w, label in labels.items()}
+
+
+def well_caption(ctx, well: str) -> str:
+    """What a one-well view and the *Well* combo call *well*: its label with the well beside it, ``Vehicle (B03)``.
+
+    Always both, unlike :func:`well_names`: the Array, Identity and Extremes views are about one physical well, and
+    the combo is how one is picked, so the well is the point; the label says which condition it is.
+    """
+    return _with_well(well_names(ctx, [well])[well], well)
+
+
+def _with_well(label: str, well: str) -> str:
+    """*label* with *well* after it, unless the label is the well or already names it (a partial description)."""
+    import re
+
+    if label == well or re.search(rf"(?<![A-Za-z0-9]){re.escape(well)}(?![A-Za-z0-9])", label):
+        return label
+    return f"{label} ({well})"
+
+
+def named_groups(ctx, sets, solo_wells) -> dict:
+    """``display name -> wells`` from *sets* (``(replicate set, its wells to draw)``) and *solo_wells*.
+
+    The one naming of the page's groups, shared with Batch Export's Nanowells mode so a saved figure names its
+    groups as the page does. A set is named by ``replicate_display_label`` (its own name, or its wells' labels when
+    the name is a generated ``Replicate 2``); a solo set (``ReplicateSet.solo``) and a lone well by
+    :func:`well_names`, over all of them at once so two that share a label are told apart. Two groups still sharing
+    a name would merge into one key and be pooled; the later one is told apart by its wells instead.
+    """
+    from review.domain.selections_model import replicate_display_label
+
+    solo_sets = [members[0] for rset, members in sets if getattr(rset, "solo", False)]
+    names = well_names(ctx, [*solo_sets, *solo_wells])
+    groups: dict = {}
+    for rset, members in sets:
+        name = names[members[0]] if getattr(rset, "solo", False) else replicate_display_label(ctx, rset)
+        groups[_untaken(name or getattr(rset, "name", ""), members, groups)] = members
+    for well in solo_wells:
+        groups[_untaken(names[well], [well], groups)] = [well]
     return groups
+
+
+def _untaken(name: str, members, taken) -> str:
+    """*name*, or — when another group already has it — *name* with its wells, so no two groups share a key."""
+    if name not in taken:
+        return name
+    named = f"{name} [{', '.join(members[:3])}{'…' if len(members) > 3 else ''}]"
+    k = 2
+    while named in taken:
+        named, k = f"{name} [{k}]", k + 1
+    return named
 
 
 def export_long_csv(state, path, wells=None) -> int:
@@ -155,6 +238,13 @@ def export_long_csv(state, path, wells=None) -> int:
 # ── the page ─────────────────────────────────────────────────────────────────
 # Everything below takes the ViewerContext. Widgets resolve through ``ctx.widgets`` and are absent until the
 # page is first shown (it builds lazily), so every entry point is self-guarding.
+
+#: The page's views that draw *Colour by* / *Split by* / *Then by* (``decorate_compute``), and so the views the
+#: page's Decorate button shows on. Only Distribution: it is the one view whose dots and groups are the figure.
+#: Statistics compares the same groups but draws a table of tests; Trajectories, Position and the one-well views
+#: draw wells or nanowells, never a group with a value. A button shown there would write the state, redraw, and
+#: change nothing on screen (CLAUDE.md §7.6) — the reason the plotting band gates its own button by tab.
+DECORATED_VIEWS = frozenset({"distribution"})
 
 #: How many nanowells can be compared in the site detail at once (decision U7: one colour each).
 MAX_SELECTED = 6
@@ -278,7 +368,7 @@ def nanowell_empty_reason(ctx) -> EmptyReason | None:
 
     if not has_plottable_selection(ctx) or not page_groups(ctx):
         chosen = [w for w in active_wells(ctx) if w in set(available)]
-        if chosen and st.computing:
+        if chosen and (st.computing or load_queued(ctx)):
             return _reading_reason(st)
         if chosen and set(chosen) <= set(st.excluded_wells):
             return _empty("Every selected well is excluded on this page.",
@@ -490,14 +580,19 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         _refresh_empty(ctx)
 
     def done(result):
+        data, metrics, error, read, gate = result
+        if st.parts_for == key[0]:
+            # The wells read are kept whichever request read them: a part is the well's files as read, valid for
+            # every baseline and gate, so a superseded load's reads spare the next load reading them again. Merged
+            # rather than replaced, so a part another load (or the overlay's read) added meanwhile is kept too.
+            st.well_parts = {**read, **st.well_parts}
         if request != st.request:
             return                                       # a newer request has been made; this one is stale
-        data, metrics, error, read, gate = result
         st.data, st.metrics, st.load_error = data, metrics, error
         st.gate, (st.gated_for, st.focus_for) = gate, version
         st.loaded_for, st.computing, st.load_progress = key, False, None
         if st.parts_for == key[0]:
-            st.well_parts, st.loaded_wells = read, wells
+            st.loaded_wells = wells
         for problem in (data.problems if data is not None else []):
             log.warning("Nanowells: %s", problem)
         _apply_pending_anchor(ctx)
@@ -571,8 +666,9 @@ def redraw(ctx) -> None:
         array = {"layers": drawn_layers(st), "image": image, "image_note": image_note, "region": st.region}
         hidden = OVERLAYS_HIDDEN_NOTE if st.overlays_hidden else ""
         note = " ".join(filter(None, [hidden, st.array_message, note]))
+    groups = page_groups(ctx)
     st.hits, model = draw_view(
-        fig, st.view, st.metrics, st.data, groups=page_groups(ctx), metric=metric, channel=channel,
+        fig, st.view, st.metrics, st.data, groups=groups, metric=metric, channel=channel,
         axis=st.axis, timepoint=shown_timepoint(ctx)[1] if st.view == "position" else st.timepoint,
         control=st.control, baseline=st.baseline, cohort=st.cohort, moving=st.moving,
         baseline_moving=st.baseline_moving, well=well,
@@ -580,7 +676,8 @@ def redraw(ctx) -> None:
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
         subset=st.subset, stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
-        gate=st.gate, **array)
+        gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
+        names=_page_names(ctx, st.view, well), **array)
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
@@ -716,7 +813,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               baseline_moving: int = 0, layers: ArrayLayers | None = None, image=None, image_note: str = "",
               region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
-              stats_cache: dict | None = None, gate=None) -> tuple[object, object]:
+              stats_cache: dict | None = None, gate=None,
+              decoration: Decoration | None = None, names: dict | None = None) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -748,7 +846,17 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
 
     *gate* (``cell_gate_compute.GateTally``, the one *metrics* were computed with) keeps the Array view's Cells
     layer to the cells the counts hold.
+
+    *decoration* is *Colour by* / *Split by* / *Then by* resolved over *groups* (``decorate_compute.decoration_for``);
+    only the Distribution view draws it (:data:`DECORATED_VIEWS`). ``None`` draws the figure undecorated, which is
+    what Batch Export's Nanowells mode passes.
+
+    *names* is ``well -> what the figure calls it`` (:func:`well_names`) wherever a view names a well standing
+    alone: a Trajectories panel, a Position line, the Array title, a Statistics sample of the ``nanowells`` unit.
+    A well missing from it prints itself. The groups are already keyed by their names
+    (:func:`named_groups`).
     """
+    names = names or {}
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
     wells = [w for members in groups.values() for w in members]
@@ -775,7 +883,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                           "dimmed.", note]))
         drawn = draw_array(fig, all_metrics, data, well=well, timepoint=well_timepoint, metric=metric,
                            channel=channel, layers=layers, image=image, image_note=image_note, region=region,
-                           selected=selected, note=note, dimmed=dimmed, gate=gate)
+                           selected=selected, note=note, dimmed=dimmed, gate=gate, name=names.get(well, ""))
         return (drawn.hits if drawn is not None else None), drawn
     if filtered is not None:
         note = " ".join(filter(None, [ss.note(filtered), note]))
@@ -783,8 +891,11 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if view == "trajectories":
         marks = {w: timepoint_marks(data, w) for w in wells}
         column = metric_column(metric, channel)
-        render_trajectories(fig, vc.trajectory_panels(metrics, wells, column, cohort=cohort, marks=marks,
-                                                      moving=moving, baseline_moving=baseline_moving),
+        panels = vc.trajectory_panels(metrics, wells, column, cohort=cohort, marks=marks, moving=moving,
+                                      baseline_moving=baseline_moving)
+        for panel in panels:
+            panel.name = names.get(panel.well, "")
+        render_trajectories(fig, panels,
                             cohort=cohort, label=_label(metric, channel), time_source=data.time_source,
                             note=" ".join(filter(None, [mvc.describe(moving, column, baseline_moving), note])))
         return None, None
@@ -796,6 +907,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         if missing:
             note = " ".join(filter(None, [note, f"No addressed nanowells at {timepoint}, so not drawn: "
                                                 f"{', '.join(missing)}."]))
+        for line in series:
+            line.name = names.get(line.well, "")
         render_position(fig, series, label=_label(metric, channel), timepoint=timepoint, note=note)
         return None, None
     if view == "statistics":
@@ -804,6 +917,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                    groups=groups, timepoint=timepoint, time_source=data.time_source,
                                    baseline=baseline, cohort=cohort, moving=moving,
                                    baseline_moving=baseline_moving)
+        model.well_names = dict(names)
         result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control,
                                    cache=stats_cache)
         if tableless:
@@ -814,7 +928,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
-                               moving=moving, baseline_moving=baseline_moving)
+                               moving=moving, baseline_moving=baseline_moving, decoration=decoration)
     model.starting = subset.start_bounds()
     if model.axis == TIME:
         model.identity_marks = {(w, tp): v for w in wells for tp, v in timepoint_marks(data, w).items()}
@@ -849,7 +963,7 @@ def statistics_result(model, groups: dict, *, unit: str, test: str, control: str
     samples = sc.samples_from_model(model, groups, unit)
     notes = [n for n in model.notes if n.startswith(_STATS_NOTES)]
     key = (unit, test, control, model.column, model.label, model.timepoint, tuple(notes),
-           tuple((s.name, s.wells, s.values.tobytes(), s.n_roster, tuple(sorted(s.excluded.items())),
+           tuple((s.name, s.label, s.wells, s.values.tobytes(), s.n_roster, tuple(sorted(s.excluded.items())),
                   s.without_value) for s in samples))
     if cache is not None and cache.get("key") == key:
         return cache["result"]
@@ -881,6 +995,55 @@ def page_well(ctx) -> str:
     st = _state(ctx)
     wells = page_wells(ctx)
     return st.well if st is not None and st.well in wells else (wells[0] if wells else "")
+
+
+#: The views that draw one well, :func:`page_well`; the others (Distribution, Trajectories, Position, Statistics)
+#: draw every well of :func:`page_groups`. A site's metrics come from that site's rows alone
+#: (``series_compute.site_metrics``), so reading a well's tables changes only the figures that draw that well.
+SINGLE_WELL_VIEWS = frozenset({"array", "identity", "extremes"})
+
+
+def _page_groups_once_loaded(ctx) -> dict:
+    """What :func:`page_groups` will be once the running load lands: the same rule, over the active wells that have
+    a table or may still turn out to have one (listed in the folder, not read yet), rather than over the wells read
+    so far. A well with no table, or one excluded on the page, is in neither."""
+    st = _state(ctx)
+    if st is None or st.data is None:
+        return {}
+    have, listed, excluded = set(st.data.wells), set(st.data.available), set(st.excluded_wells)
+    wells = [w for w in active_wells(ctx) if w not in excluded
+             and (w in have or (w in listed and w not in st.loaded_wells))]
+    return replicate_groups(ctx, wells) if wells else {}
+
+
+def _page_well_of(st, groups: dict) -> str:
+    """:func:`page_well`'s rule over *groups*: the page's choice if it is drawn, else the first drawn well."""
+    drawn = [w for members in groups.values() for w in members]
+    return st.well if st.well in drawn else (drawn[0] if drawn else "")
+
+
+def computing_shown(ctx) -> bool:
+    """Whether the page covers its figure with the *Computing…* scrim: a load is running and its result can change
+    what the current view draws.
+
+    A load for another baseline, gate version or rim focus rule changes every drawn well's numbers, so it covers
+    every view. A load that only reads wells added to the selection changes only the figures that will draw one of
+    them: on a single-well view, when the well shown is about to change; on the others, when the drawn wells or
+    their grouping are. An added well with no nanowell table, or excluded on the page, changes neither, and the
+    figure stays live while it is read."""
+    st = _state(ctx)
+    if st is None or not st.computing or st.metrics is None:
+        return False
+    if st.pending_for is None or st.loaded_for is None:
+        return True
+    key, _wells, version = st.pending_for
+    if key != st.loaded_for or version != (st.gated_for, st.focus_for):
+        return True
+    now, then = page_groups(ctx), _page_groups_once_loaded(ctx)
+    if st.view in SINGLE_WELL_VIEWS:
+        well = _page_well_of(st, now)
+        return not well or _page_well_of(st, then) != well
+    return {g: list(m) for g, m in now.items()} != {g: list(m) for g, m in then.items()}
 
 
 def page_timepoint(ctx, well: str) -> str:
@@ -930,7 +1093,7 @@ def batch_array_layers() -> ArrayLayers:
 
 def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, channel: str | None,
                layers: ArrayLayers | None = None, image=None, image_note: str = "", region=None, selected=(),
-               note: str = "", dimmed=frozenset(), gate=None) -> ArrayDrawn | None:
+               note: str = "", dimmed=frozenset(), gate=None, name: str = "") -> ArrayDrawn | None:
     """**The one composition of the Array view**, for the page and for Batch Export (through :func:`draw_view`).
 
     *layers* says what is drawn (the lattice map when none are given); *image* is the run montage or the tile
@@ -943,6 +1106,7 @@ def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, ch
         return None
     scene = array_scene(metrics, data, well, timepoint, metric_column(metric, channel), positions=layers.positions,
                         anchors=layers.anchor, cells=layers.cells, gate=gate)
+    scene.name = name                                   # what the title calls the well (``well_name``)
     if scene.frame == "well" and image is not None and hasattr(image, "source"):
         # A plate placed from a scan pattern records no tile size; the tile store read it from the first image.
         width, height = image.source.tile_size_um
@@ -1513,6 +1677,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
     if filtered is not None:
         note = " ".join(filter(None, [ss.note(filtered), note]))
     model = ec.extremes(metrics, well, timepoint, column, st.extremes_n, st.data.channels)
+    model.name = well_caption(ctx, well)
     missing = tuple(sorted(site for site in model.sites() if site not in st.crops))
     image_channel = page_image_channel(st)
     if missing:
@@ -1881,12 +2046,46 @@ def nw_on_dataset_loaded(ctx) -> None:
 
 
 def nw_on_selection_changed(ctx) -> None:
+    """Redraw for the new selection at once, from the wells already read, and read the wells it adds once the
+    selection has settled (:func:`queue_load`): a run of clicks on the plate starts one load, not one per click."""
     if ctx.widgets.get_or_none("_nw_canvas") is not None:
         visible = ctx.widgets.get_or_none("_nw_page_visible")
         if callable(visible) and visible():
-            ensure_loaded(ctx)                   # a well selected now is read now; a hidden page reads on show
+            queue_load(ctx)                      # a well selected now is read soon; a hidden page reads on show
         _call(ctx, "_nw_refresh_controls")
         redraw(ctx)
+
+
+def queue_load(ctx) -> None:
+    """Ask for :func:`ensure_loaded` once the selection has been still for the page's debounce interval
+    (``tab_view.LOAD_DEBOUNCE_MS``); each call restarts the wait. Without the page's timer, load now."""
+    timer = ctx.widgets.get_or_none("_nw_load_timer")
+    if timer is None:
+        ensure_loaded(ctx)
+        return
+    timer.start()
+    _refresh_empty(ctx)
+
+
+def load_queued(ctx) -> bool:
+    """Whether a load asked for by :func:`queue_load` is still waiting for the selection to settle."""
+    import shiboken6
+
+    timer = ctx.widgets.get_or_none("_nw_load_timer")
+    return timer is not None and shiboken6.isValid(timer) and timer.isActive()
+
+
+def run_queued_load(ctx) -> None:
+    """Start the load :func:`queue_load` asked for now, if one is waiting (the timer's own timeout, and a test
+    that does not want to wait)."""
+    timer = ctx.widgets.get_or_none("_nw_load_timer")
+    if timer is not None:
+        timer.stop()
+    visible = ctx.widgets.get_or_none("_nw_page_visible")
+    if _page_deleted(ctx) or not (callable(visible) and visible()):
+        return                                   # a page hidden meanwhile reads on its next show
+    ensure_loaded(ctx)
+    _refresh_empty(ctx)
 
 
 def nw_on_qc_params_changed(ctx) -> None:

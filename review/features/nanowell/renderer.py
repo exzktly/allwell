@@ -323,7 +323,7 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
     for swarm in panel.swarms:
         rows_here = 0
         if density:
-            _draw_density(ax, swarm, half, ink)
+            _draw_density(ax, swarm, half, ink, fill=model.decoration.inks.get(swarm.group))
         else:
             layout = _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink)
             hidden += layout.n_hidden
@@ -345,10 +345,12 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
             rows_here += 1
         lines_used = max(lines_used, rows_here)
         if subwells and sum(1 for s in panel.swarms if round(s.x) == round(swarm.x)) > 1:
+            # The bare well: the group's own name is on the tick above, and the slot is one well wide.
             _ink(ax.text(swarm.x, 0, swarm.well, transform=_below(ax, 4), ha="center", va="top",
                          fontsize=ANNOTATION_PT, color=muted, gid="nw-subwell"), muted=True)
-    # The axis label goes under whatever the swarms wrote below the ticks.
+    # The axis label goes under whatever the swarms wrote below the ticks, and under the bands' headers.
     ax._aw_gutter_pt = lines_used * line + (ANNOTATION_PT + 4 if subwells else 0) + 4
+    ax._aw_gutter_pt += _draw_bands(ax, panel, gutter + lines_used * line, ink, muted)
     marks = model.identity_marks if model.axis == TIME else {}
     for swarm in panel.swarms:
         if (swarm.well, swarm.label) in marks:
@@ -357,6 +359,35 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
     _draw_centres(ax, model, panel, ink)
     ax.grid(axis="y", alpha=0.3)
     return (len(panel.swarms) if density else 0), hidden
+
+
+#: The depth one row of band headers takes under the axis, in points.
+_BAND_ROW_PT = ANNOTATION_PT + 5
+
+
+def _draw_bands(ax, panel, below_pt: float, ink, muted) -> float:
+    """*Split by*'s bands (and *Then by*'s sub-bands) along the wells axis: each a header centred under its groups,
+    *below_pt* under the axis, with a faint divider between neighbouring bands. Returns the depth drawn, in points.
+
+    Under the group names rather than above the swarms, so a header can never sit on a dot, and the sub-bands
+    first (nearer their groups) with the bands beneath them, which reads outward the way the nesting does.
+    """
+    if not panel.bands:
+        return 0.0
+    depth = 2.0
+    rows = [(panel.sub_bands, "nw-subband", muted, False)] if panel.sub_bands else []
+    rows.append((panel.bands, "nw-band", ink, True))
+    for spans, gid, colour, bold in rows:
+        for first, last, label in spans:
+            _ink(ax.text((first + last) / 2, 0, label, transform=_below(ax, below_pt + depth), ha="center",
+                         va="top", fontsize=ANNOTATION_PT + (0.5 if bold else 0),
+                         fontweight="bold" if bold else "normal", color=colour, gid=gid),
+                 muted=not bold)
+        depth += _BAND_ROW_PT
+    for first, _last, _label in panel.bands[1:]:
+        _ink(ax.axvline(first - 0.5, color=muted, lw=0.8, ls="-", alpha=0.6, zorder=0.4, gid="nw-band-divider"),
+             muted=True)
+    return depth
 
 
 def _draw_centres(ax, model, panel, ink) -> None:
@@ -395,7 +426,14 @@ def _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink):
     idx = layout.index
     x = layout.x + swarm.x
     occupancy = [swarm.occupancy[i] for i in idx]
-    screen, publication = _occupancy_colours(occupancy)
+    value_ink = model.decoration.inks.get(swarm.group)
+    if value_ink is not None:
+        # *Colour by*: the group's value is the dot's colour, the same ink on either ground (data ink does not
+        # follow the theme). Solid for every class — a hollow dot would be decoding occupancy with no key for it.
+        pair = ([value_ink] * len(idx), [value_ink] * len(idx))
+        screen = publication = pair
+    else:
+        screen, publication = _occupancy_colours(occupancy)
     faces, edges = publication if _is_publication(ax) else screen
     coll = ax.scatter(x, layout.y, s=(DOT_PT * 0.9) ** 2, facecolors=faces, edgecolors=edges, linewidths=0.6,
                       zorder=3)
@@ -411,12 +449,13 @@ def _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink):
     return layout
 
 
-def _draw_density(ax, swarm, half, ink) -> None:
-    """A set of more than four wells: each well's nanowells as a density with its median, not dots (U2)."""
+def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:
+    """A set of more than four wells: each well's nanowells as a density with its median, not dots (U2). *fill* is
+    the group's *Colour by* ink, which the density takes in place of the plot's ink."""
     if len(swarm.values) >= 2 and np.ptp(swarm.values) > 0:
         parts = ax.violinplot([swarm.values], positions=[swarm.x], widths=[2 * half], showextrema=False)
         for body in parts["bodies"]:
-            body.set_facecolor(ink)
+            body.set_facecolor(fill or ink)
             body.set_alpha(0.35)
             body.set_edgecolor("none")
             body.set_gid("nw-density")
@@ -467,10 +506,37 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     for i, text in enumerate(reversed(lines)):
         _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=ink if text is line1 else muted,
                       gid="nw-footer-used" if text is line1 else "nw-footer"), muted=text is not line1)
+    if model.decoration.colours:
+        # Coloured by a sample variable: the dots decode by its values, and the occupancy key would decode colours
+        # the figure no longer contains.
+        _value_key(fig, model.decoration)
+        return
     # The occupancy key (U5): the colours decode only with it, and its title names the baseline in use.
     _occupancy_key(fig, "Cells at baseline",
                    baseline=baseline_text(model.baseline),
                    starting=model.starting)
+
+
+def _value_key(fig, decoration) -> None:
+    """*Colour by*'s key at the figure's top right, where the occupancy key otherwise sits: one dot per value
+    drawn, in the variable's order, titled with the variable's name. Only the values drawn — the reader counts the
+    key (``variable_series.legend_entries``)."""
+    from matplotlib.lines import Line2D
+
+    if not decoration.legend:
+        return
+    handles = [Line2D([], [], linestyle="none", marker="o", markersize=DOT_PT * 1.3, markerfacecolor=colour,
+                      markeredgecolor=colour, label=label) for label, colour in decoration.legend]
+    legend = fig.legend(handles=handles, loc="upper right", bbox_to_anchor=(0.98, 0.995), frameon=False,
+                        ncol=min(len(handles), 6), fontsize=ANNOTATION_PT + 0.5, handletextpad=0.3,
+                        columnspacing=1.0, borderaxespad=0.0, title=f"{decoration.colour_name}:" if decoration.colour_name else None,
+                        title_fontsize=ANNOTATION_PT + 0.5, alignment="right")
+    legend.set_gid("nw-value-legend")
+    muted = _inks(fig.axes[0])[2] if fig.axes else None
+    for text in [*legend.get_texts(), legend.get_title()]:
+        if muted is not None:
+            text.set_color(muted)
+        _ink(text, muted=True)
 
 
 def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None)) -> None:
@@ -899,7 +965,7 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
                 if numbers:
                     draw.crop_text(ax, row, tp)
     _ink(fig.text(0.02, 1 - 0.2 / draw.h_in,
-                  f"{model.well} · the nanowells with the largest and smallest {label.lower()}",
+                  f"{model.name or model.well} · the nanowells with the largest and smallest {label.lower()}",
                   fontsize=10, color=ink, va="top", gid="nw-extremes-title"))
     _ink(fig.text(0.02, 0.012, draw.caption(label, columns, note, image_channel), fontsize=7, color=faint,
                   gid="nw-extremes-caption", wrap=True), muted=True)
@@ -1219,7 +1285,7 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
                               why=scene.why, filled=filled)
     if in_well and layers.anchor and scene.anchor is not None:
         _draw_anchor(ax, drawn, scene.anchor)
-    _ink(ax.set_title(f"{scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
+    _ink(ax.set_title(f"{scene.name or scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
     # The footer's lines start straight under the array, where they are with Notes off; the notes go under them, in
     # the reserved room at the foot, so turning Notes on never moves a line being read (UX review, round 3).
     top = len(lines) + len(notes) - 1
@@ -1522,6 +1588,11 @@ def _ring(x, y, radius, colour):
 
 
 # ── trajectories (V4) ────────────────────────────────────────────────────────
+def _named(item) -> str:
+    """What a figure calls a panel's or a line's well: the name the page gave it, else the well itself."""
+    return item.name or item.well
+
+
 def render_trajectories(fig, panels, *, label: str, time_source: str | None = None, note: str = "",
                         cohort: bool = False) -> None:
     """One panel per well: a thin line per nanowell, a thick median per occupancy class at baseline.
@@ -1589,7 +1660,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
                         fontsize=ANNOTATION_PT, ground=inks[0])
         _trajectory_ticks(ax, panel)
         _no_offset(ax)
-        _ink(ax.set_title(panel.well, fontsize=10, fontweight="bold", loc="left", color=ink))
+        _ink(ax.set_title(_named(panel), fontsize=10, fontweight="bold", loc="left", color=ink))
         ax.grid(alpha=0.3)
         drawn += len(panel.lines)
         without += panel.n_without_value
@@ -1693,7 +1764,7 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
         # well's place in this list, A03 drawn alone took A01's colour and no well matched its swatch on the plate.
         colour = color_for_well(s.well)
         ax.fill_between(s.rings, s.q1, s.q3, color=colour, alpha=0.18, linewidth=0)
-        ax.plot(s.rings, s.median, color=colour, marker="o", markersize=3, linewidth=1.4, label=s.well)
+        ax.plot(s.rings, s.median, color=colour, marker="o", markersize=3, linewidth=1.4, label=_named(s))
         share.bar(s.rings + (k - (len(series) - 1) / 2) * width, s.excluded_share, width=width, color=colour)
     ax.set_ylabel(label, color=ink)
     _no_offset(ax)

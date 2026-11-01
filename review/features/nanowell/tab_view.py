@@ -32,6 +32,7 @@ from review.features.nanowell.anchor_queue_view import (
 )
 from review.features.nanowell.exclude_view import build_exclude_controls
 from review.features.nanowell.rim_focus_view import build_rim_focus_controls
+from review.features.nanowell.variables_view import build_variable_controls
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
 from review.features.nanowell.display_range_view import (
     build_display_range_button,
@@ -159,6 +160,9 @@ _EXTREMES_TPS_TIP = ("The timepoints the montage shows as columns. Fewer columns
                      "timepoint is always shown.")
 #: How long the page's canvas must hold one size before the Array view is re-fitted to it, in milliseconds.
 _REFIT_MS = 60
+#: How long, in ms, the selection must be still before the page reads the wells it adds: long enough to take a few
+#: quick clicks on the plate as one change, short enough that a single click reads at once to the eye.
+LOAD_DEBOUNCE_MS = 250
 _CROP_METRICS_TIP = ("Write each crop's numbers on it: its fold change in the corner and a line of its metrics along "
                      "its foot. Off leaves the crops bare; the row labels still give each nanowell's rank and value.")
 _POPOUT_METRICS_TIP = ("Write each crop's measurements under it — the same setting as the Extremes view's Metrics. "
@@ -392,6 +396,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_control_cb", control_cb)
     grp_control = band.add_scope("vs", control_cb)
 
+    variables = build_variable_controls(ctx, band)
+
     export_btn, _menu, _act = build_plot_save_menu(
         ctx, band, card_key="_nw_card", data_label="Save nanowell data…",
         data_cb=lambda: nwc.export_page_csv(ctx),
@@ -436,6 +442,13 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     # It covers the whole card as a scrim, so it follows the card's size while it shows, not only when shown.
     card.canvas.mpl_connect("resize_event", lambda _event: computing.resize(card.size()))
     reg.register("_nw_computing_label", computing)
+    # A selection change reads the wells it adds once the selection has been still this long, so a run of clicks on
+    # the plate starts one load rather than one per click (``controller.queue_load``).
+    load_timer = QTimer(card)
+    load_timer.setSingleShot(True)
+    load_timer.setInterval(LOAD_DEBOUNCE_MS)
+    load_timer.timeout.connect(lambda: nwc.run_queued_load(ctx))
+    reg.register("_nw_load_timer", load_timer)
 
     detail = QWidget(splitter)
     detail_layout = QVBoxLayout(detail)
@@ -468,7 +481,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         detail.setVisible(on)
 
     def show_computing() -> None:
-        computing.setVisible(bool(st.computing) and st.metrics is not None)
+        computing.setVisible(nwc.computing_shown(ctx))
         computing.resize(card.size())
         computing.raise_()
 
@@ -509,7 +522,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             for well in nwc.page_wells(ctx) if st.data else []:
                 # On the Identity view each well says its worst verdict, so a contradicted one is found at a glance.
                 worst = worst_verdict(st.data, well) if view == "identity" else None
-                well_cb.addItem(f"{well} · {worst.replace('_', ' ')}" if worst else well, well)
+                name = nwc.well_caption(ctx, well)        # its label as the plot tabs name it, and the well
+                well_cb.addItem(f"{name} · {worst.replace('_', ' ')}" if worst else name, well)
             _select(well_cb, nwc.page_well(ctx))
             stats_view = view == "statistics"
             fill_control_combo(ctx, st, control_cb, on_statistics=stats_view, tip=_CONTROL_TIP)
@@ -559,6 +573,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             extremes_tps.refresh()
             _sync_crop_boxes(ctx, st)
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
+            variables.refresh(view)
         finally:
             for w, b in zip(controls, blocked):
                 w.blockSignals(b)

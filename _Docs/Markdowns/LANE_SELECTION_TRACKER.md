@@ -31,7 +31,9 @@ States: `open`, `done` (with the evidence), `declined` (with the reason).
 
 | # | Item | State | Evidence |
 |---|------|-------|----------|
-| F1 | Measure first: per-file reach of fast-lane files over the 61 merges, and per-file timings | open | |
+| F1 | Measure first: per-file reach of fast-lane files over the 61 merges, and per-file timings | done | fast lane 1,306 s worker time (6 min 11 s wall, 4 workers, 12,436 tests). Replayed over 61 merges with the always-run set below: 896 s average (−31%), 8 merges whole; floor 587 s |
 | F2 | Identify tests that must always run (whole-tree guards, anything reading files by computed path) and prove the set complete | open | |
 | F3 | Fast-lane selection in `scripts/test.sh` and CI, with the docs lane folded in | open | |
 | F4 | Tests, docs, measurement after | open | |
+| G1 | Profile the always-run files (587 s, 45% of the fast lane): where the time goes, by phase and by shared cost | done | serial profile of the 170 always-run files: 538 s, 485 s of it in test bodies; `ast.walk` (a Python generator) re-walking the shared trees is the largest single cost in the guards profiled. The 60,744 `rmdir` calls seen once are pytest clearing earlier sessions' temp dirs, local only |
+| G2 | Cut the shared costs G1 finds, without weakening any guard | open | |

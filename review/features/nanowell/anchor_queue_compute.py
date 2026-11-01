@@ -83,16 +83,22 @@ class AnchorQueue:
         upto = len(self.items) if self.finished else self.index
         return sum(1 for item in self.items[:upto] if (item.well, item.timepoint) not in self.anchored)
 
+    def walked(self) -> int:
+        """How many timepoints the walk is about: the list it is walking, plus any it anchored that a later switch of
+        :attr:`per_well` took out of that list. Counting against :attr:`items` alone, a walk that anchored both of a
+        well's timepoints and then switched One per well on said "3 of 2 anchored"."""
+        return len({(item.well, item.timepoint) for item in self.items} | set(self.anchored))
+
     def position_text(self) -> str:
         """``"3 of 17 · B04 at 24h"`` — where the walk is, for the band."""
         item = self.current
         if item is None:
-            return f"Done · {len(self.anchored)} of {len(self.items)} anchored"
+            return f"Done · {len(self.anchored)} of {self.walked()} anchored"
         return f"{self.index + 1} of {len(self.items)} · {item.well} at {item.timepoint}"
 
     def summary(self) -> str:
         """What the walk did, said on the figure when it ends."""
-        parts = [f"Anchor queue finished: {len(self.anchored)} of {len(self.items)} timepoint(s) anchored"]
+        parts = [f"Anchor queue finished: {len(self.anchored)} of {self.walked()} timepoint(s) anchored"]
         skipped = self.skipped()
         if skipped:
             parts.append(f"{skipped} skipped")

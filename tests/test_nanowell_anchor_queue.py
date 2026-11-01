@@ -105,6 +105,21 @@ def test_one_per_well_keeps_each_well_s_first_timepoint_and_never_walks_back():
     assert [(i.well, i.timepoint) for i in waiting.items] == [("A01", "t_a"), ("C03", "t_c")]
 
 
+def test_switching_one_per_well_mid_walk_keeps_the_counts_true():
+    """Both of B04's timepoints anchored, then One per well switched on at C01: the list loses B04 at 24h, which was
+    anchored. Counted against the list alone the band said "3 of 2 anchored"; the walk is about all three."""
+    items = [aqc.QueueItem("B04", "0h"), aqc.QueueItem("B04", "24h"), aqc.QueueItem("C01", "0h")]
+    queue = aqc.AnchorQueue(list(items))
+    queue.anchored.update({("B04", "0h"), ("B04", "24h")})
+    queue.index = 2
+    queue.set_per_well(True)
+    assert queue.current == items[2]
+    queue.anchored.add(("C01", "0h"))
+    queue.index = len(queue.items)
+    assert queue.position_text() == "Done · 3 of 3 anchored"
+    assert queue.summary().startswith("Anchor queue finished: 3 of 3 timepoint(s) anchored.")
+
+
 # ── the real page ────────────────────────────────────────────────────────────
 
 pytest.importorskip("PySide6")

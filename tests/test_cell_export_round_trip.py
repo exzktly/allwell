@@ -103,6 +103,13 @@ def test_the_fixture_cutoff_actually_excludes_cells(
         f"the cutoff must split the population: {inside} of {len(frame)}")
 
 
+def _show_plot_tab(app, name: str) -> None:
+    """Bring the Plotting page's *name* tab to the front, as a user exporting its cells has it. Tabs fill their own
+    timepoint menus when shown (not on load), so a redraw of a tab never shown draws from an empty menu."""
+    app._notebook.setCurrentByName("Plotting")
+    app._plotting_notebook.setCurrentByName(name)
+
+
 # ── recompute helpers, transcribed from the app rather than imported ─────────
 
 def agg_family_a(rows, val_col):
@@ -205,6 +212,10 @@ def test_distribution_values_match_the_drawn_values_exactly(
     from review.features.distribution.controller import redraw_distribution
 
     ctx = two_wells._ctx
+    # With the Distribution tab in front, as the user who exports its cells has it: the tab's timepoint menu is
+    # filled when the tab is shown (not by the load), and the export is filtered to its timepoint. Redrawn without
+    # showing the tab, the menu was empty and every timepoint's cells were exported against one timepoint drawn.
+    _show_plot_tab(two_wells, "Distribution")
     redraw_distribution(ctx)
     frame, _scope = run_export(ctx, qtbot, monkeypatch, tmp_path, cell_scope)
 
@@ -347,8 +358,10 @@ def test_heatmap_count_cells_recompute_from_the_exported_cells(
     )
 
     ctx = two_wells._ctx
-    # A freshly-built tab holds an empty "Sidebar" layout, so give it the plate
-    # layout a user with wells on screen would have.
+    # With the Heat Map tab in front, as the user who exports its cells has it: its timepoint menu is filled when the
+    # tab is shown, not by the load. Shown first, because showing it builds it, and a freshly-built tab holds an
+    # empty "Sidebar" layout — so then give it the plate layout a user with wells on screen would have.
+    _show_plot_tab(two_wells, "Heat Map")
     ctx.runtime.heatmap.layouts = [
         make_plate_layout((ctx.state.dataset.well_paths or {}).keys())]
     ctx.state.heatmap.active_layout_name = active_layout(ctx).name

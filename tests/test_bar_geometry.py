@@ -245,7 +245,7 @@ def _build_sidebar(qtbot, monkeypatch, *, bar_fig=True):
     """The Properties sidebar over a figure the app knows as its Bar plot."""
     from matplotlib.figure import Figure
 
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
     from tests.test_properties_value_labels import _stub_app
 
     fig = Figure(figsize=(4, 3))

@@ -223,7 +223,7 @@ def test_typing_a_size_into_the_panel_resizes_the_aggregate_keys(qtbot, monkeypa
     Properties control usually breaks."""
     from matplotlib.figure import Figure
 
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     figure = Figure(figsize=(4, 3))
     ax = _agg_axes(figure)

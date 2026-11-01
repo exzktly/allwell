@@ -39,7 +39,7 @@ ALLOWED = {
     # The single door: turns the two fields into one ``TimeRescale``.
     "review/domain/time_rescale.py",
     # Writes them, one control each, and reads them back for the preview.
-    "review/features/export/sidebar_view.py",
+    "review/features/export/properties_view.py",
     # Saves and restores them, under one key each.
     "review/persistence/view_state.py",
 }

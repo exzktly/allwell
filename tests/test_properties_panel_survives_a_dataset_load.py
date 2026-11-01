@@ -154,7 +154,7 @@ def test_the_global_style_survives_a_reseeded_store_too():
 # ── and through the panel the user actually touches ──────────────────────────
 
 def _build_sidebar(qtbot, monkeypatch):
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     fig, ax = _figure()
     app = _stub_app()

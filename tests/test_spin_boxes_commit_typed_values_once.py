@@ -79,7 +79,7 @@ def test_arrows_and_set_value_still_apply_at_once(qtbot, cls):
 
 def test_a_properties_text_field_applies_when_finished(qtbot):
     """Drive the panel's real binding code with a stand-in for the rest of the panel."""
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     calls: list[str] = []
     panel = SimpleNamespace(_getters={}, _setters={})

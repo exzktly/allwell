@@ -102,7 +102,7 @@ def _build_sidebar(qtbot, monkeypatch, *, is_bar: bool = False,
     is the value the real one returns and the value the handler branches on."""
     from matplotlib.figure import Figure
 
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     fig = Figure(figsize=(4, 3))
     fig.add_subplot(1, 1, 1)
@@ -192,7 +192,7 @@ def test_the_section_opens_on_whatever_mode_is_already_set(qtbot, monkeypatch):
     already thinks it is there."""
     from matplotlib.figure import Figure
 
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     fig = Figure(figsize=(4, 3))
     fig.add_subplot(1, 1, 1)
@@ -278,12 +278,12 @@ def test_the_real_redraw_reports_whether_it_ran(qtbot, monkeypatch):
     """The stub above returns a bool because the real one does. Pinned here so
     the two cannot drift — a stub that is more honest than the code it stands
     in for tests nothing."""
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     fig_app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_bar=True)
     monkeypatch.undo()
     calls: list[str] = []
-    monkeypatch.setattr("review.features.export.sidebar_view.redraw_bars",
+    monkeypatch.setattr("review.features.export.properties_view.redraw_bars",
                         lambda _ctx: calls.append("bars"))
     assert ExportStyleSidebar._redraw_bound_figure(sb) is True
     assert calls == ["bars"]
@@ -485,7 +485,7 @@ def test_the_real_redraw_reaches_the_response_figure(qtbot, monkeypatch):
     **not** what ran — the half a bare "did something redraw?" assertion would
     miss, since the fall-through redraws too.
     """
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     _app, sb, _r = _build_sidebar(qtbot, monkeypatch, is_response=True)
     monkeypatch.undo()

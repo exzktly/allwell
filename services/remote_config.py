@@ -57,6 +57,7 @@ from services.slurm_batch_script import (
     launcher_from_batch_script,
     single_task,
 )
+from util.bounded_run import run_bounded
 
 _LOG = logging.getLogger(__name__)
 
@@ -503,7 +504,73 @@ def resolve_ssh_binary() -> str:
             candidate = bin_dir / "ssh.exe"
             if candidate.is_file():
                 return str(candidate)
+        # No Git for Windows found. A bare "ssh" would let Windows pick the first on PATH, which on a stock machine
+        # is the built-in OpenSSH (`is_builtin_windows_ssh`); any other ssh on PATH is taken ahead of it, and the
+        # built-in one only when it is all there is — `ssh_binary_lines` then puts a warning in the run log.
+        on_path = _windows_path_ssh()
+        others = [c for c in on_path if not is_builtin_windows_ssh(c)]
+        if others:
+            return others[0]
+        if on_path:
+            return on_path[0]
     return "ssh"
+
+
+def is_builtin_windows_ssh(path: str) -> bool:
+    """Whether *path* is Windows' built-in OpenSSH (``…\\System32\\OpenSSH\\ssh.exe``, or its ``SysWOW64`` /
+    ``Sysnative`` views).
+
+    That ssh is reported to hang instead of exiting when a program with no console window runs it with its input and
+    output redirected — how this app runs every ssh — where Git for Windows' ssh exits normally in the same setup
+    (PowerShell/Win32-OpenSSH#1330, #1470; the GUI-launched case in devswha/ovis#1989). So it is this app's last
+    resort, never its choice while another ssh exists."""
+    p = str(path).lower().replace("/", "\\")
+    return any(f"\\{d}\\openssh\\" in p for d in ("system32", "syswow64", "sysnative"))
+
+
+def _windows_path_ssh() -> list[str]:
+    """Every ``ssh.exe`` on PATH, in PATH order (``shutil.which`` gives only the first)."""
+    out: list[str] = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry.strip():
+            continue
+        candidate = Path(entry.strip().strip('"')) / "ssh.exe"
+        if candidate.is_file() and str(candidate) not in out:
+            out.append(str(candidate))
+    return out
+
+
+#: The run log's warning when the ssh this app runs its commands with is Windows' built-in OpenSSH.
+BUILTIN_WINDOWS_SSH_WARNING = (
+    "[remote] WARNING this app is running Windows' built-in ssh ({path}), because no other ssh was found. "
+    "That ssh is reported to hang instead of exiting when a program with no console window runs it with its input "
+    "and output redirected, which is how this app runs it, and a heartbeat that cannot reach the cluster lets a "
+    "granted node release itself under a running step. Install Git for Windows (git-scm.com), whose ssh does not "
+    "do this, and restart All-Well; this app then uses it.\n")
+
+
+def ssh_binary_lines() -> list[str]:
+    """The run log's lines naming the ``ssh`` this app's commands and its transfers run with, and a warning for each
+    that is Windows' built-in OpenSSH (:func:`is_builtin_windows_ssh`).
+
+    The choice used to be silent, so a run on the built-in ssh looked exactly like one on Git for Windows' — and
+    finding out which a run had used took the user three rounds of ``where`` and ``ssh -G`` by hand."""
+    lines: list[str] = []
+    for what, chosen in (("ssh", resolve_ssh_binary()), ("ssh for transfers", _transfer_ssh_or_blank())):
+        if not chosen:
+            continue
+        lines.append(f"[remote] {what}: {chosen}\n")
+        if _is_windows() and is_builtin_windows_ssh(chosen):
+            lines.append(BUILTIN_WINDOWS_SSH_WARNING.format(path=chosen))
+    return lines
+
+
+def _transfer_ssh_or_blank() -> str:
+    """:func:`resolve_ssh_for_rsync`, or ``""`` where there is no rsync to pair it with (the run reports that itself)."""
+    try:
+        return resolve_ssh_for_rsync()
+    except FileNotFoundError:
+        return ""
 
 
 def resolve_ssh_for_rsync() -> str:
@@ -1463,7 +1530,7 @@ def query_jupyterhub_profiles(
         remote_cmd += f" {shlex.quote(path)}"
     argv = host.ssh_argv(allocate_tty=False) + [remote_cmd]
     try:
-        result = subprocess.run(
+        result = run_bounded(
             argv, capture_output=True, timeout=timeout, **TEXT_UTF8,
         )
     except subprocess.TimeoutExpired:

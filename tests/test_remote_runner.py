@@ -1783,6 +1783,9 @@ def test_required_files_list_is_what_we_promised():
         # parsing, timepoint parsing, logged-swallow).
         "util/__init__.py",
         "util/aw_safe.py",
+        # subprocess.run whose timeout holds on Windows; the pipeline's nvidia-smi
+        # and Slurm probes go through it.
+        "util/bounded_run.py",
         "util/acquisition_record.py",
         "util/nanowell_address.py",
         "util/nanowell_anchors.py",

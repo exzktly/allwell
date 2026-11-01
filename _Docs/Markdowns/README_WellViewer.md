@@ -452,7 +452,11 @@ In `nanowells/`, per well:
 - `<well>_grid.json`: the registration, lattice and status of every timepoint.
 - `<well>_identity.json`: whether each timepoint's addresses stayed on the same physical nanowells. It is
   missing when the check could not run; `python -m pipeline.nanowell_identity <output_dir>` runs it again.
-- `<well>_template.npz`: the picture of an empty nanowell, kept so a later incremental run can reuse it. The per-cell Scatter selects cells by `timepoint_hours`, so a nanowell plate
+- `<well>_template.npz`: the picture of an empty nanowell, kept so a later incremental run can reuse it.
+- `<well>_masks.npz`: the cell masks Cellpose returned, kept so a re-run of the well — after an anchor is set, or
+  with settings that do not change what Cellpose is shown — segments only what it has not seen. Each is taken back
+  only for the exact pixels, scaling and model it was made from; anything else is segmented again. Deleting the file
+  costs nothing but time. A remote run leaves it on the cluster: it is not fetched back. The per-cell Scatter selects cells by `timepoint_hours`, so a nanowell plate
 analysed before the per-cell CSV carried that column shows no points there (the line and bar plots are
 unaffected); re-analyse it with **Redo it** (`--force`) to rewrite its tables.
 
@@ -559,7 +563,9 @@ were skipped, and puts your plate selection back as it was.
 Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
 run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
 addressed from it at the end of the run, through the plate's other wells. A timepoint that still cannot be
-addressed says so, and takes a click of its own. A click that is not on a nanowell (more than a quarter of the
+addressed says so, and takes a click of its own. The re-run does not segment the well's cells again: a click
+changes which nanowell is which, not the pixels Cellpose is shown, so each nanowell takes back the cell masks the
+last run made of exactly the same pixels (the run log says how many, per well). A click that is not on a nanowell (more than a quarter of the
 spacing from every one), or that is off the array (more than one and a half spacings from every nanowell
 found), is not used, and the well's record says how far off it was. A run limited to a few wells — on this
 computer or on a remote host — carries the click through the rest of the plate as a whole-plate run does: a
@@ -1881,6 +1887,18 @@ instead of being cut off part-way; the log says so.
 **Test the node** sends the scheduler Test's job to the node as a run would be
 sent, to see the CPUs and GPUs a run on it gets. **Release** gives the node back
 at once; if a run is using it you are asked first, because releasing stops the run.
+
+**Show log** opens a window with the whole story of a request, which the readout
+(only the latest state) cannot give. *This app's record* lists, with the time of
+each, the `sbatch` that was sent, every change in the job's state and the reason
+the scheduler gave (`PENDING · reason Resources`, `ReqNodeNotAvail`, a node that
+failed to boot), every answer from the host that was not ok, and what ended the
+node; it fills in live and starts with everything since the app began. *On the
+cluster* is what the host holds about the job: the job script's own output, why it
+ended, and the scheduler's full record of it (`scontrol show job`). It is read when
+the window opens, on **Refresh**, and every few seconds while it is open; a host
+that does not answer is said so in place of the text. **Copy all** puts both parts
+on the clipboard, for a message to your cluster's administrators.
 
 **What ends a granted node.** All of these are enforced on the node itself, so
 none depends on All-Well still running:

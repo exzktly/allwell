@@ -52,6 +52,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
+import json
 import math
 import threading
 
@@ -959,9 +960,33 @@ def cellpose_segmenter(diameter_px: float = 0.0, **options):
         from pipeline.cellpose import _segment_cellpose_many
         return _segment_cellpose_many(images, diameter=diameter_px, lowhigh=lowhigh,
                                       max_size_fraction=max_size_fraction, **options)
+    identity: list = []
+
+    def cache_identity() -> str:
+        """What decides this segmenter's labels beyond its input (``pipeline.nanowell_masks``): the diameter it
+        resizes to, its options (the model), the Cellpose and Torch versions, the device kind (a GPU's reduced
+        precision is not a CPU's), and the code between Cellpose and the labels. Worked out once, on first use."""
+        if not identity:
+            import torch
+
+            from pipeline import cellpose, cellpose_masks
+            from pipeline.nanowell_masks import code_digest
+
+            from importlib.metadata import PackageNotFoundError, version
+
+            try:
+                cellpose_version = version("cellpose")
+            except PackageNotFoundError:      # an install without metadata still segments; its masks are its own
+                cellpose_version = "unknown"
+            identity.append(json.dumps({"diameter_px": float(diameter_px), "options": options,
+                                        "cellpose": cellpose_version, "torch": torch.__version__,
+                                        "device": cellpose._cellpose_device()[0].type,
+                                        "code": code_digest(cellpose, cellpose_masks)}, sort_keys=True, default=str))
+        return identity[0]
     segment.accepts_range = True              # segment_sites hands it the tile's scale for each crop
     segment.accepts_size_cap = True           # and lifts the area cap on a mask for a crop
     segment.segment_many = segment_many       # and several crops at once (CROP_BATCH)
+    segment.cache_identity = cache_identity   # its masks can be kept and handed back (pipeline.nanowell_masks)
     return segment
 
 

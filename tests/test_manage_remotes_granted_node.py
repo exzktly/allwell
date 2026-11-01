@@ -43,24 +43,13 @@ def cluster(tmp_path, monkeypatch):
     c = Cluster(tmp_path)
     monkeypatch.setattr(gnp, "DatasetCache", lambda host: c)
     yield c
-    _join_panel_threads()
+    # A panel read still in flight can start a heartbeat after the one below stops them; wait for the panel's workers.
+    for thread in threading.enumerate():
+        if thread.name.startswith("aw-granted-node"):
+            thread.join(10)
     for node in remote_hold.live_nodes():
         node.stop_beating()
     remote_hold._NODES.clear()
-
-
-def _join_panel_threads(timeout_s: float = 10.0) -> None:
-    """Wait for every thread the Granted node panel started (``aw-granted-node-read`` / ``-request`` / ``-release``).
-
-    A read still answering when a test ends calls ``GrantedNode.attach``, which starts a heartbeat for a live node
-    whenever it has none. Stopping the heartbeats first and letting that read land afterwards restarts one, and the
-    autouse run-thread check reports it against the test that happened to end mid-read. So the panel's threads finish
-    first, and only then are the heartbeats stopped.
-    """
-    deadline = time.monotonic() + timeout_s
-    for thread in threading.enumerate():
-        if thread.name.startswith("aw-granted-node-") and thread is not threading.current_thread():
-            thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
 
 @pytest.fixture
@@ -246,6 +235,100 @@ def test_the_dialog_shows_the_panel_for_the_selected_host(qtbot, tmp_path, monke
             dlg._list.setCurrentRow(row)
     qtbot.waitUntil(lambda: dlg._node_panel._host.name == "plain", timeout=5000)
     assert not dlg._node_panel._request_btn.isEnabled() and "schedules" in _text(dlg._node_panel)
+
+
+# ── Show log ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def _request_and_open_log(qtbot, panel, cluster, host):
+    _will_be_granted(cluster, host)
+    panel.set_host(host)
+    qtbot.waitUntil(lambda: "No node granted." in _text(panel), timeout=10000)
+    panel._request_btn.click()
+    qtbot.waitUntil(lambda: "Node gpu-node-1" in _text(panel), timeout=15000)
+    panel._log_btn.click()
+    dlg = panel._log_dialog
+    assert dlg is not None
+    return dlg
+
+
+def test_show_log_shows_what_was_sent_and_what_the_scheduler_said_and_what_the_cluster_holds(qtbot, panel, cluster):
+    """Wrong implementation: a button connected to nothing, or a window that shows only the readout's last line."""
+    host = RemoteHost(**HOST)
+    d = cluster.hold_dir(host)
+    dlg = _request_and_open_log(qtbot, panel, cluster, host)
+    qtbot.addWidget(dlg)
+    app = dlg._app_view.toPlainText()
+    assert "sbatch --partition=gpu --gres=gpu:1" in app and "→  job 4001" in app
+    assert "node gpu-node-1 · → granted" in app
+    (d / "log").write_text("[remote] scheduler: allocation granted — job 4001 on gpu-node-1\n", encoding="utf-8")
+    dlg.refresh()
+    qtbot.waitUntil(lambda: "allocation granted — job 4001 on gpu-node-1" in dlg._remote_view.toPlainText(), timeout=10000)
+    remote = dlg._remote_view.toPlainText()
+    assert "=== hold job output" in remote and "JobState=RUNNING" in remote and "record of job 4001" in remote
+    assert "Read from the host just now" in dlg._remote_hint.text()
+
+
+def test_a_line_recorded_while_the_window_is_open_appears_in_it(qtbot, panel, cluster):
+    import threading
+
+    host = RemoteHost(**HOST)
+    dlg = _request_and_open_log(qtbot, panel, cluster, host)
+    qtbot.addWidget(dlg)
+    node = node_for(host, cluster, log_fn=lambda _m: None)
+    threading.Thread(target=lambda: node.transcript.add("a line from a worker thread"), daemon=True).start()
+    qtbot.waitUntil(lambda: "a line from a worker thread" in dlg._app_view.toPlainText(), timeout=5000)
+
+
+def test_a_closed_log_window_stops_listening_and_a_reopened_one_starts_with_the_history(qtbot, panel, cluster):
+    host = RemoteHost(**HOST)
+    first = _request_and_open_log(qtbot, panel, cluster, host)
+    qtbot.addWidget(first)
+    first.close()
+    node = node_for(host, cluster, log_fn=lambda _m: None)
+    node.transcript.add("said after the window was closed")
+    qtbot.wait(300)
+    assert "said after the window was closed" not in first._app_view.toPlainText()
+    assert not first._timer.isActive()
+    panel._log_btn.click()
+    second = panel._log_dialog
+    qtbot.addWidget(second)
+    assert second is not first
+    text = second._app_view.toPlainText()
+    assert "said after the window was closed" in text and "sbatch --partition=gpu" in text
+
+
+def test_a_host_that_does_not_answer_says_so_in_the_window_instead_of_showing_an_empty_log(qtbot, panel, cluster, monkeypatch):
+    import types
+
+    host = RemoteHost(**HOST)
+    dlg = _request_and_open_log(qtbot, panel, cluster, host)
+    qtbot.addWidget(dlg)
+    dlg._reading = False
+    monkeypatch.setattr(cluster, "_ssh_script", lambda script, *, check, timeout_s=60: types.SimpleNamespace(
+        returncode=255, stdout="", stderr="ssh: connect to host login port 22: Connection timed out\n"))
+    dlg.refresh()
+    qtbot.waitUntil(lambda: "Could not read it from the host just now" in dlg._remote_hint.text(), timeout=10000)
+    assert "Connection timed out" in dlg._remote_hint.text()
+
+
+def test_copy_all_puts_both_parts_on_the_clipboard(qtbot, panel, cluster):
+    from PySide6.QtWidgets import QApplication
+
+    host = RemoteHost(**HOST)
+    dlg = _request_and_open_log(qtbot, panel, cluster, host)
+    qtbot.addWidget(dlg)
+    qtbot.waitUntil(lambda: "=== hold job output" in dlg._remote_view.toPlainText(), timeout=10000)
+    dlg._copy_btn.click()
+    copied = QApplication.clipboard().text()
+    assert copied.startswith("== This app's record ==") and "== On the cluster ==" in copied
+    assert "sbatch --partition=gpu" in copied and "=== hold job output" in copied
+
+
+def test_show_log_is_offered_only_for_a_host_that_can_have_a_node(qtbot, panel, cluster):
+    panel.set_host(RemoteHost(**HOST))
+    assert panel._log_btn.isEnabled()
+    panel.set_host(RemoteHost(**{**HOST, "name": "plain", "compute_launcher": ""}))
+    assert not panel._log_btn.isEnabled()
 
 
 # ── teardown ──────────────────────────────────────────────────────────────────────────────────────────────────────

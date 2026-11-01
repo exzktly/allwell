@@ -6,11 +6,11 @@ The Storage browser's first listing on a real host failed with::
     bash: line 55: syntax error near unexpected token `;;'
 
 Line 55 was ``o=$({ case "$jid" in *.*) squeue …;; *) squeue …;; esac; } …)``
-(``services.slurm_ids.squeue_listing``). Bash before 5.2 finds the end of a
-``$( … )`` by counting parentheses, so a ``case`` pattern's bare ``)`` closes the
-substitution early; bash 3.2 (the one macOS ships) then rejects the whole script.
-The bash every test here runs is 5.x, which parses a substitution as commands and
-accepts it — so every test passed, and the first real server refused the script.
+(``services.slurm_ids.squeue_listing``), and the host was a Linux server. Bash
+before 5.2 (whose parsing of command substitutions was rewritten) can end a
+``$( … )`` at a ``case`` pattern's bare ``)`` and then reject the whole script. The
+bash these tests run is newer and accepts it — so every test passed, and the first
+real server refused the script.
 
 The POSIX form ``(pattern)`` balances the count. This guard reads each script the
 remote features send, finds every ``$( … )``, and requires every ``case`` inside

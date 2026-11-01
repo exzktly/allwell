@@ -82,10 +82,9 @@ def squeue_listing(jid_var: str, fmt: str = "%T") -> str:
     not ask" still can. The ``-s`` spelling (option and value in one word) is the one the manual requires.
 
     **Each ``case`` pattern opens with ``(``.** Every caller puts this inside ``$( … )``, and bash before 5.2
-    finds the end of a command substitution by counting parentheses: a bare pattern's ``)`` closes the
-    ``$(`` early, and bash 3.2 (macOS's) then fails the whole script with ``syntax error near unexpected
-    token `;;'`` — which is how the Storage browser's first listing on such a host failed. The leading ``(``
-    is POSIX and balances the count. ``tests/test_remote_scripts_parse_on_old_bash.py`` holds it.
+    (whose parsing of command substitutions was rewritten) can end the substitution at a bare pattern's ``)``
+    and then fail the whole script with ``syntax error near unexpected token `;;'`` — which is how the Storage
+    browser's first listing on a Linux host failed. The leading ``(`` is POSIX and parses on every bash. ``tests/test_remote_scripts_parse_on_old_bash.py`` holds it.
     """
     v = f'"${jid_var}"'
     return f'{{ case {v} in (*.*) squeue -h -s{v} -o %i;; (*) squeue -h -j {v} -o {fmt};; esac; }}'

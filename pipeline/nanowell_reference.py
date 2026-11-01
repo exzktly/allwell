@@ -8,14 +8,25 @@ so that is every well at every timepoint. A nanowell half covered by cells read 
 So the run is told which plate well holds no cells (``--nanowell_empty_well``, ``NanowellSettings.empty_well``).
 That well is measured before any other (``process_microscopy.process_well_zips`` puts it first,
 :func:`reference_well_first`); at each of its timepoints its own template, carrying the threshold measured on it
-(``Template.texture_cut``), is saved here with a verdict on whether the well really was empty then
-(:func:`verdict`). Every other well reads its confluence at a timepoint against the reference's template and
-threshold at that same timepoint (``nanowell_run._confluence_basis``), so a change of exposure, focus or medium
-between timepoints is calibrated by the reference imaged under it.
+(``Template.texture_cut``), is saved here with what the segmenter counted in it then (:func:`verdict`). Every other
+well reads its confluence at a timepoint against the reference's template and threshold at that same timepoint
+(``nanowell_run._confluence_basis``), so a change of exposure, focus or medium between timepoints is calibrated by
+the reference imaged under it.
 
-A timepoint has no confluence — ``None``, never 0 — in every well when the reference is not ``empty`` there, when
+**The well the user names as empty is believed.** Its cell count is not evidence against that: in a well that holds
+no cells, every object the segmenter counts is debris or floor texture it took for a cell, and on real plates that
+reached 70 % or more of the empty well's nanowells — so a rule that refused a reference whose nanowells held counted
+objects refused exactly the wells it was meant to accept, and left the whole plate with no confluence. The count is
+kept instead as what it is, the segmenter's false-count baseline (``false_cells_per_nanowell``), and when more than
+:data:`MAX_LOADED_SHARE` of the nanowells hold a counted object the reference's own timepoint says so in its notes
+(:data:`LOOKS_LOADED_PREFIX`) and the run log warns, so a mistyped well stays visible without costing the plate its
+confluence. Debris is filtered after the run, in QC.
+
+A timepoint has no confluence — ``None``, never 0 — in every well when the reference has no template there, when
 the reference has no such timepoint, when no reference well was named, or when this output folder holds no
-reference measured under the run's settings. Each says why in the timepoint's notes.
+reference measured under the run's settings. Each says why in the timepoint's notes. A reference saved by the
+earlier count-based rule, with a timepoint marked ``loaded`` or ``unverified`` and so no template, is measured
+again (:func:`own`): those statuses are no longer written, and the template they withheld is needed.
 
 Stored under ``<output>/nanowells/_confluence_reference/``: ``reference.json`` (the well, the measurement version,
 the settings key and each timepoint's verdict) and one ``<timepoint>.npz`` per empty timepoint
@@ -38,12 +49,18 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-#: The reference well is empty at a timepoint when at most this share of its counted nanowells holds a cell: a few
-#: nanowells with debris the segmenter took for a cell do not disqualify it, and a loaded well is far above it.
+#: Above this share of its counted nanowells holding a counted object, the named empty well's timepoint carries a
+#: note and the run log a warning (:data:`LOOKS_LOADED_PREFIX`). It is never refused for it: the user named it
+#: empty, and an empty well's counted objects are debris (see the module docstring).
 MAX_LOADED_SHARE = 0.05
 DIR_NAME = "_confluence_reference"
+#: ``empty`` is the only status :func:`verdict` writes. ``loaded`` and ``unverified`` are read from references saved
+#: by the earlier count-based rule, which refused the timepoint and saved no template for it.
 EMPTY, LOADED, UNVERIFIED = "empty", "loaded", "unverified"
+REFUSED_BY_THE_OLD_RULE = (LOADED, UNVERIFIED)
 NOTE_PREFIX = "No confluence at this timepoint"
+#: The note on the reference well's own timepoint when many of its nanowells hold a counted object.
+LOOKS_LOADED_PREFIX = "Named empty reference well holds counted objects"
 #: The grid block field a measured timepoint records :meth:`Reference.key_at` in.
 KEY_FIELD = "confluence_reference_key"
 OWN_KEY = "own"
@@ -53,11 +70,13 @@ OWN_KEY = "own"
 class Reference:
     """What a well's confluence is read against, timepoint by timepoint.
 
-    ``own``: this well is the reference and reads itself. Otherwise ``templates`` maps each timepoint at which the
-    reference was empty to its template (carrying its threshold), and ``reasons`` says why any other timepoint has
-    none; ``default`` is the reason for a timepoint the reference does not have. ``codes`` and ``default_code`` say
-    the same as short words, for :meth:`key_at`."""
+    ``own``: this well is the reference and reads itself; ``refused`` then names its timepoints an earlier
+    count-based rule refused and saved no template for, which :meth:`key_at` keys apart so they are measured again.
+    Otherwise ``templates`` maps each timepoint at which the reference was empty to its template (carrying its
+    threshold), and ``reasons`` says why any other timepoint has none; ``default`` is the reason for a timepoint the
+    reference does not have. ``codes`` and ``default_code`` say the same as short words, for :meth:`key_at`."""
     own: bool = False
+    refused: frozenset = frozenset()
     templates: dict = field(default_factory=dict)
     reasons: dict = field(default_factory=dict)
     default: str = ""
@@ -81,7 +100,7 @@ class Reference:
         ``other_settings``, ``absent``, or the timepoint's verdict). Codes rather than the reasons' sentences, so
         rewording a reason re-runs nothing."""
         if self.own:
-            return OWN_KEY
+            return f"{OWN_KEY}:refused" if str(timepoint) in self.refused else OWN_KEY
         template = self.templates.get(timepoint)
         if template is not None:
             return template_key(template)
@@ -104,6 +123,19 @@ def template_key(template) -> str:
 
 
 OWN = Reference(own=True)
+
+
+def own(output_dir, well: str) -> Reference:
+    """What the reference *well* itself reads against: :data:`OWN`, unless the reference saved in *output_dir* was
+    written by the earlier count-based rule and refused some of its timepoints (``loaded`` / ``unverified``, no
+    template saved). Those are then keyed apart (``Reference.refused``), so the well's recorded key no longer matches
+    there and the run measures them again, saving the template every other well's confluence needs."""
+    index = read_index(output_dir)
+    if index is None or not same_well(index.get("well"), well):
+        return OWN
+    refused = frozenset(str(tp) for tp, found in (index.get("timepoints") or {}).items()
+                        if isinstance(found, dict) and found.get("status") in REFUSED_BY_THE_OLD_RULE)
+    return Reference(own=True, refused=refused) if refused else OWN
 
 
 def none_named() -> Reference:
@@ -146,18 +178,30 @@ def _cell_count(value) -> float | None:
 
 
 def verdict(rows: list) -> dict:
-    """Whether the reference well was empty at one timepoint, from its *rows* there (``nanowells/<well>.csv``).
-    The rows may be the run's own or kept ones read back from the CSV, so each count is read as a number."""
+    """What the segmenter counted in the reference well at one timepoint, from its *rows* there
+    (``nanowells/<well>.csv``). The status is always :data:`EMPTY`: the user named the well empty, and that is
+    believed whatever was counted (module docstring). ``looks_loaded`` says when more than :data:`MAX_LOADED_SHARE`
+    of its counted nanowells hold a counted object, for the note and the warning. The rows may be the run's own or
+    kept ones read back from the CSV, so each count is read as a number."""
     counts = [_cell_count(r.get("n_cells")) for r in rows if r.get("state") in ("empty", "measured")]
     counted = [n for n in counts if n is not None]
     loaded = sum(1 for n in counted if n > 0) / len(counted) if counted else None
-    status = UNVERIFIED if loaded is None else LOADED if loaded > MAX_LOADED_SHARE else EMPTY
     # Every cell counted in a well that holds none was invented by the segmenter (or is debris it took for a cell):
     # per nanowell, that is the false-count baseline every other well's counts carry at this timepoint. Undefined
     # (None, not 0) when nothing was counted.
     false_cells = sum(counted) / len(counted) if counted else None
-    return {"status": status, "loaded_share": loaded, "nanowells_counted": len(counted),
-            "max_loaded_share": MAX_LOADED_SHARE, "false_cells_per_nanowell": false_cells}
+    return {"status": EMPTY, "loaded_share": loaded, "nanowells_counted": len(counted),
+            "max_loaded_share": MAX_LOADED_SHARE, "looks_loaded": loaded is not None and loaded > MAX_LOADED_SHARE,
+            "false_cells_per_nanowell": false_cells}
+
+
+def looks_loaded_note(found: dict) -> str:
+    """The note on the reference well's own timepoint when :func:`verdict` found it ``looks_loaded``."""
+    per = found.get("false_cells_per_nanowell")
+    return (f"{LOOKS_LOADED_PREFIX}: {found['loaded_share']:.0%} of its nanowells hold an object the segmenter "
+            f"counted ({'?' if per is None else f'{per:.2f}'} per nanowell). It is used as the empty reference "
+            "anyway, as named, so these are the segmenter's false counts (debris); if the well does hold cells, "
+            "name another, or every confluence is read against cells")
 
 
 def reason(well: str, timepoint, found: dict | None) -> str:
@@ -265,15 +309,19 @@ def kept_templates(output_dir, well: str) -> dict:
 
 def apply(sites: list, blocks: dict, well: str, verdicts: dict) -> None:
     """For the reference well itself, once its counts are known: each timepoint's verdict on its block
-    (``confluence_reference``), and at a timepoint where it was not empty, its own confluence undefined with the
-    reason in the block's notes. Idempotent, so kept rows and blocks may pass through it again."""
+    (``confluence_reference``), a note where many of its nanowells hold counted objects (:func:`looks_loaded_note`),
+    and at a timepoint whose verdict is not ``empty`` (only a kept one the earlier rule judged), its own confluence
+    undefined with the reason in the block's notes. Idempotent, so kept rows and blocks may pass through it again."""
     for tp, block in blocks.items():
         if not isinstance(block, dict):
             continue
         found = verdicts.get(tp)
         block["confluence_reference"] = {"well": well, **(found or {"status": None})}
         if "notes" in block:
-            block["notes"] = [n for n in block["notes"] if not str(n).startswith(NOTE_PREFIX)]
+            block["notes"] = [n for n in block["notes"]
+                              if not str(n).startswith((NOTE_PREFIX, LOOKS_LOADED_PREFIX))]
+        if found is not None and found.get("looks_loaded"):
+            block.setdefault("notes", []).append(looks_loaded_note(found))
         if found is not None and found["status"] != EMPTY:
             block.setdefault("notes", []).append(f"{NOTE_PREFIX}: {reason(well, tp, found)}")
             for row in sites:

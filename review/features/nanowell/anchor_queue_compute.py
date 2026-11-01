@@ -2,7 +2,7 @@
 
 After a nanowell run a set of wells and timepoints is usually left ``unaddressed`` — the run could not find the
 central square — and each needs a person to click the square on its montage (``util.nanowell_anchors``). Opening
-them one at a time from QC Triage or Home costs a round trip per timepoint. The Array view's **Anchor queue** walks
+them one at a time from QC Triage or Home costs a round trip per timepoint. The QC view's **Anchor queue** walks
 them instead: it shows the first, and each click that sets an anchor moves on to the next (``_anchor_queue``).
 
 What the queue holds is read from the grid records the run wrote (``<out>/nanowells/<well>_grid.json``), which name
@@ -38,7 +38,7 @@ class QueueItem:
 
 @dataclass
 class AnchorQueue:
-    """The queue the Array view is walking: its items, which one is shown, and what has happened to each."""
+    """The queue being walked on the Array view: its items, which one is shown, and what has happened to each."""
 
     items: list
     index: int = 0
@@ -53,6 +53,8 @@ class AnchorQueue:
     #: Every waiting timepoint. :attr:`items` is this, or with :attr:`per_well` only each well's first.
     all_items: list = field(default_factory=list)
     per_well: bool = False
+    #: The view the walk was started from, and goes back to when it ends (the QC view).
+    return_view: str = "qc"
 
     def __post_init__(self) -> None:
         if not self.all_items:

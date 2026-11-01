@@ -313,6 +313,12 @@ class AnalyzeLogPaneMixin:
         # one this pane colours the line by, so the two cannot disagree.
         for text, tag in batch:
             mirror_line("analyze", text, tag)
+        # The same lines, to this run's log file in its output folder (analyze.domain.run_log). A file that cannot
+        # be written says so once, in the pane, and the pane loses nothing either way.
+        run_log = getattr(self, "_run_log", None)
+        problem = run_log.write(batch, self._last_output_dir) if run_log is not None else None
+        if problem is not None:
+            batch = [*batch, (problem, "WARNING")]
         # Snapshot the user's scroll position before appending. Auto-
         # scroll-to-bottom only if they were already pinned there;
         # otherwise leave the viewport alone so a user scrolled up to

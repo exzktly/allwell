@@ -30,7 +30,9 @@ from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, field_sites, one_to_one
 from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
+from review.features.nanowell.decorate_compute import Decoration, decoration_for
 from review.features.nanowell import _anchor_queue as aq
+from review.features.nanowell import _qc_controller as qcc
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
 from review.features.nanowell import subset_compute as ss
@@ -99,19 +101,101 @@ def replicate_groups(ctx, wells) -> dict:
 
     Wells in no set stand as their own group, so a plate with no definitions compares well against well.
     Only wells with nanowell data are kept; a set left with none is dropped.
+
+    **Each group is keyed by what the figures call it** — :func:`named_groups`: a set by
+    ``replicate_display_label``, a well standing alone by its label (:func:`well_names`) — because the key is what
+    the ticks, the panel titles, the *vs* combo and the Statistics samples print.
     """
     from review.domain.plot_members import plot_replicate_sets
 
     have = set(wells)
-    groups, placed = {}, set()
+    sets = []
     for rset in plot_replicate_sets(ctx) or []:
         members = [w for w in rset.wells if w in have]
         if members:
-            groups[rset.name] = members
-            placed.update(members)
-    for well in sorted(have - placed):
-        groups[well] = [well]
+            sets.append((rset, members))
+    placed = {w for _rset, members in sets for w in members}
+    return named_groups(ctx, sets, sorted(have - placed))
+
+
+def _page_names(ctx, view: str, well: str) -> dict:
+    """The *names* :func:`draw_view` is given: the drawn wells' (:func:`well_names`), and on the Array view the
+    shown well's caption (:func:`well_caption`), which is a one-well title."""
+    names = well_names(ctx, page_wells(ctx))
+    if view == "array" and well:
+        names[well] = well_caption(ctx, well)
+    return names
+
+
+def well_names(ctx, wells) -> dict:
+    """``well -> what the page's figures call it``, for wells drawn side by side.
+
+    Each well's label as every plot tab names it — ``selections_model.well_display_label``: the Well Labels tab's
+    name, else the sample variables it holds (``HeLa · 10 µM``), else the well itself — so the page reads as the
+    rest of Review does. Two wells drawn together under one label (replicates left unpooled) are told apart by
+    their wells, ``HeLa · 10 µM (A01)``: here a label is also a key, and two panels or ticks reading the same with
+    nothing to say which well each is would be a figure no one could check against the plate. A label alone is
+    never given a well it does not need — ``sample_variables.label_for_well`` keeps tokens off ticks for the same
+    reason, and already adds them to a partial description.
+    """
+    from collections import Counter
+
+    from review.domain.selections_model import well_display_label
+
+    labels = {w: str(well_display_label(ctx, w) or "").strip() or w for w in wells}
+    shared = Counter(labels.values())
+    return {w: _with_well(label, w) if shared[label] > 1 else label for w, label in labels.items()}
+
+
+def well_caption(ctx, well: str) -> str:
+    """What a one-well view and the *Well* combo call *well*: its label with the well beside it, ``Vehicle (B03)``.
+
+    Always both, unlike :func:`well_names`: the Array, Identity and Extremes views are about one physical well, and
+    the combo is how one is picked, so the well is the point; the label says which condition it is.
+    """
+    return _with_well(well_names(ctx, [well])[well], well)
+
+
+def _with_well(label: str, well: str) -> str:
+    """*label* with *well* after it, unless the label is the well or already names it (a partial description)."""
+    import re
+
+    if label == well or re.search(rf"(?<![A-Za-z0-9]){re.escape(well)}(?![A-Za-z0-9])", label):
+        return label
+    return f"{label} ({well})"
+
+
+def named_groups(ctx, sets, solo_wells) -> dict:
+    """``display name -> wells`` from *sets* (``(replicate set, its wells to draw)``) and *solo_wells*.
+
+    The one naming of the page's groups, shared with Batch Export's Nanowells mode so a saved figure names its
+    groups as the page does. A set is named by ``replicate_display_label`` (its own name, or its wells' labels when
+    the name is a generated ``Replicate 2``); a solo set (``ReplicateSet.solo``) and a lone well by
+    :func:`well_names`, over all of them at once so two that share a label are told apart. Two groups still sharing
+    a name would merge into one key and be pooled; the later one is told apart by its wells instead.
+    """
+    from review.domain.selections_model import replicate_display_label
+
+    solo_sets = [members[0] for rset, members in sets if getattr(rset, "solo", False)]
+    names = well_names(ctx, [*solo_sets, *solo_wells])
+    groups: dict = {}
+    for rset, members in sets:
+        name = names[members[0]] if getattr(rset, "solo", False) else replicate_display_label(ctx, rset)
+        groups[_untaken(name or getattr(rset, "name", ""), members, groups)] = members
+    for well in solo_wells:
+        groups[_untaken(names[well], [well], groups)] = [well]
     return groups
+
+
+def _untaken(name: str, members, taken) -> str:
+    """*name*, or — when another group already has it — *name* with its wells, so no two groups share a key."""
+    if name not in taken:
+        return name
+    named = f"{name} [{', '.join(members[:3])}{'…' if len(members) > 3 else ''}]"
+    k = 2
+    while named in taken:
+        named, k = f"{name} [{k}]", k + 1
+    return named
 
 
 def export_long_csv(state, path, wells=None) -> int:
@@ -154,6 +238,13 @@ def export_long_csv(state, path, wells=None) -> int:
 # ── the page ─────────────────────────────────────────────────────────────────
 # Everything below takes the ViewerContext. Widgets resolve through ``ctx.widgets`` and are absent until the
 # page is first shown (it builds lazily), so every entry point is self-guarding.
+
+#: The page's views that draw *Colour by* / *Split by* / *Then by* (``decorate_compute``), and so the views the
+#: page's Decorate button shows on. Only Distribution: it is the one view whose dots and groups are the figure.
+#: Statistics compares the same groups but draws a table of tests; Trajectories, Position and the one-well views
+#: draw wells or nanowells, never a group with a value. A button shown there would write the state, redraw, and
+#: change nothing on screen (CLAUDE.md §7.6) — the reason the plotting band gates its own button by tab.
+DECORATED_VIEWS = frozenset({"distribution"})
 
 #: How many nanowells can be compared in the site detail at once (decision U7: one colour each).
 MAX_SELECTED = 6
@@ -262,6 +353,8 @@ def nanowell_empty_reason(ctx) -> EmptyReason | None:
         return None
     if not ctx.state.dataset.data_dir:
         return _empty("No dataset loaded.", "Open a dataset analysed in nanowell mode.")
+    if st.view == "qc":
+        return None                                      # it reads the plate's records itself and says what it found
     if st.load_error:
         return _empty("This dataset's nanowell tables cannot be read.", st.load_error)
     if st.data is None:
@@ -543,6 +636,10 @@ def redraw(ctx) -> None:
     _call(ctx, "_nw_refresh_controls")
     _call(ctx, "_nw_show_computing")
     _refresh_empty(ctx)
+    if st.view == "qc" and nanowell_empty_reason(ctx) is None:
+        idc.leave(ctx, st)
+        qcc.draw(ctx, st, fig, canvas)                   # the whole plate's records: no selection or metrics needed
+        return
     if st.metrics is None or nanowell_empty_reason(ctx) is not None:
         idc.leave(ctx, st)
         return
@@ -575,8 +672,9 @@ def redraw(ctx) -> None:
         array = {"layers": drawn_layers(st), "image": image, "image_note": image_note, "region": st.region}
         hidden = OVERLAYS_HIDDEN_NOTE if st.overlays_hidden else ""
         note = " ".join(filter(None, [hidden, st.array_message, note]))
+    groups = page_groups(ctx)
     st.hits, model = draw_view(
-        fig, st.view, st.metrics, st.data, groups=page_groups(ctx), metric=metric, channel=channel,
+        fig, st.view, st.metrics, st.data, groups=groups, metric=metric, channel=channel,
         axis=st.axis, timepoint=shown_timepoint(ctx)[1] if st.view == "position" else st.timepoint,
         control=st.control, baseline=st.baseline, cohort=st.cohort, moving=st.moving,
         baseline_moving=st.baseline_moving, well=well,
@@ -584,7 +682,8 @@ def redraw(ctx) -> None:
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
         subset=st.subset, stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
-        gate=st.gate, **array)
+        gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
+        names=_page_names(ctx, st.view, well), **array)
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
@@ -720,7 +819,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               baseline_moving: int = 0, layers: ArrayLayers | None = None, image=None, image_note: str = "",
               region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
-              stats_cache: dict | None = None, gate=None) -> tuple[object, object]:
+              stats_cache: dict | None = None, gate=None,
+              decoration: Decoration | None = None, names: dict | None = None) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -752,7 +852,17 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
 
     *gate* (``cell_gate_compute.GateTally``, the one *metrics* were computed with) keeps the Array view's Cells
     layer to the cells the counts hold.
+
+    *decoration* is *Colour by* / *Split by* / *Then by* resolved over *groups* (``decorate_compute.decoration_for``);
+    only the Distribution view draws it (:data:`DECORATED_VIEWS`). ``None`` draws the figure undecorated, which is
+    what Batch Export's Nanowells mode passes.
+
+    *names* is ``well -> what the figure calls it`` (:func:`well_names`) wherever a view names a well standing
+    alone: a Trajectories panel, a Position line, the Array title, a Statistics sample of the ``nanowells`` unit.
+    A well missing from it prints itself. The groups are already keyed by their names
+    (:func:`named_groups`).
     """
+    names = names or {}
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
     wells = [w for members in groups.values() for w in members]
@@ -779,7 +889,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                           "dimmed.", note]))
         drawn = draw_array(fig, all_metrics, data, well=well, timepoint=well_timepoint, metric=metric,
                            channel=channel, layers=layers, image=image, image_note=image_note, region=region,
-                           selected=selected, note=note, dimmed=dimmed, gate=gate)
+                           selected=selected, note=note, dimmed=dimmed, gate=gate, name=names.get(well, ""))
         return (drawn.hits if drawn is not None else None), drawn
     if filtered is not None:
         note = " ".join(filter(None, [ss.note(filtered), note]))
@@ -787,8 +897,11 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if view == "trajectories":
         marks = {w: timepoint_marks(data, w) for w in wells}
         column = metric_column(metric, channel)
-        render_trajectories(fig, vc.trajectory_panels(metrics, wells, column, cohort=cohort, marks=marks,
-                                                      moving=moving, baseline_moving=baseline_moving),
+        panels = vc.trajectory_panels(metrics, wells, column, cohort=cohort, marks=marks, moving=moving,
+                                      baseline_moving=baseline_moving)
+        for panel in panels:
+            panel.name = names.get(panel.well, "")
+        render_trajectories(fig, panels,
                             cohort=cohort, label=_label(metric, channel), time_source=data.time_source,
                             note=" ".join(filter(None, [mvc.describe(moving, column, baseline_moving), note])))
         return None, None
@@ -800,6 +913,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         if missing:
             note = " ".join(filter(None, [note, f"No addressed nanowells at {timepoint}, so not drawn: "
                                                 f"{', '.join(missing)}."]))
+        for line in series:
+            line.name = names.get(line.well, "")
         render_position(fig, series, label=_label(metric, channel), timepoint=timepoint, note=note)
         return None, None
     if view == "statistics":
@@ -808,6 +923,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                    groups=groups, timepoint=timepoint, time_source=data.time_source,
                                    baseline=baseline, cohort=cohort, moving=moving,
                                    baseline_moving=baseline_moving)
+        model.well_names = dict(names)
         result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control,
                                    cache=stats_cache)
         if tableless:
@@ -818,7 +934,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     model = distribution_model(metrics, metric, channels=data.channels, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
-                               moving=moving, baseline_moving=baseline_moving)
+                               moving=moving, baseline_moving=baseline_moving, decoration=decoration)
     model.starting = subset.start_bounds()
     if model.axis == TIME:
         model.identity_marks = {(w, tp): v for w in wells for tp, v in timepoint_marks(data, w).items()}
@@ -853,7 +969,7 @@ def statistics_result(model, groups: dict, *, unit: str, test: str, control: str
     samples = sc.samples_from_model(model, groups, unit)
     notes = [n for n in model.notes if n.startswith(_STATS_NOTES)]
     key = (unit, test, control, model.column, model.label, model.timepoint, tuple(notes),
-           tuple((s.name, s.wells, s.values.tobytes(), s.n_roster, tuple(sorted(s.excluded.items())),
+           tuple((s.name, s.label, s.wells, s.values.tobytes(), s.n_roster, tuple(sorted(s.excluded.items())),
                   s.without_value) for s in samples))
     if cache is not None and cache.get("key") == key:
         return cache["result"]
@@ -983,7 +1099,7 @@ def batch_array_layers() -> ArrayLayers:
 
 def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, channel: str | None,
                layers: ArrayLayers | None = None, image=None, image_note: str = "", region=None, selected=(),
-               note: str = "", dimmed=frozenset(), gate=None) -> ArrayDrawn | None:
+               note: str = "", dimmed=frozenset(), gate=None, name: str = "") -> ArrayDrawn | None:
     """**The one composition of the Array view**, for the page and for Batch Export (through :func:`draw_view`).
 
     *layers* says what is drawn (the lattice map when none are given); *image* is the run montage or the tile
@@ -996,6 +1112,7 @@ def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, ch
         return None
     scene = array_scene(metrics, data, well, timepoint, metric_column(metric, channel), positions=layers.positions,
                         anchors=layers.anchor, cells=layers.cells, gate=gate)
+    scene.name = name                                   # what the title calls the well (``well_name``)
     if scene.frame == "well" and image is not None and hasattr(image, "source"):
         # A plate placed from a scan pattern records no tile size; the tile store read it from the first image.
         width, height = image.source.tile_size_um
@@ -1344,6 +1461,9 @@ def on_motion(ctx, event) -> None:
     """A drag on the Array view pans it; the pixels follow at once and the image is drawn again on release. On the
     Identity view a drag pans the panel pressed, and on *Side by side* the pointer lights the address under it."""
     st = _state(ctx)
+    if st is not None and st.view == "qc":
+        qcc.on_motion(ctx, event)
+        return
     if st is not None and st.view == "identity":
         idc.on_motion(ctx, event)
         return
@@ -1539,7 +1659,11 @@ def rerun_anchored(ctx) -> bool:
     if wells and open_in_analyze(ctx, force_wells=wells, only_wells=wells, incremental=False):
         return True
     if st is not None:
-        st.array_message = "Analyze could not be opened on this dataset from here."
+        text = "Analyze could not be opened on this dataset from here."
+        if st.view == "qc":
+            st.qc_message = text
+        else:
+            st.array_message = text
         redraw(ctx)
     return False
 
@@ -1565,6 +1689,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
     if filtered is not None:
         note = " ".join(filter(None, [ss.note(filtered), note]))
     model = ec.extremes(metrics, well, timepoint, column, st.extremes_n, st.data.channels)
+    model.name = well_caption(ctx, well)
     missing = tuple(sorted(site for site in model.sites() if site not in st.crops))
     image_channel = page_image_channel(st)
     if missing:
@@ -1816,6 +1941,9 @@ def on_click(ctx, event) -> None:
     ⌘/Ctrl), or clear the selection on empty space. On the Array view a press starts a drag or a click, which
     :func:`on_release` tells apart. The plate selection is never touched."""
     st = _state(ctx)
+    if st is not None and st.view == "qc":
+        qcc.on_click(ctx, event)
+        return
     if st is not None and st.view == "identity":
         idc.on_press(ctx, event)                 # a pan, or a double-click back to the whole view
         return
@@ -1997,6 +2125,12 @@ def nw_on_channel_changed(ctx) -> None:
 
 
 def set_view(ctx, view: str) -> None:
+    """Show *view*. Leaving the Array view while the *Anchor queue* walks ends the walk there: its keys live on a band
+    group shown only on Array, so a walk left running elsewhere would go on with nothing on screen to drive it."""
+    st = _state(ctx)
+    if st is not None and view != "array" and aq.active_queue(ctx) is not None:
+        aq.stop(ctx, land_on=view)
+        return
     _set(ctx, "view", view)
 
 

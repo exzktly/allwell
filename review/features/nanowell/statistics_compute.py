@@ -97,6 +97,9 @@ class Sample:
     n_roster: int = 0
     excluded: dict = field(default_factory=dict)
     without_value: tuple = ()
+    #: What the figure prints for the sample; ``""`` prints :attr:`name`. A well on the ``nanowells`` unit is named
+    #: by its token (what *vs* matches) and labelled as the page names it (``DistributionModel.well_names``).
+    label: str = ""
 
     @property
     def n(self) -> int:
@@ -197,7 +200,8 @@ def samples_from_model(model, groups: dict, unit: str) -> list[Sample]:
             for well in members:
                 s = swarms.get(well)
                 if s is not None:
-                    out.append(Sample(well, (well,), np.asarray(s.values, dtype=float), s.n_roster, dict(s.excluded)))
+                    out.append(Sample(well, (well,), np.asarray(s.values, dtype=float), s.n_roster, dict(s.excluded),
+                                      label=getattr(model, "well_names", {}).get(well, "")))
         return out
     out = []
     for name, members in groups.items():

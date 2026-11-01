@@ -13687,9 +13687,11 @@ finished when:
   came back unaddressed and replaced the better result, on every re-run. Force,
   which re-runs the plate, is what re-anchors;
 - for a field-mode well whose input lists per well (an archive or a `<WELL>/`
-  folder), its CSV holds every field and timepoint the input holds now
-  (`_field_coverage`, `completeness.coverage_for_well`): a well whose archive gained
-  images since is sent;
+  folder), its output — the CSV together with its `_out.zip` or output folder, the
+  union Validate's `done_keys` takes — holds every field and timepoint the input
+  holds now (`_field_coverage`, `completeness.coverage_for_well`): a well whose
+  archive gained images since is sent, while a field that found no nuclei (no CSV
+  rows, its images in the archive) does not make a whole well look unfinished;
 - neither `--force` nor `--force_wells` names it, and it is not an empty-well
   blank.
 

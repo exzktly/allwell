@@ -9,8 +9,8 @@ of controls is given less than it asks for and its labels cannot give way, the l
 to that 60 px and draws the number in 14 px: "75" needs 15, "100" needs 22.
 
 :class:`SpinBox` and :class:`DoubleSpinBox` raise that explicit minimum to their own size hint — the width their
-widest value, prefix and suffix need — after every polish and whenever their range, decimals, prefix or suffix
-change. A row short of room then wraps, scrolls or squeezes something else, never the number. They are the only
+widest value needs — after every polish and whenever their range or decimals change. (Never a prefix or suffix: the
+app puts a unit in the label beside the box, ``tests/test_entry_fields_hold_only_the_value.py``.) A row short of room then wraps, scrolls or squeezes something else, never the number. They are the only
 spin boxes the application constructs (``tests/test_spin_boxes_keep_their_number.py`` holds every site to that).
 """
 
@@ -48,14 +48,6 @@ class _HoldsItsNumber:
 
     def setMaximum(self, value) -> None:  # Qt naming
         super().setMaximum(value)
-        self._hold()
-
-    def setPrefix(self, text: str) -> None:  # Qt naming
-        super().setPrefix(text)
-        self._hold()
-
-    def setSuffix(self, text: str) -> None:  # Qt naming
-        super().setSuffix(text)
         self._hold()
 
 

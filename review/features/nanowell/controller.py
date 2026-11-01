@@ -1539,6 +1539,26 @@ def anchor_controls(ctx) -> tuple[bool, bool, bool]:
     return can, can and anchor is not None, bool(fmc.anchored_wells(st.data))
 
 
+def anchor_unavailable_reason(ctx) -> str | None:
+    """Why *Set anchor* is greyed, as its tooltip says it — the first clause of :func:`anchor_controls`'s
+    predicate that fails — or ``None`` when an anchor can be set here."""
+    st = _state(ctx)
+    if st is None or st.data is None or st.view != "array" or not page_well(ctx):
+        return "No well is drawn."
+    if st.layers.lattice():
+        return "Choose Positions ▸ Measured: an anchor is set in the well frame."
+    if not drawn_layers(st).anchor:
+        return "Turn on Layers ▸ Anchor and show Overlays."
+    if fmc.anchors_file(st.data) is None:
+        return "This dataset has no in/ folder to save an anchor beside."
+    well = page_well(ctx)
+    status = ((st.data.grids.get(well) or {}).get(page_timepoint(ctx, well)) or {}).get("status")
+    if status not in fmc.ANCHORABLE:
+        return ("An anchor cannot change this timepoint: the run found no lattice to address "
+                f"({status or 'no status'}).")
+    return None
+
+
 def set_anchor_mode(ctx, on: bool) -> None:
     """*Set anchor*: while on, a click on the Array view anchors the well there; a drag still pans."""
     st = _state(ctx)

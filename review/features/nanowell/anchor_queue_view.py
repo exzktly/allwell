@@ -1,6 +1,7 @@
 """The *Anchor queue*'s walk controls: the group shown on the Array view while a walk runs (where it is, Back, Skip, One
-per well, Stop), with keys for the three a long walk presses most (:data:`KEYS`). It is the band's first group, so it
-sits at the band's left edge however the Array view's own groups wrap. The button that starts the walk is on the QC
+per well, Stop), with keys for the three a long walk presses most (:data:`KEYS`). It leads the Array view's own
+controls, in the place of Well and Timepoint, which the walk drives and its label names — so a walk adds nothing to
+the band's width. The button that starts the walk is on the QC
 view (``qc_view``); the walk itself is ``_anchor_queue``."""
 
 from __future__ import annotations
@@ -24,8 +25,8 @@ def _button(text: str, tip: str, on_click) -> QPushButton:
 
 QUEUE_TIP = ("Walk every timepoint that is not addressed and has no anchor yet: each opens on Array with Set anchor "
              "on — click the central square and the next one opens. Back, Skip, One per well and Stop sit at the left "
-             "of the band while it runs (← → Esc), and you come back here at the end, with the selection it started "
-             "with restored.")
+             "of the Array view's controls, in place of Well and Timepoint, while it runs (← → Esc), and you come "
+             "back here at the end, with the selection it started with restored.")
 
 
 PER_WELL_TIP = ("Only each well's first waiting timepoint. One anchor per well is usually enough: the re-run addresses "
@@ -52,6 +53,7 @@ def build_queue_controls(ctx, band) -> SimpleNamespace:
     """The *Anchor queue*'s own group, shown only while it runs: where it is, Back, Skip and Stop, each with a key."""
     position = QLabel("")
     position.setObjectName("NanowellQueueLabel")
+    position.setToolTip("Where the Anchor queue is. ← Back · → Skip · Esc Stop.")
     back = _button("Back", f"Show the previous timepoint in the queue; a click there replaces its anchor "
                    f"({_KEY_NAMES['back']}).", lambda: aq.step(ctx, -1))
     skip = _button("Skip", f"Leave this timepoint without an anchor and show the next one ({_KEY_NAMES['skip']}).",

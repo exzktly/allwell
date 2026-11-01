@@ -28,15 +28,17 @@ from tests.test_nanowell_page_array_layers import _drawn, _toggle, qc_page  # no
 
 
 #: Every control the page puts on its band, by its registered name.
-_BAND = ("_nw_metric_cb", "_nw_axis_seg", "_nw_baseline_cb", "_nw_cohort_box", "_nw_well_cb",
-         "_nw_image_cb", "_nw_positions_seg", "_nw_layers_btn", "_nw_overlays_btn", "_nw_zoom_out_btn",
-         "_nw_zoom_lbl", "_nw_zoom_in_btn", "_nw_fit_btn", "_nw_one_btn", "_nw_anchor_btn", "_nw_clear_anchor_btn",
-         "_nw_rerun_btn", "_nw_tp_cb", "_nw_responding_edit", "_nw_control_cb")
+_BAND = ("_nw_metric_cb", "_nw_axis_seg", "_nw_baseline_cb", "_nw_cohort_box", "_nw_well_cb", "_nw_tp_cb",
+         "_nw_positions_seg", "_nw_image_cb", "_nw_layers_btn", "_nw_anchor_btn", "_nw_clear_anchor_btn",
+         "_nw_rerun_btn", "_nw_responding_edit", "_nw_control_cb")
+#: The Array view's viewing actions, under the figure beside its navigation buttons rather than on the band.
+_CANVAS_TOOLS = ("_nw_zoom_out_btn", "_nw_zoom_lbl", "_nw_zoom_in_btn", "_nw_fit_btn", "_nw_one_btn",
+                 "_nw_overlays_btn")
 
 
 def _shown_on_band(ctx) -> list:
-    """The band's controls that are shown, in the band's order: what decides where each control sits."""
-    return [name for name in _BAND if ctx.widgets.get(name).isVisibleTo(ctx.window)]
+    """The band's and the figure toolbar's controls that are shown, in order: what decides where each one sits."""
+    return [name for name in _BAND + _CANVAS_TOOLS if ctx.widgets.get(name).isVisibleTo(ctx.window)]
 
 
 def _labels(ctx) -> list[str]:

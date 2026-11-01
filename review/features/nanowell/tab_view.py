@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QSplitter, QToolButton,
+    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QSplitter, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -315,22 +315,20 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     band.add_scope("", rim_focus.box, rim_focus.spin)
 
     moving_spin = QSpinBox()
-    moving_spin.setRange(1, MAX_WINDOW)          # 1 is off, shown as "Off"; a window of one timepoint averages nothing
-    moving_spin.setSpecialValueText("Off")
-    moving_spin.setSuffix(" timepoints")
+    # 1 is off: a window of one timepoint averages nothing. The box holds the bare number and its label says what
+    # it counts — no "Off" or unit inside the box, which Qt's spin box refuses to type over.
+    moving_spin.setRange(1, MAX_WINDOW)
     moving_spin.setToolTip(_MOVING_TIP)
     moving_spin.valueChanged.connect(lambda value: nwc.set_moving(ctx, value))
     reg.register("_nw_moving_spin", moving_spin)
-    grp_moving = band.add_scope("Moving average", moving_spin)
+    grp_moving = band.add_scope("Moving average (timepoints, 1 = off)", moving_spin)
 
     baseline_moving_spin = QSpinBox()
     baseline_moving_spin.setRange(1, MAX_WINDOW)     # 1 is off, as on the endpoint's window
-    baseline_moving_spin.setSpecialValueText("Off")
-    baseline_moving_spin.setSuffix(" timepoints")
     baseline_moving_spin.setToolTip(_BASELINE_MOVING_TIP)
     baseline_moving_spin.valueChanged.connect(lambda value: nwc.set_baseline_moving(ctx, value))
     reg.register("_nw_baseline_moving_spin", baseline_moving_spin)
-    grp_baseline_moving = band.add_scope("Baseline average", baseline_moving_spin)
+    grp_baseline_moving = band.add_scope("Baseline average (timepoints, 1 = off)", baseline_moving_spin)
 
     well_cb = QComboBox()
     well_cb.setToolTip(_WELL_TIP)
@@ -432,10 +430,11 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     detail_card = PlotCard(detail, figsize=(_DETAIL_W, _DETAIL_H), constrained=False, header=False)
     detail_card.setFigureTitle("")
     detail_card.setToolTip("The selected nanowells over time. Click a dot to select one, Shift-click to add one, "
-                           "and click empty space on the plot to clear the selection.")
+                           "and click empty space on the plot or ✕ above to clear the selection.")
     reg.register("_nw_detail_card", detail_card)
     reg.register("_nw_detail_fig", detail_card.figure)
     reg.register("_nw_detail_canvas", detail_card.canvas)
+    detail_layout.addLayout(_detail_header(ctx, detail))
     detail_layout.addWidget(detail_card, 3)
     detail_layout.addLayout(_crops_header(ctx, detail))
     strip_card = PlotCard(detail, figsize=(_DETAIL_W, _STRIP_H), constrained=False, header=False)
@@ -743,6 +742,28 @@ def _cells_box(ctx, name: str) -> QCheckBox:
     return box
 
 
+def _detail_header(ctx, parent) -> QHBoxLayout:
+    """The site detail's title row, with a close button (✕) that clears the nanowell selection — which is what hides
+    the pane (``controller.redraw_detail`` shows it only while a selected nanowell has a series). Without it the only
+    way to dismiss the pane was a click on empty space in the plot, which nothing on screen says."""
+    from ui import theme
+
+    row = QHBoxLayout()
+    row.setContentsMargins(0, 0, 0, 0)
+    title = QLabel("Selected nanowells", parent)
+    title.setObjectName("Caption")
+    close = QPushButton("✕", parent)
+    close.setObjectName("Ghost")
+    close.setFixedWidth(theme.Metrics.icon_btn_w)
+    close.setToolTip("Close the site detail and clear the nanowell selection")
+    close.clicked.connect(lambda _=False: nwc.clear_selection(ctx))
+    ctx.widgets.register("_nw_detail_close_btn", close)
+    row.addWidget(title)
+    row.addStretch(1)
+    row.addWidget(close)
+    return row
+
+
 def _crops_header(ctx, parent) -> QHBoxLayout:
     """The row above the site detail's crop strip: what the strip is, and **Pop out**, which opens the crops large in
     a window of their own (:func:`_popout_window`, ``controller.pop_out_crops``)."""
@@ -779,8 +800,8 @@ def _go_to_button(ctx, name: str, parent) -> QPushButton:
 
 
 def _popout_window(ctx):
-    """The pop-out crops window, built on first use and kept: a top-level window owned by the app's window, so it
-    closes with it, holding one :class:`PlotCard` the controller draws the crops on."""
+    """The pop-out crops window, built on first use and kept: a non-modal dialog owned by the app's window, so it
+    stays above it and closes with it, holding one :class:`PlotCard` the controller draws the crops on."""
     window = ctx.widgets.get_or_none("_nw_popout")
     if window is not None:
         return window
@@ -828,9 +849,16 @@ def _popout_controls(ctx, window) -> QHBoxLayout:
     return row
 
 
-class _PopoutWindow(QWidget):
+class _PopoutWindow(QDialog):
+    """The pop-out's window: a non-modal ``QDialog`` owned by the app's window, as every other free-standing window in
+    Review is (the per-sample control editor, the focus curve, the gating optimizer). A dialog is a transient window
+    of its parent, so it stays above it. A plain ``QWidget`` with the ``Qt.Window`` flag carries no such owner on
+    Windows, and there the window dropped behind the app the first time its **Cells** box was toggled."""
+
     def __init__(self, parent) -> None:
-        super().__init__(parent, Qt.Window)
+        super().__init__(parent)
+        self.setModal(False)
+        self.setWindowFlag(Qt.Window, True)          # keep the title bar's minimise and maximise buttons
 
     def show_raised(self) -> None:
         self.show()

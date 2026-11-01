@@ -398,11 +398,11 @@ class RemoteFormDialog(QDialog):
         # touch ssh's keepalive, which is fixed (remote_config.keepalive_options).
         wait_row = QHBoxLayout()
         wait_row.setSpacing(6)
-        wait_row.addWidget(QLabel("Max queue wait", self._scheduled_box))
+        wait_row.addWidget(QLabel("Max queue wait (min, 0 = no limit)", self._scheduled_box))
         self._queue_wait_spin = QSpinBox(self._scheduled_box)
         self._queue_wait_spin.setRange(0, 1440)  # up to 24h; 0 = unlimited
-        self._queue_wait_spin.setSuffix(" min")
-        self._queue_wait_spin.setSpecialValueText("Wait indefinitely")
+        # The bare number: the label says the unit and what 0 means, since Qt's spin box refuses typing over
+        # any text inside the box.
         self._queue_wait_spin.setValue(host.queue_wait_timeout_min)
         self._queue_wait_spin.setToolTip(
             "How long a job may wait in the scheduler queue before the run "
@@ -430,9 +430,8 @@ class RemoteFormDialog(QDialog):
 
         self._cache_budget_spin = QSpinBox(self)
         self._cache_budget_spin.setRange(1, 10000)
-        self._cache_budget_spin.setSuffix(" GB")
         self._cache_budget_spin.setValue(host.cache_budget_gb)
-        main_form.addRow("Cache budget", self._cache_budget_spin)
+        main_form.addRow("Cache budget (GB)", self._cache_budget_spin)
 
         self._extra_args_edit = QLineEdit(" ".join(host.extra_args), self)
         self._extra_args_edit.setPlaceholderText("--workers 16 --tf_threads 8")

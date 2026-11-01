@@ -16,7 +16,6 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
-    QDoubleSpinBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -29,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from review.domain.ratio_models import RatioMetric
+from widgets.spin_box import DoubleSpinBox
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -172,7 +172,7 @@ class RatioMetricsPanel(QWidget):
         den_metric_cb = self._metric_combo(ratio.denominator_metric)
         table.setCellWidget(row, 4, den_metric_cb)
 
-        eps_spin = QDoubleSpinBox(table)
+        eps_spin = DoubleSpinBox(table)
         eps_spin.setRange(0.0, 1e9)
         eps_spin.setDecimals(6)
         eps_spin.setSingleStep(0.01)

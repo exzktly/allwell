@@ -28,12 +28,12 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QListWidget, QPushButton, QSpinBox,
-    QVBoxLayout, QWidget,
+    QComboBox, QHBoxLayout, QLabel, QListWidget, QPushButton, QVBoxLayout, QWidget,
 )
 
 from ui import theme
 from review.domain.plate_layout import FILL_ALONG_COLS, FILL_ALONG_ROWS
+from widgets.spin_box import SpinBox
 
 
 #: Widest the plate column may render. The plate itself is capped narrower
@@ -245,7 +245,7 @@ def _build_fill_row(ctx, host: QWidget, column, reg) -> None:
     lead = reg.register("_var_fill_lead", QLabel("the next value,", host_row))
     row.addWidget(lead)
 
-    repeat = reg.register("_var_fill_repeat", QSpinBox(host_row))
+    repeat = reg.register("_var_fill_repeat", SpinBox(host_row))
     repeat.setRange(1, 96)
     repeat.setValue(1)
     row.addWidget(repeat)

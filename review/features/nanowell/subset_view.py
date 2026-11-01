@@ -17,13 +17,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from PySide6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QToolButton, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QToolButton, QVBoxLayout, QWidget,
 )
 
 from review.features.nanowell import controller as nwc
 from review.features.nanowell import starting_cells_compute as sc
 from review.features.nanowell import subset_compute as ss
 from widgets.owned_action import owned_action
+from widgets.spin_box import DoubleSpinBox
 
 #: The combo's entries: the Starting cells presets as the band names them, then the editor.
 _PRESET_LABELS = {"any": "All nanowells", "occupied": "Starting cells ≥1 (occupied)",
@@ -98,7 +99,7 @@ class _ConditionRow(QWidget):
             self.at_cb.addItem(f"at {text}", ss.TP_PREFIX + tp)
         self.op_cb = QComboBox()
         self.op_cb.setToolTip(_OP_TIP)
-        self.a_spin, self.b_spin = QDoubleSpinBox(), QDoubleSpinBox()
+        self.a_spin, self.b_spin = DoubleSpinBox(), DoubleSpinBox()
         for spin in (self.a_spin, self.b_spin):
             spin.setKeyboardTracking(False)              # one change per value typed, not per keystroke
         self.and_label = QLabel("and")

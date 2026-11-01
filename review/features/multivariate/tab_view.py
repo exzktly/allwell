@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
 from review.core.ui_helpers import build_plot_save_menu
@@ -45,6 +45,7 @@ _AGGS = ("mean", "median", "count", "std")
 from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
 from ui import theme
+from widgets.spin_box import SpinBox
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -198,7 +199,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     reg.register("_mv_cmethod_cb", cmethod_cb)
     clf.addWidget(cmethod_cb)
     clf.addWidget(_muted("k", cl_frame))
-    kspin = QSpinBox(cl_frame)
+    kspin = SpinBox(cl_frame)
     kspin.setRange(2, 20)
     # Reserve room for two digits + the up/down arrows; without a minimum the
     # crowded horizontal row squeezes this (width-less) spinbox until the value

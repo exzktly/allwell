@@ -33,7 +33,7 @@ from PySide6.QtGui import QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
     QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QToolButton,
+    QMessageBox, QPlainTextEdit, QPushButton, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -54,6 +54,7 @@ from analyze.granted_node_panel import GrantedNodePanel
 from analyze.scheduler_test_dialog import SchedulerTestDialog
 from services.subprocess_text import TEXT_UTF8
 from ui import theme
+from widgets.spin_box import SpinBox
 
 
 # Alias must look like a TOML bare key — letters, digits, dash, underscore.
@@ -402,7 +403,7 @@ class RemoteFormDialog(QDialog):
         wait_row = QHBoxLayout()
         wait_row.setSpacing(6)
         wait_row.addWidget(QLabel("Max queue wait (min, 0 = no limit)", self._scheduled_box))
-        self._queue_wait_spin = QSpinBox(self._scheduled_box)
+        self._queue_wait_spin = SpinBox(self._scheduled_box)
         self._queue_wait_spin.setRange(0, 1440)  # up to 24h; 0 = unlimited
         # The bare number: the label says the unit and what 0 means, since Qt's spin box refuses typing over
         # any text inside the box.
@@ -423,7 +424,7 @@ class RemoteFormDialog(QDialog):
         limit_row = QHBoxLayout()
         limit_row.setSpacing(6)
         limit_row.addWidget(QLabel("Time limit (hours)", self._scheduled_box))
-        self._granted_limit_spin = QSpinBox(self._scheduled_box)
+        self._granted_limit_spin = SpinBox(self._scheduled_box)
         self._granted_limit_spin.setRange(*GRANTED_TIME_LIMIT_H_RANGE)
         self._granted_limit_spin.setValue(host.granted_time_limit_h)
         self._granted_limit_spin.setToolTip(
@@ -433,7 +434,7 @@ class RemoteFormDialog(QDialog):
         )
         limit_row.addWidget(self._granted_limit_spin)
         limit_row.addWidget(QLabel("Release when idle after (min, 0 = never)", self._scheduled_box))
-        self._granted_idle_spin = QSpinBox(self._scheduled_box)
+        self._granted_idle_spin = SpinBox(self._scheduled_box)
         self._granted_idle_spin.setRange(*GRANTED_IDLE_RELEASE_MIN_RANGE)
         # Bare numbers: the labels say the unit and what 0 means (Qt refuses typing over text inside the box).
         self._granted_idle_spin.setValue(host.granted_idle_release_min)
@@ -466,7 +467,7 @@ class RemoteFormDialog(QDialog):
             self._on_compute_loc_changed
         )
 
-        self._cache_budget_spin = QSpinBox(self)
+        self._cache_budget_spin = SpinBox(self)
         self._cache_budget_spin.setRange(1, 10000)
         self._cache_budget_spin.setValue(host.cache_budget_gb)
         main_form.addRow("Cache budget (GB)", self._cache_budget_spin)

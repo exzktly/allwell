@@ -14,7 +14,7 @@ band and the Import action; this supplies one tab's body. Well Labels is
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget,
+    QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -27,6 +27,7 @@ from review.features.home.groups.controller import (
     rep_quick_pairs_from_dropdowns,
 )
 from review.features.home.groups.panel_view import build_replicate_panel
+from widgets.spin_box import SpinBox
 
 
 def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
@@ -94,7 +95,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
 
     size_lbl = QLabel("Replicates per group:", hdr2r)
     hdr2r_l.addWidget(size_lbl)
-    size_sb = QSpinBox(hdr2r)
+    size_sb = SpinBox(hdr2r)
     size_sb.setRange(1, len(PLATE_COLS))
     size_sb.setValue(2)
     size_sb.setToolTip(

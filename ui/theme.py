@@ -445,6 +445,12 @@ class Metrics:
     # 28 px takes a one- or two-digit box from 5–6 px of slack to 20 / 15, and
     # costs at most 14 px of width. Boxes whose own range already asks for more
     # than this are untouched.
+    #
+    # It is a floor under the *size hint* only. Qt's stylesheet engine also
+    # turns ``min-width`` into an explicit minimum width on the widget (60 px at
+    # this size), which a layout short of room squeezes the box down to — a
+    # 14 px text area. ``widgets.spin_box.SpinBox`` raises that minimum to the
+    # whole size hint, which is why the app builds no bare ``QSpinBox``.
     spin_min_w   = 28
     # Right padding a spin box reserves for its own up/down buttons, so they are
     # laid out in space of their own rather than over the number.

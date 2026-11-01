@@ -11,10 +11,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtWidgets import QCheckBox, QSpinBox
+from PySide6.QtWidgets import QCheckBox
 
 from review.features.nanowell import controller as nwc
 from review.domain import nanowell_rim_focus as rfc
+from widgets.spin_box import SpinBox
 
 RIM_FOCUS_TIP = (
     "Leave out a nanowell at any timepoint where its own rim was out of focus — its tile was soft while others in "
@@ -51,7 +52,7 @@ def build_rim_focus_controls(ctx) -> RimFocusControls:
     """**Rim focus** and its percentage; the page places both on its band."""
     box = QCheckBox("Rim focus")
     box.setToolTip(RIM_FOCUS_TIP)
-    spin = QSpinBox()
+    spin = SpinBox()
     spin.setRange(int(round(100 * rfc.MIN_FRACTION)), int(round(100 * rfc.MAX_FRACTION)))
     # A bare number, no suffix: Qt's spin box refuses typing and Backspace while the cursor sits in a suffix,
     # and a long one (" % of sharp") filled most of the field, so a click there ignored every digit typed.

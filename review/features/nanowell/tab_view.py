@@ -32,6 +32,7 @@ from review.features.nanowell.anchor_queue_view import (
 )
 from review.features.nanowell.exclude_view import build_exclude_controls
 from review.features.nanowell.rim_focus_view import build_rim_focus_controls
+from review.features.nanowell.variables_view import build_variable_controls
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
 from review.features.nanowell.display_range_view import (
     build_display_range_button,
@@ -387,6 +388,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_control_cb", control_cb)
     grp_control = band.add_scope("vs", control_cb)
 
+    variables = build_variable_controls(ctx, band)
+
     export_btn, _menu, _act = build_plot_save_menu(
         ctx, band, card_key="_nw_card", data_label="Save nanowell data…",
         data_cb=lambda: nwc.export_page_csv(ctx),
@@ -507,7 +510,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             for well in nwc.page_wells(ctx) if st.data else []:
                 # On the Identity view each well says its worst verdict, so a contradicted one is found at a glance.
                 worst = worst_verdict(st.data, well) if view == "identity" else None
-                well_cb.addItem(f"{well} · {worst.replace('_', ' ')}" if worst else well, well)
+                name = nwc.well_caption(ctx, well)        # its label as the plot tabs name it, and the well
+                well_cb.addItem(f"{name} · {worst.replace('_', ' ')}" if worst else name, well)
             _select(well_cb, nwc.page_well(ctx))
             stats_view = view == "statistics"
             fill_control_combo(ctx, st, control_cb, on_statistics=stats_view, tip=_CONTROL_TIP)
@@ -557,6 +561,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             extremes_tps.refresh()
             _sync_crop_boxes(ctx, st)
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
+            variables.refresh(view)
         finally:
             for w, b in zip(controls, blocked):
                 w.blockSignals(b)

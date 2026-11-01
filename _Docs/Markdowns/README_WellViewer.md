@@ -491,16 +491,22 @@ before — a well this plate does not have, or a typo — is warned about in the
 analysed before the other
 wells, and at every timepoint each well's confluence is read against that well's empty nanowells imaged at the same
 timepoint, which also corrects for exposure or medium changing over the time course. Without one — none named, or a
-timepoint where more than 5 % of its nanowells hold a counted cell, or a timepoint it does not have — **no well has a
-confluence** there (blank, never 0); the timepoint's notes in `<well>_grid.json` and the run log say why, and the
-reference well's grid record holds its verdict (`confluence_reference`). The reference well also measures how many
+timepoint it does not have — **no well has a confluence** there (blank, never 0); the timepoint's notes in
+`<well>_grid.json` and the run log say why. **The well you name is believed to be empty**, whatever the cell count
+finds in it: debris and floor texture in an empty well are often counted as cells, sometimes in most of its
+nanowells, and they never stop the well being used as the reference. Filter debris afterwards in QC. When more than
+5 % of its nanowells hold a counted object, its own timepoint's notes and the run log say so, with the share, in case
+the well was mistyped; the reference well's grid record holds what was counted (`confluence_reference`). An output
+folder whose reference an earlier version refused (`"status": "loaded"` in
+`nanowells/_confluence_reference/reference.json`) re-analyses the reference well at those timepoints, and every well
+read against it, on the next run — locally or remotely — without Force. The reference well also measures how many
 cells the model finds where there are none: its cells counted per nanowell are saved with its verdict
 (`false_cells_per_nanowell`) and written on every other well's timepoint (`template` →
 `reference_false_cells_per_nanowell`), the baseline that well's counts sit on. Counts on the rim-removed image use the
 reference too (see **Segment on**); counts on the raw image, and fluorescence, do not depend on it. **Test detection**
 divides by the well's own picture, because it has no reference to read, and says so when one is named. A remote run
 that does not include the reference well — re-running a few wells, or resuming a plate whose reference finished
-earlier — is sent the reference this computer already holds, so its wells keep their confluence. A well is kept as up to date only beside the reference it was read against: when the reference well is analysed for the first time after them, analysed again on other images (re-exported, forced), or judged empty at a timepoint where it was not before, every well read against it before is analysed again, locally or sent again to a remote, and the run log says which and why. Running the reference again on the same images changes nothing and re-runs no other well. Results measured this way carry a measurement version: adding timepoints to a dataset
+earlier — is sent the reference this computer already holds, so its wells keep their confluence. A well is kept as up to date only beside the reference it was read against: when the reference well is analysed for the first time after them, analysed again on other images (re-exported, forced), or given a template at a timepoint where it had none before, every well read against it before is analysed again, locally or sent again to a remote, and the run log says which and why. Running the reference again on the same images changes nothing and re-runs no other well. Results measured this way carry a measurement version: adding timepoints to a dataset
 measured by an earlier version analyses the well again in full, and Merge Plates refuses to combine two datasets
 measured by different versions. The nanowells of a circular array are the
 ones the images support: those inside its rim, those detected at any timepoint, and those at the rim that no image

@@ -10601,12 +10601,19 @@ field reads *none: no confluence*, `nanowell_fields.PLACEHOLDERS`), and a batche
 `nanowells/` is never released between them. The reference well reads itself (`nanowell_reference.OWN`): each
 timepoint's own template carries the threshold measured on it (`Template.texture_cut`, set by
 `nanowell_run._confluence_basis` on `out.template["_object"]`, collected in `WellOutcome.templates`). Once its counts
-are known, `nanowell_task._save_confluence_reference` judges each timepoint by them (`nanowell_reference.verdict`:
-`empty` when at most `MAX_LOADED_SHARE`, 5 %, of its counted nanowells hold a cell; `loaded` above; `unverified` with
-nothing counted; `false_cells_per_nanowell`, the cells counted per counted nanowell, `None` with nothing counted, is
-the segmenter's false-count baseline under that timepoint's imaging and settings), records the verdict on the reference's grid blocks (`confluence_reference`), blanks its own
-confluence where it was not empty, and saves `nanowells/_confluence_reference/` (`reference.json`: the well, the
-measurement version, the settings key and each verdict; one template `.npz` per empty timepoint). A kept timepoint of
+are known, `nanowell_task._save_confluence_reference` records what was counted at each timepoint
+(`nanowell_reference.verdict`). **The well named empty is believed**: the status is always `empty`, whatever the
+segmenter counted there, because in a well that holds no cells every counted object is debris or floor texture — on a
+reported plate more than 70 % of a confirmed-blank well's nanowells held one, and a rule that refused the reference
+above 5 % left the whole plate with no confluence. Debris is handled after the run, in QC. The verdict keeps
+`loaded_share` (the share of counted nanowells holding a counted object, `None` with nothing counted),
+`false_cells_per_nanowell` (objects counted per counted nanowell, `None` with nothing counted: the segmenter's
+false-count baseline under that timepoint's imaging and settings) and `looks_loaded` (the share above
+`MAX_LOADED_SHARE`, 5 %), which puts a note on the reference's own block (`nanowell_reference.LOOKS_LOADED_PREFIX`,
+`looks_loaded_note`, not a missing-confluence note) and a warning in the run log, so a mistyped well is visible
+without costing the plate its confluence. The verdict goes on the reference's grid blocks (`confluence_reference`),
+and `nanowells/_confluence_reference/` is saved (`reference.json`: the well, the measurement version, the settings
+key and each verdict; one template `.npz` per timepoint that has one). A kept timepoint of
 an incremental run of the reference carries its saved template over (`kept_templates`). Every other well loads it
 (`nanowell_reference.load`, refused under another measurement version or settings key) and reads each timepoint
 against the reference's template **at the same timepoint**: `_confluence_basis` brings its sites to that template's
@@ -10625,7 +10632,7 @@ nothing, and the count's levels and fluorescence use the well's own template eit
 (`pipeline/nanowell_preview.py`) has no reference — it reads the input archives, not an output folder — so it divides
 by the well's own template and, when a reference well is named and the input is rim-removed, says its crops can
 differ from what the run counts (`reference_input_note`). With no reference named, none measured in the
-output folder, none at that timepoint, or one that was not empty there, every site's confluence is `None` — never
+output folder, none at that timepoint, or one with no template there, every site's confluence is `None` — never
 0 — and the timepoint's notes say which (`nanowell_reference.NOTE_PREFIX`). `measure_timepoint` with no reference
 (Test detection) reads a timepoint against itself, which is right only for the empty well. The reference folder lies
 under `nanowells/`, so verification's pull of that directory brings it back with the rest — but only as a whole and
@@ -10643,15 +10650,20 @@ what a well's confluence was read against is recorded per timepoint in its grid 
 `Reference` `process_well_zip` loads for the well): `Reference.key_at` is `own` for the reference itself, the
 template's content digest (`template_key`: its pixels, threshold, half-size, source and crops — never the `.npz`
 file, whose zip entries carry the time of writing, and each save of the reference rewrites every kept template)
-or `none:<code>` where there was none (`unmeasured`, `other_settings`, `absent`, `loaded`, `unverified`,
-`untemplated`; codes rather than the reasons' sentences, so rewording one re-runs nothing). A timepoint is kept by
+or `none:<code>` where there was none (`unmeasured`, `other_settings`, `absent`, `untemplated`, and `loaded` /
+`unverified` read from a reference saved by the earlier count-based rule; codes rather than the reasons' sentences,
+so rewording one re-runs nothing). A reference saved by that rule holds timepoints marked `loaded` or `unverified`
+with no template: `nanowell_reference.own`, which `_confluence_reference_for` gives the reference well itself, keys
+those apart (`own:refused`, `Reference.refused`), so the reference's recorded `own` no longer matches there and it is
+measured again — incrementally, only at those timepoints — and every well read against its refusal follows. A timepoint is kept by
 an incremental run only under the key the reference saved now gives (`_prior_state(reference_key=…)`), and a
 finished well is skipped by a plain run only when every `ok` timepoint's key still matches
 (`nanowell_task.confluence_reference_current`, ANDed into `process_well_zips`' `output_exists`, asked after the
 reference's own pool has run). So a well read while the reference was missing, failed or loaded, or before it was
 re-exported, is measured again rather than kept blank or beside another reference's numbers. A remote run's
 `remote_finished_wells.finished_here` applies the same check to the local output, and leaves nothing out when the
-reference well itself is to be sent (`_read_against_the_reference`): the host measures it first. With no reference
+reference well itself is to be sent (`_read_against_the_reference`, which asks it after the reference's own
+currency check, so a reference to be measured again is not finished either): the host measures it first. With no reference
 named nothing is keyed (naming one changes the settings key). A block written before the key existed has none, so
 a plate analysed with a reference by an earlier build is measured again once. Registered in
 `tests/test_reuse_is_keyed_completely.py` (`nanowell_task.confluence_reference_current`, and two keys of

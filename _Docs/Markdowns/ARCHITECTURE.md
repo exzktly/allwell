@@ -13627,7 +13627,8 @@ the metric; the frame's own µm/px; and a note of what it leaves out.
   picture, and the tiles' pixel size draws a bar several times too short. A frame whose scale is unknown carries no bar.
   Every Image Table bar, a frame's or not, writes its length beside it ("50 µm", **Label the bar**,
   `ImageTableState.scale_bar_label`; `draw_cell_chrome`'s `bar_text`, placed by `bar_text_rect_px`, which the
-  PowerPoint plan's "Scale bar length" text box shares).
+  PowerPoint plan's "Scale bar length" text box shares), and a labelled bar and its length sit on one translucent
+  plate (`image_compose._bar_plate`) so neither is read off the data beneath.
 - **Fluorescence montages** are stitched with the Array view's own reader (`full_montage_compute.TileStore`, its
   `values` method: the sampled pixels unstretched, NaN off every tile) at the pyramid level the frame's scale needs,
   so the row's LUT — pooled across the grid by Auto — sets the brightness of every well alike. Reading a well's tiles
@@ -13637,8 +13638,11 @@ the metric; the frame's own µm/px; and a note of what it leaves out.
   Baseline, rim-focus rule and Cell Gating), so a value on the map is the value a plot draws. Because those settings
   change the values and no image-cache key could see them, a metric map is never memoised by the Image Table; the
   observations memo is keyed on all of them, so asking again repaints discs and reads nothing.
-- **Nothing drawn as something else.** The composer (`image_compose._compose_image_table_rgb`) draws a NaN pixel black
-  and the frame's `undefined` pixels in `Colors.plot_undefined_ink`, after the LUT, and the LUT window is the finite
+- **Nothing drawn as something else.** The composer (`image_compose._compose_image_table_rgb`) draws a NaN pixel in
+  its `blank_rgb` — black for a montage, where it is the absence of light; `Colors.panel_elevated` for a metric map
+  (`image_compose.metric_map_background_rgb`), because every colormap's darkest end, viridis' deep purple included,
+  all but vanishes on black and the lowest values with it — and the frame's `undefined` pixels in
+  `Colors.plot_undefined_ink`, after the LUT, and the LUT window is the finite
   pixels' (`ui_helpers.lut_colormap_to_rgb`; the Auto pool skips NaN too). A nanowell with no value of the metric is
   drawn as its **rim only** — an empty ring, its middle black (`table_frame_compute.metric_map`) — so it differs from
   every value by shape, not just by a colour a colormap could also hold. An empty nanowell's count is 0 and drawn as
@@ -13653,10 +13657,12 @@ the metric; the frame's own µm/px; and a note of what it leaves out.
   in `LUT_COLOR_NAMES`, so the LUT editor shows them, and a ramp's chip swatch is the ramp
   (`builder_view._cmap_swatch`).
 - **The colour key.** Under a grid holding any metric map or fluorescence montage, one row per such channel
-  (`image_compose.colour_keys` decides, `_colour_key.key_rgb` draws, Qt-free): the full metric name, a strip of the
-  row's colormap with the window's ends (and "1 = no change" for a fold change, at the place the cells' colouring
-  puts it, `_colour_key.key_ticks`), what the window is — one shared by every well shown, a fixed one, or each cell's
-  own — and for a metric map the "no value" ring. The live grid adds it as a label under the cells
+  (`image_compose.colour_keys` decides, `_colour_key.key_rgb` draws, Qt-free): its name as its row is labelled
+  (`NW: …`, `MONTAGE GFP`) and then in full, so a key is matched to its row by its first words; a strip of the row's
+  colormap with the window's ends (and "1 = no change" for a fold change, at the place the cells' colouring puts it,
+  `_colour_key.key_ticks`); what the window is — one shared by every well shown, a fixed one, or each cell's own —
+  and, because Auto pools over the pixels shown, "fitted to the cropped region" while a crop is set, so a whole and a
+  cropped export that colour one nanowell differently say why; and for a metric map the "no value" ring. The live grid adds it as a label under the cells
   (`controller._add_colour_key`), the saved figure as an axes below the grid in the publication palette
   (`export._draw_colour_key`), and the PowerPoint plan as a "Colour key" picture of its own (`FrameCollector.add_key`).
   A LUT row's **per cell** (`ChannelSpec.auto_per_cell`) keeps that channel out of the pooled window, so each cell is

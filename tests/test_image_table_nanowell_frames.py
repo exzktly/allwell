@@ -153,7 +153,7 @@ def test_a_metric_map_follows_the_nanowells_baseline_rather_than_a_cached_copy(q
     assert first == pytest.approx(counts["24h"][0] / counts["0h"][0]) and second == pytest.approx(1.0)
 
 
-def test_the_cell_draws_background_black_and_an_undefined_nanowell_in_the_undefined_ink(qtbot, tmp_path):
+def test_the_cell_draws_its_background_grey_and_an_undefined_nanowell_as_a_ring(qtbot, tmp_path):
     from matplotlib import colormaps
 
     from review.features.image_browser.image_table.builder_view import _default_colormap_for
@@ -168,10 +168,14 @@ def test_the_cell_draws_background_black_and_an_undefined_nanowell_in_the_undefi
     cell = {"well": "A01", "chan": spec.axis_token(), "tp": "24", "fov": "F0"}
     arr = load_frame_array(ctx, cache, "A01", cell["chan"], "24", "F0")
     rgb = cell_display_rgb(ctx, cache, cell, 0, None, arr)
-    assert tuple(rgb[0, 0]) == (0, 0, 0)
+    from review.features.image_browser.image_table.image_compose import metric_map_background_rgb
+
+    # Not black: viridis' darkest end all but vanishes on black, and the lowest values with it.
+    background = metric_map_background_rgb()
+    assert tuple(rgb[0, 0]) == background and background != (0, 0, 0)
     empty = next(s for s, n in zip(fx.SITES, fx.COUNTS["A01"]["24h"]) if not n)
     y, x = _px(*empty)
-    assert tuple(rgb[y, x]) == (0, 0, 0)                                   # the ring's empty middle
+    assert tuple(rgb[y, x]) == background                                 # the ring's empty middle
     assert (rgb[y - 2:y + 3, x - 2:x + 3] == np.array(_undefined_rgb(), dtype=np.uint8)).all(axis=-1).any()
     # The window is the defined values' own (10 to 50 here), not NaN: the brightest nanowell is the colormap's top.
     brightest = fx.SITES[int(np.argmax([g if n else -1 for g, n in zip(fx.GFP["A01"], fx.COUNTS["A01"]["24h"])]))]

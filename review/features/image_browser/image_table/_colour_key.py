@@ -116,7 +116,9 @@ def key_rgb(keys, *, width_px: int, scale: float = 1.0, on_screen: bool = True) 
     else:
         bg, ink = _rgb(theme.CPub.bg), _rgb(theme.CPub.text)
     undefined_ink = _rgb(theme.Colors.plot_undefined_ink)
-    black = _rgb(theme.CPub.label_group)
+    from review.features.image_browser.image_table.image_compose import metric_map_background_rgb
+
+    black = metric_map_background_rgb()             # the ring swatch sits on what a metric map's background is
     s = max(0.5, float(scale))
     row, pad, font_px = int(_ROW_PX * s), int(_PAD * s), max(6, int(_FONT_PX * s))
     strip_w, strip_h = int(_STRIP_W * s), int(_STRIP_H * s)

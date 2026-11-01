@@ -319,6 +319,7 @@ def _compose_image_table_rgb(
     log_scale: bool = False,
     label_colors: bool = False,
     undefined_mask=None,
+    blank_rgb=None,
 ) -> np.ndarray | None:
     """Render the cell's display state to a uint8 RGB array.
 
@@ -331,10 +332,11 @@ def _compose_image_table_rgb(
     or the above-threshold cells for "Binary (threshold)"), or None.
 
     A NaN pixel is one with nothing there (a nanowell frame outside every tile
-    or nanowell, ``review/data/nanowell_images``) and is drawn black, whatever
-    the colormap; *undefined_mask* marks the pixels of nanowells that are there
-    with no value, drawn in ``Colors.plot_undefined_ink`` — so neither reads as
-    a value at the bottom of the LUT.
+    or nanowell, ``review/data/nanowell_images``) and is drawn in *blank_rgb*
+    (black when not given), whatever the colormap; *undefined_mask* marks the
+    pixels of nanowells that are there with no value, drawn in
+    ``Colors.plot_undefined_ink`` — so neither reads as a value at the bottom
+    of the LUT.
 
     Returns ``None`` when the input array can't be coerced — the
     caller falls back to whatever placeholder it shows for missing
@@ -382,7 +384,7 @@ def _compose_image_table_rgb(
     rgb = lut_colormap_to_rgb(af, lo, hi, cmap_name or "", log_scale=log_scale)
     blank = ~_np.isfinite(af)
     if blank.any():
-        rgb[blank] = _CHROME_COLORS["black"]
+        rgb[blank] = _CHROME_COLORS["black"] if blank_rgb is None else blank_rgb
     if undefined_mask is not None and _np.shape(undefined_mask)[:2] == af.shape[:2]:
         rgb[_np.asarray(undefined_mask, dtype=bool)] = _undefined_rgb()
 
@@ -402,6 +404,16 @@ def _compose_image_table_rgb(
             rgb[boundary] = [255, 255, 255]
 
     return rgb
+
+def metric_map_background_rgb() -> tuple[int, int, int]:
+    """What a metric map draws where no nanowell is: a neutral dark grey, not black, because every colormap's
+    darkest end — viridis' deep purple included — all but vanishes on black, and the lowest values with it. A
+    montage keeps black: there it is the absence of light, and a stretch puts nothing below it."""
+    from ui import theme
+
+    ink = str(theme.Colors.panel_elevated).lstrip("#")
+    return int(ink[0:2], 16), int(ink[2:4], 16), int(ink[4:6], 16)
+
 
 def _undefined_rgb() -> tuple[int, int, int]:
     from ui import theme
@@ -966,6 +978,7 @@ def _nanowell_frame_rgb(ctx, cache, cell, r: int, crop_tool, arr) -> np.ndarray 
     return _compose_image_table_rgb(
         arr, None, lo=lo, hi=hi, cmap_name=_row_cmap_name(ctx, r, chan), is_overlay=False,
         show_boundaries=False, log_scale=_row_log_scale(ctx, r, chan), undefined_mask=undefined,
+        blank_rgb=metric_map_background_rgb() if is_metric_map(chan) else None,
     )
 
 
@@ -987,6 +1000,8 @@ def colour_keys(ctx, cells) -> list:
                 continue
             order.setdefault(chan, r)
             wells.setdefault(chan, set()).add(cell["well"])
+    crop_tool = getattr(getattr(getattr(ctx, "runtime", None), "image_table", None), "crop_tool", None)
+    cropped = getattr(crop_tool, "crop", None) is not None
     keys = []
     for chan, r in order.items():
         spec = _channel_opts_for(ctx, chan) or {}
@@ -998,11 +1013,18 @@ def colour_keys(ctx, cells) -> list:
         elif spec.get("lut_min") is not None or spec.get("lut_max") is not None:
             scope = "a fixed window, the same for every cell"
         else:
+            # Auto pools over the pixels shown, so a crop moves the window: say so, or two exports of the same
+            # plate — whole and cropped — colour one nanowell differently with nothing to tell them apart.
             scope = f"one window shared by all {n} well{'' if n == 1 else 's'}"
+            if cropped:
+                scope += ", fitted to the cropped region"
         metric = nanowell_metric_for_token(ctx, chan)
         kind = fold_change_scale(metric)
         label = metric_label(chan)
-        title = metric.label if metric is not None else (label or f"{montage_channel(chan).upper()} montage")
+        # Named as its row is (``NW: …``, ``MONTAGE GFP``), so a key is matched to its row by its first words, and
+        # in full after them.
+        title = (f"NW: {metric.label if metric is not None else label}" if label is not None
+                 else display_token(chan))
         keys.append(ColourKey(
             title=title, cmap=_row_cmap_name(ctx, r, chan) or "Greys", lo=lo, hi=hi,
             log=_row_log_scale(ctx, r, chan), centre={"ratio": 1.0, "log": 0.0}.get(kind),
@@ -1386,6 +1408,9 @@ def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
         # same-toned background.
         halo = (0, 0, 0) if col != (0, 0, 0) else (255, 255, 255)
         pad = max(1, bar_thickness_for(H, bar_thickness_px) // 3)
+        if bar_text:
+            # One plate behind the bar and its length, so neither is read off whatever data lies under them.
+            a = _bar_plate(a, rect, bar_text, col)
         a[max(0, y0 - pad):min(H, y1 + pad), max(0, x0 - pad):min(W, x1 + pad)] = halo
         a[y0:y1, x0:x1] = col
         if bar_text:
@@ -1429,8 +1454,28 @@ def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
     return a
 
 
+def _bar_plate(a, rect, text: str, ink) -> np.ndarray:
+    """*a* with a translucent plate, of the tone opposite the bar's ink, behind the bar and its length label."""
+    import numpy as _np
+
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:
+        return a
+    H, W = a.shape[:2]
+    tx0, ty0, tx1, ty1 = bar_text_rect_px(W, H, rect, text, font_px=bar_label_font_px(H))
+    x0, y0, x1, y1 = rect
+    m = max(3, 2 * (y1 - y0))
+    img = Image.fromarray(a)
+    plate = (0, 0, 0, 140) if tuple(ink) != (0, 0, 0) else (255, 255, 255, 160)
+    ImageDraw.Draw(img, "RGBA").rectangle(
+        [max(0, min(x0, tx0) - m), max(0, min(y0, ty0) - m), min(W - 1, max(x1, tx1) + m),
+         min(H - 1, max(y1, ty1) + m)], fill=plate)
+    return _np.array(img.convert("RGB"), dtype=_np.uint8)          # writable: the bar is drawn on it next
+
+
 def _draw_bar_text(a, rect, text: str, ink) -> np.ndarray:
-    """*a* with the bar's length written beside it, in the bar's ink on a translucent plate of the opposite tone."""
+    """*a* with the bar's length written beside it in the bar's ink (on the plate :func:`_bar_plate` drew)."""
     import numpy as _np
 
     try:
@@ -1442,8 +1487,6 @@ def _draw_bar_text(a, rect, text: str, ink) -> np.ndarray:
     bx0, by0, bx1, by1 = bar_text_rect_px(W, H, rect, text, font_px=font_px)
     img = Image.fromarray(a)
     draw = ImageDraw.Draw(img, "RGBA")
-    plate = (0, 0, 0, 140) if tuple(ink) != (0, 0, 0) else (255, 255, 255, 160)
-    draw.rectangle([bx0, by0, bx1, by1], fill=plate)
     font = _load_chrome_font(font_px)
     try:
         l, t, r, b = draw.textbbox((0, 0), text, font=font)

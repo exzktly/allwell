@@ -119,8 +119,9 @@ def test_the_key_names_each_metric_in_full_with_the_window_its_cells_are_drawn_i
             load_frame_array(ctx, ctx.state.image_table.image_cache, cell["well"], cell["chan"], "24", "F0")
     _pool(ctx, cells)
     keys = colour_keys(ctx, cells)
-    assert [k.title for k in keys] == ["GFP montage", "GFP Brightness (mean per-cell intensity)",
-                                       "Count fold change"]       # the phase picture has no quantity to key
+    # Named as the rows are, then in full: the phase picture has no quantity to key.
+    assert [k.title for k in keys] == ["MONTAGE GFP", "NW: GFP Brightness (mean per-cell intensity)",
+                                       "NW: Count fold change"]
     brightness = keys[1]
     measured = [g for well in ("A01", "B01")
                 for g, n in zip(fx.GFP[well], fx.COUNTS[well]["24h"]) if n]
@@ -134,6 +135,22 @@ def test_the_key_names_each_metric_in_full_with_the_window_its_cells_are_drawn_i
     assert key_ticks(keys[1]) == [(0.0, f"{min(measured):.3g}"), (1.0, f"{max(measured):.3g}")]
     rgb = key_rgb(keys, width_px=520)
     assert rgb.shape[1] == 520 and rgb.shape[0] > 3 * 40
+    assert keys[1].scope == "one window shared by all 2 wells"
+
+
+def test_a_key_says_when_its_window_was_fitted_to_a_crop(qtbot, tmp_path):
+    from review.data.crop_tool import CropTool
+    from review.features.image_browser.image_table.image_compose import colour_keys
+
+    ctx = _loaded(qtbot, tmp_path)
+    _use(ctx, [COUNT])
+    cells = _cells([COUNT])
+    _pool(ctx, cells)
+    crop = CropTool(lambda: None)
+    ctx.runtime.image_table.crop_tool = crop
+    assert colour_keys(ctx, cells)[0].scope == "one window shared by all 2 wells"
+    crop.set_crop((0, 0, 30, 30), notify=False)
+    assert colour_keys(ctx, cells)[0].scope == "one window shared by all 2 wells, fitted to the cropped region"
 
 
 # ── M1 is in test_image_table_nanowell_frames.py (the ring); M2 there too (the summed sentence).
@@ -189,6 +206,12 @@ def test_the_scale_bar_carries_its_length_and_can_be_told_not_to(qtbot, tmp_path
     x0, y0, x1, _y1 = bar_rect_px(240, 240, bar_px=86)
     above = np.s_[max(0, y0 - 30):y0 - 2, x0:x1]
     assert not plain[above].any() and labelled[above].max() == 255
+    # A labelled bar sits on a plate that darkens the data under it, so it is not read off a bright disc.
+    bright = np.full((240, 240, 3), 200, np.uint8)
+    plated = draw_cell_chrome(bright, bar_px=86, bar_color="white", bar_text="43 µm")
+    unplated = draw_cell_chrome(bright, bar_px=86, bar_color="white")
+    beside = np.s_[y0 - 2, x0 - 1]
+    assert plated[beside].max() < 150 and unplated[beside].min() == 200
 
 
 # ── L1: a cropped metric map is re-painted, and its bar measured on what was painted ──

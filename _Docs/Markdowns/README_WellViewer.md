@@ -5858,13 +5858,14 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     occupied) — each nanowell drawn as a disc in its metric's colour, *viridis* by default. A fold change is drawn
     blue below 1, red above and grey at 1, on a log scale, so a doubling and a halving are equally strong. The values
     follow the Nanowells page's **Baseline** and the Cell Gating rules, so they match the page and the plots.
-    Outside the nanowells is black; a nanowell with no value (no cells for a brightness, out of focus, gated out) is
-    an **empty ring**, never a coloured disc.
+    Outside the nanowells is dark grey, so even the lowest values stand out; a nanowell with no value (no cells for
+    a brightness, out of focus, gated out) is an **empty ring**, never a coloured disc.
 
   The metrics sit behind **Nanowell metrics** in the Channels tray (click it to show them), and a new table starts
-  with MONTAGE and the raw channels only. Under the grid a **colour key** names each metric in full, shows its
-  colours with the values at each end ("1 = no change" for a fold change), says whether every well shares one
-  window, and shows the empty ring; the saved figure and the PowerPoint slide carry the same key. The status line
+  with MONTAGE and the raw channels only. Under the grid a **colour key** names each metric as its row does and
+  then in full, shows its colours with the values at each end ("1 = no change" for a fold change), says whether
+  every well shares one window (and, while a crop is set, that Auto fitted it to the cropped region — so a cropped
+  export's colours can differ from a whole one's), and shows the empty ring; the saved figure and the PowerPoint slide carry the same key. The status line
   sums, per metric, how many nanowells have no value and why.
 
   All three line up pixel for pixel, so one crop shows the same part of the well in every row, and a cropped metric
@@ -6699,7 +6700,7 @@ channel for every well).
   (**every cell**, or a single grid corner), where in the image it sits, its
   **thickness**, and its colour (**Auto** picks black or white for contrast against
   the pixels underneath). The bar's length is written beside it ("50 µm") on a
-  small plate; untick **Label the bar** to leave it unlabelled. The bar is drawn
+  small plate behind both; untick **Label the bar** to leave it unlabelled. The bar is drawn
   into the pixels, so the live grid and the exported figure match exactly.
 
   **If the box is ticked and no bar appears, the status line says why.** There are

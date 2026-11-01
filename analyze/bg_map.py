@@ -1046,6 +1046,9 @@ class AnalyzeBackgroundMapMixin:
         Lives here rather than in ``analyze/form.py`` because it now validates
         the map as well as the field, and because that file is at its budget.
         """
+        nanowell = getattr(self, "_nanowell_cb", None)
+        if nanowell is not None and nanowell.isChecked():
+            return None        # a nanowell run uses no blank well's correction; the section is hidden then
         uses = []
         if self._flatfield_cb.value() == "empty_well":
             uses.append("flat-field correction")

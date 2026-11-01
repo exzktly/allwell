@@ -1158,6 +1158,12 @@ segments the channel marked Phase; then only the chosen method's own settings.
 
 ### 5. Image correction — field flatness & background
 
+**Hidden for a nanowell plate.** With **Plate type: Nanowell array** the
+section disappears: a nanowell run applies neither correction (each nanowell's
+signal is measured against its own tile's floor level), so nothing here would
+change its numbers, and a correction set to need a blank well no longer blocks
+Run. Switching back to Standard plate shows it again with the choices as left.
+
 Two independent corrections that run **per channel at quantification time**,
 so they change the pixel values that get measured and can only be changed by
 re-running the pipeline. **They start at the command line's own defaults** — no

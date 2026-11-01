@@ -2834,8 +2834,9 @@ def main() -> None:
 
     # Precompute per-channel flat-field models once (basic / empty_well). The
     # gaussian mode needs no precompute (estimated per image in the worker), and
-    # 'none' is a no-op.
-    if args.flatfield in ("basic", "empty_well"):
+    # 'none' is a no-op. A nanowell run corrects nothing this way — each well goes to
+    # ``nanowell_task.run_zip_task``, which reads neither model — so it builds neither.
+    if args.flatfield in ("basic", "empty_well") and not nanowell:
         prepare_models(
             shared_kwargs, what="Flat-field", mode=args.flatfield,
             input_dir=input_dir, groups=blank_groups,
@@ -2846,7 +2847,7 @@ def main() -> None:
 
     # Precompute per-channel additive background fields once (--background
     # empty_well). top_hat / sliding_disk estimate per image in the worker.
-    if args.background == "empty_well":
+    if args.background == "empty_well" and not nanowell:
         prepare_models(
             shared_kwargs, what="Background", mode=args.background,
             input_dir=input_dir, groups=blank_groups,

@@ -437,6 +437,21 @@ def test_the_nanowell_section_sits_directly_below_segmentation(tab):
     assert not tab._nanowell_cb.isChecked() and section.isHidden()
 
 
+def test_image_correction_is_hidden_for_a_nanowell_plate_and_its_blank_well_blocks_nothing(tab):
+    """A nanowell run applies no flat-field or background subtraction (``nanowell_task.run_zip_task`` reads
+    neither), so the Image correction section is hidden while the Plate type is Nanowell array, and a correction
+    that would need a blank well does not block the run from a section the user cannot see."""
+    section = tab._section_widgets["Image correction"]
+    assert not section.isHidden()
+    tab._flatfield_cb.setValue("empty_well")              # needs a Background well, and none is named
+    assert tab._background_well_validation_error(check_input=False)
+    tab._plate_type_seg.setCurrentIndex(1)                # the control a user presses
+    assert tab._nanowell_cb.isChecked() and section.isHidden()
+    assert tab._background_well_validation_error(check_input=False) is None
+    tab._plate_type_seg.setCurrentIndex(0)
+    assert not section.isHidden() and tab._background_well_validation_error(check_input=False)
+
+
 def test_an_uncounted_preview_draws_its_seen_sites_as_not_counted_rather_than_as_holding_cells():
     """Without Cellpose every seen site is "measured" with no count; drawn in the "cells" colour, the whole array
     would read as full. They take their own colour and legend entry; occluded and clipped keep theirs."""

@@ -203,6 +203,10 @@ class AnalyzeQCSectionMixin:
         self._background_well_needed_lbl.setWordWrap(True)
         sec.layout().addWidget(self._background_well_needed_lbl)
         self._build_background_map_row(sec)
+        # Hidden for a nanowell plate, whose run applies none of it (``analyze.nanowell_section``).
+        sync = getattr(self, "_sync_image_correction_to_plate_type", None)
+        if callable(sync):
+            sync()
 
         def _sync_bg(_=None) -> None:
             bg_method = self._background_cb.value()

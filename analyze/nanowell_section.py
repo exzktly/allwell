@@ -397,9 +397,19 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_registration_btn.setEnabled(on)
         self._nanowell_preview_btn.setEnabled(on)
         self._nanowell_pin_segmentation(on)
+        self._sync_image_correction_to_plate_type()
         self._refresh_nanowell_custom()
         self._carry_cellpose_diameter()
         self._sync_cell_diameter_to_resize()
+
+    def _sync_image_correction_to_plate_type(self) -> None:
+        """The Image correction section (flat-field, background subtraction) is hidden for a nanowell plate. A
+        nanowell run never applies either: each well goes to ``pipeline.nanowell_task.run_zip_task``, which measures
+        against its own per-tile floor levels, and ``process_microscopy`` builds no flat-field or background model
+        for it. Called again once that section exists, since this section is built before it."""
+        section = getattr(self, "_section_widgets", {}).get("Image correction")
+        if section is not None:
+            section.setVisible(not self._nanowell_cb.isChecked())
 
     def _sync_cell_diameter_to_resize(self) -> None:
         """With Resize: None the count tells Cellpose no diameter (``NanowellSettings.segmenter_diameter_px`` is 0),

@@ -11493,7 +11493,13 @@ Nanowell array section (`analyze/nanowell_section.py`, shown only while Channels
 directly below Segmentation) holds the plate format, the array geometry (*Hexagonal lattice in a circle*, which sends no flag, or *Infer
 from the image*, which sends `--nanowell_geometry infer`; `GEOMETRY_CHOICES` in `domain/nanowell_fields.py`), the
 margin, the square's edge angle and the occlusion and
-clipping thresholds; a blank number sends no flag and the pipeline's default applies. **The count's own settings sit
+clipping thresholds; a blank number sends no flag and the pipeline's default applies. **The Image correction section
+is hidden in nanowell mode** (`_sync_image_correction_to_plate_type`, called from `_refresh_nanowell_enabled` and once
+more at the end of `qc_section._build_image_correction_section`, which is built after this one): a nanowell well goes
+to `nanowell_task.run_zip_task`, which reads neither flat-field nor background model, and `process_microscopy`
+builds neither model for a nanowell run. Its values are still sent unchanged, so the settings key of an existing
+nanowell dataset does not move; `bg_map._background_well_validation_error` asks nothing of a hidden section's blank
+well. **The count's own settings sit
 with segmentation**: the cell count is its own Cellpose call with its own model, input and cell size, and reads none
 of the Segmentation section's other settings, so `_build_nanowell_count_rows` builds the **Cellpose model**,
 **Segment on** and **Cell diameter (µm)** rows (`_COUNT_FIELDS`) into the Segmentation section's label-free page

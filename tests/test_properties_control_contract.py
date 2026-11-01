@@ -134,7 +134,7 @@ def _different_value(sidebar, key):
 
 
 def _bound_keys(qtbot, monkeypatch, kind):
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     seen: list[str] = []
     original = ExportStyleSidebar._bind_getter_setter
@@ -158,7 +158,7 @@ def test_no_pref_key_is_bound_to_two_controls(qtbot, monkeypatch, kind):
 
 @pytest.mark.parametrize("kind", _KINDS)
 def test_a_rebuilt_panel_shows_every_stored_value(qtbot, monkeypatch, kind):
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     app, first = _sidebar(qtbot, monkeypatch, kind=kind)
     fig = getattr(app, kind)
@@ -184,7 +184,7 @@ def test_a_rebuilt_panel_shows_every_stored_value(qtbot, monkeypatch, kind):
 
 @pytest.mark.parametrize("kind", _KINDS)
 def test_moving_a_control_writes_its_own_key_only(qtbot, monkeypatch, kind):
-    import review.features.export.sidebar_view as SV
+    import review.features.export.properties_view as SV
 
     monkeypatch.setattr(SV, "apply_export_style_to_current", lambda *a, **k: None)
     app, sb = _sidebar(qtbot, monkeypatch, kind=kind)
@@ -247,7 +247,7 @@ def test_choosing_an_error_bar_kind_reaches_the_plot_state(qtbot, monkeypatch):
     the app's own toggle; both differ from the starting state, so a control
     connected to nothing cannot pass.
     """
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     monkeypatch.setattr(ExportStyleSidebar, "_redraw_active_plot",
                         lambda self: None, raising=False)

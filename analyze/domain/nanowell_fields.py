@@ -45,6 +45,10 @@ LEGACY_SEGMENT_SCOPE = "tile"
 #: Whether Cellpose resizes the count's input to the cell diameter first (``pipeline.nanowell_run.RESIZE_MODES``), as
 #: (option value, label), the first the default and what a run that names none did.
 RESIZE_CHOICES = (("cell", "To the cell diameter"), ("none", "None (as imaged)"))
+#: What every nanowell fluorescence number is measured above (``pipeline.nanowell_run.FLUOR_BACKGROUNDS``), as
+#: (option value, label), the first the default and what a run that names none did. The second needs the empty
+#: reference well.
+FLUOR_BACKGROUND_CHOICES = (("floor", "This well's nanowell floor"), ("empty_well", "Empty reference well"))
 
 #: ``--nanowell_scan`` spellings (``pipeline.nanowell_pattern_record.parse_scan``), the first the default.
 SCAN_CHOICES = tuple(f"{corner}-{major}{'-serpentine' if serpentine else ''}"
@@ -182,6 +186,11 @@ def _empty_well_errors(opts: dict) -> list[str]:
     empty_well = str(opts.get("nanowell_empty_well") or "").strip()
     if empty_well and canonical_well_label(empty_well) is None:
         return [f"Empty reference well {empty_well!r} is not a plate well (e.g. H12)."]
+    background = str(opts.get("nanowell_fluor_background") or FLUOR_BACKGROUND_CHOICES[0][0]).strip()
+    if background not in {value for value, _label in FLUOR_BACKGROUND_CHOICES}:
+        return [f"Nanowell fluorescence background {background!r} is not one this version knows."]
+    if background == "empty_well" and not empty_well:
+        return ["Fluorescence background is set to the empty reference well, but no Empty reference well is named."]
     return []
 
 

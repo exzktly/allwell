@@ -46,6 +46,7 @@ import numpy as np
 
 from review.data.nanowell_images import NanowellFrame, metric_baseline, metric_label, montage_channel
 from review.features.nanowell import full_montage_compute as fmc
+from review.features.nanowell.background_compute import bare_label
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell.image_compute import read_montage, tile_boxes
 from review.features.nanowell.observation_compute import nanowell_observations
@@ -230,7 +231,11 @@ def _metric_frame(ctx, well: str, timepoint: str, label: str, geometry, baseline
         table = nanowell_observations(ctx, [well], baseline)
     if table is None:
         return NanowellFrame(None, geometry[2], note="This dataset holds no nanowell tables.")
+    # By label, by key, or by the label without its background clause: a frame kept in a view names the same metric
+    # on a dataset whose fluorescence was measured above another background (``background_compute.bare_label``).
+    bare = bare_label(label).lower()
     spec = next((m for m in table.metrics if m.label.lower() == label.lower() or m.key.lower() == label.lower()), None)
+    spec = spec or next((m for m in table.metrics if bare_label(m.label).lower() == bare), None)
     if spec is None:
         return NanowellFrame(None, geometry[2], note=f"No nanowell metric is called {label!r} on this dataset.")
     frame = table.frame

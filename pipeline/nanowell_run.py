@@ -100,6 +100,11 @@ LEGACY_SEGMENT_SCOPE = "tile"
 #: the pixels the network runs on), at whatever the model makes of cells at that size.
 RESIZE_MODES = ("cell", "none")
 LEGACY_RESIZE = "cell"
+#: What every fluorescence number of a nanowell is measured above. ``floor``: the level of the bare nanowell floor on
+#: the same tile, read from the well itself. ``empty_well``: the floor level of the named empty reference well at
+#: the same timepoint (``pipeline.nanowell_reference``), which no cell of the measured well can raise.
+FLUOR_BACKGROUND_FLOOR, FLUOR_BACKGROUND_EMPTY_WELL = "floor", "empty_well"
+FLUOR_BACKGROUNDS = (FLUOR_BACKGROUND_FLOOR, FLUOR_BACKGROUND_EMPTY_WELL)
 
 GEOMETRY_HEX_CIRCLE = "hex_circle"
 GEOMETRY_INFER = "infer"
@@ -124,6 +129,8 @@ class NanowellSettings:
     #: The plate well that holds no cells, which every well's confluence is calibrated against
     #: (``pipeline.nanowell_reference``); ``None``, none named, and no well has a confluence.
     empty_well: str | None = None
+    #: What every fluorescence number is measured above (``FLUOR_BACKGROUNDS``); ``empty_well`` needs *empty_well*.
+    fluor_background: str = FLUOR_BACKGROUND_FLOOR
     #: The nanowell diameter measured on the plate, whatever the geometry (tracker F2): sites are fitted, owned and
     #: measured at it. Set from the well's one diameter by :func:`measure_timepoint` and by :func:`run_well` for its
     #: roster, and by Test detection; never part of the reuse key, which holds the setting (``key``), while the
@@ -147,6 +154,11 @@ class NanowellSettings:
             raise ValueError(f"Unknown nanowell segmenter scale {self.segment_scale!r}; one of {SEGMENT_SCALES}")
         if self.resize not in RESIZE_MODES:
             raise ValueError(f"Unknown nanowell Cellpose resize {self.resize!r}; one of {RESIZE_MODES}")
+        if self.fluor_background not in FLUOR_BACKGROUNDS:
+            raise ValueError(f"Unknown nanowell fluorescence background {self.fluor_background!r}; one of "
+                             f"{FLUOR_BACKGROUNDS}")
+        if self.fluor_background == FLUOR_BACKGROUND_EMPTY_WELL and not self.empty_well:
+            raise ValueError("A fluorescence background from the empty well needs an empty reference well")
 
     @property
     def infer(self) -> bool:
@@ -187,6 +199,8 @@ class NanowellSettings:
             key["resize"] = self.resize
         if self.empty_well:                                # every confluence is read against it
             key["empty_well"] = self.empty_well
+        if self.fluor_background != FLUOR_BACKGROUND_FLOOR:  # the floor is what every earlier run measured above
+            key["fluor_background"] = self.fluor_background
         return key
 
     def segmenter_diameter_px(self, pixel_size_um: float) -> float:
@@ -1157,7 +1171,10 @@ def _normalise(located, images, template, by_tile, geoms, channels, pitch_um: fl
                  "offset_range": ([float(np.percentile(offsets, 5)), float(np.percentile(offsets, 95))]
                                   if identifiable and offsets else None),
                  "nanowells_levelled": len(out.levels), "tiles_without_gain": sorted(no_gain),
-                 "texture_threshold": out.threshold, "cell_share": cell_share}
+                 "texture_threshold": out.threshold, "cell_share": cell_share,
+                 # The well's floor level per fluorescence channel: what an empty reference well saves for the
+                 # wells measured above it (``pipeline.nanowell_reference``, ``fluor_background="empty_well"``).
+                 "fluorescence_floor": dict(out.backgrounds)}
     if not identifiable:
         out.notes.append("The template's floor and surround are too alike to tell an offset from a gain: each "
                          "nanowell is corrected for brightness only")
@@ -1436,6 +1453,9 @@ def _site_row(timepoint, i, address, g, v, c, got, state, owner, detected, fused
         f = None if got is None else got["fluor"].get(channel)
         row[f"{channel}_integrated"] = None if f is None else f.integrated
         row[f"{channel}_mean_bg"] = None if f is None else f.mean_minus_background
+        # The level both numbers above are taken over, which Review subtracts from the cells' mean intensity too, so
+        # cell fluorescence and nanowell fluorescence have the same background (``--nanowell_fluor_background``).
+        row[f"{channel}_background"] = None if f is None else f.background
     return row
 
 
@@ -1567,14 +1587,43 @@ def _prepare_timepoint(located: Located, images: dict, settings: NanowellSetting
                                             located.pitch_um or settings.pitch_um, out)
         out.template["normalisation"] = norm.block
         out.notes += norm.notes
-        for channel, well_level in norm.backgrounds.items():
-            borrowed = sorted(t for t in by_tile if t is not None and t not in norm.tile_backgrounds.get(channel, {}))
-            if borrowed:
-                out.notes.append(f"{len(borrowed)} tile(s) gave no {channel} floor level of their own "
-                                 f"({', '.join(borrowed)}): their fluorescence background is the well's")
+        if settings.fluor_background == FLUOR_BACKGROUND_EMPTY_WELL:
+            out.notes += _empty_well_backgrounds(norm, confluence_reference, located.timepoint, channels)
+        else:
+            for channel, well_level in norm.backgrounds.items():
+                borrowed = sorted(t for t in by_tile
+                                  if t is not None and t not in norm.tile_backgrounds.get(channel, {}))
+                if borrowed:
+                    out.notes.append(f"{len(borrowed)} tile(s) gave no {channel} floor level of their own "
+                                     f"({', '.join(borrowed)}): their fluorescence background is the well's")
     return _Prepared(located, images, settings, channels, out, addressed, addresses, points_m, detected, report, fused,
                      kind, geoms, by_tile, visibility, coverage, template, segment, norm,
                      cellpose=segmenter is None and count_cells, reported=seams.reported)
+
+
+def _empty_well_backgrounds(norm: Normalisation, reference, timepoint, channels) -> list[str]:
+    """Replace *norm*'s fluorescence backgrounds with the empty reference well's floor level at *timepoint*, one level
+    per channel for every tile, and return the notes saying where there is none.
+
+    The reference well itself keeps its own well-wide level, which is the one it saves for the others. A channel the
+    reference has no level for at this timepoint (it lacks the channel, was not measured, or was refused by the earlier count-based rule) gets
+    no background, so every fluorescence number of it is blank rather than measured above the well's own floor: the
+    run asked for the empty well, and a silent substitute would read as the number asked for."""
+    from pipeline import nanowell_reference as nref
+
+    norm.tile_backgrounds = {}
+    if reference is None or reference.own:
+        return []
+    levels, why = reference.fluor_at(timepoint)
+    notes, backgrounds = [], {}
+    for channel in (channels or {}):
+        level = levels.get(channel)
+        backgrounds[channel] = level
+        if level is None:
+            reason = why or f"the empty reference well has no {channel} floor level there"
+            notes.append(f"{nref.FLUOR_NOTE_PREFIX} {channel}: {reason}")
+    norm.backgrounds = backgrounds
+    return notes
 
 
 def _with_seam_tiles(located: Located, images: dict, channels: dict | None, report, centres,

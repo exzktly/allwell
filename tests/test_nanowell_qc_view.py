@@ -256,3 +256,25 @@ def test_a_plate_that_cannot_be_read_says_why_on_the_figure_and_is_not_read_agai
     nwc.redraw(ctx)
     nwc.redraw(ctx)
     assert len(calls) == 1
+
+
+def test_the_queue_button_says_what_it_walks_and_one_per_well_visibly_changes_it(qc_page):
+    """Reported: "I click on one per well, and expected to be given a stitched well in which to identify the
+    fiducial … But clicking on one per well does nothing". It was a toggle that changed only what a separate, plain
+    button would later walk. It is now a checkbox, and the walk's button — the page's primary action — says what
+    pressing it walks, so the option visibly changes something; the figure says what to press."""
+    from PySide6.QtWidgets import QCheckBox
+
+    ctx, st, _out = qc_page
+    queue_btn, per_well = ctx.widgets.get("_nw_queue_btn"), ctx.widgets.get("_nw_qc_per_well_btn")
+    assert isinstance(per_well, QCheckBox) and queue_btn.property("variant") == "primary"
+    # A01 t_a and B01 t_c are not addressed; B01 also has an anchor waiting, so one per well leaves B01 out.
+    assert queue_btn.text() == "Anchor queue: 2 timepoints"
+    per_well.click()
+    assert st.anchor_queue_per_well and queue_btn.text() == "Anchor queue: 1 well"
+    per_well.click()
+    assert queue_btn.text() == "Anchor queue: 2 timepoints"
+    fig = ctx.widgets.get("_nw_fig")
+    assert [t.get_text() for t in fig.texts if t.get_gid() == "nw-qc-message"] == [
+        "2 timepoint(s) not addressed: press Anchor queue to set their anchors one after another, or click an "
+        "orange cell to set one."]

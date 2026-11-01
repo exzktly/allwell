@@ -34,7 +34,7 @@ from tests._repo_scan import parsed_sources
 
 _PANEL_MODULE = "review/features/export/style.py"
 _PANEL_FUNCTION = "open_export_style_panel"
-_SIDEBAR_MODULE = "review/features/export/sidebar_view.py"
+_SIDEBAR_MODULE = "review/features/export/properties_view.py"
 _DISPATCH_FUNCTION = "_redraw_bound_figure"
 _FEATURE_ROSTER = "_FIGURE_OWNING_FEATURES"
 

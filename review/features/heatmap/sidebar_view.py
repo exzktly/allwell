@@ -5,8 +5,8 @@ user picks an R×C grid size, drags wells from the *sidebar plate-map*
 into table cells, moves wells between cells by dragging, and clears a
 cell by double-clicking it (or by dragging the well back onto the
 sidebar plate-map). The sidebar buttons are the canonical drag source
-when the Heat Map tab is active — see
-``runtime_app._sync_heatmap_well_drag_mode``.
+when the Heat Map tab is focused — the descriptor's ``plate_drag_source``,
+applied by ``core/tab_controller.sync_rail_plate_drag_mode``.
 
 State of truth: ``app._heatmap_layouts``. The sidebar maintains exactly
 one layout named ``SIDEBAR_LAYOUT_NAME`` and synchronises the table

@@ -294,6 +294,38 @@ def queue_tip(matrix: QcMatrix | None) -> str:
     return tip
 
 
+def queue_size(matrix: QcMatrix | None, per_well: bool) -> int:
+    """How many items *Anchor queue* would walk: every timepoint not addressed, or with *per_well* each well's first,
+    leaving out wells that already have an anchor waiting for a re-run — ``anchor_queue_compute.one_per_well``'s
+    rule, counted from the matrix so the button can say it before the walk starts."""
+    if matrix is None:
+        return 0
+    cells = [c for c in matrix.cells.values() if c.state == NOT_ADDRESSED]
+    if not per_well:
+        return len(cells)
+    waiting = {c.well for c in matrix.cells.values() if c.state == ANCHOR_WAITING}
+    return len({c.well for c in cells} - waiting)
+
+
+def queue_label(matrix: QcMatrix | None, per_well: bool) -> str:
+    """*Anchor queue*'s text: what pressing it walks, so *One per well* visibly changes it."""
+    n = queue_size(matrix, per_well)
+    if matrix is None:
+        return "Anchor queue"
+    noun = ("well" if n == 1 else "wells") if per_well else ("timepoint" if n == 1 else "timepoints")
+    return f"Anchor queue: {n} {noun}"
+
+
+def action_line(matrix: QcMatrix | None) -> str:
+    """What to do about the timepoints not addressed, said on the figure (a tooltip is not seen over VNC on a
+    phone); ``""`` when there are none."""
+    n = matrix.counts.get(NOT_ADDRESSED, 0) if matrix is not None else 0
+    if not n:
+        return ""
+    return (f"{n:,} timepoint(s) not addressed: press Anchor queue to set their anchors one after another, or "
+            "click an orange cell to set one.")
+
+
 def hours_of(times_h: dict, tp: str):
     hours = (times_h or {}).get(tp)
     return hours if isinstance(hours, (int, float)) and hours == hours else None

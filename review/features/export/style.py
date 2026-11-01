@@ -1,7 +1,7 @@
 """Export-style profile management + figure export pipeline.
 
 The right-side sidebar widget that hosts the editor lives in
-``review.features.export.sidebar_view`` so the GUI portion is swappable. This
+``review.features.export.properties_view`` so the GUI portion is swappable. This
 module owns profile lookups (``EXPORT_PROFILES``) and opening the editor.
 
 Two things it does not own, and callers import them from their owners:
@@ -106,7 +106,7 @@ def launch_export_editor(win, fig, default_name: str, *, plot_bg: str = "",
     try:
         # Lazy import: the view module imports symbols defined above, so a
         # top-level import would create a circular dependency.
-        from review.features.export.sidebar_view import ExportStyleSidebar
+        from review.features.export.properties_view import ExportStyleSidebar
 
         dock = _resolve_export_dock(win, fig)
         parent = dock if dock is not None else (canvas.parent() if canvas is not None else win)
@@ -135,7 +135,7 @@ def launch_export_editor(win, fig, default_name: str, *, plot_bg: str = "",
                 # the container narrower than its child, clipping content
                 # against the window edge). Importing the constant here
                 # keeps the two sides in lock-step.
-                from review.features.export.sidebar_view import (
+                from review.features.export.properties_view import (
                     EXPORT_STYLE_PANEL_WIDTH as _PANEL_W,
                 )
                 host = getattr(dock, "_dock_host", None)
@@ -149,7 +149,7 @@ def launch_export_editor(win, fig, default_name: str, *, plot_bg: str = "",
                         parent_layout.addWidget(sb)
 
         if dock is not None:
-            from review.features.export.sidebar_view import (
+            from review.features.export.properties_view import (
                 EXPORT_STYLE_PANEL_WIDTH as _PANEL_W,
             )
             # Show the sidebar as the dock's sole visible panel — this also

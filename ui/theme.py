@@ -1294,6 +1294,13 @@ QPushButton[variant="secondary"], QToolButton[variant="secondary"] {{
     border: 1px solid {c.control_border};
     color: {c.text_primary};
 }}
+/* The rule above outranks the plain `:disabled` one (an attribute selector is more specific than a
+   pseudo-state alone), so without this a greyed secondary button painted exactly as an enabled one. */
+QPushButton[variant="secondary"]:disabled, QToolButton[variant="secondary"]:disabled {{
+    color: {c.text_muted};
+    background-color: {c.panel};
+    border-color: {c.border_subtle};
+}}
 
 QPushButton[variant="danger"], QToolButton[variant="danger"] {{
     background-color: transparent;

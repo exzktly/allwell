@@ -81,6 +81,8 @@ def _emit_nanowell_flags(args: list[str], opts: dict) -> None:
     empty_well = str(opts.get("nanowell_empty_well") or "").strip()
     if empty_well:                                   # every well's confluence is read against it
         args += ["--nanowell_empty_well", empty_well]
+    if str(opts.get("nanowell_fluor_background") or "").strip() == "empty_well":   # the floor sends nothing
+        args += ["--nanowell_fluor_background", "empty_well"]
     if plate_format == "custom":                     # a known format's geometry is its own, never sent
         for key in ("nanowell_diameter_um", "nanowell_pitch_um"):
             _emit_num_flag(args, opts, key, f"--{key}", float)

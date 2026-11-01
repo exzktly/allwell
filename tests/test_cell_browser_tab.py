@@ -81,8 +81,9 @@ def test_cell_browser_bar_survives_empty_refresh(loaded_app):
 def test_cell_browser_section_icon_registered(viewer_app):
     # Cell Browser is now a sub-tab of the unified Image Browser rail entry —
     # it's the rail entry that carries the section icon, not the leaf.
-    assert viewer_app._SECTION_ICONS.get("Image Browser")
-    assert "Cell Browser" not in viewer_app._SECTION_ICONS
+    features = viewer_app._ctx.features
+    assert features.get("Image Browser").icon
+    assert not features.get("Cell Browser").icon
 
 
 def test_cell_browser_click_navigates_to_segmentation(loaded_app):

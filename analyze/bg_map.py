@@ -1046,6 +1046,8 @@ class AnalyzeBackgroundMapMixin:
         Lives here rather than in ``analyze/form.py`` because it now validates
         the map as well as the field, and because that file is at its budget.
         """
+        if self._corrections_unused():
+            return None                     # a nanowell run applies neither, so its blank is not asked for
         uses = []
         if self._flatfield_cb.value() == "empty_well":
             uses.append("flat-field correction")

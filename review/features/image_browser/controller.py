@@ -17,12 +17,10 @@ import logging
 
 from core.safe import swallowed
 
-# Sub-tab body/sidebar builders are imported *inside* each branch of
-# ``build_image_browser_subtab`` (not at module scope) so that a build profile
-# which drops a sub-tab — physically excluding its module from the binary —
-# never imports it. A sub-tab only imports its own module when actually built,
-# which only happens when the profile admits it. (Segmentation's review-image
-# build is a god-method reached through the core ``image_browser_subtab_app_bridge``.)
+# Each sub-tab's body and rail-frame builder is its descriptor's ``build``
+# (``features/registry.py``), which imports the sub-tab's module only when
+# called, so a build profile that drops a sub-tab — physically excluding its
+# module from the binary — never imports it.
 
 _logger = logging.getLogger("review")
 
@@ -46,30 +44,14 @@ def build_image_browser_subtab(ctx, idx: int) -> None:
     if built.get(name):
         return
     frame = sub.widget(idx)
+    # Each leaf builds itself (``FeatureDescriptor.build``, declared in
+    # ``features/registry.py`` with its imports inside, so a profile that strips
+    # a sub-tab never imports it) — the same seam Home's container uses.
+    desc = ctx.features.get(name)
+    if desc is None or desc.build is None:
+        return
     try:
-        if name == "Segmentation":
-            from review.core.tab_controller import image_browser_subtab_app_bridge
-            image_browser_subtab_app_bridge(ctx, segmentation_frame=frame)
-        elif name == "Image Table":
-            from review.features.image_browser.image_table.tab_view import build_image_table_tab
-            from review.features.image_browser.image_table.picker_view import build_image_table_picker
-            build_image_table_tab(ctx, frame)
-            build_image_table_picker(ctx, ctx.widgets.get("_sidebar_image_table_frame"))
-        elif name == "Cell Browser":
-            from review.features.image_browser.cell_browser.tab_view import (
-                build_cell_browser_sidebar, build_cell_browser_tab,
-            )
-            build_cell_browser_tab(ctx, frame)
-            build_cell_browser_sidebar(ctx, ctx.widgets.get("_sidebar_cell_browser_frame"))
-        elif name == "Playground":
-            from review.features.image_browser.playground.tab_view import build_playground_tab
-            # No layout pre-set here: the builder lays the frame out through
-            # ``widgets.page_body.build_page_body``, which owns the page's top
-            # edge (an inset applied here is what used to push this sub-tab's
-            # content 12px below every other page's).
-            build_playground_tab(ctx, frame)
-        else:
-            return
+        desc.build(ctx, frame)
         built[name] = True
     except Exception:
         _logger.exception("Image Browser: build sub-tab %r failed", name)

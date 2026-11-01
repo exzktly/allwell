@@ -23,9 +23,9 @@ from pathlib import Path
 import pandas as pd
 
 from review.domain.observation import NANOWELLS, ObservationMetric, ObservationTable
-from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data, site_channels
+from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data, site_backgrounds, site_channels
 from review.features.nanowell.controller import gate_tally, gate_version, sync_focus_rule
-from review.features.nanowell.distribution_compute import METRICS
+from review.features.nanowell.distribution_compute import METRICS, metric_label
 from review.features.nanowell.series_compute import exclusion_reason, metric_kinds, site_metrics
 
 log = logging.getLogger("review")
@@ -34,10 +34,13 @@ log = logging.getLogger("review")
 _MEMO_MAX = 8
 
 
-def _metric_specs(channels) -> tuple[ObservationMetric, ...]:
+def _metric_specs(channels, modes=()) -> tuple[ObservationMetric, ...]:
+    """Every metric a plot can draw from the nanowell rows; *modes* (one per well, ``background_compute``) decide what
+    a fluorescence metric's label says its background was."""
     kinds = metric_kinds(channels)
     specs = []
-    for key, (label, needs_channel) in METRICS.items():
+    for key in METRICS:
+        label, needs_channel = metric_label(key, None, modes), METRICS[key][1]
         if key == "occupancy_class":
             continue                              # a category ("0", "1", "2", "3+"), not a number to plot
         if needs_channel:
@@ -74,8 +77,10 @@ def nanowell_metric_specs(ctx, wells) -> tuple[ObservationMetric, ...] | None:
     data_dir = getattr(ctx.state.dataset, "data_dir", None)
     if not data_dir:
         return None
-    channels = site_channels(Path(data_dir), sorted(set(wells or ())))
-    return None if channels is None else _metric_specs(channels)
+    wells = sorted(set(wells or ()))
+    channels = site_channels(Path(data_dir), wells)
+    return None if channels is None else _metric_specs(channels,
+                                                        list(site_backgrounds(Path(data_dir), wells).values()))
 
 
 def nanowell_observations(ctx, wells, baseline: str | None = None) -> ObservationTable | None:
@@ -110,7 +115,7 @@ def nanowell_observations(ctx, wells, baseline: str | None = None) -> Observatio
         return None
     if not len(data.sites):
         table = ObservationTable(NANOWELLS, pd.DataFrame(columns=["well", "timepoint", "nw_q", "nw_r", "state"]),
-                                 _metric_specs(data.channels))
+                                 _metric_specs(data.channels, list(data.fluor_backgrounds.values())))
     else:
         metrics = site_metrics(data, baseline, gate_tally(ctx, data), focus)
         frame = _frame(metrics)
@@ -123,7 +128,8 @@ def nanowell_observations(ctx, wells, baseline: str | None = None) -> Observatio
 
         from review.domain.nanowell_rim_focus import note as focus_note
 
-        table = ObservationTable(NANOWELLS, frame, _metric_specs(channels), why_missing,
+        table = ObservationTable(NANOWELLS, frame, _metric_specs(channels, list(data.fluor_backgrounds.values())),
+                                 why_missing,
                                  notes=tuple(filter(None, [focus_note(metrics, focus)])))
     if len(memo) >= _MEMO_MAX:
         memo.pop(next(iter(memo)))

@@ -38,7 +38,7 @@ def test_export_axis_opens_on_all():
     single-axis target is not honoured: the panel used to open on axis 1 and
     save that, so a stored "1" says nothing about what anyone chose."""
     from types import SimpleNamespace
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
     fn = ExportStyleSidebar._open_on_all_axes
 
     for saved in ("All", "1", "3"):
@@ -61,7 +61,7 @@ def test_opening_on_all_keeps_axis_one_s_limit_on_axis_one():
     from matplotlib.figure import Figure
 
     from review.core import plot_style as PS
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     prefs = {"axis_target": "1", "y_lim_min": "0", "y_lim_max": "5"}
     self_ = SimpleNamespace(_prefs=prefs, _axis_buckets={},
@@ -83,7 +83,7 @@ def test_export_click_selects_axis():
     that misses every axis, or one made while the sidebar is hidden, no-ops so
     normal canvas interaction is untouched."""
     from types import SimpleNamespace
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
     fn = ExportStyleSidebar._on_canvas_axis_pick
 
     class FakeCombo:

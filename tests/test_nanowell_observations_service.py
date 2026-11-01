@@ -142,4 +142,4 @@ def test_the_scatter_s_nanowell_entries_are_listed_without_computing_the_table(n
     monkeypatch.setattr(observation_compute, "load_nanowell_data", no_rows)
     entries = cell_nanowell_entries(nw_ctx)
     assert entries["Nanowell ▸ Cell count"] == "n"
-    assert entries["Nanowell ▸ GFP Brightness (mean per-cell intensity)"] == "brightness_GFP"
+    assert entries["Nanowell ▸ GFP Cell fluorescence (mean per cell, own-well background subtracted)"] == "brightness_GFP"

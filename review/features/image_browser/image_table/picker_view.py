@@ -7,10 +7,8 @@ that explicitly ignores replicate sets / groups. State is held in
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-
 from core.safe import swallowed
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from review.features.image_browser.image_table.controller import image_table_active_wells
 from review.features.image_browser.image_table.controller import image_table_clear_active
 from review.features.image_browser.image_table.controller import image_table_refresh_picker
@@ -41,8 +39,8 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
     # The app-wide plate geometry (widgets/plate_geometry.py): same caps, same
     # cell scale and same centring as every other plate map in the app. The
-    # "rail" role hides the built-in action row — the rail keeps its own
-    # Select All / Clear buttons below.
+    # "rail" role hides the built-in action row — the selection footer below
+    # carries All / None.
     from review.core.rail_plate import mount_rail_plate
     from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
     apply_plate_geometry(plate, role="rail")
@@ -64,30 +62,22 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
             cb()
     plate.selectionChanged.connect(_on_plate_changed)
 
-    btn_row = QWidget(parent)
-    bl = QHBoxLayout(btn_row)
-    bl.setContentsMargins(0, 4, 0, 4)
-    bl.setSpacing(4)
+    # The selection footer — count, **All**, **None** — the same widget and the
+    # same words as under the plotting pages' plate. It is also the count label
+    # ``image_table_refresh_picker`` writes to.
+    from widgets.selection_footer import SelectionFooter
+    footer = SelectionFooter(
+        parent,
+        all_tooltip="Select every loaded well for the table.",
+        none_tooltip="Clear the table's well selection.",
+    )
+    footer.selectAllRequested.connect(lambda: image_table_select_all(ctx))
+    footer.selectNoneRequested.connect(lambda: image_table_clear_active(ctx))
+    layout.addWidget(footer)
+    ctx.runtime.image_table.count_lbl = footer
 
-    select_all = QPushButton("Select All", btn_row)
-    select_all.setProperty("variant", "secondary")
-    select_all.clicked.connect(lambda _=False: image_table_select_all(ctx))
-    bl.addWidget(select_all)
-
-    clear_btn = QPushButton("Clear", btn_row)
-    clear_btn.setProperty("variant", "secondary")
-    clear_btn.clicked.connect(lambda _=False: image_table_clear_active(ctx))
-    bl.addWidget(clear_btn)
-    bl.addStretch(1)
-    layout.addWidget(btn_row)
-
-    ctx.runtime.image_table.count_lbl = QLabel("0 wells active", parent)
-    ctx.runtime.image_table.count_lbl.setObjectName("Muted")
-    ctx.runtime.image_table.count_lbl.setAlignment(Qt.AlignLeft)
-    layout.addWidget(ctx.runtime.image_table.count_lbl)
-
-    layout.addStretch(1)
-
+    # The instruction sits directly under the plate it explains, not at the
+    # rail's foot a screen's height away.
     help_lbl = QLabel(
         "Select wells here, then build the table on the shelf — drag a root "
         "(Well/Timepoint/FOV) onto Rows or Columns and nest channels under it — "
@@ -102,7 +92,7 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     # saved group to drive the Image Table grid, without leaving the tab. The
     # drawer's Add uses its own name field (see build_plot_groups_drawer), so it
     # doesn't collide with the main sidebar's Add.
-    from review.core.sidebar_view import build_plot_groups_drawer
+    from review.core.saved_selections import build_plot_groups_drawer
     # build_plot_groups_drawer is a shared core sidebar builder; it takes ctx
     # (drawer registry on ctx.runtime.plot_groups, widgets via ctx.widgets).
     #
@@ -117,13 +107,14 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
         wells_source=lambda: image_table_active_wells(ctx),
     )
     layout.addWidget(plot_groups_section)
+    layout.addStretch(1)
 
     image_table_refresh_picker(ctx)
     # Repaint both Plot Groups drawers now that the Image Table's drawer
     # has registered itself — otherwise the first paint of the sidebar
     # shows an empty group list even when groups exist in ctx state.
     try:
-        from review.core.sidebar_view import refresh_plot_groups_sidebar
+        from review.core.saved_selections import refresh_plot_groups_sidebar
         refresh_plot_groups_sidebar(ctx)
     except Exception:
         swallowed("image table picker: saved selections refresh on build")

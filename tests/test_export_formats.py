@@ -25,7 +25,7 @@ from widgets.fig_clipboard import (
     _render_figure,
     copy_figure_to_clipboard,
 )
-from review.features.export.sidebar_view import (
+from review.features.export.properties_view import (
     _EXPORT_FILTER_ORDER,
     _EXPORT_FILTERS,
     ExportStyleSidebar,

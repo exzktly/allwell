@@ -120,7 +120,7 @@ def _sidebar(qtbot, monkeypatch, *, kind: str):
     """
     from matplotlib.figure import Figure
 
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
 
     fig = Figure(figsize=(4, 3))
     fig.add_subplot(1, 2, 1)
@@ -267,18 +267,18 @@ def test_the_response_figure_predicate_is_defined_once(qtbot, monkeypatch):
     import ast
     import inspect
 
-    from review.features.export import sidebar_view
+    from review.features.export import properties_view
 
     # Per namespace: a later ``def`` shadows an earlier one only within the
     # same class body (or the module). Two classes each defining ``__init__``
     # is not shadowing, and counting names module-wide would say it was.
-    tree = ast.parse(inspect.getsource(sidebar_view))
+    tree = ast.parse(inspect.getsource(properties_view))
     dupes = set()
     for scope in [tree, *(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef))]:
         names = [n.name for n in scope.body if isinstance(n, ast.FunctionDef)]
         owner = getattr(scope, "name", "<module>")
         dupes |= {f"{owner}.{n}" for n in names if names.count(n) > 1}
-    assert not dupes, f"defined more than once in sidebar_view: {sorted(dupes)}"
+    assert not dupes, f"defined more than once in properties_view: {sorted(dupes)}"
 
 
 # ── the measurements the facet table's reasons rest on ──────────────────────

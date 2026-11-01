@@ -93,7 +93,7 @@ def _describe(w: QWidget) -> dict:
 def capture(out_dir: Path) -> dict:
     from matplotlib.figure import Figure
 
-    from review.features.export.sidebar_view import ExportStyleSidebar
+    from review.features.export.properties_view import ExportStyleSidebar
     from tests.test_properties_hides_what_it_cannot_do import _stub_app
     from ui import theme
     from widgets.collapsible_section import CollapsibleSection

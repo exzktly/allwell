@@ -1,7 +1,8 @@
-"""Export-style sidebar view (extracted from ``figure_export_editor``).
+"""The Properties panel: the figure-styling dock on the right of each plot.
 
 Hosts the ``ExportStyleSidebar`` widget that lives inside each plot tab's
-right-side dock. Pure view: prefs persistence, profile lookups, and the
+right-side dock. (Not the left rail — that is ``review/core/sidebar_view.py``;
+the module is named for what the user calls it, so the two are not confused.) Pure view: prefs persistence, profile lookups, and the
 matplotlib export pipeline live in ``review.figure_export_editor``.
 """
 

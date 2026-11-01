@@ -296,7 +296,7 @@ def test_the_properties_reset_repaints_the_cached_render_tabs():
     into the constant two call sites share — which says nothing about whether
     the tabs are still repainted.
     """
-    from review.features.export.sidebar_view import (
+    from review.features.export.properties_view import (
         _FEATURES_THAT_REDRAW_THEMSELVES, ExportStyleSidebar,
     )
 
@@ -306,7 +306,7 @@ def test_the_properties_reset_repaints_the_cached_render_tabs():
         f"reset-to-defaults does not repaint these cached-render tabs: {missing}")
     reset_path = ast.unparse(
         parse_source(REPO_ROOT / "review" / "features" / "export"
-                     / "sidebar_view.py"))
+                     / "properties_view.py"))
     assert "_FEATURES_THAT_REDRAW_THEMSELVES" in reset_path, (
         "the roster is no longer what the reset path dispatches through")
     assert hasattr(ExportStyleSidebar, "_redraw_active_plot")
@@ -466,7 +466,7 @@ def test_an_ordinary_grid_keeps_every_column_label():
 def test_a_sem_flip_does_not_switch_error_bars_back_on():
     """"None" is a choice about whether to draw error bars at all, not about
     which one; a SEM/SD flip made from a plot card must not override it."""
-    src = (REPO_ROOT / "review" / "features" / "export" / "sidebar_view.py").read_text()
+    src = (REPO_ROOT / "review" / "features" / "export" / "properties_view.py").read_text()
     assert 'if _sc.currentData() == "none":' in src
 
 

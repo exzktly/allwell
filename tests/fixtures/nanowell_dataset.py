@@ -49,7 +49,8 @@ def _site_row(tp: str, q: int, r: int, n: int, gfp: float) -> dict:
             "detected": True, "fused": False, "imaged_fraction": 1.0, "visible_fraction": 1.0,
             "state": "measured" if n else "empty", "partially_visible": False, "focus": 1.0, "n_cells": n,
             "confluence": round(0.1 * n, 3), "area_est_cells": n, "count_disagreement": False,
-            "consistency": "consistent", "GFP_integrated": gfp * n, "GFP_mean_bg": 0.0}
+            "consistency": "consistent", "GFP_integrated": gfp * n, "GFP_mean_bg": 0.0,
+            "GFP_background": 0.0}
 
 
 def _png(image: np.ndarray) -> bytes:

@@ -1185,7 +1185,9 @@ review/
 │   ├── channel_state.py, dataset_state.py, plot_state.py, selection_state.py,
 │   │   cell_gating_state.py, export_prefs_state.py, image_view_state.py,
 │   │   qc_state.py, stats_cache_state.py   ← cross-cutting typed state slices
-│   ├── app_shell_view.py, centre_view.py, sidebar_view.py, status_view.py
+│   ├── app_shell_view.py, centre_view.py, status_view.py
+│   ├── sidebar_view.py               ← the rail's main frame: plate, selection footer, hint (§5.4)
+│   ├── saved_selections.py           ← the Saved selections drawer and its add / load / delete (§5.4)
 │   ├── split_view.py                 ← optional side-by-side double-pane view (one-line removable; §5.10)
 │   ├── phone_panel_sheet.py          ← phone layout's Properties sheet: lends a plot's right dock to a
 │   │                                    full-width Drawer over the page and gives it back (§2)
@@ -1204,7 +1206,6 @@ review/
 │   ├── progress_jobs.py              ← run a panel edit's work on a QThread behind a
 │   │                                    ProgressPopup, one job at a time (§5.3, Cell Gating)
 │   ├── rail_plate.py                 ← the sidebar's one well-picker slot
-│   ├── section_icons.py              ← the glyph beside each rail entry
 │   ├── observation_band.py           ← the Plotting band's Observations: Cells | Nanowells toggle,
 │   │                                    its nanowell Metric picker and the cell plots' footer (§6.2l)
 │   ├── threshold_note.py             ← the sentence an unset, cut-nothing ON cutoff draws instead of bars
@@ -1351,7 +1352,7 @@ review/
 │   ├── nanowell/     collect.py, series_compute.py, summary_compute.py,
 │   │                 beeswarm_compute.py, distribution_compute.py, renderer.py,
 │   │                 controller.py, state.py, tab_view.py, view_state_io.py,
-│   │                 cell_scope_compute.py, moving_compute.py  ← the Nanowells page: nanowell
+│   │                 cell_scope_compute.py, moving_compute.py, background_compute.py  ← the Nanowells page: nanowell
 │   │                 tables, per-nanowell metrics, the Distribution beeswarm
 │   │                 and site detail [removable]; variables_view.py and
 │   │                 decorate_compute.py ← the page's Group by and Decorate
@@ -1367,7 +1368,7 @@ review/
 │   │                 _render.py (draw one record for the headless report)
 │   ├── crop/         controller.py, region.py        ← support lib (always present)
 │   ├── qc/           controller.py, params.py, tab_view.py   ← support lib
-│   ├── export/       service.py, style.py, sidebar_view.py
+│   ├── export/       service.py, style.py, properties_view.py (the right-hand Properties panel)
 │   ├── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
 │   │                 scatter_panel.py, response_panel.py, nanowell_panel.py,
 │   │                 service.py,
@@ -1391,7 +1392,7 @@ The codebase uses a suffix-based scheme so the file name tells the reader the ro
 | `renderer.py` | Pure matplotlib drawing. Decoupled from Qt — takes a figure / axes and a state snapshot. | `features/barplot/renderer.py`, `features/image_browser/review_image/renderer.py` |
 | `collect.py` | Pure data collection — the half of a plot feature that walks the loaded wells and returns plain dicts/arrays, with no matplotlib axes or Qt. Paired with a `renderer.py`; importable downward by exporters without pulling the renderer. | `features/scatter/collect.py` |
 | `tab_view.py` | Qt builder for a feature's main tab page (returns the assembled `QWidget`). | every `features/*/tab_view.py` |
-| `*_view.py` | Qt builder for a sub-panel, sidebar, or sub-dialog. | `sidebar_view.py`, `panel_view.py`, `criteria_view.py`, `picker_view.py`, `core/app_shell_view.py` |
+| `*_view.py` | Qt builder for a sub-panel, sidebar, or sub-dialog. | `sidebar_view.py`, `properties_view.py`, `panel_view.py`, `criteria_view.py`, `picker_view.py`, `core/app_shell_view.py` |
 | `state.py` / `_state.py` | Dataclass state container; no logic, only fields + defaults. `tests/test_state_modules_hold_no_machinery.py` holds the decidable half across every package root: each top-level class is a `@dataclass` or an `Enum`, and nothing imports `threading` / `queue` / `multiprocessing` / `concurrent` / `subprocess` / `os` (exemptions name one class or import, with a reason). A store with behaviour of its own lives beside the state, as `data/population_store.py` does for `StatsCacheState.populations`. | `core/app_state.py`, `core/channel_state.py`, `features/stats/state.py` |
 | `_coordinator.py` | EventBus subscriber — subscribes signals and fans them out to controllers. | `core/redraw_coordinator.py` |
 | `_registry.py` | Registry pattern (deferred lookup, debounced save, etc.). | `core/widget_registry.py`, `core/scope_registry.py`, `persistence/registry.py` |
@@ -1716,11 +1717,12 @@ and registers every centre page. The current page-list:
 | Analysis | **Statistics** | — |
 | Analysis | **Multivariate** | — (higher-dimensional analysis: correlation / PCA·UMAP·t-SNE / clustering / faceting) |
 | Analysis | **Spatial** | — (neighbourhood / colony-level spatial analysis; §5.11) |
-| Images | **Image Browser** | Segmentation / Image Table / Cell Browser / Playground |
-| Images | **smFISH** | — |
-| Data | **Review CSV** | — |
-| Data | **Saved Plots** | — (the plot gallery; decorates every plot card with a "save to gallery" button, and exports the gallery as a PDF report or a PowerPoint deck — each chart as editable shapes, each Image Table grid as one editable group per field of view) |
-| Data | **Batch Export** | — (one figure + CSV per export group, in six modes — Line, Bar, Scatter cells, Scatter aggregate, Response, Nanowells — and optionally into the Saved Plots gallery and a PowerPoint deck as well as into files) |
+| Assays | **Nanowells** | — (per-nanowell analysis of nanowell-array plates) |
+| Assays | **smFISH** | — (spot-count threshold sweep and Apply to All, which writes `smFISH_Thresh` into the CSVs; its frame view exists to validate that cut, so it is not an image viewer. Like Nanowells it is defined by a distinct kind of input data) |
+| Inspect | **Image Browser** | Segmentation / Image Table / Cell Browser / Playground |
+| Inspect | **Review CSV** | — |
+| Output | **Saved Plots** | — (the plot gallery; decorates every plot card with a "save to gallery" button, and exports the gallery as a PDF report or a PowerPoint deck — each chart as editable shapes, each Image Table grid as one editable group per field of view) |
+| Output | **Batch Export** | — (one figure + CSV per export group, in six modes — Line, Bar, Scatter cells, Scatter aggregate, Response, Nanowells — and optionally into the Saved Plots gallery and a PowerPoint deck as well as into files) |
 
 **Plotting** is a `NamedPageStack`; **Image Browser** (`QTabWidget`: the unified
 home for the disparate image-review surfaces — the review-image **Segmentation**
@@ -2774,7 +2776,7 @@ Cell Gating's CDFs and Add Prefix's fallback — both of which read the app-wide
 selection — were running off a selection only Overview's plate could set.
 
 So the plate is a layer of Sample Map, in the page body at `role="editor"`, and
-`sync_home_sidebar` keeps `_sidebar_sample_frame` hidden. Sample Map publishes
+Home declares no rail frame (§5.4). Sample Map publishes
 its Variables and Well Labels layers' selection to `selected_wells`, which gives
 those two tabs the picker they were described as having.
 
@@ -5280,19 +5282,63 @@ those combos on a data change need no build-state guard.
 
 ### 5.4 The left sidebar
 
-`core/sidebar_view.build_sidebar(app, parent)` builds the well picker
-(`widgets/well_plate_selector.WellPlateSelector`, sized by the shared
-`widgets/plate_geometry.apply_plate_geometry` — see §7) plus the **Select all /
-Select none** buttons, the selection-count chip, and the group hint label.
-Selection signals route through `review/core/selection_controller.py`
+The rail, top to bottom: the dataset control, the section list (`RailNav`), the
+rail plate slot (`core/rail_plate.py`), then the per-page frames. Everything on
+it that varies by page is declared on the feature descriptors rather than
+written in a core roster:
+
+- **Section list.** `tab_controller.sync_section_nav_from_notebook` adds one row
+  per notebook page with the descriptor's `icon` (an icon key `widgets.icons`
+  can draw), and opens each registry group (`FeatureDescriptor.group`) with a
+  `RailNav.addCaption` heading — **Analysis**, **Assays**, **Inspect**,
+  **Output**; Home is the
+  landing page and is not captioned. A caption is not an item: it has no key,
+  is never current, and hides itself while every row in its group is hidden
+  (phone layout hides two Data pages). In phone layout's two-column grid
+  (`RailNav.setColumns(2)`) a caption takes a grid row of its own across both
+  columns.
+- **Per-page frames.** A descriptor's `rail_sections` names the frames its page
+  shows (`RailSection(key, stretch)`; `MAIN_RAIL_SECTION` is the shared main
+  frame). `FeatureRegistry.rail_sections()` lists every declared frame, main
+  first; the shell (`app_shell_view`) builds exactly those, and
+  `tab_controller.on_tab_change` hides them all from the same list, then calls
+  `show_rail_sections` for each page on screen — which shows its declared frames
+  and repaints the rail plate when the main frame is among them — before running
+  the page's `on_activate`. So a frame exists only because a page declares it, a
+  profile that drops the page drops its frame, and a hook carries only what is
+  particular to its page. A page with no descriptor or no hook gets the main
+  frame. Two exemptions, each a row in `tests/test_rail_sections_are_declared.py`
+  with its reason: Home has no rail body, and Statistics shows the main frame
+  from its own hook because it does so only outside Split View.
+
+`core/sidebar_view.build_sidebar(app, parent)` fills the main frame: the well
+picker (`widgets/well_plate_selector.WellPlateSelector`, sized by the shared
+`widgets/plate_geometry.apply_plate_geometry` — see §7, mounted in the rail
+plate slot), then the **selection footer** (`widgets/selection_footer.py`: the
+count, **All**, **None**), the group hint label, the Saved selections drawer and
+the Heat Map layout configurator. The footer is registered as `_sel_count_lbl`,
+the label `selection_controller.refresh_sidebar_map_now` writes — "3 wells
+selected" in per-well mode, "2/3 sets visible" in group mode — and that repaint
+hides **All** on a single-select plate (smFISH, Playground). **All** and
+**None** call `select_all` / `select_none`, which act on whatever the plate shows:
+both decide group mode with the plate's own `_plate_passive_in_group_mode`
+(groups or a variable grouping exist and no well-editing page — Home, Review
+CSV — is on screen), so on Cell Browser, whose plate mirrors the plotted
+groups, they show and hide groups rather than writing a well selection the
+plate does not draw.
+The Image Table's picker ends in the same footer widget, so a selection reads
+and changes the same way on both multi-select pickers. Selection signals route
+through `review/core/selection_controller.py`
 functions (`on_sidebar_plate_selection_changed`, `…_drag_finished`,
 `…_well_activated`, `…_row_activated`, `…_col_activated`,
 `…_well_dropped`); `ReviewApp._on_sidebar_plate_*` are 1-line proxies
 to those functions, kept so the sidebar's `signal.connect(app._on_…)` wires
 still resolve.
 
-The same module builds the **Saved selections** drawer. Both halves of the
-drawer — capturing a selection and loading one — branch on which mode the
+The **Saved selections** drawer is `core/saved_selections.py`; the main frame
+and the Image Table's picker each place one directly under their footer, and
+its header carries the count ("Saved selections (3)",
+`saved_selections_title`). Both halves of the drawer — capturing a selection and loading one — branch on which mode the
 sidebar plate is in, because the two modes keep "the current selection" in
 different stores.
 
@@ -5351,14 +5397,12 @@ load. The Sample definitions reset scope writes both (§5.7).
 
 Other sidebar bodies live with their feature: the preview picker is
 `features/preview/preview_view.py` and the image-table picker is
-`features/image_browser/image_table/picker_view.py`. Statistics has no sidebar
-body at all — its comparison-group editor is part of the Statistics page (see
-the Split View section above for why) — and Home has none either: its
-`_sidebar_sample_frame` is registered and stays empty and hidden, because the
-plate that used to fill it is a layer of the Sample Map tab. They're stacked
-inside the same sidebar QWidget
-and shown/hidden by `core/tab_controller.on_tab_change` based on the
-active tab.
+`features/image_browser/image_table/picker_view.py`, filling the frames their
+descriptors declare. Statistics has no sidebar body at all — its
+comparison-group editor is part of the Statistics page (see the Split View
+section above for why) — and Home has none either: the plate that used to sit
+in a Home rail frame is a layer of the Sample Map tab, and Home declares no
+`rail_sections`.
 
 The collapse toggle (`Ctrl+B` / the button floating on the rail's edge) routes through
 `tab_controller.apply_sidebar_visibility`, which drives **whichever** sidebar
@@ -6157,7 +6201,7 @@ and read the pre-reset value back.
 Each plot tab pre-allocates a right-side dock via
 `make_plot_with_right_dock(parent)`. The dock is hidden by default and a
 **Properties** button on the tab's controls row toggles it. When opened, the
-dock hosts an `ExportStyleSidebar` (from `features/export/sidebar_view.py`)
+dock hosts an `ExportStyleSidebar` (from `features/export/properties_view.py`)
 backed by a `plot_style.figure_prefs(ctx, fig)` view. `_build_ui` assembles
 the panel from one builder per section — `_build_header`, then
 `_build_profile_section`, `_build_scatter_sections`, `_build_cell_values_section`,
@@ -6241,7 +6285,7 @@ control-that-does-nothing shape, arriving from the opposite direction to the
 roster failures below: not a tab a list forgot, but a section no list ever
 limited.
 
-`_STYLE_FACETS_A_FIGURE_LACKS` in `features/export/sidebar_view.py` states the
+`_STYLE_FACETS_A_FIGURE_LACKS` in `features/export/properties_view.py` states the
 exceptions, keyed by the `app` attribute naming the figure, and `_supports(facet)`
 reads it. **Only exceptions**: a figure with no row supports everything and a
 facet absent from a figure's row is supported by it, so forgetting a figure
@@ -6391,7 +6435,7 @@ What a new leaf still has to join, and what each costs when it is missed:
 | `apply_plot_card_decorators(ctx, card, "<leaf>")` | no hover save, no Saved Plots record | same |
 | `plot_card_actions._CARDS` | no Screen/Publication toggle, no global Copy/Save, and `Save figure…` raises into a swallow | `test_plot_card_roster` |
 | both rosters in `export/style.py` | an inert Properties button, or a panel that opens in the wrong place | `test_properties_panel_keys` |
-| `sidebar_view._FIGURE_OWNING_FEATURES`, unless the sidebar already imports the leaf's redraw | every Properties control that needs a real redraw repaints the **Line** tab instead and reports success | `test_properties_panel_redraws` |
+| `properties_view._FIGURE_OWNING_FEATURES`, unless the panel already imports the leaf's redraw | every Properties control that needs a real redraw repaints the **Line** tab instead and reports success | `test_properties_panel_redraws` |
 | `app_state._FEATURE_STATE_OWNERS` | a disabled feature's slice raises a bare `AttributeError` | `test_feature_slice_names` |
 | `ui_helpers.OWN_CHANNEL_LEAVES` — only if the leaf scopes its own Channel/Property | two Channel dropdowns, and an ON-cutoff box editing a channel the tab is not drawing | `test_band_globals_follow_the_leaf` |
 | `plot_style.FIGURE_PLOT_KEYS` | the figure's per-figure prefs fall back to a diagnostic key | — |
@@ -6425,7 +6469,7 @@ also resolves; bar collection, layout and hit-test math (`BarItem`,
 drag handlers from `barplot/_drag_reorder.py`; and `barplot/controller.py` for
 what it defines itself (`render_bar_items`, the redraw, the menus).
 `core/plot_style.py`, `barplot/{controller,collect}.py` and
-`export/{style,sidebar_view}.py` serve only names they own. The one declared
+`export/{style,properties_view}.py` serve only names they own. The one declared
 re-export among them is `plot_style.follows_theme`, so a renderer takes its ink
 and its "this is ink" marker from one import. A test may still patch a name one
 of these modules imports *and calls*, since that patch is the one that reaches
@@ -10693,7 +10737,9 @@ by the well's own template and, when a reference well is named and the input is 
 differ from what the run counts (`reference_input_note`). With no reference named, none measured in the
 output folder, none at that timepoint, or one with no template there, every site's confluence is `None` — never
 0 — and the timepoint's notes say which (`nanowell_reference.NOTE_PREFIX`). `measure_timepoint` with no reference
-(Test detection) reads a timepoint against itself, which is right only for the empty well. The reference folder lies
+(Test detection) reads a timepoint against itself, which is right only for the empty well.
+
+**The empty well's fluorescence floor.** `NanowellSettings.fluor_background` (`--nanowell_fluor_background`, the Nanowell section's *Fluorescence background*; in `key()` only when it is not the default `floor`, and refused without `empty_well`) chooses what every fluorescence number is measured above. `_normalise` records the well's floor level per channel on each timepoint's `normalisation` block (`fluorescence_floor`, the median of its tiles' floors), and `nanowell_task._save_confluence_reference` saves the reference's into `reference.json` beside each `empty` timepoint's template (`_fluorescence_floor` reads it from the grid block, so a kept timepoint of an incremental run keeps its level). `nanowell_reference.load` returns them as `Reference.fluor_levels` only for a run that measures above them, and `Reference.key_at` then adds them to the template's key, so a well measured above a floor that has since moved is stale even when the template did not move (`tests/test_reuse_is_keyed_completely.py`, key `fluor_floor`: the level moved alone must decline the reuse). In `_prepare_timepoint`, `_empty_well_backgrounds` replaces the timepoint's per-tile backgrounds with the reference's one level per channel; the reference well reads its own well-wide level, the one it saved. A channel with no level there — the reference has no image in it, was not measured, or is an output folder the earlier count-based rule refused (the reference is otherwise always believed, `nanowell_reference.verdict`) — gets no background, so every fluorescence number of it is `None` with a note (`nanowell_reference.FLUOR_NOTE_PREFIX`), never measured above the well's own floor in its place: the run asked for the empty well, and a silent substitute reads as the number asked for. A nanowell run applies none of the standard pipeline's flat-field or background subtraction (no `pipeline/nanowell_*` module reads them); the Analyze form hides its Image correction section in nanowell mode and sends `--background none` with no flat-field (`qc_section._correction_options`), so a hidden *From blank well(s)* cannot ask for a Background well before a nanowell run (`bg_map._background_well_validation_error`). The reference folder lies
 under `nanowells/`, so verification's pull of that directory brings it back with the rest — but only as a whole and
 only as this run's: `remote_fetch_nanowells.pull_nanowell_results` sets the local one aside first and
 `_settle_reference` keeps the pulled one only when the well its index names is one this run fetched and every
@@ -10908,9 +10954,13 @@ estimate and the flag are `None`.
 **Records.** `cell_table` gives one row per counted cell with the site, its address
 (`None` for an unaddressed timepoint, so the row exists but cannot be joined over time),
 the well-frame position, the area, and the mean of any intensity images passed.
-`site_fluorescence` gives the integrated and mean interior intensity minus a background: the tile's floor level in
+`site_fluorescence` gives the integrated and mean interior intensity minus a background: by default (`fluor_background == "floor"`) the tile's floor level in
 that channel, the median over its nanowells of each one's modal interior level (`site_floor_levels`), which is the
-floor's whether or not cells sit on it; a tile none of whose nanowells gave one takes the well's, with a note. With
+floor's whether or not cells sit on it; a tile none of whose nanowells gave one takes the well's, with a note. Under
+`fluor_background == "empty_well"` it is the empty reference well's floor level at the same timepoint instead (see
+*The empty well's fluorescence floor* below). The level is written beside the numbers as `<channel>_background`
+(`nanowell_task.write_sites_csv`), which Review takes off the cells' mean intensity too, so both fluorescence
+metrics stand on one background; `MEASURE_VERSION` 9 is the version that writes it. With
 no image, under half the interior on the image, or any non-finite pixel in it, the site's fields are `None`, and with
 no background the background and everything derived from it are `None`. `site_state` is the §3.5
 state of a site: `clipped` (imaged fraction under half) and `occluded` (visible fraction
@@ -12052,7 +12102,7 @@ Every text and line is in the plot's ink and tagged `follows_theme`; the dots ta
 `widgets.plot_card.theme_paired_colours`, the hook `PlotCard.setPlotTheme` uses to repaint a paired data
 palette — so a capture, which flips the theme without a redraw, puts the publication shades on white. `render_site_detail` draws the selected nanowells' series
 against recorded time, a timepoint without a number as a gap and a hatched band, with each timepoint's state
-written above, the rows sharing one time axis labelled under the bottom row. The first selected nanowell's crops (`controller.crops_site`) are drawn on a figure of their own under the detail, `renderer.render_crop_strip` on `_nw_strip_fig`, below a row holding **Pop out** (`_nw_popout_btn`, `tab_view._crops_header`). **Pop out** (`controller.pop_out_crops`) opens a non-modal `QDialog` owned by the app's window (`tab_view._PopoutWindow`, built on first use by `tab_view._popout_window` and kept; `_nw_popout`, `_nw_popout_fig`) — a dialog rather than a `QWidget` with the `Qt.Window` flag, because Windows keeps a dialog above its owner and let the plain window drop behind the app and draws the same crops large there (`renderer.render_crop_grid`): one panel per timepoint, all on one brightness scale (the 1st–99th percentile of every crop together) so a change between timepoints reads as a change, with the source and scale in the caption. `redraw_detail` redraws it whenever it is open (`controller.draw_popout`), so it follows the selection, and says a nanowell has to be selected when none is; the page's own figure and every control beside it are untouched by it. The window carries its own row of controls (`tab_view._popout_controls`): the image channel (`_nw_popout_image_channel_cb`, one of `_IMAGE_CHANNEL_COMBOS`), **Range** (`_nw_popout_range_btn`, one of `DISPLAY_RANGE_BUTTONS`), **Cells** (`_nw_popout_cells_box`), **Metrics** (`_nw_popout_metrics_box`, `crop_metrics`: the measurement lines under each crop), **Labels** (`_nw_popout_labels_box`, `NanowellState.popout_labels`, persisted: `render_crop_grid(labels=)` leaves out each panel's timepoint and the caption, keeping the title) and **Go to nanowell**. Each is the page's one setting; `refresh_controls` runs once when the window is built and keeps every crop checkbox on its state (`_CROP_BOXES`, `_sync_crop_boxes`). The crops arrive by the site detail's own worker fetch. **Cells on the crops.** Every crop carries the cells the run counted in its own nanowell (`image_compute.Crop.cells`, ``(column, row)`` pixels, `None` when the well has no cell table so "no table" never reads as "no cell"): `_cut_well` reads the well's cell table once per timepoint (`collect.cell_positions`) and `_cells_in` keeps only the cells whose `nw_q` / `nw_r` is the crop's nanowell — the crop is cut `pad` times the nanowell's radius, so its margin takes in parts of the neighbours, and their cells are left out so every dot is one the selected nanowell's count is made of — and places each cell from the well frame using the crop's own corner — `_cut_at` returns the tile or montage pixel the crop starts at, clipped at the image's edge, so a crop cut at a tile's border measures from that border — at the tile's or the montage's scale. One switch, `NanowellState.crop_cells` (persisted; `controller.set_crop_cells`), offered as **Cells** beside *Pop out* (`_nw_strip_cells_box`), in the pop-out (`_nw_popout_cells_box`) and on the Extremes view (`_nw_extremes_cells_box`, all kept on it by `refresh_controls`), has `render_crop_strip`, `render_crop_grid` and `render_extremes` draw them through `renderer._draw_crop_cells` in the Array view's Cells colours, each caption counting the dots and naming crops of a well with no cell table (`_cells_clause`). `tests/test_nanowell_crop_cells.py` pins the pixel placement (a tile crop, one clipped at the tile's edge, a montage crop), that a neighbour's or an unassigned cell inside the crop's rectangle is left out, and drives both boxes. The detail's title row (`tab_view._detail_header`) carries a close button, `_nw_detail_close_btn` (✕), which calls `controller.clear_selection`; a click on empty space clears the selection the same way on every view, and with nothing selected `redraw_detail` hides the pane. The crop panels carry `_aw_image_panel`, so a style pass never puts a typed axis range on a crop.
+written above, the rows sharing one time axis labelled under the bottom row. **What the fluorescence was measured above.** Cell fluorescence (mean per cell, the `brightness` metric) and nanowell fluorescence (`signal`) are taken over one background, the one the run chose (`--nanowell_fluor_background`), and `background_compute` says which: `well_mode` reads a well's mode from its site table's columns and its grid record's `settings` (`floor`, `empty_well`, or `none` for a table with no `<channel>_background` column), `NanowellData.fluor_backgrounds` holds it per well, and `series_compute.site_metrics` takes the site's `<channel>_background` off the mean of its cells' means **after** Cell Gating has recomputed that mean from the cells it keeps — so the gated brightness is corrected too — leaving a `none` well's cell fluorescence raw and a site the run left without a level blank. `distribution_compute.metric_label(metric, channel, modes)` is the one axis label, used by every view, the site detail (`background_compute.short_clause` for its second line) and the plot tools' observation metrics: the Metric menu's `METRICS` names are the bare metrics, because the menu is built before a dataset is read, and the label adds *own-well background subtracted*, *empty-well background subtracted*, *background included* (a `none` well's cell fluorescence; its nanowell fluorescence was still over the floor) or *background differs between wells*. The two metrics are otherwise the same kind of number in the same channel, so only the label tells a reader whose light was taken away. The per-cell Scatter's "Nanowell ▸" entries are listed from the site tables' header rows (`collect.site_backgrounds`, from the dataset's settings rather than each grid record) so the picker needs no table computed. `renderer._wrap_label` breaks a grid's y label onto at most three lines, widening until they hold it, and keeps every word: the end of a channel metric's label is where the background and the channel are written, so cutting it after two lines made the metrics read alike (`tests/test_nanowell_metric_labels.py`). The first selected nanowell's crops (`controller.crops_site`) are drawn on a figure of their own under the detail, `renderer.render_crop_strip` on `_nw_strip_fig`, below a row holding **Pop out** (`_nw_popout_btn`, `tab_view._crops_header`). **Pop out** (`controller.pop_out_crops`) opens a non-modal `QDialog` owned by the app's window (`tab_view._PopoutWindow`, built on first use by `tab_view._popout_window` and kept; `_nw_popout`, `_nw_popout_fig`) — a dialog rather than a `QWidget` with the `Qt.Window` flag, because Windows keeps a dialog above its owner and let the plain window drop behind the app and draws the same crops large there (`renderer.render_crop_grid`): one panel per timepoint, all on one brightness scale (the 1st–99th percentile of every crop together) so a change between timepoints reads as a change, with the source and scale in the caption. `redraw_detail` redraws it whenever it is open (`controller.draw_popout`), so it follows the selection, and says a nanowell has to be selected when none is; the page's own figure and every control beside it are untouched by it. The window carries its own row of controls (`tab_view._popout_controls`): the image channel (`_nw_popout_image_channel_cb`, one of `_IMAGE_CHANNEL_COMBOS`), **Range** (`_nw_popout_range_btn`, one of `DISPLAY_RANGE_BUTTONS`), **Cells** (`_nw_popout_cells_box`), **Metrics** (`_nw_popout_metrics_box`, `crop_metrics`: the measurement lines under each crop), **Labels** (`_nw_popout_labels_box`, `NanowellState.popout_labels`, persisted: `render_crop_grid(labels=)` leaves out each panel's timepoint and the caption, keeping the title) and **Go to nanowell**. Each is the page's one setting; `refresh_controls` runs once when the window is built and keeps every crop checkbox on its state (`_CROP_BOXES`, `_sync_crop_boxes`). The crops arrive by the site detail's own worker fetch. **Cells on the crops.** Every crop carries the cells the run counted in its own nanowell (`image_compute.Crop.cells`, ``(column, row)`` pixels, `None` when the well has no cell table so "no table" never reads as "no cell"): `_cut_well` reads the well's cell table once per timepoint (`collect.cell_positions`) and `_cells_in` keeps only the cells whose `nw_q` / `nw_r` is the crop's nanowell — the crop is cut `pad` times the nanowell's radius, so its margin takes in parts of the neighbours, and their cells are left out so every dot is one the selected nanowell's count is made of — and places each cell from the well frame using the crop's own corner — `_cut_at` returns the tile or montage pixel the crop starts at, clipped at the image's edge, so a crop cut at a tile's border measures from that border — at the tile's or the montage's scale. One switch, `NanowellState.crop_cells` (persisted; `controller.set_crop_cells`), offered as **Cells** beside *Pop out* (`_nw_strip_cells_box`), in the pop-out (`_nw_popout_cells_box`) and on the Extremes view (`_nw_extremes_cells_box`, all kept on it by `refresh_controls`), has `render_crop_strip`, `render_crop_grid` and `render_extremes` draw them through `renderer._draw_crop_cells` in the Array view's Cells colours, each caption counting the dots and naming crops of a well with no cell table (`_cells_clause`). `tests/test_nanowell_crop_cells.py` pins the pixel placement (a tile crop, one clipped at the tile's edge, a montage crop), that a neighbour's or an unassigned cell inside the crop's rectangle is left out, and drives both boxes. The detail's title row (`tab_view._detail_header`) carries a close button, `_nw_detail_close_btn` (✕), which calls `controller.clear_selection`; a click on empty space clears the selection the same way on every view, and with nothing selected `redraw_detail` hides the pane. The crop panels carry `_aw_image_panel`, so a style pass never puts a typed axis range on a crop.
 
 **The QC view** (`qc_compute`, `_qc_render`, `_qc_controller`, `qc_view`) is the plate's wells down and its
 timepoints across, each cell holding the one state that says what needs doing about that timepoint. It is the
@@ -12082,8 +12132,11 @@ title counts the timepoints needing a look and the legend counts every state on 
 the canvas readout (`ax._aw_hover_label`) and its sentence is the tooltip (`qc_compute.hover_text`). A click opens
 the cell where it is dealt with: a verdict on the Identity view (`_qc_controller.open_identity`, which adds the well
 to the selection as `open_for_anchor` does), an anchor's business on the Array view through `open_for_anchor`. The
-view's band carries *Wells* and the *Anchor* group: *Anchor queue*, *One per well* and *Re-run anchored wells…*
-(`qc_view`), *Anchor queue* greyed with `qc_compute.queue_tip`'s reason when nothing waits. The export style pass
+view's band carries *Wells* and the *Anchor* group (`qc_view`): *Anchor queue*, the page's primary action, whose
+text says what it walks (`qc_compute.queue_label`, counted by `queue_size` with `one_per_well`'s rule) and which is
+greyed with `qc_compute.queue_tip`'s reason when nothing waits; *One per well*, a checkbox because it is an option of
+the walk rather than an action, whose toggling changes that count; and *Re-run anchored wells…*. While any timepoint
+is not addressed the figure says what to press (`qc_compute.action_line`), since a tooltip is not seen over VNC. The export style pass
 sets every tick label to the Properties size, so `QcDrawn.relabel` puts the matrix's own label sizes back after it.
 `tests/test_nanowell_qc_view.py` pins the precedence on records where the wrong rule answers differently, and drives
 the real page with nothing selected: the view bar, a real click on a cell, and leaving Array mid-walk.
@@ -12108,7 +12161,7 @@ shared with the enlarged crops), the ranking timepoint's column outlined, each r
 value, and **every word a crop carries is written inside it**, on a translucent band of the ground: the fold change
 at its timepoint in its top-left corner (`format_value`: `2.31×`, or a signed difference on log₂), and along its
 foot one line of the nanowell's metrics there (`series_compute.crop_metric_lines`: count, confluence as a
-percentage, the shared channel's nanowell fluorescence and brightness as `fluor.` and `bright`, in that order of
+percentage, the shared channel's nanowell fluorescence and cell fluorescence as `fluor.` and `per cell`, in that order of
 importance, `compact_number` for thousands; a state without numbers by name; a missing measurement left out, never zero) — as many as fit the
 crop's width (`renderer._one_line`), the caption saying when some were left for the pop-out, which writes each
 panel's full metrics under it (`render_crop_grid(…, metrics=…)`, `controller.crop_metrics(…, focus=True)`), ending
@@ -12452,6 +12505,26 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   tile's TIFF header, and the tiles layer takes it from there. Moving to another well or timepoint, turning the
   image off or loading another dataset cancels the store's reads at their next tile and lets its pixels go
   (`state.release_tiles`).
+- **The controls** (`tab_view._build_array_controls`, `_refresh_array_controls`). The band reads in two tiers: the
+  page's data controls first (Metric, Channel, Baseline, Subset, Rim focus — the same on every view), then the view's
+  own, ordered where → how drawn → edit: the *Where* item (`_nw_where_group`: Well with Exclude, and Timepoint, one
+  flow item so they never wrap apart; `tab_view._show_where` shows either part per view and measures the item
+  again), Positions (before Image, because Lattice is what greys it), Image with its channel and Range, Layers, and
+  Set anchor / Clear anchor / *Re-run wells…* with no caption (the QC view's copy keeps the long label). *Excluded
+  (n)* is a trailing item, so its coming and going moves nothing. The zoom (−, readout, +, *Fit*, *1:1*),
+  *Overlays* and *Notes* are viewing actions rather than settings, so they sit under the figure in the card's own toolbar,
+  after its navigation buttons (`mount_array_canvas_tools`, through `MplToolbar.add_group`, each group behind its
+  own separator and shown with the view's other controls); on the Array view that toolbar's *Reset view* is *Fit*
+  (`MplToolbar.setHomeHandler`), because matplotlib's home returns to the limits of a first draw the view's own
+  region has replaced. At 1500 px the band is two rows, walking or not. Every control that cannot act is greyed with
+  its reason after its own tooltip (`tab_view._grey`, `_refresh_array_greying`): Image on Lattice; the image
+  channel and Range unless Image is Full resolution; *1:1* with no image pixel; Set anchor with the first clause
+  of `anchor_controls`' predicate that fails (`controller.anchor_unavailable_reason`); Clear anchor and Re-run
+  wells… with nothing to clear or re-run. Nothing is hidden by a layer choice, and
+  `tests/test_nanowell_array_band_layout.py` (UI lane) holds every control's position fixed across layers,
+  colourings, images, positions and Overlays, and the row count at 1500 px. The theme's `secondary` buttons carry
+  their own `:disabled` rule: the `[variant="secondary"]` selector outranks a bare `:disabled`, so without it a
+  greyed secondary button painted as an enabled one, app-wide.
 - **Moving around and clicking** (`controller.on_click` / `on_motion` / `on_release` / `on_scroll`, connected on
   the page's canvas). A press records where it started; a drag pans the axes at once and, on release, keeps the
   region (`state.region`, for the `(well, positions)` in `region_for`, so another well or frame fits afresh) and
@@ -12504,8 +12577,9 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   `ADVANCE_DELAY_MS`, dropping the move if Back, Skip or Stop changed the position meanwhile. While it runs, on the
   Array view, a *Queue* group (`anchor_queue_view`) shows `3 of 17 · B04 at 24h`, *Back*, *Skip*, *One per well*
   and *Stop*, with keys for three of them (`anchor_queue_view.KEYS`: ← Back, → Skip, Esc Stop) as `QShortcut`s
-  parented on the group with a window context, so they act only while the group is shown. It is the band's first
-  group, so it sits at the band's left edge however the Array view's own groups wrap. Because its keys die with the
+  parented on the group with a window context, so they act only while the group is shown. It stands in the place
+  of the Where item, which the walk drives and its label names, and *Re-run wells…* steps aside while it runs, so a
+  walk adds nothing to the band's width. Because its keys die with the
   group, leaving the Array view mid-walk ends the walk (`controller.set_view` calls `_anchor_queue.stop` with the
   view chosen). The page's checkable buttons (*Set
   anchor*, *Overlays*, *One per well*) take the theme's `toggle` variant: `secondary` overrides the `:checked`
@@ -12598,7 +12672,7 @@ that name a well standing alone: a Trajectories panel (`TrajectoryPanel.name`), 
 (`PositionSeries.name`), the Array title (`ArrayScene.name`) and a Statistics sample of the nanowells unit
 (`Sample.label`, while `Sample.name` stays the well that *vs* matches); Extremes' title is `well_caption`'s. A
 sub-swarm under a group prints its bare well, the group's name being on the tick above it. Batch Export's Nanowells
-mode names its groups and wells through the same two functions. Brightness and nanowell fluorescence, and
+mode names its groups and wells through the same two functions. Cell fluorescence and nanowell fluorescence, and
 their fold changes, are drawn for the page's own **Channel** (`_nw_channel_cb`, `NanowellState.channel`, persisted),
 beside Metric on every view: the app's shared channel selector sits on the Plotting band, which this page does not show,
 so the page cannot depend on it alone. `controller.page_channel_name` resolves it — the page's choice when set; else
@@ -12714,13 +12788,13 @@ figure selects the nearest drawn dot within 6 px; Shift, ⌘ or Ctrl adds (up to
 
 **Shared machinery.** The page is on every roster a plot page joins: `plot_style._FIG_PREF_KEY_MAP`
 (`nanowell`, `nanowell_detail`, and `nanowell_crops` / `nanowell_crops_popout` for the crop strip and the pop-out window), the Properties dock and open-panel maps in `features/export/style.py`, the
-feature redraw in `features/export/sidebar_view._FIGURE_OWNING_FEATURES`, and `plot_card_actions._CARDS` for
+feature redraw in `features/export/properties_view._FIGURE_OWNING_FEATURES`, and `plot_card_actions._CARDS` for
 the page's card, the site detail's and the crop strip's (the pop-out window's card carries its own theme toggle). `view_state_io` makes a Saved Plot restore the whole configuration, the selected nanowells
 included. *Save nanowell data…* writes `long_format` for the wells the page draws (`export_long_csv(…, wells)`:
 other wells may be loaded from an earlier selection), and is refused with a status while the metrics on hand
 were computed for another baseline than the one chosen (`loaded_for[1] != baseline`, or a load in flight) or before a gating, curation or QC edit moved `population_version` (`gated_for != gate_version`, which also starts the recompute); *Save cell data…* exports the per-cell rows of the drawn
-wells that carry a nanowell address (`cell_scope_compute`), filtered by `df_included_mask` with the scatter gates applied — the same rule `gate_tally` takes out of each count — so the file holds exactly the cells the counts count (`test_nanowell_counts_follow_cell_gating.py::test_save_cell_data_exports_exactly_the_cells_the_page_s_counts_count`). The rail glyph map lives in
-`review/core/section_icons.py`. The Properties panel's Lines & Markers controls restyle the median line and
+wells that carry a nanowell address (`cell_scope_compute`), filtered by `df_included_mask` with the scatter gates applied — the same rule `gate_tally` takes out of each count — so the file holds exactly the cells the counts count (`test_nanowell_counts_follow_cell_gating.py::test_save_cell_data_exports_exactly_the_cells_the_page_s_counts_count`). Its rail glyph is the descriptor's
+`icon` (§5.4). The Properties panel's Lines & Markers controls restyle the median line and
 the statistic marks; the beeswarm dots are deliberately not tagged `_aw_marker_collection`, because a dot's
 size is the unit the layout packs by, and a larger dot from the panel would overlap its neighbours.
 
@@ -13864,9 +13938,12 @@ the metric; the frame's own µm/px; and a note of what it leaves out.
   A LUT row's **per cell** (`ChannelSpec.auto_per_cell`) keeps that channel out of the pooled window, so each cell is
   scaled to its own range; the key then says the colours are not comparable between cells.
 - **Labels.** `nanowell_images.display_token` names a frame on axes, chips, titles and the hover line: a metric by its
-  short label (`short_label`, cut at its explanation, `NW: GFP Brightness`) in its own case — `ChannelSpec.axis_token`
+  short label (`short_label`, cut at its explanation, `NW: GFP Cell fluorescence`) in its own case — `ChannelSpec.axis_token`
   keeps a nanowell frame's case, since upper-casing broke `log₂` and `n₀` — while the key and the chip's tooltip give
-  the full label. A frame shows the whole well, so neither the corner of a grid made only of frames
+  the full label. A frame's token carries the full label, background clause included, and
+  `table_frame_compute._metric_frame` resolves it by label, by key, or by the label without that clause
+  (`background_compute.bare_label`), so a frame kept in a view draws the same metric on a dataset measured above
+  another background. A frame shows the whole well, so neither the corner of a grid made only of frames
   (`facet_view.plan_facets`) nor a frame's identity label names a field.
 - **The builder.** The Channels tray folds the metric maps behind one **Nanowell metrics** toggle
   (`builder_view._build_tray`), and the starting table (`_default_spec`) holds `MONTAGE` and the raw channels but no
@@ -19050,7 +19127,7 @@ The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which u
 | `removable_row` (`widgets/removable_row.py`) | **A list row whose remove button appears while the pointer is over it.** Built for the recent-datasets list, which two surfaces draw — Home's card and the no-dataset placeholder — and which wants the row itself to be the target with a small × on its right edge. Two decisions carry the widget. The ×'s **space is reserved in both states**: a control that appears by widening the row shifts the label at the instant the pointer arrives, so the button lives inside a fixed-width slot and only the button inside it is hidden. And **hover is counted, not sampled** — moving from the row onto the × is a Leave on one and an Enter on the other, so a handler hiding on any Leave removes the button exactly as the user reaches for it; Enter and Leave are counted across the row and every child, and the count is order-independent because Qt does not promise Enter-before-Leave across a parent/child crossing. `row_entry` and `row_remove_button` are named accessors, because a caller holding "the row at index 2" cannot otherwise tell a wrapped row from the bare widget an unremovable one returns, and a lookup spelled five ways is five places to fix. |
 | `Popover`, `Drawer`, `Toast`, `EmptyState` | Generic overlay primitives. `Drawer` slides in from `edge="right"` (default — the Help drawer) or `edge="bottom"` (a full-width panel sized by `height_hint`/`height_fraction` — the Application Log drawer, whose long lines the narrow right panel clipped). |
 | `FlowLayout` | A `QLayout` (not a widget) that reflows its children onto multiple lines instead of clipping — the standard Qt Flow Layout adapted to PySide6. Control rows that carry more widgets than fit at a narrow width (the plotting / image-review "TabCtrl" rows) use it so **Split View** halving the pane grows the row taller rather than hiding controls off the right edge. Four rules go with it. (1) A flow row skips hidden widgets when it places items, so *which* widgets are visible is an input to the layout, not merely a blanked slot — `_FlowItemVisibility` watches show/hide on every managed widget and invalidates the layout, without which a row that swaps one option group for another (the Multivariate tab's per-mode row) keeps the positions computed for the previous visible set and paints the newly-shown group on top of them. That watcher resolves the layout from its own `parent()` and keeps **no** per-instance state: its C++ object belongs to the layout, so it outlives the Python instance `__init__` ran on, and PySide builds a fresh wrapper for it once that instance is collected. Anything stashed on `self` is gone by then — a watcher that remembered its layout in an attribute raised `AttributeError` inside the Qt event loop on every subsequent show and hide, and the row stopped reflowing. (2) A label and the control it names must go in as one `flow_group` item, or the row can wrap between them. (3) A host whose row may wrap needs `sync_flow_height`, since a stacked page sizes the row from its one-line minimum and clips the second line otherwise. (4) Spacing is fixed — 14px horizontal, `theme.Spacing.xs` vertical — **not** derived from the platform style, and no call site overrides it. Deriving it asks `pixelMetric(PM_Layout*Spacing)`, which Qt documents as returning -1 on styles that implement the size-class-aware `layoutSpacing()` instead. Measured, the two styles are exact opposites: QMacStyle reports `pixelMetric = -1, layoutSpacing = 14`, Fusion reports `pixelMetric = 6, layoutSpacing = -1`. The layout clamps with `max(0, …)`, so on macOS every row that relied on the derived value packed its controls edge to edge, while CI (on Fusion) saw 6 and looked fine. The 14 is QMacStyle's own button-row spacing, adopted app-wide because it is the one number measured against a real control row — it is deliberately off the `theme.Spacing` scale. Passing `-1` still derives, but now asks both APIs and falls back to the defaults rather than to nothing. |
-| `MplToolbar` | The slim toolbar shown under every matplotlib figure (home / pan / zoom / save + coords readout). |
+| `MplToolbar` | The slim toolbar shown under every matplotlib figure (home / pan / zoom / save + coords readout). `add_group` appends a caller's widgets behind their own separator; `setHomeHandler` lets a figure that keeps its own view region make *Reset view* its own fit. |
 | `WrapCheckBox` | A checkbox whose label word-wraps, for the Analyze form's long-labelled options. A plain `QCheckBox` reports its full text width as its minimum, which pins the whole scroll-area sidebar that wide; this composites a text-less indicator with a wrapped `QLabel`. Because the label wraps, the composite's height depends on its width — and a `QWidget` inherits neither its child's `heightForWidth` nor a size policy advertising one, so it implements both. Without them a parent column sizes the row from a single line and a label that wraps to two spills over whatever sits below it. The indicator↔label gap is the app-wide checkbox `spacing` token (`theme.Spacing.sm`), not a hand-picked constant — the composite draws its own label, so a smaller gap read tighter to the box than every native checkbox beside it, and with no Fusion pin the app renders under the platform style (native QMacStyle on macOS, Fusion only on CI), where that shortfall put the first word on top of the indicator. Same lesson as `FlowLayout`'s spacing rule: a control gap comes from the token scale, never from an off-scale constant or the platform style. |
 | `BrandTile`, `IconButton`, `StatusDot`, `KbdHint`, `SelectionChip` | Misc small bits. |
 
@@ -21454,11 +21531,16 @@ named `ssh` or `rsync`.
    - Add an `app._redraw_<name>()` shim on `ReviewApp` and call it from
      the relevant tab-change / selection-change paths in
      `core/selection_controller`.
-4. Register the tab in `core/centre_view.py`'s `groups` list (it sits
-   under "Analysis" / "Images" / "Data" sections) and create a
-   `_build_<name>()` closure that calls your `build_<name>_tab`.
-5. Add an icon to `_SECTION_ICONS` in `runtime_app.py` if you want it to
-   appear in the rail nav.
+4. Declare a top-level `FeatureDescriptor` in `features/registry.py` with
+   `build=` and `group=` — the rail caption it sits under. `centre_view`
+   builds pages group by group in `FeatureRegistry.groups()` order, which is
+   declaration order, so a new group needs no edit outside the descriptor; but
+   a group of one fails `tests/test_rail_nav_groups.py` (it looks orphaned and
+   costs a phone a whole grid row), so find the page a partner first.
+5. Give a top-level descriptor its rail glyph (`icon=`, an icon key
+   `widgets.icons` can draw) and every page with an `on_activate` hook its
+   rail frames (`rail_sections=`, usually the main frame);
+   `tests/test_rail_sections_are_declared.py` fails on either missing.
 6. End your redraw with
    `core.plot_style.apply_export_style_to_current(ctx, fig, canvas)` so the
    Properties sidebar's toggles apply.
@@ -21469,18 +21551,13 @@ named `ssh` or `rsync`.
    feature package — `review/features/<feature>/` — with a
    `build_<name>(app, parent)` function. Pure cross-cutting sidebar bodies
    (e.g. the main plate picker) live in `review/core/sidebar_view.py`.
-2. In `runtime_app._build_ui`, allocate a `QWidget` for it and hide it by
-   default:
-   ```python
-   self._sidebar_<name>_frame = QWidget()
-   QVBoxLayout(self._sidebar_<name>_frame).setContentsMargins(0, 0, 0, 0)
-   sidebar_layout.addWidget(self._sidebar_<name>_frame, 1)
-   self._sidebar_<name>_frame.hide()
-   ```
-3. In `core/tab_controller.on_tab_change`, show your frame on the relevant
-   tab and hide every other sibling frame.
-4. Build the frame body lazily — usually called from the tab's
-   `_build_<tab>()` closure in `core/centre_view.py`.
+2. Declare the frame on the page's descriptor:
+   `rail_sections=(RailSection("_sidebar_<name>_frame"),)` — stretch `0` if it
+   shows beside the main frame and should stay compact under it. The shell
+   builds it, and the tab switch hides it on every change and shows it while
+   the page is on screen (§5.4); nothing else needs editing.
+3. Build the frame body lazily into `ctx.widgets.get("_sidebar_<name>_frame")`
+   — usually from the tab's own builder.
 
 ### 11.3 Persist some state to disk
 
@@ -21603,7 +21680,7 @@ builders never run from the background drain.
 Every figure-styling toggle writes into that figure's own prefs
 (`plot_style.figure_prefs`, stored in `core/export_prefs_state.py`'s
 `axis_prefs` under the figure's key; the panel itself is
-`features/export/sidebar_view.py`). Every controller ends its redraw
+`features/export/properties_view.py`). Every controller ends its redraw
 with `core.plot_style.apply_export_style_to_current(ctx, fig, canvas)`.
 If a new redraw entry point you added is "losing" the user's toggles, it's
 missing that call at the end.
@@ -21962,7 +22039,7 @@ The map (each rule links to the test that holds it):
 | A closed `ReviewApp` is collected, leaves no top-level widget, PySide wrapper or app-class object behind, and a window closed mid-drain runs no deferred builder after it is gone (§10.4) — slow lane, run by hand | `tests/test_a_closed_review_app_is_freed.py` |
 | A closed minimal shell with the Playground built is collected and leaves no top-level widget behind (§10.4) — fast lane | `tests/test_a_closed_shell_is_freed.py` |
 | A menu or toolbar action whose signal is connected is built with `widgets.owned_action`, never by `addAction(text)` (§7) — fast lane | `tests/test_connected_actions_are_owned.py`, bite cases in `tests/test_guards_bite.py` |
-| `core/plot_style`, `barplot/{controller,collect}` and `export/{style,sidebar_view}` serve only names they define, apart from declared re-exports that are live and are the owner's own object (only `plot_style.follows_theme`); each name in `services.remote_runner.__all__` is the object its owner defines (§5.8, *Plotting import paths*) | `tests/test_plotting_facades_are_frozen.py`, bite cases in `tests/test_guards_bite.py` |
+| `core/plot_style`, `barplot/{controller,collect}` and `export/{style,properties_view}` serve only names they define, apart from declared re-exports that are live and are the owner's own object (only `plot_style.follows_theme`); each name in `services.remote_runner.__all__` is the object its owner defines (§5.8, *Plotting import paths*) | `tests/test_plotting_facades_are_frozen.py`, bite cases in `tests/test_guards_bite.py` |
 | Every literal `lazy` / `lazy_names` / registry `_import_attr` target names something its module defines | `tests/test_lazy_targets_resolve.py`, bite cases in `tests/test_guards_bite.py` |
 | Split View is one-line removable — uninstalled, the resolvers collapse to single-tab (§5.10) | `tests/test_split_view.py::test_not_installed_is_single_tab` |
 | Build profiles: a subset boots + loads, the strip plan matches the runtime filter, and the binary drops the excluded features' deps (§5.3 *Build profiles*) | `tests/test_feature_profile.py`, `tests/test_derive_profile.py`, `tests/test_profile_build.py` |

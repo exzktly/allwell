@@ -406,18 +406,13 @@ def test_import_follows_the_layer_not_the_tab(tab):
 
 # ── Home keeps no rail body ─────────────────────────────────────────────────
 
-def test_home_never_shows_a_rail_plate_frame(qtbot):
+def test_home_never_shows_a_rail_plate_frame():
     """``activate_home``'s docstring has always said Home shows no rail frame.
-    The sample frame contradicted it, and carried the second plate."""
-    from review.features.home.controller import sync_home_sidebar
+    The sample frame contradicted it, and carried the second plate. It is gone:
+    the rail's frames are the ones pages declare, and Home declares none, so
+    the tab switch shows nothing on the rail for it."""
+    from review.features.registry import build_feature_registry
 
-    ctx = _ctx()
-    frame = QWidget()
-    qtbot.addWidget(frame)
-    frame.show()
-    ctx.widgets.register("_sidebar_sample_frame", frame)
-    ctx.features = SimpleNamespace(get=lambda _n: None,
-                                   sub_leaves=lambda _p: ("Sample Map",))
-    ctx.runtime.home.subtabs = None
-    sync_home_sidebar(ctx)
-    assert not frame.isVisible()
+    features = build_feature_registry()
+    assert features.get("Home").rail_sections == ()
+    assert "_sidebar_sample_frame" not in {s.key for s in features.rail_sections()}

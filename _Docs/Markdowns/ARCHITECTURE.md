@@ -1195,6 +1195,9 @@ review/
 │   │                                    ProgressPopup, one job at a time (§5.3, Cell Gating)
 │   ├── rail_plate.py                 ← the sidebar's one well-picker slot
 │   ├── section_icons.py              ← the glyph beside each rail entry
+│   ├── observation_band.py           ← the Plotting band's Observations: Cells | Nanowells toggle,
+│   │                                    its nanowell Metric picker and the cell plots' footer (§6.2l)
+│   ├── threshold_note.py             ← the sentence an unset, cut-nothing ON cutoff draws instead of bars
 │   └── ui_helpers.py, notifications.py, dnd.py
 ├── data/                          ← IO + decode
 │   ├── data_loading.py, image_discovery.py, image_resolver.py,
@@ -1213,6 +1216,10 @@ review/
 │   │   verdicts, per field and per cell, onto the row cache (§6.7)
 │   ├── frame_load.py, dataset_dims.py   ← the layer under every image grid:
 │   │   an address → its pixels, and what a dataset offers per dimension
+│   ├── dataset_layout.py           ← where in/ and out/ are, given the folder opened
+│   ├── nanowell_images.py          ← a nanowell run's stitched montage as a frame (MONTAGE)
+│   ├── observations.py             ← cells, or the Nanowells feature's nanowell rows through its
+│   │   registry service; a cell's own nanowell's metric joined onto its row (§6.2l)
 ├── domain/                        ← Qt-free models + pure logic
 │   ├── batch_models.py, ratio_models.py, selections_model.py, plate_layout.py
 │   ├── fold_change.py, fold_change_scopes.py, fold_change_state.py
@@ -1221,6 +1228,9 @@ review/
 │   ├── gating_state.py, sample_definitions.py, viewer_state.py, stats_compute.py
 │   ├── well_population.py   ← a well's threshold-free cells, for threshold edits without a read
 │   ├── metric_registry.py, qc_params.py
+│   ├── channel_roles.py              ← which channel is phase: listed last, never the default plot channel
+│   ├── observation.py                ← cells | nanowells, the observation-table contract, well medians,
+│   │                                    the "Observations: …" footer line (§6.2l)
 │   ├── multivariate_compute.py       ← PCA/correlation/clustering/faceting math (Qt-free)
 │   ├── spatial_compute.py            ← spatial/neighbourhood math (Qt-free)
 │   ├── image_frames.py               ← the per-field frame plan an Image Table
@@ -1326,7 +1336,9 @@ review/
 │   │                 controller.py, state.py, tab_view.py, view_state_io.py,
 │   │                 cell_scope_compute.py, moving_compute.py  ← the Nanowells page: nanowell
 │   │                 tables, per-nanowell metrics, the Distribution beeswarm
-│   │                 and site detail [removable]
+│   │                 and site detail [removable]; observation_compute.py and
+│   │                 overlay_compute.py answer the observations.nanowell and
+│   │                 segmentation.nanowell_overlay services (§6.2l)
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
 │   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
 │   │                 + _svg_shapes.py (the PowerPoint export),
@@ -1838,11 +1850,21 @@ every plot, 97px of chrome where the row now costs 53.
 That swap is what the band buys on the **Scatter Plot** sub-tab. Scatter has
 per-axis channel and property selectors of its own, so the global
 Channel / Property / Threshold controls do not drive its plot; they are removed
-from the band while Scatter is current, and a `Cells | Wells` **View** toggle
-takes their place. The band therefore only ever carries controls that do
-something.
+from the band while Scatter is current, and a **Points: Each observation | Per
+well** toggle takes their place — each cell (or each nanowell, under
+Observations: Nanowells), or one point per well. The band therefore only ever
+carries controls that do something.
 
-The View toggle lives in the band, which is core, while the Scatter page is a
+The first group in the band, before every other control, is **Observations:
+Cells | Nanowells** (`core/observation_band.py`, §6.2l). It is shown only on a
+nanowell dataset, in a build with the Nanowells feature, on a leaf whose
+descriptor declares nanowells; a leaf that declares cells only shows the static
+line "Observations: cells — no nanowell view for this plot" in its place. Under
+Nanowells a leaf drawing with the band's scope (every one but Scatter, whose
+axes pick their own) swaps Channel / Property / ON threshold for one **Metric**
+picker over the nanowell metrics.
+
+The Points toggle lives in the band, which is core, while the Scatter page is a
 feature. They are wired through `ctx.runtime.scatter.set_mode` and the widget
 registry, never an import: the band calls `set_mode`, and `build_scatter_tab`
 mirrors the toggle back through `ctx.widgets.get_or_none("_plotting_scatter_view")`
@@ -5451,7 +5473,10 @@ The relevant modules:
 | `data/image_discovery.py` | Scans zips / loose directories for masks, overlays, tophat images. Classifies by suffix + schema. **The loose-file fallback walks three levels and no further.** When no layout yields a channel's images, `_scan_raw_disk_files` lists the input and output trees through `_walk_capped`, which returns what `sorted(rglob('*'))` filtered to depth 3 returned, in the same (first-hit-wins) order, but never enters a directory whose entries would be deeper — `rglob` listed the whole tree and discarded the deep part afterwards. Like `rglob`, it lists a symlinked directory and does not descend into it (`os.walk(followlinks=False)`): following links walked linked trees and loops the old scan never saw, and surfaced files that could change which one the first-hit merge used (`tests/test_image_table_rerender_rescans_nothing.py`). **A scan logs a summary, not its members.** An inventory covers every timepoint and FOV of the well whatever the view selects (it is cached per well, channel and variant for the session), so `zip_members.scan_zip_members` writes `Scanning <zip> (N members)` and `Result: …` and nothing per image; the per-member classification lines (`+ FLUOR fov=… tp=…`, `SKIP non-image`) print only when `core.debug_flags.review_image_load_debug_enabled()` — the log drawer shows DEBUG, so ungated they put thousands of lines about undisplayed frames in front of the user (`tests/test_zip_scan_logs_a_summary.py`). **An inventory carries its own provenance.** The scanners must not lose a whole archive to one unreadable member, so a mid-scan failure returns the entries gathered so far — right behaviour, wrong shape, because a short dict of real images is byte-for-byte the same object as a complete inventory of a well that genuinely holds that many frames, and Review draws the two identically: fewer timepoints, no gap, nothing to click on. `data/zip_members.ScanResult` is a `dict` subclass carrying `partial` and `reason`, so every existing consumer keeps working unchanged and only the ones that want to say "incomplete" out loud have to ask. Every abort path marks it (an unreadable nested member, an archive that will not open, an exception mid-scan); `merge_partial` carries the flag from each source scan onto the accumulator a well is assembled from, since an inventory built from one complete and one truncated scan is truncated; and `find_well_images_and_masks` returns through `ScanResult.derive` rather than `dict(sorted(...))`, which would silently drop the flag. `scan_folder_members` is the folder-side twin, with the same treatment and the partial-count warning its zip sibling already had. **The per-well filter over loose raw files asks "could this be someone else's?", never "is this mine?".** The latter is unanswerable for a well label the resolver cannot parse, and guarding the whole filter behind a parsed token meant an unparseable label admitted every file in the directory — which, because such files collide on `(fov, tp)` and the merge is first-hit-wins, showed one arbitrary *other* well's frame under that label rather than a visible mix. `_raw_file_names_some_well` asks the three vocabularies in the open (the pipeline schema, the legacy five-field regex, then `image_resolver`'s shared free-text token pattern, imported rather than re-spelled), and `_raw_file_passes_unknown_well` admits only the files that name no well at all: a file naming any well cannot be claimed by a well we cannot name, and a file naming none contradicts nothing, which keeps working the single-well directory this fallback exists for. |
 | `data/image_resolver.py` | Filename → kind classifier (`mask` / `overlay` / `fluor_processed` / `smfish` / `phase`), and the frame-precedence resolver over it. The classifier is a **vocabulary wrapper**, not a second implementation: `classify_filename_kind` calls `image_identity.classify_filename_role` and renames the result into the legacy `kind` strings, and `OUTPUT_SUFFIXES` is generated from `ROLE_CATALOG`. Two independently written classifiers over two copies of the suffix table is what the module used to be, and they drifted exactly as far as an unshared table lets them — the copy here had no `phase` entry, so a processed phase image classified as a raw fluorescence frame and was served as one. Also the single home for `normalize_numeric_token`, the FOV/timepoint token normaliser that collapses `1`, `01` and `1.0` to one key — and which treats only `None` as absent, because FOV and timepoint tokens are legitimately `0`. Every site that compares such a token routes through it: `review_image/collect.review_norm_fov` (the review side's public name, kept because the image-table and review-image call sites are written against it), `core/dataset_state._norm_fov` and `data/frame_load.norm_token` are aliases of it. Tokens reach the viewer from filenames, CSV columns and combo text, so a second copy that formats differently silently strands a filter. **The free-text well-token pattern reads a row letter case-insensitively for every row except F.** A lower-case `f` followed by one or two digits is how this codebase spells a *field*: `pipeline/ome_explode` writes `{experiment}_{channel}_{well}_f{fov}_{tp}`, and the well in that same template comes from `canonical_well_label`, which upper-cases. Matching `f1` as the well `F01` therefore made every plate using the standard convention answer "yes, this is well F01" for every well's first field — selecting F01 in Review drew A01's image and F02 drew B02's, each well rendering another well's frame with nothing on screen to say so — and claimed a file naming no well at all (`sample_f3_t0.tif`) for F03. `well_token_matches_text`'s substring fallback, which answers the same question for a name that glues the well to its neighbours (`plateA01run.tif`), carries the same rule: converting one and not the other would leave two definitions of the same word inside one function. The cost is narrow and deliberate — a plate whose filenames spell a row-F well in lower case (`f01_GFP_…`) is no longer found by the free-text scan, those names being genuinely ambiguous, while the two parsers ahead of this one read such a well by *position*, which is not ambiguous at all. Legacy three-digit fields (`F001`) never matched and still do not. |
 | `data/frame_load.py` | An address — `(well, channel-token, timepoint, fov)` — resolved to the float32 array it names, or to the int32 segmentation mask beside it, plus the channel-token vocabulary that decoding one needs (`base_channel`, the ` (binary)` / ` (mask)` / ` (raw)` suffixes, `NUC_SEG_TOKEN`). Three separate tabs ask this question — the Image Table composes a grid of them, the Cell Browser crops per-cell thumbnails out of them, the Playground corrects a single one — and each is independently removable, so the answer cannot live in any of them. **Resolving a render variant is addressing, not rendering:** `"GFP (binary)"` loads exactly the pixels `"GFP"` does, and only what the caller then draws with them differs, which is why the suffix vocabulary is here and the rendering it selects is not. **Two shortfalls are reported rather than absorbed**, through sets the caller owns and passes in: `scan_misses` (a well/channel scan that came up empty and might be momentary, so a pass says it once instead of once per cell and the next pass retries it; an empty scan of folders that exist, walked to the end, is kept in the cache instead) and `raw_fallbacks` (a cell that asked for the corrected top-hat image and was served the raw one — common, since a pipeline often corrects only some of a well's frames, and a grid silently mixing the two would look uniformly corrected). There is a third, `partial_scans`: a well/channel whose image inventory came back truncated (`ScanResult.partial`), recorded once per key by `_record_partial_scan` so a grid of ninety cells over one truncated well says so once rather than ninety times. It is the shortfall a caller cannot infer from what it received — the frames are real and the grid is simply short — and it survives a cache hit, because the truncated inventory is what was written into the session-long image cache. They are parameters, not something read off `ctx`, because they belong to the *caller's* render pass; the Image Table binds its own through thin wrappers in `image_compose` (`partial_scan_report` is the public reader, and `reset_scan_misses` clears the set per pass) and holds them on `state.image_table.partial_scans`, cleared on dataset load beside `scan_misses`; a caller with no pass simply gets its pixels. **An unspecified axis refuses rather than guesses:** an empty FOV or an empty timepoint (an empty dropdown) matches every key, so when more than one distinct value on that axis would satisfy the request, `match_image_ref` returns `(None, "ambiguous_fov")` / `(None, "ambiguous_tp")` instead of whichever entry the dict happened to yield first. Both axes, not just FOV — a rule written for one of two symmetric axes leaves the other returning an arbitrary frame under a successful-looking `"normalized"` status. A genuinely single-FOV or single-timepoint dataset still resolves, and the top-hat-to-raw fallback treats an `ambiguous_*` kind as a deliberate refusal rather than a gap to retry. |
-| `data/dataset_dims.py` | The four option lists every image grid starts from — which wells are loaded, which channel tokens can be shown (including each channel's binary variant, `NUC+SEG` when a nuclear token is known, and the user's ratio metrics as virtual channels), which timepoints and which FOVs exist. Each has the same two-tier shape: prefer what the run recorded in `pipeline_info.json`, fall back to scanning the loaded CSVs when it recorded nothing (older runs, custom schemas). The fallback is what keeps a thin-sidecar dataset usable and is deliberately second — the sidecar names every value the run produced, the cache only the ones whose rows happen to be loaded. The Image Table fills its axis dropdowns from these and the Playground fills its single-frame selectors from the same lists, so the two cannot disagree about what a dataset contains. |
+| `data/dataset_dims.py` | The four option lists every image grid starts from — which wells are loaded, which channel tokens can be shown (including each channel's binary variant, `NUC+SEG` when a nuclear token is known and the run writes overlays — never on a nanowell run, which offers its stitched montage as `MONTAGE`, first, instead (§6.2l) — and the user's ratio metrics as virtual channels), which timepoints and which FOVs exist. Each has the same two-tier shape: prefer what the run recorded in `pipeline_info.json`, fall back to scanning the loaded CSVs when it recorded nothing (older runs, custom schemas). The fallback is what keeps a thin-sidecar dataset usable and is deliberately second — the sidecar names every value the run produced, the cache only the ones whose rows happen to be loaded. The Image Table fills its axis dropdowns from these and the Playground fills its single-frame selectors from the same lists, so the two cannot disagree about what a dataset contains. |
+| `data/dataset_layout.py` | Where a dataset's input images are, given the folder opened: `<root>` of an `in/` + `out/` pair, or `out/` itself with `in/` beside it — the one answer for the loader and the in-place-append recovery, which had answered it differently, so opening `out/` left `in_dir` unset and every input-frame reader reported its image missing with `in/` beside it. |
+| `data/nanowell_images.py` | A nanowell run's stitched montage (`<well>_<tp>_montage.png` in `out.zip`) read as an 8-bit frame, matched by timepoint label or hours. Needs no nanowell semantics, so it sits below every feature and a build without the Nanowells feature still shows it (§6.2l). |
+| `data/observations.py` | What a plot's points are on this dataset and the rows behind them: cells, or nanowell rows asked of the Nanowells feature's `observations.nanowell` service; the members every plot draws; a cell's own nanowell's metric joined onto its row (§6.2l). |
 | `data/inclusion.py` | The inclusion chokepoint's answer, keyed for an image view: `excluded_nids_for_frame` gives the nucleus ids in one frame that `df_included_mask` rejects, and `drop_excluded_labels` zeroes them out of a label image. An image view that draws straight off a segmentation mask shows curated-away cells as segmented, counted cells — the plots disagree with the picture and nothing on screen says which is right — and filtering the labels once fixes every render that reads them. In the app the well is read through `narrow_rows` (the identity columns and every verdict layer's declared inputs, projected), not `get_rows` — a whole-frame read cost about a second on a 1.5M-cell well and pushed the frame into the row cache, evicting a well a plot was using — and the map is remembered in `StatsCacheState.populations` under `(well, ReviewImageState.override_version, rows_version)`: the counter `invalidate_stats_cache` bumps on every manual delete, crop, QC and gating change, which also clears that store, and the tick a gating pass makes. Remembered by the context rather than on the frame, it survives the row cache evicting the well, so the next rendered cell does not read the well again. A context without that store (the pure-logic tests) falls back to memoising on the row frame's own `attrs`, keyed by the counter **and the frame's identity**, so it cannot be inherited by a derived frame — `attrs` propagates through `df.copy()`, where the counter alone would call another frame's map fresh; a build with no Review-Image slice has no counter to key on and simply recomputes. The map (`FrameExclusions`) groups only the dropped rows and holds one id array per frame, making a frame's `frozenset` the first time that frame is drawn — a gated well can drop a million cells and a render asks for a few frames. The all-included case — the common one — short-circuits before the frame-token normalisation, and `drop_excluded_labels` returns the array untouched, so a dataset with no curation pays nothing at all. The filter's query is built at 64-bit width and narrowed to the ids the frame actually holds rather than cast to the label array's dtype — casting wrapped an id larger than `int32` into a negative one, and a wrapped value colliding with a live label blanks the wrong cell. A non-integer label array is returned untouched and a read-only one is copied. **An already-rendered grid is not repainted** when an inclusion layer changes: `invalidate_stats_cache` fires `ctx.runtime.image_table.inclusion_changed_cb`, which marks the table stale so the header cues a Generate. Re-rendering would be seconds of decoding per edit, and an edit comes in runs of ten; the cue is what keeps a stale grid from quietly disagreeing with every plot. |
 | `core/app_settings.py` | `app_settings()` — the one door onto this user's `QSettings`: an INI file, `settings.ini` in the app's folder (`util.state_dir`), on every platform rather than the native store (a plist on macOS, the registry on Windows, `~/.config/AllWell` on Linux). Settings an earlier version left in the native store — keyed on the organisation/application pair named here — are copied over once per process when `settings.ini` does not exist yet, and the native store is cleared only after the INI file wrote without error (`_adopt_native_settings`; never while `ALLWELL_STATE_DIR` is set; `tests/test_one_app_folder.py`). A module function rather than a method on any object, because reaching the handle used to mean reaching for `_qsettings` on whatever object a caller happened to hold, and the object a feature has is not the one that defines it: `ctx.window` is the `ReviewApp` review widget while `_qsettings` belongs to the `AllWellApp` main window containing it, with no forwarding. A guarded `getattr(ctx.window, "_qsettings", None)` therefore reads `None` in the shipped app and every setting reads as absent — which is exactly how the recent-datasets list came to write nothing and read nothing while its tests passed. Five construction sites across three modules now go through here. There is no object to have the wrong one of. Tests never reach the real store: `tests/conftest.py` patches this function to a scratch INI file once per session (`_session_settings_go_to_a_scratch_file`, for windows a test file builds before its first test) and again per test (`_settings_go_to_a_scratch_file`); `PhoneShell` keeps the function it is handed at construction, so the session-level patch is what isolates a per-file window (`tests/test_settings_never_reach_the_real_store.py`). |
 | `data/parquet_cache.py` | A columnar cache of each well's **parsed** frame, written beside its CSV as `.aw_parquet/<well>.parquet`. The parse is the load — 3,068 ms of a 3,119 ms read on a 120,000-row well — and nothing about the file changes between reads, so the parse is repeated work. Through the real path on a plate-shaped fixture that read is 51 ms. **Whole frames for the row cache, deliberately.** Parquet is columnar and a subset read is the larger win — six of thirty-seven columns measures 7 ms — but the row cache holds one frame per well and every `get_rows` caller reads whatever column it needs from it, so a partial frame there answers a later caller's column with a `KeyError` at best and a silently-empty plot at worst; and the verdict projectors fail open on a missing input column, so a QC metric left out of a partial frame would read as every cell passing. So `read_well_frame` never passes `read_cached(columns=…)`. The per-well summaries do: they read the four columns an open needs and never enter the row cache. **Every failure mode is a miss, never an error**: no pyarrow, no cache file, a fingerprint that does not match, a file that will not parse, a read-only output volume. Each costs a slower load and nothing else, which is the only acceptable price for a cache; a missing engine is logged once per session rather than once per well. The fingerprint is `"<size>:<mtime_ns>:v<PARSER_VERSION>"`, stored in the Parquet schema metadata beside pandas' own block rather than in place of it — `replace_schema_metadata` replaces the whole mapping. Size and mtime rather than a content hash: the file is tens of megabytes and this runs once per well per load, while the thing guarded against is the pipeline rewriting the CSV, which an incremental run does when it merges new rows into an existing well, and which moves both. **`PARSER_VERSION` is the half no file-stat can see.** What is being reused is not the CSV — it is `load_well_csv`'s *output*, which is a function of the file and of `_STRING_COLS`, `_CATEGORY_MAX_UNIQUE_SHARE`, the per-channel column rename, the FOV normalisation, the `Included` default and the `shape_circularity` back-fill; every one of those has changed at least once. Without it, adding a derived column to the parser means an untouched CSV keeps serving the frame from before the change — the column simply absent, the dropdown offering it never appearing, nothing said. `tests/test_parquet_cache.py::test_a_changed_parser_invalidates_every_cache` pins the constant against a hash of the parser's own source, so editing it without bumping fails; the cache is registered in `tests/test_reuse_is_keyed_completely.py` like the app's other two reuse decisions, with the written reason per key. **The fingerprint is taken before the parse**, by `read_well_frame`, and `write_cache` re-stats and declines when the two disagree: a three-second read with an Analyze run or a remote fetch writing into the same `out/` would otherwise stamp the new file's identity onto the old file's rows, and that cache is then wrong on every read afterwards. Writes go through a staging file in the destination directory and an `os.replace`, so a crash mid-write leaves the previous cache or none, never half a plate. `prune` runs once per dataset load and removes what nothing can reclaim — a `.parquet` or `.summary.json` whose CSV is gone (unreachable, since the entry is only ever addressed by that name) and any abandoned staging file. It is deliberately not an eviction policy: the cache costs about 400 MB beside a 96-well plate's 600 MB of CSVs, and a plate opened once a year is precisely the one whose five-minute parse it exists to save. The directory is a subdirectory *and* dot-prefixed: every scan that enumerates a dataset's per-well CSVs is a non-recursive `out_dir.glob("*.csv")`, which a subdirectory cannot match, and the dot is the second line of defence. pyarrow is a GUI-side dependency only — the pipeline writes these CSVs and never reads them back, so `requirements-remote.txt` does not carry it and a remote run pays no install for it. Note what the pandas metadata block does *not* do: the categorical dtypes survive without it, because Arrow encodes a category as a `DictionaryType` in the schema proper and `to_pandas` reads it back from there. **A read costs about one frame.** `read_cached` reads without `pre_buffer` (which held the whole compressed file beside the table it decoded to), and `table_to_frame` — the one conversion from an Arrow table to a well's frame, used by the CSV read too — converts with `self_destruct=True, split_blocks=True`, so each column's Arrow buffers are freed as it is converted rather than the whole consolidated frame being allocated beside the whole table. Either option alone measured no lower than the default; both together halve the conversion's peak. The frame that comes back is the default conversion's in everything a caller sees, with one block per column; pyarrow hands single-chunk null-free numeric columns and category codes over as read-only views of its buffers, so those are copied one at a time, because the app writes into held frames in place. Arrow's allocator (mimalloc) keeps freed pages rather than returning them, and pandas and numpy cannot use them, so `release_arrow_memory` hands them back around each conversion and after a cache write. On a 1.5M-row well with a 399 MiB frame a cache hit peaks at 587 MiB over the process's starting size and leaves 437 MiB resident, from 1,169 and 1,169. The split layout has measured costs elsewhere, stated in `table_to_frame`'s docstring: a deep `copy()` of a split frame consolidates the copy and peaks at about three times its size, which is why the cell-scope export's slice is a shallow copy of its boolean `.loc`. |
@@ -13465,6 +13490,101 @@ parent process supervises the per-well worker pool:
   writes are shielded by `pipeline.io._safe_imwrite`'s retry-with-backoff, which
   also triages disk-full vs transient rather than always claiming disk-full.
 
+### 6.2l Nanowell observations in the plot tools
+
+Review has two tables of observations on a nanowell plate: the per-cell rows every plot tool reads, and the
+per-nanowell × timepoint rows the Nanowells page computes (`series_compute.site_metrics`: count, confluence,
+brightness, fluorescence, their fold changes, growth rate). The plot tools read the second one too, through one
+contract and one registry service, so a nanowell metric can be plotted, correlated and summarised with the same
+tools as a cell's, while the Nanowells feature stays removable.
+
+**The contract** (`review/domain/observation.py`). Two kinds of observation, `cells` and `nanowells`; an
+`ObservationTable` is a frame of rows of one kind, the `ObservationMetric`s that may be plotted from it (key, label,
+kind, channel), a `why_missing(metric)` that names each undefined value's reason, and the notes every figure from it
+carries (the rim-focus rule). `well_medians` reduces a metric to each well's median over its nanowells per timepoint
+(the mean for a 0/1 flag such as `occupied`, `SHARE_METRICS` — the median of 0/1 flags is not a share), and
+`group_points` reduces those to a member's mean ± SEM **over wells**: wells are the replicates; nanowells are never
+pooled across wells into one sample. `footer_line` writes the first footer line of every figure drawn from
+observations — it begins "Observations: cells" or "Observations: nanowells" and counts what was used and left out by
+reason — and `pooled_cells_line` the cell plots' line on a nanowell plate. The word "unit" appears in none of them:
+the app already uses it for the replicate unit and for the Nanowells page's sample choice.
+
+**The supplier** (`features/nanowell/observation_compute.py`). The Nanowells descriptor declares the service
+`observations.nanowell`, answered with the page's own `site_metrics` over the requested wells, computed with the page's
+Baseline, rim-focus rule and Cell Gating tally — so a fold change on a plot and on the page are one number — plus an
+`occupied` flag and `timepoint_hours` read the way the cell rows read it, so a plot's timepoint choices select the same
+rows. Wells are read once into the page's `well_parts`; the table is memoised on `(folder, wells, baseline, focus rule,
+gating version)`, every input that changes a row. The page's Fixed cohort and Moving average are figure transforms,
+not row properties, and are not applied.
+
+**The asker** (`review/data/observations.py`). `nanowell_observations(ctx, wells)` asks the registry
+(`ctx.features.query`) and gets `None` from a build without the feature; `available_observations` is `(cells,)` or
+`(cells, nanowells)` from the dataset (`is_nanowell_run`) and the build. `observation_groups` is the members every
+plot draws (replicate sets, else selected wells). `with_nanowell_columns` joins a cell's own nanowell's metric onto its
+row as a `nw::<key>` column, on `(timepoint, nw_q, nw_r)`; a cell with no address gets no value. `nw::` columns are
+not intensities: `metric_registry` exempts them from the fluorescence gate and the ON cutoff.
+
+**The toggle** (`review/core/observation_band.py`). `FeatureDescriptor.observations` says what a Plotting leaf can
+draw; `band_mode` derives what the band shows (nothing on a standard plate or in a build without the feature, the
+toggle on a leaf declaring nanowells, a static line on one declaring cells only), and `effective_observations` what a
+leaf draws — cells on any leaf that cannot draw nanowells, whatever the toggle last said. The choice is
+`PlotState.observations`, the Metric picker's `PlotState.nanowell_metric`. `tests/test_observations_band.py` holds
+every Plotting leaf to a declaration and a cells-only leaf to a written reason.
+
+**What each leaf draws under Nanowells.**
+
+| Leaf | Draws | Module |
+|---|---|---|
+| Scatter (Points: each observation) | one point per nanowell × timepoint, any metric on each axis (own X / Y pickers) | `scatter/_observations.py`, `observation_compute.py` |
+| Scatter (Points: per well) | each well's median over its nanowells per timepoint | same |
+| Bar Plots | per member: mean over wells of each well's median ± SEM over wells, wells as dots; occupied share; N nanowells | `barplot/_observations.py` |
+| Line Graphs | the same over time; occupied share; N nanowells; the CDF over nanowells | `lineplot/_observations.py` |
+| Heat Map | the plate grid, a cell the mean over its wells of their medians, `±` the SEM over wells | `heatmap/_observations.py` |
+| Distribution | every nanowell value per member through the tab's own histogram / KDE / violin renderer | `distribution/_observations.py` |
+| Response Curves | cells only (its X is a sample variable) | — |
+
+The band's Fold change menu normalises cell plots; a nanowell figure does not apply it and says so in its footer
+(`FOLD_CHANGE_NOT_APPLIED`) — the per-nanowell fold changes are metrics of their own, against the page's Baseline.
+
+**Cells on a nanowell plate** keep drawing as before, and every cell figure of such a plate (Bar, Line, Scatter,
+Distribution, Heat Map, Response) ends with "Observations: cells · pooled from N occupied nanowells per well"
+(`stamp_cells_footer`); N counts distinct addresses in the cell rows, which name only nanowells holding a cell. In a
+build without the Nanowells feature the line adds "nanowell views are not in this build", so a nanowell plate never
+reads as an ordinary one. The per-cell Scatter's axis pickers and Multivariate's feature picker offer each cell's own
+nanowell's metrics ("Nanowell ▸ …", the Nanowell family) through `with_nanowell_columns`.
+
+**Images.** A nanowell run's `out.zip` holds no masks or overlays, only one stitched phase montage per well and
+timepoint. The Image Table offers it as the virtual channel `MONTAGE` (first on a nanowell run, which offers no
+`NUC+SEG`; `data/nanowell_images.py`, `frame_load`); a montage has no field, so a cell's FOV is ignored. Segmentation
+draws a frame that has no label map rather than aborting: the image without outlines, a status line saying why, and
+Delete / Crop / Edit disabled with that reason (`review_image/renderer.set_cell_editing`). On a nanowell run the
+Nanowells feature's `segmentation.nanowell_overlay` service (`features/nanowell/overlay_compute.py`) adds each counted
+cell as a dot and each nanowell the tile owns as a one-pixel rim, placed by the grid record's tile placement over the
+pixel size; without the feature the line says the overlays are not in this build. Nothing draws a label map
+synthesised from points — points look like points.
+
+**Removability.** Removing the Nanowells feature removes nanowell plotting with it: the services vanish with the
+descriptor, the toggle is not offered, and Batch Export's Nanowells mode is not offered (`_offered_modes`), so its lazy
+bindings into the package are never resolved. What a build without it still needs moved below every feature: the phase
+predicate (`domain/channel_roles.py`), the layout resolver (`data/dataset_layout.py`) and the montage reader.
+`tests/test_a_nanowell_dataset_in_a_build_without_nanowells.py` loads a nanowell dataset with the package blocked at
+import and checks every one of those surfaces, and the inverse with it present.
+
+**Three rules that apply to every plate.** A nanowell run surfaced them; none is nanowell-specific.
+
+- *The phase channel is never the default plot channel.* A run that segments on phase lists the phase token among
+  `fluor_tokens` (a nanowell run lists it first). `domain/channel_roles.py` is the one answer to "which channel is
+  phase" — `frame_load.phase_channel` and the Nanowells page delegate to it — and the channel list keeps the phase
+  channel, last, and opens on the first other one (`order_fluor_channels`, `default_fluor_channel`).
+- *An ON cutoff nobody set that cuts nothing is said, not drawn.* The segmentation channel's default ThreshFracOn is
+  0.0, so its Fraction-above panel is 1.0 and its Events-above panel the cell count for every well.
+  `channel_state_controller.on_cut_not_set` names that case (no stored cutoff, and a default of 0.0); the Bar and Line
+  tabs replace those two panels' contents with `core/threshold_note.ON_CUT_NOT_SET_NOTE`. A stored cutoff, including
+  a deliberate 0, and a readout channel's non-zero default are drawn as before.
+- *A status line belongs to the tab that wrote it.* `NotificationService.set_status` records the tab on screen as the
+  line's owner and `tab_controller.on_tab_change` clears a line another tab wrote (`clear_unless_owned_by`), so an
+  Image Table summary or a Line plot's nuclei count no longer stands under a tab it does not describe.
+
 ### 6.3 `all_well_launcher.py`
 
 PyInstaller entry point. Two responsibilities:
@@ -17918,6 +18038,12 @@ their cells is the one place that AND is invisible by construction: an excluded
 cell simply has no outline. The **Why removed** toggle
 (`renderer.toggle_review_image_exclusion_layers`) outlines each excluded cell in
 the ink of the layer that removed it.
+
+A frame with **no label map** has no outlines to colour, and Segmentation draws it anyway: the image without
+outlines, the status line saying why (`NO_LABEL_MAP` / `NO_LABEL_MAP_NANOWELL`), and Delete Cell / Crop cells / Edit ▾
+disabled with that reason as their tooltip (`set_cell_editing`), since each acts on outlined cells. It used to abort
+on a missing label map — every frame of a nanowell run — leaving a blank page and live controls. A nanowell run's
+cells are drawn as points and its nanowells as rims (§6.2l).
 
 Four rules hold it together, and each replaced a way the first version was
 quietly wrong.

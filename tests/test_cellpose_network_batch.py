@@ -44,6 +44,16 @@ def test_more_workers_on_one_gpu_each_get_a_smaller_batch():
     assert cp.batch_for_memory(8 * GiB, 4 * GiB, 200 * MiB, 8) == 1
 
 
+def test_memory_something_else_holds_lowers_the_batch():
+    # The 2-worker T4 above, with only 6 GiB free: 6 x 0.8 / 2 = 2.4 GiB over 200 MiB is 12, not the total's 26.
+    assert cp.batch_for_memory(16 * GiB, 1.2 * GiB, 200 * MiB, 2, free_bytes=6 * GiB) == 12
+
+
+def test_free_memory_never_raises_the_batch_above_the_total_s_share():
+    # All 16 GiB free: 16 x 0.8 / 2 = 6.4 GiB, but the total's share less the weights is 5.2 GiB, so 26 stands.
+    assert cp.batch_for_memory(16 * GiB, 1.2 * GiB, 200 * MiB, 2, free_bytes=16 * GiB) == 26
+
+
 def test_a_tile_measured_as_free_leaves_the_ceiling():
     assert cp.batch_for_memory(16 * GiB, 1 * GiB, 0, 2) == cp.NETWORK_BATCH
 
@@ -76,7 +86,8 @@ class _Model:
         return np.zeros(0), [None, np.zeros((2, 1, 1)), np.zeros((1, 1))], None
 
 
-def _fake_torch(monkeypatch, *, total=16 * GiB, tile=200 * MiB):
+def _fake_torch(monkeypatch, *, total=16 * GiB, tile=200 * MiB, held_elsewhere=0):
+    """*held_elsewhere* is memory other processes hold on the GPU, which only the driver's free count sees."""
     memory = {"allocated": int(0.6 * GiB), "peak": int(0.6 * GiB), "tile": tile, "emptied": 0}
     oom = type("OutOfMemoryError", (RuntimeError,), {})
     torch = types.ModuleType("torch")
@@ -89,6 +100,7 @@ def _fake_torch(monkeypatch, *, total=16 * GiB, tile=200 * MiB):
         reset_peak_memory_stats=lambda i=None: memory.update(peak=memory["allocated"]),
         max_memory_allocated=lambda i=None: memory["peak"],
         empty_cache=lambda: memory.update(emptied=memory["emptied"] + 1),
+        mem_get_info=lambda i=None: (total - memory["allocated"] - held_elsewhere, total),
     )
     monkeypatch.setitem(sys.modules, "torch", torch)
     monkeypatch.setattr(cp, "_NETWORK_BATCHES", {})
@@ -108,7 +120,34 @@ def test_a_worker_on_a_gpu_measures_a_tile_once_and_sizes_its_batch_to_its_share
         assert cp._network_batch(model, "cpsam") == 26
     assert model.batches == [cp.PROBE_TILES]                       # measured once, by one pass of blank tiles
     line = next(r.getMessage() for r in caplog.records if "network batch" in r.getMessage())
-    assert "26 tiles a pass" in line and "a tile takes 200 MB" in line and "2 worker(s) share cuda:0's 16.0 GB" in line
+    assert "26 tiles a pass" in line and "a tile takes 200 MB" in line
+    assert "2 worker(s) share cuda:0's 16.0 GB, 15.4 GB of it free" in line
+
+
+def test_a_gpu_another_process_fills_gives_the_worker_the_batch_that_fits_what_is_free(monkeypatch, caplog):
+    """Reported: four L4s, ten workers, and the run ran out of GPU memory. The batch was sized from each GPU's total,
+    so memory another process held on it was planned on as if it were this run's."""
+    memory, oom = _fake_torch(monkeypatch, total=24 * GiB, tile=200 * MiB, held_elsewhere=16 * GiB)
+    monkeypatch.setenv(par.GPU_SHARERS_ENV, "3")
+    model = _Model(_cuda(), oom=oom, memory=memory)
+    with caplog.at_level(logging.INFO, logger="process_microscopy"):
+        # Free: 24 - 0.6 - 16 = 7.4 GiB; x 0.8 / 3 = 1.97 GiB over 200 MiB is 10. The total alone gave 26.
+        assert cp._network_batch(model, "cpsam") == 10
+    line = next(r.getMessage() for r in caplog.records if "network batch" in r.getMessage())
+    assert "3 worker(s) share cuda:0's 24.0 GB, 7.4 GB of it free" in line
+    assert memory["emptied"] == 1                        # the measuring pass's cache handed back before reading free
+
+
+def test_a_driver_that_cannot_say_what_is_free_leaves_the_total_s_share(monkeypatch, caplog):
+    memory, oom = _fake_torch(monkeypatch, total=16 * GiB, tile=200 * MiB)
+    def no_info(i=None):
+        raise RuntimeError("CUDA driver error: not supported")
+    sys.modules["torch"].cuda.mem_get_info = no_info
+    monkeypatch.setenv(par.GPU_SHARERS_ENV, "2")
+    with caplog.at_level(logging.INFO):
+        assert cp._network_batch(_Model(_cuda(), oom=oom, memory=memory), "cpsam") == 26
+    assert any("could not read the free memory on cuda:0" in r.getMessage() for r in caplog.records)
+    assert any("free not known" in r.getMessage() for r in caplog.records)
 
 
 def test_the_same_gpu_shared_by_more_workers_gives_each_a_smaller_batch(monkeypatch):
@@ -131,7 +170,7 @@ def test_a_measuring_pass_that_runs_out_of_memory_starts_the_worker_at_half_of_i
     with caplog.at_level(logging.WARNING, logger="process_microscopy"):
         cp._eval_halving_on_oom(model, "cpsam", np.zeros((3, 4, 4, 1)))
     assert model.batches == [cp.PROBE_TILES, 2, 1]                # measured, then 2, then halved to what fits
-    assert cp._NETWORK_BATCHES["cpsam"] == 1 and memory["emptied"] == 2
+    assert cp._NETWORK_BATCHES["cpsam"] == 1 and memory["emptied"] == 2   # after the measuring pass, then the halving
     warned = [r.getMessage() for r in caplog.records]
     assert warned[0].startswith(f"Cellpose cpsam ran out of GPU memory measuring a pass of {cp.PROBE_TILES} tiles; "
                                 "running 2 a pass")

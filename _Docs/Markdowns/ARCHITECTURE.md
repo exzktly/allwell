@@ -10687,11 +10687,16 @@ are installed (not in CI), and holds the wiring with a fake model everywhere.
 **The network batch** (`pipeline.cellpose._network_batch`, `batch_for_memory`, `_eval_halving_on_oom`). Off a GPU it
 is `NETWORK_BATCH`. On one, a worker measures once, before its first batch, what a tile costs: one pass of
 `PROBE_TILES` (4) blank tiles between Torch's `reset_peak_memory_stats` and `max_memory_allocated`, over the tiles.
-Its share is `GPU_HEADROOM` (0.8; the rest is each process's CUDA context, which the allocator does not count,
-fragmentation and the mask step) of the GPU's total memory over the workers sharing it, less its own model's
-weights; the batch is that over a tile, between 1 and `NETWORK_BATCH`, logged once per worker and model. The total,
-not the free memory, is divided, because the workers load at different moments and an early one's allocator still
-holds memory a later one would read as taken. The workers sharing a GPU are counted by the main process
+Its share is the smaller of two figures, each split over the workers sharing the GPU: `GPU_HEADROOM` (0.8; the rest
+is each process's CUDA context, which the allocator does not count, fragmentation and the mask step) of the GPU's
+total memory, less its own model's weights; and `GPU_HEADROOM` of the memory the driver reports free
+(`torch.cuda.mem_get_info`, read by `_free_bytes` after the worker empties its own allocator's cache, with its model
+already loaded). The batch is that share over a tile, between 1 and `NETWORK_BATCH`, logged once per worker and model
+with both the total and the free figure. The total's share alone planned on memory any other process held — another
+run, an orphaned worker from a killed one, another user's job — and ran out on the first pass. The free figure can
+only lower the batch: a worker that measures after a sibling on the same GPU has filled its allocator reads that
+sibling's memory as taken and runs a smaller batch than its fair share, which costs throughput but not wells. A driver
+that cannot report free memory leaves the total's share, with a warning. The workers sharing a GPU are counted by the main process
 (`ParallelPlan.gpu_sharers`: the workers spread over the GPUs, rounded up; a `--workers` that overrides the cap is
 counted as given) and handed to the spawned workers in `parallelism.GPU_SHARERS_ENV`, set by
 `export_gpu_sharers` in `process_microscopy.main` before any pool exists; a process not told (Test detection) takes

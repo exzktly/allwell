@@ -509,13 +509,35 @@ _NETWORK_BATCHES: dict[str, int] = {}
 
 
 def batch_for_memory(total_bytes: float, weights_bytes: float, tile_bytes: float, sharers: int,
-                     ceiling: int = NETWORK_BATCH) -> int:
-    """How many tiles a pass may hold: this worker's share of the GPU's memory (``GPU_HEADROOM`` of it, split among
-    *sharers* workers), less its own model's weights, over what one tile costs; at least 1, at most *ceiling*."""
+                     ceiling: int = NETWORK_BATCH, free_bytes: float | None = None) -> int:
+    """How many tiles a pass may hold: this worker's share of the GPU's memory, over what one tile costs; at least 1,
+    at most *ceiling*.
+
+    The share is the smaller of two: ``GPU_HEADROOM`` of the GPU's *total* memory split among *sharers* workers, less
+    this worker's own model's weights; and ``GPU_HEADROOM`` of the memory *free_bytes* says is free now (with this
+    worker's model already loaded, so its weights are not in it), split the same way. The second is what keeps a
+    worker from planning on memory something else holds — another run, a process left over from one, another user's
+    job — which the total alone cannot see. It can only lower the batch, never raise it. ``None`` (not measured)
+    leaves the total's share alone."""
     share = total_bytes * GPU_HEADROOM / max(1, sharers) - weights_bytes
+    if free_bytes is not None:
+        share = min(share, free_bytes * GPU_HEADROOM / max(1, sharers))
     if tile_bytes <= 0:
         return ceiling
     return max(1, min(ceiling, int(share // tile_bytes)))
+
+
+def _free_bytes(torch, index: int) -> float | None:
+    """The bytes free on GPU *index* by the driver's count — every process's memory, not only this one's — after this
+    worker hands back what its allocator holds cached; ``None`` when the driver cannot say."""
+    torch.cuda.empty_cache()
+    try:
+        free, _total = torch.cuda.mem_get_info(index)
+    except (AttributeError, RuntimeError):
+        swallowed(f"could not read the free memory on cuda:{index}; sizing the batch from its total alone",
+                  level=logging.WARNING)
+        return None
+    return float(free)
 
 
 def _gpu_sharers() -> int:
@@ -565,10 +587,12 @@ def _network_batch(model, key: str) -> int:
         return batch
     tile = (torch.cuda.max_memory_allocated(index) - before) / PROBE_TILES
     sharers = _gpu_sharers()
-    batch = batch_for_memory(total, weights, tile, sharers)
+    free = _free_bytes(torch, index)
+    batch = batch_for_memory(total, weights, tile, sharers, free_bytes=free)
+    free_note = "free not known" if free is None else f"{free / 2 ** 30:.1f} GB of it free"
     log.info("Cellpose %s network batch: %d tiles a pass (a tile takes %.0f MB; %d worker(s) share cuda:%d's %.1f GB, "
-             "this one's model %.1f GB).", key, batch, tile / 2 ** 20, sharers, index, total / 2 ** 30,
-             weights / 2 ** 30)
+             "%s; this one's model %.1f GB).", key, batch, tile / 2 ** 20, sharers, index, total / 2 ** 30,
+             free_note, weights / 2 ** 30)
     _NETWORK_BATCHES[key] = batch
     return batch
 

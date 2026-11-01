@@ -182,6 +182,13 @@ class ImageTableState:
     # a cell the user never asked a bar for. Same per-pass lifetime as the three
     # records above.
     scale_bar_refusals: set = field(default_factory=set)
+    # ``((well, tp, token_lower), note)`` for each nanowell frame
+    # (``review/data/nanowell_images``) the CURRENT pass drew short or could not
+    # draw — tiles with no image, nanowells with no value of the metric or no
+    # position, a scale bar it cannot carry because its scale is unknown — so
+    # the status line and the saved figure's line say what the frame leaves out.
+    # Same per-pass lifetime as the records above.
+    nanowell_frame_notes: set = field(default_factory=set)
 
     #: Why this pass planned **no bar at all**, or ``""`` when it planned one.
     #:
@@ -223,6 +230,7 @@ class ImageTableState:
         self.raw_fallbacks = set()
         self.partial_scans = set()
         self.scale_bar_refusals = set()
+        self.nanowell_frame_notes = set()
         self.scale_bar_plan_note = ""
 
     def effective_row_dims(self) -> list:

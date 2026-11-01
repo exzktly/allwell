@@ -61,6 +61,7 @@ if TYPE_CHECKING:
 import logging
 from pathlib import Path
 
+from review.data import nanowell_images as _nanowell_images
 from review.data.image_resolver import normalize_numeric_token
 from review.domain.channel_roles import phase_channel as _phase_channel
 from domain.tp_match import tp_close
@@ -72,8 +73,9 @@ logger = logging.getLogger(__name__)
 
 NUC_SEG_TOKEN = "NUC+SEG"
 #: A nanowell run's stitched phase montage (``review/data/nanowell_images``), offered as a channel: one picture per
-#: well and timepoint, so the cell's FOV does not apply.
-MONTAGE_TOKEN = "MONTAGE"
+#: well and timepoint, so the cell's FOV does not apply. Its siblings ``MONTAGE <CH>`` and ``NW: <metric>`` are
+#: nanowell frames too (``nanowell_images.is_nanowell_frame``) and load the same way.
+MONTAGE_TOKEN = _nanowell_images.PHASE_MONTAGE
 
 # A "binary" channel variant — e.g. ``"GFP (binary)"`` — is a virtual channel that
 # renders its base channel as the ThreshFracOn threshold-binary (positive cells
@@ -479,9 +481,9 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
     # A "GFP (binary)" / "GFP (mask)" / "GFP (raw)" token loads the same pixels as
     # "GFP" — the render is applied downstream (cell_display_rgb); here we just
     # resolve the base channel.
+    if _nanowell_images.is_nanowell_frame(chan_upper):
+        return _load_nanowell_frame(ctx, cache, well, chan_upper, tp, scan_misses)
     chan_lower = base_channel(chan_upper).strip().lower()
-    if chan_lower == MONTAGE_TOKEN.lower():
-        return _load_montage(ctx, cache, well, tp, scan_misses)
     is_overlay = chan_lower == NUC_SEG_TOKEN.lower()
     fluor = load_well_channel(ctx, cache, well, chan_lower,
                               use_tophat=use_tophat, scan_misses=scan_misses,
@@ -547,21 +549,47 @@ def load_frame_array(ctx, cache: dict, well: str, chan_upper: str, tp: str,
         return None
 
 
-def _load_montage(ctx, cache: dict, well: str, tp: str, scan_misses: set | None) -> np.ndarray | None:
-    """The montage of *well* at *tp* as float32, memoised in the caller's *cache*; a miss is logged once."""
+def _frame_key(well: str, token: str, tp) -> tuple:
+    return (well, str(token).strip().lower(), "nanowell-frame", str(tp))
+
+
+def _load_nanowell_frame(ctx, cache: dict, well: str, token: str, tp: str,
+                         scan_misses: set | None) -> np.ndarray | None:
+    """A nanowell frame's values (``nanowell_images``), memoised in the caller's *cache* with the frame itself, so
+    :func:`nanowell_frame_of` can say its scale and what it leaves out; a miss is logged once.
+
+    The Nanowells feature draws every kind through ``image_table.nanowell_frame``. Without it in the build the phase
+    montage is still read from the stored picture, at no known scale; the other two are not drawn.
+
+    A montage is memoised: it is made of files, like every other frame here. A metric map is asked for every time,
+    because its values follow the Nanowells page's Baseline, rim-focus rule and Cell Gating, none of which this key
+    could see; the feature memoises the rows it is painted from on all of them, so asking again is cheap."""
     import numpy as np
 
-    from review.data.nanowell_images import read_montage_array
-
-    key = (well, MONTAGE_TOKEN.lower(), "montage", str(tp))
-    if key not in cache:
-        image, why = read_montage_array(ctx.state.dataset.data_dir, well, tp)
-        cache[key] = None if image is None else image.astype(np.float32)
-        if image is None:
-            logger.info("frame_load: no montage for well=%r tp=%r: %s", well, tp, why)
+    key = _frame_key(well, token, tp)
+    if key not in cache or _nanowell_images.is_metric_map(token):
+        features = getattr(ctx, "features", None)
+        frame = None if features is None else ctx.features.query(
+            "image_table.nanowell_frame", ctx, well, tp, token, default=None)
+        if frame is None and _nanowell_images.montage_channel(token) == "":
+            image, why = _nanowell_images.read_montage_array(ctx.state.dataset.data_dir, well, tp)
+            frame = _nanowell_images.NanowellFrame(
+                None if image is None else image.astype(np.float32), None, None, why)
+        elif frame is None:
+            frame = _nanowell_images.NanowellFrame(None, note="The Nanowells feature is not in this build.")
+        cache[key] = frame.values
+        cache[("nanowell-frame-of",) + key] = frame
+        if frame.values is None:
+            logger.info("frame_load: no %s frame for well=%r tp=%r: %s", token, well, tp, frame.note)
             if scan_misses is not None:
-                scan_misses.add((well, MONTAGE_TOKEN.lower(), "montage"))
+                scan_misses.add((well, str(token).strip().lower(), "nanowell-frame"))
     return cache[key]
+
+
+def nanowell_frame_of(cache: dict, well: str, token: str, tp) -> _nanowell_images.NanowellFrame | None:
+    """The :class:`~review.data.nanowell_images.NanowellFrame` :func:`load_frame_array` loaded for this cell, or
+    ``None`` when it has not loaded one (not a nanowell frame, or not loaded yet)."""
+    return cache.get(("nanowell-frame-of",) + _frame_key(well, token, tp))
 
 
 def load_mask_array(ctx, cache, well, tp, fov) -> np.ndarray | None:

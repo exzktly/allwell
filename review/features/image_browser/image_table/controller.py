@@ -915,6 +915,7 @@ def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
                 continue
             a = crop_tool.apply_to_array(arr) if crop_tool is not None else arr
             a = _np.asarray(a, dtype=_np.float32)
+            a = a[_np.isfinite(a)]          # a nanowell frame's NaN is "nothing here", not a value
             if a.size == 0:
                 continue
             lo, hi = float(a.min()), float(a.max())

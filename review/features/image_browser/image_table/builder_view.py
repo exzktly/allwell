@@ -714,6 +714,12 @@ def _default_colormap_for(ctx, name: str) -> str:
     swatch shows *and* what the channel adopts when dragged in — so the colour
     carries through instead of resetting to grey — and it stays fully editable in
     the LUT box below."""
+    from review.data.nanowell_images import METRIC_MAP_COLORMAP, is_metric_map
+
+    if is_metric_map(name):
+        # A metric is not a fluorophore, even when its name carries one, and a black-based ramp would draw its
+        # lowest values in the black of the background (``nanowell_images``).
+        return METRIC_MAP_COLORMAP
     std = _standard_cmap(name)
     if std is not None:
         return std

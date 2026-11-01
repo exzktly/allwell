@@ -43,7 +43,9 @@ from review.data.frame_load import (  # noqa: F401
     load_frame_array,
     load_mask_array,
     load_well_channel,
+    nanowell_frame_of,
 )
+from review.data.nanowell_images import is_nanowell_frame
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +59,23 @@ def _load_array(ctx, cache: dict, well: str, chan_upper: str, tp: str, fov: str,
     name. They are supplied here instead, so every Image Table call site keeps
     reporting what it always reported and the loader stays feature-free.
     """
-    return load_frame_array(ctx, cache, well, chan_upper, tp, fov,
-                            use_tophat=use_tophat,
-                            raw_fallbacks=_raw_fallbacks(ctx),
-                            scan_misses=_scan_misses(ctx),
-                            partial_scans=_partial_scans(ctx))
+    arr = load_frame_array(ctx, cache, well, chan_upper, tp, fov,
+                           use_tophat=use_tophat,
+                           raw_fallbacks=_raw_fallbacks(ctx),
+                           scan_misses=_scan_misses(ctx),
+                           partial_scans=_partial_scans(ctx))
+    if is_nanowell_frame(chan_upper):
+        frame = nanowell_frame_of(cache, well, chan_upper, tp)
+        if frame is not None and frame.note:
+            _note_nanowell_frame(ctx, well, chan_upper, tp, frame.note)
+    return arr
+
+
+def _note_nanowell_frame(ctx, well, token, tp, note: str) -> None:
+    st = getattr(getattr(ctx, "state", None), "image_table", None)
+    rec = getattr(st, "nanowell_frame_notes", None)
+    if isinstance(rec, set):
+        rec.add(((str(well), str(tp), str(token).strip().lower()), str(note)))
 
 
 def _load_well_channel(ctx, cache, well, chan_lower, *, use_tophat: bool = False):
@@ -295,6 +309,7 @@ def _compose_image_table_rgb(
     show_boundaries: bool,
     log_scale: bool = False,
     label_colors: bool = False,
+    undefined_mask=None,
 ) -> np.ndarray | None:
     """Render the cell's display state to a uint8 RGB array.
 
@@ -305,6 +320,12 @@ def _compose_image_table_rgb(
     ``show_boundaries``, and ``binary_mask`` — a precomputed array of the
     cells to paint white (the full segmentation mask for "Binary (mask)"
     or the above-threshold cells for "Binary (threshold)"), or None.
+
+    A NaN pixel is one with nothing there (a nanowell frame outside every tile
+    or nanowell, ``review/data/nanowell_images``) and is drawn black, whatever
+    the colormap; *undefined_mask* marks the pixels of nanowells that are there
+    with no value, drawn in ``Colors.plot_undefined_ink`` — so neither reads as
+    a value at the bottom of the LUT.
 
     Returns ``None`` when the input array can't be coerced — the
     caller falls back to whatever placeholder it shows for missing
@@ -350,6 +371,11 @@ def _compose_image_table_rgb(
     from review.core.ui_helpers import lut_colormap_to_rgb
     af = a.astype(_np.float32)
     rgb = lut_colormap_to_rgb(af, lo, hi, cmap_name or "", log_scale=log_scale)
+    blank = ~_np.isfinite(af)
+    if blank.any():
+        rgb[blank] = _CHROME_COLORS["black"]
+    if undefined_mask is not None and _np.shape(undefined_mask)[:2] == af.shape[:2]:
+        rgb[_np.asarray(undefined_mask, dtype=bool)] = _undefined_rgb()
 
     # 4. Boundary overlay: paint white pixels at the segmentation
     # boundaries (same padded-diff scheme used by the live renderer).
@@ -367,6 +393,13 @@ def _compose_image_table_rgb(
             rgb[boundary] = [255, 255, 255]
 
     return rgb
+
+def _undefined_rgb() -> tuple[int, int, int]:
+    from ui import theme
+
+    ink = str(theme.Colors.plot_undefined_ink).lstrip("#")
+    return int(ink[0:2], 16), int(ink[2:4], 16), int(ink[4:6], 16)
+
 
 def _row_channel(ctx, row_idx: int) -> str:
     """The representative channel token for grid row *row_idx* (its first cell)."""
@@ -492,7 +525,7 @@ def reset_scan_misses(ctx, *, retry_misses: bool = True) -> None:
     st = getattr(getattr(ctx, "state", None), "image_table", None)
     if st is None:
         return
-    attrs = ("raw_fallbacks", "partial_scans", "scale_bar_refusals")
+    attrs = ("raw_fallbacks", "partial_scans", "scale_bar_refusals", "nanowell_frame_notes")
     if retry_misses:
         attrs = ("scan_misses", *attrs)
     for attr in attrs:
@@ -677,11 +710,36 @@ def partial_scan_clause(ctx) -> str:
     """
     wells, reasons = partial_scan_report(ctx)
     if not wells:
-        return ""
+        return nanowell_frame_clause(ctx)
     return (f" WARNING: the image list for {len(wells)} well"
             f"{'' if len(wells) == 1 else 's'} ({', '.join(wells)}) is "
             f"INCOMPLETE — frames the dataset holds are missing from this "
-            f"artifact: {'; '.join(reasons) or 'a scan stopped short'}.")
+            f"artifact: {'; '.join(reasons) or 'a scan stopped short'}."
+            f"{nanowell_frame_clause(ctx)}")
+
+
+#: How many nanowell-frame notes a status line spells out before counting the rest.
+_FRAME_NOTES_SHOWN = 3
+
+
+def nanowell_frame_clause(ctx) -> str:
+    """What this pass's nanowell frames leave out, or ``""``.
+
+    Carried by :func:`partial_scan_clause`, so every surface that reports a
+    short artifact — the Generate line and each saved figure's line — says this
+    too, in one wording: a fluorescence montage missing a tile, or a metric map
+    whose undefined nanowells are drawn in the undefined ink, is a cell that
+    draws and looks finished.
+    """
+    st = getattr(getattr(ctx, "state", None), "image_table", None)
+    rec = getattr(st, "nanowell_frame_notes", None)
+    if not isinstance(rec, set) or not rec:
+        return ""
+    items = sorted(rec)
+    shown = [f"{well} {tp} {token.upper()}: {note.rstrip('.')}" for (well, tp, token), note in items[:_FRAME_NOTES_SHOWN]]
+    more = len(items) - len(shown)
+    return (f" Nanowell frames — {'; '.join(shown)}"
+            f"{f'; and {more} more (see the log)' if more > 0 else ''}.")
 
 
 def partial_scan_report(ctx) -> tuple[list[str], list[str]]:
@@ -772,6 +830,8 @@ def _format_pixel_intensity(arr, y: int, x: int) -> str:
         if is_int:
             return str(int(v))
         try:
+            if np.isnan(float(v)):
+                return "no value"
             return f"{float(v):.4g}"
         except Exception:
             return str(v)
@@ -805,6 +865,8 @@ def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr) -> np.ndarray | N
     fov = cell["fov"]
 
     _use_tophat, show_boundaries, binary_mode = _row_display_opts(ctx, r, chan_token)
+    if is_nanowell_frame(chan):
+        return _nanowell_frame_rgb(ctx, cache, cell, r, crop_tool, arr)
     # A variant token carries its own render: "GFP (binary)" is the base channel's
     # threshold-binary and "GFP (mask)" its cell mask, whatever the row says.
     # Resolve the real channel and let the token settle the mode — the spec above
@@ -852,6 +914,23 @@ def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr) -> np.ndarray | N
         show_boundaries=show_boundaries,
         log_scale=_row_log_scale(ctx, r, chan_token),
         label_colors=_row_label_colors(ctx, r, chan_token),
+    )
+
+
+def _nanowell_frame_rgb(ctx, cache, cell, r: int, crop_tool, arr) -> np.ndarray | None:
+    """A nanowell frame's pixels: the row's LUT and colormap over its values, cropped, with its background and its
+    undefined nanowells drawn as such. It has no segmentation, so the row's boundary and binary renders do not
+    apply (a binary render would otherwise report a missing mask on every cell)."""
+    chan = cell["chan"]
+    frame = nanowell_frame_of(cache, cell["well"], chan, cell["tp"])
+    undefined = None if frame is None else frame.undefined
+    if crop_tool is not None:
+        arr = crop_tool.apply_to_array(arr)
+        undefined = crop_tool.apply_to_array(undefined) if undefined is not None else None
+    lo, hi = _parse_lut(ctx, r, chan)
+    return _compose_image_table_rgb(
+        arr, None, lo=lo, hi=hi, cmap_name=_row_cmap_name(ctx, r, chan), is_overlay=False,
+        show_boundaries=False, log_scale=_row_log_scale(ctx, r, chan), undefined_mask=undefined,
     )
 
 
@@ -1297,6 +1376,8 @@ def cell_chrome_kwargs(ctx, r: int, c: int, cell, plan, overlay_chans=None) -> d
     bar_px, bar_targets, label_targets = plan
     st = ctx.state.image_table
     bar = bar_px if (bar_px and (r, c) in bar_targets) else 0
+    if bar and is_nanowell_frame(cell.get("chan")):
+        bar = _nanowell_frame_bar_px(ctx, cell)
     label_text = ""
     if (r, c) in label_targets:
         label_text = cell_identity_label(ctx, cell, overlay_chans)
@@ -1313,6 +1394,24 @@ def cell_chrome_kwargs(ctx, r: int, c: int, cell, plan, overlay_chans=None) -> d
         label_color=getattr(st, "label_color", "white"),
         label_bg=bool(getattr(st, "label_bg", True)),
     )
+
+
+def _nanowell_frame_bar_px(ctx, cell) -> int:
+    """The scale bar's length on a nanowell frame, at the frame's own scale.
+
+    A montage is the well downsampled to fit one picture, so the tiles' pixel
+    size — what **Pixel µm/px** holds — would draw a bar several times too
+    short. A frame whose scale is unknown carries no bar, and says so."""
+    st = ctx.state.image_table
+    length = float(getattr(st, "scale_bar_um", 0.0) or 0.0)
+    frame = nanowell_frame_of(getattr(st, "image_cache", None) or {}, cell.get("well"), cell.get("chan"), cell.get("tp"))
+    scale = getattr(frame, "um_per_px", None)
+    if not scale or scale <= 0 or length <= 0:
+        if frame is not None and frame.values is not None:
+            _note_nanowell_frame(ctx, cell.get("well"), cell.get("chan"), cell.get("tp"),
+                                 "its scale is not known, so it carries no scale bar")
+        return 0
+    return max(1, int(round(length / scale)))
 
 
 #: Burned into any cell served the raw frame in place of the corrected one.

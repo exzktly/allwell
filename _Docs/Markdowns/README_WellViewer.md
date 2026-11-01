@@ -5832,15 +5832,30 @@ A nanowell dataset also opens in every other Review tab, which read it like this
   A plot that cannot draw nanowells (Response Curves) says so in the row. On a standard plate the toggle is not
   shown.
 - **Multivariate** lists a **Nanowell** feature family: each cell's own nanowell's metrics.
-- **Image Table** offers **MONTAGE** — the stitched picture the run analysed, one per well and timepoint (its FOV
-  setting does not apply) — and does not offer NUC+SEG, which a nanowell run never writes. The raw tiles stay
-  available as PHASE / GFP. Opening the `out` folder directly finds the `in` folder beside it.
+- **Image Table** lays nanowell wells side by side with its usual crop, zoom, LUT and export. Each picture is one
+  whole well at one timepoint (the FOV setting does not apply), and three kinds are offered as channels:
+  - **MONTAGE** — the stitched phase picture the run analysed.
+  - **MONTAGE GFP** (one per fluorescence channel) — the same stitch built from that channel's raw tiles, which needs
+    the `in` folder beside the results. The run keeps no fluorescence montage, so the first Generate reads every
+    tile of each well shown and can take a few seconds per well. Leave the row's LUT on **Auto** to give every well
+    one brightness window.
+  - **NW: <metric>** (one per nanowell metric: cell count, confluence, brightness, fold changes, growth rate,
+    occupied) — each nanowell drawn as a disc in its metric's colour, *viridis* by default. The values follow the
+    Nanowells page's **Baseline** and the Cell Gating rules, so they match the page and the plots. Outside the
+    nanowells is black; a nanowell with no value (no cells for a brightness, out of focus, gated out) is drawn
+    grey-blue, never as a low value, and the status line says how many there were and why.
+
+  All three line up pixel for pixel, so one crop shows the same part of the well in every row. The scale bar is
+  measured at the montage's own scale, not at **Pixel µm/px**. NUC+SEG is not offered, because a nanowell run never
+  writes it. The raw tiles stay available as PHASE / GFP. Opening the `out` folder directly finds the `in` folder
+  beside it.
 - **Segmentation** shows the tile with each counted cell as a dot and each nanowell as a ring. A nanowell run
   records cells as points, not outlines, so Delete Cell, Crop cells and Edit are greyed out, and the line above the
   image says why.
 
 A build of All-Well without the Nanowells feature still opens a nanowell dataset, plots its cells and shows its
-montages, and says on every cell figure and in Segmentation that the nanowell views are not in this build.
+phase montages (without a scale bar, and without the fluorescence montages and metric maps), and says on every cell
+figure and in Segmentation that the nanowell views are not in this build.
 
 Pick wells on the plate at the left. Replicate sets from Sample Definitions are used exactly as the plot tabs
 use them.

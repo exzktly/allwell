@@ -6,6 +6,20 @@ Image Table offers it as the virtual channel ``MONTAGE`` (``frame_load``); a mon
 cell's FOV is ignored. Reading it needs no nanowell semantics, which is why it lives here, below every feature, and
 works in a build without the Nanowells feature (the montage is an image; what is *in* it is that feature's).
 
+**Nanowell frames.** Three kinds of virtual channel draw a nanowell well as one picture per (well, timepoint), all
+in the *same* pixel geometry — the grid record's ``montage_origin_um`` and ``montage_um_per_px``, over the stored
+montage's size — so one crop is one region of the well in every row, and a metric row lines up pixel for pixel with
+the montage beneath it:
+
+* ``MONTAGE`` — the run's phase montage;
+* ``MONTAGE <CH>`` — the same stitch drawn from *CH*'s raw tiles (the run keeps no fluorescence montage);
+* ``NW: <metric label>`` — the well's nanowells, each disc filled with its value of that per-nanowell metric.
+
+The second and third need the Nanowells feature — where each tile went and what each nanowell's metric is are its
+semantics — and are drawn by the registry service ``image_table.nanowell_frame``, which answers a
+:class:`NanowellFrame`; this module only names the tokens and holds the type. A build without the feature offers
+neither, and draws ``MONTAGE`` from the stored picture with no known scale.
+
 Qt-free.
 """
 
@@ -13,6 +27,7 @@ from __future__ import annotations
 
 import io
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +35,65 @@ import numpy as np
 from domain.tp_match import tp_close
 
 MONTAGE_SUFFIX = "_montage.png"
+
+#: The phase montage's token; a fluorescence montage is ``MONTAGE <CH>``.
+PHASE_MONTAGE = "MONTAGE"
+#: A per-nanowell metric's token is this prefix and the metric's label (``ObservationMetric.label``).
+METRIC_PREFIX = "NW: "
+#: A metric map's default colormap: its lowest value is not black, which is what a frame draws where nothing is.
+METRIC_MAP_COLORMAP = "viridis"
+
+
+@dataclass
+class NanowellFrame:
+    """One nanowell frame, in the montage's geometry.
+
+    *values* is float32, rows × columns, NaN wherever nothing was imaged or no nanowell is. *undefined* marks the
+    pixels of nanowells that are there but have no value of the metric (``None`` for a montage), so a nanowell
+    with no value is never drawn as background. *um_per_px* is the frame's own scale (``None`` when unknown), which
+    a scale bar must use rather than the tiles' pixel size. *note* says what the frame leaves out, or why there is
+    no frame (then *values* is ``None``)."""
+    values: np.ndarray | None
+    um_per_px: float | None = None
+    undefined: np.ndarray | None = None
+    note: str = ""
+
+
+def montage_token(channel: str = "") -> str:
+    """The token of *channel*'s montage; the phase montage's without one."""
+    return f"{PHASE_MONTAGE} {channel.strip().upper()}" if channel.strip() else PHASE_MONTAGE
+
+
+def montage_channel(token) -> str | None:
+    """``""`` for the phase montage's token, the lower-cased channel of ``MONTAGE <CH>``, or ``None``."""
+    text = str(token or "").strip()
+    if text.upper() == PHASE_MONTAGE:
+        return ""
+    head = PHASE_MONTAGE + " "
+    if text.upper().startswith(head) and text[len(head):].strip():
+        return text[len(head):].strip().lower()
+    return None
+
+
+def metric_token(label: str) -> str:
+    return f"{METRIC_PREFIX}{label}"
+
+
+def metric_label(token) -> str | None:
+    """The metric label a ``NW: <label>`` token names (as written, compared case-insensitively by the reader)."""
+    text = str(token or "").strip()
+    if text.upper().startswith(METRIC_PREFIX.upper()) and text[len(METRIC_PREFIX):].strip():
+        return text[len(METRIC_PREFIX):].strip()
+    return None
+
+
+def is_nanowell_frame(token) -> bool:
+    """Whether *token* is one of the three nanowell frames (a montage of any channel, or a metric map)."""
+    return montage_channel(token) is not None or metric_label(token) is not None
+
+
+def is_metric_map(token) -> bool:
+    return metric_label(token) is not None
 
 
 def _hours(token) -> float:

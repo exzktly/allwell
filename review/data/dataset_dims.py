@@ -77,8 +77,10 @@ def channel_options(ctx) -> list[str]:
     from review.domain.qc_params import is_nanowell_run
     if is_nanowell_run(info):
         # A nanowell run writes no segmentation overlay — NUC+SEG would be "(no image)" in every cell — and keeps
-        # one stitched montage per well and timepoint, the picture it analysed: that is offered first instead.
-        options.insert(0, MONTAGE_TOKEN)
+        # one stitched montage per well and timepoint, the picture it analysed: that is offered first instead,
+        # then the nanowell frames only the Nanowells feature can draw (``nanowell_images``).
+        options[:0] = [MONTAGE_TOKEN] + _nanowell_montages(ctx, info, chans)
+        options += _nanowell_metric_maps(ctx)
     elif seg_tok:
         options.append(NUC_SEG_TOKEN)
 
@@ -91,6 +93,33 @@ def channel_options(ctx) -> list[str]:
             options.append(lbl)
 
     return options
+
+
+def _nanowell_frames_in_build(ctx) -> bool:
+    features = getattr(ctx, "features", None)
+    return features is not None and features.service("image_table.nanowell_frame") is not None
+
+
+def _nanowell_montages(ctx, info: dict, chans: list[str]) -> list[str]:
+    """``MONTAGE <CH>`` for every fluorescence channel the run read — the phase channel's montage is ``MONTAGE``."""
+    if not _nanowell_frames_in_build(ctx):
+        return []
+    from review.data.frame_load import phase_channel
+    from review.data.nanowell_images import montage_token
+
+    phase = phase_channel(info)
+    return [montage_token(c) for c in chans if c and c != phase]
+
+
+def _nanowell_metric_maps(ctx) -> list[str]:
+    """``NW: <metric>`` for every per-nanowell metric of the dataset (read from the tables' header rows only)."""
+    if not _nanowell_frames_in_build(ctx):
+        return []
+    from review.data.nanowell_images import metric_token
+    from review.data.observations import nanowell_metric_specs
+
+    specs = nanowell_metric_specs(ctx, list(getattr(ctx.state.dataset, "well_paths", {}) or {})) or ()
+    return [metric_token(m.label) for m in specs]
 
 
 def cache_column_tokens(ctx, column: str) -> list[str]:

@@ -20,15 +20,16 @@ Four rosters, each a lane of its own and each marked by the collection hook:
     out with ``--no-ui`` and never runs them.
 
 **When the gated lanes run.** The first three run only when a change can reach
-them. ``scripts/lane_needed.py <gate>`` answers that for a gate in ``GATES``:
-a changed path matching the gate's patterns, or a first-party module that one
-of the gate's roster files imports *directly* (read from the files on each
-run), means run it; a diff that cannot be computed also means run it.
-``scripts/preflight.sh`` and CI both ask. The trigger cannot be the import
-closure — one ``import analyze.tab`` reaches most of the application — so a
-module two imports away can change a gated test's result without triggering
-its lane; CI therefore runs every gated lane on each push to ``main``, where
-such a miss is caught on the merge rather than never.
+them. ``scripts/lane_needed.py <gate>`` answers that for a gate in ``GATES``. A
+changed roster file, a harness path in ``GATES``, or a file a roster file names
+by path (``process_microscopy.py``, ``requirements-remote.txt``) runs it. A
+changed Python file runs it when the definitions that changed reach a roster
+file through the names each importer takes from the module before it, test
+helpers and borrowed test modules included, or reach a file a roster file runs.
+A diff that cannot be computed runs it. ``scripts/preflight.sh`` and CI both
+ask; CI also runs every gated lane on each push to ``main``, where what the
+script cannot follow (a module named by a computed string, a data file an
+application module reads) is caught on the merge rather than never.
 
 **The UI roster.** Tests whose subject is how the GUI *looks and lays out*:
 widget geometry, sizing, wrapping and fit, spacing, colours and painting,
@@ -390,32 +391,31 @@ DOCS_ONLY_PATTERNS: tuple[str, ...] = (
 VERSION_FILE = "version.py"
 
 
-#: The harness files every gate watches: a change to how lanes are split or run
-#: can break any of them.
+#: The harness files every gate watches by name: how the lanes are run and with which packages. Three more harness
+#: files are compared rather than matched, in ``scripts/lane_needed.py``: this file (a gate runs only when its own
+#: rosters, patterns or entry points change), ``pyproject.toml`` (only when its ``[tool.pytest]`` table does) and
+#: ``tests/conftest.py`` (a hook, an autouse fixture, or a fixture one of the gate's tests asks for).
+#: ``scripts/lane_needed.py`` and ``scripts/change_scope.py`` are absent on purpose: they decide which lanes run,
+#: no gated test runs them, and their own tests are in the fast lane.
 _HARNESS = (
-    r"^tests/_lanes\.py$",
-    r"^tests/conftest\.py$",
     r"^scripts/test\.sh$",
-    r"^scripts/lane_needed\.py$",
-    r"^scripts/change_scope\.py$",
-    r"^pyproject\.toml$",
     r"^tests/requirements-dev\.txt$",
     r"^\.github/workflows/ci\.yml$",
 )
 
-#: Gate name -> (the rosters it runs, the path patterns that trigger it).
-#: ``scripts/lane_needed.py`` adds each roster file's own direct imports to the
-#: patterns, so only paths no roster file imports by name need listing here.
+#: Gate name -> (the rosters it runs, the harness paths that trigger it). Nothing else is listed:
+#: ``scripts/lane_needed.py`` follows a changed definition through every module that imports it to the roster
+#: files, and reads from the roster files themselves which files they name by path (the pipeline they run, the
+#: launcher source they check, the requirements they parse). A pattern added here must be anchored: an unanchored
+#: word (``ssh``, ``bootstrap``) also names files that have nothing to do with the gate.
 GATES: dict[str, tuple[tuple[dict[str, str], ...], tuple[str, ...]]] = {
     "nanowell": (
         (NANOWELL_E2E_FILES, NANOWELL_FEATURE_FILES),
-        (r"nanowell", r"^pipeline/", r"^process_microscopy\.py$",
-         r"tile_register", *_HARNESS),
+        _HARNESS,
     ),
     "remote": (
         (REMOTE_FILES,),
-        (r"^services/remote", r"ssh", r"slurm", r"srun", r"rsync", r"scheduler",
-         r"bootstrap", r"transport", r"^scripts/allwell_remote", r"^analyze/remote_dialog", r"^analyze/remote_storage",
-         r"^services/run_journal", r"^services/pipeline_runner", *_HARNESS),
+        _HARNESS,
     ),
 }
+

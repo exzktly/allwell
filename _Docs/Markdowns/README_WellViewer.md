@@ -3995,9 +3995,11 @@ These affordances are global — set them once and every tab honours them.
 #### Typing a number
 
 A number you type into a box — bins, a cluster count, a moving-average
-window, ε, an axis limit — takes effect when you press **Enter** or click out
-of the box, not as you type each digit. Typing `200` redraws once, at 200,
-rather than at 2, then 20, then 200. The box's up/down arrows and the mouse
+window, ε, an axis limit — takes effect when you press **Enter**, click into
+another box, or stop typing for a second — not as you type each digit. Typing
+`200` redraws once, at 200, rather than at 2, then 20, then 200. Clicking a plot
+or a tab after typing is fine: the number applies a second after your last
+keystroke either way. The box's up/down arrows and the mouse
 wheel still apply each step straight away.
 
 #### Channel selector
@@ -5997,9 +5999,8 @@ the sentence names it.
   not be fitted (it has no rim focus, so it is kept unchecked). A well with fewer than ten rims at a timepoint
   is not judged. The footer says it briefly — *Out of focus, left out: 12 nanowell-timepoints (6 nanowells; rim
   under 75% of its well's sharpest)* and *Focus unchecked: 3 rim not fitted* — where "the well's sharpest" is the
-  sharpest tenth described above. A percentage typed into the box takes effect on Enter, on Tab, when you
-  click the figure or another control, or a second after you stop typing — the same on the Cell Gating tab's copy
-  of the box; the page redrawing meanwhile (tiles arriving on the Array view) never puts the old number back. It is the same switch as **Exclude out-of-focus nanowells** on the Cell Gating tab — ticking
+  sharpest tenth described above. A percentage typed into the box takes effect as any typed number does (see
+  *Typing a number*): on Enter, on Tab, or a second after you stop typing; the page redrawing meanwhile (tiles arriving on the Array view) never puts the old number back. It is the same switch as **Exclude out-of-focus nanowells** on the Cell Gating tab — ticking
   either ticks both — so the cells of an out-of-focus nanowell also leave Plotting, Scatter, histograms and
   exports, not only this page. Turning it on changes the numbers a figure draws, so a figure saved before it
   existed redraws with it applied; untick it to see the run's own counts. Batch Export's Nanowells mode uses the

@@ -74,7 +74,6 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
     # A bare number, no suffix: Qt's spin box refuses typing and Backspace while the cursor sits in a suffix, so a
     # click after the number ignored every digit typed. The labels either side say what the number is.
     spin.setValue(int(round(100 * params.nanowell_focus_fraction)))
-    spin.commit_after_pause()                # Enter and focus-out commit; so does a pause: a click on a canvas ends no edit
     spin.setToolTip(TOOLTIP)
     head_layout.addWidget(spin)
     of = QLabel("of the well's sharpest rims", head)

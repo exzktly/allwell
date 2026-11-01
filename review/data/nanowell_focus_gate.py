@@ -24,7 +24,9 @@ page each say what it left out.
 * Switched off, the column is **removed** from every cached frame (``cache_projectors.drop_verdict_column``), so a
   frame is not filtered by a control the user has just unticked.
 * The site table is read once per file version (path, modification time and size) and only the five columns the
-  rule reads; the rule is applied after the lookup, so a change of fraction re-judges without re-reading.
+  rule reads, and it is judged once per file version *and rule*: the projector runs on every well at every
+  dataset load and on every plate-wide narrow read, and re-judging the whole table each time was much of what made
+  a nanowell plate slow to open. A change of fraction re-judges without re-reading.
 
 Qt-free: this is the data layer. It imports the domain's rule and parameters and nothing above them.
 """
@@ -39,7 +41,7 @@ import pandas as pd
 
 from review.data.cache_projectors import drop_verdict_column, project_verdict_column
 from review.domain.nanowell_rim_focus import (
-    CELL_KEY, NW_FOCUS_PASS_COLUMN, SITE_COLUMNS, FocusTally, cell_pass, flag_sites, tally,
+    CELL_KEY, NW_FOCUS_PASS_COLUMN, SITE_COLUMNS, FocusTally, RimFocusRule, cell_pass, flag_sites, tally,
 )
 
 log = logging.getLogger("review")
@@ -84,8 +86,22 @@ def _read_site_table(path: str, _mtime_ns: int, _size: int) -> pd.DataFrame | No
     return frame
 
 
-def site_table(ctx, well: str) -> pd.DataFrame | None:
-    """*well*'s site table (the rule's columns only), or ``None`` when the dataset has none for it."""
+@functools.lru_cache(maxsize=512)
+def _judged_site_table(path: str, mtime_ns: int, size: int, well: str, rule_key: tuple) -> pd.DataFrame | None:
+    """:func:`flag_sites` of one site table version under the rule whose :meth:`RimFocusRule.key` is *rule_key*.
+
+    Equal keys give equal verdicts (that is what the key is for), so the judged table is shared between callers:
+    **read it, never mutate it**. Every caller here only filters or concatenates it, which copies."""
+    table = _read_site_table(path, mtime_ns, size)
+    if table is None:
+        return None
+    rule = RimFocusRule(True, rule_key[1]) if rule_key and rule_key[0] else RimFocusRule(False)
+    return flag_sites(table, well, rule)
+
+
+def flagged_sites(ctx, well: str, rule) -> pd.DataFrame | None:
+    """*well*'s addressed nanowell-timepoints judged by *rule*, or ``None`` with no table. Cached per file version
+    and rule (module docstring); the frame returned is shared, so a caller must not change it."""
     folder = nanowell_dir(getattr(ctx.state.dataset, "data_dir", None))
     if folder is None:
         return None
@@ -94,13 +110,8 @@ def site_table(ctx, well: str) -> pd.DataFrame | None:
         stat = path.stat()
     except OSError:
         return None
-    return _read_site_table(str(path), stat.st_mtime_ns, stat.st_size)
-
-
-def flagged_sites(ctx, well: str, rule) -> pd.DataFrame | None:
-    """*well*'s addressed nanowell-timepoints judged by *rule*, or ``None`` with no table."""
-    table = site_table(ctx, well)
-    return None if table is None else flag_sites(table, well, rule)
+    key = rule.key() if rule is not None else (False,)
+    return _judged_site_table(str(path), stat.st_mtime_ns, stat.st_size, str(well), key)
 
 
 def _wells_of(df, label: str) -> list[str]:
@@ -188,8 +199,6 @@ def nanowell_focus_status(ctx) -> tuple[str, bool]:
         return ("", False)
     on = bool(params.exclude_soft_nanowells)
     rule = params.nanowell_focus_rule()
-    from review.domain.nanowell_rim_focus import RimFocusRule
-
     judged = plate_tally(ctx, rule if on else RimFocusRule(True, rule.fraction))
     if judged is None:
         return ("", False)

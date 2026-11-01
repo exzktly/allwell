@@ -42,6 +42,15 @@ def nanowell_observations(ctx, wells) -> ObservationTable | None:
     return ctx.features.query("observations.nanowell", ctx, list(wells), default=None)   # NANOWELL_SERVICE
 
 
+def nanowell_metric_specs(ctx, wells) -> tuple | None:
+    """The metrics :func:`nanowell_observations` would offer for *wells*, with no rows read or computed, or ``None``
+    when this build or this dataset has none. For a picker's entries: computing the whole table to name its metrics
+    held up every nanowell plate's load."""
+    if not is_nanowell_dataset(ctx):
+        return None
+    return ctx.features.query("observations.nanowell_metrics", ctx, list(wells), default=None)  # NANOWELL_METRICS_SERVICE
+
+
 def occupied_nanowells_by_well(ctx, wells) -> dict[str, int]:
     """Per well, how many distinct nanowell addresses its cell rows name — the nanowells holding a cell.
 

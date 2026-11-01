@@ -11069,7 +11069,11 @@ pitch, a square misread — would name every nanowell after its neighbour, and f
 each nanowell with its neighbour from that timepoint on. So before the rim is decided, `_settle_steps` puts the
 anchored timepoints in one frame. It groups them by the lattice step (within ±3, `STEP_REACH`) at which each one's
 detected sites best overlay the sites of the timepoint that detected most (`pipeline/nanowell_frames.py`:
-`best_step`, `settle_frames`, `choose_frame` — the one rule, shared with Datasets → Validate's relabel), keeps the frame holding
+`best_step`, `settle_frames`, `choose_frame` — the one rule, shared with Datasets → Validate's relabel). A step other
+than `(0, 0)` counts only when it matches at least `MIN_STEP_GAIN` (3) more sites and at least half of those `(0, 0)`
+leaves unmatched, the floor the roster's own step test (`nanowell_rim.MIN_CRESCENT`) uses: a step off moves a whole
+edge row, while a dense reference that missed one nanowell let a shifted overlay of a sparser timepoint win by that
+one site. It then keeps the frame holding
 the best-ranked origin (`ORIGIN_RANK`: a hand-set anchor, then the central square, then the array centre, then a
 plate-rigid prediction), then the most timepoints, and moves every other timepoint's addresses onto it
 (`_shift_origin`: `origin_shift`, `origin_registered_to` and a note in its grid block, the step in its checkpoint

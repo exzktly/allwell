@@ -211,3 +211,34 @@ def test_an_earlier_record_with_a_step_off_timepoint_is_not_reused():
     assert not _has_a_step_off_timepoint({**circle, "timepoints": {"0h": {"consistency": "consistent"}}})
     # An inferred array's timepoints each see their own array, so a mismatch there is an observation, not a step.
     assert not _has_a_step_off_timepoint({**circle, "array_radius": {"radius_um": None, "roster": [[0, 0]]}})
+
+
+def _hexagon(radius):
+    return {(q, r) for q in range(-radius, radius + 1) for r in range(-radius, radius + 1)
+            if max(abs(q), abs(r), abs(q + r)) <= radius}
+
+
+@pytest.mark.parametrize("sparse_method", ["fiducial", "array_centre"])
+def test_one_nanowell_the_reference_missed_does_not_move_a_sparser_timepoint(sparse_method):
+    """A dense timepoint that missed one nanowell (debris) near the side where a sparser timepoint's detections stop
+    short of the rim: every shift that stays inside the array overlaps the sparser one almost fully, and with no
+    margin one of them won by that single site — the timepoint was renamed after its neighbours (array centre) or
+    the well left unaddressed (both fiducial). A step off moves a whole edge row, never one site."""
+    from pipeline.nanowell_frames import AGREE, best_step, settle_frames
+
+    dense = _hexagon(8) - {(7, 0)}                      # 216 of 217: one hidden by debris
+    sparse = _hexagon(7)                                # the dim outer ring undetected, every address right
+    assert best_step(sparse, dense) == (0, 0)
+    decision = settle_frames({"0h": dense, "24h": sparse}, {"0h": "fiducial", "24h": sparse_method})
+    assert decision.verdict == AGREE and decision.shifts == {}
+    assert nr.misanchored({"0h": dense, "24h": sparse}) == {}
+
+
+def test_a_whole_timepoint_a_step_off_is_still_found_by_overlap():
+    """The other side of the margin: the same sparse timepoint truly a step off, against the dense one with its
+    missing nanowell, is still read as that step."""
+    from pipeline.nanowell_frames import best_step
+
+    dense = _hexagon(8) - {(7, 0)}
+    stepped = {(q - 1, r) for q, r in _hexagon(8) if (q, r) != (3, 2)}     # the whole array, named a site off
+    assert best_step(stepped, dense) == (1, 0)

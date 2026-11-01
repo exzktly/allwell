@@ -65,12 +65,13 @@ _OPTS = {
     "filename_sep": "-",
     "smfish_tokens": ["RFP"],
     "shape_features": ["area", "solidity"],
-    "flatfield": "gaussian",
-    "background": "top_hat",
-    "background_well": "H12",
-    # The written form the editor produces — an explicit well list, never a
-    # range, so what is stored round-trips to itself.
-    "background_well_map": "H12=A01,A02",
+    # A nanowell run applies no Image correction, so its spec always carries
+    # none (``qc_section._correction_options``); the standard-plate round trip
+    # below, with ``_STANDARD_CORRECTIONS``, is the one that restores real values.
+    "flatfield": "none",
+    "background": "none",
+    "background_well": "",
+    "background_well_map": "",
     "auto_threshold": False,
     "run_check": False,
     "auto_threshold_method": "controls",
@@ -112,6 +113,7 @@ _OPTS = {
     "nanowell_segment_on": "raw",              # not the default, so the round trip proves it is restored
     "nanowell_segment_scope": "tile",          # the same
     "nanowell_empty_well": "H12",              # the same
+    "nanowell_fluor_background": "empty_well",  # the same
     "nanowell_registration_from": "/data/plate6/out",
 }
 
@@ -167,6 +169,12 @@ _OTSU_WITH_WELLS_SPEC = {
 # Blank means "use the model's own default" for both StarDist thresholds. The
 # spec has to be hydrated *over* a form already holding real values for this to
 # prove anything — which is exactly the edit-a-queued-job situation.
+#: A standard plate's Image correction, set to values a fresh form does not hold. Its run applies them, unlike a
+#: nanowell run's, so a standard spec is the one that proves they are restored. The map is the written form the
+#: editor produces — an explicit well list, never a range, so what is stored round-trips to itself.
+_STANDARD_CORRECTIONS = {"flatfield": "gaussian", "background": "top_hat", "background_well": "H12",
+                         "background_well_map": "H12=A01,A02"}
+
 _BLANK_THRESHOLDS_SPEC = {
     **_SPEC,
     "opts": {**_OPTS, "stardist_prob_thresh": "", "stardist_nms_thresh": ""},
@@ -196,6 +204,9 @@ def test_the_fixture_is_all_non_default(tab):
                  # nanowell mode pins label-free segmentation, which has no cytoplasm channel, so a saved
                  # nanowell spec always carries it blank.
                  "cytoplasm_token",
+                 # and applies no Image correction, so it always carries none of it; the standard-plate round
+                 # trip (_STANDARD_CORRECTIONS) restores real values.
+                 "flatfield", "background", "background_well", "background_well_map",
                  # Off whenever force is on: one choice of three (see _OPTS), so it cannot differ from the
                  # default in the same fixture as force; test_fill_in_what_is_missing_round_trips covers it.
                  "incremental"}
@@ -208,6 +219,15 @@ def test_hydrate_then_collect_reproduces_the_spec(tab):
     """The round trip. A key that survives here is a key the edit flow keeps."""
     tab.hydrate_job(_SPEC)
     assert tab.collect_spec() == _SPEC
+
+
+def test_a_standard_plate_s_image_correction_round_trips(tab):
+    spec = copy.deepcopy(tab.collect_spec())                 # a standard plate, as the form collects one
+    assert all(spec["opts"][k] != v for k, v in _STANDARD_CORRECTIONS.items())
+    spec["opts"].update(_STANDARD_CORRECTIONS)
+    tab.hydrate_job(_SPEC)                                   # over a nanowell job, which sends none of them
+    tab.hydrate_job(spec)
+    assert tab.collect_spec() == spec
 
 
 def test_fill_in_what_is_missing_round_trips(tab):

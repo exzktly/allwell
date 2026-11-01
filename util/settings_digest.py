@@ -132,6 +132,8 @@ KEYED_ON: dict[str, str] = {
                                    "every cell was seen at",
     "nanowell_empty_well":         "the empty well every confluence is calibrated against, so every "
                                    "confluence",
+    "nanowell_fluor_background":   "what every fluorescence number is measured above (the well's own "
+                                   "floor or the empty well's), so every fluorescence number",
     "nanowell_grid":               "the described grid a dataset without an acquisition record is "
                                    "placed from, so where every tile and nanowell sits",
     "nanowell_scan":               "the order the described grid's fields were taken in, the same",

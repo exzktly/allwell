@@ -28,6 +28,7 @@ import numpy as np
 
 from review.features.nanowell._array_key import draw_key, key_entries
 from review.features.nanowell.array_compute import padded
+from review.features.nanowell.background_compute import short_clause
 from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
 from review.features.nanowell.extremes_compute import caption, format_value
@@ -530,8 +531,6 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
     """
     fig.clear()
     outside = outside or {}
-    from review.features.nanowell.background_compute import short_clause
-
     # Each fluorescence row's second line says what its background was (*backgrounds*: the wells' modes).
     rows = list(DETAIL_ROWS) + ([(f"brightness_{channel}", f"Cell brightness\n{short_clause('brightness', backgrounds)}"),
                                 (f"signal_{channel}", f"Nanowell fluor.\n{short_clause('signal', backgrounds)}")]

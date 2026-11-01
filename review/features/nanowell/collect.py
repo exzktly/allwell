@@ -37,6 +37,7 @@ import numpy as np
 import pandas as pd
 
 from domain.nanowell_roster import roster_rule
+from review.features.nanowell.background_compute import well_mode
 # A measurable timepoint at which the nanowell's own rim was out of focus: named by the rule's module, because the
 # app-wide inclusion layer reaches the same verdict and may not import this feature.
 from review.domain.nanowell_rim_focus import OUT_OF_FOCUS  # noqa: F401 — re-exported for the page's modules
@@ -373,8 +374,6 @@ def read_well_part(folder: Path, well: str, cell_files, wells) -> WellPart:
     brightness = _cell_brightness(_cell_files_of(well, cell_files, wells), well, tables)
     from pipeline.nanowell_identity import exclusions, verdicts
 
-    from review.features.nanowell.background_compute import well_mode
-
     return WellPart(well, table=table, grid=grid.get("timepoints") or {},
                     background=well_mode(table.columns, grid.get("settings")),
                     roster_rule=roster_rule(grid.get("array_radius")),
@@ -449,8 +448,6 @@ def site_backgrounds(data_dir, wells) -> dict:
     site tables' header rows and the run's settings, as :func:`site_channels` reads them; ``{}`` where it would
     return ``None``. :func:`load_nanowell_data` reads each well's own grid record instead, which a merged plate
     can make differ from the dataset's settings."""
-    from review.features.nanowell.background_compute import well_mode
-
     found = _site_headers(data_dir, wells)
     if found is None:
         return {}

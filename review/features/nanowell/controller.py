@@ -24,7 +24,7 @@ from review.domain import nanowell_rim_focus as rfc
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
-    METRICS, PER_NANOWELL, TIME, WELLS, distribution_model, match_channel, metric_column,
+    METRICS, PER_NANOWELL, TIME, WELLS, distribution_model, match_channel, metric_column, metric_label,
 )
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, field_sites, one_to_one
@@ -873,8 +873,6 @@ def _stats_cache(st) -> dict:
 
 def _label(metric: str, channel: str | None, data=None) -> str:
     """*metric*'s axis label, naming what the shown wells' fluorescence was measured above (``background_compute``)."""
-    from review.features.nanowell.distribution_compute import metric_label
-
     return metric_label(metric, channel, list(getattr(data, "fluor_backgrounds", {}).values()))
 
 

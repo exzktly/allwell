@@ -13861,9 +13861,12 @@ the metric; the frame's own µm/px; and a note of what it leaves out.
   A LUT row's **per cell** (`ChannelSpec.auto_per_cell`) keeps that channel out of the pooled window, so each cell is
   scaled to its own range; the key then says the colours are not comparable between cells.
 - **Labels.** `nanowell_images.display_token` names a frame on axes, chips, titles and the hover line: a metric by its
-  short label (`short_label`, cut at its explanation, `NW: GFP Brightness`) in its own case — `ChannelSpec.axis_token`
+  short label (`short_label`, cut at its explanation, `NW: GFP Cell fluorescence`) in its own case — `ChannelSpec.axis_token`
   keeps a nanowell frame's case, since upper-casing broke `log₂` and `n₀` — while the key and the chip's tooltip give
-  the full label. A frame shows the whole well, so neither the corner of a grid made only of frames
+  the full label. A frame's token carries the full label, background clause included, and
+  `table_frame_compute._metric_frame` resolves it by label, by key, or by the label without that clause
+  (`background_compute.bare_label`), so a frame kept in a view draws the same metric on a dataset measured above
+  another background. A frame shows the whole well, so neither the corner of a grid made only of frames
   (`facet_view.plan_facets`) nor a frame's identity label names a field.
 - **The builder.** The Channels tray folds the metric maps behind one **Nanowell metrics** toggle
   (`builder_view._build_tray`), and the starting table (`_default_spec`) holds `MONTAGE` and the raw channels but no

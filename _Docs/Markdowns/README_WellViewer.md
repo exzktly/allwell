@@ -5896,12 +5896,12 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     tile of each well shown and can take a few seconds per well. Leave the row's LUT on **Auto** to give every well
     one brightness window; tick **per cell** in its LUT row to scale each well to its own range instead, which shows
     a dim well at the cost of comparing wells.
-  - **NW: *metric name*** (one per nanowell metric: cell count, confluence, brightness, fold changes, growth rate,
+  - **NW: *metric name*** (one per nanowell metric: cell count, confluence, cell and nanowell fluorescence, fold changes, growth rate,
     occupied) — each nanowell drawn as a disc in its metric's colour, *viridis* by default. A fold change is drawn
     blue below 1, red above and grey at 1, on a log scale, so a doubling and a halving are equally strong. The values
     follow the Nanowells page's **Baseline** and the Cell Gating rules, so they match the page and the plots.
     Outside the nanowells is dark grey, so even the lowest values stand out; a nanowell with no value (no cells for
-    a brightness, out of focus, gated out) is an **empty ring**, never a coloured disc.
+    a cell fluorescence, out of focus, gated out) is an **empty ring**, never a coloured disc.
 
   The metrics sit behind **Nanowell metrics** in the Channels tray (click it to show them), and a new table starts
   with MONTAGE and the raw channels only. Under the grid a **colour key** names each metric as its row does and

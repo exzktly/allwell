@@ -60,6 +60,17 @@ def short_clause(metric: str, modes) -> str:
     return _SHORT[found.pop()] if len(found) == 1 else "mixed background"
 
 
+def bare_label(label: str) -> str:
+    """*label* without the background clause :func:`clause` gave it — ``"GFP Cell fluorescence (mean per cell,
+    empty-well background subtracted)"`` → ``"GFP Cell fluorescence (mean per cell)"``. A name that is kept and read
+    back later (the Image Table's ``NW: <label>`` frame) is compared on this, so it names the same metric on a dataset
+    measured above another background."""
+    text = str(label or "")
+    for words in (*_CLAUSES.values(), MIXED_CLAUSE):
+        text = text.replace(f", {words})", ")").replace(f" ({words})", "")
+    return text
+
+
 def describe(modes, empty_well: str | None = None) -> str:
     """One sentence for a figure's notes when the wells' backgrounds are not all the same, or ``""``."""
     found = set(modes)

@@ -20,7 +20,7 @@ from review.data.nanowell_images import display_token, metric_token, montage_tok
 from tests.fixtures import nanowell_dataset as fx  # noqa: E402
 
 COUNT = metric_token("Cell count")
-BRIGHTNESS = metric_token("GFP Brightness (mean per-cell intensity)")
+BRIGHTNESS = metric_token("GFP Cell fluorescence (mean per cell, own-well background subtracted)")
 COUNT_FC = metric_token("Count fold change")
 LOG2_FC = metric_token("log₂ count fold change, (n + 1) / (n₀ + 1)")
 
@@ -120,7 +120,7 @@ def test_the_key_names_each_metric_in_full_with_the_window_its_cells_are_drawn_i
     _pool(ctx, cells)
     keys = colour_keys(ctx, cells)
     # Named as the rows are, then in full: the phase picture has no quantity to key.
-    assert [k.title for k in keys] == ["MONTAGE GFP", "NW: GFP Brightness (mean per-cell intensity)",
+    assert [k.title for k in keys] == ["MONTAGE GFP", "NW: GFP Cell fluorescence (mean per cell, own-well background subtracted)",
                                        "NW: Count fold change"]
     brightness = keys[1]
     measured = [g for well in ("A01", "B01")

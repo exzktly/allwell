@@ -1014,11 +1014,26 @@ def colour_keys(ctx, cells) -> list:
         # in full after them.
         title = (f"NW: {metric.label if metric is not None else label}" if label is not None
                  else display_token(chan))
+        if kind:
+            title += f", relative to {_baseline_phrase(ctx, chan)}"
         keys.append(ColourKey(
             title=title, cmap=_row_cmap_name(ctx, r, chan) or "Greys", lo=lo, hi=hi,
             log=_row_log_scale(ctx, r, chan), centre={"ratio": 1.0, "log": 0.0}.get(kind),
             scope=scope, undefined=label is not None))
     return keys
+
+
+def _baseline_phrase(ctx, token) -> str:
+    """What a fold-change map's values are relative to, in words: the timepoint or rule its token pins, or the
+    Nanowells page's own Baseline, named with what that is now — a fold change with no stated reference is a ratio
+    to something the reader has to guess."""
+    from review.data.nanowell_images import BASELINE_RULES, baseline_text, metric_baseline
+
+    code = metric_baseline(token)
+    if code is None:
+        page = getattr(ctx.state.feature_slice("nanowell"), "baseline", None) or "earliest"
+        return f"the Nanowells page's baseline ({baseline_text(page)})"
+    return f"the {baseline_text(code)} timepoint" if code in BASELINE_RULES else baseline_text(code)
 
 
 #: A cropped metric map is re-painted finer until its longer side reaches this many pixels (at most

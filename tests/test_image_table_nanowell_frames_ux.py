@@ -121,7 +121,7 @@ def test_the_key_names_each_metric_in_full_with_the_window_its_cells_are_drawn_i
     keys = colour_keys(ctx, cells)
     # Named as the rows are, then in full: the phase picture has no quantity to key.
     assert [k.title for k in keys] == ["MONTAGE GFP", "NW: GFP Cell fluorescence (mean per cell, own-well background subtracted)",
-                                       "NW: Count fold change"]
+                                       "NW: Count fold change, relative to the Nanowells page's baseline (earliest)"]
     brightness = keys[1]
     measured = [g for well in ("A01", "B01")
                 for g, n in zip(fx.GFP[well], fx.COUNTS[well]["24h"]) if n]
@@ -257,3 +257,74 @@ def test_a_grid_of_whole_wells_names_no_field(qtbot, tmp_path):
     assert "FOV" not in cell_identity_label(ctx, frames[1][0]) and "NW: Cell count" in cell_identity_label(
         ctx, frames[1][0])
     assert "FOV:F0" in cell_identity_label(ctx, _cells(["GFP"])[0][0])
+
+
+# ── A fold change's baseline, chosen per channel ────────────────────────────
+def test_a_fold_change_token_carries_its_baseline_and_reads_back_without_it():
+    from review.data.nanowell_images import baseline_timepoint_code, metric_baseline, metric_label
+
+    pinned = metric_token("Count fold change", baseline_timepoint_code("0h"))
+    assert pinned == "NW: Count fold change @tp:0h"
+    assert metric_label(pinned) == "Count fold change" and metric_baseline(pinned) == "tp:0h"
+    assert display_token(pinned) == "NW: Count fold change vs 0h"
+    assert metric_baseline("NW: Count fold change @FIRST_MEASURABLE") == "first_measurable"
+    assert metric_baseline(COUNT_FC) is None and display_token(COUNT_FC) == "NW: Count fold change"
+
+
+def test_a_pinned_baseline_draws_its_own_fold_change_whatever_the_page_s_baseline(qtbot, tmp_path):
+    from review.data.nanowell_images import baseline_timepoint_code
+
+    ctx = _loaded(qtbot, tmp_path)
+    at = tuple(int(v / fx.PX_UM) for v in (100.0, 100.0))         # nanowell (0, 0)
+    counts = fx.COUNTS["A01"]
+    vs_0h = metric_token("Count fold change", baseline_timepoint_code("0h"))
+    vs_24h = metric_token("Count fold change", baseline_timepoint_code("24h"))
+    ctx.state.feature_slice("nanowell").baseline = "tp:24h"        # the page says 24 h …
+    assert load_frame_array(ctx, {}, "A01", vs_0h, "24", "F0")[at] == pytest.approx(counts["24h"][0] / counts["0h"][0])
+    assert load_frame_array(ctx, {}, "A01", vs_24h, "24", "F0")[at] == pytest.approx(1.0)
+    assert load_frame_array(ctx, {}, "A01", COUNT_FC, "24", "F0")[at] == pytest.approx(1.0)   # … unpinned follows it
+
+
+def test_a_baseline_the_page_does_not_know_is_no_frame_and_says_so(qtbot, tmp_path):
+    from review.data.frame_load import nanowell_frame_of
+
+    ctx = _loaded(qtbot, tmp_path)
+    cache: dict = {}
+    token = "NW: Count fold change @sometime"
+    assert load_frame_array(ctx, cache, "A01", token, "24", "F0") is None
+    assert "'sometime' is not a baseline" in nanowell_frame_of(cache, "A01", token, "24").note
+
+
+def test_the_channel_menu_offers_each_baseline_and_choosing_one_rewrites_the_channel(qtbot, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMenu
+
+    from review.features.image_browser.image_table import builder_view as BV
+
+    ctx = _loaded(qtbot, tmp_path)
+    assert [code for code, _text in BV.baseline_choices(ctx, COUNT_FC)] == [
+        None, "earliest", "first_measurable", "tp:0h", "tp:24h"]
+    assert BV.baseline_choices(ctx, COUNT) == []                  # not a fold change: nothing to be relative to
+    monkeypatch.setattr(BV, "_edit", lambda _ctx: None)
+    (cs,) = _use(ctx, [COUNT_FC])
+    menu = BV._channel_menu(ctx, cs)
+    actions = {a.text(): a for a in menu.actions()}
+    assert actions["The Nanowells page's baseline (now earliest)"].isChecked()
+    actions["24h"].trigger()
+    assert cs.channel == "NW: Count fold change @tp:24h" and cs.axis_token() == cs.channel
+    again = BV._channel_menu(ctx, cs)                     # kept: Qt deletes an unreferenced menu's actions
+    assert {a.text(): a for a in again.actions()}["24h"].isChecked()
+    plain = BV._channel_menu(ctx, _use(ctx, [COUNT])[0])
+    assert "Fold change relative to" not in [a.text() for a in plain.actions()]
+    assert isinstance(plain, QMenu)
+
+
+def test_the_key_says_what_each_fold_change_is_relative_to(qtbot, tmp_path):
+    from review.data.nanowell_images import baseline_timepoint_code
+    from review.features.image_browser.image_table.image_compose import colour_keys
+
+    ctx = _loaded(qtbot, tmp_path)
+    vs_0h = metric_token("Count fold change", baseline_timepoint_code("0h"))
+    _use(ctx, [COUNT_FC, vs_0h, COUNT])
+    titles = [k.title for k in colour_keys(ctx, _cells([COUNT_FC, vs_0h, COUNT]))]
+    assert titles == ["NW: Count fold change, relative to the Nanowells page's baseline (earliest)",
+                      "NW: Count fold change, relative to 0h", "NW: Cell count"]

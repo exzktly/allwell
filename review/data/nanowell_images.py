@@ -13,7 +13,9 @@ the montage beneath it:
 
 * ``MONTAGE`` — the run's phase montage;
 * ``MONTAGE <CH>`` — the same stitch drawn from *CH*'s raw tiles (the run keeps no fluorescence montage);
-* ``NW: <metric label>`` — the well's nanowells, each disc filled with its value of that per-nanowell metric.
+* ``NW: <metric label>`` — the well's nanowells, each disc filled with its value of that per-nanowell metric; a
+  fold change may pin its baseline, ``NW: <label> @<baseline>`` (:func:`metric_token`), and otherwise follows the
+  Nanowells page's.
 
 The second and third need the Nanowells feature — where each tile went and what each nanowell's metric is are its
 semantics — and are drawn by the registry service ``image_table.nanowell_frame``, which answers a
@@ -80,16 +82,61 @@ def montage_channel(token) -> str | None:
     return None
 
 
-def metric_token(label: str) -> str:
-    return f"{METRIC_PREFIX}{label}"
+#: Between a metric's label and the baseline its fold change is taken from, in a token: ``NW: Count fold change
+#: @tp:0h``. A baseline is the Nanowells page's own code — ``earliest``, ``first_measurable`` or ``tp:<timepoint>`` —
+#: so the reader hands it to the page's metrics unchanged.
+BASELINE_SEP = " @"
+#: The two baselines that are rules rather than timepoints, as the page names them.
+BASELINE_RULES = {"earliest": "earliest", "first_measurable": "first measurable"}
+_TIMEPOINT_BASELINE = "tp:"
+
+
+def metric_token(label: str, baseline: str | None = None) -> str:
+    """The token of the metric *label*, with its fold change taken from *baseline* when one is given (``None``: the
+    Nanowells page's own Baseline, whatever it is when the cell is drawn)."""
+    token = f"{METRIC_PREFIX}{label}"
+    return f"{token}{BASELINE_SEP}{baseline}" if baseline else token
+
+
+def _metric_parts(token) -> tuple[str, str | None] | None:
+    text = str(token or "").strip()
+    if not text.upper().startswith(METRIC_PREFIX.upper()):
+        return None
+    rest = text[len(METRIC_PREFIX):].strip()
+    baseline = None
+    if BASELINE_SEP in rest:
+        rest, baseline = (part.strip() for part in rest.rsplit(BASELINE_SEP, 1))
+    return (rest, baseline or None) if rest else None
 
 
 def metric_label(token) -> str | None:
-    """The metric label a ``NW: <label>`` token names (as written, compared case-insensitively by the reader)."""
-    text = str(token or "").strip()
-    if text.upper().startswith(METRIC_PREFIX.upper()) and text[len(METRIC_PREFIX):].strip():
-        return text[len(METRIC_PREFIX):].strip()
-    return None
+    """The metric label a ``NW: <label>`` token names (as written, compared case-insensitively by the reader),
+    without the baseline a fold change may carry."""
+    parts = _metric_parts(token)
+    return None if parts is None else parts[0]
+
+
+def metric_baseline(token) -> str | None:
+    """The baseline code a metric token pins its fold change to, or ``None`` — the page's own Baseline, or not a
+    metric token. A code is matched case-insensitively for the rules, as written for a timepoint."""
+    parts = _metric_parts(token)
+    if parts is None or parts[1] is None:
+        return None
+    code = parts[1]
+    return code.lower() if code.lower() in BASELINE_RULES else code
+
+
+def baseline_timepoint_code(timepoint: str) -> str:
+    """The baseline code that takes every fold change from *timepoint* (the run's own label)."""
+    return f"{_TIMEPOINT_BASELINE}{timepoint}"
+
+
+def baseline_text(code) -> str:
+    """How a label names a baseline code: ``earliest``, ``first measurable``, or the timepoint's own name."""
+    text = str(code or "")
+    if text.lower().startswith(_TIMEPOINT_BASELINE):
+        return text[len(_TIMEPOINT_BASELINE):]
+    return BASELINE_RULES.get(text.lower(), text)
 
 
 def is_nanowell_frame(token) -> bool:
@@ -120,7 +167,9 @@ def display_token(token) -> str:
     text = str(token or "").strip()
     label = metric_label(text)
     if label is not None:
-        return f"{METRIC_PREFIX}{short_label(label)}"
+        baseline = metric_baseline(text)
+        tail = f" vs {baseline_text(baseline)}" if baseline else ""
+        return f"{METRIC_PREFIX}{short_label(label)}{tail}"
     channel = montage_channel(text)
     if channel:
         return f"{PHASE_MONTAGE} {channel.upper()}"

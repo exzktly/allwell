@@ -1629,6 +1629,7 @@ def _fill_channel_menu(ctx, menu: QMenu, cs: ChannelSpec) -> QMenu:
     created a GC cycle that could fault under native macOS menus). Colour also
     lives in the LUT box below; it's mirrored here for one-click access."""
     menu.clear()
+    _add_baseline_choices(ctx, menu, cs)
 
     # Render mode — corrected / raw / cell mask / ≥ threshold (radio-like).
     hdr = menu.addAction("Render")
@@ -1685,6 +1686,46 @@ def _channel_menu(ctx, cs: ChannelSpec, parent=None) -> QMenu:
 
 def _set_render(cs: ChannelSpec, key: str) -> None:
     cs.render = key
+
+
+def baseline_choices(ctx, token: str) -> list[tuple[str | None, str]]:
+    """``[(baseline code, menu text)]`` a nanowell fold-change channel can take its fold change from, or ``[]`` for
+    any other channel: the Nanowells page's own Baseline (``None``, named with what it is now), the two rules, and
+    each timepoint the run recorded, by the run's own label."""
+    from review.data.nanowell_images import BASELINE_RULES, baseline_text, baseline_timepoint_code
+    from review.data.observations import fold_change_scale, nanowell_metric_for_token
+
+    if not fold_change_scale(nanowell_metric_for_token(ctx, token)):
+        return []
+    page = getattr(ctx.state.feature_slice("nanowell"), "baseline", None)
+    choices: list[tuple[str | None, str]] = [
+        (None, f"The Nanowells page's baseline (now {baseline_text(page) if page else 'earliest'})")]
+    choices += [(code, f"The {text} timepoint") for code, text in BASELINE_RULES.items()]
+    info = getattr(ctx.state.dataset, "pipeline_info", None) or {}
+    for label in info.get("available_timepoints") or []:
+        if str(label).strip():
+            choices.append((baseline_timepoint_code(str(label).strip()), str(label).strip()))
+    return choices
+
+
+def _add_baseline_choices(ctx, menu: QMenu, cs: ChannelSpec) -> None:
+    """A fold-change map's **Fold change relative to** choices, at the top of its ⚙ menu. Choosing one rewrites the
+    channel's token (``nanowell_images.metric_token``), so the baseline travels with the channel — two rows of one
+    metric can take their fold changes from two timepoints side by side."""
+    from review.data.nanowell_images import metric_baseline, metric_label, metric_token
+
+    choices = baseline_choices(ctx, cs.channel)
+    if not choices:
+        return
+    hdr = menu.addAction("Fold change relative to")
+    hdr.setEnabled(False)
+    current, label = metric_baseline(cs.channel), metric_label(cs.channel)
+    for code, text in choices:
+        act = owned_action(menu, text)
+        act.setCheckable(True)
+        act.setChecked(code == current)
+        act.triggered.connect(lambda _c=False, c=code: (_set_attr(cs, "channel", metric_token(label, c)), _edit(ctx)))
+    menu.addSeparator()
 
 
 def _set_attr(cs: ChannelSpec, attr: str, val) -> None:

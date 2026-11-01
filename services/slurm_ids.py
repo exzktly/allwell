@@ -80,9 +80,14 @@ def squeue_listing(jid_var: str, fmt: str = "%T") -> str:
     print, so a caller that compares the output with job states treats any non-empty answer for a step as alive
     (:func:`is_step`). ``squeue``'s exit status is the command's, so a caller that tells "invalid job id" from "could
     not ask" still can. The ``-s`` spelling (option and value in one word) is the one the manual requires.
+
+    **Each ``case`` pattern opens with ``(``.** Every caller puts this inside ``$( … )``, and bash before 5.2
+    (whose parsing of command substitutions was rewritten) can end the substitution at a bare pattern's ``)``
+    and then fail the whole script with ``syntax error near unexpected token `;;'`` — which is how the Storage
+    browser's first listing on a Linux host failed. The leading ``(`` is POSIX and parses on every bash. ``tests/test_remote_scripts_parse_on_old_bash.py`` holds it.
     """
     v = f'"${jid_var}"'
-    return f'{{ case {v} in *.*) squeue -h -s{v} -o %i;; *) squeue -h -j {v} -o {fmt};; esac; }}'
+    return f'{{ case {v} in (*.*) squeue -h -s{v} -o %i;; (*) squeue -h -j {v} -o {fmt};; esac; }}'
 
 
 def hold_check_shell(staging_dir: str) -> str:

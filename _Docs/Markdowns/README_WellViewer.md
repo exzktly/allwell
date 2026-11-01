@@ -2945,7 +2945,13 @@ What is on it:
   complete (green), partial (amber, with an arc showing how much of it landed),
   failures recorded (red), images with no measurements behind them (blue — the
   same colour the Datasets tools use to flag an odd well), measurements whose
-  output archive is gone (cyan), staged but never processed (grey). A nanowell
+  output archive is gone (cyan), staged but never processed (grey). If the run
+  ended early — you stopped or suspended it, the remote host lost its node or
+  its connection to the app, or the pipeline exited with an error — the grey
+  wells are called *Not reached — run ended early* instead, because the run
+  never got to them rather than skipping them; **Finish this run** processes
+  them. (After Datasets → Validate rescans the folder, they go back to "staged,
+  never processed": Validate cannot know how the run ended.) A nanowell
   well whose timepoints ran but could not be addressed (no central square found)
   is partial, not "never processed", and the health card lists it under
   *Nanowell timepoints not addressed* — and only there, not among the partial
@@ -3999,6 +4005,14 @@ offered yet.
 ### Controls shared by every tab
 
 These affordances are global — set them once and every tab honours them.
+
+#### Typing a number
+
+A number you type into a box — bins, a cluster count, a moving-average
+window, ε, an axis limit — takes effect when you press **Enter** or click out
+of the box, not as you type each digit. Typing `200` redraws once, at 200,
+rather than at 2, then 20, then 200. The box's up/down arrows and the mouse
+wheel still apply each step straight away.
 
 #### Channel selector
 
@@ -6216,8 +6230,14 @@ Selecting nanowells does not change the plate selection.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind brightness) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
-is selected and kept, so selecting it again is instant. While a newly selected well is read, or the figures are
-recomputed, the page dims the figure and shows *Computing…* across it. Before the first figure is drawn the page
+is selected and kept, so selecting it again is instant. Wells clicked one after another on the plate are read
+together, a quarter of a second after the last click, rather than one load per click. While a newly selected well is read, or the figures are
+recomputed, the page dims the figure and shows *Computing…* across it — but only when the result can change what
+the figure shows. Each well's numbers depend on that well alone, so while wells added to the selection are read,
+the views that show one well (Array, Identity, Extremes) stay live unless the added well is the one they will
+switch to, and the views of every well (Distribution, Trajectories, Position, Statistics) stay live when the added
+well has no nanowell table or is excluded on the page. A change of baseline, Cell Gating or the rim focus rule
+dims every view. Before the first figure is drawn the page
 says *Reading the nanowell tables…* with a progress bar under it: it counts the wells as their tables are read
 (*Reading the tables: 12 of 40 wells.*), then starts again as their cells are counted for Cell Gating (*Counting
 the gated cells: …*).

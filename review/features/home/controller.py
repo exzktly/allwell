@@ -489,6 +489,7 @@ def _paint_plate(ctx) -> None:
     cells = hc.plate_cells(ctx)
     record_wells = (ctx.state.dataset.pipeline_info or {}).get("run_check") or {}
     record_wells = record_wells.get("wells") or {}
+    ended_early = hc.run_ended_early(ctx)
     if cells:
         plate.setEnabledWells(sorted(cells))
     paint_plate(plate, cells, hc.plate_fractions(ctx))
@@ -515,7 +516,7 @@ def _paint_plate(ctx) -> None:
     quality = {} if gating_pending else wells_needing_review(ctx)
     paint_field_quality(plate, quality)
     plate.setWellTooltipProvider(
-        lambda well: well_tooltip(well, cells, record_wells, quality))
+        lambda well: well_tooltip(well, cells, record_wells, quality, ended_early=ended_early))
 
     host = _widget(ctx, "_home_legend")
     _clear(host)
@@ -525,7 +526,7 @@ def _paint_plate(ctx) -> None:
         swatch.setFixedSize(theme.Spacing.md, theme.Spacing.md)
         swatch.setStyleSheet(legend_swatch_style(state))
         layout.addWidget(swatch, index, 0)
-        layout.addWidget(QLabel(legend_label(state), host), index, 1)
+        layout.addWidget(QLabel(legend_label(state, ended_early=ended_early), host), index, 1)
         value = QLabel(str(count), host)
         value.setObjectName("Muted" if not count else "")
         layout.addWidget(value, index, 2)

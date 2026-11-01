@@ -336,9 +336,15 @@ class ExportStyleSidebar(QWidget):
             self._setters[key] = lambda v, w=widget: w.setChecked(bool(v))
             widget.toggled.connect(lambda _c: self._on_fields_changed())
         elif isinstance(widget, QLineEdit):
+            # Applied when the entry is finished (Enter or focus-out), not per
+            # keystroke: an axis limit typed as "-0.5" would otherwise reach the
+            # plot as "-", "-0" and "-0." first, each a persist and a redraw.
+            # The setter emits the commit itself, so a programmatic set applies
+            # exactly as it did when it rode on ``textChanged`` (and is still
+            # ignored under ``_updating``).
             self._getters[key] = widget.text
-            self._setters[key] = lambda v, w=widget: w.setText(str(v))
-            widget.textChanged.connect(lambda _t: self._on_fields_changed())
+            self._setters[key] = lambda v, w=widget: (w.setText(str(v)), w.editingFinished.emit())
+            widget.editingFinished.connect(self._on_fields_changed)
 
     def _build_ui(self) -> None:
         """Assemble the panel: header, one builder per section, footer.

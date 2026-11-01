@@ -42,6 +42,7 @@ def _select(qtbot, ctx, wells):
 
     ctx.state.selection.selected_wells = set(wells)
     nwc.nw_on_selection_changed(ctx)
+    nwc.run_queued_load(ctx)                                           # not waiting out the debounce
     st = ctx.state.feature_slice("nanowell")
     qtbot.waitUntil(lambda: not st.computing, timeout=20000)
     return st
@@ -142,3 +143,170 @@ def test_save_nanowell_data_writes_the_wells_the_page_draws(counted, qtbot, tmp_
     monkeypatch.setattr(csv_export, "ask_save_csv", lambda *_a, **_k: str(path))
     nwc.export_page_csv(ctx)
     assert sorted(pd.read_csv(path)["well"].unique()) == ["B01"]
+
+
+# ── the Computing… scrim covers the figure only when the load can change it ─────────────────────────
+def _add_wells(ctx, wells):
+    """Select *wells* through the page's hook and return the state while their read is still running: the
+    worker's result is delivered by a queued signal, so it cannot land before the event loop runs again."""
+    from review.features.nanowell import controller as nwc
+
+    ctx.state.selection.selected_wells = set(wells)
+    nwc.nw_on_selection_changed(ctx)
+    nwc.run_queued_load(ctx)
+    st = ctx.state.feature_slice("nanowell")
+    assert st.computing, "adding an unread well starts a read"
+    return st
+
+
+def _scrim_shown(ctx) -> bool:
+    return ctx.widgets.get("_nw_computing_label").isVisible()
+
+
+def _on_view(qtbot, ctx, view, wells, *, well=""):
+    from review.features.nanowell import controller as nwc
+
+    ctx.state.selection.selected_wells = set(wells)
+    st = _loaded(qtbot, ctx)
+    st.view, st.well = view, well
+    nwc.redraw(ctx)
+    assert not _scrim_shown(ctx)
+    return st
+
+
+@pytest.mark.parametrize("view", ["array", "identity", "extremes"])
+def test_adding_a_well_does_not_cover_a_view_that_draws_one_other_well(counted, qtbot, view):
+    """Reported: adding wells on the Array view dimmed the page with *Computing…* though the figure, which
+    draws one well, had nothing to redraw. The added well is still read, for the views that draw it."""
+    ctx, reads = counted
+    _on_view(qtbot, ctx, view, {"A01"}, well="A01")
+    st = _add_wells(ctx, {"A01", "B01"})
+    assert not _scrim_shown(ctx)
+    qtbot.waitUntil(lambda: not st.computing, timeout=20000)
+    assert reads == ["A01", "B01"] and not _scrim_shown(ctx)
+
+
+def test_adding_a_well_covers_a_view_that_draws_every_well(counted, qtbot):
+    ctx, _reads = counted
+    _on_view(qtbot, ctx, "distribution", {"A01"})
+    st = _add_wells(ctx, {"A01", "B01"})
+    assert _scrim_shown(ctx)
+    qtbot.waitUntil(lambda: not st.computing, timeout=20000)
+    assert not _scrim_shown(ctx)
+
+
+def test_adding_the_well_the_array_view_will_switch_to_covers_it(counted, qtbot):
+    """With no well chosen the Array view shows the first drawn well, so adding a well that sorts before the
+    shown one changes the figure once it is read."""
+    from review.features.nanowell import controller as nwc
+
+    ctx, _reads = counted
+    _on_view(qtbot, ctx, "array", {"B01"})
+    assert nwc.page_well(ctx) == "B01"
+    st = _add_wells(ctx, {"A01", "B01"})
+    assert _scrim_shown(ctx)
+    qtbot.waitUntil(lambda: not st.computing, timeout=20000)
+    assert nwc.page_well(ctx) == "A01" and not _scrim_shown(ctx)
+
+
+def test_a_new_baseline_covers_a_single_well_view(counted, qtbot):
+    """The shown well's own numbers change with the baseline, so the single-well exemption does not apply."""
+    from review.features.nanowell import controller as nwc
+
+    ctx, _reads = counted
+    st = _on_view(qtbot, ctx, "array", {"A01"}, well="A01")
+    st.baseline = "first_measurable"
+    nwc.ensure_loaded(ctx)
+    assert st.computing and _scrim_shown(ctx)
+    qtbot.waitUntil(lambda: not st.computing, timeout=20000)
+    assert not _scrim_shown(ctx)
+
+
+@pytest.mark.parametrize("view", ["distribution", "trajectories", "position", "statistics"])
+def test_adding_a_well_without_a_table_does_not_cover_a_view_of_every_well(qtbot, tmp_path, view):
+    """A well with no nanowell table is never drawn, so reading it changes no view's figure."""
+    out = _write_nanowell_dataset(tmp_path)
+    for name in ("A02.csv", "A02_grid.json"):
+        (out / "nanowells" / name).unlink()
+    ctx = _page(qtbot, out)
+    _on_view(qtbot, ctx, view, {"A01", "B01"})
+    st = _add_wells(ctx, {"A01", "A02", "B01"})
+    assert not _scrim_shown(ctx)
+    qtbot.waitUntil(lambda: not st.computing, timeout=20000)
+    assert not _scrim_shown(ctx)
+
+
+@pytest.mark.parametrize("view", ["distribution", "trajectories", "position", "statistics"])
+def test_adding_a_well_excluded_on_the_page_does_not_cover_a_view_of_every_well(counted, qtbot, view):
+    ctx, reads = counted
+    st = _on_view(qtbot, ctx, view, {"A01"})
+    st.excluded_wells = ["B01"]
+    st = _add_wells(ctx, {"A01", "B01"})
+    assert not _scrim_shown(ctx)
+    qtbot.waitUntil(lambda: not st.computing, timeout=20000)
+    assert reads == ["A01", "B01"] and not _scrim_shown(ctx)
+
+
+@pytest.mark.parametrize("view", ["trajectories", "position", "statistics"])
+def test_adding_a_drawn_well_covers_every_view_of_every_well(counted, qtbot, view):
+    ctx, _reads = counted
+    _on_view(qtbot, ctx, view, {"A01"})
+    st = _add_wells(ctx, {"A01", "B01"})
+    assert _scrim_shown(ctx)
+    qtbot.waitUntil(lambda: not st.computing, timeout=20000)
+    assert not _scrim_shown(ctx)
+
+
+# ── a run of selection changes starts one load ─────────────────────────────────────────────────────────
+def test_quick_selection_changes_start_one_load_once_the_selection_settles(counted, qtbot):
+    """Clicking wells on the plate one after another used to start a load per click, each superseding the last."""
+    from review.features.nanowell import controller as nwc
+
+    ctx, reads = counted
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    request = st.request
+    for wells in ({"A01", "A02"}, {"A01", "A02", "B01"}):
+        ctx.state.selection.selected_wells = wells
+        nwc.nw_on_selection_changed(ctx)
+        assert nwc.load_queued(ctx) and not st.computing and st.request == request
+    qtbot.waitUntil(lambda: not nwc.load_queued(ctx) and not st.computing, timeout=20000)
+    assert st.request == request + 1
+    assert reads == ["A01", "A02", "B01"] and nwc.page_wells(ctx) == ["A01", "A02", "B01"]
+
+
+def test_a_well_selected_first_reads_as_reading_while_the_load_waits(counted, qtbot):
+    """During the debounce nothing is computing yet, but the selected well's table is on its way: the page says
+    it is reading, never that the well's table could not be used."""
+    from review.features.nanowell import controller as nwc
+
+    ctx, _reads = counted
+    st = _loaded(qtbot, ctx)
+    ctx.state.selection.selected_wells = {"A01"}
+    nwc.nw_on_selection_changed(ctx)
+    assert nwc.load_queued(ctx) and not st.computing
+    assert nwc.nanowell_empty_reason(ctx).title == "Reading the nanowell tables…"
+    qtbot.waitUntil(lambda: st.metrics is not None and not st.computing and not nwc.load_queued(ctx),
+                    timeout=20000)
+    assert nwc.nanowell_empty_reason(ctx) is None
+
+
+def test_a_superseded_load_keeps_the_wells_it_read(counted, qtbot):
+    """A load overtaken by a newer selection still read its wells' files; they are kept, so selecting the well
+    again does not read it a second time."""
+    from review.features.nanowell import controller as nwc
+
+    ctx, reads = counted
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    ctx.state.selection.selected_wells = {"A01", "B01"}
+    nwc.nw_on_selection_changed(ctx)
+    nwc.run_queued_load(ctx)
+    assert st.computing
+    ctx.state.selection.selected_wells = {"A01"}                       # deselected before its read lands
+    nwc.nw_on_selection_changed(ctx)
+    nwc.run_queued_load(ctx)
+    assert not st.computing                                            # A01 is current: the B01 load is stale
+    qtbot.waitUntil(lambda: "B01" in st.well_parts, timeout=20000)
+    _select(qtbot, ctx, {"A01", "B01"})
+    assert reads == ["A01", "B01"] and nwc.page_wells(ctx) == ["A01", "B01"]

@@ -507,36 +507,30 @@ def test_preflight_runs_every_gated_lane_behind_its_gate():
         assert f"python scripts/lane_needed.py {gate}" in preflight
 
 
-def test_the_nanowell_gate_sees_its_patterns_and_what_its_tests_import():
-    """``analyze/tab.py`` matches no nanowell pattern; only reading the roster's
-    imports (the nanowell form tests drive the real AnalyzeTab) puts it in."""
-    lane = _lane_needed_module()
-    imports = lane.roster_imports("nanowell")
-    for path in ("pipeline/io.py", "process_microscopy.py", "review/features/nanowell/controller.py",
-                 "util/nanowell_anchors.py", "tests/conftest.py"):
-        assert lane.surface_reason("nanowell", path, set()).startswith("lane surface"), path
-    for path in ("analyze/tab.py", "datasets/subset/subset_compute.py"):
-        assert lane.surface_reason("nanowell", path, set()) == "", path
-        assert lane.surface_reason("nanowell", path, imports) == \
-            "imported directly by a test in this lane", path
-    assert lane.surface_reason("nanowell", "tests/test_nanowell_form.py", imports) == \
-        "a test file in this lane"
-    for path in ("review/domain/stats_compute.py", "widgets/flow_layout.py", "tests/test_bar_geometry.py"):
-        assert lane.surface_reason("nanowell", path, imports) == "", path
+def test_each_gate_sees_its_tests_helpers_and_the_files_its_tests_name():
+    """What each gate starts from: its roster files, the modules and test helpers they import (a helper used to
+    be skipped, so ``tests/_fake_remote.py`` reached no lane), and the files they name by path. Python beyond
+    that is followed by ``code_reaches`` (``test_a_gated_lane_runs_on_what_changed.py``)."""
+    import subprocess
 
-
-def test_the_remote_gate_sees_its_patterns_and_what_its_tests_import():
     lane = _lane_needed_module()
-    imports = lane.roster_imports("remote")
-    for path in ("services/remote_runner.py", "services/ssh_key_setup.py", "scripts/allwell_remote.py",
-                 "analyze/remote_dialog.py", "services/slurm_batch_script.py"):
-        assert lane.surface_reason("remote", path, set()).startswith("lane surface"), path
-    assert lane.surface_reason("remote", "services/pipeline_service.py", set()) == ""
-    assert lane.surface_reason("remote", "services/pipeline_service.py", imports) == \
-        "imported directly by a test in this lane"
-    for path in ("review/domain/stats_compute.py", "pipeline/nanowell_detect.py",
-                 "tests/test_nanowell_form.py"):
-        assert lane.surface_reason("remote", path, imports) == "", path
+    root = Path(__file__).resolve().parents[1]
+    tracked = subprocess.run(["git", "ls-files"], cwd=root, capture_output=True, text=True,
+                             check=True).stdout.split()
+    nanowell = lane.roster_imports("nanowell")
+    for path in ("analyze/tab.py", "review/features/nanowell/controller.py", "tests/_nanowell_synth.py"):
+        assert path in nanowell, path
+    remote = lane.roster_imports("remote")
+    for path in ("services/remote_runner.py", "tests/_fake_remote.py", "tests/_hold_cluster.py"):
+        assert path in remote, path
+    assert lane.path_reason("nanowell", "tests/test_nanowell_form.py") == "a test file in this lane"
+    assert lane.path_reason("remote", "tests/test_nanowell_form.py") == ""
+    for gate in ("nanowell", "remote"):
+        assert lane.path_reason(gate, "scripts/test.sh").startswith("lane surface"), gate
+        assert "process_microscopy.py" in lane.named_files(gate, tracked), gate
+        for path in ("startup/mpl_bootstrap.py", "services/acquisition_transport.py", "pipeline/czi_read.py",
+                     "scripts/lane_needed.py", "scripts/change_scope.py"):
+            assert lane.path_reason(gate, path) == "", (gate, path)
 
 
 def test_an_unanswerable_diff_runs_the_lane():

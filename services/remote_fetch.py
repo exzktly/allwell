@@ -247,6 +247,7 @@ def _tp_sort_key(tok: str):
 def run_client_side_completeness_check(
     local_input_dir: Path | None, local_output_dir: Path, *,
     log_fn: Callable[[str], None] | None = None, suspended: bool = False,
+    ended_early: bool = False,
 ) -> dict:
     """Record completeness for a remote run, on the client, after the fetch.
 
@@ -275,6 +276,10 @@ def run_client_side_completeness_check(
     well it covers partial (``FetchedOutputVerifier.verify``, row B4), and the
     verdict reaches the log at warning level (``LogFnLogger``). *suspended*
     records a Suspend's wind-down as one rather than as a broken plate.
+    *ended_early* records any other early end — a Stop, a lost node or
+    heartbeat, a pipeline that exited non-zero — so the wells the run never
+    reached are told apart from wells it skipped
+    (``pipeline.completeness.build_block``).
     """
     log = log_fn or (lambda _m: None)
     out_dir = Path(local_output_dir)
@@ -311,6 +316,7 @@ def run_client_side_completeness_check(
             started_at=None,
             mode="remote",
             suspended=suspended,
+            ended_early=ended_early,
             atomic_writer=_safe_atomic_text_write,
             log=_LogFnLogger(log),
         )
@@ -1553,8 +1559,13 @@ class FetchedOutputVerifier:
         # fields the very next line repairs. Runs before the `ok` gate too — a
         # run that came back short is exactly the one whose record is worth
         # having, and the shortfall is what the record is for.
+        # `ended_early` from the pipeline's own exit status: a Stop, a suspend, a
+        # lost node or heartbeat, or a crash all end here with `ok` False, and a
+        # well the run never reached then reads as "not reached" on Home rather
+        # than as one the run was asked to process and silently skipped.
         completeness = run_client_side_completeness_check(
-            run.local_input_dir, run.local_output_dir, log_fn=log, suspended=suspended)
+            run.local_input_dir, run.local_output_dir, log_fn=log, suspended=suspended,
+            ended_early=not ok)
 
         if not ok:
             log("[remote] pipeline returned non-zero — skipping cleanup, leaving remote state.\n")
@@ -1578,7 +1589,8 @@ class FetchedOutputVerifier:
                 # each of them partial; taken again, it describes what the retry brought home. Without this a
                 # well the retry recovered whole failed verification anyway (row B8).
                 completeness = run_client_side_completeness_check(
-                    run.local_input_dir, run.local_output_dir, log_fn=log, suspended=suspended)
+                    run.local_input_dir, run.local_output_dir, log_fn=log, suspended=suspended,
+                    ended_early=not ok)
         missing = [*missing, *short_reanchored]      # the remote holds their only re-anchored copy
         if not sidecar_ok:
             missing.append("this run's pipeline_info.json could not be pulled, so the local one describes another "

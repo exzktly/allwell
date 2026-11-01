@@ -1098,7 +1098,8 @@ allwell/
 │                                  (a combo read and written by value, showing labels)
 │                                  and notice_badge.py (the "!" unread pip on the log button)
 │                                  and spin_box.py (SpinBox / DoubleSpinBox, the only spin
-│                                  boxes the app builds: no layout squeezes their number;
+│                                  boxes the app builds: no layout squeezes their number, and a
+│                                  typed value commits once, on Enter or focus-out;
 │                                  test_spin_boxes_keep_their_number.py)
 │                                  and progress_popup.py (ProgressPopup, the application-modal
 │                                  progress bar the Cell Gating panel's jobs run behind)
@@ -4029,7 +4030,8 @@ Three rules the page is built around:
   `success` = complete, `warn` = partial, `danger` = an errored well, and
   `accent` = the anomalous one, which here is *images with no measurements* —
   Concatenate paints the identical condition (merged with no measurements CSV on
-  one side) in the same token. `text_muted` carries *staged, never processed*,
+  one side) in the same token. `text_muted` carries *staged, never processed*
+  (worded *not reached* after a run that ended early — §9.6's `ended_early`),
   the token the Datasets dashboards use for pending and for Validate's "no
   output yet". `accent2` is unused: it means "the other of two normal groups"
   (Merge Plates), which no state here is. The rule is one colour per state and
@@ -12495,8 +12497,14 @@ footer names it; the run montage is drawn as saved, and its footer says the rang
 (`active_wells`) and computes the metrics on `core.worker_bridge.run_off_thread`. The wells read are kept
 (`state.well_parts`, for the data dir in `parts_for`; `loaded_wells` the wells asked for, a well without a table
 included), so a well selected again reads nothing and a deselection neither reads nor recomputes; the worker
-reads into its own copy of the parts, which `done` adopts. A selection change on the shown page asks for the new
-wells at once (`nw_on_selection_changed`); a hidden page reads on its next show. With nothing selected nothing is
+reads into its own copy of the parts, which `done` merges into `well_parts` whether or not its request is still the
+current one — a part is the well's files as read, valid for every baseline and gate, so a load overtaken by a newer
+selection still spares the next one its reads. A selection change on the shown page redraws at once from the wells
+already read and asks for the new ones once the selection has been still for `tab_view.LOAD_DEBOUNCE_MS` (250 ms;
+`queue_load` restarts the page's `_nw_load_timer`, whose timeout runs `run_queued_load`), so a run of clicks on the
+plate starts one load rather than one per click; while it waits, `load_queued` makes `nanowell_empty_reason` say
+the page is reading rather than that the selected wells' tables are unusable. Every other caller — activation, a
+dataset load, a baseline, gate or focus-rule change — loads at once. A hidden page reads on its next show. With nothing selected nothing is
 read, and `_metrics_of` gives an empty table so the page counts as loaded and says what to select.
 While a load runs, its placeholder (*Reading the nanowell tables…*, `_reading_reason`) draws a progress bar: the
 worker counts the wells of each of its two passes — `collect.load_nanowell_data(on_well=…)` over the tables it reads
@@ -12504,6 +12512,15 @@ now (wells already in `well_parts` cost nothing and are not counted), then `gate
 — and hands each count to the GUI thread through the bridge's `stage` / `progress` signals into
 `state.load_progress`, `(stage, done, total)`. The hint names the pass, since the bar starts again for the second.
 A count from an older request is dropped like its result; before the first count the bar has no known end.
+Once a figure is drawn, a running load covers it with the *Computing…* scrim (`_nw_computing_label`) only when
+`computing_shown` says the result can change what the current view draws. A site's metrics come from that site's
+rows alone, so a load that only reads wells added to the selection changes only the figures that draw one of them.
+`_page_groups_once_loaded` is `page_groups` as it will be when the load lands — the same rule over the active wells
+that have a table or may still have one (listed, not yet read), with tableless and page-excluded wells in neither —
+and the scrim shows when that differs from what is drawn now: for the single-well views (`SINGLE_WELL_VIEWS`: Array,
+Identity, Extremes) when the shown well (`page_well`'s rule over each) would change, for Distribution, Trajectories,
+Position and Statistics when the drawn wells or their grouping would. A load for another baseline, gate version or
+rim focus rule changes every drawn well's numbers and covers every view.
 `tableless_wells` names a drawn well with no usable table — none in the folder, or one read and left out — but
 never a well whose table is still being read. Each load request is numbered and a result for an older one is
 discarded, so a slow load can never replace a newer baseline's figure — including when the baseline goes back to the one
@@ -20141,6 +20158,24 @@ run still reaches the check and writes a record: suspend exits through the
 normal end-of-well path, so the block carries a `suspended` flag and the
 shortfall is reported as a stop rather than shouted at as a fault.
 
+The block also carries `ended_early`: the run did not reach its own end. A
+suspend sets it (so `suspended` implies it, and a record that predates the field
+is read through `suspended`). A remote run sets it from the pipeline's exit
+status: the record there is written on the client after the fetch
+(`remote_fetch.run_client_side_completeness_check`, called from
+`FetchedOutputVerifier.verify` with `ended_early=not ok`), so a Stop, a lost
+node or heartbeat, a driver that went away mid-batch, or a pipeline that exited
+non-zero all record it. It exists because on disk a well the run never got to
+and a well it was given and wrote nothing for are identical (input present, no
+output), and only the run knows which it was. Home keeps both in the same
+painted state (`CELL_INPUT_ONLY`, grey) and changes the words: *Not reached —
+run ended early* in the tooltip, legend, health row and next-step line, and in
+QC triage's row detail, against *Staged, never processed* after a run that
+ended cleanly (`review/features/home/collect.py::run_ended_early`,
+`plate_panel.state_label`; `tests/test_a_well_the_run_never_reached_is_named_so.py`).
+A record Validate writes carries `False`, since Validate describes the folder
+as it stands and cannot know how the run that wrote it ended.
+
 `--no_run_check` turns it off, spelled negative-sense like `--no_auto_threshold`
 because the GUI checkbox is the positive. Turning it off still writes a stub
 recording that it was turned off: "the check was off" and "this dataset predates
@@ -20411,28 +20446,79 @@ you're in before you type the command.
     dialogs; about 100 s. Marked `remote_lane`; **`scripts/test.sh --remote`**.
 
   `GATES` in the same module names two gates, `nanowell` (both nanowell lanes)
-  and `remote`, each with its rosters and path patterns.
+  and `remote`, each with its rosters and the harness paths that trigger it
+  (`scripts/test.sh`, `tests/requirements-dev.txt`, `.github/workflows/ci.yml`).
   `scripts/lane_needed.py <gate> [--base REF]` answers whether a change needs
-  them: a changed path matching the patterns, or a first-party module one of the
-  gate's roster files imports **directly** (read from the files' syntax trees on
-  each run, so a new test extends its trigger by joining the roster), means run
-  it; a diff that cannot be computed means run it. The import closure cannot be
-  the trigger — one `import analyze.tab` reaches most of the application — so a
-  module two imports away can still move a gated test without triggering its
-  lane. CI's `nanowell` job (the end-to-end lane) and `gated` job (the feature
-  and remote lanes, one gate step each) therefore ask the script on a pull
-  request and run unconditionally on a push to `main`; every run is gated on its
-  JUnit report (`scripts/junit_gate.py`). `scripts/preflight.sh` asks the same
-  question before running each lane. Measured over the 52 merges before the
-  split, the nanowell gate would have fired on 46 (that stretch was mostly
-  nanowell work) and the remote gate on 27; even when a gate fires, moving its
-  tests into a parallel job takes about five minutes off CI's fast-lane job.
+  them, and every other trigger is computed rather than listed:
+  - **A roster file, or a file one names by path.** The script reads the
+    roster files' string constants (and `ROOT / "dir" / "file"` chains) for
+    tracked paths: `process_microscopy.py`, which the stand-in cluster runs;
+    `requirements-remote.txt`, which the bootstrap tests parse;
+    `all_well_launcher.py` and `_Docs/_Installation/all_well.spec`, whose source
+    the dispatch tests read. A change to any of them runs the lane. A file used
+    only as something read (`.read_text()`, `.open()`, `open()`) is not *run*,
+    so a change that merely reaches it through its imports does not.
+  - **Python, followed through its importers.** For each changed `.py` file the
+    script compares its syntax tree where the branch left the base with the tree
+    now and names the definitions that changed: top-level functions, classes,
+    assignments and imports (an import by the name it binds), each class's own
+    members, and an `if __name__ == "__main__":` block as a definition of its
+    own; docstrings and comments are ignored. It widens that set to every
+    definition in the module that refers to one, then follows it outwards. In
+    each module that imports the changed one, a definition is affected when it
+    takes an affected name from it — `from m import f`, `m.f` on an alias of
+    `m`, `from m import *`, a string naming `m` with the attribute as another
+    string (the feature registry), or `Class.attr`; a changed method also
+    counts as a change to its class, since an importer calls it on an instance
+    it made. Matching is by qualified name, so `other.f()` on an unrelated
+    object is not a use of `m.f`. The graph covers application code, every
+    test helper under `tests/`, and any test module a roster file borrows from,
+    so `tests/_fake_remote.py` (nine remote test files) reaches the remote lane.
+    The lane runs when the change reaches a roster file or a file one runs.
+    Files are read up front and parsed only when the change reaches a module
+    whose name they contain: a change that reaches nothing parses a few
+    hundred files in a few seconds, and one that reaches far parses about a
+    thousand in up to twenty.
+  - **What cannot be narrowed runs the lane:** a new, deleted or unparseable
+    file, a change to a module-level statement that defines nothing (a
+    conditional block, a call), an importer that uses such a module only for
+    the side effects of importing it, and a diff that cannot be computed.
+  - **Harness files compared, not matched.** `tests/_lanes.py` reaches a gate
+    only when that gate's rosters (as sets of files) or trigger patterns
+    differ, both versions loaded. `pyproject.toml` reaches it only when its
+    `[tool.pytest]` table differs. `tests/conftest.py` reaches it when a hook or
+    an autouse fixture changes, or a fixture one of its tests asks for by
+    parameter or by string. A change to `version.py`'s `__version__` alone
+    reaches nothing. `scripts/lane_needed.py` and `scripts/change_scope.py`
+    reach no gate: they decide which lanes run and no lane runs them.
+
+  The firing rate follows from what the lanes test, not from the rule. Replayed
+  over 61 merges to `main`, the nanowell gate fires on 52 and the remote gate
+  on 39 — about as often as a path-pattern rule did (51 and 41), but not on the
+  same merges. It runs a lane on five merges the patterns skipped, each with a
+  path to a lane test (a `services/remote_hold.py` change reaching the nanowell
+  form tests through `PipelineRunner`, a `pipeline/` change reaching
+  `process_microscopy.py`, which the remote stand-in tests run), and skips six
+  the patterns ran: four `tests/_lanes.py` edits that changed only the other
+  gate's rosters, a test file in no roster, and a CZI converter no lane test
+  reaches. The end-to-end tests run the whole pipeline and several remote
+  tests build `AnalyzeTab` or read `AllWellApp`, so most pipeline and Analyze
+  changes can break them; making the gates fire less means moving tests, not
+  loosening the trigger. What the script cannot follow — a module named by a
+  computed string, a data file an application module reads at run time, a test
+  that builds a path at run time — is why CI's `nanowell` job (the end-to-end
+  lane) and `gated` job (the feature and remote lanes, one gate step each) ask
+  the script on a pull request and run unconditionally on a push to `main`;
+  every run is gated on its JUnit report (`scripts/junit_gate.py`).
+  `scripts/preflight.sh` asks the same question before running each lane.
+  `tests/test_a_gated_lane_runs_on_what_changed.py` holds each part on
+  synthetic trees, and the files the real rosters must be found naming.
   No file is in two rosters and no whole-tree guard is in any. Naming test files
   on the command line selects them whichever lane they belong to.
   `tests/test_the_fast_lane_stays_fast.py` holds every roster to real files in
   one roster, the hook to marking each with its own mark, `scripts/test.sh` to
   keeping each out of the fast lane, CI and preflight to running each lane behind
-  its gate, and each gate to seeing both its patterns and its tests' imports.
+  its gate, and each gate to seeing its tests' helpers and the files they name.
 - **Change scope** (`scripts/change_scope.py`). Before the fast lane runs, the
   change is classified against its base (`origin/main`, or
   `$ALLWELL_SCOPE_BASE`; committed, uncommitted and untracked paths, through
@@ -21612,6 +21698,7 @@ The map (each rule links to the test that holds it):
 | A well token is judged by `util.well_token`, never a local whole-token regex (§15) | `tests/test_well_token_single_parser.py` |
 | A removable feature's state slice is reached from outside that feature through `state.feature_slice(name)`, never by attribute. `AppState.__getattr__` **raises** for a slice whose feature is not in `FEATURES`, so a profile build without it fails at the access — and `getattr(ctx.state.stats, "pairwise", [])` does not help, because the default covers a missing *attribute* on an object that already exists and reaching the object is what raises. Removability is read from `profiles/full.toml`, so a slice whose feature is kept forever (`bar`, `preview`, `review_image`) is not the subject; `features/registry.py` is exempt because every access there sits inside that feature's own activation hook, and the guard fails if that exemption stops describing a real access | `tests/test_disabled_feature_slices.py`, with bite cases in `tests/test_guards_bite.py` |
 | Every spin box the application builds is `widgets.spin_box.SpinBox` / `DoubleSpinBox`. The stylesheet's `min-width` floor becomes an explicit 60 px minimum on a bare `QSpinBox`, and a row short of room squeezes the box to it — a 14 px text area, which clipped the QC panel's and the Nanowells band's focus percentages; the subclasses hold their minimum at their whole size hint | `tests/test_spin_boxes_keep_their_number.py` (an AST guard over every package, the reported QC row in a 330 px panel, and the squeezed row with each class) |
+| A typed number is applied once, when it is finished. `SpinBox` / `DoubleSpinBox` set `setKeyboardTracking(False)`, so `valueChanged` fires on Enter or focus-out rather than per keystroke (the arrows, the wheel and `setValue` still fire at once) — typing "200" into a box wired to a recompute no longer runs it for 2 and 20 first. The Properties panel's bound `QLineEdit`s (the axis limits) apply on `editingFinished`; their setters emit it themselves, so a programmatic set still applies immediately | `tests/test_spin_boxes_commit_typed_values_once.py` (types into each class and the panel's real binding keystroke by keystroke) |
 | `swallow` and `swallowed` are not swapped. They are near-identical names with opposite call shapes — a context manager and a call for inside an `except` block — and swapping them fails only when the line runs. `with swallowed():` raises **before** the body, so the work it was meant to guard never happens; `swallowed()` outside a handler logs a suppression with no exception in flight, which reads as a failure that did not occur | `tests/test_safe_helpers_used_right.py`, with bite cases in `tests/test_guards_bite.py` |
 | A text-mode subprocess names its codec. `text=True` alone decodes the pipe with `locale.getpreferredencoding(False)` — UTF-8 here, the ANSI codepage on a user's Windows box — so a stream that reads correctly for the developer mojibakes the remote's `✓` / `→` markers for them and raises `UnicodeDecodeError` out of a reader thread on the first byte the codepage has no character for, skipping the `proc.wait()` behind it | `tests/test_subprocess_text_decoding.py`, with bite cases in `tests/test_guards_bite.py` |
 | A captured subprocess's timeout holds on Windows. `subprocess.run`'s Windows branch waits, after killing a child that timed out, with no timeout for pipes that a process the child started can hold open for ever; `util.bounded_run.run_bounded` is the one spelling | `tests/test_subprocess_timeouts_return_on_windows.py`, with bite cases in `tests/test_guards_bite.py` |

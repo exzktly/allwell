@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
-from widgets.well_plate_selector import WellPlateSelector
+from widgets.well_plate_selector import WellPlateSelector, marker_ink
 from util.well_token import canonical_well_label
 from ui import theme
 
@@ -76,10 +76,26 @@ def canon_well(well_id: str) -> str:
     return canonical_well_label(well_id) or ""
 
 
-def status_dot(color: str, d: int = 11) -> QLabel:
+#: A legend swatch that carries a glyph is drawn this much larger than a plain
+#: dot, so the glyph inside it is still a character and not a speck.
+_GLYPH_DOT_SCALE = 1.45
+
+
+def status_dot(color: str, d: int = 11, glyph: str | None = None, ink: str | None = None) -> QLabel:
+    """A round swatch of *color*, *d* px across. With *glyph* it is drawn
+    larger and carries that character in *ink* (or the ink a plate marker
+    would take on *color*), as the plate draws a well that wears one — so a
+    legend row for a state the plate tells apart by its glyph shows the glyph."""
     lbl = QLabel()
+    if glyph:
+        d = round(d * _GLYPH_DOT_SCALE)
+        lbl.setText(glyph)
+        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setStyleSheet(f"background:{color}; border-radius:{d // 2}px; color:{ink or marker_ink(color)};"
+                          f" font-weight:700; font-size:{max(7, round(d * 0.72))}px;")
+    else:
+        lbl.setStyleSheet(f"background:{color}; border-radius:{d // 2}px;")
     lbl.setFixedSize(d, d)
-    lbl.setStyleSheet(f"background:{color}; border-radius:{d // 2}px;")
     return lbl
 
 
@@ -510,12 +526,16 @@ class PlateProgress(QWidget):
         head = QLabel(title, self._legend_host)
         head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
         self._legend_lay.addWidget(head)
-        for color, text in items:
+        for item in items:
+            # ``(colour, label)``, or ``(colour, label, glyph, ink)`` for a state
+            # the plate tells apart by the glyph its wells wear.
+            color, text = item[0], item[1]
+            glyph, ink = (item[2], item[3]) if len(item) > 2 else (None, None)
             row = QWidget(self._legend_host)
             r = QHBoxLayout(row)
             r.setContentsMargins(0, 0, 0, 0)
             r.setSpacing(_LEGEND_ROW_SPACING_PX)
-            r.addWidget(status_dot(color))
+            r.addWidget(status_dot(color, glyph=glyph, ink=ink))
             label = QLabel(text, row)
             label.setStyleSheet(f"color:{theme.Colors.text_primary};")
             r.addWidget(label)

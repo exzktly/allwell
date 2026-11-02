@@ -1160,7 +1160,7 @@ class _BatchedRemoteProcess:
                 f"[remote] batched mode: {len(all_zips)} well(s) in "
                 f"{n_batches} batch(es) of up to {self._batch_size} "
                 # Two batches at the peak when the whole next one uploads while one runs (remote_batch_step).
-                f"(peak remote disk ≈ {peak_batches(self._upload_ahead_mode, n_batches) * self._batch_size + len(blanks)} "
+                f"(peak remote disk ≈ {peak_batches(getattr(self, '_upload_ahead_mode', None), n_batches) * self._batch_size + len(blanks)} "
                 f"well-input)\n"
             )
 

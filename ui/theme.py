@@ -834,7 +834,8 @@ QWidget#ControlBand {{
    blanket ``QWidget`` rule above would fill each of them with the app canvas
    colour, painting a lighter rectangle over the band; naming them lets that be
    undone here without the rule also reaching the controls they contain. */
-QWidget#ControlBandScope, QWidget#ControlBandGroup {{
+QWidget#ControlBandScope, QWidget#ControlBandGroup,
+QWidget#ControlBandForm, QWidget#ControlSheetSection, QWidget#ControlSheetRow {{
     background-color: transparent;
 }}
 /* Divider hairlines. Every divider in the app funnels through this rule so a
@@ -2098,7 +2099,7 @@ def _touch_qss(u: float) -> str:
     bar = pt(phone_layout.SCROLLBAR_PT)
     handle = pt(phone_layout.SCROLL_HANDLE_PT)
     inset = max(0, (bar - handle) // 2)
-    c = Colors
+    c, t = Colors, Typography
     return f"""
 /* ── Phone layout: touch sizes (theme.set_touch_unit) ─────────────────── */
 QPushButton, QToolButton, QComboBox, QLineEdit, QAbstractSpinBox {{
@@ -2139,6 +2140,28 @@ QScrollBar::handle:horizontal {{
     margin: {inset}px 0px;
 }}
 QScrollBar::handle:pressed {{ background-color: {c.accent}; }}
+/* The Controls sheet's form (widgets/control_band_form.py): section titles in
+   the rail's caption style, labels in a column, hints as captions, and a
+   value-only button reading left like the combos above and below it. */
+QWidget#ControlBandForm QLabel#ControlSheetSectionTitle {{
+    color: {c.text_muted};
+    font-size: {t.caption_size}px;
+    font-weight: {t.semibold};
+    padding-top: {pt(8)}px;
+}}
+QWidget#ControlBandForm QLabel#ControlSheetLabel,
+QWidget#ControlBandForm QLabel[sheetLabel="true"] {{
+    color: {c.text_secondary};
+    font-size: {t.body_size}px;
+}}
+QWidget#ControlBandForm QLabel[sheetHint="true"] {{
+    color: {c.text_muted};
+    font-size: {t.caption_size}px;
+}}
+QWidget#ControlBandForm QPushButton[sheetValue="true"] {{
+    text-align: left;
+    padding-left: {pt(12)}px;
+}}
 """
 
 

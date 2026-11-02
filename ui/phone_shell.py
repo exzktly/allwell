@@ -1874,7 +1874,15 @@ class PhoneShell(QObject):
         self._sheet_home = parent
         holder = sheet._aw_holder
         holder.layout().insertWidget(0, band)
-        band.setStacked(True)
+        # A control band is read down as a form — one control per row, label
+        # column, Data / Display / Actions; a page's own block of controls
+        # (``phoneControls``) takes its own stacked form.
+        if hasattr(band, "setForm"):
+            band.setForm(True, label_width=self.pt(phone_layout.SHEET_LABEL_PT),
+                         row_height=self.pt(phone_layout.TOUCH_ROW_PT),
+                         gap=self.pt(phone_layout.TOUCH_GAP_PT))
+        else:
+            band.setStacked(True)
         band.show()
         scope = getattr(band, "_scope", None)       # a ControlBand's flow
         if scope is not None:
@@ -1992,7 +2000,10 @@ class PhoneShell(QObject):
         if band is None:
             return
         try:
-            band.setStacked(False)
+            if hasattr(band, "setForm"):
+                band.setForm(False)
+            else:
+                band.setStacked(False)
             scope = getattr(band, "_scope", None)
             if scope is not None:
                 scope.setSpacing(-1)

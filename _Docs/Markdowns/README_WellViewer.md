@@ -9609,7 +9609,7 @@ holds:
 |---|---|
 | **Bar Plots ▾** | Picks the page's view (Bar Plots, Line Graphs, Heat Map, …), and under **Go to** every other section (Home, Statistics, Image Browser, …) — so getting anywhere in Review is this one menu. |
 | **Wells** | Slides the well plate and its **All** / **None** up from the bottom, with the plot still in view above them: tap wells and watch them appear in the plot. A row or column label selects the whole row or column. The button shows how many wells are selected (**Wells · 4**); **Done ✕** puts the plate away. Pages that do not pick wells (Home, Statistics) do not show it. |
-| **⚙ Controls** | Slides the page's own controls — channel, property, display, threshold and the rest — up from the bottom, with the plot still in view above them so you can watch it change. **Done ✕** puts them away. |
+| **⚙ Controls** | Slides the page's own controls up from the bottom, with the plot still in view above them so you can watch it change. They read top to bottom in three groups, the same on every page: **Data** (channel, property, timepoints, threshold, …), one per row with its name on the left and the control filling the rest; **Display** (Display ▾, Fold change ▾, …); and **Actions** (Save ▾, Reset Order, Properties, …), as a row of equal buttons. A note about the data sits under the **Data** heading. **Done ✕** puts them away. |
 
 **Wells** and **⚙ Controls** both rise from just above the bar, so **Done ✕** is
 where you tapped to open them; opening one puts the other away. Saved

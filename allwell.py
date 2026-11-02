@@ -678,6 +678,7 @@ class AllWellApp(QMainWindow):
         # Capture logs from startup (not lazily on first drawer-open) so the
         # drawer shows history the moment it opens — and onto the right logger.
         self._attach_log_ring_buffer()
+        self._build_page_history(review_topbar)
         self._build_phone_shell(review_topbar)
 
     # ── phone layout ─────────────────────────────────────────────────────
@@ -748,6 +749,10 @@ class AllWellApp(QMainWindow):
             getattr(self, "_reset_view_btn", None), getattr(self, "_refresh_btn", None),
             getattr(self, "_help_btn", None), getattr(self, "_statusbar", None),
             getattr(self, "_storage_btn", None),
+            # The desk's ‹ › sit after the mode bar; phone layout has its own
+            # Back beside ☰ (and Forward in ⋯), so these step aside.
+            getattr(self, "_history_back_btn", None),
+            getattr(self, "_history_forward_btn", None),
         ) if w is not None]
 
         # Analyze's phone form: the form as the page, the run a strip above it
@@ -797,6 +802,7 @@ class AllWellApp(QMainWindow):
             show_page_view=lambda name: (self._analyze_phone.show_view(name)
                                          if self._analyze_phone is not None else None),
             well_picker=_well_picker,
+            history=getattr(self, "_history", None),
             wells_count=lambda: len(review._ctx.state.selection.selected_wells or ()),
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
@@ -870,8 +876,8 @@ class AllWellApp(QMainWindow):
         - ⌘O / Ctrl+O — open dataset (matches the titlebar Open button).
         - ⌘E / Ctrl+E — export figure (drives the active plot card's
           ``save_figure`` toolbar action).
-        - ⌘← / Ctrl+← — back through the section tab history.
-        - ⌘→ / Ctrl+→ — forward through the section tab history.
+        - ⌘← / Ctrl+← — Back (the ‹ button; ``ui/page_history.py``).
+        - ⌘→ / Ctrl+→ — Forward (the › button).
         - ⌘/ / Ctrl+/ — toggle the help drawer (matches the header ? button).
         - ⌘L / Ctrl+L — toggle the application log drawer (matches the
           status-bar log button).
@@ -908,14 +914,81 @@ class AllWellApp(QMainWindow):
             review._toggle_sidebar()
 
     def _tab_history_back(self) -> None:
-        review = getattr(self, "_review", None)
-        if review is not None and hasattr(review, "_tab_history_back"):
-            review._tab_history_back()
+        history = getattr(self, "_history", None)
+        if history is not None:
+            history.back()
 
     def _tab_history_forward(self) -> None:
-        review = getattr(self, "_review", None)
-        if review is not None and hasattr(review, "_tab_history_forward"):
-            review._tab_history_forward()
+        history = getattr(self, "_history", None)
+        if history is not None:
+            history.forward()
+
+    # ── Back / Forward ──────────────────────────────────────────────────
+    def _build_page_history(self, band) -> None:
+        """Back and Forward through the places the window has been
+        (``ui/page_history.py``): a place is the mode, and in Review the
+        section and its page tab. Recorded on every mode switch, section change
+        and page-tab change, whichever control made it — the rail, the page
+        menu, a shortcut, code. The desk's ‹ › sit right after the mode bar, at
+        the head of the page tabs, like a browser's beside its address."""
+        from ui.page_history import PageHistory
+        review = self._review
+        self._history = PageHistory(self, location=self._history_place,
+                                    go=self._history_go)
+        self._history_back_btn = self._history.make_button("back")
+        self._history_forward_btn = self._history.make_button("forward")
+        lay = band.layout() if band is not None else None
+        if lay is not None:
+            at = lay.indexOf(self._mode_seg) + 1
+            lay.insertWidget(at, self._history_back_btn)
+            lay.insertWidget(at + 1, self._history_forward_btn)
+        review.modeChanged.connect(self._history.record)
+        notebook = getattr(review, "_notebook", None)
+        if notebook is not None:
+            notebook.currentChanged.connect(self._history.record)
+        self._history.changed.connect(self._watch_page_bars)
+        self._watch_page_bars()
+        self._history.record()
+
+    def _watch_page_bars(self) -> None:
+        """Record a page-tab change in any section, a section built later
+        included: each bar is connected the first time it is seen."""
+        for bar in getattr(self._review, "_page_tabs_bar_by_name", {}).values():
+            if bar is not None and not bar.property("_awHistory"):
+                bar.setProperty("_awHistory", True)
+                bar.currentChanged.connect(self._history.record)
+
+    def _history_place(self) -> tuple:
+        """Where the window is: ``(mode,)``, or ``("review", section, page)``."""
+        review = self._review
+        mode = review.currentMode() if hasattr(review, "currentMode") else "review"
+        if mode != "review":
+            return (mode,)
+        section = review._notebook.currentName() if review._notebook is not None else ""
+        bar = getattr(review, "_page_tabs_bar_by_name", {}).get(section)
+        page = bar.tabText(bar.currentIndex()) if bar is not None and bar.count() else ""
+        return ("review", section, page)
+
+    def _history_go(self, place: tuple) -> None:
+        """Go back to *place*, the way a user would have got there."""
+        review = self._review
+        mode = place[0]
+        current = review.currentMode() if hasattr(review, "currentMode") else "review"
+        if mode != current:
+            self._on_titlebar_mode_seg(pane_index(mode))
+        if mode == "review" and len(place) == 3:
+            _mode, section, page = place
+            if section:
+                review._notebook.setCurrentByName(section)
+            bar = getattr(review, "_page_tabs_bar_by_name", {}).get(section)
+            if bar is not None and page:
+                for i in range(bar.count()):
+                    if bar.tabText(i) == page:
+                        bar.setCurrentIndex(i)
+                        break
+        if self._phone is not None:
+            self._phone.page_changed()
+            self._phone.refresh()
 
     def _export_active_figure(self) -> None:
         review = getattr(self, "_review", None)

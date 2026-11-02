@@ -4056,8 +4056,12 @@ offered yet.
   right (`Display ▾`, `Save ▾`, Properties).
 - **Status bar** — a live status dot on the left, keyboard-shortcut chips on
   the right.
-- **Tab history** — `Ctrl+←` / `Ctrl+→` step back and forward through the tabs
-  you have visited, like a browser's back/forward.
+- **Back and Forward** — **‹** and **›** just right of the Review · Analyze ·
+  Datasets switch (or `Ctrl+←` / `Ctrl+→`) step back and forward through the
+  places you have been, like a browser's: each section, each page tab within it
+  (Bar Plots, Line Graphs, …), and each switch between Review, Analyze and
+  Datasets is a step. Going somewhere new after stepping back forgets the way
+  forward. A button is greyed out when there is nowhere to go that way.
 
 ### Controls shared by every tab
 
@@ -9600,7 +9604,8 @@ the same, once, for the new shape.
 |---|---|
 | **☰** | Slides the sidebar out over the page from the left: the dataset, every section (Home, Plotting, Statistics, …) as a grid of tiles, the well plate and saved selections, just as at the desk. For picking wells, **Wells** in the bottom bar (below) is quicker. Its top line shows the well and nuclei counts the desktop's status bar shows. Tap wells as usual — the sidebar stays out while you pick several; a row or column label selects the whole row or column (except on the smFISH page, which picks one well at a time). Tap a section, **✕**, or the dimmed page at the right to slide it away. In Datasets it holds the tools. Analyze has no sidebar in phone layout — its form is the page — so **☰** is not shown there. |
 | **Review · Analyze · Datasets** | Switches mode, as on the desktop. |
-| **⋯** | **Text size** (S, M, L), **Reload dataset**, **Help**, **App log**, and **Desktop layout** — the way back. A **!** on it means the app log has something new. |
+| **‹** | Back to where you were before — the previous page, page tab or mode, as on the desktop. Greyed out when there is nowhere to go back to. |
+| **⋯** | **Text size** (S, M, L), **Reload dataset**, **Help**, **App log**, **Forward ›** (where **‹** came from; greyed out when there is nowhere to go forward to), and **Desktop layout** — the way back. A **!** on it means the app log has something new. Holding the phone sideways, **›** sits beside **‹** in the bar instead. |
 
 In Review a bar along the bottom of the screen — where your thumb already is —
 holds:
@@ -9803,8 +9808,8 @@ architecture-specific and can't produce a universal binary.
 |---|---|
 | `⌘O` / `Ctrl+O` | Open a results folder |
 | `⌘E` / `Ctrl+E` | Save the active figure (drives the visible plot card's Save figure action) |
-| `⌘←` / `Ctrl+←` | Back through tab history |
-| `⌘→` / `Ctrl+→` | Forward through tab history |
+| `⌘←` / `Ctrl+←` | Back (the **‹** button) |
+| `⌘→` / `Ctrl+→` | Forward (the **›** button) |
 | `⌘/` / `Ctrl+/` | Open the help drawer |
 | `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception. Each entry starts with the time it was logged (hours, minutes, seconds), and a blank line separates one entry from the next, so a multi-line entry such as a traceback reads as one. While the drawer is shut, a "!" badge on the status bar's log button says new lines have arrived — blue for routine messages, amber once a warning has come in, red once an error has — and it clears when you open the drawer |
 | `⌘B` / `Ctrl+B` | Collapse / expand the left sidebar (same as the top-bar panel button) |

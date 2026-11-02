@@ -95,7 +95,7 @@ they're shell-wide:
   chosen once at startup (dev-facing `ALLWELL_THEME` env var / `--theme` flag) —
   see §8.
 - **Help drawer + keyboard shortcuts** — `Ctrl+O` (open), `Ctrl+E` (export the
-  active figure), `Ctrl+←`/`→` (tab history), `Ctrl+/` (help drawer), `Ctrl+L`
+  active figure), `Ctrl+←`/`→` (Back / Forward, below), `Ctrl+/` (help drawer), `Ctrl+L`
   (log drawer), `Ctrl+B` (collapse the sidebar), `Ctrl+W` (close). All are
   installed in `AllWellApp._install_shortcuts`, and
   `tests/test_shortcut_advertising.py` holds them in sync with what the help
@@ -120,6 +120,27 @@ they're shell-wide:
   line breaks.
 - **Status bar** (bottom of the window) with a status-message label and
   key-hint chips.
+- **Back and Forward** (`ui/page_history.PageHistory`, over the Qt-free
+  `core/nav_history.NavHistory`). A *place* is the mode, and in Review the
+  section and its page tab: `("review", "Plotting", "Bar Plots")`,
+  `("analyze",)`. `AllWellApp._build_page_history` records a place on every
+  `ReviewApp.modeChanged`, every change of Review's notebook and every page-tab
+  bar's `currentChanged` (each bar connected the first time it is seen, so a
+  section built later is covered) — whatever made the move: a rail tile, the
+  phone's page menu and its *Go to*, the mode bar, code. Mode switches are
+  places, so Back after jumping from a plot to Analyze returns to the plot.
+  Datasets' tools and Analyze's phone views are not: a mode is one place. The
+  rules are a browser's: a move after Back drops the way forward, the place you
+  are at is never added twice (a relayout re-announces the mode), and going to
+  a place runs inside `NavHistory.replaying()` so its own moves are not
+  recorded; at most 200 places are kept. `_history_go` goes through the mode
+  bar's handler, `setCurrentByName` and the page bar, then tells phone layout
+  the page changed. The desk's ‹ › (`IconButton`s from
+  `PageHistory.make_button`) sit right after the mode bar, at the head of the
+  page tabs, with their shortcuts (`Ctrl+←` / `Ctrl+→`) in their tooltips; each
+  is disabled, not hidden, while its direction has nowhere to go, through
+  `PageHistory.changed`. Phone layout makes its own from the same history
+  (`PhoneHandles.history`; below).
 - **App icon, window geometry persistence.**
 - **Phone layout** — below.
 
@@ -243,10 +264,15 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
 5. maximizes the window (phone) or restores the desk geometry it remembered —
    only one remembered on a desk-shaped screen.
 
-**The top bar.** Upright: ☰ (48 pt, ✕ while the rail is out), the mode switch
-(Review · Analyze · Datasets, labels only, one shared segment width that
-`ModeBar._equalise_widths` re-measures after every UI scale — measured before the
-restyle it clipped "Datasets"), and ⋯ (48 pt). The page's own controls are in a
+**The top bar.** Upright: ☰ (48 pt, ✕ while the rail is out), Back ‹ (44 pt), the
+mode switch (Review · Analyze · Datasets, labels only, `MODE_PAD_PT` (9 pt) either
+side of each label, one shared segment width that `ModeBar._equalise_widths`
+re-measures after every UI scale — measured before the restyle it clipped
+"Datasets"), and ⋯ (48 pt). The four do not leave room for a Forward at a touch
+size — at 12 pt of mode padding Back alone did not fit — so upright *Forward ›*
+is an item in ⋯, enabled as the button would be; sideways › sits beside ‹ in the
+one bar, both at `LANDSCAPE_BAR_BUTTON_PT`. The desk's ‹ › are hidden in phone
+layout (`desk_only`). The page's own controls are in a
 52 pt strip (`PhoneStrip`) at the **foot** of the window — added last to the
 band's parent layout, so in Analyze it sits under the run bar — because the foot
 is what a thumb reaches without shifting its grip, and it is the edge the two

@@ -768,3 +768,91 @@ def test_the_controls_sheet_reads_as_one_column_of_labelled_rows(qapp, win, mini
         shell.set_on(False)
         QTest.qWait(600)
         _pump(qapp)
+
+
+def test_back_and_forward_through_pages_page_tabs_and_modes(qapp, win, mini_dataset):
+    """Back after two moves lands on the first; a page tab and a mode switch
+    are places of their own; Back and Forward are disabled at the ends; and a
+    new move after Back forgets the way forward. Driven through the shortcut
+    the window has always had (Ctrl+Left), so it fails on the history that
+    recorded Review's sections only, and then through the buttons."""
+    from PySide6.QtTest import QTest
+
+    review = win._review
+    if win._mode_seg.currentIndex() != 0:
+        win._on_titlebar_mode_seg(0)
+    review._load_path(mini_dataset)
+    _pump(qapp)
+    nav = review._section_nav
+    nav.setCurrentKey("Plotting")
+    review._plotting_notebook.setCurrentByName("Bar Plots")
+    _pump(qapp)
+    bar = review._page_tabs_bar_by_name["Plotting"]
+    names = [bar.tabText(i) for i in range(bar.count())]
+    nav.setCurrentKey("Statistics")                 # a section tile
+    _pump(qapp)
+    nav.setCurrentKey("Plotting")
+    bar.setCurrentIndex(names.index("Line Graphs"))  # a page tab
+    _pump(qapp)
+    win._on_titlebar_mode_seg(1)                     # Analyze
+    _pump(qapp)
+
+    win._tab_history_back()
+    _pump(qapp)
+    assert review.currentMode() == "review", "Back did not undo the mode switch"
+    assert review._plotting_notebook.currentName() == "Line Graphs"
+    win._tab_history_back()
+    _pump(qapp)
+    assert review._notebook.currentName() == "Plotting"
+    assert review._plotting_notebook.currentName() == "Bar Plots", \
+        "Back skipped the page-tab change"
+    win._tab_history_back()
+    _pump(qapp)
+    assert review._notebook.currentName() == "Statistics"
+
+    back, fwd = win._history_back_btn, win._history_forward_btn
+    assert fwd.isEnabled()
+    fwd.click()
+    _pump(qapp)
+    assert review._plotting_notebook.currentName() == "Bar Plots"
+    while back.isEnabled():
+        back.click()
+        _pump(qapp)
+    assert not win._history.can_back()
+    fwd.click()
+    _pump(qapp)
+    nav.setCurrentKey("Spatial")                     # a new move after Back
+    _pump(qapp)
+    assert not fwd.isEnabled() and not win._history.can_forward(), \
+        "a move after Back kept the old way forward"
+    assert back.isEnabled()
+    back.click()
+    _pump(qapp)
+    assert fwd.isEnabled()
+    QTest.qWait(10)
+
+
+def test_phone_layout_has_back_beside_the_menu_and_forward_in_options(qapp, win):
+    from PySide6.QtTest import QTest
+
+    review, shell = win._review, win._phone
+    shell.set_on(True)
+    QTest.qWait(600)
+    _pump(qapp)
+    try:
+        lay = review._top_bar.layout()
+        assert lay.indexOf(shell.back_button) == lay.indexOf(shell.menu_button) + 1
+        assert _visible(shell.back_button) and not _visible(win._history_back_btn)
+        assert shell.back_button.isEnabled() == win._history.can_back()
+        u = win.screen().geometry().width() / 390
+        assert shell.back_button.width() >= round(44 * u) - 1
+        # Upright everything in the bar fits on the screen.
+        assert shell.options_button.geometry().right() <= review._top_bar.width()
+        assert shell.back_button.geometry().right() < win._mode_seg.geometry().left()
+        shell._fill_menu()
+        fwd = [a for a in shell._menu.actions() if a.text().startswith("Forward")]
+        assert fwd and fwd[0].isEnabled() == win._history.can_forward()
+    finally:
+        shell.set_on(False)
+        QTest.qWait(600)
+        _pump(qapp)

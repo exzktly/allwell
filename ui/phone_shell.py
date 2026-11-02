@@ -142,6 +142,9 @@ class PhoneHandles:
     #: How many wells are selected, for the Wells button's label; ``None``
     #: when there is no count to show.
     wells_count: Callable[[], int | None] = lambda: None
+    #: The window's Back / Forward (``ui.page_history.PageHistory``): phone
+    #: layout makes its own pair of buttons from it.
+    history: object | None = None
 
 
 # ── the rescale pass ──────────────────────────────────────────────────────
@@ -858,6 +861,12 @@ LANDSCAPE_BAR_PT = 44
 #: sideways the bar's height is taken from the plots. Upright they are
 #: ``TOUCH_ROW_PT`` squares.
 LANDSCAPE_BAR_BUTTON_PT = 40
+#: The padding either side of each mode's label in the compact mode bar. Upright
+#: the bar holds ☰, Back, the three modes and ⋯ across 390 pt: at 12 pt a side
+#: Back did not fit, and 9 still leaves "Datasets" its full label.
+MODE_PAD_PT = 9
+#: The ‹ › glyphs in phone layout's bar.
+HISTORY_GLYPH_PT = 20
 #: The side rail leaves this much of the page showing to its right when the
 #: phone is upright — the strip a thumb taps to close it; sideways it is a
 #: fixed width, since half a landscape screen of sections would be mostly air.
@@ -1027,6 +1036,12 @@ class PhoneShell(QObject):
         self.menu_button.setCheckable(True)
         self.menu_button.clicked.connect(self._on_menu_clicked)
 
+        # Back beside ☰ — and Forward with it sideways; upright the bar has no
+        # room for both at a touch size, and Forward is in ⋯ (``_fill_menu``).
+        history = self._h.history
+        self.back_button = history.make_button("back") if history is not None else None
+        self.forward_button = history.make_button("forward") if history is not None else None
+
         self.page_button = QToolButton()
         self.page_button.setObjectName("PhonePageButton")
         self.page_button.setPopupMode(QToolButton.InstantPopup)
@@ -1080,6 +1095,8 @@ class PhoneShell(QObject):
         if layout is not None:
             at = self._h.band_insert_at
             layout.insertWidget(at, self.menu_button)
+            for i, b in enumerate(self._history_buttons()):
+                layout.insertWidget(at + 1 + i, b)
             bar_at = layout.indexOf(self._h.mode_bar) if self._h.mode_bar else at
             layout.insertWidget(bar_at + 1, self._band_spacer)
             layout.addWidget(self.options_button)
@@ -1148,10 +1165,13 @@ class PhoneShell(QObject):
         self._rail_status.setText(text)
         self._rail_status.setVisible(show)
 
+    def _history_buttons(self) -> list[QWidget]:
+        return [b for b in (self.back_button, self.forward_button) if b is not None]
+
     def _phone_only(self) -> list[QWidget]:
-        return [self.menu_button, self.page_button, self.wells_button,
-                self.controls_button, self._band_spacer, self.options_button,
-                self._strip]
+        return [self.menu_button, *self._history_buttons(), self.page_button,
+                self.wells_button, self.controls_button, self._band_spacer,
+                self.options_button, self._strip]
 
     def _place_page_controls(self, *, landscape: bool) -> None:
         """The page menu, Wells and Controls: in the strip at the window's
@@ -1249,7 +1269,7 @@ class PhoneShell(QObject):
             self._hid = []
         bar = self._h.mode_bar
         if bar is not None and hasattr(bar, "setCompact"):
-            bar.setCompact(on, pad=self.pt(12))
+            bar.setCompact(on, pad=self.pt(MODE_PAD_PT))
         from PySide6.QtWidgets import QTextEdit
         for log in self._h.logs():
             # Wrapped, a log trimmed at its block cap re-anchors a scrolled-up
@@ -1535,6 +1555,14 @@ class PhoneShell(QObject):
                 side = self.pt(LANDSCAPE_BAR_BUTTON_PT if land else phone_layout.TOUCH_ROW_PT)
                 for b in (self.menu_button, self.options_button):
                     b.setFixedSize(side, side)
+                # Back at the touch floor upright, beside ☰; Forward joins it
+                # sideways, where the one bar is long enough for both.
+                step = self.pt(LANDSCAPE_BAR_BUTTON_PT if land else phone_layout.TOUCH_MIN_PT)
+                for b in self._history_buttons():
+                    b.setFixedSize(step, step)
+                    b.setIconPixels(round(self.pt(HISTORY_GLYPH_PT) / theme.ui_scale()))
+                if self.forward_button is not None:
+                    self.forward_button.setVisible(land)
                 band.setFixedHeight(bar)
                 band.layout().setContentsMargins(self.pt(4), 0, self.pt(4), 0)
                 band.layout().setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
@@ -2214,5 +2242,12 @@ class PhoneShell(QObject):
             lit = self._h.log_badge is not None and self._h.log_badge.tone() is not None
             owned_action(m, "App log  •" if lit else "App log").triggered.connect(
                 self._h.show_log)
+        history = self._h.history
+        if history is not None and not bool(self._landscape):
+            # Upright the bar has Back only; Forward is here, disabled when
+            # there is nowhere to go forward to.
+            fwd = owned_action(m, "Forward ›")
+            fwd.setEnabled(history.can_forward())
+            fwd.triggered.connect(history.forward)
         m.addSeparator()
         owned_action(m, "Desktop layout").triggered.connect(lambda: self.set_on(False))

@@ -14,12 +14,14 @@ API
 ---
 * ``Drawer(host, parent=None, *, edge="right", width_hint=None,
   width_fraction=0.34, height_hint=None, height_fraction=0.4, margin=None,
-  top_inset=0, scrim=0.35)`` — *width_hint* / *height_hint* may be callables,
+  top_inset=0, bottom_inset=0, scrim=0.35)`` — *width_hint* / *height_hint* may be callables,
   re-asked on every open and host resize; *scrim* is the backdrop's opacity;
   *margin* is the padding around the content (default
   ``Spacing.lg``); *top_inset* (an int, or a callable returning one) keeps the
   drawer and its backdrop below a strip of the host that stays usable, such as
-  a toolbar holding the button that opens it.
+  a toolbar holding the button that opens it; *bottom_inset* does the same
+  above a strip at the host's foot (a bottom bar whose button opens a bottom
+  sheet, which then rises from the bar rather than over it).
 * ``setContentWidget(widget)`` / ``contentWidget()`` / ``takeContentWidget()``
   (removes the content without deleting it, for a host lending a widget)
 * ``open()`` / ``close()`` / ``toggle()`` / ``isOpen()`` / ``closeNow()``
@@ -79,7 +81,7 @@ class Drawer(QWidget):
                  edge: str = "right",
                  width_hint: int | None = None, width_fraction: float = 0.34,
                  height_hint: int | None = None, height_fraction: float = 0.4,
-                 margin: int | None = None, top_inset=0,
+                 margin: int | None = None, top_inset=0, bottom_inset=0,
                  scrim: float = 0.35) -> None:
         super().__init__(parent or host)
         self.setObjectName("Drawer")
@@ -87,6 +89,7 @@ class Drawer(QWidget):
         self._host = host
         self._edge = edge if edge in ("right", "left", "bottom") else "right"
         self._top_inset = top_inset
+        self._bottom_inset = bottom_inset
         # An int, or a callable re-asked on every open and resize (phone
         # layout sizes its rail from the screen, which turns).
         self._width_hint = (width_hint if callable(width_hint)
@@ -201,6 +204,11 @@ class Drawer(QWidget):
         inset = self._top_inset() if callable(self._top_inset) else self._top_inset
         return max(0, min(int(inset or 0), self._host.height()))
 
+    def _foot(self) -> int:
+        """The bottom inset, in px: the strip at the host's foot left usable."""
+        inset = self._bottom_inset() if callable(self._bottom_inset) else self._bottom_inset
+        return max(0, min(int(inset or 0), self._host.height() - self._inset()))
+
     def _drawer_width(self) -> int:
         if callable(self._width_hint):
             return max(1, min(int(self._width_hint()), self._host.width()))
@@ -209,20 +217,21 @@ class Drawer(QWidget):
         return max(280, round(self._host.width() * self._width_fraction))
 
     def _drawer_height(self) -> int:
+        room = self._host.height() - self._foot()
         if callable(self._height_hint):
-            return max(1, min(int(self._height_hint()), self._host.height()))
+            return max(1, min(int(self._height_hint()), room))
         if self._height_hint:
-            return min(self._height_hint, self._host.height())
-        return max(200, round(self._host.height() * self._height_fraction))
+            return min(self._height_hint, room)
+        return min(room, max(200, round(self._host.height() * self._height_fraction)))
 
     def _open_rect(self) -> QRect:
         """On-screen geometry when fully open, per edge."""
         if self._edge == "bottom":
             h = self._drawer_height()
-            return QRect(0, self._host.height() - h, self._host.width(), h)
+            return QRect(0, self._host.height() - self._foot() - h, self._host.width(), h)
         w, top = self._drawer_width(), self._inset()
         x = 0 if self._edge == "left" else self._host.width() - w
-        return QRect(x, top, w, self._host.height() - top)
+        return QRect(x, top, w, self._host.height() - top - self._foot())
 
     def _closed_rect(self) -> QRect:
         """Off-screen (dismissed) geometry the panel animates to/from, per edge."""
@@ -231,11 +240,12 @@ class Drawer(QWidget):
             return QRect(0, self._host.height(), self._host.width(), h)
         w, top = self._drawer_width(), self._inset()
         x = -w if self._edge == "left" else self._host.width()
-        return QRect(x, top, w, self._host.height() - top)
+        return QRect(x, top, w, self._host.height() - top - self._foot())
 
     def _sync_backdrop_geom(self) -> None:
         top = self._inset() if self._edge != "bottom" else 0
-        self._backdrop.setGeometry(0, top, self._host.width(), self._host.height() - top)
+        self._backdrop.setGeometry(0, top, self._host.width(),
+                                   self._host.height() - top - self._foot())
 
     def _on_anim_finished(self) -> None:
         if not self._open:

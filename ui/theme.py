@@ -1837,7 +1837,7 @@ QProgressBar::chunk {{
    beside the real one. */
 QWidget#PhoneStrip {{
     background-color: {c.rail};
-    border-bottom: 1px solid {c.border_subtle};
+    border-top: 1px solid {c.border_subtle};
 }}
 /* Analyze's run controls, moved to the foot of the pane in phone layout
    (analyze/phone_view.py) so Run and + Queue stay in reach. */
@@ -1859,7 +1859,8 @@ QWidget#AnalyzeRunFooter > QWidget {{
     background-color: transparent;
 }}
 QToolButton#PhoneMenuButton, QToolButton#PhonePageButton,
-QToolButton#PhoneOptionsButton, QToolButton#PhoneControlsButton {{
+QToolButton#PhoneOptionsButton, QToolButton#PhoneControlsButton,
+QToolButton#PhoneWellsButton {{
     background-color: transparent;
     border: 1px solid {c.control_border};
     border-radius: {r.sm}px;
@@ -1878,7 +1879,8 @@ QToolButton#PhoneMenuButton:checked {{
     border-color: {c.accent};
 }}
 QToolButton#PhoneMenuButton:hover, QToolButton#PhonePageButton:hover,
-QToolButton#PhoneOptionsButton:hover, QToolButton#PhoneControlsButton:hover {{
+QToolButton#PhoneOptionsButton:hover, QToolButton#PhoneControlsButton:hover,
+QToolButton#PhoneWellsButton:hover {{
     background-color: {c.hover};
 }}
 QToolButton#PhonePageButton::menu-indicator,
@@ -1889,6 +1891,12 @@ QToolButton#PhoneOptionsButton::menu-indicator {{
 QLabel#PlateHeadline[phone="true"] {{
     font-size: {t.h3_size}px;
     font-weight: {t.semibold};
+}}
+QLabel#PhoneMenuCaption {{
+    color: {c.text_muted};
+    font-size: {t.caption_size}px;
+    font-weight: {t.semibold};
+    padding: {s.md}px {s.lg}px {s.xs}px {s.lg}px;
 }}
 QLabel#PhoneRailStatus {{
     color: {c.text_secondary};
@@ -2085,6 +2093,11 @@ def _touch_qss(u: float) -> str:
         return round(n * u)
     floor = pt(phone_layout.TOUCH_MIN_PT)
     row = pt(phone_layout.TOUCH_ROW_PT)
+    # A thumb-wide track with a slimmer handle drawn centred in it: the whole
+    # track takes the press, the handle stays a quiet mark of where you are.
+    bar = pt(phone_layout.SCROLLBAR_PT)
+    handle = pt(phone_layout.SCROLL_HANDLE_PT)
+    inset = max(0, (bar - handle) // 2)
     c = Colors
     return f"""
 /* ── Phone layout: touch sizes (theme.set_touch_unit) ─────────────────── */
@@ -2111,9 +2124,21 @@ QCheckBox::indicator, QRadioButton::indicator {{
     width: {pt(24)}px; height: {pt(24)}px;
 }}
 QCheckBox, QRadioButton {{ spacing: {pt(10)}px; min-height: {floor}px; }}
-QScrollBar:vertical {{ width: {pt(10)}px; }}
-QScrollBar:horizontal {{ height: {pt(10)}px; }}
-QScrollBar::handle {{ background-color: {c.border_strong}; border-radius: {pt(5)}px; }}
+QScrollBar:vertical {{ width: {bar}px; }}
+QScrollBar:horizontal {{ height: {bar}px; }}
+QScrollBar::handle {{
+    background-color: {c.border_strong};
+    border-radius: {handle // 2}px;
+}}
+QScrollBar::handle:vertical {{
+    min-height: {row}px;
+    margin: 0px {inset}px;
+}}
+QScrollBar::handle:horizontal {{
+    min-width: {row}px;
+    margin: {inset}px 0px;
+}}
+QScrollBar::handle:pressed {{ background-color: {c.accent}; }}
 """
 
 

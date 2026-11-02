@@ -18,9 +18,16 @@ What phone layout does, and where:
   edge — ``ui.phone_drawer.RailDrawer`` lends the panels to that drawer and
   gives them back.
 * **Chrome that suits a thumb**: the header row goes, the mode bar drops its
-  glyphs, the page sub-tab strip becomes one "Bar Plots ▾" menu, desk-only
-  and destructive buttons go, the keyboard hints go; text size and the way
-  back to the desktop layout sit behind the band's "Aa" button.
+  glyphs, desk-only and destructive buttons go, the keyboard hints go; text
+  size and the way back to the desktop layout sit behind the band's ⋯. The
+  page's own controls go to a strip at the window's *foot*, in thumb reach:
+  one "Bar Plots ▾" menu (the section's pages, then every other section),
+  **Wells** (the page's plate in a sheet over the live plot) and
+  **⚙ Controls** (the page's control band in a sheet).
+* **Everything that scrolls, scrolls by a drag** (:func:`grab_every_scroll_area`
+  and the sweep), except where a drag already means something
+  (:func:`drag_scroll_eligible`, ``_DragOwnerGuard``); scroll bars are a
+  thumb wide (``theme._touch_qss``).
 * **Larger text** (:meth:`PhoneShell.set_text_size`): the size tokens are
   scaled and the stylesheet re-applied — about 6 s on a loaded app, under an
   overlay that swallows the taps made meanwhile — then one explicit pass
@@ -115,9 +122,6 @@ class PhoneHandles:
     #: The stack of pages whose ``currentChanged`` is a page change (Review's
     #: notebook): phone layout sweeps for what the new page built at once.
     pages: QWidget | None = None
-    #: Panes whose form pages scroll by a drag in phone layout (Datasets'
-    #: tools, Analyze's form): every ``QScrollArea`` under them.
-    swipe_roots: Callable[[], list] = lambda: []
     #: Panes whose form pages are narrowed to the phone's width in phone layout
     #: (``ui/phone_fit``): Datasets, whose tools are laid out for the desk.
     fit_roots: Callable[[], list] = lambda: []
@@ -131,6 +135,13 @@ class PhoneHandles:
     page_views: Callable[[], list] = lambda: []
     page_view: Callable[[], str] = lambda: ""
     show_page_view: Callable[[str], None] = lambda _name: None
+    #: The well picker of the Review page on screen, as the widgets the Wells
+    #: sheet borrows, top to bottom (the rail's plate slot, the All / None
+    #: footer under it) — or ``[]`` when the page picks no wells.
+    well_picker: Callable[[], list] = lambda: []
+    #: How many wells are selected, for the Wells button's label; ``None``
+    #: when there is no count to show.
+    wells_count: Callable[[], int | None] = lambda: None
 
 
 # ── the rescale pass ──────────────────────────────────────────────────────
@@ -548,20 +559,54 @@ class _DragOwnerGuard(QObject):
     on the Progress page, which itself scrolls — is left to that area too, when
     it scrolls by a drag and has somewhere to go (:func:`_inner_area_owns_drag`).
     Both viewports accept the gesture otherwise, and the outer one wins it: a
-    swipe on the log scrolled the page and the log stayed where it was."""
+    swipe on the log scrolled the page and the log stayed where it was.
+
+    So is a drag that starts on any widget whose class reads mouse moves
+    itself (:func:`_handles_own_drag` — a colour picker's square, an Image
+    Table chip), and one on a plot, except on a plot page's own scroll area
+    (marked by ``_swipe_plot_area``), where a swipe on the plot is how the page
+    scrolls. A plot anywhere else — a dialog's — may be one you draw on."""
 
     def eventFilter(self, obj, ev) -> bool:  # Qt naming
         if not isinstance(ev, QEvent) or ev.type() != QEvent.ScrollPrepare:
             return False
         from PySide6.QtWidgets import QAbstractSlider
         w = obj.childAt(ev.startPos().toPoint()) if isinstance(obj, QWidget) else None
+        plots_swipe = isinstance(obj, QWidget) and bool(obj.property(_P_SWIPE_PLOTS))
         while w is not None and w is not obj:
-            if (isinstance(w, QAbstractSlider) or _plate_owns_drag(w)
-                    or _inner_area_owns_drag(w)):
+            if _is_canvas(w):
+                owns = not plots_swipe
+            elif type(w).__name__ in _DRAG_OWNERS:
+                owns = _plate_owns_drag(w)
+            else:
+                owns = (isinstance(w, QAbstractSlider) or _handles_own_drag(w)
+                        or _inner_area_owns_drag(w))
+            if owns:
                 ev.ignore()
                 return True
             w = w.parentWidget()
         return False
+
+
+def _is_canvas(w: QWidget) -> bool:
+    """A matplotlib canvas, recognised without importing matplotlib."""
+    return getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure")
+
+
+def _handles_own_drag(w: QWidget) -> bool:
+    """*w*'s class reads mouse moves itself — a colour picker's square, an
+    Image Table chip you drag to a zone, a table you drag cells out of — so a
+    drag on it means something to it. Derived from the class rather than kept
+    as a roster, so a widget written tomorrow that handles its own drag is
+    covered by having been written. Qt's own classes do not count: a plain
+    button or label reads mouse moves only in C++, and gives the drag up."""
+    for cls in type(w).__mro__:
+        module = getattr(cls, "__module__", "") or ""
+        if cls is object or module.startswith(("PySide6", "shiboken6")):
+            continue
+        if "mouseMoveEvent" in vars(cls):
+            return True
+    return False
 
 
 def _inner_area_owns_drag(w: QWidget) -> bool:
@@ -593,6 +638,64 @@ def _plate_owns_drag(w: QWidget) -> bool:
 
 #: Set on a viewport while :func:`set_drag_scroll` has it scrolling by a drag.
 _P_DRAG_SCROLL = "_awDragScroll"
+
+#: Set on the viewport of a plot page's scroll area (``_swipe_plot_area``): a
+#: drag that starts on its plot scrolls the page. Anywhere else a drag that
+#: starts on a plot is the plot's — a plot in a dialog may be one you draw on.
+_P_SWIPE_PLOTS = "_awSwipePlots"
+
+
+def drag_scroll_eligible(area: QWidget) -> bool:
+    """Whether phone layout makes *area* scroll by a drag.
+
+    Every scroll area does — the window's, a dialog's, a popover's, a combo
+    box's list — except those whose own drag already means something:
+
+    * an editable text box, where a drag places the cursor and selects text
+      (a read-only one — a log — scrolls by the drag);
+    * an item view that drags its items (reordering, drag and drop) — one
+      that only selects scrolls, and a tap still selects (a combo box's list
+      included: a drag on it used to pick whichever row it ended on);
+    * a graphics view, which has drag modes of its own;
+    * an area whose own class, or its viewport's, reads mouse moves itself
+      (:func:`_handles_own_drag` — Heat Map's layout table drags cells out).
+
+    A plate, a slider, a plot or any other widget that handles its own drag
+    *inside* an area that scrolls keeps the drag through the viewport's guard
+    (``_DragOwnerGuard``), not through this rule.
+    """
+    from PySide6.QtWidgets import (
+        QAbstractItemView, QAbstractScrollArea, QGraphicsView, QPlainTextEdit, QTextEdit,
+    )
+    if not isinstance(area, QAbstractScrollArea) or isinstance(area, QGraphicsView):
+        return False
+    if isinstance(area, (QTextEdit, QPlainTextEdit)) and not area.isReadOnly():
+        return False
+    if isinstance(area, QAbstractItemView) and (
+            area.dragEnabled() or area.dragDropMode() != QAbstractItemView.NoDragDrop):
+        return False
+    return not (_handles_own_drag(area) or _handles_own_drag(area.viewport()))
+
+
+def grab_every_scroll_area(on: bool) -> int:
+    """Make every eligible scroll area in the process scroll by a drag (*on*),
+    or stop every one that does. Returns how many viewports it changed."""
+    from PySide6.QtWidgets import QAbstractScrollArea
+    n = 0
+    for w in list(QApplication.allWidgets()):
+        try:
+            if not isinstance(w, QAbstractScrollArea):
+                continue
+            vp = w.viewport()
+            if on and drag_scroll_eligible(w):
+                set_drag_scroll(vp, True)
+                n += 1
+            elif not on and vp.property(_P_DRAG_SCROLL):
+                set_drag_scroll(vp, False)
+                n += 1
+        except RuntimeError:
+            swallowed()  # deleted while the list was walked
+    return n
 
 
 def set_drag_scroll(viewport: QWidget, on: bool) -> None:
@@ -772,7 +875,8 @@ SHEET_HEIGHT_SHARE = 0.6
 #: ``analyze/phone_view.AnalyzePhoneView._fit_progress``. The log takes the
 #: rest of the width.
 LANDSCAPE_SUMMARY_PT = 440
-#: How often the side rail's status line follows the status bar while out.
+#: How often the side rail's status line follows the status bar while out,
+#: and the Wells button its count while the Wells sheet is open.
 _RAIL_STATUS_MS = 400
 #: The least height a plot gets per row of axes in phone layout.
 PLOT_ROW_PT = 220
@@ -937,12 +1041,22 @@ class PhoneShell(QObject):
         self.controls_button.setText("⚙ Controls")
         self.controls_button.clicked.connect(self.toggle_controls)
 
+        # The well picker, one tap from the page: the page's plate and its
+        # All / None slide up in a sheet of their own, with the plot left in
+        # view above them, so a well tapped is a bar drawn where the eye is.
+        self.wells_button = QToolButton()
+        self.wells_button.setObjectName("PhoneWellsButton")
+        self.wells_button.setText("Wells")
+        self.wells_button.clicked.connect(self.toggle_wells)
+
         self._band_spacer = QWidget()
         self._band_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         # Upright, the bar has room for ☰, the three modes and ⋯ and no more,
-        # so Review's page menu and Controls take a strip of their own under
-        # it; sideways they join the bar (``_place_page_controls``).
+        # so the page menu, Wells and Controls take a strip of their own at the
+        # *foot* of the window — the part of a phone a thumb reaches without
+        # shifting its grip, and the edge the two sheets rise from. Sideways
+        # they join the bar (``_place_page_controls``).
         from PySide6.QtWidgets import QHBoxLayout
         self._strip = QWidget()
         self._strip.setObjectName("PhoneStrip")
@@ -972,7 +1086,7 @@ class PhoneShell(QObject):
             host = band.parentWidget()
             host_lay = host.layout() if host is not None else None
             if host_lay is not None:
-                host_lay.insertWidget(host_lay.indexOf(band) + 1, self._strip)
+                host_lay.addWidget(self._strip)
         self._place_page_controls(landscape=False)
         changed = getattr(self._h.log_badge, "changed", None)
         if changed is not None:
@@ -1004,6 +1118,13 @@ class PhoneShell(QObject):
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(_RAIL_STATUS_MS)
         self._status_timer.timeout.connect(self._sync_rail_status)
+        self._wells_timer = QTimer(self)
+        self._wells_timer.setInterval(_RAIL_STATUS_MS)
+        self._wells_timer.timeout.connect(self._sync_wells_label)
+        self._wells_sheet = None
+        #: What the open Wells sheet borrowed: (widget, its parent, its index
+        #: in the parent's layout), so each goes back exactly where it was.
+        self._wells_lent: list[tuple] = []
         drawer = self._h.rail_drawer
         holder = drawer.contentWidget() if drawer is not None else None
         if holder is not None and holder.layout() is not None:
@@ -1028,20 +1149,23 @@ class PhoneShell(QObject):
         self._rail_status.setVisible(show)
 
     def _phone_only(self) -> list[QWidget]:
-        return [self.menu_button, self.page_button, self.controls_button,
-                self._band_spacer, self.options_button, self._strip]
+        return [self.menu_button, self.page_button, self.wells_button,
+                self.controls_button, self._band_spacer, self.options_button,
+                self._strip]
 
     def _place_page_controls(self, *, landscape: bool) -> None:
-        """The page menu and Controls: in the strip upright, in the bar sideways."""
+        """The page menu, Wells and Controls: in the strip at the window's
+        foot upright, in the bar sideways."""
         strip_lay = self._strip.layout()
         band = self._h.band
         band_lay = band.layout() if band is not None else None
         if landscape and band_lay is not None:
             at = band_lay.indexOf(self._band_spacer)
-            band_lay.insertWidget(at, self.page_button, 0, Qt.AlignVCenter)
-            band_lay.insertWidget(at + 1, self.controls_button, 0, Qt.AlignVCenter)
+            for i, b in enumerate((self.page_button, self.wells_button, self.controls_button)):
+                band_lay.insertWidget(at + i, b, 0, Qt.AlignVCenter)
         else:
             strip_lay.insertWidget(0, self.page_button)
+            strip_lay.addWidget(self.wells_button)
             strip_lay.addWidget(self.controls_button)
 
     def _sync_log_badge(self) -> None:
@@ -1069,7 +1193,7 @@ class PhoneShell(QObject):
         self._save(phone_layout.KEY_ON, on)
         self._hide_banner()
         if not on:
-            self.close_controls(now=True)
+            self.close_sheets(now=True)
         if on:
             self._remember_desk_window()
         phone_layout.set_on(on)
@@ -1256,9 +1380,15 @@ class PhoneShell(QObject):
                 return
             widgets = fresh
         factor = self.plot_factor()
+        from PySide6.QtWidgets import QAbstractScrollArea
         for w in widgets:
             try:
                 w.setProperty(_P_SEEN, True)
+                # Every scroll area built after the switch — a page built
+                # lazily, a dialog, a popover, a combo box's list — scrolls by
+                # a drag like the ones that were there at the switch.
+                if isinstance(w, QAbstractScrollArea) and drag_scroll_eligible(w):
+                    set_drag_scroll(w.viewport(), True)
                 if w.property(_P_WATCHED) or not _phone_relevant(w):
                     continue
                 w.installEventFilter(self._filter)
@@ -1309,27 +1439,20 @@ class PhoneShell(QObject):
                 label.setMaximumWidth(int(pin[1]))
 
     def _grab_scrolling(self, on: bool) -> None:
-        """Let a drag scroll the long panels, the way a thumb expects.
+        """Let a drag scroll everything that scrolls, the way a thumb expects.
 
         Over VNC a touch-drag arrives as a left-button mouse drag, which a Qt
-        scroll area ignores. Grabbed on the side rail, the Controls sheet, the
-        logs and the form pages of Datasets and Analyze (``_grab_page_scrolling``)
-        — and on plot pages (``_swipe_plot_area``). A press on a control inside
-        still reaches the control, and a drag that starts on a plate or a
-        slider is left to it (``_DragOwnerGuard``).
+        scroll area ignores. So every scroll area in the process that
+        :func:`drag_scroll_eligible` allows takes Qt's drag-to-scroll on the
+        switch — the side rail, the sheets, the pages, the logs, the
+        Properties panel, a dialog's lists — and the sweep gives it to every
+        one built later (``_sweep``). Leaving phone layout gives back every
+        one, whoever grabbed it. A press on a control inside still reaches the
+        control, and a drag that starts on a plate, a slider, a plot off the
+        plot pages or a smaller area that scrolls itself is left to it
+        (``_DragOwnerGuard``).
         """
-        from PySide6.QtWidgets import QAbstractScrollArea
-        roots = [self._h.rail_drawer, self._sheet]
-        targets = []
-        for r in roots:
-            if r is not None:
-                targets += r.findChildren(QAbstractScrollArea)
-        targets += [w for w in QApplication.allWidgets()
-                    if type(w).__name__ in ("QTextEdit", "QPlainTextEdit")
-                    and w.isReadOnly()]
-        for area in targets:
-            set_drag_scroll(area.viewport(), on)
-        self._grab_page_scrolling(on)
+        grab_every_scroll_area(on)
         if not on:
             self._fit_pages()
 
@@ -1350,20 +1473,6 @@ class PhoneShell(QObject):
                         watcher = _FitOnShow(area, on_show=self._refresh_tool_label)
                         area.installEventFilter(watcher)
                     watcher.refit()
-                except RuntimeError:
-                    swallowed()  # deleted while the list was walked
-
-    def _grab_page_scrolling(self, on: bool = True) -> None:
-        """Every form page under ``swipe_roots`` scrolls by a drag. Run on the
-        switch and on every ``refresh`` (a mode or page change), since a
-        Datasets tool page is built when it is first shown."""
-        from PySide6.QtWidgets import QScrollArea
-        for root in self._h.swipe_roots():
-            if root is None:
-                continue
-            for area in root.findChildren(QScrollArea):
-                try:
-                    set_drag_scroll(area.viewport(), on)
                 except RuntimeError:
                     swallowed()  # deleted while the list was walked
 
@@ -1417,7 +1526,7 @@ class PhoneShell(QObject):
             strip_lay.setContentsMargins(self.pt(8), self.pt(4), self.pt(8), self.pt(4))
             strip_lay.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
             self._strip.setFixedHeight(self.pt(phone_layout.TOP_BAR_PT))
-            for b in (self.page_button, self.controls_button):
+            for b in (self.page_button, self.wells_button, self.controls_button):
                 b.setFixedHeight(self.pt(phone_layout.TOUCH_MIN_PT))
         self._size_canvases(on)
         if band is not None and band.layout() is not None:
@@ -1496,6 +1605,7 @@ class PhoneShell(QObject):
             area = area.parentWidget()
         if area is None or not self._band_managed(area):
             return
+        area.viewport().setProperty(_P_SWIPE_PLOTS, bool(on))
         set_drag_scroll(area.viewport(), on)
 
     def _apply_analyze_columns(self, two: bool) -> None:
@@ -1587,7 +1697,7 @@ class PhoneShell(QObject):
             return
         # The phone turned (VNC resized the desktop under a maximized window),
         # or a new resolution changed what a phone point is.
-        self.close_controls(now=True)
+        self.close_sheets(now=True)
         self._restyle_in_place()
         scale_canvases(self.plot_factor())
         self._apply_sizes()
@@ -1660,12 +1770,42 @@ class PhoneShell(QObject):
         return marked
 
     def _ensure_sheet(self):
+        """The Controls sheet, built for the screen's present shape."""
         land = self.is_landscape()
         if self._sheet is not None and getattr(self._sheet, "_aw_land", None) == land:
             return self._sheet
         if self._sheet is not None:
             self._sheet.closeNow()
             self._sheet.deleteLater()
+        self._sheet = self._build_sheet(land, self._give_band_back)
+        return self._sheet
+
+    def _ensure_wells_sheet(self):
+        """The Wells sheet, built for the screen's present shape."""
+        land = self.is_landscape()
+        sheet = self._wells_sheet
+        if sheet is not None and getattr(sheet, "_aw_land", None) == land:
+            return sheet
+        if sheet is not None:
+            sheet.closeNow()
+            sheet.deleteLater()
+        self._wells_sheet = self._build_sheet(land, self._give_wells_back)
+        self._wells_sheet.setProperty("phoneWellsSheet", True)
+        return self._wells_sheet
+
+    def _foot_strip(self) -> int:
+        """How much of the window's foot the strip holds, while it shows: a
+        bottom sheet rises from above it, so the button that opened the sheet
+        — which then reads "Done ✕" — stays where the thumb left it."""
+        strip = self._strip
+        if not strip.isVisibleTo(self._win):
+            return 0
+        return max(0, self._win.height() - strip.mapTo(self._win, strip.rect().topLeft()).y())
+
+    def _build_sheet(self, land: bool, on_closed):
+        """A sheet phone layout lends a page's widgets to: a bottom drawer
+        upright, rising from above the strip, as tall as what it holds up to
+        ``SHEET_HEIGHT_SHARE`` of the window; a right-hand panel sideways."""
         from PySide6.QtWidgets import QScrollArea
         from widgets.drawer import Drawer
         band = self._h.band
@@ -1690,7 +1830,7 @@ class PhoneShell(QObject):
                            margin=0, top_inset=_below_band, scrim=0.0)
         else:
             sheet = Drawer(self._win, edge="bottom", height_hint=_content_height,
-                           margin=0, scrim=0.0)
+                           margin=0, bottom_inset=self._foot_strip, scrim=0.0)
         sheet.setProperty("phoneSheet", True)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -1711,8 +1851,7 @@ class PhoneShell(QObject):
             # content lays out again — after the lend settles, and whenever a
             # control in it grows or shrinks.
             holder.installEventFilter(_RefitOnLayout(holder, sheet))
-        sheet.closed.connect(self._give_band_back)
-        self._sheet = sheet
+        sheet.closed.connect(on_closed)
         return sheet
 
     def toggle_controls(self) -> None:
@@ -1725,6 +1864,7 @@ class PhoneShell(QObject):
         band = self._current_band()
         if band is None:
             return
+        self.close_wells(now=True)      # one sheet at a time
         sheet = self._ensure_sheet()
         parent = band.parentWidget()
         lay = parent.layout() if parent is not None else None
@@ -1739,7 +1879,7 @@ class PhoneShell(QObject):
         scope = getattr(band, "_scope", None)       # a ControlBand's flow
         if scope is not None:
             scope.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
-        self._grab_scrolling(True)
+        self._sweep(force=False)    # the sheet's own scroll area, if new
         sheet.open()
         self.controls_button.setText("Done ✕")
 
@@ -1750,6 +1890,101 @@ class PhoneShell(QObject):
             self._sheet.closeNow()
         elif self._sheet.isOpen():
             self._sheet.close()
+
+    def close_sheets(self, *, now: bool = False) -> None:
+        """Close the Controls and Wells sheets, giving back what they hold."""
+        self.close_controls(now=now)
+        self.close_wells(now=now)
+
+    # ── the Wells sheet ───────────────────────────────────────────────────
+    def _well_picker(self) -> list:
+        fn = self._h.well_picker
+        try:
+            return [w for w in (fn() if fn is not None else []) if w is not None]
+        except RuntimeError:
+            swallowed()  # a page torn down while it was asked
+            return []
+
+    def toggle_wells(self) -> None:
+        if self._wells_sheet is not None and self._wells_sheet.isOpen():
+            self.close_wells()
+        else:
+            self.open_wells()
+
+    def open_wells(self) -> None:
+        """Lend the page's well picker to the Wells sheet and slide it up.
+
+        At the desk the plate sits in the rail beside the plot. On a phone the
+        rail is a drawer over the plot, below the dataset and nine section
+        tiles, so picking wells was ☰, a scroll, the taps, ✕ — and the plot
+        they change was hidden the whole time. The sheet holds the plate and
+        its All / None and nothing else, rises from the foot with no scrim,
+        and leaves the plot in view above it."""
+        picker = self._well_picker()
+        if not picker:
+            return
+        self.close_controls(now=True)      # one sheet at a time
+        if self._h.navigator_open():
+            self._h.set_navigator(False)
+        sheet = self._ensure_wells_sheet()
+        lay = sheet._aw_holder.layout()
+        # Every place is read before anything moves: the footer sits under
+        # the slot, and read after the slot had gone its index was one short,
+        # so it came back above the plate.
+        self._wells_lent = []
+        for w in picker:
+            parent = w.parentWidget()
+            home = parent.layout() if parent is not None else None
+            self._wells_lent.append((w, parent, home.indexOf(w) if home is not None else -1))
+        for i, w in enumerate(picker):
+            lay.insertWidget(i, w)
+            w.show()
+        self._sweep(force=False)    # the sheet's own scroll area, if new
+        sheet.open()
+        self.wells_button.setText("Done ✕")
+        self._wells_timer.start()
+        self.refresh()
+
+    def close_wells(self, *, now: bool = False) -> None:
+        sheet = self._wells_sheet
+        if sheet is None:
+            return
+        if now:
+            sheet.closeNow()
+        elif sheet.isOpen():
+            sheet.close()
+
+    def _give_wells_back(self) -> None:
+        """Every widget the Wells sheet borrowed goes back to its place."""
+        self._wells_timer.stop()
+        lent, self._wells_lent = self._wells_lent, []
+        # Lowest index first, so each insert lands where it was read.
+        for w, parent, index in sorted(lent, key=lambda e: e[2]):
+            try:
+                lay = parent.layout() if parent is not None else None
+                if lay is not None:
+                    lay.insertWidget(max(0, index), w)
+                else:
+                    w.setParent(parent)
+            except RuntimeError:
+                swallowed()  # the rail went while its plate was out
+        self._sync_wells_label()
+
+    def _sync_wells_label(self) -> None:
+        """"Wells · 4" — the count is what the plot shows, so it is worth a
+        glance from the foot of the screen — or "Done ✕" while the sheet is
+        open."""
+        sheet = self._wells_sheet
+        if sheet is not None and sheet.isOpen():
+            self.wells_button.setText("Done ✕")
+            return
+        fn = self._h.wells_count
+        try:
+            n = fn() if fn is not None else None
+        except RuntimeError:
+            swallowed()  # read while the dataset was being swapped
+            n = None
+        self.wells_button.setText(f"Wells · {n}" if n else "Wells")
 
     def _give_band_back(self) -> None:
         band, self._sheet_band = self._sheet_band, None
@@ -1787,21 +2022,28 @@ class PhoneShell(QObject):
         # show there.
         self.menu_button.setVisible(not views)
         bar = self._current_page_bar()
-        self.page_button.setVisible((bar is not None and review) or tools or views)
+        sections = self._sections() if review else []
+        self.page_button.setVisible((review and (bar is not None or bool(sections)))
+                                    or tools or views)
         if views:
             self.page_button.setText(f"{self._h.page_view()} ▾")
         elif tools:
             self.page_button.setText(f"{self._h.current_tool()} ▾")
         elif bar is not None:
             self.page_button.setText(f"{bar.tabText(bar.currentIndex())} ▾")
+        elif sections:
+            self.page_button.setText(f"{self._current_section_label()} ▾")
         self.controls_button.setVisible(review and self._current_band() is not None)
+        wells_open = self._wells_sheet is not None and self._wells_sheet.isOpen()
+        self.wells_button.setVisible(review and (wells_open or bool(self._well_picker())))
+        self._sync_wells_label()
         land = bool(self._landscape)
         self._strip.setVisible((review or tools or views) and not land
-                               and (self.page_button.isVisibleTo(self._strip)
-                                    or self.controls_button.isVisibleTo(self._strip)))
+                               and any(b.isVisibleTo(self._strip) for b in (
+                                   self.page_button, self.wells_button,
+                                   self.controls_button)))
         if not review:
-            self.close_controls()
-        self._grab_page_scrolling()
+            self.close_sheets()
         self._fit_pages()
 
     def _refresh_when_settled(self) -> None:
@@ -1817,7 +2059,7 @@ class PhoneShell(QObject):
         return bar if bar is not None and bar.count() > 0 else None
 
     def _on_menu_clicked(self) -> None:
-        self.close_controls()
+        self.close_sheets()
         self._h.set_navigator(not self._h.navigator_open())
         self.refresh()
 
@@ -1836,17 +2078,62 @@ class PhoneShell(QObject):
             self._fill_named_menu(self._h.page_views(), self._h.page_view(),
                                   self._pick_page_view)
             return
+        # Review: this section's pages, then every other section — so moving
+        # anywhere in Review is the one menu at the foot of the screen, two
+        # taps, rather than ☰ at the top, a section tile, then this menu.
         bar = self._current_page_bar()
-        if bar is None:
-            return
         group = QActionGroup(self._page_menu)
-        for i in range(bar.count()):
-            act = QAction(bar.tabText(i), self._page_menu, checkable=True)
-            act.setChecked(i == bar.currentIndex())
-            act.setEnabled(bar.isTabEnabled(i))
-            act.triggered.connect(lambda _c=False, b=bar, idx=i: self._pick_page(b, idx))
-            group.addAction(act)
-            self._page_menu.addAction(act)
+        if bar is not None:
+            self._menu_caption(self._current_section_label())
+            for i in range(bar.count()):
+                act = QAction(bar.tabText(i), self._page_menu, checkable=True)
+                act.setChecked(i == bar.currentIndex())
+                act.setEnabled(bar.isTabEnabled(i))
+                act.triggered.connect(lambda _c=False, b=bar, idx=i: self._pick_page(b, idx))
+                group.addAction(act)
+                self._page_menu.addAction(act)
+        current = self._current_section()
+        others = [(k, label) for k, label in self._sections() if k != current]
+        if others:
+            if bar is not None:
+                self._page_menu.addSeparator()
+            self._menu_caption("Go to")
+            for key, label in others:
+                act = QAction(label, self._page_menu)
+                act.triggered.connect(lambda _c=False, k=key: self._pick_section(k))
+                self._page_menu.addAction(act)
+
+    def _menu_caption(self, text: str) -> None:
+        """A heading in the page menu, drawn like the rail's group captions
+        rather than as an item: a disabled action reads as one that cannot be
+        picked, and Qt's own section text is not drawn under the app's style."""
+        from PySide6.QtWidgets import QWidgetAction
+        act = QWidgetAction(self._page_menu)
+        label = QLabel(text.upper())
+        label.setObjectName("PhoneMenuCaption")
+        act.setDefaultWidget(label)
+        act.setEnabled(False)
+        self._page_menu.addAction(act)
+
+    def _sections(self) -> list[tuple[str, str]]:
+        """Review's sections a user can pick now, as the rail offers them."""
+        nav = self._h.rail_nav
+        shown = getattr(nav, "shownItems", None)
+        return shown() if callable(shown) else []
+
+    def _current_section(self) -> str | None:
+        nav = self._h.rail_nav
+        key = getattr(nav, "currentKey", None)
+        return key() if callable(key) else None
+
+    def _current_section_label(self) -> str:
+        current = self._current_section()
+        return next((label for k, label in self._sections() if k == current), current or "")
+
+    def _pick_section(self, key: str) -> None:
+        self.close_sheets(now=True)
+        self._h.rail_nav.setCurrentKey(key)
+        self.page_changed()
 
     def _fill_tool_menu(self) -> None:
         """Datasets mode: the page button lists the tools, as ☰ does."""
@@ -1876,7 +2163,7 @@ class PhoneShell(QObject):
 
     def _pick_page(self, bar, idx: int) -> None:
         bar.setCurrentIndex(idx)
-        self.close_controls(now=True)
+        self.close_sheets(now=True)
         self.page_changed()
 
     def _text_size_row(self):

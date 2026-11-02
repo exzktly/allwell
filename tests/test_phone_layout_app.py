@@ -567,6 +567,16 @@ def test_properties_from_the_controls_sheet_opens_a_full_width_sheet(qapp, win, 
         QTest.qWait(400)
         _pump(qapp)
         assert sheet.width() == win.width() and dock.width() == win.width()
+        # Reported: the Properties panel did not scroll by a drag. Its scroll
+        # area was outside every root phone layout grabbed.
+        from PySide6.QtWidgets import QAbstractScrollArea, QScroller
+        long_areas = [a for a in dock.findChildren(QAbstractScrollArea)
+                      if a.isVisible() and a.verticalScrollBar().maximum() > 0]
+        assert long_areas, "the Properties panel had nothing to scroll on this screen"
+        for a in long_areas:
+            assert a.viewport().property("_awDragScroll"), \
+                f"{type(a).__name__} in the Properties panel does not scroll by a drag"
+            assert QScroller.hasScroller(a.viewport())
 
         sidebar = next(iter(review._export_style_sidebars.values()))
         sidebar._close_dock()
@@ -616,3 +626,70 @@ def test_phone_layout_never_filters_every_event_in_the_application(qapp, win, mo
         QTest.qWait(600)
         _pump(qapp)
     assert not any(w.property(_P_WATCHED) for w in QApplication.allWidgets())
+
+
+def test_wells_at_the_foot_opens_the_rail_s_plate_over_the_live_plot(qapp, win, mini_dataset):
+    """Through the real window: the strip is at the foot of the window, Wells
+    lends the rail's own plate slot and All / None to a sheet above it with the
+    plot still showing, a well picked there draws, and the plate goes back into
+    the rail when the sheet closes. Home — 1,600 px of page — scrolls by a drag."""
+    from PySide6.QtTest import QTest
+
+    review, shell = win._review, win._phone
+    if win._mode_seg.currentIndex() != 0:
+        win._on_titlebar_mode_seg(0)
+    review._load_path(mini_dataset)
+    _pump(qapp)
+    review._notebook.setCurrentByName("Plotting")
+    review._plotting_notebook.setCurrentByName("Bar Plots")
+    review._drain_pending_centre_builders()
+    review._set_selected_wells(set(), commit=True)
+    _pump(qapp)
+    shell.set_on(True)
+    QTest.qWait(600)
+    _pump(qapp)
+    try:
+        win.resize(390, 780)
+        _pump(qapp)
+        strip = shell._strip
+        assert _visible(strip)
+        assert strip.mapTo(win, strip.rect().bottomLeft()).y() >= win.height() - 2, \
+            "the page menu, Wells and Controls are not at the foot of the window"
+        assert _visible(shell.wells_button) and shell.wells_button.text() == "Wells"
+
+        slot = review._sidebar_plate_slot
+        rail_home = slot.parentWidget()
+        index = rail_home.layout().indexOf(slot)
+        shell.wells_button.click()
+        QTest.qWait(400)
+        _pump(qapp)
+        sheet = shell._wells_sheet
+        assert sheet.isOpen() and slot.parentWidget() is sheet._aw_holder
+        footer = review._ctx.widgets.get("_sel_count_lbl")
+        assert footer.parentWidget() is sheet._aw_holder
+        assert _visible(review._sidebar_plate)
+        assert not review._ctx.widgets.get("_phone_drawer").isOpen()
+        assert sheet.geometry().bottom() < strip.mapTo(win, strip.rect().topLeft()).y()
+        review._set_selected_wells({"A01", "B02"}, commit=True)
+        QTest.qWait(500)
+        _pump(qapp)
+        assert shell.wells_button.text() == "Done ✕"
+        shell.wells_button.click()
+        QTest.qWait(400)
+        _pump(qapp)
+        assert not sheet.isOpen()
+        assert slot.parentWidget() is rail_home and rail_home.layout().indexOf(slot) == index
+        assert shell.wells_button.text() == "Wells · 2"
+
+        review._notebook.setCurrentByName("Home")
+        shell.page_changed()
+        QTest.qWait(400)
+        _pump(qapp)
+        home = review.findChild(QWidget, "HomeScroll")
+        assert home is not None and home.verticalScrollBar().maximum() > 0
+        assert home.viewport().property("_awDragScroll"), "Home does not scroll by a drag"
+    finally:
+        review._notebook.setCurrentByName("Plotting")
+        shell.set_on(False)
+        QTest.qWait(600)
+        _pump(qapp)

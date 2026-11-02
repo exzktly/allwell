@@ -718,6 +718,24 @@ class AllWellApp(QMainWindow):
             dash = getattr(self._analyze, "_dashboard", None)
             return [dash] if dash is not None else []
 
+        def _well_picker() -> list:
+            # The rail's one plate slot (``review/core/rail_plate.py``) while it
+            # shows a plate for the page on screen, and the main frame's All /
+            # None footer under it while that frame is the page's — the Image
+            # Table's and Segmentation's pickers carry their own.
+            # Read by its registry key, not through ``rail_plate``: a module
+            # inside Review is not imported from out here.
+            from widgets.well_plate_selector import WellPlateSelector
+            widgets = review._ctx.widgets
+            slot = widgets.get_or_none("_sidebar_plate_slot")
+            plates = slot.findChildren(WellPlateSelector) if slot is not None else []
+            if not any(not p.isHidden() for p in plates):
+                return []
+            footer = widgets.get_or_none("_sel_count_lbl")
+            main = widgets.get_or_none("_sidebar_main_frame")
+            shown = footer is not None and main is not None and not main.isHidden()
+            return [slot, footer] if shown else [slot]
+
         # Gone from the phone's top bar: the publication look, both resets,
         # copy-analysis and reveal-folder — three of them destructive, a
         # fat-finger target on a phone, and none of them for reading results —
@@ -765,7 +783,6 @@ class AllWellApp(QMainWindow):
             logs=lambda: [w for w in (getattr(self._analyze, "_log", None),) if w is not None],
             status_text=lambda: self._status_lbl_app.text() if self._status_lbl_app else "",
             pages=getattr(review, "_notebook", None),
-            swipe_roots=lambda: [getattr(self, "_datasets", None), self._analyze],
             fit_roots=lambda: [getattr(self, "_datasets", None)],
             tool_names=lambda: (self._datasets.tool_names()
                                 if getattr(self, "_datasets", None) is not None else []),
@@ -779,6 +796,8 @@ class AllWellApp(QMainWindow):
                                if self._analyze_phone is not None else ""),
             show_page_view=lambda name: (self._analyze_phone.show_view(name)
                                          if self._analyze_phone is not None else None),
+            well_picker=_well_picker,
+            wells_count=lambda: len(review._ctx.state.selection.selected_wells or ()),
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
         # Among the small icon buttons at the header row's right end, just

@@ -9598,22 +9598,29 @@ the same, once, for the new shape.
 
 | Control | What it does |
 |---|---|
-| **☰** | Slides the sidebar out over the page from the left: the dataset, every section (Home, Plotting, Statistics, …) as a grid of tiles, and the well plate, just as at the desk. Its top line shows the well and nuclei counts the desktop's status bar shows. Tap wells as usual — the sidebar stays out while you pick several; a row or column label selects the whole row or column (except on the smFISH page, which picks one well at a time). Tap a section, **✕**, or the dimmed page at the right to slide it away. In Datasets it holds the tools. Analyze has no sidebar in phone layout — its form is the page — so **☰** is not shown there. |
+| **☰** | Slides the sidebar out over the page from the left: the dataset, every section (Home, Plotting, Statistics, …) as a grid of tiles, the well plate and saved selections, just as at the desk. For picking wells, **Wells** in the bottom bar (below) is quicker. Its top line shows the well and nuclei counts the desktop's status bar shows. Tap wells as usual — the sidebar stays out while you pick several; a row or column label selects the whole row or column (except on the smFISH page, which picks one well at a time). Tap a section, **✕**, or the dimmed page at the right to slide it away. In Datasets it holds the tools. Analyze has no sidebar in phone layout — its form is the page — so **☰** is not shown there. |
 | **Review · Analyze · Datasets** | Switches mode, as on the desktop. |
 | **⋯** | **Text size** (S, M, L), **Reload dataset**, **Help**, **App log**, and **Desktop layout** — the way back. A **!** on it means the app log has something new. |
 
-In Review a second row under it holds:
+In Review a bar along the bottom of the screen — where your thumb already is —
+holds:
 
 | Control | What it does |
 |---|---|
-| **Bar Plots ▾** | Picks the page's view (Bar Plots, Line Graphs, Heat Map, …). |
+| **Bar Plots ▾** | Picks the page's view (Bar Plots, Line Graphs, Heat Map, …), and under **Go to** every other section (Home, Statistics, Image Browser, …) — so getting anywhere in Review is this one menu. |
+| **Wells** | Slides the well plate and its **All** / **None** up from the bottom, with the plot still in view above them: tap wells and watch them appear in the plot. A row or column label selects the whole row or column. The button shows how many wells are selected (**Wells · 4**); **Done ✕** puts the plate away. Pages that do not pick wells (Home, Statistics) do not show it. |
 | **⚙ Controls** | Slides the page's own controls — channel, property, display, threshold and the rest — up from the bottom, with the plot still in view above them so you can watch it change. **Done ✕** puts them away. |
+
+**Wells** and **⚙ Controls** both rise from just above the bar, so **Done ✕** is
+where you tapped to open them; opening one puts the other away. Saved
+selections, and the extra panels some pages add under the plate (Heat Map's
+layout, for instance), stay in **☰**.
 
 The **Properties** button among those controls (the sliders icon) puts the
 controls away and opens the figure's Properties panel across the whole screen.
 Its **✕** closes it and returns you to the plot.
 
-In Datasets the second row holds **‹tool› ▾** — the tool on screen (Convert CZI,
+In Datasets the bottom bar holds **‹tool› ▾** — the tool on screen (Convert CZI,
 Merge Plates, Job Queue, …); tap it to pick another, as you would from **☰**.
 Every tool's page fits the phone's width: fields that sit side by side at the
 desk are stacked, and long option labels wrap, so nothing needs a sideways
@@ -9630,15 +9637,21 @@ scrolls sideways. The table builder and the Generate, Crop, ON threshold, Save a
 zoom controls are under **⚙ Controls**, with Generate first. The table is redrawn
 to fit when you turn the phone or switch layouts.
 
-Holding the phone sideways, both rows become one slimmer bar, the sidebar is a
-narrower panel, and **⚙ Controls** opens as a panel on the right. Plots keep a
+Holding the phone sideways, the top bar and the bottom bar become one slimmer
+bar along the top, the sidebar is a narrower panel, and **Wells** and
+**⚙ Controls** open as a panel on the right. Plots keep a
 readable height and the page scrolls, rather than squashing several plots into
 the screen's height.
 
-Long panels — the sidebar, the controls, the logs, plot pages and the Datasets
-and Analyze forms — scroll by dragging. A drag that starts on a well plate
-still selects wells, and one on a slider still moves it. A drag on a log scrolls
-the log, not the page it sits on — drag beside the log to scroll the page. The
+Everything that scrolls scrolls by dragging it with a finger — pages, the
+sidebar, the controls, the Properties panel, Home, logs, lists, a drop-down's
+list, and any window that opens on top. A drag that starts on a well plate
+still selects wells, one on a slider still moves it, one on a colour picker
+still picks, and one on an Image Table chip still carries the chip. A drag on a
+log scrolls the log, not the page it sits on — drag beside the log to scroll the
+page. Text boxes you type into keep their drag for selecting text. Scroll bars
+are a fingertip wide, with a handle that stays at least a row long, for the long
+jump. The
 plot toolbar's pan and zoom are hidden in phone layout; switch back to the
 desktop layout for them. An **ⓘ** shows its explanation when tapped.
 
@@ -9647,7 +9660,7 @@ analysis, the publication look, Reveal folder and Storage — are hidden in phon
 stray tap cannot reach them, as are the Review CSV and Batch Export sections;
 switch back to the desktop layout to use them.
 
-**Analyze** has two views, picked from the button under the top bar:
+**Analyze** has two views, picked from the button in the bottom bar:
 
 - **Settings ▾** — the run form fills the screen, under a strip with the run's
   headline (*Running · 52 of 96 wells · 1 failed*) and its overall bar.
@@ -9659,8 +9672,8 @@ switch back to the desktop layout to use them.
   lines of the log. Sideways, the progress sits on the left — the stages beside
   the plate — and the log on the right.
 
-**Run Pipeline**, **Suspend**, **+ Queue** and **Stop** sit in a bar along the
-bottom of the screen in both views, so they are always in reach. Starting a run —
+**Run Pipeline**, **Suspend**, **+ Queue** and **Stop** sit in a bar just above
+the bottom bar in both views, so they are always in reach. Starting a run —
 from **Run Pipeline**, the queue, or a resumed job — switches to **Progress**.
 Closing the window while a run is in progress asks first in phone layout, because
 closing stops the run.

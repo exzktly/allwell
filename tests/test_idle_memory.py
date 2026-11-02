@@ -38,7 +38,14 @@ def _filled_ctx():
     })
     image_discovery._DECODE_CACHE.invalidate()
     image_discovery._DECODE_CACHE.put(("f",), np.zeros(300))
-    return SimpleNamespace(state=state, runtime=SimpleNamespace(cell_gating=SimpleNamespace(worker=None)))
+    return _Ctx(state=state, runtime=SimpleNamespace(cell_gating=SimpleNamespace(worker=None)))
+
+
+class _Ctx:
+    """A context the release can hold weakly, as it holds the app's frozen ``ViewerContext``."""
+
+    def __init__(self, **fields):
+        self.__dict__.update(fields)
 
 
 def test_a_release_empties_every_dataset_cache_and_counts_what_it_freed():
@@ -121,3 +128,30 @@ def test_every_finished_load_arms_it(monkeypatch):
     app = SimpleNamespace(_set_status=lambda text: None)
     load_controller._say_loaded(ctx, app, 2, "plate", False)
     assert armed == [ctx]
+
+
+def test_an_armed_release_does_not_keep_the_window_alive(qapp, monkeypatch):
+    """The release holds its context weakly.
+
+    Holding it strongly kept a closed window's figure canvases referenced after
+    their widgets were deleted, so a redraw they had queued ran against a
+    deleted canvas ("Internal C++ object (FigureCanvasQTAgg) already deleted")
+    in a later test's teardown.
+    """
+    import gc
+    import weakref
+
+    monkeypatch.setattr(idle_memory, "_installed", None)
+    monkeypatch.delenv(idle_memory.IDLE_ENV, raising=False)
+    ctx = _filled_ctx()
+    idle_memory.install(ctx)
+    assert idle_memory._installed is not None
+    ref = weakref.ref(ctx)
+    del ctx
+    gc.collect()
+    try:
+        assert ref() is None
+        idle_memory._installed._fire()      # a release for a closed window does nothing, and does not raise
+    finally:
+        idle_memory._installed.timer.stop()
+        idle_memory._installed.deleteLater()

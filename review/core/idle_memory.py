@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+import weakref
 
 from PySide6.QtCore import QObject, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
@@ -120,7 +121,11 @@ class _IdleReleaser(QObject):
 
     def __init__(self, ctx, app: QGuiApplication, minutes: float) -> None:
         super().__init__(app)
-        self.ctx = ctx
+        # Weakly: the releaser outlives the window, parented to the application,
+        # and a strong reference kept a closed window's figure canvases alive
+        # after their widgets were deleted, so a redraw they had queued ran
+        # against a deleted canvas.
+        self._ctx = weakref.ref(ctx)
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.setInterval(int(minutes * 60_000))
@@ -129,6 +134,11 @@ class _IdleReleaser(QObject):
         if app.applicationState() != Qt.ApplicationActive:
             self.timer.start()
 
+    @property
+    def ctx(self):
+        """The context this release serves, or ``None`` once its window is gone."""
+        return self._ctx()
+
     def _on_state(self, state) -> None:
         if state == Qt.ApplicationActive:
             self.timer.stop()
@@ -136,11 +146,14 @@ class _IdleReleaser(QObject):
             self.timer.start()
 
     def _fire(self) -> None:
+        ctx = self.ctx
+        if ctx is None:
+            return
         with swallow("idle release"):
-            if busy(self.ctx):
+            if busy(ctx):
                 self.timer.start()
                 return
-            release_idle_memory(self.ctx)
+            release_idle_memory(ctx)
 
 
 def install(ctx) -> None:

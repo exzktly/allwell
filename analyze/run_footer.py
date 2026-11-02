@@ -25,7 +25,9 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
+from services.remote_batch_step import DEFAULT_UPLOAD_AHEAD, UPLOAD_AHEAD_CHOICES
 from services.remote_config import default_remote_index, load_remotes
+from widgets.value_combo import ValueCombo
 from widgets.wrap_checkbox import WrapCheckBox
 
 
@@ -44,25 +46,42 @@ class AnalyzeRunFooterMixin:
         self._remote_params_widget = sec.parentWidget()
 
         # Batched mode. Any positive integer processes that many wells at a
-        # time, the next batch uploading while one runs: peak remote disk ≈ two
-        # batches of input + ~1 well of output (per-well Fetcher cleanup), at the
-        # cost of one model reload per batch.
+        # time, the next batch uploading while one runs as Upload ahead says
+        # (by default the whole of it: peak remote disk ≈ two batches of input
+        # + ~1 well of output), at the cost of one model reload per batch.
         # ``0`` (default) is one well per worker the pipeline will start
         # (services.remote_batch_auto), so the first upload is only as big as
         # the workers need; the whole plate when the worker count cannot be
         # known before the run, and the run log says why.
         bs_row = self._row(
             sec, "Batch size",
-            tooltip="Process this many wells at a time on the remote, which "
-                    "bounds its peak disk to about one batch of input: as each "
-                    "finished well is removed from the remote, one well of the "
-                    "next batch is uploaded in its place. "
+            tooltip="Process this many wells at a time on the remote; Upload "
+                    "ahead says how much of the next batch is sent while one "
+                    "runs. "
                     "0 sends one well per worker, worked out from the Workers "
                     "field or the CPUs and GPUs in the scheduler command; the "
                     "run log says what it chose.")
         self._remote_batch_size_edit = self._entry(bs_row, "0", width=40)
         self._field_note(bs_row, "wells · 0 = one per worker")
         bs_row.layout().addStretch(1)
+
+        ua_row = self._row(
+            sec, "Upload ahead",
+            tooltip="What of the next batch is uploaded while one runs on the node.\n"
+                    "• Whole next batch while one runs (the default): the node never waits "
+                    "for an upload after the first batch; the remote holds about two "
+                    "batches of input (2N wells).\n"
+                    "• One well as each finishes: one well of the next batch is uploaded "
+                    "in place of each finished well removed from the remote, so the remote "
+                    "holds about one batch (N); the node may wait for the rest when a batch "
+                    "ends. A nanowell run keeps a batch's wells until it ends, so its next "
+                    "batch goes up then.\n"
+                    "• Nothing ahead: each batch is uploaded only after the one before it "
+                    "has finished.")
+        self._remote_upload_ahead_cb = ValueCombo(UPLOAD_AHEAD_CHOICES, ua_row)
+        self._remote_upload_ahead_cb.setValue(DEFAULT_UPLOAD_AHEAD)
+        ua_row.layout().addWidget(self._remote_upload_ahead_cb)
+        ua_row.layout().addStretch(1)
 
         # ON by default: a remote that accumulates every run fills up, and a full
         # volume is how a run silently loses FOV-groups. Only deletes after a

@@ -41,6 +41,7 @@ _OPTS = {
     "compress_input_well_folders": True,
     "compress_output_well_folders": True,
     "remote_batch_size": "12",
+    "remote_upload_ahead": "well",
     # One choice of three on the form ("If a well already has output"): Redo
     # it is force with incremental off. The pipeline always ignored
     # --incremental under --force, so force+incremental was never a state of

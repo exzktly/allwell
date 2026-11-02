@@ -23,6 +23,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from core.safe import swallowed
 from analyze.storage_options import restore_storage_options
+from services.remote_batch_step import upload_ahead_mode
 
 
 
@@ -348,6 +349,8 @@ class AnalyzePipelineInfoMixin:
         # a remote run's fetch (``services.pipeline_runner.record_remote_batch_size``).
         # Absent on a local run's sidecar, which leaves the field alone.
         s("_remote_batch_size_edit", d.get("remote_batch_size"))
+        if "remote_upload_ahead" in d:      # recorded beside it (``record_remote_batch_size``)
+            self._remote_upload_ahead_cb.setValue(upload_ahead_mode(d.get("remote_upload_ahead")))
         restore_storage_options(self, d)
         # ``allow_low_disk`` is deliberately NOT restored, though the sidecar
         # records it. Every other option here describes how a plate was

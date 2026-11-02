@@ -50,7 +50,7 @@ def test_the_batch_size_is_added_beside_the_pipeline_s_own_options(tmp_path):
     assert record_remote_batch_size(tmp_path, {"remote_batch_size": "4"}) is True
     info = _read(p)
     assert info["execution_options"] == {
-        "nuclear_token": "DAPI", "workers": 3, "remote_batch_size": 4}
+        "nuclear_token": "DAPI", "workers": 3, "remote_batch_size": 4, "remote_upload_ahead": "batch"}
     assert info["notes"] == {"text": "keep me"}
     assert info["schema"] == "experiment:channel:well"
 
@@ -80,7 +80,7 @@ def test_a_missing_sidecar_is_not_created(tmp_path):
 def test_a_sidecar_with_no_execution_block_gets_one(tmp_path):
     p = _write_sidecar(tmp_path)
     assert record_remote_batch_size(tmp_path, {"remote_batch_size": "2"}) is True
-    assert _read(p)["execution_options"] == {"remote_batch_size": 2}
+    assert _read(p)["execution_options"] == {"remote_batch_size": 2, "remote_upload_ahead": "batch"}
 
 
 # ── the runner's real order ──────────────────────────────────────────────────
@@ -145,7 +145,8 @@ def _run_remote(monkeypatch, tmp_path, batch_size: str) -> Path:
 
 def test_the_stamp_survives_the_fetch_that_replaces_the_sidecar(monkeypatch, tmp_path):
     info = _read(_run_remote(monkeypatch, tmp_path, "3"))
-    assert info["execution_options"] == {"nuclear_token": "DAPI", "remote_batch_size": 3}
+    assert info["execution_options"] == {"nuclear_token": "DAPI", "remote_batch_size": 3,
+                                           "remote_upload_ahead": "batch"}
 
 
 # ── the loader ───────────────────────────────────────────────────────────────
@@ -166,3 +167,27 @@ def test_open_pipeline_info_restores_the_batch_size(qtbot):
         "cpu_only": False}})
     assert tab._cpu_only_cb.isChecked() is False, "the second block was not read"
     assert tab._remote_batch_size_edit.text() == "6"
+
+
+def test_upload_ahead_is_recorded_and_comes_back_through_the_form(qtbot, tmp_path):
+    """Upload ahead is the client's choice too, recorded beside the batch size; the form's box defaults to the whole
+    next batch, reaches the run's options, and is put back from a sidecar or a queued job — and a local run's
+    sidecar, which has no such key, leaves it as it stands."""
+    from analyze.tab import AnalyzeTab
+
+    p = _write_sidecar(tmp_path, {"workers": 1})
+    assert record_remote_batch_size(tmp_path, {"remote_batch_size": "4", "remote_upload_ahead": "well"}) is True
+    assert _read(p)["execution_options"]["remote_upload_ahead"] == "well"
+
+    tab = AnalyzeTab()
+    qtbot.addWidget(tab)
+    assert tab._remote_upload_ahead_cb.value() == "batch"
+    assert tab._collect_run_options()["remote_upload_ahead"] == "batch"
+    tab._apply_pipeline_info({"schema_version": 2, "execution_options": _read(p)["execution_options"]})
+    assert tab._remote_upload_ahead_cb.value() == "well"
+    assert tab._collect_run_options()["remote_upload_ahead"] == "well"
+    tab._apply_pipeline_info({"schema_version": 2, "execution_options": {"cpu_only": False}})
+    assert tab._remote_upload_ahead_cb.value() == "well"
+    tab._remote_upload_ahead_cb.setValue("none")
+    assert tab._collect_run_options()["remote_upload_ahead"] == "none"
+

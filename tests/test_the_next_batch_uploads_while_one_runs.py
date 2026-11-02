@@ -1,5 +1,5 @@
-"""A batched remote run uploads batch *i + 1* while batch *i* runs — one well in place of each well of batch *i*
-that leaves the remote, never more.
+"""A batched remote run uploads batch *i + 1* while batch *i* runs: the whole of it by default, or one well in place
+of each well of batch *i* that leaves the remote, or nothing — the Analyze form's *Upload ahead*.
 
 Batches used to go strictly one after another — upload, run, upload, run — so every upload but the first was time
 the node sat waiting. Sending the whole next batch ahead fixed that and doubled the remote's input, which is what the
@@ -24,10 +24,14 @@ from services.remote_batch_step import well_removed
 from tests.test_batch_driver import _batched, _FakeProc, _stub_runner
 
 
-def _start(tmp_path, monkeypatch, wells, upload, batch_size=1, before=None):
+def _start(tmp_path, monkeypatch, wells, upload, batch_size=1, before=None, mode="well"):
+    """*mode* is the run's Upload ahead; ``None`` leaves it unset, as a run built before the setting existed has it.
+    Most tests here drive the well-at-a-time upload, which is the one that waits for room."""
     proc = _FakeProc()
     ordering: list[str] = []
     p = _batched(tmp_path, wells, batch_size=batch_size)
+    if mode is not None:
+        p._upload_ahead_mode = mode
     _stub_runner(p, proc, ordering)
     p._runner._cache.upload_subset = upload
     if before is not None:
@@ -124,6 +128,7 @@ def test_the_batched_constructor_wires_the_fetcher_s_removals_to_the_next_batch(
         host=types.SimpleNamespace(remote_staging_dir="~/.allwell-staging", ssh_alias="h"))
     p = rp._BatchedRemoteProcess(runner, types.SimpleNamespace(well_zips=(), mode=None, incremental=False),
                                  tmp_path, ["--csv_prefix", "m"], 2, output_filter=None)
+    assert p._upload_ahead_mode == "batch", "a run that names no Upload ahead sends the whole next batch"
     freed: list[str] = []
     p._upload_ahead = types.SimpleNamespace(free=freed.append)
     fetcher = built["fetcher"]
@@ -132,6 +137,9 @@ def test_the_batched_constructor_wires_the_fetcher_s_removals_to_the_next_batch(
     monkeypatch.setattr(rf, "delete_remote_paths", lambda *a, **k: False)
     fetcher._delete_well_files_on_remote("A02")
     assert freed == ["A01"]
+    assert rp._BatchedRemoteProcess(runner, types.SimpleNamespace(well_zips=(), mode=None, incremental=False),
+                                    tmp_path, ["--csv_prefix", "m"], 2, output_filter=None,
+                                    upload_ahead="well")._upload_ahead_mode == "well"
 
 
 def test_an_upload_sent_ahead_that_fails_is_reported_after_the_batch_running_is_counted(tmp_path, monkeypatch):
@@ -299,3 +307,66 @@ def test_the_record_sent_with_each_well_describes_the_whole_batch(tmp_path, monk
     worker.join(timeout=20)
     b2 = [(sent, named) for d, sent, named in records if d == "b2"]
     assert b2 == [(["A03"], ["A03", "A04"]), (["A04"], ["A03", "A04"])]
+
+
+def test_by_default_the_whole_next_batch_goes_up_while_one_runs(tmp_path, monkeypatch):
+    """Upload ahead's default (and a run that names none): batch 2 goes up whole, in one rsync, before any well of
+    batch 1 has left the remote, and batch 3 not until batch 2 runs. Wrong implementations: a default of the
+    well-at-a-time upload (nothing goes up until a well leaves), or one batch at a time."""
+    from services.remote_batch_step import DEFAULT_UPLOAD_AHEAD, upload_ahead_mode
+
+    # A job or sidecar from before the setting, or a value that is not one of the modes, is the default.
+    assert DEFAULT_UPLOAD_AHEAD == "batch"
+    assert {upload_ahead_mode(v) for v in (None, "", "sideways", "BATCH")} == {"batch"}
+    for mode in (upload_ahead_mode(None),):
+        sent: list = []
+        here = tmp_path / str(mode)
+        here.mkdir()
+        proc, p, ordering, worker = _start(here, monkeypatch, ["A01", "A02", "A03", "A04", "A05"],
+                                           _recording_upload(sent), batch_size=2, mode=mode)
+        assert _wait_for(lambda: _up(sent, "b2") == ["A03", "A04"]), f"batch 2 was not sent whole ahead: {sent}"
+        assert [d for d, _w in sent].count("b2") == 1 and _up(sent, "b3") == []
+        log = "".join(p._logged)
+        assert "batch 2/3: uploading 2 well-zip(s) while batch 1 runs" in log
+        assert "peak remote disk ≈ 4 well-input" in log
+        proc.batch_finished(p, 1)
+        assert _wait_for(lambda: _up(sent, "b3") == ["A05"])
+        proc.batch_finished(p, 2)
+        proc.batch_finished(p, 3)
+        proc.finish()
+        worker.join(timeout=20)
+        assert not worker.is_alive() and p._returncode == 0
+
+
+def test_nothing_ahead_sends_each_batch_only_after_the_one_before(tmp_path, monkeypatch):
+    sent: list = []
+    proc, p, ordering, worker = _start(tmp_path, monkeypatch, ["A01", "A02", "A03"], _recording_upload(sent),
+                                       mode="none")
+    assert _wait_for(lambda: any(d == "b1" for d, _w in sent))
+    time.sleep(0.3)
+    assert _up(sent, "b2") == [] and getattr(p, "_upload_ahead", None) is None
+    assert "peak remote disk ≈ 1 well-input" in "".join(p._logged)
+    proc.batch_finished(p, 1)
+    assert _wait_for(lambda: _up(sent, "b2") == ["A02"])
+    proc.batch_finished(p, 2)
+    proc.batch_finished(p, 3)
+    proc.finish()
+    worker.join(timeout=20)
+    assert not worker.is_alive() and p._returncode == 0
+
+
+
+def test_the_runner_hands_the_form_s_choice_to_the_remote_run():
+    """``PipelineRunner`` builds the remote process through ``RemoteRunner.spawn``; a call that dropped the option
+    would run every job with the default whatever the form said."""
+    import ast
+    from pathlib import Path
+
+    from tests._repo_scan import parse_source
+
+    spawns = [n for n in ast.walk(parse_source(Path("services/pipeline_runner.py")))
+              if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "spawn"]
+    assert spawns and all(any(k.arg == "upload_ahead" for k in call.keywords) for call in spawns)
+    spawn_into_batched = [n for n in ast.walk(parse_source(Path("services/remote_runner.py")))
+                          if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_BatchedRemoteProcess"]
+    assert spawn_into_batched and all(any(k.arg == "upload_ahead" for k in c.keywords) for c in spawn_into_batched)

@@ -55,7 +55,7 @@ from services.input_resolution_service import iter_well_tokens
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
 from services.remote_config import RemoteHost, ssh_binary_lines
 from services.remote_batch_auto import RESOLVED_KEY, resolve_batch_size
-from services.remote_batch_step import AHEAD_UP_MARK
+from services.remote_batch_step import AHEAD_UP_MARK, upload_ahead_mode
 from services.remote_hold import GrantedRun
 from services.remote_runner import (
     OutputFilter,
@@ -994,6 +994,8 @@ def record_remote_batch_size(output_dir: Path, opts: dict) -> bool:
     exec_opts = info.get("execution_options")
     exec_opts = dict(exec_opts) if isinstance(exec_opts, dict) else {}
     exec_opts["remote_batch_size"] = batch_size
+    # How the next batch went up beside it: also the client's choice, never a pipeline argument (remote_batch_step).
+    exec_opts["remote_upload_ahead"] = upload_ahead_mode(opts.get("remote_upload_ahead"))
     info["execution_options"] = exec_opts
     return try_write_json_atomic(info_path, info)
 
@@ -2555,6 +2557,7 @@ class PipelineRunner:
                 log_fn=lambda m: self._enqueue(("line", m)),
                 progress_fn=_on_xfer_progress,
                 batch_size=batch_size,
+                upload_ahead=opts.get("remote_upload_ahead"),
                 # What Stop sets first. Without it the upload never heard a
                 # Stop: it ran to the end and the pipeline was launched.
                 stop_event=self._stop_requested,

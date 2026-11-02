@@ -90,3 +90,20 @@ def test_refit_follows_a_height_hint_that_settles_after_open(qtbot):
     QApplication.processEvents()
     assert d.geometry() == d._open_rect()
     assert d.geometry().bottom() == host.height() - 1, "the sheet runs past the window's bottom"
+
+
+def test_a_bottom_inset_keeps_a_strip_at_the_foot_usable(qtbot):
+    """Phone layout's bottom bar opens the Controls and Wells sheets; each rises
+    from *above* the bar, so the button that opened it — reading "Done ✕" —
+    stays where the thumb left it. The wrong implementation this rejects is a
+    sheet laid over the bar, which hid its own close button."""
+    host = _host(qtbot, h=600)
+    d = Drawer(host, edge="bottom", height_hint=200, bottom_inset=lambda: 57)
+    op = d._open_rect()
+    assert op.height() == 200 and op.bottom() == 600 - 57 - 1
+    tall = Drawer(host, edge="bottom", height_hint=10_000, bottom_inset=57)
+    assert tall._open_rect().top() == 0 and tall._open_rect().height() == 600 - 57
+    side = Drawer(host, edge="right", width_hint=300, top_inset=40, bottom_inset=57)
+    assert side._open_rect().top() == 40 and side._open_rect().height() == 600 - 40 - 57
+    d._sync_backdrop_geom()
+    assert d._backdrop.geometry().height() == 600 - 57

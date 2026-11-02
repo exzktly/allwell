@@ -39,6 +39,16 @@ TOUCH_ROW_PT = 48
 TOUCH_GAP_PT = 8
 TOP_BAR_PT = 52
 
+#: Scroll bars, in phone points. Over VNC a scroll bar is grabbed with a thumb,
+#: so its track is a touch target across (``SCROLLBAR_PT``), while the handle *drawn*
+#: inside the track is slimmer (``SCROLL_HANDLE_PT``) so it does not read as a
+#: control of its own. The handle is never shorter than a row
+#: (``TOUCH_ROW_PT``), so it can be caught however long the page. Most
+#: scrolling is a drag on the content itself (``ui/phone_shell.py``); the bar
+#: is for the long jump.
+SCROLLBAR_PT = 16
+SCROLL_HANDLE_PT = 8
+
 #: Body text on the phone, in points, at the Medium text size.
 BODY_PT = 15
 

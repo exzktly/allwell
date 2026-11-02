@@ -246,10 +246,26 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
 **The top bar.** Upright: ☰ (48 pt, ✕ while the rail is out), the mode switch
 (Review · Analyze · Datasets, labels only, one shared segment width that
 `ModeBar._equalise_widths` re-measures after every UI scale — measured before the
-restyle it clipped "Datasets"), and ⋯ (48 pt). Under it, in Review only, a 52 pt
-strip holds the page menu (*Bar Plots ▾*, mirroring the page's tab strip, which
-is hidden) and **⚙ Controls**. Sideways the strip's two buttons join the bar
-(`_place_page_controls`), vertically centred. ⋯ is one flat menu, no submenus: the
+restyle it clipped "Datasets"), and ⋯ (48 pt). The page's own controls are in a
+52 pt strip (`PhoneStrip`) at the **foot** of the window — added last to the
+band's parent layout, so in Analyze it sits under the run bar — because the foot
+is what a thumb reaches without shifting its grip, and it is the edge the two
+sheets rise from. It holds the page menu, **Wells** and **⚙ Controls**. Sideways
+the strip's three buttons join the bar (`_place_page_controls`), vertically
+centred, and the strip is hidden.
+
+**The page menu is the one way around Review.** It reads the page on screen
+(*Bar Plots ▾*, or the section's name when the section has no page tabs) and
+lists, under a caption naming the section, the pages of the section's tab strip
+(hidden in phone layout), then under *Go to* every other section the rail offers
+(`RailNav.shownItems`: shown and enabled, so the two sections phone layout hides
+and any disabled one are absent). Picking a section is `RailNav.setCurrentKey` —
+the same signal a rail tile sends — followed by `page_changed`. So moving
+anywhere in Review is two taps at the foot of the screen, where it was ☰ at the
+top, a tile, and then this menu. The captions are `QWidgetAction` labels
+(`PhoneMenuCaption`) rather than `QMenu.addSection`, whose text the app's style
+does not draw. In Datasets the same button lists the tools, in Analyze the two
+views (below). ⋯ is one flat menu, no submenus: the
 text size as a row of three buttons (S / M / L), *Reload dataset*, *Help*, *App
 log* and *Desktop layout*. The status bar's log "!" is mirrored onto ⋯
 (`_sync_log_badge`), driven by `NoticeBadge.changed`; the badge's Show and Hide
@@ -266,7 +282,10 @@ page left showing behind a 50 % scrim. Review's sections become a two-wide grid 
 bar's line ("4 well(s) | 72 nuclei", `PhoneRailStatus`), refreshed every 400 ms
 while the rail is out — the status bar is hidden, and the rail is where the wells
 it counts are picked. The page underneath is not moved or resized, so it is
-exactly where it was when the rail closes.
+exactly where it was when the rail closes. The rail stays the whole desk rail —
+dataset, sections, plate, saved selections, the page's own rail frames — so
+nothing is reachable only at the desk; the Wells sheet (below) is the quick way
+to the plate, not the only one.
 
 The drawer is the left panel's *expanded* state: it is driven by the same flag the
 desk's collapse toggle drives (`_sidebar_collapsed`), through
@@ -290,8 +309,9 @@ lent panel's desk place is kept on the drawer itself (`RailDrawer._homes`), not
 stamped on the panel. The drawer is hosted on the Review widget, which holds
 the band, not on a splitter (a `QSplitter` adopts any child widget as a pane). It starts right under
 the top bar (`Drawer(top_inset=…)`, re-measured as the bar's height changes), so
-☰ and the mode switch stay in reach while it is open, and it covers the strip,
-whose page menu and Controls belong to the page it hides. Each panel is lent
+☰ and the mode switch stay in reach while it is open, and it runs to the
+window's foot over the strip, whose page menu, Wells and Controls belong to the
+page it hides. Each panel is lent
 once, on entering phone layout, and given back on leaving it — to its splitter, at
 its index, with its width pin and the splitter's sizes — after which the desk's own
 visibility rule is re-applied, since a reparent can show a hidden widget. The
@@ -375,8 +395,10 @@ the same page watcher.
 **The Controls sheet.** A Review page's own controls — its `ControlBand`
 (channel, property, display, threshold, …) — are hidden in phone layout so the
 plot gets the screen, and **⚙ Controls** lends the current page's band to a sheet:
-a bottom `Drawer` upright, as tall as its content up to 60 % of the window, or a
-390 pt right-hand panel sideways — as wide as the phone held upright, so whatever
+a bottom `Drawer` upright, as tall as its content up to 60 % of the window and
+rising from just above the strip (`Drawer(bottom_inset=…)`, read off the strip's
+place each time, `PhoneShell._foot_strip`) so its **Done ✕** stays where the
+thumb opened it, or a 390 pt right-hand panel sideways — as wide as the phone held upright, so whatever
 fits the sheet upright fits the panel (`LANDSCAPE_SHEET_PT`; at 360 pt the Image
 Table's LUT rows overflowed it). A page whose controls are not a `ControlBand`
 marks the block that holds them with the `phoneControls` property and gives it a
@@ -401,8 +423,33 @@ drawer to its hints as they read now — retargeting the slide if it is still
 running. The sheet has no scrim, because the plot above it redraws
 as its controls change and a dimmed plot cannot be judged by. Its button reads
 **Done ✕** while it is open. Closing it — that button, a mode switch, rotating the
-phone, leaving phone layout — gives the band back to its page at its index,
-unstacked.
+phone, leaving phone layout, opening the Wells sheet — gives the band back to
+its page at its index, unstacked. The Controls and Wells sheets are built by one
+`PhoneShell._build_sheet`, and one is open at a time (`close_sheets`).
+
+**The Wells sheet.** At the desk the plate sits in the rail beside the plot. On a
+phone the rail is a drawer over the plot with the plate below the dataset and
+the section tiles, so picking wells was ☰, a scroll, the taps and ✕, with the
+plot those wells change hidden throughout. **Wells** lends the page's picker to a
+sheet of its own: the rail's one plate slot (`review/core/rail_plate.py`, so the
+main plate, Segmentation's and the Image Table's alike) and, while the main rail
+frame is the page's, its All / None footer (`_sel_count_lbl`) — named by the
+window as `PhoneHandles.well_picker`, which returns `[]` on a page whose slot
+shows no plate, and then the button is hidden. Like the Controls sheet it has no
+scrim and rises from above the strip, so a well tapped is a bar drawn in view.
+Each borrowed widget's parent and index are read before any of them moves — read
+one at a time, the footer's index was one short once the slot had gone, and it
+came back above the plate — and given back lowest index first when the sheet
+closes (`_give_wells_back`). The button reads **Wells · n** from
+`PhoneHandles.wells_count` (the selection's size), refreshed in `refresh()` and
+every 400 ms while the sheet is open, and **Done ✕** while it is open. Opening it
+closes ☰ and the Controls sheet; ☰, a page or section picked from the menu, a
+mode switch, rotating and leaving phone layout close it. Saved selections and
+the page's own rail frames stay in ☰. An empty plot whose hint was written for
+the desk ("Click wells on the plate at the left") is re-worded while phone
+layout is on (`ui_helpers.phone_wording`, applied in `_apply_reason`, the one
+writer of a placeholder's hint, and re-applied on every switch by a
+`phone_layout` listener `follow_phone_layout` adds per window).
 
 **The Properties sheet.** A plot's right-hand panel — the Properties
 (export-style) sidebar, or the Scatter cell viewer that shares its slot — opens
@@ -462,40 +509,74 @@ is drawn again — from the decode cache — when phone layout turns on or off a
 when the page's width changes by more than 5 % while it is on (the phone turned),
 debounced 250 ms (`install_refit`); the listener goes with the tab.
 
-**Long panels scroll by dragging** (`_grab_scrolling`): over VNC a touch-drag
-arrives as a left-button mouse drag, which a Qt scroll area ignores, so
-`QScroller` grabs the left-button gesture on the side rail, the Controls sheet, the
-read-only logs, and every `QScrollArea` under `PhoneHandles.swipe_roots` — the form
-pages of Datasets (one per tool) and Analyze (`_grab_page_scrolling`, run on the
-switch and on every `refresh`). Those forms hold plates (Datasets' subset,
-concatenate and OME-import tools, Analyze's background map), so every grabbed
-viewport carries `_DragOwnerGuard`, which refuses Qt's `QScrollPrepareEvent` when
-a drag starts on a plate or a slider: the press then reaches the plate as if no
-gesture were there, where grabbed blindly it neither selected wells nor scrolled
-(`set_drag_scroll` grabs and installs the guard together;
-`tests/test_phone_form_swipe.py`). A report-only plate
+**Everything that scrolls, scrolls by a drag** (`_grab_scrolling`): over VNC a
+touch-drag arrives as a left-button mouse drag, which a Qt scroll area ignores,
+so `QScroller` grabs the left-button gesture on the viewport of **every** scroll
+area in the process (`grab_every_scroll_area`, on the switch and on each restyle
+inside phone layout), and the sweep (`_sweep`) grabs every one built later — a
+page built lazily, a dialog, a popover, the Properties panel's, a combo box's
+list (whose view Qt replaces, so the replacement is found as a new widget).
+Leaving phone layout ungrabs every viewport carrying the `_awDragScroll` mark,
+whoever grabbed it. It is a rule rather than a roster of roots because the
+roster was the bug: it covered the rail, the Controls sheet, the logs and the
+Datasets and Analyze forms, and each root left out was a surface a thumb could
+not scroll — reported for the Properties panel, measured for Home (1,600 px of
+page) and for every dialog's list. `drag_scroll_eligible` names the
+exceptions, the scroll areas whose own drag already means something: an editable
+`QTextEdit` / `QPlainTextEdit` (a drag places the cursor and selects; a
+read-only one, a log, scrolls), an item view with drag-and-drop or drag enabled
+(reordering), a `QGraphicsView`, and an area whose class or viewport's class
+reads mouse moves in Python (`_handles_own_drag` — Heat Map's layout table drags
+cells out). An item view that only selects scrolls, and a tap still selects:
+Qt's flick gesture holds a press until it can tell a tap from a drag, so on a
+combo box's list a tap picks a row and a drag scrolls, where before the drag
+picked whichever row it ended on.
+
+Inside an area that scrolls, a drag that starts on a widget whose drag is its own
+is left to it by `_DragOwnerGuard`, which every grabbed viewport carries
+(`set_drag_scroll` grabs and installs the guard together) and which refuses Qt's
+`QScrollPrepareEvent`, so the press reaches the widget as if no gesture were
+there: a plate (grabbed blindly, one neither selected wells nor scrolled), a
+slider, any widget whose class reads mouse moves itself (`_handles_own_drag`,
+derived from the class rather than listed, so the colour picker's square and hue
+strip, an Image Table chip and a widget written tomorrow are covered by having
+been written; Qt's own classes do not count), and a plot — except on a plot
+page's own scroll area, below. A report-only plate
 (`WellPlateSelector.isReportOnly`, the run dashboard's) selects nothing and does
 not keep the drag (`_plate_owns_drag`), so Analyze's Progress page, most of which
 is that plate, scrolls from anywhere on it. A drag that starts inside a scroll
-area of its own that also scrolls by a drag and has range to scroll — a log on
-Analyze's Progress page or on a Datasets tool page — is left to that area
+area of its own that also scrolls by a drag and has vertical range to scroll — a
+log on Analyze's Progress page, a list in a form — is left to that area
 (`_inner_area_owns_drag`, which reads the `_awDragScroll` property
 `set_drag_scroll` sets, because Qt's `hasScroller` and `grabbedGesture` still
 answer yes after `ungrabGesture`). Without it both viewports accept the gesture
 and the page's wins, so a swipe on the log moved the page and not the log. A log
-with nothing to scroll leaves the drag to the page. **Plot pages scroll by a swipe on the plot** too
-(`PhoneShell._swipe_plot_area`, run from `size_canvas` — so on the switch, on Show
-and from the sweep, and a plot built later gets it): the scroll area holding a
-canvas on a page `band_roots` names grabs the gesture, and gives it back at the
-desk. A tap still reaches the plot, because Qt's flick gesture holds a press until
-it can tell a tap from a drag; a drag on a plot no longer reaches matplotlib in
-phone layout, where its pan and zoom are already hidden. Nothing else in the
-centre is grabbed — the Home editors' plates and the Image Table's chips own their
-drags. `tests/test_phone_plot_swipe.py` asserts the calls to `QScroller` rather
-than a simulated swipe: QTest stamps its mouse events from its own clock, from
-which QScroller reads a drag's speed, so a simulated swipe scrolls or not by
-timing. Whether RealVNC's touch mode delivers drags as mouse drags is not
-verified on a device.
+with nothing to scroll leaves the drag to the page.
+
+**Plot pages scroll by a swipe on the plot** (`PhoneShell._swipe_plot_area`, run
+from `size_canvas` — so on the switch, on Show and from the sweep, and a plot
+built later gets it): the scroll area holding a canvas on a page `band_roots`
+names is marked `_awSwipePlots`, and the guard then lets a drag on its plot
+scroll the page. A tap still reaches the plot; a drag on a plot no longer reaches
+matplotlib in phone layout, where its pan and zoom are already hidden. A plot
+anywhere else — a dialog's, which may be one you draw on — keeps its drag, and
+its area scrolls from everywhere else. `tests/test_phone_form_swipe.py` holds the
+rule and the guard, `tests/test_phone_plot_swipe.py` the plot pages; both assert
+the calls to `QScroller` and the `QScrollPrepareEvent` answer rather than a
+simulated swipe: QTest stamps its mouse events from its own clock, from which
+QScroller reads a drag's speed, so a simulated swipe scrolls or not by timing.
+Whether RealVNC's touch mode delivers drags as mouse drags is not verified on a
+device.
+
+**Scroll bars are a thumb wide.** The touch block makes a scroll bar's track
+`SCROLLBAR_PT` (16 pt) across — the whole track takes a press — with the handle
+drawn `SCROLL_HANDLE_PT` (8 pt) thick inside it (a margin of half the
+difference each side), never shorter than a row (`TOUCH_ROW_PT`, as
+`min-height` / `min-width`), and in the accent colour while pressed. All read
+from `core.phone_layout` on every build
+(`tests/test_phone_layout.py::test_scroll_bars_are_a_thumb_wide_in_phone_layout`).
+The desk's 10 px bars and 24 px minimum handle were 10 pt and ~24 pt under the
+phone's thumb: a target a quarter of the floor.
 
 **The window fits its screen — in both layouts.** `PhoneShell.fit_window` runs at
 startup and on every `screenChanged` / `availableGeometryChanged`: the minimum is
@@ -514,7 +595,7 @@ turned, and VNC resized the desktop under the maximized window) closes the
 Controls sheet and restyles at the new unit.
 
 **Sideways.** One 44 pt bar carries everything; the rail is 360 pt; the Controls
-sheet is a 390 pt right-hand panel; plots get at least 220 pt per row of axes
+and Wells sheets are 390 pt right-hand panels; plots get at least 220 pt per row of axes
 (`size_canvas`, upright too) and the page scrolls rather than squashing a
 three-panel figure into the screen's height. Analyze turns two-column
 (`_apply_analyze_columns`): the run summary and plate on the left, an equal

@@ -1,11 +1,13 @@
-"""Phone layout: Datasets' and Analyze's form pages scroll by a drag.
+"""Phone layout: everything that scrolls, scrolls by a drag.
 
-Asked for: drag-to-scroll on the Datasets and Analyze form views. Over VNC a
-touch-drag arrives as a left-button mouse drag, which a scroll area ignores.
-Measured in the real window: Analyze's form (in the ☰ drawer) already took the
-drag, Datasets' nine tool pages did not. ``PhoneShell._grab_page_scrolling``
-grabs every ``QScrollArea`` under ``PhoneHandles.swipe_roots`` (Datasets,
-Analyze) on the switch and on every ``refresh``.
+Over VNC a touch-drag arrives as a left-button mouse drag, which a scroll area
+ignores. It was first fixed root by root — the side rail, the Controls sheet,
+the logs, Datasets' and Analyze's form pages — and each root left out was a
+surface a thumb could not scroll: reported for the Properties panel, measured
+for Home (1,600 px of page) and every dialog's list. So phone layout now gives
+the drag to every scroll area in the process (``grab_every_scroll_area``, and
+the sweep for ones built later), except where a drag already means something
+(``drag_scroll_eligible``).
 
 Those forms hold plates — Datasets' subset, concatenate and OME-import tools,
 Analyze's background map — and a drag on a plate selects wells. A viewport that
@@ -21,16 +23,14 @@ simulated swipe scrolls or not by timing (``test_phone_plot_swipe.py``).
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QScrollPrepareEvent
 from PySide6.QtWidgets import (
-    QApplication, QLabel, QScrollArea, QScroller, QSlider, QVBoxLayout, QWidget,
+    QApplication, QLabel, QListWidget, QScrollArea, QScroller, QSlider, QVBoxLayout, QWidget,
 )
 
-from ui.phone_shell import PhoneShell, set_drag_scroll
+from ui.phone_shell import set_drag_scroll
 from widgets.well_plate_selector import WellPlateSelector
 
 
@@ -96,26 +96,97 @@ def scroller_calls(monkeypatch):
     return calls
 
 
-def test_every_form_page_under_the_swipe_roots_is_grabbed(qtbot, scroller_calls):
-    """Datasets builds one scroll area per tool page; all of them, and
-    Analyze's form, take the drag — and nothing outside the roots does."""
-    datasets = QWidget()
-    qtbot.addWidget(datasets)
-    tools = [QScrollArea(datasets) for _ in range(3)]
-    analyze = QWidget()
-    qtbot.addWidget(analyze)
-    form = QScrollArea(analyze)
-    elsewhere = QScrollArea()
-    qtbot.addWidget(elsewhere)
-    shell = SimpleNamespace(_h=SimpleNamespace(swipe_roots=lambda: [datasets, None, analyze]))
+class _DragsCells(QListWidget):
+    """An item view that reads mouse moves itself, the way Heat Map's layout
+    table drags a cell out — without Qt's own drag-and-drop switched on."""
 
-    PhoneShell._grab_page_scrolling(shell, True)
+    def mouseMoveEvent(self, e):  # noqa: N802 — Qt naming
+        super().mouseMoveEvent(e)
+
+
+_KEEP: list = []
+
+
+def _surfaces(qtbot):
+    """One of each kind of scroll area phone layout meets, and which of them
+    must scroll by a drag."""
+    from PySide6.QtWidgets import QComboBox, QGraphicsView, QTextEdit
+    page = QScrollArea()                       # a page, the Properties panel
+    log = QTextEdit()
+    log.setReadOnly(True)                      # a log
+    notes = QTextEdit()                        # an editable box: drag selects
+    plain_list = QListWidget()                 # a list that only selects
+    reorder = QListWidget()
+    reorder.setDragDropMode(QListWidget.InternalMove)   # drag reorders
+    drags_cells = _DragsCells()
+    scene = QGraphicsView()                    # drag modes of its own
+    window = QWidget()                         # another window's list
+    in_window = QListWidget(window)
+    combo = QComboBox()
+    combo.addItems([str(i) for i in range(40)])
+    for w in (page, log, notes, plain_list, reorder, drags_cells, scene, window, combo):
+        qtbot.addWidget(w)
+    scrolls = [page, log, plain_list, in_window, combo.view()]
+    keeps_its_drag = [notes, reorder, drags_cells, scene]
+    # qtbot holds its widgets weakly: the window and the combo must outlive
+    # this function, or their lists go with them.
+    _KEEP[:] = [window, combo]
+    return scrolls, keeps_its_drag
+
+
+def test_every_scroll_area_scrolls_by_a_drag_unless_its_drag_means_something(
+        qtbot, scroller_calls):
+    """The wrong implementation this rejects is a roster of roots — every
+    surface outside it, a dialog's list or a combo box's, stays unscrollable —
+    and equally one that grabs everything, which takes an editable box's text
+    selection and a list's reordering away."""
+    from ui.phone_shell import drag_scroll_eligible, grab_every_scroll_area
+    scrolls, keeps_its_drag = _surfaces(qtbot)
+    assert [drag_scroll_eligible(a) for a in scrolls] == [True] * len(scrolls)
+    assert [drag_scroll_eligible(a) for a in keeps_its_drag] == [False] * len(keeps_its_drag)
+
+    grab_every_scroll_area(True)
     grabbed = {id(t) for kind, t in scroller_calls if kind == "grab"}
-    assert grabbed == {id(a.viewport()) for a in (*tools, form)}
+    assert {id(a.viewport()) for a in scrolls} <= grabbed
+    assert not grabbed & {id(a.viewport()) for a in keeps_its_drag}
+    assert all(a.viewport().property("_awDragScroll") for a in scrolls)
 
-    PhoneShell._grab_page_scrolling(shell, False)
+    grab_every_scroll_area(False)
     ungrabbed = {id(t) for kind, t in scroller_calls if kind == "ungrab"}
-    assert ungrabbed == grabbed
+    assert ungrabbed == grabbed, "leaving phone layout must give back every grab"
+    assert not any(a.viewport().property("_awDragScroll") for a in scrolls)
+
+
+def test_a_drag_on_a_widget_that_reads_its_own_drags_is_left_to_it(qtbot):
+    """A colour picker's square, an Image Table chip: classes that read mouse
+    moves themselves keep a drag that starts on them, as a plate does."""
+    from widgets.color_picker_popover import SvSquare
+    area, label, _plate, _slider = _form(qtbot)
+    square = SvSquare()
+    area.widget().layout().insertWidget(0, square)
+    QApplication.processEvents()
+    set_drag_scroll(area.viewport(), True)
+    assert not _starts_a_scroll(area, square, QPoint(5, 5)), \
+        "a drag on the colour square would scroll the panel instead of picking"
+    assert _starts_a_scroll(area, label, QPoint(5, 5))
+
+
+def test_a_drag_on_a_plot_scrolls_only_a_plot_page(qtbot):
+    """On a plot page a swipe on the plot is how the page scrolls
+    (``_swipe_plot_area`` marks its viewport); anywhere else — a dialog's
+    plot — the drag is the plot's."""
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+    area, _label, _plate, _slider = _form(qtbot)
+    canvas = FigureCanvasQTAgg(Figure())
+    canvas.setMinimumHeight(200)
+    area.widget().layout().insertWidget(0, canvas)
+    QApplication.processEvents()
+    set_drag_scroll(area.viewport(), True)
+    centre = QPoint(canvas.width() // 2, canvas.height() // 2)
+    assert not _starts_a_scroll(area, canvas, centre)
+    area.viewport().setProperty("_awSwipePlots", True)
+    assert _starts_a_scroll(area, canvas, centre)
 
 
 def _page_with_log(qtbot, lines: int):

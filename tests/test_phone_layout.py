@@ -1286,6 +1286,148 @@ def test_a_page_change_watches_what_the_new_page_built_at_once(qapp, app_sheet):
     assert st.isTouchMode()
 
 
+def test_a_scroll_area_built_after_the_switch_scrolls_by_a_drag(qapp, app_sheet):
+    """Reported: the Properties panel, and other windows, did not scroll by a
+    drag in phone layout. Grabbing was a roster of roots fixed at the switch,
+    so anything outside it, or built later — a dialog, a page built lazily, a
+    combo box's list — took no drag. The sweep now grabs every scroll area it
+    finds, and leaving phone layout gives each one back. The wrong
+    implementation this rejects grabs only what existed at the switch."""
+    from PySide6.QtWidgets import QDialog, QListWidget, QScrollArea
+
+    qapp.setStyleSheet(theme.qss())
+    win = _window()
+    QVBoxLayout(win)
+    before = QScrollArea(win)
+    win.layout().addWidget(before)
+    shell = _shell(win)
+    shell.set_on(True)
+    _pump(qapp)
+    shell._sweep_timer.stop()            # the test ticks the sweep itself
+    assert before.viewport().property("_awDragScroll")
+    dialog = QDialog(win)
+    _WINDOWS.append(dialog)
+    later = QListWidget(dialog)
+    assert not later.viewport().property("_awDragScroll")
+    shell._sweep(force=False)
+    assert later.viewport().property("_awDragScroll"), \
+        "a list in a window opened after the switch does not scroll by a drag"
+    shell.set_on(False)
+    _pump(qapp)
+    assert not before.viewport().property("_awDragScroll")
+    assert not later.viewport().property("_awDragScroll")
+
+
+def _wells_window(qapp, picker):
+    """A window with a page, and a rail the way Review's holds its picker:
+    a head, the plate slot, the All / None footer, then saved selections."""
+    from PySide6.QtWidgets import QLabel
+    qapp.setStyleSheet(theme.qss())
+    win = _window()
+    QVBoxLayout(win).setContentsMargins(0, 0, 0, 0)
+    win.layout().addWidget(QWidget(win), 1)          # the page
+    rail = QWidget(win)
+    QVBoxLayout(rail)
+    head, slot, footer, tail = QLabel("dataset"), QWidget(), QWidget(), QLabel("saved")
+    slot.setMinimumHeight(120)
+    footer.setMinimumHeight(40)
+    for w in (head, slot, footer, tail):
+        rail.layout().addWidget(w)
+    rail.hide()                                      # the rail is in ☰, closed
+    selected = {"A01", "A02", "B01"}
+    shell = _shell(win, well_picker=lambda: picker(slot, footer),
+                   wells_count=lambda: len(selected))
+    return win, shell, rail, slot, footer
+
+
+def test_the_wells_sheet_lends_the_picker_above_the_foot_strip_and_gives_it_back(
+        qapp, app_sheet):
+    """Picking wells on a phone was ☰, a scroll past the dataset and nine
+    section tiles, the taps, then ✕ — with the plot those wells change hidden
+    behind the drawer throughout. Wells, in the strip at the foot, lends the
+    plate and its All / None to a sheet that rises from above the strip and
+    leaves the page in view, then puts each back at its place in the rail.
+
+    Wrong implementations this rejects: a strip left at the top (out of thumb
+    reach), a sheet laid over the strip (its "Done ✕" hidden), and a give-back
+    that appends to the rail rather than returning each widget to its index."""
+    from PySide6.QtTest import QTest
+    win, shell, rail, slot, footer = _wells_window(qapp, lambda s, f: [s, f])
+    shell.set_on(True)
+    _pump(qapp)
+    strip = shell._strip
+    assert win.layout().indexOf(strip) == win.layout().count() - 1
+    assert strip.isVisible()
+    assert strip.mapTo(win, strip.rect().bottomLeft()).y() == win.height() - 1, \
+        "the strip is not at the foot of the window"
+    assert shell.wells_button.isVisible()
+    assert shell.wells_button.text() == "Wells · 3"
+
+    shell.wells_button.click()
+    QTest.qWait(300)
+    sheet = shell._wells_sheet
+    assert sheet.isOpen() and sheet.isVisible()
+    assert slot.parentWidget() is sheet._aw_holder and footer.parentWidget() is sheet._aw_holder
+    assert shell.wells_button.text() == "Done ✕"
+    strip_top = strip.mapTo(win, strip.rect().topLeft()).y()
+    assert sheet.geometry().bottom() < strip_top, "the sheet covers its own Done button"
+    assert sheet._backdrop._alpha == 0, "a scrim would dim the plot the wells change"
+
+    shell.wells_button.click()
+    QTest.qWait(300)
+    assert not sheet.isOpen()
+    lay = rail.layout()
+    assert (lay.indexOf(slot), lay.indexOf(footer)) == (1, 2)
+    assert shell.wells_button.text() == "Wells · 3"
+
+
+def test_a_page_with_no_picker_offers_no_wells_button(qapp, app_sheet):
+    _win, shell, *_ = _wells_window(qapp, lambda s, f: [])
+    shell.set_on(True)
+    _pump(qapp)
+    assert not shell.wells_button.isVisible()
+    shell.open_wells()                 # nothing to lend: nothing opens
+    assert shell._wells_sheet is None
+
+
+def test_the_page_menu_also_goes_to_every_other_section(qapp, app_sheet):
+    """Moving between Review's sections was ☰ at the top of the screen, then a
+    tile, then the page menu. The page menu at the foot now lists the other
+    sections the rail offers, under its pages — the ones a user can pick now:
+    not the current one, not one phone layout hides, not a disabled one."""
+    from widgets.rail_nav import RailNav
+    qapp.setStyleSheet(theme.qss())
+    win = _window()
+    QVBoxLayout(win)
+    nav = RailNav(win)
+    for key in ("Home", "Plotting", "Statistics", "Batch Export", "Spatial"):
+        nav.addItem(key)
+    nav.setCurrentKey("Plotting")
+    nav._rows["Batch Export"].hide()
+    nav.setItemEnabled("Spatial", False)
+    shell = _shell(win, rail_nav=nav)
+    shell.set_on(True)
+    _pump(qapp)
+    assert shell.page_button.isVisible() and shell.page_button.text() == "Plotting ▾"
+    shell._fill_page_menu()
+    acts = [a for a in shell._page_menu.actions()
+            if not a.isSeparator() and a.isEnabled()]
+    assert [a.text() for a in acts] == ["Home", "Statistics"]
+    acts[1].trigger()
+    assert nav.currentKey() == "Statistics"
+
+
+def test_an_empty_plot_s_hint_says_where_the_plate_is_on_a_phone():
+    """At the desk the plate is in the rail at the left; on a phone it is under
+    Wells at the foot, and Saved selections are in ☰."""
+    from review.core.ui_helpers import phone_wording
+    desk = "Click wells on the plate at the left, or open Saved selections below it."
+    assert phone_wording(desk) == desk
+    phone_layout.set_on(True)
+    assert phone_wording(desk) == ("Tap wells on the plate (Wells, at the foot of the "
+                                   "screen), or open Saved selections in ☰.")
+
+
 def test_a_rail_section_glyph_is_measured_off_the_font_it_is_drawn_in(
         qapp, app_sheet):
     """A rail row measured its glyph box off the font before the stylesheet
@@ -1383,6 +1525,23 @@ def test_the_stylesheet_touch_floors_follow_the_named_constants(monkeypatch):
     assert "min-height: 50px" in _qss_rule(sheet, "QCheckBox, QRadioButton")
     assert "44px" not in sheet and "48px" not in sheet, (
         "a touch floor in the stylesheet is a literal beside the named constant")
+
+
+def test_scroll_bars_are_a_thumb_wide_in_phone_layout(monkeypatch):
+    """Reported: on a phone the scroll bar itself is hard to use — 10 pt wide
+    with a handle that could shrink to 24 px. The track is ``SCROLLBAR_PT``
+    across, the handle drawn ``SCROLL_HANDLE_PT`` thick inside it and never
+    shorter than a row. Odd values, so a literal could not produce them."""
+    monkeypatch.setattr(phone_layout, "SCROLLBAR_PT", 23)
+    monkeypatch.setattr(phone_layout, "SCROLL_HANDLE_PT", 9)
+    monkeypatch.setattr(phone_layout, "TOUCH_ROW_PT", 61)
+    sheet = theme._touch_qss(2.0)
+    assert "width: 46px" in _qss_rule(sheet, "QScrollBar:vertical")
+    assert "height: 46px" in _qss_rule(sheet, "QScrollBar:horizontal")
+    vertical = _qss_rule(sheet, "QScrollBar::handle:vertical")
+    assert "min-height: 122px" in vertical
+    assert "margin: 0px 14px" in vertical            # (46 − 18) / 2 each side
+    assert "min-width: 122px" in _qss_rule(sheet, "QScrollBar::handle:horizontal")
 
 
 def test_the_text_size_buttons_follow_the_named_touch_sizes(

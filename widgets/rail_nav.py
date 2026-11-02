@@ -396,6 +396,17 @@ class RailNav(QFrame):
     def items(self) -> list[str]:
         return list(self._order)
 
+    def shownItems(self) -> list[tuple[str, str]]:
+        """``(key, label)`` of every row a user can pick now — shown and
+        enabled — in order. A host that offers the same choices elsewhere (a
+        phone's page menu) lists exactly these."""
+        out = []
+        for k in self._order:
+            row = self._rows[k]
+            if not row.isHidden() and row.isEnabled():
+                out.append((k, row._label.text()))
+        return out
+
     # ── binding adapter ──────────────────────────────────────────────────
     def bindingAdapter(self):
         return (self.currentKey, self.setCurrentKey, self.currentChanged)

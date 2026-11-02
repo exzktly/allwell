@@ -73,7 +73,7 @@ def split_background_wells(value) -> list[str]:
     **A rectangle is a well list.** ``H01:H12`` is the whole of row H, ``A01:D12``
     the top half, and either can sit among ordinary wells (``H01:H12, A01``).
     The corners expand to canonical labels in reading order, by
-    :func:`_expand_well_range` — the same reading the pairing map's right-hand
+    :func:`expand_well_range` — the same reading the pairing map's right-hand
     side has always used, so ``:`` means one thing wherever a set of wells is
     written. Expanded here, in the one function every reader of the field goes
     through, so a range means the same thing to the model build, the remote
@@ -93,7 +93,7 @@ def split_background_wells(value) -> list[str]:
         # refuses it by name — the same way it refuses any other well it cannot
         # find. Swallowing it here would drop a well the user believes is a
         # blank, which is the one outcome this field must not produce.
-        for w in _expand_well_range(text) or [text]:
+        for w in expand_well_range(text) or [text]:
             if w.lower() not in seen:
                 seen.add(w.lower())
                 out.append(w)
@@ -119,7 +119,7 @@ _MAP_ASSIGN = "="
 _MAP_RANGE = ":"
 
 
-def _expand_well_range(text: str) -> list[str] | None:
+def expand_well_range(text: str) -> list[str] | None:
     """The wells of a rectangular block written ``A01:D12``, or ``None``.
 
     Rows A–D by columns 1–12, in reading order. Rectangular because a plate's
@@ -172,7 +172,7 @@ def _covered_wells(text: str, *, blank: str, blanks=()) -> list[str]:
         item = piece.strip()
         if not item:
             continue
-        wells = _expand_well_range(item)
+        wells = expand_well_range(item)
         if wells is None:
             one = canonical_well_label(item)
             if one is None:

@@ -127,6 +127,19 @@ class PopulationStore:
             self._items.move_to_end(key)
             return value
 
+    def trim(self) -> int:
+        """Drop every population, as the app going idle; return the bytes dropped.
+
+        The same as :meth:`clear` in effect — every entry is rebuilt from the rows
+        on next use — but it reports what it freed (``review/core/idle_memory.py``).
+        """
+        with self._lock:
+            freed = self._held
+            self._items.clear()
+            self._sizes.clear()
+            self._held = 0
+            return freed
+
     def clear(self) -> None:
         with self._lock:
             self._items.clear()

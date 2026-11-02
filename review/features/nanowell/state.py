@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 
+from review.features.nanowell.crop_grid_compute import POPOUT_GRIDS, POPOUT_MAX_COLS
 from review.features.nanowell.moving_compute import clamp_window
 from review.domain.nanowell_rim_focus import RimFocusRule
 from review.features.nanowell.series_compute import is_baseline
@@ -157,6 +158,16 @@ class NanowellState:
     crop_metrics: bool = True
     #: Whether the pop-out writes each crop's timepoint over it and its caption under the figure.
     popout_labels: bool = True
+    #: The timepoints the pop-out shows; empty shows every timepoint of the nanowell
+    #: (``crop_grid_compute.shown_timepoints``).
+    popout_tps: list = field(default_factory=list)
+    #: The channels the pop-out draws beside the page's image channel, each a row of its own (``""`` is phase);
+    #: empty draws the image channel alone (``crop_grid_compute.shown_channels``).
+    popout_channels: list = field(default_factory=list)
+    #: The pop-out grid's shape (``crop_grid_compute.POPOUT_GRIDS``), and the timepoints per line of a
+    #: ``"columns"`` grid.
+    popout_grid: str = "auto"
+    popout_cols: int = 0
     #: The **Display range** of each image channel, ``channel key -> (low, high)`` in the raw image's units
     #: (``controller.display_key``): the window every picture of that channel on the page is drawn with — the crop
     #: strip, the pop-out, the Extremes montage and the Array view's full resolution. The page's own and kept with
@@ -222,6 +233,9 @@ class NanowellState:
     bridge: object = None                   # core.worker_bridge.WorkerBridge of the running request
     config_for: object = None               # the data dir whose saved choices are on the state
     crops: dict = field(default_factory=dict)            # (well, q, r) -> {timepoint: image_compute.Crop}
+    #: The pop-out's crops of its extra channels, ``((well, q, r), channel) -> {timepoint: Crop}``: the page's own
+    #: image channel stays in :attr:`crops`, which the strip shares.
+    popout_crops: dict = field(default_factory=dict)
     montages: dict = field(default_factory=dict)         # (well, timepoint) -> (image_compute.Montage | None, why)
     fetching: set = field(default_factory=set)           # ("crops" | "montages", key) being read on a worker
     fetch_bridges: list = field(default_factory=list)    # each worker bridge, kept alive until it delivers
@@ -302,6 +316,7 @@ class NanowellState:
         self.loaded_wells, self.well_parts, self.parts_for = frozenset(), {}, None
         self.observation_memo = {}
         self.crops, self.montages, self.fetching, self.fetch_bridges = {}, {}, set(), []
+        self.popout_crops = {}
         self.region = self.region_for = self.press = self.drawn = None
         self.anchor_mode, self.array_message = False, ""
         self.extreme_axes = {}
@@ -321,6 +336,8 @@ class NanowellState:
                 "extremes_n": self.extremes_n, "extremes_tps": list(self.extremes_tps), "crop_cells": self.crop_cells,
                 "channel": self.channel, "image_channel": self.image_channel,
                 "crop_metrics": self.crop_metrics, "popout_labels": self.popout_labels,
+                "popout_tps": list(self.popout_tps), "popout_channels": list(self.popout_channels),
+                "popout_grid": self.popout_grid, "popout_cols": self.popout_cols,
                 "display_ranges": {k: [lo, hi] for k, (lo, hi) in self.display_ranges.items()},
                 "subset": self.subset.to_config(), "layers": self.layers.to_config(),
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
@@ -361,6 +378,13 @@ class NanowellState:
         self.crop_cells = config.get("crop_cells") is True
         self.crop_metrics = config.get("crop_metrics") is not False
         self.popout_labels = config.get("popout_labels") is not False
+        for name in ("popout_tps", "popout_channels"):
+            items = config.get(name)
+            setattr(self, name, [str(v) for v in items if isinstance(v, str)] if isinstance(items, list) else [])
+        grid, cols = config.get("popout_grid"), config.get("popout_cols")
+        self.popout_grid = grid if grid in POPOUT_GRIDS else fresh.popout_grid
+        self.popout_cols = (cols if isinstance(cols, int) and not isinstance(cols, bool)
+                            and 1 <= cols <= POPOUT_MAX_COLS else fresh.popout_cols)
         self.display_ranges = _display_ranges_from(config.get("display_ranges"))
         tps = config.get("extremes_tps")
         self.extremes_tps = [str(tp) for tp in tps if isinstance(tp, str)] if isinstance(tps, list) else []

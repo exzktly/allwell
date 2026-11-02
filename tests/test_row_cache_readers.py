@@ -23,6 +23,8 @@ from tests._repo_scan import parse_source, python_sources, rel
 
 #: ``path::function`` → why that function may read only the held frames.
 _HELD_ONLY_READERS: dict[str, str] = {
+    "review/core/idle_memory.py::release_idle_memory": (
+        "Empties the cache when the app goes idle: the held frames are exactly what it gives back."),
     "review/data/data_loading.py::get_rows": "The lazy read itself: a held frame is returned, a missing one loaded.",
     "review/data/data_loading.py::load_and_project": "Stores the frame it has just read, pins and re-measures it.",
     "review/data/data_loading.py::_read_making_room": (

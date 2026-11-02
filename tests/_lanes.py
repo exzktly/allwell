@@ -214,6 +214,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_crop_outlines.py": "Each counted cell's outline drawn over the Nanowells crops",
     "test_nanowell_outlines.py": "Each counted cell's outline, kept beside a nanowell run's cell table",
     "test_nanowell_concatenate_link.py": "Concatenate of two analysed nanowell datasets joins dataset 2's timepoints onto dataset 1's …",
+    "test_nanowell_popout_grid.py": "The **Nanowell crops** pop-out's choice of timepoints, channels and grid shape, and its …",
     "test_nanowell_crop_view.py": "The selected nanowell's crops: the strip under the site detail, and **Pop out**, which …",
     "test_nanowell_dataset_carry.py": "Subset and Merge Plates carry a dataset's nanowell tables (tracker P10b, P10c), driven …",
     "test_nanowell_dataset_tools.py": "Subset, Merge Plates and Concatenate refuse nanowell results they cannot carry, by name; …",

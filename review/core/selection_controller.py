@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from util.json_write import write_json_atomic
 from PySide6.QtCore import QObject
-from core.safe import swallowed
+from core.safe import swallow, swallowed
 
 # Selection-behaviour fallbacks for registry-less callers (e.g. lightweight test
 # mocks). The real app always resolves these from the feature registry's
@@ -302,10 +302,12 @@ def _value_sets(ctx) -> list:
     return variable_replicate_sets(ctx, variable_id) if variable_id else []
 
 
-def _set_values_hidden(ctx, value_ids, *, target=None) -> None:
+def _set_values_hidden(ctx, value_ids, *, target=None, deferred=False) -> None:
     """Hide or show the Group-by values *value_ids* — ``_set_groups_hidden``'s
     counterpart for a variable grouping, with the same toggle rule: ``target``
-    None hides them all if any is visible, else shows them all."""
+    None hides them all if any is visible, else shows them all. *deferred* (a
+    plate click) repaints the plate now and leaves the plots to the click
+    debounce."""
     app = ctx.window  # transitional bridge (A3)
     ids = {v for v in value_ids if v}
     if not ids:
@@ -317,6 +319,10 @@ def _set_values_hidden(ctx, value_ids, *, target=None) -> None:
     if new == hidden:
         return
     ctx.state.plot.group_by_hidden_values = new
+    if deferred:
+        app._refresh_sidebar_map()
+        schedule_plate_rebuild(ctx, invalidate=False)
+        return
     app._rebuild_all(invalidate=False)
 
 
@@ -324,7 +330,7 @@ def _toggle_value_of_well(ctx, well_id: str) -> None:
     """A plate click while grouped by a variable: hide or show the well's value."""
     for rset in _value_sets(ctx):
         if well_id in rset.wells:
-            _set_values_hidden(ctx, [rset.value_id])
+            _set_values_hidden(ctx, [rset.value_id], deferred=True)
             return
     # Not drawn under this grouping at all, so there is nothing to toggle — and
     # a click that silently does nothing is the bug this path exists to fix.
@@ -502,7 +508,6 @@ def on_sidebar_plate_selection_changed(ctx, ids) -> None:
     # click through and update _selected_wells normally;
     # _refresh_sidebar_map_now mirrors the same exception so the painted
     # selection doesn't get wiped on the next refresh tick.
-    from PySide6.QtCore import QTimer
     if _plate_passive_in_group_mode(ctx):
         return  # rep-set mode, no per-well pane visible: the plate is passive
     # Keep the invariant _selected_wells ⊆ _well_paths.
@@ -511,23 +516,25 @@ def on_sidebar_plate_selection_changed(ctx, ids) -> None:
         return
     app._app_state.selection.selected_wells = new_set
     app._refresh_sidebar_map()
-    # Coalesce the commit. A drag through 96 cells fires this handler
-    # 96 times in one event-loop tick; without coalescing each one would
-    # trigger a full bar/scatter/line redraw and an export-style reapply.
-    # The deferred call fires once at the end of the tick.
-    if not app._app_state.selection.plate_commit_pending:
-        app._app_state.selection.plate_commit_pending = True
-        QTimer.singleShot(0, app._plate_commit_deferred)
+    # A press or a drag still in progress commits nothing: a drag fires this
+    # once per well it enters, each from its own mouse event and so its own
+    # event-loop pass, and the end-of-tick deferral below merged none of them —
+    # every well entered redrew every plot. The release's
+    # ``selectionDragFinished`` commits the gesture once
+    # (``on_sidebar_plate_drag_finished``).
+    plate = ctx.widgets.get_or_none("_sidebar_plate")
+    if plate is not None and getattr(plate, "isSelecting", lambda: False)():
+        return
+    # A change from anywhere else (a programmatic ``set_ids``, the All /
+    # None buttons) goes through the same click debounce.
+    schedule_plate_commit(ctx)
 
 
 def on_sidebar_plate_drag_finished(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
     if _plate_passive_in_group_mode(ctx):
         return
-    # Cancel any pending deferred commit from the paint events that
-    # led here -- we're committing right now.
-    app._app_state.selection.plate_commit_pending = False
-    on_plate_sel_change(ctx)
+    # The gesture is over: commit it once the clicks have paused.
+    schedule_plate_commit(ctx)
 
 
 def on_sidebar_plate_corner_toggled(ctx, select_all_target: bool) -> None:
@@ -559,6 +566,9 @@ def on_sidebar_plate_well_activated(ctx, well_id: str) -> None:
     # group. Solo-well clicks toggle membership in active_solo_wells.
     if well_id not in app._app_state.dataset.well_paths:
         return
+    # Every branch changes the state and repaints the plate at once, and
+    # leaves the plot redraw to the click debounce (``schedule_plate_commit`` /
+    # ``schedule_plate_rebuild``), so a run of clicks redraws once.
     if _grouping_variable(ctx):
         _toggle_value_of_well(ctx, well_id)
         return
@@ -569,14 +579,14 @@ def on_sidebar_plate_well_activated(ctx, well_id: str) -> None:
     if tab in _rep_mirror_tabs(ctx):
         sid = app._sel_id_for_well(well_id)
         if sid is not None:
-            app._sel_toggle_hidden(sid)
+            _toggle_group_deferred(ctx, sid)
             return
         if well_id in app._app_state.selection.active_solo_wells:
             app._app_state.selection.active_solo_wells.discard(well_id)
         else:
             app._app_state.selection.active_solo_wells.add(well_id)
         app._refresh_sidebar_map()
-        on_plate_sel_change(ctx)
+        schedule_plate_commit(ctx)
         return
     # Legacy fallback for non-plotting tabs that still receive
     # wellActivated in rep-set mode (Image Table / smFISH / etc):
@@ -586,7 +596,16 @@ def on_sidebar_plate_well_activated(ctx, well_id: str) -> None:
     sid = app._sel_id_for_well(well_id)
     if sid is None:
         return
-    app._sel_toggle_hidden(sid)
+    _toggle_group_deferred(ctx, sid)
+
+
+def _toggle_group_deferred(ctx, sid) -> None:
+    """Show or hide group *sid*: the flag and the plate now, the plots after the click debounce."""
+    s = sel_by_id(ctx, sid)
+    if s is None:
+        return
+    sel_set_hidden(ctx, sid, not bool(s.get("hidden")), light=True)
+    schedule_plate_rebuild(ctx, invalidate=True)
 
 
 def on_sidebar_plate_row_activated(ctx, row: str) -> None:
@@ -1804,15 +1823,59 @@ def sel_color(ctx, s) -> str:
 
 
 
+#: How long the plots wait after a click on the sidebar plate before they
+#: redraw; each further click restarts the wait, so a run of clicks redraws
+#: once. The plate itself repaints at every click.
+PLATE_CLICK_DEBOUNCE_MS = 500
+
+
+def _plate_click_timer(ctx):
+    """The window's click-debounce timer, made on first use."""
+    import shiboken6
+    from PySide6.QtCore import QTimer
+
+    timer = ctx.widgets.get_or_none("_plate_click_timer")
+    if timer is not None and shiboken6.isValid(timer):
+        return timer
+    timer = QTimer(ctx.window if isinstance(ctx.window, QObject) else None)
+    timer.setSingleShot(True)
+    timer.setInterval(PLATE_CLICK_DEBOUNCE_MS)
+    timer.timeout.connect(lambda: flush_plate_clicks(ctx))
+    return ctx.widgets.register("_plate_click_timer", timer)
+
+
+def schedule_plate_commit(ctx) -> None:
+    """Commit the plate's selection once the clicks have paused (:data:`PLATE_CLICK_DEBOUNCE_MS`)."""
+    ctx.state.selection.plate_commit_pending = True
+    _plate_click_timer(ctx).start()
+
+
+def schedule_plate_rebuild(ctx, *, invalidate: bool) -> None:
+    """Rebuild the plots once the clicks have paused; an invalidating request wins over one that is not."""
+    sel = ctx.state.selection
+    sel.plate_rebuild_invalidate = bool(invalidate) or bool(sel.plate_rebuild_invalidate)
+    _plate_click_timer(ctx).start()
+
+
+def flush_plate_clicks(ctx) -> None:
+    """Run what the click debounce is holding, now: the commit, then the rebuild. No-op when nothing is."""
+    sel = ctx.state.selection
+    timer = ctx.widgets.get_or_none("_plate_click_timer")
+    if timer is not None:
+        with swallow("plate click debounce: stop"):
+            timer.stop()
+    commit, rebuild = sel.plate_commit_pending, sel.plate_rebuild_invalidate
+    sel.plate_commit_pending = False
+    sel.plate_rebuild_invalidate = None
+    if commit:
+        on_plate_sel_change(ctx)
+    if rebuild is not None:
+        rebuild_all(ctx, invalidate=rebuild)
+
+
 def plate_commit_deferred(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    """Run the deferred commit scheduled by a paint event. No-op if
-    a drag_finished handler already cleared the pending flag (which
-    means it already committed in the same tick)."""
-    if not app._app_state.selection.plate_commit_pending:
-        return
-    app._app_state.selection.plate_commit_pending = False
-    on_plate_sel_change(ctx)
+    """Run a deferred plate commit now (:func:`flush_plate_clicks`)."""
+    flush_plate_clicks(ctx)
 
 
 

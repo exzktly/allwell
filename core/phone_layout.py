@@ -47,6 +47,11 @@ TOP_BAR_PT = 52
 #: scrolling is a drag on the content itself (``ui/phone_shell.py``); the bar
 #: is for the long jump.
 SCROLLBAR_PT = 16
+
+#: The Controls sheet lays a page's controls out as a form (one control per
+#: row, ``widgets/control_band_form.py``); its label column is this wide, which
+#: holds "X-axis · channel" at the Medium text size and wraps anything longer.
+SHEET_LABEL_PT = 112
 SCROLL_HANDLE_PT = 8
 
 #: Body text on the phone, in points, at the Medium text size.

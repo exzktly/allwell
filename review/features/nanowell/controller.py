@@ -38,6 +38,7 @@ from review.features.nanowell.identity_compute import identity_note, marks_legen
 from review.features.nanowell import subset_compute as ss
 from review.features.nanowell import statistics_compute as sc
 from review.features.nanowell._statistics_render import render_statistics
+from review.features.nanowell.crop_grid_compute import POPOUT_GRIDS, POPOUT_MAX_COLS, save_name, shown_channels
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
     ArrayDrawn, render_array, render_crop_grid, render_crop_strip, render_distribution, render_extremes, render_message,
@@ -792,7 +793,11 @@ def page_image_channel(st) -> str:
 def display_key(st) -> str:
     """The name the page keeps its image channel's **Display range** under (``NanowellState.display_ranges``): the
     fluorescence channel, or the run's phase token for the phase image."""
-    channel = page_image_channel(st)
+    return channel_display_key(st, page_image_channel(st))
+
+
+def channel_display_key(st, channel: str) -> str:
+    """:func:`display_key` for any of the run's image channels (``""``: phase) — the pop-out draws several."""
     if channel:
         return channel.lower()
     phase = (getattr(st.data, "phase_token", "") or "") if st is not None and st.data is not None else ""
@@ -1826,8 +1831,9 @@ def go_to_site_in_blink(ctx) -> None:
 
 
 def draw_popout(ctx) -> None:
-    """Draw the pop-out window's crops, when it is open: the first selected nanowell's crops at every timepoint on
-    one brightness scale (``renderer.render_crop_grid``), or a sentence saying a nanowell has to be selected."""
+    """Draw the pop-out window's crops, when it is open: the first selected nanowell over the timepoints chosen, in
+    the page's image channel and each channel added beside it, on the grid chosen
+    (``renderer.render_crop_grid``) — or a sentence saying a nanowell has to be selected."""
     st = _state(ctx)
     window = ctx.widgets.get_or_none("_nw_popout")
     fig, canvas = ctx.widgets.get_or_none("_nw_popout_fig"), ctx.widgets.get_or_none("_nw_popout_canvas")
@@ -1845,8 +1851,78 @@ def draw_popout(ctx) -> None:
         render_crop_grid(fig, gated_crops(st, site, st.crops.get(site)), site, cells=st.crop_cells,
                          metrics=(crop_metrics(st, [site], page_channel(ctx), focus=True).get(site)
                                   if st.crop_metrics else None),
-                         image_channel=image_channel, display_range=display_range(ctx), labels=st.popout_labels)
+                         image_channel=image_channel, display_range=display_range(ctx), labels=st.popout_labels,
+                         more=_popout_more(ctx, st, site), timepoints=st.popout_tps, grid=st.popout_grid,
+                         cols=st.popout_cols)
     canvas.draw_idle()
+
+
+#: How many nanowell-and-channel crop sets the pop-out keeps of the channels added beside the page's own.
+POPOUT_CROPS_KEPT = 24
+
+
+def popout_channels(st) -> list:
+    """The channels the pop-out draws: the page's image channel, then each one added beside it that the dataset has
+    (``crop_grid_compute.shown_channels``)."""
+    available = [""] + list(getattr(st.data, "image_channels", None) or []) if st is not None and st.data else [""]
+    return shown_channels(page_image_channel(st), st.popout_channels if st is not None else [], available)
+
+
+def _popout_more(ctx, st, site) -> list:
+    """``(channel, crops or None, display_range)`` for each channel the pop-out draws beside the page's image
+    channel; a channel's crops not yet cut are read on a worker, and ``None`` until they arrive."""
+    out = []
+    data, metrics = st.data, st.metrics
+    for channel in popout_channels(st)[1:]:
+        key = (tuple(site), channel)
+        if key not in st.popout_crops:
+            _fetch(ctx, "popout_crops", key, lambda channel=channel: site_crops(data, metrics, site, channel=channel),
+                   failed=lambda message: {"": Crop(None, "", f"The crops could not be cut: {message}")})
+        out.append((channel, gated_crops(st, site, st.popout_crops.get(key)),
+                    st.display_ranges.get(channel_display_key(st, channel))))
+    return out
+
+
+def set_popout_timepoints(ctx, timepoints) -> None:
+    """Show these timepoints in the pop-out (every one when empty)."""
+    _set_popout(ctx, popout_tps=[str(tp) for tp in timepoints])
+
+
+def set_popout_channels(ctx, channels) -> None:
+    """Draw these channels in the pop-out beside the page's image channel, a row each (``""``: phase)."""
+    _set_popout(ctx, popout_channels=[str(c) for c in channels])
+
+
+def set_popout_grid(ctx, grid: str, cols: int = 0) -> None:
+    """The pop-out grid's shape (``crop_grid_compute.POPOUT_GRIDS``) and, for ``"columns"``, its width."""
+    if grid not in POPOUT_GRIDS:
+        grid = "auto"
+    cols = max(1, min(POPOUT_MAX_COLS, int(cols))) if grid == "columns" else 0
+    _set_popout(ctx, popout_grid=grid, popout_cols=cols)
+
+
+def _set_popout(ctx, **values) -> None:
+    st = _state(ctx)
+    if st is None or all(getattr(st, name) == value for name, value in values.items()):
+        return
+    for name, value in values.items():
+        setattr(st, name, value)
+    _save_soon(ctx)
+    _call(ctx, "_nw_popout_refresh")
+    draw_popout(ctx)
+
+
+def save_popout_figure(ctx) -> None:
+    """**Save figure…** in the pop-out: its figure, under a name that says which nanowell and channels it shows."""
+    st = _state(ctx)
+    fig = ctx.widgets.get_or_none("_nw_popout_fig")
+    if st is None or fig is None:
+        return
+    site = crops_site(st)
+    if site is None:
+        ctx.notify.set_status("Select a nanowell first: the pop-out saves the selected nanowell over time.")
+        return
+    ctx.figures.save(fig, save_name(site, popout_channels(st)))
 
 
 def redraw_detail(ctx) -> None:
@@ -1973,7 +2049,10 @@ def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
             store[key] = value
             while kind == "montages" and len(store) > MONTAGES_KEPT:
                 store.pop(next(iter(store)))
-        (redraw_detail if kind == "crops" else redraw)(ctx)
+        if kind == "popout_crops":
+            while len(st.popout_crops) > POPOUT_CROPS_KEPT:
+                st.popout_crops.pop(next(iter(st.popout_crops)))
+        {"crops": redraw_detail, "popout_crops": draw_popout}.get(kind, redraw)(ctx)
 
     def on_failed(message) -> None:
         log.warning("Nanowells: %s for %s could not be read: %s", kind, key, message)

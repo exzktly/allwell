@@ -1846,6 +1846,16 @@ class WellPlateSelector(QWidget):
     def selectionMode(self) -> str:
         return self._grid.mode()
 
+    def isSelecting(self) -> bool:
+        """True between the press and the release of a select gesture (a click or a drag).
+
+        ``selectionChanged`` fires for every well a drag enters, each from its
+        own mouse event; a host that redraws on it would redraw once per well.
+        While this is true the gesture is still going, and
+        ``selectionDragFinished`` will follow it exactly once.
+        """
+        return bool(self._grid._drag_active)
+
     def setDragSelectEnabled(self, on: bool) -> None:
         self._grid.set_drag_select_enabled(on)
 

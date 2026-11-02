@@ -1609,6 +1609,13 @@ skip what is done".
   and overwrites its outputs; every other well is unaffected. Validate &
   Repair's completion handoff fills this in for you with exactly those wells.
 
+All three fields take a **rectangle of wells** written as two corners joined by
+a colon: `A01:C06` is rows A to C, columns 1 to 6 (18 wells), `H01:H12` is row
+H, and `A05:H05` is column 5. Either corner can come first, and rectangles mix
+with single wells (`A01:B12, H12`). An entry that is not a well or a rectangle
+(a typo such as `A1:Z9`) stops the run with a message under **Run** naming the
+field and the entry.
+
 ### 9. Advanced — output, performance, scratch folder
 
 Folded by default; folded, its header says how many settings differ from a new
@@ -4059,8 +4066,12 @@ offered yet.
   right (`Display ▾`, `Save ▾`, Properties).
 - **Status bar** — a live status dot on the left, keyboard-shortcut chips on
   the right.
-- **Tab history** — `Ctrl+←` / `Ctrl+→` step back and forward through the tabs
-  you have visited, like a browser's back/forward.
+- **Back and Forward** — **‹** and **›** just right of the Review · Analyze ·
+  Datasets switch (or `Ctrl+←` / `Ctrl+→`) step back and forward through the
+  places you have been, like a browser's: each section, each page tab within it
+  (Bar Plots, Line Graphs, …), and each switch between Review, Analyze and
+  Datasets is a step. Going somewhere new after stepping back forgets the way
+  forward. A button is greyed out when there is nowhere to go that way.
 
 ### Controls shared by every tab
 
@@ -4102,6 +4113,11 @@ plate picks a single well and **All** is not offered — unless groups are
 defined, when the plate shows groups as it does elsewhere. The Image Table's own picker ends in
 the same footer. The selection survives across tabs and is what every plot /
 aggregate / export consumes.
+
+The plate lights a well (or dims a group) the moment you click it; the plots
+redraw half a second after your last click, so picking several wells
+one after another redraws them once rather than once per well. A drag across
+the plate redraws once, when you let go.
 
 Every plate map in the app — this one, the pickers on the Statistics, Image
 Browser, Preview and Home panels, the Datasets tools' own well
@@ -6397,7 +6413,7 @@ from the image the run segmented (the well's archive in `in/`). When that archiv
 (an output folder copied on its own), cannot be read, or the nanowell has no single owner tile (a fused one),
 the crop is cut from the lower-resolution montage instead, and the caption under the strip says so and why; a
 timepoint with no crop says why. **Pop out**, above the strip, opens the crops large in a window of their own —
-one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a change
+one panel per timepoint, all of a channel's panels on one brightness scale, so a cell that appears, divides or fades reads as a change
 between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
 it like any window. Its own row of controls sets the crops where you look at them: the image channel, **Range**
 (the display range), **Cells**, **Metrics** (the measurements under each crop, ending with the rim's focus — *rim 88% of sharpest* — as a
@@ -6405,7 +6421,16 @@ percentage of its well's sharpest rims at that timepoint, the same scale as the 
 reading below the threshold is the one left out as out of focus; *not judged* where the well had too few rims, *rim
 not fitted* where the rim was not found), **Labels** (each crop's timepoint
 and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
-Extremes view follow them. **Cells**, beside *Pop out*, draws the outline of each cell the run counted in the
+Extremes view follow them. A second row shapes the montage and saves it. **Timepoints** chooses which of the
+nanowell's timepoints are panels (fewer panels are drawn larger; *All timepoints* shows every one again).
+**Channels** adds channels beside the image channel — tick EGFP while the image channel is phase, say — each drawn as
+a row of crops of its own on its own brightness scale (that channel's **Range** when it has one, else its own 1st to
+99th percentile), and the caption names each channel's scale. **Grid** sets the shape: *Auto* (one channel wraps into
+a near-square grid; several take a row each, the timepoints across), *One row*, *One column* (the timepoints down, a
+column per channel) or *N across* (the timepoints wrap every N panels, each wrapped line keeping its channels
+together). **Save ▾** saves the figure exactly as drawn — *Save figure…* names the file after the nanowell and its
+channels (`A01_q3_r-2_phase_EGFP_over_time.png`) — copies it as SVG, or files it in Saved Plots. These choices are
+kept with the page's settings. **Cells**, beside *Pop out*, draws the outline of each cell the run counted in the
 crop's own nanowell — the pixels the run counted it on — on every crop: the strip, the pop-out and the Extremes
 montage. A cell the run kept no outline of (a plate analysed before outlines were kept, or one whose
 `nanowells/<well>_outlines.npz` is missing) is a dot at its centre instead, and the caption says how many are dots
@@ -9605,7 +9630,8 @@ the same, once, for the new shape.
 |---|---|
 | **☰** | Slides the sidebar out over the page from the left: the dataset, every section (Home, Plotting, Statistics, …) as a grid of tiles, the well plate and saved selections, just as at the desk. For picking wells, **Wells** in the bottom bar (below) is quicker. Its top line shows the well and nuclei counts the desktop's status bar shows. Tap wells as usual — the sidebar stays out while you pick several; a row or column label selects the whole row or column (except on the smFISH page, which picks one well at a time). Tap a section, **✕**, or the dimmed page at the right to slide it away. In Datasets it holds the tools. Analyze has no sidebar in phone layout — its form is the page — so **☰** is not shown there. |
 | **Review · Analyze · Datasets** | Switches mode, as on the desktop. |
-| **⋯** | **Text size** (S, M, L), **Reload dataset**, **Help**, **App log**, and **Desktop layout** — the way back. A **!** on it means the app log has something new. |
+| **‹** | Back to where you were before — the previous page, page tab or mode, as on the desktop. Greyed out when there is nowhere to go back to. |
+| **⋯** | **Text size** (S, M, L), **Reload dataset**, **Help**, **App log**, **Forward ›** (where **‹** came from; greyed out when there is nowhere to go forward to), and **Desktop layout** — the way back. A **!** on it means the app log has something new. Holding the phone sideways, **›** sits beside **‹** in the bar instead. |
 
 In Review a bar along the bottom of the screen — where your thumb already is —
 holds:
@@ -9614,7 +9640,7 @@ holds:
 |---|---|
 | **Bar Plots ▾** | Picks the page's view (Bar Plots, Line Graphs, Heat Map, …), and under **Go to** every other section (Home, Statistics, Image Browser, …) — so getting anywhere in Review is this one menu. |
 | **Wells** | Slides the well plate and its **All** / **None** up from the bottom, with the plot still in view above them: tap wells and watch them appear in the plot. A row or column label selects the whole row or column. The button shows how many wells are selected (**Wells · 4**); **Done ✕** puts the plate away. Pages that do not pick wells (Home, Statistics) do not show it. |
-| **⚙ Controls** | Slides the page's own controls — channel, property, display, threshold and the rest — up from the bottom, with the plot still in view above them so you can watch it change. **Done ✕** puts them away. |
+| **⚙ Controls** | Slides the page's own controls up from the bottom, with the plot still in view above them so you can watch it change. They read top to bottom in three groups, the same on every page: **Data** (channel, property, timepoints, threshold, …), one per row with its name on the left and the control filling the rest; **Display** (Display ▾, Fold change ▾, …); and **Actions** (Save ▾, Reset Order, Properties, …), as a row of equal buttons. A note about the data sits under the **Data** heading. **Done ✕** puts them away. |
 
 **Wells** and **⚙ Controls** both rise from just above the bar, so **Done ✕** is
 where you tapped to open them; opening one puts the other away. Saved
@@ -9758,6 +9784,21 @@ worker loads StarDist once and reuses it across every FOV in that well.
   with `tf_threads` defaulting to 4. Adjust under Advanced ▸ Performance if your
   machine has very many cores.
 
+**Memory while the app is in the background.** Review keeps the wells,
+images and statistics it has read in memory so redraws are quick. Once All-Well
+has been in the background for 5 minutes (another window in front, or the
+screen locked), it gives that memory back; the first redraw after you return
+reads back from disk what it needs, which takes a moment on a large plate.
+While wells are being read back, the QC, crop and gating counts say how many
+wells they were counted over. Set the environment variable
+`ALLWELL_IDLE_RELEASE_MIN` to change the minutes, or to `0` to keep everything
+in memory. Analysis runs are not affected.
+
+Stopping a run, or closing the app while one is running, now ends all of its
+worker processes. On Windows, before this, the workers of a stopped run could
+stay behind out of sight, each holding gigabytes of memory, until the computer
+was restarted.
+
 Temporary directories (`_tmp_extract_*`, `_tmp_images_*`) are removed when
 each well completes, even after a worker error. Stragglers from a crashed
 run of the same plate are cleaned up at the start of its next run; those of
@@ -9808,8 +9849,8 @@ architecture-specific and can't produce a universal binary.
 |---|---|
 | `⌘O` / `Ctrl+O` | Open a results folder |
 | `⌘E` / `Ctrl+E` | Save the active figure (drives the visible plot card's Save figure action) |
-| `⌘←` / `Ctrl+←` | Back through tab history |
-| `⌘→` / `Ctrl+→` | Forward through tab history |
+| `⌘←` / `Ctrl+←` | Back (the **‹** button) |
+| `⌘→` / `Ctrl+→` | Forward (the **›** button) |
 | `⌘/` / `Ctrl+/` | Open the help drawer |
 | `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception. Each entry starts with the time it was logged (hours, minutes, seconds), and a blank line separates one entry from the next, so a multi-line entry such as a traceback reads as one. While the drawer is shut, a "!" badge on the status bar's log button says new lines have arrived — blue for routine messages, amber once a warning has come in, red once an error has — and it clears when you open the drawer |
 | `⌘B` / `Ctrl+B` | Collapse / expand the left sidebar (same as the top-bar panel button) |

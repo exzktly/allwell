@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QLineEdit, QWidget
 
-from analyze.domain.well_list import parse_well_list
+from analyze.domain.well_list import parse_well_list, well_scope_error
 from widgets.value_combo import ValueCombo
 
 #: The existing-output choice, ``(value, label)``. ``skip`` is the pipeline's
@@ -54,7 +54,8 @@ ONLY_WELLS_TIP = (
     "means the whole plate.\n"
     "Combine with Fill in what's missing to finish partial wells, and with Force these "
     "wells to regenerate named ones. This field is never restored from a "
-    "previous run's settings: a subset is a decision for this run only.")
+    "previous run's settings: a subset is a decision for this run only.\n"
+    "A colon writes a rectangle of wells: A01:C06 is rows A–C, columns 1–6.")
 
 SKIP_WELLS_TIP = (
     "Comma-separated wells to leave out of this run: they are not processed, "
@@ -62,7 +63,8 @@ SKIP_WELLS_TIP = (
     "they are. Every other well runs (or, with Only these wells, every well "
     "named there that is not skipped). A skipped well is skipped even if Force "
     "these wells names it. A named well the input does not hold is reported "
-    "in the log. Never restored from a previous run's settings.")
+    "in the log. Never restored from a previous run's settings.\n"
+    "A colon writes a rectangle of wells: A01:C06 is rows A–C, columns 1–6.")
 
 FORCE_WELLS_TIP = (
     "Comma-separated wells to reprocess in full, whatever else the run "
@@ -70,7 +72,8 @@ FORCE_WELLS_TIP = (
     "CSV is missing looks complete to an incremental run — its archive "
     "members are counted as already done — so only forcing it "
     "regenerates the CSV. Re-segments those wells and overwrites their "
-    "outputs; everything else is unaffected.")
+    "outputs; everything else is unaffected.\n"
+    "A colon writes a rectangle of wells: A01:C06 is rows A–C, columns 1–6.")
 
 
 class AnalyzeRunScopeMixin:
@@ -102,6 +105,21 @@ class AnalyzeRunScopeMixin:
         if forced:
             parts.append(f"redo {forced}")
         return " · ".join(parts)
+
+    def _well_scope_validation_error(self, *, check_input: bool = True) -> str | None:
+        """Block the run when a scope field holds an entry that is not a well or a range of wells.
+
+        *check_input* is accepted for the run-problem roster's signature and not read: the check is
+        about the text alone.
+        """
+        del check_input
+        fields = {}
+        for label, attr in (("Only these wells", "_only_wells_edit"), ("Skip these wells", "_skip_wells_edit"),
+                            ("Force these wells", "_force_wells_edit")):
+            edit = getattr(self, attr, None)
+            if edit is not None:
+                fields[label] = edit.text()
+        return well_scope_error(fields)
 
     def _set_existing_output(self, *, force=None, incremental=None) -> None:
         """Set the choice from the pipeline's two flags, as a sidecar records

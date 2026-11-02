@@ -164,6 +164,68 @@ def worker_initializer() -> None:
     install_handlers()
 
 
+# ── a pool worker outliving its pool ─────────────────────────────────────────
+
+#: The exit status of a worker that ended because the process that spawned it had.
+ORPHAN_EXIT_CODE = 3
+
+
+def exit_with_parent() -> None:
+    """In a spawned pool worker: end this process as soon as the process that spawned it ends.
+
+    A ``ProcessPoolExecutor`` worker waits for its next task by reading the
+    pool's call queue, and a pickled queue carries *both* ends of its pipe — so
+    the worker itself holds the write end it is waiting on, and the pipe never
+    reports end-of-file when the pool's process dies. A worker whose parent was
+    killed therefore waits for ever. Measured from source: three spawned
+    workers of a pool whose parent was SIGKILLed were still alive, re-parented
+    to init, minutes later.
+
+    That is what Windows does on every Stop: ``services.subprocess_kill`` ends
+    the pipeline's own process (``TerminateProcess`` reaches no children), and
+    :func:`watch_parent` is POSIX-only. Each of the pipeline's well workers has
+    TensorFlow, a StarDist model and a well's images loaded — gigabytes of
+    committed memory apiece on Windows — and every orphan held its share of the
+    page file until the machine was restarted, long after the app had closed.
+
+    So the worker waits, on a daemon thread, on the parent's sentinel
+    (``multiprocessing.parent_process().sentinel``: on Windows a handle to the
+    parent process, signalled when it exits; on POSIX the read end of the pipe
+    the parent spawned it through, at end-of-file when the parent is gone) and
+    calls ``os._exit`` when it fires. ``os._exit``, because there is nothing
+    left to report to and an orderly exit would join the very queue threads
+    that are blocked. A pool that shuts down normally joins its workers before
+    the parent exits, so this never fires there. A no-op in a process that is
+    not a spawned child.
+    """
+    import multiprocessing
+    from multiprocessing.connection import wait
+
+    parent = multiprocessing.parent_process()
+    if parent is None:
+        return
+    try:
+        sentinel = parent.sentinel
+    except (AttributeError, ValueError):
+        swallowed("pool worker has no parent sentinel; it cannot notice its parent exiting")
+        return
+
+    def _watch() -> None:
+        try:
+            wait([sentinel])
+        except (OSError, ValueError):
+            swallowed("pool worker stopped watching its parent")
+            return
+        os._exit(ORPHAN_EXIT_CODE)
+
+    threading.Thread(target=_watch, name="aw-exit-with-parent", daemon=True).start()
+
+
+def pool_worker_initializer() -> None:
+    """``ProcessPoolExecutor(initializer=...)`` for a pool with no other setup: :func:`exit_with_parent`."""
+    exit_with_parent()
+
+
 # ── outliving the app ────────────────────────────────────────────────────────
 
 #: Set by the app when it launches a local pipeline: the pid of the process

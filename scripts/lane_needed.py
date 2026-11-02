@@ -173,6 +173,9 @@ def _path_strings(tree: ast.AST) -> tuple[set[str], set[str]]:
 
 _PARSED: dict[tuple[str, str], tuple[str, ast.Module] | None] = {}
 
+#: A string that names a file ends in an extension: a file whose text has no such string names nothing.
+_MAY_NAME_A_FILE = re.compile(r"""\.(py|txt|toml|json|spec|sh|ps1|md|csv|ini|cfg|ya?ml)["']""")
+
 
 def _parsed(root: Path, rel: str) -> tuple[str, ast.Module] | None:
     """*rel*'s text and syntax tree, read and parsed once per run; ``None`` when it cannot be."""
@@ -197,6 +200,12 @@ def namers(gate: str, tracked: list[str], root: Path = REPO) -> dict[str, dict[s
     rosters = roster_files(gate)
     out: dict[str, dict[str, bool]] = {}
     for rel in sorted(rosters):
+        try:
+            text = (root / rel).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if not _MAY_NAME_A_FILE.search(text):
+            continue                                        # no string in it can name a file: no need to parse it
         parsed = _parsed(root, rel)
         if parsed is None:
             continue
@@ -943,6 +952,28 @@ def _tracked_files(root: Path) -> list[str]:
 
 _ROOTISH = re.compile(r"\b(ROOT|REPO|REPO_ROOT|_ROOT|HERE|PROJECT)\b|parents\[|parent\.parent|__file__")
 _WALKS = {"rglob", "glob", "walk", "iterdir", "listdir", "scandir"}
+_WHOLE_TREE = re.compile(r"\b_repo_scan\b|\bpython_sources\b|\bparsed_sources\b|\broot_modules\b")
+_WHOLE_TREE_NAMES = {"python_sources", "parsed_sources", "root_modules"}
+
+
+def _reads_whole_tree(tree: ast.Module) -> bool:
+    """Whether *tree* imports ``tests/_repo_scan`` or uses one of its whole-tree readers — in code, not only in a
+    string, as a test that builds synthetic sources mentioning them does."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[-1] == "_repo_scan":
+            return True
+        if isinstance(node, ast.ImportFrom) and any(a.name == "_repo_scan" for a in node.names):
+            return True
+        if isinstance(node, ast.Import) and any(a.name.split(".")[-1] == "_repo_scan" for a in node.names):
+            return True
+        if isinstance(node, ast.Name) and node.id in _WHOLE_TREE_NAMES:
+            return True
+        if isinstance(node, ast.Attribute) and node.attr in _WHOLE_TREE_NAMES:
+            return True
+    return False
+
+
+_MAY_WALK = re.compile(r"\b(rglob|glob|walk|iterdir|listdir|scandir|import_module)\(")
 
 
 def always_run(files: set[str], root: Path = REPO) -> dict[str, str]:
@@ -952,12 +983,20 @@ def always_run(files: set[str], root: Path = REPO) -> dict[str, str]:
     reads, so no change can be shown not to reach it."""
     out: dict[str, str] = {}
     for rel in sorted(files):
+        try:
+            text = (root / rel).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            out[rel] = "cannot be read, so cannot be narrowed"
+            continue
+        whole = _WHOLE_TREE.search(text)
+        if not whole and not _MAY_WALK.search(text):
+            continue                                        # nothing to find: no need to parse it
         parsed = _parsed(root, rel)
         if parsed is None:
             out[rel] = "cannot be read, so cannot be narrowed"
             continue
-        text, tree = parsed
-        if re.search(r"\b_repo_scan\b|\bpython_sources\b|\bparsed_sources\b|\broot_modules\b", text):
+        tree = parsed[1]
+        if whole and _reads_whole_tree(tree):
             out[rel] = "reads the whole source tree"
             continue
         for node in ast.walk(tree):

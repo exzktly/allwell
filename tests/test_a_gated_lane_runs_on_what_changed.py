@@ -575,3 +575,12 @@ def test_an_error_while_deciding_runs_the_whole_lane_rather_than_skipping_it(lan
     out = capsys.readouterr()
     assert out.out.strip() == "ALL" and "could not decide (RuntimeError: boom)" in out.err
     assert lane.main(["remote"]) == 0
+
+
+def test_a_test_that_only_names_the_tree_reader_in_a_string_is_narrowed_as_usual(lane, tmp_path):
+    """A test that builds synthetic sources mentioning ``tests._repo_scan`` does not read the tree itself."""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text(
+        'SOURCE = "from tests._repo_scan import python_sources"\n\ndef test_x():\n    assert SOURCE\n',
+        encoding="utf-8")
+    assert lane.always_run({"tests/test_x.py"}, tmp_path) == {}

@@ -213,6 +213,24 @@ class RowCache(MutableMapping):
             self.evictions += len(dropped)
             return len(dropped)
 
+    def trim(self) -> tuple[int, int]:
+        """Drop every frame not pinned, as the app going idle; return ``(wells, bytes)`` dropped.
+
+        Unlike :meth:`release` this is not the budget giving way, so it does not
+        count as evictions: the plate still fits, and the next view to ask for a
+        well reads it back (``data_loading.get_rows``) exactly as after an
+        eviction. See ``review/core/idle_memory.py``.
+        """
+        with self._lock:
+            dropped = [label for label in self._frames if label not in self._pins]
+            freed = 0
+            for label in dropped:
+                del self._frames[label]
+                size = self._sizes.pop(label, 0)
+                self._held -= size
+                freed += size
+            return len(dropped), freed
+
     # ── the budget ───────────────────────────────────────────────────────────
 
     @property

@@ -9753,6 +9753,19 @@ worker loads StarDist once and reuses it across every FOV in that well.
   with `tf_threads` defaulting to 4. Adjust under Advanced ▸ Performance if your
   machine has very many cores.
 
+**Memory while the app is in the background.** Review keeps the wells,
+images and statistics it has read in memory so redraws are quick. Once All-Well
+has been in the background for 5 minutes (another window in front, or the
+screen locked), it gives that memory back; the first redraw after you return
+reads back from disk what it needs, which takes a moment on a large plate.
+While wells are being read back, the QC, crop and gating counts say how many
+wells they were counted over. Set the environment variable
+`ALLWELL_IDLE_RELEASE_MIN` to change the minutes, or to `0` to keep everything
+in memory. The window also limits numpy's maths libraries to 4 threads each,
+which stops it reserving page file for threads it never uses; set
+`OPENBLAS_NUM_THREADS` yourself to choose another number. Analysis runs are not
+affected by either.
+
 Temporary directories (`_tmp_extract_*`, `_tmp_images_*`) are removed when
 each well completes, even after a worker error. Stragglers from a crashed
 run of the same plate are cleaned up at the start of its next run; those of

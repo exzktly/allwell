@@ -231,18 +231,24 @@ class _DecodedArrayCache:
                 _k, (_a, nb) = self._store.popitem(last=False)
                 self._total_bytes -= nb
 
-    def invalidate(self) -> None:
+    def invalidate(self) -> int:
+        """Drop every decoded array; return the bytes they held."""
         with self._lock:
+            freed = self._total_bytes
             self._store.clear()
             self._total_bytes = 0
+            return freed
 
 
 _DECODE_CACHE = _DecodedArrayCache()
 
 
-def invalidate_decode_cache() -> None:
-    """Drop every cached decoded array — called on dataset load (new pixels)."""
-    _DECODE_CACHE.invalidate()
+def invalidate_decode_cache() -> int:
+    """Drop every cached decoded array — on dataset load (new pixels), and when the app goes idle.
+
+    Returns the bytes the dropped arrays held.
+    """
+    return _DECODE_CACHE.invalidate()
 
 
 def _source_mtime_ns(ref: ImgRef) -> int:

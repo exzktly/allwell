@@ -511,10 +511,18 @@ def on_sidebar_plate_selection_changed(ctx, ids) -> None:
         return
     app._app_state.selection.selected_wells = new_set
     app._refresh_sidebar_map()
-    # Coalesce the commit. A drag through 96 cells fires this handler
-    # 96 times in one event-loop tick; without coalescing each one would
-    # trigger a full bar/scatter/line redraw and an export-style reapply.
-    # The deferred call fires once at the end of the tick.
+    # A press or a drag still in progress commits nothing: a drag fires this
+    # once per well it enters, each from its own mouse event and so its own
+    # event-loop pass, and the end-of-tick deferral below merged none of them —
+    # every well entered redrew every plot. The release's
+    # ``selectionDragFinished`` commits the gesture once
+    # (``on_sidebar_plate_drag_finished``).
+    plate = ctx.widgets.get_or_none("_sidebar_plate")
+    if plate is not None and getattr(plate, "isSelecting", lambda: False)():
+        return
+    # A change from anywhere else (a programmatic ``set_ids``, the All /
+    # None buttons) is coalesced to the end of the tick, which merges a burst
+    # made in one pass.
     if not app._app_state.selection.plate_commit_pending:
         app._app_state.selection.plate_commit_pending = True
         QTimer.singleShot(0, app._plate_commit_deferred)

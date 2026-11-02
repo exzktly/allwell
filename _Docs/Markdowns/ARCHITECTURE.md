@@ -19796,7 +19796,13 @@ WellPlateSelector.selectionChanged       ← widget signal
         ▼
 ReviewApp._on_sidebar_plate_selection_changed(ids)
         ├── updates app._selected_wells
-        └── app._refresh_sidebar_map()   ← updates colours; no plot redraw yet
+        ├── app._refresh_sidebar_map()   ← updates colours; no plot redraw yet
+        └── commits nothing while plate.isSelecting() — the press-to-release
+            of a click or drag. A drag fires selectionChanged once per well it
+            enters, each from its own mouse event, so an end-of-tick deferral
+            merges none of them; the release commits the gesture once. A
+            change made outside a gesture (set_ids, All / None) is deferred
+            to the end of the tick instead (tests/test_a_plate_drag_commits_once.py).
 
 User releases mouse / clicks "Select all" / "Select none"
         │

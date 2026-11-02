@@ -154,6 +154,12 @@ def flow_group(parent: QWidget | None, *items, spacing: int = 4) -> QWidget:
 _DEFAULT_H_SPACING = 14
 _DEFAULT_V_SPACING = theme.Spacing.xs   # 4
 
+#: Dynamic Qt property: a widget carrying it set to ``True`` always starts a new
+#: line of its :class:`FlowLayout`, however much room the current line has left.
+#: A property on the widget rather than a list on the layout, so it survives the
+#: widget being moved within the flow (``move_to_end``, ``ControlBand.setStacked``).
+BREAK_BEFORE = "flowBreakBefore"
+
 
 class FlowLayout(QLayout):
     """Left-to-right layout that wraps to the next line on overflow.
@@ -357,7 +363,9 @@ class FlowLayout(QLayout):
             # of the Composite/Crop overlap).
             size = item.sizeHint().expandedTo(item.minimumSize())
             next_x = x + size.width() + space_x
-            if next_x - space_x > effective.right() and line_height > 0:
+            overflows = next_x - space_x > effective.right()
+            breaks = widget is not None and bool(widget.property(BREAK_BEFORE))
+            if (overflows or breaks) and line_height > 0:
                 # Wrap: flush the finished line centred, then start a new one.
                 _flush()
                 line = []

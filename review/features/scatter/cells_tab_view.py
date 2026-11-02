@@ -86,7 +86,9 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     tp_button = reg.register("_scatter_tp_button", QPushButton("Timepoints: 0 selected", ctrl))
     tp_button.setProperty("variant", "secondary")
     tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
-    ctrl.add_scope("", tp_button)
+    # Its own line: it picks the timepoints of both axes, and straight after the
+    # Y-axis property it read as Y's alone.
+    ctrl.add_scope("", tp_button, new_line=True)
     # Hidden legacy single-tp combo — kept so export / save-figure paths that
     # still read ``_scatter_tp_var.currentText()`` see a valid timepoint string
     # (the first selected one).

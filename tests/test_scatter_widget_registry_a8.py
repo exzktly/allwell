@@ -55,3 +55,28 @@ def test_agg_build_registers_handles(viewer_app, qtbot):
     build_scatter_agg_tab(app._ctx, parent)
     _check(app, _AGG)
     assert app._scatter_agg_stat_x_var is app._scatter_agg_stat_x_cb
+
+
+@pytest.mark.parametrize("builder, button, y_property", [
+    (build_scatter_cells_tab, "_scatter_tp_button", "_scatter_metric_y_cb"),
+    (build_scatter_agg_tab, "_scatter_agg_tp_button", "_scatter_agg_metric_y_cb"),
+])
+def test_the_timepoints_button_sits_on_its_own_line(viewer_app, qtbot, builder, button, y_property):
+    """Timepoints picks the timepoints of both axes, so it starts a line of its
+    own rather than reading as part of the Y-axis controls beside it — through
+    the real builder, at a band width where everything would fit on one line."""
+    from PySide6.QtCore import QRect
+
+    app = viewer_app
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    builder(app._ctx, parent)
+    btn = app._ctx.widgets.get_or_none(button)
+    y_group = app._ctx.widgets.get_or_none(y_property).parent()   # its "property" label group
+    host = btn.parent()
+    assert host is y_group.parent(), "the button and the Y-axis property are not in one flow"
+    for w in (host, btn, y_group):
+        w.setVisible(True)
+    host.layout().setGeometry(QRect(0, 0, 5000, 400))
+    assert btn.geometry().top() > y_group.geometry().bottom(), (
+        f"Timepoints shares the Y-axis line: {btn.geometry()} vs {y_group.geometry()}")

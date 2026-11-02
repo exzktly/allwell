@@ -46,7 +46,7 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSizePolicy, QWidg
 
 from ui import theme
 from widgets.checkbox_fit import fit_checkbox_width
-from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
+from widgets.flow_layout import BREAK_BEFORE, FlowLayout, flow_group, sync_flow_height
 
 
 #: Sentinel for "this band's page has not chosen a leaf yet" — distinct from
@@ -96,8 +96,8 @@ class ControlBandSlot(QWidget):
     def name(self) -> str:
         return self._name
 
-    def add_scope(self, label: str, *widgets: QWidget) -> QWidget:
-        return self._claim(self._band.add_scope(label, *widgets))
+    def add_scope(self, label: str, *widgets: QWidget, new_line: bool = False) -> QWidget:
+        return self._claim(self._band.add_scope(label, *widgets, new_line=new_line))
 
     def add_action(self, widget: QWidget) -> QWidget:
         return self._claim(self._band.add_action(widget))
@@ -198,7 +198,7 @@ class ControlBand(QWidget):
 
     # ── building ────────────────────────────────────────────────────────────
     def add_scope(self, label: str, *widgets: QWidget,
-                  trailing: bool = False) -> QWidget:
+                  trailing: bool = False, new_line: bool = False) -> QWidget:
         """Add a scope control, optionally with a label bound to it.
 
         The label and its control(s) are added as **one** flow item, so a wrap
@@ -213,6 +213,12 @@ class ControlBand(QWidget):
         Threshold ended up mid-row with Timepoints after it. A flag keeps the
         rule with the control instead of making each builder remember to call
         it last.
+
+        ``new_line=True`` starts the item on a line of its own (and so everything
+        after it too), however wide the band is. For a control that applies to
+        everything before it rather than to its neighbour: Scatter's Timepoints
+        sat straight after the Y-axis property and read as Y's alone, when it
+        picks the timepoints of both axes.
         """
         if not widgets:
             raise ValueError("add_scope needs at least one widget")
@@ -228,6 +234,8 @@ class ControlBand(QWidget):
         else:
             item = flow_group(self._scope_host, *widgets)
             item.setObjectName("ControlBandGroup")
+        if new_line:
+            item.setProperty(BREAK_BEFORE, True)
         if trailing:
             self._trailing.append(item)
         self._scope.addWidget(item)

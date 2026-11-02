@@ -532,3 +532,23 @@ def test_the_band_is_one_row_shorter_for_hiding_a_slot(styled_app):
     band.show_slot("left")
     styled_app.processEvents()
     assert band.heightForWidth(420) <= everything
+
+
+def test_new_line_scope_item_starts_its_own_line_in_a_wide_band(styled_app):
+    """``add_scope(..., new_line=True)`` puts the item on a line of its own even
+    when the band has room to spare, and the slot passes the flag through."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QComboBox, QPushButton
+    from widgets.control_band import ControlBand
+
+    band = ControlBand()
+    slot = band.slot("leaf")
+    band.show_slot("leaf")
+    first = slot.add_scope("Y-axis", QComboBox())
+    tp = slot.add_scope("", QPushButton("Timepoints: 1 selected"), new_line=True)
+    band.show()
+    styled_app.processEvents()
+    band.scope_host.layout().setGeometry(QRect(0, 0, 3000, 400))
+    assert tp.geometry().top() > first.geometry().bottom(), (
+        f"Timepoints shares the Y-axis line: {tp.geometry()} vs {first.geometry()}")
+    assert tp.geometry().left() == first.geometry().left()

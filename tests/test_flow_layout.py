@@ -96,3 +96,35 @@ def test_the_visibility_watcher_keeps_no_per_instance_state(qapp):
     )
     # And it still does its job: consumes nothing, raises nothing.
     assert watcher.eventFilter(label, QEvent(QEvent.Hide)) is False
+
+
+def test_a_break_before_item_starts_a_new_line_with_room_to_spare(qapp):
+    """``BREAK_BEFORE`` wraps an item that would fit on the current line, and
+    every item after it follows it onto the new line."""
+    from widgets.flow_layout import BREAK_BEFORE
+
+    host, widgets = _build(qapp, [(40, 24)] * 4, 1000, 400)
+    flat = {w.geometry().top() for w in widgets}
+    assert len(flat) == 1, "without the property four 40px items share one 1000px line"
+
+    from PySide6.QtCore import QRect
+
+    widgets[2].setProperty(BREAK_BEFORE, True)
+    host.layout().setGeometry(QRect(0, 0, 1000, 400))
+    tops = [w.geometry().top() for w in widgets]
+    assert tops[0] == tops[1]
+    assert tops[2] == tops[3]
+    assert tops[2] > tops[1], f"the break item stayed on the first line: tops={tops}"
+    assert widgets[2].geometry().left() == widgets[0].geometry().left(), \
+        "the new line does not start at the left edge"
+
+
+def test_a_break_before_first_item_adds_no_empty_line(qapp):
+    from widgets.flow_layout import BREAK_BEFORE
+    from PySide6.QtCore import QRect
+
+    host, widgets = _build(qapp, [(40, 24)] * 2, 1000, 400)
+    widgets[0].setProperty(BREAK_BEFORE, True)
+    host.layout().setGeometry(QRect(0, 0, 1000, 400))
+    assert widgets[0].geometry().top() == 0
+    assert host.layout().heightForWidth(1000) == 24

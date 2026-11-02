@@ -93,7 +93,9 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     agg_tp_button = reg.register("_scatter_agg_tp_button", QPushButton("Timepoints: 0 selected"))
     agg_tp_button.setProperty("variant", "secondary")
     agg_tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
-    ctrl.add_scope("", agg_tp_button)
+    # Its own line: it picks the timepoints of both axes, and straight after the
+    # Y-axis property it read as Y's alone.
+    ctrl.add_scope("", agg_tp_button, new_line=True)
     ctx.runtime.scatter.agg_tp_selections = {}
     # Stash the aggregate tp-selection summary refresher so view_state restore can
     # repaint the button's readout without importing this feature module.

@@ -142,6 +142,8 @@ def test_an_incremental_run_recomputes_a_timepoint_whose_anchor_was_set_or_moved
         "24h": {"status": "ok", "record_digest": "d", "origin_method": "plate_rigid", "anchors_digest": "then"},
         "48h": {"status": "ok", "record_digest": "d", "origin_method": "fiducial", "anchors_digest": "then"}}}
     (tmp_path / nt.NANOWELL_DIR / "A01_grid.json").write_text(json.dumps(grid))
+    nt.write_sites_csv(tmp_path / nt.NANOWELL_DIR / "A01.csv",
+                       [{"timepoint": tp, "nw_q": 0, "nw_r": 0} for tp in ("0h", "24h", "48h")], [])
 
     def kept(anchors, digest):
         prior = nt._prior_state(tmp_path, "A01", "m", "k", ["0h", "24h", "48h"], {}, anchors, digest)
@@ -168,3 +170,25 @@ def test_a_manual_anchor_is_evidence_the_plate_re_anchoring_can_carry():
     grids, truth = _plate_grids(target_ref_method="manual")
     predictions, reasons = nt.plan_reanchor(grids)
     assert reasons == {} and "24h" in predictions["B02"]
+
+
+def test_an_incremental_run_measures_again_a_timepoint_whose_site_rows_are_missing(tmp_path, monkeypatch):
+    """The grid record says 0h and 24h were measured; the site table holds only 24h's rows (or is gone). Kept, 0h was
+    written back with no rows under a record still saying ``ok``, and a well whose every timepoint was so kept came
+    back as a header-only table that Review dropped with no reason given. A timepoint is kept only with its rows."""
+    import pipeline.settings_record as settings_record
+    from pipeline import nanowell_measure as nm
+
+    monkeypatch.setattr(settings_record, "well_settings_allow_reuse", lambda *a: True)
+    monkeypatch.setattr(nr, "record_digest", lambda record, well, tp: "d")
+    (tmp_path / nt.NANOWELL_DIR).mkdir()
+    blocks = {tp: {"status": "ok", "record_digest": "d", "origin_method": "fiducial"} for tp in ("0h", "24h")}
+    (tmp_path / nt.NANOWELL_DIR / "A01_grid.json").write_text(json.dumps(
+        {"scheme_version": nt.SCHEME_VERSION, "measure_version": nm.MEASURE_VERSION, "timepoints": blocks}))
+
+    def prior():
+        return nt._prior_state(tmp_path, "A01", "m", "k", ["0h", "24h"], {}, {}, "")
+    assert prior() is None                                                # no site table: nothing to reuse
+    nt.write_sites_csv(tmp_path / nt.NANOWELL_DIR / "A01.csv", [{"timepoint": "24h", "nw_q": 0, "nw_r": 0}], [])
+    found = prior()
+    assert found["kept"] == {"24h"} and [r["timepoint"] for r in found["sites"]] == ["24h"]

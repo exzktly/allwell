@@ -381,17 +381,34 @@ def read_well_part(folder: Path, well: str, cell_files, wells) -> WellPart:
                                       f"(e.g. ({int(first['nw_q'])}, {int(first['nw_r'])}) at "
                                       f"{first['timepoint']}), so its nanowells cannot be followed over time; "
                                       "the well is left out.")
+    timepoints = grid.get("timepoints") or {}
+    # A well the run placed no array in writes a header-only table: read as zero rows it adds no well to the data
+    # and would be dropped without a word, the reason sitting unread in its grid record. Say it (CLAUDE.md §7).
+    empty = _no_sites_problem(well, timepoints) if table.empty else ""
     tables: dict = {}
     brightness = _cell_brightness(_cell_files_of(well, cell_files, wells), well, tables)
     from pipeline.nanowell_identity import exclusions, verdicts
 
-    return WellPart(well, table=table, grid=grid.get("timepoints") or {},
+    return WellPart(well, table=table, grid=timepoints, problem=empty,
                     background=well_mode(table.columns, grid.get("settings")),
                     roster_rule=roster_rule(grid.get("array_radius")),
                     reanalysed=(grid.get("array_radius") or {}).get("reanalysed_because") or "",
                     brightness=brightness, cell_table=tables.get(well),
                     identity=verdicts(folder.parent, well, list(grid.get("timepoints") or {})),
                     identity_excluded=exclusions(folder.parent, well))
+
+
+def _no_sites_problem(well: str, timepoints: dict) -> str:
+    """Why *well*'s table has no rows, from its grid record: each timepoint's status and reason, timepoints that
+    share both named together, in the record's order."""
+    by_cause: dict = {}
+    for tp, block in timepoints.items():
+        block = block if isinstance(block, dict) else {}
+        status, reason = str(block.get("status") or "no status"), str(block.get("reason") or "").strip()
+        by_cause.setdefault(f"{status} ({reason})" if reason else status, []).append(str(tp))
+    causes = "; ".join(f"{', '.join(tps)}: {cause}" for cause, tps in by_cause.items())
+    return (f"{well}: the run found no nanowell to measure at any timepoint, so its nanowell table has no rows"
+            + (f" — {causes}." if causes else ", and its grid record names no timepoint."))
 
 
 def _phase_token(sidecar: dict) -> str:

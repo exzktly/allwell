@@ -552,12 +552,18 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
             and (grid["timepoints"][tp].get("origin_method") != "plate_rigid"
                  or grid["timepoints"][tp].get("anchors_digest", "") == anchors_digest)
             and (reference_key is None or grid["timepoints"][tp].get(nref.KEY_FIELD) == reference_key(tp))}
+    sites_path = Path(prior_dir) / NANOWELL_DIR / f"{well_label}.csv"
+    rows = _read_rows(sites_path)
+    # The grid record says a timepoint was measured; its rows in the site table are the measurement. A timepoint whose
+    # rows are not there (a table lost, never fetched, or written apart from its record) is measured again: kept, it
+    # would be written back with no rows while its record still said ``ok``, and Review would drop the well without a
+    # reason.
+    kept &= {r.get("timepoint") for r in rows}
     if not kept:
         return None
-    sites_path = Path(prior_dir) / NANOWELL_DIR / f"{well_label}.csv"
     # A finished well's CSV is gzipped (``write_well_csv``): either spelling, plain winning (``util/csv_gz``).
     cells_path = existing_csv(Path(prior_dir) / f"{csv_prefix}_{well_label}.csv")
-    sites = [r for r in _read_rows(sites_path) if r["timepoint"] in kept]
+    sites = [r for r in rows if r["timepoint"] in kept]
     cells = [with_timepoint_hours(r) for r in _read_rows(cells_path) if r["timepoint"] in kept]
     return {"grid": grid, "kept": kept, "sites": sites, "cells": cells,
             "order": {tp: k for k, tp in enumerate(timepoints)}}

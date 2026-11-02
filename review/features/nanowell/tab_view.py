@@ -511,7 +511,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         computing.raise_()
 
     def page_visible() -> bool:
-        return band.isVisible()          # the band shows whenever the page does, empty state or not
+        # The page's own area, never its band: phone layout lends the band to its Controls sheet, which hides it while
+        # the page is on screen, and judged by the band the page skipped every read a selection asked for.
+        return plot_area.isVisible()
 
     controls = (view_bar, metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, moving_spin,
                 baseline_moving_spin,

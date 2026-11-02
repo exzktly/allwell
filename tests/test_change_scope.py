@@ -181,8 +181,11 @@ def test_the_fast_lane_runs_only_the_docs_lane_for_a_docs_change(tmp_path):
     run = _run_lane(root, "--no-ui")
     assert run.returncode == 0, run.stdout + run.stderr
     assert "1 passed" in run.stdout, run.stdout
-    # The failing test outside the lane runs once the change is code, which is what proves it was left out.
-    _write(root, "app.py", "X = 4\n")
+    # The failing test outside the docs lane runs once a code change reaches it, which is what proves the docs lane
+    # left it out. A code change runs the fast-lane files it reaches (scripts/lane_needed.py fast), so the change
+    # that reaches it here is to the test itself.
+    _write(root, "tests/test_unrelated.py",
+           "def test_fails():\n    assert False, 'outside the docs lane'  # edited\n")
     run = _run_lane(root, "--no-ui")
     assert run.returncode != 0 and "outside the docs lane" in run.stdout, run.stdout
 

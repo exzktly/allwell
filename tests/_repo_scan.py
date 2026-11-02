@@ -106,7 +106,44 @@ def rel(path: Path) -> str:
 
 @lru_cache(maxsize=None)
 def _parse_text(source: str, filename: str) -> ast.Module:
-    return ast.parse(source, filename=filename)
+    tree = ast.parse(source, filename=filename)
+    _SHARED[id(tree)] = [tree, None]
+    return tree
+
+
+# ── Walking ──────────────────────────────────────────────────────────────────
+#
+# Parsing once per process left the other half of every guard's cost: walking.
+# ``ast.walk`` is a generator written in Python, and a guard that wants every
+# call, import or attribute in the tree walks all of it — so 150-odd guards each
+# walked the same shared trees again, and the walk was most of what they spent.
+# A shared tree is never mutated (see above), so its walk is the same sequence
+# every time: the first walk of each shared module is recorded and later walks
+# replay the list, in the same order. Any other node — a subtree, a tree a test
+# built itself — walks as it always did. ``tests/test_guards_bite.py`` holds the
+# replay to the walk it replaces, node for node.
+_SHARED: dict[int, list] = {}
+_ast_walk = ast.walk
+
+
+def _walk(node):
+    entry = _SHARED.get(id(node))
+    if entry is None or entry[0] is not node:
+        return _ast_walk(node)
+    if entry[1] is None:
+        entry[1] = list(_ast_walk(node))
+    return iter(entry[1])
+
+
+ast.walk = _walk
+
+
+def parse_text(source: str, filename: str = "<unknown>") -> ast.Module:
+    """The parsed module for repository *source* text, from the same per-process cache as :func:`parse_source`.
+
+    For a guard that is handed a file's text rather than its path — usually because its own bite test hands it
+    synthetic text too. The tree is shared: read it, never mutate it."""
+    return _parse_text(source, filename)
 
 
 def parse_source(path: Path | str) -> ast.Module:

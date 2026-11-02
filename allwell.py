@@ -723,10 +723,13 @@ class AllWellApp(QMainWindow):
             # shows a plate for the page on screen, and the main frame's All /
             # None footer under it while that frame is the page's — the Image
             # Table's and Segmentation's pickers carry their own.
-            from review.core.rail_plate import SLOT_KEY, rail_plates
+            # Read by its registry key, not through ``rail_plate``: a module
+            # inside Review is not imported from out here.
+            from widgets.well_plate_selector import WellPlateSelector
             widgets = review._ctx.widgets
-            slot = widgets.get_or_none(SLOT_KEY)
-            if slot is None or not any(not p.isHidden() for p in rail_plates(review._ctx)):
+            slot = widgets.get_or_none("_sidebar_plate_slot")
+            plates = slot.findChildren(WellPlateSelector) if slot is not None else []
+            if not any(not p.isHidden() for p in plates):
                 return []
             footer = widgets.get_or_none("_sel_count_lbl")
             main = widgets.get_or_none("_sidebar_main_frame")

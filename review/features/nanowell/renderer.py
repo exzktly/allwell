@@ -29,6 +29,7 @@ import numpy as np
 from review.features.nanowell._array_key import KEY_COLUMNS, draw_key, key_entries, reason_tag, state_word
 from review.features.nanowell.array_compute import padded
 from review.features.nanowell.background_compute import short_clause
+from review.features.nanowell.crop_grid_compute import grid_shape, shown_timepoints
 from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
 from review.features.nanowell.extremes_compute import caption, format_value
@@ -734,16 +735,21 @@ def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, ima
 
 
 def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metrics: dict | None = None,
-                     image_channel: str = "", display_range=None, labels: bool = True) -> None:
-    """The selected nanowell at every timepoint, large: one panel per timepoint, filling the page's figure.
+                     image_channel: str = "", display_range=None, labels: bool = True, more=(),
+                     timepoints=None, grid: str = "auto", cols: int = 0) -> None:
+    """The selected nanowell over time, large: one panel per timepoint, filling the pop-out's figure.
 
     Asked for: a larger view of a selected nanowell over time than the site detail's strip of small crops. Every
-    panel is drawn on **one** brightness scale — the 1st to 99th percentile of all the crops together — so a cell
-    that appears, divides or fades reads as a change between panels, not as each crop stretched to its own range.
-    *crops* is ``timepoint -> image_compute.Crop`` as the strip takes it, or ``None`` while they are cut; a
-    timepoint without a crop says why in its panel, and the caption says where the crops were cut from. A
-    *display_range* chosen on the page replaces the percentile scale (:func:`crop_scale`). *labels* off leaves out
-    each panel's timepoint and the caption; the title stays."""
+    panel of one channel is drawn on **one** brightness scale — the 1st to 99th percentile of all that channel's crops
+    together — so a cell that appears, divides or fades reads as a change between panels, not as each crop stretched
+    to its own range. *crops* is ``timepoint -> image_compute.Crop`` of *image_channel* as the strip takes it, or
+    ``None`` while they are cut; a timepoint without a crop says why in its panel, and the caption says where the crops
+    were cut from. A *display_range* chosen on the page replaces the percentile scale (:func:`crop_scale`).
+
+    *more* adds channels: ``(channel, crops or None, display_range)`` each, drawn as a row (or column) of its own on a
+    scale of its own. *timepoints* chooses which of the nanowell's timepoints are shown (every one when empty;
+    ``crop_grid_compute.shown_timepoints``), and *grid* / *cols* the shape (``crop_grid_compute.grid_shape``).
+    *labels* off leaves out each panel's timepoint and the caption; the title stays."""
     fig.clear()
     _bg, ink, faint = _inks(fig.add_subplot(111))
     fig.clear()
@@ -751,52 +757,78 @@ def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metr
         _ink(fig.text(0.5, 0.5, "Cutting the crops…" if crops is None else "No crop could be cut.", ha="center",
                       va="center", color=faint, gid="nw-crop-grid-pending"), muted=True)
         return
-    items = list(crops.items())
-    scale = crop_scale((c for _tp, c in items), display_range)
-    cols = int(min(len(items), max(1, np.ceil(np.sqrt(len(items) * 1.6)))))
-    rows = int(np.ceil(len(items) / cols))
-    # *metrics* (``timepoint -> [items]``) are written under each panel, so the rows leave room for them.
-    grid = fig.add_gridspec(rows, cols, left=0.02, right=0.98, top=0.87, bottom=0.15 if metrics else 0.08, wspace=0.05,
-                            hspace=0.36 if metrics else 0.18)
+    channels = [(image_channel, crops, display_range)] + [tuple(row) for row in more]
+    tps = shown_timepoints(list(crops), timepoints)
+    shown = [[c for tp in tps if (c := (row or {}).get(tp)) is not None] for _ch, row, _dr in channels]
+    scales = [crop_scale(row, dr) for row, (_ch, _row, dr) in zip(shown, channels)]
+    shape = grid_shape(len(channels), len(tps), grid, cols)
+    # *metrics* (``timepoint -> [items]``) are written under the first channel's panels, so the rows leave room.
+    spec = fig.add_gridspec(shape.rows, shape.cols, left=0.02, right=0.98, top=0.87, bottom=0.15 if metrics else 0.08,
+                            wspace=0.05, hspace=0.36 if metrics else 0.3 if shape.rows > 1 else 0.18)
+    every = [c for row in shown for c in row]
+    mixed = len({c.source for c in every if c.image is not None}) > 1
     notes: set = set()
-    mixed = len({c.source for _tp, c in items if c.image is not None}) > 1
     tally: dict = {}
-    for k, (tp, crop) in enumerate(items):
-        ax = fig.add_subplot(grid[k // cols, k % cols])
-        # An image, pixel for pixel: the style pass must not put the card's typed axis range on it.
-        ax._aw_image_panel = True
-        ax.set_xticks([])
-        ax.set_yticks([])
-        if crop.image is not None:
-            lo, hi = scale.of(crop)
-            ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi, gid="nw-crop-grid-image")
-            if cells:
-                _draw_crop_cells(ax, crop, tally, size=CELL_DOT_PT2 * 2)
-            if crop.source == "montage":
-                notes.add(crop.note)
-        else:
-            _ink(ax.text(0.5, 0.5, crop.note, ha="center", va="center", wrap=True, fontsize=8,
-                         transform=ax.transAxes, color=faint, gid="nw-crop-missing"), muted=True)
-        if labels:
-            _ink(ax.set_title(tp + (" (montage)" if mixed and crop.source == "montage" else ""), fontsize=9,
-                              color=ink, gid="nw-crop-title"))
-        said = (metrics or {}).get(tp, [])
-        if said:
-            width_pt = ax.get_position().width * fig.get_size_inches()[0] * 72
-            _ink(ax.text(0.5, -0.03, "\n".join(_pack(said, width_pt, 8.0)), ha="center", va="top", fontsize=8,
-                         transform=ax.transAxes, color=faint, gid="nw-crop-grid-metrics"), muted=True)
-    _ink(fig.text(0.02, 0.955, f"{site[0]} · q {site[1]}, r {site[2]} over time · {_of_channel(image_channel)}",
-                  fontsize=11, color=ink,
+    several = len(channels) > 1
+    for c, (channel, row, _dr) in enumerate(channels):
+        for k, tp in enumerate(tps):
+            r, col = shape.place(c, k)
+            ax = fig.add_subplot(spec[r, col])
+            crop = None if row is None else row.get(tp)
+            _crop_grid_panel(ax, crop, scales[c], cells=cells, tally=tally, notes=notes, faint=faint,
+                             pending=row is None)
+            if labels:
+                title = (f"{channel or 'phase'} · {tp}" if several else tp) + (
+                    " (montage)" if mixed and crop is not None and crop.source == "montage" else "")
+                _ink(ax.set_title(title, fontsize=9, color=ink, gid="nw-crop-title"))
+            said = (metrics or {}).get(tp, []) if c == 0 else []
+            if said:
+                width_pt = ax.get_position().width * fig.get_size_inches()[0] * 72
+                _ink(ax.text(0.5, -0.03, "\n".join(_pack(said, width_pt, 8.0)), ha="center", va="top", fontsize=8,
+                             transform=ax.transAxes, color=faint, gid="nw-crop-grid-metrics"), muted=True)
+    names = " + ".join(_of_channel(channel) for channel, _row, _dr in channels)
+    _ink(fig.text(0.02, 0.955, f"{site[0]} · q {site[1]}, r {site[2]} over time · {names}", fontsize=11, color=ink,
                   gid="nw-crop-grid-title"))
-    sources = {crop.source for _tp, crop in items if crop.image is not None}
+    if labels:
+        _ink(fig.text(0.02, 0.015, _crop_grid_caption(channels, every, scales, notes, tally), fontsize=8,
+                      color=faint, gid="nw-crop-grid-caption", wrap=True), muted=True)
+
+
+def _crop_grid_panel(ax, crop, scale, *, cells: bool, tally: dict, notes: set, faint, pending: bool) -> None:
+    """One panel of the pop-out's grid: *crop* on *scale*, or a sentence saying why there is none."""
+    # An image, pixel for pixel: the style pass must not put the card's typed axis range on it.
+    ax._aw_image_panel = True
+    ax.set_xticks([])
+    ax.set_yticks([])
+    if crop is not None and crop.image is not None:
+        lo, hi = scale.of(crop)
+        ax.imshow(crop.image, cmap="gray", interpolation="nearest", vmin=lo, vmax=hi, gid="nw-crop-grid-image")
+        if cells:
+            _draw_crop_cells(ax, crop, tally, size=CELL_DOT_PT2 * 2)
+        if crop.source == "montage":
+            notes.add(crop.note)
+        return
+    text = ("Cutting the crops…" if pending else crop.note if crop is not None
+            else "No crop of this channel at this timepoint.")
+    _ink(ax.text(0.5, 0.5, text, ha="center", va="center", wrap=True, fontsize=8, transform=ax.transAxes,
+                 color=faint, gid="nw-crop-missing"), muted=True)
+
+
+def _crop_grid_caption(channels, every, scales, notes, tally) -> str:
+    """The pop-out's caption: where the crops were cut from, the brightness scale each channel is drawn on, the
+    montage crops' notes and the counted cells."""
+    sources = {crop.source for crop in every if crop.image is not None}
     origin = ("cut from its owner tile at full resolution" if sources == {"tile"} else
               "cut from the montage, at its lower resolution" if sources == {"montage"} else
               "cut from its owner tile, or the montage where marked" if sources else "none could be cut")
-    caption = (f"{origin}; every panel on {scale.said()}"
-               + "".join(f"; {note}" for note in sorted(notes)) + (f"; {_cells_clause(tally)}" if tally else ""))
-    if labels:
-        _ink(fig.text(0.02, 0.015, caption, fontsize=8, color=faint, gid="nw-crop-grid-caption", wrap=True),
-             muted=True)
+    if len(channels) == 1:
+        scale = f"every panel on {scales[0].said()}"
+    else:
+        scale = "each channel's panels on a scale of their own: " + "; ".join(
+            f"{channel or 'phase'} " + ("not cut yet" if row is None else f"on {s.said()}")
+            for (channel, row, _dr), s in zip(channels, scales))
+    return (f"{origin}; {scale}" + "".join(f"; {note}" for note in sorted(notes))
+            + (f"; {_cells_clause(tally)}" if tally else ""))
 
 
 @dataclass(frozen=True)

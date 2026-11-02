@@ -6406,7 +6406,7 @@ from the image the run segmented (the well's archive in `in/`). When that archiv
 (an output folder copied on its own), cannot be read, or the nanowell has no single owner tile (a fused one),
 the crop is cut from the lower-resolution montage instead, and the caption under the strip says so and why; a
 timepoint with no crop says why. **Pop out**, above the strip, opens the crops large in a window of their own —
-one panel per timepoint, all on one brightness scale, so a cell that appears, divides or fades reads as a change
+one panel per timepoint, all of a channel's panels on one brightness scale, so a cell that appears, divides or fades reads as a change
 between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
 it like any window. Its own row of controls sets the crops where you look at them: the image channel, **Range**
 (the display range), **Cells**, **Metrics** (the measurements under each crop, ending with the rim's focus — *rim 88% of sharpest* — as a
@@ -6414,7 +6414,16 @@ percentage of its well's sharpest rims at that timepoint, the same scale as the 
 reading below the threshold is the one left out as out of focus; *not judged* where the well had too few rims, *rim
 not fitted* where the rim was not found), **Labels** (each crop's timepoint
 and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
-Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted in the
+Extremes view follow them. A second row shapes the montage and saves it. **Timepoints** chooses which of the
+nanowell's timepoints are panels (fewer panels are drawn larger; *All timepoints* shows every one again).
+**Channels** adds channels beside the image channel — tick EGFP while the image channel is phase, say — each drawn as
+a row of crops of its own on its own brightness scale (that channel's **Range** when it has one, else its own 1st to
+99th percentile), and the caption names each channel's scale. **Grid** sets the shape: *Auto* (one channel wraps into
+a near-square grid; several take a row each, the timepoints across), *One row*, *One column* (the timepoints down, a
+column per channel) or *N across* (the timepoints wrap every N panels, each wrapped line keeping its channels
+together). **Save ▾** saves the figure exactly as drawn — *Save figure…* names the file after the nanowell and its
+channels (`A01_q3_r-2_phase_EGFP_over_time.png`) — copies it as SVG, or files it in Saved Plots. These choices are
+kept with the page's settings. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted in the
 crop's own nanowell, on every crop — the strip, the pop-out and the Extremes montage (the run keeps no cell
 outlines). A crop is cut a little wider than its nanowell, so its edges show parts of the neighbours; their cells are
 not dotted, so every dot is a cell the selected nanowell's count is made of. It is one setting, also offered on the Extremes view, and kept with the page's

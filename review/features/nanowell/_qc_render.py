@@ -84,7 +84,7 @@ def _row_tops(wells) -> list:
 
 
 def draw_qc(fig, matrix, *, which: str, out_dir, message: str = "", highlight=frozenset(),
-            excluded=(), error: str = "") -> QcDrawn | None:
+            excluded=(), error: str = "", walk=qc.WALK_DEFAULT) -> QcDrawn | None:
     """Draw *matrix*, the wells *which* (``qc_compute.WELL_FILTERS``) chooses as rows. *message* is the last anchor
     action's result, written under the title; *highlight* rings those ``(well, timepoint)`` cells; *excluded* wells
     are labelled so (the page's choice, not the run's — they keep their row)."""
@@ -104,7 +104,7 @@ def draw_qc(fig, matrix, *, which: str, out_dir, message: str = "", highlight=fr
     ax = fig.add_axes((_LEFT, _BOTTOM, _RIGHT - _LEFT, _TOP - _BOTTOM))
     _theme_axes(ax)
     ground, ink, muted = _inks(ax)
-    _title(fig, matrix, which, out_dir, message, ink, muted)
+    _title(fig, matrix, which, out_dir, message, ink, muted, walk)
     if not wells:
         ax.set_axis_off()
         _ink(ax.text(0.5, 0.5, "Every timepoint is addressed and confirmed.", ha="center", va="center",
@@ -134,11 +134,11 @@ def draw_qc(fig, matrix, *, which: str, out_dir, message: str = "", highlight=fr
     return drawn
 
 
-def _title(fig, matrix, which, out_dir, message, ink, muted) -> None:
+def _title(fig, matrix, which, out_dir, message, ink, muted, walk=qc.WALK_DEFAULT) -> None:
     _ink(fig.text(_LEFT, 0.965, qc.summary(matrix), ha="left", va="top", fontsize=10, fontweight="bold", color=ink,
                   gid="nw-qc-summary"))
     y = 0.925
-    action = qc.action_line(matrix)
+    action = qc.action_line(matrix, walk)
     lines = ([(message, ink)] if message else []) + ([(action, ink)] if action and not message else []) \
         + [(n, muted) for n in qc.notes(matrix, which, out_dir)]
     for text, colour in lines:

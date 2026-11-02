@@ -270,10 +270,12 @@ def test_with_nothing_waiting_the_queue_says_so_and_changes_nothing(qtbot, tmp_p
     _on_qc(qtbot, ctx, st)
     queue_btn = ctx.widgets.get("_nw_queue_btn")
     assert not queue_btn.isEnabled()
-    assert queue_btn.toolTip().endswith("\n\nNo timepoint is waiting for an anchor.")
+    assert queue_btn.toolTip().endswith("\n\nNo timepoint is in a state Walk includes (not addressed, "
+                                        "contradicted, inconclusive, partial).")
     assert aq.start(ctx) is False
     assert st.anchor_queue is None
-    assert st.qc_message == "No nanowell timepoint is waiting for an anchor."
+    assert st.qc_message == ("No timepoint is in a state Walk includes (not addressed, contradicted, inconclusive, "
+                             "partial).")
     assert set(ctx.state.selection.selected_wells) == {"A02"}
 
 
@@ -326,7 +328,8 @@ def test_one_per_well_walks_each_well_s_first_timepoint_and_ends_by_itself(qtbot
 
     aq.start(ctx)                                                    # the next walk starts one per well too
     assert st.anchor_queue is None and st.qc_message == (
-        "No nanowell timepoint is waiting for an anchor with One per well: 1 more wait in wells that already have "
+        "No timepoint is in a state Walk includes (not addressed, contradicted, inconclusive, partial) with One per "
+        "well: 1 more wait in wells that already have "
         "one. One per well is now off, so Anchor queue walks them all. 2 timepoint(s) have an anchor that no run has "
         "used yet: Re-run anchored wells… addresses them.")
     # The refusal turned One per well off, and the QC view's toggle says so: the next press is not refused the same

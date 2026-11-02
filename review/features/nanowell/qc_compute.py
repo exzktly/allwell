@@ -46,6 +46,16 @@ ARRAY_STATES = (NOT_ADDRESSED, ANCHOR_WAITING, NOT_LOCATED)
 WORDS = {NOT_ADDRESSED: "not addressed", ANCHOR_WAITING: "anchor waiting", NOT_LOCATED: "not located",
          CONTRADICTED: "contradicted", INCONCLUSIVE: "inconclusive", PARTIAL: "partial", NOT_CHECKED: "not checked",
          REFERENCE: "reference", CONFIRMED: "confirmed"}
+#: The states *Anchor queue* can walk: every state that needs a look and is a timepoint the Array view can show.
+#: *Anchor waiting* is not one: its remedy is a re-run, not another look.
+WALKABLE = (NOT_ADDRESSED, CONTRADICTED, INCONCLUSIVE, PARTIAL, NOT_LOCATED)
+#: What it walks until the user chooses otherwise: every state an anchor can act on, and partial, to look over.
+#: Not located is left out: no anchor changes it, and its montage often shows nothing to see.
+WALK_DEFAULT = (NOT_ADDRESSED, CONTRADICTED, INCONCLUSIVE, PARTIAL)
+#: The states a walk opens with *Set anchor* on, so a click on the central square anchors it and moves on: the
+#: square was not found or not trusted. A partial timepoint registered cleanly, so it is opened to look at, and a
+#: click there must not drop an anchor by accident; not located cannot take one.
+ARMED = (NOT_ADDRESSED, CONTRADICTED, INCONCLUSIVE)
 #: The *Wells* control: only the wells needing a look, or every well with a grid record.
 WELL_FILTERS = ("needing", "all")
 _OK = "ok"
@@ -281,49 +291,69 @@ def legend_items(matrix: QcMatrix) -> list[tuple[str, int]]:
     return [(s, matrix.counts.get(s, 0)) for s in QC_STATES if matrix.counts.get(s) or s == CONFIRMED]
 
 
-def queue_tip(matrix: QcMatrix | None) -> str:
+def queue_tip(matrix: QcMatrix | None, states=WALK_DEFAULT) -> str:
     """Why *Anchor queue* is greyed, or ``""`` when it has something to walk."""
     if matrix is None:
         return "The plate's records are still being read."
-    if matrix.counts.get(NOT_ADDRESSED):
+    if queue_items(matrix, states):
         return ""
-    tip = "No timepoint is waiting for an anchor."
+    tip = f"No timepoint is in a state Walk includes ({walk_words(states)})."
     waiting = matrix.counts.get(ANCHOR_WAITING, 0)
     if waiting:
         tip += f" {waiting} have an anchor waiting for a re-run: Re-run anchored wells… addresses them."
     return tip
 
 
-def queue_size(matrix: QcMatrix | None, per_well: bool) -> int:
-    """How many items *Anchor queue* would walk: every timepoint not addressed, or with *per_well* each well's first,
+def queue_items(matrix: QcMatrix | None, states) -> list:
+    """The ``anchor_queue_compute.QueueItem`` of every cell in *states*, plate order then time order: what *Anchor
+    queue* walks."""
+    if matrix is None:
+        return []
+    wanted = set(states)
+    out = []
+    for well in matrix.wells:
+        for tp in matrix.timepoints:
+            cell = matrix.cells.get((well, tp))
+            if cell is not None and cell.state in wanted:
+                out.append(aqc.QueueItem(well, tp, cell.why, cell.refused, cell.state))
+    return out
+
+
+def waiting_wells(matrix: QcMatrix | None) -> set:
+    """The wells with an anchor waiting for a re-run: *One per well* leaves them out."""
+    return {c.well for c in matrix.cells.values() if c.state == ANCHOR_WAITING} if matrix is not None else set()
+
+
+def queue_size(matrix: QcMatrix | None, per_well: bool, states=WALK_DEFAULT) -> int:
+    """How many items *Anchor queue* would walk: every cell in *states*, or with *per_well* each well's first,
     leaving out wells that already have an anchor waiting for a re-run — ``anchor_queue_compute.one_per_well``'s
     rule, counted from the matrix so the button can say it before the walk starts."""
-    if matrix is None:
-        return 0
-    cells = [c for c in matrix.cells.values() if c.state == NOT_ADDRESSED]
-    if not per_well:
-        return len(cells)
-    waiting = {c.well for c in matrix.cells.values() if c.state == ANCHOR_WAITING}
-    return len({c.well for c in cells} - waiting)
+    items = queue_items(matrix, states)
+    return len(aqc.one_per_well(items, waiting_wells(matrix))) if per_well else len(items)
 
 
-def queue_label(matrix: QcMatrix | None, per_well: bool) -> str:
-    """*Anchor queue*'s text: what pressing it walks, so *One per well* visibly changes it."""
-    n = queue_size(matrix, per_well)
+def queue_label(matrix: QcMatrix | None, per_well: bool, states=WALK_DEFAULT) -> str:
+    """*Anchor queue*'s text: what pressing it walks, so *One per well* and *Walk* visibly change it."""
+    n = queue_size(matrix, per_well, states)
     if matrix is None:
         return "Anchor queue"
     noun = ("well" if n == 1 else "wells") if per_well else ("timepoint" if n == 1 else "timepoints")
     return f"Anchor queue: {n} {noun}"
 
 
-def action_line(matrix: QcMatrix | None) -> str:
-    """What to do about the timepoints not addressed, said on the figure (a tooltip is not seen over VNC on a
-    phone); ``""`` when there are none."""
-    n = matrix.counts.get(NOT_ADDRESSED, 0) if matrix is not None else 0
+def action_line(matrix: QcMatrix | None, states=WALK_DEFAULT) -> str:
+    """What to do about the timepoints needing a look, said on the figure (a tooltip is not seen over VNC on a
+    phone); ``""`` when *Anchor queue* has nothing to walk."""
+    n = len(queue_items(matrix, states))
     if not n:
         return ""
-    return (f"{n:,} timepoint(s) not addressed: press Anchor queue to set their anchors one after another, or "
-            "click an orange cell to set one.")
+    return (f"Press Anchor queue to step through {n:,} of them on the Array view ({walk_words(states)}), "
+            "or click a cell to open one.")
+
+
+def walk_words(states) -> str:
+    """The states *Walk* includes, by their legend words, in legend order."""
+    return ", ".join(WORDS[s] for s in QC_STATES if s in set(states)) or "none"
 
 
 def hours_of(times_h: dict, tp: str):

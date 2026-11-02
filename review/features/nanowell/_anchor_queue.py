@@ -24,8 +24,9 @@ from PySide6.QtCore import QTimer
 from review.core.selection_controller import set_selected_wells
 from review.features.nanowell import anchor_queue_compute as aqc
 from review.features.nanowell import controller as nwc
+from review.features.nanowell import _qc_controller as qcc
 from review.features.nanowell import full_montage_compute as fmc
-from review.features.nanowell.collect import nanowell_dir
+from review.features.nanowell import qc_compute as qc
 from util.nanowell_anchors import AnchorsFileError, read_anchors
 
 #: How long the anchor just set stays on screen before the next timepoint replaces it.
@@ -66,12 +67,17 @@ def build_queue(ctx) -> tuple[aqc.AnchorQueue | None, str]:
         anchors = read_anchors(path)
     except AnchorsFileError as exc:
         return None, f"The anchors file cannot be used: {exc}"
-    items, pending = aqc.waiting_items(aqc.grid_statuses(nanowell_dir(data_dir)), anchors, order=st.data.order)
+    del anchors                                          # read only to refuse an unusable file before walking
+    matrix = qcc.matrix(ctx)
+    if matrix is None:
+        return None, "The plate's grid records and identity checks are still being read."
+    items = qc.queue_items(matrix, st.anchor_queue_states)
+    pending = frozenset(k for k, c in matrix.cells.items() if c.state == qc.ANCHOR_WAITING)
     queue = aqc.AnchorQueue(items, selection_before=frozenset(ctx.state.selection.selected_wells),
                             pending_rerun=pending, data_dir=str(data_dir))
     queue.set_per_well(st.anchor_queue_per_well)
     if not queue.items:
-        why = "No nanowell timepoint is waiting for an anchor"
+        why = f"No timepoint is in a state Walk includes ({qc.walk_words(st.anchor_queue_states)})"
         if items:
             # One per well left nothing: every well with a waiting timepoint already has an anchor for a re-run,
             # which is the remedy the message names. Its toggle sits in the group shown only during a walk, so it is
@@ -117,10 +123,16 @@ def _open_current(ctx, queue) -> bool:
     wanted = set(queue.selection_before) | {item.well}
     if set(ctx.state.selection.selected_wells) != wanted:
         set_selected_wells(ctx, wanted)
-    shown = nwc.open_for_anchor(ctx, item.well, item.timepoint, zoom=OPEN_ZOOM)
+    armed = item.state in qc.ARMED
+    shown = nwc.open_for_anchor(ctx, item.well, item.timepoint, zoom=OPEN_ZOOM, arm=armed)
     st = _state(ctx)
     if shown and st is not None:
-        if item.refused and not st.array_message:
+        if not armed:
+            st.array_message = (f"{item.well} at {item.timepoint} is {item.state.replace('_', ' ')}"
+                                + (f": {item.reason.rstrip('.')}" if item.reason else "")
+                                + ". Opened to look at, with Set anchor off: → goes on to the next one; turn Set "
+                                  "anchor on to re-anchor it.")
+        elif item.refused and not st.array_message:
             st.array_message = ("The last run could not address this timepoint from the anchor set here: click the "
                                 "central square again.")
         elif st.array_message and not st.anchor_mode:

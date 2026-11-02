@@ -576,17 +576,20 @@ Review, open the Nanowells page, choose the *Array* view, pick the well and time
 click it. The click is saved in `in/nanowell_anchors.json`
 beside the acquisition record; the run snaps it to the nearest nanowell, so it only has to land on the square.
 When several wells and timepoints need an anchor — the usual state after a run — open the Nanowells page's
-**QC** view, which shows every timepoint not addressed at a glance, and press **Anchor queue** there instead of
-picking each one: it switches to the Array view on the first timepoint on the plate left unaddressed, with **Set
-anchor** already on, and each click on a central square saves the anchor and, after a moment, opens the next. Each
+**QC** view, which shows every timepoint needing a look at a glance, and press **Anchor queue** there instead of
+picking each one: it switches to the Array view on the first timepoint on the plate in a state **Walk** includes,
+and steps through them all. A timepoint not addressed, contradicted or inconclusive opens with **Set anchor**
+already on: each click on a central square saves the anchor and, after a moment, opens the next. A partial (or not
+located) one opens to be looked at, with Set anchor off so a click there sets nothing: press **→** for the next, or
+turn Set anchor on to re-anchor it. The walk's label names each one's state (*12 of 330 · B04 at 24h · partial*). Each
 timepoint opens zoomed to 10× on the centre of the whole-well montage, where the central square usually is;
 press **Fit** (under the figure) to see the whole well when it is not there. A *Queue*
 group in place of Well and Timepoint (they come back when the walk ends) says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous
 timepoint; a click there replaces its anchor), **Skip**, **One per well** and **Stop** — or press **←** for Back,
 **→** for Skip and **Esc** for Stop while the queue runs. Choosing another view while it runs stops it. When **Set anchor** cannot be turned on for a timepoint, the figure
-says why; press Skip to go on. The queue holds every unaddressed
-timepoint without an anchor, plate order then time order, and also any timepoint whose anchor the last run could
-not use; an anchor you set that no run has used yet is not asked for again. Tick **One per well** (before pressing Anchor queue, or during the walk) to be shown
+says why; press Skip to go on. The queue holds every timepoint in the states Walk ticks, plate order then time
+order — including any timepoint whose anchor the last run could not use; an anchor you set that no run has used yet
+is not asked for again. Tick **One per well** (before pressing Anchor queue, or during the walk) to be shown
 only each well's first such timepoint, and no well that already has an anchor waiting for a re-run: one click per
 well is usually enough (see above), and any timepoint the re-run still cannot address shows up in the next
 queue. The choice is remembered until you close the app. If One per well leaves nothing to walk (every well
@@ -6226,10 +6229,12 @@ the sentence names it.
   by plate row and labelled by its letter; pointing at a cell names it in the readout, and its tooltip says what
   the state means. **Click a cell** to open it where it is dealt with: a verdict opens on **Identity**, a timepoint
   not addressed (or waiting, or not located) opens on **Array** with **Set anchor** on. The **Anchor** group here
-  holds **Anchor queue** — the highlighted button, which says what it will walk (*Anchor queue: 17 timepoints*) —
-  the **One per well** box, which narrows that to each well's first (*Anchor queue: 5 wells*), and **Re-run anchored
-  wells…** (see *Setting the anchor by hand*). While any timepoint is not addressed, the figure says to press
-  Anchor queue or click an orange cell.
+  holds **Anchor queue** — the highlighted button, which says what it will walk (*Anchor queue: 330 timepoints*) —
+  **Walk ▾**, which chooses the states it steps through (each listed with its count: not addressed, contradicted,
+  inconclusive and partial are ticked; not located is not, since an anchor cannot change it), the **One per well**
+  box, which narrows the walk to each well's first (*Anchor queue: 61 wells*), and **Re-run anchored wells…** (see
+  *Setting the anchor by hand*). While there is anything to walk, the figure says to press Anchor queue or click a
+  cell.
 - **Trajectories** — one panel per well: a thin line per nanowell through its values over time, coloured by
   its occupancy at baseline, and a thick line for each occupancy class's median. A gap is a timepoint without
   a value. Growth rate and occupancy have one value per nanowell, so they are greyed here.

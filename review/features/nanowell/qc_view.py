@@ -52,13 +52,55 @@ def build_qc_controls(ctx, band) -> SimpleNamespace:
     per_well = QCheckBox("One per well")
     per_well.setToolTip(PER_WELL_TIP)
     per_well.toggled.connect(lambda on: _set_per_well(ctx, on))
+    walk_btn, walk_actions = _walk_button(ctx, band)
     rerun_btn = _button("Re-run anchored wells…", RERUN_TIP, lambda: nwc.rerun_anchored(ctx))
     for name, widget in (("_nw_queue_btn", queue_btn), ("_nw_qc_per_well_btn", per_well),
-                         ("_nw_qc_rerun_btn", rerun_btn)):
+                         ("_nw_qc_rerun_btn", rerun_btn), ("_nw_qc_walk_btn", walk_btn)):
         reg.register(name, widget)
-    grp_anchor = band.add_scope("Anchor", queue_btn, per_well, rerun_btn)
+    grp_anchor = band.add_scope("Anchor", queue_btn, walk_btn, per_well, rerun_btn)
     return SimpleNamespace(wells_seg=wells_seg, queue_btn=queue_btn, per_well=per_well, rerun_btn=rerun_btn,
-                           groups=(grp_wells, grp_anchor), signalling=(wells_seg, per_well))
+                           walk_btn=walk_btn, walk_actions=walk_actions, groups=(grp_wells, grp_anchor),
+                           signalling=(wells_seg, per_well, *walk_actions.values()))
+
+
+def _walk_button(ctx, parent):
+    """*Walk ▾*: which states *Anchor queue* steps through, each with its count on the plate. Not addressed,
+    contradicted and inconclusive open with *Set anchor* on (``qc_compute.ARMED``); partial and not located open to
+    be looked at."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QMenu, QToolButton
+
+    from widgets.owned_action import owned_action
+
+    button = QToolButton(parent)
+    button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    button.setPopupMode(QToolButton.InstantPopup)
+    button.setProperty("variant", "secondary")
+    button.setProperty("hasMenu", True)
+    button.setToolTip(WALK_TIP)
+    menu = QMenu(button)
+    button.setMenu(menu)
+    actions = {}
+    for state in qc.WALKABLE:
+        action = owned_action(menu, qc.WORDS[state])
+        action.setCheckable(True)
+        action.toggled.connect(lambda on, state=state: _set_walk(ctx, state, on))
+        ctx.widgets.register(f"_nw_qc_walk_{state}", action)
+        actions[state] = action
+    return button, actions
+
+
+def _set_walk(ctx, state: str, on: bool) -> None:
+    st = ctx.state.feature_slice("nanowell")
+    chosen = (set(st.anchor_queue_states) | {state}) if on else (set(st.anchor_queue_states) - {state})
+    st.anchor_queue_states = tuple(s for s in qc.WALKABLE if s in chosen)
+    nwc._call(ctx, "_nw_refresh_controls")             # the button's count and the figure's sentence follow it
+    nwc.redraw(ctx)
+
+
+WALK_TIP = ("Which timepoints Anchor queue steps through, by their state on the plate. Not addressed, contradicted "
+            "and inconclusive open with Set anchor on: click the central square and the next one opens. Partial and "
+            "not located open to be looked at, with Set anchor off: → goes on to the next one.")
 
 
 def _set_per_well(ctx, on: bool) -> None:
@@ -75,8 +117,14 @@ def refresh_qc_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
     c.wells_seg.setCurrentByData(st.qc_wells)
     c.per_well.setChecked(st.anchor_queue_per_well)
     matrix = qcc.matrix(ctx)
-    why = qc.queue_tip(matrix)
-    c.queue_btn.setText(qc.queue_label(matrix, st.anchor_queue_per_well))
+    states = st.anchor_queue_states
+    for state, action in c.walk_actions.items():
+        action.setChecked(state in states)
+        action.setText(f"{qc.WORDS[state]} ({matrix.counts.get(state, 0) if matrix is not None else 0:,})")
+    c.walk_btn.setText(f"Walk: {len(states)} state{'s' if len(states) != 1 else ''}")
+    c.walk_btn.setToolTip(f"{WALK_TIP}\n\nNow: {qc.walk_words(states)}.")
+    why = qc.queue_tip(matrix, states)
+    c.queue_btn.setText(qc.queue_label(matrix, st.anchor_queue_per_well, states))
     c.queue_btn.setEnabled(not why and aq.active_queue(ctx) is None)
     c.queue_btn.setToolTip(QUEUE_TIP + (f"\n\n{why}" if why else ""))
     anchored = bool(fmc.anchored_wells(st.data)) if st.data is not None else False

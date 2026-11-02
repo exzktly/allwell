@@ -366,7 +366,7 @@ def test_a_ui_roster_row_reaches_neither_gate(lane):
     after = src.replace("UI_LANE_FILES: dict[str, str] = {",
                         'UI_LANE_FILES: dict[str, str] = {\n    "test_zz_new_ui.py": "a new UI test",', 1)
     assert after != src
-    for gate in lane.GATES:
+    for gate in ("nanowell-e2e", "nanowell-features", "remote"):
         assert lane.lanes_change_reaches(gate, src, after) == "", gate
         assert lane.lanes_change_selects(gate, src, after) == {}, gate
 
@@ -388,7 +388,7 @@ def test_a_changed_lane_trigger_runs_the_whole_lane(lane):
     src = _lanes_source()
     after = src.replace('r"^scripts/test\\.sh$",', 'r"^scripts/test\\.sh$",\n    r"^scripts/other\\.sh$",', 1)
     assert after != src
-    for gate in lane.GATES:
+    for gate in ("nanowell-e2e", "nanowell-features", "remote"):
         assert set(lane.lanes_change_selects(gate, src, after)) == {lane.ALL}, gate
 
 
@@ -521,3 +521,66 @@ def test_the_whole_lane_runs_when_asked_or_when_the_harness_changes(tmp_path, ho
     _git(root, "commit", "-qm", "change")
     done = _run_lane(root, **({"ALLWELL_FULL_LANE": "1"} if how == "full-lane" else {}))
     assert "test_b ran" in done.stdout, done.stdout + done.stderr
+
+
+# ── the fast lane ────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize(("source", "why"), [
+    ("from tests._repo_scan import python_sources\n\ndef test_x():\n    assert python_sources()\n",
+     "reads the whole source tree"),
+    ("from pathlib import Path\n\nROOT = Path(__file__).parents[1]\n\ndef test_x():\n"
+     "    assert list(ROOT.rglob('*.py'))\n", "walks the repository"),
+    ("import importlib\n\ndef test_x(name):\n    importlib.import_module(name)\n",
+     "imports a module by a computed name"),
+], ids=["whole-tree", "walks-repo", "computed-import"])
+def test_a_test_no_import_graph_can_narrow_always_runs(lane, tmp_path, source, why):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text(source, encoding="utf-8")
+    assert lane.always_run({"tests/test_x.py"}, tmp_path) == {"tests/test_x.py": why}
+
+
+def test_a_test_that_lists_its_own_temporary_directory_is_narrowed_as_usual(lane, tmp_path):
+    """A glob over ``tmp_path`` reads what the test wrote, not the repository: it is selected like any other."""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text(
+        "def test_x(tmp_path):\n    assert not list(tmp_path.glob('*.csv'))\n", encoding="utf-8")
+    assert lane.always_run({"tests/test_x.py"}, tmp_path) == {}
+
+
+def test_the_fast_lane_is_every_test_file_in_no_gated_roster(lane):
+    fast = {f"tests/{name}" for name in lane._fast_roster(ROOT)}
+    gated = set().union(*(lane.roster_files(g) for g in ("nanowell-e2e", "nanowell-features", "remote")))
+    assert fast and not fast & gated
+    assert fast | gated == {p.relative_to(ROOT).as_posix() for p in (ROOT / "tests").glob("test_*.py")}
+
+
+def test_a_file_leaving_a_gated_roster_joins_the_fast_lane_selection(lane):
+    src = _lanes_source()
+    name = sorted(lane._lanes.REMOTE_FILES)[0]
+    after = src.replace(f'    "{name}":', f'    "zz_removed_{name}":', 1)
+    assert after != src
+    assert lane._fast_lanes_change(src, after) == {f"tests/{name}": "tests/_lanes.py moves it into the fast lane"}
+    assert lane._fast_lanes_change(src, src) == {}
+    assert set(lane._fast_lanes_change(src, "GATES = {")) == {lane.ALL}
+
+
+def test_an_error_while_deciding_runs_the_whole_lane_rather_than_skipping_it(lane, monkeypatch, capsys):
+    """Python exits 1 on an uncaught exception, and 1 is also "nothing reached": a crash would have skipped the
+    lane in CI and in scripts/test.sh. Any error now answers ALL, exit 0."""
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(lane, "select", broken)
+    assert lane.main(["remote", "--files"]) == 0
+    out = capsys.readouterr()
+    assert out.out.strip() == "ALL" and "could not decide (RuntimeError: boom)" in out.err
+    assert lane.main(["remote"]) == 0
+
+
+def test_a_test_that_only_names_the_tree_reader_in_a_string_is_narrowed_as_usual(lane, tmp_path):
+    """A test that builds synthetic sources mentioning ``tests._repo_scan`` does not read the tree itself."""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text(
+        'SOURCE = "from tests._repo_scan import python_sources"\n\ndef test_x():\n    assert SOURCE\n',
+        encoding="utf-8")
+    assert lane.always_run({"tests/test_x.py"}, tmp_path) == {}

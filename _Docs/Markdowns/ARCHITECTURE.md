@@ -12146,9 +12146,10 @@ the cell where it is dealt with: a verdict on the Identity view (`_qc_controller
 to the selection as `open_for_anchor` does), an anchor's business on the Array view through `open_for_anchor`. The
 view's band carries *Wells* and the *Anchor* group (`qc_view`): *Anchor queue*, the page's primary action, whose
 text says what it walks (`qc_compute.queue_label`, counted by `queue_size` with `one_per_well`'s rule) and which is
-greyed with `qc_compute.queue_tip`'s reason when nothing waits; *One per well*, a checkbox because it is an option of
-the walk rather than an action, whose toggling changes that count; and *Re-run anchored wells…*. While any timepoint
-is not addressed the figure says what to press (`qc_compute.action_line`), since a tooltip is not seen over VNC. The export style pass
+greyed with `qc_compute.queue_tip`'s reason when nothing is in the states it walks; *Walk ▾*, a menu of the walkable
+states each with its count on the plate; *One per well*, a checkbox because it is an option of the walk rather than
+an action, whose toggling changes that count; and *Re-run anchored wells…*. While the queue has anything to walk the
+figure says what to press (`qc_compute.action_line`), since a tooltip is not seen over VNC. The export style pass
 sets every tick label to the Properties size, so `QcDrawn.relabel` puts the matrix's own label sizes back after it.
 `tests/test_nanowell_qc_view.py` pins the precedence on records where the wrong rule answers differently, and drives
 the real page with nothing selected: the view bar, a real click on a cell, and leaving Array mid-walk.
@@ -12561,14 +12562,21 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   Incremental, and forcing makes it moot), through `review/core/analyze_handoff.open_in_analyze` — Review's one
   door into Analyze, shared by Home's *Finish this run*, QC triage and this view. A file that cannot be written
   is said on the figure (`state.array_message`).
-- **The anchor queue.** *Anchor queue* (on the QC view's Anchor group, not the Array view's) walks every timepoint on the plate that
-  is waiting for an anchor, one montage after another. `anchor_queue_compute` (Qt-free) decides what waits: it
-  reads every grid record under `nanowells/` — not `state.data.grids`, which holds only the wells the page has
-  loaded — and takes each `unaddressed` timepoint with no anchor set, or with the very anchor the last run tried
-  and refused (the block's `manual_anchor_um` equals the file's). An anchor set and not yet used by a run is not
-  waiting (its remedy is a re-run), and is kept (`AnchorQueue.pending_rerun`) so the empty-queue message can say
-  so. Order is plate order, then each well's timepoints in the page's time order (`NanowellData.order`), never the
-  record's or the labels'. *One per well* (`AnchorQueue.set_per_well`, `one_per_well`) narrows the walk to each
+- **The anchor queue.** *Anchor queue* (on the QC view's Anchor group, not the Array view's) walks the plate's
+  timepoints in the QC states *Walk* ticks (`state.anchor_queue_states`, for the session; `qc_compute.WALKABLE`:
+  not addressed, contradicted, inconclusive, partial and not located, all but not located ticked by default), one
+  montage after another. `build_queue` takes them from the QC view's matrix (`qc_compute.queue_items`), so the
+  queue and the matrix cannot disagree, and the plate need not be selected: the matrix reads every well's records,
+  not `state.data.grids`, which holds only the wells the page has loaded. Its *not addressed* cells come from
+  `anchor_queue_compute.waiting_items`: each `unaddressed` timepoint with no anchor set, or with the very anchor the
+  last run tried and refused (the block's `manual_anchor_um` equals the file's). An anchor set and not yet used by a
+  run is not walked (its remedy is a re-run), and is kept (`AnchorQueue.pending_rerun`) so the empty-queue message
+  can say so. Each `QueueItem` carries its state, which the walk's label names (`3 of 330 · B04 at 24h ·
+  partial`). States where an anchor is the fix — not addressed, contradicted, inconclusive (`qc_compute.ARMED`) —
+  open with *Set anchor* on; a partial or not located timepoint opens to be looked at, `open_for_anchor(arm=False)`
+  leaving *Set anchor* off so a click cannot drop an anchor by accident, and the figure says → goes on. Order is
+  plate order, then the matrix's time order (the acquisition record's hours, as `NanowellData.order` sorts), never
+  the record's or the labels'. *One per well* (`AnchorQueue.set_per_well`, `one_per_well`) narrows the walk to each
   well's first waiting timepoint and drops every well that already has an anchor waiting for a re-run, since the
   end of a run addresses a well's other timepoints from one anchor through the rest of the plate. It is kept for
   the session on `state.anchor_queue_per_well`; switching mid-walk keeps the shown item when the new list holds it
@@ -20933,7 +20941,22 @@ you're in before you type the command.
     files, and crosses rosters: a UI or gated file that reads a document runs
     in it (CI still leaves the UI ones out).
   - **code**: anything else, and every case the script cannot decide (no git,
-    an unknown base, an empty diff). An unanswerable question runs everything.
+    an unknown base, an empty diff). The fast lane then runs the test files the
+    change can reach — `scripts/lane_needed.py fast`, the gated lanes' rule
+    applied to the fast lane, whose roster is every test file in no gated
+    roster, computed from the tree — together with the files that run on every
+    change because no import graph can say what they read
+    (`lane_needed.always_run`): a test that reads the whole source tree (one
+    that imports `tests/_repo_scan` or calls its whole-tree readers, in code
+    rather than in a string), one that walks the repository (a glob or listing
+    rooted at it), and one that imports a module by a computed name; when a
+    document changed, the docs lane joins them. A file that leaves a gated
+    roster joins the selection. A harness path, the pytest configuration or a
+    conftest hook or autouse fixture runs the whole lane, and these are checked
+    before anything is parsed. Replayed over 61 merges, the files that run on
+    every change are about a third of the lane's test time, and selection leaves
+    about 41% of it out on average after about 40 s of selecting; eight of the
+    61 ran whole. An unanswerable question runs everything.
 
   `scripts/test.sh` narrows itself for the default lane and `--no-ui` when no
   test files are named; `--ui`, the gated lanes and a run that names its files
@@ -20941,13 +20964,13 @@ you're in before you type the command.
   `scripts/preflight.sh` prints the scope first, then skips lint and tests or
   runs the docs lane accordingly; its working-tree check always runs. In CI, the `ruff` and `pytest (fast lane)` jobs ask the script on a pull
   request (`fetch-depth: 0`, for the diff) and skip their steps, so the job still
-  reports green; a push to `main` always lints and runs the whole lane with
-  `ALLWELL_FULL_LANE=1`. That push is where a test that reaches a document two
+  reports green; a push to `main`, or a pull request labelled `full-ci`, always lints and runs
+  the whole lane with `ALLWELL_FULL_LANE=1`. That push is where a test that reaches a document two
   imports away, which the docs lane cannot see, gets caught, the same backstop
   the gated lanes rely on. `tests/test_change_scope.py` pins each scope and
   drives the real `scripts/test.sh` in a scratch repository: nothing runs for a
   version bump, only the docs lane runs for an edited manual, and a failing test
-  outside that lane runs again once the change is code.
+  outside that lane runs again once a code change reaches it.
 - **UI tests** (`tests/_lanes.py::UI_LANE_FILES`, ~620 tests in seventy files),
   which run in the local fast lane and are left out of CI's. They are the tests
   whose subject is how the GUI looks and lays out: widget geometry, wrapping and
@@ -21224,9 +21247,19 @@ help while `qtbot` still holds the app).
    want all of it; each parsing its own copy was about 150 s of the run. The
    cache is keyed on the source *text*, not the path or its stat, so a file
    rewritten in place (which is what `test_guards_bite.py` does between cases)
-   is re-parsed rather than answered stale. **The trees are shared: read them,
-   never mutate one.** `ast.parse` on a string a test builds is untouched by
-   this and stays. `test_the_fast_lane_stays_fast.py` holds the rule.
+   is re-parsed rather than answered stale. A guard handed a file's *text*
+   rather than its path goes through `parse_text(source, filename)`, the same
+   cache. **The trees are shared: read them, never mutate one.** Because they
+   never change, `tests/_repo_scan` also records the first `ast.walk` of each
+   shared tree and replays it for later walks of that tree, in the same order —
+   a guard walks the trees again and again, and the walk is a generator written
+   in Python; replaying it took the lane from 6 min 11 s to 5 min 00 s and the
+   files that run on every change from 587 s to 346 s of test time. A subtree,
+   or a tree a test built itself, walks as it always did. `ast.parse` on a
+   string a test builds is untouched by this and stays.
+   `test_the_fast_lane_stays_fast.py` holds the rule, and
+   `test_guards_bite.py::test_a_replayed_walk_of_a_shared_tree_is_the_walk_it_replaces`
+   the replay.
 
 9. **No test spawns `ssh`, `rsync`, `scp` or `sftp`.** The autouse
    `_no_real_network_tools` fixture hooks `subprocess.Popen.__init__` and raises

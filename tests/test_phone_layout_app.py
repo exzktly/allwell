@@ -135,16 +135,16 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert not drawer.isOpen()
     assert review._section_nav.currentKey() == key
 
-    # ⚙ Controls: the page's band slides up in a sheet, flowing, and goes
-    # back to its page when the sheet closes.
+    # ⚙ Controls: the page's band slides up in a sheet, laid out as a form,
+    # and goes back to its page, a row again, when the sheet closes.
     shell.controls_button.click()
     _pump(qapp)
     band = shell._sheet_band
-    assert band is not None and _visible(band) and band._stacked
+    assert band is not None and _visible(band) and band.form() is not None
     assert shell._sheet.isOpen()
     shell.controls_button.click()
     _pump(qapp)
-    assert shell._sheet_band is None and not band._stacked
+    assert shell._sheet_band is None and band.form() is None
     assert band.parentWidget() is not shell._sheet._aw_holder
     assert not _visible(band)                      # hidden in its page again
 

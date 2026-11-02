@@ -1825,10 +1825,8 @@ def sel_color(ctx, s) -> str:
 
 #: How long the plots wait after a click on the sidebar plate before they
 #: redraw; each further click restarts the wait, so a run of clicks redraws
-#: once. The plate itself repaints at every click. The same interval the
-#: Nanowells page waits before reading the wells a selection adds
-#: (``nanowell.tab_view.LOAD_DEBOUNCE_MS``).
-PLATE_CLICK_DEBOUNCE_MS = 250
+#: once. The plate itself repaints at every click.
+PLATE_CLICK_DEBOUNCE_MS = 500
 
 
 def _plate_click_timer(ctx):

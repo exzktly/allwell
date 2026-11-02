@@ -4101,7 +4101,7 @@ the same footer. The selection survives across tabs and is what every plot /
 aggregate / export consumes.
 
 The plate lights a well (or dims a group) the moment you click it; the plots
-redraw a quarter of a second after your last click, so picking several wells
+redraw half a second after your last click, so picking several wells
 one after another redraws them once rather than once per well. A drag across
 the plate redraws once, when you let go.
 

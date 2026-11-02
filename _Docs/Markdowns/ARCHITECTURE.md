@@ -19807,8 +19807,7 @@ passive-mode wellActivated that toggles a group, a solo well or a Group-by
 value — changes the state and repaints the plate at once, and asks for the
 plot redraw through selection_controller.schedule_plate_commit /
 schedule_plate_rebuild. Those restart one single-shot QTimer per window
-(_plate_click_timer, PLATE_CLICK_DEBOUNCE_MS = 250, the interval the
-Nanowells page waits before reading new wells); when the clicks pause it
+(_plate_click_timer, PLATE_CLICK_DEBOUNCE_MS = 500); when the clicks pause it
 fires flush_plate_clicks, which runs the commit below and then any rebuild
 (invalidating if any click asked to). So picking six wells one click at a
 time draws the plots once, not six times with each draw holding up the next

@@ -1016,7 +1016,7 @@ def always_run(files: set[str], root: Path = REPO) -> dict[str, str]:
 def _fast_lanes_change(old_source: str | None, new_source: str | None) -> dict[str, str]:
     """Which fast-lane tests a change to ``tests/_lanes.py`` reaches: each file that left a gated roster, and so
     runs in the fast lane now; :data:`ALL` when the harness patterns change or a version does not load."""
-    def _load(source: str | None):
+    def _load(source: str | None) -> tuple[set[str], tuple] | None:
         if source is None:
             return None
         namespace: dict = {"__name__": "_lanes_snapshot"}

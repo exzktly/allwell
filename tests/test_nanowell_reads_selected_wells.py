@@ -331,3 +331,24 @@ def test_a_well_the_page_draws_by_any_route_is_read_not_called_unusable(counted,
     assert reads == ["A01", "B01"] and st.data.wells == ["A01", "B01"]
     assert nwc.nanowell_empty_reason(ctx) is None
     assert nwc.page_wells(ctx) == ["B01"]
+
+
+def test_a_selection_is_read_while_the_page_s_band_is_elsewhere(counted, qtbot):
+    """Phone layout lends the page's control band to its Controls sheet (``ui.phone_shell``), so the band is hidden
+    while the page is on screen. The page judged itself hidden by its band, so every selection after the first was
+    skipped as "a hidden page reads on show" — no load, no log line — and the page said "None of the selected wells'
+    nanowell tables could be used." over tables it never opened. Reported as only the first row selected loading."""
+    from review.features.nanowell import controller as nwc
+
+    ctx, reads = counted
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    from widgets.control_band import ControlBand
+
+    bands = ctx.widgets.get("_nw_canvas").window().findChildren(ControlBand)
+    assert bands
+    for band in bands:
+        band.hide()                                                   # lent to the closed Controls sheet
+    _select(qtbot, ctx, {"B01"})
+    assert reads == ["A01", "B01"]
+    assert nwc.nanowell_empty_reason(ctx) is None and nwc.page_wells(ctx) == ["B01"]

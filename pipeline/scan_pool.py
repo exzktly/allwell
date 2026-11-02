@@ -39,6 +39,7 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any
 
+from pipeline.suspend import pool_worker_initializer
 from util.aw_safe import swallowed
 
 #: Below this many files, the scan runs on threads instead.
@@ -154,8 +155,10 @@ def _across_processes(fn, items, workers, on_result) -> "list | None":
     """The results, or ``None`` when no pool could be had."""
     try:
         context = mp.get_context("spawn")
-        with ProcessPoolExecutor(max_workers=workers,
-                                 mp_context=context) as pool:
+        # The initializer ends a worker whose parent has gone, which would
+        # otherwise wait on the call queue for ever (suspend.exit_with_parent).
+        with ProcessPoolExecutor(max_workers=workers, mp_context=context,
+                                 initializer=pool_worker_initializer) as pool:
             # Chunked, because a spawned worker is expensive to reach: sending
             # one path at a time makes the round trip per file comparable to
             # the parse it is asking for. Small chunks all the same — a large

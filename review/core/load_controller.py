@@ -905,6 +905,10 @@ def _say_loaded(ctx, app, n: int, display: str, gating_started: bool) -> None:
     # After the hydrators, because the flags are set by the first ``_doc.read``
     # and the loads above are what trigger it.
     _report_persistence_doc_state(ctx)
+    # The caches this load filled are given back if the app then sits in the
+    # background (review/core/idle_memory.py).
+    from review.core import idle_memory
+    idle_memory.install(ctx)
 
 
 def _open_wells(ctx, app, csvs) -> None:

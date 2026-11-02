@@ -1606,6 +1606,13 @@ skip what is done".
   and overwrites its outputs; every other well is unaffected. Validate &
   Repair's completion handoff fills this in for you with exactly those wells.
 
+All three fields take a **rectangle of wells** written as two corners joined by
+a colon: `A01:C06` is rows A to C, columns 1 to 6 (18 wells), `H01:H12` is row
+H, and `A05:H05` is column 5. Either corner can come first, and rectangles mix
+with single wells (`A01:B12, H12`). An entry that is not a well or a rectangle
+(a typo such as `A1:Z9`) stops the run with a message under **Run** naming the
+field and the entry.
+
 ### 9. Advanced — output, performance, scratch folder
 
 Folded by default; folded, its header says how many settings differ from a new
@@ -4099,6 +4106,11 @@ plate picks a single well and **All** is not offered — unless groups are
 defined, when the plate shows groups as it does elsewhere. The Image Table's own picker ends in
 the same footer. The selection survives across tabs and is what every plot /
 aggregate / export consumes.
+
+The plate lights a well (or dims a group) the moment you click it; the plots
+redraw half a second after your last click, so picking several wells
+one after another redraws them once rather than once per well. A drag across
+the plate redraws once, when you let go.
 
 Every plate map in the app — this one, the pickers on the Statistics, Image
 Browser, Preview and Home panels, the Datasets tools' own well
@@ -9752,6 +9764,21 @@ worker loads StarDist once and reuses it across every FOV in that well.
 - **CPU-only.** Workers default to `floor((cpu_count − 1) / tf_threads)`,
   with `tf_threads` defaulting to 4. Adjust under Advanced ▸ Performance if your
   machine has very many cores.
+
+**Memory while the app is in the background.** Review keeps the wells,
+images and statistics it has read in memory so redraws are quick. Once All-Well
+has been in the background for 5 minutes (another window in front, or the
+screen locked), it gives that memory back; the first redraw after you return
+reads back from disk what it needs, which takes a moment on a large plate.
+While wells are being read back, the QC, crop and gating counts say how many
+wells they were counted over. Set the environment variable
+`ALLWELL_IDLE_RELEASE_MIN` to change the minutes, or to `0` to keep everything
+in memory. Analysis runs are not affected.
+
+Stopping a run, or closing the app while one is running, now ends all of its
+worker processes. On Windows, before this, the workers of a stopped run could
+stay behind out of sight, each holding gigabytes of memory, until the computer
+was restarted.
 
 Temporary directories (`_tmp_extract_*`, `_tmp_images_*`) are removed when
 each well completes, even after a worker error. Stragglers from a crashed

@@ -106,6 +106,17 @@ class ImageRepository:
     # ── lifecycle ─────────────────────────────────────────────────────────
 
     @staticmethod
+    def release_decoded() -> int:
+        """Drop the decoded arrays only, for an app gone idle; return the bytes they held.
+
+        The zip handles are kept: they are small and still describe the dataset
+        that is open (``review/core/idle_memory.py``).
+        """
+        from review.data.image_discovery import invalidate_decode_cache
+
+        return invalidate_decode_cache()
+
+    @staticmethod
     def invalidate() -> None:
         """Drop the decoded-array and zip-handle caches.
 

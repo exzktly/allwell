@@ -76,6 +76,10 @@ class SelectionState:
     notes_text: str = ""
 
     plate_commit_pending: bool = False
+    # A plot rebuild a plate click asked for and the click debounce is holding
+    # (``selection_controller.schedule_plate_rebuild``): ``None`` when there is
+    # none, else whether it invalidates the statistics cache.
+    plate_rebuild_invalidate: bool | None = None
 
     # ── saved selections ("rep mode") ────────────────────────────────────────
 

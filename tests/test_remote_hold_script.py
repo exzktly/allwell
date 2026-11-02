@@ -411,17 +411,20 @@ def test_a_scheduler_that_cannot_answer_leaves_the_files_to_decide(hold, tmp_pat
 def test_a_running_step_restarts_the_idle_clock(hold, tmp_path):
     """Wrong implementation: keeping the node but leaving the idle clock where it was, so the node goes the moment
     the step ends instead of a whole idle limit later."""
-    h = hold(idle_release_s=4, env=_squeue(tmp_path, ["4242.3"]))
-    deadline = time.monotonic() + 7
+    h = hold(idle_release_s=6, env=_squeue(tmp_path, ["4242.3"]))
+    deadline = time.monotonic() + 9
     while time.monotonic() < deadline:
         assert h.alive(), "released for idleness while a run step was running"
         time.sleep(0.3)
     (tmp_path / "steps").write_text("")
     step_ended = time.monotonic()
     h.wait()
-    assert h.ended() == "idle 4 s"
-    # The script sees the step end at its next look (polls are 1 s apart), so the full limit runs from at most one
-    # poll before the step ended; a clock left running would release within about a poll of it.
+    assert h.ended() == "idle 6 s"
+    # The idle clock restarts from the last look that saw the step running, which is up to a poll (1 s, plus the
+    # stand-in squeue's own run time) before the step ended, and the script tells time in whole seconds
+    # (`date +%s`), so the limit can elapse nearly a second early. With a 6 s limit the node therefore goes at least
+    # about 3.5 s after the step ends; a clock left running would release within about a poll of it. With a 4 s
+    # limit the same two allowances let a correct script release 2.4 s after the step ended, which is what CI saw.
     assert time.monotonic() - step_ended >= 2.5, "the idle clock had kept running while the step kept the node"
 
 

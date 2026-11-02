@@ -10,6 +10,7 @@ from pipeline.output_policy import (
 )
 from pipeline.well_skip import _canonical_force_wells
 from services.subprocess_text import TEXT_UTF8
+from util.blas_threads import uncapped_env
 
 HERE = Path(__file__).resolve().parent.parent
 PIPELINE_SCRIPT = HERE / "process_microscopy.py"
@@ -417,7 +418,9 @@ def spawn_pipeline(args: list[str]) -> subprocess.Popen:
         # The pipeline watches this pid and winds itself down if the app goes
         # away (`pipeline.suspend.watch_parent`): in a session of its own it
         # would otherwise outlive a crash and race the restarted app's run.
-        env={**os.environ, "PYTHONUNBUFFERED": "1",
+        # The window's BLAS thread cap is removed: the pipeline sizes its own
+        # pools per worker (`util.blas_threads.uncapped_env`).
+        env={**uncapped_env(os.environ), "PYTHONUNBUFFERED": "1",
              "ALLWELL_PARENT_PID": str(os.getpid())},
         **kwargs,
     )

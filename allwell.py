@@ -35,6 +35,12 @@ __import__("os").environ["ALLWELL_BOOT_LOG"] = str(_boot_diag.log_path())
 # app's folder. A pipeline on a remote host never sees it and keeps its old
 # folders (util.state_dir.on_the_desktop).
 __import__("os").environ["ALLWELL_DESKTOP"] = "1"
+# Bound numpy's and scipy's BLAS thread pools before either is imported: on
+# Windows each pool thread commits a page-file-backed buffer it never uses, and
+# with one thread per core that was gigabytes held until the app quit. The local
+# pipeline gets the uncapped environment back (util.blas_threads).
+from util.blas_threads import cap_for_gui as _cap_blas_for_gui
+_cap_blas_for_gui()
 _boot_diag.boot(f"boot log: {_boot_diag.log_path()}")
 
 _boot_diag.boot("importing PySide6 (Qt DLLs) …")

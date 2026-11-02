@@ -133,6 +133,13 @@ def _dispatch_multiprocessing_child() -> None:
 
 _dispatch_multiprocessing_child()
 
+# The window's BLAS cap (util.blas_threads) has to precede the matplotlib import
+# below, which loads numpy. Only the window gets it: a ``--run-*`` child is the
+# pipeline or a tool the app started, and sizes its own threads.
+if not (len(sys.argv) > 1 and sys.argv[1].startswith("--run-")):
+    from util.blas_threads import cap_for_gui as _cap_blas_for_gui
+    _cap_blas_for_gui()
+
 import matplotlib
 matplotlib.use("QtAgg")
 

@@ -266,6 +266,15 @@ def active_wells(ctx) -> list[str]:
     return sorted({w for _name, wells, _rset in plot_group_well_lists(ctx, fallback_to_all=False) for w in wells})
 
 
+def unread_wells(ctx) -> list[str]:
+    """The wells the page draws that have a nanowell table it has not read yet (none before the first load)."""
+    st = _state(ctx)
+    if st is None or st.data is None:
+        return []
+    available = set(st.data.available)
+    return [w for w in active_wells(ctx) if w in available and w not in st.loaded_wells]
+
+
 def tableless_wells(ctx) -> list[str]:
     """The wells the page draws that have no usable nanowell table: none in the folder, or one that was read and
     left out (``data.problems`` says why). A well whose table is still being read is not one of them."""
@@ -634,6 +643,11 @@ def redraw(ctx) -> None:
         # than draw fold changes against the wrong baseline, counts that hold cells the gate has left out, or
         # counts from nanowells the rule now leaves out.
         ensure_loaded(ctx)
+    elif unread_wells(ctx) and not st.computing and not load_queued(ctx):
+        # The page draws a well whose table it has not read. The selection hook queues that read, but the drawn wells
+        # also change by routes that reach only this redraw (a replicate set shown, a group-by, a restored view), and
+        # a well left unread here was then reported as one whose table "could not be used".
+        queue_load(ctx)
     _call(ctx, "_nw_refresh_controls")
     _call(ctx, "_nw_show_computing")
     _refresh_empty(ctx)

@@ -503,3 +503,38 @@ def test_brightness_reads_a_gzipped_cell_csv_and_prefers_a_plain_twin(tmp_path):
     assert load_nanowell_data(out).sites["brightness_GFP"].tolist() == [20.0]
     pd.DataFrame({**cells, "GFP_mean_intensity": [30.0]}).to_csv(out / "measurements_A01.csv", index=False)
     assert load_nanowell_data(out).sites["brightness_GFP"].tolist() == [30.0]
+
+
+def test_a_well_whose_run_found_no_nanowell_is_named_with_its_grid_s_reasons(tmp_path):
+    """A well the run could not place an array in writes a header-only table beside a grid record that says why at
+    each timepoint. Read as zero rows it used to vanish with no problem recorded, so the page said only "None of the
+    selected wells' nanowell tables could be used." with an empty hint — the reason sat unread in the grid record."""
+    grids = {"C02": {"t_c": {"status": "no_lattice", "reason": "no square lattice was found in the tiles"},
+                     "t_a": {"status": "no_lattice", "reason": "no square lattice was found in the tiles"},
+                     "t_d": {"status": "unaddressed", "reason": "the fiducial was not found"}}}
+    out = _dataset(tmp_path, {"A01": _series_well(), "C02": []}, grids=grids)
+    data = load_nanowell_data(out)
+    assert data.wells == ["A01"] and data.available == ["A01", "C02"]
+    assert data.problems == [
+        "C02: the run found no nanowell to measure at any timepoint, so its nanowell table has no rows — "
+        "t_c, t_a: no_lattice (no square lattice was found in the tiles); t_d: unaddressed (the fiducial was not "
+        "found)."]
+
+
+def test_a_selection_of_only_such_wells_says_why_on_the_page(tmp_path):
+    grids = {"C02": {"t_c": {"status": "no_lattice", "reason": "no square lattice was found in the tiles"}}}
+    out = _dataset(tmp_path, {"A01": _series_well(), "C02": []}, grids=grids)
+    st = NanowellState()
+    nwc.load_into(st, out)
+    ctx = SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(data_dir=str(out))),
+                          widgets=SimpleNamespace(get_or_none=lambda _n: None))
+    import review.core.selection_controller as sel
+    from unittest import mock
+
+    with mock.patch.object(nwc, "_state", return_value=st), mock.patch.object(nwc, "active_wells",
+                                                                               return_value=["C02"]), \
+            mock.patch.object(sel, "has_plottable_selection", return_value=True):
+        reason = nwc.nanowell_empty_reason(ctx)
+    assert reason.title == "None of the selected wells' nanowell tables could be used."
+    assert reason.hint == ("C02: the run found no nanowell to measure at any timepoint, so its nanowell table has no "
+                           "rows — t_c: no_lattice (no square lattice was found in the tiles).")

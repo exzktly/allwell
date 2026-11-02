@@ -310,3 +310,24 @@ def test_a_superseded_load_keeps_the_wells_it_read(counted, qtbot):
     qtbot.waitUntil(lambda: "B01" in st.well_parts, timeout=20000)
     _select(qtbot, ctx, {"A01", "B01"})
     assert reads == ["A01", "B01"] and nwc.page_wells(ctx) == ["A01", "B01"]
+
+
+def test_a_well_the_page_draws_by_any_route_is_read_not_called_unusable(counted, qtbot):
+    """The page used to read new wells only from its selection hook. Anything else that changes which wells it
+    draws — a replicate set shown, a group-by, a restored view, a redraw fanned out by another control — reached
+    ``redraw`` alone, which reads nothing: the well stayed unread and the page said "None of the selected wells'
+    nanowell tables could be used." with an empty hint, over a table it had never opened. Reported on a batched
+    remote plate as "only the first row loads". A redraw now asks for whatever the page draws and has not read."""
+    from review.features.nanowell import controller as nwc
+
+    ctx, reads = counted
+    ctx.state.selection.selected_wells = {"A01"}
+    st = _loaded(qtbot, ctx)
+    assert reads == ["A01"]
+    ctx.state.selection.selected_wells = {"B01"}                       # no selection hook: any other route
+    nwc.redraw(ctx)
+    assert nwc.load_queued(ctx) or st.computing
+    qtbot.waitUntil(lambda: not nwc.load_queued(ctx) and not st.computing, timeout=20000)
+    assert reads == ["A01", "B01"] and st.data.wells == ["A01", "B01"]
+    assert nwc.nanowell_empty_reason(ctx) is None
+    assert nwc.page_wells(ctx) == ["B01"]

@@ -3065,7 +3065,7 @@ back into the field so the two cannot disagree in that direction either.
 
 **A rectangle is a well list, in the field as well as in the map.** `H01:H12`
 names the whole of row H and mixes with ordinary wells, expanded by the same
-`_expand_well_range` the map's right-hand side has always used, so `:` means one
+`expand_well_range` the map's right-hand side has always used, so `:` means one
 thing wherever a set of wells is written. It is expanded inside
 `split_background_wells` — the one function every reader of that field goes
 through — so the model build, the remote staging planner, the batched hold-out,
@@ -16764,6 +16764,18 @@ map, not the subset's: it describes the directory the run leaves behind.
 The Analyze form carries it as **Only these wells** beside **Skip these wells**
 and **Force these wells** (`analyze/well_scope.py`;
 `analyze.domain.well_list.parse_well_list` is the one parse for all three).
+All three take rectangles of wells as the background-well field does: two
+corners joined by a colon (`A01:C06`, either corner first, spaces allowed) are
+expanded by `util.well_token.expand_well_range` into canonical labels in reading
+order, and a well named twice is listed once; a single well stays as typed. An
+entry that is neither a well nor a rectangle is kept as the token it is and
+refused before the run (`well_list.well_scope_error`, asked through
+`AnalyzeRunScopeMixin._well_scope_validation_error` from the run-problem roster in
+`analyze/run_problems.py`, section *Run scope*), because the pipeline side
+canonicalises these lists with `pipeline.well_skip._canonical_force_wells`, which
+drops what it cannot read: an *Only these wells* field holding nothing readable
+sent no `--only_wells` at all and ran the whole plate
+(`tests/test_well_ranges_in_the_scope_fields.py`).
 **Skip these wells** is not a pipeline flag: a skipped well is one the run leaves
 exactly as it is, which is what `--only_wells` already promises every well it does
 not name, so `PipelineRunner._apply_skip_wells` turns `opts["skip_wells"]` into that

@@ -112,7 +112,8 @@ class AnalyzeRunProblemsMixin:
         for section, title, check in (
                 ("Image correction", "Background Well Error", self._background_well_validation_error),
                 ("Auto-threshold", "Control Well Error", self._auto_threshold_validation_error),
-                ("Nanowell array", "Nanowell Error", self._nanowell_validation_error)):
+                ("Nanowell array", "Nanowell Error", self._nanowell_validation_error),
+                ("Run scope", "Well List Error", self._well_scope_validation_error)):
             message = check(check_input=check_input)
             if message:
                 problems.append(RunProblem(section, title, message))

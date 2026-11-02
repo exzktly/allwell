@@ -1606,6 +1606,13 @@ skip what is done".
   and overwrites its outputs; every other well is unaffected. Validate &
   Repair's completion handoff fills this in for you with exactly those wells.
 
+All three fields take a **rectangle of wells** written as two corners joined by
+a colon: `A01:C06` is rows A to C, columns 1 to 6 (18 wells), `H01:H12` is row
+H, and `A05:H05` is column 5. Either corner can come first, and rectangles mix
+with single wells (`A01:B12, H12`). An entry that is not a well or a rectangle
+(a typo such as `A1:Z9`) stops the run with a message under **Run** naming the
+field and the entry.
+
 ### 9. Advanced — output, performance, scratch folder
 
 Folded by default; folded, its header says how many settings differ from a new

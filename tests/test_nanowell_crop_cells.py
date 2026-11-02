@@ -5,7 +5,10 @@ now can — the site detail's strip, the pop-out and the Extremes montage — be
 beside the strip and on the Extremes view.
 
 The cells are placed in the crop from the well frame: a crop records where its top-left pixel is, so a cell's
-pixel is ``(well µm − corner µm) / µm per pixel``. The cases here are built so a wrong corner lands a cell on a
+pixel index is ``(well µm − corner µm) / µm per pixel − ½``: pixel ``i`` covers ``[corner + i·scale, corner +
+(i+1)·scale)`` and ``imshow`` draws it centred on ``i``, the rule ``nanowell_measure.cell_table`` placed each cell's
+centre by. (The ``− ½`` was once missing, which drew every dot half a pixel right of and below its cell; a cell's
+outline is placed by the same rule, so the two now agree.) The cases here are built so a wrong corner lands a cell on a
 different pixel — a crop clipped at the tile's edge, where the corner is the tile's edge rather than the nanowell's
 centre less the crop's half-width, and a montage crop, whose scale is the montage's. The page tests drive the real
 checkboxes and read the dots back from the figures.
@@ -45,10 +48,12 @@ def _tile_data(tmp_path, cells, **site):
 
 def test_a_tile_crop_places_each_cell_at_its_pixel_and_leaves_out_the_cells_outside_it(tmp_path):
     # The nanowell at (100, 40) µm is tile pixel (200, 80) at 0.5 µm/px; ±8.4 px puts the crop's corner at (191, 71).
+    # A cell centred at 100 µm sits on the edge between tile pixels 199 and 200 (0.5 µm each): index 199.5, which is
+    # 8.5 in the crop.
     data, metrics = _tile_data(tmp_path, [(100.0, 40.0), (98.0, 41.0), (150.0, 40.0)])
     crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
     assert crop.source == "tile"
-    assert crop.cells.tolist() == [[9.0, 9.0], [5.0, 11.0]]          # (150, 40) µm is off the crop
+    assert crop.cells.tolist() == [[8.5, 8.5], [4.5, 10.5]]          # (150, 40) µm is off the crop
 
 
 def test_a_crop_clipped_at_the_tile_s_edge_measures_from_the_edge(tmp_path):
@@ -56,7 +61,7 @@ def test_a_crop_clipped_at_the_tile_s_edge_measures_from_the_edge(tmp_path):
     # corner, so a cell at (3, 2) µm — pixel (6, 4) of the tile — is pixel (6, 4) of the crop, not (11, 11).
     data, metrics = _tile_data(tmp_path, [(3.0, 2.0)], well_x_um=2.0, well_y_um=1.0)
     crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
-    assert crop.source == "tile" and crop.cells.tolist() == [[6.0, 4.0]]
+    assert crop.source == "tile" and crop.cells.tolist() == [[5.5, 3.5]]
 
 
 def test_a_montage_crop_places_its_cells_at_the_montage_s_scale(tmp_path):
@@ -66,7 +71,7 @@ def test_a_montage_crop_places_its_cells_at_the_montage_s_scale(tmp_path):
     data = _with_cells(data, tmp_path, [(100.0, 40.0), (101.0, 42.0)])
     crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
     # 2 µm/px from (0, 0); the nanowell's ±4.2 µm puts the crop's corner at montage pixel (47, 17).
-    assert crop.source == "montage" and crop.cells.tolist() == [[3.0, 3.0], [3.5, 4.0]]
+    assert crop.source == "montage" and crop.cells.tolist() == [[2.5, 2.5], [3.0, 3.5]]
 
 
 def test_a_tile_crop_draws_only_its_own_nanowell_s_cells_not_a_neighbour_s_in_its_margin(tmp_path):
@@ -75,7 +80,7 @@ def test_a_tile_crop_draws_only_its_own_nanowell_s_cells_not_a_neighbour_s_in_it
     # crop if the crop took every cell its rectangle covers.
     data, metrics = _tile_data(tmp_path, [(100.0, 40.0, 0, 0), (98.0, 41.0, 1, 0), (101.0, 39.0, None, None)])
     crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
-    assert crop.source == "tile" and crop.cells.tolist() == [[9.0, 9.0]]
+    assert crop.source == "tile" and crop.cells.tolist() == [[8.5, 8.5]]
 
 
 def test_a_montage_crop_draws_only_its_own_nanowell_s_cells(tmp_path):
@@ -84,7 +89,7 @@ def test_a_montage_crop_draws_only_its_own_nanowell_s_cells(tmp_path):
     data, metrics = _crop_data(tmp_path)
     data = _with_cells(data, tmp_path, [(100.0, 40.0, 0, -1), (101.0, 42.0, 0, 0)])
     crop = ic.site_crops(data, metrics, ("A01", 0, 0))["t0"]
-    assert crop.source == "montage" and crop.cells.tolist() == [[3.5, 4.0]]
+    assert crop.source == "montage" and crop.cells.tolist() == [[3.0, 3.5]]
 
 
 def test_a_well_without_a_cell_table_says_none_could_be_read_not_that_it_has_none(tmp_path):
@@ -144,7 +149,8 @@ def test_the_cells_box_draws_each_timepoint_s_cells_on_the_strip_and_the_pop_out
     assert page.state.feature_slice("nanowell").crop_cells is True
     assert _dots(page, "_nw_strip_fig") == [CELLS["t_c"], CELLS["t_a"]]
     caption = [t.get_text() for t in page.widgets.get("_nw_strip_fig").texts if t.get_gid() == "nw-crop-caption"]
-    assert caption[0].endswith("; dots: the 4 cells the run counted in this nanowell")
+    assert caption[0].endswith("; dots: the 4 cells the run counted in this nanowell; 2 crop(s) of a run that kept "
+                               "no cell outlines, so dots there")
     _press(qtbot, page, "_nw_popout_btn")
     qtbot.addWidget(page.widgets.get("_nw_popout"))
     assert _dots(page, "_nw_popout_fig") == [CELLS["t_c"], CELLS["t_a"]]

@@ -2,7 +2,8 @@
 (ARCHITECTURE §6.2l).
 
 A nanowell run writes no label map — its cells are counted per nanowell and recorded as positions in the well frame
-(``well_x_um``, ``well_y_um``), not as outlines — so Segmentation, which draws outlines from a label map, had nothing
+(``well_x_um``, ``well_y_um``), with each cell's outline kept apart for the Nanowells crops
+(``pipeline.nanowell_outlines``), not as a tile's label image — so Segmentation, which draws outlines from a label map, had nothing
 to draw and drew nothing at all. It now draws the tile without outlines (its own, generic, fallback) and asks this
 module, through the registry service ``segmentation.nanowell_overlay``, for what can honestly be drawn: each counted
 cell as a point, and each nanowell the tile owns as a circle in its state's colour. Points look like points; nothing

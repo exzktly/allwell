@@ -1,7 +1,7 @@
 """The Array view's Cells layer: a dot at the centre of each cell the run counted (nanowell tracker V-cells).
 
 Asked for: "Can boundaries/masks be drawn on the cells themselves in a nanowell? Are these masks saved? Can it be
-toggled on and off like the other nanowell toggles?" The run keeps no cell outlines, so of the options offered the
+toggled on and off like the other nanowell toggles?" The run kept no cell outlines then, so of the options offered the
 user chose the one that needs no re-run: a dot per counted cell, from the cell table every nanowell run already
 writes, switched on and off from the Layers menu like the other layers.
 

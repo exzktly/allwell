@@ -455,6 +455,9 @@ In `nanowells/`, per well:
 - `<well>_identity.json`: whether each timepoint's addresses stayed on the same physical nanowells. It is
   missing when the check could not run; `python -m pipeline.nanowell_identity <output_dir>` runs it again.
 - `<well>_template.npz`: the picture of an empty nanowell, kept so a later incremental run can reuse it.
+- `<well>_outlines.npz`: the outline of every cell the run counted, which the Nanowells crops draw when **Cells** is
+  on. Only Review reads it; deleting it turns the outlines back into dots. A remote run fetches it back with the
+  well's tables.
 - `<well>_masks.npz`: the cell masks Cellpose returned, kept so a re-run of the well — after an anchor is set, or
   with settings that do not change what Cellpose is shown — segments only what it has not seen. Each is taken back
   only for the exact pixels, scaling and model it was made from; anything else is segmented again. Deleting the file
@@ -6332,8 +6335,8 @@ the sentence names it.
     `q,r` when both are on). A nanowell without a value never has a number written (never a 0): it writes why instead, as above. A label
     in a nanowell without a fill has a thin outline of the background colour, and one in a hatched nanowell sits on a
     small patch of it, so it reads over the hatch. *Cells* (off until you turn it on) puts a dot at the centre of every cell the run counted,
-    from the run's cell table, so you can see where cells were found and where none were; the run does not
-    keep cell outlines, so the dot is the cell's centre, not its shape. The dots are the cells the counts hold:
+    from the run's cell table, so you can see where cells were found and where none were; at the array's scale the
+    dot is the cell's centre, not its shape (the crops below draw each cell's outline). The dots are the cells the counts hold:
     a cell Home's Cell Gating leaves out, or one in a field excluded in QC triage, by the field-quality flag or by
     the FOVs chosen on Cell Gating, is not drawn, and the footer counts how many were left out for each. On
     *Lattice* positions each dot keeps its place inside its nanowell, and **Overlays** hides the dots with the
@@ -6402,12 +6405,14 @@ percentage of its well's sharpest rims at that timepoint, the same scale as the 
 reading below the threshold is the one left out as out of focus; *not judged* where the well had too few rims, *rim
 not fitted* where the rim was not found), **Labels** (each crop's timepoint
 and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
-Extremes view follow them. **Cells**, beside *Pop out*, draws a dot at the centre of each cell the run counted in the
-crop's own nanowell, on every crop — the strip, the pop-out and the Extremes montage (the run keeps no cell
-outlines). A crop is cut a little wider than its nanowell, so its edges show parts of the neighbours; their cells are
-not dotted, so every dot is a cell the selected nanowell's count is made of. It is one setting, also offered on the Extremes view, and kept with the page's
+Extremes view follow them. **Cells**, beside *Pop out*, draws the outline of each cell the run counted in the
+crop's own nanowell — the pixels the run counted it on — on every crop: the strip, the pop-out and the Extremes
+montage. A cell the run kept no outline of (a plate analysed before outlines were kept, or one whose
+`nanowells/<well>_outlines.npz` is missing) is a dot at its centre instead, and the caption says how many are dots
+and why. A crop is cut a little wider than its nanowell, so its edges show parts of the neighbours; their cells are
+not drawn, so every outline is a cell the selected nanowell's count is made of. It is one setting, also offered on the Extremes view, and kept with the page's
 settings. As on the Array view, a cell Cell Gating leaves out, or one in an excluded field, is not drawn. The caption
-counts the dots and those left out, and a well without a cell table is named there rather than shown as empty.
+counts the cells drawn and those left out, and a well without a cell table is named there rather than shown as empty.
 The box beside **Cells** chooses what the crops are an image of: *Phase* (the image the run segmented), or any
 fluorescence channel the run read — EGFP, say — cut from that channel's image of the same tile, at the same place.
 It is one setting for every picture on the page: the strip, the pop-out, the Extremes montage and the Array view's

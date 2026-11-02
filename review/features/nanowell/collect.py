@@ -601,6 +601,9 @@ CELL_POSITION_COLUMNS = ("well", "timepoint", "nw_q", "nw_r", "well_x_um", "well
 #: Read too when the table has it: the tile each cell was counted in, which a field exclusion is stated in
 #: (``cell_gate_compute.hidden_cells``).
 CELL_FOV_COLUMN = "fov"
+#: Read too when the table has it: the cell's label on that tile, which with the timepoint and ``fov`` names the cell's
+#: outline (``cell_outline_compute``).
+CELL_ID_COLUMN = "nucleus_id"
 
 
 def cell_positions(data: NanowellData, well: str, timepoint: str) -> pd.DataFrame | None:
@@ -625,7 +628,7 @@ def cell_positions(data: NanowellData, well: str, timepoint: str) -> pd.DataFram
 def _read_cell_positions(path: str, _mtime_ns: int, _size: int) -> pd.DataFrame | None:
     """One cell table's positions; the modification time and size are the cache key, so an edited file is read
     again."""
-    wanted = {*CELL_POSITION_COLUMNS, CELL_FOV_COLUMN}
+    wanted = {*CELL_POSITION_COLUMNS, CELL_FOV_COLUMN, CELL_ID_COLUMN}
     try:
         frame = pd.read_csv(path, usecols=lambda c: c in wanted,
                             dtype={"timepoint": str, "well": str, CELL_FOV_COLUMN: str})

@@ -29,6 +29,8 @@ from types import MappingProxyType
 
 import numpy as np
 
+from pipeline.nanowell_outlines import OUTLINE_COLUMN, encode_outlines, extend_aligned
+
 #: The plate formats the pipeline knows: (lattice pitch, nanowell diameter), micrometres. The pitch is nominal: it
 #: seeds :func:`working_pitch`, a lattice search on the tiles from half to twice it, and the pitch measured there
 #: (or by the lattice fit) is what every later step uses — the per-tile fits, registration, the fiducial search,
@@ -1424,6 +1426,8 @@ def _cell_rows(labels, px, fit_sites, counts, addresses, owner, origin, channel_
     located_at = [addresses[i] or (None, None) for i in table["site_index"]]
     table["nw_ring"] = [lattice_ring(q, r, kind) for q, r in located_at]
     table["nw_label"] = [None if q is None else f"{q}_{r}" for q, r in located_at]
+    # Each cell's pixels, placed in the well frame, for Review to outline it on a crop (``pipeline.nanowell_outlines``).
+    table[OUTLINE_COLUMN] = encode_outlines(labels, table["label"], px, origin)
     return table
 
 
@@ -1689,8 +1693,7 @@ def _finish_timepoint(prep: _Prepared, *, on_segmented=None, inspect: dict | Non
         if is_seam_tile(owner):
             start = len(out.cells.get("label", ()))
             seam_rows.extend(range(start, start + len(table.get("label", ()))))
-        for name, values in table.items():
-            out.cells.setdefault(name, []).extend(values)
+        extend_aligned(out.cells, table)
         if own_keep is not None:
             keep[1].update(own_keep[1])
     _renumber_seam_cells(out.cells, seam_rows)
@@ -2955,7 +2958,6 @@ def _record_measured(outcome: WellOutcome, tp, measured, consistency, reference,
     for row in measured.sites:
         row["consistency"] = status
     outcome.sites.extend(measured.sites)
-    for name, values in measured.cells.items():
-        outcome.cells.setdefault(name, []).extend(values)
+    extend_aligned(outcome.cells, measured.cells)
     outcome.cells.setdefault("timepoint", []).extend([tp] * len(measured.cells.get("label", ())))
     steps.tick()

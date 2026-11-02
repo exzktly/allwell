@@ -207,7 +207,8 @@ def field_sites(rows) -> frozenset:
 
 
 def cells_into(scene: ArrayScene, rows, data, gate=None) -> None:
-    """The Cells layer: a dot at each counted cell's centre, from the run's cell table (the run keeps no outlines).
+    """The Cells layer: a dot at each counted cell's centre, from the run's cell table. A whole array is drawn too small
+    for a cell's shape to read, so the array draws dots; the crops draw each cell's outline (``cell_outline_compute``).
 
     In the well frame a dot is where the run measured the cell. On the lattice it keeps its offset from its
     nanowell's measured centre, added to that nanowell's lattice place, so it sits in the same spot of the same
@@ -247,7 +248,7 @@ def cells_into(scene: ArrayScene, rows, data, gate=None) -> None:
         x, y = np.asarray(lx, dtype=float), np.asarray(ly, dtype=float)
     scene.cells = (x, y)
     note = (f"Cells: a dot at the centre of each of the {len(x):,} cells the run counted here, from its cell table; "
-            "the run keeps no cell outlines.")
+            "the crops of a selected nanowell draw each cell's outline.")
     if unplaced:
         note += f" {unplaced:,} more have no place on the lattice (their nanowell has no address or measured centre)."
     if gated:

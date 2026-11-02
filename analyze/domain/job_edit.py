@@ -138,6 +138,11 @@ class AnalyzeJobEditMixin:
         batch = getattr(self, "_remote_batch_size_edit", None)
         if batch is not None and "remote_batch_size" in opts:
             batch.setText(str(opts["remote_batch_size"] or ""))
+        ahead = getattr(self, "_remote_upload_ahead_cb", None)
+        if ahead is not None and "remote_upload_ahead" in opts:
+            from services.remote_batch_step import upload_ahead_mode
+
+            ahead.setValue(upload_ahead_mode(opts["remote_upload_ahead"]))
 
         # Refused by ``_apply_pipeline_info`` on purpose — a sidecar's subset
         # must not narrow the next run — but a queued job's subset is the

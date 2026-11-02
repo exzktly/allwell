@@ -83,7 +83,8 @@ from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_handoff import chase_handoff, watch_of
 from services.remote_batch_ledger import checked, fail, failed_batches_line, ledger_of
-from services.remote_batch_step import Step, abandon_upload_ahead, run_batch, well_removed
+from services.remote_batch_step import (
+    Step, abandon_upload_ahead, peak_batches, run_batch, upload_ahead_mode, well_removed)
 from services.remote_batch_resume import (
     _blank_argv, announce_adopted, background_aliases, download_adopted, note_remote_scratch, nothing_left_to_run,
     reattach_output_dir, stage_leftovers, take_from_remote)
@@ -391,8 +392,11 @@ class _BatchedRemoteProcess:
         progress_fn: Callable[[float], None] | None = None,
         stop_event: threading.Event | None = None,
         reservation=None,
+        upload_ahead: str | None = None,
     ):
         self._runner = runner
+        # How much of the next batch goes up while one runs (`remote_batch_step.UPLOAD_AHEAD_CHOICES`).
+        self._upload_ahead_mode = upload_ahead_mode(upload_ahead)
         self._zipped = zipped
         # A job queued before staging (`services.remote_reservation`): `_start_driver` hands it the driver rather
         # than asking for a node of its own, when it still can.
@@ -1155,8 +1159,8 @@ class _BatchedRemoteProcess:
             self._log(
                 f"[remote] batched mode: {len(all_zips)} well(s) in "
                 f"{n_batches} batch(es) of up to {self._batch_size} "
-                # One batch at the peak: the next goes up a well in place of each one that leaves (remote_batch_step).
-                f"(peak remote disk ≈ {self._batch_size + len(blanks)} "
+                # Two batches at the peak when the whole next one uploads while one runs (remote_batch_step).
+                f"(peak remote disk ≈ {peak_batches(self._upload_ahead_mode, n_batches) * self._batch_size + len(blanks)} "
                 f"well-input)\n"
             )
 

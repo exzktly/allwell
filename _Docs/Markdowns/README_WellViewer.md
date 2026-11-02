@@ -9761,10 +9761,12 @@ reads back from disk what it needs, which takes a moment on a large plate.
 While wells are being read back, the QC, crop and gating counts say how many
 wells they were counted over. Set the environment variable
 `ALLWELL_IDLE_RELEASE_MIN` to change the minutes, or to `0` to keep everything
-in memory. The window also limits numpy's maths libraries to 4 threads each,
-which stops it reserving page file for threads it never uses; set
-`OPENBLAS_NUM_THREADS` yourself to choose another number. Analysis runs are not
-affected by either.
+in memory. Analysis runs are not affected.
+
+Stopping a run, or closing the app while one is running, now ends all of its
+worker processes. On Windows, before this, the workers of a stopped run could
+stay behind out of sight, each holding gigabytes of memory, until the computer
+was restarted.
 
 Temporary directories (`_tmp_extract_*`, `_tmp_images_*`) are removed when
 each well completes, even after a worker error. Stragglers from a crashed

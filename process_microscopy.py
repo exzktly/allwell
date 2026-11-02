@@ -1479,7 +1479,9 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
     """
     import sys as _sys
 
+    from pipeline.suspend import exit_with_parent as _exit_with_parent
     from pipeline.suspend import install_handlers as _install_suspend
+    _exit_with_parent()         # a killed run must not leave its workers behind
     _install_suspend()          # a group signal reaches every worker
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 

@@ -95,7 +95,7 @@ def _drop_image_table_frames(ctx) -> int:
 
 def release_idle_memory(ctx) -> int:
     """Empty Review's dataset caches; return the bytes they held. See the module docstring."""
-    from review.data.image_discovery import invalidate_decode_cache
+    from review.data.image_repository import ImageRepository
 
     freed = 0
     wells = 0
@@ -106,7 +106,7 @@ def release_idle_memory(ctx) -> int:
     with swallow("idle release: populations"):
         freed += state.stats_cache.populations.trim()
     with swallow("idle release: decoded images"):
-        freed += invalidate_decode_cache()
+        freed += (getattr(state, "images", None) or ImageRepository).release_decoded()
     with swallow("idle release: image table frames"):
         freed += _drop_image_table_frames(ctx)
     if freed:

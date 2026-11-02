@@ -4100,6 +4100,11 @@ defined, when the plate shows groups as it does elsewhere. The Image Table's own
 the same footer. The selection survives across tabs and is what every plot /
 aggregate / export consumes.
 
+The plate lights a well (or dims a group) the moment you click it; the plots
+redraw a quarter of a second after your last click, so picking several wells
+one after another redraws them once rather than once per well. A drag across
+the plate redraws once, when you let go.
+
 Every plate map in the app — this one, the pickers on the Statistics, Image
 Browser, Preview and Home panels, the Datasets tools' own well
 pickers, and the status map on a running job's dashboard — is the same control

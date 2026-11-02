@@ -19800,18 +19800,29 @@ ReviewApp._on_sidebar_plate_selection_changed(ids)
         └── commits nothing while plate.isSelecting() — the press-to-release
             of a click or drag. A drag fires selectionChanged once per well it
             enters, each from its own mouse event, so an end-of-tick deferral
-            merges none of them; the release commits the gesture once. A
-            change made outside a gesture (set_ids, All / None) is deferred
-            to the end of the tick instead (tests/test_a_plate_drag_commits_once.py).
+            merges none of them.
+
+The click debounce. Every plate click — a select-mode click or drag, a
+passive-mode wellActivated that toggles a group, a solo well or a Group-by
+value — changes the state and repaints the plate at once, and asks for the
+plot redraw through selection_controller.schedule_plate_commit /
+schedule_plate_rebuild. Those restart one single-shot QTimer per window
+(_plate_click_timer, PLATE_CLICK_DEBOUNCE_MS = 250, the interval the
+Nanowells page waits before reading new wells); when the clicks pause it
+fires flush_plate_clicks, which runs the commit below and then any rebuild
+(invalidating if any click asked to). So picking six wells one click at a
+time draws the plots once, not six times with each draw holding up the next
+click. A test that needs the redraw now calls flush_plate_clicks
+(tests/test_plate_clicks_redraw_once.py: three clicks, then one commit).
 
 User releases mouse / clicks "Select all" / "Select none"
         │
         ▼
 selectionDragFinished → ReviewApp._on_sidebar_plate_drag_finished
                                 or
-              click handler → app._on_plate_sel_change()
+              click handler → schedule_plate_commit(ctx)
         │
-        ▼
+        ▼  (once the clicks pause: flush_plate_clicks)
 selection_controller.on_plate_sel_change(ctx)
         ├── commits the plate change (SelectionState diffs prev_sel → last_sel)
         └── emits bus.selection_changed

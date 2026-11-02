@@ -74,8 +74,8 @@ _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or ou
            ("addresses", "Addresses", "Each nanowell's q,r, wherever it is drawn large enough to hold it."),
            ("values", "Values", "Each nanowell's value of the Metric, written inside it (under its q,r when "
                                 "Addresses is on) wherever it is drawn large enough to hold it."),
-           ("cells", "Cells", "A dot at the centre of each cell the run counted, from its cell table. The run keeps "
-                              "no cell outlines, so a dot is all there is to draw."),
+           ("cells", "Cells", "A dot at the centre of each cell the run counted, from its cell table. A cell's "
+                              "outline is drawn on the selected nanowell's crops, where it is large enough to read."),
            ("tiles", "Tiles", "Each tile's placement, coloured by how the run placed it, with its residual."),
            ("anchor", "Anchor", "The anchor set by hand, and what the grid record says about addressing this "
                                 "timepoint; with it on, Set anchor is offered."),
@@ -181,10 +181,10 @@ _POPOUT_METRICS_TIP = ("Write each crop's measurements under it — the same set
 _POPOUT_LABELS_TIP = ("Write each crop's timepoint over it and the line under the figure saying where the crops were "
                       "cut from and on what brightness scale. Off leaves the crops bare; the title still names the "
                       "nanowell and channel.")
-_CROP_CELLS_TIP = ("Draw a dot at the centre of each cell the run counted in the crop's own nanowell on every crop "
-                   "— the strip, the pop-out and the Extremes montage. Cells of the neighbouring nanowells that the "
-                   "crop's margin takes in are not drawn. The run keeps no cell outlines, so a dot is all there is "
-                   "to draw.")
+_CROP_CELLS_TIP = ("Draw the outline of each cell the run counted in the crop's own nanowell on every crop — the "
+                   "strip, the pop-out and the Extremes montage. A cell the run kept no outline of (a plate analysed "
+                   "before outlines were kept) is a dot at its centre. Cells of the neighbouring nanowells that the "
+                   "crop's margin takes in are not drawn.")
 _TP_TIP = ("The timepoint drawn on Along x: Wells and Position (the latest by default), the one Extremes ranks the "
            "nanowells at (the well's latest by default), and the one the Array view shows (the well's first by "
            "default).")

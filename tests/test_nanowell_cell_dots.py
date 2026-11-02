@@ -1,7 +1,7 @@
 """The Array view's Cells layer: a dot at the centre of each cell the run counted (nanowell tracker V-cells).
 
 Asked for: "Can boundaries/masks be drawn on the cells themselves in a nanowell? Are these masks saved? Can it be
-toggled on and off like the other nanowell toggles?" The run keeps no cell outlines, so of the options offered the
+toggled on and off like the other nanowell toggles?" The run kept no cell outlines then, so of the options offered the
 user chose the one that needs no re-run: a dot per counted cell, from the cell table every nanowell run already
 writes, switched on and off from the Layers menu like the other layers.
 
@@ -55,7 +55,7 @@ def test_a_dot_is_drawn_where_the_run_measured_each_counted_cell(tmp_path):
     scene = _scene(_write(tmp_path))
     expected = sorted((CENTRES[q][0] + dx, CENTRES[q][1] + dy) for tp, q, (dx, dy) in CELLS if tp == "t_c")
     assert sorted(zip(*map(list, scene.cells))) == expected                  # t_c's three, not t_a's one
-    assert "each of the 3 cells the run counted" in scene.cells_note and "no cell outlines" in scene.cells_note
+    assert "each of the 3 cells the run counted" in scene.cells_note and "draw each cell's outline" in scene.cells_note
 
 
 def test_on_the_lattice_a_dot_keeps_its_place_in_its_nanowell(tmp_path):

@@ -166,6 +166,7 @@ NANOWELL_E2E_FILES = {
     "test_nanowell_manual_anchor_run.py": "an anchor set by hand addresses a well end to end; 40 s",
     "test_nanowell_mask_reuse_run.py": "a well re-run after a click takes its cell masks from the run before; 90 s",
     "test_nanowell_segmenter_input_sheet.py": "a run writes the sample of what its segmenter was given; 8 s",
+    "test_nanowell_outlines_run.py": "every counted cell's outline is kept, centred on its row, through the real run; 23 s",
     "test_a_remote_nanowell_run_on_a_standin_cluster.py": "a batched remote nanowell run through its final re-anchoring pass on the stand-in cluster (tracker P1); 27 s",
 }
 
@@ -210,6 +211,8 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_contents.py": "Section C: what is inside each nanowell (tracker §3.5, §3.6)",
     "test_nanowell_count_settings_sit_with_segmentation.py": "The nanowell count's own segmentation settings sit in the Segmentation section, shown in …",
     "test_nanowell_crop_cells.py": "The counted cells drawn on every Nanowells crop, as the Array view's Cells layer draws them …",
+    "test_nanowell_crop_outlines.py": "Each counted cell's outline drawn over the Nanowells crops",
+    "test_nanowell_outlines.py": "Each counted cell's outline, kept beside a nanowell run's cell table",
     "test_nanowell_concatenate_link.py": "Concatenate of two analysed nanowell datasets joins dataset 2's timepoints onto dataset 1's …",
     "test_nanowell_popout_grid.py": "The **Nanowell crops** pop-out's choice of timepoints, channels and grid shape, and its …",
     "test_nanowell_crop_view.py": "The selected nanowell's crops: the strip under the site detail, and **Pop out**, which …",

@@ -125,6 +125,10 @@ class Crop:
     #: How many dots the page left out of :attr:`cells` for Cell Gating, and how many for an excluded field.
     gated: int = 0
     in_fields: int = 0
+    #: Each of :attr:`cells`' outline in the crop, in the same order: a list of ``(column, row)`` boundaries, or
+    #: ``None`` for a cell the run kept no outline of. ``None`` as a whole when the well has no outlines file
+    #: (``cell_outline_compute``), so the page draws dots and says why.
+    outlines: list | None = None
 
 
 _IMAGE_SUFFIXES = (".tif", ".tiff")
@@ -203,7 +207,7 @@ def _cut_at(image: np.ndarray, cx: float, cy: float, half: float) -> tuple[np.nd
     return np.array(image[top:min(y1, h), left:min(x1, w)], copy=True), left, top
 
 
-def _cells_in(cells, left_um: float, top_um: float, um_per_px: float, shape, address) -> dict:
+def _cells_in(cells, left_um: float, top_um: float, um_per_px: float, shape, address, outlines=None) -> dict:
     """The counted cells of the nanowell at *address* ``(q, r)`` (*cells*, a frame of ``nw_q`` / ``nw_r`` /
     ``well_x_um`` / ``well_y_um``) that fall inside a crop whose top-left pixel is at ``(left_um, top_um)`` in the
     well frame, as :class:`Crop`'s ``cells`` (pixel positions in the crop) and ``cell_rows`` (their rows); both
@@ -213,16 +217,26 @@ def _cells_in(cells, left_um: float, top_um: float, um_per_px: float, shape, add
     parts of the neighbours, and a dot on a neighbour's cell read as a cell of the selected nanowell. The cell
     table's ``nw_q`` / ``nw_r`` is the nanowell the run counted the cell in, so the dots are exactly the cells that
     nanowell's count is made of. ``cell_rows`` lets the page leave out, when it draws, the ones Cell Gating leaves
-    out of that count (``controller.gated_crops``)."""
+    out of that count (``controller.gated_crops``).
+
+    A position is placed in the crop's pixel *indices*, as ``imshow`` draws them: pixel ``i`` covers
+    ``[corner + i·scale, corner + (i+1)·scale)`` in the well frame and is drawn centred on ``i``, so a well-frame
+    position is ``(µm − corner) / scale − ½`` — the rule ``nanowell_measure.cell_table`` placed the cell's centre by,
+    and the one each cell's outline is placed by (``outlines``, the well's ``cell_outline_compute.well_outlines``:
+    the crop's ``outlines``)."""
     if cells is None:
         return {"cells": None, "cell_rows": None}
+    from review.features.nanowell.cell_outline_compute import crop_outlines
+
     h, w = shape[:2]
-    x = (cells["well_x_um"].to_numpy(dtype=float) - left_um) / um_per_px
-    y = (cells["well_y_um"].to_numpy(dtype=float) - top_um) / um_per_px
+    x = (cells["well_x_um"].to_numpy(dtype=float) - left_um) / um_per_px - 0.5
+    y = (cells["well_y_um"].to_numpy(dtype=float) - top_um) / um_per_px - 0.5
     own = ((cells["nw_q"].to_numpy(dtype=float) == float(address[0]))
            & (cells["nw_r"].to_numpy(dtype=float) == float(address[1])))
     inside = own & (x >= -0.5) & (x <= w - 0.5) & (y >= -0.5) & (y <= h - 0.5)
-    return {"cells": np.column_stack([x[inside], y[inside]]), "cell_rows": cells[inside].reset_index(drop=True)}
+    rows = cells[inside].reset_index(drop=True)
+    return {"cells": np.column_stack([x[inside], y[inside]]), "cell_rows": rows,
+            "outlines": crop_outlines(outlines, rows, left_um, top_um, um_per_px)}
 
 
 def site_crops(data, metrics, site, *, pad: float = 1.4, channel: str = "") -> dict:
@@ -269,6 +283,9 @@ def _cut_well(data, well: str, records, pad: float, out: dict, tifffile, channel
             log.warning("Nanowells: %s could not be opened for crops: %s", archive, exc)
             why_not = f"{archive.name} could not be read ({exc})"
     held_cells: dict = {}
+    from review.features.nanowell.cell_outline_compute import well_outlines
+
+    outlines = well_outlines(data, well) if hasattr(data, "cell_tables") else None
 
     def cells_at(tp):
         """The well's counted cells at *tp* (read once per timepoint); ``None`` when it has no cell table."""
@@ -293,7 +310,7 @@ def _cut_well(data, well: str, records, pad: float, out: dict, tifffile, channel
             if zf is not None and owned:
                 if tile_held[0] != (tp, owner):
                     tile_held[:] = [(tp, owner), _owner_tile(zf, names, data, well, tp, owner, tifffile, channel)]
-                crop = _tile_crop(tile_held[1], data, row, owner, half_um, cells_at(tp), channel)
+                crop = _tile_crop(tile_held[1], data, row, owner, half_um, cells_at(tp), channel, outlines)
             if crop is None and channel:
                 crops[tp] = Crop(None, "", _no_channel_crop(channel, zf is None, why_not, owned), channel=channel)
                 continue
@@ -314,7 +331,7 @@ def _cut_well(data, well: str, records, pad: float, out: dict, tifffile, channel
                 crop = (Crop(image, "montage", note,
                              **_cells_in(cells_at(tp), montage.origin_um[0] + cut[1] * montage.um_per_px,
                                          montage.origin_um[1] + cut[2] * montage.um_per_px, montage.um_per_px,
-                                         image.shape, site[1:]))
+                                         image.shape, site[1:], outlines))
                         if image is not None else Crop(None, "", "Off the montage."))
             crops[tp] = crop
     finally:
@@ -345,7 +362,7 @@ def _owner_tile(zf, names, data, well, tp, owner, tifffile, channel: str = "") -
         return None
 
 
-def _tile_crop(image, data, row, owner, half_um, cells=None, channel: str = "") -> Crop | None:
+def _tile_crop(image, data, row, owner, half_um, cells=None, channel: str = "", outlines=None) -> Crop | None:
     if image is None:
         return None
     tp = row["timepoint"]
@@ -365,4 +382,4 @@ def _tile_crop(image, data, row, owner, half_um, cells=None, channel: str = "") 
     pixels, left, top = cut
     return Crop(pixels, "tile", f"{owner}, full resolution", channel=channel,
                 **_cells_in(cells, float(tile["left_um"]) + left * scale, float(tile["top_um"]) + top * scale, scale,
-                            pixels.shape, (int(row["nw_q"]), int(row["nw_r"]))))
+                            pixels.shape, (int(row["nw_q"]), int(row["nw_r"])), outlines))

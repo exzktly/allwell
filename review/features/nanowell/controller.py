@@ -1982,8 +1982,10 @@ def gated_crops(st, site, crops):
             continue
         hide, gated, in_fields = cg.hidden_cells(rows, st.gate, well, tp,
                                                  field_sites(metrics[metrics["timepoint"] == tp]))
+        outlines = (None if crop.outlines is None
+                    else [o for o, hidden in zip(crop.outlines, hide) if not hidden])
         out[tp] = replace(crop, cells=crop.cells[~hide], cell_rows=rows[~hide].reset_index(drop=True), gated=gated,
-                          in_fields=in_fields) if hide.any() else crop
+                          in_fields=in_fields, outlines=outlines) if hide.any() else crop
     return out
 
 

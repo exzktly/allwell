@@ -646,9 +646,12 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
 
 
 def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None) -> None:
-    """The counted cells of *crop*'s own nanowell, as the Array view's Cells layer draws them: a light dot with a dark
-    rim at each centre (the run keeps no outlines); a neighbour's cells in the crop's margin are not drawn. *tally* adds up what was drawn and which crops had no cell table, for
-    the caption."""
+    """The counted cells of *crop*'s own nanowell: each cell's outline, traced from the pixels the run counted it on
+    (``Crop.outlines``), in the Array view's Cells colour; a cell the run kept no outline of is a light dot with a
+    dark rim at its centre, as the Cells layer draws it. A neighbour's cells in the crop's margin are not drawn.
+    *tally* adds up what was drawn, how many as outlines, and which crops had no cell table or no outlines, for the
+    caption."""
+    from matplotlib.collections import LineCollection
     from ui.nanowell_sites import CELL_COLOUR, CELL_EDGE_COLOUR
 
     if crop is None or crop.image is None:
@@ -660,25 +663,51 @@ def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None) -> None:
     for key in ("gated", "in_fields"):
         if getattr(crop, key, 0):
             tally[key] = tally.get(key, 0) + getattr(crop, key)
+    outlines = crop.outlines if crop.outlines is not None and len(crop.outlines) == len(crop.cells) else None
+    if outlines is None:
+        tally["no_outlines"] = tally.get("no_outlines", 0) + (1 if len(crop.cells) else 0)
+        dotted = np.ones(len(crop.cells), dtype=bool)
+    else:
+        dotted = np.array([not o for o in outlines], dtype=bool)
+        lines = [line for o in outlines if o for line in o]
+        tally["outlined"] = tally.get("outlined", 0) + int((~dotted).sum())
+        tally["unoutlined"] = tally.get("unoutlined", 0) + int(dotted.sum())
+        if lines:
+            # The rim colour under the fill colour, so an outline reads on a bright cell and a dark floor alike.
+            ax.add_collection(LineCollection(lines, colors=CELL_EDGE_COLOUR, linewidths=1.6, zorder=5,
+                                             gid="nw-crop-outlines-rim"))
+            ax.add_collection(LineCollection(lines, colors=CELL_COLOUR, linewidths=0.8, zorder=5,
+                                             gid="nw-crop-outlines"))
     if len(crop.cells):
-        ax.scatter(crop.cells[:, 0], crop.cells[:, 1], s=size or CELL_DOT_PT2, c=CELL_COLOUR,
-                   edgecolors=CELL_EDGE_COLOUR, linewidths=0.4, zorder=5, gid="nw-crop-cells")
+        if dotted.any():
+            ax.scatter(crop.cells[dotted, 0], crop.cells[dotted, 1], s=size or CELL_DOT_PT2, c=CELL_COLOUR,
+                       edgecolors=CELL_EDGE_COLOUR, linewidths=0.4, zorder=5, gid="nw-crop-cells")
         h, w = crop.image.shape[:2]
         ax.set_xlim(-0.5, w - 0.5)                      # the dots must not widen the image's own extent
         ax.set_ylim(h - 0.5, -0.5)
 
 
 def _cells_clause(tally: dict) -> str:
-    """What the cell dots on a set of crops are, for its caption: how many were drawn, how many the page left out
-    (Cell Gating's, and an excluded field's), and that a crop without a cell table has none drawn because none could
-    be read — never that it holds no cells."""
+    """What the cells drawn on a set of crops are, for its caption: how many were drawn, whether as outlines or as
+    dots (and why a cell is a dot: the run kept no outline of it), how many the page left out (Cell Gating's, and an
+    excluded field's), and that a crop without a cell table has none drawn because none could be read — never that
+    it holds no cells."""
     if not tally:
         return ""
-    said = [f"dots: the {tally.get('drawn', 0):,} cells the run counted in this nanowell"] if "drawn" in tally else []
+    said = []
+    if "drawn" in tally:
+        outlined = tally.get("outlined", 0)
+        what = ("outlines" if outlined and outlined == tally["drawn"] else
+                "outlines and dots" if outlined else "dots")
+        said.append(f"{what}: the {tally.get('drawn', 0):,} cells the run counted in this nanowell")
     if tally.get("gated"):
         said.append(f"{tally['gated']:,} more Cell Gating leaves out, not drawn")
     if tally.get("in_fields"):
         said.append(f"{tally['in_fields']:,} more in an excluded field, not drawn")
+    if tally.get("unoutlined") and tally.get("outlined"):
+        said.append(f"{tally['unoutlined']:,} of them dots, the run kept no outline of them")
+    if tally.get("no_outlines"):
+        said.append(f"{tally['no_outlines']} crop(s) of a run that kept no cell outlines, so dots there")
     if tally.get("no_table"):
         said.append(f"{tally['no_table']} crop(s) of a well without a cell table, so no cells drawn there")
     return "; ".join(said)

@@ -355,7 +355,7 @@ def test_a_cut_crop_records_the_rows_of_the_cells_it_draws(tmp_path):
 
     data, metrics = _tile_data(tmp_path, [(100.0, 40.0), (98.0, 41.0), (150.0, 40.0)])
     crop = imc.site_crops(data, metrics, ("A01", 0, 0))["t0"]
-    assert crop.cells.tolist() == [[9.0, 9.0], [5.0, 11.0]]
+    assert crop.cells.tolist() == [[8.5, 8.5], [4.5, 10.5]]          # pixel indices (test_nanowell_crop_cells)
     assert crop.cell_rows[["well_x_um", "well_y_um"]].values.tolist() == [[100.0, 40.0], [98.0, 41.0]]
 
 
@@ -400,7 +400,7 @@ def test_the_crop_strip_draws_only_the_cells_the_counts_hold(qtbot, tmp_path, mo
     dots = [c.get_offsets().tolist() for ax in fig.axes for c in ax.collections if c.get_gid() == "nw-crop-cells"]
     assert dots == [[[8.0, 9.0]]], dots                                  # the 10 px object's dot is gone
     assert caption[0].endswith("; dots: the 1 cells the run counted in this nanowell; 1 more Cell Gating leaves out, not "
-                               "drawn"), caption
+                               "drawn; 1 crop(s) of a run that kept no cell outlines, so dots there"), caption
 
 
 def test_save_nanowell_data_records_the_gate_beside_the_gated_counts(qtbot, tmp_path, monkeypatch):

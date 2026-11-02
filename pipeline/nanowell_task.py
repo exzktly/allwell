@@ -27,6 +27,7 @@ import numpy as np
 from pipeline import nanowell_measure as nm
 from pipeline import nanowell_reference as nref
 from pipeline.nanowell_masks import MaskStore, masks_path
+from pipeline.nanowell_outlines import outlines_path, write_well_outlines
 from pipeline import nanowell_run as nr
 from pipeline.nanowell_parallel import release_cellpose_gpu_cache
 from pipeline.run_report import withdraw_seal
@@ -566,7 +567,9 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
     sites = [r for r in rows if r["timepoint"] in kept]
     cells = [with_timepoint_hours(r) for r in _read_rows(cells_path) if r["timepoint"] in kept]
     return {"grid": grid, "kept": kept, "sites": sites, "cells": cells,
-            "order": {tp: k for k, tp in enumerate(timepoints)}}
+            "order": {tp: k for k, tp in enumerate(timepoints)},
+            # The kept timepoints' cell outlines are carried over from here (``pipeline.nanowell_outlines``).
+            "outlines": outlines_path(Path(prior_dir) / NANOWELL_DIR, well_label)}
 
 
 def _has_a_step_off_timepoint(grid: dict) -> bool:
@@ -766,6 +769,21 @@ def _save_masks(well_label: str, masks: MaskStore) -> None:
                     well_label, masks.target, type(exc).__name__, exc)
 
 
+def _write_outlines(output_dir: Path, well_label: str, outcome, prior: dict | None) -> None:
+    """Keep the outlines of the cells the well's table now holds (``pipeline.nanowell_outlines``): this run's, and
+    the kept timepoints' from the file they were kept from. Display data only, so a failure to write is logged and the
+    run goes on; Review then draws those cells as dots and says why."""
+    target = outlines_path(output_dir / NANOWELL_DIR, well_label)
+    try:
+        n = write_well_outlines(target, outcome.cells, prior["outlines"] if prior else None,
+                                prior["kept"] if prior else ())
+    except (OSError, ValueError) as exc:
+        log.warning("Well %s — its cell outlines could not be kept in %s (%s: %s); Review draws its cells as dots.",
+                    well_label, target, type(exc).__name__, exc)
+        return
+    log.info("Well %s — %d cell outline(s) kept.", well_label, n)
+
+
 def _stamp_anchors(outcome, todo, digest: str) -> None:
     """Record on each timepoint this run located the plate's anchors as they were (``_prior_state`` keeps a
     ``plate_rigid`` timepoint only under the same digest)."""
@@ -948,6 +966,7 @@ def _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, rec
         write_empty_cells_csv(output_dir / f"{csv_prefix}_{well_label}.csv", fluor_tokens)
         compress_well_csv(output_dir / f"{csv_prefix}_{well_label}.csv")
     write_sites_csv(output_dir / NANOWELL_DIR / f"{well_label}.csv", all_sites, fluor_tokens)
+    _write_outlines(output_dir, well_label, outcome, prior)
     write_grid_json(output_dir / NANOWELL_DIR / f"{well_label}_grid.json", well_label, outcome, settings)
     from pipeline.nanowell_inspect import SUFFIX, write_sheet
 

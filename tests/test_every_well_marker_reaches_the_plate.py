@@ -180,6 +180,10 @@ ROSTER: dict[str, list[tuple]] = {
     # The kept cell masks are a cache: failing to write them costs the next run time, never a wrong number.
     "Well %s — its cell masks could not be kept in %s (%s: %s); a re-run segments them again.":
         [((W, "m.npz", "OSError", "full"), "W", "note", "")],
+    # The kept cell outlines are display data for Review's crops: kept or not, the well's numbers are the same.
+    "Well %s — %d cell outline(s) kept.": [((W, 120), "I", "note", "")],
+    "Well %s — its cell outlines could not be kept in %s (%s: %s); Review draws its cells as dots.":
+        [((W, "o.npz", "OSError", "full"), "W", "note", "")],
     "Well %s has no acquisition record: tiles placed from a %s grid, scan %s, %s%% overlap, %s um per pixel, "
     "fields in the order of their names": [((W, "3x3", "snake", 10, 0.5), "I", "note", "")],
     "Well %s: the acquisition record has no mosaic position or no pixel size for it, so it is placed from the "

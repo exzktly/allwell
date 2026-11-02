@@ -10,8 +10,9 @@ name: CI
 # locally) is the guardrails + pure-logic + per-feature tests — the
 # refactor-safety net. The three gated lanes in tests/_lanes.py (nanowell
 # end-to-end ~320 tests, nanowell features ~1,020, remote / HPC ~800) run in
-# the jobs below, in parallel with it, and only when scripts/lane_needed.py says
-# the pull request can reach them. Those numbers are worth keeping honest:
+# the jobs below, in parallel with it. On a pull request each asks its own gate
+# (scripts/lane_needed.py) and runs only the test files the change can reach, or
+# nothing; a push to main or a full-ci label runs every lane whole. Those numbers are worth keeping honest:
 # they read "~1,770 tests, ~60s" for long enough that the lane grew more than
 # fourfold underneath them, and this comment is what a reader consults to decide
 # whether the 15-minute job cap below still has headroom. Re-measure with
@@ -92,9 +93,9 @@ jobs:
       - name: What can this change reach?
         id: scope
         run: |
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+          if [[ "${{ github.event_name }}" != "pull_request" || "${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}" == "true" ]]; then
             echo "scope=code" >> "$GITHUB_OUTPUT"; echo "ALLWELL_FULL_LANE=1" >> "$GITHUB_ENV"
-            echo "push to ${{ github.ref_name }}: the whole lane"
+            echo "push to ${{ github.ref_name }} or a full-ci label: the whole lane"
           else
             echo "ALLWELL_SCOPE_BASE=origin/${{ github.base_ref }}" >> "$GITHUB_ENV"
             echo "scope=$(python scripts/change_scope.py --base "origin/${{ github.base_ref }}")" >> "$GITHUB_OUTPUT"
@@ -143,13 +144,14 @@ jobs:
     # backstop for a hang, not a budget: a lane that creeps toward 20 is a lane to
     # split or speed up, not a number to raise again.
     #
-    # Gated, like the job below: on a pull request scripts/lane_needed.py decides
-    # whether the change can reach a nanowell test (a changed definition followed
-    # through its importers to a nanowell test or to a file one runs, such as
-    # process_microscopy.py), and the job passes without running the lane when it
-    # cannot. A push to main always runs it: the merge is where what the script
-    # cannot follow (a module named by a computed string, a data file read at run
-    # time) gets caught.
+    # Gated, like the job below: on a pull request scripts/lane_needed.py
+    # nanowell-e2e names the end-to-end test files the change can reach (a changed
+    # definition followed through its importers, or a file one runs, such as
+    # process_microscopy.py); scripts/test.sh runs only those, and the job passes
+    # without installing anything when there are none. A push to main, or a pull
+    # request labelled full-ci, runs the whole lane: the merge is where what the
+    # script cannot follow (a module named by a computed string, a data file read
+    # at run time) gets caught.
     name: pytest (nanowell lane)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -163,10 +165,12 @@ jobs:
       - name: Can this change reach the lane?
         id: gate
         run: |
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"; echo "push to ${{ github.ref_name }}: always run"
-          elif python scripts/lane_needed.py nanowell --base "origin/${{ github.base_ref }}"; then
+          if [[ "${{ github.event_name }}" != "pull_request" || "${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "ALLWELL_FULL_LANE=1" >> "$GITHUB_ENV"
+            echo "push to ${{ github.ref_name }} or a full-ci label: the whole lane"
+          elif python scripts/lane_needed.py nanowell-e2e --base "origin/${{ github.base_ref }}"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "ALLWELL_SCOPE_BASE=origin/${{ github.base_ref }}" >> "$GITHUB_ENV"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
@@ -191,8 +195,9 @@ jobs:
   gated:
     # The two other gated rosters (tests/_lanes.py): the nanowell feature tests
     # (form, page, playground search, Review's nanowell data; ~530 s of work) and
-    # the remote / HPC tests (~100 s). Each runs only when scripts/lane_needed.py
-    # says the pull request can reach it, and both always run on a push to main.
+    # the remote / HPC tests (~100 s). Each asks its own gate on a pull request and
+    # runs only the test files the change reaches; both run whole on a push to
+    # main or under a full-ci label.
     # Out of the fast-lane job, they run beside it rather than after it.
     name: pytest (nanowell features + remote)
     runs-on: ubuntu-latest
@@ -204,23 +209,27 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Can this change reach the nanowell tests?
+      - name: Can this change reach the nanowell feature tests?
         id: nanowell
         run: |
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"; echo "push to ${{ github.ref_name }}: always run"
-          elif python scripts/lane_needed.py nanowell --base "origin/${{ github.base_ref }}"; then
+          if [[ "${{ github.event_name }}" != "pull_request" || "${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "ALLWELL_FULL_LANE=1" >> "$GITHUB_ENV"
+            echo "push to ${{ github.ref_name }} or a full-ci label: the whole lane"
+          elif python scripts/lane_needed.py nanowell-features --base "origin/${{ github.base_ref }}"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "ALLWELL_SCOPE_BASE=origin/${{ github.base_ref }}" >> "$GITHUB_ENV"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Can this change reach the remote tests?
         id: remote
         run: |
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"; echo "push to ${{ github.ref_name }}: always run"
+          if [[ "${{ github.event_name }}" != "pull_request" || "${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "ALLWELL_FULL_LANE=1" >> "$GITHUB_ENV"
+            echo "push to ${{ github.ref_name }} or a full-ci label: the whole lane"
           elif python scripts/lane_needed.py remote --base "origin/${{ github.base_ref }}"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "ALLWELL_SCOPE_BASE=origin/${{ github.base_ref }}" >> "$GITHUB_ENV"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi

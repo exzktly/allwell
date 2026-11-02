@@ -43,7 +43,8 @@ scripts/test.sh                                # THE test command — CI runs th
 scripts/test.sh --nanowell                     # the nanowell end-to-end lane (gated)
 scripts/test.sh --nanowell-features            # the other nanowell tests (gated)
 scripts/test.sh --remote                       # the remote / HPC tests (gated)
-python scripts/lane_needed.py nanowell|remote  # does this branch need that gate's lanes? (exit 0 = yes)
+python scripts/lane_needed.py <gate>           # nanowell-e2e | nanowell-features | remote: which of its test files
+                                               # this branch reaches, and why (exit 0 = run, 1 = nothing reached)
 python scripts/change_scope.py                 # version-only / docs-only / code: what the fast lane runs
 ALLWELL_FULL_LANE=1 scripts/test.sh            # the whole fast lane, whatever the change
 scripts/test.sh --ui                           # only the GUI layout / appearance tests
@@ -92,27 +93,29 @@ the container**:
   - **Remote / HPC** (~800 tests, `--remote`): ssh, rsync, the remote runner,
     batches, Slurm, bootstrap, the Remotes dialogs (~100 s).
 
-  `scripts/lane_needed.py nanowell|remote` decides. A changed roster file, a
-  harness file (`scripts/test.sh`, `ci.yml`, `tests/requirements-dev.txt`; the
-  gate's own rows in `tests/_lanes.py`; `pyproject.toml`'s `[tool.pytest]`), or
-  a file a roster file names by path (`process_microscopy.py`, which the
-  stand-in cluster runs; `requirements-remote.txt`) means run it. A changed
-  Python file means run it when its changed definitions reach a roster test:
-  the script follows them through every module that imports them, by the names
-  each importer actually takes (`from m import f`, `m.f`), test helpers such as
-  `tests/_fake_remote.py` included, until it reaches a lane test or a file one
-  runs. Anything it cannot narrow — a new or unparseable file, a module-level
-  statement that defines nothing, a diff it cannot compute — means run it.
-  `lane_needed.py` and `change_scope.py` start no lane: no lane runs them.
-  `scripts/preflight.sh` and CI both ask; CI also runs every gated lane on each
-  push to `main`, which catches what the script cannot follow (a module named
-  by a computed string, a data file read at run time). **If you skip
-  preflight, ask the script yourself and run the lanes it names before
-  pushing.** Expect it to fire often, and believe it when it does: the
-  end-to-end tests run the whole pipeline and the remote tests build the
-  Analyze tab, so most pipeline and Analyze changes really can break them.
-  Replayed over 61 merges, it ran the nanowell lanes on 52 and the remote lane
-  on 39. Building the import graph takes up to ~20 s when a change reaches far.
+  Each lane has its own gate, and on a branch it runs **only the test files the
+  change can reach** — `scripts/test.sh --nanowell` / `--nanowell-features` /
+  `--remote` ask `scripts/lane_needed.py nanowell-e2e|nanowell-features|remote`
+  and pass it the files, or skip the lane when nothing is reached. A file is
+  reached when it changed, when it names a changed file by path
+  (`process_microscopy.py`, which the stand-in cluster runs;
+  `requirements-remote.txt`), or when a changed definition reaches it through
+  the names each importer actually takes (`from m import f`, `m.f`), test
+  helpers such as `tests/_fake_remote.py` included. The **whole lane** runs when
+  the change touches what every test in it receives: a harness file
+  (`scripts/test.sh`, `ci.yml`, `tests/requirements-dev.txt`), the lane's own
+  triggers in `tests/_lanes.py`, `pyproject.toml`'s `[tool.pytest]`, a conftest
+  hook or autouse fixture, or a diff it cannot compute. `lane_needed.py` and
+  `change_scope.py` start no lane: no lane runs them. `ALLWELL_FULL_LANE=1`
+  runs a lane whole, and so does naming its files; CI runs every lane whole on
+  each push to `main` and on a pull request labelled `full-ci` (re-run the
+  workflow after adding the label), which catches what the script cannot follow
+  (a module named by a computed string, a data file read at run time, one test
+  disturbed by another it shared a worker with). `scripts/preflight.sh` and CI
+  ask the same question. **If you skip preflight, run the lanes yourself before
+  pushing** — `scripts/test.sh --remote` selects on its own. Replayed over 61
+  merges, selection cut the gated lanes' worker time per merge from 5,518 s to
+  2,328 s. Building the import graph takes up to ~20 s when a change reaches far.
   A new nanowell or remote test joins its roster. Naming files (`scripts/test.sh tests/test_nanowell_run.py`) runs
   them whichever lane they belong to.
 - **Scoped by the change.** `scripts/change_scope.py` classifies the branch

@@ -99,22 +99,31 @@ elif (( QUICK == 0 )); then
     fi
 
     # The gated lanes (tests/_lanes.py): the nanowell end-to-end and feature tests, and the remote /
-    # HPC tests. Each runs only when scripts/lane_needed.py says this branch can reach it — the same
-    # question CI's jobs ask — because together they cost several minutes.
-    step "nanowell lanes (scripts/test.sh --nanowell, --nanowell-features)"
-    if python scripts/lane_needed.py nanowell | sed 's/^/   /'; then
-        run_lane "nanowell lane" --nanowell
-        run_lane "nanowell feature lane" --nanowell-features
-    else
-        echo "   skipped"
-    fi
-
-    step "remote lane (scripts/test.sh --remote)"
-    if python scripts/lane_needed.py remote | sed 's/^/   /'; then
-        run_lane "remote lane" --remote
-    else
-        echo "   skipped"
-    fi
+    # HPC tests. Each asks its own gate, scripts/lane_needed.py <gate> — the same question CI's jobs
+    # ask — and runs only the test files the change can reach, or the whole lane when the change
+    # touches what every test receives, or nothing. The selection is computed once and handed to
+    # scripts/test.sh as named files, so the import graph is built once per lane.
+    gated_lane() {
+        local name="$1" flag="$2" gate="$3"
+        step "$name (scripts/test.sh $flag)"
+        local files=() f status
+        while IFS= read -r f; do [[ -n "$f" ]] && files+=("$f"); done \
+            < <(python scripts/lane_needed.py "$gate" --files 2> >(sed 's/^/   /' >&2) \
+                && echo "__status=0" || echo "__status=$?")
+        local last=$(( ${#files[@]} - 1 ))
+        status="${files[$last]#__status=}"
+        unset "files[$last]"
+        if [[ "$status" == "1" ]]; then
+            echo "   skipped"
+        elif [[ "$status" != "0" || "${files[*]:-}" == "ALL" || ${#files[@]} -eq 0 ]]; then
+            ALLWELL_FULL_LANE=1 run_lane "$name" "$flag"
+        else
+            run_lane "$name" "$flag" "${files[@]}"
+        fi
+    }
+    gated_lane "nanowell lane" --nanowell nanowell-e2e
+    gated_lane "nanowell feature lane" --nanowell-features nanowell-features
+    gated_lane "remote lane" --remote remote
 else
     step "fast lane"
     echo "   skipped (--quick)"

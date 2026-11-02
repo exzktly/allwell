@@ -699,14 +699,14 @@ def _cells_clause(tally: dict) -> str:
         what = ("outlines" if outlined and outlined == tally["drawn"] else
                 "outlines and dots" if outlined else "dots")
         said.append(f"{what}: the {tally.get('drawn', 0):,} cells the run counted in this nanowell")
-        if tally.get("unoutlined") and outlined:
-            said.append(f"{tally['unoutlined']:,} of them dots, the run kept no outline of them")
-        if tally.get("no_outlines"):
-            said.append(f"{tally['no_outlines']} crop(s) of a run that kept no cell outlines, so dots there")
     if tally.get("gated"):
         said.append(f"{tally['gated']:,} more Cell Gating leaves out, not drawn")
     if tally.get("in_fields"):
         said.append(f"{tally['in_fields']:,} more in an excluded field, not drawn")
+    if tally.get("unoutlined") and tally.get("outlined"):
+        said.append(f"{tally['unoutlined']:,} of them dots, the run kept no outline of them")
+    if tally.get("no_outlines"):
+        said.append(f"{tally['no_outlines']} crop(s) of a run that kept no cell outlines, so dots there")
     if tally.get("no_table"):
         said.append(f"{tally['no_table']} crop(s) of a well without a cell table, so no cells drawn there")
     return "; ".join(said)

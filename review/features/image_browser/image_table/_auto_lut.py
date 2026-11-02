@@ -1,7 +1,8 @@
 """The Image Table's pooled Auto window: one display range per channel across the whole grid.
 
 Moved out of ``controller`` (whose line budget it held) as one cohesive pass; ``controller`` re-exports it.
-Centring a nanowell fold change's window on "no change" is ``_colour_key.centred_window`` (ARCHITECTURE §6.2l).
+Centring a nanowell fold change's window on "no change", when its LUT row asks, is ``_colour_key.centred_window``
+(ARCHITECTURE §6.2l).
 """
 
 from __future__ import annotations
@@ -98,4 +99,6 @@ def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
                 cur[1] = max(cur[1], hi)
                 if low_pos is not None:
                     cur[2] = low_pos if cur[2] is None else min(cur[2], low_pos)
-    st.auto_lut_by_channel = {k: centred_window(ctx, v) for k, v in pooled.items()}
+    st.auto_lut_by_channel = {
+        k: centred_window(ctx, v, bool((_channel_opts_for(ctx, v[3]) or {}).get("centre_on_change")))
+        for k, v in pooled.items()}

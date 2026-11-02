@@ -302,6 +302,11 @@ class ChannelSpec:
     # dim well near-black; this trades the comparison for visibility, and the
     # colour key under the grid says which one is in force.
     auto_per_cell: bool = False
+    # Nanowell fold changes only: centre the Auto window on "no change" — (1/k, k)
+    # for a ratio, (-m, m) for a fold change already on a log scale — so a
+    # diverging colormap's midpoint means unchanged. Off, Auto is the data's own
+    # min and max, as on every other row.
+    centre_on_change: bool = False
 
     def axis_token(self) -> str:
         """Token this channel contributes to an axis / ``active_channels``.
@@ -332,6 +337,7 @@ class ChannelSpec:
             "lut_min": self.lut_min, "lut_max": self.lut_max, "log": bool(self.log),
             "label_colors": bool(self.label_colors),
             "auto_per_cell": bool(self.auto_per_cell),
+            "centre_on_change": bool(self.centre_on_change),
         }
 
     @classmethod
@@ -343,6 +349,7 @@ class ChannelSpec:
             lut_min=d.get("lut_min"), lut_max=d.get("lut_max"), log=bool(d.get("log", False)),
             label_colors=bool(d.get("label_colors", False)),
             auto_per_cell=bool(d.get("auto_per_cell", False)),
+            centre_on_change=bool(d.get("centre_on_change", False)),
         )
 
 

@@ -799,15 +799,9 @@ def _is_transmitted(ctx, name: str) -> bool:
 
 
 def new_channel_spec(ctx, name: str) -> ChannelSpec:
-    """A fresh channel *name* as the builder adds it: its default colormap, and for
-    a nanowell fold change a log scale, so the pooled window can centre on 1 with
-    ×2 and ×½ the same distance from it."""
-    from review.data.observations import fold_change_scale, nanowell_metric_for_token
-
-    cs = ChannelSpec(channel=name, render="corrected", colormap=_default_colormap_for(ctx, name))
-    if fold_change_scale(nanowell_metric_for_token(ctx, name)) == "ratio":
-        cs.log = True
-    return cs
+    """A fresh channel *name* as the builder adds it, with its default colormap. A nanowell fold change starts
+    linear with its Auto window at the data's min and max, like every row; **centre on 1** on its LUT row centres it."""
+    return ChannelSpec(channel=name, render="corrected", colormap=_default_colormap_for(ctx, name))
 
 
 # ── drop acceptance (so a zone never highlights for a token it ignores) ──────
@@ -1548,7 +1542,36 @@ def _lut_row(ctx, token: str, specs: list) -> QFrame:
         _lut_touched(ctx)
     per_cell.toggled.connect(_per_cell)
     h.addWidget(per_cell)
+    centre = _centre_checkbox(ctx, row, specs)
+    if centre is not None:
+        h.addWidget(centre)
     return row
+
+
+def _centre_checkbox(ctx, row, specs) -> QCheckBox | None:
+    """A nanowell fold change's **centre on 1** (**centre on 0** for one already on a log scale), or ``None`` for any
+    other channel. On, its Auto window is centred on no change (``_colour_key.centred_window``) and a ratio is shown
+    on a log scale, so ×2 and ×½ sit the same distance either side; off, Auto is the data's min and max."""
+    from review.data.observations import fold_change_scale, nanowell_metric_for_token
+
+    cs0 = specs[0]
+    scale = fold_change_scale(nanowell_metric_for_token(ctx, cs0.channel))
+    if not scale:
+        return None
+    box = QCheckBox("centre on 0" if scale == "log" else "centre on 1", row)
+    box.setObjectName("ITBLutCentre")
+    box.setChecked(bool(cs0.centre_on_change))
+    box.setToolTip("Auto window centred on no change, so the diverging colours' middle means unchanged and a gain "
+                   "and a loss of the same size look alike. Off: Auto spans the data's own min and max.")
+
+    def _toggled(on: bool):
+        for cs in specs:
+            cs.centre_on_change = bool(on)
+            if scale == "ratio":
+                cs.log = bool(on)
+        _lut_touched(ctx)
+    box.toggled.connect(_toggled)
+    return box
 
 
 def _fmt_lut(v: float) -> str:

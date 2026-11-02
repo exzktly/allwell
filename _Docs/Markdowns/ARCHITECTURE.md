@@ -13931,9 +13931,15 @@ the metric; the frame's own µm/px; and a note of what it leaves out.
   0; its brightness has no value and is a ring.
 - **Colormaps.** A metric map defaults to `viridis` (`builder_view._default_colormap_for`) whatever channel its name
   carries, because a black-based ramp would draw its lowest values in the background's black. A fold change
-  (`observations.fold_change_scale`) defaults to the diverging `coolwarm`, and `builder_view.new_channel_spec` turns
-  on log scale for a ratio; the pooled Auto window is then centred on "no change" (`_colour_key.centred_window`, called by `_auto_lut._compute_auto_luts`):
-  `(1/k, k)` for a ratio, `(-m, m)` for a fold change already on a log scale. Transmitted light — `MONTAGE`, the
+  (`observations.fold_change_scale`) defaults to the diverging `coolwarm`, and otherwise its LUT works as every row's
+  does: linear, its Auto window the data's own min and max pooled across the grid, a typed min / max used as typed.
+  Its LUT row adds **centre on 1** (**centre on 0** for a fold change already on a log scale;
+  `builder_view._centre_checkbox`, `ChannelSpec.centre_on_change`), which centres the pooled Auto window on "no
+  change" (`_colour_key.centred_window`, called by `_auto_lut._compute_auto_luts`) — `(1/k, k)` for a ratio, which it
+  also puts on a log scale so ×2 and ×½ sit the same distance either side, `(-m, m)` for a log fold change — so the
+  diverging map's midpoint means unchanged; the key's scope then says "centred on no change". It is a choice rather
+  than the default because a centred window is wider than the data on its shorter side. Wherever no change falls in
+  the window the key marks it, at an end when that is where it is (`_colour_key.key_ticks`). Transmitted light — `MONTAGE`, the
   run's phase channel, or a channel named phase / BF / DIC / TL as a whole word — defaults to `Greys`
   (`builder_view._is_transmitted`); a tint made the phase montage read as fluorescence. `viridis` and `coolwarm` are
   in `LUT_COLOR_NAMES`, so the LUT editor shows them, and a ramp's chip swatch is the ramp

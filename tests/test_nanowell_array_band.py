@@ -141,7 +141,7 @@ def test_the_walk_takes_the_place_of_well_and_timepoint_and_gives_them_back(qc_v
     assert not ctx.widgets.get("_nw_where_group").isVisibleTo(ctx.window)
     assert not _shown(ctx, "_nw_rerun_btn")
     QTest.keyClick(window, Qt.Key_Right)                              # the keys still reach the walk
-    ready()
+    qtbot.waitUntil(lambda: st.anchor_pending is None and not st.computing, timeout=20000)
     assert st.anchor_queue.index == 1
     QTest.keyClick(window, Qt.Key_Escape)
     assert st.anchor_queue is None and st.view == "qc"

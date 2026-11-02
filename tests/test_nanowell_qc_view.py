@@ -102,7 +102,8 @@ def test_the_sentences_say_what_a_click_does():
     assert qc.short_text(m.cells[("C01", "t_a")]) == "C01 · t_a · partial (3 left out)"
     assert qc.queue_tip(m) == ""
     none_waiting = qc.plate_qc(_records(grids={"D01": _records().grids["D01"]}), order=_by_time)
-    assert qc.queue_tip(none_waiting) == "No timepoint is waiting for an anchor."
+    assert qc.queue_tip(none_waiting) == ("No timepoint is in a state Walk includes (not addressed, contradicted, "
+                                          "inconclusive, partial).")
 
 
 def test_each_state_is_drawn_with_its_own_texture_and_the_line_plots_hatches():
@@ -201,7 +202,10 @@ def test_the_anchor_queue_is_on_the_qc_view_only_and_walks_what_the_matrix_count
     queue_btn = ctx.widgets.get("_nw_queue_btn")
     assert queue_btn.isVisibleTo(window) and queue_btn.isEnabled()
     queue, _why = aq.build_queue(ctx)
-    assert len(queue.all_items) == st.qc_matrix.counts["not_addressed"] == 2
+    # Walk's default: the two not addressed and the partial one, in plate then time order.
+    assert [(i.well, i.timepoint, i.state) for i in queue.all_items] == [
+        ("A01", "t_a", "not_addressed"), ("A02", "t_a", "partial"), ("B01", "t_c", "not_addressed")]
+    assert len(queue.all_items) == qc.queue_size(st.qc_matrix, False, st.anchor_queue_states)
     nwc.set_view(ctx, "array")
     assert not queue_btn.isVisibleTo(window)                       # off the Array view completely
     assert ctx.widgets.get("_nw_anchor_btn").isVisibleTo(window)   # Set anchor stays where anchors are set
@@ -231,7 +235,7 @@ def test_leaving_the_array_view_mid_walk_ends_the_walk_there(qc_page, qtbot):
     bar.setCurrentIndex([bar.tabData(i) for i in range(bar.count())].index("trajectories"))
     assert st.anchor_queue is None and not st.anchor_mode
     assert st.view == "trajectories"                               # the view chosen, not dragged back to QC
-    assert st.qc_message == ("Anchor queue finished: 0 of 2 timepoint(s) anchored, 2 skipped. Re-run anchored "
+    assert st.qc_message == ("Anchor queue finished: 0 of 3 timepoint(s) anchored, 3 skipped. Re-run anchored "
                              "wells… to address them from the anchors.")
     assert not ctx.state.selection.selected_wells                  # the selection it started with
 
@@ -269,12 +273,68 @@ def test_the_queue_button_says_what_it_walks_and_one_per_well_visibly_changes_it
     queue_btn, per_well = ctx.widgets.get("_nw_queue_btn"), ctx.widgets.get("_nw_qc_per_well_btn")
     assert isinstance(per_well, QCheckBox) and queue_btn.property("variant") == "primary"
     # A01 t_a and B01 t_c are not addressed; B01 also has an anchor waiting, so one per well leaves B01 out.
-    assert queue_btn.text() == "Anchor queue: 2 timepoints"
+    # Walk's default holds A01 t_a and B01 t_c (not addressed) and A02 t_a (partial); one per well leaves out B01,
+    # which has an anchor waiting.
+    assert queue_btn.text() == "Anchor queue: 3 timepoints"
     per_well.click()
-    assert st.anchor_queue_per_well and queue_btn.text() == "Anchor queue: 1 well"
+    assert st.anchor_queue_per_well and queue_btn.text() == "Anchor queue: 2 wells"
     per_well.click()
-    assert queue_btn.text() == "Anchor queue: 2 timepoints"
+    assert queue_btn.text() == "Anchor queue: 3 timepoints"
     fig = ctx.widgets.get("_nw_fig")
     assert [t.get_text() for t in fig.texts if t.get_gid() == "nw-qc-message"] == [
-        "2 timepoint(s) not addressed: press Anchor queue to set their anchors one after another, or click an "
-        "orange cell to set one."]
+        "Press Anchor queue to step through 3 of them on the Array view (not addressed, contradicted, inconclusive, "
+        "partial), or click a cell to open one."]
+
+
+def test_a_plate_with_nothing_unaddressed_still_has_a_queue_of_what_needs_a_look():
+    """Reported: "Says 336 of 732 need a look, but anchor queue says 0" — not located 23, inconclusive 68, partial
+    239. The queue walked only timepoints the run could not address, and this plate had none. It walks every
+    walkable state the user leaves ticked under *Walk*: by default not addressed, contradicted, inconclusive and
+    partial."""
+    ok = {"status": "ok"}
+    records = _records(grids={"A01": {"t_c": ok, "t_a": ok}, "B01": {"t_c": ok, "t_a": ok},
+                              "C01": {"t_c": {"status": "no_lattice", "reason": "No lattice was found"}, "t_a": ok}},
+                       verdicts={"A01": {"t_c": ("reference", ""), "t_a": ("inconclusive", "no central square")},
+                                 "B01": {"t_c": ("reference", ""), "t_a": ("partial", "")},
+                                 "C01": {"t_c": ("inconclusive", ""), "t_a": ("partial", "")}},
+                       anchors={}, excluded={})
+    m = qc.plate_qc(records, order=_by_time)
+    assert m.counts.get(qc.NOT_ADDRESSED, 0) == 0 and m.needing_count() == 4
+    assert qc.queue_label(m, False) == "Anchor queue: 3 timepoints"          # not located is not walked by default
+    assert [(i.well, i.timepoint, i.state) for i in qc.queue_items(m, qc.WALK_DEFAULT)] == [
+        ("A01", "t_a", "inconclusive"), ("B01", "t_a", "partial"), ("C01", "t_a", "partial")]
+    assert qc.queue_label(m, False, qc.WALKABLE) == "Anchor queue: 4 timepoints"
+    assert qc.queue_label(m, False, (qc.INCONCLUSIVE,)) == "Anchor queue: 1 timepoint"
+    assert qc.queue_label(m, True) == "Anchor queue: 3 wells"
+
+
+def test_the_walk_arms_set_anchor_where_an_anchor_fixes_it_and_opens_partial_ones_to_look_at(qc_page, qtbot):
+    from review.features.nanowell import controller as nwc
+
+    ctx, st, out = qc_page
+    _write_sidecar(out, "A01", {"t_c": "inconclusive", "t_a": "reference"})
+    nwc.redraw(ctx)                                                   # a changed file: the plate is read again
+    qtbot.waitUntil(lambda: st.qc_reading is None and st.qc_records is not None
+                    and (st.qc_matrix is None or st.qc_matrix.counts.get("inconclusive")), timeout=20000)
+    nwc._call(ctx, "_nw_refresh_controls")
+    queue_btn = ctx.widgets.get("_nw_queue_btn")
+    assert queue_btn.text() == "Anchor queue: 4 timepoints"
+    walk_partial = ctx.widgets.get("_nw_qc_walk_partial")
+    assert walk_partial.isChecked() and walk_partial.text() == "partial (1)"
+    walk_partial.trigger()                                            # untick: the count follows
+    assert queue_btn.text() == "Anchor queue: 3 timepoints"
+    walk_partial.trigger()
+    assert queue_btn.text() == "Anchor queue: 4 timepoints"
+
+    def opened():
+        qtbot.waitUntil(lambda: st.anchor_pending is None and not st.computing and st.view == "array",
+                        timeout=20000)
+        return ctx.widgets.get("_nw_queue_lbl").text(), st.anchor_mode
+
+    queue_btn.click()
+    assert opened() == ("1 of 4 · A01 at t_c · inconclusive", True)  # an anchor can fix it: Set anchor on
+    ctx.widgets.get("_nw_queue_skip_btn").click()
+    assert opened() == ("2 of 4 · A01 at t_a", True)
+    ctx.widgets.get("_nw_queue_skip_btn").click()
+    assert opened() == ("3 of 4 · A02 at t_a · partial", False)      # to look at: a click sets nothing
+    assert st.array_message.startswith("A02 at t_a is partial. Opened to look at, with Set anchor off")

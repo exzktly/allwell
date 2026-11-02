@@ -12146,9 +12146,10 @@ the cell where it is dealt with: a verdict on the Identity view (`_qc_controller
 to the selection as `open_for_anchor` does), an anchor's business on the Array view through `open_for_anchor`. The
 view's band carries *Wells* and the *Anchor* group (`qc_view`): *Anchor queue*, the page's primary action, whose
 text says what it walks (`qc_compute.queue_label`, counted by `queue_size` with `one_per_well`'s rule) and which is
-greyed with `qc_compute.queue_tip`'s reason when nothing waits; *One per well*, a checkbox because it is an option of
-the walk rather than an action, whose toggling changes that count; and *Re-run anchored wells…*. While any timepoint
-is not addressed the figure says what to press (`qc_compute.action_line`), since a tooltip is not seen over VNC. The export style pass
+greyed with `qc_compute.queue_tip`'s reason when nothing is in the states it walks; *Walk ▾*, a menu of the walkable
+states each with its count on the plate; *One per well*, a checkbox because it is an option of the walk rather than
+an action, whose toggling changes that count; and *Re-run anchored wells…*. While the queue has anything to walk the
+figure says what to press (`qc_compute.action_line`), since a tooltip is not seen over VNC. The export style pass
 sets every tick label to the Properties size, so `QcDrawn.relabel` puts the matrix's own label sizes back after it.
 `tests/test_nanowell_qc_view.py` pins the precedence on records where the wrong rule answers differently, and drives
 the real page with nothing selected: the view bar, a real click on a cell, and leaving Array mid-walk.
@@ -12561,14 +12562,21 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   Incremental, and forcing makes it moot), through `review/core/analyze_handoff.open_in_analyze` — Review's one
   door into Analyze, shared by Home's *Finish this run*, QC triage and this view. A file that cannot be written
   is said on the figure (`state.array_message`).
-- **The anchor queue.** *Anchor queue* (on the QC view's Anchor group, not the Array view's) walks every timepoint on the plate that
-  is waiting for an anchor, one montage after another. `anchor_queue_compute` (Qt-free) decides what waits: it
-  reads every grid record under `nanowells/` — not `state.data.grids`, which holds only the wells the page has
-  loaded — and takes each `unaddressed` timepoint with no anchor set, or with the very anchor the last run tried
-  and refused (the block's `manual_anchor_um` equals the file's). An anchor set and not yet used by a run is not
-  waiting (its remedy is a re-run), and is kept (`AnchorQueue.pending_rerun`) so the empty-queue message can say
-  so. Order is plate order, then each well's timepoints in the page's time order (`NanowellData.order`), never the
-  record's or the labels'. *One per well* (`AnchorQueue.set_per_well`, `one_per_well`) narrows the walk to each
+- **The anchor queue.** *Anchor queue* (on the QC view's Anchor group, not the Array view's) walks the plate's
+  timepoints in the QC states *Walk* ticks (`state.anchor_queue_states`, for the session; `qc_compute.WALKABLE`:
+  not addressed, contradicted, inconclusive, partial and not located, all but not located ticked by default), one
+  montage after another. `build_queue` takes them from the QC view's matrix (`qc_compute.queue_items`), so the
+  queue and the matrix cannot disagree, and the plate need not be selected: the matrix reads every well's records,
+  not `state.data.grids`, which holds only the wells the page has loaded. Its *not addressed* cells come from
+  `anchor_queue_compute.waiting_items`: each `unaddressed` timepoint with no anchor set, or with the very anchor the
+  last run tried and refused (the block's `manual_anchor_um` equals the file's). An anchor set and not yet used by a
+  run is not walked (its remedy is a re-run), and is kept (`AnchorQueue.pending_rerun`) so the empty-queue message
+  can say so. Each `QueueItem` carries its state, which the walk's label names (`3 of 330 · B04 at 24h ·
+  partial`). States where an anchor is the fix — not addressed, contradicted, inconclusive (`qc_compute.ARMED`) —
+  open with *Set anchor* on; a partial or not located timepoint opens to be looked at, `open_for_anchor(arm=False)`
+  leaving *Set anchor* off so a click cannot drop an anchor by accident, and the figure says → goes on. Order is
+  plate order, then the matrix's time order (the acquisition record's hours, as `NanowellData.order` sorts), never
+  the record's or the labels'. *One per well* (`AnchorQueue.set_per_well`, `one_per_well`) narrows the walk to each
   well's first waiting timepoint and drops every well that already has an anchor waiting for a re-run, since the
   end of a run addresses a well's other timepoints from one anchor through the rest of the plate. It is kept for
   the session on `state.anchor_queue_per_well`; switching mid-walk keeps the shown item when the new list holds it

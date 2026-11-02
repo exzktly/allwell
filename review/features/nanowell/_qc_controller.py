@@ -108,7 +108,7 @@ def draw(ctx, st, fig, canvas) -> None:
 
     st.hits, st.drawn = None, None
     data_dir = ctx.state.dataset.data_dir
-    st.qc_drawn = draw_qc(fig, matrix(ctx), which=st.qc_wells, error=st.qc_error, out_dir=Path(data_dir) if data_dir else None,
+    st.qc_drawn = draw_qc(fig, matrix(ctx), which=st.qc_wells, error=st.qc_error, walk=st.anchor_queue_states, out_dir=Path(data_dir) if data_dir else None,
                           message=st.qc_message, highlight=st.qc_highlight, excluded=st.excluded_wells)
     apply_export_style_to_current(ctx, fig, canvas)
     if st.qc_drawn is not None and st.qc_drawn.relabel is not None:

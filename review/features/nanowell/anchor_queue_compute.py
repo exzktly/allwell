@@ -34,6 +34,9 @@ class QueueItem:
     timepoint: str
     reason: str = ""            # the grid record's reason for leaving it unaddressed
     refused: bool = False       # an anchor is set, and the last run tried it and still could not address it
+    #: Its QC state (``qc_compute``): ``not_addressed`` for a timepoint the run could not number; an addressed one
+    #: walked because its addresses were not confirmed reads ``inconclusive``, ``contradicted``, ``partial``….
+    state: str = "not_addressed"
 
 
 @dataclass
@@ -96,7 +99,8 @@ class AnchorQueue:
         item = self.current
         if item is None:
             return f"Done · {len(self.anchored)} of {self.walked()} anchored"
-        return f"{self.index + 1} of {len(self.items)} · {item.well} at {item.timepoint}"
+        where = f"{self.index + 1} of {len(self.items)} · {item.well} at {item.timepoint}"
+        return where if item.state == "not_addressed" else f"{where} · {item.state.replace('_', ' ')}"
 
     def summary(self) -> str:
         """What the walk did, said on the figure when it ends."""

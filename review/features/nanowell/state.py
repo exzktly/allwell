@@ -240,10 +240,15 @@ class NanowellState:
     #: The zoom :func:`controller.open_for_anchor` was asked to open at (times *Fit*, on the montage's centre), set
     #: with *anchor_pending* and applied with it once the well is drawn. Never persisted.
     anchor_zoom: float | None = None
+    #: Whether :func:`controller.open_for_anchor` turns *Set anchor* on once the well is drawn (``False``: the anchor
+    #: queue opened a timepoint to be looked at, where a click must not set an anchor). Never persisted.
+    anchor_arm: bool = True
     #: The *Anchor queue* being walked (``anchor_queue_compute.AnchorQueue``), or ``None``. Never persisted.
     anchor_queue: object = None
     #: *One per well*: the queue walks each well's first waiting timepoint only. For the session, never persisted.
     anchor_queue_per_well: bool = False
+    #: *Walk*: the QC states the queue walks (``qc_compute.WALKABLE``). For the session, never persisted.
+    anchor_queue_states: tuple = ("not_addressed", "contradicted", "inconclusive", "partial")
     #: The *Overlays* button: the coloured layers hidden for a look at the image beneath, without touching which
     #: layers are on. Not persisted — a page reopened with its overlays silently missing would look broken.
     overlays_hidden: bool = False

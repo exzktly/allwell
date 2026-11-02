@@ -1570,7 +1570,7 @@ def set_anchor_mode(ctx, on: bool) -> None:
         _call(ctx, "_nw_refresh_controls")
 
 
-def open_for_anchor(ctx, well: str, timepoint: str, *, zoom: float | None = None) -> bool:
+def open_for_anchor(ctx, well: str, timepoint: str, *, zoom: float | None = None, arm: bool = True) -> bool:
     """The ``nanowell.open_anchor`` service: show *well* at *timepoint* on the Array view, ready for *Set anchor*.
 
     QC Triage and Home's health card offer it for a timepoint the run left unaddressed. The well is added to the
@@ -1595,6 +1595,7 @@ def open_for_anchor(ctx, well: str, timepoint: str, *, zoom: float | None = None
     st.overlays_hidden, st.region, st.array_message = False, None, ""
     st.anchor_pending = (well, timepoint or "")
     st.anchor_zoom = float(zoom) if zoom else None
+    st.anchor_arm = bool(arm)
     _save_soon(ctx)
     if not notebook.setCurrentByName("Nanowells"):
         st.anchor_pending = st.anchor_zoom = None
@@ -1625,6 +1626,9 @@ def _apply_pending_anchor(ctx) -> None:
         # Set only now that the page draws this well: a draw before its tables landed showed another well, and the
         # change of well refits the view. ``region_for`` is stamped so the next draw keeps it.
         st.region, st.region_for = fmc.CentreZoom(zoom), (well, st.layers.positions)
+    if not st.anchor_arm:
+        st.anchor_mode = False                           # opened to look at: a click must not drop an anchor
+        return
     if anchor_controls(ctx)[0]:
         st.anchor_mode = True
         return

@@ -1007,6 +1007,8 @@ def colour_keys(ctx, cells) -> list:
             scope = f"one window shared by all {n} well{'' if n == 1 else 's'}"
             if cropped:
                 scope += ", fitted to the cropped region"
+            if spec.get("centre_on_change") and fold_change_scale(nanowell_metric_for_token(ctx, chan)):
+                scope += ", centred on no change"
         metric = nanowell_metric_for_token(ctx, chan)
         kind = fold_change_scale(metric)
         label = metric_label(chan)

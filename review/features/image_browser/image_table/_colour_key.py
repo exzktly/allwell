@@ -53,18 +53,20 @@ def metric_map_background_rgb() -> tuple[int, int, int]:
     return _rgb(theme.Colors.panel_elevated)
 
 
-def centred_window(ctx, pooled: list) -> tuple[float, float]:
-    """The pooled ``(lo, hi)``, centred on "no change" for a nanowell fold change.
+def centred_window(ctx, pooled: list, centre: bool = False) -> tuple[float, float]:
+    """The pooled ``(lo, hi)``: the data's own min and max, as on every row — or, with *centre* (the LUT row's
+    **centre on 1** for a nanowell fold change), centred on "no change".
 
-    A fold change pooled to its own min and max puts 1 wherever the data happen to
-    fall, so no colour means "unchanged" and a gain and a loss of the same size
-    look different. A ratio (log-scaled on its row) gets ``(1/k, k)``, a fold
-    change already on a log scale ``(-m, m)``, so the diverging map's midpoint is
-    no change. A zero ratio has no logarithm; it sits at the bottom of the window.
+    Centred, a ratio (log-scaled on its row) gets ``(1/k, k)`` and a fold change already on a log scale ``(-m, m)``,
+    so a diverging map's midpoint means unchanged and a gain and a loss of the same size look alike; the cost is a
+    window wider than the data on its shorter side, which is why it is a choice and not the default. A zero ratio has
+    no logarithm; it sits at the bottom of the window.
     """
     from review.data.observations import fold_change_scale, nanowell_metric_for_token
 
     lo, hi, low_pos, chan = pooled
+    if not centre:
+        return lo, hi
     scale = fold_change_scale(nanowell_metric_for_token(ctx, chan))
     if scale == "log":
         m = max(abs(lo), abs(hi)) or 1.0
@@ -105,8 +107,11 @@ def key_ticks(key: ColourKey) -> list[tuple[float, str]]:
     ticks = [(0.0, number(key.lo)), (1.0, number(key.hi))]
     if key.centre is not None:
         t = _position(key.centre, key.lo, key.hi, key.log)
-        if t is not None:
-            ticks.append((t, f"{number(key.centre)} = no change"))
+        text = f"{number(key.centre)} = no change"
+        if t in (0.0, 1.0):                  # no change is an end of the window: say so there, not twice
+            ticks[int(t)] = (t, text)
+        elif t is not None:
+            ticks.append((t, text))
     return ticks
 
 

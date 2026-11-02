@@ -5938,8 +5938,11 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     one brightness window; tick **per cell** in its LUT row to scale each well to its own range instead, which shows
     a dim well at the cost of comparing wells.
   - **NW: *metric name*** (one per nanowell metric: cell count, confluence, cell and nanowell fluorescence, fold changes, growth rate,
-    occupied) — each nanowell drawn as a disc in its metric's colour, *viridis* by default. A fold change is drawn
-    blue below 1, red above and grey at 1, on a log scale, so a doubling and a halving are equally strong. The values
+    occupied) — each nanowell drawn as a disc in its metric's colour, *viridis* by default. A fold change is drawn in
+    blue-to-red, and its colour range works like every other LUT's: **Auto** spans the values shown, and a typed min
+    or max is used as typed. Tick **centre on 1** on its LUT row to centre the range on no change instead, on a log
+    scale, so grey means unchanged and a doubling and a halving are equally strong; the colour key always marks where
+    1 falls. The values
     follow the Nanowells page's **Baseline** and the Cell Gating rules, so they match the page and the plots. To take
     a fold change from a particular timepoint instead, open the channel's ⚙ menu and choose under **Fold change
     relative to**: the page's baseline, the earliest or first measurable timepoint, or any timepoint of the run. The

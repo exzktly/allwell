@@ -164,6 +164,34 @@ if [[ -z "${ALLWELL_FULL_LANE:-}" && ( "$MARK" == "$FAST" || "$MARK" == "$FAST a
                 if [[ "$MARK" == "$FAST" ]]; then MARK="not slow"; else MARK="not slow and not ui_lane"; fi
                 set -- "${DOCS_TESTS[@]}" "$@"
             fi ;;
+        code)
+            # A code change runs the fast-lane files it can reach (scripts/lane_needed.py fast --files): what a
+            # changed definition reaches through its importers, plus every file that reads the whole tree, walks
+            # the repository, imports by a computed name or reads a changed document, which run on every change.
+            # Naming test files runs exactly those; ALLWELL_FULL_LANE=1 runs the whole lane.
+            NAMED=""
+            for arg in "$@"; do
+                if [[ "$arg" == tests/* || "$arg" == *.py || "$arg" == *.py::* ]]; then NAMED=1; break; fi
+            done
+            if [[ -z "$NAMED" ]]; then
+                SELECTED=()
+                while IFS= read -r f; do [[ -n "$f" ]] && SELECTED+=("$f"); done \
+                    < <(python scripts/lane_needed.py fast --files && echo "__status=0" || echo "__status=$?")
+                last=$(( ${#SELECTED[@]} - 1 ))
+                status="${SELECTED[$last]#__status=}"
+                unset "SELECTED[$last]"
+                if [[ "$status" == "1" ]]; then
+                    echo "scripts/test.sh: nothing this change touches reaches a fast-lane test — no tests to run" \
+                         "(ALLWELL_FULL_LANE=1 runs the lane anyway)" >&2
+                    exit 0
+                elif [[ "$status" != "0" || "${SELECTED[*]:-}" == "ALL" || ${#SELECTED[@]} -eq 0 ]]; then
+                    echo "scripts/test.sh: running the whole fast lane" >&2
+                else
+                    echo "scripts/test.sh: running the ${#SELECTED[@]} fast-lane test files this change can reach" \
+                         "(ALLWELL_FULL_LANE=1 runs the whole lane; scripts/lane_needed.py fast says why)" >&2
+                    set -- "${SELECTED[@]}" "$@"
+                fi
+            fi ;;
     esac
 fi
 

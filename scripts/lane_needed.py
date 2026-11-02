@@ -72,7 +72,19 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tests"))
 import _lanes  # noqa: E402
 
-GATES = _lanes.GATES
+GATES = dict(_lanes.GATES)
+
+#: The fast lane as a gate of its own: every test file in no gated roster. It is not in ``tests/_lanes.py`` because
+#: it is not a roster anyone writes — it is what the rosters leave — and it is computed from the tree on each run.
+FAST = "fast"
+
+
+def _fast_roster(root: Path) -> dict[str, str]:
+    gated = {name for gate in GATES.values() if gate is not GATES.get(FAST) for roster in gate[0] for name in roster}
+    return {p.name: "" for p in sorted((root / "tests").glob("test_*.py")) if p.name not in gated}
+
+
+GATES[FAST] = ((_fast_roster(REPO),), next(iter(_lanes.GATES.values()))[1])
 
 # ── resolving first-party imports ────────────────────────────────────────────
 
@@ -159,6 +171,24 @@ def _path_strings(tree: ast.AST) -> tuple[set[str], set[str]]:
     return read, other
 
 
+_PARSED: dict[tuple[str, str], tuple[str, ast.Module] | None] = {}
+
+#: A string that names a file ends in an extension: a file whose text has no such string names nothing.
+_MAY_NAME_A_FILE = re.compile(r"""\.(py|txt|toml|json|spec|sh|ps1|md|csv|ini|cfg|ya?ml)["']""")
+
+
+def _parsed(root: Path, rel: str) -> tuple[str, ast.Module] | None:
+    """*rel*'s text and syntax tree, read and parsed once per run; ``None`` when it cannot be."""
+    key = (str(root), rel)
+    if key not in _PARSED:
+        try:
+            text = (root / rel).read_text(encoding="utf-8")
+            _PARSED[key] = (text, ast.parse(text))
+        except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
+            _PARSED[key] = None
+    return _PARSED[key]
+
+
 def namers(gate: str, tracked: list[str], root: Path = REPO) -> dict[str, dict[str, bool]]:
     """The tracked files *gate*'s roster files name by path, each mapped to every roster file that names it and
     whether that file does more than read it. A lane test that names ``process_microscopy.py`` runs it; one that
@@ -171,9 +201,15 @@ def namers(gate: str, tracked: list[str], root: Path = REPO) -> dict[str, dict[s
     out: dict[str, dict[str, bool]] = {}
     for rel in sorted(rosters):
         try:
-            read, other = _path_strings(ast.parse((root / rel).read_text(encoding="utf-8")))
-        except (OSError, SyntaxError, UnicodeDecodeError):
+            text = (root / rel).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
             continue
+        if not _MAY_NAME_A_FILE.search(text):
+            continue                                        # no string in it can name a file: no need to parse it
+        parsed = _parsed(root, rel)
+        if parsed is None:
+            continue
+        read, other = _path_strings(parsed[1])
         for runs, strings in ((False, read), (True, other)):
             for text in strings:
                 text = text.strip().removeprefix("./")
@@ -451,12 +487,11 @@ class Tree:
         """*path* parsed and indexed, or ``None`` when it cannot be read or parsed."""
         info = self._files.get(path)
         if info is None and path in self.texts and path not in self.unparsed:
-            try:
-                tree = ast.parse(self.texts[path])
-            except (SyntaxError, ValueError):
+            parsed = _parsed(self.root, path)
+            if parsed is None:
                 self.unparsed.add(path)
                 return None
-            self._index(path, tree)
+            self._index(path, parsed[1])
             info = self._files[path]
         return info
 
@@ -915,6 +950,100 @@ def _tracked_files(root: Path) -> list[str]:
     return sorted(set(out))
 
 
+_ROOTISH = re.compile(r"\b(ROOT|REPO|REPO_ROOT|_ROOT|HERE|PROJECT)\b|parents\[|parent\.parent|__file__")
+_WALKS = {"rglob", "glob", "walk", "iterdir", "listdir", "scandir"}
+_WHOLE_TREE = re.compile(r"\b_repo_scan\b|\bpython_sources\b|\bparsed_sources\b|\broot_modules\b")
+_WHOLE_TREE_NAMES = {"python_sources", "parsed_sources", "root_modules"}
+
+
+def _reads_whole_tree(tree: ast.Module) -> bool:
+    """Whether *tree* imports ``tests/_repo_scan`` or uses one of its whole-tree readers — in code, not only in a
+    string, as a test that builds synthetic sources mentioning them does."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[-1] == "_repo_scan":
+            return True
+        if isinstance(node, ast.ImportFrom) and any(a.name == "_repo_scan" for a in node.names):
+            return True
+        if isinstance(node, ast.Import) and any(a.name.split(".")[-1] == "_repo_scan" for a in node.names):
+            return True
+        if isinstance(node, ast.Name) and node.id in _WHOLE_TREE_NAMES:
+            return True
+        if isinstance(node, ast.Attribute) and node.attr in _WHOLE_TREE_NAMES:
+            return True
+    return False
+
+
+_MAY_WALK = re.compile(r"\b(rglob|glob|walk|iterdir|listdir|scandir|import_module)\(")
+
+
+def always_run(files: set[str], root: Path = REPO) -> dict[str, str]:
+    """The fast-lane files that must run on every change, each with why: a test that reads the whole tree (a guard
+    built on ``tests/_repo_scan``), one that walks the repository itself (a glob or listing rooted at the
+    repository), and one that imports a module by a computed name. No import graph can say what such a test
+    reads, so no change can be shown not to reach it."""
+    out: dict[str, str] = {}
+    for rel in sorted(files):
+        try:
+            text = (root / rel).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            out[rel] = "cannot be read, so cannot be narrowed"
+            continue
+        whole = _WHOLE_TREE.search(text)
+        if not whole and not _MAY_WALK.search(text):
+            continue                                        # nothing to find: no need to parse it
+        parsed = _parsed(root, rel)
+        if parsed is None:
+            out[rel] = "cannot be read, so cannot be narrowed"
+            continue
+        tree = parsed[1]
+        if whole and _reads_whole_tree(tree):
+            out[rel] = "reads the whole source tree"
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            if name in _WALKS and _ROOTISH.search(ast.get_source_segment(text, node) or ""):
+                out[rel] = "walks the repository"
+                break
+            if name == "import_module" and node.args and not isinstance(node.args[0], ast.Constant):
+                out[rel] = "imports a module by a computed name"
+                break
+    return out
+
+
+def _fast_lanes_change(old_source: str | None, new_source: str | None) -> dict[str, str]:
+    """Which fast-lane tests a change to ``tests/_lanes.py`` reaches: each file that left a gated roster, and so
+    runs in the fast lane now; :data:`ALL` when the harness patterns change or a version does not load."""
+    def _load(source: str | None) -> tuple[set[str], tuple] | None:
+        if source is None:
+            return None
+        namespace: dict = {"__name__": "_lanes_snapshot"}
+        try:
+            exec(compile(source, LANES_FILE, "exec"), namespace)  # noqa: S102 — the repository's own file
+            gated = {name for rosters, _ in namespace["GATES"].values() for roster in rosters for name in roster}
+            return gated, tuple(namespace.get("_HARNESS", ()))
+        except Exception:  # noqa: BLE001 — any failure to load means "cannot say", which runs the lane
+            return None
+    old, new = _load(old_source), _load(new_source)
+    if old is None or new is None:
+        return {ALL: "tests/_lanes.py cannot be compared"}
+    if old[1] != new[1]:
+        return {ALL: "tests/_lanes.py changes the harness patterns"}
+    return {f"tests/{name}": "tests/_lanes.py moves it into the fast lane" for name in sorted(old[0] - new[0])}
+
+
+def _docs_readers(root: Path) -> list[str]:
+    """The test files that read the documents (``scripts/change_scope.py``'s docs lane)."""
+    scripts = str(root / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import change_scope
+
+    return change_scope.docs_lane(root, parsed=lambda rel: _parsed(root, rel))
+
+
 def select(gate: str, base: str, root: Path = REPO) -> dict[str, str]:
     """The roster files of *gate* this change can reach, each with why; ``{ALL: why}`` when the whole lane must run
     (a harness file, the pytest configuration, the lane's own triggers, a conftest hook or autouse fixture, a diff
@@ -922,13 +1051,32 @@ def select(gate: str, base: str, root: Path = REPO) -> dict[str, str]:
     paths = changed_paths(base, root)
     if paths is None:
         return {ALL: f"could not diff against {base}"}
-    rosters = roster_files(gate)
-    named = namers(gate, _tracked_files(root), root)
+    for path in paths:
+        # What runs the whole lane is decided by the paths alone; answer it before parsing anything.
+        if any(re.search(pattern, path) for pattern in GATES[gate][1]):
+            return {ALL: f"{path} is part of the harness that runs the lane"}
+        if path == PYPROJECT:
+            why = pytest_config_change(_source_at(base, path, root), _read(root, path))
+            if why:
+                return {ALL: why}
     out: dict[str, str] = {}
     python: dict[str, set[str] | None] = {}
+    if gate == FAST:
+        GATES[FAST] = ((_fast_roster(root),), GATES[FAST][1])
+        out.update(always_run(roster_files(gate), root))
+    rosters = roster_files(gate)
+    named = namers(gate, _tracked_files(root), root)
+    if gate == FAST:
+        if any(re.search(pattern, p) for p in paths for pattern in _lanes.DOCS_ONLY_PATTERNS):
+            for test in _docs_readers(root):
+                if test in rosters:
+                    out.setdefault(test, "reads a document that changed")
     for path in paths:
         if path == LANES_FILE:
-            for test, why in lanes_change_selects(gate, _source_at(base, path, root), _read(root, path)).items():
+            changed = (_fast_lanes_change if gate == FAST else
+                       lambda old, new: lanes_change_selects(gate, old, new))(_source_at(base, path, root),
+                                                                              _read(root, path))
+            for test, why in changed.items():
                 out.setdefault(test, why)
         elif path == PYPROJECT:
             why = pytest_config_change(_source_at(base, path, root), _read(root, path))
@@ -983,7 +1131,10 @@ def main(argv: list[str]) -> int:
         print("\n".join(sorted(roster_imports(args.gate))))
         return 0
 
-    chosen = select(args.gate, args.base)
+    try:
+        chosen = select(args.gate, args.base)
+    except Exception as exc:  # noqa: BLE001 — exit 1 means "skip": an error must never be read as that
+        chosen = {ALL: f"could not decide ({type(exc).__name__}: {exc}), so the whole lane runs"}
     if args.files:
         # The files go to stdout for scripts/test.sh and preflight to read; the account of why goes to stderr.
         _report(args.gate, chosen, sys.stderr)

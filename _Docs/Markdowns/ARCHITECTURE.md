@@ -20915,7 +20915,22 @@ you're in before you type the command.
     files, and crosses rosters: a UI or gated file that reads a document runs
     in it (CI still leaves the UI ones out).
   - **code**: anything else, and every case the script cannot decide (no git,
-    an unknown base, an empty diff). An unanswerable question runs everything.
+    an unknown base, an empty diff). The fast lane then runs the test files the
+    change can reach — `scripts/lane_needed.py fast`, the gated lanes' rule
+    applied to the fast lane, whose roster is every test file in no gated
+    roster, computed from the tree — together with the files that run on every
+    change because no import graph can say what they read
+    (`lane_needed.always_run`): a test that reads the whole source tree (one
+    that imports `tests/_repo_scan` or calls its whole-tree readers, in code
+    rather than in a string), one that walks the repository (a glob or listing
+    rooted at it), and one that imports a module by a computed name; when a
+    document changed, the docs lane joins them. A file that leaves a gated
+    roster joins the selection. A harness path, the pytest configuration or a
+    conftest hook or autouse fixture runs the whole lane, and these are checked
+    before anything is parsed. Replayed over 61 merges, the files that run on
+    every change are about a third of the lane's test time, and selection leaves
+    about 41% of it out on average after about 40 s of selecting; eight of the
+    61 ran whole. An unanswerable question runs everything.
 
   `scripts/test.sh` narrows itself for the default lane and `--no-ui` when no
   test files are named; `--ui`, the gated lanes and a run that names its files
@@ -20923,13 +20938,13 @@ you're in before you type the command.
   `scripts/preflight.sh` prints the scope first, then skips lint and tests or
   runs the docs lane accordingly; its working-tree check always runs. In CI, the `ruff` and `pytest (fast lane)` jobs ask the script on a pull
   request (`fetch-depth: 0`, for the diff) and skip their steps, so the job still
-  reports green; a push to `main` always lints and runs the whole lane with
-  `ALLWELL_FULL_LANE=1`. That push is where a test that reaches a document two
+  reports green; a push to `main`, or a pull request labelled `full-ci`, always lints and runs
+  the whole lane with `ALLWELL_FULL_LANE=1`. That push is where a test that reaches a document two
   imports away, which the docs lane cannot see, gets caught, the same backstop
   the gated lanes rely on. `tests/test_change_scope.py` pins each scope and
   drives the real `scripts/test.sh` in a scratch repository: nothing runs for a
   version bump, only the docs lane runs for an edited manual, and a failing test
-  outside that lane runs again once the change is code.
+  outside that lane runs again once a code change reaches it.
 - **UI tests** (`tests/_lanes.py::UI_LANE_FILES`, ~620 tests in seventy files),
   which run in the local fast lane and are left out of CI's. They are the tests
   whose subject is how the GUI looks and lays out: widget geometry, wrapping and
@@ -21206,9 +21221,19 @@ help while `qtbot` still holds the app).
    want all of it; each parsing its own copy was about 150 s of the run. The
    cache is keyed on the source *text*, not the path or its stat, so a file
    rewritten in place (which is what `test_guards_bite.py` does between cases)
-   is re-parsed rather than answered stale. **The trees are shared: read them,
-   never mutate one.** `ast.parse` on a string a test builds is untouched by
-   this and stays. `test_the_fast_lane_stays_fast.py` holds the rule.
+   is re-parsed rather than answered stale. A guard handed a file's *text*
+   rather than its path goes through `parse_text(source, filename)`, the same
+   cache. **The trees are shared: read them, never mutate one.** Because they
+   never change, `tests/_repo_scan` also records the first `ast.walk` of each
+   shared tree and replays it for later walks of that tree, in the same order —
+   a guard walks the trees again and again, and the walk is a generator written
+   in Python; replaying it took the lane from 6 min 11 s to 5 min 00 s and the
+   files that run on every change from 587 s to 346 s of test time. A subtree,
+   or a tree a test built itself, walks as it always did. `ast.parse` on a
+   string a test builds is untouched by this and stays.
+   `test_the_fast_lane_stays_fast.py` holds the rule, and
+   `test_guards_bite.py::test_a_replayed_walk_of_a_shared_tree_is_the_walk_it_replaces`
+   the replay.
 
 9. **No test spawns `ssh`, `rsync`, `scp` or `sftp`.** The autouse
    `_no_real_network_tools` fixture hooks `subprocess.Popen.__init__` and raises

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import ast
 
-from tests._repo_scan import python_sources, rel
+from tests._repo_scan import parse_text, python_sources, rel
 
 
 def _registered_figure_names(source: str) -> set[str]:
@@ -34,7 +34,7 @@ def _registered_figure_names(source: str) -> set[str]:
     not a figure, and appears as a bare literal elsewhere.
     """
     try:
-        tree = ast.parse(source)
+        tree = parse_text(source)
     except SyntaxError:  # pragma: no cover - the tree parses
         return set()
     out: set[str] = set()

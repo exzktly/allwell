@@ -5784,3 +5784,31 @@ def test_spin_box_guard_clears_the_subclass_and_a_type_check(tmp_path, monkeypat
                   "spin = SpinBox()\nok = isinstance(spin, QSpinBox)\nnote: QSpinBox = None\n")
     assert _run_scan(monkeypatch, "tests.test_spin_boxes_keep_their_number",
                      "test_the_application_builds_no_bare_qt_spin_box", [good]) is None
+
+
+def test_a_replayed_walk_of_a_shared_tree_is_the_walk_it_replaces(tmp_path):
+    """``tests/_repo_scan`` records the first walk of each shared tree and replays it, in place of walking again.
+    The replay must be that walk node for node, in order — every guard reads it — and a tree the test built itself
+    must walk as it always did. A replay that kept the first tree's list for a second file with the same text, or
+    that served a subtree from its root's list, fails here."""
+    import ast
+
+    from tests import _repo_scan
+
+    source = "def f(a):\n    return [b for b in a if b]\n\nclass C:\n    x = f(1)\n"
+    first = tmp_path / "one.py"
+    first.write_text(source, encoding="utf-8")
+    tree = parse_source(first)
+    expected = [type(n).__name__ for n in _repo_scan._ast_walk(tree)]
+    assert [type(n).__name__ for n in ast.walk(tree)] == expected
+    assert [type(n).__name__ for n in ast.walk(tree)] == expected          # replayed this time
+    assert [n for n in ast.walk(tree)] == list(_repo_scan._ast_walk(tree))  # the same nodes, not copies
+    sub = tree.body[0]
+    assert [type(n).__name__ for n in ast.walk(sub)] == [type(n).__name__ for n in _repo_scan._ast_walk(sub)]
+    built = ast.parse(source)
+    assert [type(n).__name__ for n in ast.walk(built)] == expected
+    other = tmp_path / "two.py"
+    other.write_text(source.replace("x = f(1)", "x = f(1)\n    y = 2"), encoding="utf-8")
+    second = parse_source(other)
+    assert len(list(ast.walk(second))) == len(list(_repo_scan._ast_walk(second))) > len(expected)
+

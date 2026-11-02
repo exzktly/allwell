@@ -125,11 +125,18 @@ the container**:
   **Docs-only** (that, plus `_Docs/Markdowns/*.md`, `CLAUDE.md`,
   `tests/FAST_LANE.md`): no lint, and the fast lane becomes the **docs lane**,
   the ~25 test files that read those documents, computed on each run.
-  Anything else, or anything it cannot decide, is **code** and runs everything.
-  So `scripts/test.sh` on a docs branch runs the docs lane and says so on
-  stderr; `ALLWELL_FULL_LANE=1` runs the whole lane, and naming files or
-  choosing another lane is never narrowed. CI always runs the whole lane on a
-  push to `main`, which catches a test reaching a document two imports away.
+  Anything else is **code**, and the fast lane runs the test files the change
+  can reach (`scripts/lane_needed.py fast`, the same rule as the gated lanes)
+  plus every file no import graph can narrow, which runs on any change: the
+  whole-tree guards built on `tests/_repo_scan`, tests that walk the repository
+  or import by a computed name, and — when a document changed — the docs lane.
+  Replayed over 61 merges that is about 41% less test time, after ~40 s of
+  selecting; a harness change, the pytest configuration or an autouse conftest
+  fixture runs the whole lane, and so does anything it cannot decide.
+  `scripts/test.sh` says on stderr which it ran; `ALLWELL_FULL_LANE=1` runs the
+  whole lane, and naming files or choosing another lane is never narrowed. CI
+  runs the whole lane on a push to `main` and under a `full-ci` label, which
+  catches what selection cannot follow.
 - **UI tests** (~620 tests, inside the fast lane): GUI layout and appearance —
   widget geometry, fit, colours, theme, dashboards, phone layout, and the bare
   widgets in `widgets/` (`tests/_lanes.py::UI_LANE_FILES`, each with its

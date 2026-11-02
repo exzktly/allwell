@@ -251,3 +251,23 @@ def test_the_shared_builders_declare_their_role(qtbot):
     assert section_of_action(pop) == "Display"
     assert section_of_action(cmd) == "Actions"
     assert prop.property("sheetText") == "Properties"
+
+
+def test_a_flat_icon_button_is_drawn_as_a_button_in_the_sheet(qtbot):
+    """The Properties toggle is an ``IconButton``, whose own stylesheet is
+    transparent: in the Actions grid it was the one cell with no fill or edge.
+    In the sheet it takes the application's button style; leaving the form
+    gives its own back. Another tool button's stylesheet is left alone — a
+    popover button's hides its menu arrow, and clearing it drew a stray one."""
+    band, _parts, w = _band(qtbot)
+    own = w["props"].styleSheet()
+    assert "transparent" in own
+    fold_qss = "QToolButton::menu-indicator { image: none; }"
+    w["fold"].setStyleSheet(fold_qss)
+    band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
+    _settle()
+    assert w["props"].styleSheet() == ""
+    assert w["fold"].styleSheet() == fold_qss
+    band.setForm(False)
+    _settle()
+    assert w["props"].styleSheet() == own

@@ -152,6 +152,9 @@ class ControlBand(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._slots: dict[str, ControlBandSlot] = {}
+        #: The form the band is laid out as (``setForm``), or ``None``.
+        self._form = None
+        self._form_items: tuple[list, list] = ([], [])
         #: Which leaf's controls the row is showing. ``_NO_SLOT`` until the page
         #: first selects one, which is what lets a band with no leaves at all
         #: behave exactly as it did before slots existed.
@@ -284,6 +287,70 @@ class ControlBand(QWidget):
             self._moved_actions = []
         self.updateGeometry()
 
+    def setForm(self, on: bool, *, label_width: int = 0, row_height: int = 0,
+                gap: int = 0) -> None:
+        """Lay the band out as a one-column form, grouped into Data, Display
+        and Actions (:mod:`widgets.control_band_form`) — or put the row back.
+
+        For a narrow host that shows the controls as a list to read down —
+        phone layout's Controls sheet. The same widgets move; nothing is
+        rebuilt, and they go back to the row in their order, trailing items
+        last, with whatever visibility the page gave them meanwhile.
+        """
+        from widgets.control_band_form import BandForm
+        on = bool(on)
+        if on == (self._form is not None):
+            return
+        root = self.layout()
+        if on:
+            scope = []
+            while self._scope.count():
+                w = self._scope.takeAt(0).widget()
+                if w is not None:
+                    scope.append(w)
+            actions = []
+            while self._actions.count():
+                w = self._actions.takeAt(0).widget()
+                if w is not None:
+                    actions.append(w)
+            self._form_items = (scope, actions)
+            # The sheet pads its content already; the row's own margins would
+            # cost a form row the width a touch stepper needs.
+            self._row_margins = root.contentsMargins()
+            root.setContentsMargins(0, 0, 0, 0)
+            host = QWidget(self)
+            host.setObjectName("ControlBandForm")
+            self._scope_host.hide()
+            root.addWidget(host, 1)
+            self._form = BandForm(host, scope, actions, label_width=label_width,
+                                  row_height=row_height, gap=gap)
+        else:
+            form, self._form = self._form, None
+            form.undo()
+            scope, actions = self._form_items
+            self._form_items = ([], [])
+            for w in scope:
+                hidden = w.isHidden()
+                w.setParent(self._scope_host)
+                self._scope.addWidget(w)
+                w.setHidden(hidden)
+            self._restack_trailing()
+            for w in actions:
+                hidden = w.isHidden()
+                w.setParent(self)
+                self._actions.addWidget(w)
+                w.setHidden(hidden)
+            root.removeWidget(form.host)
+            form.host.deleteLater()
+            root.setContentsMargins(self._row_margins)
+            self._scope_host.show()
+        self.updateGeometry()
+
+    def form(self):
+        """The :class:`~widgets.control_band_form.BandForm` the band is laid
+        out as, or ``None`` while it is a row."""
+        return self._form
+
     # ── per-leaf slots ──────────────────────────────────────────────────────
     def slot(self, name: str) -> ControlBandSlot:
         """The :class:`ControlBandSlot` called *name*, created on first ask.
@@ -361,6 +428,8 @@ class ControlBand(QWidget):
         return True
 
     def heightForWidth(self, width: int) -> int:  # Qt naming
+        if self._form is not None:
+            return self._form_height(width)
         scope = self._scope.heightForWidth(self._scope_width_for(width))
         return max(scope, self._action_height(), self.ROW_H) + self._chrome_height()
 
@@ -373,11 +442,23 @@ class ControlBand(QWidget):
         all) still measures :meth:`band_height`.
         """
         hint = super().minimumSizeHint()
+        if self._form is not None:
+            hint.setHeight(self._form_height(self.width() or hint.width()))
+            return hint
         row = self._scope.heightForWidth(1_000_000)   # unwrapped: a single row
         hint.setHeight(
             max(row, self._action_height(), self.ROW_H) + self._chrome_height()
         )
         return hint
+
+    def _form_height(self, width: int) -> int:
+        """The form's height at *width* — its rows, wrapped labels and grids."""
+        m = self.layout().contentsMargins()
+        lay = self._form.host.layout()
+        inner = max(width - m.left() - m.right(), 1)
+        h = (lay.totalHeightForWidth(inner) if lay.hasHeightForWidth()
+             else lay.totalSizeHint().height())
+        return h + self._chrome_height()
 
     def sizeHint(self):  # Qt naming
         hint = super().sizeHint()

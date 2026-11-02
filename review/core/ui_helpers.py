@@ -586,6 +586,8 @@ def make_properties_button(ctx, parent: QWidget, figure_key: str, *,
     """
     from widgets.icon_button import IconButton
     btn = IconButton("sliders-horizontal", parent, tooltip=tooltip)
+    # What it reads where a band is laid out as a form, beside its icon.
+    btn.setProperty("sheetText", "Properties")
     btn.clicked.connect(lambda _=False: ctx.figures.open_style_panel(figure_key))
     return btn
 
@@ -850,6 +852,9 @@ def make_popover_button(text: str, parent: QWidget):
     # hide QToolButton's native menu-indicator — the two would otherwise render
     # as overlapping double arrows.
     btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
+    # A panel of live options: how the plot is shown. A band laid out as a
+    # form (phone layout's Controls sheet) puts it under Display.
+    btn.setProperty("bandRole", "display")
     menu = QMenu(btn)
     content = QWidget(menu)
     content_layout = QVBoxLayout(content)
@@ -883,6 +888,9 @@ def make_action_menu_button(text: str, parent: QWidget, tooltip: str = ""):
     # The label carries the ▾ caret (added above if the caller left it off), so
     # hide the native indicator — mirrors make_popover_button.
     btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
+    # Click-and-close commands: a band laid out as a form puts it under
+    # Actions, although it drops a menu like a Display panel does.
+    btn.setProperty("bandRole", "action")
     menu = QMenu(btn)
     btn.setMenu(menu)
     return btn, menu

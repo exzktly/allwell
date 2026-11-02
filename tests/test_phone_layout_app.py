@@ -135,16 +135,16 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert not drawer.isOpen()
     assert review._section_nav.currentKey() == key
 
-    # ⚙ Controls: the page's band slides up in a sheet, flowing, and goes
-    # back to its page when the sheet closes.
+    # ⚙ Controls: the page's band slides up in a sheet, laid out as a form,
+    # and goes back to its page, a row again, when the sheet closes.
     shell.controls_button.click()
     _pump(qapp)
     band = shell._sheet_band
-    assert band is not None and _visible(band) and band._stacked
+    assert band is not None and _visible(band) and band.form() is not None
     assert shell._sheet.isOpen()
     shell.controls_button.click()
     _pump(qapp)
-    assert shell._sheet_band is None and not band._stacked
+    assert shell._sheet_band is None and band.form() is None
     assert band.parentWidget() is not shell._sheet._aw_holder
     assert not _visible(band)                      # hidden in its page again
 
@@ -690,6 +690,169 @@ def test_wells_at_the_foot_opens_the_rail_s_plate_over_the_live_plot(qapp, win, 
         assert home.viewport().property("_awDragScroll"), "Home does not scroll by a drag"
     finally:
         review._notebook.setCurrentByName("Plotting")
+        shell.set_on(False)
+        QTest.qWait(600)
+        _pump(qapp)
+
+
+def test_the_controls_sheet_reads_as_one_column_of_labelled_rows(qapp, win, mini_dataset):
+    """Reported: the Controls sheet was "a mess" — controls at their own
+    widths flowing in ragged rows, labels inside some controls and beside
+    others, a hint between two of them, data choices and commands mixed.
+    Through the real sheet on Bar Plots: every data control starts and ends at
+    the same x with its label in a column to its left ("Timepoints" a label,
+    not part of the button), the sections run Data, Display, Actions top to
+    bottom, the Properties icon says what it is, nothing scrolls sideways — and
+    closing the sheet gives the page its row back. Stated without the form's
+    own API, so it fails on the old sheet with an AssertionError."""
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QComboBox, QLabel
+
+    from widgets.icon_button import IconButton
+    from widgets.labeled_combo import LabeledComboBox
+    from widgets.stepper import Stepper
+
+    review, shell = win._review, win._phone
+    if win._mode_seg.currentIndex() != 0:
+        win._on_titlebar_mode_seg(0)
+    review._load_path(mini_dataset)
+    _pump(qapp)
+    review._notebook.setCurrentByName("Plotting")
+    review._plotting_notebook.setCurrentByName("Bar Plots")
+    review._drain_pending_centre_builders()
+    _pump(qapp)
+    shell.set_on(True)
+    QTest.qWait(600)
+    _pump(qapp)
+    try:
+        # The window phone layout gives it: the screen's width, which is
+        # 390 phone points on any phone (a 390 px window here would be 190).
+        shell.controls_button.click()
+        QTest.qWait(500)
+        _pump(qapp)
+        band = shell._sheet_band
+        sheet_scroll = shell._sheet.contentWidget()
+
+        def shown(t):
+            return [w for w in band.findChildren(t) if w.isVisible()]
+
+        controls = [w for w in shown(QComboBox) + shown(Stepper)
+                    if not isinstance(w.parentWidget(), Stepper)]
+        tp = review._ctx.widgets.get("_bar_tp_button")
+        controls.append(tp)
+        lefts = {w.mapTo(band, w.rect().topLeft()).x() for w in controls}
+        rights = {w.mapTo(band, w.rect().topRight()).x() for w in controls}
+        assert len(lefts) == 1 and len(rights) == 1, (
+            "the sheet's controls do not share one column", sorted(lefts), sorted(rights))
+        labels = {lb.text(): lb for lb in shown(QLabel)}
+        assert "Timepoints" in labels, "Timepoints is not a label of its own"
+        tp_label = labels["Timepoints"]
+        assert tp_label.mapTo(band, tp_label.rect().topRight()).x() < min(lefts)
+        for combo in shown(LabeledComboBox):
+            assert ": " not in combo._painted_text(), combo._painted_text()
+        heads = [labels[h] for h in ("DATA", "DISPLAY", "ACTIONS")]
+        ys = [h.mapTo(band, h.rect().topLeft()).y() for h in heads]
+        assert ys == sorted(ys)
+        props = [b for b in shown(IconButton) if "properties" in (b.toolTip() or "").lower()]
+        assert props and props[0].text() == "Properties"
+        assert sheet_scroll.widget().width() <= sheet_scroll.viewport().width(), \
+            "the sheet scrolls sideways"
+
+        shell.controls_button.click()
+        QTest.qWait(400)
+        _pump(qapp)
+        assert band.parentWidget() is not shell._sheet._aw_holder
+        channel = review._plotting_channel_cb
+        assert channel._painted_text().startswith("Channel: ")
+    finally:
+        shell.set_on(False)
+        QTest.qWait(600)
+        _pump(qapp)
+
+
+def test_back_and_forward_through_pages_page_tabs_and_modes(qapp, win, mini_dataset):
+    """Back after two moves lands on the first; a page tab and a mode switch
+    are places of their own; Back and Forward are disabled at the ends; and a
+    new move after Back forgets the way forward. Driven through the shortcut
+    the window has always had (Ctrl+Left), so it fails on the history that
+    recorded Review's sections only, and then through the buttons."""
+    from PySide6.QtTest import QTest
+
+    review = win._review
+    if win._mode_seg.currentIndex() != 0:
+        win._on_titlebar_mode_seg(0)
+    review._load_path(mini_dataset)
+    _pump(qapp)
+    nav = review._section_nav
+    nav.setCurrentKey("Plotting")
+    review._plotting_notebook.setCurrentByName("Bar Plots")
+    _pump(qapp)
+    bar = review._page_tabs_bar_by_name["Plotting"]
+    names = [bar.tabText(i) for i in range(bar.count())]
+    nav.setCurrentKey("Statistics")                 # a section tile
+    _pump(qapp)
+    nav.setCurrentKey("Plotting")
+    bar.setCurrentIndex(names.index("Line Graphs"))  # a page tab
+    _pump(qapp)
+    win._on_titlebar_mode_seg(1)                     # Analyze
+    _pump(qapp)
+
+    win._tab_history_back()
+    _pump(qapp)
+    assert review.currentMode() == "review", "Back did not undo the mode switch"
+    assert review._plotting_notebook.currentName() == "Line Graphs"
+    win._tab_history_back()
+    _pump(qapp)
+    assert review._notebook.currentName() == "Plotting"
+    assert review._plotting_notebook.currentName() == "Bar Plots", \
+        "Back skipped the page-tab change"
+    win._tab_history_back()
+    _pump(qapp)
+    assert review._notebook.currentName() == "Statistics"
+
+    back, fwd = win._history_back_btn, win._history_forward_btn
+    assert fwd.isEnabled()
+    fwd.click()
+    _pump(qapp)
+    assert review._plotting_notebook.currentName() == "Bar Plots"
+    while back.isEnabled():
+        back.click()
+        _pump(qapp)
+    assert not win._history.can_back()
+    fwd.click()
+    _pump(qapp)
+    nav.setCurrentKey("Spatial")                     # a new move after Back
+    _pump(qapp)
+    assert not fwd.isEnabled() and not win._history.can_forward(), \
+        "a move after Back kept the old way forward"
+    assert back.isEnabled()
+    back.click()
+    _pump(qapp)
+    assert fwd.isEnabled()
+    QTest.qWait(10)
+
+
+def test_phone_layout_has_back_beside_the_menu_and_forward_in_options(qapp, win):
+    from PySide6.QtTest import QTest
+
+    review, shell = win._review, win._phone
+    shell.set_on(True)
+    QTest.qWait(600)
+    _pump(qapp)
+    try:
+        lay = review._top_bar.layout()
+        assert lay.indexOf(shell.back_button) == lay.indexOf(shell.menu_button) + 1
+        assert _visible(shell.back_button) and not _visible(win._history_back_btn)
+        assert shell.back_button.isEnabled() == win._history.can_back()
+        u = win.screen().geometry().width() / 390
+        assert shell.back_button.width() >= round(44 * u) - 1
+        # Upright everything in the bar fits on the screen.
+        assert shell.options_button.geometry().right() <= review._top_bar.width()
+        assert shell.back_button.geometry().right() < win._mode_seg.geometry().left()
+        shell._fill_menu()
+        fwd = [a for a in shell._menu.actions() if a.text().startswith("Forward")]
+        assert fwd and fwd[0].isEnabled() == win._history.can_forward()
+    finally:
         shell.set_on(False)
         QTest.qWait(600)
         _pump(qapp)

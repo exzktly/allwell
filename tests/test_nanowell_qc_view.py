@@ -149,6 +149,10 @@ def qc_page(qtbot, tmp_path):
     bar.setCurrentIndex([bar.tabData(i) for i in range(bar.count())].index("qc"))     # as a click does
     qtbot.waitUntil(lambda: st.qc_records is not None and st.qc_drawn is not None and bool(st.qc_drawn.cells),
                     timeout=20000)
+    # The nanowell tables load on a worker of their own (``controller.ensure_loaded``), separately from the QC
+    # records above, and the anchor queue refuses to build until they are in. On a slow runner the QC records
+    # can land first, so the page is only ready once both have.
+    qtbot.waitUntil(lambda: st.data is not None and not st.computing, timeout=20000)
     return ctx, st, out
 
 
@@ -202,6 +206,7 @@ def test_the_anchor_queue_is_on_the_qc_view_only_and_walks_what_the_matrix_count
     queue_btn = ctx.widgets.get("_nw_queue_btn")
     assert queue_btn.isVisibleTo(window) and queue_btn.isEnabled()
     queue, _why = aq.build_queue(ctx)
+    assert queue is not None, _why
     # Walk's default: the two not addressed and the partial one, in plate then time order.
     assert [(i.well, i.timepoint, i.state) for i in queue.all_items] == [
         ("A01", "t_a", "not_addressed"), ("A02", "t_a", "partial"), ("B01", "t_c", "not_addressed")]

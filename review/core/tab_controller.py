@@ -370,26 +370,6 @@ def on_notebook_current_changed(ctx, _idx) -> None:
         flush_dirty_scopes(app)
     except Exception:
         _logger.exception("flush_dirty_scopes failed on tab change")
-    # Record the visit in the tab-history stack so cmd-left / cmd-right can
-    # walk through it. _tab_history_replaying is set by the back/forward
-    # shortcuts to suppress appending while they replay an entry.
-    if not title:
-        return
-    if not hasattr(app, "_tab_history"):
-        app._tab_history = []
-        app._tab_history_idx = -1
-    if getattr(app, "_tab_history_replaying", False):
-        return
-    # Drop any forward entries when the user navigates away from the
-    # middle of the history (standard browser semantics).
-    idx = app._tab_history_idx
-    if idx < len(app._tab_history) - 1:
-        del app._tab_history[idx + 1:]
-    # Avoid logging consecutive duplicates.
-    if app._tab_history and app._tab_history[-1] == title:
-        return
-    app._tab_history.append(title)
-    app._tab_history_idx = len(app._tab_history) - 1
 
 
 def run_tab_switch_smoke_checks(
@@ -577,40 +557,6 @@ def sync_section_nav_from_notebook(ctx) -> None:
             nav.setCurrentKey(cur)
     finally:
         app._section_nav_building = False
-
-
-
-def tab_history_back(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    hist = getattr(app, "_tab_history", None)
-    if not hist:
-        return
-    idx = app._tab_history_idx - 1
-    if idx < 0:
-        return
-    app._tab_history_idx = idx
-    app._tab_history_replaying = True
-    try:
-        app._notebook.setCurrentByName(hist[idx])
-    finally:
-        app._tab_history_replaying = False
-
-
-
-def tab_history_forward(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    hist = getattr(app, "_tab_history", None)
-    if not hist:
-        return
-    idx = app._tab_history_idx + 1
-    if idx >= len(hist):
-        return
-    app._tab_history_idx = idx
-    app._tab_history_replaying = True
-    try:
-        app._notebook.setCurrentByName(hist[idx])
-    finally:
-        app._tab_history_replaying = False
 
 
 

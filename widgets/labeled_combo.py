@@ -35,6 +35,7 @@ class LabeledComboBox(QComboBox):
     def __init__(self, label: str, parent=None) -> None:
         super().__init__(parent)
         self._label = label
+        self._label_shown = True
         self._last_hint = QSize()
 
     def label(self) -> str:
@@ -45,13 +46,25 @@ class LabeledComboBox(QComboBox):
         self.updateGeometry()
         self.update()
 
+    def setLabelShown(self, shown: bool) -> None:
+        """Paint the label prefix (the default) or only the value — for a host
+        that shows the label beside the box itself (a form's label column).
+        Without its label the box also gives up its fit-to-content minimum, so
+        a long value elides in a narrow row rather than widening it."""
+        self._label_shown = bool(shown)
+        self.updateGeometry()
+        self.update()
+
+    def labelShown(self) -> bool:
+        return self._label_shown
+
     def _painted_text(self) -> str:
         # Before a caller populates the combo (or an empty dataset leaves it
         # with no items), currentText() is "" — paint the bare label rather
         # than nothing, so the box reads "Timepoint" instead of collapsing to
         # an unlabelled sliver now that its width tracks painted content.
         text = self.currentText()
-        if not self._label:
+        if not self._label or not self._label_shown:
             return text
         return f"{self._label}: {text}" if text else self._label
 
@@ -68,6 +81,8 @@ class LabeledComboBox(QComboBox):
         return self.style().sizeFromContents(QStyle.CT_ComboBox, opt, content, self)
 
     def minimumSizeHint(self) -> QSize:
+        if not self._label_shown:
+            return QComboBox.minimumSizeHint(self)
         return self.sizeHint()
 
     def paintEvent(self, event) -> None:

@@ -34,6 +34,7 @@ from review.features.nanowell.exclude_view import build_exclude_controls
 from review.features.nanowell.rim_focus_view import build_rim_focus_controls
 from review.features.nanowell.variables_view import build_variable_controls
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
+from review.features.nanowell.popout_view import build_popout_view_controls
 from review.features.nanowell.qc_view import build_qc_controls, refresh_qc_controls
 from review.features.nanowell.display_range_view import (
     RANGE_TIP as _RANGE_TIP,
@@ -604,6 +605,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             extremes_numbers.setChecked(st.crop_metrics)
             extremes_tps.refresh()
             _sync_crop_boxes(ctx, st)
+            popout_refresh = ctx.widgets.get_or_none("_nw_popout_refresh")
+            if callable(popout_refresh):
+                popout_refresh()
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
             variables.refresh(view)
         finally:
@@ -872,11 +876,13 @@ def _popout_window(ctx):
     layout = QVBoxLayout(window)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.addLayout(_popout_controls(ctx, window))
+    layout.addLayout(build_popout_view_controls(ctx, window, timepoint_text))
     card = PlotCard(window, figsize=(_FIG_W, _FIG_H * 0.8), constrained=False, header=False)
     card.setFigureTitle("")
     layout.addWidget(card)
     window.resize(900, 640)
     ctx.widgets.register("_nw_popout", window)
+    ctx.widgets.register("_nw_popout_card", card)
     ctx.widgets.register("_nw_popout_fig", card.figure)
     ctx.widgets.register("_nw_popout_canvas", card.canvas)
     card.plotThemeChanged.connect(lambda _m: nwc.draw_popout(ctx))

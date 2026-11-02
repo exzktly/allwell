@@ -211,6 +211,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_count_settings_sit_with_segmentation.py": "The nanowell count's own segmentation settings sit in the Segmentation section, shown in …",
     "test_nanowell_crop_cells.py": "The counted cells drawn on every Nanowells crop, as the Array view's Cells layer draws them …",
     "test_nanowell_concatenate_link.py": "Concatenate of two analysed nanowell datasets joins dataset 2's timepoints onto dataset 1's …",
+    "test_nanowell_popout_grid.py": "The **Nanowell crops** pop-out's choice of timepoints, channels and grid shape, and its …",
     "test_nanowell_crop_view.py": "The selected nanowell's crops: the strip under the site detail, and **Pop out**, which …",
     "test_nanowell_dataset_carry.py": "Subset and Merge Plates carry a dataset's nanowell tables (tracker P10b, P10c), driven …",
     "test_nanowell_dataset_tools.py": "Subset, Merge Plates and Concatenate refuse nanowell results they cannot carry, by name; …",

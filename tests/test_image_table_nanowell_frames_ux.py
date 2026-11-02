@@ -66,25 +66,55 @@ def test_the_phase_montage_and_the_phase_channel_default_to_grey_and_a_fluoropho
 
 
 # ── H1b: a fold change diverges about 1 ─────────────────────────────────────
-def test_a_fold_change_map_is_diverging_log_scaled_and_its_window_centred_on_no_change(qtbot, tmp_path):
+def test_a_fold_change_s_auto_window_is_its_data_like_any_row_and_centres_on_no_change_when_asked(qtbot, tmp_path):
     ctx = _loaded(qtbot, tmp_path)
     fc, count = _use(ctx, [COUNT_FC, COUNT])
-    assert (fc.colormap, fc.log) == ("coolwarm", True) and (count.colormap, count.log) == ("viridis", False)
+    assert (fc.colormap, fc.log, fc.centre_on_change) == ("coolwarm", False, False)
+    assert (count.colormap, count.log) == ("viridis", False)
     cells = _cells([COUNT_FC, COUNT])
     _pool(ctx, cells)
     window = ctx.state.image_table.auto_lut_by_channel
-    # A01 24 h over 0 h: 3/1 = 3 at (0, 0), 2/2 = 1, 4/4 = 1; B01: 2/2, 4/1 = 4, 1/1. Largest ratio 4, smallest 1.
-    lo, hi = window[COUNT_FC.lower()]
-    assert (lo, hi) == pytest.approx((0.25, 4.0))
-    assert window[COUNT.lower()] == pytest.approx((0.0, 5.0))       # not a fold change: its own min and max
+    # A01 24 h over 0 h: 3/1 = 3 at (0, 0), 2/2 = 1, 4/4 = 1; B01: 2/2, 4/1 = 4, 1/1. Smallest ratio 1, largest 4.
+    assert window[COUNT_FC.lower()] == pytest.approx((1.0, 4.0))     # the data's min and max, as on every row
+    assert window[COUNT.lower()] == pytest.approx((0.0, 5.0))
+    fc.centre_on_change = True                                        # **centre on 1**
+    ctx.state.image_table.channel_opts[fc.axis_token()] = fc.to_dict()
+    _pool(ctx, cells)
+    assert ctx.state.image_table.auto_lut_by_channel[COUNT_FC.lower()] == pytest.approx((0.25, 4.0))
+
+
+def test_the_lut_row_offers_centre_on_1_for_a_fold_change_only_and_ticking_it_centres_and_logs(qtbot, tmp_path,
+                                                                                                 monkeypatch):
+    from PySide6.QtWidgets import QCheckBox
+
+    from review.features.image_browser.image_table import builder_view as BV
+
+    ctx = _loaded(qtbot, tmp_path)
+    monkeypatch.setattr(BV, "_lut_touched", lambda _ctx: None)
+    fc, count, log2 = _use(ctx, [COUNT_FC, COUNT, LOG2_FC])
+    row = BV._lut_row(ctx, fc.axis_token(), [fc])
+    box = next(b for b in row.findChildren(QCheckBox) if b.objectName() == "ITBLutCentre")
+    assert box.text() == "centre on 1" and not box.isChecked()
+    box.setChecked(True)
+    assert fc.centre_on_change and fc.log                             # a ratio is centred on a log scale
+    box.setChecked(False)
+    assert not fc.centre_on_change and not fc.log
+    log_row = BV._lut_row(ctx, log2.axis_token(), [log2])           # kept: Qt deletes an unreferenced row
+    log_box = next(b for b in log_row.findChildren(QCheckBox) if b.objectName() == "ITBLutCentre")
+    assert log_box.text() == "centre on 0"
+    log_box.setChecked(True)
+    assert log2.centre_on_change and not log2.log                     # already logarithmic: stays linear
+    count_row = BV._lut_row(ctx, count.axis_token(), [count])
+    assert not [b for b in count_row.findChildren(QCheckBox) if b.objectName() == "ITBLutCentre"]
 
 
 def test_a_fold_change_already_on_a_log_scale_is_centred_on_zero(qtbot, tmp_path):
     from review.features.image_browser.image_table._colour_key import centred_window as _centred_window
 
     ctx = _loaded(qtbot, tmp_path)
-    assert _centred_window(ctx, [-0.5, 2.0, None, LOG2_FC]) == (-2.0, 2.0)
-    assert _centred_window(ctx, [0.0, 3.0, 0.5, COUNT_FC]) == pytest.approx((1 / 3.0, 3.0))
+    assert _centred_window(ctx, [-0.5, 2.0, None, LOG2_FC], centre=True) == (-2.0, 2.0)
+    assert _centred_window(ctx, [0.0, 3.0, 0.5, COUNT_FC], centre=True) == pytest.approx((1 / 3.0, 3.0))
+    assert _centred_window(ctx, [0.0, 3.0, 0.5, COUNT_FC]) == (0.0, 3.0)        # not asked: the data's own
 
 
 # ── L2: per cell, said out loud ─────────────────────────────────────────────
@@ -127,11 +157,14 @@ def test_the_key_names_each_metric_in_full_with_the_window_its_cells_are_drawn_i
                 for g, n in zip(fx.GFP[well], fx.COUNTS[well]["24h"]) if n]
     assert (brightness.lo, brightness.hi) == pytest.approx((min(measured), max(measured)))
     assert brightness.undefined and brightness.cmap == "viridis"
-    assert keys[2].centre == 1.0 and keys[2].log and not keys[0].undefined
-    from review.features.image_browser.image_table._colour_key import key_ticks
+    assert keys[2].centre == 1.0 and not keys[2].log and not keys[0].undefined
+    from review.features.image_browser.image_table._colour_key import ColourKey, key_ticks
 
-    # A ratio window of (1/4, 4) on a log scale puts "no change" at the strip's middle, and nowhere else.
-    assert key_ticks(keys[2]) == [(0.0, "0.25"), (1.0, "4"), (pytest.approx(0.5), "1 = no change")]
+    # Uncentred, the window is the data's (1 to 4) and no change is its low end: said there, once.
+    assert key_ticks(keys[2]) == [(0.0, "1 = no change"), (1.0, "4")]
+    # A centred ratio window of (1/4, 4) on a log scale puts "no change" at the strip's middle, and nowhere else.
+    centred = ColourKey("x", "coolwarm", 0.25, 4.0, log=True, centre=1.0)
+    assert key_ticks(centred) == [(0.0, "0.25"), (1.0, "4"), (pytest.approx(0.5), "1 = no change")]
     assert key_ticks(keys[1]) == [(0.0, f"{min(measured):.3g}"), (1.0, f"{max(measured):.3g}")]
     from review.features.image_browser.image_table.image_compose import _load_chrome_font
 

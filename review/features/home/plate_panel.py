@@ -10,22 +10,52 @@ it. Undoing a read-only base's read-only-ness would be fighting it, so this
 takes the ``editor`` role and borrows only the two lines it wants — the lit
 colouring and the shared geometry call.
 
-**Every colour here means what it means on the other plate maps in the app**,
-because a reader who has learnt one plate has learnt all of them:
+**The plate has to stay readable for a reader with colour-vision
+deficiency**, the way Analyze's run plate does — and it did not. It used to
+paint complete, partial and failed in the general status tokens ``success``,
+``warn`` and ``danger``: green, amber and red, the three hues red/green
+deficiency folds onto one olive-to-yellow axis. Measured with CIEDE2000 on the
+Machado et al. (2009) simulation, a complete well and a failed one came out
+4.4 apart under deuteranopia in the default grey theme and 6.9 in blue, and a
+complete well and the pale unfinished share of a partial well's dial 2.8 apart
+under protanopia in blue — the same well, as far as that reader could tell.
 
-===================== ============== ==========================================
-State                 Token          The same token elsewhere
-===================== ============== ==========================================
-complete              ``success``    done / merged / complete on every dashboard
-partial               ``warn``       Validate's *partial*, and work in flight
-failures recorded     ``danger``     Validate's *missing*, any errored well
-images, no            ``accent``     Concatenate's *merged — no measurements CSV
-measurements                         on one side*: the identical condition, and
-                                     the convention that ``accent`` flags the
-                                     anomalous well rather than a normal one
-staged, never         ``text_muted`` *pending* on Concatenate, Merge Plates and
-processed                            Import Loose; *no output yet* on Validate
-===================== ============== ==========================================
+So the states take the run plate's design rather than the status tokens': what
+survives red/green deficiency is lightness and blue-against-yellow, and every
+state sits somewhere different on those two axes. Where Home and Analyze show
+the same fact, they show it in the same token:
+
+===================== ================ =========================================
+State                 Token            Why this one
+===================== ================ =========================================
+complete              ``run_done``     Analyze's *downloaded / thresholded*: the
+                                       same fact. A forest green that reads as a
+                                       dark khaki under red/green deficiency
+partial               ``home_partial`` Its own amber — the "work left" hue of
+                                       ``warn``, darker, so the two shares of
+                                       its coverage dial stay apart
+                                       (``ui/theme.py`` gives the numbers)
+failures recorded     ``run_problem``  Analyze's problem fill. White is the one
+                                       fill no other state here takes and the
+                                       same under every vision
+images, no            ``accent``       Concatenate's *merged — no measurements
+measurements                           CSV on one side*: the identical condition
+measurements, no      ``stale``        Validate's *output present, archive
+output archive                         missing*: the identical condition
+staged, never         ``run_pending``  Analyze's *grouped, queued for
+processed                              processing*: staged and not yet run
+===================== ================ =========================================
+
+``tests/test_home_plate_is_colour_blind_safe.py`` holds every pair of those
+apart — and the pale share of a partial dial apart from all of them — at the
+run plate's own bars, in every registered theme. ``accent`` and ``stale`` are
+theme tokens and the rest are not; that guard is why a theme that
+re-tunes one of them cannot quietly bring two states back together.
+
+A failed well is white *without* the run plate's red ✕. A well holds one glyph,
+and on this plate that glyph is the field-quality marker below — a failed well
+can be out of focus too — so the ✕ would either hide that marker or be hidden
+by it. White alone already says "failed" here, because no other state is white.
 
 ``accent2`` is deliberately unused: it means "belongs to the other of two normal
 groups" on Merge Plates, and no state here is that.
@@ -64,15 +94,17 @@ from .collect import (
     input_only_label,
 )
 
-#: One colour per painted state. Read through ``theme.Colors`` so a theme swap
-#: carries the plate with it, and drawn from the status palette every other
-#: plate map uses (see the table above) rather than from the well-identity
-#: palette the plots key to wells.
-STATE_COLORS = {
-    CELL_COMPLETE: theme.Colors.success,
-    CELL_PARTIAL: theme.Colors.warn,
-    CELL_FAILED: theme.Colors.danger,
-    CELL_NO_MEASUREMENTS: theme.Colors.accent,
+#: One colour token per painted state, by name, resolved when the plate is
+#: painted (:func:`state_color`) so the plate follows whichever theme is
+#: applied. See the table above for why each state takes the token it does, and
+#: ``tests/test_home_plate_is_colour_blind_safe.py`` for the measurement that
+#: holds them apart. Status tokens, never the well-identity palette the plots
+#: key to wells.
+STATE_TOKENS = {
+    CELL_COMPLETE: "run_done",
+    CELL_PARTIAL: "home_partial",
+    CELL_FAILED: "run_problem",
+    CELL_NO_MEASUREMENTS: "accent",
     # Numbers whole, output archive gone. Its own colour, because painting it
     # like `partial` would say the run has work left to do and painting it
     # neutral would say nothing was checked — and the first version of this
@@ -81,9 +113,28 @@ STATE_COLORS = {
     # "the other of two normal groups" and forbids anomaly use, and not
     # `threshold`, which the plate's render guard proved indistinguishable
     # from `warn` once painted.
-    CELL_CSV_ONLY: theme.Colors.stale,
-    CELL_INPUT_ONLY: theme.Colors.text_muted,
+    CELL_CSV_ONLY: "stale",
+    CELL_INPUT_ONLY: "run_pending",
 }
+
+
+def state_color(state: str) -> str | None:
+    """The colour *state* is painted in under the current theme.
+
+    ``None`` for a state the plate leaves uncoloured (:data:`NEUTRAL_STATES`)
+    and for one it does not know, which is then drawn as the neutral cell
+    rather than in a colour that would claim something about the well.
+    """
+    token = STATE_TOKENS.get(state)
+    if token is None:
+        return None
+    return getattr(theme.Colors, token)
+
+
+def state_colors() -> dict[str, str]:
+    """Every painted state's colour under the current theme."""
+    return {state: getattr(theme.Colors, token) for state, token in STATE_TOKENS.items()}
+
 
 #: The states that assert nothing, and so are painted in nothing: the plate's
 #: own uncoloured cell. Every other state carries a colour, and no state carries
@@ -131,7 +182,7 @@ def paint_plate(plate: WellPlateSelector, cells: dict, fractions: dict) -> None:
     plate.clearWellColors()
     plate.clearWellFractions()
     for well, state in (cells or {}).items():
-        colour = STATE_COLORS.get(state)
+        colour = state_color(state)
         if colour is None:
             # Neutral, not skipped: an earlier paint may have left a colour on
             # this well, and ``clearWellColors`` above only covers the ones the
@@ -147,7 +198,7 @@ def paint_plate(plate: WellPlateSelector, cells: dict, fractions: dict) -> None:
 #: image quality.
 #:
 #: A **marker**, not a ninth colour, and that is a constraint rather than a
-#: preference. ``STATE_COLORS`` above is closed under a written invariant —
+#: preference. ``STATE_TOKENS`` above is closed under a written invariant —
 #: no state carries a colour another state also carries — and the two
 #: candidates a ninth state would reach for are both spoken for: ``accent2``
 #: is reserved for "the other of two normal groups" and forbidden for anomaly

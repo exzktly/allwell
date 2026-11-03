@@ -263,8 +263,8 @@ def test_the_marker_is_not_a_ninth_colour():
     from review.features.home import plate_panel as pp
 
     assert pp.FLAGGED_FIELD_GLYPH
-    assert pp.FLAGGED_FIELD_GLYPH not in pp.STATE_COLORS
-    colours = list(pp.STATE_COLORS.values())
+    assert pp.FLAGGED_FIELD_GLYPH not in pp.STATE_TOKENS
+    colours = list(pp.state_colors().values())
     assert len(colours) == len(set(colours)), "two states share a colour"
 
 

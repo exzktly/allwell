@@ -3003,10 +3003,11 @@ moments.
 What is on it:
 
 - **The plate.** One dot per well, coloured by what the run actually produced:
-  complete (green), partial (amber, with an arc showing how much of it landed),
-  failures recorded (red), images with no measurements behind them (blue — the
-  same colour the Datasets tools use to flag an odd well), measurements whose
-  output archive is gone (cyan), staged but never processed (grey). If the run
+  complete (forest green), partial (amber, drawn as a dial whose darker part
+  is how much of it landed), failures recorded (white), images with no
+  measurements behind them (blue — the same colour the Datasets tools use to
+  flag an odd well), measurements whose output archive is gone (cyan), staged
+  but never processed (warm grey). If the run
   ended early — you stopped or suspended it, the remote host lost its node or
   its connection to the app, or the pipeline exited with an error — the grey
   wells are called *Not reached — run ended early* instead, because the run
@@ -3020,9 +3021,17 @@ What is on it:
   link: clicking it opens **Nanowells → Array** on that well's first timepoint
   without an address, with **Set anchor** already on, so the next click on the
   central square sets the anchor. The well's tooltip on the plate counts its
-  timepoints not addressed. Those
-  colours are the ones every other well map in the app uses for the same
-  things, so a colour you have learnt once reads the same here. A well the record says nothing about — because no completeness check has
+  timepoints not addressed. The colours are chosen to stay
+  distinguishable with colour blindness, like the Analyze run plate's: under
+  red/green colour blindness complete reads as a dark khaki, partial as a
+  yellow, failed stays white and the blues stay blue, so no two states merge.
+  Where this plate and the Analyze plate show the same thing they use the same
+  colour — forest green for complete, warm grey for not yet processed, white
+  for a well with a problem — and the blue and cyan are the ones the Datasets
+  tools use for the same two conditions, so a colour you have learnt once
+  reads the same here. Unlike on the Analyze plate a failed well carries no
+  `✕`: the only mark a well here carries is the `!` that says it needs a look
+  (see *Cell Gating* below). A well the record says nothing about — because no completeness check has
   been run, or because it produced nothing at all — is left plain, uncoloured:
   the legend beside the plate has a hollow swatch and a count for it, and the
   well's tooltip says which of the two it is. Every colour on the plate has a

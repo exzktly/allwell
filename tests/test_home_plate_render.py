@@ -18,7 +18,7 @@ from ui import theme
 from review.features.home import collect as hc
 from review.features.home.plate_panel import (
     NEUTRAL_STATES,
-    STATE_COLORS,
+    STATE_TOKENS,
     build_home_plate,
     paint_plate,
 )
@@ -30,7 +30,7 @@ pytestmark = pytest.mark.qt
 #: remembered, and the one that fails as a `KeyError` deep inside a fixture
 #: rather than as a message naming what was forgotten — which is what happened
 #: when `csv_only` was added.
-ALL_STATES = tuple(dict.fromkeys((*STATE_COLORS, *NEUTRAL_STATES)))
+ALL_STATES = tuple(dict.fromkeys((*STATE_TOKENS, *NEUTRAL_STATES)))
 
 
 def _relative_luminance(c: QColor) -> float:
@@ -48,8 +48,7 @@ def _contrast(a: QColor, b: QColor) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
-@pytest.fixture
-def painted(qapp):
+def _render(qapp) -> dict:
     """One well per state, rendered, sampled at each well's centre pixel."""
     wells = [f"A{i + 1:02d}" for i in range(len(ALL_STATES))]
     cells = dict(zip(wells, ALL_STATES))
@@ -82,11 +81,27 @@ def painted(qapp):
     return out
 
 
+@pytest.fixture
+def painted(qapp):
+    return _render(qapp)
+
+
+@pytest.fixture(params=theme.available_themes())
+def painted_in_each_theme(request, qapp):
+    """The same render under every registered theme, then the baseline back."""
+    theme.apply_theme(request.param)
+    try:
+        yield request.param, _render(qapp)
+    finally:
+        theme.apply_theme("blue")
+
+
 def test_the_plate_actually_painted(painted):
     """Guards every other assertion in this file: at least the four unmistakable
-    status states must have landed as their own hues."""
+    status states must have landed as their own hues — and a failed well as the
+    white no other state takes."""
     assert painted[hc.CELL_COMPLETE].green() > painted[hc.CELL_COMPLETE].red()
-    assert painted[hc.CELL_FAILED].red() > painted[hc.CELL_FAILED].blue()
+    assert min(painted[hc.CELL_FAILED].getRgb()[:3]) > 230
     assert painted[hc.CELL_NO_MEASUREMENTS].blue() > painted[hc.CELL_NO_MEASUREMENTS].red()
     assert painted[hc.CELL_PARTIAL].red() > painted[hc.CELL_PARTIAL].blue()
 
@@ -98,7 +113,7 @@ def test_no_coloured_well_is_painted_black(painted):
     panel = QColor(theme.Colors.panel)
     dark = {
         state: (painted[state].name(), round(_contrast(painted[state], panel), 2))
-        for state in STATE_COLORS
+        for state in STATE_TOKENS
         if _contrast(painted[state], panel) < 2.5
     }
     assert not dark, f"states painted into the background: {dark}"
@@ -107,7 +122,7 @@ def test_no_coloured_well_is_painted_black(painted):
 def test_every_coloured_state_is_distinguishable_from_every_other(painted):
     """Pixel-level version of the token check: after the widget's own gradient
     and highlight, the states must still be told apart."""
-    states = sorted(STATE_COLORS)
+    states = sorted(STATE_TOKENS)
     clashes = []
     for i, a in enumerate(states):
         for b in states[i + 1:]:
@@ -125,5 +140,36 @@ def test_the_absence_states_are_painted_as_plain_uncoloured_wells(painted):
     both (``collect.plate_cells``)."""
     tones = {painted[state].name() for state in NEUTRAL_STATES}
     assert len(tones) == 1, f"absence states drew different cells: {tones}"
-    for state in STATE_COLORS:
+    for state in STATE_TOKENS:
         assert painted[state].name() not in tones
+
+
+#: The least CIEDE2000 between the centre pixels of two states as *drawn*,
+#: under every simulated vision. Lower than the token guard's 13
+#: (``test_home_plate_is_colour_blind_safe.py``) because the sphere shading
+#: blends the centre of every lit well toward white, which compresses every pair
+#: toward each other — the run plate's own complete / queued pair, which Home
+#: shares, is 11.5 here under deuteranopia. The palette this replaced drew
+#: complete and failed 3.6 apart under deuteranopia in the grey theme.
+_MIN_DRAWN_APART = 10.0
+
+
+def test_every_state_is_told_apart_as_drawn_under_colour_blindness(painted_in_each_theme):
+    """What the reader with colour-vision deficiency actually sees: the rendered
+    pixels, simulated (Machado et al. 2009), including the uncoloured cell the
+    two absence states share — which must not be mistaken for any painted
+    state either."""
+    from tests._ciede import VISIONS, de2000, lab, seen
+
+    theme_name, px = painted_in_each_theme
+    looks = {s: c.name() for s, c in px.items()}
+    close = []
+    for i, a in enumerate(ALL_STATES):
+        for b in ALL_STATES[i + 1:]:
+            if a in NEUTRAL_STATES and b in NEUTRAL_STATES:
+                continue
+            for vision in VISIONS:
+                d = de2000(lab(seen(looks[a], vision)), lab(seen(looks[b], vision)))
+                if d < _MIN_DRAWN_APART:
+                    close.append((a, b, vision, round(d, 1)))
+    assert not close, f"{theme_name} theme: states drawn too alike: {close}"

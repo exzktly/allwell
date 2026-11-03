@@ -4181,19 +4181,39 @@ Three rules the page is built around:
   "None yet". Conflating *not computed* with *computed as zero* is the bug class
   the completeness record exists to end, and the page reporting it must not
   reintroduce it.
-- **Every colour it spends means what it means on the other plate maps.**
-  `success` = complete, `warn` = partial, `danger` = an errored well, and
-  `accent` = the anomalous one, which here is *images with no measurements* —
-  Concatenate paints the identical condition (merged with no measurements CSV on
-  one side) in the same token. `text_muted` carries *staged, never processed*
-  (worded *not reached* after a run that ended early — §9.6's `ended_early`),
-  the token the Datasets dashboards use for pending and for Validate's "no
-  output yet". `accent2` is unused: it means "the other of two normal groups"
-  (Merge Plates), which no state here is. The rule is one colour per state and
-  no colour that means something else elsewhere; `tests/test_home_plate_colors.py`
-  asserts the table, and `tests/test_home_plate_render.py` samples the rendered
-  widget, because the two can disagree — a table of legible tokens can still
-  arrive as near-black cells if something dims them on the way to the screen.
+- **Every colour it spends is held to the run plate's colour-blind bars, and
+  means what it means on the other plate maps.** Home's plate is the same kind
+  of map as Analyze's run plate and is read by the same people, so it follows
+  that plate's design (§7, the `RunDashboard` entry: lightness and blue-against-yellow
+  carry the states, because those survive red/green deficiency) and reuses its
+  tokens wherever the two show the same fact. `plate_panel.STATE_TOKENS` maps
+  each state to a token *name*, resolved at paint time (`state_color` /
+  `state_colors`) so the plate follows the applied theme: complete =
+  `run_done` (Analyze's downloaded / thresholded), failures recorded =
+  `run_problem` (the white problem fill, the one fill no other Home state
+  takes), staged-never-processed = `run_pending` (Analyze's queued — worded
+  *not reached* after a run that ended early, §9.6's `ended_early`), images
+  with no measurements = `accent` (Concatenate paints the identical condition
+  in it), measurements with no output archive = `stale` (Validate's identical
+  condition), and partial = `home_partial`, an amber of its own, darker than
+  `warn` so the two shares of its coverage dial stay apart. A failed well is
+  white without the run plate's ✕, because a well holds one glyph and Home's
+  is the field-quality `!`. `accent2` is unused: it means "the other of two
+  normal groups" (Merge Plates), which no state here is.
+  `tests/test_home_plate_is_colour_blind_safe.py` measures every appearance a
+  well can take — each state's fill and the pale remaining share of a partial
+  dial — at CIEDE2000 ≥ 13 under normal vision, deuteranopia and protanopia
+  (full and 60 % severity, Machado 2009) and ≥ 9 under tritanopia, the dial's
+  two shares ≥ 12 apart, in every registered theme (two of the six tokens are
+  theme tokens), and drives `controller._paint_plate` against the real plate to
+  assert each state's colour reaches `setWellState`. It shares its arithmetic
+  with the run plate's guard through `tests/_ciede.py`.
+  `tests/test_home_plate_colors.py` asserts the token table, and
+  `tests/test_home_plate_render.py` samples the rendered widget — including
+  the same CVD measurement on the drawn pixels, where the sphere shading
+  compresses every pair toward white (floor 10) — because the two can
+  disagree: a table of legible tokens can still arrive as near-black cells if
+  something dims them on the way to the screen.
 - **The two states that describe an absence are painted in nothing at all.**
   `unchecked` (no completeness record exists) and `no_output` (the record holds
   the well and it has no evidence at all) both assert nothing, so they get the
@@ -19173,7 +19193,7 @@ Notable members worth knowing about by name:
 
 The dial covers **transfers as well as compute**: a well filling with the bytes of its own archive while it uploads or downloads, and with FOV-groups while it computes, so the stages that dominate a remote run's wall-clock are the ones the plate describes best. Plate-wide transfer progress is separate and lives on the status line, fed by `remote_xfer` (below). An uploaded-but-not-started well has its own colour on a remote run (`run_uploaded`), distinct from the computing amber, so a plate mid-run says which wells are actually being worked on rather than being one block of amber. It is a pale lavender beside the deep `run_on_server` blue used for "computed, awaiting fetch"; both mean "it is over there", so the pair reads as one family. The legend gains a matching **uploaded** row, on remote runs only.
 
-**The plate paints only with the `run_*` tokens** (`ui/theme.py`: `run_pending`, `run_uploaded`, `run_processing`, `run_on_server`, `run_done`, `run_problem`, and `run_failed_mark` for the ✕'s ink) — the wells and the legend — never with the general status tokens. Those (`success`, `danger`, `stale`) colour text, badges and other plates across the app. The palette is built for red/green colour vision deficiency, the commonest kind, under which red and green collapse onto one axis and what remains is lightness and blue-against-yellow: "complete" is a forest green that reads as a dark khaki, "processing" a plum that reads as a slate blue, "uploaded" a gold, "on server" an azure and "pending" a warm grey, the four coloured states at a matched, moderate chroma. Every *appearance* a well can take is held apart — each state's solid fill and the pale "remaining" tint of each state drawn as a dial (`WellPlateSelector._remaining_tone`, read from the painter by the test rather than re-derived) — at CIEDE2000 ≥ 13 under normal vision and under deuteranopia and protanopia at full and at 60 % severity (the Machado 2009 matrices; the anomalous trichromacies are the common forms), and ≥ 9 under tritanopia; each dial's two shares stay ≥ 12 apart. The tints are counted because the reported confusion was one: a light-green "complete" well against a just-started amber "processing" dial measured CIEDE2000 ≈ 4. **Problems are not a colour.** A failed well and a partial or unfinished one are both `run_problem` white — the one fill no other state takes, and the same under every vision — and say which problem with their glyph: a red ✕ in `run_failed_mark`, passed to `setWellMarker` as the glyph's own ink, or a dark "!". A red fill for "failed" was the hue a red/green deficient viewer loses, set apart from its neighbours only by its ✕. The legend draws both rows on the white swatch with the glyph in it (`status_dot(..., glyph=, ink=)`, legend items `(colour, label, glyph, ink)`). Every fill is at least 3:1 against the panel the plate sits on in both themes, the WCAG floor for non-text graphics, and the ✕ at least 3:1 on the white under every simulated vision. No theme overrides them, since that separation is the property being protected. `tests/test_run_plate_is_colour_blind_safe.py` holds the palette (every appearance pairwise, each dial, the panel, the ✕ on white, and that the two palettes this replaced fail the same bar) and that the plate and legend paint with it by value, with the ✕'s ink checked where it reaches `setWellMarker`.
+**The plate paints only with the `run_*` tokens** (`ui/theme.py`: `run_pending`, `run_uploaded`, `run_processing`, `run_on_server`, `run_done`, `run_problem`, and `run_failed_mark` for the ✕'s ink) — the wells and the legend — never with the general status tokens. Those (`success`, `danger`, `stale`) colour text, badges and other plates across the app. Review Home's plate reuses `run_done`, `run_pending` and `run_problem` for the facts it shares with this one, and is held to the same bars by `tests/test_home_plate_is_colour_blind_safe.py` (§5.2, Home's plate). The palette is built for red/green colour vision deficiency, the commonest kind, under which red and green collapse onto one axis and what remains is lightness and blue-against-yellow: "complete" is a forest green that reads as a dark khaki, "processing" a plum that reads as a slate blue, "uploaded" a gold, "on server" an azure and "pending" a warm grey, the four coloured states at a matched, moderate chroma. Every *appearance* a well can take is held apart — each state's solid fill and the pale "remaining" tint of each state drawn as a dial (`WellPlateSelector._remaining_tone`, read from the painter by the test rather than re-derived) — at CIEDE2000 ≥ 13 under normal vision and under deuteranopia and protanopia at full and at 60 % severity (the Machado 2009 matrices; the anomalous trichromacies are the common forms), and ≥ 9 under tritanopia; each dial's two shares stay ≥ 12 apart. The tints are counted because the reported confusion was one: a light-green "complete" well against a just-started amber "processing" dial measured CIEDE2000 ≈ 4. **Problems are not a colour.** A failed well and a partial or unfinished one are both `run_problem` white — the one fill no other state takes, and the same under every vision — and say which problem with their glyph: a red ✕ in `run_failed_mark`, passed to `setWellMarker` as the glyph's own ink, or a dark "!". A red fill for "failed" was the hue a red/green deficient viewer loses, set apart from its neighbours only by its ✕. The legend draws both rows on the white swatch with the glyph in it (`status_dot(..., glyph=, ink=)`, legend items `(colour, label, glyph, ink)`). Every fill is at least 3:1 against the panel the plate sits on in both themes, the WCAG floor for non-text graphics, and the ✕ at least 3:1 on the white under every simulated vision. No theme overrides them, since that separation is the property being protected. `tests/test_run_plate_is_colour_blind_safe.py` holds the palette (every appearance pairwise, each dial, the panel, the ✕ on white, and that the two palettes this replaced fail the same bar) and that the plate and legend paint with it by value, with the ✕'s ink checked where it reaches `setWellMarker`.
 
 **The headline is derived from the phase the run is in, never pushed at it.**
 `AnalyzeProgressMixin` holds one phase per run — prepare, group, grouped,

@@ -123,9 +123,9 @@ def marker_ink(fill: str | None) -> str:
 
     The previous rule was ``ink_dark if group_color is not None else
     text_primary`` — a *proxy* for "the fill is bright", and wrong for one of
-    the six colours this plate can paint. Against ``text_muted`` (#5F6B7C, the
-    "staged, never processed" state) a dark ink gives a contrast ratio of
-    3.88:1: below AA for normal text and hopeless for a stroke this thin.
+    the colours this plate can paint. Against a mid grey such as
+    ``text_muted`` (#5F6B7C) a dark ink gives a contrast ratio of 3.88:1:
+    below AA for normal text and hopeless for a stroke this thin.
 
     So the fill is measured instead of guessed at. Relative luminance by the
     WCAG definition, which is the same arithmetic the theme's own contrast

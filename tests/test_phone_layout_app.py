@@ -328,13 +328,12 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         assert dash.maximumWidth() == round(440 * u)
         assert dash.isRailBeside()
         assert shell._h.analyze_body.stretch(shell._h.analyze_body.indexOf(dash)) == 1
-        # The well-colour key: a column of its own between the summary and the
-        # log, since the summary has no height to spare under the plate — and
-        # the summary keeps its full width, so the plate is not shrunk for it.
+        # The well-colour key moves above the plate, inside the dashboard, so
+        # the log beside it keeps its whole width.
         chips = dash.legendChips()
         body = shell._h.analyze_body
-        assert body.indexOf(chips) == body.indexOf(dash) + 1
-        assert dash.minimumWidth() == round(440 * u)
+        assert body.indexOf(chips) < 0
+        assert dash.layout().indexOf(chips) == dash.layout().indexOf(dash._body) - 1
         monkeypatch.setattr(shell, "is_landscape", lambda: False)
         shell._apply_sizes()
         _pump(qapp)
@@ -342,10 +341,8 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         assert shell._h.analyze_body.direction() == QBoxLayout.TopToBottom
         assert not dash.isRailBeside()
         assert shell._h.analyze_body.stretch(shell._h.analyze_body.indexOf(dash)) == 0
-        # Upright the key is back under the plate, inside the dashboard.
-        assert body.indexOf(chips) < 0
+        # Upright the key is back under the plate.
         assert dash.layout().indexOf(chips) == dash.layout().indexOf(dash._body) + 1
-        assert dash.minimumWidth() == 0
     finally:
         shell.set_on(False)
         _pump(qapp)

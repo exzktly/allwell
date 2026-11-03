@@ -741,16 +741,20 @@ built by `_build_legend_chips` from the same `_legend_items` on every
 `_build_legend`, so a remote run's renamed rows reach them on `reset`), because
 the stage rail names stages and nothing else on the page says what a well's
 colour means. They show only while the plate does (`syncLegendChips`: stacked,
-not compact, not collapsed), so Analyze's Settings strip carries none. Upright
-they sit under the body at the page's width. Sideways the column has no height
-to spare under the plate, so `PhoneShell._apply_analyze_columns` lays them out
-as a narrow column of their own between the summary and the log (`legendChips`)
-and pins the summary at its full `LANDSCAPE_SUMMARY_PT` width, so the width
-comes out of the log's share and the fitted plate keeps its size; turning
-upright, `homeLegendChips` puts them back under the body. Pinning the stage
-rail beside the plate asks each rail row to `updateGeometry` first: the rows'
-bars are hidden just before, and the rail's layout otherwise answers with the
-width it last measured, bars included, once anything has laid the body out.
+not compact, not collapsed), so Analyze's Settings strip carries none, and they
+reserve their wrapped height (`sync_flow_height`), so the plate fit below counts
+every line. Upright they sit under the body at the page's width. Sideways
+(`setRailBeside`) they move above the body at caption size, inside the
+dashboard (`_place_legend_chips`): under the plate they would be pushed off the
+short page, the rail column has no room once a remote run's five stages fill
+it, and a column of their own would come out of the log's width — so the plate
+gives up the two lines instead. Because the rail can then be the taller half of
+the body row, the fit adds `PlateProgress.rail_height_beside_plate` to the room
+it reads from the column's minimum (which a taller rail hides), and the plate
+grows to the rail's height. Pinning the stage rail beside the plate asks each
+rail row to `updateGeometry` first: the rows' bars are hidden just before, and
+the rail's layout otherwise answers with the width it last measured, bars
+included, once anything has laid the body out.
 Tapping a well writes what it is doing to a line under the plate
 (`PlateWellDetail`), since there is no hover. The analysis log wraps in phone
 layout — reading the end of an error line on a phone is worth the cost that a

@@ -299,3 +299,20 @@ def test_sideways_the_stage_rail_sits_beside_the_plate_without_its_bars(qtbot):
     assert dash._body_lay.direction() == QBoxLayout.TopToBottom
     assert all(b.isVisibleTo(dash) for b in bars)
     assert dash.plate_room_width() == upright_room
+
+
+def test_sideways_the_plate_grows_to_the_height_of_a_taller_stage_rail(tab, hosted):
+    """Sideways the stage rail sits beside the plate. A remote run has five
+    stages, so the rail can be the taller of the two, and then it — not the
+    plate — sets the row's minimum height. The fit reads its room from the
+    column's minimum, so without allowing for that it left the plate at its
+    floor, beside a rail with height to spare: the plate takes the rail's
+    height, which costs the column nothing."""
+    dash, plate = tab._dashboard, tab._dashboard._plate
+    dash.reset(remote=True, total=4)
+    hosted(600, 340)
+    dash.setRailBeside(True)
+    tab._phone_view.show_view(PROGRESS)
+    _pump()
+    assert plate.height() == dash._rail_host.height(), (
+        f"the plate is {plate.height()} px beside a {dash._rail_host.height()} px rail")

@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from widgets.flow_layout import FlowLayout
+from widgets.flow_layout import FlowLayout, sync_flow_height
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector, marker_ink
 from util.well_token import canonical_well_label
@@ -351,9 +351,10 @@ class PlateProgress(QWidget):
             self._legend_flow = FlowLayout(self._legend_chips, margin=0,
                                            h_spacing=theme.Spacing.md,
                                            v_spacing=theme.Spacing.xs)
-            # A gap at the right for when a host lays the chips out as a
-            # column beside something else (phone layout sideways, the log).
-            self._legend_flow.setContentsMargins(0, 0, theme.Spacing.sm, 0)
+            # Reserve the wrapped lines' height, not one line's: phone
+            # layout fits the plate to what the column's minimum leaves, and
+            # a second line it did not count would cut the plate's last row.
+            sync_flow_height(self._legend_chips)
             self._legend_chips.hide()
             root.addWidget(self._legend_chips)
         # One line under the plate for a tapped well's detail (stacked only).
@@ -568,6 +569,11 @@ class PlateProgress(QWidget):
         if host is None:
             return
         self._clear(self._legend_flow)
+        # Sideways the chips take height from the plate, so they are set at
+        # caption size and packed tighter there.
+        small = self._legend_chips_small()
+        size = f" font-size:{theme.Typography.caption_size}px;" if small else ""
+        self._legend_flow.setSpacing(theme.Spacing.xs if small else theme.Spacing.sm)
         for item in items:
             color, text = item[0], item[1]
             glyph, ink = (item[2], item[3]) if len(item) > 2 else (None, None)
@@ -577,9 +583,13 @@ class PlateProgress(QWidget):
             c.setSpacing(_LEGEND_ROW_SPACING_PX)
             c.addWidget(status_dot(color, glyph=glyph, ink=ink))
             label = QLabel(text, chip)
-            label.setStyleSheet(f"color:{theme.Colors.text_primary};")
+            label.setStyleSheet(f"color:{theme.Colors.text_primary};{size}")
             c.addWidget(label)
             self._legend_flow.addWidget(chip)
+        self._legend_chips_built_small = small
+
+    def _legend_chips_small(self) -> bool:
+        return bool(getattr(self, "_stacked", False) and getattr(self, "_rail_beside", False))
 
     # ── phone layout ────────────────────────────────────────────────────────
     def setStacked(self, stacked: bool) -> None:
@@ -643,6 +653,15 @@ class PlateProgress(QWidget):
     def isRailBeside(self) -> bool:
         return self._rail_beside
 
+    def rail_height_beside_plate(self, plate: QWidget) -> int:
+        """How much taller the stage rail is than *plate* when it sits beside
+        it (``setRailBeside``) — height the plate can take without the body
+        growing, since the taller of the two already sets the row. 0 when the
+        rail is above the plate, or no taller."""
+        if not (self._stacked and self._rail_beside):
+            return 0
+        return max(0, self._rail_host.minimumSizeHint().height() - plate.minimumHeight())
+
     def plate_room_width(self) -> int:
         """The width the plate could take in the body as it is laid out now,
         whatever cap it carries: the body's width, less the stage rail and the
@@ -659,6 +678,7 @@ class PlateProgress(QWidget):
         column = self._stacked and not self._rail_beside
         self._body_lay.setDirection(
             QBoxLayout.TopToBottom if column else QBoxLayout.LeftToRight)
+        self._place_legend_chips()
         self._pin_rail_width()
 
     def _show_well_detail(self, well_id: str) -> None:
@@ -675,28 +695,36 @@ class PlateProgress(QWidget):
     # ── the legend's phone form ─────────────────────────────────────────────
     def legendChips(self) -> QWidget | None:
         """The legend as wrapping chips — its form while stacked — or
-        ``None`` for a dashboard built without a legend. Under the body by
-        default; a host with a better place for it (phone layout sideways,
-        where the column under the plate has no height to spare) may lay it
-        out elsewhere and give it back with :meth:`homeLegendChips`."""
+        ``None`` for a dashboard built without a legend."""
         return getattr(self, "_legend_chips", None)
 
-    def homeLegendChips(self) -> None:
-        """Put the chips back under the body after a host laid them out
-        elsewhere. Idempotent."""
+    def _place_legend_chips(self) -> None:
+        """Upright, the chips go under the body at the page's width.
+        Sideways (``setRailBeside``) they go above the body instead, at
+        caption size: under the plate they would be pushed off the short
+        page, and every other place on it is taken — the rail column has no
+        room once a remote run's five stages fill it, and a column of their
+        own would come out of the log's width. So sideways the plate gives up
+        the two lines they need (phone layout fits the plate to what the
+        column leaves). Idempotent."""
         chips = self.legendChips()
         if chips is None:
             return
         root = self.layout()
-        if chips.parentWidget() is not self or root.indexOf(chips) < 0:
-            root.insertWidget(root.indexOf(self._body) + 1, chips)
+        above = self._legend_chips_small()
+        at, body_at = root.indexOf(chips), root.indexOf(self._body)
+        if at != (body_at - 1 if above else body_at + 1):
+            root.removeWidget(chips)
+            body_at = root.indexOf(self._body)
+            root.insertWidget(body_at if above else body_at + 1, chips)
+        if getattr(self, "_legend_chips_built_small", None) != self._legend_chips_small():
+            self._build_legend_chips(self._legend_items()[1])
         self.syncLegendChips()
 
     def syncLegendChips(self) -> None:
         """Show the chips while stacked and the body is showing — never in
         the compact strip or a collapsed dashboard — wherever they are laid
-        out. Called again by a host that has just moved them, since moving a
-        widget hides it."""
+        out. Moving a widget hides it, so this runs after every move too."""
         chips = self.legendChips()
         if chips is None:
             return

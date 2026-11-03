@@ -374,9 +374,7 @@ def test_a_stacked_run_dashboard_keeps_a_key_to_its_well_colours(qapp):
 def test_the_colour_key_follows_the_dashboard_s_body_not_only_the_stacking(qapp):
     """The chips show only while the plate they explain does: not in the
     compact strip Analyze's Settings view shows above its form, and not in a
-    collapsed dashboard — including after a host has laid them out elsewhere
-    and handed them back."""
-    from PySide6.QtWidgets import QWidget, QVBoxLayout
+    collapsed dashboard."""
     from widgets.run_dashboard import RunDashboard
     d = RunDashboard()
     d.show()
@@ -392,18 +390,46 @@ def test_the_colour_key_follows_the_dashboard_s_body_not_only_the_stacking(qapp)
     assert not chips.isVisible()
     d._toggle.setChecked(True)
     d._on_toggle()
-    # A host lays the chips out elsewhere, then gives them back.
-    elsewhere = QWidget()
-    QVBoxLayout(elsewhere).addWidget(chips)
-    elsewhere.show()
-    d.homeLegendChips()
-    assert chips.parentWidget() is d
-    assert d.layout().indexOf(chips) == d.layout().indexOf(d._body) + 1
     assert chips.isVisible()
-    d.homeLegendChips()                          # idempotent
-    assert d.layout().indexOf(chips) == d.layout().indexOf(d._body) + 1
     d.hide()
-    elsewhere.hide()
+
+
+def test_sideways_the_colour_key_sits_above_the_plate_inside_the_dashboard(qapp):
+    """Sideways (the rail beside the plate) the column has no height to spare
+    under the plate, and a column of the key's own would come out of the log's
+    width beside it. So the key moves above the body, at caption size, inside
+    the dashboard's own width — the plate gives up the two lines. Upright it is
+    back under the body at the body size."""
+    from ui import theme
+    from widgets.run_dashboard import RunDashboard
+    d = RunDashboard()
+    d.reset(remote=True, total=4)
+    d.show()
+    d.setStacked(True)
+    root, chips = d.layout(), d.legendChips()
+
+    def label_qss():
+        flow = d._legend_flow
+        return {flow.itemAt(i).widget().layout().itemAt(1).widget().styleSheet()
+                for i in range(flow.count())}
+
+    assert root.indexOf(chips) == root.indexOf(d._body) + 1
+    assert not any("font-size" in q for q in label_qss())
+    d.setRailBeside(True)
+    assert chips.parentWidget() is d
+    assert root.indexOf(chips) == root.indexOf(d._body) - 1
+    assert chips.isVisible()
+    assert label_qss() == {f"color:{theme.Colors.text_primary}; "
+                           f"font-size:{theme.Typography.caption_size}px;"}
+    assert _chip_labels(d) == ["pending", "uploaded", "processing", "on server", "downloaded",
+                               "partial / unfinished", "failed"]
+    d.setRailBeside(True)                        # idempotent
+    assert root.indexOf(chips) == root.indexOf(d._body) - 1
+    d.setRailBeside(False)
+    assert root.indexOf(chips) == root.indexOf(d._body) + 1
+    assert not any("font-size" in q for q in label_qss())
+    assert chips.isVisible()
+    d.hide()
 
 
 def test_run_dashboard_stage_columns_follow_the_scale(qapp):

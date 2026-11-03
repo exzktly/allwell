@@ -300,6 +300,13 @@ class AnalyzePhoneView:
             for _ in range(3):
                 self._relayout(plate, right)
                 spare = right.height() - right.minimumSizeHint().height()
+                # Sideways the stage rail sits beside the plate, and when it is
+                # the taller of the two it sets the row's minimum height: the
+                # plate can grow to the rail's height without the column
+                # needing a pixel more, which the column's minimum does not
+                # show. A remote run's five stages beside the colour key's two
+                # lines left the plate at its floor without this.
+                spare += self._tab._dashboard.rail_height_beside_plate(plate)
                 budget = max(floor, min(natural, plate.minimumHeight() + spare))
                 width = self._width_for_height(plate, budget, full_w)
                 height = plate.heightForWidth(width)

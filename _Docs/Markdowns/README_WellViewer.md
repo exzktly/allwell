@@ -9702,8 +9702,9 @@ switch back to the desktop layout to use them.
   plate. Tap a well to see what it is doing on the line under the plate. The log is below, with long lines
   wrapped, and scrolls inside its own box. Everything fits on one screen: on a
   short screen the plate map is drawn smaller to leave room for the last few
-  lines of the log. Sideways, the progress sits on the left — the stages beside
-  the plate, the colour key beside that — and the log on the right.
+  lines of the log. Sideways, the progress sits on the left — the colour key in
+  two small lines above the stages and the plate beside them — and the log on
+  the right, at its full width.
 
 **Run Pipeline**, **Suspend**, **+ Queue** and **Stop** sit in a bar just above
 the bottom bar in both views, so they are always in reach. Starting a run —

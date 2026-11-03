@@ -38,7 +38,6 @@ from review.features.nanowell.identity_compute import identity_note, marks_legen
 from review.features.nanowell import subset_compute as ss
 from review.features.nanowell import statistics_compute as sc
 from review.features.nanowell._statistics_render import render_statistics
-from review.features.nanowell._resolve_render import draw_resolve_target
 from review.features.nanowell.crop_grid_compute import POPOUT_GRIDS, POPOUT_MAX_COLS, save_name, shown_channels
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
@@ -705,10 +704,7 @@ def redraw(ctx) -> None:
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
         st.drawn = model
-        if isinstance(model, ArrayDrawn) and model.ax is not None:
-            hint = aq.target(ctx, well, page_timepoint(ctx, well))
-            if hint is not None:
-                draw_resolve_target(model.ax, model.region, model.size_px, hint.point_um)
+        aq.ring_target(ctx, model, well, page_timepoint(ctx, well))     # the Resolve walk's hint, when walking
         if model is not None and model.rendered is not None:
             _want_tiles(ctx, {(tile, None) for tile in model.rendered.unread} | set(model.rendered.wants))
         _call(ctx, "_nw_refresh_zoom")

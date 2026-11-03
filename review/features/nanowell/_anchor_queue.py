@@ -255,7 +255,7 @@ def current_guide(ctx) -> rc.Guide | None:
                         hours=hours)
 
 
-def target(ctx, well: str, timepoint: str):
+def target(ctx, well: str, timepoint: str) -> rc.Hint | None:
     """The hint to ring on the Array view when it draws *well* at *timepoint* during a walk, or ``None``."""
     st = _state(ctx)
     queue = active_queue(ctx)
@@ -264,6 +264,16 @@ def target(ctx, well: str, timepoint: str):
         return None
     hint = st.resolve_hint
     return hint if isinstance(hint, rc.Hint) and hint.point_um is not None else None
+
+
+def ring_target(ctx, drawn, well: str, timepoint: str) -> None:
+    """Ring the walk's hint on the Array view just drawn (*drawn*, ``renderer.ArrayDrawn``) when it shows the walk's
+    current timepoint; nothing otherwise."""
+    from review.features.nanowell._resolve_render import draw_resolve_target
+
+    hint = target(ctx, well, timepoint)
+    if hint is not None and getattr(drawn, "ax", None) is not None:
+        draw_resolve_target(drawn.ax, drawn.region, drawn.size_px, hint.point_um)
 
 
 def exclude_current(ctx) -> bool:

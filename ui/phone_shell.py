@@ -2061,17 +2061,15 @@ class PhoneShell(QObject):
         # show there.
         self.menu_button.setVisible(not views)
         bar = self._current_page_bar()
-        sections = self._sections() if review else []
-        self.page_button.setVisible((review and (bar is not None or bool(sections)))
-                                    or tools or views)
+        # In Review the page button lists the section's own pages and nothing
+        # else, so a section without pages has none: changing section is ☰'s.
+        self.page_button.setVisible((review and bar is not None) or tools or views)
         if views:
             self.page_button.setText(f"{self._h.page_view()} ▾")
         elif tools:
             self.page_button.setText(f"{self._h.current_tool()} ▾")
         elif bar is not None:
             self.page_button.setText(f"{bar.tabText(bar.currentIndex())} ▾")
-        elif sections:
-            self.page_button.setText(f"{self._current_section_label()} ▾")
         self.controls_button.setVisible(review and self._current_band() is not None)
         wells_open = self._wells_sheet is not None and self._wells_sheet.isOpen()
         self.wells_button.setVisible(review and (wells_open or bool(self._well_picker())))
@@ -2117,9 +2115,10 @@ class PhoneShell(QObject):
             self._fill_named_menu(self._h.page_views(), self._h.page_view(),
                                   self._pick_page_view)
             return
-        # Review: this section's pages, then every other section — so moving
-        # anywhere in Review is the one menu at the foot of the screen, two
-        # taps, rather than ☰ at the top, a section tile, then this menu.
+        # Review: this section's pages, and only those. Changing section is
+        # ☰'s job — the menu once listed every other section under a "Go to"
+        # heading too, and two buttons offering the same sections read as one
+        # control duplicated rather than as two with different jobs.
         bar = self._current_page_bar()
         group = QActionGroup(self._page_menu)
         if bar is not None:
@@ -2130,16 +2129,6 @@ class PhoneShell(QObject):
                 act.setEnabled(bar.isTabEnabled(i))
                 act.triggered.connect(lambda _c=False, b=bar, idx=i: self._pick_page(b, idx))
                 group.addAction(act)
-                self._page_menu.addAction(act)
-        current = self._current_section()
-        others = [(k, label) for k, label in self._sections() if k != current]
-        if others:
-            if bar is not None:
-                self._page_menu.addSeparator()
-            self._menu_caption("Go to")
-            for key, label in others:
-                act = QAction(label, self._page_menu)
-                act.triggered.connect(lambda _c=False, k=key: self._pick_section(k))
                 self._page_menu.addAction(act)
 
     def _menu_caption(self, text: str) -> None:
@@ -2168,11 +2157,6 @@ class PhoneShell(QObject):
     def _current_section_label(self) -> str:
         current = self._current_section()
         return next((label for k, label in self._sections() if k == current), current or "")
-
-    def _pick_section(self, key: str) -> None:
-        self.close_sheets(now=True)
-        self._h.rail_nav.setCurrentKey(key)
-        self.page_changed()
 
     def _fill_tool_menu(self) -> None:
         """Datasets mode: the page button lists the tools, as ☰ does."""

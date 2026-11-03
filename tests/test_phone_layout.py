@@ -1479,31 +1479,39 @@ def test_a_page_with_no_picker_offers_no_wells_button(qapp, app_sheet):
     assert shell._wells_sheet is None
 
 
-def test_the_page_menu_also_goes_to_every_other_section(qapp, app_sheet):
-    """Moving between Review's sections was ☰ at the top of the screen, then a
-    tile, then the page menu. The page menu at the foot now lists the other
-    sections the rail offers, under its pages — the ones a user can pick now:
-    not the current one, not one phone layout hides, not a disabled one."""
+def test_the_page_menu_lists_this_section_s_pages_and_never_the_sections(qapp, app_sheet):
+    """Reported: the bottom-left page menu duplicated ☰ — it listed every other
+    Review section under "Go to", which ☰'s section tiles already offer. The
+    page menu now lists only the current section's pages; changing section is
+    ☰'s alone. A section with no pages has no page button at all, rather than
+    a menu with nothing in it."""
+    from PySide6.QtWidgets import QTabBar
     from widgets.rail_nav import RailNav
     qapp.setStyleSheet(theme.qss())
     win = _window()
     QVBoxLayout(win)
     nav = RailNav(win)
-    for key in ("Home", "Plotting", "Statistics", "Batch Export", "Spatial"):
+    for key in ("Home", "Plotting", "Statistics"):
         nav.addItem(key)
     nav.setCurrentKey("Plotting")
-    nav._rows["Batch Export"].hide()
-    nav.setItemEnabled("Spatial", False)
-    shell = _shell(win, rail_nav=nav)
+    pages = QTabBar(win)
+    for title in ("Bar Plots", "Line Graphs", "Scatter Plot"):
+        pages.addTab(title)
+    pages.setCurrentIndex(1)
+    current_bar = {"bar": pages}
+    shell = _shell(win, rail_nav=nav, current_page_bar=lambda: current_bar["bar"])
     shell.set_on(True)
     _pump(qapp)
-    assert shell.page_button.isVisible() and shell.page_button.text() == "Plotting ▾"
+    shell.refresh()
+    assert shell.page_button.isVisible() and shell.page_button.text() == "Line Graphs ▾"
     shell._fill_page_menu()
-    acts = [a for a in shell._page_menu.actions()
-            if not a.isSeparator() and a.isEnabled()]
-    assert [a.text() for a in acts] == ["Home", "Statistics"]
-    acts[1].trigger()
-    assert nav.currentKey() == "Statistics"
+    picks = [a.text() for a in shell._page_menu.actions() if not a.isSeparator() and a.isEnabled()]
+    assert picks == ["Bar Plots", "Line Graphs", "Scatter Plot"]
+    # A section with no pages of its own: no page button.
+    current_bar["bar"] = None
+    nav.setCurrentKey("Statistics")
+    shell.refresh()
+    assert not shell.page_button.isVisible()
 
 
 def test_an_empty_plot_s_hint_says_where_the_plate_is_on_a_phone():

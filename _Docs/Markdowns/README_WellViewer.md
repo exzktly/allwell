@@ -9638,7 +9638,7 @@ holds:
 
 | Control | What it does |
 |---|---|
-| **Bar Plots ▾** | Picks the page's view (Bar Plots, Line Graphs, Heat Map, …), and under **Go to** every other section (Home, Statistics, Image Browser, …) — so getting anywhere in Review is this one menu. |
+| **Bar Plots ▾** | Picks a page within the section you are in (Bar Plots, Line Graphs, Heat Map, …). To change section (Home, Statistics, Image Browser, …), use **☰**. A section with only one page has no such button. |
 | **Wells** | Slides the well plate and its **All** / **None** up from the bottom, with the plot still in view above them: tap wells and watch them appear in the plot. A row or column label selects the whole row or column. The button shows how many wells are selected (**Wells · 4**); **Done ✕** puts the plate away. Pages that do not pick wells (Home, Statistics) do not show it. |
 | **⚙ Controls** | Slides the page's own controls up from the bottom, with the plot still in view above them so you can watch it change. They read top to bottom in three groups, the same on every page: **Display** (Display ▾, Fold change ▾, Decorate ▾, …) and **Actions** (Save ▾, Reset Order, Properties, …), each a row of equal buttons, so they are in view as soon as the panel opens; then **Data** (channel, property, timepoints, threshold, …), one per row with its name on the left and the control filling the rest, which you scroll on a page with many settings. A note about the data sits under the **Data** heading. **Decorate ▾** appears only where it changes the plot — Bar Plots, and the Nanowells page's Distribution view — and only once the plate has sample variables. **Done ✕** puts them away. |
 

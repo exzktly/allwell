@@ -1840,6 +1840,12 @@ QWidget#PhoneStrip {{
     background-color: {c.rail};
     border-top: 1px solid {c.border_subtle};
 }}
+/* The foot of a window phone layout gives its phone form (ui/phone_window.py):
+   the window's own row of buttons and Close ✕, outside what scrolls. */
+QWidget#PhoneWindowFoot {{
+    background-color: {c.rail};
+    border-top: 1px solid {c.border_subtle};
+}}
 /* Analyze's run controls, moved to the foot of the pane in phone layout
    (analyze/phone_view.py) so Run and + Queue stay in reach. */
 QWidget#PhoneRunBar {{
@@ -2117,7 +2123,8 @@ QFrame#RailNavRow {{ min-height: {row}px; }}
 QWidget#Drawer[phoneSheet="true"] QPushButton,
 QWidget#Drawer[phoneSheet="true"] QToolButton,
 QWidget#Drawer[phoneSheet="true"] QComboBox,
-QWidget#Drawer[phoneSheet="true"] QLineEdit {{
+QWidget#Drawer[phoneSheet="true"] QLineEdit,
+QWidget#PhoneWindowFoot QPushButton {{
     min-height: {row}px;
 }}
 QMenu::separator {{ height: 1px; margin: {pt(4)}px 0px; }}

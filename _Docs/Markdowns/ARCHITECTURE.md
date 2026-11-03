@@ -732,9 +732,25 @@ so the plate's grid kept a quarter of the plate's height.
 
 **The run dashboard** in phone layout is stacked
 (`PlateProgress.setStacked`): the body row turns to a column, the column dividers,
-legend, title, collapse toggle, status word and "Stages" heading go (the headline
-says the state, the stage rows name themselves), the headline is set larger
-(`PlateHeadline[phone]`), and the plate fills the column's width, centred.
+title, collapse toggle, status word and "Stages" heading go (the headline says the
+state, the stage rows name themselves), the headline is set larger
+(`PlateHeadline[phone]`), and the plate fills the column's width, centred. The
+legend's fixed-width column goes too, but the legend does not: the same rows are
+drawn as wrapping dot-and-label chips under the whole body (`_legend_chips`,
+built by `_build_legend_chips` from the same `_legend_items` on every
+`_build_legend`, so a remote run's renamed rows reach them on `reset`), because
+the stage rail names stages and nothing else on the page says what a well's
+colour means. They show only while the plate does (`syncLegendChips`: stacked,
+not compact, not collapsed), so Analyze's Settings strip carries none. Upright
+they sit under the body at the page's width. Sideways the column has no height
+to spare under the plate, so `PhoneShell._apply_analyze_columns` lays them out
+as a narrow column of their own between the summary and the log (`legendChips`)
+and pins the summary at its full `LANDSCAPE_SUMMARY_PT` width, so the width
+comes out of the log's share and the fitted plate keeps its size; turning
+upright, `homeLegendChips` puts them back under the body. Pinning the stage
+rail beside the plate asks each rail row to `updateGeometry` first: the rows'
+bars are hidden just before, and the rail's layout otherwise answers with the
+width it last measured, bars included, once anything has laid the body out.
 Tapping a well writes what it is doing to a line under the plate
 (`PlateWellDetail`), since there is no hover. The analysis log wraps in phone
 layout — reading the end of an error line on a phone is worth the cost that a

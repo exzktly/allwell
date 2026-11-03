@@ -9696,12 +9696,14 @@ switch back to the desktop layout to use them.
 - **Settings ▾** — the run form fills the screen, under a strip with the run's
   headline (*Running · 52 of 96 wells · 1 failed*) and its overall bar.
 - **Progress ▾** — the headline, the overall bar, the stages, and the plate map
-  coloured by each well's progress, one above the other. Tap a well to see what
-  it is doing on the line under the plate. The log is below, with long lines
+  coloured by each well's progress, one above the other, with a key to the well
+  colours (pending, processing, processed, complete, partial, failed — or, for a
+  remote run, uploaded, on server and downloaded) in a few lines just under the
+  plate. Tap a well to see what it is doing on the line under the plate. The log is below, with long lines
   wrapped, and scrolls inside its own box. Everything fits on one screen: on a
   short screen the plate map is drawn smaller to leave room for the last few
   lines of the log. Sideways, the progress sits on the left — the stages beside
-  the plate — and the log on the right.
+  the plate, the colour key beside that — and the log on the right.
 
 **Run Pipeline**, **Suspend**, **+ Queue** and **Stop** sit in a bar just above
 the bottom bar in both views, so they are always in reach. Starting a run —

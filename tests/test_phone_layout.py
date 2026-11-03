@@ -334,13 +334,76 @@ def test_run_dashboard_stacks_and_unstacks(qapp):
     assert d._body_lay.direction() == QBoxLayout.TopToBottom
     assert all(div.isHidden() for div in d._dividers)
     assert d._legend_host.isHidden()
+    assert not d._legend_chips.isHidden()        # the legend's phone form stays
     assert d._rail_host.maximumWidth() > rail_w
     d.setStacked(False)
     assert d._body_lay.direction() == QBoxLayout.LeftToRight
     assert not any(div.isHidden() for div in d._dividers)
     assert not d._legend_host.isHidden()
+    assert d._legend_chips.isHidden()
     assert d._rail_host.maximumWidth() == rail_w
     d.hide()
+
+
+def _chip_labels(d) -> list[str]:
+    # Each chip is a dot then its label; the dot of a glyph state carries text too ("!").
+    flow = d._legend_flow
+    return [flow.itemAt(i).widget().layout().itemAt(1).widget().text() for i in range(flow.count())]
+
+
+def test_a_stacked_run_dashboard_keeps_a_key_to_its_well_colours(qapp):
+    """Phone layout stacks the dashboard and drops the legend's fixed-width
+    column. The stage rail names stages, not well colours, so without a key a
+    phone showed a coloured plate nobody could read. The legend stays as
+    chips under the plate, with every row the desk legend has — including
+    the rows a remote run adds when the dashboard is reset for one."""
+    from widgets.run_dashboard import RunDashboard
+    d = RunDashboard()
+    d.show()
+    d.setStacked(True)
+    assert d._legend_chips.isVisible()
+    assert _chip_labels(d) == ["pending", "processing", "processed", "complete",
+                               "partial / unfinished", "failed"]
+    d.reset(remote=True, total=4)                # a remote run renames and adds rows
+    assert _chip_labels(d) == ["pending", "uploaded", "processing", "on server", "downloaded",
+                               "partial / unfinished", "failed"]
+    assert d._legend_chips.isVisible()
+    d.hide()
+
+
+def test_the_colour_key_follows_the_dashboard_s_body_not_only_the_stacking(qapp):
+    """The chips show only while the plate they explain does: not in the
+    compact strip Analyze's Settings view shows above its form, and not in a
+    collapsed dashboard — including after a host has laid them out elsewhere
+    and handed them back."""
+    from PySide6.QtWidgets import QWidget, QVBoxLayout
+    from widgets.run_dashboard import RunDashboard
+    d = RunDashboard()
+    d.show()
+    d.setStacked(True)
+    chips = d.legendChips()
+    assert chips.isVisible()
+    d.setCompact(True)
+    assert not chips.isVisible()
+    d.setCompact(False)
+    assert chips.isVisible()
+    d._toggle.setChecked(False)
+    d._on_toggle()
+    assert not chips.isVisible()
+    d._toggle.setChecked(True)
+    d._on_toggle()
+    # A host lays the chips out elsewhere, then gives them back.
+    elsewhere = QWidget()
+    QVBoxLayout(elsewhere).addWidget(chips)
+    elsewhere.show()
+    d.homeLegendChips()
+    assert chips.parentWidget() is d
+    assert d.layout().indexOf(chips) == d.layout().indexOf(d._body) + 1
+    assert chips.isVisible()
+    d.homeLegendChips()                          # idempotent
+    assert d.layout().indexOf(chips) == d.layout().indexOf(d._body) + 1
+    d.hide()
+    elsewhere.hide()
 
 
 def test_run_dashboard_stage_columns_follow_the_scale(qapp):

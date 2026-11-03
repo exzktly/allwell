@@ -1653,6 +1653,21 @@ class PhoneShell(QObject):
             # (analyze/phone_view.py), by width and height together.
             if hasattr(d, "setRailBeside"):
                 d.setRailBeside(two)
+            # The legend's chips sit under the plate upright. Sideways the
+            # column has no height to spare under the plate, so they become a
+            # narrow column of their own between the summary and the log,
+            # centred beside the plate they explain. Their width comes out of
+            # the log's share, not the summary's: the summary keeps its full
+            # width, or the plate fitted inside it would shrink to make room.
+            chips = d.legendChips() if hasattr(d, "legendChips") else None
+            if chips is not None:
+                if two:
+                    body.insertWidget(body.indexOf(d) + 1, chips, 0, Qt.AlignVCenter)
+                    d.syncLegendChips()
+                    d.setMinimumWidth(self.pt(LANDSCAPE_SUMMARY_PT))
+                else:
+                    d.homeLegendChips()
+                    d.setMinimumWidth(0)
             # Its width is then a share of the row, up to the cap, rather than
             # its size hint, which follows the fitted plate and would only
             # ever shrink it. Upright it takes its hint, the log the rest.

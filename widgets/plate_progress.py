@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from widgets.flow_layout import FlowLayout
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector, marker_ink
 from util.well_token import canonical_well_label
@@ -340,6 +341,21 @@ class PlateProgress(QWidget):
             body.addStretch(1)
 
         root.addWidget(self._body)
+        if show_legend:
+            # The legend's phone form: the same rows as wrapping dot-and-label
+            # chips under the whole body, shown only while stacked. Under the
+            # body rather than inside it, so it spans the page's width whether
+            # the rail sits above the plate (upright) or beside it (sideways).
+            self._legend_chips = QWidget(self)
+            self._legend_chips.setObjectName("PlateLegendChips")
+            self._legend_flow = FlowLayout(self._legend_chips, margin=0,
+                                           h_spacing=theme.Spacing.md,
+                                           v_spacing=theme.Spacing.xs)
+            # A gap at the right for when a host lays the chips out as a
+            # column beside something else (phone layout sideways, the log).
+            self._legend_flow.setContentsMargins(0, 0, theme.Spacing.sm, 0)
+            self._legend_chips.hide()
+            root.addWidget(self._legend_chips)
         # One line under the plate for a tapped well's detail (stacked only).
         self._well_detail = QLabel("", self)
         self._well_detail.setObjectName("PlateWellDetail")
@@ -542,6 +558,28 @@ class PlateProgress(QWidget):
             r.addStretch(1)
             self._legend_lay.addWidget(row)
         self._legend_lay.addStretch(1)
+        self._build_legend_chips(items)
+
+    def _build_legend_chips(self, items) -> None:
+        """The phone form of the same legend: one dot-and-label chip per item,
+        wrapping across the page's width (shown while stacked, ``setStacked``).
+        No heading — the chips sit directly under the plate they explain."""
+        host = getattr(self, "_legend_chips", None)
+        if host is None:
+            return
+        self._clear(self._legend_flow)
+        for item in items:
+            color, text = item[0], item[1]
+            glyph, ink = (item[2], item[3]) if len(item) > 2 else (None, None)
+            chip = QWidget(host)
+            c = QHBoxLayout(chip)
+            c.setContentsMargins(0, 0, 0, 0)
+            c.setSpacing(_LEGEND_ROW_SPACING_PX)
+            c.addWidget(status_dot(color, glyph=glyph, ink=ink))
+            label = QLabel(text, chip)
+            label.setStyleSheet(f"color:{theme.Colors.text_primary};")
+            c.addWidget(label)
+            self._legend_flow.addWidget(chip)
 
     # ── phone layout ────────────────────────────────────────────────────────
     def setStacked(self, stacked: bool) -> None:
@@ -549,9 +587,10 @@ class PlateProgress(QWidget):
 
         For phone layout, where the pane is one narrow column: side by side,
         the fixed-width stage rail and legend leave the plate a sliver. The
-        legend goes while stacked — it explains colours the stage rail above
-        already names, and a third block below the plate would push the plate
-        off a short screen — and so do the column dividers.
+        legend's fixed-width column goes while stacked, and so do the column
+        dividers; the legend itself stays, as compact wrapping chips under the
+        body (``_legend_chips``). The stage rail names stages, not what each
+        well colour means, so without it a phone had no key to the plate.
         """
         self._stacked = bool(stacked)
         self._apply_body_direction()
@@ -560,6 +599,7 @@ class PlateProgress(QWidget):
         legend = getattr(self, "_legend_host", None)
         if legend is not None:
             legend.setVisible(not self._stacked)
+        self.syncLegendChips()
         # The header's title and collapse toggle are desk chrome: on a phone
         # the dashboard *is* the page, and the headline under them says what
         # state the run is in — so it is set larger (``PlateHeadline[phone]``).
@@ -632,12 +672,52 @@ class PlateProgress(QWidget):
     def isStacked(self) -> bool:
         return self._stacked
 
+    # ── the legend's phone form ─────────────────────────────────────────────
+    def legendChips(self) -> QWidget | None:
+        """The legend as wrapping chips — its form while stacked — or
+        ``None`` for a dashboard built without a legend. Under the body by
+        default; a host with a better place for it (phone layout sideways,
+        where the column under the plate has no height to spare) may lay it
+        out elsewhere and give it back with :meth:`homeLegendChips`."""
+        return getattr(self, "_legend_chips", None)
+
+    def homeLegendChips(self) -> None:
+        """Put the chips back under the body after a host laid them out
+        elsewhere. Idempotent."""
+        chips = self.legendChips()
+        if chips is None:
+            return
+        root = self.layout()
+        if chips.parentWidget() is not self or root.indexOf(chips) < 0:
+            root.insertWidget(root.indexOf(self._body) + 1, chips)
+        self.syncLegendChips()
+
+    def syncLegendChips(self) -> None:
+        """Show the chips while stacked and the body is showing — never in
+        the compact strip or a collapsed dashboard — wherever they are laid
+        out. Called again by a host that has just moved them, since moving a
+        widget hides it."""
+        chips = self.legendChips()
+        if chips is None:
+            return
+        chips.setVisible(getattr(self, "_stacked", False)
+                         and not getattr(self, "_compact", False)
+                         and self._toggle.isChecked())
+
     def _pin_rail_width(self) -> None:
         if self._stacked and self._rail_beside:
             # Beside the plate, the rail's preferred width (its progress bars
             # ask for a lot) would leave the plate a sliver; it takes its
             # minimum and the plate the rest.
             self._rail_host.setMinimumWidth(0)
+            # Read afresh: the rows' bars were hidden just before this, but the
+            # rail's layout holds each row's size as it was last measured until
+            # the row reports a change (``updateGeometry``), which Qt otherwise
+            # does only on the next event-loop turn. Once anything has laid the
+            # body out (the legend chips appearing does), that held size still
+            # counts the bars and the rail is pinned twice as wide as it needs.
+            for row in self._rail_host.findChildren(QWidget):
+                row.updateGeometry()
             self._rail_host.setMaximumWidth(self._rail_host.minimumSizeHint().width())
         elif self._stacked:
             self._rail_host.setMinimumWidth(0)
@@ -666,6 +746,7 @@ class PlateProgress(QWidget):
         show = self._toggle.isChecked()
         self._body.setVisible(show and not getattr(self, "_compact", False))
         self._toggle.setText("▾" if show else "▸")
+        self.syncLegendChips()
 
     def setCompact(self, compact: bool) -> None:
         """Only the header, headline and overall bar: the stage rail, plate,
@@ -690,6 +771,7 @@ class PlateProgress(QWidget):
                     w.layout().invalidate()
             self._well_detail.setVisible(
                 getattr(self, "_stacked", False) and bool(self._well_detail.text()))
+        self.syncLegendChips()
 
     def isCompact(self) -> bool:
         return bool(getattr(self, "_compact", False))

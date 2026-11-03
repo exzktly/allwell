@@ -2,7 +2,7 @@
 
 After a nanowell run a set of wells and timepoints is usually left ``unaddressed`` — the run could not find the
 central square — and each needs a person to click the square on its montage (``util.nanowell_anchors``). Opening
-them one at a time from QC Triage or Home costs a round trip per timepoint. The QC view's **Anchor queue** walks
+them one at a time from QC Triage or Home costs a round trip per timepoint. The QC view's **Resolve** walk steps through
 them instead: it shows the first, and each click that sets an anchor moves on to the next (``_anchor_queue``).
 
 What the queue holds is read from the grid records the run wrote (``<out>/nanowells/<well>_grid.json``), which name
@@ -41,7 +41,8 @@ class QueueItem:
 
 @dataclass
 class AnchorQueue:
-    """The queue being walked on the Array view: its items, which one is shown, and what has happened to each."""
+    """The *Resolve* walk: its items, which one is shown, and what has happened to each. What it says when it ends
+    is ``resolve_compute.finished``'s, which knows the class it walked."""
 
     items: list
     index: int = 0
@@ -101,17 +102,6 @@ class AnchorQueue:
             return f"Done · {len(self.anchored)} of {self.walked()} anchored"
         where = f"{self.index + 1} of {len(self.items)} · {item.well} at {item.timepoint}"
         return where if item.state == "not_addressed" else f"{where} · {item.state.replace('_', ' ')}"
-
-    def summary(self) -> str:
-        """What the walk did, said on the figure when it ends."""
-        parts = [f"Anchor queue finished: {len(self.anchored)} of {self.walked()} timepoint(s) anchored"]
-        skipped = self.skipped()
-        if skipped:
-            parts.append(f"{skipped} skipped")
-        text = ", ".join(parts) + "."
-        if self.anchored or self.pending_rerun:
-            text += " Re-run anchored wells… to address them from the anchors."
-        return text
 
 
 def _same(a, b) -> bool:

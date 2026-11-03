@@ -1,5 +1,5 @@
 """The QC view on the Nanowells page: the plate's wells and timepoints, each with the state that says what needs doing
-(``qc_compute``, drawn by ``_qc_render``), and the *Anchor queue* that walks the ones waiting for an anchor.
+(``qc_compute``, drawn by ``_qc_render``), and the *Resolve* walk that steps through one class of problem.
 
 The records are read for the whole plate, not for the selected wells: the matrix is the one place to see what the run
 left to do, and a well nobody has selected yet is exactly the one to find. Reading hashes each well's sites table
@@ -7,9 +7,10 @@ left to do, and a well nobody has selected yet is exactly the one to find. Readi
 ``qc_compute.signature`` — the names, times and sizes of the files it read — and read again only when one changes:
 a run, the identity check, an anchor set or cleared.
 
-A click on a cell opens it where it is dealt with: an identity verdict on the Identity view, a timepoint not addressed
-(or one whose anchor waits for a re-run, or one an anchor cannot change) on the Array view with *Set anchor* on
-(``controller.open_for_anchor``).
+A click on a cell that holds a problem starts the *Resolve* walk of that cell's class at that cell
+(``_anchor_queue.start_class``): it opens where the problem is fixed, with the guide card saying what is wrong, what
+to click and where, and what happens next, and the next timepoint of the same class is one key away. A cell with
+nothing to fix (confirmed, the reference, not checked) opens on the Identity view.
 """
 
 from __future__ import annotations
@@ -17,7 +18,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import controller as _controller
+from review.features.nanowell import resolve_compute as rc
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell import qc_compute as qc
 from review.features.nanowell._qc_render import draw_qc
@@ -108,7 +111,9 @@ def draw(ctx, st, fig, canvas) -> None:
 
     st.hits, st.drawn = None, None
     data_dir = ctx.state.dataset.data_dir
-    st.qc_drawn = draw_qc(fig, matrix(ctx), which=st.qc_wells, error=st.qc_error, walk=st.anchor_queue_states, out_dir=Path(data_dir) if data_dir else None,
+    plate = matrix(ctx)
+    st.qc_drawn = draw_qc(fig, plate, which=st.qc_wells, error=st.qc_error,
+                          walk=rc.walk_states(plate, st.anchor_queue_states), out_dir=Path(data_dir) if data_dir else None,
                           message=st.qc_message, highlight=st.qc_highlight, excluded=st.excluded_wells)
     apply_export_style_to_current(ctx, fig, canvas)
     if st.qc_drawn is not None and st.qc_drawn.relabel is not None:
@@ -146,6 +151,8 @@ def on_click(ctx, event) -> None:
     if cell is None:
         return
     st.qc_message, st.qc_highlight = "", frozenset()
+    if rc.class_of(cell.state) is not None and aq.start_class(ctx, cell.state, cell.well, cell.timepoint):
+        return
     if cell.state in qc.ARRAY_STATES:
         _nwc().open_for_anchor(ctx, cell.well, cell.timepoint)
     else:

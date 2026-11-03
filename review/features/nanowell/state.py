@@ -251,18 +251,26 @@ class NanowellState:
     #: ``(well, timepoint)`` another page asked to set an anchor on (``controller.open_for_anchor``): *Set anchor* is
     #: turned on there once the well's tables are loaded, since it can only be turned on with the grid status read.
     anchor_pending: object = None
-    #: The zoom :func:`controller.open_for_anchor` was asked to open at (times *Fit*, on the montage's centre), set
-    #: with *anchor_pending* and applied with it once the well is drawn. Never persisted.
-    anchor_zoom: float | None = None
+    #: The zoom :func:`controller.open_for_anchor` was asked to open at (``full_montage_compute.CentreZoom``: times
+    #: *Fit*, on the montage's centre or on a hint), set with *anchor_pending* and applied with it once the well is
+    #: drawn. Never persisted.
+    anchor_zoom: object = None
     #: Whether :func:`controller.open_for_anchor` turns *Set anchor* on once the well is drawn (``False``: the anchor
     #: queue opened a timepoint to be looked at, where a click must not set an anchor). Never persisted.
     anchor_arm: bool = True
-    #: The *Anchor queue* being walked (``anchor_queue_compute.AnchorQueue``), or ``None``. Never persisted.
+    #: The *Resolve* walk being stepped through (``anchor_queue_compute.AnchorQueue``), or ``None``. Never persisted.
     anchor_queue: object = None
     #: *One per well*: the queue walks each well's first waiting timepoint only. For the session, never persisted.
     anchor_queue_per_well: bool = False
-    #: *Walk*: the QC states the queue walks (``qc_compute.WALKABLE``). For the session, never persisted.
+    #: *Problem*: the class of problem *Resolve* walks (``resolve_compute.PICKABLE``), as a one-state tuple once
+    #: chosen; several states (the default) means the worst of them with anything on the plate
+    #: (``resolve_compute.chosen``). For the session, never persisted.
     anchor_queue_states: tuple = ("not_addressed", "contradicted", "inconclusive", "partial")
+    #: Where the *Resolve* walk's current timepoint is fixed (``resolve_compute.Hint``), ringed on the Array view while
+    #: that timepoint is shown, and the Identity view's *Nanowell* box text the walk wrote for a partial timepoint
+    #: (cleared with the walk, never a box the reader typed). Never persisted.
+    resolve_hint: object = None
+    resolve_focus: str = ""
     #: The *Overlays* button: the coloured layers hidden for a look at the image beneath, without touching which
     #: layers are on. Not persisted — a page reopened with its overlays silently missing would look broken.
     overlays_hidden: bool = False

@@ -579,26 +579,49 @@ Review, open the Nanowells page, choose the *Array* view, pick the well and time
 click it. The click is saved in `in/nanowell_anchors.json`
 beside the acquisition record; the run snaps it to the nearest nanowell, so it only has to land on the square.
 When several wells and timepoints need an anchor — the usual state after a run — open the Nanowells page's
-**QC** view, which shows every timepoint needing a look at a glance, and press **Anchor queue** there instead of
-picking each one: it switches to the Array view on the first timepoint on the plate in a state **Walk** includes,
-and steps through them all. A timepoint not addressed, contradicted or inconclusive opens with **Set anchor**
-already on: each click on a central square saves the anchor and, after a moment, opens the next. A partial (or not
-located) one opens to be looked at, with Set anchor off so a click there sets nothing: press **→** for the next, or
-turn Set anchor on to re-anchor it. The walk's label names each one's state (*12 of 330 · B04 at 24h · partial*). Each
-timepoint opens zoomed to 10× on the centre of the whole-well montage, where the central square usually is;
-press **Fit** (under the figure) to see the whole well when it is not there. A *Queue*
-group in place of Well and Timepoint (they come back when the walk ends) says where you are (*3 of 17 · B04 at 24h*) and offers **Back** (to the previous
-timepoint; a click there replaces its anchor), **Skip**, **One per well** and **Stop** — or press **←** for Back,
-**→** for Skip and **Esc** for Stop while the queue runs. Choosing another view while it runs stops it. When **Set anchor** cannot be turned on for a timepoint, the figure
-says why; press Skip to go on. The queue holds every timepoint in the states Walk ticks, plate order then time
-order — including any timepoint whose anchor the last run could not use; an anchor you set that no run has used yet
-is not asked for again. Tick **One per well** (before pressing Anchor queue, or during the walk) to be shown
-only each well's first such timepoint, and no well that already has an anchor waiting for a re-run: one click per
-well is usually enough (see above), and any timepoint the re-run still cannot address shows up in the next
-queue. The choice is remembered until you close the app. If One per well leaves nothing to walk (every well
-waiting already has an anchor for a re-run), **Anchor queue** says so and turns One per well off, so pressing it
-again walks those timepoints too. When it ends — after the last one, or when you stop it — it goes back to the QC
-view, says how many it anchored and how many were skipped, rings the cells it anchored (now *anchor waiting*), and
+**QC** view, which shows every timepoint needing a look at a glance, and resolve them one class at a time
+instead of picking each one. Choose the class under **Problem ▾** (each listed with its count — *not addressed*,
+*contradicted*, *inconclusive*, *partial*, *not located*) and press **Resolve** (*Resolve: 330 timepoints*), or
+simply **click any cell** that needs a look: that timepoint opens, and the walk goes on through every other
+timepoint of the same class. Each one opens where it is fixed, with a card above the figure that says:
+
+- **Problem** — what is wrong with this timepoint, with the run's or the identity check's reason;
+- **Do this** — exactly what to click, and where. On the montage a dashed **ring** marks the best evidence of where
+  the central square is, and the card says what the ring is: where the reference timepoint's square matches this
+  montage, the square the run picked (and whether it trusted it), or the array's fitted centre. The view opens
+  zoomed on the ring; without one, at 10× on the centre of the whole-well montage, where the square usually is.
+  Press **Fit** (under the figure) to see the whole well;
+- **Then** — what happens when you do it, how many of the class are left, and what comes after the class.
+
+What each class asks of you:
+
+- **not addressed**, **contradicted**, **inconclusive** open on the *Array* view with **Set anchor** already on:
+  click the middle of the central square — on the ring when the ring is on it — and the anchor is saved and, after
+  a moment, the next one opens. An anchor you set comes before anything the run found itself, so this also fixes a
+  timepoint whose square the run picked wrongly. If you cannot find the square, press **Skip**;
+- **partial** opens on the *Identity* view's Distance map, coloured by status and centred on the nanowells it leaves
+  out. Nothing needs fixing — those nanowells already stay out of every comparison over time — so check they are the
+  ones that moved (a whole tile left out was placed a lattice step off) and press **Looks right — next**;
+- **not located** opens on the montage with Set anchor off, since an anchor cannot change it: if the well holds no
+  array, is empty or is out of focus, press **Exclude well** (on the card) to leave it out of this page's figures;
+  otherwise press Skip;
+- **anchor waiting** (clicking such a cell) shows the anchor already set: press **Re-run anchored wells…** on the
+  card.
+
+A *Queue* group in place of Well and Timepoint (they come back when the walk ends) says where you are (*3 of 17 ·
+B04 at 24h*) and offers **Back** (to the previous timepoint of the class; a click there replaces its anchor),
+**Skip**, **One per well** and **Stop** — or press **←** for Back, **→** for Skip and **Esc** for Stop while the
+walk runs. Choosing another view while it runs stops it. When **Set anchor** cannot be turned on for a timepoint,
+the figure says why; press Skip to go on. The walk holds every timepoint of the class, plate order then time order —
+including any timepoint whose anchor the last run could not use; an anchor you set that no run has used yet is not
+asked for again. Tick **One per well** (before pressing Resolve, or during the walk) to be shown only each well's
+first such timepoint, and no well that already has an anchor waiting for a re-run: one click per well is usually
+enough (see above), and any timepoint the re-run still cannot address shows up in the next walk. The choice is
+remembered until you close the app. If One per well leaves nothing to walk (every well waiting already has an anchor
+for a re-run), **Resolve** says so and turns One per well off, so pressing it again walks those timepoints too. When
+it ends — after the last one, or when you stop it — it goes back to the QC view, says what it did (how many it
+anchored and skipped, or how many it looked at) and what to do next — **Re-run anchored wells…** when anything was
+anchored, otherwise the next class on the plate to resolve — rings the cells it anchored (now *anchor waiting*), and
 puts your plate selection back as it was.
 Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
 run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
@@ -6246,14 +6269,14 @@ the sentence names it.
   counts every state on the plate. **Wells** chooses the rows: *Needing a look* (the default) shows only wells with
   something to look at and says how many it left out; *All* shows every well. On a large plate the rows are banded
   by plate row and labelled by its letter; pointing at a cell names it in the readout, and its tooltip says what
-  the state means. **Click a cell** to open it where it is dealt with: a verdict opens on **Identity**, a timepoint
-  not addressed (or waiting, or not located) opens on **Array** with **Set anchor** on. The **Anchor** group here
-  holds **Anchor queue** — the highlighted button, which says what it will walk (*Anchor queue: 330 timepoints*) —
-  **Walk ▾**, which chooses the states it steps through (each listed with its count: not addressed, contradicted,
-  inconclusive and partial are ticked; not located is not, since an anchor cannot change it), the **One per well**
-  box, which narrows the walk to each well's first (*Anchor queue: 61 wells*), and **Re-run anchored wells…** (see
-  *Setting the anchor by hand*). While there is anything to walk, the figure says to press Anchor queue or click a
-  cell.
+  the state means and what a click does. **Click a cell** that needs a look to resolve it: it opens where it is
+  fixed, with a card saying what is wrong, what to click and where, and what happens next, and the walk goes on to
+  the next timepoint of the same class (see *Setting the anchor by hand*). A confirmed or reference cell opens on
+  **Identity**. Beside **Wells**, **Problem ▾** chooses the class of problem to resolve, each listed with its count
+  (until you choose, the worst class on the plate); **Resolve** — the highlighted button, which says what it will
+  walk (*Resolve: 330 timepoints*) — steps through that class from its first timepoint; the **One per well** box
+  narrows the walk to each well's first (*Resolve: 61 wells*); and **Re-run anchored wells…** puts the anchors to
+  use. While there is anything to walk, the figure says to press Resolve or click a cell.
 - **Trajectories** — one panel per well: a thin line per nanowell through its values over time, coloured by
   its occupancy at baseline, and a thick line for each occupancy class's median. A gap is a timepoint without
   a value. Growth rate and occupancy have one value per nanowell, so they are greyed here.
@@ -6362,7 +6385,7 @@ the sentence names it.
     record does not give is marked at its corner, and the figure says so. *Anchor* shows the anchor set by
     hand and says how the timepoint was addressed (and, where it was not, how to anchor it), which is what lets
     **Set anchor**, **Clear anchor** and **Re-run wells…** act (see *Setting the anchor by hand* above; the
-    **Anchor queue** is on the QC view). *Run
+    **Resolve** walk is on the QC view). *Run
     record* lists beside the figure the grid record of this timepoint (status, how the origin was found,
     pitch, angle, overlap, nanowells detected of the roster), the empty-nanowell template the counts were
     divided by, and the status of every other timepoint; a template the run found far from the well's

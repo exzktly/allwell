@@ -1772,6 +1772,37 @@ QLabel#AnalyzeBannerTally {{
     font-size: {t.caption_size}px;
 }}
 
+/* ── Nanowells: the Resolve walk's guide card ────────────────────────── */
+/* review/features/nanowell/resolve_view.py: what is wrong with the timepoint
+   shown, what to do and where, and what happens next. The resume banner's
+   family (`panel` fill, accent edge) for the same measured reason — three text
+   tiers that must all stay legible — and an accent edge because it carries
+   the action the reader is in the middle of. */
+QWidget#NanowellResolveGuide {{
+    background-color: {c.panel};
+    border: {m.hairline}px solid {c.accent};
+    border-radius: {r.md}px;
+}}
+QLabel#NanowellResolveKicker {{
+    color: {c.accent};
+    font-size: {t.caption_size}px;
+    font-weight: {t.semibold};
+}}
+QLabel#NanowellResolveTitle {{
+    color: {c.text_primary};
+    font-size: {t.body_size}px;
+    font-weight: {t.semibold};
+}}
+QLabel#NanowellResolveTerm {{
+    color: {c.text_secondary};
+    font-size: {t.small_size}px;
+    font-weight: {t.semibold};
+}}
+QLabel#NanowellResolveBody {{
+    color: {c.text_primary};
+    font-size: {t.small_size}px;
+}}
+
 /* ── Splitter ────────────────────────────────────────────────────────── */
 /* A styled ::handle with no width/height collapses the grab area to ~1px and
    overrides setHandleWidth — so give it an explicit size per orientation. */

@@ -30,6 +30,7 @@ from review.features.nanowell.identity_compute import worst_verdict
 from review.features.nanowell.anchor_queue_view import (
     build_queue_controls, refresh_queue_controls,
 )
+from review.features.nanowell.resolve_view import build_resolve_guide, refresh_resolve_guide
 from review.features.nanowell.exclude_view import build_exclude_controls
 from review.features.nanowell.rim_focus_view import build_rim_focus_controls
 from review.features.nanowell.variables_view import build_variable_controls
@@ -99,8 +100,8 @@ _METRIC_CB_MIN_W = 220
 _VIEW_TIPS = {
     "distribution": "One dot per nanowell, per well and timepoint.",
     "qc": ("Every well and timepoint of the plate at once: which the run could not address, which have an anchor\n"
-           "waiting for a re-run, and what the identity check said about the rest. Click a cell to open it on\n"
-           "Identity, or on Array to set its anchor. The Anchor queue starts here."),
+           "waiting for a re-run, and what the identity check said about the rest. Click a cell to resolve it\n"
+           "and the next ones like it, or choose a Problem and press Resolve."),
     "array": ("One well's nanowells over its montage or at their lattice places — every element a layer\n"
               "you turn on or off (Image, Positions, Layers)."),
     "trajectories": "Each nanowell's metric over time, with the median of each occupancy class.",
@@ -206,7 +207,7 @@ _ZOOM_TIP = ("How far the view is zoomed against Fit. The wheel zooms about the 
              "two-finger swipe); − and + zoom about the centre.")
 _ANCHOR_TIP = ("On: click the central square to anchor this well at this timepoint. Drag still pans. Offered where "
                "an anchor can change the result: a timepoint addressed or left unaddressed. To walk every timepoint "
-               "waiting for an anchor, use Anchor queue on the QC view.")
+               "waiting for an anchor, use Resolve on the QC view.")
 _CLEAR_ANCHOR_TIP = "Remove this well's anchor at this timepoint."
 _RERUN_TIP = ("Re-run anchored wells: open Analyze on this dataset, limited to the wells with an anchor, each run again "
               "in full so its timepoints are located with the anchor.")
@@ -433,6 +434,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     band.add_action(make_properties_button(ctx, band, "nanowell"))
     layout.addWidget(band)
     layout.addWidget(start.editor)                  # the Subset's conditions, under the band when shown
+    # The Resolve walk's guide card, between the band and the figure it explains: shown only while a walk runs.
+    guide = build_resolve_guide(ctx, plot_area)
+    layout.addWidget(guide.frame)
 
     # ── the figures ─────────────────────────────────────────────────────────
     splitter = QSplitter(Qt.Horizontal, plot_area)
@@ -575,7 +579,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             _refresh_array_controls(ctx, st, array, array_controls)
             refresh_identity_controls(st, identity, view == "identity")
             refresh_qc_controls(ctx, st, view == "qc", qc_controls)
-            refresh_queue_controls(ctx, array, queue)
+            walk_view = aq.current_view(ctx)
+            refresh_queue_controls(ctx, view == walk_view, queue)
+            refresh_resolve_guide(ctx, view, guide)
             # Only where values over time are drawn: a per-nanowell metric has one, and a one-well view is one time.
             # Trajectories draws Cell count in place of a per-nanowell metric (``resolve_metric``), and the cohort
             # applies to what it draws, so its box stays where it can be turned off.
@@ -598,7 +604,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
                         or view in RANKED_WELL_VIEWS or view in ONE_WELL_VIEWS)
             shows_well = view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS
             _show_where(grp_where, well_part, tp_cb, shows_well, shows_tp,
-                        walking=array and aq.active_queue(ctx) is not None)
+                        walking=view == walk_view)
             exclusion.refresh(st, well_cb)
             extremes_spin.setValue(st.extremes_n)
             extremes_cells.setChecked(st.crop_cells)

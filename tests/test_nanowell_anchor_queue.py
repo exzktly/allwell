@@ -81,10 +81,15 @@ def test_the_queue_says_where_it_is_and_what_it_did():
     assert queue.skipped() == 1                                     # B01 at t_c, passed over
     queue.index = 3
     assert queue.finished and queue.current is None
-    assert queue.summary() == ("Anchor queue finished: 1 of 3 timepoint(s) anchored, 2 skipped. "
-                               "Re-run anchored wells… to address them from the anchors.")
-    assert aqc.AnchorQueue(items[:1], index=1).summary() == ("Anchor queue finished: 0 of 1 timepoint(s) anchored, "
-                                                            "1 skipped.")
+    from review.features.nanowell import resolve_compute as rc
+
+    assert rc.finished("not_addressed", anchored=len(queue.anchored), walked=queue.walked(),
+                       skipped=queue.skipped()) == (
+        "Resolve finished: 1 of 3 not addressed timepoint(s) anchored, 2 skipped. Next: press Re-run anchored wells… "
+        "so the run addresses them from your anchors.")
+    one = aqc.AnchorQueue(items[:1], index=1)
+    assert rc.finished("not_addressed", anchored=0, walked=one.walked(), skipped=one.skipped()) == (
+        "Resolve finished: 0 of 1 not addressed timepoint(s) anchored, 1 skipped.")
 
 
 def test_one_per_well_keeps_each_well_s_first_timepoint_and_never_walks_back():
@@ -117,7 +122,7 @@ def test_switching_one_per_well_mid_walk_keeps_the_counts_true():
     queue.anchored.add(("C01", "0h"))
     queue.index = len(queue.items)
     assert queue.position_text() == "Done · 3 of 3 anchored"
-    assert queue.summary().startswith("Anchor queue finished: 3 of 3 timepoint(s) anchored.")
+    assert (queue.walked(), queue.skipped()) == (3, 0)
 
 
 # ── the real page ────────────────────────────────────────────────────────────
@@ -247,8 +252,8 @@ def test_the_queue_walks_every_unaddressed_montage_and_a_click_moves_it_on(qtbot
     assert set(ctx.state.selection.selected_wells) == {"A02"}
     # Back where it started, saying what it did and ringing the cells it anchored.
     assert st.view == "qc" and not st.array_message
-    assert st.qc_message == ("Anchor queue finished: 2 of 3 timepoint(s) anchored, 1 skipped. "
-                             "Re-run anchored wells… to address them from the anchors.")
+    assert st.qc_message == ("Resolve finished: 2 of 3 not addressed timepoint(s) anchored, 1 skipped. Next: press "
+                             "Re-run anchored wells… so the run addresses them from your anchors.")
     assert st.qc_highlight == {("A01", "t_a"), ("B01", "t_c")}
     anchors = read_anchors(anchors_path(out.parent / "in"))
     assert sorted(anchors) == [("A01", "t_a"), ("B01", "t_c")]
@@ -270,12 +275,10 @@ def test_with_nothing_waiting_the_queue_says_so_and_changes_nothing(qtbot, tmp_p
     _on_qc(qtbot, ctx, st)
     queue_btn = ctx.widgets.get("_nw_queue_btn")
     assert not queue_btn.isEnabled()
-    assert queue_btn.toolTip().endswith("\n\nNo timepoint is in a state Walk includes (not addressed, "
-                                        "contradicted, inconclusive, partial).")
+    assert queue_btn.toolTip().endswith("\n\nNo timepoint is “not addressed”.")
     assert aq.start(ctx) is False
     assert st.anchor_queue is None
-    assert st.qc_message == ("No timepoint is in a state Walk includes (not addressed, contradicted, inconclusive, "
-                             "partial).")
+    assert st.qc_message == "No timepoint is “not addressed”."
     assert set(ctx.state.selection.selected_wells) == {"A02"}
 
 
@@ -321,17 +324,17 @@ def test_one_per_well_walks_each_well_s_first_timepoint_and_ends_by_itself(qtbot
     click()
     qtbot.waitUntil(lambda: st.anchor_queue is None, timeout=5000)   # past the last well, the walk ends itself
     assert set(ctx.state.selection.selected_wells) == {"A02"}
-    assert st.view == "qc" and st.qc_message == ("Anchor queue finished: 2 of 2 timepoint(s) anchored. "
-                                                 "Re-run anchored wells… to address them from the anchors.")
+    assert st.view == "qc" and st.qc_message == ("Resolve finished: 2 of 2 not addressed timepoint(s) anchored. "
+                                                 "Next: press Re-run anchored wells… so the run addresses them from "
+                                                 "your anchors.")
     assert sorted(read_anchors(anchors_path(out.parent / "in"))) == [("A01", "t_a"), ("B01", "t_c")]
     _on_qc(qtbot, ctx, st)                                           # the anchors file changed: read again
 
     aq.start(ctx)                                                    # the next walk starts one per well too
     assert st.anchor_queue is None and st.qc_message == (
-        "No timepoint is in a state Walk includes (not addressed, contradicted, inconclusive, partial) with One per "
-        "well: 1 more wait in wells that already have "
-        "one. One per well is now off, so Anchor queue walks them all. 2 timepoint(s) have an anchor that no run has "
-        "used yet: Re-run anchored wells… addresses them.")
+        "No timepoint is “not addressed” with One per well: 1 more wait in wells that already have one. One per well "
+        "is now off, so Resolve walks them all. 2 timepoint(s) have an anchor that no run has used yet: Re-run "
+        "anchored wells… addresses them.")
     # The refusal turned One per well off, and the QC view's toggle says so: the next press is not refused the same
     # way for ever, and walks the timepoint one per well left out.
     assert not st.anchor_queue_per_well

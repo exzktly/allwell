@@ -704,6 +704,7 @@ def redraw(ctx) -> None:
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
         st.drawn = model
+        aq.ring_target(ctx, model, well, page_timepoint(ctx, well))     # the Resolve walk's hint, when walking
         if model is not None and model.rendered is not None:
             _want_tiles(ctx, {(tile, None) for tile in model.rendered.unread} | set(model.rendered.wants))
         _call(ctx, "_nw_refresh_zoom")
@@ -1589,7 +1590,8 @@ def set_anchor_mode(ctx, on: bool) -> None:
         _call(ctx, "_nw_refresh_controls")
 
 
-def open_for_anchor(ctx, well: str, timepoint: str, *, zoom: float | None = None, arm: bool = True) -> bool:
+def open_for_anchor(ctx, well: str, timepoint: str, *, zoom: float | None = None, arm: bool = True,
+                    at: tuple | None = None) -> bool:
     """The ``nanowell.open_anchor`` service: show *well* at *timepoint* on the Array view, ready for *Set anchor*.
 
     QC Triage and Home's health card offer it for a timepoint the run left unaddressed. The well is added to the
@@ -1598,7 +1600,8 @@ def open_for_anchor(ctx, well: str, timepoint: str, *, zoom: float | None = None
     is brought forward. *Set anchor* itself waits for the well's tables (:func:`_apply_pending_anchor`), because
     whether the timepoint can take an anchor is read from its grid record. With *zoom* the view opens that many
     times *Fit* about the centre of the whole-well montage (``full_montage_compute.CentreZoom``) rather than
-    fitted: the anchor queue's way in. Returns whether the page was shown."""
+    fitted: the anchor queue's way in; with *at* as well (a well-frame point) about that point instead — where the
+    *Resolve* walk's hint says the square is. Returns whether the page was shown."""
     st = _state(ctx)
     notebook = getattr(ctx.window, "_notebook", None)
     if st is None or notebook is None or not well:
@@ -1613,7 +1616,7 @@ def open_for_anchor(ctx, well: str, timepoint: str, *, zoom: float | None = None
                             st.layers.positions)
     st.overlays_hidden, st.region, st.array_message = False, None, ""
     st.anchor_pending = (well, timepoint or "")
-    st.anchor_zoom = float(zoom) if zoom else None
+    st.anchor_zoom = fmc.CentreZoom(float(zoom), tuple(at) if at is not None else None) if zoom else None
     st.anchor_arm = bool(arm)
     _save_soon(ctx)
     if not notebook.setCurrentByName("Nanowells"):
@@ -1644,7 +1647,8 @@ def _apply_pending_anchor(ctx) -> None:
     if zoom:
         # Set only now that the page draws this well: a draw before its tables landed showed another well, and the
         # change of well refits the view. ``region_for`` is stamped so the next draw keeps it.
-        st.region, st.region_for = fmc.CentreZoom(zoom), (well, st.layers.positions)
+        region = zoom if isinstance(zoom, fmc.CentreZoom) else fmc.CentreZoom(float(zoom))
+        st.region, st.region_for = region, (well, st.layers.positions)
     if not st.anchor_arm:
         st.anchor_mode = False                           # opened to look at: a click must not drop an anchor
         return
@@ -1686,7 +1690,7 @@ def set_anchor_at(ctx, x_um: float, y_um: float) -> None:
     changed = _anchor_change(ctx, lambda path, well, tp: set_anchor(path, well, tp, (float(x_um), float(y_um))),
                              "The anchor could not be saved")
     if changed is not None:
-        aq.anchor_set(ctx, *changed)                 # the Anchor queue, when walking, moves on to the next
+        aq.anchor_set(ctx, *changed)                 # the Resolve walk, when walking, moves on to the next
 
 
 def clear_anchor(ctx) -> None:
@@ -2252,10 +2256,12 @@ def nw_on_channel_changed(ctx) -> None:
 
 
 def set_view(ctx, view: str) -> None:
-    """Show *view*. Leaving the Array view while the *Anchor queue* walks ends the walk there: its keys live on a band
-    group shown only on Array, so a walk left running elsewhere would go on with nothing on screen to drive it."""
+    """Show *view*. Choosing another view than the one the *Resolve* walk's timepoint is on ends the walk there: its
+    keys, its band group and its guide card are shown only on that view, so a walk left running elsewhere would go
+    on with nothing on screen to drive it."""
     st = _state(ctx)
-    if st is not None and view != "array" and aq.active_queue(ctx) is not None:
+    walking = aq.current_view(ctx)
+    if st is not None and walking is not None and view != walking:
         aq.stop(ctx, land_on=view)
         return
     _set(ctx, "view", view)

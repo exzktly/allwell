@@ -1,7 +1,8 @@
 """The QC view's controls on the band: *Wells* (a row for each well needing a look, or for every well) and the
-*Anchor* group — **Anchor queue**, **One per well** and **Re-run anchored wells…** — which is where the anchor walk
-starts and where it comes back to (``_anchor_queue``). The walk's own controls (where it is, Back, Skip, Stop) are
-``anchor_queue_view``'s, shown on the Array view while it runs."""
+*Resolve* group — **Problem ▾** (which class of problem to resolve, each with its count), **Resolve** (the walk of
+that class), **One per well** and **Re-run anchored wells…** — which is where the walk starts and where it comes back
+to (``_anchor_queue``). The walk's own controls (where it is, Back, Skip, Stop) are ``anchor_queue_view``'s band
+group and ``resolve_view``'s guide card, shown on the view its timepoint is on while it runs."""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from review.features.nanowell import _qc_controller as qcc
 from review.features.nanowell import controller as nwc
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell import qc_compute as qc
+from review.features.nanowell import resolve_compute as rc
 from review.features.nanowell.anchor_queue_view import PER_WELL_TIP, QUEUE_TIP
 
 _WELLS = (("needing", "Needing a look"), ("all", "All"))
@@ -47,7 +49,7 @@ def build_qc_controls(ctx, band) -> SimpleNamespace:
     grp_wells = band.add_scope("Wells", wells_seg)
 
     # The page's one action: primary, and saying what it walks, so the option beside it visibly changes something.
-    queue_btn = _button("Anchor queue", QUEUE_TIP, lambda: aq.start(ctx), variant="primary")
+    queue_btn = _button("Resolve", QUEUE_TIP, lambda: aq.start(ctx), variant="primary")
     # An option of the walk, not an action: a checkbox, which no one presses expecting a walk to start.
     per_well = QCheckBox("One per well")
     per_well.setToolTip(PER_WELL_TIP)
@@ -57,17 +59,19 @@ def build_qc_controls(ctx, band) -> SimpleNamespace:
     for name, widget in (("_nw_queue_btn", queue_btn), ("_nw_qc_per_well_btn", per_well),
                          ("_nw_qc_rerun_btn", rerun_btn), ("_nw_qc_walk_btn", walk_btn)):
         reg.register(name, widget)
-    grp_anchor = band.add_scope("Anchor", queue_btn, walk_btn, per_well, rerun_btn)
+    # No caption: *Problem: …* and *Resolve: …* name themselves, and a "Resolve" caption read twice beside them.
+    grp_anchor = band.add_scope("", walk_btn, queue_btn, per_well, rerun_btn)
     return SimpleNamespace(wells_seg=wells_seg, queue_btn=queue_btn, per_well=per_well, rerun_btn=rerun_btn,
                            walk_btn=walk_btn, walk_actions=walk_actions, groups=(grp_wells, grp_anchor),
                            signalling=(wells_seg, per_well, *walk_actions.values()))
 
 
 def _walk_button(ctx, parent):
-    """*Walk ▾*: which states *Anchor queue* steps through, each with its count on the plate. Not addressed,
-    contradicted and inconclusive open with *Set anchor* on (``qc_compute.ARMED``); partial and not located open to
-    be looked at."""
+    """*Problem ▾*: which class of problem *Resolve* walks, one at a time, each listed with its count on the plate
+    (``resolve_compute.PICKABLE``). Not addressed, contradicted and inconclusive open with *Set anchor* on; partial
+    opens on Identity to be looked at; not located opens to be looked at, or its well excluded."""
     from PySide6.QtCore import Qt
+    from PySide6.QtGui import QActionGroup
     from PySide6.QtWidgets import QMenu, QToolButton
 
     from widgets.owned_action import owned_action
@@ -80,27 +84,31 @@ def _walk_button(ctx, parent):
     button.setToolTip(WALK_TIP)
     menu = QMenu(button)
     button.setMenu(menu)
+    group = QActionGroup(menu)
+    group.setExclusive(True)
     actions = {}
-    for state in qc.WALKABLE:
-        action = owned_action(menu, qc.WORDS[state])
+    for state in rc.PICKABLE:
+        action = owned_action(menu, rc.CLASSES[state].label)
         action.setCheckable(True)
-        action.toggled.connect(lambda on, state=state: _set_walk(ctx, state, on))
+        group.addAction(action)
+        action.triggered.connect(lambda _on=False, state=state: _set_walk(ctx, state))
         ctx.widgets.register(f"_nw_qc_walk_{state}", action)
         actions[state] = action
     return button, actions
 
 
-def _set_walk(ctx, state: str, on: bool) -> None:
+def _set_walk(ctx, state: str) -> None:
     st = ctx.state.feature_slice("nanowell")
-    chosen = (set(st.anchor_queue_states) | {state}) if on else (set(st.anchor_queue_states) - {state})
-    st.anchor_queue_states = tuple(s for s in qc.WALKABLE if s in chosen)
+    st.anchor_queue_states = (state,)
     nwc._call(ctx, "_nw_refresh_controls")             # the button's count and the figure's sentence follow it
     nwc.redraw(ctx)
 
 
-WALK_TIP = ("Which timepoints Anchor queue steps through, by their state on the plate. Not addressed, contradicted "
-            "and inconclusive open with Set anchor on: click the central square and the next one opens. Partial and "
-            "not located open to be looked at, with Set anchor off: → goes on to the next one.")
+WALK_TIP = ("Which class of problem Resolve steps through. Each opens where it is fixed, with a card saying what is "
+            "wrong, what to click and where, and what happens next. Not addressed, contradicted and inconclusive "
+            "open on Array with Set anchor on: click the central square and the next one opens. Partial opens on "
+            "Identity, centred on the nanowells it leaves out, to be looked at. Not located opens to be looked at, "
+            "or its well excluded.")
 
 
 def _set_per_well(ctx, on: bool) -> None:
@@ -109,7 +117,7 @@ def _set_per_well(ctx, on: bool) -> None:
 
 
 def refresh_qc_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
-    """Shown only on the QC view; *Anchor queue* greyed, saying why, when nothing waits for an anchor."""
+    """Shown only on the QC view; *Resolve* greyed, saying why, when the class chosen has nothing on the plate."""
     for group in c.groups:
         group.setVisible(on_view)
     if not on_view:
@@ -117,11 +125,12 @@ def refresh_qc_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
     c.wells_seg.setCurrentByData(st.qc_wells)
     c.per_well.setChecked(st.anchor_queue_per_well)
     matrix = qcc.matrix(ctx)
-    states = st.anchor_queue_states
+    states = rc.walk_states(matrix, st.anchor_queue_states)
+    chosen = states[0] if states else None
     for state, action in c.walk_actions.items():
-        action.setChecked(state in states)
-        action.setText(f"{qc.WORDS[state]} ({matrix.counts.get(state, 0) if matrix is not None else 0:,})")
-    c.walk_btn.setText(f"Walk: {len(states)} state{'s' if len(states) != 1 else ''}")
+        action.setChecked(state == chosen)
+        action.setText(f"{rc.CLASSES[state].label} ({matrix.counts.get(state, 0) if matrix is not None else 0:,})")
+    c.walk_btn.setText(f"Problem: {qc.WORDS[chosen]}" if chosen else "Problem")
     c.walk_btn.setToolTip(f"{WALK_TIP}\n\nNow: {qc.walk_words(states)}.")
     why = qc.queue_tip(matrix, states)
     c.queue_btn.setText(qc.queue_label(matrix, st.anchor_queue_per_well, states))

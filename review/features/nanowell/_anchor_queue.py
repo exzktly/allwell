@@ -38,6 +38,7 @@ from review.features.nanowell import controller as nwc
 from review.features.nanowell import _qc_controller as qcc
 from review.features.nanowell import qc_compute as qc
 from review.features.nanowell import resolve_compute as rc
+from review.features.nanowell._resolve_render import draw_resolve_target
 from util.nanowell_anchors import AnchorsFileError, read_anchors
 
 #: How long the anchor just set stays on screen before the next timepoint replaces it.
@@ -269,8 +270,6 @@ def target(ctx, well: str, timepoint: str) -> rc.Hint | None:
 def ring_target(ctx, drawn, well: str, timepoint: str) -> None:
     """Ring the walk's hint on the Array view just drawn (*drawn*, ``renderer.ArrayDrawn``) when it shows the walk's
     current timepoint; nothing otherwise."""
-    from review.features.nanowell._resolve_render import draw_resolve_target
-
     hint = target(ctx, well, timepoint)
     if hint is not None and getattr(drawn, "ax", None) is not None:
         draw_resolve_target(drawn.ax, drawn.region, drawn.size_px, hint.point_um)

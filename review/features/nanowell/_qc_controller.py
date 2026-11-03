@@ -18,7 +18,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import controller as _controller
+from review.features.nanowell import resolve_compute as rc
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell import qc_compute as qc
 from review.features.nanowell._qc_render import draw_qc
@@ -109,11 +111,9 @@ def draw(ctx, st, fig, canvas) -> None:
 
     st.hits, st.drawn = None, None
     data_dir = ctx.state.dataset.data_dir
-    from review.features.nanowell.resolve_compute import walk_states
-
     plate = matrix(ctx)
     st.qc_drawn = draw_qc(fig, plate, which=st.qc_wells, error=st.qc_error,
-                          walk=walk_states(plate, st.anchor_queue_states), out_dir=Path(data_dir) if data_dir else None,
+                          walk=rc.walk_states(plate, st.anchor_queue_states), out_dir=Path(data_dir) if data_dir else None,
                           message=st.qc_message, highlight=st.qc_highlight, excluded=st.excluded_wells)
     apply_export_style_to_current(ctx, fig, canvas)
     if st.qc_drawn is not None and st.qc_drawn.relabel is not None:
@@ -151,9 +151,6 @@ def on_click(ctx, event) -> None:
     if cell is None:
         return
     st.qc_message, st.qc_highlight = "", frozenset()
-    from review.features.nanowell import _anchor_queue as aq
-    from review.features.nanowell import resolve_compute as rc
-
     if rc.class_of(cell.state) is not None and aq.start_class(ctx, cell.state, cell.well, cell.timepoint):
         return
     if cell.state in qc.ARRAY_STATES:

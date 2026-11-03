@@ -127,7 +127,7 @@ they're shell-wide:
   `ReviewApp.modeChanged`, every change of Review's notebook and every page-tab
   bar's `currentChanged` (each bar connected the first time it is seen, so a
   section built later is covered) — whatever made the move: a rail tile, the
-  phone's page menu and its *Go to*, the mode bar, code. Mode switches are
+  phone's page menu, the mode bar, code. Mode switches are
   places, so Back after jumping from a plot to Analyze returns to the plot.
   Datasets' tools and Analyze's phone views are not: a mode is one place. The
   rules are a browser's: a move after Back drops the way forward, the place you
@@ -280,15 +280,14 @@ sheets rise from. It holds the page menu, **Wells** and **⚙ Controls**. Sidewa
 the strip's three buttons join the bar (`_place_page_controls`), vertically
 centred, and the strip is hidden.
 
-**The page menu is the one way around Review.** It reads the page on screen
-(*Bar Plots ▾*, or the section's name when the section has no page tabs) and
-lists, under a caption naming the section, the pages of the section's tab strip
-(hidden in phone layout), then under *Go to* every other section the rail offers
-(`RailNav.shownItems`: shown and enabled, so the two sections phone layout hides
-and any disabled one are absent). Picking a section is `RailNav.setCurrentKey` —
-the same signal a rail tile sends — followed by `page_changed`. So moving
-anywhere in Review is two taps at the foot of the screen, where it was ☰ at the
-top, a tile, and then this menu. The captions are `QWidgetAction` labels
+**The page menu picks a page; ☰ picks a section.** The page menu reads the page
+on screen (*Bar Plots ▾*) and lists, under a caption naming the section, the
+pages of the section's tab strip (hidden in phone layout) — and nothing else. A
+section with no page tabs has no page button. It once also listed every other
+section under *Go to*, which ☰'s section tiles already offer, and two buttons
+offering the same sections read as one control duplicated rather than as two
+with different jobs. The caption's section name comes from
+`RailNav.shownItems`. The captions are `QWidgetAction` labels
 (`PhoneMenuCaption`) rather than `QMenu.addSection`, whose text the app's style
 does not draw. In Datasets the same button lists the tools, in Analyze the two
 views (below). ⋯ is one flat menu, no submenus: the

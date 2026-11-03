@@ -124,6 +124,7 @@ UI_LANE_FILES: dict[str, str] = {
     "test_phone_form_swipe.py": "form pages scroll by a drag on a phone",
     "test_phone_plot_swipe.py": "a swipe on a plot scrolls its page",
     "test_phone_panel_sheet.py": "the Properties panel as a full-width sheet",
+    "test_phone_windows.py": "a dialog or pop-out window covers the phone, scrolls, and closes from its foot",
     "test_home_phone_layout.py": "Home's Overview as one column on a phone",
     "test_analyze_phone_view.py": "Analyze's form-as-page phone layout",
 }
@@ -243,6 +244,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_measure_fast_paths.py": "The measuring's fast paths compute exactly what the code they replaced did",
     "test_nanowell_ownership.py": "Ownership checks calculate seam geometry without using the implementation",
     "test_nanowell_page.py": "The Nanowells page driven through its real builder, worker and canvas, in a minimal shell …",
+    "test_phone_nanowell_popout.py": "The nanowell crops pop-out in phone layout covers the phone and closes from its foot",
     "test_nanowell_counts_follow_cell_gating.py": "The Nanowells page counts only the cells Home's Cell Gating includes …",
     "test_nanowell_array_key.py": "The Array view keys its nanowell outlines: a ring swatch per state in view, with counts",
     "test_nanowell_array_marks_are_distinct.py": "Every cause of a nanowell's exclusion draws its own mark on the Array view",
@@ -374,6 +376,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_remote_storage_liveness.py": "A folder something still needs is never deleted: each in-use and integrity rule, with stand-in squeue/stat/date/rm",
     "test_remote_storage_is_confined.py": "The storage scripts delete nothing but a run or dataset folder, against a sandbox of decoys",
     "test_remote_storage_dialog.py": "The Manage Remotes Storage browser, driven through its buttons against a local staging tree",
+    "test_phone_remote_windows.py": "The Remotes dialogs in phone layout: every button whole and reachable, a Close on screen",
     "test_remote_transit_volume.py": "A remote run must not write to the home volume",
     "test_remote_write_retry.py": "The remote client's own writes survive a transient storage fault",
     "test_rsync_retry.py": "Tests for the v5.1.1 rsync retry helper",

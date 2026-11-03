@@ -3026,10 +3026,11 @@ moments.
 What is on it:
 
 - **The plate.** One dot per well, coloured by what the run actually produced:
-  complete (green), partial (amber, with an arc showing how much of it landed),
-  failures recorded (red), images with no measurements behind them (blue — the
-  same colour the Datasets tools use to flag an odd well), measurements whose
-  output archive is gone (cyan), staged but never processed (grey). If the run
+  complete (forest green), partial (amber, drawn as a dial whose darker part
+  is how much of it landed), failures recorded (white), images with no
+  measurements behind them (blue — the same colour the Datasets tools use to
+  flag an odd well), measurements whose output archive is gone (cyan), staged
+  but never processed (warm grey). If the run
   ended early — you stopped or suspended it, the remote host lost its node or
   its connection to the app, or the pipeline exited with an error — the grey
   wells are called *Not reached — run ended early* instead, because the run
@@ -3043,9 +3044,17 @@ What is on it:
   link: clicking it opens **Nanowells → Array** on that well's first timepoint
   without an address, with **Set anchor** already on, so the next click on the
   central square sets the anchor. The well's tooltip on the plate counts its
-  timepoints not addressed. Those
-  colours are the ones every other well map in the app uses for the same
-  things, so a colour you have learnt once reads the same here. A well the record says nothing about — because no completeness check has
+  timepoints not addressed. The colours are chosen to stay
+  distinguishable with colour blindness, like the Analyze run plate's: under
+  red/green colour blindness complete reads as a dark khaki, partial as a
+  yellow, failed stays white and the blues stay blue, so no two states merge.
+  Where this plate and the Analyze plate show the same thing they use the same
+  colour — forest green for complete, warm grey for not yet processed, white
+  for a well with a problem — and the blue and cyan are the ones the Datasets
+  tools use for the same two conditions, so a colour you have learnt once
+  reads the same here. Unlike on the Analyze plate a failed well carries no
+  `✕`: the only mark a well here carries is the `!` that says it needs a look
+  (see *Cell Gating* below). A well the record says nothing about — because no completeness check has
   been run, or because it produced nothing at all — is left plain, uncoloured:
   the legend beside the plate has a hollow swatch and a count for it, and the
   well's tooltip says which of the two it is. Every colour on the plate has a
@@ -9661,9 +9670,9 @@ holds:
 
 | Control | What it does |
 |---|---|
-| **Bar Plots ▾** | Picks the page's view (Bar Plots, Line Graphs, Heat Map, …), and under **Go to** every other section (Home, Statistics, Image Browser, …) — so getting anywhere in Review is this one menu. |
+| **Bar Plots ▾** | Picks a page within the section you are in (Bar Plots, Line Graphs, Heat Map, …). To change section (Home, Statistics, Image Browser, …), use **☰**. A section with only one page has no such button. |
 | **Wells** | Slides the well plate and its **All** / **None** up from the bottom, with the plot still in view above them: tap wells and watch them appear in the plot. A row or column label selects the whole row or column. The button shows how many wells are selected (**Wells · 4**); **Done ✕** puts the plate away. Pages that do not pick wells (Home, Statistics) do not show it. |
-| **⚙ Controls** | Slides the page's own controls up from the bottom, with the plot still in view above them so you can watch it change. They read top to bottom in three groups, the same on every page: **Data** (channel, property, timepoints, threshold, …), one per row with its name on the left and the control filling the rest; **Display** (Display ▾, Fold change ▾, …); and **Actions** (Save ▾, Reset Order, Properties, …), as a row of equal buttons. A note about the data sits under the **Data** heading. **Done ✕** puts them away. |
+| **⚙ Controls** | Slides the page's own controls up from the bottom, with the plot still in view above them so you can watch it change. They read top to bottom in three groups, the same on every page: **Display** (Display ▾, Fold change ▾, Decorate ▾, …) and **Actions** (Save ▾, Reset Order, Properties, …), each a row of equal buttons, so they are in view as soon as the panel opens; then **Data** (channel, property, timepoints, threshold, …), one per row with its name on the left and the control filling the rest, which you scroll on a page with many settings. A note about the data sits under the **Data** heading. **Decorate ▾** appears only where it changes the plot — Bar Plots, and the Nanowells page's Distribution view — and only once the plate has sample variables. **Done ✕** puts them away. |
 
 **Wells** and **⚙ Controls** both rise from just above the bar, so **Done ✕** is
 where you tapped to open them; opening one puts the other away. Saved
@@ -9709,6 +9718,20 @@ jump. The
 plot toolbar's pan and zoom are hidden in phone layout; switch back to the
 desktop layout for them. An **ⓘ** shows its explanation when tapped.
 
+**Windows that open on top** — Manage Remote Servers and its Add, Edit and
+Storage windows, the Storage window, the nanowell crops' **Pop out**, Test
+detection, the per-sample control editor and the other editors and curves a page
+opens — fill the phone's screen in phone layout, whichever way the phone is held.
+What does not fit scrolls with a finger, and rows of controls that would run off
+the side are stacked. The window's own buttons (OK and Cancel, or Open folder,
+Clear and Close) sit in a bar along its bottom edge, in reach however far you
+have scrolled, and a **Close ✕** there does what the window's title-bar ✕ does —
+it is not added when the window's own Close or Cancel is already in that bar.
+Small questions (Yes / No) keep their own size. Switching back to the desktop
+layout gives an open window its desktop size again. The Windows file pickers
+(*Browse…* for a folder or a file) are Windows' own and cannot be rearranged by
+All-Well; on a phone they open at whatever size Windows gives them.
+
 The buttons that change or discard work — Reset view, Reset analysis, Copy
 analysis, the publication look, Reveal folder and Storage — are hidden in phone layout so a
 stray tap cannot reach them, as are the Review CSV and Batch Export sections;
@@ -9719,12 +9742,15 @@ switch back to the desktop layout to use them.
 - **Settings ▾** — the run form fills the screen, under a strip with the run's
   headline (*Running · 52 of 96 wells · 1 failed*) and its overall bar.
 - **Progress ▾** — the headline, the overall bar, the stages, and the plate map
-  coloured by each well's progress, one above the other. Tap a well to see what
-  it is doing on the line under the plate. The log is below, with long lines
+  coloured by each well's progress, one above the other, with a key to the well
+  colours (pending, processing, processed, complete, partial, failed — or, for a
+  remote run, uploaded, on server and downloaded) in a few lines just under the
+  plate. Tap a well to see what it is doing on the line under the plate. The log is below, with long lines
   wrapped, and scrolls inside its own box. Everything fits on one screen: on a
   short screen the plate map is drawn smaller to leave room for the last few
-  lines of the log. Sideways, the progress sits on the left — the stages beside
-  the plate — and the log on the right.
+  lines of the log. Sideways, the progress sits on the left — the colour key in
+  two small lines above the stages and the plate beside them — and the log on
+  the right, at its full width.
 
 **Run Pipeline**, **Suspend**, **+ Queue** and **Stop** sit in a bar just above
 the bottom bar in both views, so they are always in reach. Starting a run —
@@ -9875,7 +9901,7 @@ architecture-specific and can't produce a universal binary.
 | `⌘←` / `Ctrl+←` | Back (the **‹** button) |
 | `⌘→` / `Ctrl+→` | Forward (the **›** button) |
 | `⌘/` / `Ctrl+/` | Open the help drawer |
-| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception. Each entry starts with the time it was logged (hours, minutes, seconds), and a blank line separates one entry from the next, so a multi-line entry such as a traceback reads as one. While the drawer is shut, a "!" badge on the status bar's log button says new lines have arrived — blue for routine messages, amber once a warning has come in, red once an error has — and it clears when you open the drawer |
+| `⌘L` / `Ctrl+L` | Open the application log drawer — including the lines background work writes while a run is going, and every warning or error from anywhere in the app: the Analyze run log, each Datasets tool's log, Qt, and any uncaught exception. Each entry starts with the time it was logged (hours, minutes, seconds), and a blank line separates one entry from the next, so a multi-line entry such as a traceback reads as one. While the drawer is shut, a "!" badge on the status bar's log button says new lines have arrived — blue for routine messages, amber once a warning has come in, red once an error has — and it clears when you open the drawer. The drawer takes most of the window's height, and dragging its scroll bar moves the log at most a line per pixel you drag, so a long log can be read while you scroll it; tap above or below the handle to jump a page |
 | `⌘B` / `Ctrl+B` | Collapse / expand the left sidebar (same as the top-bar panel button) |
 | `⌘W` / `Ctrl+W` | Close window |
 

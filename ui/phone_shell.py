@@ -45,13 +45,13 @@ from dataclasses import dataclass, field
 from PySide6.QtCore import QEvent, QObject, QRect, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QFont, QGuiApplication
 from PySide6.QtWidgets import (
-    QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QDialog, QLabel,
+    QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QLabel,
     QLineEdit, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from core import phone_layout
 from core.safe import swallowed
-from ui import theme
+from ui import phone_window, theme
 
 _LOG = logging.getLogger(__name__)
 
@@ -519,14 +519,14 @@ def _adapt_kind(w: QWidget) -> str | None:
 def _phone_relevant(w: QWidget) -> bool:
     """Whether phone layout acts on *w* when it is shown: whatever
     :func:`_adapt_kind` names, plus the three the event filter acts on
-    itself — a plot canvas (its DPI), a top-level dialog (its place on the
-    screen) and an ⓘ hint (a tap). Everything else is left alone and never
-    watched."""
+    itself — a plot canvas (its DPI), a window of its own (a dialog, a
+    pop-out: its phone form, :func:`ui.phone_window.kind`) and an ⓘ hint (a
+    tap). Everything else is left alone and never watched."""
     if _adapt_kind(w) is not None:
         return True
     if getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure"):
         return True
-    if w.isWindow() and isinstance(w, QDialog):
+    if phone_window.kind(w) is not None:
         return True
     return w.objectName() == "InfoHint"
 
@@ -761,7 +761,7 @@ class _FitOnShow(QObject):
 
 class _PhoneEventFilter(QObject):
     """While phone layout is on, the things built or shown later get it too:
-    a plot its DPI, a dialog a place on the screen, a page's control band a
+    a plot its DPI, a window of its own its phone form, a page's control band a
     place in the Controls sheet, a stepper its − / +, a toolbar its absence, a
     form row its stacking; and an ⓘ answers a tap, since nothing hovers.
 
@@ -788,8 +788,8 @@ class _PhoneEventFilter(QObject):
             return True
         if t != QEvent.Show or not isinstance(obj, QWidget):
             return False
-        if obj.isWindow() and isinstance(obj, QDialog):
-            clamp_to_screen(obj)
+        if phone_window.kind(obj) is not None:
+            self._shell.fit_popup_window(obj)
         elif getattr(type(obj), "draw_idle", None) is not None and hasattr(obj, "figure"):
             scale_canvas(obj, self._shell.plot_factor())
             self._shell.size_canvas(obj, True)
@@ -908,6 +908,9 @@ class PhoneShell(QObject):
                  settings: Callable[[], object] | None = None) -> None:
         super().__init__(window)
         self._win = window
+        # Phone layout rearranges this window itself; it never takes the
+        # phone form every other window of the app takes (ui/phone_window.py).
+        window.setProperty(phone_window.MAIN_WINDOW_PROP, True)
         self._h = handles
         self._settings = settings
         self._filter = _PhoneEventFilter(self)
@@ -1008,6 +1011,7 @@ class PhoneShell(QObject):
             self._restyle(self.text_scale(), self.unit())
         finally:
             self._adapt_all(True)
+            self._refit_windows()
 
     # ── controls ──────────────────────────────────────────────────────────
     def _build_controls(self) -> None:
@@ -1226,6 +1230,7 @@ class PhoneShell(QObject):
         # scaled their desk sizes, and give it up *before* the restyle scales
         # them back — so the rescale pass only ever sees desk-shaped widgets.
         if not on:
+            self._unfit_windows()
             self._adapt_all(False)
         if restyle:
             self._restyle(self.text_scale() if on else 1.0, self.unit() if on else None)
@@ -1415,8 +1420,8 @@ class PhoneShell(QObject):
                 w.setProperty(_P_WATCHED, True)
                 if not w.isVisible():
                     continue        # its Show will reach the filter
-                if w.isWindow() and isinstance(w, QDialog):
-                    clamp_to_screen(w)
+                if phone_window.kind(w) is not None:
+                    self.fit_popup_window(w)
                 elif getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure"):
                     scale_canvas(w, factor)
                     self.size_canvas(w, True)
@@ -1686,6 +1691,44 @@ class PhoneShell(QObject):
             if geom is not None:
                 self._win.setGeometry(geom)
         self.fit_window()
+
+    # ── windows of their own (ui/phone_window.py) ─────────────────────────
+    def fit_popup_window(self, w: QWidget) -> None:
+        """Fit a window the app opened — a dialog, a pop-out — to the phone:
+        the phone form :mod:`ui.phone_window` gives it (the screen covered, the
+        content scrolling by a drag, its buttons and a Close ✕ at its foot), or
+        for Qt's own small dialogs only a place inside the screen."""
+        if not phone_window.kind(w):
+            return
+        screen = w.screen() or self._win.screen() or QGuiApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen is not None else self._avail()
+        area = phone_window.fit(w, avail, self.unit())
+        if area is None:
+            clamp_to_screen(w)
+        elif drag_scroll_eligible(area):
+            set_drag_scroll(area.viewport(), True)
+
+    def _refit_windows(self) -> None:
+        """Place every window that has a phone form again — the phone turned,
+        or the text size changed what its content needs."""
+        for w in phone_window.fitted_windows():
+            try:
+                if w.isVisible():
+                    self.fit_popup_window(w)
+            except RuntimeError:
+                swallowed()  # closed and deleted while the list was walked
+
+    def _unfit_windows(self) -> None:
+        """Give every window its desk form back, inside the screen."""
+        for w in phone_window.fitted_windows():
+            try:
+                scroll = phone_window.form_of(w).scroll
+                set_drag_scroll(scroll.viewport(), False)
+                phone_window.unfit(w)
+                if w.isVisible():
+                    clamp_to_screen(w)
+            except RuntimeError:
+                swallowed()  # closed and deleted while the list was walked
 
     def desk_minimum(self) -> tuple[int, int]:
         return (PHONE_MIN_W, PHONE_MIN_H) if phone_layout.is_on() else (
@@ -2061,17 +2104,15 @@ class PhoneShell(QObject):
         # show there.
         self.menu_button.setVisible(not views)
         bar = self._current_page_bar()
-        sections = self._sections() if review else []
-        self.page_button.setVisible((review and (bar is not None or bool(sections)))
-                                    or tools or views)
+        # In Review the page button lists the section's own pages and nothing
+        # else, so a section without pages has none: changing section is ☰'s.
+        self.page_button.setVisible((review and bar is not None) or tools or views)
         if views:
             self.page_button.setText(f"{self._h.page_view()} ▾")
         elif tools:
             self.page_button.setText(f"{self._h.current_tool()} ▾")
         elif bar is not None:
             self.page_button.setText(f"{bar.tabText(bar.currentIndex())} ▾")
-        elif sections:
-            self.page_button.setText(f"{self._current_section_label()} ▾")
         self.controls_button.setVisible(review and self._current_band() is not None)
         wells_open = self._wells_sheet is not None and self._wells_sheet.isOpen()
         self.wells_button.setVisible(review and (wells_open or bool(self._well_picker())))
@@ -2117,9 +2158,10 @@ class PhoneShell(QObject):
             self._fill_named_menu(self._h.page_views(), self._h.page_view(),
                                   self._pick_page_view)
             return
-        # Review: this section's pages, then every other section — so moving
-        # anywhere in Review is the one menu at the foot of the screen, two
-        # taps, rather than ☰ at the top, a section tile, then this menu.
+        # Review: this section's pages, and only those. Changing section is
+        # ☰'s job — the menu once listed every other section under a "Go to"
+        # heading too, and two buttons offering the same sections read as one
+        # control duplicated rather than as two with different jobs.
         bar = self._current_page_bar()
         group = QActionGroup(self._page_menu)
         if bar is not None:
@@ -2130,16 +2172,6 @@ class PhoneShell(QObject):
                 act.setEnabled(bar.isTabEnabled(i))
                 act.triggered.connect(lambda _c=False, b=bar, idx=i: self._pick_page(b, idx))
                 group.addAction(act)
-                self._page_menu.addAction(act)
-        current = self._current_section()
-        others = [(k, label) for k, label in self._sections() if k != current]
-        if others:
-            if bar is not None:
-                self._page_menu.addSeparator()
-            self._menu_caption("Go to")
-            for key, label in others:
-                act = QAction(label, self._page_menu)
-                act.triggered.connect(lambda _c=False, k=key: self._pick_section(k))
                 self._page_menu.addAction(act)
 
     def _menu_caption(self, text: str) -> None:
@@ -2168,11 +2200,6 @@ class PhoneShell(QObject):
     def _current_section_label(self) -> str:
         current = self._current_section()
         return next((label for k, label in self._sections() if k == current), current or "")
-
-    def _pick_section(self, key: str) -> None:
-        self.close_sheets(now=True)
-        self._h.rail_nav.setCurrentKey(key)
-        self.page_changed()
 
     def _fill_tool_menu(self) -> None:
         """Datasets mode: the page button lists the tools, as ☰ does."""

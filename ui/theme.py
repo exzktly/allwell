@@ -150,6 +150,29 @@ class Colors:
     run_problem     = "#F5F5F5"   # failed, partial or unfinished — the glyph says which
     run_failed_mark = "#DC2626"   # the ✕ on a failed well
 
+    # ── Home plate (Review Home's per-well "what the run produced" map) ──
+    # Held to the run plate's bars, by the same measurement, because it is the
+    # same kind of map read by the same people. It reuses the run tokens where
+    # the two plates show the same fact — ``run_done`` for a complete well,
+    # ``run_pending`` for one staged and never processed, ``run_problem``'s
+    # white for one with failures recorded — and the shared status tokens
+    # ``accent`` and ``stale`` for the two anomalies it shares with
+    # Concatenate and Validate. This is the one state with no match: a partial
+    # well, drawn as a dial of its coverage.
+    #
+    # Not ``warn``. Home painted partial in ``warn`` beside a ``success``
+    # complete and a ``danger`` failed, which red/green deficiency reads as
+    # three shades of one olive (CIEDE2000 4.4 between complete and failed
+    # under deuteranopia in the grey theme). With the new neighbours ``warn``
+    # is far enough from the other states, but the grey theme's ``#FFB300`` is
+    # so light that its dial's two shares come within 11.3 of each other under
+    # deuteranopia, under the run plate's 12. This amber is darker, so its
+    # pale uncovered share stands 15.9 off the covered one under every
+    # simulated vision, and it stays ≥ 17 from every other state.
+    # tests/test_home_plate_is_colour_blind_safe.py holds all of that, in
+    # every theme. Not overridden by any theme, like the run tokens.
+    home_partial    = "#D89820"   # partial: part of the well's fields covered (amber)
+
     # ── Data-viz / trace colors (categorical, keyed to wells) ────────────
     # The 96-colour ``WELL_COLORS_TUPLE`` is the canonical palette and is
     # used as-is here so that matplotlib's ``axes.prop_cycle``
@@ -1871,6 +1894,12 @@ QWidget#PhoneStrip {{
     background-color: {c.rail};
     border-top: 1px solid {c.border_subtle};
 }}
+/* The foot of a window phone layout gives its phone form (ui/phone_window.py):
+   the window's own row of buttons and Close ✕, outside what scrolls. */
+QWidget#PhoneWindowFoot {{
+    background-color: {c.rail};
+    border-top: 1px solid {c.border_subtle};
+}}
 /* Analyze's run controls, moved to the foot of the pane in phone layout
    (analyze/phone_view.py) so Run and + Queue stay in reach. */
 QWidget#PhoneRunBar {{
@@ -2148,7 +2177,8 @@ QFrame#RailNavRow {{ min-height: {row}px; }}
 QWidget#Drawer[phoneSheet="true"] QPushButton,
 QWidget#Drawer[phoneSheet="true"] QToolButton,
 QWidget#Drawer[phoneSheet="true"] QComboBox,
-QWidget#Drawer[phoneSheet="true"] QLineEdit {{
+QWidget#Drawer[phoneSheet="true"] QLineEdit,
+QWidget#PhoneWindowFoot QPushButton {{
     min-height: {row}px;
 }}
 QMenu::separator {{ height: 1px; margin: {pt(4)}px 0px; }}

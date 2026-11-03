@@ -94,6 +94,33 @@ def test_the_plate_paints_the_record(loaded_app):
     assert loaded_app._home_plate is not None
 
 
+def test_the_built_plate_wears_the_colour_blind_safe_palette(loaded_app):
+    """Through the real builder and the real repaint: each state's well holds
+    the token ``tests/test_home_plate_is_colour_blind_safe.py`` measured, by
+    value. The record names wells the fixture does not load; the plate keeps
+    them (``plate_cells``), which is what gives one well per state here."""
+    from ui import theme
+    from review.features.home.controller import refresh_home
+
+    _write_run_check(loaded_app, {
+        "A01": _well("complete"),
+        "A02": _well("partial", covered_any=4),
+        "B01": _well("partial", covered_any=6, failed=["f1"]),
+        "B02": _well("missing", covered_any=0),
+        "C01": _well("csv_only"),
+        "C02": _well("partial", covered_any=0),
+    })
+    refresh_home(loaded_app._ctx)
+
+    expected = {"A01": theme.Colors.run_done, "A02": theme.Colors.home_partial,
+                "B01": theme.Colors.run_problem, "B02": theme.Colors.accent,
+                "C01": theme.Colors.stale, "C02": theme.Colors.run_pending}
+    grid = loaded_app._home_plate._grid
+    from widgets.well_plate_selector import _parse_well_id
+    drawn = {w: grid._colors[_parse_well_id(w)].name().upper() for w in expected}
+    assert drawn == {w: c.upper() for w, c in expected.items()}
+
+
 def test_clicking_a_well_selects_it_rather_than_navigating(loaded_app):
     first = sorted(loaded_app._app_state.dataset.well_paths)[0]
     from review.features.home.controller import on_home_plate_selection

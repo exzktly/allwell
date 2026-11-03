@@ -152,8 +152,21 @@ def test_every_scroll_area_scrolls_by_a_drag_unless_its_drag_means_something(
     assert all(a.viewport().property("_awDragScroll") for a in scrolls)
 
     grab_every_scroll_area(False)
-    ungrabbed = {id(t) for kind, t in scroller_calls if kind == "ungrab"}
-    assert ungrabbed == grabbed, "leaving phone layout must give back every grab"
+    # Compared by the C++ object, and only for viewports still alive. The
+    # sweep reaches every scroll area in the process — widgets earlier tests
+    # in this worker left behind among them — and one of those can be deleted
+    # between the grab and the give-back, or its Python id reused by another,
+    # which made a comparison of Python ids fail in full-lane runs while the
+    # file passed alone. A viewport that no longer exists has nothing to give
+    # back; every one that does must have been given back.
+    import shiboken6
+
+    def alive(kind):
+        return {shiboken6.getCppPointer(t)[0] for k, t in scroller_calls
+                if k == kind and shiboken6.isValid(t)}
+    still_grabbed = alive("grab") - alive("ungrab")
+    assert not still_grabbed, "leaving phone layout must give back every grab"
+    assert {shiboken6.getCppPointer(a.viewport())[0] for a in scrolls} <= alive("ungrab")
     assert not any(a.viewport().property("_awDragScroll") for a in scrolls)
 
 

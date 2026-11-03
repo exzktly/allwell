@@ -334,12 +334,101 @@ def test_run_dashboard_stacks_and_unstacks(qapp):
     assert d._body_lay.direction() == QBoxLayout.TopToBottom
     assert all(div.isHidden() for div in d._dividers)
     assert d._legend_host.isHidden()
+    assert not d._legend_chips.isHidden()        # the legend's phone form stays
     assert d._rail_host.maximumWidth() > rail_w
     d.setStacked(False)
     assert d._body_lay.direction() == QBoxLayout.LeftToRight
     assert not any(div.isHidden() for div in d._dividers)
     assert not d._legend_host.isHidden()
+    assert d._legend_chips.isHidden()
     assert d._rail_host.maximumWidth() == rail_w
+    d.hide()
+
+
+def _chip_labels(d) -> list[str]:
+    # Each chip is a dot then its label; the dot of a glyph state carries text too ("!").
+    flow = d._legend_flow
+    return [flow.itemAt(i).widget().layout().itemAt(1).widget().text() for i in range(flow.count())]
+
+
+def test_a_stacked_run_dashboard_keeps_a_key_to_its_well_colours(qapp):
+    """Phone layout stacks the dashboard and drops the legend's fixed-width
+    column. The stage rail names stages, not well colours, so without a key a
+    phone showed a coloured plate nobody could read. The legend stays as
+    chips under the plate, with every row the desk legend has — including
+    the rows a remote run adds when the dashboard is reset for one."""
+    from widgets.run_dashboard import RunDashboard
+    d = RunDashboard()
+    d.show()
+    d.setStacked(True)
+    assert d._legend_chips.isVisible()
+    assert _chip_labels(d) == ["pending", "processing", "processed", "complete",
+                               "partial / unfinished", "failed"]
+    d.reset(remote=True, total=4)                # a remote run renames and adds rows
+    assert _chip_labels(d) == ["pending", "uploaded", "processing", "on server", "downloaded",
+                               "partial / unfinished", "failed"]
+    assert d._legend_chips.isVisible()
+    d.hide()
+
+
+def test_the_colour_key_follows_the_dashboard_s_body_not_only_the_stacking(qapp):
+    """The chips show only while the plate they explain does: not in the
+    compact strip Analyze's Settings view shows above its form, and not in a
+    collapsed dashboard."""
+    from widgets.run_dashboard import RunDashboard
+    d = RunDashboard()
+    d.show()
+    d.setStacked(True)
+    chips = d.legendChips()
+    assert chips.isVisible()
+    d.setCompact(True)
+    assert not chips.isVisible()
+    d.setCompact(False)
+    assert chips.isVisible()
+    d._toggle.setChecked(False)
+    d._on_toggle()
+    assert not chips.isVisible()
+    d._toggle.setChecked(True)
+    d._on_toggle()
+    assert chips.isVisible()
+    d.hide()
+
+
+def test_sideways_the_colour_key_sits_above_the_plate_inside_the_dashboard(qapp):
+    """Sideways (the rail beside the plate) the column has no height to spare
+    under the plate, and a column of the key's own would come out of the log's
+    width beside it. So the key moves above the body, at caption size, inside
+    the dashboard's own width — the plate gives up the two lines. Upright it is
+    back under the body at the body size."""
+    from ui import theme
+    from widgets.run_dashboard import RunDashboard
+    d = RunDashboard()
+    d.reset(remote=True, total=4)
+    d.show()
+    d.setStacked(True)
+    root, chips = d.layout(), d.legendChips()
+
+    def label_qss():
+        flow = d._legend_flow
+        return {flow.itemAt(i).widget().layout().itemAt(1).widget().styleSheet()
+                for i in range(flow.count())}
+
+    assert root.indexOf(chips) == root.indexOf(d._body) + 1
+    assert not any("font-size" in q for q in label_qss())
+    d.setRailBeside(True)
+    assert chips.parentWidget() is d
+    assert root.indexOf(chips) == root.indexOf(d._body) - 1
+    assert chips.isVisible()
+    assert label_qss() == {f"color:{theme.Colors.text_primary}; "
+                           f"font-size:{theme.Typography.caption_size}px;"}
+    assert _chip_labels(d) == ["pending", "uploaded", "processing", "on server", "downloaded",
+                               "partial / unfinished", "failed"]
+    d.setRailBeside(True)                        # idempotent
+    assert root.indexOf(chips) == root.indexOf(d._body) - 1
+    d.setRailBeside(False)
+    assert root.indexOf(chips) == root.indexOf(d._body) + 1
+    assert not any("font-size" in q for q in label_qss())
+    assert chips.isVisible()
     d.hide()
 
 
@@ -1390,31 +1479,39 @@ def test_a_page_with_no_picker_offers_no_wells_button(qapp, app_sheet):
     assert shell._wells_sheet is None
 
 
-def test_the_page_menu_also_goes_to_every_other_section(qapp, app_sheet):
-    """Moving between Review's sections was ☰ at the top of the screen, then a
-    tile, then the page menu. The page menu at the foot now lists the other
-    sections the rail offers, under its pages — the ones a user can pick now:
-    not the current one, not one phone layout hides, not a disabled one."""
+def test_the_page_menu_lists_this_section_s_pages_and_never_the_sections(qapp, app_sheet):
+    """Reported: the bottom-left page menu duplicated ☰ — it listed every other
+    Review section under "Go to", which ☰'s section tiles already offer. The
+    page menu now lists only the current section's pages; changing section is
+    ☰'s alone. A section with no pages has no page button at all, rather than
+    a menu with nothing in it."""
+    from PySide6.QtWidgets import QTabBar
     from widgets.rail_nav import RailNav
     qapp.setStyleSheet(theme.qss())
     win = _window()
     QVBoxLayout(win)
     nav = RailNav(win)
-    for key in ("Home", "Plotting", "Statistics", "Batch Export", "Spatial"):
+    for key in ("Home", "Plotting", "Statistics"):
         nav.addItem(key)
     nav.setCurrentKey("Plotting")
-    nav._rows["Batch Export"].hide()
-    nav.setItemEnabled("Spatial", False)
-    shell = _shell(win, rail_nav=nav)
+    pages = QTabBar(win)
+    for title in ("Bar Plots", "Line Graphs", "Scatter Plot"):
+        pages.addTab(title)
+    pages.setCurrentIndex(1)
+    current_bar = {"bar": pages}
+    shell = _shell(win, rail_nav=nav, current_page_bar=lambda: current_bar["bar"])
     shell.set_on(True)
     _pump(qapp)
-    assert shell.page_button.isVisible() and shell.page_button.text() == "Plotting ▾"
+    shell.refresh()
+    assert shell.page_button.isVisible() and shell.page_button.text() == "Line Graphs ▾"
     shell._fill_page_menu()
-    acts = [a for a in shell._page_menu.actions()
-            if not a.isSeparator() and a.isEnabled()]
-    assert [a.text() for a in acts] == ["Home", "Statistics"]
-    acts[1].trigger()
-    assert nav.currentKey() == "Statistics"
+    picks = [a.text() for a in shell._page_menu.actions() if not a.isSeparator() and a.isEnabled()]
+    assert picks == ["Bar Plots", "Line Graphs", "Scatter Plot"]
+    # A section with no pages of its own: no page button.
+    current_bar["bar"] = None
+    nav.setCurrentKey("Statistics")
+    shell.refresh()
+    assert not shell.page_button.isVisible()
 
 
 def test_an_empty_plot_s_hint_says_where_the_plate_is_on_a_phone():

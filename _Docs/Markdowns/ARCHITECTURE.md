@@ -101,7 +101,12 @@ they're shell-wide:
   `tests/test_shortcut_advertising.py` holds them in sync with what the help
   drawer and status bar advertise.
 - **Application Log drawer** — a bottom-edge, full-width `Drawer` opened by the
-  status-bar log tray (`_log_btn`). Its ring handler attaches to the
+  status-bar log tray (`_log_btn`), `LOG_DRAWER_HEIGHT_FRACTION` (0.7) of the
+  window tall. Its view scrolls by a `widgets/fine_scroll_bar.FineScrollBar`:
+  dragging the handle moves the log at most one line per pixel, where a plain
+  bar maps up to 500 entries onto the short track and moved hundreds of lines
+  for a 40 px drag; a short log drags proportionally, as before, and a click on
+  the groove still pages. Its ring handler attaches to the
   `review` logger (which sets `propagate = False`) *and* to root — the
   latter is how it sees the `services.*` loggers the Analyze runners use — at
   startup, so it captures history before first open and appends live. `emit`
@@ -127,7 +132,7 @@ they're shell-wide:
   `ReviewApp.modeChanged`, every change of Review's notebook and every page-tab
   bar's `currentChanged` (each bar connected the first time it is seen, so a
   section built later is covered) — whatever made the move: a rail tile, the
-  phone's page menu and its *Go to*, the mode bar, code. Mode switches are
+  phone's page menu, the mode bar, code. Mode switches are
   places, so Back after jumping from a plot to Analyze returns to the plot.
   Datasets' tools and Analyze's phone views are not: a mode is one place. The
   rules are a browser's: a move after Back drops the way forward, the place you
@@ -238,8 +243,8 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    minimum heights the touch floors took (below, *The UI scale*);
 4. pins the touch sizes (`_apply_sizes`), scales the plots, and, while phone
    layout is on, watches the widgets it adapts so that anything shown later gets
-   the same treatment: a plot its DPI and height, a dialog a place inside the
-   screen, a control band its place in the Controls sheet, a matplotlib toolbar
+   the same treatment: a plot its DPI and height, a window of its own its
+   phone form (below, *Windows of their own*), a control band its place in the Controls sheet, a matplotlib toolbar
    its absence (pan and zoom are modes a VNC drag fights with), a stepper its
    − / +, a form row its stacking — and makes an ⓘ answer a tap with its text,
    since nothing hovers on a phone. `_PhoneEventFilter` is installed **on those
@@ -280,15 +285,14 @@ sheets rise from. It holds the page menu, **Wells** and **⚙ Controls**. Sidewa
 the strip's three buttons join the bar (`_place_page_controls`), vertically
 centred, and the strip is hidden.
 
-**The page menu is the one way around Review.** It reads the page on screen
-(*Bar Plots ▾*, or the section's name when the section has no page tabs) and
-lists, under a caption naming the section, the pages of the section's tab strip
-(hidden in phone layout), then under *Go to* every other section the rail offers
-(`RailNav.shownItems`: shown and enabled, so the two sections phone layout hides
-and any disabled one are absent). Picking a section is `RailNav.setCurrentKey` —
-the same signal a rail tile sends — followed by `page_changed`. So moving
-anywhere in Review is two taps at the foot of the screen, where it was ☰ at the
-top, a tile, and then this menu. The captions are `QWidgetAction` labels
+**The page menu picks a page; ☰ picks a section.** The page menu reads the page
+on screen (*Bar Plots ▾*) and lists, under a caption naming the section, the
+pages of the section's tab strip (hidden in phone layout) — and nothing else. A
+section with no page tabs has no page button. It once also listed every other
+section under *Go to*, which ☰'s section tiles already offer, and two buttons
+offering the same sections read as one control duplicated rather than as two
+with different jobs. The caption's section name comes from
+`RailNav.shownItems`. The captions are `QWidgetAction` labels
 (`PhoneMenuCaption`) rather than `QMenu.addSection`, whose text the app's style
 does not draw. In Datasets the same button lists the tools, in Analyze the two
 views (below). ⋯ is one flat menu, no submenus: the
@@ -367,7 +371,11 @@ word), and a `QComboBox` sized to its longest entry is let shrink to a few
 characters (`AdjustToMinimumContentsLengthWithIcon`; a `StyleChange` event then
 clears the minimum size hint QComboBox caches). A label or combo is judged
 against the tighter of its centred room and the room to its right less the
-content's right margin. Text the fit replaced is restored by `unfit` only while
+content's right margin. Last, when none of that made the content fit, a
+horizontal row that is a layout nested in a widget's layout rather than a widget
+of its own is turned top-to-bottom, outermost first (`_stack_inner_rows`) — a
+dialog's row of buttons and spin boxes is usually built that way (*Windows of
+their own*, below), and the Datasets tools fit before the pass gets there. Text the fit replaced is restored by `unfit` only while
 it is still the text the fit set (`_awPhoneTextSet`): a page that has repainted
 the widget since keeps its new text. Before measuring, the fit shows every
 widget Qt would show on the next event-loop turn — one added to an
@@ -439,9 +447,12 @@ in phone layout, and with it every control the page has.
 A `ControlBand` is laid out in the sheet as a **form**
 (`ControlBand.setForm`, `widgets/control_band_form.BandForm`), not as its row:
 the same widgets, moved and given back, in three sections in a fixed order —
-**Data** (every scope control: the band's own definition of scope), **Display**
-(actions that open a panel of live options) and **Actions** (commands, the
-Properties toggle). A Data control is one row: its label in a column
+**Display** (actions that open a panel of live options), **Actions** (commands,
+the Properties toggle) and **Data** (every scope control: the band's own
+definition of scope). The button grids come first because they are a row or two
+on every page, while Data runs as long as the page has controls: on Nanowells,
+with a dozen Data rows, grids laid out after it sat some 560 px of scrolling
+below the top, and Decorate read as missing. A Data control is one row: its label in a column
 `SHEET_LABEL_PT` (112 pt) wide, the control stretched over the rest (a width
 pin, such as a touch stepper's, lifted for the length of the form), the row at
 least `TOUCH_ROW_PT` tall and `TOUCH_GAP_PT` from the next. The label is found
@@ -651,6 +662,56 @@ with a short side under 1,300 px; phones are 19.5:9 (2.17) or longer, monitors
 turned, and VNC resized the desktop under the maximized window) closes the
 Controls sheet and restyles at the new unit.
 
+**Windows of their own.** Every window the app opens beside the main one — Manage
+Remote Servers and the dialogs it opens, Remote Storage, the Storage dialog, the
+nanowell crops pop-out, Test detection (a `QWidget` with the `Qt.Window` flag, not
+a dialog), the per-sample control editor, the focus and optimizer curves, the
+background-map editor — was laid out for the desk. On a 432 × 936 px phone,
+Remote Storage's content needed 893 px of width and was squeezed below its own
+minimum, its buttons cut to fragments; sideways, Manage Remote Servers needed
+499 px of height on a 432 px screen; the Storage dialog filled in its rows after it
+was clamped and left the screen again; and Test detection, which was never looked
+at, opened 984 px wide with its title bar's ✕ — its only way out — past the
+edge. So in phone layout each such window takes a **phone form**
+(`ui/phone_window.py`, Qt-only and pane-free): it covers the screen's available
+geometry exactly, frame included, with its minimum and maximum both pinned there,
+so nothing it does later can take it off the screen; its own layout moves whole
+onto a body widget (`QWidget.setLayout` takes a layout from the widget that
+holds it, re-parenting every widget it manages) inside a scroll area, which
+scrolls by a drag like every other and is narrowed with `ui/phone_fit`
+(`fit_content`); and a foot outside what scrolls (`QWidget#PhoneWindowFoot`,
+its buttons at the 48 pt row floor) holds the window's last row when that row
+is only buttons — a `QDialogButtonBox` or a row of push buttons — so OK and
+Cancel stay in view, plus **Close ✕**, which calls `close()` exactly as the
+title bar's ✕ does (a dialog answers it with `reject`). The Close is left out
+when the row brought down holds the window's own Close or Cancel (a button box's
+reject role, or the text), and when the window has no ✕ of its own
+(`CustomizeWindowHint` without `WindowCloseButtonHint`). A row of buttons wider
+than the phone stays in the body, where it scrolls. `phone_window.kind` decides
+which windows: a top-level `Qt.Window` or `Qt.Dialog` that is not frameless gets
+the form; Qt's own small dialogs (`QMessageBox`, `QInputDialog`,
+`QProgressDialog`, `QFileDialog`, `QColorDialog`, `QFontDialog`,
+`QErrorMessage`), a `QMainWindow` and a window with no layout are only kept
+inside the screen (`clamp_to_screen`); a popup, a tool window, a tooltip or a
+splash screen is none of its business; and the window `PhoneShell` rearranges
+itself carries `phoneMainWindow` and is never given the form. The windows are
+found the way everything else phone layout adapts is found — `_phone_relevant`
+names them, so the sweep marks each and the per-widget filter fits it on every
+Show (a pop-out kept and re-shown is placed again) — never by an
+application-wide filter, for the reason above. They are placed again after
+every restyle inside phone layout (`_restyle_in_place`: the phone turned, the
+text size changed), and given their desk form back on the way out, before the
+restyle (`_unfit_windows`): the layout, the row of buttons at its index and
+stretch, the maximum, the minimum (put back only when the code set it; one the
+layout set is left to the layout) and the size. A *native* file dialog —
+`QFileDialog.getOpenFileName` and its siblings, which open Windows' own picker —
+is not a Qt widget at all, and phone layout cannot size it.
+`tests/test_phone_windows.py` drives a `PhoneShell`, phone layout on, the real
+dialogs and the shell's own sweep on a phone-shaped screen;
+`tests/test_phone_remote_windows.py` (remote roster) does the same for Remote
+Storage and Manage Remote Servers, `tests/test_phone_nanowell_popout.py`
+(nanowell-features roster) for the crops pop-out opened by `pop_out_crops`.
+
 **Sideways.** One 44 pt bar carries everything; the rail is 360 pt; the Controls
 and Wells sheets are 390 pt right-hand panels; plots get at least 220 pt per row of axes
 (`size_canvas`, upright too) and the page scrolls rather than squashing a
@@ -732,9 +793,29 @@ so the plate's grid kept a quarter of the plate's height.
 
 **The run dashboard** in phone layout is stacked
 (`PlateProgress.setStacked`): the body row turns to a column, the column dividers,
-legend, title, collapse toggle, status word and "Stages" heading go (the headline
-says the state, the stage rows name themselves), the headline is set larger
-(`PlateHeadline[phone]`), and the plate fills the column's width, centred.
+title, collapse toggle, status word and "Stages" heading go (the headline says the
+state, the stage rows name themselves), the headline is set larger
+(`PlateHeadline[phone]`), and the plate fills the column's width, centred. The
+legend's fixed-width column goes too, but the legend does not: the same rows are
+drawn as wrapping dot-and-label chips under the whole body (`_legend_chips`,
+built by `_build_legend_chips` from the same `_legend_items` on every
+`_build_legend`, so a remote run's renamed rows reach them on `reset`), because
+the stage rail names stages and nothing else on the page says what a well's
+colour means. They show only while the plate does (`syncLegendChips`: stacked,
+not compact, not collapsed), so Analyze's Settings strip carries none, and they
+reserve their wrapped height (`sync_flow_height`), so the plate fit below counts
+every line. Upright they sit under the body at the page's width. Sideways
+(`setRailBeside`) they move above the body at caption size, inside the
+dashboard (`_place_legend_chips`): under the plate they would be pushed off the
+short page, the rail column has no room once a remote run's five stages fill
+it, and a column of their own would come out of the log's width — so the plate
+gives up the two lines instead. Because the rail can then be the taller half of
+the body row, the fit adds `PlateProgress.rail_height_beside_plate` to the room
+it reads from the column's minimum (which a taller rail hides), and the plate
+grows to the rail's height. Pinning the stage rail beside the plate asks each
+rail row to `updateGeometry` first: the rows' bars are hidden just before, and
+the rail's layout otherwise answers with the width it last measured, bars
+included, once anything has laid the body out.
 Tapping a well writes what it is doing to a line under the plate
 (`PlateWellDetail`), since there is no hover. The analysis log wraps in phone
 layout — reading the end of an error line on a phone is worth the cost that a
@@ -1222,10 +1303,15 @@ allwell/
 │   │                              panel to one left-edge Drawer over the page and gives it back
 │   │                              (§2). Serves all three panes, so it is shared, not Review's;
 │   │                              allwell.py tells it where each panel lives, and it imports no pane
-│   └── phone_shell.py          ← phone layout's Qt half: the top bar, strip and ⋯ menu, the
-│                                  Controls sheet, the switch both ways, the window fitting its
-│                                  screen, the live restyle and the rescale pass (§2, §8). Handed every pane widget it moves
-│                                  by allwell.py, so it imports no pane
+│   ├── phone_shell.py          ← phone layout's Qt half: the top bar, strip and ⋯ menu, the
+│   │                              Controls sheet, the switch both ways, the window fitting its
+│   │                              screen, the live restyle and the rescale pass (§2, §8). Handed every pane widget it moves
+│   │                              by allwell.py, so it imports no pane
+│   └── phone_window.py         ← phone layout's form for a window of its own (a dialog, a
+│                                  pop-out): the screen covered, the content in a drag-scrolled
+│                                  body, the window's buttons and a Close ✕ at its foot, and the
+│                                  desk form given back (§2). Qt-only and pane-free; phone_shell
+│                                  finds the windows and calls in
 ├── widgets/                     ← reusable Qt widgets (no app coupling) — including
 │                                  separator.py (the two divider builders every pane
 │                                  uses) and page_stack.py (NamedPageStack, the
@@ -4181,19 +4267,39 @@ Three rules the page is built around:
   "None yet". Conflating *not computed* with *computed as zero* is the bug class
   the completeness record exists to end, and the page reporting it must not
   reintroduce it.
-- **Every colour it spends means what it means on the other plate maps.**
-  `success` = complete, `warn` = partial, `danger` = an errored well, and
-  `accent` = the anomalous one, which here is *images with no measurements* —
-  Concatenate paints the identical condition (merged with no measurements CSV on
-  one side) in the same token. `text_muted` carries *staged, never processed*
-  (worded *not reached* after a run that ended early — §9.6's `ended_early`),
-  the token the Datasets dashboards use for pending and for Validate's "no
-  output yet". `accent2` is unused: it means "the other of two normal groups"
-  (Merge Plates), which no state here is. The rule is one colour per state and
-  no colour that means something else elsewhere; `tests/test_home_plate_colors.py`
-  asserts the table, and `tests/test_home_plate_render.py` samples the rendered
-  widget, because the two can disagree — a table of legible tokens can still
-  arrive as near-black cells if something dims them on the way to the screen.
+- **Every colour it spends is held to the run plate's colour-blind bars, and
+  means what it means on the other plate maps.** Home's plate is the same kind
+  of map as Analyze's run plate and is read by the same people, so it follows
+  that plate's design (§7, the `RunDashboard` entry: lightness and blue-against-yellow
+  carry the states, because those survive red/green deficiency) and reuses its
+  tokens wherever the two show the same fact. `plate_panel.STATE_TOKENS` maps
+  each state to a token *name*, resolved at paint time (`state_color` /
+  `state_colors`) so the plate follows the applied theme: complete =
+  `run_done` (Analyze's downloaded / thresholded), failures recorded =
+  `run_problem` (the white problem fill, the one fill no other Home state
+  takes), staged-never-processed = `run_pending` (Analyze's queued — worded
+  *not reached* after a run that ended early, §9.6's `ended_early`), images
+  with no measurements = `accent` (Concatenate paints the identical condition
+  in it), measurements with no output archive = `stale` (Validate's identical
+  condition), and partial = `home_partial`, an amber of its own, darker than
+  `warn` so the two shares of its coverage dial stay apart. A failed well is
+  white without the run plate's ✕, because a well holds one glyph and Home's
+  is the field-quality `!`. `accent2` is unused: it means "the other of two
+  normal groups" (Merge Plates), which no state here is.
+  `tests/test_home_plate_is_colour_blind_safe.py` measures every appearance a
+  well can take — each state's fill and the pale remaining share of a partial
+  dial — at CIEDE2000 ≥ 13 under normal vision, deuteranopia and protanopia
+  (full and 60 % severity, Machado 2009) and ≥ 9 under tritanopia, the dial's
+  two shares ≥ 12 apart, in every registered theme (two of the six tokens are
+  theme tokens), and drives `controller._paint_plate` against the real plate to
+  assert each state's colour reaches `setWellState`. It shares its arithmetic
+  with the run plate's guard through `tests/_ciede.py`.
+  `tests/test_home_plate_colors.py` asserts the token table, and
+  `tests/test_home_plate_render.py` samples the rendered widget — including
+  the same CVD measurement on the drawn pixels, where the sphere shading
+  compresses every pair toward white (floor 10) — because the two can
+  disagree: a table of legible tokens can still arrive as near-black cells if
+  something dims them on the way to the screen.
 - **The two states that describe an absence are painted in nothing at all.**
   `unchecked` (no completeness record exists) and `no_output` (the record holds
   the well and it has no evidence at all) both assert nothing, so they get the
@@ -19216,7 +19322,7 @@ Notable members worth knowing about by name:
 
 The dial covers **transfers as well as compute**: a well filling with the bytes of its own archive while it uploads or downloads, and with FOV-groups while it computes, so the stages that dominate a remote run's wall-clock are the ones the plate describes best. Plate-wide transfer progress is separate and lives on the status line, fed by `remote_xfer` (below). An uploaded-but-not-started well has its own colour on a remote run (`run_uploaded`), distinct from the computing amber, so a plate mid-run says which wells are actually being worked on rather than being one block of amber. It is a pale lavender beside the deep `run_on_server` blue used for "computed, awaiting fetch"; both mean "it is over there", so the pair reads as one family. The legend gains a matching **uploaded** row, on remote runs only.
 
-**The plate paints only with the `run_*` tokens** (`ui/theme.py`: `run_pending`, `run_uploaded`, `run_processing`, `run_on_server`, `run_done`, `run_problem`, and `run_failed_mark` for the ✕'s ink) — the wells and the legend — never with the general status tokens. Those (`success`, `danger`, `stale`) colour text, badges and other plates across the app. The palette is built for red/green colour vision deficiency, the commonest kind, under which red and green collapse onto one axis and what remains is lightness and blue-against-yellow: "complete" is a forest green that reads as a dark khaki, "processing" a plum that reads as a slate blue, "uploaded" a gold, "on server" an azure and "pending" a warm grey, the four coloured states at a matched, moderate chroma. Every *appearance* a well can take is held apart — each state's solid fill and the pale "remaining" tint of each state drawn as a dial (`WellPlateSelector._remaining_tone`, read from the painter by the test rather than re-derived) — at CIEDE2000 ≥ 13 under normal vision and under deuteranopia and protanopia at full and at 60 % severity (the Machado 2009 matrices; the anomalous trichromacies are the common forms), and ≥ 9 under tritanopia; each dial's two shares stay ≥ 12 apart. The tints are counted because the reported confusion was one: a light-green "complete" well against a just-started amber "processing" dial measured CIEDE2000 ≈ 4. **Problems are not a colour.** A failed well and a partial or unfinished one are both `run_problem` white — the one fill no other state takes, and the same under every vision — and say which problem with their glyph: a red ✕ in `run_failed_mark`, passed to `setWellMarker` as the glyph's own ink, or a dark "!". A red fill for "failed" was the hue a red/green deficient viewer loses, set apart from its neighbours only by its ✕. The legend draws both rows on the white swatch with the glyph in it (`status_dot(..., glyph=, ink=)`, legend items `(colour, label, glyph, ink)`). Every fill is at least 3:1 against the panel the plate sits on in both themes, the WCAG floor for non-text graphics, and the ✕ at least 3:1 on the white under every simulated vision. No theme overrides them, since that separation is the property being protected. `tests/test_run_plate_is_colour_blind_safe.py` holds the palette (every appearance pairwise, each dial, the panel, the ✕ on white, and that the two palettes this replaced fail the same bar) and that the plate and legend paint with it by value, with the ✕'s ink checked where it reaches `setWellMarker`.
+**The plate paints only with the `run_*` tokens** (`ui/theme.py`: `run_pending`, `run_uploaded`, `run_processing`, `run_on_server`, `run_done`, `run_problem`, and `run_failed_mark` for the ✕'s ink) — the wells and the legend — never with the general status tokens. Those (`success`, `danger`, `stale`) colour text, badges and other plates across the app. Review Home's plate reuses `run_done`, `run_pending` and `run_problem` for the facts it shares with this one, and is held to the same bars by `tests/test_home_plate_is_colour_blind_safe.py` (§5.2, Home's plate). The palette is built for red/green colour vision deficiency, the commonest kind, under which red and green collapse onto one axis and what remains is lightness and blue-against-yellow: "complete" is a forest green that reads as a dark khaki, "processing" a plum that reads as a slate blue, "uploaded" a gold, "on server" an azure and "pending" a warm grey, the four coloured states at a matched, moderate chroma. Every *appearance* a well can take is held apart — each state's solid fill and the pale "remaining" tint of each state drawn as a dial (`WellPlateSelector._remaining_tone`, read from the painter by the test rather than re-derived) — at CIEDE2000 ≥ 13 under normal vision and under deuteranopia and protanopia at full and at 60 % severity (the Machado 2009 matrices; the anomalous trichromacies are the common forms), and ≥ 9 under tritanopia; each dial's two shares stay ≥ 12 apart. The tints are counted because the reported confusion was one: a light-green "complete" well against a just-started amber "processing" dial measured CIEDE2000 ≈ 4. **Problems are not a colour.** A failed well and a partial or unfinished one are both `run_problem` white — the one fill no other state takes, and the same under every vision — and say which problem with their glyph: a red ✕ in `run_failed_mark`, passed to `setWellMarker` as the glyph's own ink, or a dark "!". A red fill for "failed" was the hue a red/green deficient viewer loses, set apart from its neighbours only by its ✕. The legend draws both rows on the white swatch with the glyph in it (`status_dot(..., glyph=, ink=)`, legend items `(colour, label, glyph, ink)`). Every fill is at least 3:1 against the panel the plate sits on in both themes, the WCAG floor for non-text graphics, and the ✕ at least 3:1 on the white under every simulated vision. No theme overrides them, since that separation is the property being protected. `tests/test_run_plate_is_colour_blind_safe.py` holds the palette (every appearance pairwise, each dial, the panel, the ✕ on white, and that the two palettes this replaced fail the same bar) and that the plate and legend paint with it by value, with the ✕'s ink checked where it reaches `setWellMarker`.
 
 **The headline is derived from the phase the run is in, never pushed at it.**
 `AnalyzeProgressMixin` holds one phase per run — prepare, group, grouped,

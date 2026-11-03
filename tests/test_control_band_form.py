@@ -152,8 +152,12 @@ def test_sections_come_in_a_fixed_order_and_actions_are_equal_cells(qtbot):
     band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
     _settle()
     form = band.form()
-    boxes = [form.section_box(n) for n in SECTIONS]
-    assert [b.y() for b in boxes] == sorted(b.y() for b in boxes)
+    # The button grids first, Data last: on a page with many Data rows
+    # (Nanowells) grids laid out after it sat below the fold, and Decorate was
+    # reported missing.
+    assert SECTIONS == ("Display", "Actions", "Data")
+    y = {n: form.section_box(n).y() for n in ("Display", "Actions", "Data")}
+    assert y["Display"] < y["Actions"] < y["Data"], y
     assert form.buttons("Display") == [w["fold"], w["display"]]
     assert form.buttons("Actions") == [w["reset"], w["save"], w["props"]]
     # Equal cells: Qt hands the odd pixel of a division to one of them.

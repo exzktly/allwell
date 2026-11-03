@@ -6,7 +6,9 @@ a narrow sheet, where a flow wraps wherever a label happens to end and leaves
 no edge to scan down. :meth:`ControlBand.setForm` hands the band to
 :class:`BandForm`, which moves the *same* widgets — nothing is rebuilt, nothing
 is copied, so every connection and every later ``setVisible`` / ``setText`` a
-page makes still lands — into three sections, in a fixed order:
+page makes still lands — into three sections, in a fixed order (``SECTIONS``):
+the two button grids, Display then Actions, short on every page and so always
+in view when the sheet opens, then Data, which scrolls.
 
 * **Data** — every scope control (the band's own definition of scope: *what
   data is shown*). One control per row: its label in a fixed-width column on
@@ -50,8 +52,11 @@ from PySide6.QtWidgets import (
     QStylePainter, QToolButton, QVBoxLayout, QWidget,
 )
 
-#: The sections, in the order they are laid out.
-SECTIONS = ("Data", "Display", "Actions")
+#: The sections, in the order they are laid out. The button grids come first:
+#: they are a row or two whatever the page, while Data runs as long as the page
+#: has controls — a dozen rows on Nanowells — and grids laid out after it sat
+#: below the fold, where Decorate was reported as missing from the page.
+SECTIONS = ("Display", "Actions", "Data")
 #: Property a builder sets on an action to say which section it joins.
 ROLE_PROPERTY = "bandRole"
 ROLE_SECTION = {"display": "Display", "action": "Actions"}

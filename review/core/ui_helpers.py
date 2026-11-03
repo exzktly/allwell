@@ -1372,7 +1372,6 @@ def mute_color(hex_color: str, factor: float = 0.5) -> str:
 
 
 def apply_theme(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
     """Apply the application-wide stylesheet.
 
     Single source of truth is the repo-root ``theme`` module. Previously
@@ -1382,9 +1381,7 @@ def apply_theme(ctx) -> None:
     """
     try:
         from ui import theme  # type: ignore
-        app = QApplication.instance()
-        if app is not None:
-            app.setStyleSheet(theme.qss())
+        theme.apply_app_stylesheet(QApplication.instance(), theme.qss())
     except Exception:
         swallowed()  # was: pass (silent except)
 

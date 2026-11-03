@@ -21572,7 +21572,16 @@ help while `qtbot` still holds the app).
    `test_analyze_help_section.py`) install it from a `scope="module"` fixture and
    pay for it once. Applying the sheet to a single host widget instead
    (`test_control_row_spacing.py`) is cheaper again, and is the right shape
-   whenever the assertion does not need it applied app-wide. `--durations=N` is
+   whenever the assertion does not need it applied app-wide. The app follows
+   the same rule: the shell (`AllWellApp._apply_stylesheet`) and Review
+   (`ui_helpers.apply_theme`) each install the sheet while a window is built,
+   through `theme.apply_app_stylesheet`, which does nothing when the
+   application already has that exact text. Applying it twice re-polished every
+   widget twice, and in the slow lane, where a built app is never reclaimed, each
+   build walked every widget the earlier ones left: the sixth build of one
+   process took 84 s, nearly all of it in those two calls, and
+   `test_home_page.py` run whole timed out at pytest's 90 s limit. With the
+   check, every build takes about 5 s (`tests/test_app_stylesheet_applied_once.py`). `--durations=N` is
    how a violation shows up: the cost lands in `setup`, not in the test body.
 
 7. **A fast-lane test does not keep the widgets it builds.** An autouse fixture,

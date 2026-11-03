@@ -439,9 +439,12 @@ in phone layout, and with it every control the page has.
 A `ControlBand` is laid out in the sheet as a **form**
 (`ControlBand.setForm`, `widgets/control_band_form.BandForm`), not as its row:
 the same widgets, moved and given back, in three sections in a fixed order —
-**Data** (every scope control: the band's own definition of scope), **Display**
-(actions that open a panel of live options) and **Actions** (commands, the
-Properties toggle). A Data control is one row: its label in a column
+**Display** (actions that open a panel of live options), **Actions** (commands,
+the Properties toggle) and **Data** (every scope control: the band's own
+definition of scope). The button grids come first because they are a row or two
+on every page, while Data runs as long as the page has controls: on Nanowells,
+with a dozen Data rows, grids laid out after it sat some 560 px of scrolling
+below the top, and Decorate read as missing. A Data control is one row: its label in a column
 `SHEET_LABEL_PT` (112 pt) wide, the control stretched over the rest (a width
 pin, such as a touch stepper's, lifted for the length of the form), the row at
 least `TOUCH_ROW_PT` tall and `TOUCH_GAP_PT` from the next. The label is found

@@ -7,7 +7,7 @@ seven of the nine were wider than the phone — up to 479 px past its right edge
 on a 432 px screen — and a ``QHBoxLayout`` cannot wrap, so the only way to a
 control was a sideways scroll, and the description paragraphs above were cut.
 
-:func:`fit` narrows a scroll area's content to its viewport in two moves, both
+:func:`fit` narrows a scroll area's content to its viewport in up to three moves, all
 undone by :func:`unfit`:
 
 1. **Stack the rows that overflow.** A widget with a phone form of its own
@@ -29,6 +29,13 @@ undone by :func:`unfit`:
    A broken label's lines are measured, not estimated, and a label broken
    here is broken again if it still does not fit. A combo box sized to its
    longest entry is let shrink to a few characters, its entry elided.
+3. **Stack a row that is only a layout.** When neither move made the content
+   fit, a horizontal box layout nested inside a widget's layout — not a widget
+   of its own, which the first move already handles — and wider than its room
+   is turned top-to-bottom, outermost first. A dialog's row of buttons and
+   spin boxes is usually built that way (Remote Storage's *Delete… · Keep
+   forever · Expire in [14] days · Use host rule* held its content 893 px wide
+   on a 432 px phone); the Datasets tools fit before this move is reached.
 
 The fonts matter: CI's runner has no Inter and draws in DejaVu Sans, which runs
 wider, so the tests run the Datasets tools at a larger type scale too.
@@ -334,10 +341,49 @@ def fit_content(content: QWidget, width: int, *, max_passes: int = 40) -> bool:
             if (combo.isVisibleTo(content)
                     and _min_width(combo) > _label_room(combo, content, width)):
                 broke |= _narrow_combo(combo)
-        if not broke:
+        if not broke and not _stack_inner_rows(content, width):
             break
     _activate(content)
     return _min_width(content) <= width
+
+
+def _inner_layouts(lay) -> list:
+    """The layouts nested inside *lay* as items — not a child widget's own."""
+    out = []
+    for i in range(lay.count()):
+        inner = lay.itemAt(i).layout()
+        if inner is not None:
+            out.append(inner)
+            out.extend(_inner_layouts(inner))
+    return out
+
+
+def _stack_inner_rows(content: QWidget, width: int) -> bool:
+    """Turn top-to-bottom the horizontal rows that are layouts nested in a
+    widget's layout rather than widgets of their own — a dialog's row of
+    buttons and spin boxes is usually one — when they are wider than their
+    room. The last resort, after every other move has been tried: a page whose
+    rows are widgets (the Datasets tools) fits before it is reached.
+    Outermost first, like :func:`_overflowing_rows`. ``True`` if any row was
+    stacked."""
+    rows = []
+    for w in [content, *content.findChildren(QWidget)]:
+        if w.layout() is None or (w is not content and not w.isVisibleTo(content)):
+            continue
+        for lay in _inner_layouts(w.layout()):
+            if (isinstance(lay, QBoxLayout) and lay.direction() == QBoxLayout.LeftToRight
+                    and lay.count() > 1):
+                x = w.mapTo(content, lay.geometry().topLeft()).x()
+                if lay.minimumSize().width() > max(0, width - 2 * max(0, x)):
+                    rows.append(lay)
+    stacked = False
+    for lay in rows:
+        if any(o is not lay and lay in _inner_layouts(o) for o in rows):
+            continue        # inside another overflowing row: may fit once that one stacks
+        lay.setDirection(QBoxLayout.TopToBottom)
+        lay.setProperty(_P_STACKED, True)
+        stacked = True
+    return stacked
 
 
 def unfit(area: QScrollArea) -> None:
@@ -367,6 +413,11 @@ def unfit_content(content: QWidget) -> None:
         if w.property(_P_WRAPPED) and isinstance(w, QLabel):
             w.setWordWrap(False)
             w.setProperty(_P_WRAPPED, None)
+        if w.layout() is not None:
+            for lay in _inner_layouts(w.layout()):
+                if lay.property(_P_STACKED) and isinstance(lay, QBoxLayout):
+                    lay.setDirection(QBoxLayout.LeftToRight)
+                    lay.setProperty(_P_STACKED, None)
         text = w.property(_P_TEXT)
         if text is not None and isinstance(w, (QAbstractButton, QLabel)):
             if w.text() == w.property(_P_SET):

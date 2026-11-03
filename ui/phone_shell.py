@@ -45,13 +45,13 @@ from dataclasses import dataclass, field
 from PySide6.QtCore import QEvent, QObject, QRect, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QFont, QGuiApplication
 from PySide6.QtWidgets import (
-    QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QDialog, QLabel,
+    QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QLabel,
     QLineEdit, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from core import phone_layout
 from core.safe import swallowed
-from ui import theme
+from ui import phone_window, theme
 
 _LOG = logging.getLogger(__name__)
 
@@ -519,14 +519,14 @@ def _adapt_kind(w: QWidget) -> str | None:
 def _phone_relevant(w: QWidget) -> bool:
     """Whether phone layout acts on *w* when it is shown: whatever
     :func:`_adapt_kind` names, plus the three the event filter acts on
-    itself — a plot canvas (its DPI), a top-level dialog (its place on the
-    screen) and an ⓘ hint (a tap). Everything else is left alone and never
-    watched."""
+    itself — a plot canvas (its DPI), a window of its own (a dialog, a
+    pop-out: its phone form, :func:`ui.phone_window.kind`) and an ⓘ hint (a
+    tap). Everything else is left alone and never watched."""
     if _adapt_kind(w) is not None:
         return True
     if getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure"):
         return True
-    if w.isWindow() and isinstance(w, QDialog):
+    if phone_window.kind(w) is not None:
         return True
     return w.objectName() == "InfoHint"
 
@@ -761,7 +761,7 @@ class _FitOnShow(QObject):
 
 class _PhoneEventFilter(QObject):
     """While phone layout is on, the things built or shown later get it too:
-    a plot its DPI, a dialog a place on the screen, a page's control band a
+    a plot its DPI, a window of its own its phone form, a page's control band a
     place in the Controls sheet, a stepper its − / +, a toolbar its absence, a
     form row its stacking; and an ⓘ answers a tap, since nothing hovers.
 
@@ -788,8 +788,8 @@ class _PhoneEventFilter(QObject):
             return True
         if t != QEvent.Show or not isinstance(obj, QWidget):
             return False
-        if obj.isWindow() and isinstance(obj, QDialog):
-            clamp_to_screen(obj)
+        if phone_window.kind(obj) is not None:
+            self._shell.fit_popup_window(obj)
         elif getattr(type(obj), "draw_idle", None) is not None and hasattr(obj, "figure"):
             scale_canvas(obj, self._shell.plot_factor())
             self._shell.size_canvas(obj, True)
@@ -908,6 +908,9 @@ class PhoneShell(QObject):
                  settings: Callable[[], object] | None = None) -> None:
         super().__init__(window)
         self._win = window
+        # Phone layout rearranges this window itself; it never takes the
+        # phone form every other window of the app takes (ui/phone_window.py).
+        window.setProperty(phone_window.MAIN_WINDOW_PROP, True)
         self._h = handles
         self._settings = settings
         self._filter = _PhoneEventFilter(self)
@@ -1008,6 +1011,7 @@ class PhoneShell(QObject):
             self._restyle(self.text_scale(), self.unit())
         finally:
             self._adapt_all(True)
+            self._refit_windows()
 
     # ── controls ──────────────────────────────────────────────────────────
     def _build_controls(self) -> None:
@@ -1226,6 +1230,7 @@ class PhoneShell(QObject):
         # scaled their desk sizes, and give it up *before* the restyle scales
         # them back — so the rescale pass only ever sees desk-shaped widgets.
         if not on:
+            self._unfit_windows()
             self._adapt_all(False)
         if restyle:
             self._restyle(self.text_scale() if on else 1.0, self.unit() if on else None)
@@ -1415,8 +1420,8 @@ class PhoneShell(QObject):
                 w.setProperty(_P_WATCHED, True)
                 if not w.isVisible():
                     continue        # its Show will reach the filter
-                if w.isWindow() and isinstance(w, QDialog):
-                    clamp_to_screen(w)
+                if phone_window.kind(w) is not None:
+                    self.fit_popup_window(w)
                 elif getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure"):
                     scale_canvas(w, factor)
                     self.size_canvas(w, True)
@@ -1686,6 +1691,44 @@ class PhoneShell(QObject):
             if geom is not None:
                 self._win.setGeometry(geom)
         self.fit_window()
+
+    # ── windows of their own (ui/phone_window.py) ─────────────────────────
+    def fit_popup_window(self, w: QWidget) -> None:
+        """Fit a window the app opened — a dialog, a pop-out — to the phone:
+        the phone form :mod:`ui.phone_window` gives it (the screen covered, the
+        content scrolling by a drag, its buttons and a Close ✕ at its foot), or
+        for Qt's own small dialogs only a place inside the screen."""
+        if not phone_window.kind(w):
+            return
+        screen = w.screen() or self._win.screen() or QGuiApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen is not None else self._avail()
+        area = phone_window.fit(w, avail, self.unit())
+        if area is None:
+            clamp_to_screen(w)
+        elif drag_scroll_eligible(area):
+            set_drag_scroll(area.viewport(), True)
+
+    def _refit_windows(self) -> None:
+        """Place every window that has a phone form again — the phone turned,
+        or the text size changed what its content needs."""
+        for w in phone_window.fitted_windows():
+            try:
+                if w.isVisible():
+                    self.fit_popup_window(w)
+            except RuntimeError:
+                swallowed()  # closed and deleted while the list was walked
+
+    def _unfit_windows(self) -> None:
+        """Give every window its desk form back, inside the screen."""
+        for w in phone_window.fitted_windows():
+            try:
+                scroll = phone_window.form_of(w).scroll
+                set_drag_scroll(scroll.viewport(), False)
+                phone_window.unfit(w)
+                if w.isVisible():
+                    clamp_to_screen(w)
+            except RuntimeError:
+                swallowed()  # closed and deleted while the list was walked
 
     def desk_minimum(self) -> tuple[int, int]:
         return (PHONE_MIN_W, PHONE_MIN_H) if phone_layout.is_on() else (

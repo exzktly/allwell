@@ -352,3 +352,36 @@ def test_a_row_built_after_the_page_showed_is_fitted_at_once(qtbot):
     assert h.direction() == QHBoxLayout.TopToBottom, (
         "the row built after the page showed was not seen by the fit")
     assert hidden.isHidden() and not dialog.isVisible()
+
+
+def test_a_row_that_is_a_layout_rather_than_a_widget_is_stacked_last_and_given_back(qtbot):
+    """A dialog's row of buttons and spin boxes is usually a ``QHBoxLayout`` nested in the dialog's own layout,
+    not a widget of its own — Remote Storage's *Delete… · Keep forever · Expire in [14] days · Use host rule* —
+    so the widget-row pass never saw it and the dialog's content stayed 893 px wide on a 432 px phone. Such a row
+    is turned top-to-bottom when nothing else made the content fit; a row inside it that fits once its parent
+    stacks keeps its direction; and the desk form comes back."""
+    from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout
+
+    from ui.phone_fit import fit_content, unfit_content
+
+    content = QWidget()
+    qtbot.addWidget(content)
+    outer = QVBoxLayout(content)
+    row = QHBoxLayout()
+    pair = QHBoxLayout()                       # small enough on its own line
+    pair.addWidget(QPushButton("Expire in"))
+    pair.addWidget(QPushButton("14"))
+    for text in ("Delete…", "Keep forever", "Use host rule", "Remove expired now"):
+        b = QPushButton(text)
+        b.setMinimumWidth(120)
+        row.addWidget(b)
+    row.addLayout(pair)
+    outer.addLayout(row)
+    content.show()
+    qtbot.waitExposed(content)
+
+    assert fit_content(content, 300)
+    assert row.direction() == QHBoxLayout.TopToBottom
+    assert pair.direction() == QHBoxLayout.LeftToRight, "a row that fits once its parent stacked was stacked too"
+    unfit_content(content)
+    assert row.direction() == QHBoxLayout.LeftToRight

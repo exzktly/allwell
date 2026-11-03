@@ -9695,6 +9695,20 @@ jump. The
 plot toolbar's pan and zoom are hidden in phone layout; switch back to the
 desktop layout for them. An **ⓘ** shows its explanation when tapped.
 
+**Windows that open on top** — Manage Remote Servers and its Add, Edit and
+Storage windows, the Storage window, the nanowell crops' **Pop out**, Test
+detection, the per-sample control editor and the other editors and curves a page
+opens — fill the phone's screen in phone layout, whichever way the phone is held.
+What does not fit scrolls with a finger, and rows of controls that would run off
+the side are stacked. The window's own buttons (OK and Cancel, or Open folder,
+Clear and Close) sit in a bar along its bottom edge, in reach however far you
+have scrolled, and a **Close ✕** there does what the window's title-bar ✕ does —
+it is not added when the window's own Close or Cancel is already in that bar.
+Small questions (Yes / No) keep their own size. Switching back to the desktop
+layout gives an open window its desktop size again. The Windows file pickers
+(*Browse…* for a folder or a file) are Windows' own and cannot be rearranged by
+All-Well; on a phone they open at whatever size Windows gives them.
+
 The buttons that change or discard work — Reset view, Reset analysis, Copy
 analysis, the publication look, Reveal folder and Storage — are hidden in phone layout so a
 stray tap cannot reach them, as are the Review CSV and Batch Export sections;

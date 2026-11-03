@@ -243,8 +243,8 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    minimum heights the touch floors took (below, *The UI scale*);
 4. pins the touch sizes (`_apply_sizes`), scales the plots, and, while phone
    layout is on, watches the widgets it adapts so that anything shown later gets
-   the same treatment: a plot its DPI and height, a dialog a place inside the
-   screen, a control band its place in the Controls sheet, a matplotlib toolbar
+   the same treatment: a plot its DPI and height, a window of its own its
+   phone form (below, *Windows of their own*), a control band its place in the Controls sheet, a matplotlib toolbar
    its absence (pan and zoom are modes a VNC drag fights with), a stepper its
    − / +, a form row its stacking — and makes an ⓘ answer a tap with its text,
    since nothing hovers on a phone. `_PhoneEventFilter` is installed **on those
@@ -371,7 +371,11 @@ word), and a `QComboBox` sized to its longest entry is let shrink to a few
 characters (`AdjustToMinimumContentsLengthWithIcon`; a `StyleChange` event then
 clears the minimum size hint QComboBox caches). A label or combo is judged
 against the tighter of its centred room and the room to its right less the
-content's right margin. Text the fit replaced is restored by `unfit` only while
+content's right margin. Last, when none of that made the content fit, a
+horizontal row that is a layout nested in a widget's layout rather than a widget
+of its own is turned top-to-bottom, outermost first (`_stack_inner_rows`) — a
+dialog's row of buttons and spin boxes is usually built that way (*Windows of
+their own*, below), and the Datasets tools fit before the pass gets there. Text the fit replaced is restored by `unfit` only while
 it is still the text the fit set (`_awPhoneTextSet`): a page that has repainted
 the widget since keeps its new text. Before measuring, the fit shows every
 widget Qt would show on the next event-loop turn — one added to an
@@ -657,6 +661,56 @@ with a short side under 1,300 px; phones are 19.5:9 (2.17) or longer, monitors
 16:9 (1.78) or 16:10. A geometry change while phone layout is on (the phone
 turned, and VNC resized the desktop under the maximized window) closes the
 Controls sheet and restyles at the new unit.
+
+**Windows of their own.** Every window the app opens beside the main one — Manage
+Remote Servers and the dialogs it opens, Remote Storage, the Storage dialog, the
+nanowell crops pop-out, Test detection (a `QWidget` with the `Qt.Window` flag, not
+a dialog), the per-sample control editor, the focus and optimizer curves, the
+background-map editor — was laid out for the desk. On a 432 × 936 px phone,
+Remote Storage's content needed 893 px of width and was squeezed below its own
+minimum, its buttons cut to fragments; sideways, Manage Remote Servers needed
+499 px of height on a 432 px screen; the Storage dialog filled in its rows after it
+was clamped and left the screen again; and Test detection, which was never looked
+at, opened 984 px wide with its title bar's ✕ — its only way out — past the
+edge. So in phone layout each such window takes a **phone form**
+(`ui/phone_window.py`, Qt-only and pane-free): it covers the screen's available
+geometry exactly, frame included, with its minimum and maximum both pinned there,
+so nothing it does later can take it off the screen; its own layout moves whole
+onto a body widget (`QWidget.setLayout` takes a layout from the widget that
+holds it, re-parenting every widget it manages) inside a scroll area, which
+scrolls by a drag like every other and is narrowed with `ui/phone_fit`
+(`fit_content`); and a foot outside what scrolls (`QWidget#PhoneWindowFoot`,
+its buttons at the 48 pt row floor) holds the window's last row when that row
+is only buttons — a `QDialogButtonBox` or a row of push buttons — so OK and
+Cancel stay in view, plus **Close ✕**, which calls `close()` exactly as the
+title bar's ✕ does (a dialog answers it with `reject`). The Close is left out
+when the row brought down holds the window's own Close or Cancel (a button box's
+reject role, or the text), and when the window has no ✕ of its own
+(`CustomizeWindowHint` without `WindowCloseButtonHint`). A row of buttons wider
+than the phone stays in the body, where it scrolls. `phone_window.kind` decides
+which windows: a top-level `Qt.Window` or `Qt.Dialog` that is not frameless gets
+the form; Qt's own small dialogs (`QMessageBox`, `QInputDialog`,
+`QProgressDialog`, `QFileDialog`, `QColorDialog`, `QFontDialog`,
+`QErrorMessage`), a `QMainWindow` and a window with no layout are only kept
+inside the screen (`clamp_to_screen`); a popup, a tool window, a tooltip or a
+splash screen is none of its business; and the window `PhoneShell` rearranges
+itself carries `phoneMainWindow` and is never given the form. The windows are
+found the way everything else phone layout adapts is found — `_phone_relevant`
+names them, so the sweep marks each and the per-widget filter fits it on every
+Show (a pop-out kept and re-shown is placed again) — never by an
+application-wide filter, for the reason above. They are placed again after
+every restyle inside phone layout (`_restyle_in_place`: the phone turned, the
+text size changed), and given their desk form back on the way out, before the
+restyle (`_unfit_windows`): the layout, the row of buttons at its index and
+stretch, the maximum, the minimum (put back only when the code set it; one the
+layout set is left to the layout) and the size. A *native* file dialog —
+`QFileDialog.getOpenFileName` and its siblings, which open Windows' own picker —
+is not a Qt widget at all, and phone layout cannot size it.
+`tests/test_phone_windows.py` drives a `PhoneShell`, phone layout on, the real
+dialogs and the shell's own sweep on a phone-shaped screen;
+`tests/test_phone_remote_windows.py` (remote roster) does the same for Remote
+Storage and Manage Remote Servers, `tests/test_phone_nanowell_popout.py`
+(nanowell-features roster) for the crops pop-out opened by `pop_out_crops`.
 
 **Sideways.** One 44 pt bar carries everything; the rail is 360 pt; the Controls
 and Wells sheets are 390 pt right-hand panels; plots get at least 220 pt per row of axes
@@ -1249,10 +1303,15 @@ allwell/
 │   │                              panel to one left-edge Drawer over the page and gives it back
 │   │                              (§2). Serves all three panes, so it is shared, not Review's;
 │   │                              allwell.py tells it where each panel lives, and it imports no pane
-│   └── phone_shell.py          ← phone layout's Qt half: the top bar, strip and ⋯ menu, the
-│                                  Controls sheet, the switch both ways, the window fitting its
-│                                  screen, the live restyle and the rescale pass (§2, §8). Handed every pane widget it moves
-│                                  by allwell.py, so it imports no pane
+│   ├── phone_shell.py          ← phone layout's Qt half: the top bar, strip and ⋯ menu, the
+│   │                              Controls sheet, the switch both ways, the window fitting its
+│   │                              screen, the live restyle and the rescale pass (§2, §8). Handed every pane widget it moves
+│   │                              by allwell.py, so it imports no pane
+│   └── phone_window.py         ← phone layout's form for a window of its own (a dialog, a
+│                                  pop-out): the screen covered, the content in a drag-scrolled
+│                                  body, the window's buttons and a Close ✕ at its foot, and the
+│                                  desk form given back (§2). Qt-only and pane-free; phone_shell
+│                                  finds the windows and calls in
 ├── widgets/                     ← reusable Qt widgets (no app coupling) — including
 │                                  separator.py (the two divider builders every pane
 │                                  uses) and page_stack.py (NamedPageStack, the

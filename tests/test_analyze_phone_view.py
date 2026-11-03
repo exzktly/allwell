@@ -301,18 +301,31 @@ def test_sideways_the_stage_rail_sits_beside_the_plate_without_its_bars(qtbot):
     assert dash.plate_room_width() == upright_room
 
 
-def test_sideways_the_plate_grows_to_the_height_of_a_taller_stage_rail(tab, hosted):
+
+def test_a_taller_stage_rail_beside_the_plate_is_room_the_plate_may_take(qtbot):
     """Sideways the stage rail sits beside the plate. A remote run has five
-    stages, so the rail can be the taller of the two, and then it — not the
-    plate — sets the row's minimum height. The fit reads its room from the
-    column's minimum, so without allowing for that it left the plate at its
-    floor, beside a rail with height to spare: the plate takes the rail's
-    height, which costs the column nothing."""
-    dash, plate = tab._dashboard, tab._dashboard._plate
+    stages, so the rail can be the taller of the two, and then it, not the
+    plate, sets the body row's minimum height. The fit reads the plate's room
+    from the column's minimum, which hides that, so ``_fit_progress`` adds
+    ``rail_height_beside_plate``: the rail's height above the plate's, beside
+    it only — above the plate (upright) the rail's height is not the plate's
+    to take."""
+    from widgets.run_dashboard import RunDashboard
+    dash = RunDashboard()
+    qtbot.addWidget(dash)
     dash.reset(remote=True, total=4)
-    hosted(600, 340)
+    dash.show()
+    plate = dash._plate
+    dash.setStacked(True)
+    plate.setMinimumHeight(40)
+    assert dash.rail_height_beside_plate(plate) == 0          # rail above the plate
     dash.setRailBeside(True)
-    tab._phone_view.show_view(PROGRESS)
     _pump()
-    assert plate.height() == dash._rail_host.height(), (
-        f"the plate is {plate.height()} px beside a {dash._rail_host.height()} px rail")
+    plate.setMinimumHeight(40)
+    rail_min = dash._rail_host.minimumSizeHint().height()
+    assert rail_min > 40
+    assert dash.rail_height_beside_plate(plate) == rail_min - 40
+    plate.setMinimumHeight(rail_min + 10)
+    assert dash.rail_height_beside_plate(plate) == 0          # the plate is the taller
+    dash.setStacked(False)
+    assert dash.rail_height_beside_plate(plate) == 0          # the desk: no fit at all

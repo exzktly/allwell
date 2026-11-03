@@ -9694,6 +9694,23 @@ the next step, the plate, its legend, your notes, the counts, Health, Run
 parameters, your work, saved plots and recent datasets, one under another, with
 nothing to scroll sideways for. Long folder paths and dataset names wrap.
 
+**Sample Map** keeps its **Replicates · Variables · Well Labels** switch at the
+top and scrolls everything under it, one column at the phone's width:
+
+- **Replicates** — the plate as wide as the screen, then **Clear all groups** and
+  **+ Add**, then Quick Replicates as a short form (*Group along*, *Replicates
+  per group*, *Order*, one under another) with **Apply Quick Replicates** across
+  the full width, then the active group and the group list, which shows four
+  groups before it scrolls inside its own box.
+- **Variables** — the plate first (or, before you have defined a variable, the
+  **+ Variable** prompt in its place), then what to set the selected wells to,
+  the fill, and the group roll-up, and under all of that the list of variables
+  and the selected one's name, type, unit and values.
+- **Well Labels** — the help sentence, **Add Prefix** and **Add Suffix** side
+  by side under it, then the 8 × 12 grid of label cells across the screen's
+  width. Held upright the cells are narrow, so a long label shows only its start
+  while you type into it; turn the phone sideways for cells several times wider.
+
 **The Image Table** opens on its images in phone layout, sized so the columns
 fill the screen; **−** and **+** zoom from there, and past 100 % the table
 scrolls sideways. The table builder and the Generate, Crop, ON threshold, Save and

@@ -419,6 +419,58 @@ showing keeps its earlier breaks until the next repaint.
 `tests/test_home_phone_layout.py` holds the page, with a Windows path in the
 masthead and long recent datasets, to a 400 px phone with no sideways scroll.
 
+**Home's Sample Map is one column that scrolls.** At the desk the tab is the
+layer switch, the role strip and a `QStackedWidget` of the three layers, nothing
+above which scrolls, and each layer laid out for a pane far wider than a phone:
+measured at the phone's type scale on a 428 px phone, Replicates needed 1,030 px
+(its plate above a row of three labelled fields and a button), Variables 774 px
+with a variable defined (the fixed 268 px definition column beside the plate),
+Well Labels 761 px (twelve line edits at their own minimum width), and sideways
+the stack had 195 px of height. `review/features/home/sample_map/_phone.py`
+owns the phone form, in four parts. The strip, the grouping note and the stack
+are one widget (`_sample_map_body`), which in phone layout moves into a
+`SampleMapScroll` that takes its place under the switch — the switch stays in
+reach, and the shell's sweep grabs the area for drag-scrolling like any other;
+leaving phone layout puts the body back at its index and hides the area, so the
+desk's tab is the widgets and layout it always had. Each page of the stack is a
+`LayerPage`, which answers its size hints and `heightForWidth` with nothing while
+another layer is showing in phone layout: a stack's own layout asks every page,
+and a hidden page's `heightForWidth` whatever its size policy, so the stacked
+Variables layer held Well Labels' grid 1,955 px tall (an `Ignored` policy on the
+hidden pages, tried first, changed nothing for that reason). Each layer then
+takes a phone form of its own, named in `_phone.LAYER_PHONE_FORMS` beside the
+builders in `controller.LAYER_BUILDERS` and written in the layer's own package,
+since the layer knows what its rows mean: Replicates
+(`groups/tab_view.set_replicates_phone_form`) takes the canvas plate role and
+turns Quick Replicates into a form — each label and field a pair widget at the
+desk, so stacked the labels sit in a `SHEET_LABEL_PT` column and the fields line
+up — with *Apply* the full width, stacks the active-group banner and keeps four
+touch rows of the group list in view (`LIST_ROWS_ON_PHONE`, since a list that
+scrolls inside itself is given only its minimum in a page that scrolls);
+Variables (`variables/tab_view.set_variables_phone_form`) stacks its two columns
+`BottomToTop`, so the plate (or the empty state and its *+ Variable*) comes
+first and the definition under it, lifting the definition's fixed width and the
+plate column's 490 px cap; Well Labels (`labels/tab_view.set_labels_phone_form`)
+puts Add Prefix / Add Suffix under the help sentence, sharing the width, and
+makes the grid compact (`LabelGrid.setCompact`: cells may narrow below a line
+edit's minimum, the row letters' column and the card's margins shrink). Every
+layer gives up its desk left inset (it clears the rail toggle, hidden in phone
+layout) and the body gives both edges a `GUTTER_PT` (12 pt) gutter. Last,
+`ui/phone_fit` fits whatever is still too wide — the Variables fill sentence is
+turned top-to-bottom by it upright. The form follows a `phone_layout` listener
+(deferred a turn, as Home's Overview's is), each layer switch, and every change
+of the viewport's width, read in `SampleMapScroll.viewportEvent` because the
+vertical scroll bar coming and going narrows the viewport without resizing the
+area — and on any viewport resize while the body is wider than the viewport: a
+layer repaints rows the fit never saw (*+ Variable* swaps the empty state for the
+plate, the chips and the fill sentence, 590 px of a 414 px viewport), and the
+horizontal scroll bar that brings on is the resize that fits it again.
+`tests/test_sample_map_phone_layout.py` builds the real tab on the loaded mini
+dataset and holds every layer, empty and populated, upright and sideways, to the
+viewport's width with no overlapping siblings, its key controls inside the width
+at touch height, the layer fitted again after the real *+ Variable* is pressed,
+and the desk's geometry unchanged after a round trip.
+
 **Datasets' tool picker.** In Datasets mode the page button (Review's
 "Bar Plots ▾") reads "‹tool› ▾" and lists the tools (`_fill_tool_menu`, from the
 `tool_names` / `current_tool` / `show_tool` handles, which are
@@ -1564,8 +1616,8 @@ review/
 │   │   │                      ← replicate sets: the plate-backed editor, the
 │   │   │                        group list, and the Quick-Replicates pairing
 │   │   ├── labels/       tab_view.py   ← the 96-QLineEdit well-label grid
-│   │   ├── sample_map/   tab_view.py, controller.py  ← the layered tab the
-│   │   │                                 three editors above are pages of
+│   │   ├── sample_map/   tab_view.py, controller.py, _phone.py  ← the layered
+│   │   │                 tab the three editors above are pages of (+ its phone form)
 │   │   ├── ratios/       tab_view.py   ← the ratio-metric editor [removable]
 │   │   ├── pipeline_info/ tab_view.py  ← read-only run parameters [removable]
 │   │   └── triage/       collect.py, controller.py, tab_view.py ← QC triage:
@@ -2868,7 +2920,9 @@ layer switch, and the rule below; `tab_view.py` builds a `SegmentedControl`, a
 host the current layer's role strip is rebuilt into, and a `QStackedWidget` whose
 three pages are built by the **unchanged** builders in `home/groups`,
 `home/variables` and `home/labels`. Nothing about what a layer does moved; what
-moved is that one of them is on screen at a time.
+moved is that one of them is on screen at a time. `_phone.py` is the tab's phone
+form (§2, *Phone layout*, *Home's Sample Map is one column that scrolls*); each
+layer's own half of it lives beside that layer's builder.
 
 Three plates rather than one shared selector painting three things. A single
 plate would be the "two plates meaning different things" hazard turned inward —

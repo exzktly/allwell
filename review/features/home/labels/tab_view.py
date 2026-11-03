@@ -145,7 +145,8 @@ class LabelGrid(QWidget):
         g.setVerticalSpacing(theme.Spacing.xs)
 
         # Empty corner (0,0).
-        corner = QLabel("", grid_host)
+        self._grid_host = grid_host
+        corner = self._corner = QLabel("", grid_host)
         corner.setFixedSize(_CORNER_W, _CORNER_H)
         g.addWidget(corner, 0, 0)
 
@@ -194,6 +195,31 @@ class LabelGrid(QWidget):
         self.setStyleSheet(self._build_qss())
 
     # ── API ──────────────────────────────────────────────────────────────
+    def setCompact(self, on: bool) -> None:
+        """Let the cells narrow below a line edit's own minimum width, or not.
+
+        A ``QLineEdit`` asks for room for a few characters plus its padding, and
+        twelve of them in a row held a phone's Well Labels layer 761 px wide.
+        Compact, every cell may take whatever share of the width the grid has —
+        its text scrolls inside it while it is edited — so the grid keeps the
+        plate's 8 × 12 shape on a narrow screen. ``setMinimumWidth(0)`` gives a
+        cell its own minimum back.
+        """
+        for cell in self._cells.values():
+            cell.setMinimumWidth(1 if on else 0)
+        # The row letters' column and the card's margins give their width to the
+        # cells: a letter needs its own width and a little air, not 40 px.
+        if on:
+            label_w = (self.fontMetrics().horizontalAdvance("W")
+                       + 2 * theme.Spacing.sm)
+            margin = theme.Spacing.xs
+        else:
+            label_w, margin = _RH_W, theme.Spacing.md
+        for header in self._row_hdrs:
+            header.setFixedWidth(label_w)
+        self._corner.setFixedWidth(label_w if on else _CORNER_W)
+        self._grid_host.layout().setContentsMargins(margin, margin, margin, margin)
+
     def setEnabledWells(self, tokens) -> None:
         """Restrict editing / selection to *tokens*.
 
@@ -391,6 +417,12 @@ class LabelGrid(QWidget):
         """
 
 
+#: Registry keys of the parts of this layer its phone form rearranges.
+PAGE_KEY = "_lbl_page"
+HEAD_KEY = "_lbl_head"
+AFFIX_ROW_KEY = "_lbl_affix_row"
+
+
 def build_label_grid(ctx, parent: QWidget) -> None:
     """Mount the LabelGrid in the Well Labels sub-tab and wire it up."""
     from review.core.ui_helpers import btn_secondary
@@ -416,7 +448,8 @@ def build_label_grid(ctx, parent: QWidget) -> None:
     layout.setContentsMargins(theme.Spacing.md, 0, 0, 0)
 
     # ── top help + affix toolbar ─────────────────────────────────────
-    head = QWidget(parent)
+    ctx.widgets.register(PAGE_KEY, parent)
+    head = ctx.widgets.register(HEAD_KEY, QWidget(parent))
     hl = QHBoxLayout(head)
     hl.setContentsMargins(0, 8, 0, 6)
     hl.setSpacing(theme.Spacing.sm)
@@ -429,23 +462,32 @@ def build_label_grid(ctx, parent: QWidget) -> None:
     help_lbl.setWordWrap(True)
     hl.addWidget(help_lbl, 1)
 
-    prefix_btn = btn_secondary(head, "Add Prefix",
-                               lambda: labels_apply_affix(ctx, where="prefix"))
+    # The two buttons share a widget of their own, so the phone form can put
+    # them under the sentence, side by side (:func:`set_labels_phone_form`). At
+    # the desk the pair sits where the two buttons sat, at the row's spacing.
+    affix = ctx.widgets.register(AFFIX_ROW_KEY, QWidget(head))
+    al = QHBoxLayout(affix)
+    al.setContentsMargins(0, 0, 0, 0)
+    al.setSpacing(theme.Spacing.sm)
+
+    prefix_btn = ctx.widgets.register("_lbl_add_prefix", btn_secondary(
+        affix, "Add Prefix", lambda: labels_apply_affix(ctx, where="prefix")))
     prefix_btn.setToolTip(
         "Prepend text to the labels of every cell currently selected in the "
         "grid. Falls back to the sidebar's selected wells if no cell is "
         "selected here."
     )
-    hl.addWidget(prefix_btn)
+    al.addWidget(prefix_btn)
 
-    suffix_btn = btn_secondary(head, "Add Suffix",
-                               lambda: labels_apply_affix(ctx, where="suffix"))
+    suffix_btn = ctx.widgets.register("_lbl_add_suffix", btn_secondary(
+        affix, "Add Suffix", lambda: labels_apply_affix(ctx, where="suffix")))
     suffix_btn.setToolTip(
         "Append text to the labels of every cell currently selected in the "
         "grid. Falls back to the sidebar's selected wells if no cell is "
         "selected here."
     )
-    hl.addWidget(suffix_btn)
+    al.addWidget(suffix_btn)
+    hl.addWidget(affix)
     layout.addWidget(head)
 
     layout.addWidget(build_hline_separator(parent))
@@ -455,6 +497,46 @@ def build_label_grid(ctx, parent: QWidget) -> None:
     grid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     layout.addWidget(grid, 1)
     ctx.widgets.register("_lbl_grid", grid)
+
+
+def set_labels_phone_form(ctx, on: bool) -> None:
+    """The Well Labels layer as one column in phone layout, or as the desk has it.
+
+    At the desk the help sentence and Add Prefix / Add Suffix share a row, and
+    the grid's cells keep a line edit's own minimum width. On a phone the
+    sentence was squeezed into a column beside the two buttons and twelve cells
+    at that minimum held the layer 761 px wide. So in phone layout:
+
+    - **the help sentence is above the buttons**, which sit side by side and
+      share the width, each a full touch target;
+    - **the grid fits the width** — its cells may narrow to whatever the width
+      leaves (:meth:`LabelGrid.setCompact`), so the plate keeps its 8 × 12 shape,
+      the same orientation as the other two layers' plates, and a tapped cell is
+      edited in place, its text scrolling inside it;
+    - **no left inset of its own** — the rail toggle it clears is hidden in
+      phone layout, and the Sample Map body gives every layer the same gutters.
+
+    Idempotent, and undone exactly by ``on=False``.
+    """
+    from PySide6.QtWidgets import QBoxLayout
+
+    reg = ctx.widgets
+    page = reg.get_or_none(PAGE_KEY)
+    if page is not None and page.layout() is not None:
+        page.layout().setContentsMargins(0 if on else theme.Spacing.md, 0, 0, 0)
+    head = reg.get_or_none(HEAD_KEY)
+    if head is not None:
+        head.layout().setDirection(
+            QBoxLayout.TopToBottom if on else QBoxLayout.LeftToRight)
+    affix = reg.get_or_none(AFFIX_ROW_KEY)
+    if affix is not None:
+        for button in (reg.get_or_none("_lbl_add_prefix"),
+                       reg.get_or_none("_lbl_add_suffix")):
+            if button is not None:
+                affix.layout().setStretchFactor(button, 1 if on else 0)
+    grid = reg.get_or_none("_lbl_grid")
+    if grid is not None:
+        grid.setCompact(on)
 
 
 def label_grid_refresh(ctx) -> None:

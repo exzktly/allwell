@@ -42,7 +42,7 @@ from widgets.spin_box import SpinBox
 #: than a centred plate with its own controls starting three hundred pixels to
 #: the left of its edge. On a page wider than this the block sits at the left,
 #: under the header, where the eye already is.
-_COLUMN_W = 490
+COLUMN_W = 490
 
 
 def build_plate_column(ctx, parent: QWidget, reg) -> QWidget:
@@ -62,7 +62,7 @@ def build_plate_column(ctx, parent: QWidget, reg) -> QWidget:
     # screen with nothing to act on — the empty state this was meant to fix,
     # minus the three widgets that happened to come to mind.
     host = reg.register("_var_plate_column", QWidget(outer))
-    host.setMaximumWidth(_COLUMN_W)
+    host.setMaximumWidth(COLUMN_W)
     outer_row.addWidget(host)
     outer_row.addWidget(_build_empty_state(ctx, outer, reg), 1)
     column = QVBoxLayout(host)

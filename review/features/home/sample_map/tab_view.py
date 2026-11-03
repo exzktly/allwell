@@ -15,6 +15,9 @@ from __future__ import annotations
 from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from ui import theme
+from review.features.home.sample_map._phone import (
+    BODY_KEY, LayerPage, install as install_phone_form, on_layer_shown,
+)
 from review.features.home.sample_map.controller import (
     LAYER_BUILDERS, LAYER_PLATES, LAYERS, SHARED_SELECTION_LAYERS, STACK_KEY,
     STRIP_KEY, SWITCH_KEY, on_layer_selection_changed, set_layer,
@@ -43,26 +46,35 @@ def build_sample_map_subtab(ctx, frame: QWidget) -> None:
     # stacked and hidden: the sentence is about what the plate below it means
     # right now, and a hidden sibling is a second answer waiting to be shown by
     # a bug.
-    strip_host = reg.register(STRIP_KEY, QWidget(frame))
+    # Everything under the switch is one widget, because in phone layout it is
+    # the part that scrolls (``_phone``): the switch stays in reach above it.
+    # At the desk it is a plain column in the switch's place in the layout.
+    body = reg.register(BODY_KEY, QWidget(frame))
+    column = QVBoxLayout(body)
+    column.setContentsMargins(0, 0, 0, 0)
+    column.setSpacing(theme.Spacing.sm)
+    outer.addWidget(body, 1)
+
+    strip_host = reg.register(STRIP_KEY, QWidget(body))
     strip_column = QVBoxLayout(strip_host)
     strip_column.setContentsMargins(0, 0, 0, 0)
     strip_column.setSpacing(0)
-    outer.addWidget(strip_host)
+    column.addWidget(strip_host)
 
     # What the plots are currently pooling by, on the page where the pooling is
     # declared. The choice is made on the plotting band and the groups are made
     # here, so a user painting a fifth group has no way of knowing from this tab
     # that a variable has been grouping the plots all along.
-    note = reg.register("_sample_map_grouping_note", QLabel("", frame))
+    note = reg.register("_sample_map_grouping_note", QLabel("", body))
     note.setObjectName("Muted")
     note.setWordWrap(True)
     note.setVisible(False)
-    outer.addWidget(note)
+    column.addWidget(note)
 
-    stack = reg.register(STACK_KEY, QStackedWidget(frame))
-    outer.addWidget(stack, 1)
+    stack = reg.register(STACK_KEY, QStackedWidget(body))
+    column.addWidget(stack, 1)
     for layer in LAYERS:
-        page = QWidget(stack)
+        page = LayerPage(stack)
         QVBoxLayout(page).setContentsMargins(0, 0, 0, 0)
         stack.addWidget(page)
         module, builder = LAYER_BUILDERS[layer]
@@ -71,8 +83,13 @@ def build_sample_map_subtab(ctx, frame: QWidget) -> None:
     switch.currentChanged.connect(
         lambda index: set_layer(ctx, LAYERS[index] if 0 <= index < len(LAYERS)
                                else LAYERS[0]))
+    # In phone layout only the layer on screen may size the stack, and it is
+    # fitted to the phone's width as it arrives (``_phone.on_layer_shown``).
+    stack.currentChanged.connect(lambda _i: on_layer_shown(ctx))
     _wire_selection_publishers(ctx)
     set_layer(ctx, LAYERS[0])
+    # Last, so the phone form starts from the finished desk form.
+    install_phone_form(ctx, frame, body)
 
 
 def _wire_selection_publishers(ctx) -> None:

@@ -642,6 +642,25 @@ QPushButton#{object_name}:disabled {{
 """
 
 
+
+def apply_app_stylesheet(app, sheet: str) -> bool:
+    """Give *app* the application stylesheet *sheet*, unless it already has it.
+
+    ``QApplication.setStyleSheet`` re-polishes every widget alive in the
+    process, whatever the text — and a widget built later is styled from the
+    application's sheet anyway, so applying the same text again changes
+    nothing on screen. It is not free: the shell and Review each applied the
+    sheet while the window was built, and in a process that has built windows
+    before (the slow test lane, where a built app is never reclaimed) each
+    call walked every leftover widget too — 55 s of a 65 s fourth build, over
+    13,788 widgets. Returns whether the sheet was applied.
+    """
+    if app is None or app.styleSheet() == sheet:
+        return False
+    app.setStyleSheet(sheet)
+    return True
+
+
 def qss() -> str:
     """Return the application-wide base stylesheet.
 

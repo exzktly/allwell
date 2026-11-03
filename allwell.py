@@ -370,9 +370,7 @@ class AllWellApp(QMainWindow):
         # active theme's tokens are already applied by ``main`` (via
         # ``theme.select_theme_from_env``) before this runs, so ``qss()`` here
         # reflects the selected theme (ALLWELL_THEME); default is grey.
-        app = QApplication.instance()
-        if app is not None:
-            app.setStyleSheet(theme_v2.qss())
+        theme_v2.apply_app_stylesheet(QApplication.instance(), theme_v2.qss())
 
     def _build_ui(self) -> None:
         from analyze.tab import AnalyzeTab

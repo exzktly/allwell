@@ -14,7 +14,7 @@ hide the remedy, which is an anchor. So, in order:
 4. ``ok`` → the identity check's verdict: contradicted, inconclusive, partial, not checked, reference, confirmed.
 
 Which timepoints are *not addressed* and which have an *anchor waiting* is decided by
-``anchor_queue_compute.waiting_items`` — the very function the *Anchor queue* walks — so the matrix and the queue
+``anchor_queue_compute.waiting_items`` — the very function the *Resolve* walk reads — so the matrix and the queue
 cannot disagree about what is waiting.
 
 Reading it costs a hash of each well's sites table (the identity check's own staleness test), so
@@ -46,7 +46,7 @@ ARRAY_STATES = (NOT_ADDRESSED, ANCHOR_WAITING, NOT_LOCATED)
 WORDS = {NOT_ADDRESSED: "not addressed", ANCHOR_WAITING: "anchor waiting", NOT_LOCATED: "not located",
          CONTRADICTED: "contradicted", INCONCLUSIVE: "inconclusive", PARTIAL: "partial", NOT_CHECKED: "not checked",
          REFERENCE: "reference", CONFIRMED: "confirmed"}
-#: The states *Anchor queue* can walk: every state that needs a look and is a timepoint the Array view can show.
+#: The states *Resolve* can walk: every state that needs a look and is a timepoint the Array view can show.
 #: *Anchor waiting* is not one: its remedy is a re-run, not another look.
 WALKABLE = (NOT_ADDRESSED, CONTRADICTED, INCONCLUSIVE, PARTIAL, NOT_LOCATED)
 #: What it walks until the user chooses otherwise: every state an anchor can act on, and partial, to look over.
@@ -228,33 +228,33 @@ def hover_text(cell: QcCell, hours=None) -> str:
     head = f"{cell.well} · {cell.timepoint}{_hours(hours)} — "
     why = cell.why.rstrip(".")
     identity = " Click to open it on Identity."
+    walk = " Click to resolve it, then the next one like it."
     if cell.state == CONFIRMED:
         body = "confirmed: its addresses name the same nanowells as at the reference timepoint." + identity
     elif cell.state == REFERENCE:
         body = "reference: the timepoint this well's others are checked against." + identity
     elif cell.state == PARTIAL:
         body = (f"partial: {cell.left_out or 0:,} nanowell(s) left out of comparisons over time; the rest are used."
-                + (f" {why}." if why else "") + identity)
+                + (f" {why}." if why else "") + " Click to see which, then the next one like it.")
     elif cell.state == INCONCLUSIVE:
         body = (f"inconclusive: the identity check could not decide{f' — {why}' if why else ''}. Still used in "
-                "comparisons over time; look before relying on it." + identity)
+                "comparisons over time; confirm its central square." + walk)
     elif cell.state == CONTRADICTED:
-        body = (f"contradicted{f': {why}' if why else ''}. Left out of every comparison over time." + identity)
+        body = (f"contradicted{f': {why}' if why else ''}. Left out of every comparison over time; set its central "
+                "square." + walk)
     elif cell.state == NOT_CHECKED:
         body = f"not checked{f': {why}' if why else ''}." + identity
     elif cell.state == NOT_ADDRESSED and cell.refused:
-        body = ("not addressed: the last run could not address it from the anchor set here. Click to set it again "
-                "on Array.")
+        body = "not addressed: the last run could not address it from the anchor set here; set it again." + walk
     elif cell.state == NOT_ADDRESSED:
-        body = (f"not addressed: {why or 'the run could not find the central square'}. Click to set its anchor on "
-                "Array.")
+        body = f"not addressed: {why or 'the run could not find the central square'}." + walk
     elif cell.state == ANCHOR_WAITING:
         body = ("anchor waiting: an anchor is set here and no run has used it yet. Re-run anchored wells… addresses "
-                "it. Click to see it on Array.")
+                "it. Click to see it.")
     else:
         status = cell.grid_status.replace("_", " ") or "no status"
-        body = (f"not located ({status}){f': {why}' if why else ''}. An anchor set by hand cannot change this. "
-                "Click to see it on Array.")
+        body = (f"not located ({status}){f': {why}' if why else ''}. An anchor set by hand cannot change this."
+                " Click to see it, then the next one like it.")
     return head + body
 
 
@@ -292,12 +292,12 @@ def legend_items(matrix: QcMatrix) -> list[tuple[str, int]]:
 
 
 def queue_tip(matrix: QcMatrix | None, states=WALK_DEFAULT) -> str:
-    """Why *Anchor queue* is greyed, or ``""`` when it has something to walk."""
+    """Why *Resolve* is greyed, or ``""`` when it has something to walk."""
     if matrix is None:
         return "The plate's records are still being read."
     if queue_items(matrix, states):
         return ""
-    tip = f"No timepoint is in a state Walk includes ({walk_words(states)})."
+    tip = f"No timepoint is “{walk_words(states)}”."
     waiting = matrix.counts.get(ANCHOR_WAITING, 0)
     if waiting:
         tip += f" {waiting} have an anchor waiting for a re-run: Re-run anchored wells… addresses them."
@@ -305,8 +305,8 @@ def queue_tip(matrix: QcMatrix | None, states=WALK_DEFAULT) -> str:
 
 
 def queue_items(matrix: QcMatrix | None, states) -> list:
-    """The ``anchor_queue_compute.QueueItem`` of every cell in *states*, plate order then time order: what *Anchor
-    queue* walks."""
+    """The ``anchor_queue_compute.QueueItem`` of every cell in *states*, plate order then time order: what *Resolve*
+    walks."""
     if matrix is None:
         return []
     wanted = set(states)
@@ -325,7 +325,7 @@ def waiting_wells(matrix: QcMatrix | None) -> set:
 
 
 def queue_size(matrix: QcMatrix | None, per_well: bool, states=WALK_DEFAULT) -> int:
-    """How many items *Anchor queue* would walk: every cell in *states*, or with *per_well* each well's first,
+    """How many items *Resolve* would walk: every cell in *states*, or with *per_well* each well's first,
     leaving out wells that already have an anchor waiting for a re-run — ``anchor_queue_compute.one_per_well``'s
     rule, counted from the matrix so the button can say it before the walk starts."""
     items = queue_items(matrix, states)
@@ -333,26 +333,26 @@ def queue_size(matrix: QcMatrix | None, per_well: bool, states=WALK_DEFAULT) -> 
 
 
 def queue_label(matrix: QcMatrix | None, per_well: bool, states=WALK_DEFAULT) -> str:
-    """*Anchor queue*'s text: what pressing it walks, so *One per well* and *Walk* visibly change it."""
+    """*Resolve*'s text: what pressing it walks, so *One per well* and *Problem* visibly change it."""
     n = queue_size(matrix, per_well, states)
     if matrix is None:
-        return "Anchor queue"
+        return "Resolve"
     noun = ("well" if n == 1 else "wells") if per_well else ("timepoint" if n == 1 else "timepoints")
-    return f"Anchor queue: {n} {noun}"
+    return f"Resolve: {n} {noun}"
 
 
 def action_line(matrix: QcMatrix | None, states=WALK_DEFAULT) -> str:
     """What to do about the timepoints needing a look, said on the figure (a tooltip is not seen over VNC on a
-    phone); ``""`` when *Anchor queue* has nothing to walk."""
+    phone); ``""`` when *Resolve* has nothing to walk."""
     n = len(queue_items(matrix, states))
     if not n:
         return ""
-    return (f"Press Anchor queue to step through {n:,} of them on the Array view ({walk_words(states)}), "
-            "or click a cell to open one.")
+    return (f"Press Resolve to step through the {n:,} {walk_words(states)} timepoint{'s' if n != 1 else ''}, each "
+            "opened where it is fixed with what to do, or click any cell to start at it. Problem chooses the class.")
 
 
 def walk_words(states) -> str:
-    """The states *Walk* includes, by their legend words, in legend order."""
+    """The states *Problem* chooses, by their legend words, in legend order."""
     return ", ".join(WORDS[s] for s in QC_STATES if s in set(states)) or "none"
 
 

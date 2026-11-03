@@ -195,6 +195,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_anchor_queue.py": "The QC view's Anchor queue: every timepoint the run left unaddressed, shown one montage …",
     "test_nanowell_array_band.py": "the Array view's controls: Where, the walk in its place, greyed with a reason",
     "test_nanowell_qc_view.py": "The Nanowells page's QC view: every well and timepoint's state, a click on a cell, the queue",
+    "test_nanowell_resolve.py": "The QC view's Resolve walk: a click on a problem takes you to it, says what is wrong …",
     "test_an_unaddressed_nanowell_timepoint_offers_its_anchor.py": "A nanowell timepoint the run left unaddressed is named as such, and opens straight onto …",
     "test_an_unaddressed_nanowell_well_is_not_staged_and_never_processed.py": "A nanowell well whose timepoints ran and could not be addressed is partial on Home, not …",
     "test_batch_export_nanowell_mode.py": "Batch Export's Nanowells mode (tracker I4): per export group, the chosen view per metric …",

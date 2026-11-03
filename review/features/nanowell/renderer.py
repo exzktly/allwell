@@ -1403,8 +1403,9 @@ def _array_axes(fig, scene, image, region, *, right: float, bottom: float, top: 
     w_px, h_px = max(int(round(box.width)), 1), max(int(round(box.height)), 1)
     fit = fit_region(whole, w_px, h_px, margin=0.0)
     if isinstance(region, CentreZoom):
-        # Centred on the whole-well montage itself, not on the padded union with the nanowells drawn around it.
-        cx, cy = _centre(_image_extent(image) if image is not None else fit)
+        # Centred on the whole-well montage itself, not on the padded union with the nanowells drawn around it, or
+        # on the point the Resolve walk was told the square is near.
+        cx, cy = region.at if region.at is not None else _centre(_image_extent(image) if image is not None else fit)
         half_w, half_h = (fit[2] - fit[0]) / (2 * region.factor), (fit[3] - fit[1]) / (2 * region.factor)
         x0, y0, x1, y1 = cx - half_w, cy - half_h, cx + half_w, cy + half_h
     else:

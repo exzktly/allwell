@@ -1,16 +1,27 @@
-"""The QC view's **Anchor queue**: walk every timepoint waiting for an anchor, one montage after another.
+"""The QC view's **Resolve** walk: step through one class of problem, one timepoint after another, each opened where
+it is fixed with the guide card saying what is wrong, what to do and where, and what happens next
+(``resolve_compute``, drawn by ``resolve_view``).
 
-*Anchor queue* (on the QC view's Anchor group) reads which timepoints are waiting (``anchor_queue_compute``) and opens
-the first exactly as QC Triage's *Set anchor…* does (``controller.open_for_anchor``): the Array view on that well
-and timepoint, the anchor layer on in the well frame, *Set anchor* on once the well's tables are loaded. A click on
-the central square writes the anchor as it always does (``controller.set_anchor_at``), which tells the queue
-(:func:`anchor_set`); after a short pause — long enough to see where the anchor landed — the next timepoint is
-shown. Each timepoint opens at :data:`OPEN_ZOOM` times *Fit* on the centre of the whole-well montage, where the
-central square usually is. *One per well* limits the walk to each well's first waiting timepoint. *Skip* moves on without an anchor, *Back* returns to the previous one (a click there replaces its anchor),
-and *Stop* ends the walk; so does leaving the Array view for another (``controller.set_view``), since the walk's
-keys live on a band group shown only there. The walk ends by itself after the last item. Whichever way it ends, the
-page goes back to the view the walk started from — the QC view — which says how many were anchored, rings the cells
-anchored, and holds *Re-run anchored wells…*, which is what puts the anchors to use.
+The walk starts two ways: *Resolve* on the QC view's band walks the class chosen under *Problem* from its first
+timepoint (:func:`start`), and a click on a cell of the matrix walks that cell's class from that cell
+(:func:`start_class`), so the next one of the same kind is one key away. A timepoint whose class is fixed on the
+montage (not addressed, contradicted, inconclusive, not located, anchor waiting) opens exactly as QC Triage's *Set
+anchor…* does (``controller.open_for_anchor``): the Array view on that well and timepoint, the anchor layer on in the
+well frame, *Set anchor* on once the well's tables are loaded for the classes an anchor fixes, zoomed about the best
+evidence of where the square is (``resolve_compute.hint_for``), which is ringed. A partial timepoint opens on the
+Identity view instead, its Distance map centred on the nanowells left out (:func:`_open_identity_item`): that is where
+they are drawn as such, and there is nothing to set.
+
+A click on the central square writes the anchor as it always does (``controller.set_anchor_at``), which tells the
+walk (:func:`anchor_set`); after a short pause — long enough to see where the anchor landed — the next timepoint is
+shown. A timepoint with no hint opens at :data:`OPEN_ZOOM` times *Fit* on the centre of the whole-well montage, where
+the central square usually is; one with a hint at ``resolve_compute.HINT_ZOOM`` about it. *One per well* limits a
+*Resolve* walk to each well's first timepoint. *Skip* moves on, *Back* returns to the previous one (a click there
+replaces its anchor), and *Stop* ends the walk; so does choosing a view other than the one the shown timepoint is
+on (``controller.set_view``). The walk ends by itself after the last item. Whichever way it ends, the page goes back
+to the view the walk started from — the QC view — which says what the walk did and what to do next
+(``resolve_compute.finished``: *Re-run anchored wells…* when anything was anchored, the next class otherwise), rings
+the cells anchored, and holds *Re-run anchored wells…*, which is what puts the anchors to use.
 
 Each step shows its well beside the selection the queue started with, never accumulating the wells walked past,
 and the end restores that selection: plate selections are app-wide, and a walk over thirty wells must not leave
@@ -25,8 +36,8 @@ from review.core.selection_controller import set_selected_wells
 from review.features.nanowell import anchor_queue_compute as aqc
 from review.features.nanowell import controller as nwc
 from review.features.nanowell import _qc_controller as qcc
-from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell import qc_compute as qc
+from review.features.nanowell import resolve_compute as rc
 from util.nanowell_anchors import AnchorsFileError, read_anchors
 
 #: How long the anchor just set stays on screen before the next timepoint replaces it.
@@ -53,14 +64,16 @@ def active_queue(ctx) -> aqc.AnchorQueue | None:
     return queue
 
 
-def build_queue(ctx) -> tuple[aqc.AnchorQueue | None, str]:
-    """The :class:`anchor_queue_compute.AnchorQueue` of this dataset's waiting timepoints, or ``(None, why)``."""
+def build_queue(ctx, states=None) -> tuple[aqc.AnchorQueue | None, str]:
+    """The :class:`anchor_queue_compute.AnchorQueue` of this dataset's timepoints in *states* (the class *Problem*
+    chooses when ``None``), or ``(None, why)``. The anchors file is found from the dataset folder, so a click on the
+    matrix can start a walk before any well's tables are read."""
 
     st = _state(ctx)
     data_dir = ctx.state.dataset.data_dir
-    if st is None or st.data is None or not data_dir:
+    if st is None or not data_dir:
         return None, "The nanowell tables are not loaded."
-    path = fmc.anchors_file(st.data)
+    path = qcc.anchors_path(st, data_dir)
     if path is None:
         return None, "This dataset has no in/ folder beside it to keep anchors in, so none can be set."
     try:
@@ -71,20 +84,21 @@ def build_queue(ctx) -> tuple[aqc.AnchorQueue | None, str]:
     matrix = qcc.matrix(ctx)
     if matrix is None:
         return None, "The plate's grid records and identity checks are still being read."
-    items = qc.queue_items(matrix, st.anchor_queue_states)
+    states = rc.walk_states(matrix, st.anchor_queue_states) if states is None else tuple(states)
+    items = qc.queue_items(matrix, states)
     pending = frozenset(k for k, c in matrix.cells.items() if c.state == qc.ANCHOR_WAITING)
     queue = aqc.AnchorQueue(items, selection_before=frozenset(ctx.state.selection.selected_wells),
                             pending_rerun=pending, data_dir=str(data_dir))
     queue.set_per_well(st.anchor_queue_per_well)
     if not queue.items:
-        why = f"No timepoint is in a state Walk includes ({qc.walk_words(st.anchor_queue_states)})"
+        why = f"No timepoint is “{qc.walk_words(states)}”"
         if items:
             # One per well left nothing: every well with a waiting timepoint already has an anchor for a re-run,
             # which is the remedy the message names. Its toggle sits in the group shown only during a walk, so it is
             # turned off here, or nothing on the page could ever walk the rest.
             st.anchor_queue_per_well = False
             why += (f" with One per well: {len(items)} more wait in wells that already have one. One per well is now "
-                    "off, so Anchor queue walks them all")
+                    "off, so Resolve walks them all")
         why += "."
         if pending:
             why += (f" {len(pending)} timepoint(s) have an anchor that no run has used yet: Re-run anchored wells… "
@@ -94,13 +108,33 @@ def build_queue(ctx) -> tuple[aqc.AnchorQueue | None, str]:
 
 
 def start(ctx) -> bool:
-    """*Anchor queue*: build the queue and show its first timepoint; when nothing waits, say so on the figure."""
+    """*Resolve*: build the walk of the class *Problem* chooses and show its first timepoint; when there is none,
+    say so on the figure."""
+    return _begin(ctx, *build_queue(ctx))
 
+
+def start_class(ctx, state: str, well: str, timepoint: str) -> bool:
+    """A click on the matrix: walk every timepoint of *state*'s class, starting at *well* at *timepoint*, so the next
+    one of the same kind follows. *One per well* is not applied: the cell clicked is always the one shown."""
+    st = _state(ctx)
+    if st is None or rc.class_of(state) is None:
+        return False
+    per_well, st.anchor_queue_per_well = st.anchor_queue_per_well, False
+    try:
+        queue, why = build_queue(ctx, (state,))
+    finally:
+        st.anchor_queue_per_well = per_well
+    if queue is not None:
+        keys = [(item.well, item.timepoint) for item in queue.items]
+        queue.index = keys.index((well, timepoint)) if (well, timepoint) in keys else 0
+    return _begin(ctx, queue, why)
+
+
+def _begin(ctx, queue, why: str) -> bool:
     st = _state(ctx)
     if st is None:
         return False
     st.qc_message, st.qc_highlight = "", frozenset()
-    queue, why = build_queue(ctx)
     if queue is None:
         if st.view == "qc":
             st.qc_message = why
@@ -123,15 +157,21 @@ def _open_current(ctx, queue) -> bool:
     wanted = set(queue.selection_before) | {item.well}
     if set(ctx.state.selection.selected_wells) != wanted:
         set_selected_wells(ctx, wanted)
-    armed = item.state in qc.ARMED
-    shown = nwc.open_for_anchor(ctx, item.well, item.timepoint, zoom=OPEN_ZOOM, arm=armed)
     st = _state(ctx)
+    cls = rc.class_of(item.state) or rc.CLASSES[qc.NOT_ADDRESSED]
+    hint = _hint(ctx, st, item)
+    st.resolve_hint = hint
+    if cls.view == "identity":
+        shown = _open_identity_item(ctx, st, item)
+        nwc._call(ctx, "_nw_refresh_controls")
+        return shown
+    _forget_focus(st)
+    armed = cls.armed
+    zoom = rc.HINT_ZOOM if hint.point_um is not None else OPEN_ZOOM
+    shown = nwc.open_for_anchor(ctx, item.well, item.timepoint, zoom=zoom, arm=armed, at=hint.point_um)
     if shown and st is not None:
         if not armed:
-            st.array_message = (f"{item.well} at {item.timepoint} is {item.state.replace('_', ' ')}"
-                                + (f": {item.reason.rstrip('.')}" if item.reason else "")
-                                + ". Opened to look at, with Set anchor off: → goes on to the next one; turn Set "
-                                  "anchor on to re-anchor it.")
+            st.array_message = ""                       # the guide card says what to do
         elif item.refused and not st.array_message:
             st.array_message = ("The last run could not address this timepoint from the anchor set here: click the "
                                 "central square again.")
@@ -140,6 +180,101 @@ def _open_current(ctx, queue) -> bool:
             st.array_message += " Skip (→) goes on to the next one."
     nwc._call(ctx, "_nw_refresh_controls")
     return shown
+
+
+def _hint(ctx, st, item) -> rc.Hint:
+    """Where *item*'s fix is made, from its grid block and its entry in the well's identity sidecar (read without
+    re-hashing the tables: the matrix this walk was built from already decided the verdict)."""
+    from pipeline.nanowell_identity import read_sidecar
+
+    records = getattr(st, "qc_records", None)
+    block = ((records.grids.get(item.well) or {}).get(item.timepoint)) if records is not None else None
+    entry = None
+    if item.state in (qc.CONTRADICTED, qc.INCONCLUSIVE):
+        out_dir = _out_dir(ctx)
+        payload = read_sidecar(out_dir, item.well, verify=False) if out_dir is not None else None
+        entry = ((payload or {}).get("timepoints") or {}).get(item.timepoint)
+    return rc.hint_for(item.state, block, entry)
+
+
+def _out_dir(ctx):
+    from pathlib import Path
+
+    from review.data.nanowell_focus_gate import nanowell_dir
+
+    folder = nanowell_dir(ctx.state.dataset.data_dir)
+    return Path(folder).parent if folder is not None else None
+
+
+def _open_identity_item(ctx, st, item) -> bool:
+    """A partial timepoint: the Identity view's Distance map of it against its reference, coloured by status and
+    centred on the nanowells it leaves out (the *Nanowell* box, which the walk fills and clears)."""
+    records = getattr(st, "qc_records", None)
+    left_out = ((records.excluded.get(item.well) or {}).get(item.timepoint)) if records is not None else ()
+    focus = rc.focus_address(left_out)
+    st.identity_mode = "distance"
+    if st.identity_colour == "distance":
+        st.identity_colour = "auto"                     # Auto colours a partial timepoint by status
+    st.resolve_focus = st.identity_focus = focus
+    st.anchor_mode = False
+    return qcc.open_identity(ctx, item.well, item.timepoint)
+
+
+def _forget_focus(st) -> None:
+    """Clear the *Nanowell* box when the walk wrote what it holds; a box the reader typed is theirs."""
+    if st.resolve_focus and st.identity_focus == st.resolve_focus:
+        st.identity_focus = ""
+    st.resolve_focus = ""
+
+
+def current_view(ctx) -> str | None:
+    """The view the walk's current timepoint is shown on, or ``None`` with no walk."""
+    queue = active_queue(ctx)
+    item = queue.current if queue is not None else None
+    cls = rc.class_of(item.state) if item is not None else None
+    return None if item is None else (cls.view if cls is not None else "array")
+
+
+def current_guide(ctx) -> rc.Guide | None:
+    """The guide card's text for the timepoint shown (``resolve_compute.guide_for``), or ``None`` with no walk."""
+    st = _state(ctx)
+    queue = active_queue(ctx)
+    item = queue.current if queue is not None else None
+    if st is None or item is None:
+        return None
+    cls = rc.class_of(item.state)
+    armed = bool(cls is not None and cls.armed and (st.anchor_mode or st.anchor_pending is not None))
+    records = st.qc_records
+    left_out = None
+    hours = ""
+    if records is not None:
+        left_out = len((records.excluded.get(item.well) or {}).get(item.timepoint) or ()) or None
+        hours = rc.hours_suffix(item.timepoint, qc.hours_of(records.times_h, item.timepoint))
+    hint = st.resolve_hint if isinstance(st.resolve_hint, rc.Hint) else rc.Hint()
+    return rc.guide_for(item, hint, index=queue.index, total=len(queue.items), armed=armed, left_out=left_out,
+                        hours=hours)
+
+
+def target(ctx, well: str, timepoint: str):
+    """The hint to ring on the Array view when it draws *well* at *timepoint* during a walk, or ``None``."""
+    st = _state(ctx)
+    queue = active_queue(ctx)
+    item = queue.current if queue is not None else None
+    if st is None or item is None or (item.well, item.timepoint) != (well, timepoint):
+        return None
+    hint = st.resolve_hint
+    return hint if isinstance(hint, rc.Hint) and hint.point_um is not None else None
+
+
+def exclude_current(ctx) -> bool:
+    """The guide card's *Exclude well* (a timepoint not located): leave the shown well out of the page's figures,
+    then go on to the next timepoint."""
+    queue = active_queue(ctx)
+    item = queue.current if queue is not None else None
+    if item is None:
+        return False
+    nwc.set_well_excluded(ctx, item.well, True)
+    return step(ctx, +1)
 
 
 def step(ctx, delta: int) -> bool:
@@ -200,10 +335,15 @@ def stop(ctx, land_on: str | None = None) -> bool:
         return False
     st.anchor_queue = None
     st.anchor_mode = False
+    st.resolve_hint = None
+    _forget_focus(st)
     if set(ctx.state.selection.selected_wells) != set(queue.selection_before):
         set_selected_wells(ctx, set(queue.selection_before))
+    passed = min(queue.index, len(queue.items))
     queue.index = len(queue.items)
-    text = queue.summary()
+    state = queue.items[0].state if queue.items else None
+    text = rc.finished(state, anchored=len(queue.anchored), walked=queue.walked(), skipped=queue.skipped(),
+                       looked=passed, matrix=qcc.matrix(ctx))
     st.view = land_on or queue.return_view or "qc"
     if st.view == "array":
         st.array_message = text

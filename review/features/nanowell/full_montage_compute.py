@@ -343,8 +343,10 @@ class CentreZoom:
     """A region the Array view works out when it draws: *factor* times *Fit*, about the centre of the image layer
     (the whole-well montage), or of everything drawn when no image is. The anchor queue opens each timepoint this
     way, because the central square an anchor marks is usually there; a pan or a zoom replaces it with the
-    ``(left, top, right, bottom)`` it lands on."""
+    ``(left, top, right, bottom)`` it lands on. With *at* (a well-frame point, µm) it centres there instead: the
+    *Resolve* walk's best guess at where the square is (``resolve_compute.hint_for``)."""
     factor: float
+    at: tuple | None = None
 
 
 def zoom_region(region, factor: float, at_um: tuple[float, float]):

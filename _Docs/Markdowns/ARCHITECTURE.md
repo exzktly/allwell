@@ -12298,15 +12298,21 @@ hatches for the identity verdicts (`_identity_marks.HATCH`), horizontal and vert
 plate rows are banded apart over 12 rows, and rows too short to name are labelled by their plate-row letter. The
 title counts the timepoints needing a look and the legend counts every state on the plate. *Wells*
 (`state.qc_wells`, persisted) shows a row for each well needing a look or for every well. A cell's short form leads
-the canvas readout (`ax._aw_hover_label`) and its sentence is the tooltip (`qc_compute.hover_text`). A click opens
-the cell where it is dealt with: a verdict on the Identity view (`_qc_controller.open_identity`, which adds the well
-to the selection as `open_for_anchor` does), an anchor's business on the Array view through `open_for_anchor`. The
-view's band carries *Wells* and the *Anchor* group (`qc_view`): *Anchor queue*, the page's primary action, whose
-text says what it walks (`qc_compute.queue_label`, counted by `queue_size` with `one_per_well`'s rule) and which is
-greyed with `qc_compute.queue_tip`'s reason when nothing is in the states it walks; *Walk ▾*, a menu of the walkable
-states each with its count on the plate; *One per well*, a checkbox because it is an option of the walk rather than
-an action, whose toggling changes that count; and *Re-run anchored wells…*. While the queue has anything to walk the
-figure says what to press (`qc_compute.action_line`), since a tooltip is not seen over VNC. The export style pass
+the canvas readout (`ax._aw_hover_label`) and its sentence is the tooltip (`qc_compute.hover_text`), which says what
+a click does. A click on a cell holding a problem starts the *Resolve* walk of that cell's class **at that cell**
+(`_anchor_queue.start_class`, below), so it opens where the problem is fixed with the guide card saying what to do,
+and the next timepoint of the same class is one key away; a cell with nothing to fix (confirmed, the reference, not
+checked) opens on the Identity view (`_qc_controller.open_identity`, which adds the well to the selection as
+`open_for_anchor` does). The view's band carries *Wells* and an uncaptioned *Resolve* group (`qc_view`): *Problem ▾*,
+a menu of the classes a walk can resolve (`resolve_compute.PICKABLE`: not addressed, contradicted, inconclusive,
+partial, not located), exclusive, each with its count on the plate; *Resolve*, the page's primary action, whose text
+says what it walks (`qc_compute.queue_label`, counted by `queue_size` with `one_per_well`'s rule) and which is
+greyed with `qc_compute.queue_tip`'s reason when the class chosen is empty; *One per well*, a checkbox because it is
+an option of the walk rather than an action, whose toggling changes that count; and *Re-run anchored wells…*. The
+class is `state.anchor_queue_states` as a one-state tuple once chosen; until then the several-state default reads as
+the worst class with anything on the plate (`resolve_compute.chosen` / `walk_states`), so *Resolve* is never empty
+while something needs a look. While it has anything to walk the figure says what to press
+(`qc_compute.action_line`), since a tooltip is not seen over VNC. The export style pass
 sets every tick label to the Properties size, so `QcDrawn.relabel` puts the matrix's own label sizes back after it.
 `tests/test_nanowell_qc_view.py` pins the precedence on records where the wrong rule answers differently, and drives
 the real page with nothing selected: the view bar, a real click on a cell, and leaving Array mid-walk.
@@ -12719,54 +12725,91 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   Incremental, and forcing makes it moot), through `review/core/analyze_handoff.open_in_analyze` — Review's one
   door into Analyze, shared by Home's *Finish this run*, QC triage and this view. A file that cannot be written
   is said on the figure (`state.array_message`).
-- **The anchor queue.** *Anchor queue* (on the QC view's Anchor group, not the Array view's) walks the plate's
-  timepoints in the QC states *Walk* ticks (`state.anchor_queue_states`, for the session; `qc_compute.WALKABLE`:
-  not addressed, contradicted, inconclusive, partial and not located, all but not located ticked by default), one
-  montage after another. `build_queue` takes them from the QC view's matrix (`qc_compute.queue_items`), so the
-  queue and the matrix cannot disagree, and the plate need not be selected: the matrix reads every well's records,
-  not `state.data.grids`, which holds only the wells the page has loaded. Its *not addressed* cells come from
+- **The Resolve walk.** *Resolve* (on the QC view's band, not the Array view's) walks one **class of problem** at a
+  time — the class *Problem* chooses, or the class of the cell clicked — one timepoint after another, each opened
+  where its problem is fixed with a guide card saying what is wrong, exactly what to do and where, and what happens
+  next. The rules are Qt-free in `resolve_compute`: `CLASSES` gives each class (a QC state) its picker label, the
+  view it opens on and whether it opens with *Set anchor* on — not addressed, contradicted and inconclusive on Array,
+  armed, because an anchor set by hand comes first in `nanowell_lattice.resolve_origin` and so re-addresses even a
+  timepoint whose square the run did find; partial on Identity, since its left-out nanowells already stay out of
+  every join and there is nothing to set, only which nanowells to see; not located and anchor waiting on Array,
+  unarmed (no anchor changes the first; the second already has one and needs a re-run). `build_queue(ctx, states)`
+  takes the class's timepoints from the QC view's matrix (`qc_compute.queue_items`), so the walk and the matrix
+  cannot disagree, and finds the anchors file from the dataset folder (`_qc_controller.anchors_path`) so a click can
+  start a walk before any well's tables are read; the plate need not be selected. Its *not addressed* cells come from
   `anchor_queue_compute.waiting_items`: each `unaddressed` timepoint with no anchor set, or with the very anchor the
-  last run tried and refused (the block's `manual_anchor_um` equals the file's). An anchor set and not yet used by a
-  run is not walked (its remedy is a re-run), and is kept (`AnchorQueue.pending_rerun`) so the empty-queue message
-  can say so. Each `QueueItem` carries its state, which the walk's label names (`3 of 330 · B04 at 24h ·
-  partial`). States where an anchor is the fix — not addressed, contradicted, inconclusive (`qc_compute.ARMED`) —
-  open with *Set anchor* on; a partial or not located timepoint opens to be looked at, `open_for_anchor(arm=False)`
-  leaving *Set anchor* off so a click cannot drop an anchor by accident, and the figure says → goes on. Order is
-  plate order, then the matrix's time order (the acquisition record's hours, as `NanowellData.order` sorts), never
-  the record's or the labels'. *One per well* (`AnchorQueue.set_per_well`, `one_per_well`) narrows the walk to each
-  well's first waiting timepoint and drops every well that already has an anchor waiting for a re-run, since the
-  end of a run addresses a well's other timepoints from one anchor through the rest of the plate. It is kept for
-  the session on `state.anchor_queue_per_well`; switching mid-walk keeps the shown item when the new list holds it
-  and otherwise goes on at the first item after it, never back over wells already passed.
-  When *One per well* leaves nothing to walk, `build_queue` refuses (the remedy is a re-run, which the message
-  names) and turns `anchor_queue_per_well` off, so the next press walks every waiting timepoint; the QC view's
-  *One per well* toggle shows it turned off.
-  `_anchor_queue` walks it: each step sets the selection to the one the queue started with plus the step's well
-  (so the wells walked past do not accumulate on every other tab) and calls `open_for_anchor`, the same service
-  QC Triage and Home use, with `zoom=OPEN_ZOOM` (10): the view opens at that many times *Fit* on the centre of the
-  whole-well montage, where the central square usually is. The region is a `full_montage_compute.CentreZoom`,
-  which `renderer._array_axes` resolves at draw time against the image layer's extent (everything drawn, without
-  an image); it is held on `state.anchor_zoom` and applied by `_apply_pending_anchor` once the well's tables have
-  landed and the page draws that well, because a draw before then shows another well and the change of well
-  refits. A pan or zoom replaces it with the tuple it lands on; the next step opens at 10× again. When *Set anchor*
-  cannot be turned on for a step, the figure's reason is followed by a pointer to Skip. `set_anchor_at` tells the queue when an anchor is saved (`_anchor_change` returns the
-  `(well, timepoint)` it changed); when it is the current item, the queue records it and moves on after
+  last run tried and refused (the block's `manual_anchor_um` equals the file's). An anchor set and not yet used is
+  *anchor waiting*, kept on `AnchorQueue.pending_rerun` so the empty-walk message can say so. `start` walks the chosen
+  class from its first timepoint; `start_class(state, well, timepoint)` (a click) walks the cell's class with *One
+  per well* off and `AnchorQueue.index` on the cell. Each `QueueItem` carries its state, which the band's label
+  names (`3 of 330 · B04 at 24h · partial`). Order is plate order, then the matrix's time order (the acquisition
+  record's hours, as `NanowellData.order` sorts), never the record's or the labels'. *One per well*
+  (`AnchorQueue.set_per_well`, `one_per_well`) narrows a *Resolve* walk to each well's first timepoint and drops every
+  well that already has an anchor waiting for a re-run, since the end of a run addresses a well's other timepoints
+  from one anchor through the rest of the plate. It is kept for the session on `state.anchor_queue_per_well`;
+  switching mid-walk keeps the shown item when the new list holds it and otherwise goes on at the first item after
+  it, never back over wells already passed. When *One per well* leaves nothing to walk, `build_queue` refuses (the
+  remedy is a re-run, which the message names) and turns `anchor_queue_per_well` off, so the next press walks every
+  timepoint; the QC view's *One per well* toggle shows it turned off.
+
+  **Where.** `resolve_compute.hint_for` names the best evidence of where the central square is, in the well frame
+  anchors are set in: where the reference timepoint's square correlates on this montage (the identity sidecar's
+  `square.found_um`, only when that registration was `ok`, read with `read_sidecar(verify=False)` because the matrix
+  the walk came from already judged the sidecar current), then the square the run picked (the grid block's
+  `fiducial.position_um`, accepted or not), then the rim-fitted centre (`array_boundary.centre_um`), then nothing.
+  Each `Hint` carries the words that say which it is, because a ring is a claim and a reader clicks differently on
+  the run's rejected guess than on where the reference's square matched. `_anchor_queue._open_current` holds it on
+  `state.resolve_hint` and opens an Array item through `open_for_anchor(zoom=, at=)`: `HINT_ZOOM` (6) times *Fit*
+  about the hint, or `OPEN_ZOOM` (10) about the montage's centre without one. The region is a
+  `full_montage_compute.CentreZoom(factor, at)`, which `renderer._array_axes` resolves at draw time against the
+  image layer's extent; it is held on `state.anchor_zoom` and applied by `_apply_pending_anchor` once the well's
+  tables have landed and the page draws that well, because a draw before then shows another well and the change of
+  well refits. A pan or zoom replaces it with the tuple it lands on. `controller.redraw` rings the hint on the Array
+  view (`_resolve_render.draw_resolve_target`, a dashed ring of fixed screen size, hollow so the square under it stays
+  visible) whenever the drawn well and timepoint are the walk's current item (`_anchor_queue.target`). A partial item
+  opens through `_open_identity_item`: the Distance map (an `identity_colour` of *Distance* goes back to *Auto*, which
+  colours a partial timepoint by status), with the *Nanowell* box set to `resolve_compute.focus_address` of the
+  timepoint's exclusions — the left-out nanowell nearest their middle, so a tile left out is seen whole. The walk
+  remembers what it wrote (`state.resolve_focus`) and clears the box when it moves to an Array item or ends, never a
+  box the reader typed.
+
+  **The guide card** (`resolve_view`, `_nw_resolve_guide`, styled `QWidget#NanowellResolveGuide` in `ui/theme.py`)
+  sits between the band and the figure and is shown while a walk runs and the page is on the view its current item is
+  on (`_anchor_queue.current_view`). `_anchor_queue.current_guide` builds its text with `resolve_compute.guide_for`:
+  a kicker (`Resolving: not addressed · 3 of 17`), the well and timepoint (hours added only when the label does not
+  already say them, `hours_suffix`), and three rows — *Problem* (the state in words, with the grid record's or the
+  identity check's reason; a partial timepoint's cause codes in words, `_CAUSES`), *Do this* (what to click, and the
+  hint's words for where) and *Then* (what happens on the click, how many of the class remain, and what follows the
+  class: *Re-run anchored wells…* for the anchor classes, nothing for partial). It carries the one button its class
+  takes beside a click on the montage (`resolve_view.BUTTONS`): *Looks right — next* (partial; `step(+1)`), *Exclude
+  well* (not located; `_anchor_queue.exclude_current`, which excludes the well through `set_well_excluded` and moves
+  on) or *Re-run anchored wells…* (anchor waiting). *Back*, *Skip* and *Stop* stay on the band's *Queue* group
+  directly above it.
+
+  Each step sets the selection to the one the walk started with plus the step's well (so the wells walked past do
+  not accumulate on every other tab). When *Set anchor* cannot be turned on for an armed step, the figure's reason is
+  followed by a pointer to Skip. `set_anchor_at` tells the walk when an anchor is saved (`_anchor_change` returns the
+  `(well, timepoint)` it changed); when it is the current item, the walk records it and moves on after
   `ADVANCE_DELAY_MS`, dropping the move if Back, Skip or Stop changed the position meanwhile. While it runs, on the
-  Array view, a *Queue* group (`anchor_queue_view`) shows `3 of 17 · B04 at 24h`, *Back*, *Skip*, *One per well*
-  and *Stop*, with keys for three of them (`anchor_queue_view.KEYS`: ← Back, → Skip, Esc Stop) as `QShortcut`s
-  parented on the group with a window context, so they act only while the group is shown. It stands in the place
-  of the Where item, which the walk drives and its label names, and *Re-run wells…* steps aside while it runs, so a
-  walk adds nothing to the band's width. Because its keys die with the
-  group, leaving the Array view mid-walk ends the walk (`controller.set_view` calls `_anchor_queue.stop` with the
-  view chosen). The page's checkable buttons (*Set
-  anchor*, *Overlays*, *One per well*) take the theme's `toggle` variant: `secondary` overrides the `:checked`
-  fill, so on and off painted the same. Stop, stepping
-  past the last item, or leaving the Array view restores the starting selection and returns to the view the walk
-  started from (`AnchorQueue.return_view`, the QC view) or to the view chosen instead; the summary (anchored,
-  skipped, and the pointer to *Re-run anchored wells…*) goes to the QC view's `state.qc_message` — with the cells
-  anchored ringed (`state.qc_highlight`), each now *anchor waiting* beside the *Re-run anchored wells…* button —
-  and to the status line, which is seen whichever view the page lands on. `state.anchor_queue` is never persisted, and a queue
-  built for another dataset is dropped by `active_queue`.
+  view its item is shown on, a *Queue* group (`anchor_queue_view`) shows `3 of 17 · B04 at 24h`, *Back*, *Skip*,
+  *One per well* and *Stop*, with keys for three of them (`anchor_queue_view.KEYS`: ← Back, → Skip, Esc Stop) as
+  `QShortcut`s parented on the group with a window context, so they act only while the group is shown. It stands in
+  the place of the Where item, which the walk drives and its label names, and *Re-run wells…* steps aside while it
+  runs, so a walk adds nothing to the band's width. Because its keys and card die with the group, choosing a view
+  other than the one the current item is on ends the walk (`controller.set_view` calls `_anchor_queue.stop` with the
+  view chosen). The page's checkable buttons (*Set anchor*, *Overlays*, *One per well*) take the theme's `toggle`
+  variant: `secondary` overrides the `:checked` fill, so on and off painted the same. Stop, stepping past the last
+  item, or choosing another view restores the starting selection and returns to the view the walk started from
+  (`AnchorQueue.return_view`, the QC view) or to the view chosen instead. What it says there is
+  `resolve_compute.finished`: what it did (anchored and skipped, or *looked at* for a class with nothing to set) and
+  the next step — *Re-run anchored wells…* when anything was anchored, otherwise the next class with anything on the
+  plate — in the QC view's `state.qc_message`, with the cells anchored ringed (`state.qc_highlight`), each now *anchor
+  waiting*, and on the status line, which is seen whichever view the page lands on. `state.anchor_queue`,
+  `resolve_hint` and `resolve_focus` are never persisted, and a walk built for another dataset is dropped by
+  `active_queue`. `tests/test_nanowell_resolve.py` pins the hint's order on records where each source is a different
+  point, the card's sentences, and drives the real page: a click on the second timepoint of a class opens that one
+  and Back stays in its class, the view centred on a hint placed off the montage's centre with the ring there, and
+  *Exclude well*.
 
 `tests/test_nanowell_page_array_layers.py` turns each layer off and on through the real controls and reads the
 figure, checks the colourings, the presets and the saved-settings migration;

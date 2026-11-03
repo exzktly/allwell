@@ -1,8 +1,8 @@
-"""The *Anchor queue*'s walk controls: the group shown on the Array view while a walk runs (where it is, Back, Skip, One
-per well, Stop), with keys for the three a long walk presses most (:data:`KEYS`). It leads the Array view's own
-controls, in the place of Well and Timepoint, which the walk drives and its label names — so a walk adds nothing to
-the band's width. The button that starts the walk is on the QC
-view (``qc_view``); the walk itself is ``_anchor_queue``."""
+"""The *Resolve* walk's band controls: the group shown while a walk runs, on the view its timepoint is shown on (where
+it is, Back, Skip, One per well, Stop), with keys for the three a long walk presses most (:data:`KEYS`). It leads the
+view's own controls, in the place of Well and Timepoint, which the walk drives and its label names — so a walk adds
+nothing to the band's width. The button that starts the walk is on the QC view (``qc_view``), the card that says what
+to do is ``resolve_view``'s, and the walk itself is ``_anchor_queue``."""
 
 from __future__ import annotations
 
@@ -23,10 +23,11 @@ def _button(text: str, tip: str, on_click) -> QPushButton:
     return button
 
 
-QUEUE_TIP = ("Walk every timepoint that is not addressed and has no anchor yet: each opens on Array with Set anchor "
-             "on — click the central square and the next one opens. Back, Skip, One per well and Stop sit at the left "
-             "of the Array view's controls, in place of Well and Timepoint, while it runs (← → Esc), and you come "
-             "back here at the end, with the selection it started with restored.")
+QUEUE_TIP = ("Step through every timepoint of the class chosen under Problem. Each opens where it is fixed, with a "
+             "card above the figure saying what is wrong, what to click and where, and what happens next — for an "
+             "anchor, click the central square and the next one opens. Back, Skip, One per well and Stop sit on the "
+             "card and at the left of the view's controls while it runs (← → Esc), and you come back here at the "
+             "end, with the selection it started with restored.")
 
 
 PER_WELL_TIP = ("Only each well's first waiting timepoint. One anchor per well is usually enough: the re-run addresses "
@@ -36,7 +37,7 @@ PER_WELL_TIP = ("Only each well's first waiting timepoint. One anchor per well i
 
 #: The keys for Back, Skip and Stop. A walk is fifty clicks on the canvas, and reaching for a button between each is
 #: most of its time. They live on the Queue group with a window context, so they act only while that group is
-#: shown: during a walk, on the Array view. Arrow keys still reach a text field that has focus (Qt lets an editor
+#: shown: during a walk, on the view its timepoint is shown on. Arrow keys still reach a text field that has focus (Qt lets an editor
 #: claim them first).
 KEYS = {"back": Qt.Key_Left, "skip": Qt.Key_Right, "stop": Qt.Key_Escape}
 _KEY_NAMES = {"back": "←", "skip": "→", "stop": "Esc"}
@@ -50,10 +51,10 @@ def _shortcut(group, name: str, on_key) -> QShortcut:
 
 
 def build_queue_controls(ctx, band) -> SimpleNamespace:
-    """The *Anchor queue*'s own group, shown only while it runs: where it is, Back, Skip and Stop, each with a key."""
+    """The *Resolve* walk's own group, shown only while it runs: where it is, Back, Skip and Stop, each with a key."""
     position = QLabel("")
     position.setObjectName("NanowellQueueLabel")
-    position.setToolTip("Where the Anchor queue is. ← Back · → Skip · Esc Stop.")
+    position.setToolTip("Where the Resolve walk is. ← Back · → Skip · Esc Stop.")
     back = _button("Back", f"Show the previous timepoint in the queue; a click there replaces its anchor "
                    f"({_KEY_NAMES['back']}).", lambda: aq.step(ctx, -1))
     skip = _button("Skip", f"Leave this timepoint without an anchor and show the next one ({_KEY_NAMES['skip']}).",
@@ -79,10 +80,10 @@ def build_queue_controls(ctx, band) -> SimpleNamespace:
                            keys=keys)
 
 
-def refresh_queue_controls(ctx, on_array: bool, c: SimpleNamespace) -> None:
-    """The walk's group: shown on the Array view while a walk runs, saying where it is."""
+def refresh_queue_controls(ctx, on_walk_view: bool, c: SimpleNamespace) -> None:
+    """The walk's group: shown while a walk runs, on the view its timepoint is shown on, saying where it is."""
     queue = aq.active_queue(ctx)
-    c.group.setVisible(on_array and queue is not None)
+    c.group.setVisible(on_walk_view and queue is not None)
     if queue is not None:
         c.position.setText(queue.position_text())
         c.back.setEnabled(queue.index > 0)

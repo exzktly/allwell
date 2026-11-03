@@ -750,9 +750,11 @@ def test_the_controls_sheet_reads_as_one_column_of_labelled_rows(qapp, win, mini
         assert tp_label.mapTo(band, tp_label.rect().topRight()).x() < min(lefts)
         for combo in shown(LabeledComboBox):
             assert ": " not in combo._painted_text(), combo._painted_text()
-        heads = [labels[h] for h in ("DATA", "DISPLAY", "ACTIONS")]
+        # The button grids first, so they are in view when the sheet opens
+        # whatever the length of the page's Data rows.
+        heads = [labels[h] for h in ("DISPLAY", "ACTIONS", "DATA")]
         ys = [h.mapTo(band, h.rect().topLeft()).y() for h in heads]
-        assert ys == sorted(ys)
+        assert ys == sorted(ys), dict(zip(("DISPLAY", "ACTIONS", "DATA"), ys))
         props = [b for b in shown(IconButton) if "properties" in (b.toolTip() or "").lower()]
         assert props and props[0].text() == "Properties"
         assert sheet_scroll.widget().width() <= sheet_scroll.viewport().width(), \

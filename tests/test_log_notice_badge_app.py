@@ -43,6 +43,15 @@ def test_a_logged_warning_raises_the_log_buttons_badge_until_opened(qapp, monkey
         assert badge.tone() is None
         assert not badge.isVisible()
 
+        # Built tall, and with a scroll bar whose handle drag moves at most one
+        # line per pixel: the reported drawer was short and its bar too fast.
+        import allwell
+        from widgets.fine_scroll_bar import FineScrollBar
+        assert allwell.LOG_DRAWER_HEIGHT_FRACTION == 0.7            # was 0.4
+        expected = round(win.height() * allwell.LOG_DRAWER_HEIGHT_FRACTION)
+        assert win._log_drawer._open_rect().height() == expected
+        assert isinstance(win._log_view.verticalScrollBar(), FineScrollBar)
+
         # The drawer names the boot log, which lives in a hidden folder and is
         # needed only after the app has died — when nobody remembers the path.
         from PySide6.QtWidgets import QLabel

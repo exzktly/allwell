@@ -120,6 +120,10 @@ def _save_review_before_close(review) -> None:
         swallowed()
 
 
+#: The Application Log drawer's share of the window's height. Most of it: the
+#: drawer is opened to read the log, and at 0.4 it showed a handful of entries.
+LOG_DRAWER_HEIGHT_FRACTION = 0.7
+
 #: What the window says while a close waits for a stopped run to let go of what it holds.
 CLOSE_WAIT_NOTICE = ("Stopping the Analyze run before closing — waiting for it to release "
                      "its remote job and files (up to 25 s).")
@@ -1770,7 +1774,7 @@ class AllWellApp(QMainWindow):
             from widgets.drawer import Drawer
             # A wide, horizontal log panel that rises from the bottom edge (log
             # lines are long — a narrow side panel wrapped/clipped them).
-            drawer = Drawer(self, edge="bottom", height_fraction=0.4)
+            drawer = Drawer(self, edge="bottom", height_fraction=LOG_DRAWER_HEIGHT_FRACTION)
             body = QWidget(drawer)
             bl = QVBoxLayout(body)
             bl.setContentsMargins(0, 0, 0, 0)
@@ -1803,6 +1807,13 @@ class AllWellApp(QMainWindow):
                 f"font-size: {theme_v2.Typography.caption_size}px; "
                 f"border: 1px solid {theme_v2.Colors.border_subtle}; }}"
             )
+            # A plain bar maps up to 500 entries onto the drawer's short track,
+            # so a drag on it moved many lines per pixel; this one moves at
+            # most one line per pixel of drag (widgets/fine_scroll_bar.py).
+            from widgets.fine_scroll_bar import FineScrollBar
+            view = self._log_view
+            view.setVerticalScrollBar(FineScrollBar(
+                Qt.Vertical, view, max_rate=lambda: view.fontMetrics().lineSpacing()))
             bl.addWidget(self._log_view, 1)
             drawer.setContentWidget(body)
             self._log_drawer = drawer

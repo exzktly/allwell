@@ -682,7 +682,7 @@ def test_the_help_drawer_lands_on_the_current_tab_not_the_top_of_the_chapter(
 # ── the recent-datasets card, on a page built for real ──────────────────────
 
 def test_the_recents_card_opens_the_dataset_it_names(loaded_app, tmp_path,
-                                                     monkeypatch):
+                                                     monkeypatch, qtbot):
     """The one thing only a real app can show: that the card is built, painted
     from the store, and wired to the load path.
 
@@ -749,8 +749,15 @@ def test_the_recents_card_opens_the_dataset_it_names(loaded_app, tmp_path,
     button = row_entry(host.layout().itemAt(0).widget())
     assert "another_plate" in button.text()
     button.click()
-    from PySide6.QtTest import QTest
-    QTest.qWait(200)
+    # The open is deferred on a 50 ms timer (``recent_view.open_recent``). A
+    # fixed 200 ms wait missed it when the test ran late in a busy process —
+    # earlier apps' leftover timers and events ahead of it — so the test waits
+    # for the open itself, and the assertion below still names the failure.
+    import pytestqt.exceptions
+    try:
+        qtbot.waitUntil(lambda: bool(opened), timeout=5000)
+    except pytestqt.exceptions.TimeoutError:
+        pass
     assert opened == [other], (
         "clicking the row did not reach _load_path, so the card is a picture "
         "of a shortcut rather than a shortcut"

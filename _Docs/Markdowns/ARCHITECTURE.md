@@ -101,7 +101,12 @@ they're shell-wide:
   `tests/test_shortcut_advertising.py` holds them in sync with what the help
   drawer and status bar advertise.
 - **Application Log drawer** — a bottom-edge, full-width `Drawer` opened by the
-  status-bar log tray (`_log_btn`). Its ring handler attaches to the
+  status-bar log tray (`_log_btn`), `LOG_DRAWER_HEIGHT_FRACTION` (0.7) of the
+  window tall. Its view scrolls by a `widgets/fine_scroll_bar.FineScrollBar`:
+  dragging the handle moves the log at most one line per pixel, where a plain
+  bar maps up to 500 entries onto the short track and moved hundreds of lines
+  for a 40 px drag; a short log drags proportionally, as before, and a click on
+  the groove still pages. Its ring handler attaches to the
   `review` logger (which sets `propagate = False`) *and* to root — the
   latter is how it sees the `services.*` loggers the Analyze runners use — at
   startup, so it captures history before first open and appends live. `emit`

@@ -151,7 +151,7 @@ def _grid_for(values_lists: Iterable[Sequence[float]], n_pts: int = 200, log_x: 
     return np.linspace(lo, hi, n_pts)
 
 
-def _empty_msg(ax) -> None:
+def _empty_msg(ax, message: str = "") -> None:
     # Preserve the facecolor that the caller already applied via
     # apply_axes_style; matplotlib's ax.clear() resets it otherwise.
     fc = ax.get_facecolor()
@@ -166,7 +166,7 @@ def _empty_msg(ax) -> None:
     from review.core.plot_style import follows_theme, tokens_for
     _bg, _title_fg, _muted_fg, _grid, _spine = tokens_for(ax)
     follows_theme(ax.text(
-        0.5, 0.5, NO_DATA_MSG,
+        0.5, 0.5, message or NO_DATA_MSG,
         ha="center", va="center", transform=ax.transAxes,
         fontsize=10, color=_muted_fg,
     ), muted=True)
@@ -383,16 +383,54 @@ def redraw_distribution(ctx) -> None:
         _nw_dist.label_and_footer(fig, nw_label, nw_footer)
         canvas.draw_idle()
         return
-    pooled = collect_distribution(ctx, val_col=val_col, fluor_gates=fluor_gates, ratios=ratios,
-                                  tp_filter=tp_filter, display_label=_display_label_for)
-    if pooled is not None:
-        groups, exact, pool = pooled
+    def compute():
+        return _collect_cells(ctx, val_col, fluor_gates, ratios, tp_filter)
+
+    def draw(collected) -> None:
+        groups, exact, pool = collected
         try:
             _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layout_choice, exact)
             stamp_cells_footer(ctx, fig)
         finally:
-            pool.close()
+            if pool is not None:
+                pool.close()
+
+    # Wells the row cache does not hold are read from disk, which from a network
+    # share or a slow drive takes long enough to freeze the window: that read
+    # goes to a worker and the plot says what it is waiting for. A selection
+    # held in memory draws here, synchronously, as it always did.
+    from review.core import background_read
+    to_read = background_read.wells_not_held(ctx, _member_wells(ctx))
+    if to_read and background_read.start(ctx, READ_KEY, compute, on_done=draw, discard=_release,
+                                         on_failed=lambda message: _say_read_failed(ctx, canvas, message)):
+        _say_reading(ctx, canvas, len(to_read))
         return
+    background_read.cancel(ctx, READ_KEY)
+    draw(compute())
+
+
+#: The Distribution tab's key in ``review.core.background_read``.
+READ_KEY = "distribution"
+
+
+def _member_wells(ctx) -> list[str]:
+    """Every well the cells figure draws from: each plotted member's wells."""
+    from review.data.data_loading import plot_group_well_lists
+
+    return [w for _name, wells, _rset in plot_group_well_lists(ctx, False) for w in wells]
+
+
+def _collect_cells(ctx, val_col, fluor_gates, ratios, tp_filter) -> tuple:
+    """``(groups, exact, pool)``: the cells figure's arrays, from wells and state alone — no widget.
+
+    Safe on a worker (``review.core.background_read``). *pool* is ``None`` when
+    the selection fits under the sampling cap and every value is drawn; the
+    caller closes it otherwise, once the figure is drawn.
+    """
+    pooled = collect_distribution(ctx, val_col=val_col, fluor_gates=fluor_gates, ratios=ratios,
+                                  tp_filter=tp_filter, display_label=_display_label_for)
+    if pooled is not None:
+        return pooled
     groups: list[tuple[str, str, np.ndarray]] = []
     for name, color, df in iter_plot_groups(ctx, fallback_to_all=False):
         vals = _all_fluor_values_filtered(
@@ -406,8 +444,26 @@ def redraw_distribution(ctx) -> None:
             # label when one is defined (the raw name stays the CSV identity in
             # iter_plot_groups, which the export path keys on).
             groups.append((_display_label_for(ctx, name), color, vals))
-    _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layout_choice, None)
-    stamp_cells_footer(ctx, fig)
+    return groups, None, None
+
+
+def _release(collected) -> None:
+    """Close a superseded result's spilled pool, if it has one."""
+    if collected and collected[2] is not None:
+        collected[2].close()
+
+
+def _say_reading(ctx, canvas, n_wells: int) -> None:
+    """Put the waiting sentence on the plot while its wells are read off the window's thread."""
+    axes = _setup_axes(ctx, 1)
+    _empty_msg(axes[0], f"Reading {n_wells} well{'s' if n_wells != 1 else ''} from disk…")
+    canvas.draw_idle()
+
+
+def _say_read_failed(ctx, canvas, message: str) -> None:
+    axes = _setup_axes(ctx, 1)
+    _empty_msg(axes[0], f"Could not read the wells: {message}")
+    canvas.draw_idle()
 
 
 def _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layout_choice, exact) -> None:

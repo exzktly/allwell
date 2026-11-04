@@ -250,9 +250,12 @@ def tab(ctx, monkeypatch):
     return SimpleNamespace(drawn=drawn, said=said)
 
 
-def test_during_a_load_the_calls_owe_the_reading_and_the_load_pays_it_once(ctx, tab, monkeypatch):
-    from review.core import plot_hold
+def test_during_a_load_the_calls_owe_the_reading_and_the_load_pays_it_once(ctx, tab, monkeypatch, qtbot):
+    """The well is not in the row cache, so paying the debt reads it from disk — on a worker
+    (``review.core.background_read``), with the status line saying so until the CDFs are drawn."""
+    from review.core import background_read, plot_hold
     from review.features.home.cell_gating.controller import (
+        FIRST_FRAMES_READ_KEY,
         cell_gating_load_cell_areas,
         cell_gating_read_owed_cell_areas,
     )
@@ -266,6 +269,8 @@ def test_during_a_load_the_calls_owe_the_reading_and_the_load_pays_it_once(ctx, 
     assert seen == {"parquet": [], "full": []}, "a call during the load read the plate"
     assert ctx.runtime.cell_gating.areas_owed and not tab.drawn
     cell_gating_read_owed_cell_areas(ctx)
+    assert tab.said[-1] == "Reading cells from 1 well…" and not tab.drawn
+    qtbot.waitUntil(lambda: not background_read.running(ctx, FIRST_FRAMES_READ_KEY), timeout=10_000)
     _assert_narrow(seen)
     assert len(seen["parquet"]) == 1
     rt = ctx.runtime.cell_gating

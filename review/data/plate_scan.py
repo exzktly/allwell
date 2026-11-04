@@ -68,6 +68,15 @@ def per_well(ctx, kind: str, label: str, params: Hashable, compute: Callable, *,
     return result
 
 
+def remembered(ctx, kind: str, label: str, params: Hashable) -> bool:
+    """Whether :func:`per_well` would answer for *label* from its memo, reading nothing."""
+    store = getattr(ctx.state, "stats_cache", None)
+    version = getattr(ctx.state.dataset, "rows_version", None)
+    if store is None or version is None:
+        return False
+    return ("plate_scan", kind, label, params, version) in store.cache
+
+
 #: A key with no entry, and a remembered ``None`` (which ``dict.get`` cannot tell apart).
 _MISSING = object()
 _NONE = object()

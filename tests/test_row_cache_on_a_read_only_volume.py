@@ -143,4 +143,5 @@ def test_the_storage_button_offers_the_local_copy(plate, monkeypatch):
     local = local_row_cache_dir(plate.parent)
     areas = {a.key: set(a.paths) for a in ls.cache_areas(plate.parent.parent)}
     assert local in areas["rows"], "the open dataset's row cache leaves out the copy kept on this machine"
-    assert local in areas["local-rows"]
+    assert local not in areas["local-rows"], "the open dataset's copy is offered twice"
+

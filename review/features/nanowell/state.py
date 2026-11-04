@@ -127,7 +127,7 @@ class NanowellState:
     axis: str = "time"
     well: str = ""                          # the well the Array view shows
     timepoint: str = ""                     # the Array view's timepoint; "" = the earliest
-    selected_sites: list = field(default_factory=list)  # [[well, q, r], ...] — not a plate selection
+    selected_sites: list = field(default_factory=list)  # [[well, q, r]] or [] — one nanowell; not a plate selection
     control: str = ""                       # the group compared against on *Along x: Wells* ("" = none)
     cohort: bool = False                    # only nanowells with a value at every timepoint (tracker I8)
     #: The moving average's window in timepoints on Distribution and Trajectories; 0 is off (``moving_compute``).
@@ -402,7 +402,9 @@ class NanowellState:
             if (isinstance(item, (list, tuple)) and len(item) == 3 and isinstance(item[0], str)
                     and all(isinstance(v, int) and not isinstance(v, bool) for v in item[1:])):
                 sites.append([item[0], int(item[1]), int(item[2])])
-        self.selected_sites = sites
+        # One nanowell at a time (``controller._select``): a page saved while several could be selected opens on
+        # the last of them.
+        self.selected_sites = sites[-1:]
         thresholds = config.get("thresholds")
         self.thresholds = {k: float(v) for k, v in (thresholds.items() if isinstance(thresholds, dict) else ())
                            if isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool)

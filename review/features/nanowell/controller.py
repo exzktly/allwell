@@ -248,8 +248,6 @@ def export_long_csv(state, path, wells=None) -> int:
 #: change nothing on screen (CLAUDE.md §7.6) — the reason the plotting band gates its own button by tab.
 DECORATED_VIEWS = frozenset({"distribution"})
 
-#: How many nanowells can be compared in the site detail at once (decision U7: one colour each).
-MAX_SELECTED = 6
 #: How near, in screen pixels, a click must land to a dot to select it.
 CLICK_RADIUS_PX = 6.0
 
@@ -1395,7 +1393,7 @@ def focus_nanowell_at(ctx, event) -> None:
     st.region = (x - half, y - half, x + half, y + half)        # widened to the axes' shape when drawn
     site = sites.sites[k]
     if site[1] is not None and site[2] is not None:
-        _select(ctx, site, False)                                # redraws, at the new region
+        _select(ctx, site)                                       # redraws, at the new region
     else:
         redraw(ctx)                                              # an unaddressed nanowell cannot be selected
 
@@ -1441,7 +1439,7 @@ def _array_press(st, event) -> None:
     if drawn is None or event.button != 1 or event.inaxes is not drawn.ax:
         return
     ax = drawn.ax
-    st.press = (event.x, event.y, ax.get_xlim(), ax.get_ylim(), ax.transData.inverted().frozen(), _adding(event))
+    st.press = (event.x, event.y, ax.get_xlim(), ax.get_ylim(), ax.transData.inverted().frozen())
 
 
 def set_identity_colour(ctx, colour: str) -> None:
@@ -1492,7 +1490,7 @@ def on_motion(ctx, event) -> None:
         return
     if st is None or st.press is None or st.view != "array" or st.drawn is None or event.x is None:
         return
-    x, y, xlim, ylim, inverse, _adding_ = st.press
+    x, y, xlim, ylim, inverse = st.press
     (px, py), (cx, cy) = inverse.transform((x, y)), inverse.transform((event.x, event.y))
     st.drawn.ax.set_xlim(xlim[0] + px - cx, xlim[1] + px - cx)
     st.drawn.ax.set_ylim(ylim[0] + py - cy, ylim[1] + py - cy)
@@ -1514,7 +1512,7 @@ def on_release(ctx, event) -> None:
     st.press = None
     if st.view != "array" or st.drawn is None or event.button != 1:
         return
-    x, y, _xlim, _ylim, inverse, adding = press
+    x, y, _xlim, _ylim, inverse = press
     ex, ey = (x, y) if event.x is None else (event.x, event.y)
     if abs(ex - x) + abs(ey - y) > CLICK_SLOP_PX:
         (x0, x1), (y1, y0) = st.drawn.ax.get_xlim(), st.drawn.ax.get_ylim()
@@ -1524,7 +1522,7 @@ def on_release(ctx, event) -> None:
     if st.anchor_mode and st.drawn.frame == "well":
         set_anchor_at(ctx, *inverse.transform((x, y)))
         return
-    _select(ctx, st.hits.nearest(st.drawn.ax, x, y, CLICK_RADIUS_PX) if st.hits is not None else None, adding)
+    _select(ctx, st.hits.nearest(st.drawn.ax, x, y, CLICK_RADIUS_PX) if st.hits is not None else None)
 
 
 def on_scroll(ctx, event) -> None:
@@ -2068,8 +2066,8 @@ def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
 
 
 def on_click(ctx, event) -> None:
-    """A press on the figure. On the Distribution figure: select the nanowell under it, add it with Shift (or
-    ⌘/Ctrl), or clear the selection on empty space. On the Array view a press starts a drag or a click, which
+    """A press on the figure. On the Distribution figure: select the nanowell under it (one at a time), or clear the
+    selection on empty space. On the Array view a press starts a drag or a click, which
     :func:`on_release` tells apart. The plate selection is never touched."""
     st = _state(ctx)
     if st is not None and st.view == "qc":
@@ -2080,7 +2078,7 @@ def on_click(ctx, event) -> None:
         return
     if st is not None and st.view == "extremes":
         if event.button == 1:
-            _select(ctx, st.extreme_axes.get(event.inaxes), _adding(event))
+            _select(ctx, st.extreme_axes.get(event.inaxes))
         return
     if st is not None and st.view == "array":
         if event.dblclick and event.button == 1 and not st.anchor_mode:
@@ -2094,25 +2092,16 @@ def on_click(ctx, event) -> None:
     # space, and clears the selection as an empty-space click does on every other view. Returning here left a
     # selection, and the site detail it opens, with no way to clear it from the figure.
     site = st.hits.nearest(event.inaxes, event.x, event.y, CLICK_RADIUS_PX) if st.hits is not None else None
-    _select(ctx, site, _adding(event))
+    _select(ctx, site)
 
 
-def _select(ctx, site, adding: bool) -> None:
-    """Select *site* (``None``: empty space), or with *adding* add it to the selection or take it out."""
+def _select(ctx, site) -> None:
+    """Select *site* alone (``None``: empty space, which clears the selection).
+
+    One nanowell at a time, whatever keys are held: a Shift or ⌘ / Ctrl click used to add a nanowell to the site
+    detail, up to six overlaid in one colour each, and that was never asked for."""
     st = _state(ctx)
-    current = [list(s) for s in st.selected_sites]
-    if site is None:
-        if adding:
-            return
-        st.selected_sites = []
-    else:
-        site = [str(site[0]), int(site[1]), int(site[2])]
-        if not adding:
-            st.selected_sites = [site]
-        elif site in current:
-            st.selected_sites = [s for s in current if s != site]
-        else:
-            st.selected_sites = (current + [site])[-MAX_SELECTED:]
+    st.selected_sites = [] if site is None else [[str(site[0]), int(site[1]), int(site[2])]]
     selection_changed(ctx)
 
 
@@ -2123,14 +2112,6 @@ def clear_selection(ctx) -> None:
         return
     st.selected_sites = []
     selection_changed(ctx)
-
-
-def _adding(event) -> bool:
-    """Whether the click adds to the selection: Shift, or ⌘ / Ctrl, held. Matplotlib reports the held keys as
-    ``event.modifiers`` (3.7 and later) and sometimes as ``event.key``; either is enough."""
-    held = {str(m).lower() for m in (getattr(event, "modifiers", None) or ())}
-    held |= set(str(event.key or "").lower().split("+"))
-    return bool(held & {"shift", "control", "ctrl", "cmd", "super", "meta"})
 
 
 def selection_changed(ctx) -> None:

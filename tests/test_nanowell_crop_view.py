@@ -87,7 +87,7 @@ def test_the_pop_out_follows_the_selection_and_says_when_there_is_none(page, qtb
     qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
     _click_dot(qtbot, page, ("A01", 0, 0))
     qtbot.waitUntil(lambda: _popout_title(page) == ["A01 · q 0, r 0 over time · phase image"], timeout=10000)
-    nwc._select(page, None, False)                                   # what a click on empty space does
+    nwc._select(page, None)                                          # what a click on empty space does
     said = [t.get_text() for ax in page.widgets.get("_nw_popout_fig").axes for t in ax.texts
             if t.get_gid() == "nw-popout-empty"]
     assert said == ["Select a nanowell on the plot to see its crops here."]

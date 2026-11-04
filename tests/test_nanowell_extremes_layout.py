@@ -131,7 +131,7 @@ def test_each_crop_is_captioned_with_its_nanowell_s_metrics_at_that_timepoint(pa
 def test_the_pop_out_writes_the_metrics_under_each_panel(page, qtbot):  # noqa: F811
     _choose_extremes(qtbot, page)
     st = page.state.feature_slice("nanowell")
-    nwc._select(page, ("A01", 0, 0), False)
+    nwc._select(page, ("A01", 0, 0))
     nwc.pop_out_crops(page)
     qtbot.addWidget(page.widgets.get("_nw_popout"))
     fig = page.widgets.get("_nw_popout_fig")

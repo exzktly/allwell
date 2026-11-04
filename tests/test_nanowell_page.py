@@ -243,7 +243,11 @@ def _click_dot(qtbot, ctx, site, modifier=Qt.NoModifier):
     raise AssertionError(f"{site} is not drawn")
 
 
-def test_clicking_a_dot_selects_that_nanowell_and_shift_click_adds_another(page, qtbot):
+@pytest.mark.parametrize("held", [Qt.NoModifier, Qt.ShiftModifier, Qt.ControlModifier, Qt.MetaModifier],
+                         ids=["plain", "shift", "ctrl", "cmd"])
+def test_clicking_a_dot_selects_that_nanowell_alone_whatever_keys_are_held(page, qtbot, held):
+    """One nanowell at a time. A Shift or ⌘ / Ctrl click used to add a nanowell to the site detail, up to six
+    overlaid, which was never asked for: the second click must replace the first, not join it."""
     _loaded(qtbot, page)
     before = set(page.state.selection.selected_wells)
     _click_dot(qtbot, page, ("A01", 1, 0))
@@ -252,9 +256,19 @@ def test_clicking_a_dot_selects_that_nanowell_and_shift_click_adds_another(page,
     assert page.widgets.get("_nw_detail_pane").isVisible()
     detail_texts = [t.get_text() for t in page.widgets.get("_nw_detail_fig").texts]
     assert detail_texts == ["A01 · q 1, r 0 — measured at every timepoint"]
-    _click_dot(qtbot, page, ("B01", 0, 0), Qt.ShiftModifier)
-    assert st.selected_sites == [["A01", 1, 0], ["B01", 0, 0]]
+    _click_dot(qtbot, page, ("B01", 0, 0), held)
+    assert st.selected_sites == [["B01", 0, 0]]
+    detail_texts = [t.get_text() for t in page.widgets.get("_nw_detail_fig").texts]
+    assert len(detail_texts) == 1 and detail_texts[0].startswith("B01 · q 0, r 0"), detail_texts
     assert set(page.state.selection.selected_wells) == before                  # not a plate selection
+
+
+def test_a_page_saved_with_several_nanowells_opens_on_the_last_alone():
+    from review.features.nanowell.state import NanowellState
+
+    st = NanowellState()
+    st.apply_config({"selected_sites": [["A01", 1, 0], ["B01", 0, 0], ["A02", 2, 1]]})
+    assert st.selected_sites == [["A02", 2, 1]]
 
 
 def test_clicking_empty_space_clears_the_selection_and_hides_the_detail(page, qtbot):

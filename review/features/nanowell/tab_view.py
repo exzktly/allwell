@@ -485,8 +485,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     detail_layout.setContentsMargins(0, 0, 0, 0)
     detail_card = PlotCard(detail, figsize=(_DETAIL_W, _DETAIL_H), constrained=False, header=False)
     detail_card.setFigureTitle("")
-    detail_card.setToolTip("The selected nanowells over time. Click a dot to select one, Shift-click to add one, "
-                           "and click empty space on the plot or ✕ above to clear the selection.")
+    detail_card.setToolTip("The selected nanowell over time. Click a dot to select it, and click empty space on "
+                           "the plot or ✕ above to clear the selection.")
     reg.register("_nw_detail_card", detail_card)
     reg.register("_nw_detail_fig", detail_card.figure)
     reg.register("_nw_detail_canvas", detail_card.canvas)

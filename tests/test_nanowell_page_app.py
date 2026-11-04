@@ -80,13 +80,13 @@ def test_a_saved_plot_restores_the_metric_the_axis_and_the_selected_nanowells(na
     from review.persistence import view_state
 
     ctx, st = _open(nanowell_app, qtbot)
-    st.metric, st.axis, st.selected_sites = "confluence_fc", "wells", [["A01", 1, 0], ["B01", 0, 0]]
+    st.metric, st.axis, st.selected_sites = "confluence_fc", "wells", [["B01", 0, 0]]
     assert save_plot_from_card(ctx, "Nanowells", b"\x89PNG", "Nanowells").startswith("Saved")
     view_state._activate_tab(ctx, "Home")
     st.metric, st.axis, st.selected_sites = "n", "time", []
     restore_saved_plot(ctx, get_store(ctx).records[-1].id)
     assert (st.metric, st.axis) == ("confluence_fc", "wells")
-    assert st.selected_sites == [["A01", 1, 0], ["B01", 0, 0]]
+    assert st.selected_sites == [["B01", 0, 0]]
     qtbot.waitUntil(lambda: not st.computing, timeout=30000)
     assert ctx.widgets.get("_nw_fig").axes[0].get_ylabel() == "Confluence fold change"      # and redrawn
 

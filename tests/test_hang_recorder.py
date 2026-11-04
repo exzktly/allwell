@@ -39,7 +39,7 @@ SCRIPT = textwrap.dedent("""
     pump(0.5)
     _stuck_reading_a_well()
     pump(1.5)
-    print(boot_diag.log_path())
+    print(boot_diag.log_path(), flush=True)
     os._exit(0)
 """)
 

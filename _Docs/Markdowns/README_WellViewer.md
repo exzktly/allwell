@@ -2877,7 +2877,13 @@ What this means in use:
   (about 4 seconds for a 1.1M-cell well) and kept beside it in a hidden
   `.aw_parquet` folder, with each well's summary; later opens read those instead
   (that well reads back in about a fifth of a second). A new version of All-Well
-  that parses differently re-parses each well once. Reading a well needs about
+  that parses differently re-parses each well once. **A dataset on a drive
+  All-Well cannot write to** — a read-only network share, or a
+  Windows-formatted (NTFS) USB drive on a Mac, which macOS can only read — keeps
+  these copies on your computer instead, in the `row-cache` folder inside the
+  app's own folder (`~/.allwell` on macOS and Linux, `%LOCALAPPDATA%\allwell`
+  on Windows), so only its first open is slow. The log drawer says once when
+  that happens, and where the copies went. Reading a well needs about
   twice its size in memory while it is parsed, and about one and a half times
   while it is read back.
 - **An open reads each well once.** After the wells that fit have been read,
@@ -5086,6 +5092,14 @@ still exported (see below).
   All-Well, the application log says the previous session ended this way and
   names the file — send it with the report, together with how much memory the
   Mac has.
+- **If the app stops responding** — a load stuck on *Loading 7/61* that never
+  moves on, say — wait at least 30 seconds before quitting it. After 30 seconds
+  without a response, All-Well writes what every part of it was doing at that
+  moment into the same `allwell-boot.log`, which says exactly where it is stuck;
+  if it recovers, the log adds how long it was unresponsive. While a dataset
+  opens, the log also names each well's file just before reading it
+  (`dataset load: reading measurements_C05.csv.gz (7/61)`). Send the file with
+  the report. `ALLWELL_HANG_DUMP_S` changes the 30 seconds; `0` turns this off.
   If a message like *"Timers cannot be stopped from another thread"* appears,
   the same log also records which part of the app caused it — send that file
   with the report, even if the app did not close.
@@ -7804,9 +7818,14 @@ The dialog lists what can go, each with its size, and clears what you tick:
   in the last hour is skipped, and a *Scratch folder* you chose yourself in
   the Analyze form is never touched.
 - **Row cache of the open dataset** — unticked to begin with. Fast copies of the
-  dataset's CSVs, kept in `.aw_parquet` folders beside them. Clearing it frees
+  dataset's CSVs, kept in `.aw_parquet` folders beside them (or in the app's
+  folder, for a dataset on a drive All-Well cannot write to). Clearing it frees
   that space but makes the next open of the dataset slower while the copies are
   rebuilt.
+- **Fast copies of datasets on read-only drives** — unticked to begin with. The
+  same copies for every dataset that was opened from a drive All-Well cannot
+  write to, kept in the app's folder. Each is rebuilt the next time its dataset
+  is opened, which is then slower.
 
 A file something is still holding open (on Windows, often an antivirus scan)
 is left in place, and the dialog says how many and which; close what holds it,

@@ -237,6 +237,8 @@ def populated(home, monkeypatch):
         "repo_fonts": _write(home / "checkout" / ".mplcache" / "fontlist.json", 400),
         # the open dataset
         "rows": _write(home / "plate" / ".aw_parquet" / "A01.parquet", 6000),
+        # Another dataset's row cache, kept on this machine because its folder could not be written.
+        "local_rows": _write(state_dir.local_row_cache_dir(home / "elsewhere" / "out") / "A01.parquet", 300),
         "csv": _write(home / "plate" / "A01.csv", 100),
     }
     # Zero-padded so every owner file is OWNER_BYTES long, whatever the PID.
@@ -273,11 +275,12 @@ def test_each_area_offers_exactly_what_may_go(populated, home):
                    f["legacy_spill"].parent, f["repo_fonts"].parent},
         "scratch": {f["idle_scratch"].parent.parent},
         "rows": {f["rows"].parent},
+        "local-rows": {f["local_rows"].parent},
     }
     # The row cache and the run scratch are offered unticked: one slows the
     # next open, the other costs a suspended run its progress.
     areas = ls.cache_areas(home / "plate")
-    assert [a.key for a in areas if not a.default_on] == ["scratch", "rows"]
+    assert [a.key for a in areas if not a.default_on] == ["local-rows", "scratch", "rows"]
     # Only the scratch asks first.
     assert [a.key for a in areas if a.confirm] == ["scratch"]
     # No dataset open, no row cache area.
@@ -289,12 +292,13 @@ def test_clearing_everything_frees_exactly_that_and_spares_the_rest(populated, h
     areas = ls.cache_areas(home / "plate")
     sizes = ls.measure(areas)
     assert sizes == {"fonts": 1000, "temp": 7000 + OWNER_BYTES, "logs": 500,
-                     "legacy": 2000 + OWNER_BYTES, "scratch": 1500, "rows": 6000}
+                     "legacy": 2000 + OWNER_BYTES, "scratch": 1500, "rows": 6000,
+                     "local-rows": 300}
     result = ls.clear(areas)
     assert result.freed == sum(sizes.values()) and result.failed == []
     gone = ("fonts", "boot1", "bootstrap", "dead_spill", "old_unowned",
             "legacy_boot", "legacy_fonts", "legacy_scan", "legacy_spill", "repo_fonts", "rows",
-            "idle_scratch")
+            "idle_scratch", "local_rows")
     kept = ("boot", "bootstrap_recent", "bootstrap_new", "live_spill", "young_unowned",
             "scratch", "deep_live_scratch", "suspended", "scan", "remotes", "queue", "settings", "csv")
     assert [k for k in gone if f[k].exists()] == []
@@ -436,6 +440,16 @@ def test_clear_lists_again_and_spares_what_came_into_use(populated, home):
 def test_the_in_out_layout_s_row_cache_is_offered(home):
     rows = _write(home / "plate" / "out" / ".aw_parquet" / "A01.parquet", 10)
     assert _offered(ls.cache_areas(home / "plate"))["rows"] == {rows.parent}
+
+
+def test_the_open_dataset_s_local_copy_is_offered_once_with_its_row_cache(home):
+    """A dataset on a read-only drive keeps its row cache on this machine; it is that dataset's row cache, listed
+    under it and not again under every read-only dataset's copies, where clearing would count it twice."""
+    local = _write(state_dir.local_row_cache_dir(home / "plate" / "out") / "A01.parquet", 10)
+    offered = _offered(ls.cache_areas(home / "plate"))
+    assert offered["rows"] == {local.parent}
+    assert local.parent not in offered["local-rows"]
+    assert local.parent in _offered(ls.cache_areas(None))["local-rows"]
 
 
 def test_sizes_never_read_1000_of_a_unit():

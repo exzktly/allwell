@@ -150,6 +150,7 @@ def summarize_frame(df: pd.DataFrame, columns=None) -> WellSummary:
 
 
 def summary_path(csv_path: Path) -> Path:
+    """Where *csv_path*'s summary is written: beside its Parquet cache (``parquet_cache.cache_dir``)."""
     from review.data.parquet_cache import cache_path
 
     return cache_path(csv_path).with_suffix(".summary.json")
@@ -166,14 +167,19 @@ def read_summary(csv_path: Path) -> WellSummary | None:
     fingerprint = source_fingerprint(csv_path)
     if fingerprint is None:
         return None
-    try:
-        data = json.loads(summary_path(csv_path).read_text())
-        if not isinstance(data, dict) or data.get("fingerprint") != _stamp(fingerprint):
-            return None
-        return WellSummary.from_json(data["summary"])
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        # Any unreadable summary is a miss, recomputed — never a failed open.
-        return None
+    from review.data.parquet_cache import read_paths
+
+    # The dataset's own cache folder first, then this machine's (``parquet_cache.read_paths``).
+    for path in read_paths(csv_path, ".summary.json"):
+        try:
+            data = json.loads(path.read_text())
+            if not isinstance(data, dict) or data.get("fingerprint") != _stamp(fingerprint):
+                continue
+            return WellSummary.from_json(data["summary"])
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            # Any unreadable summary is a miss, recomputed — never a failed open.
+            continue
+    return None
 
 
 def write_summary(csv_path: Path, summary: WellSummary, fingerprint: str | None) -> bool:
@@ -184,26 +190,42 @@ def write_summary(csv_path: Path, summary: WellSummary, fingerprint: str | None)
     the new file's identity would be served as current for ever. A failure to
     write costs a recompute next open and is never raised.
     """
-    from review.data.parquet_cache import source_fingerprint
+    from review.data.parquet_cache import keep_locally, own_cache_dir, source_fingerprint
 
     current = source_fingerprint(csv_path)
     if fingerprint is None or current != fingerprint:
         return False
+    text = json.dumps({"fingerprint": _stamp(fingerprint), "summary": summary.to_json()})
     path = summary_path(csv_path)
-    tmp = path.with_name(f"__aw_tmp_{path.name}.pid{os.getpid()}")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps({"fingerprint": _stamp(fingerprint), "summary": summary.to_json()}))
-        os.replace(tmp, path)
+        try:
+            _write_text_through_staging(path, text)
+        except OSError as exc:
+            if path.parent != own_cache_dir(Path(csv_path).parent):
+                raise
+            # The volume refused a write its permission bits allow: kept on this machine from here on.
+            path = keep_locally(Path(csv_path).parent, f"{type(exc).__name__}: {exc}") / path.name
+            _write_text_through_staging(path, text)
         return True
     except OSError as exc:
         _logger.debug("could not store the summary of %s (%s); it is recomputed on the next open",
                       Path(csv_path).name, exc)
+        return False
+
+
+def _write_text_through_staging(path: Path, text: str) -> None:
+    """Write *text* to *path* through a staging file and ``os.replace``; the staging file never outlives a failure."""
+    tmp = path.with_name(f"__aw_tmp_{path.name}.pid{os.getpid()}")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(text)
+        os.replace(tmp, path)
+    except OSError:
         try:
             tmp.unlink()
         except OSError:
-            _logger.debug("no staging file to remove for %s", Path(csv_path).name)
-        return False
+            _logger.debug("no staging file to remove for %s", path.name)
+        raise
 
 
 def well_summary(csv_path: Path) -> WellSummary:

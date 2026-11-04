@@ -345,6 +345,80 @@ def arm_faulthandler() -> None:
         pass  # diagnostics-only; never block startup
 
 
+#: Seconds the window's thread may go without returning to its event loop
+#: before every thread's stack is written to the boot log; ``0`` turns it off.
+HANG_DUMP_ENV = "ALLWELL_HANG_DUMP_S"
+DEFAULT_HANG_DUMP_S = 30.0
+
+#: The hang recorder's timer, kept so it lives as long as the application.
+_HANG_TIMER = None
+
+
+def hang_dump_seconds() -> float:
+    """:data:`HANG_DUMP_ENV` as seconds, else :data:`DEFAULT_HANG_DUMP_S`; ``0`` when turned off."""
+    raw = os.environ.get(HANG_DUMP_ENV, "").strip()
+    if not raw:
+        return DEFAULT_HANG_DUMP_S
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_HANG_DUMP_S
+
+
+def install_hang_recorder(app) -> None:
+    """Write every thread's stack to the boot log when the window stops responding. Never raises.
+
+    A load that stops at "Loading 7/61" and never moves on leaves nothing
+    behind: no exception reaches Python, the process is still alive, and when
+    the user force-quits it the boot log's last line says only which phase it
+    was in. That is not enough to tell a read the disk never answers from a
+    loop in the app.
+
+    So a ``QTimer`` on the window's thread re-arms
+    ``faulthandler.dump_traceback_later`` every quarter of
+    :func:`hang_dump_seconds`. While the event loop runs — including the
+    ``processEvents`` a dataset load pumps between wells — the deadline keeps
+    moving and nothing is written. When the thread is stuck inside one call for
+    longer than the limit, faulthandler's own thread writes every Python
+    thread's stack to the boot log, which names the exact line it is stuck on.
+    When the thread comes back, the next tick writes how long it was gone.
+
+    The dump is faulthandler's ``Timeout`` form, whose thread headers read
+    ``Thread 0x…`` and so match none of :data:`_CRASH_MARKERS`: a session that
+    stalled and recovered is not kept as a crash. One that never recovers and
+    is force-quit is kept anyway, as an unclean ending, with the stacks in it.
+    """
+    global _HANG_TIMER
+    seconds = hang_dump_seconds()
+    h = _handle()
+    if seconds <= 0 or h is None or _HANG_TIMER is not None:
+        return
+    try:
+        import faulthandler
+
+        from PySide6.QtCore import QTimer
+
+        last = [time.monotonic()]
+
+        def _beat() -> None:
+            now = time.monotonic()
+            gap, last[0] = now - last[0], now
+            if gap > seconds:
+                boot(f"the window did not respond for {gap:.0f} s; the thread stacks written above "
+                     f"show where it was")
+            faulthandler.dump_traceback_later(seconds, repeat=False, file=h, exit=False)
+
+        timer = QTimer(app)
+        timer.setInterval(max(100, int(seconds * 250)))
+        timer.timeout.connect(_beat)
+        app.aboutToQuit.connect(faulthandler.cancel_dump_traceback_later)
+        _beat()
+        timer.start()
+        _HANG_TIMER = timer
+    except Exception as exc:  # noqa: BLE001 - diagnostics-only; never block startup
+        boot(f"the hang recorder could not be installed ({type(exc).__name__}: {exc})")
+
+
 #: Qt's words for an object touched from a thread that does not own it — the
 #: "Timers cannot be stopped from another thread" family. Qt only *warns* for
 #: these, and the native crash that usually follows leaves a stack of the

@@ -65,10 +65,12 @@ from util.state_dir import (
     BOOT_LOG_NAME,
     BOOTSTRAP_LOG_GLOB,
     FONT_CACHE_SUBDIR,
+    ROW_CACHE_SUBDIR,
     TEMP_SUBDIR,
     default_scratch_dir,
     gui_state_dir,
     legacy_gui_paths,
+    local_row_cache_dir,
 )
 
 #: The folder each dataset's Parquet row cache sits in, beside its CSVs. The
@@ -249,13 +251,23 @@ def _old_logs(base: Path, *, now: float) -> list[Path]:
 
 
 def _row_cache_dirs(dataset_dir: Path) -> list[Path]:
-    """The ``.aw_parquet`` folders of *dataset_dir*: its own, and its ``out/``'s."""
+    """The row caches of *dataset_dir* and its ``out/``: each one's ``.aw_parquet``, and the copy kept on this
+    machine when that folder could not be written (``util.state_dir.local_row_cache_dir``)."""
     found = []
     for folder in (dataset_dir, dataset_dir / "out"):
-        candidate = folder / ROW_CACHE_DIRNAME
-        if candidate.is_dir() and not is_link(candidate):
-            found.append(candidate)
+        for candidate in (folder / ROW_CACHE_DIRNAME, local_row_cache_dir(folder)):
+            if candidate.is_dir() and not is_link(candidate):
+                found.append(candidate)
     return found
+
+
+def _local_row_caches(base: Path) -> list[Path]:
+    """Every dataset's row cache kept on this machine, under ``row-cache/`` in the app's folder."""
+    root = base / ROW_CACHE_SUBDIR
+    try:
+        return sorted(p for p in root.iterdir() if p.is_dir() and not is_link(p))
+    except OSError:
+        return []
 
 
 def cache_areas(dataset_dir: Path | None = None, *,
@@ -302,6 +314,15 @@ def cache_areas(dataset_dir: Path | None = None, *,
             + tuple(_working_folders(Path(tempfile.gettempdir()),
                                      SYSTEM_TEMP_PREFIXES, now=t))),
     ]
+    # The open dataset's own local copies are offered with its row cache below, not twice.
+    open_rows = set(_row_cache_dirs(Path(dataset_dir))) if dataset_dir is not None else set()
+    areas.append(CacheArea(
+        "local-rows", "Fast copies of datasets on read-only drives",
+        "Row caches of datasets whose own folder could not be written (a "
+        "read-only share, or a Windows-formatted drive on a Mac), kept here "
+        "instead. Rebuilt the next time each of those datasets is opened, "
+        "which is then slower.",
+        tuple(p for p in _local_row_caches(base) if p not in open_rows), default_on=False))
     scratch = default_scratch_dir()
     areas.append(CacheArea(
         SCRATCH_KEY, "Analyze run scratch",

@@ -30,6 +30,7 @@ from __future__ import annotations
 import copy
 import logging
 import time
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -410,11 +411,36 @@ def cell_gating_read_owed_cell_areas(ctx) -> None:
         rt.status_label.setText("Reading cells once cell gating has finished…")
         return
     rt.areas_owed = False
-    labels = _read_first_frames(ctx)
-    _cell_gating_refresh_opt_timepoints(ctx)
-    _cell_gating_refresh_opt_fc_controls(ctx)
-    _cell_gating_autofill_opt_range(ctx)
-    _show_cell_areas(ctx, labels)
+    plan = _first_frames_plan(ctx)
+
+    def finish(collected) -> None:
+        if collected is not None:
+            _fill_first_frames(ctx, collected)
+        _cell_gating_refresh_opt_timepoints(ctx)
+        _cell_gating_refresh_opt_fc_controls(ctx)
+        _cell_gating_autofill_opt_range(ctx)
+        _show_cell_areas(ctx, plan.labels)
+
+    def failed(message: str) -> None:
+        rt.areas_owed = True
+        rt.status_label.setText(f"Could not read the wells' cells: {message}")
+
+    # A well neither remembered nor held is read from disk — from a network
+    # share or a slow drive, long enough to freeze the window — so that reading
+    # goes to a worker (``review.core.background_read``) and the status line
+    # says what it is waiting for. A plate already in memory is read here.
+    from review.core import background_read
+    from review.data.plate_scan import remembered
+    held_or_known = set(plan.labels) - set(background_read.wells_not_held(ctx, plan.labels))
+    pending = [label for label in plan.labels
+               if label not in held_or_known and not remembered(ctx, FIRST_FRAME_KIND, label, plan.params)]
+    if pending and background_read.start(ctx, FIRST_FRAMES_READ_KEY, lambda: _collect_first_frames(ctx, plan),
+                                         on_done=finish, on_failed=failed):
+        rt.status_label.setText(f"Reading cells from {len(pending)} well{'s' if len(pending) != 1 else ''}…")
+        return
+    background_read.cancel(ctx, FIRST_FRAMES_READ_KEY)
+    _read_first_frames(ctx)
+    finish(None)
 
 
 def _pay_owed_reading_if_shown(ctx) -> None:
@@ -425,33 +451,64 @@ def _pay_owed_reading_if_shown(ctx) -> None:
         swallowed("cell gating: paying the owed reading after a pass")
 
 
-def _read_first_frames(ctx) -> list[str]:
-    """Fill the CDF arrays from each source well's first frame; return the wells."""
-    rt = ctx.runtime.cell_gating
-    rt.cell_areas = []
-    rt.fluor_data = {}
-    rt.ratio_data = {}
-    labels = _cell_gating_source_wells(ctx)
+#: ``plate_scan``'s kind for one well's first-frame values.
+FIRST_FRAME_KIND = "cell_gating_first_frame"
+#: The first-frame reading's key in ``review.core.background_read``.
+FIRST_FRAMES_READ_KEY = "cell_gating_first_frames"
+
+
+@dataclass(frozen=True)
+class _FirstFramesPlan:
+    """What :func:`_collect_first_frames` reads, settled on the window's thread before it runs."""
+
+    labels: list
+    channels: tuple
+    ratios: list
+    params: tuple
+    columns: set
+
+
+def _first_frames_plan(ctx) -> _FirstFramesPlan:
     ratios = list(ctx.state.channel.ratio_metrics or [])
     channels = tuple(ctx.state.channel.fluor_channels)
     params = (channels, tuple((rm.display_label(), rm.numerator_col(), rm.denominator_col(),
                                float(rm.epsilon or 0.0)) for rm in ratios))
-    columns = _first_frame_columns(channels, ratios)
-    for label in labels:
+    return _FirstFramesPlan(_cell_gating_source_wells(ctx), channels, ratios, params,
+                            _first_frame_columns(channels, ratios))
+
+
+def _collect_first_frames(ctx, plan: _FirstFramesPlan) -> tuple:
+    """``(areas, fluor, ratios)`` over the plan's wells, from wells alone — no widget, so safe on a worker."""
+    areas_out: list = []
+    fluor_out: dict = {}
+    ratio_out: dict = {}
+    for label in plan.labels:
         # Remembered per well (``plate_scan``) until its rows or verdicts change,
         # and read narrowly: what is kept is one frame's values per well — the
         # first frame's cells — never the rows.
-        found = per_well(ctx, "cell_gating_first_frame", label, params,
-                         lambda df: _first_frame_values(df, channels, ratios), columns=columns)
+        found = per_well(ctx, FIRST_FRAME_KIND, label, plan.params,
+                         lambda df: _first_frame_values(df, plan.channels, plan.ratios), columns=plan.columns)
         if found is None:
             continue
         areas, fluor, ratio_vals = found
-        rt.cell_areas.extend(float(a) for a in areas)
+        areas_out.extend(float(a) for a in areas)
         for channel, values in fluor.items():
-            rt.fluor_data.setdefault(channel, []).extend(float(x) for x in values)
+            fluor_out.setdefault(channel, []).extend(float(x) for x in values)
         for name, values in ratio_vals.items():
-            rt.ratio_data.setdefault(name, []).extend(float(x) for x in values)
-    return labels
+            ratio_out.setdefault(name, []).extend(float(x) for x in values)
+    return areas_out, fluor_out, ratio_out
+
+
+def _fill_first_frames(ctx, collected) -> None:
+    rt = ctx.runtime.cell_gating
+    rt.cell_areas, rt.fluor_data, rt.ratio_data = collected
+
+
+def _read_first_frames(ctx) -> list[str]:
+    """Fill the CDF arrays from each source well's first frame, here and now; return the wells."""
+    plan = _first_frames_plan(ctx)
+    _fill_first_frames(ctx, _collect_first_frames(ctx, plan))
+    return plan.labels
 
 
 def _show_cell_areas(ctx, labels: list[str]) -> None:

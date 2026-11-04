@@ -99,7 +99,7 @@ class AppRuntime:
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
                  "review_image", "review", "stats", "plot_groups", "export",
                  "centre", "view_state", "tab", "groups", "pipeline_info",
-                 "playground", "qc", "home", "triage", "jobs")
+                 "playground", "qc", "home", "triage", "jobs", "reads")
 
     def __init__(self, app=None, store: dict | None = None) -> None:
         if store is None:
@@ -255,6 +255,10 @@ class AppRuntime:
         # serialises the Cell Gating panel's background jobs and owns the popup
         # each shows. Created lazily on the first job, never persisted.
         object.__setattr__(self, "jobs", _FeatureRuntime(s, "_jobs_"))
+        # Plate-wide reads running off the window's thread (prefix ``_reads_``):
+        # ``ctx.runtime.reads.jobs`` maps a read's key to its generation and live
+        # worker bridge (``review.core.background_read``). Never persisted.
+        object.__setattr__(self, "reads", _FeatureRuntime(s, "_reads_"))
         # Playground testbed transient scratch (prefix ``_playground_``): the
         # current frame identity key (``ctx.runtime.playground.frame_key`` <->
         # ``app._playground_frame_key``), the reference-field worker bridge

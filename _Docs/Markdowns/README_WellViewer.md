@@ -2929,6 +2929,14 @@ What this means in use:
   it drew of how many. Clicking a point still opens that cell. Gate percentages
   always count every cell, not the sample, and an exported CSV always holds every
   cell.
+- **A plot that has to read wells from disk says so instead of freezing.** On a
+  plate too large to keep in memory, the Distribution plot and Cell Gating's
+  curves read the wells they need back from disk, which from a network share or
+  a slow USB drive can take minutes. They do that in the background: the plot
+  reads *Reading N wells from disk…* and Cell Gating's status line *Reading
+  cells from N wells…* until the figure is drawn, and the window stays usable
+  meanwhile. Change the selection while it reads and only the newest figure is
+  drawn. A plate that fits in memory draws at once, as before.
 - **The Distribution plot draws its curves from a sample above 200,000 values.**
   The counts in the legend and title, the histogram's bars and bin range, and the
   violin's median line still use every value; only the KDE and CDF curves and

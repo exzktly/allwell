@@ -44,9 +44,17 @@ def _cell_gating_reader(stack) -> str | None:
 
 
 def _settle(app, qtbot) -> None:
+    """Wait for the gating pass and for Cell Gating's own first-frame reading, which runs on a worker when its
+    wells are not held (``review.core.background_read``)."""
+    from review.core import background_read
+
     worker = getattr(app._ctx.runtime.cell_gating, "worker", None)
     if worker is not None:
         qtbot.waitUntil(lambda: not worker.isRunning(), timeout=30_000)
+    from review.features.home.cell_gating.controller import FIRST_FRAMES_READ_KEY
+
+    qtbot.waitUntil(lambda: not background_read.running(app._ctx, FIRST_FRAMES_READ_KEY),
+                    timeout=30_000)
     qtbot.wait(50)
 
 
@@ -104,10 +112,10 @@ def test_a_reopen_reads_cell_gating_s_wells_once_and_narrowly(viewer_app, mini_d
     for _kind, who, cols in ours:
         assert cols is not None, f"{who} read every column"
         by_reader[who] = by_reader.get(who, 0) + 1
-    assert 1 <= by_reader.get("_read_first_frames", 0) <= len(wells), by_reader
+    assert 1 <= by_reader.get("_collect_first_frames", 0) <= len(wells), by_reader
     assert by_reader.get("_well_timepoints", 0) <= 2, by_reader
     assert by_reader.get("_well_value_extent", 0) <= 2, by_reader
-    assert set(by_reader) <= {"_read_first_frames", "_well_timepoints", "_well_value_extent"}, by_reader
+    assert set(by_reader) <= {"_collect_first_frames", "_well_timepoints", "_well_value_extent"}, by_reader
 
     # What the tab shows is the whole-frame answer, with the loaded ratio in it.
     rt = ctx.runtime.cell_gating
@@ -179,14 +187,16 @@ def test_the_owed_reading_waits_for_the_load_s_gating_pass(viewer_app, mini_data
 
     monkeypatch.setattr(cg.GatingWorker, "_run_inner", held_pass)
     reads: list = []
-    real_read = cg._read_first_frames
+    real_read = cg._collect_first_frames
 
-    def spied(c):
+    # The one reader of the first frames, on either path: the window's thread when the wells are held, a worker
+    # (``review.core.background_read``) when they must come from disk.
+    def spied(c, plan):
         w = c.runtime.cell_gating.worker
         reads.append(bool(w is not None and w.isRunning() and not getattr(w, "ended", False)))
-        return real_read(c)
+        return real_read(c, plan)
 
-    monkeypatch.setattr(cg, "_read_first_frames", spied)
+    monkeypatch.setattr(cg, "_collect_first_frames", spied)
     try:
         app._load_path(mini_dataset)
         worker = ctx.runtime.cell_gating.worker
@@ -239,14 +249,16 @@ def test_a_pass_the_user_started_pays_the_reading_the_tab_deferred(viewer_app, m
 
     monkeypatch.setattr(cg.GatingWorker, "_run_inner", held_pass)
     reads: list = []
-    real_read = cg._read_first_frames
+    real_read = cg._collect_first_frames
 
-    def spied(c):
+    # The one reader of the first frames, on either path: the window's thread when the wells are held, a worker
+    # (``review.core.background_read``) when they must come from disk.
+    def spied(c, plan):
         w = c.runtime.cell_gating.worker
         reads.append(bool(w is not None and w.isRunning() and not getattr(w, "ended", False)))
-        return real_read(c)
+        return real_read(c, plan)
 
-    monkeypatch.setattr(cg, "_read_first_frames", spied)
+    monkeypatch.setattr(cg, "_collect_first_frames", spied)
     try:
         ctx.state.cell_gating.fluor_gates["gfp"] = 105.0
         cg.cell_gating_start_gating_worker(ctx)

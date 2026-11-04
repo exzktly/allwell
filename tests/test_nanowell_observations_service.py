@@ -143,3 +143,40 @@ def test_the_scatter_s_nanowell_entries_are_listed_without_computing_the_table(n
     entries = cell_nanowell_entries(nw_ctx)
     assert entries["Nanowell ▸ Cell count"] == "n"
     assert entries["Nanowell ▸ GFP Cell fluorescence (mean per cell, own-well background subtracted)"] == "brightness_GFP"
+
+
+
+def test_the_occupied_count_is_read_once_per_file_version(nw_ctx, monkeypatch):
+    """The footer under every cell plot asked for this on each redraw, and on a plate too large for the row cache
+    each ask was a second whole-frame read of every well. It is a property of the CSV alone, so it is counted once
+    per file version, from the two address columns — and counted again when the CSV is rewritten."""
+    import os
+
+    import review.data.data_loading as dl
+    from review.data import observations, parquet_cache
+
+    monkeypatch.setattr(observations, "_OCCUPIED", {})
+    nw_ctx.state.dataset.cache.clear()                      # not held: what a plate too large for memory looks like
+    reads = []
+    real_read, real_get_rows = parquet_cache.read_cached, dl.get_rows
+
+    def spy(path, columns=None):
+        reads.append(columns)
+        return real_read(path, columns=columns)
+
+    def no_whole_frame(*_a, **_k):
+        raise AssertionError("the whole frame was read")
+
+    monkeypatch.setattr(parquet_cache, "read_cached", spy)
+    monkeypatch.setattr(dl, "get_rows", no_whole_frame)
+    assert observations.occupied_nanowells_by_well(nw_ctx, ["A01", "B01"]) == {"A01": 4, "B01": 3}
+    assert reads == [["nw_q", "nw_r"], ["nw_q", "nw_r"]]
+    assert observations.occupied_nanowells_by_well(nw_ctx, ["A01", "B01"]) == {"A01": 4, "B01": 3}
+    assert len(reads) == 2, "a second redraw read the wells again"
+
+    path = nw_ctx.state.dataset.well_paths["A01"]
+    stat = os.stat(path)
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))   # the pipeline rewrote it
+    monkeypatch.setattr(dl, "get_rows", real_get_rows)                # its stale Parquet cache parses again
+    assert observations.occupied_nanowells_by_well(nw_ctx, ["A01"]) == {"A01": 4}
+    assert len([k for k in observations._OCCUPIED if k[0] == str(path)]) == 2, "the rewritten CSV was not recounted"

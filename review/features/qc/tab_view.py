@@ -511,6 +511,19 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     brd_cb.toggled.connect(lambda _=None: _apply())
     nw_widgets["exclude_soft_nanowells"].toggled.connect(lambda _=None: _apply())
     nw_widgets["nanowell_focus_fraction"].valueChanged.connect(lambda _=None: _apply())
+    # A percentage outside the range is put back by the box on Enter or on leaving it; say so where the row's own
+    # sentence is, and on the status line (``widgets.spin_box``, "refused out loud").
+    nw_widgets["nanowell_focus_fraction"].refused.connect(lambda typed: _say_refused_focus(typed))
+
+    def _say_refused_focus(typed: str) -> None:
+        from review.domain.nanowell_rim_focus import refused_percentage
+
+        spin = nw_widgets["nanowell_focus_fraction"]
+        text = refused_percentage(spin.range_text(), typed, spin.value())
+        label = nw_widgets.get("nanowell_focus_status")
+        if label is not None:
+            nanowell_focus_view.show_problem(label, text)
+        ctx.notify.set_status(text)
     # The cut applies on ``editingFinished`` like the debris bounds.
     def _finish_cut() -> None:
         """Apply, then make the box show the number that is actually in force.

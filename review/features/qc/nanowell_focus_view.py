@@ -120,6 +120,11 @@ def refresh(ctx, w: dict) -> None:
     _count_off_thread(ctx, label)
 
 
+def show_problem(label, text: str) -> None:
+    """Put *text* on the row's sentence as a notice — a refused percentage — until the next count replaces it."""
+    _show(label, text, True)
+
+
 def _show(label, text: str, is_problem: bool) -> None:
     label.setText(text)
     label.setObjectName("Notice" if is_problem else "Muted")

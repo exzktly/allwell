@@ -59,6 +59,10 @@ def build_rim_focus_controls(ctx) -> RimFocusControls:
     spin.setToolTip(RIM_FOCUS_TIP)
     box.toggled.connect(lambda on: nwc.set_rim_focus(ctx, on=on))
     spin.valueChanged.connect(lambda value: nwc.set_rim_focus(ctx, fraction=value / 100.0))
+    # A number outside the range is put back by the box on Enter or on leaving it; without a word it looked like
+    # every edit was being thrown away (``widgets.spin_box``, "refused out loud").
+    spin.refused.connect(lambda typed: ctx.notify.set_status(
+        rfc.refused_percentage(spin.range_text(), typed, spin.value())))
     reg = ctx.widgets
     reg.register("_nw_rim_focus_box", box)
     reg.register("_nw_rim_focus_spin", spin)

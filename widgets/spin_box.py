@@ -24,11 +24,21 @@ The arrows, the wheel and ``setValue`` still emit at once; only typing waits. Wh
 force it is shown in italics (:meth:`_HoldsItsNumber.pending`), so a number waiting for its pause is never mistaken
 for one already applied — a pause in the middle of a number commits what is there, and the change of style says so.
 ``tests/test_spin_boxes_commit_typed_values_once.py`` holds it.
+
+**A number the box will not take is refused out loud.** Typed text outside the range (20 in a box that takes 30 to
+95, or 96 in one that takes up to 95) cannot be committed, and Qt's own answer on Enter or on leaving the box is to put the
+last value back without a word — so a user who typed 20 and clicked away saw the box snap back to 75 and could only
+conclude their edits were being thrown away. That was reported twice on the rim focus boxes. Qt calls :meth:`fixup`
+exactly then, so the box emits ``refused(text)`` there — and a number over the maximum is kept as typed
+(:meth:`validate`) rather than losing the keystroke that took it over, which turned 96 into 9 and committed that — and the screen that owns it says what range it takes
+(:meth:`range_text`). After a pause the box commits a number it takes, refuses one no further digit could
+rescue, and leaves a partial one (the 4 on the way to 45) as typed rather than refusing it under the user's fingers.
+``tests/test_spin_boxes_say_what_they_refuse.py`` holds it.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QTimer
+from PySide6.QtCore import QEvent, QTimer, Signal
 from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
 
@@ -53,7 +63,7 @@ class _HoldsItsNumber:
         self._commit_pause = QTimer(self)
         self._commit_pause.setSingleShot(True)
         self._commit_pause.setInterval(TYPING_PAUSE_MS)
-        self._commit_pause.timeout.connect(self.interpretText)
+        self._commit_pause.timeout.connect(self._commit_if_acceptable)
         self.lineEdit().textEdited.connect(lambda _text: self._commit_pause.start())
         # Typed but not yet in force: italics until it commits or is put back.
         self.lineEdit().textChanged.connect(lambda _text: self._show_pending())
@@ -67,6 +77,45 @@ class _HoldsItsNumber:
         if self.validate(text, 0)[0] != QValidator.Acceptable:
             return True
         return self.valueFromText(text) != self.value()
+
+    def _commit_if_acceptable(self) -> None:
+        """The pause's commit. A number the box takes is committed; one that more typing could still make a number it
+        takes (the 4 on the way to 45) is left as typed; one that no further digit can rescue (20 in a box that takes
+        30 to 95, or 96 in a box that takes up to 95) is refused now — put back, and said — rather than left in
+        italics for ever."""
+        text = self.lineEdit().text()
+        if self.validate(text, 0)[0] == QValidator.Acceptable:
+            self.interpretText()
+        elif not any(self.validate(text + digit, 0)[0] == QValidator.Acceptable for digit in "0123456789"):
+            self.interpretText()
+
+    def validate(self, text, pos):  # Qt naming
+        """Qt's answer, except that a number outside the range is *Intermediate*, never *Invalid*.
+
+        Qt refuses the keystroke that takes a number over the maximum, so typing 96 into a box that takes up to 95
+        left "9" — and committed 9, a number the user never typed, without a word. Kept as typed instead, the
+        number is refused out loud on Enter, focus-out or the pause (:meth:`fixup`, module docstring)."""
+        result = super().validate(text, pos)
+        if result[0] == QValidator.Invalid:
+            try:
+                number = float(str(text).strip())
+            except ValueError:
+                return result
+            if number > self.maximum() or number < self.minimum():
+                return (QValidator.Intermediate, text, pos)
+        return result
+
+    def fixup(self, text):  # Qt naming
+        """Qt calls this on Enter or focus-out when the text is not a value the box takes, just before it puts the
+        last value back: say so (module docstring)."""
+        typed = str(text).strip()
+        if typed and typed != self.textFromValue(self.value()).strip():
+            self.refused.emit(typed)
+        return super().fixup(text)
+
+    def range_text(self) -> str:
+        """The range the box takes, as a person would write it: ``"30–95"``."""
+        return f"{self.textFromValue(self.minimum())}–{self.textFromValue(self.maximum())}"
 
     def _show_pending(self) -> None:
         font = self.lineEdit().font()
@@ -112,9 +161,15 @@ class _HoldsItsNumber:
 class SpinBox(_HoldsItsNumber, QSpinBox):
     """A ``QSpinBox`` no layout can squeeze below the width its widest value needs (module docstring)."""
 
+    #: Typed text the box refused and replaced with its last value (module docstring).
+    refused = Signal(str)
+
 
 class DoubleSpinBox(_HoldsItsNumber, QDoubleSpinBox):
     """A ``QDoubleSpinBox`` no layout can squeeze below the width its widest value needs (module docstring)."""
+
+    #: Typed text the box refused and replaced with its last value (module docstring).
+    refused = Signal(str)
 
     def setDecimals(self, places: int) -> None:  # Qt naming
         super().setDecimals(places)

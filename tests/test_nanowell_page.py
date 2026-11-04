@@ -532,17 +532,18 @@ def test_every_rim_focus_change_applies_however_the_box_is_left(qtbot, page):
 
 
 def test_a_rim_focus_outside_its_range_is_refused_out_loud(qtbot, page, monkeypatch):
-    """Reported: the Rim focus threshold "snaps back" whenever the user clicks elsewhere. The box takes 30 to 95, and
-    any other number was put back by Qt without a word, so it looked like every edit was thrown away."""
+    """Reported: the Rim focus threshold "snaps back" whenever the user clicks elsewhere. The box takes 1 to 95, and
+    any other number was put back by Qt without a word, so it looked like every edit was thrown away. 96 is also the
+    case Qt used to turn into 9 by dropping the keystroke that took it over the maximum."""
     st = _loaded(qtbot, page)
     said: list = []
     monkeypatch.setattr(page.notify, "set_status", said.append)
     spin = page.widgets.get("_nw_rim_focus_spin")
     before = page.state.qc.params.nanowell_focus_fraction
     spin.lineEdit().selectAll()
-    qtbot.keyClicks(spin.lineEdit(), "20")
+    qtbot.keyClicks(spin.lineEdit(), "96")
     spin.interpretText()                                              # leaving the box
-    assert said == [f"Rim focus takes 30–95% of the well's sharpest rims: 20 was not applied, "
+    assert said == [f"Rim focus takes 1–95% of the well's sharpest rims: 96 was not applied, "
                     f"and it stays at {round(100 * before)}%."]
     assert page.state.qc.params.nanowell_focus_fraction == before and not st.computing
 

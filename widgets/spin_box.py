@@ -26,10 +26,11 @@ for one already applied — a pause in the middle of a number commits what is th
 ``tests/test_spin_boxes_commit_typed_values_once.py`` holds it.
 
 **A number the box will not take is refused out loud.** Typed text outside the range (20 in a box that takes 30 to
-95, or a 100 the box cut to 10) cannot be committed, and Qt's own answer on Enter or on leaving the box is to put the
+95, or 96 in one that takes up to 95) cannot be committed, and Qt's own answer on Enter or on leaving the box is to put the
 last value back without a word — so a user who typed 20 and clicked away saw the box snap back to 75 and could only
 conclude their edits were being thrown away. That was reported twice on the rim focus boxes. Qt calls :meth:`fixup`
-exactly then, so the box emits ``refused(text)`` there, and the screen that owns it says what range it takes
+exactly then, so the box emits ``refused(text)`` there — and a number over the maximum is kept as typed
+(:meth:`validate`) rather than losing the keystroke that took it over, which turned 96 into 9 and committed that — and the screen that owns it says what range it takes
 (:meth:`range_text`). After a pause the box commits a number it takes, refuses one no further digit could
 rescue, and leaves a partial one (the 4 on the way to 45) as typed rather than refusing it under the user's fingers.
 ``tests/test_spin_boxes_say_what_they_refuse.py`` holds it.
@@ -80,12 +81,29 @@ class _HoldsItsNumber:
     def _commit_if_acceptable(self) -> None:
         """The pause's commit. A number the box takes is committed; one that more typing could still make a number it
         takes (the 4 on the way to 45) is left as typed; one that no further digit can rescue (20 in a box that takes
-        30 to 95) is refused now — put back, and said — rather than left in italics for ever."""
+        30 to 95, or 96 in a box that takes up to 95) is refused now — put back, and said — rather than left in
+        italics for ever."""
         text = self.lineEdit().text()
         if self.validate(text, 0)[0] == QValidator.Acceptable:
             self.interpretText()
         elif not any(self.validate(text + digit, 0)[0] == QValidator.Acceptable for digit in "0123456789"):
             self.interpretText()
+
+    def validate(self, text, pos):  # Qt naming
+        """Qt's answer, except that a number outside the range is *Intermediate*, never *Invalid*.
+
+        Qt refuses the keystroke that takes a number over the maximum, so typing 96 into a box that takes up to 95
+        left "9" — and committed 9, a number the user never typed, without a word. Kept as typed instead, the
+        number is refused out loud on Enter, focus-out or the pause (:meth:`fixup`, module docstring)."""
+        result = super().validate(text, pos)
+        if result[0] == QValidator.Invalid:
+            try:
+                number = float(str(text).strip())
+            except ValueError:
+                return result
+            if number > self.maximum() or number < self.minimum():
+                return (QValidator.Intermediate, text, pos)
+        return result
 
     def fixup(self, text):  # Qt naming
         """Qt calls this on Enter or focus-out when the text is not a value the box takes, just before it puts the

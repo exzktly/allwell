@@ -76,3 +76,23 @@ def test_the_double_box_says_so_too(qtbot):
     b.interpretText()
     assert refused == ["0.1"] and b.value() == 0.7
     assert b.range_text() == "0.30–0.95"
+
+
+@pytest.mark.parametrize("typed", ["96", "100"])
+def test_a_number_over_the_maximum_is_kept_as_typed_and_refused(qtbot, box, typed):
+    """Qt drops the keystroke that takes a number over the maximum, so 96 became 9 — committed, and never typed."""
+    b, refused = box
+    seen: list = []
+    b.valueChanged.connect(seen.append)
+    _type(qtbot, b, typed)
+    assert b.lineEdit().text() == typed
+    b.interpretText()
+    assert refused == [typed] and seen == [] and b.value() == 70
+
+
+def test_a_lower_rim_focus_is_taken(qtbot):
+    """The rule's floor is 1%: a low fraction only flags the worst-blurred rims (``nanowell_rim_focus``)."""
+    from review.domain import nanowell_rim_focus as rfc
+
+    assert rfc.clamp_fraction(0.1) == 0.1 and rfc.clamp_fraction(0.01) == 0.01
+    assert rfc.clamp_fraction(0.0) is None and rfc.clamp_fraction(0.96) is None

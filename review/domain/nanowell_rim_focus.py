@@ -51,9 +51,11 @@ OUT_OF_FOCUS = "out_of_focus"
 
 #: The default fraction of the well's sharp rims a nanowell's rim must reach (module docstring for the measurement).
 DEFAULT_FRACTION = 0.75
-#: The smallest and largest fractions the page accepts: below the low end almost nothing is flagged, and at 1 a
-#: tenth of every timepoint's nanowells would be by construction.
-MIN_FRACTION, MAX_FRACTION = 0.3, 0.95
+#: The smallest and largest fractions the page accepts. No floor is needed beyond "more than nothing": a low fraction
+#: only flags the worst-blurred rims, which is a legitimate choice on a plate whose sharpness varies widely, and
+#: untick the rule to flag none. The ceiling is real: the reference is the 90th percentile of the well's rims, so at
+#: 1 about nine in ten of every timepoint's nanowells would be flagged by construction, whatever the images.
+MIN_FRACTION, MAX_FRACTION = 0.01, 0.95
 #: Which percentile of a well's rims at a timepoint stands for "the sharp ones": high enough to be the in-focus
 #: tiles when most of the array is soft, low enough not to be the one noisiest rim.
 REFERENCE_PERCENTILE = 90.0

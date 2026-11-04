@@ -74,23 +74,73 @@ def fold_change_scale(metric) -> str:
     return "log" if str(metric.key).startswith("log") else "ratio"
 
 
+#: :func:`occupied_nanowells_by_well`'s answer per well file version: ``(path, fingerprint) -> count``, or ``None``
+#: for a table with no nanowell address columns.
+_OCCUPIED: dict[tuple[str, str], int | None] = {}
+
+
+def _count_occupied(rows) -> int | None:
+    if rows is None or "nw_q" not in rows.columns or "nw_r" not in rows.columns:
+        return None
+    return int(len(rows[["nw_q", "nw_r"]].dropna().drop_duplicates()))
+
+
+def _occupied_in(ctx, well: str, path) -> int | None:
+    """One well's count, without reading the whole frame when it is not held.
+
+    The well's own held frame when the row cache has it; else the two address columns from its Parquet cache;
+    else (no current cache) the whole frame, as before.
+    """
+    from pathlib import Path
+
+    from review.data.data_loading import get_rows
+    from review.data.parquet_cache import cached_column_names, read_cached
+
+    cache = getattr(ctx.state.dataset, "cache", None)
+    held = cache.get(well) if cache is not None else None
+    if held is not None:
+        return _count_occupied(held)
+    names = cached_column_names(Path(path))
+    if names is not None:
+        if "nw_q" not in names or "nw_r" not in names:
+            return None
+        frame = read_cached(Path(path), columns=["nw_q", "nw_r"])
+        if frame is not None:
+            return _count_occupied(frame)
+    return _count_occupied(get_rows(ctx, well))
+
+
 def occupied_nanowells_by_well(ctx, wells) -> dict[str, int]:
     """Per well, how many distinct nanowell addresses its cell rows name — the nanowells holding a cell.
 
     Read from the cell table alone, so it needs no nanowell feature: it is what a build without one can still say
     about a nanowell plate's cell plots (``observation.pooled_cells_line``).
+
+    **Counted once per file version.** The count is of every cell row, not the included ones, so it is a property
+    of the CSV alone: it is remembered per well under the file's path and fingerprint
+    (``parquet_cache.source_fingerprint``: size, modification time, parser version), and a rewritten CSV is
+    counted again. It was read on every redraw of every cell plot that carries the footer — on a plate too large
+    for the row cache, a second whole-frame read of every well on each visit to Distribution, on top of the one
+    the plot itself made. A well that has to be counted reads only its two address columns.
     """
-    from review.data.data_loading import get_rows
+    from review.data.parquet_cache import source_fingerprint
 
     out: dict[str, int] = {}
+    paths = ctx.state.dataset.well_paths
     for well in wells:
-        if well not in ctx.state.dataset.well_paths:
+        path = paths.get(well)
+        if path is None:
             continue
-        rows = get_rows(ctx, well)
-        if rows is None or "nw_q" not in rows.columns or "nw_r" not in rows.columns:
-            continue
-        addressed = rows[["nw_q", "nw_r"]].dropna()
-        out[well] = int(len(addressed.drop_duplicates()))
+        fingerprint = source_fingerprint(path)
+        key = (str(path), fingerprint) if fingerprint is not None else None
+        if key is not None and key in _OCCUPIED:
+            count = _OCCUPIED[key]
+        else:
+            count = _occupied_in(ctx, well, path)
+            if key is not None:
+                _OCCUPIED[key] = count
+        if count is not None:
+            out[well] = count
     return out
 
 

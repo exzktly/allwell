@@ -27,6 +27,7 @@ from review.core.ui_helpers import (
 )
 from core.safe import swallow, swallowed
 from util.csv_gz import GZ_READ_ERRORS, csv_stem, glob_csvs, open_csv_text
+from startup import boot_diag
 from review.data.curation import apply_curation_to_cache
 from review.data.field_exclusions import apply_field_exclusions_to_cache
 from review.domain.dataset_name import dataset_display_name
@@ -926,6 +927,8 @@ def _open_wells(ctx, app, csvs) -> None:
     for i, p in enumerate(csvs, 1):
         tok = app._extract_well_token(csv_stem(p.name))
         key = tok if tok else csv_stem(p.name)
+        # On disk before the read, so a load that never comes back names the file it was reading.
+        boot_diag.boot(f"dataset load: reading {p.name} ({i}/{n})")
         # The repository's open is the same load a lazy read reaches on a cache
         # miss: it registers the path, reads the CSV, runs every registered
         # projector and records the FOV verdict. This pass used to do those four

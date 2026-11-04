@@ -34,6 +34,10 @@ _HELD_ONLY_READERS: dict[str, str] = {
     "review/data/narrow_rows.py::narrow_rows": (
         "One well: a held frame is returned as held, and a missing one read narrowly from disk."),
     "review/data/data_loading.py::held_wells_note": "Counts the held wells, to say when a readout covers only them.",
+    "review/core/background_read.py::wells_not_held": (
+        "Asks which wells are not held, to decide whether a view's draw would read from disk and so go to a worker."),
+    "review/data/observations.py::_occupied_in": (
+        "One well: a held frame is counted as held, and a missing one read as its two address columns from disk."),
     "review/features/lineplot/controller.py::_nuclei_counted": (
         "The Line Graphs status line's included count, refreshed on every redraw: counts the held wells through "
         "df_included_mask, takes an unheld well's total from its summary, and says the included count does not "

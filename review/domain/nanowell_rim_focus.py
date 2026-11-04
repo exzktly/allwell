@@ -83,6 +83,13 @@ class RimFocusRule:
         return f"rim under {self.fraction:.0%} of its well's sharpest" if self.active() else "off"
 
 
+def refused_percentage(range_text: str, typed: str, kept: int) -> str:
+    """What a rim focus box says when it puts back a typed percentage it does not take (``widgets.spin_box``'s
+    ``refused``). One sentence for both copies of the box — the Nanowells page's and the Cell Gating panel's."""
+    return (f"Rim focus takes {range_text}% of the well's sharpest rims: {typed} was not applied, "
+            f"and it stays at {kept}%.")
+
+
 def clamp_fraction(value) -> float | None:
     """*value* as a fraction the page accepts, or ``None`` when it is not a number in range."""
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):

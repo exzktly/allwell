@@ -4127,6 +4127,13 @@ turns upright once it is in force — so if you pause mid-number, the upright te
 is what was applied. The box's up/down arrows and the mouse
 wheel still apply each step straight away.
 
+Each box takes a range of numbers. Type one outside it — 20 in a box that takes
+30 to 95 — and the box goes back to the number in force when you press Enter,
+click elsewhere or stop typing. The **Rim focus** boxes (on the Nanowells page
+and in Cell Gating) also say so on the status line and on their own row: which
+percentages they take, and that yours was not applied. A number on its way to
+one the box takes — the 4 of 45 — waits for the next digit.
+
 #### Channel selector
 
 The single channel dropdown at the top of every plotting sub-tab is shared
@@ -6204,7 +6211,8 @@ the sentence names it.
 - **Rim focus** (on by default) and its percentage box beside it — leave out a nanowell at any timepoint where its own rim
   was out of focus. Every nanowell run measures each nanowell's rim sharpness (the `focus` column of
   `nanowells/<well>.csv`), so this works on datasets you already have, with no re-run. A nanowell is out of
-  focus at a timepoint when its rim is less sharp than this percentage (75 % by default) of the sharpest tenth
+  focus at a timepoint when its rim is less sharp than this percentage (75 % by default, any from 30 to 95; a
+  number outside that is refused, and the status line says so) of the sharpest tenth
   of its well's rims at that timepoint — so one soft tile is caught while the rest of the well is sharp. There
   it has no count, confluence or fluorescence, no fold change from or to it and no growth rate through it; its
   state reads *rim out of focus*, the Array view hatches it with dots, its detail names the timepoint, and the

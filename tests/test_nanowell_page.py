@@ -531,6 +531,22 @@ def test_every_rim_focus_change_applies_however_the_box_is_left(qtbot, page):
                     and not getattr(canvas, "_draw_pending", False), timeout=5000)
 
 
+def test_a_rim_focus_outside_its_range_is_refused_out_loud(qtbot, page, monkeypatch):
+    """Reported: the Rim focus threshold "snaps back" whenever the user clicks elsewhere. The box takes 30 to 95, and
+    any other number was put back by Qt without a word, so it looked like every edit was thrown away."""
+    st = _loaded(qtbot, page)
+    said: list = []
+    monkeypatch.setattr(page.notify, "set_status", said.append)
+    spin = page.widgets.get("_nw_rim_focus_spin")
+    before = page.state.qc.params.nanowell_focus_fraction
+    spin.lineEdit().selectAll()
+    qtbot.keyClicks(spin.lineEdit(), "20")
+    spin.interpretText()                                              # leaving the box
+    assert said == [f"Rim focus takes 30–95% of the well's sharpest rims: 20 was not applied, "
+                    f"and it stays at {round(100 * before)}%."]
+    assert page.state.qc.params.nanowell_focus_fraction == before and not st.computing
+
+
 def _key_texts(ctx):
     fig = ctx.widgets.get("_nw_fig")
     return [t.get_text() for ax in fig.axes for a in ax.artists if a.get_gid() == "nw-array-key"

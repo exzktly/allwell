@@ -699,26 +699,31 @@ def _cell_gating_first_frame_rows(df) -> tuple:
     tp_h = (pd.to_numeric(same_fov.get("timepoint_hours"), errors="coerce")
             if "timepoint_hours" in same_fov.columns
             else pd.Series(np.nan, index=same_fov.index, dtype=float))
-    tp_str = timepoint_text(same_fov)
-    tp_str_num = pd.to_numeric(tp_str, errors="coerce")
 
+    # The text timepoints are read only when the numeric column is empty. Parsing
+    # every cell's label as a number (``"t00"`` fails per element, slowly) was
+    # most of the Cell Gating tab's first visit — 3.2 s of 6.7 s on a 60-well,
+    # 12-timepoint plate — and its answer was used only in the branches below.
     if tp_h.notna().any():
         min_h = float(tp_h.min())
         mask = (tp_h == min_h)
         frame_desc_tp = f"{min_h:g}"
-    elif tp_str_num.notna().any():
-        min_n = float(tp_str_num.min())
-        mask = tp_str_num == min_n
-        frame_desc_tp = f"{min_n:g}"
     else:
-        non_empty = tp_str[tp_str != ""]
-        if non_empty.empty:
-            mask = pd.Series(True, index=same_fov.index)
-            frame_desc_tp = ""
+        tp_str = timepoint_text(same_fov)
+        tp_str_num = pd.to_numeric(tp_str, errors="coerce")
+        if tp_str_num.notna().any():
+            min_n = float(tp_str_num.min())
+            mask = tp_str_num == min_n
+            frame_desc_tp = f"{min_n:g}"
         else:
-            first = sorted(non_empty.unique(), key=str.lower)[0]
-            mask = tp_str == first
-            frame_desc_tp = first
+            non_empty = tp_str[tp_str != ""]
+            if non_empty.empty:
+                mask = pd.Series(True, index=same_fov.index)
+                frame_desc_tp = ""
+            else:
+                first = sorted(non_empty.unique(), key=str.lower)[0]
+                mask = tp_str == first
+                frame_desc_tp = first
 
     frame_df = same_fov.loc[mask]
     frame_desc = f"fov={first_fov}, tp={frame_desc_tp}"

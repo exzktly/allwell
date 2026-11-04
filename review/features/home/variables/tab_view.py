@@ -57,6 +57,16 @@ POLICY_NOTE = (
 )
 
 
+#: Registry key of the widget holding the two columns, which the phone form
+#: stacks (:func:`set_variables_phone_form`).
+COLUMNS_KEY = "_var_columns"
+#: Registry key of the definition column (``editor_view``).
+EDITOR_KEY = "_var_editor_column"
+
+#: Qt's QWIDGETSIZE_MAX, a widget's default maximum width.
+_QT_MAX = 16_777_215
+
+
 def build_variables_subtab(ctx, frame: QWidget) -> None:
     """Build the tab body into *frame*. Registered lazily, like every sub-tab."""
     from .controller import refresh_variables, wire_variables
@@ -83,7 +93,7 @@ def build_variables_subtab(ctx, frame: QWidget) -> None:
     message.setWordWrap(True)
     outer.addWidget(message)
 
-    body = QWidget(frame)
+    body = reg.register(COLUMNS_KEY, QWidget(frame))
     columns = QHBoxLayout(body)
     columns.setContentsMargins(0, 0, 0, 0)
     columns.setSpacing(theme.Spacing.lg)
@@ -93,6 +103,44 @@ def build_variables_subtab(ctx, frame: QWidget) -> None:
 
     wire_variables(ctx)
     refresh_variables(ctx)
+
+
+def set_variables_phone_form(ctx, on: bool) -> None:
+    """The Variables layer as one column in phone layout, or as the desk has it.
+
+    The desk sets the definition column (a fixed 268 px rail) beside the plate
+    column, which a phone held upright has no room for: both were squeezed and
+    the empty state's sentence ran down a column a few words wide. On a phone
+    the two columns are one, **plate first** — the plate is what the layer is
+    for (the module docstring's "a canvas with a form beside it"), and with no
+    variables yet its place holds the empty state and its *+ Variable*, which is
+    the one thing to do — and the definition under it, at the full width, with
+    no left inset of its own (the rail toggle it clears is hidden in phone
+    layout). ``BottomToTop`` reverses the desk's left-to-right order without
+    moving a widget. Idempotent, and undone exactly by ``on=False``.
+    """
+    from PySide6.QtWidgets import QBoxLayout
+
+    reg = ctx.widgets
+    columns = reg.get_or_none(COLUMNS_KEY)
+    if columns is not None:
+        columns.layout().setDirection(
+            QBoxLayout.BottomToTop if on else QBoxLayout.LeftToRight)
+    editor = reg.get_or_none(EDITOR_KEY)
+    if editor is not None:
+        if on:
+            editor.setMinimumWidth(0)
+            editor.setMaximumWidth(_QT_MAX)
+        else:
+            editor.setFixedWidth(EDITOR_W)
+        editor.layout().setContentsMargins(0 if on else theme.Spacing.md, 0, 0, 0)
+    # The plate column's width cap keeps it one block beside the definition at
+    # the desk; stacked on a phone held sideways it held the fill sentence to
+    # 490 px of a 900 px page and cut "the next Dose," and "rows per value."
+    from .plate_view import COLUMN_W
+    plate_column = reg.get_or_none("_var_plate_column")
+    if plate_column is not None:
+        plate_column.setMaximumWidth(_QT_MAX if on else COLUMN_W)
 
 
 def _build_header(ctx, parent: QWidget, reg) -> QWidget:

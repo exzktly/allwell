@@ -48,9 +48,9 @@ _VALUES_H = 290
 
 
 def build_editor_column(ctx, parent: QWidget, reg) -> QWidget:
-    from .tab_view import EDITOR_W, section_label
+    from .tab_view import EDITOR_KEY, EDITOR_W, section_label
 
-    host = QWidget(parent)
+    host = reg.register(EDITOR_KEY, QWidget(parent))
     host.setFixedWidth(EDITOR_W)
     column = QVBoxLayout(host)
     # A left inset, because the rail sits hard against the pane edge and the

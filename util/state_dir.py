@@ -14,6 +14,8 @@ machine outside a dataset folder, in one fixed layout:
                            intermediate images, per-FOV checkpoints — unless the
                            user points the run elsewhere (:func:`default_scratch_dir`)
 ``czi-scans/``             the pipeline's CZI header cache (``pipeline.scan_cache``)
+``row-cache/``             the fast copies of a dataset's CSVs when its own folder
+                           cannot be written (:func:`local_row_cache_dir`)
 ``settings.ini``           window geometry, recent datasets and the other Qt
                            settings (``core.app_settings``)
 ``remotes.toml``           the remote hosts (``services.remote_config``)
@@ -53,6 +55,11 @@ storage button offers their old copies instead (:func:`legacy_gui_paths`).
 
 The Parquet row caches are not here, by design: each sits in a ``.aw_parquet``
 folder beside the CSVs it caches, so it travels and is deleted with its dataset.
+The exception is a dataset whose folder cannot be written — a read-only share,
+or a Windows-formatted (NTFS) drive on a Mac, which macOS mounts read-only.
+Without a cache such a dataset is parsed in full on every open, so its cache is
+kept here instead, under ``row-cache/`` in a folder named for the dataset
+folder's path (:func:`local_row_cache_dir`).
 
 **Scratch on Windows.** The scratch holds gigabytes of transient files, and
 ``%LOCALAPPDATA%`` is the part of a profile that is never roamed, so the move
@@ -101,6 +108,9 @@ SCRATCH_FALLBACK_ENV = "ALLWELL_SCRATCH_FALLBACK_DIR"
 SCAN_CACHE_SUBDIR = "czi-scans"
 SCAN_CACHE_ENV = "ALLWELL_SCAN_CACHE"
 SCAN_CACHE_OFF = frozenset({"off", "0", "false", "no"})
+#: Where the row caches of datasets whose own folder cannot be written are kept
+#: (``review.data.parquet_cache``, :func:`local_row_cache_dir`).
+ROW_CACHE_SUBDIR = "row-cache"
 #: The user's records, each carried over from where an earlier version kept it
 #: by :func:`adopt_legacy_file`.
 SETTINGS_NAME = "settings.ini"
@@ -278,6 +288,25 @@ def legacy_scratch_dir() -> Path | None:
     if override and _overlaps(old, Path(override).expanduser()):
         return None
     return old
+
+
+def local_row_cache_dir(csv_dir: Path) -> Path:
+    """Where the row cache of the CSVs in *csv_dir* is kept when *csv_dir* cannot be written.
+
+    One folder per dataset folder, named for a hash of its absolute path, so two
+    datasets never share entries and the same dataset finds its cache on every
+    open. Not created here. ``review.data.parquet_cache`` writes it and
+    ``core.local_storage`` offers it for clearing; both name it through this
+    function, which is why it lives in ``util/`` rather than in either.
+    """
+    import hashlib
+
+    try:
+        absolute = Path(csv_dir).resolve()
+    except OSError:
+        absolute = Path(os.path.abspath(csv_dir))
+    digest = hashlib.sha1(str(absolute).encode("utf-8", "surrogateescape")).hexdigest()[:16]
+    return gui_state_dir() / ROW_CACHE_SUBDIR / f"{absolute.name or 'root'}-{digest}"
 
 
 def app_file(name: str) -> Path:

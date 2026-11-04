@@ -62,6 +62,21 @@ wrong analysis rather than a crash. ``Included`` is deliberately not in that
 list: ``load_well_csv`` itself adds it (defaulting to 1 when the CSV has no such
 column), so it belongs to the parse and is cached with the rest of it.
 
+**A dataset folder that cannot be written keeps its cache on this machine.**
+A read-only share, or a Windows-formatted (NTFS) drive on a Mac, which macOS
+mounts read-only, cannot hold a ``.aw_parquet`` folder. Before, such a dataset
+was parsed in full on every open — on a USB hard disk, minutes for a plate that
+opens in seconds once cached. :func:`cache_dir` sends those writes to
+``row-cache/`` in the app's folder instead (``util.state_dir.local_row_cache_dir``,
+one folder per dataset folder, named for a hash of its path), and says so once
+per folder in the log. It decides by asking whether the folder can be written,
+and also switches when a write there fails with an ``OSError``, because a
+volume can refuse writes its permission bits allow. Reads look in the dataset's
+own ``.aw_parquet`` first and then in the local folder (:func:`read_paths`), so
+a read-only share that someone else already cached is still read from its own
+copy, and a cache in either place is used whenever its fingerprint matches.
+The storage button offers the local copies for clearing (``core.local_storage``).
+
 **pyarrow is optional at runtime.** Every entry point answers "no" when it is
 absent, so an install without it — the pipeline-only one, or a partial
 environment — reads CSVs exactly as it always did. Nothing in ``pipeline/`` or
@@ -81,6 +96,7 @@ if TYPE_CHECKING:
 
 from core.safe import swallow
 from util.csv_gz import csv_stem, existing_csv
+from util.state_dir import local_row_cache_dir
 
 _logger = logging.getLogger("review.parquet_cache")
 
@@ -129,6 +145,10 @@ PARSER_VERSION = 2
 
 #: Set once a missing engine has been reported, so a 96-well load says it once.
 _engine_warned = False
+
+#: Dataset folders whose cache is kept on this machine (:func:`cache_dir`), by
+#: the folder's path, so the decision and its log line are made once per folder.
+_local_dirs: dict[str, Path] = {}
 
 #: Exception type names already reported by :func:`write_cache`, so a plate whose
 #: output volume is read-only says so once rather than once per well per open.
@@ -242,10 +262,79 @@ def table_to_frame(table) -> pd.DataFrame:
     return frame
 
 
+def own_cache_dir(csv_dir) -> Path:
+    """The ``.aw_parquet`` folder beside the CSVs in *csv_dir*, whether or not it can be written."""
+    return Path(csv_dir) / CACHE_DIRNAME
+
+
+def _can_write(csv_dir: Path) -> bool:
+    own = own_cache_dir(csv_dir)
+    return os.access(own if own.is_dir() else csv_dir, os.W_OK)
+
+
+def keep_locally(csv_dir: Path, why: str) -> Path:
+    """Send *csv_dir*'s cache writes to this machine from now on, saying so once; return the folder."""
+    key = str(csv_dir)
+    local = _local_dirs.get(key)
+    if local is None:
+        local = local_row_cache_dir(csv_dir)
+        _local_dirs[key] = local
+        _logger.warning("%s cannot be written (%s), so the fast copies of its CSVs are kept on this "
+                        "machine instead, in %s. Opening it again stays fast.", csv_dir, why, local)
+    return local
+
+
+def cache_dir(csv_dir) -> Path:
+    """Where the caches of the CSVs in *csv_dir* are written.
+
+    Their own ``.aw_parquet`` folder, unless the dataset folder cannot be
+    written; then a folder on this machine (module docstring). Decided once
+    per folder per session.
+    """
+    csv_dir = Path(csv_dir)
+    local = _local_dirs.get(str(csv_dir))
+    if local is not None:
+        return local
+    if _can_write(csv_dir):
+        return own_cache_dir(csv_dir)
+    return keep_locally(csv_dir, "it is read-only")
+
+
 def cache_path(csv_path: Path) -> Path:
-    """The cached frame's path for *csv_path*."""
+    """Where the cached frame for *csv_path* is written (:func:`cache_dir`)."""
     csv_path = Path(csv_path)
-    return csv_path.parent / CACHE_DIRNAME / f"{csv_stem(csv_path.name)}.parquet"
+    return cache_dir(csv_path.parent) / f"{csv_stem(csv_path.name)}.parquet"
+
+
+def read_paths(csv_path: Path, suffix: str = ".parquet") -> list[Path]:
+    """The places a cache file for *csv_path* is looked for, in order: the dataset's own folder, then this machine's.
+
+    *suffix* names the file kind (``.parquet``, or ``.summary.json`` for
+    ``well_summary``). The caller still checks each file's fingerprint; a file
+    in either place that matches is current.
+    """
+    csv_path = Path(csv_path)
+    name = f"{csv_stem(csv_path.name)}{suffix}"
+    own = own_cache_dir(csv_path.parent) / name
+    written = cache_dir(csv_path.parent) / name
+    if written == own:
+        return [own]
+    return [own, written]
+
+
+def _current_cache(pq, csv_path: Path, want: str) -> tuple[Path, object] | None:
+    """The first of :func:`read_paths` whose fingerprint is *want*, with its schema; ``None`` when none is."""
+    for path in read_paths(csv_path):
+        if not path.exists():
+            continue
+        try:
+            schema = pq.read_schema(path)
+        except Exception as exc:  # noqa: BLE001 - an unreadable cache is a miss
+            _logger.debug("parquet schema unreadable for %s (%s)", path, exc)
+            continue
+        if (schema.metadata or {}).get(_FINGERPRINT_KEY, b"").decode() == want:
+            return path, schema
+    return None
 
 
 def source_fingerprint(csv_path: Path) -> str | None:
@@ -278,18 +367,13 @@ def source_fingerprint(csv_path: Path) -> str | None:
 def cached_column_names(csv_path: Path) -> list[str] | None:
     """The Parquet cache's column names, when a current cache exists; read from the schema alone."""
     pq = _pyarrow()
-    path = cache_path(csv_path)
     want = source_fingerprint(csv_path)
-    if pq is None or want is None or not path.exists():
+    if pq is None or want is None:
         return None
-    try:
-        schema = pq.read_schema(path)
-    except Exception as exc:  # noqa: BLE001 - an unreadable cache is a miss, as in read_cached
-        _logger.debug("parquet schema unreadable for %s (%s)", Path(csv_path).name, exc)
+    found = _current_cache(pq, Path(csv_path), want)
+    if found is None:
         return None
-    if (schema.metadata or {}).get(_FINGERPRINT_KEY, b"").decode() != want:
-        return None
-    return [n for n in schema.names if not n.startswith("__index_level_")]
+    return [n for n in found[1].names if not n.startswith("__index_level_")]
 
 
 def read_cached(csv_path: Path, columns: list[str] | None = None) -> pd.DataFrame | None:
@@ -320,19 +404,18 @@ def read_cached(csv_path: Path, columns: list[str] | None = None) -> pd.DataFram
     pq = _pyarrow()
     if pq is None:
         return None
-    path = cache_path(csv_path)
-    if not path.exists():
-        return None
     want = source_fingerprint(csv_path)
     if want is None:
         return None
+    # A cache whose fingerprint differs describes an older CSV and is passed over.
+    found = _current_cache(pq, Path(csv_path), want)
+    if found is None:
+        return None
+    path, schema = found
     try:
-        meta = pq.read_schema(path).metadata or {}
-        if meta.get(_FINGERPRINT_KEY, b"").decode() != want:
-            return None  # the CSV was rewritten; the cache describes the old one
         subset = None
         if columns is not None:
-            present = set(pq.read_schema(path).names)
+            present = set(schema.names)
             subset = [c for c in columns if c in present]
         # ``pre_buffer=False``: the default coalesces and reads every column
         # chunk's compressed bytes into memory ahead of decoding them, which on
@@ -390,12 +473,11 @@ def write_cache(csv_path: Path, frame, fingerprint: str | None = None) -> bool:
             "read the new file.", csv_path.name)
         return False
     fingerprint = current
+    csv_path = Path(csv_path)
     path = cache_path(csv_path)
-    tmp = path.with_name(f"__aw_tmp_{path.name}.pid{os.getpid()}")
     try:
         import pyarrow as pa
 
-        path.parent.mkdir(parents=True, exist_ok=True)
         table = pa.Table.from_pandas(frame, preserve_index=False)
         # The fingerprint goes *beside* whatever Arrow already put in the
         # schema, never in place of it: ``replace_schema_metadata`` replaces the
@@ -409,8 +491,17 @@ def write_cache(csv_path: Path, frame, fingerprint: str | None = None) -> bool:
         # shape that will ever reach here.
         meta = dict(table.schema.metadata or {})
         meta[_FINGERPRINT_KEY] = fingerprint.encode()
-        pq.write_table(table.replace_schema_metadata(meta), tmp)
-        os.replace(tmp, path)
+        table = table.replace_schema_metadata(meta)
+        try:
+            _write_through_staging(pq, table, path)
+        except OSError as exc:
+            if path.parent != own_cache_dir(csv_path.parent):
+                raise
+            # The folder said it could be written and the volume refused anyway
+            # (a read-only mount whose permission bits allow writing): keep this
+            # folder's cache on this machine from here on, and write it there.
+            path = keep_locally(csv_path.parent, f"{type(exc).__name__}: {exc}") / path.name
+            _write_through_staging(pq, table, path)
         return True
     except Exception as exc:  # noqa: BLE001 - a cache that cannot be written is not fatal
         # Once per session per reason, not once per well. A read-only output
@@ -424,9 +515,21 @@ def write_cache(csv_path: Path, frame, fingerprint: str | None = None) -> bool:
                             "still the source and will be parsed on every "
                             "load. Further failures of this kind are not "
                             "repeated.", csv_path.name, exc)
-        with swallow("remove the abandoned Parquet staging file"):
-            tmp.unlink()
         return False
+
+
+def _write_through_staging(pq, table, path: Path) -> None:
+    """Write *table* to *path* through a staging file and ``os.replace``; the staging file never outlives a failure."""
+    tmp = path.with_name(f"__aw_tmp_{path.name}.pid{os.getpid()}")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pq.write_table(table, tmp)
+        os.replace(tmp, path)
+    except BaseException:
+        with swallow("remove the abandoned Parquet staging file"):
+            if tmp.exists():
+                tmp.unlink()
+        raise
 
 
 def prune(csv_dir) -> int:
@@ -459,7 +562,14 @@ def prune(csv_dir) -> int:
     Every failure is skipped rather than raised — this runs on the load path and
     a directory it cannot tidy must never cost the user their dataset.
     """
-    directory = Path(csv_dir) / CACHE_DIRNAME
+    removed = 0
+    for directory in (own_cache_dir(csv_dir), local_row_cache_dir(Path(csv_dir))):
+        removed += _prune_one(Path(csv_dir), directory)
+    return removed
+
+
+def _prune_one(csv_dir: Path, directory: Path) -> int:
+    """:func:`prune` for one cache folder of *csv_dir* — its own, or the one on this machine."""
     removed = 0
     if not directory.is_dir():
         return 0

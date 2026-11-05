@@ -830,7 +830,7 @@ States: `todo`, `done` (with the test and the mutation that proved it), `decline
 | R3 | `CropCache` bounding `st.crops` | R3 | done | `tests/test_nanowell_window_popout.py`: `test_the_crop_store_keeps_its_bound`, `test_every_place_that_empties_the_store_keeps_it_bounded`. Mutations, each an `AssertionError`: `protected` ignored in `__setitem__`; `set_image_channel` resetting to `{}` |
 | D1a | docs, Phase 1 | D1 | done | README_WellViewer.md: *Drawing a window* under the Distribution figure and the pop-out's Show / Window / Rows paragraph; ARCHITECTURE.md: *The Distribution window* paragraph (modules, membership, the press/release split, the pop-out's Window mode, `render_site_rows`, `CropCache`); `scripts/test.sh` docs lane passes |
 | H1 | crop µm-per-pixel and centre fields | — | declined | Not needed: each crop is cut at 1.4 × its own nanowell's radius, so equal tiles show every nanowell at one nanowell-relative scale; the caption says so (§2 decision 16) |
-| H2 | `composite_compute.py` and its tests | H2 | todo | |
+| H2 | `composite_compute.py` and its tests | H2 | done | `tests/test_nanowell_composite_layout.py`, 6 tests. Mutations, each an `AssertionError`: patches sorted by well name (the patch-order test); a ring starting at `(k, 0)` (the spiral test); no empty ring between patches, `step = 2 * radius` (the patch-place test and the overlap test). The tracker's overlap fixture (three tiles a patch) could not see that mutation, so `test_tiles_never_overlap` uses two full seven-tile patches |
 | H3 | drawing the composite, hover, click, timepoint stepper | H3 | todo | |
 | H4 | the composite reaches no well field, CSV or Batch Export | H4 | todo | |
 | D1b | docs, Phase 2 | D1 | todo | |

@@ -20260,9 +20260,11 @@ ReviewApp._on_sidebar_plate_selection_changed(ids)
         ├── updates app._selected_wells
         ├── app._refresh_sidebar_map()   ← updates colours; no plot redraw yet
         └── commits nothing while plate.isSelecting() — the press-to-release
-            of a click or drag. A drag fires selectionChanged once per well it
-            enters, each from its own mouse event, so an end-of-tick deferral
-            merges none of them.
+            of a click or drag — and stops the click-debounce timer
+            (_hold_plate_click_timer), so the previous click's wait cannot
+            expire under a held press; the release restarts it. A drag fires
+            selectionChanged once per well it enters, each from its own mouse
+            event, so an end-of-tick deferral merges none of them.
 
 The click debounce. Every plate click — a select-mode click or drag, a
 passive-mode wellActivated that toggles a group, a solo well or a Group-by
@@ -20271,10 +20273,14 @@ plot redraw through selection_controller.schedule_plate_commit /
 schedule_plate_rebuild. Those restart one single-shot QTimer per window
 (_plate_click_timer, PLATE_CLICK_DEBOUNCE_MS = 500); when the clicks pause it
 fires flush_plate_clicks, which runs the commit below and then any rebuild
-(invalidating if any click asked to). So picking six wells one click at a
+(invalidating if any click asked to). The wait counts from the last well
+added: the press that adds one stops the timer and its release starts it
+afresh, so a click that lands just as the previous wait is running out does
+not redraw with its press half-done. So picking six wells one click at a
 time draws the plots once, not six times with each draw holding up the next
 click. A test that needs the redraw now calls flush_plate_clicks
-(tests/test_plate_clicks_redraw_once.py: three clicks, then one commit).
+(tests/test_plate_clicks_redraw_once.py: three clicks, then one commit; a
+held press outlasting the previous click's wait, then one commit after it).
 
 User releases mouse / clicks "Select all" / "Select none"
         │

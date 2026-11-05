@@ -608,11 +608,20 @@ def test_the_array_footer_is_short_until_notes_is_turned_on(qtbot, page):
     assert not st.layers.notes and not button.isChecked() and not _texts(page, "nw-array-notes")
 
 
-def test_a_nanowell_with_cells_and_no_fold_change_says_why_on_the_array(qtbot, page):
+def test_a_nanowell_with_cells_and_no_fold_change_says_why_on_the_array(qtbot, page, monkeypatch):
     """Asked: "what is the meaning of the nanowell status no value? I see clearly identifiable cells in them". At t_a,
     A01's nanowell (2, 0) holds 3 cells and (3, 0) holds 1, but at the baseline t_c (2, 0) held none and (3, 0) was
     occluded: both count fold changes are undefined. Each says which inside itself, and the key names both (UX
-    review B1: the two could not be told apart on the array)."""
+    review B1: the two could not be told apart on the array).
+
+    This fixture puts all four nanowells on one point, so the array would leave three labels out as overlapping
+    (``test_labels_that_would_overlap_are_left_out_and_the_footer_says_so``); here the question is what each label
+    says, so every label is kept."""
+    import numpy as np
+
+    from review.features.nanowell import renderer
+
+    monkeypatch.setattr(renderer, "_spaced", lambda x, *_a, **_k: np.ones(len(x), dtype=bool))
     _loaded(qtbot, page)
     nwc.set_view(page, "array")
     nwc._set(page, "metric", "count_fc")
@@ -624,6 +633,31 @@ def test_a_nanowell_with_cells_and_no_fold_change_says_why_on_the_array(qtbot, p
     assert 'no value: no cells at baseline ("0 at base") · 1' in keyed
     labels = dict(zip([s[1:] for s in st.drawn.sites.sites], _texts(page, "nw-array-address")))
     assert (labels[(2, 0)].splitlines()[-1], labels[(3, 0)].splitlines()[-1]) == ("0 at base", "base occl.")
+
+
+def test_labels_that_would_overlap_are_left_out_and_the_footer_says_so(qtbot, page):
+    """Four nanowells drawn on one point each wrote their label over the others, so no label could be read. The first
+    is written, the rest are left out, and the footer counts them: a shortfall is said, not silent. Wrong
+    implementation: every label drawn (four ``nw-array-address`` texts), or three left out without a word."""
+    _loaded(qtbot, page)
+    nwc.set_view(page, "array")
+    nwc._set(page, "metric", "count_fc")
+    nwc.set_timepoint(page, "t_a")
+    assert len(_texts(page, "nw-array-address")) == 1
+    footer = " ".join(_texts(page, "nw-array-footer"))
+    assert "3 nanowell addresses and values left out where they would overlap their neighbours" in footer
+
+
+def test_spaced_keeps_a_box_unless_it_overlaps_one_already_kept():
+    import numpy as np
+
+    from review.features.nanowell.renderer import _spaced
+
+    x, y = np.array([0.0, 10.0, 40.0, 41.0]), np.zeros(4)
+    w = h = np.full(4, 20.0)
+    # The second overlaps the first; the fourth overlaps the third; the third is clear of both.
+    assert _spaced(x, y, w, h).tolist() == [True, False, True, False]
+    assert _spaced(x, y, w, h, pad=40.0).tolist() == [True, False, False, False]
 
 
 def test_the_rim_focus_control_on_the_band_changes_the_qc_layer_s_rule_and_the_metrics_follow(qtbot, page):

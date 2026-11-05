@@ -974,7 +974,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                               f"{', '.join(tableless)}.")
     if note:
         model.notes.insert(0, note)
-    return render_distribution(fig, model, selected=selected, wrap_footer=nw_phone.on_phone()), model
+    return render_distribution(fig, model, selected=selected), model
 
 
 #: The Distribution model's notes the Statistics view carries: what changes which values were compared (the fixed

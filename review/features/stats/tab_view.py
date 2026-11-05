@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from review.core.ui_helpers import btn_primary, btn_secondary
+from widgets.canvas import make_canvas
 from widgets.labeled_combo import LabeledComboBox
 from widgets.page_body import build_page_body
 from review.features.stats.controller import stats_active_group
@@ -372,11 +373,10 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     ff_l.setContentsMargins(0, 0, 0, 0)
 
     from matplotlib.figure import Figure as _StatsFigure
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as _StatsFCA
 
     fig = reg.register("_stats_fig", _StatsFigure(figsize=(5, 2.8), dpi=96))
     reg.register("_stats_ax", fig.add_subplot(111))
-    canvas_widget = reg.register("_stats_canvas_widget", _StatsFCA(fig))
+    canvas_widget = reg.register("_stats_canvas_widget", make_canvas(fig))
     ff_l.addWidget(canvas_widget)
     layout.addWidget(fig_frame)
     # Hide the figure frame until a test that actually plots (KS) is run.

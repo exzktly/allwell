@@ -304,6 +304,43 @@ def form_registry_violations(path: Path) -> list[str]:
     return out
 
 
+#: The one module allowed to construct a matplotlib canvas. Every plot canvas is
+#: built through ``make_canvas`` so that it declares itself to the phone shell
+#: (PHONE_FORM_TRACKER.md P3.1) instead of being found by a duck type.
+CANVAS_BUILDER = "widgets/canvas.py"
+
+
+def direct_canvas_constructions(files: list[Path]) -> list[str]:
+    """Calls that build a matplotlib Qt canvas outside :data:`CANVAS_BUILDER`:
+    ``["file:line name", ...]``. A canvas is built by a call to a name or
+    attribute that starts ``FigureCanvasQT`` or is ``FigureCanvas`` (``FigureCanvasQTAgg(fig)``, the
+    attribute call ``runtime.FigureCanvas(fig)``) or by a name the module
+    bound from ``matplotlib.backends.backend_qt*`` — under any alias; the tree
+    had ``FigureCanvas``, ``_FigureCanvas``, ``_StatsFCA`` and ``_FC``. A
+    non-Qt canvas (``FigureCanvasAgg``, for an export) is not a widget and is
+    not this rule's."""
+    out: list[str] = []
+    for path in files:
+        if rel(path) == CANVAS_BUILDER:
+            continue
+        tree = parse_source(path)
+        aliases = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+            and node.module.startswith("matplotlib.backends.backend_qt")
+            for alias in node.names if alias.name.startswith("FigureCanvas")}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            name = fn.id if isinstance(fn, ast.Name) else fn.attr if isinstance(fn, ast.Attribute) else ""
+            bare = name.lstrip("_")
+            if name in aliases or bare.startswith("FigureCanvasQT") or bare == "FigureCanvas":
+                out.append(f"{rel(path)}:{node.lineno} {name}(...)")
+    return out
+
+
 # ── the tests ───────────────────────────────────────────────────────────────
 
 def test_data_and_drawing_layers_never_read_the_mode():
@@ -348,3 +385,11 @@ def test_the_form_registry_knows_kinds_and_not_phones():
         f"{FORM_REGISTRY} is a widgets/ module that records which widgets have an alternate form; "
         "it must import nothing from the application and name no layout "
         "(PHONE_FORM_TRACKER.md §2.3):\n  " + "\n  ".join(offenders))
+
+
+def test_every_plot_canvas_is_built_through_make_canvas():
+    offenders = direct_canvas_constructions(python_sources())
+    assert not offenders, (
+        f"build a plot canvas with widgets.canvas.make_canvas, not a FigureCanvas call, so it "
+        f"declares itself to phone layout (PHONE_FORM_TRACKER.md P3.1); {len(offenders)} site(s):\n  "
+        + "\n  ".join(offenders))

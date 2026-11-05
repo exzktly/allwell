@@ -88,6 +88,7 @@ _NO_SIDECAR_MESSAGE = (
 )
 
 
+from widgets.canvas import make_canvas
 from widgets.labeled_combo import LabeledComboBox
 from widgets.page_body import build_page_body
 from util.well_token import canonical_well_label
@@ -151,7 +152,6 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     """
     # Defer matplotlib imports until the tab actually builds. Loading the
     # QtAgg backend at module import time was a measurable chunk of startup.
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
 
     # A8 burn-down: Qt widget handles go through the WidgetRegistry
@@ -178,7 +178,6 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     ctx.runtime.smfish.cdf_ax = None
     ctx.runtime.smfish.cdf_fig = None
     ctx.runtime.smfish.Figure = Figure
-    ctx.runtime.smfish.FigureCanvas = FigureCanvas
 
     bridge = _WorkerBridge(parent)
     bridge.status.connect(lambda text: _smfish_set_status(ctx, text))
@@ -265,7 +264,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     # Matplotlib image
     fig_img = reg.register("_smfish_fig_img", Figure(figsize=(6, 5), dpi=100))
     reg.register("_smfish_ax_img", fig_img.add_subplot(111))
-    canvas_img = reg.register("_smfish_canvas_img", FigureCanvas(fig_img))
+    canvas_img = reg.register("_smfish_canvas_img", make_canvas(fig_img))
     # Theme the canvas immediately so it's never a bare white figure before the
     # first refresh paints data. No message with it: the canvas sits behind the
     # empty-state stack,
@@ -539,7 +538,7 @@ def _smfish_open_cdf_popup(ctx) -> None:
     vl = QVBoxLayout(popup)
     ctx.runtime.smfish.cdf_fig = ctx.runtime.smfish.Figure(figsize=(7.2, 3.4), dpi=100)
     ctx.runtime.smfish.cdf_ax = ctx.runtime.smfish.cdf_fig.add_subplot(111)
-    ctx.runtime.smfish.cdf_canvas = ctx.runtime.smfish.FigureCanvas(ctx.runtime.smfish.cdf_fig)
+    ctx.runtime.smfish.cdf_canvas = make_canvas(ctx.runtime.smfish.cdf_fig)
     vl.addWidget(ctx.runtime.smfish.cdf_canvas)
     popup.finished.connect(lambda _r: _smfish_close_cdf_popup(ctx))
     ctx.runtime.smfish.cdf_popup = popup

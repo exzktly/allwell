@@ -5952,3 +5952,44 @@ def test_phone_guard_clears_a_registry_that_knows_only_kinds(tmp_path):
                   "import weakref\nfrom PySide6.QtWidgets import QWidget\nfrom util import aw_safe\n\n\n"
                   "def declare(widget: QWidget, kind: str) -> None:\n    widget.setProperty('formKind', kind)\n")
     assert module.form_registry_violations(path) == []
+
+
+CANVAS_CONSTRUCTIONS = {
+    "qt_agg_by_name": ("review/features/x/tab_view.py",
+                       "from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg\n\n\n"
+                       "def build(fig):\n    return FigureCanvasQTAgg(fig)\n"),
+    # `import ... as FigureCanvas`, six tabs spelled it so.
+    "aliased_as_figure_canvas": ("review/features/x/tab_view.py",
+                                 "def build(fig):\n"
+                                 "    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas\n"
+                                 "    return FigureCanvas(fig)\n"),
+    # An alias no pattern on the name would match: stats/tab_view.py had `_StatsFCA`.
+    "aliased_to_something_else": ("review/features/x/tab_view.py",
+                                  "def build(fig):\n"
+                                  "    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as _StatsFCA\n"
+                                  "    return _StatsFCA(fig)\n"),
+    # smFISH stored the class on its runtime state and called it from there.
+    "attribute_call": ("review/features/x/tab_view.py",
+                       "def build(ctx, fig):\n    return ctx.runtime.x.FigureCanvas(fig)\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(CANVAS_CONSTRUCTIONS))
+def test_phone_guard_catches_a_canvas_built_outside_make_canvas(tmp_path, monkeypatch, shape):
+    name, body = CANVAS_CONSTRUCTIONS[shape]
+    path = _write(tmp_path, name, body)
+    module = _phone_scan(monkeypatch, tmp_path)
+    assert len(module.direct_canvas_constructions([path])) == 1, f"the {shape} canvas went uncaught"
+
+
+def test_phone_guard_clears_make_canvas_and_a_non_qt_export_canvas(tmp_path, monkeypatch):
+    module = _phone_scan(monkeypatch, tmp_path)
+    good = _write(tmp_path, "review/features/x/tab_view.py",
+                  "from widgets.canvas import make_canvas\n\n\ndef build(fig):\n    return make_canvas(fig)\n")
+    export = _write(tmp_path, "review/features/x/export.py",
+                    "from matplotlib.backends.backend_agg import FigureCanvasAgg\n\n\n"
+                    "def save(fig):\n    FigureCanvasAgg(fig)\n")
+    builder = _write(tmp_path, "widgets/canvas.py",
+                     "def make_canvas(fig):\n    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg\n"
+                     "    return FigureCanvasQTAgg(fig)\n")
+    assert module.direct_canvas_constructions([good, export, builder]) == []

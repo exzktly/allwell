@@ -339,3 +339,28 @@ def test_a_control_band_built_after_the_switch_is_hidden_in_its_page_and_found_a
     assert band.isHidden()
     band.show()                                    # what the Controls sheet will do to it
     assert shell._current_band() is band
+
+
+# ── canvases (P3) ───────────────────────────────────────────────────────────
+
+def test_make_canvas_builds_a_qt_canvas_that_declares_itself(qapp):
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+
+    from widgets.canvas import make_canvas
+
+    host = QWidget()
+    fig = Figure()
+    canvas = make_canvas(fig, host)
+    assert isinstance(canvas, FigureCanvasQTAgg) and canvas.figure is fig
+    assert canvas.parentWidget() is host
+    assert fr.kind_of(canvas) == "canvas"
+    assert fr.declared("canvas") == [canvas]
+
+
+def test_a_plot_card_s_canvas_declares_itself(qapp):
+    """The wrong implementation: a card that still builds its canvas directly."""
+    from widgets.plot_card import PlotCard
+
+    card = PlotCard()
+    assert fr.kind_of(card.canvas) == "canvas"

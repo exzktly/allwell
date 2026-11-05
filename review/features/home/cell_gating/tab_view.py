@@ -42,6 +42,7 @@ from review.core.ui_helpers import (
     build_section_header,
     install_canvas_wheel_scroll,
 )
+from widgets.canvas import make_canvas
 from widgets.separator import build_hline_separator
 from review.features.qc.tab_view import build_qc_gate_controls
 from review.features.home.cell_gating.controller import (
@@ -106,7 +107,6 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     State and widget handles are attached to the app under the
     ``_cell_gating_*`` prefix.
     """
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
 
     # A8 burn-down: Qt widget handles go through the WidgetRegistry (``ctx.widgets``),
@@ -190,7 +190,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     _cell_gating_apply_scatter_gate_mode(ctx)
     cell_gating_refresh_included_count(ctx)
 
-    _build_cdf_section(ctx, parent, root, FigureCanvas, Figure)
+    _build_cdf_section(ctx, parent, root, Figure)
 
     # The optimizer is a tool, not tab state, so it lives in its own non-modal
     # window — built now (hidden) so its handles register with everything else.
@@ -460,12 +460,12 @@ def _build_readout_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
 
 
 def _build_cdf_section(ctx, parent: QWidget, root: QVBoxLayout,
-                       FigureCanvas, Figure) -> None:
+                       Figure) -> None:
     """The CDFs, directly under the controls they are read against."""
     reg = ctx.widgets
     reg.register("_cell_gating_figure", Figure(figsize=(8, 5), dpi=100))
     canvas = reg.register("_cell_gating_canvas",
-                          FigureCanvas(ctx.widgets.get("_cell_gating_figure")))
+                          make_canvas(ctx.widgets.get("_cell_gating_figure")))
 
     plot_scroll = reg.register("_cell_gating_plot_scroll", QScrollArea(parent))
     plot_scroll.setWidgetResizable(True)

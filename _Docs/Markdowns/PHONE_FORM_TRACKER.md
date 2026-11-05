@@ -569,7 +569,7 @@ and present in the Controls sheet (see the existing
 
 | Id | Item | State | Evidence |
 |---|---|---|---|
-| P3.1 | One way to build a canvas, which declares `"canvas"` | `todo` | |
+| P3.1 | One way to build a canvas, which declares `"canvas"` | `done` | `widgets/canvas.py::make_canvas(figure, parent=None)` (matplotlib imported inside it: the QtAgg backend import is a measurable part of start-up) builds the canvas and declares `"canvas"`. Nine sites converted, not the seven the tracker listed — the guard found two more that a grep for `FigureCanvas(` had missed: `review/features/stats/tab_view.py` (a real production canvas, imported `as _StatsFCA`) and the `__main__` demo in `widgets/mpl_toolbar.py` (`_FC`). The others: `PlotCard`, `cell_gating/tab_view.py`, `cell_gating/opt_curve_view.py`, `smfish/tab_view.py` x2 (the second called a class stored on `ctx.runtime.smfish.FigureCanvas`; that attribute is gone), `playground/sweep_curve_view.py`, `review/core/focus_curve_view.py`. Guard `test_every_plot_canvas_is_built_through_make_canvas` counted 9 before converting and 0 after; 4 bite cases (by name, `as FigureCanvas`, `as _StatsFCA`, the attribute call) and a clean file including a non-Qt `FigureCanvasAgg` export canvas, which is not this rule's. Mutation: reverting the stats site failed it naming `stats/tab_view.py:380`. Tests: `test_make_canvas_builds_a_qt_canvas_that_declares_itself`, `test_a_plot_card_s_canvas_declares_itself`. Snapshot unchanged; 483 phone and page tests passed |
 | P3.2 | The canvas duck type leaves the shell | `todo` | |
 | P3.3 | ⓘ hints declare `"hint"` | `todo` | |
 

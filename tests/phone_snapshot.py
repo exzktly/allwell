@@ -170,6 +170,19 @@ def collect(win, qapp) -> dict[str, dict[str, dict]]:
     out: dict[str, dict[str, dict]] = {}
 
     def take(name: str) -> None:
+        # Analyze re-checks its form on a timer and writes the result under the
+        # Run button, so whether that line is showing depends on whether the
+        # timer has fired. Asking the same question here makes the state the
+        # same either way (it is idempotent, and returns at once off Analyze).
+        check = getattr(win._analyze, "_live_run_check", None)
+        if check is not None:
+            check()
+        # Likewise the shell finds the widgets a page built after the switch on
+        # a 300 ms timer; a snapshot taken before it ticks sees a control band
+        # the shell has not yet moved to the Controls sheet. Run the sweep now,
+        # so the snapshot is the settled state, not the state at a lucky moment.
+        shell._sweep(force=False)
+        _pump(qapp, 5)
         out[name] = snapshot(win)
 
     shell.desk_button.click()

@@ -269,8 +269,27 @@ That separation is the part that is already right and must stay so.
 Documented in ARCHITECTURE *Phone layout*: the sweep and its marks (about 6 ms
 per tick at 4,300 widgets reading the marks, 25 ms forced); per-widget event
 filters; the restyle bracket in `PhoneShell._restyle_in_place`; about 6 s per
-switch on a loaded app, nearly all of it `QApplication.setStyleSheet`. P0.3
-re-measures these on this tree.
+switch on a loaded app, nearly all of it `QApplication.setStyleSheet`. 
+
+**Measured on this tree (P0.3).** Offscreen, the mini dataset loaded and pages
+visited in Plotting, Statistics and Image Browser; medians of 15 runs (7 for
+the forced sweep and `_adapt_all`), by `time.perf_counter` around the call, in
+a scratch script that built `AllWellApp(None)` and called `shell.set_on(True)`:
+
+| What | Measured |
+|---|---|
+| Widgets in the process, at the desk after load | 4,562 |
+| Widgets in the process, in phone layout | 5,105 |
+| `PhoneShell.set_on(True)` | 11.0 s |
+| `_sweep(force=False)`, once every 300 ms | 18.4 ms |
+| `_sweep(force=True)` | 109.4 ms |
+| `_adapt_all(True)` | 80.2 ms |
+| Widgets carrying `_awPhoneWatched`, so with an event filter on them | 120 |
+
+The unforced sweep costs about three times what ARCHITECTURE.md says (6 ms), so
+roughly 6 % of the main thread's time is spent re-finding widgets while phone
+layout is on. The switch time is dominated by the stylesheet re-polish, which
+this plan does not touch.
 
 Fifteen phone test files, about 300 tests. `tests/test_phone_layout_app.py` is
 the full-app one (`pytestmark = pytest.mark.slow`, a module-scoped `win`
@@ -373,9 +392,9 @@ docstring.
 
 | Id | Item | State | Evidence |
 |---|---|---|---|
-| P0.1 | Layout snapshot harness and committed baseline | `wip` | `tests/phone_snapshot.py` (capture, diff, scenario driver) and `tests/test_phone_layout_snapshot.py` written; prototype run measured 40 upright scenarios, 2,268 widgets, 589 KB, ~24 s after a 12 s switch into phone layout. STOPPED HERE: baseline `tests/fixtures/phone_snapshot_baseline.json` not yet written, determinism (two runs identical) and the `_apply_stepper` mutation not yet done |
+| P0.1 | Layout snapshot harness and committed baseline | `done` | `tests/test_phone_layout_snapshot.py` + `tests/fixtures/phone_snapshot_baseline.json` (53 scenarios, 2,996 widgets, 779 KB, ~42 s): upright every Review page, Datasets tool and Analyze view; sideways Analyze and each section's first page; large text size on two pages. Identical on 5 consecutive runs. Mutations watched failing: `_adapt_stepper` made a no-op -> `Stepper ... touch_mode: True -> False` on Image Browser/Playground; `_adapt_toolbar` made a no-op -> `MplToolbar` appeared on Plotting/Bar Plots and Home/Cell Gating. Two sources of nondeterminism found and settled in `collect()`'s `take()`: Analyze's 'run problems' line (written by a timer, `_live_run_check`) and the shell's 300 ms sweep not yet having hidden a late-built control band; both are now run synchronously before each snapshot. Skips with the reason on another Qt version, font or screen |
 | P0.2 | Guard: data and drawing layers never read the mode | `done` | `test_data_and_drawing_layers_never_read_the_mode`; rule already held on main, so proven by 7 bite cases in `test_guards_bite.py` |
-| P0.3 | Record the costs on this tree | `todo` | |
+| P0.3 | Record the costs on this tree | `done` | measured below in §1.5 |
 | P0.4 | Ratchet: reads of the mode outside the sanctioned layers | `done` | `test_every_read_of_the_mode_outside_the_sanctioned_layers_is_rostered`; scratch `is_on()` in `stats/controller.py` failed it naming the line; 13 reads rostered (scan finds 16: `image_table/_phone_fit.py` owns its phone form and is sanctioned by path) |
 | P0.5 | Ratchet: widgets the shell recognises by name | `done` | `test_the_shell_recognises_no_more_widgets_by_name_than_the_budget`, budget 10 (3 class keys, 1 object-name key, `InfoHint` x2, `draw_idle` x4); scratch extra key failed it |
 

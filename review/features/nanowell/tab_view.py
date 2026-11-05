@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from review.features.export.service import export_cell_data_from
 from review.features.nanowell import _anchor_queue as aq
+from review.features.nanowell import _phone as nw_phone
 from review.features.nanowell import controller as nwc
 from review.features.nanowell.cell_scope_compute import cell_scope
 from review.features.nanowell.distribution_compute import (
@@ -821,12 +822,11 @@ def _detail_placement(ctx, card, detail, detail_layout, strip_card):
     settles — the pane going full-screen, the phone turned."""
     import weakref
 
-    from core import phone_layout
     from core.safe import swallow
 
     def show_detail(on: bool) -> None:
         detail.setVisible(on)
-        phone = phone_layout.is_on()
+        phone = nw_phone.on_phone()
         was_hidden = card.isHidden()
         card.setVisible(not (on and phone))
         if was_hidden and not card.isHidden():
@@ -845,12 +845,12 @@ def _detail_placement(ctx, card, detail, detail_layout, strip_card):
         live = card_ref()
         if live is None or not shiboken6.isValid(live) or not shiboken6.isValid(detail):
             # The page is gone (its Python wrapper can outlive the widgets): stop listening rather than touch it.
-            phone_layout.remove_listener(follow_phone)
+            nw_phone.stop_following(follow_phone)
             return
         with swallow("Nanowells: re-place the site detail for phone layout"):
             show_detail(not detail.isHidden())
 
-    phone_layout.add_listener(follow_phone)
+    nw_phone.follow(follow_phone)
     strip_refit = QTimer(strip_card)
     strip_refit.setSingleShot(True)
     strip_refit.setInterval(_REFIT_MS)

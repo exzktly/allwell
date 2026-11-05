@@ -185,8 +185,11 @@ other read, in `allwell.py` and three `review/core/` helpers (plot style, the
 split toggle, the rail toggle), is on a roster in that test with a written
 reason, and the roster only shrinks. Wording that differs by mode lives in a
 `_phone.py` beside what it words: `review/core/empty_state_phone.py` rewords an
-empty plot's hint (the plate is under Wells, a finger taps), and the Image
-Table's `_phone_fit` says where its builder is.
+empty plot's hint (the plate is under Wells, a finger taps), the Image
+Table's `_phone_fit` says where its builder is, and the Nanowells page reads the
+mode only in `review/features/nanowell/_phone.py` (the site detail takes the page,
+the crop strip wraps) — its renderer is told `wrap_footer` by the controller and
+never reads the mode.
 
 **Widgets declare their phone form.** `widgets/form_registry.py` records which
 widgets have an alternate form and of what *kind* (`"stepper"`, `"toolbar"`,

@@ -32,6 +32,7 @@ from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell.decorate_compute import Decoration, decoration_for
 from review.features.nanowell import _anchor_queue as aq
+from review.features.nanowell import _phone as nw_phone
 from review.features.nanowell import _qc_controller as qcc
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
@@ -973,7 +974,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                               f"{', '.join(tableless)}.")
     if note:
         model.notes.insert(0, note)
-    return render_distribution(fig, model, selected=selected), model
+    return render_distribution(fig, model, selected=selected, wrap_footer=nw_phone.on_phone()), model
 
 
 #: The Distribution model's notes the Statistics view carries: what changes which values were compared (the fixed
@@ -1938,11 +1939,9 @@ def save_popout_figure(ctx) -> None:
 def _strip_cols(fig, crops) -> int:
     """The crop strip's columns: one row at a desk (``0``), and in phone layout as many rows as make each crop
     largest in the strip's own figure (``crop_grid_compute.strip_columns``)."""
-    from core import phone_layout
-
     from .crop_grid_compute import strip_columns
 
-    if not crops or not phone_layout.is_on():
+    if not crops or not nw_phone.on_phone():
         return 0
     width, height = fig.get_size_inches()
     return strip_columns(len(crops), width * 0.94, height * 0.78)
@@ -1950,10 +1949,8 @@ def _strip_cols(fig, crops) -> int:
 
 def refit_crop_strip(ctx) -> None:
     """Lay the crop strip out again for its new size — in phone layout only, where its columns follow its shape."""
-    from core import phone_layout
-
     st = _state(ctx)
-    if not phone_layout.is_on() or st is None or not st.selected_sites or _page_deleted(ctx):
+    if not nw_phone.on_phone() or st is None or not st.selected_sites or _page_deleted(ctx):
         return
     redraw_detail(ctx)
 

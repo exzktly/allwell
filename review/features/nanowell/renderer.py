@@ -231,7 +231,7 @@ _FOOTER_BASE = 0.035
 _LINE = 0.03
 
 
-def render_distribution(fig, model: DistributionModel, *, selected=()) -> HitMap:
+def render_distribution(fig, model: DistributionModel, *, selected=(), wrap_footer: bool = False) -> HitMap:
     """Draw *model* on *fig* (cleared first) and return where every dot went."""
     fig.clear()
     hits = HitMap()
@@ -263,20 +263,18 @@ def render_distribution(fig, model: DistributionModel, *, selected=()) -> HitMap
             _ink(ax.set_xlabel(model.x_label, color=inks[1], labelpad=ax._aw_gutter_pt))
     _footer(fig, model, inks, panels, densities, hidden,
             crowded=any(getattr(ax, "_aw_crowded", False) for ax in axes),
-            counts_hidden=any(getattr(ax, "_aw_counts_hidden", False) for ax in axes))
+            counts_hidden=any(getattr(ax, "_aw_counts_hidden", False) for ax in axes),
+            wrap_footer=wrap_footer)
     return hits
 
 
-def _wrapped_for_phone(fig, lines: list) -> tuple[list, int]:
-    """*lines* broken to the figure's width in phone layout, and how many of them the first line became.
+def _wrapped_to_figure(fig, lines: list) -> tuple[list, int]:
+    """*lines* broken to the figure's width, and how many of them the first line became.
 
     At a desk every footer line fits its figure; on a phone the longer ones ran off the right edge ("Timepoints: 0 h
-    t00 · 1 h t01 · …"). Each piece becomes a line of its own, so the footer's spacing and the room it reserves follow.
-    A character of the footer's type is taken as about 0.55 of its size wide."""
-    from core import phone_layout
-
-    if not phone_layout.is_on():
-        return lines, 1
+    t00 · 1 h t01 · …"), so the caller asks for the wrap (``render_distribution(wrap_footer=True)``). Each piece
+    becomes a line of its own, so the footer's spacing and the room it reserves follow. A character of the footer's
+    type is taken as about 0.55 of its size wide."""
     import textwrap
 
     width_pt = fig.get_size_inches()[0] * 72 * (1 - 0.07 - 0.02)
@@ -506,7 +504,7 @@ def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:
 
 
 def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden: int, *,
-            crowded: bool = False, counts_hidden: bool = False) -> None:
+            crowded: bool = False, counts_hidden: bool = False, wrap_footer: bool = False) -> None:
     """The sums the figure owes the reader, over the panels drawn; what was left out is stated beside them."""
 
     _bg, ink, muted = inks
@@ -543,7 +541,7 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     if densities:
         lines.append("Sets of more than four wells are drawn as densities with each well's median; select fewer "
                      "wells to see and click single nanowells.")
-    lines, line1_parts = _wrapped_for_phone(fig, lines)
+    lines, line1_parts = _wrapped_to_figure(fig, lines) if wrap_footer else (lines, 1)
     if len(lines) > _FOOTER_LINES:
         # Every line here is owed to the reader — a panel not drawn, values not drawn as dots — so the footer
         # grows to hold them rather than cutting the last (roll-up review X11).

@@ -4,7 +4,9 @@ PHONE_FORM_TRACKER.md P0.1. The migration moves *how* widgets are found and
 given their phone form, and must not change what a person sees. This reduces a
 window to one comparable record per visible widget — its class, name, place and
 size, font, minimum height, and the state the phone forms set (a stepper's
-touch mode, a row's direction, a plot's DPI) — so a before and an after can be
+touch mode, a row's direction, a plot's DPI). What kind a widget *declared* is
+not recorded: it is how the shell finds the widget, not what a person sees, and
+recording it would make every row of the migration regenerate the baseline — so a before and an after can be
 diffed and every difference read.
 
 The record is keyed by a *path*, not by an address: each widget is named
@@ -21,19 +23,7 @@ from PySide6.QtWidgets import QBoxLayout, QWidget
 
 #: Bump when a field is added or removed, so a stale baseline fails with its
 #: own message instead of as a wall of differences.
-SCHEMA = 1
-
-
-def _kind(w: QWidget):
-    """The declared phone-form kind, once the registry exists (P1); ``None``
-    before then, so a baseline taken before the migration compares against one
-    taken after it only on the fields both have."""
-    try:
-        from widgets import form_registry
-    except ImportError:
-        return None
-    reader = getattr(form_registry, "kind_of", None)
-    return reader(w) if reader is not None else None
+SCHEMA = 2
 
 
 def _extra(w: QWidget) -> dict:
@@ -84,7 +74,6 @@ def snapshot(window: QWidget, root: QWidget | None = None) -> dict[str, dict]:
                     "w": child.width(), "h": child.height(),
                     "min_h": child.minimumHeight(),
                     "font": round(font.pointSizeF(), 2) if font.pointSizeF() > 0 else font.pixelSize(),
-                    "kind": _kind(child),
                     **_extra(child),
                 }
             walk(child, path)

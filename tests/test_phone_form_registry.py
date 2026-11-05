@@ -248,3 +248,19 @@ def test_a_shell_that_is_gone_leaves_no_listener(qapp):
     gc.collect()
     fr.declare(QWidget(), "stepper")              # a stale listener removes itself when called
     assert len(fr._listeners) == before
+
+
+# ── the shared kinds declare themselves (P2) ────────────────────────────────
+
+def test_a_stepper_built_after_the_switch_takes_its_touch_form_without_a_sweep(qapp, shell):
+    """The real ``Stepper``, with nothing recognising it by name. Wrong
+    implementation: a stepper that does not declare, which the sweep used to
+    find by its class name and now nothing does."""
+    from widgets.stepper import Stepper
+
+    st = Stepper(shell._win, value=3.0, minimum=0.0, maximum=10.0)
+    assert fr.kind_of(st) == "stepper"
+    assert not st.isTouchMode()
+    st.show()
+    _pump(qapp)
+    assert st.isTouchMode()

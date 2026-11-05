@@ -69,11 +69,11 @@ SHELL = "ui/phone_shell.py"
 
 #: ``ui/phone_shell.py``'s recognition by name today, counted by site. Each row
 #: of PHONE_FORM_TRACKER.md that removes a site lowers this in the same commit;
-#: P4.4 takes it to zero. Measured: ``_KIND_BY_CLASS`` 3 keys,
+#: P4.4 takes it to zero. Measured: ``_KIND_BY_CLASS`` 2 keys,
 #: ``_KIND_BY_OBJECT_NAME`` 1 key, ``"InfoHint"`` compared in 2 places, and the
 #: ``draw_idle`` duck type in 4 (``_phone_relevant``, ``_is_canvas``,
 #: ``_PhoneEventFilter.eventFilter``, ``PhoneShell._sweep``).
-RECOGNISED_BY_NAME_BUDGET = 10
+RECOGNISED_BY_NAME_BUDGET = 9
 
 
 # ── roster of reads outside the sanctioned layers ───────────────────────────

@@ -499,12 +499,10 @@ def _is_phone_controls(w: QWidget) -> bool:
 #: (``PhoneShell._ADAPTERS``) and :func:`_phone_relevant` watches every widget
 #: that has one, so a kind added here is both watched and adapted; a kind that
 #: ``_ADAPTERS`` lacks fails ``tests/test_phone_layout.py``.
-_KIND_BY_CLASS = {"ControlBand": "controls", "MplToolbar": "toolbar",
-                  "Stepper": "stepper"}
+_KIND_BY_CLASS = {"ControlBand": "controls", "MplToolbar": "toolbar"}
 _KIND_BY_OBJECT_NAME = {"AnalyzeFormRow": "form_row"}
 ADAPTED_KINDS = frozenset(
-    ("controls", form_registry.CUSTOM, *_KIND_BY_CLASS.values(),
-     *_KIND_BY_OBJECT_NAME.values()))
+    ("controls", "toolbar", "stepper", "form_row", form_registry.CUSTOM))
 
 
 def _adapt_kind(w: QWidget) -> str | None:

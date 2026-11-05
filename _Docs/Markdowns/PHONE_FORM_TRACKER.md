@@ -527,7 +527,7 @@ widget alone (§7.8 rule 3).
 
 | Id | Item | State | Evidence |
 |---|---|---|---|
-| P2.1 | `Stepper` declares `"stepper"` | `todo` | |
+| P2.1 | `Stepper` declares `"stepper"` | `done` | `Stepper.__init__` declares `"stepper"`; `"Stepper"` left `_KIND_BY_CLASS`; P0.5 budget 10 -> 9. `test_a_stepper_built_after_the_switch_takes_its_touch_form_without_a_sweep` (real `Stepper`, sweep timer stopped). Mutation: deleting the `declare` line failed it (`None == 'stepper'`) and failed the snapshot (`Stepper#Stepper touch_mode: True -> False`, width 447 -> 125 on Image Browser/Playground). The snapshot no longer records the declared kind (it is how the shell finds a widget, not what is seen); schema 2, baseline rewritten without that field — nothing else in it changed |
 | P2.2 | `MplToolbar` declares `"toolbar"` | `todo` | |
 | P2.3 | Analyze form rows declare `"form_row"` | `todo` | |
 | P2.4 | `ControlBand` and the Image Table's controls declare `"controls"` | `todo` | |

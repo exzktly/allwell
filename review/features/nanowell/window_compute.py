@@ -182,6 +182,15 @@ class WindowRows:
     column: str
     timepoints: list          # every timepoint of the data, in order: the montage's columns
 
+    def format(self, value: float) -> str:
+        """*value* as a row writes it: a fold change as ``2.31×`` (``+1.20`` on the log₂ scale), any other metric as
+        the bare number — a cell count of 3 is not ``3×``. ``—`` when undefined."""
+        if not isinstance(value, float) or not math.isfinite(value):
+            return "—"
+        if self.column.startswith("log2_"):
+            return f"{value:+.3g}"
+        return f"{value:.3g}×" if "_fc" in self.column else f"{value:.3g}"
+
 
 def changed_sentence(window: DistributionWindow, now: tuple, n_now: int) -> str:
     """"" when the settings are those the window was drawn under; else which changed and how the count moved."""

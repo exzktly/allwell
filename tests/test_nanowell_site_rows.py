@@ -85,3 +85,23 @@ def test_rows_from_several_wells_name_their_well_and_extremes_rows_do_not():
     fig = Figure(figsize=(12.0, 7.0))
     renderer.render_extremes(fig, _extremes_fixture()[0], _extremes_fixture()[1], label="Count fold change")
     assert _row_labels(fig) == ["#1  q 1, r 0", "#2  q 2, r -1", "#1  q 0, r 0", "#2  q -1, r 2"]
+
+
+def test_a_window_s_rows_write_a_cell_count_as_a_number_and_a_fold_change_with_its_times_sign():
+    """Extremes' rows are fold changes and write ``3×``; the window's rows are any metric, and a cell count of 3
+    is not ``3×``."""
+    from review.features.nanowell.window_compute import WindowRow, WindowRows
+
+    rows = [WindowRow(("A01", 1, 0), 1, 3.0, {"T0": 2.0, "T1": 3.0})]
+    crops = {("A01", 1, 0): {tp: _crop(1) for tp in ("T0", "T1")}}
+
+    def drawn(column):
+        fig = Figure(figsize=(8.0, 5.0))
+        renderer.render_site_rows(fig, WindowRows("T1", column, ["T0", "T1"]), [("Window", rows)], crops,
+                                  label="x", empty="", title="t", head="h", with_well=True)
+        return [t.get_text() for t in fig.texts + [t for ax in fig.axes for t in ax.texts]
+                if t.get_gid() in ("nw-extremes-row", "nw-extremes-value")]
+
+    assert drawn("n") == ["#1  A01 q 1, r 0\n3", "2", "3"]
+    assert drawn("count_fc") == ["#1  A01 q 1, r 0\n3×", "2×", "3×"]
+    assert drawn("brightness_fc_GFP")[1] == "2×" and drawn("log2_count_fc")[1] == "+2"

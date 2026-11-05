@@ -17,7 +17,11 @@ from dataclasses import replace
 from review.features.nanowell import controller as _controller
 from review.features.nanowell import window_compute as wc
 from review.features.nanowell._window_render import DRAG_GID, draw_drag, draw_window
-from review.features.nanowell.renderer import DENSITY_ABOVE, MAX_PANELS
+from review.features.nanowell.renderer import DENSITY_ABOVE, MAX_PANELS, render_message, render_site_rows
+from review.features.nanowell.state import POPOUT_LAYOUTS, POPOUT_SOURCES
+
+#: Rows of the window's nanowells the pop-out shows at a time.
+WINDOW_PAGE = 24
 
 
 def _nwc():
@@ -48,6 +52,7 @@ def after_draw(ctx, st, model) -> None:
     if window is not None and st.hits is not None:
         draw_window(st.hits, window, result)
     _nwc()._call(ctx, "_nw_window_refresh")
+    _nwc()._call(ctx, "_nw_popout_window_refresh")
 
 
 def on_press(ctx, st, event) -> None:
@@ -172,3 +177,98 @@ def strip_text(st) -> str:
     said = wc.label_text(window, result, hidden, model.axis)
     changed = wc.changed_sentence(window, wc.settings_key(st), len(result.rows))
     return f"{said} {changed}".strip()
+
+
+# ── the pop-out ──────────────────────────────────────────────────────────────
+def page_count(st) -> int:
+    """How many pages of :data:`WINDOW_PAGE` rows the window's nanowells make (1 with none)."""
+    result = current(st)[1]
+    return max(1, -(-len(result.rows) // WINDOW_PAGE)) if result is not None else 1
+
+
+def open_window_popout(ctx) -> None:
+    """**Open in pop-out**: show the window's nanowells there, from the first page, and bring the window forward."""
+    st = _state(ctx)
+    if st is None:
+        return
+    st.popout_source, st.window_page = "window", 0
+    nwc = _nwc()
+    nwc._save_soon(ctx)
+    nwc._call(ctx, "_nw_popout_refresh")
+    nwc._call(ctx, "_nw_popout_window_refresh")
+    nwc._call(ctx, "_nw_open_popout")
+    nwc.draw_popout(ctx)
+
+
+def set_popout_source(ctx, source: str) -> None:
+    """**Show**: the selected nanowell, or the window's (``state.POPOUT_SOURCES``)."""
+    if source in POPOUT_SOURCES:
+        _nwc()._set_popout(ctx, popout_source=source)
+
+
+def set_popout_layout(ctx, layout: str) -> None:
+    """**Layout** of the window's nanowells (``state.POPOUT_LAYOUTS``); the pages start over."""
+    if layout in POPOUT_LAYOUTS:
+        _nwc()._set_popout(ctx, popout_layout=layout, window_page=0)
+
+
+def step_window_page(ctx, delta: int) -> None:
+    """◀ ▶: move *delta* pages, kept within the pages there are."""
+    st = _state(ctx)
+    if st is None:
+        return
+    st.window_page = min(max(st.window_page + delta, 0), page_count(st) - 1)
+    _nwc()._call(ctx, "_nw_popout_window_refresh")
+    _nwc().draw_popout(ctx)
+
+
+def draw_window_popout(ctx, st, fig) -> None:
+    """The pop-out in Window mode: the nanowells inside the window as rows of crops over time, one page of
+    :data:`WINDOW_PAGE`, ranked as ``window_compute.members`` ranks them. The crops of the page are cut on a worker,
+    all in one pass, and each row says so until its crops arrive."""
+    window, result = current(st)
+    if window is None:
+        st.popout_hits = {}
+        render_message(fig, "Draw a window on the Distribution view to see its nanowells here.",
+                       gid="nw-popout-window-empty")
+        return
+    rows = result.rows
+    if not rows:
+        st.popout_hits = {}
+        render_message(fig, strip_text(st) + " No nanowell is inside it.", gid="nw-popout-window-empty")
+        return
+    st.window_page = min(max(st.window_page, 0), page_count(st) - 1)
+    first = st.window_page * WINDOW_PAGE
+    shown = rows[first:first + WINDOW_PAGE]
+    sites = [row.site for row in shown]
+    nwc = _nwc()
+    st.crops.protected = set(sites) | {tuple(s) for s in st.selected_sites}
+    missing = tuple(sorted(s for s in sites if s not in st.crops))
+    image_channel = nwc.page_image_channel(st)
+    if missing:
+        data, metrics = st.data, st.metrics
+        nwc._fetch(ctx, "window_crops", missing,
+                   lambda: nwc.crops_for_sites(data, metrics, missing, channel=image_channel),
+                   failed=lambda message: {s: {"": nwc.Crop(None, "", f"The crops could not be cut: {message}")}
+                                           for s in missing},
+                   deliver=lambda found: st.crops.update(found))
+    metric, channel, _note = nwc.resolve_metric("distribution", st.metric, nwc.page_channel_name(ctx),
+                                                st.data.channels)
+    label = nwc._label(metric, channel, st.data)
+    timepoints = [str(tp) for tp in st.data.timepoints()]
+    model = wc.WindowRows(result.rank_key, st.window_model.column, timepoints)
+    st.popout_hits = render_site_rows(
+        fig, model, [(f"Rows {first + 1}–{first + len(shown)} of {len(rows):,}", shown)],
+        {s: nwc.gated_crops(st, s, st.crops[s]) for s in sites if s in st.crops},
+        label=label, empty=strip_text(st), title=f"Distribution window · {label}", head=strip_text(st),
+        cells=st.crop_cells, numbers=st.crop_metrics, image_channel=image_channel,
+        display_range=nwc.display_range(ctx),
+        timepoints=nwc.extremes_columns(timepoints, result.rank_key, st.popout_tps),
+        metrics=nwc.crop_metrics(st, sites, channel) if st.crop_metrics else None, with_well=True)
+
+
+def on_popout_click(ctx, event) -> None:
+    """A click on a crop of the pop-out's window rows selects its nanowell (the site detail follows)."""
+    st = _state(ctx)
+    if st is not None and event.button == 1 and event.inaxes in st.popout_hits:
+        _nwc()._select(ctx, st.popout_hits[event.inaxes])

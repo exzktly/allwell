@@ -1140,7 +1140,8 @@ def render_site_rows(fig, model, blocks, crops: dict, *, label: str, empty: str,
     hits: dict = {}
     for k, (block_title, rows) in enumerate(blocks):
         bx, by = draw.block_origin(k, blocks, len(columns))
-        draw.block_header(bx, by, f"{block_title} · {label} at {model.timepoint}", columns)
+        draw.block_header(bx, by, f"{block_title} · {label}" + (f" at {model.timepoint}" if model.timepoint else ""),
+                          columns)
         for i, row in enumerate(rows):
             y_crop_top = by - _EXT_HEADER - i * draw.row_h
             draw.row_label(bx, y_crop_top, row)
@@ -1179,6 +1180,12 @@ class _ExtremesDrawing:
         return _ink(self.fig.text(x_in / self.w_in, y_in / self.h_in, said, color=color, **kw),
                     muted=color == self.faint)
 
+    def value_text(self, value: float) -> str:
+        """A row's value as the figure writes it: the model's own ``format`` when it has one (the window's rows are
+        any metric, not only a fold change), else a fold change (``extremes_compute.format_value``)."""
+        own = getattr(self.model, "format", None)
+        return own(value) if own is not None else format_value(self.model.column, value)
+
     def block_origin(self, k: int, blocks, n_columns: int) -> tuple[float, float]:
         """The top-left corner of block *k*, the montage centred both ways in the room between title and caption."""
         rows = [len(r) for _t, r in blocks]
@@ -1203,7 +1210,7 @@ class _ExtremesDrawing:
     def row_label(self, bx: float, y_crop_top: float, row) -> None:
         self.text(bx + _EXT_LABELS_W - 0.08, y_crop_top - self.layout.side / 2,
                   (f"#{row.rank}  {row.site[0]} " if self.with_well else f"#{row.rank}  ")
-                  + f"q {row.site[1]}, r {row.site[2]}\n{format_value(self.model.column, row.value)}",
+                  + f"q {row.site[1]}, r {row.site[2]}\n{self.value_text(row.value)}",
                   color=self.ink, ha="right", va="center", fontsize=_EXT_LABEL_PT, gid="nw-extremes-row")
 
     def crop(self, x0: float, y_crop_top: float, site_crops, tp: str):
@@ -1239,7 +1246,7 @@ class _ExtremesDrawing:
         ranked = tp == self.model.timepoint
         side_pt = self.layout.side * 72
         band = {"boxstyle": "square,pad=0.15", "facecolor": _inks(ax)[0], "alpha": 0.62, "linewidth": 0}
-        _ink(ax.text(0.03, 0.97, format_value(self.model.column, row.values.get(tp, math.nan)),
+        _ink(ax.text(0.03, 0.97, self.value_text(row.values.get(tp, math.nan)),
                      transform=ax.transAxes, ha="left", va="top", fontsize=_EXT_VALUE_PT,
                      fontweight="bold" if ranked else "normal", color=self.ink, bbox=band, zorder=6,
                      gid="nw-extremes-value"))

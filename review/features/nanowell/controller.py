@@ -1901,6 +1901,11 @@ def draw_popout(ctx) -> None:
     fig, canvas = ctx.widgets.get_or_none("_nw_popout_fig"), ctx.widgets.get_or_none("_nw_popout_canvas")
     if st is None or window is None or fig is None or canvas is None or not window.isVisible():
         return
+    if st.popout_source == "window":
+        wnc.draw_window_popout(ctx, st, fig)
+        canvas.draw_idle()
+        return
+    st.popout_hits = {}
     site = crops_site(st)
     if site is None:
         render_message(fig, "Select a nanowell on the plot to see its crops here.", gid="nw-popout-empty")
@@ -1971,6 +1976,7 @@ def _set_popout(ctx, **values) -> None:
         setattr(st, name, value)
     _save_soon(ctx)
     _call(ctx, "_nw_popout_refresh")
+    _call(ctx, "_nw_popout_window_refresh")
     draw_popout(ctx)
 
 
@@ -1979,6 +1985,9 @@ def save_popout_figure(ctx) -> None:
     st = _state(ctx)
     fig = ctx.widgets.get_or_none("_nw_popout_fig")
     if st is None or fig is None:
+        return
+    if st.popout_source == "window":
+        ctx.figures.save(fig, f"distribution_window_rows_{st.metric}")
         return
     site = crops_site(st)
     if site is None:
@@ -2077,7 +2086,7 @@ MONTAGES_KEPT = 6
 
 
 #: The reads that cut crops, which are of the page's image channel.
-_CROP_KINDS = ("crops", "extreme_crops")
+_CROP_KINDS = ("crops", "extreme_crops", "window_crops")
 
 
 def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
@@ -2123,7 +2132,7 @@ def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
         if kind == "popout_crops":
             while len(st.popout_crops) > POPOUT_CROPS_KEPT:
                 st.popout_crops.pop(next(iter(st.popout_crops)))
-        {"crops": redraw_detail, "popout_crops": draw_popout}.get(kind, redraw)(ctx)
+        {"crops": redraw_detail, "popout_crops": draw_popout, "window_crops": draw_popout}.get(kind, redraw)(ctx)
 
     def on_failed(message) -> None:
         log.warning("Nanowells: %s for %s could not be read: %s", kind, key, message)

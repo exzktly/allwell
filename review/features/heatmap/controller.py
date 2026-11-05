@@ -712,6 +712,15 @@ def redraw_heatmap(ctx) -> None:
     _draw_heatmap(ctx)
 
 
+def _refresh_empty_state(ctx) -> None:
+    """Re-evaluate this tab's empty-state reason, which reads ``layout.cells``."""
+    try:
+        from review.core.ui_helpers import refresh_empty_state_pages
+        refresh_empty_state_pages(ctx.window)
+    except Exception:
+        swallowed()
+
+
 def _draw_heatmap(ctx) -> None:
     ax = ctx.widgets.get_or_none("_heatmap_ax")
     canvas = ctx.widgets.get_or_none("_heatmap_canvas")
@@ -736,6 +745,10 @@ def _draw_heatmap(ctx) -> None:
         )
         ax.set_axis_off()
         canvas.draw_idle()
+        # This path ends the draw early, so the refresh at the foot of the full draw never ran: a layout
+        # filled on a dataset with no timepoints left the "No wells on this heat map" placeholder over a
+        # page that has wells and says so on its own canvas.
+        _refresh_empty_state(ctx)
         return
 
     metric = _selected_metric(ctx)
@@ -1054,11 +1067,7 @@ def _draw_heatmap(ctx) -> None:
     # refresh triggers fire when the user fills it — and the placeholder's own
     # instruction is "click Auto-populate from selection". Without this, doing
     # exactly what it says left the placeholder standing over a populated grid.
-    try:
-        from review.core.ui_helpers import refresh_empty_state_pages
-        refresh_empty_state_pages(ctx.window)
-    except Exception:
-        swallowed()
+    _refresh_empty_state(ctx)
 
 
 def _grid_values(ctx, layout, tp, metric, val_col, threshold, fluor_gates, nw):

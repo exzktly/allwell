@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import math
+import textwrap
 
 import numpy as np
 
@@ -189,8 +190,13 @@ def _msg_ax(ax, text: str) -> None:
     ax.figure.set_facecolor(bg)
     ax.set_facecolor(bg)
     ax.axis("off")
-    ax.text(0.5, 0.5, text, ha="center", va="center", wrap=True,
-            transform=ax.transAxes, color=muted, fontsize=9)
+    size = 9
+    # Wrapped to this panel's own width: ``wrap=True`` wraps at the *figure's* edge, so in a grid of panels
+    # each message ran on into the one beside it. A sans-serif character is about 0.55 of its size wide.
+    width_pt = ax.get_position().width * ax.figure.get_figwidth() * 72
+    per_line = max(6, int(width_pt / (0.55 * size)))
+    ax.text(0.5, 0.5, "\n".join(textwrap.wrap(text, per_line)) or text, ha="center", va="center",
+            transform=ax.transAxes, color=muted, fontsize=size)
 
 
 def _style_axes(ax, title: str = "", xlabel: str = "", ylabel: str = "") -> None:

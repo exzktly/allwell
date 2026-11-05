@@ -39,10 +39,27 @@ def build(kind: str, root: Path) -> tuple[Path, set[str]]:
     if kind == "nanowell":
         from tests.test_nanowell_page import COUNTS, _write_nanowell_dataset
 
-        return _write_nanowell_dataset(root / "nanowell"), set(COUNTS)
+        out = _write_nanowell_dataset(root / "nanowell")
+        _give_cells_hours(out)
+        return out, set(COUNTS)
     if kind == "images":
         return image_plate(root / "images") / "out", {"A01", "A02"}
     raise ValueError(kind)
+
+
+def _give_cells_hours(out: Path) -> None:
+    """The nanowell fixture labels its timepoints ``t_c``, ``t_0`` and so on, which its own tests want, and
+    leaves out ``timepoint_hours``, which the plotting pages read to know there is a timepoint at all: with
+    none, the Heat Map has nothing to draw and the plate's other pages offer no timepoint menu. The labels
+    are numbered in order, a day apart."""
+    import pandas as pd
+
+    frames = {path: pd.read_csv(path) for path in sorted(out.glob("measurements_*.csv"))}
+    labels = sorted({label for frame in frames.values() for label in frame["timepoint"].astype(str)})
+    hours = {label: 24.0 * i for i, label in enumerate(labels)}
+    for path, frame in frames.items():
+        frame["timepoint_hours"] = frame["timepoint"].astype(str).map(hours)
+        frame.to_csv(path, index=False)
 
 
 def image_plate(root: Path) -> Path:

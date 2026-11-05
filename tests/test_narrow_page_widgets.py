@@ -242,3 +242,26 @@ def test_triage_buttons_keep_their_whole_caption_on_a_phone_width_page(qapp, tmp
         assert btn.width() >= btn.minimumSizeHint().width(), (
             f"{btn.text()!r} is {btn.width()} px wide and needs {btn.minimumSizeHint().width()}")
     parent.close()
+
+
+# ── Playground dock combos ──────────────────────────────────────────────────
+
+_LONG_NAMES = ("A01_DAPI_Nanowell_Plate_Overview_Stitched_Montage_Full_Well_Raw_Channel",
+               "A01_GFP_Nanowell_Plate_Overview_Stitched_Montage_Full_Well_Raw_Channel")
+
+
+def test_a_dock_combo_is_not_as_wide_as_its_longest_item(qapp):
+    """A nanowell run's channel names are long, and a plain combo's minimum width
+    is its longest item — 650 px for the Playground dock's content, in a 349 px
+    viewport that cannot scroll sideways."""
+    from PySide6.QtWidgets import QComboBox
+
+    from review.features.image_browser.playground.tab_view import _dock_combo
+    plain = QComboBox()
+    plain.addItems(_LONG_NAMES)
+    host = QWidget()
+    dock = _dock_combo(host)
+    dock.addItems(_LONG_NAMES)
+    assert plain.minimumSizeHint().width() > 400          # the premise: it does pin the page
+    assert dock.minimumSizeHint().width() < 200
+    assert dock.itemText(0) == _LONG_NAMES[0]             # and the items themselves are whole

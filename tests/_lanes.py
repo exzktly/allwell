@@ -224,6 +224,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_dataset_tools.py": "Subset, Merge Plates and Concatenate refuse nanowell results they cannot carry, by name; …",
     "test_nanowell_display_range.py": "The Nanowells page's **Display range**: a *min* / *max* / **Auto** brightness window for …",
     "test_nanowell_edge_points_vectorised.py": "``nanowell_detect._edge_points`` is vectorised over its rays without changing a bit",
+    "test_nanowell_site_rows.py": "Extremes and the Distribution window draw their rows of crops through one renderer",
     "test_nanowell_extremes_layout.py": "The Extremes montage laid out to fill its figure, the timepoints it shows chosen, and each …",
     "test_nanowell_fiducial_reason.py": "An unaddressed timepoint says why the central square was refused (tracker F1)",
     "test_nanowell_figures_read.py": "The Nanowells page's figures read at the size they are drawn: type scaled to the panel, …",

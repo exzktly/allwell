@@ -12888,6 +12888,25 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   figure is `array_notes`, each line only when it applies to what is drawn (the fused sentence only with a fused
   nanowell, the tile colours only with tiles), and is written only with `notes` on, under the footer's lines (which stay where they are with Notes off, straight under the array), in room `render_array` reserves for it whether `notes` is on or off: turning Notes on never moves, shrinks or covers the array (a box drawn over the array's foot was tried and hid its bottom row). It returns an `ArrayDrawn` (the hit map, the axes, the
   region shown and its size in pixels, and the tiles' `Rendered`), which the page keeps on `state.drawn`.
+- **Hovering a nanowell** (`array_hover_compute.py`, Qt-free). `site_at` finds the nanowell whose disc (its
+  `radius_um`, in the scene's frame) holds the pointer — the nearest centre where discs overlap, none between them.
+  Two surfaces read it. The canvas's readout chip (`widgets/mpl_toolbar`, which reads `axes._aw_hover_label`) leads
+  with `short_text` — `nanowell 3,-2 · measured · 4.2`, or `no value` and its reason — set by
+  `renderer._hover_label` from the scene alone. The full card is `hover_text`, which `controller.on_motion` (through
+  `_array_hover`) shows as a `QToolTip` while no button is held, and hides on a drag, off the nanowells and off the
+  axes: the address and ring, the timepoint and its hours, the state (and the run's own state when Cell Gating or the
+  rim-focus rule overwrote it, `run_state`) with the fused / partially-visible / count-disagreement flags and the
+  row's `reason`, the shown metric's value as the figure labels it (`ArrayDrawn.label`) or why it has none
+  (`ArrayScene.why`), the count and confluence (with the run's own count when the state leaves none), the occupancy
+  class and baseline count, each channel's cell and nanowell fluorescence, every fold change from the baseline and the
+  growth rate, the rim focus against the well's sharp rims and the page's rule's verdict (`focus_line`: in focus, out
+  of focus, rule off, or why it was not judged — no rim fitted, fewer than `MIN_SITES` rims, a state that is not
+  judged), the identity check, and where it sits (position, radius, visible share, owner tile). Every number is
+  read from the `site_metrics` row, never recomputed, so the card cannot disagree with a figure; a value the row does
+  not define is written `no value`, never `0`. The rows of the well at the timepoint drawn are indexed by address
+  once per draw (`rows_by_address`, kept on `ArrayDrawn.rows`, which a redraw replaces), so a pointer move reads a
+  dict rather than filtering the table. `tests/test_nanowell_array_hover.py` drives the card through
+  `controller.on_motion` on a fixture where every nanowell and timepoint has its own count.
 - **Full resolution** (`full_montage_compute`, Qt-free): every tile from `in/<well>.zip` (the member
   `image_compute._member_for` finds) at the grid record's `left_um`/`top_um`, at the x pixel size, in the
   record's order with a later tile covering an earlier one in the overlap — no blending, so every pixel is a

@@ -6505,6 +6505,13 @@ the sentence names it.
   desktop and never reaches All-Well. The swipe zooms about the pointer when the pointer is on the image, and
   about the view's centre when it was last left elsewhere on the figure.
 
+  Hover over a nanowell to see what its row of the nanowell table says at this timepoint: its address and
+  ring, its state (and why, when it has no value), the value it is coloured by, its cell count and
+  confluence, each channel's fluorescence, its fold changes from the baseline and growth rate, its rim focus
+  against the well's sharpest rims with the verdict (in focus, out of focus, or why it was not judged), the
+  identity check, and where it sits. The readout beside the pointer also leads with the nanowell's address,
+  state and value. A value the nanowell does not have reads *no value*, never 0.
+
   Click a nanowell to open its site detail, as on the beeswarm (with **Set anchor** on, a click sets the anchor
   instead). Double-click a nanowell to centre it, zoom until it fills the view and open its site detail —
   anywhere inside its rim counts, and it works with the overlays hidden. The footer counts the nanowells in the key's groups. The page remembers the layers with its

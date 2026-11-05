@@ -1522,8 +1522,12 @@ def on_motion(ctx, event) -> None:
     if st is not None and st.view == "identity":
         idc.on_motion(ctx, event)
         return
+    if st is not None and st.press is None and st.view == "array":
+        _array_hover(ctx, st, event)
+        return
     if st is None or st.press is None or st.view != "array" or st.drawn is None or event.x is None:
         return
+    _array_hover(ctx, st, None)                          # a drag hides the card: it would trail the pan
     x, y, xlim, ylim, inverse = st.press
     (px, py), (cx, cy) = inverse.transform((x, y)), inverse.transform((event.x, event.y))
     st.drawn.ax.set_xlim(xlim[0] + px - cx, xlim[1] + px - cx)
@@ -1531,6 +1535,33 @@ def on_motion(ctx, event) -> None:
     canvas = ctx.widgets.get_or_none("_nw_canvas")
     if canvas is not None:
         canvas.draw_idle()
+
+
+def _array_hover(ctx, st, event) -> None:
+    """The card for the nanowell under the pointer on the Array view, as a tooltip (``array_hover_compute``): its
+    address, state, the shown value or why it has none, counts, fluorescence, fold changes, rim focus, identity and
+    place. Hidden off the nanowells, while dragging (*event* ``None``), and off the array's axes."""
+    from PySide6.QtGui import QCursor
+    from PySide6.QtWidgets import QToolTip
+
+    from review.features.nanowell import array_hover_compute as ahc
+
+    drawn = st.drawn
+    scene = getattr(drawn, "scene", None)
+    k = None
+    if event is not None and scene is not None and event.inaxes is drawn.ax and event.xdata is not None:
+        k = ahc.site_at(scene.sites, event.xdata, event.ydata)
+    if k is None:
+        QToolTip.hideText()
+        return
+    if drawn.rows is None:
+        drawn.rows = ahc.rows_by_address(st.metrics, scene.well, scene.timepoint)
+    site = scene.sites.sites[k]
+    text = ahc.hover_text(drawn.rows.get((site[1], site[2])), site, timepoint=scene.timepoint,
+                          value=scene.sites.values[k], label=drawn.label,
+                          why=scene.why.get((site[1], site[2]), ""), channels=list(st.data.channels),
+                          rule=st.rim_focus_rule(), name=scene.name, state=str(scene.sites.state[k]))
+    QToolTip.showText(QCursor.pos(), text, ctx.widgets.get_or_none("_nw_canvas"))
 
 
 def on_release(ctx, event) -> None:

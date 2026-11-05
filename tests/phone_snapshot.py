@@ -110,3 +110,117 @@ def diff(before: dict[str, dict], after: dict[str, dict], limit: int = 12) -> li
                 if a != b:
                     lines.append(f"changed  {path}  {field}: {a!r} -> {b!r}")
     return lines[:limit] + ([f"... and {len(lines) - limit} more"] if len(lines) > limit else [])
+
+
+# ── the scenarios ───────────────────────────────────────────────────────────
+
+BASELINE = "tests/fixtures/phone_snapshot_baseline.json"
+
+
+def fingerprint(qapp) -> dict:
+    """What a snapshot's numbers depend on besides the code: the Qt version, the
+    application font and the offscreen screen. A baseline taken under another
+    fingerprint says nothing about this machine's geometry."""
+    from PySide6 import QtCore
+    rect = qapp.primaryScreen().availableGeometry()
+    return {"schema": SCHEMA, "qt": QtCore.qVersion(),
+            "font": qapp.font().family(), "screen": [rect.width(), rect.height()]}
+
+
+def _pump(qapp, n: int = 20) -> None:
+    from PySide6.QtTest import QTest
+    for _ in range(n):
+        qapp.processEvents()
+    QTest.qWait(30)
+    for _ in range(n):
+        qapp.processEvents()
+
+
+def _review_pages(win, qapp, take, *, first_page_only: bool) -> None:
+    """Every Review section the phone shows, and every page of the ones that
+    have page tabs. Review CSV and Batch Export are hidden on a phone."""
+    review = win._review
+    nav = review._section_nav
+    for key, _label in nav.shownItems():
+        row = getattr(nav, "_rows", {}).get(key)
+        if row is not None and row.isHidden():
+            continue
+        nav.setCurrentKey(key)
+        _pump(qapp)
+        bar = review._page_tabs_bar_by_name.get(key)
+        if bar is None:
+            take(f"review/{key}")
+            continue
+        for i in range(1 if first_page_only else bar.count()):
+            bar.setCurrentIndex(i)
+            _pump(qapp)
+            take(f"review/{key}/{bar.tabText(i)}")
+
+
+def collect(win, qapp) -> dict[str, dict[str, dict]]:
+    """Put a loaded window in phone layout and snapshot every page of every
+    mode, upright; then the first page of each section and both Analyze views
+    sideways; then two pages at the large text size, which restyles the window
+    with every phone form taken off and put back (the bracket the migration
+    moves). Returns ``{scenario: snapshot}``.
+
+    The caller has loaded a dataset into ``win._review`` and left the window
+    at the desk. Phone layout is left on."""
+    shell = win._phone
+    out: dict[str, dict[str, dict]] = {}
+
+    def take(name: str) -> None:
+        out[name] = snapshot(win)
+
+    shell.desk_button.click()
+    _pump(qapp, 60)
+
+    _review_pages(win, qapp, lambda n: take(n), first_page_only=False)
+    win._on_titlebar_mode_seg(2)
+    _pump(qapp)
+    for tool in shell._h.tool_names():
+        shell._pick_tool(tool)
+        _pump(qapp)
+        take(f"datasets/{tool}")
+    win._on_titlebar_mode_seg(1)
+    _pump(qapp)
+    for view in shell._h.page_views():
+        shell._pick_page_view(view)
+        _pump(qapp)
+        take(f"analyze/{view}")
+
+    # Sideways: this offscreen screen is square, so the shape is forced.
+    real = shell.is_landscape
+    shell.is_landscape = lambda: True
+    try:
+        shell._apply_sizes()
+        _pump(qapp)
+        for view in shell._h.page_views():
+            shell._pick_page_view(view)
+            _pump(qapp)
+            take(f"sideways/analyze/{view}")
+        win._on_titlebar_mode_seg(0)
+        _pump(qapp)
+        _review_pages(win, qapp, lambda n: take(f"sideways/{n}"), first_page_only=True)
+    finally:
+        shell.is_landscape = real
+        shell._apply_sizes()
+        _pump(qapp)
+
+    # A text-size change restyles inside phone layout.
+    before = shell.text_size()
+    shell.set_text_size("large")
+    _pump(qapp, 60)
+    try:
+        review = win._review
+        for section, page in (("Home", "Overview"), ("Plotting", "Bar Plots")):
+            review._section_nav.setCurrentKey(section)
+            _pump(qapp)
+            bar = review._page_tabs_bar_by_name[section]
+            bar.setCurrentIndex(next(i for i in range(bar.count()) if bar.tabText(i) == page))
+            _pump(qapp)
+            take(f"large/review/{section}/{page}")
+    finally:
+        shell.set_text_size(before)
+        _pump(qapp, 60)
+    return out

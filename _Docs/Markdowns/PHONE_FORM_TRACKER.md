@@ -373,7 +373,7 @@ docstring.
 
 | Id | Item | State | Evidence |
 |---|---|---|---|
-| P0.1 | Layout snapshot harness and committed baseline | `wip` | `tests/phone_snapshot.py` (capture + diff) written; scenario driver prototyped in scratch, timing and determinism not yet measured; test and baseline not written |
+| P0.1 | Layout snapshot harness and committed baseline | `wip` | `tests/phone_snapshot.py` (capture, diff, scenario driver) and `tests/test_phone_layout_snapshot.py` written; prototype run measured 40 upright scenarios, 2,268 widgets, 589 KB, ~24 s after a 12 s switch into phone layout. STOPPED HERE: baseline `tests/fixtures/phone_snapshot_baseline.json` not yet written, determinism (two runs identical) and the `_apply_stepper` mutation not yet done |
 | P0.2 | Guard: data and drawing layers never read the mode | `done` | `test_data_and_drawing_layers_never_read_the_mode`; rule already held on main, so proven by 7 bite cases in `test_guards_bite.py` |
 | P0.3 | Record the costs on this tree | `todo` | |
 | P0.4 | Ratchet: reads of the mode outside the sanctioned layers | `done` | `test_every_read_of_the_mode_outside_the_sanctioned_layers_is_rostered`; scratch `is_on()` in `stats/controller.py` failed it naming the line; 13 reads rostered (scan finds 16: `image_table/_phone_fit.py` owns its phone form and is sanctioned by path) |

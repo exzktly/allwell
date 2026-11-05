@@ -830,8 +830,9 @@ def _detail_placement(ctx, card, detail, detail_layout, strip_card):
         was_hidden = card.isHidden()
         card.setVisible(not (on and phone))
         if was_hidden and not card.isHidden():
-            # Hidden, the figure was not drawn (``controller.redraw``); it is drawn now that it is back.
-            QTimer.singleShot(0, lambda: nwc.redraw(ctx))
+            # Hidden, the figure was not drawn (``controller.redraw``); it is drawn now that it is back. With the card as
+            # the timer's context, Qt drops the call if the page is deleted before it runs.
+            QTimer.singleShot(0, card, lambda: nwc.redraw(ctx))
         # Alone on a phone the detail has the height to give its crops; beside the figure the series keep most of it.
         detail_layout.setStretchFactor(strip_card, 3 if phone else 1)
 
@@ -839,7 +840,11 @@ def _detail_placement(ctx, card, detail, detail_layout, strip_card):
     card_ref = weakref.ref(card)
 
     def follow_phone(_on: bool) -> None:
-        if card_ref() is None:
+        import shiboken6
+
+        live = card_ref()
+        if live is None or not shiboken6.isValid(live) or not shiboken6.isValid(detail):
+            # The page is gone (its Python wrapper can outlive the widgets): stop listening rather than touch it.
             phone_layout.remove_listener(follow_phone)
             return
         with swallow("Nanowells: re-place the site detail for phone layout"):

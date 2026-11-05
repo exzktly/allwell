@@ -1711,3 +1711,39 @@ def test_the_rail_drawer_lends_the_current_mode_s_panel_and_gives_all_back(qapp)
     assert {m for m, p in panels.items() if not p.isHidden()} == {"analyze", "datasets"}
     assert not any(drawer.is_lent(p) for p in panels.values())
     host.deleteLater()
+
+
+# ── following the layout for as long as an owner lives ──────────────────────
+
+def test_follow_calls_back_while_the_owner_lives_and_leaves_when_it_is_gone(qapp):
+    """``phone_layout.follow``: a page-lifetime listener. Wrong implementations: one that never removes itself (a
+    process-wide listener keeping a deleted page's callbacks alive and calling into it), and one that checks only the
+    Python wrapper (which outlives the C++ widget and then raises on first use)."""
+    import gc
+
+    from PySide6.QtCore import QObject
+
+    seen = []
+    owner = QObject()
+    before = len(phone_layout._listeners)
+    phone_layout.follow(owner, seen.append)
+    assert len(phone_layout._listeners) == before + 1
+    phone_layout.set_on(True)
+    phone_layout.set_on(False)
+    assert seen == [True, False]
+    # The C++ object is deleted while the wrapper is still referenced: the next layout change drops the listener
+    # without calling it.
+    import shiboken6
+    shiboken6.delete(owner)
+    phone_layout.set_on(True)
+    phone_layout.set_on(False)
+    assert seen == [True, False], "the listener was called for a deleted owner"
+    assert len(phone_layout._listeners) == before
+    # And a collected owner is dropped the same way.
+    gone = QObject()
+    phone_layout.follow(gone, seen.append)
+    del gone
+    gc.collect()
+    phone_layout.set_on(True)
+    phone_layout.set_on(False)
+    assert seen == [True, False] and len(phone_layout._listeners) == before

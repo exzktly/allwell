@@ -187,9 +187,12 @@ reason, and the roster only shrinks. Wording that differs by mode lives in a
 `_phone.py` beside what it words: `review/core/empty_state_phone.py` rewords an
 empty plot's hint (the plate is under Wells, a finger taps), the Image
 Table's `_phone_fit` says where its builder is, and the Nanowells page reads the
-mode only in `review/features/nanowell/_phone.py` (the site detail takes the page,
-the crop strip wraps) — its renderer is told `wrap_footer` by the controller and
-never reads the mode.
+mode only in `review/features/nanowell/_phone.py`, which holds the decisions (the
+site detail takes the page, the crop strip wraps to its shape) so the controller
+and the tab view only call it — and its renderer is told `wrap_footer` by the
+controller and never reads the mode. A page that has to follow a layout change
+for as long as it lives does it with `phone_layout.follow(owner, fn)`, which holds
+the owner weakly and drops the listener once the owner or its C++ object is gone.
 
 **Widgets declare their phone form.** `widgets/form_registry.py` records which
 widgets have an alternate form and of what *kind* (`"stepper"`, `"toolbar"`,

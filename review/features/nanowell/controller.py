@@ -1936,17 +1936,6 @@ def save_popout_figure(ctx) -> None:
     ctx.figures.save(fig, save_name(site, popout_channels(st)))
 
 
-def _strip_cols(fig, crops) -> int:
-    """The crop strip's columns: one row at a desk (``0``), and in phone layout as many rows as make each crop
-    largest in the strip's own figure (``crop_grid_compute.strip_columns``)."""
-    from .crop_grid_compute import strip_columns
-
-    if not crops or not nw_phone.on_phone():
-        return 0
-    width, height = fig.get_size_inches()
-    return strip_columns(len(crops), width * 0.94, height * 0.78)
-
-
 def refit_crop_strip(ctx) -> None:
     """Lay the crop strip out again for its new size — in phone layout only, where its columns follow its shape."""
     st = _state(ctx)
@@ -1990,7 +1979,7 @@ def redraw_detail(ctx) -> None:
     strip_fig, strip_canvas = ctx.widgets.get_or_none("_nw_strip_fig"), ctx.widgets.get_or_none("_nw_strip_canvas")
     if strip_fig is not None and strip_canvas is not None:
         render_crop_strip(strip_fig, crops, first, cells=st.crop_cells, image_channel=image_channel,
-                          display_range=display_range(ctx), cols=_strip_cols(strip_fig, crops))
+                          display_range=display_range(ctx), cols=nw_phone.strip_columns_for(strip_fig, crops))
         strip_canvas.draw_idle()
 
 

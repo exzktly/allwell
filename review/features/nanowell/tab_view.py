@@ -508,7 +508,10 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     splitter.setStretchFactor(1, 2)
     layout.addWidget(wrap_with_empty_state(ctx.window, splitter, icon="hexagon", reason=nwc.nanowell_empty_reason), 1)
 
-    show_detail = _detail_placement(ctx, card, detail, detail_layout, strip_card)
+    show_detail = nw_phone.detail_placement(card, detail, detail_layout, strip_card,
+                                            redraw_figure=lambda: nwc.redraw(ctx),
+                                            refit_strip=lambda: nwc.refit_crop_strip(ctx),
+                                            refit_ms=_REFIT_MS)
 
     def show_computing() -> None:
         computing.setVisible(nwc.computing_shown(ctx))
@@ -810,53 +813,6 @@ def _cells_box(ctx, name: str) -> QCheckBox:
     box.toggled.connect(lambda on: nwc.set_crop_cells(ctx, on))
     ctx.widgets.register(name, box)
     return box
-
-
-def _detail_placement(ctx, card, detail, detail_layout, strip_card):
-    """``show_detail(on)``: show the site detail beside the figure — or, in phone layout, instead of it.
-
-    A phone is one column wide: beside the detail the figure was squeezed to a strip a few pixels wide, with no dot left
-    to tap. So there the detail takes the page while a nanowell is selected, and ✕ (which clears the selection) brings
-    the figure back. Switching phone layout with a nanowell selected re-places them at once, and the crop strip, which
-    wraps its crops to its own shape in phone layout (``controller._strip_cols``), is laid out again once a resize of it
-    settles — the pane going full-screen, the phone turned."""
-    import weakref
-
-    from core.safe import swallow
-
-    def show_detail(on: bool) -> None:
-        detail.setVisible(on)
-        phone = nw_phone.on_phone()
-        was_hidden = card.isHidden()
-        card.setVisible(not (on and phone))
-        if was_hidden and not card.isHidden():
-            # Hidden, the figure was not drawn (``controller.redraw``); it is drawn now that it is back. With the card as
-            # the timer's context, Qt drops the call if the page is deleted before it runs.
-            QTimer.singleShot(0, card, lambda: nwc.redraw(ctx))
-        # Alone on a phone the detail has the height to give its crops; beside the figure the series keep most of it.
-        detail_layout.setStretchFactor(strip_card, 3 if phone else 1)
-
-    # Held weakly through the card: the listener is process-wide and must not keep a closed page alive.
-    card_ref = weakref.ref(card)
-
-    def follow_phone(_on: bool) -> None:
-        import shiboken6
-
-        live = card_ref()
-        if live is None or not shiboken6.isValid(live) or not shiboken6.isValid(detail):
-            # The page is gone (its Python wrapper can outlive the widgets): stop listening rather than touch it.
-            nw_phone.stop_following(follow_phone)
-            return
-        with swallow("Nanowells: re-place the site detail for phone layout"):
-            show_detail(not detail.isHidden())
-
-    nw_phone.follow(follow_phone)
-    strip_refit = QTimer(strip_card)
-    strip_refit.setSingleShot(True)
-    strip_refit.setInterval(_REFIT_MS)
-    strip_refit.timeout.connect(lambda: nwc.refit_crop_strip(ctx))
-    strip_card.canvas.mpl_connect("resize_event", lambda _event: strip_refit.start())
-    return show_detail
 
 
 def _detail_header(ctx, parent) -> QHBoxLayout:

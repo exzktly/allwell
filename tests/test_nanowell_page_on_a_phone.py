@@ -202,3 +202,19 @@ def test_the_page_redraw_asks_for_the_wrap_exactly_when_phone_layout_is_on(qtbot
     finally:
         phone_layout.set_on(False)
     assert seen and set(seen) == {True}, seen
+
+
+def test_switching_phone_layout_with_a_nanowell_selected_re_places_the_figure_and_the_detail(qtbot, page):
+    """The layout flips while a nanowell stays selected: the detail takes the page on a phone and sits beside the
+    figure again at the desk, with no click in between. Wrong implementation: a page that places its detail only
+    when a dot is clicked, which every other test here passes."""
+    _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    card, detail = page.widgets.get("_nw_card"), page.widgets.get("_nw_detail_pane")
+    assert detail.isVisible() and card.isVisible(), "at the desk the detail sits beside the figure"
+    phone_layout.set_on(True)
+    try:
+        assert detail.isVisible() and card.isHidden(), "the detail did not take the page when phone layout turned on"
+    finally:
+        phone_layout.set_on(False)
+    assert detail.isVisible() and card.isVisible(), "the figure did not come back when phone layout turned off"

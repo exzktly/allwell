@@ -1675,6 +1675,7 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     from matplotlib.figure import Figure
 
     from ui import phone_shell as ps
+    from analyze.form_chrome import AnalyzeFormChromeMixin
     from widgets import form_registry
     from widgets.control_band import ControlBand
     from widgets.mpl_toolbar import MplToolbar
@@ -1686,8 +1687,9 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     host = QWidget()
     canvas = FigureCanvasQTAgg(Figure())
     canvas.setParent(host)
-    row = QWidget(host)
-    row.setObjectName("AnalyzeFormRow")
+    holder = QWidget(host)
+    QVBoxLayout(holder)
+    row = AnalyzeFormChromeMixin._row(None, holder, "A label").parentWidget()   # the app's builder
     block = QWidget(host)
     block.setProperty("phoneControls", True)
     block.setStacked = lambda _on: None

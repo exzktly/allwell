@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QBoxLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from widgets import form_registry
 from widgets.separator import build_hline_separator
 
 
@@ -291,6 +292,7 @@ class AnalyzeFormChromeMixin:
         # it hands the pane back to the desk (``ui/phone_shell.py``).
         row.setObjectName("AnalyzeFormRow")
         row.setProperty("stackedAtDesk", True)
+        form_registry.declare(row, "form_row")
         rl = QBoxLayout(QBoxLayout.TopToBottom, row)
         rl.setContentsMargins(0, 2, 0, 2)
         rl.setSpacing(2)

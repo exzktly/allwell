@@ -500,7 +500,7 @@ def _is_phone_controls(w: QWidget) -> bool:
 #: that has one, so a kind added here is both watched and adapted; a kind that
 #: ``_ADAPTERS`` lacks fails ``tests/test_phone_layout.py``.
 _KIND_BY_CLASS = {"ControlBand": "controls"}
-_KIND_BY_OBJECT_NAME = {"AnalyzeFormRow": "form_row"}
+_KIND_BY_OBJECT_NAME: dict[str, str] = {}
 ADAPTED_KINDS = frozenset(
     ("controls", "toolbar", "stepper", "form_row", form_registry.CUSTOM))
 

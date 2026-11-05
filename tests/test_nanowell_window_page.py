@@ -74,10 +74,83 @@ def test_a_click_still_selects_one_nanowell(page, qtbot):
     assert st.windows == {}
 
 
-def test_the_clear_button_clears(page, qtbot):
+def test_clearing_removes_the_band(page, qtbot):
     st = _loaded(qtbot, page)
     _drag(page, _first_panel(page), (-0.4, 1.5), (1.4, 4.5))
     assert len(st.windows) == 1
     wnc.clear_window(page)
     assert st.windows == {}
     assert all(not patches for patches in _bands(page).values())
+
+
+# ── the strip ────────────────────────────────────────────────────────────────
+def _drawn(page, qtbot):
+    st = _loaded(qtbot, page)
+    _drag(page, _first_panel(page), (-0.4, 1.5), (1.4, 4.5))
+    return st
+
+
+def _members(st):
+    return _counts(wnc.current(st)[1].sites())
+
+
+def _type(page, lo, hi):
+    for name, text in (("_nw_window_lo", lo), ("_nw_window_hi", hi)):
+        page.widgets.get(name).setText(text)
+    page.widgets.get("_nw_window_hi").editingFinished.emit()
+
+
+def test_the_strip_states_the_counts(page, qtbot):
+    _drawn(page, qtbot)
+    label = page.widgets.get("_nw_window_label")
+    assert page.widgets.get("_nw_window_label").parent().isVisible()
+    assert label.text().startswith("Window ") and "2 inside at every covered timepoint · 5 at any" in label.text()
+
+
+def test_the_clear_button_clears_from_the_strip(page, qtbot):
+    st = _drawn(page, qtbot)
+    qtbot.mouseClick(page.widgets.get("_nw_window_clear_btn"), Qt.LeftButton)
+    assert st.windows == {} and not page.widgets.get("_nw_window_label").parent().isVisible()
+
+
+def test_typed_bounds_move_the_window(page, qtbot):
+    st = _drawn(page, qtbot)
+    _type(page, "2", "3")
+    window = next(iter(st.windows.values()))
+    assert (window.lo, window.hi) == (2.0, 3.0)
+    assert _members(st) == {("B01", 3, 3)}
+
+
+def test_typed_bounds_the_wrong_way_round_are_swapped(page, qtbot):
+    st = _drawn(page, qtbot)
+    _type(page, "3", "2")
+    window = next(iter(st.windows.values()))
+    assert (window.lo, window.hi) == (2.0, 3.0)
+
+
+def test_text_that_is_not_a_number_is_put_back(page, qtbot):
+    st = _drawn(page, qtbot)
+    before = next(iter(st.windows.values()))
+    _type(page, "abc", "3")
+    assert next(iter(st.windows.values())) == before
+    assert page.widgets.get("_nw_window_lo").text() == f"{before.lo:.6g}"
+
+
+def test_any_widens_the_window(page, qtbot):
+    st = _drawn(page, qtbot)
+    page.widgets.get("_nw_window_rule_cb").setCurrentIndex(1)
+    assert next(iter(st.windows.values())).rule == "any"
+    assert _members(st) == {("A01", 1, 2), ("A01", 2, 4), ("A01", 0, 3), ("B01", 3, 3), ("B01", 1, 2)}
+
+
+def test_another_metric_hides_the_window_and_the_first_brings_it_back(page, qtbot):
+    from review.features.nanowell import controller as nwc
+
+    st = _drawn(page, qtbot)
+    strip = page.widgets.get("_nw_window_label").parent()
+    nwc.set_metric(page, "c")
+    qtbot.waitUntil(lambda: st.window_model is not None and st.window_model.column == "c", timeout=5000)
+    assert not strip.isVisible() and all(not patches for patches in _bands(page).values())
+    nwc.set_metric(page, "n")
+    qtbot.waitUntil(lambda: st.window_model is not None and st.window_model.column == "n", timeout=5000)
+    assert strip.isVisible() and all(len(patches) == 1 for patches in _bands(page).values())

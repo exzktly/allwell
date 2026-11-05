@@ -35,6 +35,7 @@ from review.features.nanowell.resolve_view import build_resolve_guide, refresh_r
 from review.features.nanowell.exclude_view import build_exclude_controls
 from review.features.nanowell.rim_focus_view import build_rim_focus_controls
 from review.features.nanowell.variables_view import build_variable_controls
+from review.features.nanowell.window_view import build_window_strip
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
 from review.features.nanowell.popout_view import build_popout_view_controls
 from review.features.nanowell.qc_view import build_qc_controls, refresh_qc_controls
@@ -438,6 +439,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     # The Resolve walk's guide card, between the band and the figure it explains: shown only while a walk runs.
     guide = build_resolve_guide(ctx, plot_area)
     layout.addWidget(guide.frame)
+    layout.addWidget(build_window_strip(ctx, plot_area))
 
     # ── the figures ─────────────────────────────────────────────────────────
     splitter = QSplitter(Qt.Horizontal, plot_area)
@@ -617,6 +619,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             popout_refresh = ctx.widgets.get_or_none("_nw_popout_refresh")
             if callable(popout_refresh):
                 popout_refresh()
+            window_refresh = ctx.widgets.get_or_none("_nw_window_refresh")
+            if callable(window_refresh):
+                window_refresh()
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
             variables.refresh(view)
         finally:

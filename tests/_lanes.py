@@ -85,6 +85,7 @@ UI_LANE_FILES: dict[str, str] = {
     "test_stepper_focus_keeps_height.py": "focusing a stepper keeps its touch height",
     "test_widgets_support.py": "set_variant updates the style property",
     "test_wrap_checkbox.py": "a wrapping checkbox reports its height",
+    "test_narrow_page_widgets.py": "wrapping radio / capped label / dock and Batch Export stacking / Triage buttons at a phone width",
     "test_section_header_layout.py": "a section title keeps one line while it fits",
     # ── theme tokens and the stylesheet (ui/theme.py) ──────────────────────
     "test_theme_accent_pairing.py": "accent2 moves with accent in every theme",

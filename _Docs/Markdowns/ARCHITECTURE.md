@@ -12317,6 +12317,18 @@ on top of that, both in `moving_compute`:
   changes from the averaged baseline; `distribution_model`, `wells_summary` and `trajectory_panels` all take
   `baseline_moving=…`.
 
+*When the window leaves nothing.* Because a window is never shortened, a window longer than the drawn series
+allows leaves every value out: *N* timepoints need at least *N* in the well for a measured value and *N* after the
+baseline for a fold change (so a two-timepoint plate with the *Earliest* baseline has no fold-change window at
+all), and *Along x: Wells* or Statistics at a timepoint with fewer than *N − 1* before it — the first, say, which
+the Array view's choice of the seeding timepoint carries over — has none either. An empty plot over such data read
+as a dataset with no values, so `moving_compute.nothing_left_text` names it instead: the reason most values went
+under, the longest shorter window that would leave something (and how many values), then `describe`'s sentence.
+`distribution_model` sets it as `DistributionModel.empty` (and in its notes, which the Statistics report carries)
+when no swarm holds a value, and `draw_view` draws it with `render_message` (gid `nw-moving-empty`) in place of the
+beeswarm; Trajectories does the same when no line is left (`controller._moving_left_nothing`). It is said only when
+the values were there before the average, so a figure emptied by something else keeps its own message.
+
 A ratio over a baseline that is constant per nanowell averages the same whichever is divided first.
 `log2_count_fc` is averaged as logs — the mean of log₂((n + 1) / (n₀ + 1)), a geometric mean of the ratios, not
 the log of their mean — and the footer says so.
@@ -12848,7 +12860,12 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   `no value: no cells at baseline ("0 at base") · 3`, the commonest three and then `other reasons` — from
   `ArrayScene.why` (`array_compute.no_value_reasons`, `(q, r) -> label` from `series_compute.exclusion_reason` worded
   by `distribution_compute.reason_label`, so the key and the Distribution footer give the same cause), and the
-  quoted tag (`_array_key.reason_tag`) is what each such nanowell writes inside itself with *Values* on, so the
+  quoted tag (`_array_key.reason_tag`) is what each such nanowell writes inside itself with *Values* on. Each
+  reason is also a mark of its own (`_array_key.no_value_marks`, `REASON_HATCHES`): the commonest keeps the plain
+  grey ring, the next a vertical hatch, then a back-diagonal, then stars for `other reasons` — none a hatch a state
+  draws — and `_fill_by_metric` draws each reason's nanowells with the hatch its key entry shows, so the reasons are
+  told apart on the array with *Values* off, when no tag is written, and no two key swatches look alike
+  (`tests/test_nanowell_array_marks_are_distinct.py` reads both off the drawn artists). So the
   reason of any one nanowell can be read off the array: a fold change on a nanowell full of cells is undefined
   whenever its baseline had none or was not measurable, and a bare "no value" read as "not measured". It is a
   standalone legend (`ax.add_artist`), so the export-style pass sizes its text but never moves it. The Array
@@ -20051,6 +20068,32 @@ indistinguishable from a button wired to nothing. The log toggles and the base
 are deliberately untouched — an axis drawn in log stays in log and merely picks
 its own bounds again.
 
+**Colour limits** (`c_lim_min` / `c_lim_max`, the *Colour limits* row of Limits &
+Scale) are MATLAB's `clim` for the figure: `plot_style._apply_colour_limits` runs
+at the end of `apply_export_style_prefs` and sets the range of every artist
+`colour_mapped(fig)` returns — an image or collection with a colour bar
+(`artist.colorbar`), outside a `_aw_colorbar` axes, and not marked
+`_aw_owns_clim`. The colour bar follows the mappable. A blank end keeps the
+range the plot chose, which the pass remembers on the artist
+(`_aw_auto_clim`) the first time it meets it, so blanking a typed end gives the
+plot's own end back without a redraw; a pair that is no range, half-typed text,
+or a non-positive low end on a `LogNorm` leaves the plot's own. The keys are in
+`AXIS_LIMIT_PREF_KEYS`, so they are per figure, cleared by **Auto scale** and
+dropped on a dataset switch with the X and Y limits, but they are not in the
+per-panel buckets: a colour scale belongs to the figure, not to a subplot. The
+row is offered only on the figures in `properties_view._COLOUR_SCALE_FIGURES`
+(Nanowells, Spatial, Multivariate), each with what it colours: a bar, line or
+scatter plot keys its colours with a legend, so the row would move nothing
+there. The roster is held against what it lists — the feature packages whose
+code makes a colour bar — so a new one fails rather than going without the row.
+The Heat Map, the one exemption, marks its image `_aw_owns_clim`, because Display
+▾ owns its range (Auto / Global / typed, and the log norm), and carries a
+`colour_limits` facet in `_STYLE_FACETS_A_FIGURE_LACKS`
+(`tests/test_properties_hides_what_it_cannot_do.py` re-measures that the keys
+change nothing there). `tests/test_colour_limits.py` covers the pass, the Array
+view's filled nanowells through `render_array`, the real sidebar's two fields
+and Auto scale, and the roster.
+
 **The store is replaced, not edited, so nothing may hold a piece of it.**
 `view_state.restore` rebuilds `axis_prefs` as `{str(k): dict(v)}` and
 `reset_for_new_dataset` rebuilds it without the entries that emptied, so every
@@ -22631,7 +22674,7 @@ The map (each rule links to the test that holds it):
 | Every divider frame carries a name the QSS styles, so it paints a 1 px `border_subtle` hairline rather than Qt's 3 px etched default (§8) | `tests/test_divider_naming.py` |
 | A well token is judged by `util.well_token`, never a local whole-token regex (§15) | `tests/test_well_token_single_parser.py` |
 | A removable feature's state slice is reached from outside that feature through `state.feature_slice(name)`, never by attribute. `AppState.__getattr__` **raises** for a slice whose feature is not in `FEATURES`, so a profile build without it fails at the access — and `getattr(ctx.state.stats, "pairwise", [])` does not help, because the default covers a missing *attribute* on an object that already exists and reaching the object is what raises. Removability is read from `profiles/full.toml`, so a slice whose feature is kept forever (`bar`, `preview`, `review_image`) is not the subject; `features/registry.py` is exempt because every access there sits inside that feature's own activation hook, and the guard fails if that exemption stops describing a real access | `tests/test_disabled_feature_slices.py`, with bite cases in `tests/test_guards_bite.py` |
-| Every spin box the application builds is `widgets.spin_box.SpinBox` / `DoubleSpinBox`. The stylesheet's `min-width` floor becomes an explicit 60 px minimum on a bare `QSpinBox`, and a row short of room squeezes the box to it — a 14 px text area, which clipped the QC panel's and the Nanowells band's focus percentages; the subclasses hold their minimum at their whole size hint | `tests/test_spin_boxes_keep_their_number.py` (an AST guard over every package, the reported QC row in a 330 px panel, and the squeezed row with each class) |
+| Every spin box the application builds is `widgets.spin_box.SpinBox` / `DoubleSpinBox`. The stylesheet's `min-width` floor becomes an explicit 60 px minimum on a bare `QSpinBox`, and a row short of room squeezes the box to it — a 14 px text area, which clipped the QC panel's and the Nanowells band's focus percentages; the subclasses hold their minimum at their whole size hint. The hint is only the style's estimate of the text area, so each box also measures the field it was really laid out with (`text_shortfall`, the style's `SE_LineEditContents` against the widest value plus the field's own 6 px) whenever the box or its field is resized or the field's font changes, and grows its hint by any shortfall, up to 200 px. The italic shown while a typed number is pending is derived from the box's font each time, so the field never keeps a font the box no longer measures itself in | `tests/test_spin_boxes_keep_their_number.py` (an AST guard over every package, the reported QC row in a 330 px panel, the squeezed row with each class, a field drawn wider than the hint planned, and the field following the box's font after a typed value) |
 | A typed number is applied once, when it is finished. `SpinBox` / `DoubleSpinBox` set `setKeyboardTracking(False)`, so `valueChanged` fires on Enter, on focus-out, or after `TYPING_PAUSE_MS` (one second) without typing, rather than per keystroke (the arrows, the wheel and `setValue` still fire at once) — typing "200" into a box wired to a recompute no longer runs it for 2 and 20 first. The pause is started by `textEdited` alone, so a refresh from state never commits anything; while the field holds typed text that is not the value in force (`pending()`) it is drawn in italics, so a number waiting for its pause — or a partial one a mid-number pause is about to commit — never looks applied; it exists because Enter and focus-out are not always reachable — a click on a plot canvas, a tool button or a tab bar ends no edit, and a window left inactive has no focus to lose — and a number typed and then left was silently dropped. **A number the box will not take is refused out loud**: Qt's answer to text outside the range, on Enter or focus-out, is to put the last value back silently, and it calls `fixup` exactly then, so the box emits `refused(text)` from there and the owning screen says which range it takes (`range_text()`). The pause commits a number the box takes, refuses one no further digit can rescue (20 in 30–95), and leaves a partial one (the 4 of 45) as typed; a number over the maximum is *Intermediate* in `validate` rather than Qt's *Invalid*, so typing 96 into a box that takes up to 95 keeps "96" and refuses it, where Qt dropped the 6 and committed 9; `tests/test_spin_boxes_say_what_they_refuse.py`. The Properties panel's bound `QLineEdit`s (the axis limits) apply on `editingFinished`; their setters emit it themselves, so a programmatic set still applies immediately | `tests/test_spin_boxes_commit_typed_values_once.py` (types into each class and the panel's real binding keystroke by keystroke) |
 | `swallow` and `swallowed` are not swapped. They are near-identical names with opposite call shapes — a context manager and a call for inside an `except` block — and swapping them fails only when the line runs. `with swallowed():` raises **before** the body, so the work it was meant to guard never happens; `swallowed()` outside a handler logs a suppression with no exception in flight, which reads as a failure that did not occur | `tests/test_safe_helpers_used_right.py`, with bite cases in `tests/test_guards_bite.py` |
 | A text-mode subprocess names its codec. `text=True` alone decodes the pipe with `locale.getpreferredencoding(False)` — UTF-8 here, the ANSI codepage on a user's Windows box — so a stream that reads correctly for the developer mojibakes the remote's `✓` / `→` markers for them and raises `UnicodeDecodeError` out of a reader thread on the first byte the codepage has no character for, skipping the `proc.wait()` behind it | `tests/test_subprocess_text_decoding.py`, with bite cases in `tests/test_guards_bite.py` |

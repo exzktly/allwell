@@ -66,6 +66,20 @@ def test_a_row_short_of_room_does_not_squeeze_the_number(qtbot, qapp, cls):
     assert _text_area(spin) >= _needs(spin), f"{_text_area(spin)} px for a number that needs {_needs(spin)} px"
 
 
+@pytest.mark.parametrize("cls", [SpinBox, DoubleSpinBox])
+def test_a_field_drawn_wider_than_the_hint_planned_still_holds_the_number(qtbot, qapp, cls):
+    """The Rim focus box looked wide and showed one digit of "95": the room the style lays the field out with is
+    not the room the size hint planned for. Here the field draws in a font half again the box's own — the hint is
+    measured in the box's font — so the number needs more than the hint allowed, and the box must grow to fit it."""
+    spin, _host = _squeezed(qtbot, qapp, cls)
+    field = spin.findChild(QLineEdit)
+    font = field.font()
+    font.setPixelSize(round(1.5 * field.fontMetrics().height()))
+    field.setFont(font)
+    qtbot.waitUntil(lambda: _text_area(spin) >= _needs(spin), timeout=2000)
+    assert spin.text_shortfall() <= 0
+
+
 def test_a_plain_qspinbox_in_the_same_row_is_squeezed_which_is_why_the_subclass_exists(qtbot, qapp):
     """The same row with Qt's own spin box: the layout takes the filler's wish out of the number. If this ever
     stops being squeezed, Qt has changed and the subclass can go."""
@@ -111,3 +125,23 @@ def test_the_application_builds_no_bare_qt_spin_box():
     sites = _bare_spin_box_calls()
     assert not sites, "build these with widgets.spin_box.SpinBox / DoubleSpinBox:\n  " + "\n  ".join(sites)
 
+
+
+@pytest.mark.parametrize("cls", [SpinBox, DoubleSpinBox])
+def test_the_field_follows_the_box_s_font_after_a_typed_value(qtbot, qapp, cls):
+    """Typing shows the pending number in italics by setting a font on the field. Taken from the field itself, that
+    font froze the field at the size it had then, so a later change of the box's font (a UI scale, phone layout)
+    left the number drawn in a size the box no longer measured itself in."""
+    spin = cls()
+    qtbot.addWidget(spin)
+    spin.setRange(10, 100)
+    spin.setValue(50)
+    field = spin.findChild(QLineEdit)
+    field.setText("60")                                  # typed, not yet committed: italic
+    assert field.font().italic()
+    spin.interpretText()
+    assert not field.font().italic()
+    bigger = spin.font()
+    bigger.setPointSizeF(bigger.pointSizeF() * 2 if bigger.pointSizeF() > 0 else 24)
+    spin.setFont(bigger)
+    assert field.font().pointSizeF() == pytest.approx(bigger.pointSizeF())

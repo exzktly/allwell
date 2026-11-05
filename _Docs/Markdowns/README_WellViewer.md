@@ -4372,7 +4372,14 @@ row, holding five actions:
   boxes by hand does not do this — an axis keeps the bounds it was last given
   until the plot is drawn again — which is what the button is for. It leaves
   the log scaling and the log base alone: an axis you set to logarithmic stays
-  logarithmic and simply chooses its own range. Settings persist across
+  logarithmic and simply chooses its own range.
+  **Colour limits**, in the same section, set the range of a plot's colour
+  scale, like MATLAB's `clim` — for example the Nanowells **Array** view's
+  filled nanowells, or the Spatial and Multivariate maps: values below the low
+  end take the first colour, values above the high end the last, and the colour
+  bar follows. Leave a box blank to keep the plot's own end. It applies to every
+  plot with a colour bar on that figure, and **Auto scale** clears it too. The
+  Heat Map has no Colour limits row: its range is set under **Display ▾**. Settings persist across
   redraws — and across the **Screen / Publication** switch, which decides
   colours and nothing else. **Show grid** in particular reaches the files you
   export: a figure saved, copied, filed in Saved Plots or sent through Batch
@@ -6232,6 +6239,11 @@ the sentence names it.
   rather than averaged over fewer timepoints. With *Fixed cohort* ticked too, the cohort is chosen from the
   measured values and then averaged. The footer states the window.
 
+  A window longer than the series allows leaves nothing to draw — for example a window of 3 on a plate with
+  two timepoints, a fold change whose baseline has fewer timepoints after it than the window, or *Along x:
+  Wells* at the first timepoint. The figure then says so in place of the plot, with the reason and the longest
+  window that would draw something (or that none would, in which case set the window to 1).
+
   For a **fold change**, each window starts *after* the baseline timepoint: a window that included the baseline
   would average in its fold change of exactly 1 and pull the first values after it towards 1, and one that
   reached before it would mix in values from before the reference point. Those timepoints are counted as
@@ -6438,7 +6450,9 @@ the sentence names it.
     *baseline occluded* / *baseline rim out of focus* when the baseline could not be measured. The key has one entry
     per reason (the commonest three, then *other reasons*), each with a short tag in quotes — *no value: no cells
     at baseline ("0 at base") · 3* — and with **Values** on each such nanowell writes that tag inside itself, so you
-    can read the reason of the one you are looking at. Every key entry ends with its count. The outline's width follows the nanowell's size on screen (about
+    can read the reason of the one you are looking at. Each reason also has its own ring, shown beside it in the
+    key: the commonest a plain grey ring, the next with vertical lines, then back-diagonal lines, then stars for
+    *other reasons* — so the reasons can be told apart with **Values** off too. Every key entry ends with its count. The outline's width follows the nanowell's size on screen (about
     6 % of its diameter, never under 2.5 or over 8 screen pixels), so it stays visible zoomed out and on a phone. Either way a nanowell on a tile seam is dashed in purple and
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the

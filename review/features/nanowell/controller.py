@@ -42,7 +42,7 @@ from review.features.nanowell.crop_grid_compute import POPOUT_GRIDS, POPOUT_MAX_
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
     ArrayDrawn, render_array, render_crop_grid, render_crop_strip, render_distribution, render_extremes, render_message,
-    render_position, render_site_detail, render_trajectories,
+    redraw_selection_rings, render_position, render_site_detail, render_trajectories,
 )
 from review.features.nanowell.state import (
     IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS,
@@ -2172,7 +2172,6 @@ def _move_selection_rings(ctx) -> bool:
     a load running, or the metrics on hand stale for the baseline, rim focus rule, Cell Gating or the drawn wells —
     the cases where :func:`redraw` fetches before it draws. Each of those falls back to the full redraw."""
     from review.core.plot_style import apply_export_style_to_current
-    from review.features.nanowell.renderer import redraw_selection_rings
 
     st = _state(ctx)
     fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")

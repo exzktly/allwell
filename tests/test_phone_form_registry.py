@@ -364,3 +364,26 @@ def test_a_plot_card_s_canvas_declares_itself(qapp):
 
     card = PlotCard()
     assert fr.kind_of(card.canvas) == "canvas"
+
+
+def test_a_canvas_built_after_the_switch_is_drawn_at_the_phone_dpi_and_height_without_a_sweep(qapp, shell):
+    """The case the sweep exists for — a plot on a page built after the switch —
+    with nothing recognising the canvas by type. Wrong implementation: a shell
+    that dropped the canvas branch and did not add the kind to its adapters."""
+    from matplotlib.figure import Figure
+
+    from ui.phone_shell import PLOT_ROW_PT
+    from widgets.canvas import make_canvas
+
+    fig = Figure()
+    fig.add_subplot(111)
+    canvas = make_canvas(fig, shell._win)
+    factor = shell.plot_factor()
+    assert factor > 1.0, "a phone-point canvas is drawn larger than the desk's"
+    assert getattr(fig, "_aw_dpi_factor", 1.0) == 1.0
+    assert canvas.minimumHeight() < shell.pt(PLOT_ROW_PT)
+    canvas.show()
+    _pump(qapp)
+    assert fig._aw_dpi_factor == factor
+    assert fig.dpi == pytest.approx(fig._aw_dpi_base * factor * (canvas.device_pixel_ratio or 1.0))
+    assert canvas.minimumHeight() >= shell.pt(PLOT_ROW_PT)

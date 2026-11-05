@@ -190,10 +190,11 @@ holds. `PhoneShell` listens (`_listen_for_declarations`, weakly, so a closed
 window leaves no listener). A declaration is made inside the widget's
 constructor, so while phone layout is on the shell only installs its event
 filter on the widget and the form is applied on the widget's first Show.
-`_adapt_kind` reads that declared kind (`ControlBand`, `MplToolbar`, `Stepper`
-and the Analyze form row declare theirs, as does the Image Table's controls
-block); what the shell still recognises by name — the `InfoHint` object name and
-the `draw_idle` duck type that finds a plot canvas —
+`_adapt_kind` reads that declared kind (`ControlBand`, `MplToolbar`, `Stepper`,
+the Analyze form row, every plot canvas — built only through
+`widgets.canvas.make_canvas`, which a guard enforces — and the Image Table's
+controls block declare theirs); what the shell still recognises by name — the
+`InfoHint` object name —
 `test_the_shell_recognises_no_more_widgets_by_name_than_the_budget` counts, and
 only lets the count fall.
 `tests/test_phone_layout_snapshot.py` records what the window shows in phone

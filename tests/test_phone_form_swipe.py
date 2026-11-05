@@ -188,10 +188,11 @@ def test_a_drag_on_a_plot_scrolls_only_a_plot_page(qtbot):
     """On a plot page a swipe on the plot is how the page scrolls
     (``_swipe_plot_area`` marks its viewport); anywhere else — a dialog's
     plot — the drag is the plot's."""
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
     from matplotlib.figure import Figure
+
+    from widgets.canvas import make_canvas      # a canvas is a canvas by declaring itself
     area, _label, _plate, _slider = _form(qtbot)
-    canvas = FigureCanvasQTAgg(Figure())
+    canvas = make_canvas(Figure())
     canvas.setMinimumHeight(200)
     area.widget().layout().insertWidget(0, canvas)
     QApplication.processEvents()

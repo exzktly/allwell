@@ -1671,12 +1671,12 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     names them — is watched. The drift this rejects: a type taught to
     ``adapt`` but not to the watch list is never watched, so a widget built
     after the switch never gets its phone form, and nothing fails."""
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
     from matplotlib.figure import Figure
 
     from ui import phone_shell as ps
     from analyze.form_chrome import AnalyzeFormChromeMixin
     from widgets import form_registry
+    from widgets.canvas import make_canvas
     from widgets.control_band import ControlBand
     from widgets.mpl_toolbar import MplToolbar
     from widgets.stepper import Stepper
@@ -1685,8 +1685,7 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     for meth in ps.PhoneShell._ADAPTERS.values():
         assert callable(getattr(ps.PhoneShell, meth, None)), meth
     host = QWidget()
-    canvas = FigureCanvasQTAgg(Figure())
-    canvas.setParent(host)
+    canvas = make_canvas(Figure(), host)
     holder = QWidget(host)
     QVBoxLayout(holder)
     row = AnalyzeFormChromeMixin._row(None, holder, "A label").parentWidget()   # the app's builder
@@ -1695,7 +1694,7 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     block.setStacked = lambda _on: None
     custom = QWidget(host)
     form_registry.register(custom, lambda _on: None)      # a view's own form
-    widgets = [ControlBand(host), MplToolbar(canvas, host), Stepper(host), row, block, custom]
+    widgets = [ControlBand(host), MplToolbar(canvas, host), Stepper(host), row, block, custom, canvas]
     named = {ps._adapt_kind(w) for w in widgets}
     assert named == set(ps.ADAPTED_KINDS), named
     assert all(ps._phone_relevant(w) for w in widgets)

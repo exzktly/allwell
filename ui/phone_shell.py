@@ -474,8 +474,8 @@ def scale_canvas(canvas, factor: float) -> None:
 
 
 def _canvases():
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-    return [w for w in QApplication.allWidgets() if isinstance(w, FigureCanvasQTAgg)]
+    """Every live plot canvas — each declared itself when it was built."""
+    return form_registry.declared("canvas")
 
 
 def scale_canvases(factor: float) -> int:
@@ -496,27 +496,25 @@ def scale_canvases(factor: float) -> int:
 #: that has one, so a kind added here is both watched and adapted; a kind that
 #: ``_ADAPTERS`` lacks fails ``tests/test_phone_layout.py``.
 ADAPTED_KINDS = frozenset(
-    ("controls", "toolbar", "stepper", "form_row", form_registry.CUSTOM))
+    ("controls", "toolbar", "stepper", "form_row", "canvas", form_registry.CUSTOM))
 
 
 def _adapt_kind(w: QWidget) -> str | None:
     """Which kind of phone form ``PhoneShell.adapt`` gives *w*, or ``None`` for a
     widget it leaves alone: the kind the widget declared with
     ``widgets.form_registry`` — a page's controls, a plot toolbar, a stepper, an
-    Analyze form row, or a form a view registered for itself."""
+    Analyze form row, a plot canvas, or a form a view registered for itself."""
     declared = form_registry.kind_of(w)
     return declared if declared in ADAPTED_KINDS else None
 
 
 def _phone_relevant(w: QWidget) -> bool:
     """Whether phone layout acts on *w* when it is shown: whatever
-    :func:`_adapt_kind` names, plus the three the event filter acts on
-    itself — a plot canvas (its DPI), a window of its own (a dialog, a
-    pop-out: its phone form, :func:`ui.phone_window.kind`) and an ⓘ hint (a
-    tap). Everything else is left alone and never watched."""
+    :func:`_adapt_kind` names, plus the two the event filter acts on itself — a
+    window of its own (a dialog, a pop-out: its phone form,
+    :func:`ui.phone_window.kind`) and an ⓘ hint (a tap). Everything else is left
+    alone and never watched."""
     if _adapt_kind(w) is not None:
-        return True
-    if getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure"):
         return True
     if phone_window.kind(w) is not None:
         return True
@@ -584,8 +582,8 @@ class _DragOwnerGuard(QObject):
 
 
 def _is_canvas(w: QWidget) -> bool:
-    """A matplotlib canvas, recognised without importing matplotlib."""
-    return getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure")
+    """A plot canvas: one built through ``widgets.canvas.make_canvas``."""
+    return form_registry.kind_of(w) == "canvas"
 
 
 def _handles_own_drag(w: QWidget) -> bool:
@@ -782,9 +780,6 @@ class _PhoneEventFilter(QObject):
             return False
         if phone_window.kind(obj) is not None:
             self._shell.fit_popup_window(obj)
-        elif getattr(type(obj), "draw_idle", None) is not None and hasattr(obj, "figure"):
-            scale_canvas(obj, self._shell.plot_factor())
-            self._shell.size_canvas(obj, True)
         else:
             self._shell.adapt(obj)
         return False
@@ -1341,7 +1336,14 @@ class PhoneShell(QObject):
     #: ``adapt``'s dispatch: one method per kind in :data:`ADAPTED_KINDS`.
     _ADAPTERS = {"controls": "_adapt_controls", "toolbar": "_adapt_toolbar",
                  "stepper": "_adapt_stepper", "form_row": "_stack_form_row",
-                 form_registry.CUSTOM: "_adapt_custom"}
+                 "canvas": "_adapt_canvas", form_registry.CUSTOM: "_adapt_custom"}
+
+    def _adapt_canvas(self, w: QWidget, on: bool) -> None:
+        """A plot is drawn at the phone's DPI and tall enough for its rows of
+        axes. Leaving phone layout is `scale_canvases` and `_size_canvases`."""
+        if on:
+            scale_canvas(w, self.plot_factor())
+            self.size_canvas(w, True)
 
     @staticmethod
     def _adapt_custom(w: QWidget, on: bool) -> None:
@@ -1435,7 +1437,6 @@ class PhoneShell(QObject):
             if not fresh:
                 return
             widgets = fresh
-        factor = self.plot_factor()
         from PySide6.QtWidgets import QAbstractScrollArea
         for w in widgets:
             try:
@@ -1453,9 +1454,6 @@ class PhoneShell(QObject):
                     continue        # its Show will reach the filter
                 if phone_window.kind(w) is not None:
                     self.fit_popup_window(w)
-                elif getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure"):
-                    scale_canvas(w, factor)
-                    self.size_canvas(w, True)
                 else:
                     self.adapt(w)
             except RuntimeError:

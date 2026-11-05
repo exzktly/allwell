@@ -4,8 +4,10 @@ The slow lane's other phone tests run on Qt's default offscreen screen, an 800×
 puts the app on a real screen — a 1640×980 desktop, a phone held upright (432×936), a phone held
 sideways (936×432) — loads a dataset that carries data for the pages it covers, visits every page
 (``tests/_page_tour.py``) and measures each for the defects a person finds by looking
-(``tests/_layout_checks.py``). Three datasets, three screens: nine app constructions, about ten
-minutes in one worker, so it is a slow-lane file run on its own::
+(``tests/_layout_checks.py``). Three datasets, three screens: nine app constructions, each in a
+process of its own (a full app's widgets are never reclaimed in-process, and nine in one process
+slowed from seconds per page to minutes per page), three at a time, about ten minutes in all, so it
+is a slow-lane file run on its own::
 
     scripts/test.sh tests/test_every_page_renders.py -m ""
 
@@ -22,16 +24,19 @@ Three things are asserted for each (dataset, screen):
 
 from __future__ import annotations
 
+import json
 import os
-import re
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
-from tests._layout_checks import check_window
-from tests._page_datasets import DATASETS, build
-from tests._page_tour import tour
-from tests._screens import SCREENS, FakeScreen, is_phone, place, pump
+from tests._layout_checks import Finding
+from tests._page_datasets import DATASETS
+from tests._repo_scan import REPO_ROOT
+from tests._screens import SCREENS, is_phone
 
 pytestmark = pytest.mark.slow
 
@@ -45,62 +50,40 @@ KNOWN: dict[tuple[str, str, str, str], str] = {}
 EMPTY: dict[tuple[str, str], dict[str, str]] = {}
 
 CASES = [(dataset, screen) for dataset in DATASETS for screen in SCREENS]
+#: Each case is a full app in a process of its own; three at a time fits a 4-CPU container.
+PARALLEL_CASES = 3
+CASE_TIMEOUT_S = 1500
 
 
-class Rendered(dict):
-    """``page -> (findings, showing_empty_state)``, in tour order."""
+def _run_case(kind: str, screen: str, root: Path) -> list[dict]:
+    """The case in a fresh interpreter, with the environment the suite's conftest sets. Raises with the
+    child's stderr if it fails."""
+    out = root / f"{kind}-{screen}.json"
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", ALLWELL_DESKTOP="1",
+               ALLWELL_STATE_DIR=str(root / f"{kind}-{screen}-state"),
+               ALLWELL_SCRATCH_DIR=str(root / f"{kind}-{screen}-scratch"),
+               PYTHONPATH=str(REPO_ROOT))
+    done = subprocess.run([sys.executable, "-m", "tests._page_render_case", kind, screen, str(out)],
+                          cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=CASE_TIMEOUT_S)
+    if done.returncode != 0 or not out.exists():
+        raise RuntimeError(f"{kind} on {screen} exited {done.returncode}:\n{done.stderr[-3000:]}")
+    return json.loads(out.read_text(encoding="utf-8"))
 
 
-def _slug(text: str) -> str:
-    return re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-")
+@pytest.fixture(scope="module")
+def all_cases(tmp_path_factory) -> dict:
+    """Every case, three processes at a time. ``(dataset, screen) -> pages``."""
+    root = tmp_path_factory.mktemp("page_render")
+    with ThreadPoolExecutor(max_workers=PARALLEL_CASES) as pool:
+        futures = {case: pool.submit(_run_case, *case, root) for case in CASES}
+        return {case: future.result() for case, future in futures.items()}
 
 
-def _showing_empty_state(win) -> bool:
-    from widgets.empty_state import EmptyState
-
-    return any(w.isVisibleTo(win) for w in win.findChildren(EmptyState))
-
-
-@pytest.fixture(scope="module", params=CASES, ids=[f"{d}-{s}" for d, s in CASES])
-def rendered(request, qapp, tmp_path_factory):
-    from allwell import AllWellApp
-    from core import phone_layout
-    from ui import theme
-
-    kind, screen = request.param
-    rect, phone = SCREENS[screen], is_phone(screen)
-    shots = os.environ.get("ALLWELL_PAGE_SHOTS")
-    if shots:
-        Path(shots).mkdir(parents=True, exist_ok=True)
-    with FakeScreen(rect):
-        data, wells = build(kind, tmp_path_factory.mktemp(f"pages_{kind}"))
-        win = AllWellApp(None)
-        win.show()
-        pump(qapp)
-        win._review._load_path(data)
-        pump(qapp, 60, 400)
-        win._review._set_selected_wells(set(wells), commit=True)
-        pump(qapp, 40, 400)
-        shell = win._phone
-        if phone:
-            shell.desk_button.click()
-            pump(qapp, 60, 300)
-        place(win, rect, qapp)
-        result = Rendered()
-        try:
-            for page in tour(win, qapp, kind=kind, wells=wells, phone=phone):
-                pump(qapp, 20, 450)
-                if phone:
-                    shell._sweep(force=False)
-                    pump(qapp, 10, 100)
-                result[page] = (check_window(win, shell if phone else None), _showing_empty_state(win))
-                if shots:
-                    win.grab().save(str(Path(shots) / f"{kind}_{screen}_{_slug(page)}.png"))
-            yield request.param, result
-        finally:
-            phone_layout.set_on(False)
-            theme.apply_ui_scale(1.0)
-            win.close()
+@pytest.fixture(params=CASES, ids=[f"{d}-{s}" for d, s in CASES])
+def rendered(request, all_cases):
+    """``((dataset, screen), {page: (findings, showing_empty_state)})`` for one case."""
+    pages = all_cases[request.param]
+    return request.param, {p["page"]: ([Finding(*f) for f in p["findings"]], p["empty"]) for p in pages}
 
 
 def test_the_tour_reaches_every_page_the_screen_offers(rendered):

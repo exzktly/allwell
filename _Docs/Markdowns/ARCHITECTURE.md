@@ -2096,8 +2096,9 @@ its own order, which left Threshold mid-row with Timepoints after it. The flag
 keeps the rule with the control instead of asking every builder to remember to
 call it last. A page that wants its controls on rows of related controls adds
 `ControlBand.add_break()` between them: a `flow_layout.flow_break` item ends the
-flow's line while it is shown, takes no room, adds no empty line when the line is
-already empty, and is skipped while hidden (so a page can keep rows on one view
+flow's line while it is shown — the new line starts at the next item shown, so a
+break with nothing shown after it adds no gap — takes no room, adds no empty line
+when the line is already empty, and is skipped while hidden (so a page can keep rows on one view
 and let them flow on another); the phone form (`control_band_form.BandForm`)
 skips it, being one row per control already. `FlowLayout.move_to_end` does the reordering — `removeWidget`
 followed by `addWidget` cannot, because Qt deletes the `QWidgetItem` that
@@ -12380,16 +12381,21 @@ upside down, a fractional bound on a whole-number field, a tile condition with n
 saved, each name trimmed and at most `MAX_NAME` characters — in the page's block of its
 `persistence.json` (`saved_subsets`, through `to_config` / `apply_config`, so `review/persistence/nanowell.py` reads
 and writes it with the rest of the page and each dataset has its own). Saving under a name already kept replaces
-that subset in its place; a subset with no conditions is not saved; on restore an entry whose name or subset is not
-one is dropped rather than restored as a different subset under that name. The page's *Subset* stays the one
+that subset in its place; a subset with no conditions is not saved; the same conditions are kept under one name only
+(saving them under a second is refused, naming the first, since the box could show only one name and Rename or Delete
+would act on the other); on restore an entry whose name or subset is not one, or that repeats an earlier entry's
+conditions, is dropped rather than restored as a different subset under that name. Reset view
+(`reset_scopes.reset_view`) returns the page's choices to their defaults and keeps the saved subsets: they are a
+library the user built in the dataset, not a view setting. The page's *Subset* stays the one
 source of what is drawn: a saved subset is a name for a `Subset` value, and `saved_name_of` names the page's subset
 only while it equals a saved one, so an edited copy is the page's own and the saved one is untouched. The Subset
 combo (`subset_view._fill_combo`) lists the saved names between the presets and *Custom subset…*, rebuilt only when
 the names change, with data `saved:<name>`; choosing one calls `controller.apply_saved_subset`. The editor's name
 row — a name box, *Save* (`controller.save_subset`), *Rename* (`rename_saved_subset`, enabled for a saved subset in
 use and a different name) and *Delete* (`delete_saved_subset`, which leaves the page's subset as it is) — says each
-result in the editor's status line and refills the name box only when the saved name in use changes, so a name
-being typed is never replaced. `tests/test_nanowell_saved_subsets.py`.
+result in the editor's status line and refills the name box only when the saved name in use changes and the box
+still holds the previous name or nothing — a new name typed for a draft survives Apply, which is how a draft is saved
+under a new name (Save waits while edits are pending). `tests/test_nanowell_saved_subsets.py`.
 
 Each condition answers 1, 0 or NaN per nanowell (`_site_answers`, vectorised over the metrics frame by site number);
 NaN is "no value", never zero — an occluded baseline, a well with no recorded pitch, a timepoint the nanowell was
@@ -12924,9 +12930,11 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   of focus, rule off, or why it was not judged — no rim fitted, fewer than `MIN_SITES` rims, a state that is not
   judged), the identity check, and where it sits (position, radius, visible share, owner tile). Every number is
   read from the `site_metrics` row, never recomputed, so the card cannot disagree with a figure; a value the row does
-  not define is written `no value`, never `0`. The rows of the well at the timepoint drawn are indexed by address
-  once per draw (`rows_by_address`, kept on `ArrayDrawn.rows`, which a redraw replaces), so a pointer move reads a
-  dict rather than filtering the table. `tests/test_nanowell_array_hover.py` drives the card through
+  not define is written `no value`, never `0`. The rows of the well at the timepoint drawn are indexed once per draw
+  (`rows_by_address`, kept on `ArrayDrawn.rows`, which a redraw replaces), so a pointer move reads a dict rather than
+  filtering the table: by address, and a nanowell the run placed but could not address (drawn in the well frame as
+  `(well, None, None)`) by its measured place, which `row_for` looks up — so its card reads its row rather than saying
+  the table has none. Building the index took 37 ms on a 96-well × 400-nanowell × 10-timepoint table of 64 columns. `tests/test_nanowell_array_hover.py` drives the card through
   `controller.on_motion` on a fixture where every nanowell and timepoint has its own count.
 - **Full resolution** (`full_montage_compute`, Qt-free): every tile from `in/<well>.zip` (the member
   `image_compute._member_for` finds) at the grid record's `left_um`/`top_um`, at the x pixel size, in the
@@ -12955,7 +12963,9 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   (before Image, because Lattice is what greys it), Image with its channel and Range, and Layers. The breaks are in
   the view's `groups`, so on every other view they are hidden and the band flows as one zone. A row too wide for the
   window wraps within itself and never takes the next row's controls. *Excluded (n)* is a trailing item, so its
-  coming and going moves nothing. The zoom (−, readout, +, *Fit*, *1:1*),
+  coming and going moves nothing: last in the band on every other view, and on the Array view placed at the end of
+  the well row, just before its break (`ControlBand.place_trailing`, through `FlowLayout.move_before`), since it names
+  wells. The zoom (−, readout, +, *Fit*, *1:1*),
   *Overlays* and *Notes* are viewing actions rather than settings, so they sit under the figure in the card's own toolbar,
   after its navigation buttons (`mount_array_canvas_tools`, through `MplToolbar.add_group`, each group behind its
   own separator and shown with the view's other controls); on the Array view that toolbar's *Reset view* is *Fit*
@@ -13132,8 +13142,10 @@ editor, `SubsetEditor`, is a panel the page places under the band — never a di
 condition, *all* / *any*, *Add condition*, *Clear*, *Reset* and *Apply*; an edit changes only the draft the rows
 hold — `SubsetEditor.changed` says in the panel's `Warn` line that it is not applied yet (or why it is not a subset
 yet) — and *Apply* passes the draft through `controller.set_subset` once, so the page redraws once per Apply rather
-than per keystroke; *Reset* rebuilds the rows from the page's subset; Apply and Reset are enabled only while the draft
-differs from the subset in use (`pending`), Apply only while it is a valid subset, and *Save* only while nothing is
+than per keystroke; *Reset* rebuilds the rows from the page's subset; Apply and Reset are enabled only while the rows have
+been edited since they were built from the page's subset or applied (`pending`, against `_built`, the conditions as
+the rows wrote them then — not against the page's subset, which a row cannot always show exactly: a bound past the
+spin box's decimals or range would read as an edit nobody made, one Reset could never clear), Apply only while it is a valid subset, and *Save* only while nothing is
 pending, since it keeps the subset in use; the rows are rebuilt from the page's state only when it holds another
 subset than the one they started from (a preset or saved subset chosen in the box, a restore) or the dataset's
 channels changed, so a refresh from any other control keeps a draft), Timepoint (on

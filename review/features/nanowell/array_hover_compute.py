@@ -61,8 +61,15 @@ def _address(q, r) -> str:
     return coordinate_text(q, r) or "no address"
 
 
+def _position_key(x, y) -> tuple | None:
+    """The key a nanowell without an address is found by: its measured place in the well frame, to 0.1 µm."""
+    x, y = _number(x), _number(y)
+    return None if x is None or y is None else ("at", round(x, 1), round(y, 1))
+
+
 def rows_by_address(metrics, well: str, timepoint: str) -> dict:
-    """``(q, r) -> row`` (a dict) of *well*'s nanowells at *timepoint*: built once per drawn figure, so a hover
+    """*well*'s nanowells at *timepoint*, each row (a dict) under ``(q, r)`` — or, for one the run placed but could
+    not address, under its measured position (:func:`row_for` finds either). Built once per drawn figure, so a hover
     reads a dict rather than filtering the whole table on every pointer move."""
     if metrics is None or not len(metrics):
         return {}
@@ -70,9 +77,22 @@ def rows_by_address(metrics, well: str, timepoint: str) -> dict:
     out = {}
     for row in rows.to_dict("records"):
         q, r = _number(row.get("nw_q")), _number(row.get("nw_r"))
-        if q is not None and r is not None:
-            out[(int(q), int(r))] = row
+        key = (int(q), int(r)) if q is not None and r is not None else _position_key(row.get("well_x_um"),
+                                                                                      row.get("well_y_um"))
+        if key is not None:
+            out[key] = row
     return out
+
+
+def row_for(rows: dict, site, x, y) -> dict | None:
+    """The row of the drawn nanowell *site* ``(well, q, r)`` at (*x*, *y*) in :func:`rows_by_address`'s index: by
+    address, or by measured place when it has none (drawn only in the well frame, where *x*, *y* are that place).
+    ``None`` only when the table truly has no row for it."""
+    _w, q, r = site
+    if q is not None and r is not None:
+        return rows.get((q, r))
+    key = _position_key(x, y)
+    return rows.get(key) if key is not None else None
 
 
 def short_text(site, value, state: str, why: str = "") -> str:

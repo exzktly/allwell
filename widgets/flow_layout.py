@@ -233,6 +233,18 @@ class FlowLayout(QLayout):
                 return True
         return False
 
+    def move_before(self, widget: QWidget, before: QWidget) -> bool:
+        """Move *widget*'s item to just before *before*'s, keeping it alive (as :meth:`move_to_end`); ``False``
+        when either is not in the flow."""
+        items = [item.widget() for item in self._items]
+        if widget not in items or before not in items or widget is before:
+            return False
+        moved = self._items.pop(items.index(widget))
+        index = [item.widget() for item in self._items].index(before)
+        self._items.insert(index, moved)
+        self.invalidate()
+        return True
+
     def takeAt(self, index: int) -> QLayoutItem | None:
         if 0 <= index < len(self._items):
             item = self._items.pop(index)
@@ -355,6 +367,7 @@ class FlowLayout(QLayout):
         # otherwise short controls (labels/checkboxes) top-align against tall
         # buttons and the row reads ragged.
         line: list = []
+        broken = False                                   # a shown flow_break ended the line before the next item
 
         def _flush() -> None:
             if test_only:
@@ -369,19 +382,16 @@ class FlowLayout(QLayout):
             if widget is not None and not widget.isVisible():
                 continue
             if widget is not None and widget.property(FLOW_BREAK):
-                if line:                                 # end the line; a break on an empty line adds none
-                    _flush()
-                    line = []
-                    x = effective.x()
-                    y = y + line_height + space_y
-                    line_height = 0
+                # The next item placed starts a new line. Deferred to that item, so a break with nothing shown
+                # after it (the last item, or all after it hidden) adds no gap, and one on an empty line adds none.
+                broken = broken or bool(line)
                 continue
             # Never pack a widget into less than it needs (defends against a
             # widget whose sizeHint under-reports its painted width — the cause
             # of the Composite/Crop overlap).
             size = item.sizeHint().expandedTo(item.minimumSize())
             next_x = x + size.width() + space_x
-            if next_x - space_x > effective.right() and line_height > 0:
+            if (broken or next_x - space_x > effective.right()) and line_height > 0:
                 # Wrap: flush the finished line centred, then start a new one.
                 _flush()
                 line = []
@@ -389,6 +399,7 @@ class FlowLayout(QLayout):
                 y = y + line_height + space_y
                 next_x = x + size.width() + space_x
                 line_height = 0
+            broken = False
             line.append((item, QRect(QPoint(x, y), size)))
             x = next_x
             line_height = max(line_height, size.height())

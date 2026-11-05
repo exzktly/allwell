@@ -141,3 +141,15 @@ def test_a_hidden_break_lets_the_items_flow_together_again(qapp):
     qapp.processEvents()
     fl.setGeometry(QRect(0, 0, 1000, 200))
     assert b.y() == a.y() and b.x() > a.x()
+
+
+def test_a_break_with_nothing_shown_after_it_adds_no_gap(qapp):
+    """A break that ends up last — the last item, or every item after it hidden — must not add a line's spacing."""
+    from PySide6.QtCore import QRect
+
+    _host, fl, (a, b), _breaks = _build_with_breaks(qapp, [(40, 20), "|", (40, 20)], 1000)
+    assert fl.heightForWidth(1000) == 2 * 20 + 4
+    b.hide()
+    qapp.processEvents()
+    fl.setGeometry(QRect(0, 0, 1000, 200))
+    assert fl.heightForWidth(1000) == 20

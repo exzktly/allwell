@@ -90,6 +90,27 @@ def test_the_array_band_is_three_rows_of_related_controls(qc_page, themed, qtbot
         assert rows == [{0}, {1}, {2}], rows                           # wide enough: one row each
 
 
+def test_the_excluded_chip_ends_the_well_row_on_the_array_view(qc_page, themed, qtbot):
+    """*Excluded (n)* names wells: on the Array view it sits at the end of the well row, not after the picture's
+    controls, and on another view it is back at the end of the band."""
+    from review.features.nanowell import controller as nwc
+
+    ctx = qc_page
+    nwc.set_well_excluded(ctx, "A01", True)
+    _settle(qtbot, ctx, 1500)
+    chip = ctx.widgets.get("_nw_excluded_wells_btn")
+    assert chip.isVisibleTo(ctx.window)
+    assert _row_of(ctx, "_nw_excluded_wells_btn") == _row_of(ctx, "_nw_anchor_btn")
+    host = _band(ctx)._scope_host
+    order = [host.layout().itemAt(i).widget() for i in range(host.layout().count())]
+    group = chip.parentWidget() if chip.parentWidget() is not host else chip
+    assert order.index(group) < order.index(ctx.widgets.get("_nw_positions_seg").parentWidget())
+    nwc.set_view(ctx, "distribution")
+    QApplication.processEvents()
+    order = [host.layout().itemAt(i).widget() for i in range(host.layout().count())]
+    assert order[-1] is group
+
+
 def test_the_row_breaks_are_the_array_view_s_alone(qc_page, themed, qtbot):
     """On another view the same band flows as it did: the breaks are hidden, so Distribution's controls are not
     split across rows the Array view needs."""

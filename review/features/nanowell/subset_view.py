@@ -265,6 +265,11 @@ class SubsetEditor(QFrame):
         self.shown: ss.Subset | None = None
         self._channels: tuple = ()
         self.rows: list[_ConditionRow] = []
+        #: The conditions as the rows wrote them when last built from the page's subset or applied. An edit is
+        #: pending when the rows now write something else — not when they differ from the page's subset, which a
+        #: row cannot always show exactly (a bound past the spin box's decimals or range), and which would then
+        #: read as an edit nobody made, one Reset could never clear.
+        self._built: ss.Subset | None = None
         lay = QVBoxLayout(self)
         head = QHBoxLayout()
         head.addWidget(QLabel("Use the nanowells that meet"))
@@ -382,9 +387,17 @@ class SubsetEditor(QFrame):
         self.delete_btn.setEnabled(bool(name))
 
     def _fill_name(self) -> None:
+        """The name box shows the saved name in use when that changes — unless the user has typed another name
+        there, which is kept (Apply then Save is how a draft is saved under a new name). ``_named`` ``None`` (after
+        Save, Rename or Delete) refills it regardless."""
         name = self.current_name()
+        typed = " ".join(self.name_edit.text().split())
         if name != self._named:
+            keep = self._named is not None and typed and typed != self._named
             self._named = name
+            if keep:
+                self._enable_names()
+                return
             blocked = self.name_edit.blockSignals(True)
             self.name_edit.setText(name)
             self.name_edit.blockSignals(blocked)
@@ -430,10 +443,11 @@ class SubsetEditor(QFrame):
             return None, str(exc)
 
     def pending(self) -> bool:
-        """Whether the conditions as written differ from the subset in use (and so wait for Apply or Reset)."""
-        st = self._state()
-        draft, why = self._draft()
-        return bool(why) or (st is not None and draft != st.subset)
+        """Whether the rows have been edited since they were built from the subset in use or applied (and so wait
+        for Apply or Reset)."""
+        if self._built is None:
+            return False
+        return bool(self._draft()[1]) or self.written() != self._built
 
     def changed(self) -> None:
         """An edit: say what the conditions as written are and whether they wait for Apply — or why they are not a
@@ -446,7 +460,8 @@ class SubsetEditor(QFrame):
             said = "No conditions: every nanowell." if not draft.is_active() else draft.label()
             self._say(f"Not applied yet — {said}. Apply to draw it, or Reset.", warn=True)
         else:
-            self._say_subset(draft)
+            st = self._state()
+            self._say_subset(st.subset if st is not None else draft)
         self._enable_edits()
 
     def apply(self) -> None:
@@ -456,6 +471,7 @@ class SubsetEditor(QFrame):
             self._say(f"Not applied: {why}.", warn=True)
             return
         self.shown = draft
+        self._built = self.written()
         nwc.set_subset(self._ctx, draft)
         self._say_subset(draft)
         self._fill_name()
@@ -522,6 +538,7 @@ class SubsetEditor(QFrame):
         self.match_cb.blockSignals(blocked)
         for condition in st.subset.conditions:
             self._add_row(condition)
+        self._built = self.written()
         self.shown = st.subset
         self._say_subset(st.subset)
         self._fill_name()

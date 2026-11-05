@@ -194,3 +194,26 @@ def test_the_page_s_canvas_shows_the_card_of_the_nanowell_under_the_pointer(qc_p
     event = MouseEvent("motion_notify_event", canvas, x_px, y_px)
     canvas.callbacks.process(event.name, event)
     assert shown["text"] is None                                  # off every nanowell: hidden
+
+
+def test_a_placed_nanowell_without_an_address_is_found_by_its_place_not_said_to_have_no_row():
+    """In the measured frame a nanowell the run placed but could not address is drawn, keyed ``(well, None, None)``.
+    Its row exists; the card must read it rather than say the table has none (CLAUDE.md §7)."""
+    import pandas as pd
+
+    from review.features.nanowell.array_hover_compute import hover_text, row_for, rows_by_address
+
+    metrics = pd.DataFrame([
+        {"well": "A01", "timepoint": "t_a", "nw_q": 0.0, "nw_r": 0.0, "well_x_um": 10.0, "well_y_um": 10.0,
+         "state": "measured", "n": 4.0},
+        {"well": "A01", "timepoint": "t_a", "nw_q": float("nan"), "nw_r": float("nan"), "well_x_um": 130.0,
+         "well_y_um": 70.0, "state": "unaddressed", "n_cells": 7.0, "reason": "the timepoint was not addressed"},
+    ])
+    rows = rows_by_address(metrics, "A01", "t_a")
+    row = row_for(rows, ("A01", None, None), 130.0, 70.0)
+    assert row is not None and row["n_cells"] == 7.0
+    card = hover_text(row, ("A01", None, None), timepoint="t_a", state="unaddressed")
+    assert "no row" not in card and "Why: the timepoint was not addressed" in card
+    assert "(the run counted 7)" in card
+    assert row_for(rows, ("A01", 0, 0), 10.0, 10.0)["n"] == 4.0
+    assert row_for(rows, ("A01", None, None), 999.0, 999.0) is None

@@ -390,6 +390,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
 
     array_controls = _build_array_controls(ctx, band)
     array_controls.groups.append(data_row_end)
+    # *Excluded (n)* names wells, so on the Array view it ends the well row; elsewhere it stays last in the band.
+    array_controls.band, array_controls.excluded_group = band, exclusion.excluded_group
     identity = build_identity_controls(ctx, band)
     statistics = build_statistics_controls(ctx, band)
     qc_controls = build_qc_controls(ctx, band)
@@ -1131,6 +1133,8 @@ def _refresh_array_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
         action.setEnabled(layers.nanowells)
     for group in c.groups:
         group.setVisible(on_view)
+    if c.band is not None:
+        c.band.place_trailing(c.excluded_group, c.well_row_end if on_view else None)
     c.overlays_btn.setChecked(not st.overlays_hidden)
     c.notes_btn.setChecked(layers.notes)
     if not on_view:
@@ -1252,7 +1256,8 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
 
     return SimpleNamespace(
         image_cb=image_cb, positions_seg=positions_seg, layer_actions=layer_actions, colour_actions=colour_actions,
-        groups=[grp_positions, grp_image, grp_layers, well_row_end], grp_anchor=grp_anchor, one_btn=one_btn,
+        groups=[grp_positions, grp_image, grp_layers, well_row_end], grp_anchor=grp_anchor, well_row_end=well_row_end,
+        band=None, excluded_group=None, one_btn=one_btn,
         image_channel_cb=image_channel_cb, range_btn=range_btn, canvas_tools=(out_btn, zoom_lbl, in_btn, fit_btn,
                                                                               one_btn),
         anchor_btn=anchor_btn, clear_anchor_btn=clear_anchor_btn, rerun_btn=rerun_btn, overlays_btn=overlays_btn,

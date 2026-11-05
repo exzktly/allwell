@@ -1556,7 +1556,8 @@ def _array_hover(ctx, st, event) -> None:
     if drawn.rows is None:
         drawn.rows = ahc.rows_by_address(st.metrics, scene.well, scene.timepoint)
     site = scene.sites.sites[k]
-    text = ahc.hover_text(drawn.rows.get((site[1], site[2])), site, timepoint=scene.timepoint,
+    row = ahc.row_for(drawn.rows, site, scene.sites.x[k], scene.sites.y[k])
+    text = ahc.hover_text(row, site, timepoint=scene.timepoint,
                           value=scene.sites.values[k], label=drawn.label,
                           why=scene.why.get((site[1], site[2]), ""), channels=list(st.data.channels),
                           rule=st.rim_focus_rule(), name=scene.name, state=str(scene.sites.state[k]))

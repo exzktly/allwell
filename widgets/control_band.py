@@ -245,6 +245,14 @@ class ControlBand(QWidget):
         self._restack_trailing()
         return brk
 
+    def place_trailing(self, item: QWidget, before: QWidget | None) -> None:
+        """Put the trailing *item* just before *before* (a break, say, so it ends that row rather than the band), or
+        back at the end with ``None``. For a page whose trailing chip belongs to one row on one view only."""
+        if before is None:
+            self._scope.move_to_end(item)
+        else:
+            self._scope.move_before(item, before)
+
     def _restack_trailing(self) -> None:
         """Re-append the pinned items so they stay last as others arrive."""
         for item in self._trailing:

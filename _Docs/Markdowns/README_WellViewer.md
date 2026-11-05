@@ -6221,7 +6221,9 @@ the sentence names it.
   one left as it was (save under the same name to replace it). **Rename** gives the saved subset in use the name
   typed; **Delete** forgets it, and the figure keeps using its conditions until you choose another. Each dataset
   keeps its own saved subsets (up to 50, names up to 60 characters), in its `persistence.json` with the page's
-  other settings.
+  other settings. The same conditions are saved under one name only: saving them again under another says which
+  name already has them. **Reset view** puts the page's controls back to their defaults and keeps the saved
+  subsets.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
 - **Names.** Wells and groups are called what every other tab calls them: a replicate group by its name, a well by
   the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two

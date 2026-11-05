@@ -446,17 +446,23 @@ def saved_from_config(block) -> dict:
             subset = Subset.from_config(item)
         except (ValueError, TypeError):
             continue
-        if name and subset.is_active() and name not in out and len(out) < MAX_SAVED:
+        if (name and subset.is_active() and name not in out and subset not in out.values()
+                and len(out) < MAX_SAVED):
             out[name] = subset
     return out
 
 
 def with_saved(saved: dict, name: str, subset: Subset) -> dict:
     """*saved* with *subset* kept under *name* (replacing a subset of that name in its place), or ``ValueError``:
-    no conditions to keep, a name that is not one, or :data:`MAX_SAVED` already kept."""
+    no conditions to keep, a name that is not one, the same conditions already kept under another name, or
+    :data:`MAX_SAVED` already kept. One subset has one name: with two, the Subset box could show only one of them
+    (:func:`saved_name_of`), and Rename or Delete would act on the name the user did not choose."""
     name = clean_name(name)
     if not subset.is_active():
         raise ValueError("the subset has no conditions to save")
+    other = next((k for k, kept in saved.items() if kept == subset.validated() and k != name), None)
+    if other is not None:
+        raise ValueError(f"these conditions are already saved as \u201c{other}\u201d: rename that one instead")
     if name not in saved and len(saved) >= MAX_SAVED:
         raise ValueError(f"a dataset keeps at most {MAX_SAVED} subsets: delete one first")
     out = dict(saved)

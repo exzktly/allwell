@@ -45,8 +45,9 @@ def test_saving_keeps_each_subset_under_its_name_and_the_same_name_replaces_in_p
     saved = ss.with_saved({}, "Singles", SINGLES)
     saved = ss.with_saved(saved, "Ring", RING)
     assert list(saved) == ["Singles", "Ring"] and saved["Ring"] == RING
-    saved = ss.with_saved(saved, "Singles", RING)
-    assert list(saved) == ["Singles", "Ring"] and saved["Singles"] == RING
+    pairs = ss.Subset((C("n0", "eq", 2),)).validated()
+    saved = ss.with_saved(saved, "Singles", pairs)
+    assert list(saved) == ["Singles", "Ring"] and saved["Singles"] == pairs
     with pytest.raises(ValueError, match="no conditions"):
         ss.with_saved(saved, "Everything", ss.Subset())
 
@@ -149,3 +150,72 @@ def test_the_saved_subsets_are_kept_in_the_dataset_s_own_file(page):  # noqa: F8
     fresh = NanowellState()
     persisted.load_from_data_dir(page, fresh)
     assert fresh.saved_subsets == {"Singles": SINGLES}
+
+
+# ── found by review ──────────────────────────────────────────────────────────
+from tests.test_reset_view_persists_every_domain import stub  # noqa: E402,F401
+
+
+def test_reset_view_keeps_the_saved_subsets_and_resets_the_page(stub):  # noqa: F811
+    """Reset view returns the page's choices to their defaults; the subsets saved by name are a library the user
+    built in the dataset, not a view setting, and survive it."""
+    from review.persistence import reset_scopes
+
+    ctx, _written = stub
+    nw = ctx.state.feature_slice("nanowell")
+    nw.saved_subsets = {"Singles": SINGLES, "Ring": RING}
+    nw.subset = RING
+    reset_scopes.reset_view(ctx)
+    assert nw.subset == ss.Subset() and nw.saved_subsets == {"Singles": SINGLES, "Ring": RING}
+
+
+def test_one_subset_has_one_name():
+    """The same conditions under a second name are refused, naming the first: with two names the box could show
+    only one, and Rename or Delete would act on the name the user did not pick. A file holding two keeps the first."""
+    saved = ss.with_saved({}, "alpha", SINGLES)
+    with pytest.raises(ValueError, match="already saved as “alpha”"):
+        ss.with_saved(saved, "beta", SINGLES)
+    assert ss.with_saved(saved, "alpha", SINGLES) == saved           # the same name again replaces it
+    restored = ss.saved_from_config({"alpha": SINGLES.to_config(), "beta": SINGLES.to_config()})
+    assert restored == {"alpha": SINGLES}
+
+
+def test_saving_the_same_conditions_under_a_second_name_says_so_on_the_page(page):  # noqa: F811
+    st = page.state.feature_slice("nanowell")
+    editor = _save(page, SINGLES, "alpha")
+    editor.name_edit.setText("beta")
+    editor.save_btn.click()
+    assert list(st.saved_subsets) == ["alpha"]
+    assert editor.status.objectName() == "Warn" and "already saved as “alpha”" in editor.status.text()
+
+
+def test_a_name_typed_for_a_draft_survives_apply(page):  # noqa: F811
+    """Save waits while edits are pending and says to Apply first; pressing Apply must not then wipe the new name
+    the user typed for the draft."""
+    from review.features.nanowell import controller as nwc
+
+    st = page.state.feature_slice("nanowell")
+    nwc.set_subset(page, SINGLES)
+    editor = _save(page, SINGLES, "alpha")
+    editor.name_edit.setText("beta")
+    editor.rows[0].op_cb.setCurrentIndex(editor.rows[0].op_cb.findData("ge"))
+    assert not editor.save_btn.isEnabled()                           # Apply first
+    editor.apply_btn.click()
+    assert editor.name_edit.text() == "beta" and editor.save_btn.isEnabled()
+    editor.save_btn.click()
+    assert list(st.saved_subsets) == ["alpha", "beta"] and st.saved_subsets["beta"] == st.subset
+
+
+def test_a_subset_a_row_cannot_show_exactly_is_not_an_edit_nobody_made(page):  # noqa: F811
+    """A bound past the spin box's decimals (a restored config, a hand-edited file) is shown rounded. That is not a
+    pending edit: Apply would silently round the subset in use, and Reset could never clear it."""
+    from review.features.nanowell import controller as nwc
+
+    st = page.state.feature_slice("nanowell")
+    precise = ss.Subset((C("c", "ge", 0.12345, at="baseline"),)).validated()
+    nwc.set_subset(page, precise)
+    editor = _editor(page)
+    assert not editor.pending()
+    assert not editor.apply_btn.isEnabled() and not editor.reset_btn.isEnabled()
+    assert not editor.status.text().startswith("Not applied yet")
+    assert st.subset == precise

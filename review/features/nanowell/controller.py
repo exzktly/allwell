@@ -41,6 +41,7 @@ from review.features.nanowell import subset_compute as ss
 from review.features.nanowell import statistics_compute as sc
 from review.features.nanowell._statistics_render import render_statistics
 from review.features.nanowell.crop_grid_compute import POPOUT_GRIDS, POPOUT_MAX_COLS, save_name, shown_channels
+from review.features.nanowell.crop_cache_compute import CropCache
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
     ArrayDrawn, render_array, render_crop_grid, render_crop_strip, render_distribution, render_extremes, render_message,
@@ -2429,7 +2430,7 @@ def set_image_channel(ctx, channel: str) -> None:
     if st is None or st.image_channel == (channel or ""):
         return
     st.image_channel = channel or ""
-    st.crops = {}
+    st.crops = CropCache()
     st.fetching = {tag for tag in st.fetching if tag[0] not in _CROP_KINDS}
     st.release_tiles()
     _save_soon(ctx)

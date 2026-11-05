@@ -16,6 +16,7 @@ from review.domain.nanowell_rim_focus import RimFocusRule
 from review.features.nanowell.series_compute import is_baseline
 from review.features.nanowell.statistics_compute import TEST_KEYS as STATS_TESTS
 from review.features.nanowell.statistics_compute import UNITS as STATS_UNITS
+from review.features.nanowell.crop_cache_compute import CropCache
 from review.features.nanowell.subset_compute import Subset
 from review.features.nanowell.subset_compute import restore as restore_subset
 from review.features.nanowell.window_compute import DistributionWindow
@@ -245,7 +246,7 @@ class NanowellState:
     load_progress: object = None
     bridge: object = None                   # core.worker_bridge.WorkerBridge of the running request
     config_for: object = None               # the data dir whose saved choices are on the state
-    crops: dict = field(default_factory=dict)            # (well, q, r) -> {timepoint: image_compute.Crop}
+    crops: dict = field(default_factory=CropCache)       # (well, q, r) -> {timepoint: image_compute.Crop}, bounded
     #: The pop-out's crops of its extra channels, ``((well, q, r), channel) -> {timepoint: Crop}``: the page's own
     #: image channel stays in :attr:`crops`, which the strip shares.
     popout_crops: dict = field(default_factory=dict)
@@ -340,7 +341,7 @@ class NanowellState:
         self.gate, self.gated_for, self.focus_for = None, None, None
         self.loaded_wells, self.well_parts, self.parts_for = frozenset(), {}, None
         self.observation_memo = {}
-        self.crops, self.montages, self.fetching, self.fetch_bridges = {}, {}, set(), []
+        self.crops, self.montages, self.fetching, self.fetch_bridges = CropCache(), {}, set(), []
         self.popout_crops = {}
         self.region = self.region_for = self.press = self.drawn = None
         self.anchor_mode, self.array_message = False, ""

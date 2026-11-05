@@ -74,3 +74,26 @@ def test_a_drag_commits_once_after_it_ends(loaded_app, qtbot, monkeypatch):
     qtbot.waitUntil(lambda: len(commits) == 1, timeout=sc.PLATE_CLICK_DEBOUNCE_MS * 8)
     qtbot.wait(sc.PLATE_CLICK_DEBOUNCE_MS * 2)
     assert len(commits) == 1
+
+
+def test_the_wait_counts_from_the_last_well_added(loaded_app, qtbot, monkeypatch):
+    """A press that adds a well restarts the wait; the previous click's wait does not expire under it.
+
+    The wait used to run from the previous click's release, so a second press
+    held past it redrew the plots with that press half-done and again at its
+    release. The press is held here for longer than the whole debounce so the
+    previous wait has certainly expired if it is still running.
+    """
+    commits, grid = _counting(loaded_app, monkeypatch)
+    _click(grid, 0, 0)                                           # A01
+    qtbot.wait(sc.PLATE_CLICK_DEBOUNCE_MS * 6 // 10)
+    QTest.mousePress(grid, Qt.LeftButton, Qt.NoModifier, _pt(grid, 0, 1))   # A02, held
+    qtbot.wait(sc.PLATE_CLICK_DEBOUNCE_MS * 8 // 10)
+    assert commits == [], "the previous click's wait expired while the next press was held"
+    QTest.mouseRelease(grid, Qt.LeftButton, Qt.NoModifier, _pt(grid, 0, 1))
+    QApplication.processEvents()
+    qtbot.wait(sc.PLATE_CLICK_DEBOUNCE_MS * 6 // 10)
+    assert commits == [], "the wait did not restart at the last well added"
+    qtbot.waitUntil(lambda: len(commits) == 1, timeout=sc.PLATE_CLICK_DEBOUNCE_MS * 8)
+    qtbot.wait(sc.PLATE_CLICK_DEBOUNCE_MS * 2)
+    assert len(commits) == 1

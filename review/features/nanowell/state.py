@@ -18,6 +18,7 @@ from review.features.nanowell.statistics_compute import TEST_KEYS as STATS_TESTS
 from review.features.nanowell.statistics_compute import UNITS as STATS_UNITS
 from review.features.nanowell.subset_compute import Subset
 from review.features.nanowell.subset_compute import restore as restore_subset
+from review.features.nanowell.window_compute import DistributionWindow
 
 AXES = ("time", "wells")
 #: The QC view's *Wells*: a row for each well with a timepoint needing a look, or for every well with a grid record.
@@ -40,6 +41,11 @@ METRIC_KEYS = ("n", "c", "brightness", "signal", "count_fc", "log2_count_fc", "c
 #: How many nanowells each of the Extremes view's blocks shows by default, and the most it can show: a figure of two
 #: dozen rows of crops is already small on a laptop screen.
 EXTREMES_DEFAULT_N, EXTREMES_MAX_N = 5, 12
+
+#: What the pop-out shows: the selected nanowell, or the nanowells inside the Distribution window.
+POPOUT_SOURCES = ("selected", "window")
+#: How the pop-out lays out the window's nanowells: rows of crops over time.
+POPOUT_LAYOUTS = ("rows",)
 
 
 #: What the Array view draws under the nanowells: nothing, the run's downsampled montage, or the raw tiles at
@@ -168,6 +174,13 @@ class NanowellState:
     #: ``"columns"`` grid.
     popout_grid: str = "auto"
     popout_cols: int = 0
+    #: The Distribution windows, ``window_compute.window_key(column, axis) -> DistributionWindow`` (one per metric
+    #: and axis; the strip and the pop-out read the one for what is drawn).
+    windows: dict = field(default_factory=dict)
+    #: What the pop-out shows: the selected nanowell, or the nanowells inside the window.
+    popout_source: str = "selected"
+    #: How the pop-out lays out the window's nanowells: rows of crops over time, or the hex composite.
+    popout_layout: str = "rows"
     #: The **Display range** of each image channel, ``channel key -> (low, high)`` in the raw image's units
     #: (``controller.display_key``): the window every picture of that channel on the page is drawn with — the crop
     #: strip, the pop-out, the Extremes montage and the Array view's full resolution. The page's own and kept with
@@ -241,6 +254,10 @@ class NanowellState:
     fetch_bridges: list = field(default_factory=list)    # each worker bridge, kept alive until it delivers
     #: The Extremes view's crop panels on screen, ``{axes: (well, q, r)}``: a click on a row selects its nanowell.
     extreme_axes: dict = field(default_factory=dict)
+    window_page: int = 0                    # the pop-out's page of the window's nanowells; 0 when the window changes
+    window_press: object = None             # (axes, x px, y px) of a press on the Distribution figure
+    window_model: object = None             # the DistributionModel last drawn, which windows are read against
+    popout_hits: dict = field(default_factory=dict)   # the pop-out's crop axes -> (well, q, r), for a click
     # The Array view's interaction, never persisted: where it is zoomed to (``(left, top, right, bottom)`` in the
     # frame it draws, for the ``(well, positions)`` in ``region_for``), the press a drag or click started with,
     # whether a click sets the anchor, and what the last draw put on screen (``renderer.ArrayDrawn``).
@@ -328,6 +345,7 @@ class NanowellState:
         self.region = self.region_for = self.press = self.drawn = None
         self.anchor_mode, self.array_message = False, ""
         self.extreme_axes = {}
+        self.window_page, self.window_press, self.window_model, self.popout_hits = 0, None, None, {}
         self.identity_sidecars, self.identity_frames, self.identity_drawn = {}, {}, None
         self.identity_zoom, self.identity_zoom_for, self.identity_press = {}, None, None
         self.stats_cache = None
@@ -346,6 +364,8 @@ class NanowellState:
                 "crop_metrics": self.crop_metrics, "popout_labels": self.popout_labels,
                 "popout_tps": list(self.popout_tps), "popout_channels": list(self.popout_channels),
                 "popout_grid": self.popout_grid, "popout_cols": self.popout_cols,
+                "windows": {k: w.to_config() for k, w in self.windows.items()},
+                "popout_source": self.popout_source, "popout_layout": self.popout_layout,
                 "display_ranges": {k: [lo, hi] for k, (lo, hi) in self.display_ranges.items()},
                 "subset": self.subset.to_config(), "layers": self.layers.to_config(),
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
@@ -393,6 +413,9 @@ class NanowellState:
         self.popout_grid = grid if grid in POPOUT_GRIDS else fresh.popout_grid
         self.popout_cols = (cols if isinstance(cols, int) and not isinstance(cols, bool)
                             and 1 <= cols <= POPOUT_MAX_COLS else fresh.popout_cols)
+        self.windows = _windows_from(config.get("windows"))
+        self.popout_source = _choice(config.get("popout_source"), POPOUT_SOURCES, fresh.popout_source)
+        self.popout_layout = _choice(config.get("popout_layout"), POPOUT_LAYOUTS, fresh.popout_layout)
         self.display_ranges = _display_ranges_from(config.get("display_ranges"))
         tps = config.get("extremes_tps")
         self.extremes_tps = [str(tp) for tp in tps if isinstance(tp, str)] if isinstance(tps, list) else []
@@ -409,6 +432,18 @@ class NanowellState:
         self.thresholds = {k: float(v) for k, v in (thresholds.items() if isinstance(thresholds, dict) else ())
                            if isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool)
                            and math.isfinite(v)}
+
+
+def _windows_from(block) -> dict:
+    """The saved Distribution windows, ``key -> DistributionWindow``; a block that is not a window is dropped, so a
+    damaged one restores as no window rather than as half of one."""
+    return {k: w for k, b in (block.items() if isinstance(block, dict) else ())
+            if isinstance(k, str) and (w := DistributionWindow.from_config(b)) is not None}
+
+
+def _choice(value, allowed, default):
+    """*value* when it is one of *allowed*, else *default*."""
+    return value if value in allowed else default
 
 
 def _display_ranges_from(block) -> dict:

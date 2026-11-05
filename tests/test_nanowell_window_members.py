@@ -140,3 +140,18 @@ def test_the_range_includes_both_of_its_ends():
     other cases keep every value strictly inside or outside, so exclusive bounds passed them all.)"""
     result = wc.members(_time_model(), _w(keys=("T0",), lo=2.5, hi=3.0))
     assert result.sites() == [("A01", 2, 0), ("B01", 0, 0), ("A01", 1, 0)]
+
+
+def test_the_page_keeps_its_windows_and_pop_out_choices():
+    from review.features.nanowell.state import NanowellState
+
+    state = NanowellState()
+    window = _w(keys=("T0",), panel="A01", rule="any")
+    state.windows[wc.window_key("count_fc", "time")] = window
+    state.popout_source = "window"
+    restored = NanowellState()
+    restored.apply_config(state.to_config())
+    assert restored.windows == {wc.window_key("count_fc", "time"): window} and restored.popout_source == "window"
+    damaged = NanowellState()
+    damaged.apply_config({"windows": {"k": {"lo": 1}}, "popout_source": "nonsense", "popout_layout": "hex"})
+    assert (damaged.windows, damaged.popout_source, damaged.popout_layout) == ({}, "selected", "rows")

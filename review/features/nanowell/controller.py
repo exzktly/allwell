@@ -28,6 +28,7 @@ from review.features.nanowell.distribution_compute import (
 )
 from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell.array_compute import array_scene, field_sites, one_to_one
+from review.features.nanowell import array_hover_compute as ahc
 from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell.decorate_compute import Decoration, decoration_for
@@ -1543,8 +1544,6 @@ def _array_hover(ctx, st, event) -> None:
     place. Hidden off the nanowells, while dragging (*event* ``None``), and off the array's axes."""
     from PySide6.QtGui import QCursor
     from PySide6.QtWidgets import QToolTip
-
-    from review.features.nanowell import array_hover_compute as ahc
 
     drawn = st.drawn
     scene = getattr(drawn, "scene", None)

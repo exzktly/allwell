@@ -29,6 +29,7 @@ import numpy as np
 from review.features.nanowell._array_key import (KEY_COLUMNS, draw_key, key_entries, no_value_marks, reason_tag,
                                                   state_word)
 from review.features.nanowell.array_compute import padded
+from review.features.nanowell import array_hover_compute as ahc
 from review.features.nanowell.background_compute import short_clause
 from review.features.nanowell.crop_grid_compute import grid_shape, shown_timepoints
 from review.features.nanowell.beeswarm_compute import swarm_layout
@@ -1477,8 +1478,6 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
 def _hover_label(scene):
     """What the canvas's readout chip leads with over a nanowell: its address, state and value
     (``array_hover_compute.short_text``); nothing off the nanowells."""
-    from review.features.nanowell import array_hover_compute as ahc
-
     def label(x, y) -> str | None:
         k = ahc.site_at(scene.sites, x, y)
         if k is None:

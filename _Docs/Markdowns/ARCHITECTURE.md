@@ -190,7 +190,7 @@ Table's `_phone_fit` says where its builder is.
 
 **Widgets declare their phone form.** `widgets/form_registry.py` records which
 widgets have an alternate form and of what *kind* (`"stepper"`, `"toolbar"`,
-`"controls"`, `"form_row"`, or `"custom"` for a form a view registers with an
+`"controls"`, `"canvas"`, `"hint"`, or `"custom"` for a form a view registers with an
 `apply(on)` callable). It lives in `widgets/` because the classes that declare
 are there, and it knows kinds, not phones: it imports nothing from the
 application and names no layout, which `test_the_form_registry_knows_kinds_and_not_phones`
@@ -199,7 +199,7 @@ window leaves no listener). A declaration is made inside the widget's
 constructor, so while phone layout is on the shell only installs its event
 filter on the widget and the form is applied on the widget's first Show.
 `_adapt_kind` reads that declared kind (`ControlBand`, `MplToolbar`, `Stepper`,
-the Analyze form row, every plot canvas — built only through
+every plot canvas — built only through
 `widgets.canvas.make_canvas`, which a guard enforces — every ⓘ from
 `widgets.info_icon`, and the Image Table's controls block declare theirs). The
 shell recognises no widget by its class name, its object name or a duck type;
@@ -256,8 +256,8 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    neither changes. Nearly all of it is `QApplication.setStyleSheet`
    re-polishing every widget: a near-empty stylesheet still costs most of it,
    so the cost scales with the widget count, not with the sheet. Widgets
-   that take a different *form* on a phone — a stepper's − / +, an Analyze form
-   row's stacked label — take it after the restyle on the way in and give it up
+   that take a different *form* on a phone — a stepper's − / +, a plot's DPI and
+   height — take it after the restyle on the way in and give it up
    before the restyle on the way out, and give it up for the length of the two
    restyles made *inside* phone layout too, a text-size change and the phone
    turning (`PhoneShell._restyle_in_place`) — so the rescale pass only ever
@@ -286,7 +286,7 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    the same treatment: a plot its DPI and height, a window of its own its
    phone form (below, *Windows of their own*), a control band its place in the Controls sheet, a matplotlib toolbar
    its absence (pan and zoom are modes a VNC drag fights with), a stepper its
-   − / +, a form row its stacking — and makes an ⓘ answer a tap with its text,
+   − / + — and makes an ⓘ answer a tap with its text,
    since nothing hovers on a phone. `_PhoneEventFilter` is installed **on those
    widgets only** (`_phone_relevant` names them), never on the application: an
    application-wide filter handed every event of every object in the process to

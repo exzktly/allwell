@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QBoxLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-from widgets import form_registry
 from widgets.separator import build_hline_separator
 
 
@@ -287,12 +286,10 @@ class AnalyzeFormChromeMixin:
         is one most people never see.
         """
         row = QWidget(parent)
-        # Named so phone layout can find the form's rows; ``stackedAtDesk``
-        # tells it these are already label-above-field and must stay so when
-        # it hands the pane back to the desk (``ui/phone_shell.py``).
+        # Named so ``_normalise_field_widths`` and the pane's own builders can
+        # find the form's rows. Every row is already label-above-field, at the
+        # desk and on a phone, so phone layout has nothing to do to one.
         row.setObjectName("AnalyzeFormRow")
-        row.setProperty("stackedAtDesk", True)
-        form_registry.declare(row, "form_row")
         rl = QBoxLayout(QBoxLayout.TopToBottom, row)
         rl.setContentsMargins(0, 2, 0, 2)
         rl.setSpacing(2)

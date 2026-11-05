@@ -283,41 +283,6 @@ def test_a_plot_toolbar_built_after_the_switch_is_hidden_without_a_sweep(qapp, s
     assert not tb.isVisible()
 
 
-def test_an_analyze_form_row_built_after_the_switch_reaches_the_shell_s_row_adapter(qapp, shell, monkeypatch):
-    """The app's own row builder, with nothing recognising the row by its object
-    name. The adapter is spied on, not the layout: every row this builder makes
-    is already label-above-field (``stackedAtDesk``), so the adapter does nothing
-    to it — what has to hold is that the shell still reaches it."""
-    from PySide6.QtWidgets import QVBoxLayout
-
-    from analyze.form_chrome import AnalyzeFormChromeMixin
-
-    calls = []
-    monkeypatch.setattr(shell, "_stack_form_row", lambda row, on: calls.append((row, on)))
-    holder = QWidget(shell._win)
-    QVBoxLayout(holder)
-    row = AnalyzeFormChromeMixin._row(None, holder, "Nucleus probability").parentWidget()
-    assert fr.kind_of(row) == "form_row"
-    holder.show()
-    _pump(qapp)
-    assert (row, True) in calls
-
-
-def test_a_declared_form_row_that_is_label_beside_field_stacks_on_a_phone(qapp, shell):
-    """The adapter's behaviour for the case it exists for: a row that is beside
-    its label at the desk."""
-    from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QLabel, QLineEdit
-
-    row = QWidget(shell._win)
-    lay = QHBoxLayout(row)
-    lay.addWidget(QLabel("Threshold"))
-    lay.addWidget(QLineEdit())
-    fr.declare(row, "form_row")
-    row.show()
-    _pump(qapp)
-    assert lay.direction() == QBoxLayout.TopToBottom
-
-
 def test_a_control_band_built_after_the_switch_is_hidden_in_its_page_and_found_as_the_page_s_controls(qapp, shell):
     """The real ``ControlBand`` with something in it. Hidden in the page because
     the Controls sheet shows it; and ``_current_band`` — which used to find it by

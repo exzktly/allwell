@@ -493,14 +493,14 @@ def scale_canvases(factor: float) -> int:
 #: that has one, so a kind added here is both watched and adapted; a kind that
 #: ``_ADAPTERS`` lacks fails ``tests/test_phone_layout.py``.
 ADAPTED_KINDS = frozenset(
-    ("controls", "toolbar", "stepper", "form_row", "canvas", "hint", form_registry.CUSTOM))
+    ("controls", "toolbar", "stepper", "canvas", "hint", form_registry.CUSTOM))
 
 
 def _adapt_kind(w: QWidget) -> str | None:
     """Which kind of phone form ``PhoneShell.adapt`` gives *w*, or ``None`` for a
     widget it leaves alone: the kind the widget declared with
-    ``widgets.form_registry`` — a page's controls, a plot toolbar, a stepper, an
-    Analyze form row, a plot canvas, or a form a view registered for itself."""
+    ``widgets.form_registry`` — a page's controls, a plot toolbar, a stepper, a
+    plot canvas, an ⓘ, or a form a view registered for itself."""
     declared = form_registry.kind_of(w)
     return declared if declared in ADAPTED_KINDS else None
 
@@ -744,8 +744,8 @@ class _FitOnShow(QObject):
 class _PhoneEventFilter(QObject):
     """While phone layout is on, the things built or shown later get it too:
     a plot its DPI, a window of its own its phone form, a page's control band a
-    place in the Controls sheet, a stepper its − / +, a toolbar its absence, a
-    form row its stacking; and an ⓘ answers a tap, since nothing hovers.
+    place in the Controls sheet, a stepper its − / +, a toolbar its absence; and
+    an ⓘ answers a tap, since nothing hovers.
 
     **Installed on those widgets only, never on the application.** It used to
     be an application-wide filter, so every event of every object in the
@@ -1235,7 +1235,7 @@ class PhoneShell(QObject):
             self._h.set_navigator(False)
         else:
             self._restore_navigator()
-        # Steppers and form rows take their phone form *after* the restyle has
+        # Steppers take their phone form *after* the restyle has
         # scaled their desk sizes, and give it up *before* the restyle scales
         # them back — so the rescale pass only ever sees desk-shaped widgets.
         if not on:
@@ -1320,7 +1320,7 @@ class PhoneShell(QObject):
 
     #: ``adapt``'s dispatch: one method per kind in :data:`ADAPTED_KINDS`.
     _ADAPTERS = {"controls": "_adapt_controls", "toolbar": "_adapt_toolbar",
-                 "stepper": "_adapt_stepper", "form_row": "_stack_form_row",
+                 "stepper": "_adapt_stepper",
                  "canvas": "_adapt_canvas", "hint": "_adapt_hint",
                  form_registry.CUSTOM: "_adapt_custom"}
 
@@ -1459,31 +1459,6 @@ class PhoneShell(QObject):
             except RuntimeError:
                 swallowed()  # deleted while the list was walked
         self._grab_scrolling(on)
-
-    def _stack_form_row(self, row: QWidget, on: bool) -> None:
-        """A label above its field on a phone, beside it at the desk."""
-        from PySide6.QtWidgets import QBoxLayout
-        lay = row.layout()
-        if not isinstance(lay, QBoxLayout) or lay.count() == 0:
-            return
-        if row.property("stackedAtDesk"):
-            return              # label-above-field at the desk too; nothing to do
-        label = lay.itemAt(0).widget()
-        want = QBoxLayout.TopToBottom if on else QBoxLayout.LeftToRight
-        if lay.direction() == want:
-            return
-        lay.setDirection(want)
-        if label is None:
-            return
-        if on:
-            row.setProperty("_awLabelPin", [label.minimumWidth(), label.maximumWidth()])
-            label.setMinimumWidth(0)
-            label.setMaximumWidth(_QWIDGETSIZE_MAX)
-        else:
-            pin = row.property("_awLabelPin")
-            if pin:
-                label.setMinimumWidth(int(pin[0]))
-                label.setMaximumWidth(int(pin[1]))
 
     def _grab_scrolling(self, on: bool) -> None:
         """Let a drag scroll everything that scrolls, the way a thumb expects.

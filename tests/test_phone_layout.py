@@ -708,24 +708,6 @@ def test_a_stacked_dashboard_is_the_page_and_says_what_a_tapped_well_is(qapp):
     d.hide()
 
 
-def test_a_form_row_stacks_its_label_and_gets_its_pin_back(qapp):
-    from PySide6.QtWidgets import QBoxLayout, QHBoxLayout
-    from ui.phone_shell import PhoneShell
-    row = QWidget()
-    row.setObjectName("AnalyzeFormRow")
-    lay = QHBoxLayout(row)
-    label = QLabel("Nucleus probability")
-    label.setFixedWidth(110)
-    lay.addWidget(label)
-    lay.addWidget(QLineEdit())
-    PhoneShell._stack_form_row(None, row, True)
-    assert lay.direction() == QBoxLayout.TopToBottom
-    assert label.maximumWidth() > 110
-    PhoneShell._stack_form_row(None, row, False)
-    assert lay.direction() == QBoxLayout.LeftToRight
-    assert (label.minimumWidth(), label.maximumWidth()) == (110, 110)
-
-
 def test_a_title_too_wide_for_a_phone_is_broken_into_full_lines():
     from review.core.plot_style import _break_to_fit
     text = "GFP Mean Intensity (above threshold) ± SEM — t = 0 h"
@@ -1677,7 +1659,6 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     from matplotlib.figure import Figure
 
     from ui import phone_shell as ps
-    from analyze.form_chrome import AnalyzeFormChromeMixin
     from widgets import form_registry
     from widgets.canvas import make_canvas
     from widgets.control_band import ControlBand
@@ -1690,15 +1671,12 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
         assert callable(getattr(ps.PhoneShell, meth, None)), meth
     host = QWidget()
     canvas = make_canvas(Figure(), host)
-    holder = QWidget(host)
-    QVBoxLayout(holder)
-    row = AnalyzeFormChromeMixin._row(None, holder, "A label").parentWidget()   # the app's builder
     block = QWidget(host)
     form_registry.declare(block, "controls")
     block.setStacked = lambda _on: None
     custom = QWidget(host)
     form_registry.register(custom, lambda _on: None)      # a view's own form
-    widgets = [ControlBand(host), MplToolbar(canvas, host), Stepper(host), row, block, custom, canvas,
+    widgets = [ControlBand(host), MplToolbar(canvas, host), Stepper(host), block, custom, canvas,
                info_icon(host, "An explanation")]
     named = {ps._adapt_kind(w) for w in widgets}
     assert named == set(ps.ADAPTED_KINDS), named

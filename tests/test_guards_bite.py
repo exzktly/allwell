@@ -5923,3 +5923,28 @@ def test_phone_guard_counts_every_way_the_shell_recognises_a_widget_by_name():
         "_KIND_BY_OBJECT_NAME entry 'AnalyzeFormRow'",
         'compares an object name to "InfoHint"', "duck-types a canvas by draw_idle"]
     assert module.recognised_by_name(ast.parse("def f():\n    return 1\n")) == []
+
+
+FORM_REGISTRY_VIOLATIONS = {
+    "imports_core": "from core import phone_layout\n",
+    "imports_ui": "import ui.theme\n",
+    "imports_review_in_function": "def f():\n    from review.core import x\n",
+    "a_phone_identifier": "def on_phone_layout(w):\n    return w\n",
+    "a_phone_string": 'KIND = "phone_form"\n',
+    "a_phone_attribute": "def f(shell):\n    return shell.phone_unit\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(FORM_REGISTRY_VIOLATIONS))
+def test_phone_guard_catches_the_app_or_a_phone_in_the_form_registry(tmp_path, shape):
+    module = importlib.import_module("tests.test_phone_mode_stays_in_views")
+    path = _write(tmp_path, "form_registry.py", FORM_REGISTRY_VIOLATIONS[shape])
+    assert module.form_registry_violations(path), f"the {shape} violation went uncaught"
+
+
+def test_phone_guard_clears_a_registry_that_knows_only_kinds(tmp_path):
+    module = importlib.import_module("tests.test_phone_mode_stays_in_views")
+    path = _write(tmp_path, "form_registry.py",
+                  "import weakref\nfrom PySide6.QtWidgets import QWidget\nfrom util import aw_safe\n\n\n"
+                  "def declare(widget: QWidget, kind: str) -> None:\n    widget.setProperty('formKind', kind)\n")
+    assert module.form_registry_violations(path) == []

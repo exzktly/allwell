@@ -259,6 +259,39 @@ def recognised_by_name(tree: ast.AST) -> list[tuple[int, str]]:
     return sorted(found)
 
 
+#: ``widgets/form_registry.py`` may import none of these: it is in ``widgets/``,
+#: which carries no app knowledge, and it knows kinds, not layouts.
+FORM_REGISTRY = "widgets/form_registry.py"
+_FORBIDDEN_IMPORT_ROOTS = ("core", "ui", "review", "analyze", "datasets", "allwell")
+
+
+def form_registry_violations(path: Path) -> list[str]:
+    """Imports of the application and any identifier or string naming a phone,
+    in the registry module: ``["line what", ...]``."""
+    out: list[str] = []
+    for node in ast.walk(parse_source(path)):
+        if isinstance(node, ast.Import):
+            out.extend(f"{node.lineno} imports {a.name}" for a in node.names
+                       if a.name.split(".")[0] in _FORBIDDEN_IMPORT_ROOTS)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module and node.module.split(".")[0] in _FORBIDDEN_IMPORT_ROOTS:
+                out.append(f"{node.lineno} imports from {node.module}")
+        words = []
+        if isinstance(node, ast.Name):
+            words = [node.id]
+        elif isinstance(node, ast.Attribute):
+            words = [node.attr]
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            words = [node.name]
+        elif isinstance(node, ast.arg):
+            words = [node.arg]
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            words = [node.value]
+        out.extend(f"{getattr(node, 'lineno', 0)} names a phone: {w[:40]!r}"
+                   for w in words if "phone" in w.lower())
+    return out
+
+
 # ── the tests ───────────────────────────────────────────────────────────────
 
 def test_data_and_drawing_layers_never_read_the_mode():
@@ -295,3 +328,11 @@ def test_the_shell_recognises_no_more_widgets_by_name_than_the_budget():
         f"the shell now recognises {len(sites)} widgets by name and the budget says "
         f"{RECOGNISED_BY_NAME_BUDGET}: lower RECOGNISED_BY_NAME_BUDGET to {len(sites)} "
         f"in the same commit.\n  " + listing)
+
+
+def test_the_form_registry_knows_kinds_and_not_phones():
+    offenders = form_registry_violations(REPO_ROOT / FORM_REGISTRY)
+    assert not offenders, (
+        f"{FORM_REGISTRY} is a widgets/ module that records which widgets have an alternate form; "
+        "it must import nothing from the application and name no layout "
+        "(PHONE_FORM_TRACKER.md §2.3):\n  " + "\n  ".join(offenders))

@@ -170,6 +170,36 @@ naming every widget it rearranges and the callables it drives (the mode, the
 navigator, the band, the run dashboards, the logs, the status text, a relayout),
 so a pane that moves a widget changes one line there.
 
+**Which layers know about phone layout.** Data and drawing never do: no
+`renderer.py`, `collect.py`, `*_compute.py`, and nothing under `domain/`,
+`services/`, `pipeline/` or `util/` imports the flag or the shell; their sizes
+arrive as arguments (`tests/test_phone_mode_stays_in_views.py`). The tokens
+(`core/phone_layout.py`, `ui/theme.py`) and the chrome (`ui/phone_shell.py`,
+`ui/phone_drawer.py`, `ui/phone_window.py`, `ui/phone_fit.py`) read it freely.
+A view reads it only from a `_phone.py` or `phone_view.py` beside it; every
+other read, in `allwell.py` and a few `review/core/` helpers, is on a roster in
+that test with a written reason, and the roster only shrinks.
+
+**Widgets declare their phone form.** `widgets/form_registry.py` records which
+widgets have an alternate form and of what *kind* (`"stepper"`, `"toolbar"`,
+`"controls"`, `"form_row"`, or `"custom"` for a form a view registers with an
+`apply(on)` callable). It lives in `widgets/` because the classes that declare
+are there, and it knows kinds, not phones: it imports nothing from the
+application and names no layout, which `test_the_form_registry_knows_kinds_and_not_phones`
+holds. `PhoneShell` listens (`_listen_for_declarations`, weakly, so a closed
+window leaves no listener). A declaration is made inside the widget's
+constructor, so while phone layout is on the shell only installs its event
+filter on the widget and the form is applied on the widget's first Show.
+`_adapt_kind` reads a declared kind first and falls back to the class and
+object names the shell still recognises (`_KIND_BY_CLASS`,
+`_KIND_BY_OBJECT_NAME`, the `InfoHint` object name, the `draw_idle` duck type);
+`test_the_shell_recognises_no_more_widgets_by_name_than_the_budget` counts those
+and only lets the count fall.
+`tests/test_phone_layout_snapshot.py` records what the window shows in phone
+layout (every page, upright, sideways and at the large text size) against
+`tests/fixtures/phone_snapshot_baseline.json`, which is the check that a change
+to how widgets are found has not changed what is seen.
+
 **The phone point.** Every size in phone layout is written in phone points
 (`u`): the short side of the screen's geometry divided by 390, the width in
 points of a typical phone held upright (`phone_layout.phone_unit`). RealVNC
@@ -19562,6 +19592,7 @@ The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which u
 | `FooterScrollArea` (`widgets/footer_scroll_area.py`) | A `QScrollArea` with a pinned footer under the viewport; the viewport is shortened by the footer's height, which follows the footer's contents. The Analyze run footer. |
 | `ValueCombo` (`widgets/value_combo.py`) | A combo of `(value, label)` items, read and written by `value()` / `setValue()`, so the label can be copy while the value stays an argument. The Analyze correction and Cellpose-model combos. |
 | `RailNav` | The left-rail section navigator. |
+| `form_registry` (`widgets/form_registry.py`) | Which widgets have an alternate form, and of what kind: `declare(widget, kind)` from a constructor, `register(widget, apply)` for a view's own form, `declared(kind)` for the live ones, `add_listener` for whoever applies them (phone layout's shell). Kinds, not layouts — it imports nothing from the application. Held weakly; liveness is `shiboken6.isValid`, because a wrapper outlives its C++ widget. §2 *Phone layout*. |
 | `info_icon` (`widgets/info_icon.py`) | The `ⓘ` hover-for-more marker, styled by the `#InfoHint` QSS rule. A function rather than a class — it returns a configured `QLabel`. Shared by the Analyze form (`AnalyzeFormChromeMixin._info_icon` delegates to it) and the Playground's threshold rows, so the app has one "there is an explanation here" affordance rather than a copy per pane. Sets WhatsThis as well as the tooltip, which is the route that works for someone who cannot hold a hover. |
 | `SchemaPicker` (`widgets/schema_picker.py`) | The filename-schema builder: a separator box, one dropdown per filename position, and the colon-delimited schema string the two of them write. The dropdowns and the string are two views of one value and sync both ways, each write blocking the other's signals so they cannot chase each other. Vocabulary and validity come from `util.schema` — the module the pipeline parses schemas with — so the picker offers exactly the fields the pipeline understands, reads a string the way `parse_schema` reads it (empty tokens collapse, rather than the dropdowns showing a layout the run will not use), and reports errors in `validate_schema`'s own wording. `schema()` returns the typed string in preference to the dropdowns, since the string can express more positions than there are dropdowns. `row_factory(parent, label) -> cell` is the layout seam: the Analyze form passes its own `_row` so the picker sits inside that form's label column, and the Datasets pane's Zip Loose Folder page takes the default plain row. Mounted by both, because both ask the user about the same filenames — Zip Loose Folder produces the archives Analyze then reads. **Detection is opt-in**: passing `detect_label` builds a *Detect from filenames* button as the picker's first row, in the field column, with the two-register readout beneath it and the rows it fills below that, and a host that will not answer `detectRequested` therefore never shows a button that does nothing. `setDetection(text, note=…, problem=…)` takes sentences the picker neither composes nor understands; the neutral half is muted body text and the note is a `QLabel#Notice` panel, so a result the reader must not skim past differs in outline and not only in hue. |
 | `SegmentedControl`, `ChipGroup`, `Stepper`, `StyledSlider`, `ToggleSwitch` | Form controls; each exposes `bindingAdapter()` returning `(getter, setter, change_signal)` for the Export Style sidebar's binding loop. |

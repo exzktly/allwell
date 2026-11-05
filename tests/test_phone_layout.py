@@ -1671,6 +1671,7 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     from matplotlib.figure import Figure
 
     from ui import phone_shell as ps
+    from widgets import form_registry
     from widgets.control_band import ControlBand
     from widgets.mpl_toolbar import MplToolbar
     from widgets.stepper import Stepper
@@ -1686,7 +1687,9 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     block = QWidget(host)
     block.setProperty("phoneControls", True)
     block.setStacked = lambda _on: None
-    widgets = [ControlBand(host), MplToolbar(canvas, host), Stepper(host), row, block]
+    custom = QWidget(host)
+    form_registry.register(custom, lambda _on: None)      # a view's own form
+    widgets = [ControlBand(host), MplToolbar(canvas, host), Stepper(host), row, block, custom]
     named = {ps._adapt_kind(w) for w in widgets}
     assert named == set(ps.ADAPTED_KINDS), named
     assert all(ps._phone_relevant(w) for w in widgets)

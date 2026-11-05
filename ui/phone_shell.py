@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import logging
 import re
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -52,6 +53,7 @@ from PySide6.QtWidgets import (
 from core import phone_layout
 from core.safe import swallowed
 from ui import phone_window, theme
+from widgets import form_registry
 
 _LOG = logging.getLogger(__name__)
 
@@ -501,13 +503,19 @@ _KIND_BY_CLASS = {"ControlBand": "controls", "MplToolbar": "toolbar",
                   "Stepper": "stepper"}
 _KIND_BY_OBJECT_NAME = {"AnalyzeFormRow": "form_row"}
 ADAPTED_KINDS = frozenset(
-    ("controls", *_KIND_BY_CLASS.values(), *_KIND_BY_OBJECT_NAME.values()))
+    ("controls", form_registry.CUSTOM, *_KIND_BY_CLASS.values(),
+     *_KIND_BY_OBJECT_NAME.values()))
 
 
 def _adapt_kind(w: QWidget) -> str | None:
     """Which kind of phone form ``PhoneShell.adapt`` gives *w*, or ``None``
     for a widget it leaves alone: a page's controls (a ``ControlBand`` or a
-    ``phoneControls`` block), a plot toolbar, a stepper, an Analyze form row."""
+    ``phoneControls`` block), a plot toolbar, a stepper, an Analyze form row.
+    A kind the widget declared (``widgets.form_registry``) is read first; the
+    class and object names below it are what is still recognised by name."""
+    declared = form_registry.kind_of(w)
+    if declared in ADAPTED_KINDS:
+        return declared
     kind = _KIND_BY_CLASS.get(type(w).__name__)
     if kind is not None:
         return kind
@@ -928,6 +936,34 @@ class PhoneShell(QObject):
         self._landscape: bool | None = None
         self._build_controls()
         self._load_settings()
+        self._listen_for_declarations()
+
+    # ── declarations ──────────────────────────────────────────────────────
+    def _listen_for_declarations(self) -> None:
+        """Hear every widget that declares a form (``widgets.form_registry``).
+        The listener holds the shell weakly and leaves the registry when the
+        shell is gone, so a window torn down does not keep a listener alive."""
+        ref = weakref.ref(self)
+
+        def _listener(widget: QWidget, kind: str) -> None:
+            shell = ref()
+            if shell is None:
+                form_registry.remove_listener(_listener)
+                return
+            shell._on_declared(widget, kind)
+
+        form_registry.add_listener(_listener)
+        self.destroyed.connect(lambda *_: form_registry.remove_listener(_listener))
+
+    def _on_declared(self, widget: QWidget, _kind: str) -> None:
+        """A widget declared its form — from inside its constructor, so it is
+        not finished: only watch it. It is adapted on its first Show, as a
+        widget built after the switch always was."""
+        if not phone_layout.is_on() or widget.property(_P_WATCHED):
+            return
+        widget.setProperty(_P_SEEN, True)
+        widget.installEventFilter(self._filter)
+        widget.setProperty(_P_WATCHED, True)
 
     # ── settings ──────────────────────────────────────────────────────────
     def _store(self):
@@ -1318,7 +1354,16 @@ class PhoneShell(QObject):
 
     #: ``adapt``'s dispatch: one method per kind in :data:`ADAPTED_KINDS`.
     _ADAPTERS = {"controls": "_adapt_controls", "toolbar": "_adapt_toolbar",
-                 "stepper": "_adapt_stepper", "form_row": "_stack_form_row"}
+                 "stepper": "_adapt_stepper", "form_row": "_stack_form_row",
+                 form_registry.CUSTOM: "_adapt_custom"}
+
+    @staticmethod
+    def _adapt_custom(w: QWidget, on: bool) -> None:
+        """A widget whose view registered a form of its own
+        (``form_registry.register``) is handed the mode."""
+        apply = form_registry.custom_apply(w)
+        if apply is not None:
+            apply(on)
 
     def _adapt_controls(self, w: QWidget, on: bool) -> None:
         """A page's controls go to the Controls sheet: hidden in the page."""

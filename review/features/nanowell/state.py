@@ -18,6 +18,7 @@ from review.features.nanowell.statistics_compute import TEST_KEYS as STATS_TESTS
 from review.features.nanowell.statistics_compute import UNITS as STATS_UNITS
 from review.features.nanowell.subset_compute import Subset
 from review.features.nanowell.subset_compute import restore as restore_subset
+from review.features.nanowell.subset_compute import saved_from_config, saved_to_config
 
 AXES = ("time", "wells")
 #: The QC view's *Wells*: a row for each well with a timepoint needing a look, or for every well with a grid record.
@@ -178,6 +179,9 @@ class NanowellState:
     #: its ring or distance from the centre, its address, its imaging field. No conditions: every nanowell. See
     #: ``subset_compute``.
     subset: Subset = field(default_factory=Subset)
+    #: The subsets saved by name in this dataset (``name -> Subset``, in the order saved): kept with the page's
+    #: settings in the dataset's ``persistence.json``, so each dataset has its own (``subset_compute.with_saved``).
+    saved_subsets: dict = field(default_factory=dict)
     #: What the Identity view shows of the chosen timepoint against the well's reference (:data:`IDENTITY_MODES`).
     identity_mode: str = "distance"
     #: What the Distance map colours by (:data:`IDENTITY_COLOURS`).
@@ -347,7 +351,8 @@ class NanowellState:
                 "popout_tps": list(self.popout_tps), "popout_channels": list(self.popout_channels),
                 "popout_grid": self.popout_grid, "popout_cols": self.popout_cols,
                 "display_ranges": {k: [lo, hi] for k, (lo, hi) in self.display_ranges.items()},
-                "subset": self.subset.to_config(), "layers": self.layers.to_config(),
+                "subset": self.subset.to_config(), "saved_subsets": saved_to_config(self.saved_subsets),
+                "layers": self.layers.to_config(),
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
                 "excluded_wells": list(self.excluded_wells),
                 "stats_unit": self.stats_unit, "stats_test": self.stats_test, "qc_wells": self.qc_wells,
@@ -378,6 +383,7 @@ class NanowellState:
         self.stats_test = test if test in STATS_TESTS else fresh.stats_test
         self.qc_wells = config.get("qc_wells") if config.get("qc_wells") in QC_WELLS else fresh.qc_wells
         self.subset = _subset_from(config)
+        self.saved_subsets = saved_from_config(config.get("saved_subsets"))
         wells = config.get("excluded_wells")
         self.excluded_wells = sorted({w for w in wells if isinstance(w, str) and w}) if isinstance(wells, list) else []
         count = config.get("extremes_n")

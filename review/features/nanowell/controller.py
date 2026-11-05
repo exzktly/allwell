@@ -2402,6 +2402,56 @@ def set_subset(ctx, subset) -> bool:
     return True
 
 
+def save_subset(ctx, name: str) -> str:
+    """Keep the page's *Subset* under *name* in this dataset (replacing one of that name); ``""`` when kept, else
+    why not, said and nothing changed: no conditions, a name that is not one, too many saved."""
+    st = _state(ctx)
+    if st is None:
+        return "No dataset is open."
+    try:
+        st.saved_subsets = ss.with_saved(st.saved_subsets, name, st.subset)
+    except ValueError as exc:
+        return f"Not saved: {exc}."
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    return ""
+
+
+def apply_saved_subset(ctx, name: str) -> bool:
+    """Make the subset saved as *name* the page's *Subset*; ``False`` when no subset is saved under it."""
+    st = _state(ctx)
+    subset = st.saved_subsets.get(name) if st is not None else None
+    if subset is None:
+        _call(ctx, "_nw_refresh_controls")
+        return False
+    return set_subset(ctx, subset)
+
+
+def rename_saved_subset(ctx, old: str, new: str) -> str:
+    """Call the subset saved as *old* *new*; ``""`` when renamed, else why not (nothing changed)."""
+    st = _state(ctx)
+    if st is None:
+        return "No dataset is open."
+    try:
+        st.saved_subsets = ss.renamed(st.saved_subsets, old, new)
+    except ValueError as exc:
+        return f"Not renamed: {exc}."
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+    return ""
+
+
+def delete_saved_subset(ctx, name: str) -> None:
+    """Forget the subset saved as *name*. The page's *Subset* stays as it is: deleting a name removes nothing from
+    the figure."""
+    st = _state(ctx)
+    if st is None or name not in st.saved_subsets:
+        return
+    st.saved_subsets = {k: v for k, v in st.saved_subsets.items() if k != name}
+    _save_soon(ctx)
+    _call(ctx, "_nw_refresh_controls")
+
+
 def page_subset(ctx, st) -> ss.Subset:
     """The page's *Subset* with every scatter-gate condition's box read from the gates as they stand now
     (``subset_compute.bind_gates``): what every figure, badge and saved file evaluates. Read at each use, so a gate

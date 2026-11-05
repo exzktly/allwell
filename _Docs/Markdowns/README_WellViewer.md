@@ -6209,6 +6209,15 @@ the sentence names it.
   box is outlined while a subset is set, and the subset is kept with the page's settings. For clonality use the
   *Earliest* baseline: a count taken later — at a first measurable or a named timepoint — may follow a division,
   and the figure counts those nanowells.
+
+  **Saving a subset by name.** The editor's **Name** box names the subset as written: type a name and press
+  **Save** (or Enter) to keep it in this dataset. Saved subsets are listed by name in the Subset box, between the
+  quick choices and *Custom subset…*; choosing one makes it the subset again. The box shows a saved subset's name
+  only while its conditions are exactly the saved ones — change one and it reads *Custom subset…*, with the saved
+  one left as it was (save under the same name to replace it). **Rename** gives the saved subset in use the name
+  typed; **Delete** forgets it, and the figure keeps using its conditions until you choose another. Each dataset
+  keeps its own saved subsets (up to 50, names up to 60 characters), in its `persistence.json` with the page's
+  other settings.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
 - **Names.** Wells and groups are called what every other tab calls them: a replicate group by its name, a well by
   the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two

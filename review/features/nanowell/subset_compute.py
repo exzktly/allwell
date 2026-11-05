@@ -404,6 +404,77 @@ def restore(block) -> Subset:
         return Subset()
 
 
+# ── saved subsets ────────────────────────────────────────────────────────────
+#: The longest name a saved subset takes: room for "Singles, ring ≤ 3, GFP+ at 48 h" with plenty to spare.
+MAX_NAME = 60
+#: The most subsets one dataset keeps: far beyond the questions asked of one plate, and a bound on the saved block.
+MAX_SAVED = 50
+
+
+def clean_name(text) -> str:
+    """*text* as a saved subset's name — trimmed, inner runs of spaces made one — or ``ValueError`` saying why it
+    cannot be one (empty, or longer than :data:`MAX_NAME`)."""
+    name = " ".join(str(text or "").split())
+    if not name:
+        raise ValueError("a saved subset needs a name")
+    if len(name) > MAX_NAME:
+        raise ValueError(f"a name holds at most {MAX_NAME} characters")
+    return name
+
+
+def saved_name_of(saved: dict, subset: Subset) -> str:
+    """The name *subset* is saved under in *saved* (``name -> Subset``), or ``""`` when it is saved under none —
+    so the page names a saved subset only while it is exactly the one saved: one condition changed and it is
+    the page's own again."""
+    if not subset.is_active():
+        return ""
+    return next((name for name, kept in saved.items() if kept == subset), "")
+
+
+def saved_to_config(saved: dict) -> dict:
+    """``name -> subset block``, in the order the subsets were saved."""
+    return {name: subset.to_config() for name, subset in saved.items()}
+
+
+def saved_from_config(block) -> dict:
+    """The saved subsets of a dataset's page block, ``name -> Subset``. An entry whose name or subset is not one is
+    dropped rather than restored as a different subset under its name; past :data:`MAX_SAVED`, the rest are."""
+    out: dict = {}
+    for name, item in (block.items() if isinstance(block, dict) else ()):
+        try:
+            name = clean_name(name) if isinstance(name, str) else None
+            subset = Subset.from_config(item)
+        except (ValueError, TypeError):
+            continue
+        if name and subset.is_active() and name not in out and len(out) < MAX_SAVED:
+            out[name] = subset
+    return out
+
+
+def with_saved(saved: dict, name: str, subset: Subset) -> dict:
+    """*saved* with *subset* kept under *name* (replacing a subset of that name in its place), or ``ValueError``:
+    no conditions to keep, a name that is not one, or :data:`MAX_SAVED` already kept."""
+    name = clean_name(name)
+    if not subset.is_active():
+        raise ValueError("the subset has no conditions to save")
+    if name not in saved and len(saved) >= MAX_SAVED:
+        raise ValueError(f"a dataset keeps at most {MAX_SAVED} subsets: delete one first")
+    out = dict(saved)
+    out[name] = subset.validated()
+    return out
+
+
+def renamed(saved: dict, old: str, new: str) -> dict:
+    """*saved* with the subset called *old* called *new*, in the same place, or ``ValueError``: no subset called
+    *old*, a new name that is not one, or one another subset already has."""
+    new = clean_name(new)
+    if old not in saved:
+        raise ValueError(f"no saved subset is called {old!r}")
+    if new != old and new in saved:
+        raise ValueError(f"a subset called {new!r} is already saved")
+    return {(new if name == old else name): subset for name, subset in saved.items()}
+
+
 # ── scatter gates ────────────────────────────────────────────────────────────
 def _nanowell_key(column) -> str | None:
     return column[len(_NW_PREFIX):] if isinstance(column, str) and column.startswith(_NW_PREFIX) else None

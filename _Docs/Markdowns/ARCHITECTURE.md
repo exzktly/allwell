@@ -12375,6 +12375,22 @@ timepoint, `owner`, `fused`, the `ROW_FLAGS` and `gate`) is read *at* a timepoin
 canonical form and the one place a condition is refused (an unknown field, an op the field cannot take, a range
 upside down, a fractional bound on a whole-number field, a tile condition with no tile).
 
+**Saved subsets** (`subset_compute.clean_name` / `with_saved` / `renamed` / `saved_name_of` / `saved_from_config`,
+`NanowellState.saved_subsets`). A dataset keeps up to `MAX_SAVED` subsets by name — `name -> Subset`, in the order
+saved, each name trimmed and at most `MAX_NAME` characters — in the page's block of its
+`persistence.json` (`saved_subsets`, through `to_config` / `apply_config`, so `review/persistence/nanowell.py` reads
+and writes it with the rest of the page and each dataset has its own). Saving under a name already kept replaces
+that subset in its place; a subset with no conditions is not saved; on restore an entry whose name or subset is not
+one is dropped rather than restored as a different subset under that name. The page's *Subset* stays the one
+source of what is drawn: a saved subset is a name for a `Subset` value, and `saved_name_of` names the page's subset
+only while it equals a saved one, so an edited copy is the page's own and the saved one is untouched. The Subset
+combo (`subset_view._fill_combo`) lists the saved names between the presets and *Custom subset…*, rebuilt only when
+the names change, with data `saved:<name>`; choosing one calls `controller.apply_saved_subset`. The editor's name
+row — a name box, *Save* (`controller.save_subset`), *Rename* (`rename_saved_subset`, enabled for a saved subset in
+use and a different name) and *Delete* (`delete_saved_subset`, which leaves the page's subset as it is) — says each
+result in the editor's status line and refills the name box only when the saved name in use changes, so a name
+being typed is never replaced. `tests/test_nanowell_saved_subsets.py`.
+
 Each condition answers 1, 0 or NaN per nanowell (`_site_answers`, vectorised over the metrics frame by site number);
 NaN is "no value", never zero — an occluded baseline, a well with no recorded pitch, a timepoint the nanowell was
 not seen at. *At any timepoint* is 1 when some value passes, 0 when every value it has fails; *at every timepoint*

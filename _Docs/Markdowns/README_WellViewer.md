@@ -6643,6 +6643,17 @@ make a page; ◀ ▶ turn it. Every crop is on one brightness scale, the Timepoi
 Save controls apply as they do to one nanowell, and a click on a row selects its nanowell, so the side panel follows.
 A row whose crops are not yet cut says so; one that cannot be cut says why.
 
+**Layout: Hex** draws the same nanowells all at once as an **artificial hex array — a composite, not a well**. Each
+source well has its own labelled patch, and inside a patch the nanowells are placed by rank, the first at the patch's
+centre and the rest spiralling outward, so a position says nothing about where a nanowell sat in its well. Tiles are
+drawn apart inside a dashed frame, each with a mark along its foot in its well's colour, and the title says it is not a
+real array. Every tile is its nanowell's crop at one size and all are on one brightness scale, so wells of different
+exposure compare. It shows 91 nanowells a page (◀ ▶ turn it) at one timepoint — the window's latest covered one at first;
+the timepoint ◀ ▶ beside it step through the others. A tile with no image at that timepoint is a **hatched hexagon**, never
+a blank, and the caption counts those by reason. Pointing at a tile names its nanowell in the status bar (*Tile 37 · A03
+3,-2*); a click selects it, so the side panel follows. The composite is only a view: it is not a well of the plate, joins no
+selection, and is never exported as one.
+
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind cell fluorescence) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it
 is selected and kept, so selecting it again is instant. Wells clicked one after another on the plate are read

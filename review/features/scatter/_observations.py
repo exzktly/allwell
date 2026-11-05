@@ -156,7 +156,9 @@ def redraw(ctx, page: str) -> None:
     if page == "cells":
         _paint_nanowell_gates(ctx, ax, drawn, x_key, y_key, muted)
     footer = "\n".join([drawn.footer, *drawn.notes])
-    follows_theme(fig.text(0.01, 0.005, footer, ha="left", va="bottom", fontsize=7, color=muted, gid="observations_footer"), muted=True)
+    from review.core.observation_band import write_footer
+
+    write_footer(fig, footer, muted)
     apply_export_style_to_current(ctx, fig, canvas)
     if page == "cells":
         # ``ax.clear()`` above voided any armed RectangleSelector; rebuild it on the fresh axes.

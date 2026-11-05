@@ -57,6 +57,8 @@ _OCCUPANCY_INDEX = {"0": 0, "1": 1, "2": 2, "3+": 3}
 class HitMap:
     """Where each drawn dot is, for turning a click into a nanowell: per axes, display-space points and sites."""
     entries: list = field(default_factory=list)   # (ax, x_data, y_data, sites)
+    panels: list = field(default_factory=list)    # (axes, index into model.panels): which axes drew which panel
+    values: list = field(default_factory=list)    # per entry, the values of the dots it holds (the window's rings)
 
     def nearest(self, ax, x_px: float, y_px: float, radius_px: float):
         """The site of the drawn dot nearest the display point on *ax*, within *radius_px*, or ``None``."""
@@ -260,6 +262,7 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), wrap_foot
     densities = hidden = 0
     for i, (ax, panel) in enumerate(zip(axes, panels)):
         _prepare_axes(ax, scale)
+        hits.panels.append((ax, i))
         d, u = _draw_panel(fig, ax, model, panel, hits, rings, inks, ylim=shared, spacing=spacing)
         densities, hidden = densities + d, hidden + u
         if i % cols:
@@ -490,6 +493,7 @@ def _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink):
     coll.set_gid("nw-dots")
     sites = [swarm.sites[i] for i in idx]
     hits.entries.append((ax, x, layout.y, sites))
+    hits.values.append(swarm.values[idx])
     _ring_selected(ax, x, layout.y, sites, rings)
     return layout
 

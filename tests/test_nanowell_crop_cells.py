@@ -135,8 +135,12 @@ def _dots(ctx, key):
 
 
 def _press(qtbot, ctx, name):
+    """Click *name* once it is laid out: visible, and placed inside its parent. A box in a wrapping row of controls
+    (the crop strip's, a ``FlowLayout``) is placed a layout pass after it is shown, and until then it has Qt's default
+    640 x 480 geometry, which a click lands outside the box's own text and indicator."""
     box = ctx.widgets.get(name)
-    qtbot.waitUntil(lambda: box.isVisible() and box.width() > 0, timeout=5000)
+    qtbot.waitUntil(lambda: box.isVisible() and box.width() > 0
+                    and box.parentWidget().rect().contains(box.geometry()), timeout=5000)
     qtbot.mouseClick(box, Qt.LeftButton)
 
 

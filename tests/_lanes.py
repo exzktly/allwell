@@ -246,6 +246,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_measure_fast_paths.py": "The measuring's fast paths compute exactly what the code they replaced did",
     "test_nanowell_ownership.py": "Ownership checks calculate seam geometry without using the implementation",
     "test_nanowell_page.py": "The Nanowells page driven through its real builder, worker and canvas, in a minimal shell …",
+    "test_nanowell_page_on_a_phone.py": "The Nanowells page's site detail, crop strip and footer in phone layout, in a minimal shell",
     "test_phone_nanowell_popout.py": "The nanowell crops pop-out in phone layout covers the phone and closes from its foot",
     "test_nanowell_counts_follow_cell_gating.py": "The Nanowells page counts only the cells Home's Cell Gating includes …",
     "test_nanowell_array_key.py": "The Array view keys its nanowell outlines: a ring swatch per state in view, with counts",

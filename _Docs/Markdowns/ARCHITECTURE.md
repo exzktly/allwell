@@ -14384,6 +14384,13 @@ build without the Nanowells feature the line adds "nanowell views are not in thi
 reads as an ordinary one. The per-cell Scatter's axis pickers and Multivariate's feature picker offer each cell's own
 nanowell's metrics ("Nanowell ▸ …", the Nanowell family) through `with_nanowell_columns`.
 
+**Every observations footer is written by `observation_band.write_footer`** — the nanowell footers of Bar, Line,
+Distribution and Heat Map and the cells footer above — bottom-left, gid `FOOTER_GID`, wrapped to the figure's width.
+The wrap keeps a capture's shape: an unwrapped line wider than the figure was only clipped on screen, but a
+`bbox_inches="tight"` capture (Copy, Save to Saved Plots, an export) widened to take it in, leaving the plot pressed
+against the left edge of an image as wide as the footer. `tests/test_observation_footer_stays_in_the_figure.py`
+saves a Nanowells distribution with a long footer through the card and holds the helper as the only writer.
+
 **Images.** A nanowell run's `out.zip` holds no masks or overlays, only one stitched phase montage per well and
 timepoint. The Image Table draws a nanowell well as three kinds of *nanowell frame*, virtual channels named in
 `data/nanowell_images.py` and loaded through `frame_load` like any other (a frame has no field, so a cell's FOV is

@@ -164,6 +164,19 @@ def refresh_current(ctx) -> None:
 FOOTER_GID = "observations_footer"
 
 
+def write_footer(fig, text: str, muted) -> None:
+    """Write *text* as *fig*'s observations footer, bottom-left, wrapped to the figure's width.
+
+    Every observations footer goes through here. The wrap is what keeps a long footer inside the figure: unwrapped,
+    a note wider than the figure ran off the canvas's right edge on screen, where it was merely clipped, and a
+    ``bbox_inches="tight"`` capture — Copy, Save to Saved Plots, an export — then widened to take the whole line in,
+    leaving the plot squeezed against the left edge of an image as wide as its longest footer line. Existing line
+    breaks are kept; only a line wider than the figure is broken further.
+    """
+    follows_theme(fig.text(0.01, 0.002, text, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID,
+                           wrap=True), muted=True)
+
+
 def stamp_cells_footer(ctx, fig, wells=None) -> str:
     """On a nanowell dataset, write the cell plot's footer onto *fig* (and return it); ``""`` elsewhere.
 
@@ -185,7 +198,7 @@ def stamp_cells_footer(ctx, fig, wells=None) -> str:
 
     axes = getattr(fig, "axes", [])
     muted = tokens_for(axes[0])[2] if axes else None
-    follows_theme(fig.text(0.01, 0.002, line, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID), muted=True)
+    write_footer(fig, line, muted)
     return line
 
 

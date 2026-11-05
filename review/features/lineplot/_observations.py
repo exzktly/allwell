@@ -21,7 +21,7 @@ LEAF = "Line Graphs"
 def draw(ctx, ax_mean, ax_frac, ax_n, ax_cdf, legend_kw: dict) -> bool:
     """Draw the panels under Nanowells; ``False`` (nothing drawn) when the leaf draws cells."""
     from review.core.observation_band import (
-        FOLD_CHANGE_NOT_APPLIED, FOOTER_GID, chosen_metric, effective_observations, nanowell_table_for,
+        FOLD_CHANGE_NOT_APPLIED, FOOTER_GID, chosen_metric, effective_observations, nanowell_table_for, write_footer,
     )
     from review.core.plot_style import tokens_for
     from review.data.observations import observation_groups
@@ -84,5 +84,5 @@ def draw(ctx, ax_mean, ax_frac, ax_n, ax_cdf, legend_kw: dict) -> bool:
         ctx.notify.set_status(f"Observations: nanowells · {used:,} of {total:,} nanowell values used")
     if _fc.fold_change_state(ctx).active:
         lines.append(FOLD_CHANGE_NOT_APPLIED)
-    follows_theme(fig.text(0.01, 0.002, "\n".join(lines), ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID), muted=True)
+    write_footer(fig, "\n".join(lines), muted)
     return True

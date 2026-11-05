@@ -9,8 +9,6 @@ a replicate. Rows come from the Nanowells feature through ``review/data/observat
 
 from __future__ import annotations
 
-from widgets.plot_card import follows_theme
-
 from domain.tp_match import tp_close
 
 from review.domain.observation import NANOWELLS
@@ -58,7 +56,7 @@ def nanowell_groups(ctx, tp_filter) -> tuple[list, str, str] | None:
 
 def label_and_footer(fig, label: str, footer: str) -> None:
     """Name the metric on every value axis and write the footer, after the tab's renderer has drawn."""
-    from review.core.observation_band import FOOTER_GID
+    from review.core.observation_band import FOOTER_GID, write_footer
     from review.core.plot_style import tokens_for
 
     for text in [t for t in fig.texts if t.get_gid() == FOOTER_GID]:
@@ -69,5 +67,5 @@ def label_and_footer(fig, label: str, footer: str) -> None:
         if ax.get_xlabel():
             ax.set_xlabel(label)
     muted = tokens_for(fig.axes[0])[2] if fig.axes else None
-    follows_theme(fig.text(0.01, 0.002, footer, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID), muted=True)
+    write_footer(fig, footer, muted)
 

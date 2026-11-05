@@ -130,6 +130,8 @@ def redraw(ctx, page: str) -> None:
     groups = scatter_groups(ctx)
     table = nanowell_observations(ctx, [w for g in groups for w in g.wells]) if groups else None
     if table is None or not groups:
+        if page == "cells":
+            ctx.runtime.scatter.gate_render = []
         ax.set_axis_off()
         follows_theme(ax.text(0.5, 0.5, "No wells selected — nothing to plot." if not groups else
                 "No nanowell tables for the selected wells.", transform=ax.transAxes, ha="center", va="center",
@@ -151,10 +153,37 @@ def redraw(ctx, page: str) -> None:
     ax.grid(True, alpha=0.3, color=grid)
     if any(len(s.x) for s in drawn.series):
         ax.legend(loc="best", fontsize=8, framealpha=0.0, facecolor="none")
+    if page == "cells":
+        _paint_nanowell_gates(ctx, ax, drawn, x_key, y_key, muted)
     footer = "\n".join([drawn.footer, *drawn.notes])
     follows_theme(fig.text(0.01, 0.005, footer, ha="left", va="bottom", fontsize=7, color=muted, gid="observations_footer"), muted=True)
     apply_export_style_to_current(ctx, fig, canvas)
+    if page == "cells":
+        # ``ax.clear()`` above voided any armed RectangleSelector; rebuild it on the fresh axes.
+        from review.features.scatter.gating import refresh_gate_selector
+        refresh_gate_selector(ctx)
     canvas.draw_idle()
+
+
+def _paint_nanowell_gates(ctx, ax, drawn, x_key: str, y_key: str, ink) -> None:
+    """Draw the stored scatter gates over the per-nanowell points, as the cell scatter does over cells.
+
+    The axes are named by the same ``nw::<key>`` columns the per-cell "Nanowell ▸" pickers use, so a gate drawn
+    here is stamped with them (``gating._on_gate_drawn`` reads ``interaction_cache``) and means the same box in
+    the same space wherever it is drawn: a gate on nanowell count × brightness shows on this plot and on a cell
+    plot of "Nanowell ▸ count" × "Nanowell ▸ brightness", and on no other axis pair. Without this the redraw
+    that follows a drawn gate cleared it from the screen, and stamped it with no columns at all.
+
+    Each label's percentage is of the group's plotted nanowells, the population the box was drawn over.
+    """
+    from review.data.observations import nanowell_cell_column
+    from review.features.scatter.gating import paint_gates
+
+    cols = (nanowell_cell_column(x_key), nanowell_cell_column(y_key))
+    ctx.runtime.scatter.interaction_cache = {"points": [], "col_x": cols[0], "col_y": cols[1]}
+    data = {s.label: {"x": s.x, "y": s.y, "color": s.color} for s in drawn.series if len(s.x)}
+    # No per-timepoint split in the label: one line per group (or one percentage for one group).
+    paint_gates(ctx, [(ax, data, [], ink, True)], cols=cols)
 
 
 #: The section and label prefix of a cell axis that is the cell's own nanowell's metric.

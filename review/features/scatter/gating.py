@@ -342,7 +342,7 @@ def _pct(xs: np.ndarray, ys: np.ndarray, gate: dict[str, float]):
     return 100.0 * nin / tot, nin, tot
 
 
-def compute_gate_inclusion(df, gates, ratios=None) -> np.ndarray:
+def compute_gate_inclusion(df, gates, ratios=None, nanowell_values=None) -> np.ndarray:
     """Boolean array over *df*'s rows: ``True`` for any cell inside ANY gate.
 
     The Cell Gating tab uses this to turn the interactive scatter gates into the
@@ -356,11 +356,23 @@ def compute_gate_inclusion(df, gates, ratios=None) -> np.ndarray:
     With no usable gates the mask is all-``False`` — the caller decides what an
     empty gate set means (the worker treats "mode on, no gates" as no
     restriction before reaching here).
+
+    A gate drawn on a nanowell metric names ``nw::<key>`` columns, which no cell
+    table holds. *nanowell_values* (``observations.nanowell_gate_values``) are
+    the nanowell rows to read them from: each cell takes its own nanowell's value
+    at its timepoint, joined onto a copy of *df* (``join_nanowell_columns``).
+    Without them such a gate contributes nothing, as any gate on a column the
+    rows lack does.
     """
     from review.data.data_loading import resolve_value_series
+    from review.data.observations import join_nanowell_columns
 
     n = len(df)
     inside = np.zeros(n, dtype=bool)
+    if nanowell_values is not None:
+        wanted = [c for g in gates or [] for c in (g.get("x_col"), g.get("y_col"))
+                  if c and c not in df.columns]
+        df = join_nanowell_columns(df, nanowell_values, wanted)
     for gate in gates or []:
         x_col = gate.get("x_col")
         y_col = gate.get("y_col")

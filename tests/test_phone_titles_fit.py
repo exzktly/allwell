@@ -273,3 +273,32 @@ def test_a_second_fit_does_not_break_an_already_broken_x_label_again():
     once = ax.xaxis.label.get_text()
     plot_style._fit_labels_to_phone(fig)
     assert ax.xaxis.label.get_text() == once
+
+
+def _overlap_px(a, b) -> float:
+    return min(min(a.x1, b.x1) - max(a.x0, b.x0), min(a.y1, b.y1) - max(a.y0, b.y0))
+
+
+def test_a_footer_stamped_after_the_layout_is_kept_clear_of_the_x_label(phone, monkeypatch):
+    """The Distribution page stamps its "Observations: cells · pooled …" footer
+    after the plot has been styled, which is after phone layout reserved room for
+    figure text — so the footer was drawn across the x-label above it."""
+    monkeypatch.setattr(plot_style, "figure_prefs", lambda ctx, fig: {})
+    fig = Figure(figsize=(4.06, 7.96), dpi=100)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(111)
+    fig.subplots_adjust(bottom=0.12)
+    ax.set_xlabel("GFP mean intensity", fontsize=14)
+    ax.hist([10, 11, 11, 12, 13])
+    plot_style._apply_layout_engine(fig, {})
+    footer = fig.text(0.01, 0.002, "Observations: cells · pooled from 3-4 occupied nanowells per well",
+                      ha="left", va="bottom", fontsize=7)
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    assert _overlap_px(footer.get_window_extent(renderer),
+                       ax.xaxis.label.get_window_extent(renderer)) > 2, \
+        "the fixture must overlap to prove anything"
+    plot_style.relayout(None, fig)
+    fig.canvas.draw()
+    assert _overlap_px(footer.get_window_extent(renderer),
+                       ax.xaxis.label.get_window_extent(renderer)) <= 0

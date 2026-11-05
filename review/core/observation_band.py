@@ -186,6 +186,9 @@ def stamp_cells_footer(ctx, fig, wells=None) -> str:
     axes = getattr(fig, "axes", [])
     muted = tokens_for(axes[0])[2] if axes else None
     follows_theme(fig.text(0.01, 0.002, line, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID), muted=True)
+    from review.core.plot_style import relayout
+
+    relayout(ctx, fig)        # the figure was laid out before this text existed
     return line
 
 

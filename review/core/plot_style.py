@@ -1933,6 +1933,20 @@ def _apply_layout_engine(fig, prefs: dict) -> None:
                 swallowed()  # was: pass (silent except)
 
 
+def relayout(ctx, fig) -> None:
+    """Lay *fig* out again, for text written on it after its style pass.
+
+    A footer is stamped once the plot is drawn, which is after
+    :func:`apply_export_style_to_current` has set the layout: the phone layout's
+    reservation for figure text (:func:`_figure_text_band`) never saw it, and the
+    footer was drawn across the x-label above it.
+    """
+    if fig is None:
+        return
+    _apply_layout_engine(fig, figure_prefs(ctx, fig))
+    _fit_ticks(fig)
+
+
 def apply_export_style_to_current(ctx, fig, canvas=None) -> None:
     # Per-figure view (shared publication style + *this* figure's axis limits,
     # log scaling and mark styling) so neither leaks across tabs. A8 teardown:

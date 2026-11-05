@@ -14385,11 +14385,24 @@ reads as an ordinary one. The per-cell Scatter's axis pickers and Multivariate's
 nanowell's metrics ("Nanowell ▸ …", the Nanowell family) through `with_nanowell_columns`.
 
 **Every observations footer is written by `observation_band.write_footer`** — the nanowell footers of Bar, Line,
-Distribution and Heat Map and the cells footer above — bottom-left, gid `FOOTER_GID`, wrapped to the figure's width.
-The wrap keeps a capture's shape: an unwrapped line wider than the figure was only clipped on screen, but a
-`bbox_inches="tight"` capture (Copy, Save to Saved Plots, an export) widened to take it in, leaving the plot pressed
-against the left edge of an image as wide as the footer. `tests/test_observation_footer_stays_in_the_figure.py`
-saves a Nanowells distribution with a long footer through the card and holds the helper as the only writer.
+Distribution, Heat Map and Scatter and the cells footer above — bottom-left, gid `FOOTER_GID`, wrapped to the
+figure's width, and then `plot_style.keep_panels_clear_of_footer` moves the panels clear of it. The wrap keeps a
+capture's shape: an unwrapped line wider than the figure was only clipped on screen, but a `bbox_inches="tight"`
+capture (Copy, Save to Saved Plots, an export) widened to take it in, leaving the plot pressed against the left
+edge of an image as wide as the footer. The room is needed because a footer belongs to no axes, so a renderer's
+fixed bottom margin left none for it and the footer was drawn across the x-axis label. With no layout engine the
+panels are squeezed upward together — each one's original position mapped from the span the panels occupy onto
+that span less the overlap, a divider-placed colour bar following its parent — until the lowest panel ink sits
+above the footer's top; positions are moved rather than `subplots_adjust` re-run, because the export-style pass
+pins every panel to the place it first saw (`_fixed_axes_position`). A panel whose position is no longer the one
+this left was placed again by its renderer and is squeezed from there, so redraws do not ratchet; the footer
+shrinking or going gives the room back, and the canvas's `resize_event` re-measures it. Under a layout engine the
+footer's band is kept out of the engine's rectangle (`_figure_text_band`). Only a figure carrying an observations
+footer is touched, so pages that lay out their own figure text keep their places. It runs from `write_footer`, from
+`stamp_cells_footer` when it removes a footer, and at the end of every desk `_apply_layout_engine`.
+`tests/test_observation_footer_stays_in_the_figure.py` saves a Nanowells distribution with a long footer through
+the card, measures the footer against every panel's ink on Distribution, Bar and Line, checks redraws do not
+move the panels again, and holds the helper as the only writer of a footer gid (by name or spelled out).
 
 **Images.** A nanowell run's `out.zip` holds no masks or overlays, only one stitched phase montage per well and
 timepoint. The Image Table draws a nanowell well as three kinds of *nanowell frame*, virtual channels named in

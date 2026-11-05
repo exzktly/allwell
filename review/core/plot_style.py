@@ -1871,6 +1871,106 @@ def _figure_text_band(fig) -> tuple | None:
     return (0.0, bottom, 1.0, top - bottom)
 
 
+#: The most of the panels' own height they give up to text written on the figure itself.
+_TEXT_BAND_MAX = 0.5
+
+
+def keep_panels_clear_of_footer(fig) -> None:
+    """Move *fig*'s panels up far enough that their ink clears its observations footer (and the figure's other text).
+
+    Only a figure carrying an observations footer (``observation_band.FOOTER_GID``) is touched — the pages that
+    lay out their own figure text, the Nanowells page's renderers among them, keep the places they chose. Such a
+    figure's other bottom text is cleared too, since the band is measured over all of it.
+
+    A footer written with ``fig.text`` is outside every axes, so nothing that lays the panels out sees it: a
+    renderer's fixed bottom margin had room for the x-axis label and none for the footer, and the footer's first
+    line was drawn across the label — more so once it wrapped onto more lines. Under a layout engine (constrained
+    or tight, at the desk by the user's choice or on a phone) the band the figure text occupies is kept out of the
+    engine's rectangle (:func:`_figure_text_band`). With no engine the panels are squeezed upward together — each
+    one's position mapped from the span they occupy onto that span less the overlap — until the lowest panel ink
+    (tick labels, the axis label) sits above the footer's top. Positions are moved rather than ``subplots_adjust``
+    re-run, because a renderer places some panels by hand and the export-style pass pins every panel to the place
+    it first saw (``_fixed_axes_position``); re-running the grid would snap those back to it.
+
+    Each panel's own placement is kept and taken back whenever the footer shrinks or goes: a panel whose position
+    is no longer the one this left was placed again by its renderer, and that place becomes the one to squeeze
+    from, so repeated redraws do not ratchet the panels upward. Run again whenever the canvas is resized, because
+    the footer keeps its size in pixels while the figure's changes.
+    """
+    if fig is None or fig.bbox.height <= 0:
+        return
+    from review.core.observation_band import FOOTER_GID
+
+    has_footer = any(t.get_gid() == FOOTER_GID and t.get_visible() and t.get_text() for t in fig.texts)
+    if has_footer:
+        _refit_footer_room_on_resize(fig)
+    engine = fig.get_layout_engine()
+    if engine is not None:
+        if not has_footer:
+            return          # the engine's rectangle is its own caller's (phone layout sets it)
+        band = _figure_text_band(fig)
+        with swallow("keep a plot's panels clear of its figure text"):
+            engine.set(rect=band if band is not None else (0.0, 0.0, 1.0, 1.0))
+        return
+    visible = [ax for ax in fig.axes if ax.get_visible()]
+    placed = [ax for ax in visible if _places_itself(ax)]
+    for ax in placed:
+        left = getattr(ax, "_aw_text_band_pos", None)
+        if left is not None and _same_box(ax.get_position(original=True), left):
+            ax.set_position(ax._aw_text_band_orig, which="original")
+        else:
+            ax._aw_text_band_orig = ax.get_position(original=True).frozen()
+        ax._aw_text_band_pos = None
+    band = _figure_text_band(fig) if has_footer else None
+    if band is None or band[1] <= 0.0 or not placed:
+        return
+    renderer = fig.canvas.get_renderer()
+    boxes = [ax.get_tightbbox(renderer) for ax in visible]
+    lowest = min(b.y0 for b in boxes if b is not None) / fig.bbox.height
+    lo = min(ax.get_position(original=True).y0 for ax in placed)
+    hi = max(ax.get_position(original=True).y1 for ax in placed)
+    if hi <= lo:
+        return
+    need = min(band[1] - lowest, (hi - lo) * _TEXT_BAND_MAX)
+    if need <= 0.0:
+        return
+    scale = (hi - lo - need) / (hi - lo)
+    for ax in placed:
+        x0, y0, w, h = ax.get_position(original=True).bounds
+        ax.set_position([x0, lo + need + (y0 - lo) * scale, w, h * scale], which="original")
+        ax._aw_text_band_pos = ax.get_position(original=True).frozen()
+
+
+def _places_itself(ax) -> bool:
+    """Whether moving *ax*'s own position moves it: true unless another axes' divider places it.
+
+    A colour bar appended with ``make_axes_locatable`` is positioned by its parent's divider, which reads the
+    parent's original position; moving the parent moves both, and the bar's own position is never read.
+    """
+    locator = ax.get_axes_locator()
+    if locator is None:
+        return True
+    divider = getattr(locator, "_axes_divider", None)
+    return getattr(divider, "_axes", None) is ax
+
+
+def _same_box(a, b) -> bool:
+    return all(math.isclose(p, q, abs_tol=1e-9) for p, q in zip(a.bounds, b.bounds))
+
+
+def _refit_footer_room_on_resize(fig) -> None:
+    """Re-run :func:`keep_panels_clear_of_footer` when *fig*'s canvas changes size (once per canvas)."""
+    canvas = getattr(fig, "canvas", None)
+    if canvas is None or not hasattr(canvas, "mpl_connect") or getattr(canvas, "_aw_text_band_cid", None) is not None:
+        return
+
+    def _on_resize(_event) -> None:
+        with swallow("keep a resized plot's panels clear of its figure text"):
+            keep_panels_clear_of_footer(fig)
+
+    canvas._aw_text_band_cid = canvas.mpl_connect("resize_event", _on_resize)
+
+
 def _apply_layout_engine(fig, prefs: dict) -> None:
     from core import phone_layout
     if phone_layout.is_on():
@@ -1929,6 +2029,8 @@ def _apply_layout_engine(fig, prefs: dict) -> None:
                 fig.tight_layout()
             except Exception:
                 swallowed()  # was: pass (silent except)
+    with swallow("keep a plot's panels clear of its figure text"):
+        keep_panels_clear_of_footer(fig)
 
 
 def apply_export_style_to_current(ctx, fig, canvas=None) -> None:

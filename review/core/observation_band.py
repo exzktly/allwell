@@ -171,10 +171,14 @@ def write_footer(fig, text: str, muted) -> None:
     a note wider than the figure ran off the canvas's right edge on screen, where it was merely clipped, and a
     ``bbox_inches="tight"`` capture — Copy, Save to Saved Plots, an export — then widened to take the whole line in,
     leaving the plot squeezed against the left edge of an image as wide as its longest footer line. Existing line
-    breaks are kept; only a line wider than the figure is broken further.
+    breaks are kept; only a line wider than the figure is broken further. The panels are then moved clear of it
+    (``plot_style.keep_panels_clear_of_footer``), so the footer is never drawn across the x-axis label.
     """
+    from review.core.plot_style import keep_panels_clear_of_footer
+
     follows_theme(fig.text(0.01, 0.002, text, ha="left", va="bottom", fontsize=7, color=muted, gid=FOOTER_GID,
                            wrap=True), muted=True)
+    keep_panels_clear_of_footer(fig)
 
 
 def stamp_cells_footer(ctx, fig, wells=None) -> str:
@@ -190,6 +194,10 @@ def stamp_cells_footer(ctx, fig, wells=None) -> str:
     for text in [t for t in getattr(fig, "texts", []) if t.get_gid() == FOOTER_GID]:
         text.remove()
     if fig is None or not is_nanowell_dataset(ctx):
+        if fig is not None:
+            from review.core.plot_style import keep_panels_clear_of_footer
+
+            keep_panels_clear_of_footer(fig)   # the footer just removed gives its room back
         return ""
     if wells is None:
         wells = getattr(getattr(ctx.state, "selection", None), "selected_wells", None) or ()

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QVBoxLayout, QWidg
 
 from review.data.nanowell_focus_gate import nanowell_dir, nanowell_focus_status
 from review.domain import nanowell_rim_focus as rfc
+from widgets.capped_label import CappedLabel
 from widgets.spin_box import SpinBox
 
 TOOLTIP = (
@@ -82,7 +83,7 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
     head_layout.addWidget(of, 1)
     head_layout.addStretch(1)
     layout.addWidget(head)
-    status = QLabel("", row)
+    status = CappedLabel("", row)
     status.setObjectName("Muted")
     status.setWordWrap(True)
     status.setMaximumWidth(text_width)

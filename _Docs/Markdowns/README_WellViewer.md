@@ -4372,7 +4372,14 @@ row, holding five actions:
   boxes by hand does not do this — an axis keeps the bounds it was last given
   until the plot is drawn again — which is what the button is for. It leaves
   the log scaling and the log base alone: an axis you set to logarithmic stays
-  logarithmic and simply chooses its own range. Settings persist across
+  logarithmic and simply chooses its own range.
+  **Colour limits**, in the same section, set the range of a plot's colour
+  scale, like MATLAB's `clim` — for example the Nanowells **Array** view's
+  filled nanowells, or the Spatial and Multivariate maps: values below the low
+  end take the first colour, values above the high end the last, and the colour
+  bar follows. Leave a box blank to keep the plot's own end. It applies to every
+  plot with a colour bar on that figure, and **Auto scale** clears it too. The
+  Heat Map has no Colour limits row: its range is set under **Display ▾**. Settings persist across
   redraws — and across the **Screen / Publication** switch, which decides
   colours and nothing else. **Show grid** in particular reaches the files you
   export: a figure saved, copied, filed in Saved Plots or sent through Batch

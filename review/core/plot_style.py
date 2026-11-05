@@ -287,6 +287,10 @@ DEFAULT_EXPORT_STYLE_PREFS = {
     "x_lim_max": "",
     "y_lim_min": "",
     "y_lim_max": "",
+    # The colour range of every colour-mapped plot on the figure that carries a colour bar (the Array view's
+    # nanowells, the Spatial and Multivariate maps), like MATLAB's ``clim``: blank keeps the plot's own end.
+    "c_lim_min": "",
+    "c_lim_max": "",
     "x_log": False,
     "y_log": False,
     # The base a log axis is drawn in, as the user typed it: "10", "2", "e", or
@@ -650,6 +654,7 @@ def _ensure_export_style_prefs(ctx) -> dict:
 # from it, so they follow the user across plates.
 AXIS_LIMIT_PREF_KEYS = frozenset({
     "x_lim_min", "x_lim_max", "y_lim_min", "y_lim_max",
+    "c_lim_min", "c_lim_max",
 })
 
 AXIS_SCOPED_PREF_KEYS = AXIS_LIMIT_PREF_KEYS | frozenset({
@@ -1210,7 +1215,56 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
 
         _hold_typed_limits(ax, *typed_limits)
 
+    _apply_colour_limits(fig, prefs)
     _apply_layout_engine(fig, prefs)
+
+
+def colour_mapped(fig) -> list:
+    """Every artist of *fig* whose colours come from a colour scale the reader is shown — an image or a collection
+    with a colour bar — and whose range its renderer has not claimed (``_aw_owns_clim``: the Heat Map, whose
+    Display ▾ sets its own)."""
+    out = []
+    for ax in fig.axes:
+        if getattr(ax, "_aw_colorbar", False):
+            continue
+        for artist in (*ax.images, *ax.collections):
+            if getattr(artist, "colorbar", None) is None or getattr(artist, "_aw_owns_clim", False):
+                continue
+            if artist.get_array() is None:
+                continue
+            out.append(artist)
+    return out
+
+
+def _apply_colour_limits(fig, prefs) -> None:
+    """Properties → Limits & Scale → Colour limits: the range of every colour-mapped plot on *fig*
+    (:func:`colour_mapped`), like MATLAB's ``clim``. A blank end keeps the range the plot chose itself, remembered
+    on the artist the first time this pass meets it so that blanking a typed end gives the plot's own back without
+    a redraw. A pair that is no range (low at or above high), or a non-positive low on a log colour scale, is left
+    as the plot drew it. Its colour bar follows the mappable."""
+    from matplotlib.colors import LogNorm
+
+    def typed(key: str) -> float | None:
+        try:
+            value = _to_float_or_none(prefs.get(key, ""))
+        except ValueError:
+            return None                          # half-typed text ("1e", "-") is no limit yet
+        return value if value is not None and math.isfinite(value) else None
+
+    lo, hi = typed("c_lim_min"), typed("c_lim_max")
+    for artist in colour_mapped(fig):
+        auto = getattr(artist, "_aw_auto_clim", None)
+        if auto is None:
+            auto = artist.get_clim()
+            artist._aw_auto_clim = auto
+        want_lo = auto[0] if lo is None else lo
+        want_hi = auto[1] if hi is None else hi
+        if want_lo is None or want_hi is None or not want_lo < want_hi:
+            want_lo, want_hi = auto
+        if isinstance(artist.norm, LogNorm) and want_lo is not None and want_lo <= 0:
+            want_lo = auto[0]
+        if (want_lo, want_hi) != tuple(artist.get_clim()):
+            artist.set_clim(want_lo, want_hi)
 
 
 def _type_scale(ax) -> float:

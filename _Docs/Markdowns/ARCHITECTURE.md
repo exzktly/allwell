@@ -20068,6 +20068,26 @@ indistinguishable from a button wired to nothing. The log toggles and the base
 are deliberately untouched — an axis drawn in log stays in log and merely picks
 its own bounds again.
 
+**Colour limits** (`c_lim_min` / `c_lim_max`, the *Colour limits* row of Limits &
+Scale) are MATLAB's `clim` for the figure: `plot_style._apply_colour_limits` runs
+at the end of `apply_export_style_prefs` and sets the range of every artist
+`colour_mapped(fig)` returns — an image or collection with a colour bar
+(`artist.colorbar`), outside a `_aw_colorbar` axes, and not marked
+`_aw_owns_clim`. The colour bar follows the mappable. A blank end keeps the
+range the plot chose, which the pass remembers on the artist
+(`_aw_auto_clim`) the first time it meets it, so blanking a typed end gives the
+plot's own end back without a redraw; a pair that is no range, half-typed text,
+or a non-positive low end on a `LogNorm` leaves the plot's own. The keys are in
+`AXIS_LIMIT_PREF_KEYS`, so they are per figure, cleared by **Auto scale** and
+dropped on a dataset switch with the X and Y limits, but they are not in the
+per-panel buckets: a colour scale belongs to the figure, not to a subplot. The
+Heat Map marks its image `_aw_owns_clim`, because Display ▾ owns its range
+(Auto / Global / typed, and the log norm), and the row is hidden there through
+the `colour_limits` facet of `_STYLE_FACETS_A_FIGURE_LACKS`
+(`tests/test_properties_hides_what_it_cannot_do.py` re-measures that it changes
+nothing). `tests/test_colour_limits.py` covers the pass, the Array view's
+filled nanowells through `render_array`, and the real sidebar's two fields.
+
 **The store is replaced, not edited, so nothing may hold a piece of it.**
 `view_state.restore` rebuilds `axis_prefs` as `{str(k): dict(v)}` and
 `reset_for_new_dataset` rebuilds it without the entries that emptied, so every

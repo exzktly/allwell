@@ -1835,6 +1835,17 @@ def _refit_on_resize(ctx, fig, canvas) -> None:
     canvas._aw_refit_cid = canvas.mpl_connect("resize_event", _on_resize)
 
 
+def _renderer_of(fig):
+    """A renderer to measure *fig*'s text with, whatever its canvas.
+
+    Batch Export draws its figures on a bare ``FigureCanvasBase``, which has no ``get_renderer``; matplotlib's
+    ``Figure._get_renderer`` makes one for any canvas (an Agg renderer at the figure's size and dpi)."""
+    canvas = getattr(fig, "canvas", None)
+    if canvas is not None and hasattr(canvas, "get_renderer"):
+        return canvas.get_renderer()
+    return fig._get_renderer()
+
+
 def _figure_text_band(fig) -> tuple | None:
     """``(left, bottom, width, height)`` of the figure left to the panels by its own text, or ``None`` for all of it.
 
@@ -1852,7 +1863,7 @@ def _figure_text_band(fig) -> tuple | None:
     height = fig.bbox.height
     if height <= 0:
         return None
-    renderer = fig.canvas.get_renderer()
+    renderer = _renderer_of(fig)
     bottom, top = 0.0, 1.0
     for text in texts:
         y = text.get_position()[1]
@@ -1924,7 +1935,7 @@ def keep_panels_clear_of_footer(fig) -> None:
     band = _figure_text_band(fig) if has_footer else None
     if band is None or band[1] <= 0.0 or not placed:
         return
-    renderer = fig.canvas.get_renderer()
+    renderer = _renderer_of(fig)
     boxes = [ax.get_tightbbox(renderer) for ax in visible]
     lowest = min(b.y0 for b in boxes if b is not None) / fig.bbox.height
     lo = min(ax.get_position(original=True).y0 for ax in placed)

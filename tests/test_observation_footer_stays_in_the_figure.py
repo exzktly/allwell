@@ -190,3 +190,22 @@ def test_under_a_layout_engine_the_footer_s_band_is_kept_out_of_its_rectangle():
     assert rect[1] > 0.0
     fig.canvas.draw()
     assert _overlap_px(fig) <= 0
+
+
+def test_a_figure_on_a_bare_canvas_is_cleared_too():
+    """Batch Export draws on a bare ``FigureCanvasBase``, which has no renderer of its own; its figures are the ones
+    that are written to disk, so they must be measured and cleared like the tabs' are."""
+    from matplotlib.backend_bases import FigureCanvasBase
+    from matplotlib.figure import Figure
+
+    from review.core.observation_band import write_footer
+
+    fig = Figure(figsize=(7.2, 5.4), dpi=100)
+    FigureCanvasBase(fig)
+    ax = fig.add_subplot()
+    fig.subplots_adjust(bottom=0.12)
+    ax.set_xlabel("Cell count", fontsize=14)
+    write_footer(fig, "Observations: nanowells\n" + LONG_NOTE, None)
+    renderer = fig._get_renderer()
+    footer = fig.texts[0].get_window_extent(renderer)
+    assert footer.y1 <= ax.get_tightbbox(renderer).y0

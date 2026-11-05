@@ -1014,7 +1014,7 @@ def cell_gating_on_threshold_frac_on_change(ctx) -> None:
         # ``_redraw`` only fans out to the default-scope plots (line /
         # distribution / heat map). Bar and scatter redraw via the fold-change
         # scope registry, so also emit ``plot_options_changed`` — otherwise a
-        # ThreshFracOn edit leaves the (now default) Bar Plots tab stale.
+        # ThreshFracOn edit leaves the Bar Plots tab stale.
         redraw_app(ctx)
         ctx.bus.plot_options_changed.emit(ctx.state.plot)
         # Mirror the new value onto Plotting's band quick-edit so it reflects

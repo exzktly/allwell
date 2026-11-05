@@ -1246,6 +1246,27 @@ def _features() -> list[FeatureDescriptor]:
 
         # ── Plotting sub-leaves (no rail entry; dispatch hooks only) ───────
         FeatureDescriptor(
+            name="Heat Map", parent="Plotting", build=_build_heatmap,
+            # The layout configurator sits in the main frame under the plate,
+            # which is its drag source while the page is focused.
+            rail_sections=(MAIN_RAIL_SECTION,
+                           RailSection("_heatmap_sidebar_frame",
+                                       build=_svc_heatmap_build_layout_sidebar)),
+            plate_drag_source=True,
+            on_activate=_activate_heatmap,
+            on_channel_changed=_channel_heatmap,
+            redraw=_redraw_heatmap,
+            view_state_io=_heatmap_view_state_io,
+            states=(StateSpec("heatmap", _state_heatmap),),
+            services={
+                "heatmap.refresh_layout_sidebar":
+                    _svc_heatmap_refresh_layout_sidebar,
+                "heatmap.well_dropped": _svc_heatmap_well_dropped,
+            },
+            # Well medians over nanowells under Observations: Nanowells (<feature>/_observations.py).
+            observations=("cells", "nanowells"),
+        ),
+        FeatureDescriptor(
             name="Bar Plots", parent="Plotting", build=_build_barplot,
             rail_sections=_MAIN,
             states=(StateSpec("bar", _state_bar),),
@@ -1291,27 +1312,6 @@ def _features() -> list[FeatureDescriptor]:
             redraw=_redraw_distribution,
             states=(StateSpec("distribution", _state_distribution),),
             # Each nanowell's value of the band's metric under Observations: Nanowells (distribution/_observations.py).
-            observations=("cells", "nanowells"),
-        ),
-        FeatureDescriptor(
-            name="Heat Map", parent="Plotting", build=_build_heatmap,
-            # The layout configurator sits in the main frame under the plate,
-            # which is its drag source while the page is focused.
-            rail_sections=(MAIN_RAIL_SECTION,
-                           RailSection("_heatmap_sidebar_frame",
-                                       build=_svc_heatmap_build_layout_sidebar)),
-            plate_drag_source=True,
-            on_activate=_activate_heatmap,
-            on_channel_changed=_channel_heatmap,
-            redraw=_redraw_heatmap,
-            view_state_io=_heatmap_view_state_io,
-            states=(StateSpec("heatmap", _state_heatmap),),
-            services={
-                "heatmap.refresh_layout_sidebar":
-                    _svc_heatmap_refresh_layout_sidebar,
-                "heatmap.well_dropped": _svc_heatmap_well_dropped,
-            },
-            # Well medians over nanowells under Observations: Nanowells (<feature>/_observations.py).
             observations=("cells", "nanowells"),
         ),
 

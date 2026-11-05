@@ -231,10 +231,56 @@ _FOOTER_LINES = 5
 #: Where the footer starts, above the Group-by notice ``plot_style`` writes at the figure's foot.
 _FOOTER_BASE = 0.035
 _LINE = 0.03
+#: A footer line's height in units of its type size, so two lines never touch: ``_LINE`` of a figure is 8 pt on a
+#: short (sideways) figure, where an 8 pt line has no room.
+_LINE_LEADING = 1.4
+#: The occupancy key's one row, in points: its type (:data:`ANNOTATION_PT` + 0.5) and a little leading.
+_KEY_PT = (ANNOTATION_PT + 0.5) * 1.5
+#: What stands over a panel's top edge that the key must clear, in points: a title's 6 pt pad and its 10 pt type, and
+#: with the wells' own titles (``pad=14``, room for the counts above the swarms) that pad.
+_TITLE_PT = 6 + 10 * 1.3
+_PANEL_TITLE_PT = 14 + 10 * 1.3
+#: The occupancy key's dots and their class names, in points: what its five entries need not to touch.
+_KEY_WIDTH_PT = 217.0
+#: One average glyph's width in units of its size, which errs wide for the digits and lower case a footer is.
+_GLYPH_EM = 0.55
 
 
-def render_distribution(fig, model: DistributionModel, *, selected=(), wrap_footer: bool = False,
-                        spacing: float = 1.0) -> HitMap:
+def _figure_pt(fig) -> tuple[float, float]:
+    """The figure's ``(width, height)`` in points: what a fixed size in points is measured against, so a size that
+    reads well on a wide figure is not taken from a narrow or short one as a share of it."""
+    w, h = fig.get_size_inches()
+    return float(w) * 72.0, float(h) * 72.0
+
+
+def _line_step(fig, size_pt: float = FOOTER_PT) -> float:
+    """The distance between two footer lines of *size_pt* type, as a share of the figure's height: ``_LINE`` wherever
+    the figure is tall enough for it, more where it is not."""
+    return max(_LINE, _LINE_LEADING * size_pt / max(_figure_pt(fig)[1], 1.0))
+
+
+def _head_room(fig, *, floor_top: float, title_pt: float = _TITLE_PT) -> tuple[float, float, float]:
+    """``(top, key_bottom, key_height)``, as shares of the figure's height, for panels with a *title_pt* title over
+    them and the occupancy key above that.
+
+    *floor_top* is where the panels' tops sit on a figure tall enough for them; on a short one they come down just
+    far enough that the key, the title and the panels' counts each have their own band instead of the key being
+    written over the titles."""
+    h_pt = max(_figure_pt(fig)[1], 1.0)
+    key_h = max(_LINE * 0.9, _KEY_PT / h_pt)
+    top = min(floor_top, 0.995 - key_h - title_pt / h_pt)
+    return top, min(0.995 - key_h, max(0.955, top + title_pt / h_pt)), key_h
+
+
+def _fit_text(text: str, width_pt: float, size_pt: float, *, em: float = _GLYPH_EM) -> str:
+    """*text* broken into lines that fit *width_pt* at *size_pt*; every word kept."""
+    import textwrap
+
+    chars = max(8, int(width_pt / (em * size_pt)))
+    return "\n".join(textwrap.wrap(text, chars)) or text
+
+
+def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: float = 1.0) -> HitMap:
     """Draw *model* on *fig* (cleared first) and return where every dot went.
 
     *spacing* is Properties → Beeswarm → Point spacing: the distance between neighbouring dots as a multiple of a
@@ -245,8 +291,9 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), wrap_foot
     hits = HitMap()
     panels = model.panels[:MAX_PANELS]
     rows, cols = _grid(len(panels))
-    bottom = 0.10 + _FOOTER_BASE + _LINE * _FOOTER_LINES
-    fig.subplots_adjust(left=0.07, right=0.98, top=0.86, bottom=bottom, wspace=0.12 if rows * cols > 1 else 0.2,
+    bottom = 0.10 + _FOOTER_BASE + _line_step(fig) * _FOOTER_LINES
+    top, key_bottom, key_h = _head_room(fig, floor_top=0.86, title_pt=_PANEL_TITLE_PT)
+    fig.subplots_adjust(left=0.07, right=0.98, top=top, bottom=bottom, wspace=0.12 if rows * cols > 1 else 0.2,
                         hspace=0.62)
     axes = [fig.add_subplot(rows, cols, i + 1) for i in range(len(panels))] if panels else []
     rings = {tuple(site): colour for site, colour in zip(map(tuple, selected), selection_colours())}
@@ -272,21 +319,21 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), wrap_foot
     _footer(fig, model, inks, panels, densities, hidden,
             crowded=any(getattr(ax, "_aw_crowded", False) for ax in axes),
             counts_hidden=any(getattr(ax, "_aw_counts_hidden", False) for ax in axes),
-            wrap_footer=wrap_footer)
+            key_at=(key_bottom, key_h))
     return hits
 
 
-def _wrapped_to_figure(fig, lines: list) -> tuple[list, int]:
+def _wrapped_to_figure(fig, lines: list, *, left: float = 0.07, size_pt: float = FOOTER_PT) -> tuple[list, int]:
     """*lines* broken to the figure's width, and how many of them the first line became.
 
-    At a desk every footer line fits its figure; on a phone the longer ones ran off the right edge ("Timepoints: 0 h
-    t00 · 1 h t01 · …"), so the caller asks for the wrap (``render_distribution(wrap_footer=True)``). Each piece
-    becomes a line of its own, so the footer's spacing and the room it reserves follow. A character of the footer's
-    type is taken as about 0.55 of its size wide."""
+    A footer line written from *left* (a share of the figure's width) at *size_pt* runs off the right edge of a narrow
+    figure ("Timepoints: 0 h t00 · 1 h t01 · …"), so every footer is broken to what the figure holds. Each piece
+    becomes a line of its own, so the footer's spacing and the room it reserves follow. The width is the figure's own,
+    in points, so no view needs to be told it is on a phone: a figure wide enough for a line leaves it whole."""
     import textwrap
 
-    width_pt = fig.get_size_inches()[0] * 72 * (1 - 0.07 - 0.02)
-    chars = max(20, int(width_pt / (0.55 * FOOTER_PT)))
+    width_pt = _figure_pt(fig)[0] * (1 - left - 0.02)
+    chars = max(20, int(width_pt / (_GLYPH_EM * size_pt)))
     out, first = [], 1
     for k, line in enumerate(lines):
         parts = textwrap.wrap(line, chars) or [line]
@@ -538,7 +585,7 @@ def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:
 
 
 def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden: int, *,
-            crowded: bool = False, counts_hidden: bool = False, wrap_footer: bool = False) -> None:
+            crowded: bool = False, counts_hidden: bool = False, key_at: tuple[float, float] | None = None) -> None:
     """The sums the figure owes the reader, over the panels drawn; what was left out is stated beside them."""
 
     _bg, ink, muted = inks
@@ -575,14 +622,15 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     if densities:
         lines.append("Sets of more than four wells are drawn as densities with each well's median; select fewer "
                      "wells to see and click single nanowells.")
-    lines, line1_parts = _wrapped_to_figure(fig, lines) if wrap_footer else (lines, 1)
+    lines, line1_parts = _wrapped_to_figure(fig, lines)
+    step = _line_step(fig)
     if len(lines) > _FOOTER_LINES:
         # Every line here is owed to the reader — a panel not drawn, values not drawn as dots — so the footer
         # grows to hold them rather than cutting the last (roll-up review X11).
-        fig.subplots_adjust(bottom=0.10 + _FOOTER_BASE + _LINE * len(lines))
+        fig.subplots_adjust(bottom=0.10 + _FOOTER_BASE + step * len(lines))
     for i, text in enumerate(reversed(lines)):
         first = (len(lines) - 1 - i) < line1_parts
-        _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=ink if first else muted,
+        _ink(fig.text(0.07, _FOOTER_BASE + i * step, text, fontsize=FOOTER_PT, color=ink if first else muted,
                       gid="nw-footer-used" if first else "nw-footer"), muted=not first)
     if model.decoration.colours:
         # Coloured by a sample variable: the dots decode by its values, and the occupancy key would decode colours
@@ -592,7 +640,7 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     # The occupancy key (U5): the colours decode only with it, and its title names the baseline in use.
     _occupancy_key(fig, "Cells at baseline",
                    baseline=baseline_text(model.baseline),
-                   starting=model.starting)
+                   starting=model.starting, at=key_at)
 
 
 def _value_key(fig, decoration) -> None:
@@ -617,14 +665,27 @@ def _value_key(fig, decoration) -> None:
         _ink(text, muted=True)
 
 
-def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None)) -> None:
+def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None),
+                   at: tuple[float, float] | None = None) -> None:
     """The occupancy colours' key at the figure's top right: every figure coloured by occupancy class carries one,
     or its colours decode to nothing. Its title reads ``title (baseline; faint: filtered out):``, each part in the
     brackets only when it applies; *starting* is the ``(minimum, maximum)`` count at the baseline the *Subset*
-    holds every kept nanowell to (``Subset.start_bounds``), whose excluded classes are drawn faint."""
+    holds every kept nanowell to (``Subset.start_bounds``), whose excluded classes are drawn faint.
+
+    *at* is the key's ``(bottom, height)`` as shares of the figure's height (:func:`_head_room`): above the panels'
+    titles whatever the figure's height. Without one the key sits where a tall figure puts it."""
     from widgets.plot_card import theme_paired_colours
 
-    key = fig.add_axes([0.6, 0.955, 0.38, _LINE * 0.9])        # top right, above the panels' titles
+    bottom, height = at if at is not None else _head_room(fig, floor_top=0.88)[1:]
+    # Five dots with their class beside each, and the title ending where the first begins: 217 pt holds them at the key's
+    # type with a dot's room between, so a narrow figure's key takes more of its width than 38% rather than touching.
+    width = min(0.96, max(0.38, _KEY_WIDTH_PT / max(_figure_pt(fig)[0], 1.0)))
+    key = fig.add_axes([0.98 - width, bottom, width, height])  # top right, above the panels' titles
+    # Phone layout hands the panels to constrained layout, which keeps clear of text written on the figure and knows
+    # nothing of an axes added by hand (``plot_style._figure_text_band``). A blank line of the key's own height at
+    # the key's own place tells it the band is taken, so the panels' titles start below the key rather than under it.
+    fig.text(0.98, bottom + height / 2, " ", fontsize=ANNOTATION_PT + 0.5, ha="right", va="center", alpha=0.0,
+             color=_inks(key)[1], gid="nw-legend-band")
     key.set_axis_off()
     key.set_xlim(0, 10)
     key.set_ylim(0, 1)
@@ -1040,6 +1101,9 @@ def _pack(items, width_pt: float, size_pt: float) -> list[str]:
     return lines
 
 
+_EXT_TOP_DEFAULT = 0.5
+
+
 @dataclass
 class _ExtremesLayout:
     """Where the Extremes montage goes, in inches: the crop's side and whether the two blocks sit side by side."""
@@ -1047,6 +1111,8 @@ class _ExtremesLayout:
     beside: bool
     #: Whether the crops are large enough for their metrics, written inside each crop along its foot.
     metrics_shown: bool = True
+    #: The room above the montage, in inches: the figure's title, which is as many lines as the figure's width needs.
+    top: float = _EXT_TOP_DEFAULT
 
 
 #: The smallest crop side (inches) that holds its metrics legibly: below it, only the fold change is written on the
@@ -1055,9 +1121,10 @@ _EXT_MIN_SIDE_WITH_METRICS = 0.6
 #: Inches: the row labels' column, the space between crops, the room above the montage and the caption below it, a
 #: block's title and timepoint headers, and the gap between two blocks side by side.
 _EXT_LABELS_W, _EXT_GAP, _EXT_TOP, _EXT_BOTTOM, _EXT_HEADER, _EXT_BLOCK_GAP = 0.8, 0.05, 0.5, 0.45, 0.38, 0.25
+_EXT_TITLE_PT = 10.0
 
 
-def _extremes_layout(fig, blocks, cols: int) -> _ExtremesLayout:
+def _extremes_layout(fig, blocks, cols: int, top: float = _EXT_TOP) -> _ExtremesLayout:
     """The largest square crop the figure holds, with the Largest and Smallest blocks side by side or one above the
     other, whichever gives the larger crops.
 
@@ -1071,10 +1138,10 @@ def _extremes_layout(fig, blocks, cols: int) -> _ExtremesLayout:
         n_blocks = len(blocks) if beside else 1
         per_col = (w - 0.2 - n_blocks * _EXT_LABELS_W - (n_blocks - 1) * _EXT_BLOCK_GAP) / (cols * n_blocks)
         n_rows = max(rows) if beside else sum(rows)
-        per_row = (h - _EXT_TOP - _EXT_BOTTOM - (1 if beside else len(blocks)) * _EXT_HEADER) / n_rows
+        per_row = (h - top - _EXT_BOTTOM - (1 if beside else len(blocks)) * _EXT_HEADER) / n_rows
         side = max(min(per_col, per_row) - _EXT_GAP, 0.2)
         if best is None or side > best.side + 1e-6:
-            best = _ExtremesLayout(side, beside, side >= _EXT_MIN_SIDE_WITH_METRICS)
+            best = _ExtremesLayout(side, beside, side >= _EXT_MIN_SIDE_WITH_METRICS, top)
     return best
 
 
@@ -1110,7 +1177,11 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
     metrics = metrics or {}
     every = [crop for row in model.largest + model.smallest
              for tp, crop in (crops.get(row.site) or {}).items() if tp in columns or tp == ""]
-    layout = _extremes_layout(fig, blocks, len(columns))
+    # The title is broken to the figure's width, and the montage starts below however many lines that is.
+    heading = _fit_text(f"{model.name or model.well} · the nanowells with the largest and smallest {label.lower()}",
+                      fig.get_size_inches()[0] * 72 * 0.96, _EXT_TITLE_PT)
+    heading_h = 0.2 + (heading.count("\n") + 1) * _EXT_TITLE_PT * 1.25 / 72
+    layout = _extremes_layout(fig, blocks, len(columns), max(_EXT_TOP, heading_h + 0.05))
     draw = _ExtremesDrawing(fig, layout, model, metrics, crop_scale(every, display_range), cells, ink, faint)
     draw.numbers = numbers
     hits: dict = {}
@@ -1126,9 +1197,8 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
                 hits[ax] = row.site
                 if numbers:
                     draw.crop_text(ax, row, tp)
-    _ink(fig.text(0.02, 1 - 0.2 / draw.h_in,
-                  f"{model.name or model.well} · the nanowells with the largest and smallest {label.lower()}",
-                  fontsize=10, color=ink, va="top", gid="nw-extremes-title"))
+    _ink(fig.text(0.02, 1 - 0.2 / draw.h_in, heading, fontsize=_EXT_TITLE_PT, color=ink, va="top",
+                  gid="nw-extremes-title"))
     _ink(fig.text(0.02, 0.012, draw.caption(label, columns, note, image_channel), fontsize=7, color=faint,
                   gid="nw-extremes-caption", wrap=True), muted=True)
     return hits
@@ -1165,7 +1235,8 @@ class _ExtremesDrawing:
         total_h = ((1 if self.layout.beside else len(blocks)) * _EXT_HEADER
                    + (max(rows) if self.layout.beside else sum(rows)) * self.row_h)
         x_start = max((self.w_in - total_w) / 2, 0.1)
-        y_top = self.h_in - _EXT_TOP - max((self.h_in - _EXT_TOP - _EXT_BOTTOM - total_h) / 2, 0.0)
+        top = self.layout.top
+        y_top = self.h_in - top - max((self.h_in - top - _EXT_BOTTOM - total_h) / 2, 0.0)
         if self.layout.beside:
             return x_start + k * (block_w + _EXT_BLOCK_GAP), y_top
         return x_start, y_top - sum(_EXT_HEADER + n * self.row_h for n in rows[:k])
@@ -1202,8 +1273,10 @@ class _ExtremesDrawing:
         else:
             self.pending = self.pending or site_crops is None
             said = "Cutting…" if site_crops is None else (crop.note if crop is not None else f"No row at {tp}.")
-            _ink(ax.text(0.5, 0.5, said, ha="center", va="center", wrap=True, fontsize=5.5, transform=ax.transAxes,
-                         color=self.faint, gid="nw-extremes-missing"), muted=True)
+            # Broken to the crop's own width: ``wrap=True`` breaks at the figure's, and the sentence ran across its
+            # neighbours.
+            _ink(ax.text(0.5, 0.5, _fit_text(said, s * 72 * 0.9, 5.5), ha="center", va="center", fontsize=5.5,
+                         transform=ax.transAxes, color=self.faint, gid="nw-extremes-missing"), muted=True)
         if tp == self.model.timepoint:
             for spine in ax.spines.values():
                 spine.set_linewidth(1.6)
@@ -1416,6 +1489,21 @@ def _anchor_owed(scene) -> bool:
     return scene.status != "ok" or "\n" in scene.anchor_text
 
 
+#: The Array view's footer: where it starts across the figure and its type size in points.
+_ARRAY_LEFT, _ARRAY_FOOT_PT = 0.03, 7.5
+#: What the colour bar takes to the axes' right besides its own width, in points: the tick numbers ("2.00"), their
+#: pads and the label's line, at the type the bar is drawn in.
+_BAR_PT = _PREF_PT * GRID_TYPE_SCALE * (1 + 5 * 0.6) + 12.0
+
+
+def _label_lines(fig) -> int:
+    """The footer lines the Array's labels sentence can take, at this figure's width: the longest sentence
+    :func:`_draw_labels` writes, broken as the footer breaks it."""
+    longest = ("Nanowell addresses and values are written in a nanowell drawn at least 99 px across: zoom in to read "
+               "them.")
+    return len(_wrapped_to_figure(fig, [longest], left=_ARRAY_LEFT, size_pt=_ARRAY_FOOT_PT)[0])
+
+
 def render_array(fig, scene, layers, *, label: str, image=None, image_note: str = "", selected=(),
                  region=None, note: str = "", dimmed=frozenset()) -> ArrayDrawn:
     """The Array view: one well at one timepoint, drawn with the *layers* that are on (``state.ArrayLayers``).
@@ -1432,11 +1520,20 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     in_well = scene.frame == "well"
     image = image if in_well and layers.image != "off" else None
     veiled = sum(1 for site in scene.sites.sites if tuple(site) in dimmed) if dimmed else 0
-    lines = array_footer(scene, layers, label=label, image_note=image_note, note=note, dimmed=veiled)
+    # Every footer line is broken to the figure's width (a long one ran off a narrow figure's edge), and the room the
+    # lines take follows from the pieces.
+    lines, head_parts = _wrapped_to_figure(
+        fig, array_footer(scene, layers, label=label, image_note=image_note, note=note, dimmed=veiled),
+        left=_ARRAY_LEFT, size_pt=_ARRAY_FOOT_PT)
     # The Notes lines' room is reserved whether Notes is on or off, so turning it on writes into space that was
     # already there and the array neither moves nor shrinks (nor is covered: a box over its foot hid a row).
-    notes = array_notes(scene, layers, label=label)
-    right = 0.62 if layers.record else 0.86
+    notes, _n = _wrapped_to_figure(fig, array_notes(scene, layers, label=label), left=_ARRAY_LEFT,
+                                   size_pt=_ARRAY_FOOT_PT)
+    step = _line_step(fig, _ARRAY_FOOT_PT)
+    # The colour bar's tick numbers and label sit to the axes' right, and take the room they need in points: a share
+    # of the figure's width left them, on a narrow figure, with the label on the figure's edge.
+    bar_room = 0.024 + _BAR_PT / max(_figure_pt(fig)[0], 1.0) + 0.01
+    right = 0.62 if layers.record else min(0.86, 0.99 - bar_room)
     # The key sits above the axes, one row per KEY_COLUMNS entries: the axes start lower for each row past the first,
     # or a key naming many causes ran off the top of the figure.
     entries = (key_entries(scene.sites, colour=layers.colour, styles=_STATE_STYLE, why=scene.why, dimmed=veiled)
@@ -1444,7 +1541,8 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     key_rows = -(-len(entries) // KEY_COLUMNS)
     drawn = _array_axes(fig, scene, image, region, right=right, top=0.92 - max(key_rows - 1, 0) * _KEY_ROW,
                         bottom=_FOOTER_BASE + (len(lines) + len(notes)
-                                               + (1 if layers.addresses or layers.values else 0) + 0.5) * _LINE)
+                                               + (_label_lines(fig) if layers.addresses or layers.values else 0)
+                                               + 0.5) * step)
     ax = drawn.ax
     drawn.sites, drawn.scene, drawn.label = scene.sites, scene, label
     ax._aw_hover_label = _hover_label(scene)
@@ -1462,8 +1560,9 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     if (layers.addresses or layers.values) and len(scene.sites):
         filled = (np.isfinite(np.asarray(scene.sites.values, dtype=float))     # as _fill_by_metric fills them
                   if layers.nanowells and layers.colour == "metric" else None)
-        lines += _draw_labels(fig, ax, drawn, scene.sites, addresses=layers.addresses, values=layers.values,
-                              why=scene.why, filled=filled)
+        lines += _wrapped_to_figure(
+            fig, _draw_labels(fig, ax, drawn, scene.sites, addresses=layers.addresses, values=layers.values,
+                              why=scene.why, filled=filled), left=_ARRAY_LEFT, size_pt=_ARRAY_FOOT_PT)[0]
     if in_well and layers.anchor and scene.anchor is not None:
         _draw_anchor(ax, drawn, scene.anchor)
     _ink(ax.set_title(f"{scene.name or scene.well} · {scene.timepoint}", fontsize=9, loc="left", color=ink))
@@ -1471,14 +1570,14 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     # the reserved room at the foot, so turning Notes on never moves a line being read (UX review, round 3).
     top = len(lines) + len(notes) - 1
     for i, text in enumerate(lines):
-        _ink(fig.text(0.03, _FOOTER_BASE + (top - i) * _LINE, text, fontsize=7.5, color=ink if i == 0 else muted,
-                      gid="nw-array-footer"), muted=i != 0)
+        _ink(fig.text(_ARRAY_LEFT, _FOOTER_BASE + (top - i) * step, text, fontsize=_ARRAY_FOOT_PT,
+                      color=ink if i < head_parts else muted, gid="nw-array-footer"), muted=i >= head_parts)
     if layers.notes:
         for j, text in enumerate(notes):
-            _ink(fig.text(0.03, _FOOTER_BASE + (top - len(lines) - j) * _LINE, text, fontsize=7.5, color=muted,
-                          gid="nw-array-notes"), muted=True)
+            _ink(fig.text(_ARRAY_LEFT, _FOOTER_BASE + (top - len(lines) - j) * step, text, fontsize=_ARRAY_FOOT_PT,
+                          color=muted, gid="nw-array-notes"), muted=True)
     if layers.record:
-        _draw_record(fig, scene.record, right + 0.08, ink, muted)
+        _draw_record(fig, scene.record, right + max(0.08, bar_room), ink, muted)
     return drawn
 
 
@@ -1750,15 +1849,44 @@ def _draw_labels(fig, ax, drawn, sites, *, addresses: bool, values: bool, why: d
     if not show.any():
         return [f"Nanowell {what} are written in a nanowell drawn at least {MIN_LABEL_DIAMETER_PX} px across: zoom "
                 "in to read them."]
-    for k in np.nonzero(show)[0]:
-        lines = labels[k].count("\n") + 1
-        # Two lines share the height one line had, so each is a little smaller.
-        size = diameter[k] * (0.22 if lines == 1 else 0.17) * 72.0 / fig.dpi
+    shown = np.nonzero(show)[0]
+    sizes = np.array([max(5.0, min(8.0, diameter[k] * (0.22 if labels[k].count("\n") == 0 else 0.17) * 72.0 / fig.dpi))
+                      for k in shown])
+    # Two labels written over one another read as neither: where a label would overlap one already written, it is
+    # left out, and the footer says how many (the nanowell is still there, and a click still finds it).
+    px_per_pt = fig.dpi / 72.0
+    scale_px = drawn.size_px[0] / max(x1 - x0, 1e-9)
+    widths = np.array([max(len(part) for part in labels[k].split("\n")) for k in shown]) * _LABEL_EM * sizes * px_per_pt
+    heights = np.array([labels[k].count("\n") + 1 for k in shown]) * _LABEL_LEADING * sizes * px_per_pt
+    kept = _spaced(sites.x[shown] * scale_px, sites.y[shown] * scale_px, widths, heights, pad=2.0)
+    for k, size, keep in zip(shown, sizes, kept):
+        if not keep:
+            continue
         backed = hatched[k] and not filled[k]
         ax.text(sites.x[k], sites.y[k], labels[k], ha="center", va="center", clip_on=True, zorder=6,
-                fontsize=max(5.0, min(8.0, size)), color=LABEL_COLOUR, linespacing=1.0, gid="nw-array-address",
+                fontsize=size, color=LABEL_COLOUR, linespacing=1.0, gid="nw-array-address",
                 path_effects=[] if filled[k] or backed else halo, bbox=backing if backed else None)
+    if not kept.all():
+        left_out = int((~kept).sum())
+        return [f"{left_out:,} nanowell {what} left out where they would overlap their neighbours: zoom in to read "
+                "them."]
     return []
+
+
+#: A label's glyph width and a line's height in units of its type size, for placing labels without drawing them.
+_LABEL_EM, _LABEL_LEADING = 0.6, 1.15
+
+
+def _spaced(x, y, w, h, *, pad: float = 0.0):
+    """Which of the boxes (centres *x*, *y*; sizes *w*, *h*, all in pixels) are kept, taken in order: a box is kept
+    unless, with *pad* pixels added round it, it overlaps one already kept."""
+    keep = np.zeros(len(x), dtype=bool)
+    for i in range(len(x)):
+        if not keep.any() or not (
+                (np.abs(x[keep] - x[i]) < (w[keep] + w[i]) / 2 + pad)
+                & (np.abs(y[keep] - y[i]) < (h[keep] + h[i]) / 2 + pad)).any():
+            keep[i] = True
+    return keep
 
 
 def _draw_anchor(ax, drawn, anchor) -> None:
@@ -1817,7 +1945,8 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
     fig.clear()
     shown = panels[:MAX_PANELS]
     rows, cols = _grid(len(shown))
-    fig.subplots_adjust(left=0.07, right=0.98, top=0.88, bottom=0.10 + _FOOTER_BASE + 2 * _LINE, wspace=0.12,
+    top, key_bottom, key_h = _head_room(fig, floor_top=0.88)
+    fig.subplots_adjust(left=0.07, right=0.98, top=top, bottom=0.10 + _FOOTER_BASE + 2 * _line_step(fig), wspace=0.12,
                         hspace=0.42)
     axes = [fig.add_subplot(rows, cols, i + 1) for i in range(len(shown))]
     inks = _inks(axes[0] if axes else fig.add_subplot(1, 1, 1))
@@ -1883,7 +2012,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
         if i + cols >= len(axes) or mixed:
             _ink(ax.set_xlabel("Time (h)" if panel.in_hours else "Timepoint (order; times unknown)", color=ink))
     if axes:
-        _occupancy_key(fig, "Thick lines · cells at baseline")
+        _occupancy_key(fig, "Thick lines · cells at baseline", at=(key_bottom, key_h))
     lines = [(f"Fixed cohort: {drawn:,} nanowells with a value at every timepoint drawn, one line each; {without:,} "
               "without one at some timepoint not drawn." if cohort else
               f"{drawn:,} nanowells drawn, one line each; {without:,} with no value at any timepoint not drawn. "
@@ -1901,10 +2030,12 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
     if note:
         lines.insert(0, note)
     # The panels sit above however many lines the footer holds (two were reserved, and four or five ran into the
-    # time axis's label), as the Distribution view's footer does.
-    fig.subplots_adjust(bottom=0.10 + _FOOTER_BASE + _LINE * max(2, len(lines)))
+    # time axis's label), as the Distribution view's footer does; each line is broken to the figure's width.
+    lines, _first = _wrapped_to_figure(fig, lines)
+    step = _line_step(fig)
+    fig.subplots_adjust(bottom=0.10 + _FOOTER_BASE + step * max(2, len(lines)))
     for i, text in enumerate(reversed(lines)):
-        _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=muted, gid="nw-traj-footer"),
+        _ink(fig.text(0.07, _FOOTER_BASE + i * step, text, fontsize=FOOTER_PT, color=muted, gid="nw-traj-footer"),
              muted=True)
 
 
@@ -1964,7 +2095,18 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
     grid = fig.add_gridspec(2, 1, height_ratios=(3, 1), hspace=0.12)
     ax = fig.add_subplot(grid[0])
     share = fig.add_subplot(grid[1], sharex=ax)
-    fig.subplots_adjust(left=0.08, right=0.88, top=0.90, bottom=0.10 + _FOOTER_BASE + _LINE)
+    lines = ["Median and interquartile range over the nanowells with a value in each ring; the bars are the share "
+             "of each ring's nanowells without one. Descriptive: no test is made."]
+    if note:
+        lines.insert(0, note)
+    lines, _first = _wrapped_to_figure(fig, lines, left=0.08)
+    step = _line_step(fig)
+    # The ring label is broken to the width of the axes it sits under, and the second line is room the axes give up.
+    ring_label = _fit_text("Ring (lattice steps from the central nanowell)", _figure_pt(fig)[0] * (0.88 - 0.08),
+                           _PREF_PT * SINGLE_TYPE_SCALE)
+    extra = (ring_label.count("\n") * 1.2 * _PREF_PT * SINGLE_TYPE_SCALE) / max(_figure_pt(fig)[1], 1.0)
+    fig.subplots_adjust(left=0.08, right=0.88, top=0.90,
+                        bottom=0.10 + extra + _FOOTER_BASE + step * max(1, len(lines)))
     for panel in (ax, share):
         _prepare_axes(panel, SINGLE_TYPE_SCALE)
     _bg, ink, muted = _inks(ax)
@@ -1993,13 +2135,9 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
     share.yaxis.set_major_locator(MaxNLocator(nbins=2))
     share.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     share.xaxis.set_major_locator(MaxNLocator(integer=True))
-    share.set_xlabel("Ring (lattice steps from the central nanowell)", color=ink)
+    share.set_xlabel(ring_label, color=ink)
     share.grid(alpha=0.3)
     fig.align_ylabels([ax, share])
-    lines = ["Median and interquartile range over the nanowells with a value in each ring; the bars are the share "
-             "of each ring's nanowells without one. Descriptive: no test is made."]
-    if note:
-        lines.insert(0, note)
     for i, text in enumerate(reversed(lines)):
-        _ink(fig.text(0.08, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=muted, gid="nw-position-footer"),
+        _ink(fig.text(0.08, _FOOTER_BASE + i * step, text, fontsize=FOOTER_PT, color=muted, gid="nw-position-footer"),
              muted=True)

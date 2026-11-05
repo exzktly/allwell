@@ -23,6 +23,15 @@ from review.domain.numeric import is_number
 #: Headroom above the tallest bar-plus-error, so the error caps are not clipped.
 HEADROOM = 1.08
 
+#: Room, in points, kept above a bar that carries the ``n/a`` mark. The mark is
+#: drawn 7 pt above the bar's top and is a 7 pt line of text; measured on a
+#: rendered figure its box ends 13.5 pt above the bar, and this leaves 2.5 pt
+#: more than that. It is
+#: a length on the page, not a share of the axis: a share would be generous on a
+#: tall panel and clip on a short one, and the panels' heights are whatever the
+#: figure was given.
+MARK_ROOM_PT = 16.0
+
 #: The fraction panel's ceiling. A raw fraction cannot exceed 1, so the axis
 #: stops just above it. Under fold change it does not apply at all — the field
 #: is then a ratio or a difference.
@@ -50,8 +59,39 @@ def tops_lows(items, get_val, get_spread) -> tuple[list[float], list[float]]:
     return tops, lows
 
 
+def marked_tops(items, get_val, get_spread) -> list[float]:
+    """Heights of the bars that carry the ``n/a`` mark — value finite, spread NaN.
+
+    The same test ``controller.render_bar_items`` applies before it calls
+    ``mark_undefined_spread``: a spread of ``None`` or zero draws no mark, so it
+    reserves no room.
+    """
+    out: list[float] = []
+    for it in items:
+        v, s = get_val(it), get_spread(it)
+        if v is None or not math.isfinite(v):
+            continue
+        # ``it.spread`` may be a numpy scalar of any width, which
+        # ``isinstance(s, float)`` would miss; and ``is_number`` is no help
+        # here, because it rejects exactly the NaN being looked for.
+        try:
+            undefined = s is not None and math.isnan(float(s))
+        except (TypeError, ValueError):
+            undefined = False
+        if undefined:
+            out.append(float(v))
+    return out
+
+
+def _panel_height_pt(ax) -> float:
+    """The panel's height on the page in points, from the figure's own size."""
+    fig = ax.get_figure()
+    return ax.get_position().height * fig.get_figheight() * 72.0
+
+
 def autofit(ax, tops, lows, *, cap=None, floor_hi=None,
-            headroom: float = HEADROOM, pad_below: bool = False) -> None:
+            headroom: float = HEADROOM, pad_below: bool = False,
+            marks=()) -> None:
     """Set *ax*'s y-limits from *tops* / *lows*, on an honest zero baseline.
 
     The axis dips below zero only for genuine negatives, so a bar of zero
@@ -70,6 +110,12 @@ def autofit(ax, tops, lows, *, cap=None, floor_hi=None,
     overlay asks for it: a label on a negative bar is drawn *below* the bar, so
     the room it needs is at the bottom of the panel, and the top padding that
     serves every positive bar does nothing for it.
+
+    *marks* are the heights of bars carrying an ``n/a`` mark, which is drawn a
+    fixed number of points above the bar. The panel is made tall enough that
+    the highest one still has :data:`MARK_ROOM_PT` of room above it, and that
+    outranks *cap*: the mark of a fraction bar at 1.0 would otherwise sit above
+    the axes, over the panel's title.
     """
     if not tops:
         return
@@ -86,6 +132,12 @@ def autofit(ax, tops, lows, *, cap=None, floor_hi=None,
     hi = raw_hi + pad
     if cap is not None:
         hi = min(hi, cap)
+    if marks:
+        # Solve (hi - top) / (hi - lo) = room / height for the highest mark.
+        height = _panel_height_pt(ax)
+        share = MARK_ROOM_PT / height if height > 0 else 0.0
+        if 0.0 < share < 1.0:
+            hi = max(hi, lo + (max(marks) - lo) / (1.0 - share))
     if pad_below and lo < 0:
         lo -= pad
     if hi > lo:
@@ -119,27 +171,39 @@ def events_axis_is_integer(*, requested: bool | None, per_fov: bool,
     return integer and not fc_active
 
 
+def _marks(items, draw_err, get_val, get_spread) -> list[float]:
+    return marked_tops(items, get_val, get_spread) if draw_err else []
+
+
 def fit_bar_panels(ax_mean, ax_frac, ax_n, items, *, fc_active: bool,
                    n_axis_integer: bool | None, per_fov: bool,
-                   value_labels: bool = False) -> None:
+                   value_labels: bool = False, draw_err: bool = False) -> None:
     """Fit all three bar panels and set the events axis' tick locator.
 
     *value_labels* says the ``mean ± spread`` overlay is on, which is a fact
     about the axis and not only about the text: the label is drawn above the
     error cap, so a panel fitted to the cap alone puts it over the title.
+    *draw_err* says error bars are on, which is when a bar with an undefined
+    spread carries the ``n/a`` mark and so needs room for it.
     """
     _hr = LABEL_HEADROOM if value_labels else HEADROOM
     autofit(ax_mean, *tops_lows(
         items,
         lambda it: it.mean if it.has_mean else float("nan"),
-        lambda it: it.spread), headroom=_hr, pad_below=value_labels)
+        lambda it: it.spread), headroom=_hr, pad_below=value_labels,
+        marks=_marks(items, draw_err,
+                     lambda it: it.mean if it.has_mean else None,
+                     lambda it: it.spread))
     # The cap applies only when FC is off — under FC the frac may be a ratio > 1.
     _cap = LABEL_FRAC_CAP if value_labels else FRAC_CAP
     autofit(ax_frac, *tops_lows(
         items,
         lambda it: it.frac if it.has_frac else float("nan"),
         lambda it: it.frac_spread), cap=None if fc_active else _cap,
-        headroom=_hr, pad_below=value_labels)
+        headroom=_hr, pad_below=value_labels,
+        marks=_marks(items, draw_err,
+                     lambda it: it.frac if it.has_frac else None,
+                     lambda it: it.frac_spread))
     if ax_n is None:
         return
     # Scanned on ``n_above`` itself, not on ``has_mean``. The mean is NaN
@@ -150,7 +214,10 @@ def fit_bar_panels(ax_mean, ax_frac, ax_n, items, *, fc_active: bool,
         items,
         lambda it: float(it.n_above) if is_number(it.n_above) else float("nan"),
         lambda it: it.n_above_spread), floor_hi=1.0, headroom=_hr,
-        pad_below=value_labels)
+        pad_below=value_labels,
+        marks=_marks(items, draw_err,
+                     lambda it: float(it.n_above) if is_number(it.n_above) else None,
+                     lambda it: it.n_above_spread))
     try:
         from matplotlib.ticker import MaxNLocator
     except ImportError:

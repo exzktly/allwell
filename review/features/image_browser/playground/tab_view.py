@@ -14,16 +14,17 @@ from __future__ import annotations
 
 from functools import partial
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QScrollArea, QVBoxLayout, QWidget,
+    QBoxLayout, QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ui import theme
 from pipeline.stardist import NMS_THRESH_HELP, PROB_THRESH_HELP
 from pipeline.background import BACKGROUND_METHODS
 from pipeline.cli_args import FLATFIELD_MODES
+from widgets.button_row import ButtonRow
 from widgets.info_icon import info_icon
 from widgets.page_body import build_page_body
 from widgets.separator import build_hline_separator
@@ -45,6 +46,72 @@ from review.features.image_browser.playground.nanowell_view import build_nanowel
 _LMAX_W = 56
 _LMIN_W = 56
 _LUT_AUTO_W = 54
+# The narrowest the preview may get beside the dock before the two stack instead.
+_CANVAS_MIN_W = 280
+# How many characters a dock combo reserves, whatever its items say.
+_COMBO_MIN_CHARS = 10
+_QWIDGETSIZE_MAX = 16777215
+
+
+class _StackWhenNarrow(QObject):
+    """Puts the controls dock beside the preview, or below it when the page is narrow.
+
+    Beside the preview the dock is a fixed-width inspector, as on every other
+    page. In a page too narrow for both that leaves the preview a sliver and
+    pushes the dock past the right edge, so below that width the two stack: the
+    preview on top, the controls under it at the page's full width. It follows
+    the page's own width rather than asking which layout the app is in, so a
+    wide window and a sideways phone keep the inspector and an upright phone
+    gets the column.
+    """
+
+    def __init__(self, body: QWidget, canvas: QWidget, dock: QWidget) -> None:
+        super().__init__(body)
+        self._body, self._canvas, self._dock = body, canvas, dock
+        self._narrow: bool | None = None
+        body.installEventFilter(self)
+
+    def apply(self) -> None:
+        body, dock = self._body, self._dock
+        narrow = body.width() < theme.Metrics.dock_w + _CANVAS_MIN_W
+        if narrow == self._narrow:
+            return
+        self._narrow = narrow
+        lay = body.layout()
+        if narrow:
+            lay.setDirection(QBoxLayout.TopToBottom)
+            dock.setMinimumWidth(0)
+            dock.setMaximumWidth(_QWIDGETSIZE_MAX)
+            lay.setStretchFactor(dock, 1)
+        else:
+            lay.setDirection(QBoxLayout.LeftToRight)
+            dock.setFixedWidth(theme.Metrics.dock_w)
+            lay.setStretchFactor(dock, 0)
+        lay.setStretchFactor(self._canvas, 1)
+        # The dock's hairline faces the preview: its left edge beside it, its top below it.
+        dock.setProperty("stacked", narrow)
+        dock.layout().setContentsMargins(0 if narrow else 1, 1 if narrow else 0, 0, 0)
+        dock.style().unpolish(dock)
+        dock.style().polish(dock)
+
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
+        if event.type() == QEvent.Resize:
+            self.apply()
+        return False
+
+
+def _dock_combo(parent: QWidget) -> QComboBox:
+    """A combo for the dock that is sized to a few characters, not to its longest item.
+
+    A dataset whose channel or frame names are long (a nanowell run's are)
+    otherwise made the combo — and so the whole dock — as wide as its longest
+    entry, 650 px, with no horizontal scroll bar to reach the rest. The text
+    elides when it does not fit; the popup still shows every item in full.
+    """
+    cb = QComboBox(parent)
+    cb.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    cb.setMinimumContentsLength(_COMBO_MIN_CHARS)
+    return cb
 
 
 def _row(parent, label_text: str, *, tooltip: str = "") -> QWidget:
@@ -104,6 +171,8 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     dock.setStyleSheet(
         f"#PlaygroundDock {{ background-color: {theme.Colors.rail};"
         f" border-left: 1px solid {theme.Colors.border_subtle}; }}"
+        f"#PlaygroundDock[stacked=\"true\"] {{ border-left: none;"
+        f" border-top: 1px solid {theme.Colors.border_subtle}; }}"
         # The blanket ``QScrollArea`` / ``QWidget`` rules would paint the
         # scroll area and its viewport in the canvas colour over the rail fill.
         "#PlaygroundDockScroll, #PlaygroundDockScroll > QWidget"
@@ -137,7 +206,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         cl.addWidget(build_hline_separator(controls))
 
     def _combo(cell, items, attr: str) -> QComboBox:
-        cb = QComboBox(cell)
+        cb = _dock_combo(cell)
         if items:
             cb.addItems(list(items))
         cb.currentIndexChanged.connect(lambda _i: on_change())
@@ -515,9 +584,10 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     qc_max_row = _row(controls, "QC max area")
     _edit(qc_max_row, "0", "_playground_qc_max_area_edit")
 
-    toggles = QWidget(controls)
-    tl = QHBoxLayout(toggles)
-    tl.setContentsMargins(0, 2, 0, 2)
+    # A wrapping row: three checkboxes side by side are wider than the dock on a
+    # phone, and a plain row held the dock's content wider than its viewport.
+    toggles = ButtonRow(controls)
+    toggles.layout().setContentsMargins(0, 2, 0, 2)
     binary_cb = QCheckBox("Binary", toggles)
     binary_cb.setToolTip(
         "Fill the cells the mask found, on black, instead of showing the image.")
@@ -556,10 +626,9 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     binary_cb.toggled.connect(_on_binary)
     colors_cb.toggled.connect(_on_colors)
     overlay_cb.toggled.connect(_on_overlay)
-    tl.addWidget(binary_cb)
-    tl.addWidget(colors_cb)
-    tl.addWidget(overlay_cb)
-    tl.addStretch(1)
+    toggles.add(binary_cb)
+    toggles.add(colors_cb)
+    toggles.add(overlay_cb)
     cl.addWidget(toggles)
     app._playground_binary_cb = binary_cb
     ctx.widgets.register("_playground_binary_colors_cb", colors_cb)
@@ -621,6 +690,8 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     canvas.setWidget(label)
     body.layout().addWidget(canvas, 1)
     body.layout().addWidget(dock)
+    _stack = _StackWhenNarrow(body, canvas, dock)
+    _stack.apply()
     app._playground_image_canvas = canvas
     app._playground_image_label = label
 

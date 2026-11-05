@@ -80,6 +80,74 @@ _SELECTION_OUTLINE_COLOR = theme.Colors.heatmap_selection
 #: renaming one tick is not.
 _TICK_WIDE_CHARS = 6
 
+#: The share of its panel's height a grid of square cells must fill to be kept
+#: square. A 12 x 8 plate in a tall, narrow panel (a phone held upright) came out
+#: a strip a third of the panel's height with the rest empty; below this share
+#: the cells stretch to the panel instead, which is what a heat map is for.
+#: Dimensionless, so it asks the same question at any size.
+_SQUARE_CELLS_MIN_FILL = 0.6
+
+
+#: What share of a cell's width its widest text may take.
+_CELL_TEXT_FILL = 0.95
+
+#: On a cell's text: the size its renderer gave it, so every fit starts from that
+#: and never from an earlier fit's shrink.
+_CELL_SRC = "_aw_cell_src"
+
+
+def fit_to_panel(fig, ax) -> None:
+    """Decide the grid's cell shape and its cells' text size from the panel as it is now.
+
+    Called by ``plot_style`` once the layout has settled, and again after the
+    margins moved: the figure is drawn before it has its final size, and a phone
+    that turns or a page that resizes changes the panel under a drawing that is
+    not redone. Square cells if they fill the panel (:func:`_grid_aspect`);
+    each cell's text shrunk, together, until the widest fits the cell, so
+    "3000" in a cell twenty pixels wide does not run into its neighbour's.
+    """
+    if not ax.images:
+        return
+    rows, cols = ax.images[0].get_array().shape[:2]
+    ax.set_aspect(_grid_aspect(fig, ax, rows, cols))
+    texts = [t for t in ax.texts if t.get_text()]
+    if not texts:
+        return
+    renderer = fig.canvas.get_renderer()
+    locator = ax.get_axes_locator()
+    ax.apply_aspect(locator(ax, renderer) if locator is not None else None)
+    (x0, _), (x1, _) = ax.transData.transform([(0.0, 0.0), (1.0, 0.0)])
+    pitch = abs(x1 - x0)
+    for t in texts:
+        if not hasattr(t, _CELL_SRC):
+            setattr(t, _CELL_SRC, float(t.get_fontsize()))
+    widest = max(renderer.get_text_width_height_descent(
+        t.get_text(), _props_at(t, getattr(t, _CELL_SRC)),
+        ismath=False)[0] for t in texts)
+    share = min(1.0, _CELL_TEXT_FILL * pitch / widest) if widest > 0 and pitch > 0 else 1.0
+    for t in texts:
+        t.set_fontsize(getattr(t, _CELL_SRC) * share)
+
+
+def _props_at(text, size: float):
+    prop = text.get_fontproperties().copy()
+    prop.set_size(size)
+    return prop
+
+
+def _grid_aspect(fig, ax, rows: int, cols: int) -> str:
+    """``"equal"`` while square cells fill enough of *ax*'s panel, else ``"auto"``.
+
+    Decided from the panel's own size on the page, not from the layout it is in.
+    """
+    pos = ax.get_position(original=True)
+    panel_w = pos.width * fig.get_figwidth()
+    panel_h = pos.height * fig.get_figheight()
+    if panel_w <= 0 or panel_h <= 0 or rows <= 0 or cols <= 0:
+        return "equal"
+    square_h = min(panel_h, panel_w * rows / cols)
+    return "equal" if square_h / panel_h >= _SQUARE_CELLS_MIN_FILL else "auto"
+
 #: Title lift, in points, when the column ticks are rotated. The flat value is
 #: 8; rotated 8pt text over twelve columns stands about twice that.
 _TITLE_PAD_ROTATED = 18
@@ -642,6 +710,15 @@ def redraw_heatmap(ctx) -> None:
     _draw_heatmap(ctx)
 
 
+def _refresh_empty_state(ctx) -> None:
+    """Re-evaluate this tab's empty-state reason, which reads ``layout.cells``."""
+    try:
+        from review.core.ui_helpers import refresh_empty_state_pages
+        refresh_empty_state_pages(ctx.window)
+    except Exception:
+        swallowed()
+
+
 def _draw_heatmap(ctx) -> None:
     ax = ctx.widgets.get_or_none("_heatmap_ax")
     canvas = ctx.widgets.get_or_none("_heatmap_canvas")
@@ -666,6 +743,10 @@ def _draw_heatmap(ctx) -> None:
         )
         ax.set_axis_off()
         canvas.draw_idle()
+        # This path ends the draw early, so the refresh at the foot of the full draw never ran: a layout
+        # filled on a dataset with no timepoints left the "No wells on this heat map" placeholder over a
+        # page that has wells and says so on its own canvas.
+        _refresh_empty_state(ctx)
         return
 
     metric = _selected_metric(ctx)
@@ -753,11 +834,13 @@ def _draw_heatmap(ctx) -> None:
 
     ax.clear()
     ax.set_facecolor(_bg)  # ax.clear() resets to white; re-apply the theme bg
+    aspect = _grid_aspect(fig, ax, masked.shape[0], masked.shape[1])
+    setattr(ax, "_aw_fit_to_panel", fit_to_panel)     # ``plot_style`` calls it once laid out
     if norm is not None:
-        im = ax.imshow(masked, aspect="equal", cmap=cmap, norm=norm,
+        im = ax.imshow(masked, aspect=aspect, cmap=cmap, norm=norm,
                        origin="upper", interpolation="nearest")
     else:
-        im = ax.imshow(masked, aspect="equal", cmap=cmap, vmin=vmin, vmax=vmax,
+        im = ax.imshow(masked, aspect=aspect, cmap=cmap, vmin=vmin, vmax=vmax,
                        origin="upper", interpolation="nearest")
     # The colour range is Display ▾'s (Auto / Global / typed, and the log norm), so the Properties bar's Colour
     # limits leave it alone (``plot_style._apply_colour_limits``) rather than fight it.
@@ -985,11 +1068,7 @@ def _draw_heatmap(ctx) -> None:
     # refresh triggers fire when the user fills it — and the placeholder's own
     # instruction is "click Auto-populate from selection". Without this, doing
     # exactly what it says left the placeholder standing over a populated grid.
-    try:
-        from review.core.ui_helpers import refresh_empty_state_pages
-        refresh_empty_state_pages(ctx.window)
-    except Exception:
-        swallowed()
+    _refresh_empty_state(ctx)
 
 
 def _grid_values(ctx, layout, tp, metric, val_col, threshold, fluor_gates, nw):

@@ -114,3 +114,18 @@ def test_facet_snapshot_stable():
         (0.0, 0.0, "1", "white"), (1.0, 0.0, "2", "white"),
         (1.0, 1.0, "4", "white"),
     ]
+
+
+def test_a_colour_bar_survives_constrained_layout_being_switched_on_afterwards():
+    """Phone layout turns constrained layout on *after* the figure is drawn.
+
+    A colour bar at full height sits in a gridspec whose outer rows have a height
+    ratio of zero, and matplotlib's constrained layout divides by it: every draw
+    raised ``ZeroDivisionError`` and the figure kept the renderer's own margins,
+    so the tick labels were cut off at both edges.
+    """
+    fig = plt.figure(figsize=(4, 8))
+    R._render_correlation(fig, _corr_res(3))
+    fig.set_layout_engine("constrained")
+    fig.canvas.draw()          # raised ZeroDivisionError before the bar was shrunk
+    plt.close(fig)

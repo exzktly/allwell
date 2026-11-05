@@ -139,12 +139,14 @@ def test_on_a_narrow_figure_no_swarm_count_runs_into_another():
                    key=lambda b: b.x0)
     assert all(a.x1 <= b.x0 for a, b in zip(boxes, boxes[1:])), "two swarm counts overlap"
     if not boxes:
-        assert any("Too narrow to write each swarm's count" in t.get_text() for t in fig.texts)
+        # The footer is broken to the figure's width, so the sentence is read across its lines.
+        assert "Too narrow to write each swarm's count" in " ".join(
+            t.get_text() for t in sorted(fig.texts, key=lambda t: -t.get_position()[1]))
 
 
-def _footer_extents(wrap_footer: bool) -> tuple[int, list[float]]:
+def _footer_extents(width_in: float) -> tuple[int, list[float]]:
     """How many footer lines the distribution figure draws, and how far right each ends as a fraction of the
-    figure's width, on a figure as narrow as a phone's."""
+    figure's width, on a figure *width_in* inches wide."""
     import numpy as np
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
@@ -157,51 +159,26 @@ def _footer_extents(wrap_footer: bool) -> tuple[int, list[float]]:
                        [("A01", j, 0) for j in range(2025)], ["1"] * 2025, 2025) for k in range(12)]
     model = dc.DistributionModel("n", "n", "Cell count", dc.TIME, True,
                                  [dc.Panel("A01", swarms, [(float(k), f"{k}") for k in range(12)])])
-    fig = Figure(figsize=(2.6, 6))
+    fig = Figure(figsize=(width_in, 6))
     FigureCanvasAgg(fig)
-    render_distribution(fig, model, wrap_footer=wrap_footer)
+    render_distribution(fig, model)
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
     texts = [t for t in fig.texts if (t.get_gid() or "").startswith("nw-footer")]
     return len(texts), [t.get_window_extent(renderer).x1 / fig.bbox.width for t in texts]
 
 
-def test_the_renderer_wraps_its_footer_when_told_to_and_never_reads_the_mode(phone):
-    """The footer wraps because the caller asked (``wrap_footer``), not because the renderer looked at phone layout.
-    Phone layout is ON here (the ``phone`` fixture), and the unwrapped footer still runs off the figure: wrong
-    implementation — a renderer that reads the mode itself — would wrap in both calls."""
-    plain_lines, plain_ends = _footer_extents(False)
-    wrapped_lines, wrapped_ends = _footer_extents(True)
-    assert max(plain_ends) > 1.0, "the fixture's footer fits, so it cannot tell the two apart"
-    assert wrapped_lines > plain_lines
-    assert max(wrapped_ends) <= 1.0, wrapped_ends
-
-
-def test_the_page_redraw_asks_for_the_wrap_exactly_when_phone_layout_is_on(qtbot, page, monkeypatch):
-    """The call the app makes: the page's own redraw hands ``render_distribution`` ``wrap_footer``, from the
-    feature's ``_phone.on_phone()``. Spied on at the boundary and delegating, so the figure is still drawn. Wrong
-    implementation: a controller that never passes it (the renderer then wraps nothing on a phone), or passes it
-    always."""
-    from review.features.nanowell import controller as nwc
-
-    _loaded(qtbot, page)
-    seen = []
-    real = nwc.render_distribution
-
-    def spy(fig, model, **kw):
-        seen.append(kw.get("wrap_footer"))
-        return real(fig, model, **kw)
-
-    monkeypatch.setattr(nwc, "render_distribution", spy)
-    nwc.redraw(page)
-    assert seen and set(seen) == {False}, seen
-    seen.clear()
-    phone_layout.set_on(True)
-    try:
-        nwc.redraw(page)
-    finally:
-        phone_layout.set_on(False)
-    assert seen and set(seen) == {True}, seen
+def test_the_footer_is_broken_to_the_figure_s_width_whatever_the_mode(phone):
+    """The footer wraps because the figure is narrow, not because the renderer looked at phone layout: phone layout is
+    ON here (the ``phone`` fixture) and a figure wide enough for its footer still leaves every line whole. Wrong
+    implementation: a renderer that wraps on the mode would break the wide figure's lines too; one that never wraps
+    would run the narrow figure's off its edge."""
+    wide_lines, wide_ends = _footer_extents(12.0)
+    narrow_lines, narrow_ends = _footer_extents(2.6)
+    assert max(wide_ends) <= 1.0 and narrow_lines > wide_lines, (wide_lines, narrow_lines)
+    assert max(narrow_ends) <= 1.0, narrow_ends
+    phone_layout.set_on(False)
+    assert _footer_extents(2.6) == (narrow_lines, narrow_ends), "the mode changed what the renderer drew"
 
 
 def test_switching_phone_layout_with_a_nanowell_selected_re_places_the_figure_and_the_detail(qtbot, page):

@@ -50,7 +50,7 @@ from PySide6.QtCore import (
     Property, QEvent, QMimeData, QPoint, QPointF, QRectF, QSize, Qt, Signal,
 )
 from PySide6.QtGui import (
-    QBrush, QColor, QDrag, QFont, QLinearGradient, QPainter, QPen, QPolygonF,
+    QBrush, QColor, QDrag, QFont, QFontMetricsF, QLinearGradient, QPainter, QPen, QPolygonF,
     QRadialGradient,
 )
 from PySide6.QtWidgets import (
@@ -62,6 +62,11 @@ from ui import theme
 from widgets._support import with_alpha
 
 _ROW_LETTERS = "ABCDEFGH"
+
+#: The smallest the column numbers and row letters are drawn when the plate is
+#: shrunk, and the share of a column's width "12" may fill.
+_HEADER_FONT_FLOOR_PX = 6
+_HEADER_FILL = 0.95
 _N_ROWS = 8
 _N_COLS = 12
 
@@ -239,6 +244,36 @@ class _PlateGrid(QWidget):
     # ── geometry (all font / size relative) ──────────────────────────────
     def _label_extent(self) -> float:
         return self.fontMetrics().height() * 1.7
+
+    def _header_font(self, cell: float) -> QFont:
+        """The font the column numbers and row letters are drawn in: the
+        widget's own, shrunk until "12" fits one column's width and a letter
+        fits one row's height.
+
+        The labels sit in a band sized from the widget's font, but each is
+        centred in one well's pitch. When the plate is shrunk (Analyze's
+        phone Progress view fits it to a short page) the pitch falls below
+        the font's size, and at full size "10", "11" and "12" ran into one
+        another and the row letters were stacked on top of each other."""
+        font = QFont(self.font())
+        size = font.pixelSize()
+        by_pixel = size > 0
+        if not by_pixel:
+            size = font.pointSizeF()
+        if size <= 0:
+            return font
+        floor = _HEADER_FONT_FLOOR_PX if by_pixel else _HEADER_FONT_FLOOR_PX * 0.75
+        for _ in range(24):
+            fm = QFontMetricsF(font)
+            if (fm.horizontalAdvance("12") <= cell * _HEADER_FILL
+                    and fm.height() <= cell) or size <= floor:
+                break
+            size = max(floor, size - 0.5)
+            if by_pixel:
+                font.setPixelSize(max(1, round(size)))
+            else:
+                font.setPointSizeF(size)
+        return font
 
     def _metrics(self) -> tuple[float, float, float, float]:
         lab = self._label_extent()
@@ -1483,6 +1518,7 @@ class _PlateGrid(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setFont(self.font())
+        header_font = self._header_font(cell)
 
         # Top-left corner select-all / select-none toggle. Drawn only when
         # the plate accepts multi-select interaction; otherwise the corner
@@ -1512,6 +1548,7 @@ class _PlateGrid(QWidget):
                 p.drawEllipse(inner)
 
         # Column numbers (1–12) along the top.
+        p.setFont(header_font)
         for ci in range(_N_COLS):
             rect = QRectF(ox + ci * cell, oy - lab, cell, lab)
             hot = self._rc_selectable and self._hover_col == ci
@@ -1524,6 +1561,7 @@ class _PlateGrid(QWidget):
             hot = self._rc_selectable and self._hover_row == ri
             p.setPen(QColor(c.text_primary if hot else c.text_muted))
             p.drawText(rect, int(Qt.AlignCenter), _ROW_LETTERS[ri])
+        p.setFont(self.font())
 
         # Visit number of each well on the acquisition path, by position.
         path_seq = {rc: i + 1 for i, rc in enumerate(self._path)}

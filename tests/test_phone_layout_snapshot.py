@@ -4,7 +4,9 @@ The phone-form migration changes how widgets are
 found and given their phone form; it must not change what a person sees. This
 puts a window with the mini dataset loaded into phone layout, snapshots every
 page of every mode (and a few sideways and at the large text size), and
-compares each snapshot with ``tests/fixtures/phone_snapshot_baseline.json``.
+compares each snapshot with ``tests/fixtures/phone_snapshot_baseline.json``. It runs on the phone's screen,
+432×936 (``tests/_screens.FakeScreen``), and sideways is that phone turned: Qt's own offscreen screen is a
+800×800 square, which no phone is.
 
 A difference is read, not regenerated away: a change to how phone layout finds
 its widgets is not finished while this shows a difference it cannot explain. To take a new baseline on
@@ -36,22 +38,30 @@ _BASELINE = Path(__file__).resolve().parents[1] / phone_snapshot.BASELINE
 
 
 @pytest.fixture(scope="module")
-def scenarios(qapp, tmp_path_factory):
+def phone_screen():
+    from tests._screens import PHONE_UPRIGHT, FakeScreen
+    with FakeScreen(PHONE_UPRIGHT) as screen:
+        yield screen
+
+
+@pytest.fixture(scope="module")
+def scenarios(qapp, tmp_path_factory, phone_screen):
     from allwell import AllWellApp
     from core import phone_layout
+    from tests._screens import place
     from tests.fixtures.mini_dataset import build_mini_dataset
     from ui import theme
 
     dataset = build_mini_dataset(tmp_path_factory.mktemp("phone_snapshot") / "mini")
     win = AllWellApp(None)
     win.show()
-    phone_snapshot._pump(qapp)
+    place(win, phone_screen.rect, qapp)
     if win._mode_seg.currentIndex() != 0:
         win._on_titlebar_mode_seg(0)
     win._review._load_path(dataset)
     phone_snapshot._pump(qapp, 40)
     try:
-        yield phone_snapshot.collect(win, qapp)
+        yield phone_snapshot.collect(win, qapp, phone_screen)
     finally:
         phone_layout.set_on(False)
         theme.apply_ui_scale(1.0)
@@ -69,7 +79,7 @@ def test_the_snapshot_covers_every_mode_and_is_not_empty(scenarios):
         [name for name, snap in scenarios.items() if len(snap) <= 20]
 
 
-def test_phone_layout_shows_what_the_baseline_recorded(qapp, scenarios):
+def test_phone_layout_shows_what_the_baseline_recorded(qapp, scenarios, phone_screen):
     here = phone_snapshot.fingerprint(qapp)
     if os.environ.get("ALLWELL_WRITE_PHONE_SNAPSHOT"):
         _BASELINE.parent.mkdir(parents=True, exist_ok=True)

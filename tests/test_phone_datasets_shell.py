@@ -134,3 +134,29 @@ def test_the_page_button_lists_analyze_s_views_in_analyze_mode(qtbot):
     assert [a.text() for a in actions if a.isChecked()] == ["Settings"]
     actions[1].trigger()
     assert shown == ["Progress"]
+
+
+def test_a_tool_name_with_an_ampersand_is_not_read_as_a_keyboard_mnemonic(qtbot):
+    """Qt takes a single ``&`` in button or menu text as a mnemonic: it drops the ampersand and underlines the next
+    letter, so "Validate & Repair" drew as "Validate ̲Repair". Both the page button's text and the menu item name
+    the tool whole. Wrong implementation: the label built as f"{name} ▾" — it carries a mnemonic."""
+    from PySide6.QtGui import QKeySequence
+
+    from ui.phone_shell import _button_label
+
+    name = "Validate & Repair"
+    host = QWidget()
+    qtbot.addWidget(host)
+    shell = SimpleNamespace(
+        _h=SimpleNamespace(mode=lambda: "datasets", tool_names=lambda: [name], current_tool=lambda: name,
+                           show_tool=lambda _n: None),
+        _page_menu=QMenu(host),
+        refresh=lambda: None,
+    )
+    _bind(shell, "_fill_tool_menu", "_fill_named_menu", "_pick_tool")
+    PhoneShell._fill_page_menu(shell)
+    (action,) = shell._page_menu.actions()
+    label = _button_label(name)
+    assert QKeySequence.mnemonic(label).isEmpty(), f"{label!r} carries a mnemonic"
+    assert QKeySequence.mnemonic(action.text()).isEmpty(), f"{action.text()!r} carries a mnemonic"
+    assert label.replace("&&", "&") == f"{name} ▾" and action.text().replace("&&", "&") == name

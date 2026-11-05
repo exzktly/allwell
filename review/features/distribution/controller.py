@@ -18,7 +18,7 @@ from review.data.data_loading import _all_fluor_values_filtered, iter_plot_group
 from review.features.distribution._pooled import collect_distribution, exact_range, sampled_note
 from core.safe import swallowed
 from review.core.plot_style import (
-    apply_export_style_to_current, figure_prefs, style_legend,
+    apply_export_style_to_current, figure_prefs, relayout, style_legend,
 )
 from review.core.channel_state_controller import (
     active_channel_label, get_all_fluor_gates, on_cutoff_for_column,
@@ -381,6 +381,7 @@ def redraw_distribution(ctx) -> None:
         nw_groups, nw_label, nw_footer = nanowell
         _draw_distribution(ctx, canvas, nw_groups, mode, bins, log_x, log_y, tp_h, layout_choice, None)
         _nw_dist.label_and_footer(fig, nw_label, nw_footer)
+        relayout(ctx, fig)        # the footer was written after the layout was set
         canvas.draw_idle()
         return
     def compute():

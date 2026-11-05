@@ -1,12 +1,13 @@
 """Where the Nanowells page decides what phone layout changes.
 
 The page lays out differently on a phone: the site detail takes the whole page
-while a nanowell is selected, the crop strip wraps to its own shape, and the
-distribution figure's footer wraps to the figure's width. Those decisions are
-made here and nowhere else in the feature, so the mode is read in one place
-(``tests/test_phone_mode_stays_in_views.py``) and the controller and the tab
-view only call. The renderer never reads the mode: ``renderer.render_distribution``
-is told ``wrap_footer`` by its caller, the controller, which asks :func:`on_phone`.
+while a nanowell is selected and the crop strip wraps to its own shape. Those
+decisions are made here and nowhere else in the feature, so the mode is read in
+one place (``tests/test_phone_mode_stays_in_views.py``) and the controller and
+the tab view only call. The renderer never reads the mode: what a narrow or short
+figure needs (a footer broken to its width, a key clear of the titles) it derives
+from the figure's own size in points, so a phone's figure and a small window's get
+the same treatment.
 """
 
 from __future__ import annotations

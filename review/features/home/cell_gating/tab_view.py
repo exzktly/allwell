@@ -43,7 +43,9 @@ from review.core.ui_helpers import (
     install_canvas_wheel_scroll,
 )
 from widgets.canvas import make_canvas
+from widgets.flow_layout import FlowLayout
 from widgets.separator import build_hline_separator
+from widgets.wrap_radio import WrapRadioRow
 from review.features.qc.tab_view import build_qc_gate_controls
 from review.features.home.cell_gating.controller import (
     _GATE_BUTTON_ATTR,
@@ -212,6 +214,7 @@ def _lead_in(parent: QWidget, text: str) -> QLabel:
     """
     lbl = QLabel(text, parent)
     lbl.setObjectName("Secondary")
+    lbl.setWordWrap(True)
     lbl.setContentsMargins(_LEAD_IN_INDENT, 0, 0, 0)
     return lbl
 
@@ -223,12 +226,13 @@ def _source_radio(parent: QWidget, layout: QVBoxLayout, label: str,
     row = QWidget(parent)
     row_layout = QHBoxLayout(row)
     row_layout.setContentsMargins(_RADIO_INDENT, 0, 0, 0)
-    radio = QRadioButton(label, row)
-    radio.setToolTip(tooltip)
-    row_layout.addWidget(radio)
-    row_layout.addStretch(1)
+    # A wrapping label: the plain radio's minimum width is its whole text, which
+    # held this tab wider than a narrow viewport that cannot scroll sideways.
+    wrapped = WrapRadioRow(label, row)
+    wrapped.setToolTip(tooltip)
+    row_layout.addWidget(wrapped, 1)
     layout.addWidget(row)
-    return radio
+    return wrapped.radio
 
 
 def _gate_source_row(ctx, parent: QWidget, mode: str, *, label: str,
@@ -245,18 +249,18 @@ def _gate_source_row(ctx, parent: QWidget, mode: str, *, label: str,
     dead for the rest of the session.
     """
     row = QWidget(parent)
-    layout = QHBoxLayout(row)
+    # A flow row: the radio and its picker wrap onto two lines at a narrow
+    # width instead of holding the tab wider than the viewport.
+    layout = FlowLayout(row)
     layout.setContentsMargins(_RADIO_INDENT, 0, 0, 0)
     radio = QRadioButton(label, row)
     radio.setToolTip(tooltip)
     layout.addWidget(radio)
-    layout.addSpacing(8)
     btn = QPushButton("All gates", row)
     btn.setMinimumWidth(_GATE_BTN_MIN_W)
     btn.setToolTip(btn_tooltip)
     btn.clicked.connect(lambda _=False: _open_gate_filter_menu(ctx, mode))
     layout.addWidget(btn)
-    layout.addStretch(1)
     parent.layout().addWidget(row)
 
     # A dead control says why it is dead and where to go. Both pickers used to
@@ -264,6 +268,7 @@ def _gate_source_row(ctx, parent: QWidget, mode: str, *, label: str,
     # yet".
     hint = QLabel("No gates drawn yet — draw one on the Scatter Plot tab.", parent)
     hint.setObjectName("Muted")
+    hint.setWordWrap(True)
     hint.setContentsMargins(_RADIO_INDENT * 2, 0, 0, 0)
     parent.layout().addWidget(hint)
 
@@ -354,7 +359,7 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
     _mount_threshold_table(ctx, frame, layout, "_cell_gating_thresh_inner")
 
     auto_row = QWidget(frame)
-    auto_row_layout = QHBoxLayout(auto_row)
+    auto_row_layout = FlowLayout(auto_row)
     auto_row_layout.setContentsMargins(_RADIO_INDENT, 4, 0, 0)
     auto_btn = QPushButton("Auto-threshold all channels", auto_row)
     auto_btn.setProperty("variant", "secondary")
@@ -374,7 +379,6 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
         "the one that best separates two wells' fraction-on.")
     opt_btn.clicked.connect(lambda _=False: show_optimizer_window(ctx))
     auto_row_layout.addWidget(opt_btn)
-    auto_row_layout.addStretch(1)
     ctx.widgets.register("_cell_gating_auto_btn", auto_btn)
     ctx.widgets.register("_cell_gating_open_optimizer_btn", opt_btn)
     layout.addWidget(auto_row)
@@ -439,6 +443,7 @@ def _build_readout_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
     # as "not applied" rather than as a zero it did not measure.
     funnel = ctx.widgets.register("_cell_gating_funnel_label", QLabel("", frame))
     funnel.setObjectName("Muted")
+    funnel.setWordWrap(True)
     funnel.setToolTip(
         "Each inclusion layer applied on top of the ones above it, in the order "
         "the app composes them. Manual curation and the intensity gate share "
@@ -481,6 +486,7 @@ def _build_cdf_section(ctx, parent: QWidget, root: QVBoxLayout,
 
     status = reg.register("_cell_gating_status_label", QLabel("No data loaded", parent))
     status.setObjectName("Muted")
+    status.setWordWrap(True)
 
     root.addWidget(build_hline_separator(parent))
     root.addWidget(build_section_header(

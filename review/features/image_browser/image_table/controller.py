@@ -165,14 +165,8 @@ def image_table_refresh_empty_state(ctx) -> None:
 
     if ctx.state.dataset.well_paths:
         empty.setText("No image table generated")
-        # In phone layout the builder is not above the placeholder but behind
-        # ⚙ Controls (``_phone_fit``), and "above" sent the reader looking at
-        # an empty page.
-        from core import phone_layout
-        empty.setHint(
-            "Open ⚙ Controls to choose channels, then press Generate."
-            if phone_layout.is_on() else
-            "Choose wells/channels above, then press Generate.")
+        from review.features.image_browser.image_table._phone_fit import empty_hint
+        empty.setHint(empty_hint())
     else:
         empty.setText(NO_DATASET_TITLE)
         empty.setHint(NO_DATASET_HINT)

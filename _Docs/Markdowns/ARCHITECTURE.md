@@ -181,8 +181,12 @@ arrive as arguments (`tests/test_phone_mode_stays_in_views.py`). The tokens
 (`core/phone_layout.py`, `ui/theme.py`) and the chrome (`ui/phone_shell.py`,
 `ui/phone_drawer.py`, `ui/phone_window.py`, `ui/phone_fit.py`) read it freely.
 A view reads it only from a `_phone.py` or `phone_view.py` beside it; every
-other read, in `allwell.py` and a few `review/core/` helpers, is on a roster in
-that test with a written reason, and the roster only shrinks.
+other read, in `allwell.py` and three `review/core/` helpers (plot style, the
+split toggle, the rail toggle), is on a roster in that test with a written
+reason, and the roster only shrinks. Wording that differs by mode lives in a
+`_phone.py` beside what it words: `review/core/empty_state_phone.py` rewords an
+empty plot's hint (the plate is under Wells, a finger taps), and the Image
+Table's `_phone_fit` says where its builder is.
 
 **Widgets declare their phone form.** `widgets/form_registry.py` records which
 widgets have an alternate form and of what *kind* (`"stepper"`, `"toolbar"`,

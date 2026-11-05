@@ -85,41 +85,37 @@ RECOGNISED_BY_NAME_BUDGET = 0
 MODE_READ_ROSTER: dict[tuple[str, str], str] = {
     ("allwell.py", "AllWellApp._build_rail_drawer._panels"):
         "the window decides which panel it lends the drawer: Analyze's form is the page, "
-        "not a panel, in phone layout. The window owns its own layout. P6.1 decides.",
+        "not a panel, in phone layout. The window owns its own layout and the drawer is built "
+        "here; there is no pane to ask.",
     ("allwell.py", "AllWellApp._build_rail_drawer._closed_inside"):
         "what a close from inside the drawer means for the sidebar flag; the window owns "
-        "both. P6.1 decides.",
+        "both the drawer and the flag.",
     ("allwell.py", "AllWellApp._sync_mode_bar"):
         "the mode bar is the window's own widget and is laid out differently in phone "
-        "layout. P6.1 decides.",
+        "layout (always shown, at its own width).",
     ("allwell.py", "AllWellApp._confirm_close_in_phone_layout"):
-        "closing the window mid-run stops a local run in phone layout; the window owns "
-        "its close. P6.1 decides.",
+        "closing the window mid-run stops a local run in phone layout, so the window asks "
+        "first; the window owns its close.",
     ("allwell.py", "AllWellApp._save_window_state"):
-        "the window must not save a phone-shaped geometry as its desk geometry. P6.1 decides.",
+        "the window must not save a phone-shaped geometry as its desk geometry; it owns "
+        "its saved state.",
     ("review/core/plot_style.py", "_refit_on_resize._on_resize"):
-        "refits a figure's titles when the canvas resizes in phone layout. P6.2 moves it "
-        "to the canvas's phone form.",
+        "refits a figure's titles when its canvas resizes in phone layout. Could read the "
+        "figure's own DPI state (_aw_dpi_factor) instead of the flag; not done, because the "
+        "layout snapshot records no layout engine or title wrapping, so such a change could "
+        "not be shown to leave plots as they were.",
     ("review/core/plot_style.py", "_apply_layout_engine"):
-        "chooses constrained layout for phone-sized plot text. P6.2 moves it to the "
-        "canvas's phone form.",
+        "chooses constrained layout for phone-sized plot text; same candidate and same "
+        "reason as _on_resize above.",
     ("review/core/plot_style.py", "apply_export_style_to_current"):
-        "stamps whether the figure was fitted for the phone. P6.2 moves it to the "
-        "canvas's phone form.",
+        "stamps whether the figure was fitted for the phone (_aw_phone_fitted); same "
+        "candidate and same reason as _on_resize above.",
     ("review/core/split_view.py", "_set_toggle_visible_for_mode"):
-        "two panes side by side cannot fit a one-column layout, so the split toggle goes. "
-        "P6.3 decides.",
+        "two panes side by side cannot fit a one-column layout, so Review's split toggle "
+        "goes; a decision of the Review shell about its own chrome.",
     ("review/core/app_shell_view.py", "position_rail_toggle"):
-        "the floating rail toggle is hidden in phone layout, where the drawer replaces "
-        "it; every path into this function ends here. P6.3 decides.",
-    ("review/core/ui_helpers.py", "phone_wording"):
-        "rewords an empty-state hint for a finger and for the Wells sheet. P6.3 decides.",
-    ("review/core/ui_helpers.py", "follow_phone_layout"):
-        "re-words every empty plot's hint when the mode flips; the listener that "
-        "phone_wording needs. P6.3 decides.",
-    ("review/features/image_browser/image_table/controller.py", "image_table_refresh_empty_state"):
-        "the empty-state hint points at Controls in phone layout and at 'above' at the "
-        "desk. P6.3 decides.",
+        "the floating rail toggle is hidden in phone layout, where the drawer replaces it; "
+        "every path into this function ends here, and it is the Review shell's own chrome.",
 }
 
 

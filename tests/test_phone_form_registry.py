@@ -447,3 +447,43 @@ def test_the_sweep_watches_a_widget_declared_while_phone_layout_was_off(qapp, sh
     phone_layout.set_on(True)
     shell._sweep(force=True)
     assert w.property("_awPhoneWatched")
+
+
+# ── wording that differs by mode lives beside the view that owns it (P6) ────
+
+def test_the_image_table_s_empty_hint_points_at_controls_only_on_a_phone(qapp):
+    """Where the builder is: above the placeholder at the desk, behind ⚙ Controls
+    on a phone. The wrong implementation is the pair of strings swapped, or a
+    hint that never reads the mode."""
+    from core import phone_layout
+    from review.features.image_browser.image_table._phone_fit import empty_hint
+
+    assert empty_hint() == "Choose wells/channels above, then press Generate."
+    phone_layout.set_on(True)
+    try:
+        assert empty_hint() == "Open ⚙ Controls to choose channels, then press Generate."
+    finally:
+        phone_layout.set_on(False)
+
+
+def test_the_image_table_controller_writes_the_hint_the_phone_module_returns(qapp):
+    """The call the app makes, not only the helper: with a dataset loaded and no
+    table yet, the placeholder is given ``empty_hint()``. Wrong implementation: a
+    controller that went back to its own strings, which the helper's test passes."""
+    from types import SimpleNamespace
+
+    from core import phone_layout
+    from review.features.image_browser.image_table._phone_fit import empty_hint
+    from review.features.image_browser.image_table.controller import image_table_refresh_empty_state
+
+    said = {}
+    empty = SimpleNamespace(setText=lambda t: said.update(text=t), setHint=lambda h: said.update(hint=h))
+    ctx = SimpleNamespace(
+        runtime=SimpleNamespace(image_table=SimpleNamespace(empty_state=empty)),
+        state=SimpleNamespace(dataset=SimpleNamespace(well_paths={"A01": "x"})))
+    phone_layout.set_on(True)
+    try:
+        image_table_refresh_empty_state(ctx)
+        assert said["hint"] == empty_hint() == "Open ⚙ Controls to choose channels, then press Generate."
+    finally:
+        phone_layout.set_on(False)

@@ -1524,7 +1524,7 @@ def test_the_page_menu_lists_this_section_s_pages_and_never_the_sections(qapp, a
 def test_an_empty_plot_s_hint_says_where_the_plate_is_on_a_phone():
     """At the desk the plate is in the rail at the left; on a phone it is under
     Wells at the foot, and Saved selections are in ☰."""
-    from review.core.ui_helpers import phone_wording
+    from review.core.empty_state_phone import phone_wording
     desk = "Click wells on the plate at the left, or open Saved selections below it."
     assert phone_wording(desk) == desk
     phone_layout.set_on(True)

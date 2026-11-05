@@ -7,9 +7,10 @@ the fast lane; this file is the one that would notice the parts not being
 wired together — a button connected to nothing, a pane whose sidebar comes
 back on the next resize, a desktop that does not come back at all.
 
-The offscreen screen is 800×800, narrower than the desk window's 1100 minimum,
-so it is phone-shaped: the window must fit it in either layout. Its unit is
-800 / 390 px per phone point, which every touch size is checked against.
+Qt's offscreen screen is 800×800, which is no screen a person has, so the window is built on a
+phone's: ``tests/_screens.FakeScreen`` makes every ``QScreen`` report 432×936, the shape
+``tests/test_phone_windows.py`` uses, for the whole file. The window must fit it in either
+layout, and its unit is 432 / 390 px per phone point, which every touch size is checked against.
 """
 
 from __future__ import annotations
@@ -27,11 +28,25 @@ def _pump(qapp, n: int = 15) -> None:
 
 
 @pytest.fixture(scope="module")
-def win(qapp):
+def phone_screen():
+    from tests._screens import PHONE_UPRIGHT, FakeScreen
+    with FakeScreen(PHONE_UPRIGHT) as screen:
+        yield screen
+
+
+#: One phone point, in pixels, on the screen the file runs on.
+def _unit() -> float:
+    from tests._screens import PHONE_UPRIGHT
+    return PHONE_UPRIGHT.width() / 390
+
+
+@pytest.fixture(scope="module")
+def win(qapp, phone_screen):
     from allwell import AllWellApp
+    from tests._screens import place
     w = AllWellApp(None)
     w.show()
-    _pump(qapp)
+    place(w, phone_screen.rect, qapp)
     yield w
     from core import phone_layout
     from ui import theme
@@ -68,7 +83,7 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
 
     shell.desk_button.click()
     _pump(qapp)
-    u = 800 / 390
+    u = _unit()
     assert phone_layout.is_on()
     assert theme.ui_scale() == pytest.approx(15 * u / 13)    # body at 15 pt
     assert theme.touch_unit() == pytest.approx(u)
@@ -241,7 +256,7 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
 
     shell = win._phone
     review = win._review
-    u = 800 / 390
+    u = _unit()
     desk_hidden = {k for k, r in review._section_nav._rows.items() if r.isHidden()}
     shell.set_on(True)
     _pump(qapp)

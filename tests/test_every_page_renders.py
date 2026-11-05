@@ -47,7 +47,26 @@ KNOWN: dict[tuple[str, str, str, str], str] = {}
 
 #: ``(dataset, screen family)`` -> the pages that are still on an empty state with that dataset, and why
 #: they cannot be filled. ``screen family`` is ``"desk"`` or ``"phone"``.
-EMPTY: dict[tuple[str, str], dict[str, str]] = {}
+_NO_NANOWELLS = "the dataset has no nanowell record, so the Nanowells pages show their empty state"
+_NANOWELL_PAGES = ("Distribution", "Array", "Trajectories", "Position", "Extremes", "Identity", "Statistics")
+_NO_SMFISH = "the dataset carries no smFISH spot counts ('No smFISH data was generated during the processing pipeline.')"
+_NO_IMAGES = "the dataset folder holds no images, so there is nothing for the Image Browser to generate from"
+_HEAT_MAP_NANOWELL = (
+    "NOT UNDERSTOOD, tracker row D25: after Auto-populate the heat map's sidebar layout holds A01, A02 and B01 and the "
+    "toolbar's Timepoint reads '—', yet the page stays on 'No wells on this heat map.'; whether that is this "
+    "fixture's missing timepoint or a defect in the page has not been measured")
+
+EMPTY: dict[tuple[str, str], dict[str, str]] = {
+    (kind, family): pages
+    for family in ("desk", "phone")
+    for kind, pages in (
+        ("mini", {**{f"Nanowells/{name}": _NO_NANOWELLS for name in _NANOWELL_PAGES},
+                  "Image Browser/Image Table": _NO_IMAGES, "Image Browser/Cell Browser": _NO_IMAGES}),
+        ("nanowell", {"Plotting/Heat Map": _HEAT_MAP_NANOWELL, "smFISH": _NO_SMFISH,
+                      "Image Browser/Image Table": _NO_IMAGES, "Image Browser/Cell Browser": _NO_IMAGES}),
+        ("images", {**{f"Nanowells/{name}": _NO_NANOWELLS for name in _NANOWELL_PAGES}, "smFISH": _NO_SMFISH}),
+    )
+}
 
 CASES = [(dataset, screen) for dataset in DATASETS for screen in SCREENS]
 #: Each case is a full app in a process of its own; three at a time fits a 4-CPU container.

@@ -135,7 +135,15 @@ def prepare(win, qapp, kind: str, page: str, wells: set[str]) -> None:
         axes = fig.add_subplot(111)
         axes.plot([0, 1, 2], [1, 3, 2])
         axes.set_title("A saved plot")
-        ctx.figures.save(fig, "A saved plot")
+        # ``ctx.figures.save`` is the Save-As *file* dialog, which blocks for ever in a child process that has
+        # no test fixture to refuse it; the gallery is filled by handing it the rendered bytes.
+        import io
+
+        from review.features.saved_plots.controller import save_figure_to_gallery
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=100)
+        save_figure_to_gallery(ctx, tab="Distribution", title="A saved plot", png_bytes=buf.getvalue())
     elif kind == "images" and page == "Image Browser/Image Table":
         from review.features.image_browser.image_table import controller as table
 

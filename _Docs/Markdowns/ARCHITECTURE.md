@@ -721,8 +721,8 @@ and the page's wins, so a swipe on the log moved the page and not the log. A log
 with nothing to scroll leaves the drag to the page.
 
 **Plot pages scroll by a swipe on the plot** (`PhoneShell._swipe_plot_area`, run
-from `size_canvas` — so on the switch, on Show and from the sweep, and a plot
-built later gets it): the scroll area holding a canvas on a page `band_roots`
+from `size_canvas` — so on the switch and on a canvas's Show, the canvas having
+declared itself, and a plot built later gets it): the scroll area holding a canvas on a page `band_roots`
 names is marked `_awSwipePlots`, and the guard then lets a drag on its plot
 scroll the page. A tap still reaches the plot; a drag on a plot no longer reaches
 matplotlib in phone layout, where its pan and zoom are already hidden. A plot

@@ -43,7 +43,7 @@ from review.features.nanowell.crop_grid_compute import POPOUT_GRIDS, POPOUT_MAX_
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
     ArrayDrawn, render_array, render_crop_grid, render_crop_strip, render_distribution, render_extremes, render_message,
-    render_position, render_site_detail, render_trajectories,
+    redraw_selection_rings, render_position, render_site_detail, render_trajectories,
 )
 from review.features.nanowell.state import (
     IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS,
@@ -201,7 +201,7 @@ def _untaken(name: str, members, taken) -> str:
     return named
 
 
-def export_long_csv(state, path, wells=None) -> int:
+def export_long_csv(state, path, wells=None, subset: ss.Subset | None = None) -> int:
     """Write every site, timepoint and metric as a long-format CSV (tracker D8); returns the rows written. With
     *wells*, only theirs: the page reads only the wells it draws, so what else is loaded is whichever wells
     happened to be selected before.
@@ -228,8 +228,10 @@ def export_long_csv(state, path, wells=None) -> int:
     table.insert(table.columns.get_loc("baseline_timepoint"), "baseline", state.baseline)
     # Every row is kept, and flagged: a file filtered to the page's Subset would lose rows a reader may want back,
     # and could not say which subset made it.
-    table["in_subset"] = ss.inside(metrics, state.subset, state.data).to_numpy()
-    table["subset"] = state.subset.label()
+    # *subset* is the page's with its scatter gates read (``page_subset``); a caller without the app has none to read.
+    subset = state.subset if subset is None else subset
+    table["in_subset"] = ss.inside(metrics, subset, state.data).to_numpy()
+    table["subset"] = subset.label()
     table["subset_baseline"] = state.baseline
     path = Path(path)
     tmp = path.with_name(path.name + ".part")
@@ -289,8 +291,8 @@ def page_groups(ctx) -> dict:
     """``group -> wells`` for the page: replicate sets over the active wells only (gap G9 of the plan)."""
     st = _state(ctx)
     excluded = set(st.excluded_wells) if st is not None else set()
-    have = [w for w in active_wells(ctx) if (st is None or st.data is None or w in set(st.data.wells))
-            and w not in excluded]
+    loaded = set(st.data.wells) if st is not None and st.data is not None else None
+    have = [w for w in active_wells(ctx) if (loaded is None or w in loaded) and w not in excluded]
     return replicate_groups(ctx, have) if have else {}
 
 
@@ -463,11 +465,16 @@ def _cell_label(ctx, well: str, data) -> str | None:
     return next((label for label, path in paths.items() if Path(path).resolve() == wanted), None)
 
 
-def gate_tally(ctx, data, on_well=None) -> cg.GateTally | None:
+def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True) -> cg.GateTally | None:
     """The cells Home's Cell Gating leaves out of *data*'s wells (``cell_gate_compute``), read from the row
     cache with the inclusion every other figure uses. Safe on a worker: the row cache is read there by the
     gating pass too. ``None`` with no data. *on_well(done, total)*, when given, is called before the first well
-    and after each one, so the page can show how far the pass has got."""
+    and after each one, so the page can show how far the pass has got.
+
+    ``scatter_gates=False`` leaves the scatter-gate layer (``Gate_Pass``) out as well: the counts the scatter
+    gates themselves are evaluated against when a gate is drawn on a nanowell metric. Counting them after that
+    layer would make a cell's inclusion depend on a count its own inclusion changes
+    (``review/data/observations.nanowell_gate_values``)."""
     from review.data.data_loading import df_included_mask, get_rows
 
     if data is None or not len(data.sites):
@@ -498,7 +505,7 @@ def gate_tally(ctx, data, on_well=None) -> cg.GateTally | None:
             # nanowell focus layer is left out too: the cells it leaves out are those of a nanowell-timepoint this
             # page already draws as an ``out_of_focus`` gap, so counting them again here would only make the note
             # say Cell Gating left them out, which it did not.
-            skipped = (*cg.FIELD_LAYERS, rfc.NW_FOCUS_PASS_COLUMN)
+            skipped = (*cg.FIELD_LAYERS, rfc.NW_FOCUS_PASS_COLUMN, *(() if scatter_gates else ("Gate_Pass",)))
             per_well.append((well, frame, df_included_mask(frame, except_layers=skipped).to_numpy()))
     if on_well is not None:
         on_well(total, total)
@@ -704,7 +711,7 @@ def redraw(ctx) -> None:
         well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
-        subset=st.subset, stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
+        subset=page_subset(ctx, st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
         gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
         names=_page_names(ctx, st.view, well), **array)
     if st.view == "statistics":
@@ -929,6 +936,10 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                       baseline_moving=baseline_moving)
         for panel in panels:
             panel.name = names.get(panel.well, "")
+        empty = _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels)
+        if empty:
+            render_message(fig, empty, gid="nw-moving-empty")
+            return None, None
         render_trajectories(fig, panels,
                             cohort=cohort, label=_label(metric, channel, data), time_source=data.time_source,
                             note=" ".join(filter(None, [mvc.describe(moving, column, baseline_moving), note])))
@@ -974,7 +985,22 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                               f"{', '.join(tableless)}.")
     if note:
         model.notes.insert(0, note)
+    if model.empty:
+        render_message(fig, model.empty, gid="nw-moving-empty")
+        return None, model
     return render_distribution(fig, model, selected=selected), model
+
+
+def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels) -> str:
+    """Trajectories' sentence in place of an empty figure when the moving average left no line to draw, or ``""``
+    (``moving_compute.nothing_left_text``)."""
+    if not mvc.is_on(moving) or any(p.lines for p in panels):
+        return ""
+    rows = metrics[metrics["well"].isin(list(wells))]
+    if column not in rows:
+        return ""
+    rows, _reasons = mvc.rebase(rows, column, pd.Series("", index=rows.index, dtype=object), baseline_moving)
+    return mvc.nothing_left_text(rows, column, moving, baseline_window=baseline_moving)
 
 
 #: The Distribution model's notes the Statistics view carries: what changes which values were compared (the fixed
@@ -1736,7 +1762,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
     st.hits, st.drawn = None, None                       # no dots to hit and nothing to zoom: rows are clicked
     timepoint = shown_timepoint(ctx)[1]
     column = metric_column(metric, channel)
-    metrics, filtered = ss.apply(st.metrics, st.subset, st.baseline, [well], st.data)
+    metrics, filtered = ss.apply(st.metrics, page_subset(ctx, st), st.baseline, [well], st.data)
     if filtered is not None and filtered.kept == 0:
         render_message(fig, ss.empty_text(filtered), gid="nw-start-empty")
         apply_export_style_to_current(ctx, fig, canvas)
@@ -1974,7 +2000,7 @@ def redraw_detail(ctx) -> None:
     render_site_detail(fig, series, channel=channel, time_source=st.data.time_source,
                        backgrounds=[st.data.fluor_backgrounds.get(w) for w in {s[0] for s, _f in series}
                                     if w in st.data.fluor_backgrounds],
-                       outside=_outside_badges(st, [site for site, _frame in series]))
+                       outside=_outside_badges(st, [site for site, _frame in series], page_subset(ctx, st)))
     canvas.draw_idle()
     strip_fig, strip_canvas = ctx.widgets.get_or_none("_nw_strip_fig"), ctx.widgets.get_or_none("_nw_strip_canvas")
     if strip_fig is not None and strip_canvas is not None:
@@ -2008,13 +2034,14 @@ def gated_crops(st, site, crops):
     return out
 
 
-def _outside_badges(st, sites) -> dict:
-    """``site -> sentence`` for each of *sites* the *Subset* leaves out of the page's figures."""
-    if not st.subset.is_active():
+def _outside_badges(st, sites, subset: ss.Subset) -> dict:
+    """``site -> sentence`` for each of *sites* the *Subset* (*subset*, :func:`page_subset`) leaves out of the
+    page's figures."""
+    if not subset.is_active():
         return {}
     out = {}
     for site in sites:
-        said = ss.site_badge(site_series(st.metrics, *site), st.subset, st.data)
+        said = ss.site_badge(site_series(st.metrics, *site), subset, st.data)
         if said:
             out[tuple(site)] = said
     return out
@@ -2132,9 +2159,42 @@ def clear_selection(ctx) -> None:
 
 
 def selection_changed(ctx) -> None:
-    """The nanowells selected for the site detail changed: save, and redraw both figures."""
+    """The nanowells selected for the site detail changed: save, and redraw both figures — on the Distribution view
+    only the rings that mark the selection, when the figure on screen is current (:func:`_move_selection_rings`)."""
     _save_soon(ctx)
-    redraw(ctx)
+    if not _move_selection_rings(ctx):
+        redraw(ctx)
+
+
+def _move_selection_rings(ctx) -> bool:
+    """Re-ring the selected nanowells on the Distribution figure as drawn and redraw the site detail; ``False``
+    (nothing done) when the figure cannot be trusted to be current, so the caller redraws it whole.
+
+    The selection changes nothing else on that figure (``renderer.render_distribution`` reads it for the rings
+    alone), and every other change to what it shows goes through :func:`redraw`. So the drawn figure is current
+    unless the last redraw stopped short of drawing it: the page or its card hidden (phone layout hides the figure
+    behind the detail), another view drawn since (the figure was cleared, so the hit map's axes are gone from it),
+    a load running, or the metrics on hand stale for the baseline, rim focus rule, Cell Gating or the drawn wells —
+    the cases where :func:`redraw` fetches before it draws. Each of those falls back to the full redraw."""
+    from review.core.plot_style import apply_export_style_to_current
+
+    st = _state(ctx)
+    fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")
+    card = ctx.widgets.get_or_none("_nw_card")
+    if (st is None or st.view != "distribution" or st.hits is None or not st.hits.entries or st.computing
+            or fig is None or canvas is None or card is None or card.isHidden() or not canvas.isVisible()
+            or _page_deleted(ctx)):
+        return False
+    if any(entry[0] not in fig.axes for entry in st.hits.entries):
+        return False
+    if (st.metrics is None or st.loaded_for is None or st.loaded_for[1] != st.baseline
+            or st.gated_for != gate_version(ctx) or st.focus_for != focus_rule(ctx).key() or unread_wells(ctx)):
+        return False
+    redraw_selection_rings(st.hits, [tuple(s) for s in st.selected_sites])
+    apply_export_style_to_current(ctx, fig, canvas)
+    canvas.draw_idle()
+    redraw_detail(ctx)
+    return True
 
 
 def _save_soon(ctx) -> None:
@@ -2296,6 +2356,18 @@ def set_subset(ctx, subset) -> bool:
     _call(ctx, "_nw_refresh_controls")
     redraw(ctx)
     return True
+
+
+def page_subset(ctx, st) -> ss.Subset:
+    """The page's *Subset* with every scatter-gate condition's box read from the gates as they stand now
+    (``subset_compute.bind_gates``): what every figure, badge and saved file evaluates. Read at each use, so a gate
+    edited on the Scatter Plot moves the subset at the page's next draw."""
+    return ss.bind_gates(st.subset, ctx.state.cell_gating.scatter_gates or [])
+
+
+def subset_gates(ctx) -> list[str]:
+    """The names of the scatter gates a Subset condition can test: those drawn on two nanowell metrics."""
+    return [name for name, _box in ss.nanowell_gates(ctx.state.cell_gating.scatter_gates or [])]
 
 
 def subset_tiles(ctx) -> list[str]:
@@ -2554,7 +2626,7 @@ def export_page_csv(ctx) -> None:
     if not path:
         return
     try:
-        rows = export_long_csv(st, path, wells)
+        rows = export_long_csv(st, path, wells, page_subset(ctx, st))
     except OSError as exc:
         log.warning("Nanowell export to %s failed: %s", path, exc)
         ctx.notify.set_status(f"Could not write {path}: {exc}")

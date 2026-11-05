@@ -282,6 +282,54 @@ def test_the_distribution_the_summary_and_trajectories_agree_on_the_baseline_s_w
     assert off.loc["t5", "median"] == pytest.approx(2.0)                # 12 / 6, the single baseline
 
 
+def test_a_window_longer_than_the_series_says_so_instead_of_drawing_nothing(tmp_path):
+    """Baseline t2 leaves three timepoints after it (t3..t5), so a fold change's window of 4 has nowhere to start:
+    every value is left out. The figure says why and names the longest window that draws something (3, which keeps
+    site 0's t5 alone), rather than an empty plot that reads as a dataset with no values."""
+    metrics, data = _fold_change_plate(tmp_path)
+    model = distribution_model(metrics, "count_fc", channels=data.channels, groups={"A01": ["A01"]},
+                               time_source=data.time_source, moving=4, baseline="tp:t2")
+    assert not any(len(s.values) for s in model.swarms())
+    # Sites 0 and 1 have a fold change at t3..t5; site 2 is occluded at the baseline and site 3 is empty there.
+    assert model.empty.startswith(
+        "Moving average over 4 timepoints: no value is left to draw — a fold change's window must start after the "
+        "baseline, so it needs 4 timepoints after the baseline, and no nanowell has that many. A window of 3 leaves "
+        "2 values.\n\nEach value is the mean")
+    assert model.empty in model.notes                                    # Statistics carries it from the notes
+    # A window that leaves something sets nothing.
+    assert distribution_model(metrics, "count_fc", channels=data.channels, groups={"A01": ["A01"]},
+                              time_source=data.time_source, moving=3, baseline="tp:t2").empty == ""
+
+
+def test_an_early_timepoint_along_wells_says_which_window_would_draw_it(tmp_path):
+    """Along wells at t1 a window of 3 needs two timepoints before t1, which has one: nothing to draw. A window of 2
+    keeps the three nanowells with a count at t0 and t1 (site 1 is occluded at t1)."""
+    from review.features.nanowell.distribution_compute import distribution_model
+
+    metrics, data = _fold_change_plate(tmp_path)
+    model = distribution_model(metrics, "n", channels=data.channels, groups={"A01": ["A01"]}, axis="wells",
+                               timepoint="t1", time_source=data.time_source, moving=3)
+    assert model.empty.startswith(
+        "Moving average over 3 timepoints: no value is left to draw at t1 — each value needs its own timepoint and "
+        "the 2 before it, and t1 has fewer than 2 before it in its well. A window of 2 leaves 3 values.\n\n")
+    assert mvc.nothing_left_text(metrics, "n", 0) == ""                  # off: nothing to say
+
+
+def test_trajectories_say_why_when_the_average_leaves_no_line(tmp_path):
+    pytest.importorskip("PySide6")
+    from review.features.nanowell import views_compute as vc
+    from review.features.nanowell.controller import _moving_left_nothing
+
+    metrics, _data = _fold_change_plate(tmp_path)
+    panels = vc.trajectory_panels(metrics, ["A01"], "count_fc", moving=4)
+    assert not any(p.lines for p in panels)
+    said = _moving_left_nothing(metrics, ["A01"], "count_fc", 4, 0, panels)
+    assert said.startswith("Moving average over 4 timepoints: no value is left to draw — a fold change's window")
+    assert "A window of 3 leaves 2 values." in said
+    assert _moving_left_nothing(metrics, ["A01"], "count_fc", 3, 0,
+                                vc.trajectory_panels(metrics, ["A01"], "count_fc", moving=3)) == ""
+
+
 # ── on the page ─────────────────────────────────────────────────────────────
 pytest.importorskip("PySide6")
 
@@ -421,7 +469,8 @@ def test_the_baseline_s_window_control_is_greyed_until_it_can_reach_the_figure(p
     assert not spin.isEnabled() and "no measured timepoint before them" in spin.toolTip()
     st.baseline_moving = 2                                   # left in the control from an earlier baseline
     nwc.redraw(page)
-    assert any("its one measured value, not averaged" in t for t in _texts(page))
+    # Two timepoints leave a fold change no window: the figure's message carries the sentence.
+    assert any("its one measured value, not averaged" in t for t in _texts(page, gid="nw-moving-empty"))
     _rebaselined(qtbot, page, st, "first_measurable")
     assert not spin.isEnabled() and "no measured timepoint before them" in spin.toolTip()
     _rebaselined(qtbot, page, st, "tp:t_a")
@@ -445,7 +494,12 @@ def test_the_page_s_fold_change_windows_start_after_the_baseline(page, qtbot):  
     nwc.set_moving(page, 2)
     late = next(s for s in st.model.swarms() if s.label == "t_a")
     assert len(late.values) == 0 and late.excluded.get("moving window reaches the baseline", 0) >= 1
-    assert any("Each window starts after the baseline" in t for t in _texts(page))
+    # Nothing is left to draw, so the figure says so in place of an empty plot, and why.
+    said, = _texts(page, gid="nw-moving-empty")
+    assert said.startswith("Moving average over 2 timepoints: no value is left")
+    assert said.count("Moving average over") == 1                       # the window is named once
+    assert "must start after the baseline, so it needs 2 timepoints after the baseline" in said
+    assert "No shorter window leaves one either" in said and "Each window starts after the baseline" in said
 
 
 def test_the_baseline_s_window_is_saved_and_restored(page, qtbot):  # noqa: F811

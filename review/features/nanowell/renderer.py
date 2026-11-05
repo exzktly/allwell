@@ -26,7 +26,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from review.features.nanowell._array_key import KEY_COLUMNS, draw_key, key_entries, reason_tag, state_word
+from review.features.nanowell._array_key import (KEY_COLUMNS, draw_key, key_entries, no_value_marks, reason_tag,
+                                                  state_word)
 from review.features.nanowell.array_compute import padded
 from review.features.nanowell.background_compute import short_clause
 from review.features.nanowell.crop_grid_compute import grid_shape, shown_timepoints
@@ -528,12 +529,35 @@ def _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink):
     coll.set_gid("nw-dots")
     sites = [swarm.sites[i] for i in idx]
     hits.entries.append((ax, x, layout.y, sites))
-    for xi, yi, s in zip(x, layout.y, sites):
+    _ring_selected(ax, x, layout.y, sites, rings)
+    return layout
+
+
+#: The gid of the ring drawn round a selected nanowell's dot on the Distribution view.
+RING_GID = "nw-selected-ring"
+
+
+def _ring_selected(ax, xs, ys, sites, rings) -> None:
+    for xi, yi, s in zip(xs, ys, sites):
         colour = rings.get(tuple(s))
         if colour is not None:
             ax.scatter([xi], [yi], s=(DOT_PT * 2.6) ** 2, facecolors="none", edgecolors=colour, linewidths=1.6,
-                       zorder=5)
-    return layout
+                       zorder=5).set_gid(RING_GID)
+
+
+def redraw_selection_rings(hits: HitMap, selected=()) -> None:
+    """Move the Distribution view's selection rings to *selected* on the figure as drawn, leaving every other artist
+    alone. The rings are the only thing on that figure the selection changes, so selecting a nanowell or closing
+    the site detail need not rebuild the model and draw every dot again — on a sixteen-well plate over ten
+    timepoints that full redraw took seconds. Draws exactly what :func:`render_distribution` would, through the
+    same :func:`_ring_selected`, at the positions the hit map recorded."""
+    rings = {tuple(site): colour for site, colour in zip(map(tuple, selected), selection_colours())}
+    for ax in {id(entry[0]): entry[0] for entry in hits.entries}.values():
+        for coll in [c for c in ax.collections if c.get_gid() == RING_GID]:
+            coll.remove()
+    if rings:
+        for ax, xs, ys, sites in hits.entries:
+            _ring_selected(ax, xs, ys, sites, rings)
 
 
 def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:
@@ -1639,7 +1663,7 @@ def _draw_nanowells(fig, ax, drawn, scene, layers, *, label: str, selected) -> N
     outline = outline_width_px(diameter_px) * 72.0 / fig.dpi
     fused = np.asarray(sites.fused, dtype=bool)
     if layers.colour == "metric":
-        _fill_by_metric(fig, ax, sites, fused, outline, label)
+        _fill_by_metric(fig, ax, sites, fused, outline, label, why=scene.why)
     else:
         _outline_by_state(ax, sites, fused, outline)
     if fused.any():                                      # dashed in the fused colour whatever else it is
@@ -1684,8 +1708,10 @@ def _dim_nanowells(ax, sites, dimmed) -> None:
     theme_paired_colours(coll, screen=(screen, "none"), publication=(publication, "none"))
 
 
-def _fill_by_metric(fig, ax, sites, fused, outline: float, label: str) -> None:
-    """Filled by the metric with a colour bar; one without a value a grey outline styled by its state."""
+def _fill_by_metric(fig, ax, sites, fused, outline: float, label: str, *, why: dict | None = None) -> None:
+    """Filled by the metric with a colour bar; one without a value a grey outline styled by its state, or — measured
+    with no value — by why it has none (*why*, ``_array_key.no_value_marks``), so each reason the key names is a
+    mark of its own on the array."""
     from ui.theme import Colors
 
     _bg, ink, muted = _inks(ax)
@@ -1702,7 +1728,10 @@ def _fill_by_metric(fig, ax, sites, fused, outline: float, label: str) -> None:
         bar.ax.tick_params(labelsize=_PREF_PT * GRID_TYPE_SCALE, colors=muted)
     states = np.array(sites.state, dtype=object)
     grey = Colors.plot_undefined_ink
-    _state_marks(ax, sites, fused, outline, ~has & np.isin(states, ["measured", "empty"]), "", "solid", grey)
+    bare = ~has & np.isin(states, ["measured", "empty"])
+    if bare.any():
+        for _reason, _n, mask, hatch in no_value_marks(sites, bare, why or {}):
+            _state_marks(ax, sites, fused, outline, mask, hatch, "solid", grey)
     for state, (hatch, style) in _STATE_STYLE.items():
         _state_marks(ax, sites, fused, outline, ~has & (states == state), hatch, style, grey)
 

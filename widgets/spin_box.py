@@ -34,13 +34,22 @@ exactly then, so the box emits ``refused(text)`` there — and a number over the
 (:meth:`range_text`). After a pause the box commits a number it takes, refuses one no further digit could
 rescue, and leaves a partial one (the 4 on the way to 45) as typed rather than refusing it under the user's fingers.
 ``tests/test_spin_boxes_say_what_they_refuse.py`` holds it.
+
+**The number is measured where it is drawn, not only where it is planned.** Raising the minimum to the size hint
+holds only as far as the hint is right, and the hint is the style's estimate of the text area, not the text area the
+style then lays out. Reported: the Nanowells page's Rim focus box looked wide and showed one digit of "95" on the
+reporter's machine, while on Linux the same box at the same size had 12 px to spare — a platform style or a
+rescaled font that takes room from the text field the hint never counted. So whenever the box or its field is
+resized, or the field's font changes, :meth:`_HoldsItsNumber._fit` compares the room the field really has with the
+width its widest value needs, and grows the box's hint (and so its minimum) by any shortfall. Where the hint was
+right this measures nothing and changes nothing. ``tests/test_spin_boxes_keep_their_number.py`` holds it.
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QTimer, Signal
-from PySide6.QtGui import QValidator
-from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
+from PySide6.QtGui import QFont, QValidator
+from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox, QStyle, QStyleOptionFrame
 
 #: How long a pause in typing commits the number typed (module docstring): long enough that typing "60" at an
 #: ordinary pace commits 60 and not 6 first — the Cell Gating panel's text bounds use the same second
@@ -50,6 +59,14 @@ TYPING_PAUSE_MS = 1000
 #: The events after which the stylesheet may have set the explicit minimum width again, or the widest value's width
 #: may have changed with the font.
 _REHOLD = (QEvent.Polish, QEvent.StyleChange, QEvent.FontChange, QEvent.Show)
+#: The events after which the room the text field really has may differ from what the hint planned for.
+_REFIT = (QEvent.Resize, QEvent.Show, QEvent.FontChange, QEvent.StyleChange)
+#: What a ``QLineEdit`` keeps beside its text: 2 px of its own margin each side and the 1 px cursor, with a pixel
+#: for a digit that renders a fraction wider than its metric.
+_FIELD_SLACK = 6
+#: The most the box grows past its own hint, so a field that can never fit (a style that hides it) cannot widen the
+#: box for ever.
+_MAX_EXTRA = 200
 
 
 class _HoldsItsNumber:
@@ -68,6 +85,9 @@ class _HoldsItsNumber:
         # Typed but not yet in force: italics until it commits or is put back.
         self.lineEdit().textChanged.connect(lambda _text: self._show_pending())
         self.valueChanged.connect(lambda _value: self._show_pending())
+        # Width the style took from the text field that the hint did not count (module docstring).
+        self._extra = 0
+        self.lineEdit().installEventFilter(self)
 
     def pending(self) -> bool:
         """Whether the text in the field is not the value in force: typed and not yet committed."""
@@ -118,10 +138,12 @@ class _HoldsItsNumber:
         return f"{self.textFromValue(self.minimum())}–{self.textFromValue(self.maximum())}"
 
     def _show_pending(self) -> None:
-        font = self.lineEdit().font()
-        pending = self.pending()
-        if font.italic() != pending:
-            font.setItalic(pending)
+        # From the box's own font, every time: a font taken from the field and set back on it would freeze the
+        # field at the size it had then, so a later change to the box's font (a UI scale, phone layout) would leave
+        # the field drawing in another size than the one the box measured itself in.
+        font = QFont(self.font())
+        font.setItalic(self.pending())
+        if self.lineEdit().font() != font:
             self.lineEdit().setFont(font)
 
     def _hold(self) -> None:
@@ -129,10 +151,52 @@ class _HoldsItsNumber:
         if self.minimumWidth() != width:
             self.setMinimumWidth(width)
 
+    def sizeHint(self):  # Qt naming
+        hint = super().sizeHint()
+        hint.setWidth(hint.width() + self._extra)
+        return hint
+
+    def minimumSizeHint(self):  # Qt naming
+        hint = super().minimumSizeHint()
+        hint.setWidth(hint.width() + self._extra)
+        return hint
+
+    def text_shortfall(self) -> int:
+        """How many pixels the text field is short of its widest value, as laid out now; 0 or less when it fits, and
+        0 before the field has a size."""
+        field = self.lineEdit()
+        if field is None or field.width() <= 0:
+            return 0
+        metrics = field.fontMetrics()
+        widest = max(metrics.horizontalAdvance(self.prefix() + self.textFromValue(v) + self.suffix())
+                     for v in (self.minimum(), self.maximum()))
+        option = QStyleOptionFrame()
+        field.initStyleOption(option)
+        margins = field.textMargins()
+        room = (field.style().subElementRect(QStyle.SE_LineEditContents, option, field).width()
+                - margins.left() - margins.right())
+        return widest + _FIELD_SLACK - room
+
+    def _fit(self) -> None:
+        short = self.text_shortfall()
+        if short > 0 and self._extra < _MAX_EXTRA:
+            self._extra = min(_MAX_EXTRA, self._extra + short)
+            self._hold()
+            self.updateGeometry()
+
+    def eventFilter(self, watched, event) -> bool:  # Qt naming
+        if watched is self.lineEdit() and event.type() in _REFIT:
+            self._fit()
+        return super().eventFilter(watched, event)
+
     def event(self, event) -> bool:  # Qt naming
         handled = super().event(event)
         if event.type() in _REHOLD:
             self._hold()
+        if event.type() == QEvent.FontChange:
+            self._show_pending()                 # the field follows the box's font (``_show_pending``)
+        if event.type() in _REFIT:
+            self._fit()
         return handled
 
     def show_value(self, value) -> None:

@@ -1098,7 +1098,7 @@ def _features() -> list[FeatureDescriptor]:
         # page: `centre_view.build_centre` adds pages in registry order and
         # calls `setCurrentIndex(0)`. No special case anywhere.
         FeatureDescriptor(
-            name="Home", group="Home", icon="home", build=_build_home,
+            name="Home", group="Home", on_phone=True, icon="home", build=_build_home,
             states=(StateSpec("home", _state_home),),
             # ``home.sync_sidebar``: the Sample Map tab's layer switch
             # repaints Home's chrome through this — **Import** writes
@@ -1123,9 +1123,9 @@ def _features() -> list[FeatureDescriptor]:
         ),
         # its builder from its local fallback map. Its plot sub-tabs are the
         # sub-leaf descriptors below.
-        FeatureDescriptor(name="Plotting", group="Analysis", icon="line-chart"),
+        FeatureDescriptor(name="Plotting", group="Analysis", on_phone=True, icon="line-chart"),
         FeatureDescriptor(
-            name="Statistics", group="Analysis", icon="sigma", build=_build_stats,
+            name="Statistics", group="Analysis", on_phone=True, icon="sigma", build=_build_stats,
             # No ``rail_sections``: Statistics shows the main frame itself, and
             # only outside Split View — see ``_activate_statistics``.
             states=(StateSpec("stats", _state_stats),),
@@ -1133,7 +1133,7 @@ def _features() -> list[FeatureDescriptor]:
             on_channel_changed=_channel_stats,
         ),
         FeatureDescriptor(
-            name="Multivariate", group="Analysis", icon="scatter-chart",
+            name="Multivariate", group="Analysis", on_phone=True, icon="scatter-chart",
             rail_sections=_MAIN, build=_build_multivariate,
             lazy_only=True,
             states=(StateSpec("multivariate", _state_multivariate),),
@@ -1144,7 +1144,7 @@ def _features() -> list[FeatureDescriptor]:
             per_well_selection=True,
         ),
         FeatureDescriptor(
-            name="Spatial", group="Analysis", icon="waypoints",
+            name="Spatial", group="Analysis", on_phone=True, icon="waypoints",
             rail_sections=_MAIN, build=_build_spatial,
             lazy_only=True,
             states=(StateSpec("spatial", _state_spatial),),
@@ -1157,7 +1157,7 @@ def _features() -> list[FeatureDescriptor]:
         # ── Assays: pages that mean something only on a dataset with that
         # kind of input (nanowell-array plates; smFISH channels) ───────────
         FeatureDescriptor(
-            name="Nanowells", group="Assays", icon="hexagon",
+            name="Nanowells", group="Assays", on_phone=True, icon="hexagon",
             rail_sections=_MAIN, build=_build_nanowell,
             lazy_only=True,
             states=(StateSpec("nanowell", _state_nanowell),),
@@ -1183,7 +1183,7 @@ def _features() -> list[FeatureDescriptor]:
         # and its frame view exists to validate that cut. Like Nanowells it is
         # defined by a distinct kind of input data, so the two share **Assays**.
         FeatureDescriptor(
-            name="smFISH", group="Assays", icon="dna", rail_sections=_MAIN,
+            name="smFISH", group="Assays", on_phone=True, icon="dna", rail_sections=_MAIN,
             build=_build_smfish, lazy_only=True,
             on_activate=_activate_smfish,
             on_selection_changed=_sel_smfish,
@@ -1195,7 +1195,7 @@ def _features() -> list[FeatureDescriptor]:
         # per-cell rows (a Review CSV row double-clicks to its cell in
         # Segmentation) ───────────────────────────────────────────────────
         FeatureDescriptor(
-            name="Image Browser", group="Inspect", icon="layout-grid",
+            name="Image Browser", group="Inspect", on_phone=True, icon="layout-grid",
             build=_build_image_browser,
             lazy_only=True,
             on_dataset_loaded=_loaded_image_browser,
@@ -1219,7 +1219,7 @@ def _features() -> list[FeatureDescriptor]:
                       "image_browser.show_field": _svc_image_browser_show_field},
         ),
         FeatureDescriptor(
-            name="Review CSV", group="Inspect", icon="file-spreadsheet",
+            name="Review CSV", group="Inspect", on_phone=False, icon="file-spreadsheet",
             rail_sections=_MAIN, build=_build_review_csv,
             on_activate=_activate_review_csv,
             on_selection_changed=_sel_review_csv,
@@ -1227,7 +1227,7 @@ def _features() -> list[FeatureDescriptor]:
         ),
         # ── Output: where work leaves the app ─────────────────────────────
         FeatureDescriptor(
-            name="Saved Plots", group="Output", icon="image",
+            name="Saved Plots", group="Output", on_phone=True, icon="image",
             rail_sections=_MAIN, build=_build_saved_plots,
             lazy_only=True,
             on_activate=_activate_saved_plots,
@@ -1239,7 +1239,7 @@ def _features() -> list[FeatureDescriptor]:
                       "saved_plots.report_pdf": _svc_saved_plots_report_pdf},
         ),
         FeatureDescriptor(
-            name="Batch Export", group="Output", icon="boxes",
+            name="Batch Export", group="Output", on_phone=False, icon="boxes",
             rail_sections=_MAIN, build=_build_batch_export,
             on_activate=_activate_batch_export,
         ),

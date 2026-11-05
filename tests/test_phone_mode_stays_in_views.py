@@ -340,6 +340,13 @@ def direct_canvas_constructions(files: list[Path]) -> list[str]:
     return out
 
 
+def pages_without_a_phone_decision(registry) -> list[str]:
+    """Top-level pages whose ``on_phone`` is still unset: a page states whether
+    phone layout offers it, so one added later cannot become phone-visible by
+    being forgotten."""
+    return [d.name for d in registry.top_level() if d.on_phone is None]
+
+
 # ── the tests ───────────────────────────────────────────────────────────────
 
 def test_data_and_drawing_layers_never_read_the_mode():
@@ -392,3 +399,18 @@ def test_every_plot_canvas_is_built_through_make_canvas():
         f"build a plot canvas with widgets.canvas.make_canvas, not a FigureCanvas call, so it "
         f"declares itself to phone layout (PHONE_FORM_TRACKER.md P3.1); {len(offenders)} site(s):\n  "
         + "\n  ".join(offenders))
+
+
+def test_every_top_level_page_states_whether_phone_layout_offers_it():
+    from review.features import registry
+    undecided = pages_without_a_phone_decision(registry.build_feature_registry())
+    assert not undecided, (
+        f"set on_phone=True or False on these FeatureDescriptors (PHONE_FORM_TRACKER.md P4.2): {undecided}")
+
+
+def test_phone_layout_hides_review_csv_and_batch_export_and_nothing_else():
+    """What ``allwell`` hands the shell as ``phone_hidden_sections``, from the
+    registry. Wrong implementation: the hand-written pair it replaced would pass
+    this too, so the guard above is what stops a new page being left out."""
+    from review.features import registry
+    assert registry.build_feature_registry().hidden_on_phone() == ["Review CSV", "Batch Export"]

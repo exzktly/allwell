@@ -117,9 +117,6 @@ class PhoneHandles:
     #: landscape), the rule between dashboard and log, and the dashboard.
     analyze_body: object | None = None
     analyze_rule: QWidget | None = None
-    #: Logs that wrap in phone layout (a sideways-scrolled log on a phone
-    #: hides the end of every error line, which is the part that matters).
-    logs: Callable[[], list] = lambda: []
     #: The status line's text ("4 well(s) | 72 nuclei"), shown at the top of
     #: the side rail since the status bar is gone on a phone.
     status_text: Callable[[], str] | None = None
@@ -1287,13 +1284,6 @@ class PhoneShell(QObject):
         bar = self._h.mode_bar
         if bar is not None and hasattr(bar, "setCompact"):
             bar.setCompact(on, pad=self.pt(MODE_PAD_PT))
-        from PySide6.QtWidgets import QTextEdit
-        for log in self._h.logs():
-            # Wrapped, a log trimmed at its block cap re-anchors a scrolled-up
-            # reader slightly off (the trim fix-up counts a block as one line;
-            # ARCHITECTURE §6.1). Reading the end of an error line on a phone
-            # is worth that.
-            log.setLineWrapMode(QTextEdit.WidgetWidth if on else QTextEdit.NoWrap)
         self._options_badge.setInset(self.pt(2) if on else 0)
         for w in self._phone_only():
             w.setVisible(on)

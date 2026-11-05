@@ -5993,3 +5993,17 @@ def test_phone_guard_clears_make_canvas_and_a_non_qt_export_canvas(tmp_path, mon
                      "def make_canvas(fig):\n    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg\n"
                      "    return FigureCanvasQTAgg(fig)\n")
     assert module.direct_canvas_constructions([good, export, builder]) == []
+
+
+def test_phone_guard_catches_a_page_with_no_phone_decision_and_clears_a_decided_one():
+    from review.core.feature_registry import FeatureDescriptor, FeatureRegistry
+
+    module = importlib.import_module("tests.test_phone_mode_stays_in_views")
+    forgotten = FeatureRegistry([FeatureDescriptor(name="New Tab", group="Analysis", icon="x"),
+                                 FeatureDescriptor(name="Old Tab", group="Analysis", icon="x", on_phone=False)])
+    assert module.pages_without_a_phone_decision(forgotten) == ["New Tab"]
+    decided = FeatureRegistry([FeatureDescriptor(name="New Tab", group="Analysis", icon="x", on_phone=True)])
+    assert module.pages_without_a_phone_decision(decided) == []
+    # A sub-leaf has no rail entry of its own and is not asked.
+    leaf = FeatureRegistry([FeatureDescriptor(name="Leaf", parent="Plotting")])
+    assert module.pages_without_a_phone_decision(leaf) == []

@@ -132,6 +132,12 @@ class FeatureDescriptor:
     # visibility, because it changes what a plate click does and the plate is
     # shared with the other pane in Split View.
     plate_drag_source: bool = False
+    # Whether the page is offered in phone layout. A top-level page states it
+    # (``True``, or ``False`` for desk work — Review CSV and Batch Export are
+    # not read on a phone); ``None`` means nobody decided, which
+    # ``tests/test_phone_mode_stays_in_views.py`` rejects, so a new page cannot
+    # become phone-visible by being forgotten.
+    on_phone: bool | None = None
     parent: str = ""                     # composite container a sub-leaf lives in
                                          # (e.g. "Plotting"); "" for top-level entries
     build: Callable | None = None     # build(ctx, frame) -> None
@@ -309,6 +315,10 @@ class FeatureRegistry:
         the page-stack's local fallback map.
         """
         return [d for d in self._ordered if d.group]
+
+    def hidden_on_phone(self) -> list[str]:
+        """The top-level pages phone layout does not offer, in rail order."""
+        return [d.name for d in self.top_level() if d.on_phone is False]
 
     def groups(self) -> list[str]:
         """The top-level groups in declaration order, each once.

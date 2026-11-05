@@ -260,7 +260,7 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         shown = [r for k, r in nav._rows.items() if not r.isHidden()]
         assert shown and all(r.minimumHeight() >= round(48 * u) - 1 for r in shown)
         # The analysis log wraps rather than scrolling sideways.
-        logs = shell._h.logs()
+        logs = [win._analyze._log]
         assert logs and all(l.lineWrapMode() == QTextEdit.WidgetWidth for l in logs)
         # The status bar is hidden, so its log "!" is mirrored onto ⋯ — inset,
         # clear of the button's edge.
@@ -347,7 +347,7 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         shell.set_on(False)
         _pump(qapp)
     assert not phone_layout.is_on()
-    assert all(l.lineWrapMode() == QTextEdit.NoWrap for l in shell._h.logs())
+    assert win._analyze._log.lineWrapMode() == QTextEdit.NoWrap
     assert {k for k, r in review._section_nav._rows.items()
             if r.isHidden()} == desk_hidden
     assert shell._options_badge.isHidden()

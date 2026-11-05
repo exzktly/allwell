@@ -38,7 +38,6 @@ from tests._page_datasets import DATASETS
 from tests._repo_scan import REPO_ROOT
 from tests._screens import SCREENS, is_phone
 
-pytestmark = pytest.mark.slow
 
 #: ``(dataset, screen, page, check)`` -> why that finding is allowed. A reason says what is true of the
 #: page, not that someone will get to it; an entry whose finding is gone fails
@@ -72,6 +71,11 @@ CASES = [(dataset, screen) for dataset in DATASETS for screen in SCREENS]
 #: Each case is a full app in a process of its own; three at a time fits a 4-CPU container.
 PARALLEL_CASES = 3
 CASE_TIMEOUT_S = 1500
+
+#: The nine cases run inside the first test's fixture setup, which the suite's 90 s per-test timeout counts: that
+#: killed the run before any case had finished. The bound is every wave of cases at its own limit.
+pytestmark = [pytest.mark.slow,
+              pytest.mark.timeout(-(-len(CASES) // PARALLEL_CASES) * CASE_TIMEOUT_S + 300)]
 
 
 def _run_case(kind: str, screen: str, root: Path) -> list[dict]:

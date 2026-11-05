@@ -821,7 +821,7 @@ States: `todo`, `done` (with the test and the mutation that proved it), `decline
 
 | Row | Item | Step | State | Evidence |
 |---|---|---|---|---|
-| W1 | `window_compute.py` and its pure tests | W1 | todo | |
+| W1 | `window_compute.py` and its pure tests | W1 | done | `tests/test_nanowell_window_members.py`, 12 tests. Mutations, each an `AssertionError`: `hit & required` for `hit >= required` fails the every test and the sentence test; the overlap test in `snap` replaced by centre-inside fails the snap test; exclusive bounds (`lo < value < hi`) passed all eleven tabled tests, so `test_the_range_includes_both_of_its_ends` (values exactly on 2.5 and 3.0) was added and fails under that mutation |
 | W2 | windows and pop-out choices on `NanowellState`, persisted | W2 | todo | |
 | W3 | the drag, the band and rings, the press/release split | W3 | todo | |
 | W4 | the strip | W4 | todo | |

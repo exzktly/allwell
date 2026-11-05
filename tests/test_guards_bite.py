@@ -5812,3 +5812,114 @@ def test_a_replayed_walk_of_a_shared_tree_is_the_walk_it_replaces(tmp_path):
     second = parse_source(other)
     assert len(list(ast.walk(second))) == len(list(_repo_scan._ast_walk(second))) > len(expected)
 
+
+
+# ── phone layout stays in its layers ────────────────────────────────────────
+
+def _phone_scan(monkeypatch, tmp_path):
+    """The phone-mode guard module, with ``rel`` made relative to *tmp_path* so
+    its layer rules (which read the path) see a synthetic repository."""
+    module = importlib.import_module("tests.test_phone_mode_stays_in_views")
+    monkeypatch.setattr(module, "rel", lambda p: Path(p).relative_to(tmp_path).as_posix())
+    return module
+
+
+PHONE_MODE_IN_DATA_OR_DRAWING = {
+    # The shape the rule exists for: a renderer deciding its own size.
+    "renderer_function_local": ("review/features/x/renderer.py",
+                                "def draw(ax):\n    from core import phone_layout\n"
+                                "    return 2 if phone_layout.is_on() else 1\n"),
+    "collect_module_level": ("review/features/x/collect.py",
+                             "from core import phone_layout\n"),
+    "compute_dotted": ("review/features/x/stats_compute.py", "import core.phone_layout\n"),
+    "domain": ("domain/model.py", "from core.phone_layout import is_on\n"),
+    "services_shell": ("services/runner.py", "from ui.phone_shell import PhoneShell\n"),
+    "util_ui_module": ("util/paths.py", "from ui import phone_window\n"),
+    "form_registry": ("pipeline/steps.py", "from widgets import form_registry\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(PHONE_MODE_IN_DATA_OR_DRAWING))
+def test_phone_guard_catches_the_mode_in_data_or_drawing(tmp_path, monkeypatch, shape):
+    name, body = PHONE_MODE_IN_DATA_OR_DRAWING[shape]
+    path = _write(tmp_path, name, body)
+    module = _phone_scan(monkeypatch, tmp_path)
+    offenders = module.data_and_drawing_reads_of_the_mode([path])
+    assert offenders, f"the {shape} import of the mode went uncaught"
+    assert Path(name).name in offenders[0]
+
+
+def test_phone_guard_clears_a_renderer_that_takes_its_size_as_an_argument(tmp_path, monkeypatch):
+    module = _phone_scan(monkeypatch, tmp_path)
+    clean = _write(tmp_path, "review/features/x/renderer.py",
+                   "def draw(ax, dpi):\n    return dpi / 100\n")
+    view = _write(tmp_path, "review/features/x/tab_view.py",
+                  "from core import phone_layout\n")
+    assert module.data_and_drawing_reads_of_the_mode([clean, view]) == []
+
+
+PHONE_MODE_READS = {
+    "controller": ("review/features/x/controller.py",
+                   "from core import phone_layout\n\n\ndef refresh():\n"
+                   "    return phone_layout.is_on()\n"),
+    "listener": ("review/core/helper.py",
+                 "from core import phone_layout\n\n\ndef follow():\n"
+                 "    phone_layout.add_listener(print)\n"),
+    "is_switching": ("review/features/x/tab_view.py",
+                     "from core import phone_layout\n\n\ndef build():\n"
+                     "    return phone_layout.is_switching()\n"),
+    # `from core.phone_layout import is_on` leaves no `phone_layout.` to match.
+    "bare_name": ("review/features/x/controller.py",
+                  "from core.phone_layout import is_on\n\n\ndef refresh():\n    return is_on()\n"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(PHONE_MODE_READS))
+def test_phone_guard_catches_an_unrostered_read_of_the_mode(tmp_path, monkeypatch, shape):
+    name, body = PHONE_MODE_READS[shape]
+    path = _write(tmp_path, name, body)
+    module = _phone_scan(monkeypatch, tmp_path)
+    offenders = module.unrostered_reads([path], roster={})
+    assert len(offenders) == 1, f"the {shape} read of the mode was not found exactly once"
+    assert name in offenders[0]
+
+
+@pytest.mark.parametrize("name", [
+    "ui/phone_shell.py", "core/anything.py", "analyze/phone_view.py",
+    "review/features/home/_phone.py", "review/core/phone_panel_sheet.py"])
+def test_phone_guard_clears_a_read_in_a_sanctioned_layer(tmp_path, monkeypatch, name):
+    path = _write(tmp_path, name,
+                  "from core import phone_layout\n\n\ndef f():\n    return phone_layout.is_on()\n")
+    module = _phone_scan(monkeypatch, tmp_path)
+    assert module.unrostered_reads([path], roster={}) == []
+
+
+def test_phone_guard_clears_a_rostered_read_and_flags_a_stale_entry(tmp_path, monkeypatch):
+    name, body = PHONE_MODE_READS["controller"]
+    path = _write(tmp_path, name, body)
+    module = _phone_scan(monkeypatch, tmp_path)
+    roster = {(name, "refresh"): "synthetic"}
+    assert module.unrostered_reads([path], roster=roster) == []
+    assert module.stale_roster_entries([path], roster=roster) == []
+    # The read is gone but its roster row is not: the roster must shrink with it.
+    clean = _write(tmp_path, name, "def refresh():\n    return False\n")
+    assert module.stale_roster_entries([clean], roster=roster) == [f"{name} refresh()"]
+
+
+def test_phone_guard_counts_every_way_the_shell_recognises_a_widget_by_name():
+    import ast
+
+    module = importlib.import_module("tests.test_phone_mode_stays_in_views")
+    source = (
+        '_KIND_BY_CLASS = {"Stepper": "stepper", "ControlBand": "controls"}\n'
+        '_KIND_BY_OBJECT_NAME = {"AnalyzeFormRow": "form_row"}\n'
+        "def f(w):\n"
+        '    if w.objectName() == "InfoHint":\n'
+        "        return 1\n"
+        '    return getattr(type(w), "draw_idle", None) is not None\n')
+    sites = module.recognised_by_name(ast.parse(source))
+    assert [what for _line, what in sites] == [
+        "_KIND_BY_CLASS entry 'ControlBand'", "_KIND_BY_CLASS entry 'Stepper'",
+        "_KIND_BY_OBJECT_NAME entry 'AnalyzeFormRow'",
+        'compares an object name to "InfoHint"', "duck-types a canvas by draw_idle"]
+    assert module.recognised_by_name(ast.parse("def f():\n    return 1\n")) == []

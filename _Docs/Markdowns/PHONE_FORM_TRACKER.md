@@ -373,11 +373,11 @@ docstring.
 
 | Id | Item | State | Evidence |
 |---|---|---|---|
-| P0.1 | Layout snapshot harness and committed baseline | `todo` | |
-| P0.2 | Guard: data and drawing layers never read the mode | `todo` | |
+| P0.1 | Layout snapshot harness and committed baseline | `wip` | `tests/phone_snapshot.py` (capture + diff) written; scenario driver prototyped in scratch, timing and determinism not yet measured; test and baseline not written |
+| P0.2 | Guard: data and drawing layers never read the mode | `done` | `test_data_and_drawing_layers_never_read_the_mode`; rule already held on main, so proven by 7 bite cases in `test_guards_bite.py` |
 | P0.3 | Record the costs on this tree | `todo` | |
-| P0.4 | Ratchet: reads of the mode outside the sanctioned layers | `todo` | |
-| P0.5 | Ratchet: widgets the shell recognises by name | `todo` | |
+| P0.4 | Ratchet: reads of the mode outside the sanctioned layers | `done` | `test_every_read_of_the_mode_outside_the_sanctioned_layers_is_rostered`; scratch `is_on()` in `stats/controller.py` failed it naming the line; 13 reads rostered (scan finds 16: `image_table/_phone_fit.py` owns its phone form and is sanctioned by path) |
+| P0.5 | Ratchet: widgets the shell recognises by name | `done` | `test_the_shell_recognises_no_more_widgets_by_name_than_the_budget`, budget 10 (3 class keys, 1 object-name key, `InfoHint` x2, `draw_idle` x4); scratch extra key failed it |
 
 **P0.1 — Layout snapshot harness.**
 *Do:* write `tests/phone_snapshot.py`, a helper that walks a window's visible
@@ -429,7 +429,7 @@ directory is enough; do not commit it. Write the numbers and the method into
 `add_listener` and `is_switching` outside `ui/`, `core/`, files named
 `*_phone.py` or `*phone_view.py`, and `review/core/phone_panel_sheet.py`. Hold
 them against an allowlist keyed by **file and function name** (not by file —
-§7.5 #10), one written reason per entry. Today that is 13 calls: `allwell.py`
+§7.5 #10), one written reason per entry. Today that is 13 rostered calls (the scan finds 16 with the Image Table's own `_phone_fit.py`, sanctioned by path): `allwell.py`
 5, `review/core/plot_style.py` 3, `review/core/ui_helpers.py` 2,
 `image_table/controller.py` 1, `review/core/split_view.py` 1,
 `review/core/app_shell_view.py` 1 — re-count before writing the roster. Add a
@@ -442,9 +442,7 @@ in a synthetic `controller.py` fires it; deleting one roster entry fires it.
 *Do:* in the same file, read `ui/phone_shell.py`'s `_KIND_BY_CLASS` and
 `_KIND_BY_OBJECT_NAME` dicts and the string and duck-type checks in
 `_phone_relevant` and `_PhoneEventFilter.eventFilter`, through the AST, and
-assert their total is at most a budget constant — today 3 classes + 1 object
-name + the `"InfoHint"` check + the canvas duck type = 6, with the
-`"InfoHint"` comparison counted once per function it appears in (re-count).
+assert their total is at most a budget constant — measured as 10: 3 class keys + 1 object-name key + `"InfoHint"` compared in 2 places + the `draw_idle` duck type in 4.
 Each later row lowers the budget in its own commit. P4.4 takes it to zero.
 *Done when:* passes on the tree; adding a key to `_KIND_BY_CLASS` in a scratch
 edit fails it.

@@ -90,6 +90,53 @@ _TICK_WIDE_CHARS = 6
 _SQUARE_CELLS_MIN_FILL = 0.6
 
 
+#: What share of a cell's width its widest text may take.
+_CELL_TEXT_FILL = 0.95
+
+#: On a cell's text: the size its renderer gave it, so every fit starts from that
+#: and never from an earlier fit's shrink.
+_CELL_SRC = "_aw_cell_src"
+
+
+def fit_to_panel(fig, ax) -> None:
+    """Decide the grid's cell shape and its cells' text size from the panel as it is now.
+
+    Called by ``plot_style`` once the layout has settled, and again after the
+    margins moved: the figure is drawn before it has its final size, and a phone
+    that turns or a page that resizes changes the panel under a drawing that is
+    not redone. Square cells if they fill the panel (:func:`_grid_aspect`);
+    each cell's text shrunk, together, until the widest fits the cell, so
+    "3000" in a cell twenty pixels wide does not run into its neighbour's.
+    """
+    if not ax.images:
+        return
+    rows, cols = ax.images[0].get_array().shape[:2]
+    ax.set_aspect(_grid_aspect(fig, ax, rows, cols))
+    texts = [t for t in ax.texts if t.get_text()]
+    if not texts:
+        return
+    renderer = fig.canvas.get_renderer()
+    locator = ax.get_axes_locator()
+    ax.apply_aspect(locator(ax, renderer) if locator is not None else None)
+    (x0, _), (x1, _) = ax.transData.transform([(0.0, 0.0), (1.0, 0.0)])
+    pitch = abs(x1 - x0)
+    for t in texts:
+        if not hasattr(t, _CELL_SRC):
+            setattr(t, _CELL_SRC, float(t.get_fontsize()))
+    widest = max(renderer.get_text_width_height_descent(
+        t.get_text(), _props_at(t, getattr(t, _CELL_SRC)),
+        ismath=False)[0] for t in texts)
+    share = min(1.0, _CELL_TEXT_FILL * pitch / widest) if widest > 0 and pitch > 0 else 1.0
+    for t in texts:
+        t.set_fontsize(getattr(t, _CELL_SRC) * share)
+
+
+def _props_at(text, size: float):
+    prop = text.get_fontproperties().copy()
+    prop.set_size(size)
+    return prop
+
+
 def _grid_aspect(fig, ax, rows: int, cols: int) -> str:
     """``"equal"`` while square cells fill enough of *ax*'s panel, else ``"auto"``.
 
@@ -777,6 +824,7 @@ def _draw_heatmap(ctx) -> None:
     ax.clear()
     ax.set_facecolor(_bg)  # ax.clear() resets to white; re-apply the theme bg
     aspect = _grid_aspect(fig, ax, masked.shape[0], masked.shape[1])
+    setattr(ax, "_aw_fit_to_panel", fit_to_panel)     # ``plot_style`` calls it once laid out
     if norm is not None:
         im = ax.imshow(masked, aspect=aspect, cmap=cmap, norm=norm,
                        origin="upper", interpolation="nearest")

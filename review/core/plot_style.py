@@ -1861,6 +1861,17 @@ def _fit_ticks(fig) -> None:
     """Keep neighbouring tick labels clear of each other (``tick_fit``), once the
     layout has settled; a figure that cannot be measured keeps its labels."""
     from review.core.tick_fit import fit_tick_labels
+
+    def fit_panels() -> None:
+        # What a renderer decided from its panel's size, which was not yet the
+        # size it ended up (``_aw_fit_to_panel(fig, ax)``).
+        for ax in fig.axes:
+            fit = getattr(ax, "_aw_fit_to_panel", None)
+            if fit is not None:
+                with swallow("fit a plot's cells to its panel"):
+                    fit(fig, ax)
+
+    fit_panels()
     with swallow("fit a plot's tick labels to its panels"):
         # Twice, laying the figure out in between: a label that wraps or
         # shrinks changes the margins the engine gives the axes, and so the
@@ -1875,6 +1886,7 @@ def _fit_ticks(fig) -> None:
     if getattr(fig, "_aw_margin_fitted", False):
         with swallow("keep a divider-placed plot's text inside its figure"):
             margin_fit.inset_for_overhang(fig)
+    fit_panels()
 
 
 def _apply_layout_engine(fig, prefs: dict) -> None:

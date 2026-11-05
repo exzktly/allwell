@@ -21,6 +21,8 @@ _RULE_TIP = ("Over several timepoints: keep a nanowell only if it is inside the 
 _PANEL_TIP = "Cover only the panel the window was drawn in, rather than every panel."
 _POPOUT_TIP = "Show the nanowells inside the window in the pop-out, as rows of crops over time."
 _CLEAR_TIP = "Clear the window"
+#: The widest the strip's Low and High fields grow, in pixels: a number of a few digits.
+_FIELD_MAX_W = 80
 
 
 def _state(ctx):
@@ -39,7 +41,7 @@ def build_window_strip(ctx, parent) -> QWidget:
     low, high = QLineEdit(strip), QLineEdit(strip)
     for field in (low, high):
         field.setToolTip(_RANGE_TIP)
-        field.setMaximumWidth(80)
+        field.setMaximumWidth(_FIELD_MAX_W)
     rule = QComboBox(strip)
     rule.addItem("every timepoint", "every")
     rule.addItem("any timepoint", "any")

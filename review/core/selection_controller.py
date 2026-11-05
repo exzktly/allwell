@@ -522,8 +522,15 @@ def on_sidebar_plate_selection_changed(ctx, ids) -> None:
     # every well entered redrew every plot. The release's
     # ``selectionDragFinished`` commits the gesture once
     # (``on_sidebar_plate_drag_finished``).
+    #
+    # The press that adds a well also restarts the wait: the debounce counts
+    # from the last well added, never from the click before it. Stopping the
+    # timer here (rather than leaving it to run) keeps the previous click's
+    # wait from expiring while this press or drag is still held, which would
+    # redraw mid-gesture and then again at the release.
     plate = ctx.widgets.get_or_none("_sidebar_plate")
     if plate is not None and getattr(plate, "isSelecting", lambda: False)():
+        _hold_plate_click_timer(ctx)
         return
     # A change from anywhere else (a programmatic ``set_ids``, the All /
     # None buttons) goes through the same click debounce.
@@ -1824,7 +1831,8 @@ def sel_color(ctx, s) -> str:
 
 
 #: How long the plots wait after a click on the sidebar plate before they
-#: redraw; each further click restarts the wait, so a run of clicks redraws
+#: redraw; each further click restarts the wait from its own press, so the
+#: wait always counts from the last well added and a run of clicks redraws
 #: once. The plate itself repaints at every click.
 PLATE_CLICK_DEBOUNCE_MS = 500
 
@@ -1842,6 +1850,14 @@ def _plate_click_timer(ctx):
     timer.setInterval(PLATE_CLICK_DEBOUNCE_MS)
     timer.timeout.connect(lambda: flush_plate_clicks(ctx))
     return ctx.widgets.register("_plate_click_timer", timer)
+
+
+def _hold_plate_click_timer(ctx) -> None:
+    """Stop the click-debounce wait while a press or drag is held; the release restarts it."""
+    timer = ctx.widgets.get_or_none("_plate_click_timer")
+    if timer is not None:
+        with swallow("plate click debounce: hold"):
+            timer.stop()
 
 
 def schedule_plate_commit(ctx) -> None:

@@ -14405,6 +14405,26 @@ build without the Nanowells feature the line adds "nanowell views are not in thi
 reads as an ordinary one. The per-cell Scatter's axis pickers and Multivariate's feature picker offer each cell's own
 nanowell's metrics ("Nanowell ▸ …", the Nanowell family) through `with_nanowell_columns`.
 
+**Every observations footer is written by `observation_band.write_footer`** — the nanowell footers of Bar, Line,
+Distribution, Heat Map and Scatter and the cells footer above — bottom-left, gid `FOOTER_GID`, wrapped to the
+figure's width, and then `plot_style.keep_panels_clear_of_footer` moves the panels clear of it. The wrap keeps a
+capture's shape: an unwrapped line wider than the figure was only clipped on screen, but a `bbox_inches="tight"`
+capture (Copy, Save to Saved Plots, an export) widened to take it in, leaving the plot pressed against the left
+edge of an image as wide as the footer. The room is needed because a footer belongs to no axes, so a renderer's
+fixed bottom margin left none for it and the footer was drawn across the x-axis label. With no layout engine the
+panels are squeezed upward together — each one's original position mapped from the span the panels occupy onto
+that span less the overlap, a divider-placed colour bar following its parent — until the lowest panel ink sits
+above the footer's top; positions are moved rather than `subplots_adjust` re-run, because the export-style pass
+pins every panel to the place it first saw (`_fixed_axes_position`). A panel whose position is no longer the one
+this left was placed again by its renderer and is squeezed from there, so redraws do not ratchet; the footer
+shrinking or going gives the room back, and the canvas's `resize_event` re-measures it. Under a layout engine the
+footer's band is kept out of the engine's rectangle (`_figure_text_band`). Only a figure carrying an observations
+footer is touched, so pages that lay out their own figure text keep their places. It runs from `write_footer`, from
+`stamp_cells_footer` when it removes a footer, and at the end of every desk `_apply_layout_engine`.
+`tests/test_observation_footer_stays_in_the_figure.py` saves a Nanowells distribution with a long footer through
+the card, measures the footer against every panel's ink on Distribution, Bar and Line, checks redraws do not
+move the panels again, and holds the helper as the only writer of a footer gid (by name or spelled out).
+
 **Images.** A nanowell run's `out.zip` holds no masks or overlays, only one stitched phase montage per well and
 timepoint. The Image Table draws a nanowell well as three kinds of *nanowell frame*, virtual channels named in
 `data/nanowell_images.py` and loaded through `frame_load` like any other (a frame has no field, so a cell's FOV is
@@ -20281,9 +20301,11 @@ ReviewApp._on_sidebar_plate_selection_changed(ids)
         ├── updates app._selected_wells
         ├── app._refresh_sidebar_map()   ← updates colours; no plot redraw yet
         └── commits nothing while plate.isSelecting() — the press-to-release
-            of a click or drag. A drag fires selectionChanged once per well it
-            enters, each from its own mouse event, so an end-of-tick deferral
-            merges none of them.
+            of a click or drag — and stops the click-debounce timer
+            (_hold_plate_click_timer), so the previous click's wait cannot
+            expire under a held press; the release restarts it. A drag fires
+            selectionChanged once per well it enters, each from its own mouse
+            event, so an end-of-tick deferral merges none of them.
 
 The click debounce. Every plate click — a select-mode click or drag, a
 passive-mode wellActivated that toggles a group, a solo well or a Group-by
@@ -20292,10 +20314,14 @@ plot redraw through selection_controller.schedule_plate_commit /
 schedule_plate_rebuild. Those restart one single-shot QTimer per window
 (_plate_click_timer, PLATE_CLICK_DEBOUNCE_MS = 500); when the clicks pause it
 fires flush_plate_clicks, which runs the commit below and then any rebuild
-(invalidating if any click asked to). So picking six wells one click at a
+(invalidating if any click asked to). The wait counts from the last well
+added: the press that adds one stops the timer and its release starts it
+afresh, so a click that lands just as the previous wait is running out does
+not redraw with its press half-done. So picking six wells one click at a
 time draws the plots once, not six times with each draw holding up the next
 click. A test that needs the redraw now calls flush_plate_clicks
-(tests/test_plate_clicks_redraw_once.py: three clicks, then one commit).
+(tests/test_plate_clicks_redraw_once.py: three clicks, then one commit; a
+held press outlasting the previous click's wait, then one commit after it).
 
 User releases mouse / clicks "Select all" / "Select none"
         │

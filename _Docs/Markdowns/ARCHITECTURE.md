@@ -14259,6 +14259,14 @@ every Plotting leaf to a declaration and a cells-only leaf to a written reason.
 | Distribution | every nanowell value per member through the tab's own histogram / KDE / violin renderer | `distribution/_observations.py` |
 | Response Curves | cells only (its X is a sample variable) | — |
 
+**Gates on the nanowell scatter.** The Cells page's nanowell scatter draws the stored scatter gates like the cell
+scatter does (`scatter/_observations._paint_nanowell_gates` → `gating.paint_gates`), and names its axes by the same
+`nw::<key>` columns the "Nanowell ▸" pickers use, both in `interaction_cache` (so `gating._on_gate_drawn` stamps a new
+gate with them) and as `axes_cols` (so a gate shows only on its own pair). A gate drawn on nanowell count × brightness
+is therefore the same box on the cell scatter's "Nanowell ▸ count" × "Nanowell ▸ brightness" and on no other pair;
+its label's percentage is of each group's plotted nanowells. The redraw also rebuilds an armed gate selector, as the
+cell redraw does. The **Apply gates** filter does not thin nanowell points. `tests/test_scatter_gates_on_nanowell_observations.py`.
+
 The band's Fold change menu normalises cell plots; a nanowell figure does not apply it and says so in its footer
 (`FOLD_CHANGE_NOT_APPLIED`) — the per-nanowell fold changes are metrics of their own, against the page's Baseline.
 

@@ -36,14 +36,14 @@ def tour(win, qapp, *, kind: str, wells: set[str], phone: bool) -> Iterator[str]
         pump(qapp, 20, 250)
         bar = review._page_tabs_bar_by_name.get(key)
         if bar is None:
-            prepare(win, qapp, kind, key)
+            prepare(win, qapp, kind, key, wells)
             yield key
             continue
         for i in range(bar.count()):
             bar.setCurrentIndex(i)
             pump(qapp, 20, 250)
             name = f"{key}/{bar.tabText(i)}"
-            prepare(win, qapp, kind, name)
+            prepare(win, qapp, kind, name, wells)
             yield name
     if kind == "mini":
         win._on_titlebar_mode_seg(2)

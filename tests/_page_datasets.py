@@ -8,8 +8,8 @@ columns, a generated gallery). :func:`prepare` does that when the tour reaches a
 
 Three datasets, because no single one carries everything:
 
-* ``mini`` — four wells, three timepoints, two fluorescent channels and per-cell shape
-  features (so Spatial and Multivariate have columns), no images;
+* ``mini`` — four wells, three timepoints, two fluorescent channels, per-cell shape features (so
+  Spatial and Multivariate have columns) and an smFISH spot-count column, no images;
 * ``nanowell`` — a nanowell plate with measurements, for every Nanowells page;
 * ``images`` — two wells of real TIFFs with segmentation labels, for the Image Browser.
 """
@@ -34,7 +34,8 @@ def build(kind: str, root: Path) -> tuple[Path, set[str]]:
     if kind == "mini":
         from tests.fixtures.mini_dataset import build_mini_dataset
 
-        return build_mini_dataset(root / "mini", with_shape=True), {"A01", "A02", "B01", "B02"}
+        return (build_mini_dataset(root / "mini", with_shape=True, with_smfish=True),
+                {"A01", "A02", "B01", "B02"})
     if kind == "nanowell":
         from tests.test_nanowell_page import COUNTS, _write_nanowell_dataset
 
@@ -104,28 +105,37 @@ def press(win, text: str) -> bool:
     return False
 
 
-def prepare(win, qapp, kind: str, page: str) -> None:
+def prepare(win, qapp, kind: str, page: str, wells: set[str]) -> None:
     """Give *page* the choices that make it draw data, if it needs any. *page* is ``"Section/Sub-page"`` or
-    ``"Section"`` as the tour names it."""
+    ``"Section"`` as the tour names it; *wells* are the dataset's wells."""
     ctx = win._review._ctx
-    if kind == "mini" and page == "Plotting/Heat Map":
+    if page == "Plotting/Heat Map":
         press(win, "Auto-populate from selection")
-    elif kind == "mini" and page == "Statistics":
+    elif page == "Statistics":
         from review.domain.batch_models import BarGroup
-
         from review.features.stats import controller as stats
 
-        win._review._app_state.stats.groups = [BarGroup("Ctrl", solo_wells=["A01", "A02"]),
-                                               BarGroup("Drug", solo_wells=["B01", "B02"])]
+        ordered = sorted(wells)
+        half = max(1, len(ordered) // 2)
+        win._review._app_state.stats.groups = [BarGroup("Ctrl", solo_wells=ordered[:half]),
+                                               BarGroup("Drug", solo_wells=ordered[half:] or ordered[:half])]
         stats.stats_refresh_group_list(ctx)
         stats.stats_refresh_map(ctx)
         ctx.runtime.stats.run()
-    elif kind == "mini" and page == "Multivariate":
+    elif page == "Multivariate":
         from review.features.multivariate import controller as mvctl
         from review.features.multivariate.collect import available_feature_columns
 
         families = available_feature_columns(ctx)
         mvctl.mv_set_features(ctx, families.get("Intensity", [])[:2] + families.get("Shape", [])[:1])
+    elif page == "Saved Plots":
+        from matplotlib.figure import Figure
+
+        fig = Figure(figsize=(4, 3))
+        axes = fig.add_subplot(111)
+        axes.plot([0, 1, 2], [1, 3, 2])
+        axes.set_title("A saved plot")
+        ctx.figures.save(fig, "A saved plot")
     elif kind == "images" and page == "Image Browser/Image Table":
         from review.features.image_browser.image_table import controller as table
 
@@ -134,9 +144,9 @@ def prepare(win, qapp, kind: str, page: str) -> None:
         table.image_table_apply_dims_preset(ctx, ["well"], ["channel"])
         table.image_table_generate(ctx)
     elif kind == "images" and page == "Image Browser/Cell Browser":
-        button = getattr(ctx.runtime.cell_browser, "generate_btn", None)
-        if button is not None:
-            button.click()
+        from review.features.image_browser.cell_browser import controller as cell_browser
+
+        cell_browser.apply_filters(ctx, live_sync=True)
     elif kind == "images" and page == "Image Browser/Playground":
         press(win, "Use dataset")
     pump(qapp, 30, 600)

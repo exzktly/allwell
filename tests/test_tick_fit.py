@@ -9,6 +9,7 @@ then stands an x-axis's labels on end, and never drops or elides one.
 from __future__ import annotations
 
 import matplotlib
+import pytest
 
 matplotlib.use("Agg")
 
@@ -18,6 +19,16 @@ from matplotlib.figure import Figure
 from review.core.tick_fit import SHRINK_STEPS, fit_tick_labels
 
 FEATURES = ["GFP Mean Intensity", "MCHERRY Mean Intensity", "Area"]
+
+
+@pytest.fixture(autouse=True)
+def _a_font_every_machine_has():
+    """What these tests measure is how wide a label is, so the font is part of the fixture. The application
+    sets ``Inter`` ahead of ``DejaVu Sans`` where its bundled fonts are registered and falls through to
+    DejaVu where they are not, as on CI: the same twelve numbers fitted upright in one and had to be stood on
+    end in the other. DejaVu Sans ships with matplotlib, so it is the one the numbers below were measured in."""
+    with matplotlib.rc_context({"font.family": ["DejaVu Sans"]}):
+        yield
 
 
 def _figure(width_in: float, labels: list[str], size: float):
@@ -40,7 +51,7 @@ def _touching(fig, ax) -> bool:
 
 def test_numbers_that_touch_are_shrunk_until_they_clear():
     labels = [str(i) for i in range(1, 13)]
-    fig, ax = _figure(2.2, labels, size=14)
+    fig, ax = _figure(3.0, labels, size=14)
     assert _touching(fig, ax), "the fixture must collide to prove anything"
     fit_tick_labels(fig)
     assert not _touching(fig, ax)

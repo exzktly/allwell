@@ -776,13 +776,17 @@ def test_plots_get_220_points_per_row_of_axes_and_their_own_height_back(qapp):
 
 
 def test_a_matplotlib_toolbar_shown_in_phone_layout_is_hidden(qapp, app_sheet):
-    class MplToolbar(QWidget):      # matched by class name, as the app's is
-        pass
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+
+    from widgets.mpl_toolbar import MplToolbar      # the real one: it declares its own kind
 
     win = _window()
     QVBoxLayout(win)
     shell = _shell(win)
-    bar = MplToolbar(win)
+    canvas = FigureCanvasQTAgg(Figure())
+    canvas.setParent(win)
+    bar = MplToolbar(canvas, win)
     win.layout().addWidget(bar)
     bar.show()
     phone_layout.set_on(True)

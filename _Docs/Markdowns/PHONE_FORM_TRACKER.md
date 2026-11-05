@@ -528,7 +528,7 @@ widget alone (§7.8 rule 3).
 | Id | Item | State | Evidence |
 |---|---|---|---|
 | P2.1 | `Stepper` declares `"stepper"` | `done` | `Stepper.__init__` declares `"stepper"`; `"Stepper"` left `_KIND_BY_CLASS`; P0.5 budget 10 -> 9. `test_a_stepper_built_after_the_switch_takes_its_touch_form_without_a_sweep` (real `Stepper`, sweep timer stopped). Mutation: deleting the `declare` line failed it (`None == 'stepper'`) and failed the snapshot (`Stepper#Stepper touch_mode: True -> False`, width 447 -> 125 on Image Browser/Playground). The snapshot no longer records the declared kind (it is how the shell finds a widget, not what is seen); schema 2, baseline rewritten without that field — nothing else in it changed |
-| P2.2 | `MplToolbar` declares `"toolbar"` | `todo` | |
+| P2.2 | `MplToolbar` declares `"toolbar"` | `done` | `MplToolbar.__init__` declares `"toolbar"`; `"MplToolbar"` left `_KIND_BY_CLASS`; budget 9 -> 8. `test_a_plot_toolbar_built_after_the_switch_is_hidden_without_a_sweep` (real toolbar on a real canvas, sweep stopped). Mutation: deleting the `declare` failed it (`None == 'toolbar'`) and the snapshot (`MplToolbar ... appeared` on Plotting/Bar Plots at large text and Home/Cell Gating). `test_phone_layout.py::test_a_matplotlib_toolbar_shown_in_phone_layout_is_hidden` built a stub class named `MplToolbar` so the by-name rule would match it — it asserted the mechanism being removed, so it now uses the real class (same intent: a toolbar is hidden on a phone) |
 | P2.3 | Analyze form rows declare `"form_row"` | `todo` | |
 | P2.4 | `ControlBand` and the Image Table's controls declare `"controls"` | `todo` | |
 

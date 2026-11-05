@@ -264,3 +264,20 @@ def test_a_stepper_built_after_the_switch_takes_its_touch_form_without_a_sweep(q
     st.show()
     _pump(qapp)
     assert st.isTouchMode()
+
+
+def test_a_plot_toolbar_built_after_the_switch_is_hidden_without_a_sweep(qapp, shell):
+    """The real ``MplToolbar`` on a real canvas. Pan and zoom are modes a VNC drag
+    fights with, so on a phone it is not shown (Reset is in Controls)."""
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+
+    from widgets.mpl_toolbar import MplToolbar
+
+    canvas = FigureCanvasQTAgg(Figure())
+    canvas.setParent(shell._win)
+    tb = MplToolbar(canvas, shell._win)
+    assert fr.kind_of(tb) == "toolbar"
+    tb.show()
+    _pump(qapp)
+    assert not tb.isVisible()

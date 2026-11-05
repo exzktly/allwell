@@ -310,7 +310,7 @@ def nothing_left_text(frame: pd.DataFrame, column: str, window: int, *, timepoin
     leaves an empty figure — a short time course, a fold change whose baseline leaves few timepoints after it, an
     early timepoint along wells. Said in place of the plot, with the reason most values went under and the
     longest window that would leave something, so it is not read as a dataset with no values; then
-    :func:`describe`'s sentence (*baseline_window* as it takes it), which the plot's footer would have carried."""
+    :func:`describe`'s sentence without its lead-in (*baseline_window* as it takes it), which the plot's footer would have carried."""
     window = clamp_window(window)
     if not window or column not in frame or not len(frame):
         return ""
@@ -337,4 +337,5 @@ def nothing_left_text(frame: pd.DataFrame, column: str, window: int, *, timepoin
             break
     else:
         text += " No shorter window leaves one either; set the window to 1 to turn the average off."
-    return text + "\n\n" + describe(window, column, baseline_window)
+    how = describe(window, column, baseline_window).split(": ", 1)[1]    # the window is already named above
+    return text + "\n\n" + how[:1].upper() + how[1:]

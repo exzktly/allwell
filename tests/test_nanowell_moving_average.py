@@ -294,7 +294,7 @@ def test_a_window_longer_than_the_series_says_so_instead_of_drawing_nothing(tmp_
     assert model.empty.startswith(
         "Moving average over 4 timepoints: no value is left to draw — a fold change's window must start after the "
         "baseline, so it needs 4 timepoints after the baseline, and no nanowell has that many. A window of 3 leaves "
-        "2 values.\n\nMoving average over 4 timepoints: each value")
+        "2 values.\n\nEach value is the mean")
     assert model.empty in model.notes                                    # Statistics carries it from the notes
     # A window that leaves something sets nothing.
     assert distribution_model(metrics, "count_fc", channels=data.channels, groups={"A01": ["A01"]},
@@ -497,6 +497,7 @@ def test_the_page_s_fold_change_windows_start_after_the_baseline(page, qtbot):  
     # Nothing is left to draw, so the figure says so in place of an empty plot, and why.
     said, = _texts(page, gid="nw-moving-empty")
     assert said.startswith("Moving average over 2 timepoints: no value is left")
+    assert said.count("Moving average over") == 1                       # the window is named once
     assert "must start after the baseline, so it needs 2 timepoints after the baseline" in said
     assert "No shorter window leaves one either" in said and "Each window starts after the baseline" in said
 

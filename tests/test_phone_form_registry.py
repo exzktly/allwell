@@ -387,3 +387,26 @@ def test_a_canvas_built_after_the_switch_is_drawn_at_the_phone_dpi_and_height_wi
     assert fig._aw_dpi_factor == factor
     assert fig.dpi == pytest.approx(fig._aw_dpi_base * factor * (canvas.device_pixel_ratio or 1.0))
     assert canvas.minimumHeight() >= shell.pt(PLOT_ROW_PT)
+
+
+def test_an_info_icon_built_after_the_switch_answers_a_tap_without_a_sweep(qapp, shell, monkeypatch):
+    """The app's own ⓘ factory, on a shown page, with the sweep off: it is watched
+    because it declared itself, and the tap reaches the filter installed on it.
+    Wrong implementation: an icon that does not declare, which nothing watches."""
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QToolTip
+
+    from widgets.info_icon import info_icon
+
+    shown = []
+    monkeypatch.setattr(QToolTip, "showText", lambda *a: shown.append(a[1]))
+    icon = info_icon(shell._win, "What this number means")
+    assert fr.kind_of(icon) == "hint"
+    icon.show()
+    _pump(qapp)
+    assert icon.property("_awPhoneWatched")
+    tap = QMouseEvent(QEvent.MouseButtonRelease, QPointF(2, 2), QPointF(2, 2),
+                      Qt.LeftButton, Qt.NoButton, Qt.NoModifier)
+    assert shell._filter.eventFilter(icon, tap) is True
+    assert shown == ["What this number means"]

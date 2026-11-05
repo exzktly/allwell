@@ -806,16 +806,19 @@ def test_an_info_hint_answers_a_tap_with_its_text(qapp, monkeypatch):
     from ui.phone_shell import _PhoneEventFilter
     shown = []
     monkeypatch.setattr(QToolTip, "showText", lambda *a: shown.append(a[1]))
-    hint = QLabel("ⓘ")
-    hint.setObjectName("InfoHint")
-    hint.setToolTip("What this number means")
+    from widgets.info_icon import info_icon
+    host = QWidget()
+    hint = info_icon(host, "What this number means")       # the app's factory: it declares itself
     filt = _PhoneEventFilter(QObject())
     tap = QMouseEvent(QEvent.MouseButtonRelease, QPointF(2, 2), QPointF(2, 2),
                       Qt.LeftButton, Qt.NoButton, Qt.NoModifier)
     assert filt.eventFilter(hint, tap) is True
     assert shown == ["What this number means"]
-    hint.setObjectName("Plain")
-    assert filt.eventFilter(hint, tap) is False
+    # A label that only borrows the ⓘ look (a status line) is not a hint, tooltip or not.
+    styled = QLabel("a status line", host)
+    styled.setObjectName("InfoHint")
+    styled.setToolTip("not a hint")
+    assert filt.eventFilter(styled, tap) is False
     assert shown == ["What this number means"]
 
 
@@ -1678,6 +1681,7 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     from widgets import form_registry
     from widgets.canvas import make_canvas
     from widgets.control_band import ControlBand
+    from widgets.info_icon import info_icon
     from widgets.mpl_toolbar import MplToolbar
     from widgets.stepper import Stepper
 
@@ -1694,7 +1698,8 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     block.setStacked = lambda _on: None
     custom = QWidget(host)
     form_registry.register(custom, lambda _on: None)      # a view's own form
-    widgets = [ControlBand(host), MplToolbar(canvas, host), Stepper(host), row, block, custom, canvas]
+    widgets = [ControlBand(host), MplToolbar(canvas, host), Stepper(host), row, block, custom, canvas,
+               info_icon(host, "An explanation")]
     named = {ps._adapt_kind(w) for w in widgets}
     assert named == set(ps.ADAPTED_KINDS), named
     assert all(ps._phone_relevant(w) for w in widgets)

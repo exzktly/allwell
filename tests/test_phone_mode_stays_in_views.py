@@ -67,15 +67,14 @@ SANCTIONED_FILES = (
 #: The one module whose recognition-by-name P0.5 counts.
 SHELL = "ui/phone_shell.py"
 
-#: ``ui/phone_shell.py``'s recognition by name today, counted by site. Each row
-#: of PHONE_FORM_TRACKER.md that removes a site lowers this in the same commit;
-#: P4.4 takes it to zero. Measured: ``"InfoHint"`` compared in 2 places
-#: (``_phone_relevant`` and ``_PhoneEventFilter.eventFilter``). Counted too, so a
-#: name cannot come back in another spelling: an entry in a ``_KIND_BY_CLASS`` /
-#: ``_KIND_BY_OBJECT_NAME`` dict (plain or annotated), a comparison of
-#: ``type(w).__name__`` with a string, and the ``draw_idle`` duck type that found
-#: a canvas before canvases declared themselves.
-RECOGNISED_BY_NAME_BUDGET = 2
+#: ``ui/phone_shell.py``'s recognition by name, counted by site: none. A widget
+#: declares its kind where it is built (``widgets.form_registry``) and the shell
+#: reads the declaration; it recognises nothing by what a widget is called or by
+#: a duck type. The count is held at zero, and still counts the spellings a name
+#: could come back in: an entry in a ``_KIND_BY_CLASS`` / ``_KIND_BY_OBJECT_NAME``
+#: dict (plain or annotated), a comparison of ``type(w).__name__`` with a string,
+#: a comparison with ``"InfoHint"``, and the ``draw_idle`` duck type.
+RECOGNISED_BY_NAME_BUDGET = 0
 
 
 # ── roster of reads outside the sanctioned layers ───────────────────────────

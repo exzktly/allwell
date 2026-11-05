@@ -496,7 +496,7 @@ def scale_canvases(factor: float) -> int:
 #: that has one, so a kind added here is both watched and adapted; a kind that
 #: ``_ADAPTERS`` lacks fails ``tests/test_phone_layout.py``.
 ADAPTED_KINDS = frozenset(
-    ("controls", "toolbar", "stepper", "form_row", "canvas", form_registry.CUSTOM))
+    ("controls", "toolbar", "stepper", "form_row", "canvas", "hint", form_registry.CUSTOM))
 
 
 def _adapt_kind(w: QWidget) -> str | None:
@@ -510,15 +510,10 @@ def _adapt_kind(w: QWidget) -> str | None:
 
 def _phone_relevant(w: QWidget) -> bool:
     """Whether phone layout acts on *w* when it is shown: whatever
-    :func:`_adapt_kind` names, plus the two the event filter acts on itself — a
-    window of its own (a dialog, a pop-out: its phone form,
-    :func:`ui.phone_window.kind`) and an ⓘ hint (a tap). Everything else is left
-    alone and never watched."""
-    if _adapt_kind(w) is not None:
-        return True
-    if phone_window.kind(w) is not None:
-        return True
-    return w.objectName() == "InfoHint"
+    :func:`_adapt_kind` names, plus a window of its own (a dialog, a pop-out: its
+    phone form, :func:`ui.phone_window.kind`). Everything else is left alone and
+    never watched."""
+    return _adapt_kind(w) is not None or phone_window.kind(w) is not None
 
 
 class _RefitOnLayout(QObject):
@@ -772,7 +767,7 @@ class _PhoneEventFilter(QObject):
     def eventFilter(self, obj, event) -> bool:  # Qt naming
         t = event.type()
         if t == QEvent.MouseButtonRelease and isinstance(obj, QLabel) \
-                and obj.objectName() == "InfoHint" and obj.toolTip():
+                and form_registry.kind_of(obj) == "hint" and obj.toolTip():
             from PySide6.QtWidgets import QToolTip
             QToolTip.showText(obj.mapToGlobal(obj.rect().bottomLeft()), obj.toolTip(), obj)
             return True
@@ -1336,7 +1331,14 @@ class PhoneShell(QObject):
     #: ``adapt``'s dispatch: one method per kind in :data:`ADAPTED_KINDS`.
     _ADAPTERS = {"controls": "_adapt_controls", "toolbar": "_adapt_toolbar",
                  "stepper": "_adapt_stepper", "form_row": "_stack_form_row",
-                 "canvas": "_adapt_canvas", form_registry.CUSTOM: "_adapt_custom"}
+                 "canvas": "_adapt_canvas", "hint": "_adapt_hint",
+                 form_registry.CUSTOM: "_adapt_custom"}
+
+    @staticmethod
+    def _adapt_hint(w: QWidget, on: bool) -> None:
+        """An ⓘ answers a tap with its text, since nothing hovers on a phone.
+        The tap itself is read by :class:`_PhoneEventFilter`, which this kind
+        gets installed on; there is nothing to set on the widget."""
 
     def _adapt_canvas(self, w: QWidget, on: bool) -> None:
         """A plot is drawn at the phone's DPI and tall enough for its rows of

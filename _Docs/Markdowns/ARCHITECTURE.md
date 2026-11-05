@@ -192,11 +192,11 @@ constructor, so while phone layout is on the shell only installs its event
 filter on the widget and the form is applied on the widget's first Show.
 `_adapt_kind` reads that declared kind (`ControlBand`, `MplToolbar`, `Stepper`,
 the Analyze form row, every plot canvas — built only through
-`widgets.canvas.make_canvas`, which a guard enforces — and the Image Table's
-controls block declare theirs); what the shell still recognises by name — the
-`InfoHint` object name —
-`test_the_shell_recognises_no_more_widgets_by_name_than_the_budget` counts, and
-only lets the count fall.
+`widgets.canvas.make_canvas`, which a guard enforces — every ⓘ from
+`widgets.info_icon`, and the Image Table's controls block declare theirs). The
+shell recognises no widget by its class name, its object name or a duck type;
+`test_the_shell_recognises_no_more_widgets_by_name_than_the_budget` holds that
+at zero, counting the spellings a name could come back in.
 `tests/test_phone_layout_snapshot.py` records what the window shows in phone
 layout (every page, upright, sideways and at the large text size) against
 `tests/fixtures/phone_snapshot_baseline.json`, which is the check that a change

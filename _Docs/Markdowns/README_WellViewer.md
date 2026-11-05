@@ -6155,7 +6155,25 @@ the sentence names it.
     an image blended from the tiles covering it (a nanowell near the scan's outer edge counts too). Read at a
     timepoint like a metric: *no* *at every timepoint* leaves out every nanowell that was ever on a seam; *yes*
     *at any timepoint* keeps only those. Datasets analysed before seam nanowells were counted have them with no
-    count.
+    count;
+  - **the nanowell's state at a timepoint** — seven more *yes* / *no* properties, read at a timepoint the same way,
+    and each independent of the others (a nanowell in a field you left out is still *found by the run* if the run
+    found it):
+    - *Found by the run* — the run recorded the nanowell at that timepoint. **Found by the run · at every
+      timepoint · yes** keeps only the nanowells tracked through the whole dataset; one that was lost and picked
+      up again later is left out.
+    - *Timepoint not addressed* — the run could not address that timepoint of the well at all, so every nanowell
+      in it is unfound. Add *Timepoint not addressed · at every timepoint · no* to tell a single lost nanowell
+      apart from a whole timepoint that failed.
+    - *Identity contradicted* — the identity check found that the nanowell's address at that timepoint may name
+      a different nanowell (a contradicted timepoint, or a nanowell a partial check left out).
+    - *Occluded or clipped* — found, but its contents could not be measured.
+    - *Rim out of focus* — flagged by the rim-focus rule (always *no* while that rule is off).
+    - *In a field left out* — its imaging field is left out by Cell Gating, QC triage or the FOVs you chose.
+    - *Measured without a count* — measured, but the run recorded no cell count.
+
+    *at any timepoint · no* on one of the last five keeps the nanowells it never touched; *yes* keeps only those
+    it did.
 
   A number is compared with ≥, ≤, =, *between* or *not between* (both ends included). Every change is applied as
   you make it; a range typed upside down is said under the conditions and changes nothing until it is fixed.

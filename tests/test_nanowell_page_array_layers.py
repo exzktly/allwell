@@ -53,7 +53,17 @@ def qc_page(montage_page, qtbot):  # noqa: F811
     ctx.widgets.get("_nw_preset_qc").trigger()
     qtbot.waitUntil(lambda: ("A01", "t_a") in st.montages, timeout=10000)
     assert st.montages[("A01", "t_a")][0] is not None, st.montages[("A01", "t_a")][1]
+    # Let the band settle on the Array view's three rows before the draw the tests measure: drawn while the band was
+    # still a row short, the canvas then shrank (512 px against 534) and the next draw fitted another region, so a
+    # zoom readout measured against it was 4 % off — under load only, as the layout pass came late.
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.processEvents()
     nwc.redraw(ctx)
+    canvas = ctx.widgets.get("_nw_canvas")
+    size = canvas.size()
+    QApplication.processEvents()
+    assert canvas.size() == size, "the page was still being laid out after its draw"
     return ctx
 
 

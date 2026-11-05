@@ -43,7 +43,7 @@ def _extra(w: QWidget) -> dict:
         out["touch_mode"] = bool(w.isTouchMode())
     lay = w.layout()
     if isinstance(lay, QBoxLayout):
-        out["direction"] = int(lay.direction())
+        out["direction"] = lay.direction().name
     figure = getattr(w, "figure", None)
     if figure is not None and hasattr(figure, "get_dpi"):
         out["dpi"] = round(float(figure.get_dpi()), 3)

@@ -492,7 +492,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_detail_canvas", detail_card.canvas)
     detail_layout.addLayout(_detail_header(ctx, detail))
     detail_layout.addWidget(detail_card, 3)
-    detail_layout.addLayout(_crops_header(ctx, detail))
+    detail_layout.addWidget(_crops_header(ctx, detail))
     strip_card = PlotCard(detail, figsize=(_DETAIL_W, _STRIP_H), constrained=False, header=False)
     strip_card.setFigureTitle("")
     reg.register("_nw_strip_card", strip_card)
@@ -507,8 +507,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     splitter.setStretchFactor(1, 2)
     layout.addWidget(wrap_with_empty_state(ctx.window, splitter, icon="hexagon", reason=nwc.nanowell_empty_reason), 1)
 
-    def show_detail(on: bool) -> None:
-        detail.setVisible(on)
+    show_detail = _detail_placement(ctx, card, detail, detail_layout, strip_card)
 
     def show_computing() -> None:
         computing.setVisible(nwc.computing_shown(ctx))
@@ -812,6 +811,49 @@ def _cells_box(ctx, name: str) -> QCheckBox:
     return box
 
 
+def _detail_placement(ctx, card, detail, detail_layout, strip_card):
+    """``show_detail(on)``: show the site detail beside the figure — or, in phone layout, instead of it.
+
+    A phone is one column wide: beside the detail the figure was squeezed to a strip a few pixels wide, with no dot left
+    to tap. So there the detail takes the page while a nanowell is selected, and ✕ (which clears the selection) brings
+    the figure back. Switching phone layout with a nanowell selected re-places them at once, and the crop strip, which
+    wraps its crops to its own shape in phone layout (``controller._strip_cols``), is laid out again once a resize of it
+    settles — the pane going full-screen, the phone turned."""
+    import weakref
+
+    from core import phone_layout
+    from core.safe import swallow
+
+    def show_detail(on: bool) -> None:
+        detail.setVisible(on)
+        phone = phone_layout.is_on()
+        was_hidden = card.isHidden()
+        card.setVisible(not (on and phone))
+        if was_hidden and not card.isHidden():
+            # Hidden, the figure was not drawn (``controller.redraw``); it is drawn now that it is back.
+            QTimer.singleShot(0, lambda: nwc.redraw(ctx))
+        # Alone on a phone the detail has the height to give its crops; beside the figure the series keep most of it.
+        detail_layout.setStretchFactor(strip_card, 3 if phone else 1)
+
+    # Held weakly through the card: the listener is process-wide and must not keep a closed page alive.
+    card_ref = weakref.ref(card)
+
+    def follow_phone(_on: bool) -> None:
+        if card_ref() is None:
+            phone_layout.remove_listener(follow_phone)
+            return
+        with swallow("Nanowells: re-place the site detail for phone layout"):
+            show_detail(not detail.isHidden())
+
+    phone_layout.add_listener(follow_phone)
+    strip_refit = QTimer(strip_card)
+    strip_refit.setSingleShot(True)
+    strip_refit.setInterval(_REFIT_MS)
+    strip_refit.timeout.connect(lambda: nwc.refit_crop_strip(ctx))
+    strip_card.canvas.mpl_connect("resize_event", lambda _event: strip_refit.start())
+    return show_detail
+
+
 def _detail_header(ctx, parent) -> QHBoxLayout:
     """The site detail's title row, with a close button (✕) that clears the nanowell selection — which is what hides
     the pane (``controller.redraw_detail`` shows it only while a selected nanowell has a series). Without it the only
@@ -820,7 +862,7 @@ def _detail_header(ctx, parent) -> QHBoxLayout:
 
     row = QHBoxLayout()
     row.setContentsMargins(0, 0, 0, 0)
-    title = QLabel("Selected nanowells", parent)
+    title = QLabel("Selected nanowell", parent)
     title.setObjectName("Caption")
     close = QPushButton("✕", parent)
     close.setObjectName("Ghost")
@@ -834,14 +876,20 @@ def _detail_header(ctx, parent) -> QHBoxLayout:
     return row
 
 
-def _crops_header(ctx, parent) -> QHBoxLayout:
+def _crops_header(ctx, parent) -> QWidget:
     """The row above the site detail's crop strip: what the strip is, and **Pop out**, which opens the crops large in
-    a window of their own (:func:`_popout_window`, ``controller.pop_out_crops``)."""
-    row = QHBoxLayout()
-    row.setContentsMargins(0, 0, 0, 0)
-    title = QLabel("Crops over time", parent)
+    a window of their own (:func:`_popout_window`, ``controller.pop_out_crops``).
+
+    A flow of controls rather than a fixed row: at phone width a fixed row cut every control to a few letters
+    ("Crops ove", "Cel", "op ou"), so the row wraps onto as many lines as it needs instead."""
+    from widgets.flow_layout import FlowLayout, sync_flow_height
+
+    host = QWidget(parent)
+    row = FlowLayout(host, h_spacing=8)
+    sync_flow_height(host)
+    title = QLabel("Crops over time", host)
     title.setObjectName("Caption")
-    button = QPushButton("Pop out", parent)
+    button = QPushButton("Pop out", host)
     button.setProperty("variant", "secondary")
     button.setToolTip("Open the first selected nanowell's crops at every timepoint, large, in a window of their own "
                       "— on one brightness scale, so changes between timepoints read as changes. The window "
@@ -850,13 +898,12 @@ def _crops_header(ctx, parent) -> QHBoxLayout:
     ctx.widgets.register("_nw_popout_btn", button)
     ctx.widgets.register("_nw_open_popout", lambda: _popout_window(ctx).show_raised())
     row.addWidget(title)
-    row.addStretch(1)
     row.addWidget(_cells_box(ctx, "_nw_strip_cells_box"))
     row.addWidget(_image_channel_combo(ctx, "_nw_strip_image_channel_cb"))
     row.addWidget(build_display_range_button(ctx, "_nw_strip_range_btn"))
-    row.addWidget(_go_to_button(ctx, "_nw_strip_go_to_btn", parent))
+    row.addWidget(_go_to_button(ctx, "_nw_strip_go_to_btn", host))
     row.addWidget(button)
-    return row
+    return host
 
 
 def _go_to_button(ctx, name: str, parent) -> QPushButton:

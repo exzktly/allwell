@@ -19,7 +19,7 @@ import logging
 from collections.abc import MutableMapping
 
 from ui import theme
-from core.safe import swallowed
+from core.safe import swallow, swallowed
 
 _logger = logging.getLogger("review")
 
@@ -1781,6 +1781,42 @@ def _refit_on_resize(ctx, fig, canvas) -> None:
     canvas._aw_refit_cid = canvas.mpl_connect("resize_event", _on_resize)
 
 
+def _figure_text_band(fig) -> tuple | None:
+    """``(left, bottom, width, height)`` of the figure left to the panels by its own text, or ``None`` for all of it.
+
+    Constrained layout places the axes from their own labels and ignores text written on the figure itself — a
+    footer under the panels, a note above them. A renderer reserves that room with ``subplots_adjust``, and phone
+    layout's switch to constrained layout threw the reservation away: the Nanowells page's Distribution footer
+    (eight lines on a narrow plate) was drawn across its lowest dots. So the band each figure text occupies below the
+    renderer's bottom margin, or above its top one, is kept out of the layout. Measured as drawn, from the text's own
+    extent; a figure with no such text is laid out whole, as before.
+    """
+    texts = [t for t in fig.texts if t.get_visible() and t.get_text()]
+    if not texts:
+        return None
+    pars = fig.subplotpars
+    height = fig.bbox.height
+    if height <= 0:
+        return None
+    renderer = fig.canvas.get_renderer()
+    bottom, top = 0.0, 1.0
+    for text in texts:
+        y = text.get_position()[1]
+        if text.get_transform() != fig.transFigure:
+            continue
+        extent = text.get_window_extent(renderer)
+        if y < pars.bottom:
+            bottom = max(bottom, extent.y1 / height)
+        elif y > pars.top:
+            top = min(top, extent.y0 / height)
+    if bottom <= 0.0 and top >= 1.0:
+        return None
+    pad = 4 / height
+    bottom = min(bottom + pad, 0.6)
+    top = max(top - pad, bottom + 0.2)
+    return (0.0, bottom, 1.0, top - bottom)
+
+
 def _apply_layout_engine(fig, prefs: dict) -> None:
     from core import phone_layout
     if phone_layout.is_on():
@@ -1803,11 +1839,17 @@ def _apply_layout_engine(fig, prefs: dict) -> None:
             _fit_labels_to_phone(fig)
         except Exception:
             swallowed()  # an unmeasurable label keeps its one line
+        reserved = None
+        with swallow("measure the text written on a phone plot's figure"):
+            reserved = _figure_text_band(fig)
         try:
             fig.set_layout_engine("constrained")
         except Exception:
             swallowed()  # a figure that refuses an engine keeps its margins
             return
+        if reserved is not None:
+            with swallow("keep a phone plot's panels clear of its footer"):
+                fig.get_layout_engine().set(rect=reserved)
         # Once more against the axes the engine settled on: it widens the
         # left margin for phone-sized tick labels, so a title fitted to the
         # axes' earlier width overran the figure's edge by a few pixels.

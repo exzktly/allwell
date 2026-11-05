@@ -55,6 +55,22 @@ def grid_shape(n_channels: int, n_tps: int, grid: str = "auto", cols: int = 0) -
     return GridShape(math.ceil(n_tps / wrap) * n_channels, wrap, n_channels, wrap, False)
 
 
+def strip_columns(n: int, width: float, height: float) -> int:
+    """How many columns lay *n* square crops out largest in a *width* × *height* area (any units, the same for both).
+
+    The site detail's strip draws one crop per timepoint. At a desk it is wide and short, and one row is largest; at
+    phone width twelve crops in one row were a few pixels each, with their captions run together, so the strip wraps
+    into as many rows as make each crop biggest. Ties keep the fewer rows."""
+    if n <= 0 or width <= 0 or height <= 0:
+        return max(1, n)
+    best, best_side = n, -1.0
+    for cols in range(n, 0, -1):
+        side = min(width / cols, height / math.ceil(n / cols))
+        if side > best_side * (1 + 1e-9):
+            best, best_side = cols, side
+    return best
+
+
 def shown_timepoints(timepoints, chosen) -> list:
     """The timepoints the pop-out shows, in the nanowell's order: those *chosen*, or every one when none is chosen —
     or when none of those chosen is one of this nanowell's (a choice made on another dataset), so the grid is never

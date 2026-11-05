@@ -262,8 +262,32 @@ def render_distribution(fig, model: DistributionModel, *, selected=()) -> HitMap
         if i + cols >= len(panels) and model.x_label:
             _ink(ax.set_xlabel(model.x_label, color=inks[1], labelpad=ax._aw_gutter_pt))
     _footer(fig, model, inks, panels, densities, hidden,
-            crowded=any(getattr(ax, "_aw_crowded", False) for ax in axes))
+            crowded=any(getattr(ax, "_aw_crowded", False) for ax in axes),
+            counts_hidden=any(getattr(ax, "_aw_counts_hidden", False) for ax in axes))
     return hits
+
+
+def _wrapped_for_phone(fig, lines: list) -> tuple[list, int]:
+    """*lines* broken to the figure's width in phone layout, and how many of them the first line became.
+
+    At a desk every footer line fits its figure; on a phone the longer ones ran off the right edge ("Timepoints: 0 h
+    t00 · 1 h t01 · …"). Each piece becomes a line of its own, so the footer's spacing and the room it reserves follow.
+    A character of the footer's type is taken as about 0.55 of its size wide."""
+    from core import phone_layout
+
+    if not phone_layout.is_on():
+        return lines, 1
+    import textwrap
+
+    width_pt = fig.get_size_inches()[0] * 72 * (1 - 0.07 - 0.02)
+    chars = max(20, int(width_pt / (0.55 * FOOTER_PT)))
+    out, first = [], 1
+    for k, line in enumerate(lines):
+        parts = textwrap.wrap(line, chars) or [line]
+        if k == 0:
+            first = len(parts)
+        out.extend(parts)
+    return out, first
 
 
 def _wrap_label(label: str, rows: int) -> str:
@@ -316,8 +340,14 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
     slot_pt = 2 * half / dot_w * DOT_PT
     crowded = slot_pt < _ROOM_FOR_LABEL_PT
     size = CROWDED_PT if crowded else ANNOTATION_PT
+    # Even the bare number needs its own width: at phone width twelve slots of a few points each ran "2,025" into
+    # "2,025" across the panel's top. Where the widest of them does not fit its slot, none is written, and the footer
+    # says the totals hold them. A digit is about 0.6 of its type size wide.
+    widest = max((len(f"{len(s.values):,}") for s in panel.swarms), default=0)
+    counts_fit = slot_pt >= 0.6 * size * widest + 2
     # The title sits above the counts, higher when they stand rotated.
     ax._aw_crowded = crowded
+    ax._aw_counts_hidden = not counts_fit
     _ink(ax.set_title(panel.title, fontsize=10, fontweight="bold", loc="left", color=ink, pad=14))
     subwells = model.axis != TIME and any(
         sum(1 for o in panel.swarms if round(o.x) == round(s.x)) > 1 for s in panel.swarms)
@@ -346,9 +376,10 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
                              transform=_below(ax, gutter + (line if swarm.n_excluded else 0)), ha="center",
                              va="top", fontsize=size, color=ink, gid="nw-hidden"))
                 rows_here += 1
-        _ink(ax.text(swarm.x, 1.0, f"{len(swarm.values):,}" if crowded else f"n = {len(swarm.values):,}",
-                     transform=_below(ax, -2), ha="center", va="bottom",       # 2 pt above the panel
-                     fontsize=size, color=muted, gid="nw-used"), muted=True)
+        if counts_fit:
+            _ink(ax.text(swarm.x, 1.0, f"{len(swarm.values):,}" if crowded else f"n = {len(swarm.values):,}",
+                         transform=_below(ax, -2), ha="center", va="bottom",       # 2 pt above the panel
+                         fontsize=size, color=muted, gid="nw-used"), muted=True)
         if swarm.n_excluded and not crowded:
             _ink(ax.text(swarm.x, 0, f"excl. {swarm.n_excluded:,}", transform=_below(ax, gutter), ha="center",
                          va="top", fontsize=size, color=muted, gid="nw-excluded"), muted=True)
@@ -475,7 +506,7 @@ def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:
 
 
 def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden: int, *,
-            crowded: bool = False) -> None:
+            crowded: bool = False, counts_hidden: bool = False) -> None:
     """The sums the figure owes the reader, over the panels drawn; what was left out is stated beside them."""
 
     _bg, ink, muted = inks
@@ -498,7 +529,10 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
         n = sum(s.n_roster for p in left_out for s in p.swarms)
         lines.append(f"{len(left_out)} more panel(s) not drawn ({n:,} values, not in the counts above); "
                      "select fewer wells to see them.")
-    if crowded:
+    if counts_hidden:
+        lines.append("Too narrow to write each swarm's count, exclusions and undrawn dots beside it; the totals above "
+                     "count them.")
+    elif crowded:
         lines.append("Too narrow to write each swarm's exclusions and undrawn dots under it; the totals above count "
                      "them.")
     if hidden and crowded:
@@ -509,13 +543,15 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     if densities:
         lines.append("Sets of more than four wells are drawn as densities with each well's median; select fewer "
                      "wells to see and click single nanowells.")
+    lines, line1_parts = _wrapped_for_phone(fig, lines)
     if len(lines) > _FOOTER_LINES:
         # Every line here is owed to the reader — a panel not drawn, values not drawn as dots — so the footer
         # grows to hold them rather than cutting the last (roll-up review X11).
         fig.subplots_adjust(bottom=0.10 + _FOOTER_BASE + _LINE * len(lines))
     for i, text in enumerate(reversed(lines)):
-        _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=ink if text is line1 else muted,
-                      gid="nw-footer-used" if text is line1 else "nw-footer"), muted=text is not line1)
+        first = (len(lines) - 1 - i) < line1_parts
+        _ink(fig.text(0.07, _FOOTER_BASE + i * _LINE, text, fontsize=FOOTER_PT, color=ink if first else muted,
+                      gid="nw-footer-used" if first else "nw-footer"), muted=not first)
     if model.decoration.colours:
         # Coloured by a sample variable: the dots decode by its values, and the occupancy key would decode colours
         # the figure no longer contains.
@@ -719,10 +755,13 @@ def _of_channel(image_channel: str) -> str:
 
 
 def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, image_channel: str = "",
-                      display_range=None) -> None:
-    """The first selected nanowell's crops, one per timepoint, on the strip under the site detail's **Pop out**
+                      display_range=None, cols: int = 0) -> None:
+    """The selected nanowell's crops, one per timepoint, on the strip under the site detail's **Pop out**
     button: each titled with its timepoint, a timepoint without a crop saying why in its place, and where the crops
-    were cut from said once in the caption. *crops* is ``None`` while they are being cut."""
+    were cut from said once in the caption. *crops* is ``None`` while they are being cut.
+
+    *cols* wraps the crops into rows of that many (``crop_grid_compute.strip_columns``, which phone layout asks for);
+    ``0`` keeps them in one row, as at a desk."""
     fig.clear()
     _bg, ink, faint = _inks(fig.add_subplot(111))
     fig.clear()
@@ -733,11 +772,18 @@ def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, ima
     items = list(crops.items())
     scale = crop_scale((c for _tp, c in items), display_range)
     notes: set = set()
+    missing: dict = {}                   # why no crop -> the timepoints it is why for, said once in the caption
     mixed = len({c.source for _tp, c in items if c.image is not None}) > 1
-    sub = fig.add_gridspec(1, len(items), left=0.03, right=0.97, top=0.84, bottom=0.36, wspace=0.08)
+    n_cols = len(items) if cols <= 0 else min(cols, len(items))
+    n_rows = -(-len(items) // n_cols)
+    if n_rows == 1:
+        sub = fig.add_gridspec(1, n_cols, left=0.03, right=0.97, top=0.84, bottom=0.36, wspace=0.08)
+    else:
+        sub = fig.add_gridspec(n_rows, n_cols, left=0.03, right=0.97, top=0.94, bottom=0.16, wspace=0.08,
+                               hspace=0.3)
     tally: dict = {}
     for k, (tp, crop) in enumerate(items):
-        ax = fig.add_subplot(sub[0, k])
+        ax = fig.add_subplot(sub[k // n_cols, k % n_cols])
         ax._aw_image_panel = True
         ax.set_xticks([])
         ax.set_yticks([])
@@ -749,7 +795,13 @@ def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, ima
             if crop.source == "montage":
                 notes.add(crop.note)
         else:
-            _ink(ax.text(0.5, 0.5, crop.note, ha="center", va="center", wrap=True, fontsize=5.5,
+            # The reason is said once, in the caption: written in each panel it wrapped to the figure's width, not
+            # the panel's, and ran across every neighbour.
+            # A note names its own timepoint ("… for A02 at t03 (ok)"); without it, the twelve notes of a well with no
+            # montage are one reason, listed against the timepoints it is for.
+            why = (crop.note or "no crop could be cut").replace(f" at {tp}", "")
+            missing.setdefault(why, []).append(tp)
+            _ink(ax.text(0.5, 0.5, "no crop", ha="center", va="center", fontsize=5.5,
                          transform=ax.transAxes, color=faint, gid="nw-crop-missing"), muted=True)
         _ink(ax.set_title(tp + (" (montage)" if mixed and crop.source == "montage" else ""), fontsize=7, color=ink,
                           pad=2, gid="nw-crop-title"))
@@ -759,8 +811,14 @@ def render_crop_strip(fig, crops: dict | None, site, *, cells: bool = False, ima
               "from its owner tile, or the montage where marked" if sources else "none could be cut")
     caption = (f"Crops ({_of_channel(image_channel)}): {site[0]} · q {site[1]}, r {site[2]}, {origin}; "
                + scale.said(numbers=scale.chosen)) + "".join(
-        f"; {note}" for note in sorted(notes)) + (f"; {_cells_clause(tally)}" if tally else "")
+        f"; {note}" for note in sorted(notes)) + (f"; {_cells_clause(tally)}" if tally else "") + "".join(
+        f"; no crop at {_timepoint_list(tps, len(items))}: {why}" for why, tps in missing.items())
     _ink(fig.text(0.03, 0.03, caption, fontsize=6, color=faint, gid="nw-crop-caption", wrap=True), muted=True)
+
+
+def _timepoint_list(tps: list, of: int) -> str:
+    """The timepoints a crop is missing at, short: "every timepoint", or the list."""
+    return "every timepoint" if len(tps) == of and of > 1 else ", ".join(tps)
 
 
 def render_crop_grid(fig, crops: dict | None, site, *, cells: bool = False, metrics: dict | None = None,

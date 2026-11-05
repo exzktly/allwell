@@ -129,6 +129,22 @@ def flow_group(parent: QWidget | None, *items, spacing: int = 4) -> QWidget:
     return box
 
 
+#: The property that marks a widget as a line break (:func:`flow_break`).
+FLOW_BREAK = "flowBreak"
+
+
+def flow_break(parent: QWidget | None) -> QWidget:
+    """A line break for a :class:`FlowLayout`: while shown, the items after it start a new line, so a row of related
+    controls can be kept apart from the next row whatever the width. It takes no room of its own, a break at the start
+    of a line (or two in a row) adds no empty line, and hidden it is skipped like any hidden item — so a page can keep
+    rows apart on one view and let the same controls flow together on another."""
+    brk = QWidget(parent)
+    brk.setObjectName("FlowBreak")
+    brk.setProperty(FLOW_BREAK, True)
+    brk.setFixedSize(0, 0)
+    return brk
+
+
 # Control-row spacing. Fixed values, deliberately not derived from the style.
 #
 # The default used to be -1, "derive from the style", as in the Qt example. That
@@ -351,6 +367,14 @@ class FlowLayout(QLayout):
         for item in self._items:
             widget = item.widget()
             if widget is not None and not widget.isVisible():
+                continue
+            if widget is not None and widget.property(FLOW_BREAK):
+                if line:                                 # end the line; a break on an empty line adds none
+                    _flush()
+                    line = []
+                    x = effective.x()
+                    y = y + line_height + space_y
+                    line_height = 0
                 continue
             # Never pack a widget into less than it needs (defends against a
             # widget whose sizeHint under-reports its painted width — the cause

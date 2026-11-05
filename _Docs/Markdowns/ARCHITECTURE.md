@@ -2094,7 +2094,12 @@ control that *narrows* the data rather than choosing which data is shown, so it
 reads last; but `add_scope` appends in call order and each tab's builder runs in
 its own order, which left Threshold mid-row with Timepoints after it. The flag
 keeps the rule with the control instead of asking every builder to remember to
-call it last. `FlowLayout.move_to_end` does the reordering — `removeWidget`
+call it last. A page that wants its controls on rows of related controls adds
+`ControlBand.add_break()` between them: a `flow_layout.flow_break` item ends the
+flow's line while it is shown, takes no room, adds no empty line when the line is
+already empty, and is skipped while hidden (so a page can keep rows on one view
+and let them flow on another); the phone form (`control_band_form.BandForm`)
+skips it, being one row per control already. `FlowLayout.move_to_end` does the reordering — `removeWidget`
 followed by `addWidget` cannot, because Qt deletes the `QWidgetItem` that
 `takeAt` returns and the re-add would then operate on a dead object.
 
@@ -12923,24 +12928,29 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   tile's TIFF header, and the tiles layer takes it from there. Moving to another well or timepoint, turning the
   image off or loading another dataset cancels the store's reads at their next tile and lets its pixels go
   (`state.release_tiles`).
-- **The controls** (`tab_view._build_array_controls`, `_refresh_array_controls`). The band reads in two tiers: the
-  page's data controls first (Metric, Channel, Baseline, Subset, Rim focus — the same on every view), then the view's
-  own, ordered where → how drawn → edit: the *Where* item (`_nw_where_group`: Well with Exclude, and Timepoint, one
-  flow item so they never wrap apart; `tab_view._show_where` shows either part per view and measures the item
-  again), Positions (before Image, because Lattice is what greys it), Image with its channel and Range, Layers, and
-  Set anchor / Clear anchor / *Re-run wells…* with no caption (the QC view's copy keeps the long label). *Excluded
-  (n)* is a trailing item, so its coming and going moves nothing. The zoom (−, readout, +, *Fit*, *1:1*),
+- **The controls** (`tab_view._build_array_controls`, `_refresh_array_controls`). On the Array view the band is
+  three rows, by what the controls act on, kept apart by two row breaks (`ControlBand.add_break`, a
+  `flow_layout.flow_break` item that ends the flow's line while shown and is skipped while hidden): the page's data
+  controls (Metric, Channel, Baseline, Rim focus, Subset — the same on every view, the Subset last because it narrows
+  the nanowells rather than choosing what is measured of them); the well — the *Where* item (`_nw_where_group`: Well
+  with Exclude, and Timepoint, one flow item so they never wrap apart; `tab_view._show_where` shows either part per
+  view and measures the item again) and Set anchor / Clear anchor / *Re-run wells…* with no caption (the QC view's
+  copy keeps the long label), since an anchor is set for that well at that timepoint; and the picture — Positions
+  (before Image, because Lattice is what greys it), Image with its channel and Range, and Layers. The breaks are in
+  the view's `groups`, so on every other view they are hidden and the band flows as one zone. A row too wide for the
+  window wraps within itself and never takes the next row's controls. *Excluded (n)* is a trailing item, so its
+  coming and going moves nothing. The zoom (−, readout, +, *Fit*, *1:1*),
   *Overlays* and *Notes* are viewing actions rather than settings, so they sit under the figure in the card's own toolbar,
   after its navigation buttons (`mount_array_canvas_tools`, through `MplToolbar.add_group`, each group behind its
   own separator and shown with the view's other controls); on the Array view that toolbar's *Reset view* is *Fit*
   (`MplToolbar.setHomeHandler`), because matplotlib's home returns to the limits of a first draw the view's own
-  region has replaced. At 1500 px the band is two rows, walking or not. Every control that cannot act is greyed with
+  region has replaced. At 1500 px the band is three rows, walking or not. Every control that cannot act is greyed with
   its reason after its own tooltip (`tab_view._grey`, `_refresh_array_greying`): Image on Lattice; the image
   channel and Range unless Image is Full resolution; *1:1* with no image pixel; Set anchor with the first clause
   of `anchor_controls`' predicate that fails (`controller.anchor_unavailable_reason`); Clear anchor and Re-run
   wells… with nothing to clear or re-run. Nothing is hidden by a layer choice, and
   `tests/test_nanowell_array_band_layout.py` (UI lane) holds every control's position fixed across layers,
-  colourings, images, positions and Overlays, and the row count at 1500 px. The theme's `secondary` buttons carry
+  colourings, images, positions and Overlays, that the three groups keep to their own rows in order at 1500 and 1200 px, and that the breaks are hidden on another view. The theme's `secondary` buttons carry
   their own `:disabled` rule: the `[variant="secondary"]` selector outranks a bare `:disabled`, so without it a
   greyed secondary button painted as an enabled one, app-wide.
 - **Moving around and clicking** (`controller.on_click` / `on_motion` / `on_release` / `on_scroll`, connected on

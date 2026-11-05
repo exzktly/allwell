@@ -46,7 +46,7 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSizePolicy, QWidg
 
 from ui import theme
 from widgets.checkbox_fit import fit_checkbox_width
-from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
+from widgets.flow_layout import FlowLayout, flow_break, flow_group, sync_flow_height
 
 
 #: Sentinel for "this band's page has not chosen a leaf yet" — distinct from
@@ -236,6 +236,14 @@ class ControlBand(QWidget):
         self._scope.addWidget(item)
         self._restack_trailing()
         return item
+
+    def add_break(self) -> QWidget:
+        """End the scope zone's line here: the controls added after it start a new line while it is shown
+        (``flow_layout.flow_break``). Hide it to let the controls on either side flow together again."""
+        brk = flow_break(self._scope_host)
+        self._scope.addWidget(brk)
+        self._restack_trailing()
+        return brk
 
     def _restack_trailing(self) -> None:
         """Re-append the pinned items so they stay last as others arrive."""

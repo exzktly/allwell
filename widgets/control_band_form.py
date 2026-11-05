@@ -207,6 +207,10 @@ class BandForm:
         self._mirrors.append(mirror)
 
     def _add_scope(self, item: QWidget) -> None:
+        from widgets.flow_layout import FLOW_BREAK
+
+        if item.property(FLOW_BREAK):        # a row's line break: a form is one row per control already
+            return
         sec = self._sections["Data"]
         hidden = item.isHidden()
         if isinstance(item, QLabel):        # a hint: a caption, not a row

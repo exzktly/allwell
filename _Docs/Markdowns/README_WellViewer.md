@@ -6415,11 +6415,13 @@ the sentence names it.
   values, two samples holding the same constant), never a number. More than 15 comparisons are not run: choose
   a control under **vs** or exclude wells. *Save figure* saves the figure and its report together.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
-  a QC picture and a full-resolution montage each did. The band's first row holds the page's data controls
-  (Metric, Channel, Baseline, Subset, Rim focus); its second holds the view's own, in the order you use them:
-  **Well** and **Timepoint** together, then **Positions**, **Image**, **Layers**, and **Set anchor**, **Clear
-  anchor** and **Re-run wells…** (*Re-run anchored wells…* on the QC view). The zoom and **Overlays** sit under
-  the figure, beside its navigation buttons:
+  a QC picture and a full-resolution montage each did. The band's controls are on three rows by what they act
+  on: the first holds the page's data controls (Metric, Channel, Baseline, Rim focus, Subset); the second the
+  well — **Well** and **Timepoint** together, then **Set anchor**, **Clear anchor** and **Re-run wells…**
+  (*Re-run anchored wells…* on the QC view), since an anchor is set for that well at that timepoint; the third
+  how the picture is drawn — **Positions**, **Image** and **Layers**. In a narrow window a row wraps onto a
+  second line of its own rather than mixing with the next row. The zoom and **Overlays** sit under the figure,
+  beside its navigation buttons:
   - **Image** — what is drawn under the nanowells: *Off*; *Run montage*, the downsampled stitched phase
     montage the run kept (read in the background: the footer says *Reading the montage…* meanwhile); or *Full
     resolution*, drawn from the raw images in `in/` where the run placed each tile — of the channel chosen in the

@@ -121,13 +121,15 @@ def gating_pass_config(ctx) -> dict:
     }
 
 
-def nanowell_values_for(ctx, config: dict) -> pd.DataFrame | None:
-    """The nanowell rows *config*'s gates read (``observations.nanowell_gate_values``), or ``None`` when no gate the
-    pass applies is drawn on a nanowell metric. GUI thread only: :class:`GatingWorker` takes it at construction."""
+def nanowell_values_for(ctx) -> pd.DataFrame | None:
+    """The nanowell rows the gates a pass applies read (``observations.nanowell_gate_values``), or ``None`` when no
+    such gate is drawn on a nanowell metric. GUI thread only: whoever starts a :class:`GatingWorker` hands it these
+    (``worker.nanowell_values``) before it runs."""
     from review.data.observations import nanowell_gate_values
 
-    gates = [*(config["gating_gates"] if config["use_scatter"] else []),
-             *(config["thresh_gates"] if config["use_thresh"] else [])]
+    cg = ctx.state.cell_gating
+    gates = [*(cell_gating_selected_scatter_gates(ctx, "gating") if cg.use_scatter_gates else []),
+             *(cell_gating_selected_scatter_gates(ctx, "thresh") if cg.use_scatter_thresh else [])]
     try:
         return nanowell_gate_values(ctx, gates)
     except Exception:
@@ -156,9 +158,9 @@ class GatingWorker(QThread):
         super().__init__(parent)
         self._ctx = ctx
         self._cancelled = False
-        #: The nanowell rows a gate on a nanowell metric reads, taken here on the GUI thread: the Nanowells
-        #: feature computes them and its memo is not for a worker (``nanowell_values_for``).
-        self._nanowell_values = nanowell_values_for(ctx, gating_pass_config(ctx))
+        #: The nanowell rows a gate on a nanowell metric reads, set by whoever starts the pass, on the GUI thread:
+        #: the Nanowells feature computes them and its memo is not for a worker (``nanowell_values_for``).
+        self.nanowell_values = None
         #: Set once the pass has stopped writing to the cached frames and is
         #: about to report its end — the moment a GUI-thread reader of those
         #: frames may go ahead (``_gating_pass_writing``), even though the
@@ -183,7 +185,7 @@ class GatingWorker(QThread):
     def _run_inner(self) -> None:
         debug = _debug_flags.cell_gating_debug_enabled()
         config = gating_pass_config(self._ctx)
-        config["nanowell_values"] = self._nanowell_values
+        config["nanowell_values"] = self.nanowell_values
         fluor_gates = config["fluor_gates"]
         # Recorded before the first well is written, so a well evicted and
         # re-read at any point during or after this pass is gated the same way
@@ -1134,6 +1136,7 @@ def cell_gating_start_gating_worker(ctx, *, before_start=None) -> GatingWorker:
         prev.wait(50)
 
     worker = GatingWorker(ctx)
+    worker.nanowell_values = nanowell_values_for(ctx)
     worker.progress.connect(lambda cur, tot: _cell_gating_on_progress(ctx, cur, tot))
     worker.finished_ok.connect(lambda: _cell_gating_on_finished(ctx))
     worker.failed.connect(lambda msg: _cell_gating_on_failed(ctx, msg))
@@ -2257,6 +2260,7 @@ def _recompute_now_on_this_thread(ctx) -> bool:
         # mechanism, the wait is a courtesy to let the thread reach a checkpoint.
         prev.wait(50)
     worker = GatingWorker(ctx)
+    worker.nanowell_values = nanowell_values_for(ctx)
     try:
         worker._run_inner()
     except Exception:

@@ -48,6 +48,8 @@ _LMIN_W = 56
 _LUT_AUTO_W = 54
 # The narrowest the preview may get beside the dock before the two stack instead.
 _CANVAS_MIN_W = 280
+# How many characters a dock combo reserves, whatever its items say.
+_COMBO_MIN_CHARS = 10
 _QWIDGETSIZE_MAX = 16777215
 
 
@@ -96,6 +98,20 @@ class _StackWhenNarrow(QObject):
         if event.type() == QEvent.Resize:
             self.apply()
         return False
+
+
+def _dock_combo(parent: QWidget) -> QComboBox:
+    """A combo for the dock that is sized to a few characters, not to its longest item.
+
+    A dataset whose channel or frame names are long (a nanowell run's are)
+    otherwise made the combo — and so the whole dock — as wide as its longest
+    entry, 650 px, with no horizontal scroll bar to reach the rest. The text
+    elides when it does not fit; the popup still shows every item in full.
+    """
+    cb = QComboBox(parent)
+    cb.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    cb.setMinimumContentsLength(_COMBO_MIN_CHARS)
+    return cb
 
 
 def _row(parent, label_text: str, *, tooltip: str = "") -> QWidget:
@@ -190,7 +206,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         cl.addWidget(build_hline_separator(controls))
 
     def _combo(cell, items, attr: str) -> QComboBox:
-        cb = QComboBox(cell)
+        cb = _dock_combo(cell)
         if items:
             cb.addItems(list(items))
         cb.currentIndexChanged.connect(lambda _i: on_change())

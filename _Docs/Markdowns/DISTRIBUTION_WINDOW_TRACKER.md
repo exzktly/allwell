@@ -828,7 +828,7 @@ States: `todo`, `done` (with the test and the mutation that proved it), `decline
 | R1 | Pin Extremes' rendering, then generalise `render_extremes` → `render_site_rows` (`ExtremeRow` is kept as the row type: a row needs only `site`, `rank`, `value`, `values`, so the window supplies the same dataclass and no rename is needed) | `renderer.py`, `tests/test_nanowell_site_rows.py` | done | `test_extremes_is_drawn_exactly_as_it_was_before_the_montage_was_generalised` hashes the figure's structure (texts, axes places, image pixels), taken before the refactor and unchanged after; mutation: one space removed from the row label made it fail with a different hash. `test_rows_from_several_wells_name_their_well_and_extremes_rows_do_not` pins `with_well`, with two rows sharing an address in different wells |
 | R2 | the pop-out's Window mode: rows, pages, clicks, controls | R2 | done | `tests/test_nanowell_window_popout.py` (rows from a real drag and the strip's button; 24-row paging on the real page; a click on a row's crop; the restore; nothing to click in This-nanowell mode) and `tests/test_nanowell_site_rows.py` (value text). Mutations, each an `AssertionError`: all rows drawn instead of the page (paging test); the `popout_source == "window"` branch disabled (four tests); the pop-out's click not connected (click test); `protected` ignored (R3's test). Deviation from the tracker, found by writing the rows test: `render_site_rows` wrote every value with `format_value`, which suffixes a fold change's `×`, so a window on *Cell count* labelled 3 cells `3×`; `window_compute.WindowRows.format` writes a fold change (`"_fc"` in the column) with `×` and any other metric as the bare number, and the drawing uses a model's own `format` when it has one (Extremes' model has none, so its pinned figure is unchanged) |
 | R3 | `CropCache` bounding `st.crops` | R3 | done | `tests/test_nanowell_window_popout.py`: `test_the_crop_store_keeps_its_bound`, `test_every_place_that_empties_the_store_keeps_it_bounded`. Mutations, each an `AssertionError`: `protected` ignored in `__setitem__`; `set_image_channel` resetting to `{}` |
-| D1a | docs, Phase 1 | D1 | todo | |
+| D1a | docs, Phase 1 | D1 | done | README_WellViewer.md: *Drawing a window* under the Distribution figure and the pop-out's Show / Window / Rows paragraph; ARCHITECTURE.md: *The Distribution window* paragraph (modules, membership, the press/release split, the pop-out's Window mode, `render_site_rows`, `CropCache`); `scripts/test.sh` docs lane passes |
 | H1 | crop µm-per-pixel and centre fields | — | declined | Not needed: each crop is cut at 1.4 × its own nanowell's radius, so equal tiles show every nanowell at one nanowell-relative scale; the caption says so (§2 decision 16) |
 | H2 | `composite_compute.py` and its tests | H2 | todo | |
 | H3 | drawing the composite, hover, click, timepoint stepper | H3 | todo | |
@@ -1025,6 +1025,15 @@ class WindowRows:
     timepoint: str            # the column ranked at (marked); "" for a per-nanowell metric
     column: str
     timepoints: list          # every timepoint of the data, in order: the montage's columns
+
+    def format(self, value: float) -> str:
+        """*value* as a row writes it: a fold change as ``2.31×`` (``+1.20`` on the log₂ scale), any other metric as
+        the bare number — a cell count of 3 is not ``3×``. ``—`` when undefined."""
+        if not isinstance(value, float) or not math.isfinite(value):
+            return "—"
+        if self.column.startswith("log2_"):
+            return f"{value:+.3g}"
+        return f"{value:.3g}×" if "_fc" in self.column else f"{value:.3g}"
 
 
 def changed_sentence(window: DistributionWindow, now: tuple, n_now: int) -> str:

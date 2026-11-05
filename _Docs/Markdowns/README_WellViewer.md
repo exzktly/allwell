@@ -6336,7 +6336,7 @@ the sentence names it.
 - Text on this page is drawn at a share of the **Properties** font sizes, scaled to the size of a panel, so a
   grid of wells stays legible; raising a size in Properties still raises it here.
 - A replicate set of more than four wells is drawn as one density per well, with its median, instead of dots;
-  select fewer wells to see (and click) single nanowells.
+  select fewer wells to see (and click) single nanowells — or draw a window (below), which reaches them anyway.
 - **Nothing without a number is drawn, and nothing is dropped silently.** Under each swarm, "excl. N" counts
   the nanowells that have no value there, and the footer lists them by reason: occluded, clipped, no address,
   not located, fused (no count), empty at baseline, no cells at baseline (none at the baseline, cells later), and so on.
@@ -6350,6 +6350,30 @@ the sentence names it.
   is shown.
 - Times are each timepoint's recorded start from the acquisition record. When the record cannot give every
   timepoint a time, the timepoint labels are used and the footer says so.
+
+**Drawing a window**
+
+Drag a rectangle on a Distribution panel to select the nanowells by where their values fall, rather than by which dot
+you can click — which includes the nanowells in a density and those counted under "+N at …", that no click reaches. A
+short press (a few pixels) is still a click and selects one nanowell; a longer drag draws a window.
+
+- The window is a **range of the metric** (both ends included) over **whole columns**: the timepoints along *Time*,
+  the groups along *Wells*. Its sides snap to the columns the drag overlaps, so where a dot sits sideways inside its
+  column never matters. A translucent band marks it on every panel it covers, and a ring marks each member's dot.
+- A strip appears above the figure while a window exists for the metric and axis drawn. It says the range and how many
+  nanowells are inside — over several timepoints, both **inside at every covered timepoint** and **at any** — and how
+  many members have no dot on the figure, by reason: *in panels not drawn* (past the twelve a figure draws), *in
+  densities*, *in overflow*. A nanowell with no value is never inside.
+- **Low** and **High** take typed numbers (Enter to apply; a number the wrong way round is swapped, text that is not a
+  number is put back), which is also the way to adjust a window on a phone. **every timepoint | any timepoint**
+  chooses which of the two counts is the window's members: *every* needs a value inside the range at each covered
+  timepoint the panel has, *any* needs one. **This panel only** restricts the window to the panel it was drawn in;
+  by default it covers every panel, since the panels share one scale. **✕** clears it.
+- The window reads the values as drawn, so Baseline, Fixed cohort, Moving average, Rim focus and the Subset are
+  already applied. When one of them changes after the window was drawn, the strip says which, and how the count moved.
+- There is one window per metric and axis, kept with the page's settings. Another metric or axis hides it; coming back
+  shows it again.
+- **Open in pop-out** shows the nanowells inside the window in the pop-out (see *Nanowell crops*).
 
 **The other views**
 
@@ -6586,6 +6610,14 @@ settings: the ranges in Review Image, the Image Table and the Cell Browser neith
 A crop cut from the run montage, which is an 8-bit picture rather than the raw image, keeps a scale of its own and
 the caption says so, as does the Array view's *Run montage* image.
 Selecting nanowells does not change the plate selection.
+
+The pop-out has a **Show** choice: **This nanowell** (the crops above) or **Window (N)**, the nanowells inside the
+Distribution window. In **Window** mode they are drawn as **Rows**: one row per nanowell, one column per timepoint, each
+row labelled with its rank, its well and address, and the value it is ranked by (the metric's value at the window's
+latest covered timepoint, largest first; a nanowell with none there last; ties by well, then address). Twenty-four rows
+make a page; ◀ ▶ turn it. Every crop is on one brightness scale, the Timepoints, Channels, Range, Cells, Metrics and
+Save controls apply as they do to one nanowell, and a click on a row selects its nanowell, so the side panel follows.
+A row whose crops are not yet cut says so; one that cannot be cut says why.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind cell fluorescence) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it

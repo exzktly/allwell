@@ -951,6 +951,10 @@ class AllWellApp(QMainWindow):
         self._watch_page_bars()
         self._history.record()
 
+    def _on_page_tab_changed(self, _index: int = 0) -> None:
+        if self._phone is not None:
+            self._phone.page_changed()
+
     def _watch_page_bars(self) -> None:
         """Record a page-tab change in any section, a section built later
         included: each bar is connected the first time it is seen."""
@@ -958,6 +962,9 @@ class AllWellApp(QMainWindow):
             if bar is not None and not bar.property("_awHistory"):
                 bar.setProperty("_awHistory", True)
                 bar.currentChanged.connect(self._history.record)
+                # The phone's page button names the page on screen, so it follows a page tab changed by
+                # code too (QC Triage's "Open in Segmentation", the tabs' own shortcuts), not only the menu.
+                bar.currentChanged.connect(self._on_page_tab_changed)
 
     def _history_place(self) -> tuple:
         """Where the window is: ``(mode,)``, or ``("review", section, page)``."""

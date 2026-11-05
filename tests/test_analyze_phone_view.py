@@ -251,6 +251,35 @@ def test_settings_keeps_the_strip_and_desk_gets_the_column_back(tab):
     assert right.isVisible() and tab._dashboard.isVisible() and tab._log.isVisible()
 
 
+def test_settings_sideways_gives_the_page_to_the_form_and_follows_a_turn(tab, hosted):
+    """Sideways the run strip, the form's pinned footer and the run bar left the form's scroll area 108 px of a
+    432 px window — a sliver. The strip is dropped from Settings sideways and comes back upright; the pane
+    turning (the shell does not tell the view) is what re-decides it."""
+    view = tab._phone_view
+    right = view._parts()[2]
+    form = tab._left_sidebar
+    hosted(390, 780)
+    assert view.current() == SETTINGS
+    assert right.isVisibleTo(tab), "upright, Settings lost its run strip"
+    upright_form = form.height()
+
+    hosted(780, 390)
+    assert not right.isVisibleTo(tab), "sideways, the run strip still takes the page's height"
+    assert form.height() >= 0.6 * tab.height(), f"the form is {form.height()} px of a {tab.height()} px pane"
+
+    hosted(390, 780)
+    assert right.isVisibleTo(tab), "the strip did not come back when the pane turned upright"
+    assert form.height() == upright_form
+
+    hosted(780, 390)
+    view.show_view(PROGRESS)
+    _pump()
+    assert right.isVisibleTo(tab), "Progress lost the run column sideways"
+    phone_layout.set_on(False)
+    _pump()
+    assert right.isVisibleTo(tab) and tab._dashboard.isVisible()
+
+
 def test_a_drag_on_a_status_plate_scrolls_the_page(qtbot):
     """The run dashboard's plate fills most of the Progress page; if it kept
     every drag that started on it, there would be almost nowhere left to

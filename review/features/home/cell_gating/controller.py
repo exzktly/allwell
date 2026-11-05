@@ -81,11 +81,11 @@ from review.features.home.cell_gating.opt_curve_view import (
 from review.features.home.cell_gating.fov_view import refresh_fov_selection_widgets
 from review.data.fov_selection import available_fovs, normalise_selection, selected_fovs
 from review.features.home.cell_gating.renderer import _cell_gating_plot_cdf
+from widgets.squeeze_label import SqueezeWrapLabel
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site).
-_CH_LBL_W = 160
 _GATE_EDIT_W = 90
 _THRESH_EDIT_W = 90
 
@@ -1793,15 +1793,15 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
     # Property and an smFISH Count Property are cut against different units:
     # ThreshFracOn is a brightness, ThreshCountOn a spot tally.
     if include:
-        headers = [("Include \u2265   (FluorGating, per-cell MFI)",
+        headers = [("Include \u2265\n(FluorGating, per-cell MFI)",
                     "Cells whose mean fluorescence intensity in this channel is "
                     "below the floor are excluded from analysis entirely.")]
     else:
         headers = [
-            ("ON \u2265   (ThreshFracOn, per-cell MFI)",
+            ("ON \u2265\n(ThreshFracOn, per-cell MFI)",
              "Included cells at or above this cut count as 'on' when the "
              "selected Property is an intensity. It removes no cells."),
-            ("ON >   (ThreshCountOn, spot count)",
+            ("ON >\n(ThreshCountOn, spot count)",
              "Included cells above this count as 'on' when the selected "
              "Property is an smFISH Count. -1 counts every cell, including the "
              "ones carrying no spots."),
@@ -1812,7 +1812,6 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
     grid.setContentsMargins(0, 0, 0, 0)
     grid.setHorizontalSpacing(16)
     grid.setVerticalSpacing(4)
-    grid.setColumnMinimumWidth(0, _CH_LBL_W)
     grid.setColumnStretch(len(headers) + 1, 1)
 
     # The column header names its layer and the measurement it is made against —
@@ -1826,12 +1825,16 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
         head = QLabel(text, table)
         head.setObjectName("Muted")
         head.setToolTip(tip)
+        # Wrapped, so a column header gives way to the page's width instead of
+        # fixing the table (and so the tab) wider than a narrow viewport.
+        head.setWordWrap(True)
         grid.addWidget(head, 0, col)
 
     seg_tok = seg_channel_token_of(ctx)
     for r, (channel, row_label) in enumerate(row_specs, start=1):
-        ch_lbl = QLabel(row_label, table)
-        ch_lbl.setFixedWidth(_CH_LBL_W)
+        # One line where the page has room, wrapping at its words where it has
+        # not (the old fixed 160 px column held the table wider than a phone).
+        ch_lbl = SqueezeWrapLabel(row_label, table)
         grid.addWidget(ch_lbl, r, 0)
 
         # R6: the typed slice is the source of truth — seed the slice with the

@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QPushButton,
+    QAbstractItemView, QHeaderView, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ui import theme
+from widgets.button_row import ButtonRow
 
 from . import collect as tc
 from . import controller as tcc
@@ -63,14 +64,16 @@ def build_triage_subtab(ctx, parent: QWidget) -> None:
         COLUMNS.index("Problem"), QHeaderView.Stretch)
     layout.addWidget(table, 1)
 
-    buttons = QHBoxLayout()
-    buttons.setSpacing(theme.Spacing.sm)
-    open_btn = QPushButton("Open in Segmentation", parent)
-    exclude_btn = QPushButton("Exclude field…", parent)
-    accept_btn = QPushButton("Accept", parent)
-    reopen_btn = QPushButton("Reopen", parent)
-    rerun_btn = QPushButton("Re-run wells…", parent)
-    anchor_btn = QPushButton("Set anchor…", parent)
+    # A flow row: six buttons are wider than a phone, and in a plain row each
+    # was squeezed until its caption read as a fragment. Wrapped, every one
+    # keeps its whole caption and the row grows taller instead.
+    button_row = ButtonRow(parent)
+    open_btn = QPushButton("Open in Segmentation", button_row)
+    exclude_btn = QPushButton("Exclude field…", button_row)
+    accept_btn = QPushButton("Accept", button_row)
+    reopen_btn = QPushButton("Reopen", button_row)
+    rerun_btn = QPushButton("Re-run wells…", button_row)
+    anchor_btn = QPushButton("Set anchor…", button_row)
     for btn, tip in (
         (open_btn, "Show this field in Image Browser → Segmentation."),
         (exclude_btn, "Leave the selected fields out of every plot, statistic "
@@ -83,9 +86,8 @@ def build_triage_subtab(ctx, parent: QWidget) -> None:
                      "anchor on: click its central square, then re-run the well."),
     ):
         btn.setToolTip(tip)
-        buttons.addWidget(btn)
-    buttons.addStretch(1)
-    layout.addLayout(buttons)
+        button_row.add(btn)
+    layout.addWidget(button_row)
 
     rows_by_index: list = []
 

@@ -20,8 +20,13 @@ from collections.abc import MutableMapping
 
 from ui import theme
 from core.safe import swallow, swallowed
+from review.core import margin_fit
 
 _logger = logging.getLogger("review")
+
+#: The share of the room a colour bar's label may fill on one line: text does
+#: not scale exactly with its size, and a label that just fits is cut by a pixel.
+_LABEL_FILL = 0.9
 
 _PLOT_FONT_REGISTERED = False  # matplotlib font-manager registration runs once
 
@@ -1211,6 +1216,7 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         _hold_typed_limits(ax, *typed_limits)
 
     _apply_layout_engine(fig, prefs)
+    _fit_ticks(fig)
 
 
 def _type_scale(ax) -> float:
@@ -1719,16 +1725,37 @@ def _fit_title(title, room: float, renderer) -> None:
     setattr(title, _FITTED, (title.get_text(), float(title.get_fontsize())))
 
 
+def _fit_axis_label(label, room: float, measure) -> None:
+    """Break *label* onto more lines if its one line is wider than *room* pixels.
+
+    A label is centred on its axes, so one wider than the axes runs past the
+    figure's edge on the side nearer it: the Scatter page's x-label was cut off
+    on a phone. Only the break is changed, never the size — the same rule the
+    y-label follows. The text is measured as its renderer wrote it, so a fit
+    never starts from an earlier fit's breaks (:func:`_title_source`).
+    """
+    text, size = _title_source(label)
+    if not text or room <= 0:
+        return
+    broken = _break_to_fit(text, measure(label, text), room)
+    label.set_text(broken)
+    setattr(label, _UNBROKEN, (text, size))
+    setattr(label, _FITTED, (label.get_text(), float(label.get_fontsize())))
+
+
 def _unfit_titles(fig) -> None:
-    """Give every title back the text and size its renderer wrote — leaving
+    """Give every title and axis label back the text its renderer wrote — leaving
     phone layout, the desk's width needs none of the phone's breaks."""
+    margin_fit.restore(fig)
+    fig._aw_margin_fitted = False
     for ax in fig.axes:
-        title = ax.title
-        if getattr(title, _FITTED, None) == (title.get_text(), float(title.get_fontsize())):
-            text, size = getattr(title, _UNBROKEN)
-            title.set_text(text)
-            title.set_fontsize(size)
-        setattr(title, _FITTED, None)
+        for text_artist in (ax.title, ax.xaxis.label, ax.yaxis.label):
+            if getattr(text_artist, _FITTED, None) == (
+                    text_artist.get_text(), float(text_artist.get_fontsize())):
+                text, size = getattr(text_artist, _UNBROKEN)
+                text_artist.set_text(text)
+                text_artist.set_fontsize(size)
+            setattr(text_artist, _FITTED, None)
 
 
 def _fit_labels_to_phone(fig) -> None:
@@ -1743,10 +1770,22 @@ def _fit_labels_to_phone(fig) -> None:
         # runs (it widens the left margin for larger tick labels), so the room
         # the title will have is the axes', not the figure's.
         _fit_title(ax.title, ax.bbox.width, renderer)
-        ylab = ax.yaxis.label
-        if ylab.get_text():
-            h = ylab.get_window_extent(renderer).height
-            ylab.set_text(_break_to_fit(ylab.get_text(), h, ax.bbox.height))
+        def along(label, text):
+            # The text's own length: a rotated label's extent is its height.
+            return renderer.get_text_width_height_descent(
+                text, label.get_fontproperties(), ismath=False)[0]
+
+        room = ax.bbox.height
+        if getattr(ax, "_aw_colorbar", False):
+            # A colour bar is short and its label is not bound to it: it is
+            # centred on the bar and may run as far as the figure does on the
+            # nearer side. Breaking it to the bar's length gave a five-line
+            # label, which is five lines of width the figure's right-hand
+            # margin does not have.
+            centre = (ax.bbox.y0 + ax.bbox.y1) / 2
+            room = max(room, 2 * min(centre, fig.bbox.height - centre)) * _LABEL_FILL
+        _fit_axis_label(ax.yaxis.label, room, along)
+        _fit_axis_label(ax.xaxis.label, ax.bbox.width, along)
 
 
 def _refit_on_resize(ctx, fig, canvas) -> None:
@@ -1774,6 +1813,7 @@ def _refit_on_resize(ctx, fig, canvas) -> None:
                 _unfit_titles(fig)
             fig._aw_phone_fitted = on
             _apply_layout_engine(fig, figure_prefs(ctx, fig))
+            _fit_ticks(fig)
             canvas.draw_idle()
         except Exception:
             swallowed("re-fit a plot's titles to its new size")
@@ -1817,6 +1857,26 @@ def _figure_text_band(fig) -> tuple | None:
     return (0.0, bottom, 1.0, top - bottom)
 
 
+def _fit_ticks(fig) -> None:
+    """Keep neighbouring tick labels clear of each other (``tick_fit``), once the
+    layout has settled; a figure that cannot be measured keeps its labels."""
+    from review.core.tick_fit import fit_tick_labels
+    with swallow("fit a plot's tick labels to its panels"):
+        # Twice, laying the figure out in between: a label that wraps or
+        # shrinks changes the margins the engine gives the axes, and so the
+        # room the labels were measured against.
+        for _ in range(2):
+            fit_tick_labels(fig)
+            engine = fig.get_layout_engine()
+            if engine is not None:
+                engine.execute(fig)
+    # The tick fit changes the text the margins were measured against, and a
+    # divider-placed figure (``margin_fit``) has no engine to measure it again.
+    if getattr(fig, "_aw_margin_fitted", False):
+        with swallow("keep a divider-placed plot's text inside its figure"):
+            margin_fit.inset_for_overhang(fig)
+
+
 def _apply_layout_engine(fig, prefs: dict) -> None:
     from core import phone_layout
     if phone_layout.is_on():
@@ -1839,6 +1899,16 @@ def _apply_layout_engine(fig, prefs: dict) -> None:
             _fit_labels_to_phone(fig)
         except Exception:
             swallowed()  # an unmeasurable label keeps its one line
+        if margin_fit.divider_placed(fig):
+            # A divider places these axes and ignores the engine, so constrained
+            # layout would only move the ones it can reach; ``margin_fit`` makes
+            # the room the divider's colour bar needs instead.
+            with swallow("keep a divider-placed plot's text inside its figure"):
+                fig.set_layout_engine(None)
+                margin_fit.inset_for_overhang(fig)
+            fig._aw_margin_fitted = True
+            return
+        fig._aw_margin_fitted = False
         reserved = None
         with swallow("measure the text written on a phone plot's figure"):
             reserved = _figure_text_band(fig)
@@ -1860,7 +1930,11 @@ def _apply_layout_engine(fig, prefs: dict) -> None:
             swallowed("re-fit the titles to the laid-out axes")
         return
     use_constrained = bool(prefs.get("layout_constrained", False))
-    use_tight = bool(prefs.get("layout_tight", False))
+    # A figure may declare that it needs tight layout (``_aw_tight_layout``, set
+    # by a renderer whose panels share a grid): a one-shot layout from the
+    # renderer's own text sizes is stale by the time this pass has restyled them.
+    use_tight = bool(prefs.get("layout_tight", False)) or bool(
+        getattr(fig, "_aw_tight_layout", False))
     try:
         if use_constrained:
             fig.set_layout_engine("constrained")
@@ -1875,6 +1949,20 @@ def _apply_layout_engine(fig, prefs: dict) -> None:
                 fig.tight_layout()
             except Exception:
                 swallowed()  # was: pass (silent except)
+
+
+def relayout(ctx, fig) -> None:
+    """Lay *fig* out again, for text written on it after its style pass.
+
+    A footer is stamped once the plot is drawn, which is after
+    :func:`apply_export_style_to_current` has set the layout: the phone layout's
+    reservation for figure text (:func:`_figure_text_band`) never saw it, and the
+    footer was drawn across the x-label above it.
+    """
+    if fig is None:
+        return
+    _apply_layout_engine(fig, figure_prefs(ctx, fig))
+    _fit_ticks(fig)
 
 
 def apply_export_style_to_current(ctx, fig, canvas=None) -> None:

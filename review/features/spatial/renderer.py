@@ -46,6 +46,7 @@ def render_spatial(ctx) -> None:
     if st is None or fig is None:
         return
     fig.clear()
+    setattr(fig, "_aw_tight_layout", False)      # a grid of panels asks for it again
     try:
         if st.last_error:
             _draw_message(fig, st.last_error)
@@ -111,8 +112,15 @@ def _render_frames_grid(fig, st) -> None:
             f"(narrow the selection to see the rest)",
             color=title_fg, fontsize=9,
         )
+    # The engine, not ``fig.tight_layout()``: that call lays the panels out once,
+    # from the type sizes this renderer drew them at, and the Properties pass
+    # then enlarges them (and a resize changes the room) — so each panel's
+    # x-label was drawn over the title of the panel below. The engine lays the
+    # figure out again at every draw, from the text as it is by then.
+    # ``plot_style`` keeps an engine a figure declares it needs.
     try:
-        fig.tight_layout()
+        fig.set_layout_engine("tight")
+        setattr(fig, "_aw_tight_layout", True)
     except Exception:  # pragma: no cover - defensive
         from core.safe import swallowed
         swallowed()

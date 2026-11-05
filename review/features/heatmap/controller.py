@@ -82,6 +82,27 @@ _SELECTION_OUTLINE_COLOR = theme.Colors.heatmap_selection
 #: renaming one tick is not.
 _TICK_WIDE_CHARS = 6
 
+#: The share of its panel's height a grid of square cells must fill to be kept
+#: square. A 12 x 8 plate in a tall, narrow panel (a phone held upright) came out
+#: a strip a third of the panel's height with the rest empty; below this share
+#: the cells stretch to the panel instead, which is what a heat map is for.
+#: Dimensionless, so it asks the same question at any size.
+_SQUARE_CELLS_MIN_FILL = 0.6
+
+
+def _grid_aspect(fig, ax, rows: int, cols: int) -> str:
+    """``"equal"`` while square cells fill enough of *ax*'s panel, else ``"auto"``.
+
+    Decided from the panel's own size on the page, not from the layout it is in.
+    """
+    pos = ax.get_position(original=True)
+    panel_w = pos.width * fig.get_figwidth()
+    panel_h = pos.height * fig.get_figheight()
+    if panel_w <= 0 or panel_h <= 0 or rows <= 0 or cols <= 0:
+        return "equal"
+    square_h = min(panel_h, panel_w * rows / cols)
+    return "equal" if square_h / panel_h >= _SQUARE_CELLS_MIN_FILL else "auto"
+
 #: Title lift, in points, when the column ticks are rotated. The flat value is
 #: 8; rotated 8pt text over twelve columns stands about twice that.
 _TITLE_PAD_ROTATED = 18
@@ -755,11 +776,12 @@ def _draw_heatmap(ctx) -> None:
 
     ax.clear()
     ax.set_facecolor(_bg)  # ax.clear() resets to white; re-apply the theme bg
+    aspect = _grid_aspect(fig, ax, masked.shape[0], masked.shape[1])
     if norm is not None:
-        im = ax.imshow(masked, aspect="equal", cmap=cmap, norm=norm,
+        im = ax.imshow(masked, aspect=aspect, cmap=cmap, norm=norm,
                        origin="upper", interpolation="nearest")
     else:
-        im = ax.imshow(masked, aspect="equal", cmap=cmap, vmin=vmin, vmax=vmax,
+        im = ax.imshow(masked, aspect=aspect, cmap=cmap, vmin=vmin, vmax=vmax,
                        origin="upper", interpolation="nearest")
 
     # Always materialise label lists of the right length. Persisted layouts

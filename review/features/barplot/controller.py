@@ -246,6 +246,7 @@ def render_bar_items(
         fc_active=fc_active,
         n_axis_integer=n_axis_integer,
         value_labels=_labels[0],
+        draw_err=draw_err,
         per_fov=bool(
             getattr(getattr(ctx, "state", None), "plot", None)
             and ctx.state.plot.use_fov_replicates

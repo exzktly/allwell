@@ -69,11 +69,13 @@ SHELL = "ui/phone_shell.py"
 
 #: ``ui/phone_shell.py``'s recognition by name today, counted by site. Each row
 #: of PHONE_FORM_TRACKER.md that removes a site lowers this in the same commit;
-#: P4.4 takes it to zero. Measured: ``_KIND_BY_CLASS`` 1 key,
-#: ``_KIND_BY_OBJECT_NAME`` empty, ``"InfoHint"`` compared in 2 places, and the
+#: P4.4 takes it to zero. Measured: ``"InfoHint"`` compared in 2 places and the
 #: ``draw_idle`` duck type in 4 (``_phone_relevant``, ``_is_canvas``,
-#: ``_PhoneEventFilter.eventFilter``, ``PhoneShell._sweep``).
-RECOGNISED_BY_NAME_BUDGET = 7
+#: ``_PhoneEventFilter.eventFilter``, ``PhoneShell._sweep``). Counted too, so a
+#: name cannot come back in another spelling: an entry in a ``_KIND_BY_CLASS`` /
+#: ``_KIND_BY_OBJECT_NAME`` dict (plain or annotated) and a comparison of
+#: ``type(w).__name__`` with a string.
+RECOGNISED_BY_NAME_BUDGET = 6
 
 
 # ── roster of reads outside the sanctioned layers ───────────────────────────
@@ -238,20 +240,30 @@ def _is_string_equal_to(node: ast.AST, value: str) -> bool:
     return isinstance(node, ast.Constant) and node.value == value
 
 
+def _compares_a_class_name(node: ast.Compare) -> bool:
+    """``type(w).__name__ == "ControlBand"`` — a widget found by its class name."""
+    sides = [node.left, *node.comparators]
+    return (any(isinstance(n, ast.Attribute) and n.attr == "__name__" for n in sides)
+            and any(isinstance(n, ast.Constant) and isinstance(n.value, str) for n in sides))
+
+
 def recognised_by_name(tree: ast.AST) -> list[tuple[int, str]]:
     """The places ``ui/phone_shell.py`` finds a widget by what it is called or
     by a duck type, rather than by what it declares: ``(line, what)``."""
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict) \
-                and any(isinstance(t, ast.Name) and t.id in ("_KIND_BY_CLASS", "_KIND_BY_OBJECT_NAME")
-                        for t in node.targets):
-            name = next(t.id for t in node.targets if isinstance(t, ast.Name))
-            found.extend((key.lineno, f"{name} entry {key.value!r}")
+        targets = ([node.target] if isinstance(node, ast.AnnAssign)
+                   else node.targets if isinstance(node, ast.Assign) else [])
+        names = [t.id for t in targets if isinstance(t, ast.Name)
+                 and t.id in ("_KIND_BY_CLASS", "_KIND_BY_OBJECT_NAME")]
+        if names and isinstance(node.value, ast.Dict):
+            found.extend((key.lineno, f"{names[0]} entry {key.value!r}")
                          for key in node.value.keys if isinstance(key, ast.Constant))
         elif isinstance(node, ast.Compare) \
                 and any(_is_string_equal_to(n, "InfoHint") for n in [node.left, *node.comparators]):
             found.append((node.lineno, 'compares an object name to "InfoHint"'))
+        elif isinstance(node, ast.Compare) and _compares_a_class_name(node):
+            found.append((node.lineno, "compares a class name to a string"))
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
                 and node.func.id == "getattr" and len(node.args) >= 2 \
                 and _is_string_equal_to(node.args[1], "draw_idle"):

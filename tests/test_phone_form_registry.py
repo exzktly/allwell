@@ -316,3 +316,26 @@ def test_a_declared_form_row_that_is_label_beside_field_stacks_on_a_phone(qapp, 
     row.show()
     _pump(qapp)
     assert lay.direction() == QBoxLayout.TopToBottom
+
+
+def test_a_control_band_built_after_the_switch_is_hidden_in_its_page_and_found_as_the_page_s_controls(qapp, shell):
+    """The real ``ControlBand`` with something in it. Hidden in the page because
+    the Controls sheet shows it; and ``_current_band`` — which used to find it by
+    class name — still finds it. Wrong implementation: a band that does not
+    declare, which both the sweep and the sheet then ignore."""
+    from PySide6.QtWidgets import QLabel, QVBoxLayout
+
+    from widgets.control_band import ControlBand
+
+    page = QWidget(shell._win)
+    QVBoxLayout(page)
+    shell._h.band_roots = lambda: [page]
+    band = ControlBand(page)
+    band.add_scope("Channel", QLabel("GFP"))
+    page.layout().addWidget(band)
+    assert fr.kind_of(band) == "controls"
+    page.show()
+    _pump(qapp)
+    assert band.isHidden()
+    band.show()                                    # what the Controls sheet will do to it
+    assert shell._current_band() is band

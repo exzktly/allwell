@@ -49,11 +49,13 @@ from PySide6.QtWidgets import (
     QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QLabel,
     QLineEdit, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
+import shiboken6
 
 from core import phone_layout
 from core.safe import swallowed
 from ui import phone_window, theme
 from widgets import form_registry
+from widgets.control_band import ControlBand
 
 _LOG = logging.getLogger(__name__)
 
@@ -487,39 +489,23 @@ def scale_canvases(factor: float) -> int:
     return len(canvases)
 
 
-def _is_phone_controls(w: QWidget) -> bool:
-    """A page's block of controls that is not a ``ControlBand`` but goes to the
-    Controls sheet like one: marked with the ``phoneControls`` property, and
-    carrying ``setStacked`` for its one-column form."""
-    return bool(w.property("phoneControls")) and hasattr(w, "setStacked")
-
-
-#: The widgets ``PhoneShell.adapt`` gives a phone form, by kind — the one
-#: roster of them. ``adapt`` dispatches on the kind :func:`_adapt_kind` names
+#: The kinds of widget ``PhoneShell.adapt`` gives a phone form — the one roster
+#: of them. A widget declares its kind where it is built
+#: (``widgets.form_registry``); ``adapt`` dispatches on it
 #: (``PhoneShell._ADAPTERS``) and :func:`_phone_relevant` watches every widget
 #: that has one, so a kind added here is both watched and adapted; a kind that
 #: ``_ADAPTERS`` lacks fails ``tests/test_phone_layout.py``.
-_KIND_BY_CLASS = {"ControlBand": "controls"}
-_KIND_BY_OBJECT_NAME: dict[str, str] = {}
 ADAPTED_KINDS = frozenset(
     ("controls", "toolbar", "stepper", "form_row", form_registry.CUSTOM))
 
 
 def _adapt_kind(w: QWidget) -> str | None:
-    """Which kind of phone form ``PhoneShell.adapt`` gives *w*, or ``None``
-    for a widget it leaves alone: a page's controls (a ``ControlBand`` or a
-    ``phoneControls`` block), a plot toolbar, a stepper, an Analyze form row.
-    A kind the widget declared (``widgets.form_registry``) is read first; the
-    class and object names below it are what is still recognised by name."""
+    """Which kind of phone form ``PhoneShell.adapt`` gives *w*, or ``None`` for a
+    widget it leaves alone: the kind the widget declared with
+    ``widgets.form_registry`` — a page's controls, a plot toolbar, a stepper, an
+    Analyze form row, or a form a view registered for itself."""
     declared = form_registry.kind_of(w)
-    if declared in ADAPTED_KINDS:
-        return declared
-    kind = _KIND_BY_CLASS.get(type(w).__name__)
-    if kind is not None:
-        return kind
-    if _is_phone_controls(w):
-        return "controls"
-    return _KIND_BY_OBJECT_NAME.get(w.objectName())
+    return declared if declared in ADAPTED_KINDS else None
 
 
 def _phone_relevant(w: QWidget) -> bool:
@@ -945,13 +931,15 @@ class PhoneShell(QObject):
 
         def _listener(widget: QWidget, kind: str) -> None:
             shell = ref()
-            if shell is None:
+            if shell is None or not shiboken6.isValid(shell):
                 form_registry.remove_listener(_listener)
                 return
             shell._on_declared(widget, kind)
 
+        # No ``destroyed`` connection: a Python callback run while Qt tears the
+        # shell down inside a garbage collection crashed a test worker natively.
+        # The listener leaves the registry the next time it is called instead.
         form_registry.add_listener(_listener)
-        self.destroyed.connect(lambda *_: form_registry.remove_listener(_listener))
 
     def _on_declared(self, widget: QWidget, _kind: str) -> None:
         """A widget declared its form — from inside its constructor, so it is
@@ -1867,17 +1855,16 @@ class PhoneShell(QObject):
     # ── the Controls sheet ────────────────────────────────────────────────
     def _current_band(self) -> QWidget | None:
         """The controls of the Review page on screen: its control band, if that
-        has controls, or else a block the page marked ``phoneControls`` (the
+        has controls, or else a block the page declared as controls (the
         Image Table's builder and action strip, whose band is empty)."""
         marked = None
-        for w in QApplication.allWidgets():
-            band = type(w).__name__ == "ControlBand"
-            if not (band or _is_phone_controls(w)) or not self._band_managed(w):
+        for w in form_registry.declared("controls"):
+            if not self._band_managed(w):
                 continue
             parent = w.parentWidget()
             if w is not self._sheet_band and (parent is None or not parent.isVisible()):
                 continue
-            if not band:
+            if not isinstance(w, ControlBand):
                 marked = w
             elif (w.scope_count() + w.action_count()) > 0:
                 return w
@@ -1990,7 +1977,7 @@ class PhoneShell(QObject):
         holder.layout().insertWidget(0, band)
         # A control band is read down as a form — one control per row, label
         # column, Data / Display / Actions; a page's own block of controls
-        # (``phoneControls``) takes its own stacked form.
+        # (declared as ``controls``) takes its own stacked form.
         if hasattr(band, "setForm"):
             band.setForm(True, label_width=self.pt(phone_layout.SHEET_LABEL_PT),
                          row_height=self.pt(phone_layout.TOUCH_ROW_PT),

@@ -29,6 +29,7 @@ from PySide6.QtCore import Qt
 
 from review.data.crop_tool import CropTool
 from review.core.ui_helpers import btn_primary
+from widgets import form_registry
 from widgets.separator import build_hline_separator
 from widgets.flow_layout import FlowLayout
 from widgets.page_body import build_page_body
@@ -99,8 +100,8 @@ def _menu_button(parent, text, *, tooltip="") -> QToolButton:
 class _TableControls(QWidget):
     """The builder shelf and the action strip, as one lendable block.
 
-    Phone layout finds a page's controls by the ``phoneControls`` property
-    (``ui.phone_shell``) and lends them to its Controls sheet, calling
+    The block declares itself as ``controls`` (``widgets.form_registry``), so
+    phone layout (``ui.phone_shell``) finds it and lends it to its Controls sheet, calling
     :meth:`setStacked` on the way in and out. Stacked, the action strip —
     Generate, zoom, the ON threshold — comes first, since it is what a phone
     reaches for, and the builder lays out in one column
@@ -110,7 +111,7 @@ class _TableControls(QWidget):
     def __init__(self, ctx, parent: QWidget) -> None:
         super().__init__(parent)
         self.setObjectName("ImageTableControls")
-        self.setProperty("phoneControls", True)
+        form_registry.declare(self, "controls")
         self._ctx = ctx
         self._actions: QWidget | None = None
         self._stacked = False

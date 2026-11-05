@@ -190,11 +190,12 @@ holds. `PhoneShell` listens (`_listen_for_declarations`, weakly, so a closed
 window leaves no listener). A declaration is made inside the widget's
 constructor, so while phone layout is on the shell only installs its event
 filter on the widget and the form is applied on the widget's first Show.
-`_adapt_kind` reads a declared kind first and falls back to the class and
-object names the shell still recognises (`_KIND_BY_CLASS`,
-`_KIND_BY_OBJECT_NAME`, the `InfoHint` object name, the `draw_idle` duck type);
-`test_the_shell_recognises_no_more_widgets_by_name_than_the_budget` counts those
-and only lets the count fall.
+`_adapt_kind` reads that declared kind (`ControlBand`, `MplToolbar`, `Stepper`
+and the Analyze form row declare theirs, as does the Image Table's controls
+block); what the shell still recognises by name — the `InfoHint` object name and
+the `draw_idle` duck type that finds a plot canvas —
+`test_the_shell_recognises_no_more_widgets_by_name_than_the_budget` counts, and
+only lets the count fall.
 `tests/test_phone_layout_snapshot.py` records what the window shows in phone
 layout (every page, upright, sideways and at the large text size) against
 `tests/fixtures/phone_snapshot_baseline.json`, which is the check that a change
@@ -517,9 +518,9 @@ place each time, `PhoneShell._foot_strip`) so its **Done ✕** stays where the
 thumb opened it, or a 390 pt right-hand panel sideways — as wide as the phone held upright, so whatever
 fits the sheet upright fits the panel (`LANDSCAPE_SHEET_PT`; at 360 pt the Image
 Table's LUT rows overflowed it). A page whose controls are not a `ControlBand`
-marks the block that holds them with the `phoneControls` property and gives it a
-`setStacked`; `_current_band` takes a band with controls first and a marked block
-otherwise, and the same lend, stack and give-back apply to either. Whether
+declares the block that holds them as `"controls"` (`widgets.form_registry`) and
+gives it a `setStacked`; `_current_band` takes a band with controls first and a
+declared block otherwise, and the same lend, stack and give-back apply to either. Whether
 ⚙ Controls shows is decided in `refresh()`, which follows the notebook's page
 changes — but a lazily built page (Image Browser) has no controls yet at that
 signal, since it builds on being shown. So `adapt()`, which hides a page's
@@ -561,7 +562,7 @@ Display and anything else Actions. The page keeps owning visibility: a row, a
 cell and a section follow the show / hide of the widget the page shows and hides
 (`_Mirror`), so `show_slot` reshapes the form. The band's row margins are dropped
 while it is a form, since the sheet pads its content, and `heightForWidth`
-answers from the form. A page's own block of controls (`phoneControls`, the
+answers from the form. A page's own block of controls (declared `controls`, the
 Image Table's builder) keeps its `setStacked` form. The sheet's buttons, combos
 and fields are 48 pt (`QWidget#Drawer[phoneSheet="true"]` in the touch block). The sheet's height is measured off the controls lent
 into it, and at `open` they still have their page's width, so the estimate is
@@ -628,7 +629,7 @@ kept in an attribute on the main window.
 through the action strip, neither of which is a `ControlBand` (its band is empty),
 and at the desk both sit above the grid — on a phone, two screens of drag-and-drop
 before the first image. So the two share one host, `tab_view._TableControls`,
-marked `phoneControls`: in phone layout it is hidden from the page, which opens on
+declared as `controls`: in phone layout it is hidden from the page, which opens on
 the grid, and ⚙ Controls lends it to the sheet. Stacked, the action strip
 (Generate, crop, the ON threshold, Save, zoom) comes first, and
 `builder_view.builder_set_stacked` turns the shelf's header row and its Rows /

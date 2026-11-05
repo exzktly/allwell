@@ -5912,16 +5912,20 @@ def test_phone_guard_counts_every_way_the_shell_recognises_a_widget_by_name():
     module = importlib.import_module("tests.test_phone_mode_stays_in_views")
     source = (
         '_KIND_BY_CLASS = {"Stepper": "stepper", "ControlBand": "controls"}\n'
-        '_KIND_BY_OBJECT_NAME = {"AnalyzeFormRow": "form_row"}\n'
+        # An annotated assignment is the spelling that once made a roster invisible.
+        '_KIND_BY_OBJECT_NAME: dict[str, str] = {"AnalyzeFormRow": "form_row"}\n'
         "def f(w):\n"
         '    if w.objectName() == "InfoHint":\n'
         "        return 1\n"
+        '    if type(w).__name__ == "ControlBand":\n'
+        "        return 2\n"
         '    return getattr(type(w), "draw_idle", None) is not None\n')
     sites = module.recognised_by_name(ast.parse(source))
     assert [what for _line, what in sites] == [
         "_KIND_BY_CLASS entry 'ControlBand'", "_KIND_BY_CLASS entry 'Stepper'",
         "_KIND_BY_OBJECT_NAME entry 'AnalyzeFormRow'",
-        'compares an object name to "InfoHint"', "duck-types a canvas by draw_idle"]
+        'compares an object name to "InfoHint"', "compares a class name to a string",
+        "duck-types a canvas by draw_idle"]
     assert module.recognised_by_name(ast.parse("def f():\n    return 1\n")) == []
 
 

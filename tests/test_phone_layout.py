@@ -1691,7 +1691,7 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     QVBoxLayout(holder)
     row = AnalyzeFormChromeMixin._row(None, holder, "A label").parentWidget()   # the app's builder
     block = QWidget(host)
-    block.setProperty("phoneControls", True)
+    form_registry.declare(block, "controls")
     block.setStacked = lambda _on: None
     custom = QWidget(host)
     form_registry.register(custom, lambda _on: None)      # a view's own form

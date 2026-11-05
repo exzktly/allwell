@@ -226,9 +226,12 @@ def test_a_crop_job_that_fails_says_so_on_the_figure_and_is_not_relaunched(page,
     st = page.state.feature_slice("nanowell")
     qtbot.waitUntil(lambda: ("A01", 1, 0) in st.crops, timeout=20000)
     detail = page.widgets.get("_nw_strip_fig")
+    # The panel says "no crop" and the reason is said once, in the caption: written in the panel it wrapped to the
+    # figure's width and ran across its neighbours.
     missing = [t.get_text() for ax in detail.axes for t in ax.texts if t.get_gid() == "nw-crop-missing"]
-    assert len(missing) == 1 and missing[0].startswith("The crops could not be cut: ")
-    assert "disk went away" in missing[0]
+    caption = [t.get_text() for t in detail.texts if t.get_gid() == "nw-crop-caption"]
+    assert missing == ["no crop"] and len(caption) == 1
+    assert "The crops could not be cut: " in caption[0] and "disk went away" in caption[0]
     nwc.set_metric(page, "c")                                        # any redraw
     nwc.redraw(page)
     assert len(calls) == 1

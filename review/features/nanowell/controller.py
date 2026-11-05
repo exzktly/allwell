@@ -650,6 +650,14 @@ def redraw(ctx) -> None:
     _call(ctx, "_nw_refresh_controls")
     _call(ctx, "_nw_show_computing")
     _refresh_empty(ctx)
+    card = ctx.widgets.get_or_none("_nw_card")
+    if card is not None and card.isHidden():
+        # Phone layout gives the site detail the page while a nanowell is selected (``tab_view.show_detail``), and the
+        # figure is hidden behind it at no size at all — drawn there, the swarm layout divided by a zero width. Only
+        # the detail is drawn; when the selection is cleared that shows the figure again, which is drawn then, at
+        # its size (``show_detail`` queues the redraw).
+        redraw_detail(ctx)
+        return
     if st.view == "qc" and nanowell_empty_reason(ctx) is None:
         idc.leave(ctx, st)
         qcc.draw(ctx, st, fig, canvas)                   # the whole plate's records: no selection or metrics needed
@@ -1927,6 +1935,29 @@ def save_popout_figure(ctx) -> None:
     ctx.figures.save(fig, save_name(site, popout_channels(st)))
 
 
+def _strip_cols(fig, crops) -> int:
+    """The crop strip's columns: one row at a desk (``0``), and in phone layout as many rows as make each crop
+    largest in the strip's own figure (``crop_grid_compute.strip_columns``)."""
+    from core import phone_layout
+
+    from .crop_grid_compute import strip_columns
+
+    if not crops or not phone_layout.is_on():
+        return 0
+    width, height = fig.get_size_inches()
+    return strip_columns(len(crops), width * 0.94, height * 0.78)
+
+
+def refit_crop_strip(ctx) -> None:
+    """Lay the crop strip out again for its new size — in phone layout only, where its columns follow its shape."""
+    from core import phone_layout
+
+    st = _state(ctx)
+    if not phone_layout.is_on() or st is None or not st.selected_sites or _page_deleted(ctx):
+        return
+    redraw_detail(ctx)
+
+
 def redraw_detail(ctx) -> None:
     """Draw the site detail for the selected nanowells — their series, and the first one's crops in the strip under
     the **Pop out** button — or hide it when none is selected; and the pop-out window, which follows the selection."""
@@ -1962,7 +1993,7 @@ def redraw_detail(ctx) -> None:
     strip_fig, strip_canvas = ctx.widgets.get_or_none("_nw_strip_fig"), ctx.widgets.get_or_none("_nw_strip_canvas")
     if strip_fig is not None and strip_canvas is not None:
         render_crop_strip(strip_fig, crops, first, cells=st.crop_cells, image_channel=image_channel,
-                          display_range=display_range(ctx))
+                          display_range=display_range(ctx), cols=_strip_cols(strip_fig, crops))
         strip_canvas.draw_idle()
 
 

@@ -364,8 +364,6 @@ def test_the_crop_strip_draws_only_the_cells_the_counts_hold(qtbot, tmp_path, mo
     caption says so."""
     from dataclasses import replace
 
-    from PySide6.QtCore import Qt
-
     from review.features.nanowell import controller as nwc
     from review.features.nanowell.image_compute import Crop
     from review.features.qc.controller import get_qc_params, recompute_qc_all
@@ -387,9 +385,9 @@ def test_the_crop_strip_draws_only_the_cells_the_counts_hold(qtbot, tmp_path, mo
     recompute_qc_all(ctx)
     _reloaded(qtbot, ctx, st)
     _click_dot(qtbot, ctx, ("A01", 0, 0))
-    box = ctx.widgets.get("_nw_strip_cells_box")
-    qtbot.waitUntil(lambda: box.isVisible() and box.width() > 0, timeout=5000)
-    qtbot.mouseClick(box, Qt.LeftButton)
+    from tests.test_nanowell_crop_cells import _press
+
+    _press(qtbot, ctx, "_nw_strip_cells_box")             # once the wrapping row has placed it
 
     def strip(gid):
         fig = ctx.widgets.get("_nw_strip_fig")

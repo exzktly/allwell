@@ -379,6 +379,8 @@ def _snapshot_bar(ctx) -> dict:
             out["bar_width"] = float(plot.bar_width)
         if hasattr(plot, "bar_group_spacing"):
             out["bar_group_spacing"] = float(plot.bar_group_spacing)
+        if hasattr(plot, "swarm_spacing"):
+            out["swarm_spacing"] = float(plot.swarm_spacing)
         # The user's drag-to-reorder bar layout. ``ordered_bar_keys``
         # falls back to the canonical order when the saved list doesn't
         # cover the current dataset's keys, so an empty / stale list is
@@ -1108,12 +1110,13 @@ def _apply_bar(ctx, state: dict) -> None:
 def _restore_bar_geometry(plot, state: dict) -> None:
     """Properties → Bars from a saved view, keeping only values that can be drawn.
 
-    A width outside ``[0, 1]`` or a spacing outside ``[0, 5]`` is not a
-    layout, it is a damaged file; each is dropped on its own so a bad width
-    does not also take a good spacing with it, and the field keeps its current
-    value.
+    A width outside ``[0, 1]``, a group spacing outside ``[0, 5]`` or a
+    beeswarm point spacing outside ``[0, 5]`` is not a layout, it is a damaged
+    file; each is dropped on its own so a bad width does not also take a good
+    spacing with it, and the field keeps its current value.
     """
-    for key, lo, hi in (("bar_width", 0.0, 1.0), ("bar_group_spacing", 0.0, 5.0)):
+    for key, lo, hi in (("bar_width", 0.0, 1.0), ("bar_group_spacing", 0.0, 5.0),
+                        ("swarm_spacing", 0.0, 5.0)):
         if key not in state:
             continue
         try:

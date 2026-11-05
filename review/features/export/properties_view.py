@@ -404,6 +404,12 @@ class ExportStyleSidebar(QWidget):
         # reads them.
         if self._is_bar_fig():
             self._build_bars_section(kit.section, kit.add_row, kit.hrow)
+        # ── Beeswarm ───────────────────────────────────────────────────────
+        # Point spacing, on the two figures that draw a beeswarm: the Bar
+        # plot (Beeswarm and All points modes) and the Nanowells page
+        # (Distribution view). Global PlotState, like Bars above.
+        if self._draws_beeswarm():
+            self._build_beeswarm_section(kit.section, kit.add_row, kit.hrow)
 
         # File format selector intentionally omitted — the Save As… dialog
         # offers PDF / SVG / EPS / PNG via the file filter, so picking the
@@ -2054,6 +2060,94 @@ class ExportStyleSidebar(QWidget):
         self._bars_refresh_preview = _refresh_preview
         _refresh_preview()
 
+    def _build_beeswarm_section(self, section, add_row, hrow) -> None:
+        """Properties → Beeswarm: how far apart the beeswarm's dots are drawn.
+
+        **Auto** is each plot's own layout — the Bar plot's dots stretch to
+        fill their column, the Nanowells Distribution view's sit edge to edge —
+        or a fixed spacing as a multiple of one dot's width: 1.0 edge to edge,
+        less overlaps them (a denser swarm), more leaves a gap. The same
+        Auto-toggle-plus-stepper shape as Bars → Width, for the reason given
+        there. Writes ``PlotState.swarm_spacing`` and redraws, since where the
+        dots go is decided by the layout, not by a restyle.
+        """
+        from widgets.stepper import Stepper as _Stepper
+
+        plot = self._app._app_state.plot
+        s_swarm = section("Beeswarm", expanded=False)
+        preview = QLabel("")
+        preview.setObjectName("Muted")
+        s_swarm.setValueWidget(preview)
+
+        spacing = float(getattr(plot, "swarm_spacing", 0.0) or 0.0)
+        auto_tog = ToggleSwitch("Auto")
+        auto_tog.setChecked(spacing <= 0)
+        auto_tog.setToolTip(
+            "Automatic spacing: the Bar plot's beeswarm fills each column, the "
+            "Nanowells Distribution view packs dots edge to edge. Switch off to "
+            "set the spacing yourself.")
+        step = _Stepper(minimum=0.1, maximum=5.0, single_step=0.1,
+                        value=spacing if spacing > 0 else 1.0, decimals=1)
+        step.setEnabled(spacing > 0)
+        step.setToolTip(
+            "Distance between neighbouring dots, as a multiple of a dot's width "
+            "— 1.0 makes them touch, lower packs them tighter (overlapping), "
+            "higher spreads them out.")
+
+        def _refresh_preview() -> None:
+            v = float(getattr(plot, "swarm_spacing", 0.0) or 0.0)
+            preview.setText("Auto" if v <= 0 else f"{v:.1f}×")
+
+        def _redraw() -> None:
+            _refresh_preview()
+            try:
+                self._redraw_active_plot()
+            except Exception:
+                swallowed()
+
+        def _on_auto(on: bool) -> None:
+            plot.swarm_spacing = 0.0 if on else float(step.value())
+            step.setEnabled(not on)
+            _redraw()
+
+        def _on_step(v: float) -> None:
+            if auto_tog.isChecked():
+                return
+            plot.swarm_spacing = float(v)
+            _redraw()
+
+        auto_tog.toggled.connect(_on_auto)
+        step.valueChanged.connect(_on_step)
+        add_row(s_swarm, "Point spacing", hrow(auto_tog, step))
+        self._swarm_auto_tog = auto_tog
+        self._swarm_spacing_step = step
+        self._swarm_refresh_preview = _refresh_preview
+        _refresh_preview()
+
+    def _resync_swarm_spacing(self) -> None:
+        """Re-seed the Beeswarm controls from ``PlotState`` on a panel open,
+        for the reason ``_resync_bar_geometry`` gives."""
+        tog = getattr(self, "_swarm_auto_tog", None)
+        if tog is None:
+            return
+        spacing = float(getattr(self._app._app_state.plot, "swarm_spacing", 0.0) or 0.0)
+        for widget, apply in (
+            (tog, lambda: tog.setChecked(spacing <= 0)),
+            (self._swarm_spacing_step,
+             lambda: self._swarm_spacing_step.setValue(spacing if spacing > 0 else 1.0)),
+        ):
+            widget.blockSignals(True)
+            try:
+                apply()
+            finally:
+                widget.blockSignals(False)
+        self._swarm_spacing_step.setEnabled(spacing > 0)
+        self._swarm_refresh_preview()
+
+    def _draws_beeswarm(self) -> bool:
+        """True on the figures that draw a beeswarm: the Bar plot and the Nanowells page."""
+        return any(getattr(self._app, attr, None) is self._fig for attr in ("_bar_fig", "_nw_fig"))
+
     def _resync_bar_geometry(self) -> None:
         """Re-seed the Bars controls from ``PlotState`` on a panel open.
 
@@ -2380,6 +2474,7 @@ class ExportStyleSidebar(QWidget):
         """
         self._resync_time_interval()
         self._resync_bar_geometry()
+        self._resync_swarm_spacing()
         plot = getattr(self._app._app_state, "plot", None)
         if plot is None:
             return

@@ -34,6 +34,7 @@ from review.data.data_loading import (
 from review.core.plot_style import (
     apply_ax_style,
     apply_export_style_to_current,
+    figure_prefs,
     follows_theme,
     mark_time_rescale,
     tokens_for,
@@ -340,6 +341,31 @@ def draw_violin(
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=_hdr_pad)
 
 
+def swarm_pitch(ctx, ax, x_span: float) -> float | None:
+    """The x distance between neighbouring beeswarm dots, in data units, or ``None`` for Auto.
+
+    Properties → Beeswarm → Point spacing (``PlotState.swarm_spacing``) is a
+    multiple of one dot's width: 1.0 draws neighbours edge to edge, less
+    overlaps them, more leaves a gap. A dot is as wide as the Marker size pref,
+    which the style pass applies to these dots after they are drawn, so the
+    spacing is worked out from that same size and from the axes' width on the
+    page over *x_span*, the x range this renderer gives the axes.
+    """
+    spacing = float(getattr(ctx.state.plot, "swarm_spacing", 0.0) or 0.0)
+    if spacing <= 0.0:
+        return None
+    fig = ax.figure
+    try:
+        dot_pt = float(figure_prefs(ctx, fig).get("marker_size", 5.0))
+    except Exception:
+        swallowed()  # a stub ctx with no style store draws at the default size
+        dot_pt = 5.0
+    width_px = ax.get_position().width * fig.get_size_inches()[0] * fig.dpi
+    if width_px <= 0.0 or x_span <= 0.0:
+        return None
+    return spacing * max(dot_pt, 0.5) * fig.dpi / 72.0 * x_span / width_px
+
+
 def draw_beeswarm(
     ctx,
     ax_mean,
@@ -377,6 +403,9 @@ def draw_beeswarm(
     else:
         target_ts_per_col = [float(target_t)] * n
     bar_w = min(0.35, 3.0 / max(n, 1))
+    xlim_lo = (min(xs) - 0.6) if xs else -0.6
+    xlim_hi = (max(xs) + 0.6) if xs else 0.4
+    pitch = swarm_pitch(ctx, ax_mean, xlim_hi - xlim_lo)
     columns: list[ColumnCells] = []
 
     try:
@@ -408,7 +437,7 @@ def draw_beeswarm(
                                 marker="x", zorder=3, linewidths=1)
             elif cell_vals.size:
                 jx, jy = _beeswarm_jitter(cell_vals.tolist(), x_center=float(xi),
-                                           max_spread=bar_w)
+                                           max_spread=bar_w, pitch=pitch)
                 sc = ax_mean.scatter(jx, jy, c=color, s=6, alpha=0.55,
                                      zorder=3, linewidths=0)
                 # v5.2.31: tag so the export-style override picks up the
@@ -436,8 +465,6 @@ def draw_beeswarm(
     if getattr(ctx.state.plot, "show_threshold_line", False):
         ax_frac.axhline(0.5, color=theme.Colors.border, lw=0.8, ls="--",
                         alpha=0.5, zorder=1)
-    xlim_lo = (min(xs) - 0.6) if xs else -0.6
-    xlim_hi = (max(xs) + 0.6) if xs else 0.4
     for ax in (ax_mean, ax_frac):
         ax.set_xticks(xs)
         ax.set_xticklabels(xlabels,

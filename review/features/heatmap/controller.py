@@ -761,6 +761,9 @@ def _draw_heatmap(ctx) -> None:
     else:
         im = ax.imshow(masked, aspect="equal", cmap=cmap, vmin=vmin, vmax=vmax,
                        origin="upper", interpolation="nearest")
+    # The colour range is Display ▾'s (Auto / Global / typed, and the log norm), so the Properties bar's Colour
+    # limits leave it alone (``plot_style._apply_colour_limits``) rather than fight it.
+    im._aw_owns_clim = True
 
     # Always materialise label lists of the right length. Persisted layouts
     # can carry shorter ``row_labels`` / ``col_labels`` (e.g. one entry left

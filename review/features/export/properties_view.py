@@ -118,6 +118,11 @@ _STYLE_FACETS_A_FIGURE_LACKS: dict[str, dict[str, str]] = {
             "names its rows and columns with ordinary ticks, which Tick label "
             "size already governs."
         ),
+        "colour_limits": (
+            "Its colour range is Display ▾'s — Auto, Global or typed, and the log "
+            "norm — and the image is marked ``_aw_owns_clim``, so the style "
+            "pass's Colour limits leave it alone rather than fight that control."
+        ),
         "log_axes": (
             "Both axes are marked ``_categorical_xaxis`` / "
             "``_categorical_yaxis``: they carry row and column positions, not "
@@ -125,6 +130,19 @@ _STYLE_FACETS_A_FIGURE_LACKS: dict[str, dict[str, str]] = {
             "log scale is Display ▾ → Log scale, which acts on the norm."
         ),
     },
+}
+
+
+#: The figures that draw a colour scale with a colour bar, so Limits & Scale offers them **Colour limits**
+#: (``plot_style._apply_colour_limits``), each with what it colours. A positive roster rather than a facet the
+#: others lack: a bar, line or scatter plot keys its colours with a legend, never a colour bar, and offering the row
+#: there would be a control that moves nothing. The Heat Map draws one but its range is Display ▾'s (the
+#: ``colour_limits`` facet above). ``tests/test_colour_limits.py`` holds the roster to the renderers: each listed
+#: figure's renderer makes a colour bar, and the bar, line and scatter renderers make none.
+_COLOUR_SCALE_FIGURES: dict[str, str] = {
+    "_nw_fig": "the Array view's nanowells filled by the metric, the Identity view's distance map",
+    "_sp_fig": "the Spatial map's points coloured by a measurement",
+    "_mv_fig": "the Multivariate correlation and loading matrices",
 }
 
 
@@ -1236,6 +1254,24 @@ class ExportStyleSidebar(QWidget):
             self._bind_getter_setter(f"{lim_key}_min", lo_edit)
             self._bind_getter_setter(f"{lim_key}_max", hi_edit)
             kit.add_row(s_lim, label, kit.hrow(lo_edit, QLabel("…"), hi_edit, spacing=sp.xs))
+        if self._offers_colour_limits():
+            # MATLAB's ``clim``: the range of the figure's colour scale — the Array view's filled nanowells, the
+            # Spatial and Multivariate maps — wherever a colour bar keys it (``plot_style._apply_colour_limits``).
+            # A restyle, not a redraw: ``set_clim`` recolours the drawn artists and their colour bar follows.
+            c_lo = QLineEdit(str(self._prefs.get("c_lim_min", "")))
+            c_lo.setMaximumWidth(_LO_EDIT_MAX_W)
+            c_hi = QLineEdit(str(self._prefs.get("c_lim_max", "")))
+            c_hi.setMaximumWidth(_HI_EDIT_MAX_W)
+            c_lo.setAccessibleName("Colour limit, low end")
+            c_hi.setAccessibleName("Colour limit, high end")
+            for edit in (c_lo, c_hi):
+                edit.setPlaceholderText("auto")
+                edit.setToolTip("The colour scale's range, as MATLAB's clim: values below the low end take the "
+                                "first colour, above the high end the last. Blank keeps the plot's own end. "
+                                "Applies to every plot on this figure with a colour bar.")
+            self._bind_getter_setter("c_lim_min", c_lo)
+            self._bind_getter_setter("c_lim_max", c_hi)
+            kit.add_row(s_lim, "Colour limits", kit.hrow(c_lo, QLabel("…"), c_hi, spacing=sp.xs))
         # Give the limits back to the plot. Typing a limit is easy and undoing
         # it was not: blanking the four fields by hand leaves the axes exactly
         # where they were, because the style pass only ever *sets* limits and
@@ -1244,8 +1280,8 @@ class ExportStyleSidebar(QWidget):
         # amount to "forget them".
         auto_btn = QPushButton("Auto scale")
         auto_btn.setToolTip(
-            "Clear the typed limits on every panel of this figure and let the "
-            "plot scale its own axes again.")
+            "Clear the typed limits — X, Y and colour — on every panel of this "
+            "figure and let the plot scale its own axes again.")
         auto_btn.clicked.connect(lambda _=False: self._autoscale_axes())
         kit.add_full(s_lim, kit.hrow(auto_btn))
         # The log toggles, their bases, and the section summary that
@@ -1919,6 +1955,11 @@ class ExportStyleSidebar(QWidget):
     def _is_heatmap_fig(self) -> bool:
         """True only for the Heat Map figure (the cell-value format applies there)."""
         return getattr(self._app, "_heatmap_fig", None) is self._fig
+
+    def _offers_colour_limits(self) -> bool:
+        """Whether this figure draws a colour scale the Colour limits row can set (:data:`_COLOUR_SCALE_FIGURES`)."""
+        return self._supports("colour_limits") and any(
+            getattr(self._app, attr, None) is self._fig for attr in _COLOUR_SCALE_FIGURES)
 
     def _supports(self, facet: str) -> bool:
         """Whether this figure has the thing *facet* names.

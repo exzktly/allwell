@@ -233,7 +233,8 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
     """One row per (well, nanowell, timepoint) with the measured values and every §3.10.1 metric.
 
     Columns, beyond the site table's own: ``state`` (with Review's ``unaddressed`` / ``not_located`` /
-    ``absent``), ``reason``, ``time_h``, ``baseline_timepoint``, ``baseline_state``, the masked values ``n``,
+    ``absent``), ``run_state`` (that state before Cell Gating and the rim-focus rule overwrite it), ``reason``,
+    ``time_h``, ``baseline_timepoint``, ``baseline_state``, the masked values ``n``,
     ``c`` and per channel ``brightness_<ch>`` / ``signal_<ch>``, and the metrics listed in the module
     docstring.
 
@@ -247,6 +248,10 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
     if not is_baseline(baseline):
         raise ValueError(f"baseline must be one of {BASELINES} or a timepoint, not {baseline!r}")
     frame = _addressed_grid(data)
+    # The state the run (and the join) gave each row, before Cell Gating or the rim-focus rule overwrite it: the
+    # subset's per-row properties (``subset_compute.ROW_FLAGS``) read each property from its own column, so a
+    # nanowell in a field left out still answers whether the run found it.
+    frame["run_state"] = frame["state"]
     cell_gate_compute.exclude_fields(frame, gate)          # a whole field out: its nanowells have no value at all
     nanowell_rim_focus.flag(frame, focus)                  # then a rim out of focus, of what is still measurable
     measurable = frame["state"].isin(MEASURABLE)

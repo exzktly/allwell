@@ -53,6 +53,9 @@ _AT_TIP = ("The timepoint the value is read at: the baseline (the count's), the 
            "timepoint, or at any / every timepoint of the well (every: the nanowell needs a passing value at each).")
 _OP_TIP = "How the value is compared. Both bounds of a range are included."
 _TILES_TIP = "The imaging fields (tiles) the condition names."
+_GATE_TIP = ("A gate drawn on the Scatter Plot over two nanowell metrics (Observations: Nanowells, or the "
+             "\"Nanowell ▸\" axes). Inside: the nanowell's point at the chosen timepoint lies in the box. The box "
+             "is read from the scatter each time, so moving the gate there moves the subset.")
 
 
 def _select(combo, value) -> None:
@@ -108,12 +111,14 @@ class _ConditionRow(QWidget):
         self.tiles_btn.setProperty("hasMenu", True)
         self.tiles_menu = QMenu(self.tiles_btn)
         self.tiles_btn.setMenu(self.tiles_menu)
+        self.gate_cb = QComboBox()
+        self.gate_cb.setToolTip(_GATE_TIP)
         self.remove_btn = QToolButton()
         self.remove_btn.setText("×")
         self.remove_btn.setToolTip("Remove this condition")
         self.remove_btn.setProperty("variant", "secondary")
-        for w in (self.field_cb, self.at_cb, self.op_cb, self.a_spin, self.and_label, self.b_spin, self.tiles_btn,
-                  self.remove_btn):
+        for w in (self.field_cb, self.at_cb, self.op_cb, self.gate_cb, self.a_spin, self.and_label, self.b_spin,
+                  self.tiles_btn, self.remove_btn):
             row.addWidget(w)
         row.addStretch(1)
         self._show(condition)
@@ -122,6 +127,7 @@ class _ConditionRow(QWidget):
         self.op_cb.currentIndexChanged.connect(self._op_changed)
         self.a_spin.valueChanged.connect(lambda _v: editor.changed())
         self.b_spin.valueChanged.connect(lambda _v: editor.changed())
+        self.gate_cb.currentIndexChanged.connect(lambda _i: editor.changed())
         self.remove_btn.clicked.connect(lambda: editor.remove(self))
 
     # ── what the row shows ──────────────────────────────────────────────
@@ -134,7 +140,8 @@ class _ConditionRow(QWidget):
         if c.b is not None:
             self.b_spin.setValue(float(c.b))
         _select(self.at_cb, c.at or "baseline")
-        self._fill_tiles(c.values)
+        self._fill_tiles(c.values if ss.is_category(c.field) else ())
+        self.fill_gates(c.values[0] if ss.is_gate(c.field) and c.values else None)
         self._visibility()
 
     def _fill_ops(self, name: str, op: str) -> None:
@@ -164,6 +171,23 @@ class _ConditionRow(QWidget):
             self.tiles_menu.addAction("No imaging fields recorded").setEnabled(False)
         self._tiles_text()
 
+    def fill_gates(self, chosen: str | None = None) -> None:
+        """Offer the nanowell gates drawn now, keeping *chosen* (or the current choice) even when it is gone, so
+        the row still says which gate the subset names."""
+        chosen = self.gate_cb.currentData() if chosen is None else chosen
+        names = list(self._editor.gates())
+        if chosen and chosen not in names:
+            names.append(chosen)
+        if [self.gate_cb.itemData(i) for i in range(self.gate_cb.count())] == names:
+            return
+        blocked = self.gate_cb.blockSignals(True)
+        self.gate_cb.clear()
+        for name in names:
+            self.gate_cb.addItem(name if name in self._editor.gates() else f"{name} (gone)", name)
+        if chosen in names:
+            _select(self.gate_cb, chosen)
+        self.gate_cb.blockSignals(blocked)
+
     def _chosen_tiles(self) -> tuple:
         return tuple(a.text() for a in self.tiles_menu.actions() if a.isCheckable() and a.isChecked())
 
@@ -175,12 +199,15 @@ class _ConditionRow(QWidget):
     def _visibility(self) -> None:
         name = self.field_cb.currentData()
         category = ss.is_category(name)
+        gate = ss.is_gate(name)
         ranged = self.op_cb.currentData() in ("between", "outside")
         self.at_cb.setVisible(ss.per_timepoint(name))
+        self.gate_cb.setVisible(gate)
+        category = category or gate                      # no bound to type for either
         self.a_spin.setVisible(not category and not ss.is_flag(name))
         self.and_label.setVisible(not category and ranged)
         self.b_spin.setVisible(not category and ranged)
-        self.tiles_btn.setVisible(category)
+        self.tiles_btn.setVisible(ss.is_category(name))
 
     # ── edits ───────────────────────────────────────────────────────────
     def _field_changed(self, _index=None) -> None:
@@ -210,8 +237,10 @@ class _ConditionRow(QWidget):
         def num(spin):
             return int(round(spin.value())) if whole else float(spin.value())
 
+        values = ((self.gate_cb.currentData(),) if self.gate_cb.currentData() else ()) if ss.is_gate(name) \
+            else self._chosen_tiles()
         return ss.Condition(name, self.op_cb.currentData(), num(self.a_spin), num(self.b_spin),
-                            self.at_cb.currentData() if ss.per_timepoint(name) else "", self._chosen_tiles())
+                            self.at_cb.currentData() if ss.per_timepoint(name) else "", values)
 
 
 class SubsetEditor(QFrame):
@@ -267,7 +296,7 @@ class SubsetEditor(QFrame):
     def fields(self, current: str) -> list:
         """The fields for the loaded dataset's channels, with *current* kept even when it names a channel this
         dataset lacks (a restored subset), so the row still shows what the subset tests."""
-        choices = ss.field_choices(self._channels)
+        choices = ss.field_choices(self._channels, gates=bool(self.gates()))
         if current not in {name for name, _l, _g in choices}:
             choices.append((current, ss.field_label(current), "Other"))
         return choices
@@ -284,6 +313,9 @@ class SubsetEditor(QFrame):
 
     def tiles(self) -> list:
         return nwc.subset_tiles(self._ctx)
+
+    def gates(self) -> list:
+        return nwc.subset_gates(self._ctx)
 
     # ── edits ───────────────────────────────────────────────────────────
     def written(self) -> ss.Subset:
@@ -333,6 +365,8 @@ class SubsetEditor(QFrame):
         data = getattr(st, "data", None)
         channels = tuple(data.channels) if data is not None else ()
         if st.subset == self.shown and channels == self._channels and len(self.rows) == len(st.subset.conditions):
+            for row in self.rows:
+                row.fill_gates()                         # a gate drawn, renamed or deleted on the scatter since
             self._say_subset(st.subset)
             return
         self._channels = channels
@@ -349,6 +383,8 @@ class SubsetEditor(QFrame):
         self._say_subset(st.subset)
 
     def _say_subset(self, subset: ss.Subset) -> None:
+        # Bound, so a condition naming a gate that is no longer drawn says so here too.
+        subset = ss.bind_gates(subset, self._ctx.state.cell_gating.scatter_gates or [])
         self._say("No conditions: every nanowell is used." if not subset.is_active() else subset.label())
 
     def _say(self, text: str, *, warn: bool = False) -> None:

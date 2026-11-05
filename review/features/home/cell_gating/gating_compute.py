@@ -192,6 +192,7 @@ def apply_fluor_gating(
     use_thresh: bool,
     thresh_gates: list,
     ratios: dict | None,
+    nanowell_values=None,
 ) -> int:
     """Write the gating columns for one well's DataFrame; return the included count.
 
@@ -203,6 +204,10 @@ def apply_fluor_gating(
     * ``Gate_Pass`` — scatter-gate membership (neutral ``1`` in intensity mode).
     * ``Gate_On`` — the thresholding layer's fraction-on population, from its own
       gate selection (neutral ``1`` when thresholding isn't gate-driven).
+
+    *nanowell_values* are the nanowell rows a gate on a nanowell metric reads
+    (``observations.nanowell_gate_values``, computed on the GUI thread before the
+    pass); ``None`` when no gate needs them.
 
     Returns the number of included cells (for the run tally). An empty/None frame
     returns 0 without mutation.
@@ -217,7 +222,7 @@ def apply_fluor_gating(
         # via df_included_mask. Mode on + no selected gates ⇒ no restriction.
         if gating_gates:
             gate_mask = pd.Series(
-                compute_gate_inclusion(df, gating_gates, ratios),
+                compute_gate_inclusion(df, gating_gates, ratios, nanowell_values),
                 index=df.index,
             )
         else:
@@ -245,7 +250,7 @@ def apply_fluor_gating(
     # stats_compute._thresh_on_col); neutral (1) otherwise so a stale membership
     # can't leak in.
     if use_thresh and thresh_gates:
-        df["Gate_On"] = compute_gate_inclusion(df, thresh_gates, ratios).astype(int)
+        df["Gate_On"] = compute_gate_inclusion(df, thresh_gates, ratios, nanowell_values).astype(int)
     else:
         df["Gate_On"] = 1
     return well_included
@@ -260,6 +265,7 @@ def gating_input_columns(ctx, label: str | None = None) -> set[str] | None:
     takes the whole frame.
     """
     from review.data.narrow_rows import value_inputs
+    from review.domain.observation import is_nanowell_cell_column
 
     config = getattr(getattr(ctx.state, "cell_gating", None), "applied_gating", None)
     if not config:
@@ -274,6 +280,10 @@ def gating_input_columns(ctx, label: str | None = None) -> set[str] | None:
     if config.get("use_thresh"):
         axes += [g.get(k) for g in config.get("thresh_gates") or [] for k in ("x_col", "y_col")]
     for axis in axes:
+        if is_nanowell_cell_column(axis):
+            # Read from the nanowell rows, joined on the cell's own nanowell (``compute_gate_inclusion``).
+            wanted |= {"well", "timepoint", "nw_q", "nw_r"}
+            continue
         cols = value_inputs(axis or "", ratios)
         if cols is None:
             return None

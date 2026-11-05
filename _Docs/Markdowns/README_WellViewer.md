@@ -43,7 +43,7 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Home](#home) (Overview · Cell Gating · Sample Map — Replicates · Variables · Well Labels — · Ratios · Pipeline Info · QC Triage)
    - [The Review window at a glance](#the-review-window-at-a-glance)
    - [Controls shared by every tab](#controls-shared-by-every-tab)
-   - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Response Curves](#response-curves) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
+   - Plotting: [Heat Map](#heat-map) · [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Response Curves](#response-curves) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution)
    - [Statistics](#statistics) · [Multivariate analysis](#multivariate-analysis) · [Spatial analysis](#spatial-analysis)
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
    - [Saved Plots](#saved-plots) · [Batch export](#batch-export)
@@ -3260,7 +3260,14 @@ choice applies once, when the menu closes.
   choose the source of the inclusion decision —
   the per-channel **intensity minimum** (the `Include ≥` column below), or the
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
-  drawn a gate there, the scatter option is greyed out and says so.
+  drawn a gate there, the scatter option is greyed out and says so. A gate drawn
+  on nanowell metrics (on the nanowell scatter, or on the "Nanowell ▸" axes)
+  keeps every cell whose own nanowell lies inside it at that cell's timepoint.
+  The nanowell values it reads count every cell the other gates keep, *before*
+  the scatter gates: a nanowell's count is made of the cells the analysis
+  includes, so reading it after the gate would let the gate change the count it
+  is judging. A plot of the gated data therefore shows the left-out nanowells
+  with fewer cells than the gate saw.
 
   **Exclude fields the run flagged** sits under the debris gate and works on
   whole fields of view rather than on single cells. While a run processes a
@@ -4365,7 +4372,14 @@ row, holding five actions:
   boxes by hand does not do this — an axis keeps the bounds it was last given
   until the plot is drawn again — which is what the button is for. It leaves
   the log scaling and the log base alone: an axis you set to logarithmic stays
-  logarithmic and simply chooses its own range. Settings persist across
+  logarithmic and simply chooses its own range.
+  **Colour limits**, in the same section, set the range of a plot's colour
+  scale, like MATLAB's `clim` — for example the Nanowells **Array** view's
+  filled nanowells, or the Spatial and Multivariate maps: values below the low
+  end take the first colour, values above the high end the last, and the colour
+  bar follows. Leave a box blank to keep the plot's own end. It applies to every
+  plot with a colour bar on that figure, and **Auto scale** clears it too. The
+  Heat Map has no Colour limits row: its range is set under **Display ▾**. Settings persist across
   redraws — and across the **Screen / Publication** switch, which decides
   colours and nothing else. **Show grid** in particular reaches the files you
   export: a figure saved, copied, filed in Saved Plots or sent through Batch
@@ -4885,7 +4899,7 @@ shift slightly after this fix.
 
 **What it shows.** Per-well summaries of a metric at one or more timepoints, as
 grouped **bars**, a **violin** of the per-cell distribution, or a **beeswarm**
-of individual cells. This is the default Plotting sub-tab.
+of individual cells.
 
 - **Needs** — at least one selected well and a channel. The **Timepoints**
   button (reads e.g. `Timepoints: 3/8 selected`) fills from the selected wells'
@@ -5548,6 +5562,7 @@ Plots, Line Graphs, Response Curves, the Scatter Wells view or the Heat Map.
 
 **What it shows.** A custom-layout heatmap of one metric across wells — you
 place cells in a grid that mirrors your plate or your experimental design.
+This is the first Plotting sub-tab, and the one Plotting opens on.
 
 - **Needs** — a well selection and a channel; a **Timepoint** chosen from the
   dropdown.
@@ -6155,7 +6170,31 @@ the sentence names it.
     an image blended from the tiles covering it (a nanowell near the scan's outer edge counts too). Read at a
     timepoint like a metric: *no* *at every timepoint* leaves out every nanowell that was ever on a seam; *yes*
     *at any timepoint* keeps only those. Datasets analysed before seam nanowells were counted have them with no
-    count.
+    count;
+  - **the nanowell's state at a timepoint** — seven more *yes* / *no* properties, read at a timepoint the same way,
+    and each independent of the others (a nanowell in a field you left out is still *found by the run* if the run
+    found it):
+    - *Found by the run* — the run recorded the nanowell at that timepoint. **Found by the run · at every
+      timepoint · yes** keeps only the nanowells tracked through the whole dataset; one that was lost and picked
+      up again later is left out.
+    - *Timepoint not addressed* — the run could not address that timepoint of the well at all, so every nanowell
+      in it is unfound. Add *Timepoint not addressed · at every timepoint · no* to tell a single lost nanowell
+      apart from a whole timepoint that failed.
+    - *Identity contradicted* — the identity check found that the nanowell's address at that timepoint may name
+      a different nanowell (a contradicted timepoint, or a nanowell a partial check left out).
+    - *Occluded or clipped* — found, but its contents could not be measured.
+    - *Rim out of focus* — flagged by the rim-focus rule (always *no* while that rule is off).
+    - *In a field left out* — its imaging field is left out by Cell Gating, QC triage or the FOVs you chose.
+    - *Measured without a count* — measured, but the run recorded no cell count.
+
+    *at any timepoint · no* on one of the last five keeps the nanowells it never touched; *yes* keeps only those
+    it did.
+  - **scatter gate** — *inside* or *outside* a gate you drew on the Scatter Plot over two nanowell metrics (with
+    Observations set to Nanowells, or on its "Nanowell ▸" axes). Read at a timepoint like a metric: each nanowell at
+    a timepoint is one point on that scatter, and *inside* means the point lies in the box. The condition follows
+    the gate: move or resize it on the Scatter Plot and the subset changes with it. If the gate is deleted or
+    renamed, the condition says "no nanowell gate by that name" and keeps no nanowell until you choose a gate
+    again. Gates drawn over a cell metric are not offered, since they place cells rather than nanowells.
 
   A number is compared with ≥, ≤, =, *between* or *not between* (both ends included). Every change is applied as
   you make it; a range typed upside down is said under the conditions and changes nothing until it is fixed.
@@ -6199,6 +6238,11 @@ the sentence names it.
   nanowell identity is not confirmed, have no value; they are counted among the exclusions with that reason
   rather than averaged over fewer timepoints. With *Fixed cohort* ticked too, the cohort is chosen from the
   measured values and then averaged. The footer states the window.
+
+  A window longer than the series allows leaves nothing to draw — for example a window of 3 on a plate with
+  two timepoints, a fold change whose baseline has fewer timepoints after it than the window, or *Along x:
+  Wells* at the first timepoint. The figure then says so in place of the plot, with the reason and the longest
+  window that would draw something (or that none would, in which case set the window to 1).
 
   For a **fold change**, each window starts *after* the baseline timepoint: a window that included the baseline
   would average in its fold change of exactly 1 and pull the first values after it towards 1, and one that
@@ -6406,7 +6450,9 @@ the sentence names it.
     *baseline occluded* / *baseline rim out of focus* when the baseline could not be measured. The key has one entry
     per reason (the commonest three, then *other reasons*), each with a short tag in quotes — *no value: no cells
     at baseline ("0 at base") · 3* — and with **Values** on each such nanowell writes that tag inside itself, so you
-    can read the reason of the one you are looking at. Every key entry ends with its count. The outline's width follows the nanowell's size on screen (about
+    can read the reason of the one you are looking at. Each reason also has its own ring, shown beside it in the
+    key: the commonest a plain grey ring, the next with vertical lines, then back-diagonal lines, then stars for
+    *other reasons* — so the reasons can be told apart with **Values** off too. Every key entry ends with its count. The outline's width follows the nanowell's size on screen (about
     6 % of its diameter, never under 2.5 or over 8 screen pixels), so it stays visible zoomed out and on a phone. Either way a nanowell on a tile seam is dashed in purple and
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the

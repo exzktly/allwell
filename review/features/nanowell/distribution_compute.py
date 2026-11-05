@@ -209,6 +209,9 @@ class DistributionModel:
     #: ``nanowells`` unit; a well missing from it prints itself. (A sub-swarm under a group prints the bare well:
     #: the group's name is on the tick above it.)
     well_names: dict = field(default_factory=dict)
+    #: Set when the moving average left no value of the drawn ones (``moving_compute.nothing_left_text``): the
+    #: figure says this in place of an empty plot.
+    empty: str = ""
 
     def swarms(self):
         return [s for p in self.panels for s in p.swarms]
@@ -345,7 +348,9 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
         frame, reasons, kept, sites = fixed_cohort(frame, column, reasons)
         model.notes.append(f"Fixed cohort: only the {kept:,} of {sites:,} nanowells with a value at every timepoint "
                            "of their well are used; the rest are counted as outside the fixed cohort.")
+    averaged_over = None
     if moving_compute.is_on(moving) and metric not in PER_NANOWELL:
+        averaged_over = frame
         frame, reasons = moving_compute.apply(frame, column, reasons, moving)
         model.notes.append(moving_compute.describe(moving, column, baseline_moving)
                            + " The rest are counted among the exclusions.")
@@ -353,6 +358,12 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
         _time_panels(model, frame, column, reasons, groups, channels)
     else:
         _wells_panel(model, frame, column, reasons, groups, timepoint, control, channels)
+    if averaged_over is not None and not any(len(s.values) for s in model.swarms()):
+        model.empty = moving_compute.nothing_left_text(averaged_over, column, moving,
+                                                       timepoint=model.timepoint if axis == WELLS else "",
+                                                       baseline_window=baseline_moving)
+        if model.empty:
+            model.notes.append(model.empty)
     _notes(model, metric, time_source)
     return model
 
@@ -388,6 +399,9 @@ def _time_panels(model, frame, column, reasons, groups, channels) -> None:
     summary = (well_summary(frame, column, channels, reasons=reasons, responding_above=model.responding_above)
                if len(frame) else None)
     labels = _time_axis(model, frame)
+    # One split of the frame into its (timepoint, well) cells, rather than a mask over every row for each pair: the
+    # masks made a sixteen-well, ten-timepoint plate cost seconds per redraw.
+    cells = dict(iter(frame.groupby(["timepoint", "well"], sort=False))) if len(frame) else {}
     for name, members in groups.items():
         rows = frame[frame["well"].isin(members)]
         tps = _order(rows)
@@ -398,11 +412,11 @@ def _time_panels(model, frame, column, reasons, groups, channels) -> None:
                       ticks=[(float(i), labels.get(tp, str(tp))) for i, tp in enumerate(tps)])
         for i, tp in enumerate(tps):
             for j, well in enumerate(members):
-                sel = (rows["timepoint"] == tp) & (rows["well"] == well)
-                if not sel.any():
+                part = cells.get((tp, well))
+                if part is None or not len(part):
                     continue
                 x = i + (j - (k - 1) / 2) * width
-                panel.swarms.append(_swarm(rows[sel], column, reasons[rows.index[sel]], label=tp, well=well, x=x,
+                panel.swarms.append(_swarm(part, column, reasons[part.index], label=tp, well=well, x=x,
                                            group=name))
         if summary is not None:
             for j, well in enumerate(members):

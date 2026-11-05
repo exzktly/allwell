@@ -10,10 +10,15 @@ Imports no feature.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from review.domain.observation import (
     CELLS, NANOWELL_CELL_PREFIX, NANOWELL_SERVICE, NANOWELLS, ObservationMetric, ObservationTable,
     is_nanowell_cell_column,
 )
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 def is_nanowell_dataset(ctx) -> bool:
@@ -187,7 +192,34 @@ def with_nanowell_columns(ctx, df, well: str, columns):
     as the Nanowells feature computes it. A cell with no address, or in a build or dataset without nanowell
     observations, gets NaN — no value, never a borrowed one. *df* itself is not changed.
     """
+    wanted = [c for c in columns if is_nanowell_cell_column(c)]
+    if df is None or not wanted:
+        return df
+    # Asked for the plotted members' wells together, not one well at a time: one table, one memo entry, shared
+    # by every well of the plot and by the pickers listing the metrics, instead of a read and a gating tally per
+    # well per redraw that evicts its own memo on any plot of more than a few wells.
+    plotted = [w for _l, ws, _c in observation_groups(ctx) for w in ws]
+    table = nanowell_observations(ctx, sorted(set(plotted) | {well}) if well in plotted else [well])
+    if table is not None:
+        _NANOWELL_LABELS.update({m.key: m.label for m in table.metrics})
+    return join_nanowell_columns(df, table.frame if table is not None else None, wanted, well=well)
+
+
+#: The columns a nanowell row and a cell row share, which name the cell's own nanowell at its timepoint.
+_ADDRESS = ("timepoint", "nw_q", "nw_r")
+
+
+def join_nanowell_columns(df, frame, columns, *, well: str | None = None):
+    """A copy of *df* (cell rows) with each ``nw::<key>`` of *columns* filled from *frame* (nanowell rows, the
+    ``ObservationTable.frame`` shape: ``well``, ``timepoint``, ``nw_q``, ``nw_r`` and one column per metric key).
+
+    Each cell takes its own nanowell's value at its timepoint. The well is *well* when given (every row of *df* is
+    that well's), else each row's own ``well`` column. A cell with no address, a nanowell the frame does not hold,
+    or no frame at all gives NaN: no value, never a borrowed one. Qt-free and ctx-free, so a gating pass can run it
+    off the GUI thread on a frame computed before the pass began.
+    """
     import numpy as np
+    import pandas as pd
 
     wanted = [c for c in columns if is_nanowell_cell_column(c)]
     if df is None or not wanted:
@@ -195,26 +227,49 @@ def with_nanowell_columns(ctx, df, well: str, columns):
     out = df.copy()
     for column in wanted:
         out[column] = np.nan
-    # Asked for the plotted members' wells together, not one well at a time: one table, one memo entry, shared
-    # by every well of the plot and by the pickers listing the metrics, instead of a read and a gating tally per
-    # well per redraw that evicts its own memo on any plot of more than a few wells.
-    plotted = [w for _l, ws, _c in observation_groups(ctx) for w in ws]
-    table = nanowell_observations(ctx, sorted(set(plotted) | {well}) if well in plotted else [well])
-    if table is None or table.frame.empty or not {"nw_q", "nw_r", "timepoint"} <= set(df.columns):
+    if frame is None or frame.empty or not set(_ADDRESS) <= set(df.columns):
+        return out
+    if well is None and "well" not in df.columns:
         return out
     keys = [c[len(NANOWELL_CELL_PREFIX):] for c in wanted]
-    _NANOWELL_LABELS.update({m.key: m.label for m in table.metrics})
-    sites = table.frame[table.frame["well"] == well][["timepoint", "nw_q", "nw_r", *[k for k in keys if k in
-                                                                                   table.frame.columns]]].copy()
-    for col in ("nw_q", "nw_r"):
-        sites[col] = sites[col].astype(float)
-    sites["timepoint"] = sites["timepoint"].astype(str)
-    left = out[["timepoint", "nw_q", "nw_r"]].copy()
-    left["timepoint"] = left["timepoint"].astype(str)
-    for col in ("nw_q", "nw_r"):
-        left[col] = left[col].astype(float)
-    merged = left.reset_index().merge(sites, on=["timepoint", "nw_q", "nw_r"], how="left").set_index("index")
+    present = [k for k in keys if k in frame.columns]
+    sites = frame[["well", *_ADDRESS, *present]].copy()
+    if well is not None:
+        sites = sites[sites["well"] == well]
+    left = out[list(_ADDRESS)].copy()
+    left["well"] = well if well is not None else out["well"].astype(str)
+    for side in (sites, left):
+        side["timepoint"] = side["timepoint"].astype(str)
+        for col in ("nw_q", "nw_r"):
+            side[col] = pd.to_numeric(side[col], errors="coerce").astype(float)
+    sites["well"] = sites["well"].astype(str)
+    # One row per nanowell and timepoint, so a duplicate in the table can never duplicate a cell.
+    sites = sites.drop_duplicates(["well", *_ADDRESS])
+    merged = left.reset_index(drop=True).merge(sites, on=["well", *_ADDRESS], how="left")
     for column, key in zip(wanted, keys):
         if key in merged.columns:
-            out.loc[merged.index, column] = merged[key].to_numpy(dtype=float)
+            out[column] = merged[key].to_numpy(dtype=float)
     return out
+
+
+def nanowell_gate_values(ctx, gates) -> pd.DataFrame | None:
+    """The nanowell rows a gate drawn on a nanowell metric is applied to cells with, or ``None`` when no gate in
+    *gates* has an ``nw::`` axis (or the build or dataset has no nanowell observations).
+
+    Every well of the dataset, counted **without** the scatter-gate layer (``scatter_gates=False``): a nanowell's
+    count is the cells the analysis includes, and the scatter gates are one of the layers that decide that, so a
+    gate on "Nanowell ▸ count" judged against the gated count would move the count it was judging. Every other
+    layer (curation, QC, the fluorescence gates) still applies, as it does on the plot. Computed on the calling
+    thread, which must be the GUI thread: the Nanowells feature's memo is not shared across threads.
+    """
+    columns = {g.get(k) for g in gates or () for k in ("x_col", "y_col")}
+    keys = sorted(c[len(NANOWELL_CELL_PREFIX):] for c in columns if is_nanowell_cell_column(c))
+    if not keys or not is_nanowell_dataset(ctx):
+        return None
+    wells = sorted(getattr(ctx.state.dataset, "well_paths", {}) or {})
+    table = ctx.features.query("observations.nanowell", ctx, wells, default=None, scatter_gates=False)
+    if table is None:
+        return None
+    # Every metric, not only the gates' own: a pass that starts a moment after this was taken may apply a gate
+    # drawn in between.
+    return table.frame.copy()

@@ -17,7 +17,21 @@ condition here, and its presets are still one click away (:meth:`Subset.starting
 * ``owner`` — the imaging field (tile) the run cut the nanowell from, at a timepoint as a metric is;
 * ``fused`` — whether the nanowell lay on a tile seam at a timepoint (no one tile held it with margin, so it was
   measured from a crop blended from the tiles covering it, ``pipeline.nanowell_seams``), so the nanowells on the
-  seams can be kept alone or left out.
+  seams can be kept alone or left out;
+* the nanowell's per-timepoint properties (:data:`ROW_FLAGS`), each a yes/no read from its own column so that no
+  one of them stands in for another: whether the run *found* the nanowell, whether the well's timepoint was not
+  addressed at all, whether the nanowell was occluded or clipped, whether the identity check contradicted its
+  address, whether the rim-focus rule flagged its rim, whether its field is left out (Cell Gating, QC triage, the
+  chosen FOVs), and whether the run measured it without a count. *Found by the run at every timepoint: yes* keeps
+  only the nanowells tracked through the whole dataset; *at any timepoint: no* on a defect keeps those it never
+  touched;
+* ``gate`` — whether the nanowell lies *inside* or *outside* a gate drawn on the Scatter Plot's nanowell scatter (or
+  on its "Nanowell ▸" axes), at a timepoint as a metric is. A nanowell at a timepoint is one point on that scatter,
+  so it is inside when its two metrics there fall in the box. The condition names the gate; its box and axes are
+  read from the gates as they are now each time the subset is evaluated (:func:`bind_gates`), so editing the gate
+  on the scatter moves the subset with it, and a gate deleted or renamed gives every nanowell no value for the
+  condition and the condition says so. Only a gate whose two axes are both nanowell metrics can be named
+  (:func:`nanowell_gates`): a box over a cell metric does not place a nanowell.
 
 A numeric field is compared with ``≥``, ``≤``, ``=``, *between* two values or *not between* them (both bounds
 inclusive); the imaging field *is one of* or *is not one of* a set of tiles; *on a tile seam* is *yes* or *no*.
@@ -40,12 +54,15 @@ Qt-free.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
 
 from review.features.nanowell import starting_cells_compute as sc
+from review.features.nanowell.collect import (
+    CLIPPED, EMPTY, FIELD_EXCLUDED, MEASURABLE, MEASURED, NOT_LOCATED, OCCLUDED, UNADDRESSED,
+)
 from review.features.nanowell.distribution_compute import METRICS, PER_NANOWELL
 from review.features.nanowell.series_compute import baseline_timepoint
 from review.features.nanowell.views_compute import lattice_kind, lattice_ring, lattice_xy, well_pitch
@@ -62,6 +79,26 @@ POSITION_FIELDS = {"ring": "Ring (steps from the centre)", "distance_um": "Dista
 TILE = "owner"
 #: Whether the nanowell lay on a tile seam at a timepoint: the site table's ``fused`` flag.
 SEAM = "fused"
+#: Whether the nanowell's point on the nanowell scatter lies in a gate drawn there, at a timepoint.
+GATE = "gate"
+#: The prefix a scatter gate's axis carries when it is a nanowell metric (``review.domain.observation``).
+_NW_PREFIX = "nw::"
+#: The nanowell's per-timepoint properties, each tested *yes* or *no* at a timepoint: field -> label. Each is read
+#: from its own column (:func:`_row_flag`), so they are independent: a nanowell in a field Cell Gating leaves out is
+#: still *found* when the run found it, and one whose identity was contradicted is still *found* too.
+ROW_FLAGS = {
+    "found": "Found by the run",
+    "tp_unaddressed": "Timepoint not addressed",
+    "occluded": "Occluded or clipped",
+    "identity_out": "Identity contradicted",
+    "rim_out_of_focus": "Rim out of focus",
+    "field_left_out": "In a field left out",
+    "no_count": "Measured without a count",
+}
+#: Which group of the editor each property is listed under.
+_ROW_FLAG_GROUPS = {"found": "Tracking", "tp_unaddressed": "Tracking", "identity_out": "Tracking"}
+#: The states in which the run recorded a row for the nanowell, i.e. found it (``collect``'s pipeline states).
+_RECORDED = (MEASURED, EMPTY, OCCLUDED, CLIPPED)
 #: The fields whose values are whole numbers: their bounds are typed without decimals.
 INTEGER_FIELDS = frozenset({START, "n", "ring", "nw_q", "nw_r"})
 #: Fold changes are measured from the baseline, so a condition on one depends on the Baseline control.
@@ -71,6 +108,7 @@ _FOLD_CHANGES = ("count_fc", "log2_count_fc", "confluence_fc", "brightness_fc", 
 NUMERIC_OPS = {"ge": "≥", "le": "≤", "eq": "=", "between": "between", "outside": "not between"}
 CATEGORY_OPS = {"in": "is one of", "not_in": "is not one of"}
 FLAG_OPS = {"yes": "yes", "no": "no"}
+GATE_OPS = {"in": "inside", "not_in": "outside"}
 #: Which timepoint a per-timepoint field is read at; a named timepoint is ``tp:<label>``.
 ATS = {"baseline": "at baseline", "earliest": "at the earliest timepoint", "latest": "at the latest timepoint",
        "any": "at any timepoint", "every": "at every timepoint"}
@@ -93,13 +131,13 @@ def metric_of(column: str) -> tuple[str, str | None] | None:
 
 
 def is_known_field(name) -> bool:
-    return isinstance(name, str) and (name in (START, TILE, SEAM) or name in POSITION_FIELDS
+    return isinstance(name, str) and (name in (START, TILE, SEAM, GATE) or name in POSITION_FIELDS or name in ROW_FLAGS
                                       or metric_of(name) is not None)
 
 
 def per_timepoint(name: str) -> bool:
     """Whether *name* has a value per timepoint, and so is tested *at* one."""
-    if name in (TILE, SEAM):
+    if name in (TILE, SEAM, GATE) or name in ROW_FLAGS:
         return True
     metric = metric_of(name)
     return metric is not None and metric[0] not in PER_NANOWELL
@@ -111,7 +149,12 @@ def is_category(name: str) -> bool:
 
 def is_flag(name: str) -> bool:
     """Whether *name* is a yes/no field, tested with *yes* or *no* and no bound."""
-    return name == SEAM
+    return name == SEAM or name in ROW_FLAGS
+
+
+def is_gate(name: str) -> bool:
+    """Whether *name* tests a scatter gate: *inside* or *outside* one named gate."""
+    return name == GATE
 
 
 def field_label(name: str) -> str:
@@ -121,6 +164,10 @@ def field_label(name: str) -> str:
         return "Imaging field"
     if name == SEAM:
         return "On a tile seam"
+    if name == GATE:
+        return "Scatter gate"
+    if name in ROW_FLAGS:
+        return ROW_FLAGS[name]
     if name in POSITION_FIELDS:
         return POSITION_FIELDS[name]
     metric = metric_of(name)
@@ -130,9 +177,11 @@ def field_label(name: str) -> str:
     return METRICS[key][0] + (f" · {channel}" if channel else "")
 
 
-def field_choices(channels=()) -> list[tuple[str, str, str]]:
+def field_choices(channels=(), *, gates: bool = False) -> list[tuple[str, str, str]]:
     """Every field a condition can test for a dataset with *channels*: ``(field, label, group)`` in the editor's
-    order — the cells at the start, the metrics (each channel metric once per channel), the position, the tile."""
+    order — the cells at the start, the metrics (each channel metric once per channel), the position, the tile and
+    seam, then the per-timepoint properties, and the scatter gates when *gates* (some gate is drawn on two
+    nanowell metrics)."""
     out = [(START, field_label(START), "Cells")]
     for key, (_label, needs) in METRICS.items():
         if key == "occupancy_class":
@@ -142,10 +191,17 @@ def field_choices(channels=()) -> list[tuple[str, str, str]]:
     out += [(name, label, "Position") for name, label in POSITION_FIELDS.items()]
     out.append((TILE, field_label(TILE), "Imaging"))
     out.append((SEAM, field_label(SEAM), "Imaging"))
+    for group in ("Tracking", "Quality"):
+        out += [(name, label, group) for name, label in ROW_FLAGS.items()
+                if _ROW_FLAG_GROUPS.get(name, "Quality") == group]
+    if gates:
+        out.append((GATE, field_label(GATE), "Gates"))
     return out
 
 
 def ops_for(name: str) -> dict:
+    if is_gate(name):
+        return GATE_OPS
     return CATEGORY_OPS if is_category(name) else FLAG_OPS if is_flag(name) else NUMERIC_OPS
 
 
@@ -181,6 +237,10 @@ class Condition:
     b: float | None = None
     at: str = ""
     values: tuple = ()
+    #: A gate condition's box as the gate stands now, ``(x key, y key, x0, y0, x1, y1)``; ``()`` when no nanowell
+    #: gate has the name; ``None`` until :func:`bind_gates` has looked. Never saved and never compared: the
+    #: condition is the gate's *name*, and its box is read from the scatter each time the subset is evaluated.
+    box: tuple | None = field(default=None, compare=False, repr=False)
 
     def validated(self) -> Condition:
         """This condition in its one canonical form, or ``ValueError`` saying why it is not a condition."""
@@ -193,6 +253,11 @@ class Condition:
             at = self.at or "baseline"
             if at not in ATS and not (at.startswith(TP_PREFIX) and len(at) > len(TP_PREFIX)):
                 raise ValueError(f"no timepoint {at!r}")
+        if is_gate(self.field):
+            names = [v for v in self.values if isinstance(v, str) and v]
+            if len(names) != 1:
+                raise ValueError("choose one scatter gate")
+            return Condition(self.field, self.op, None, None, at, (names[0],), self.box)
         if is_category(self.field):
             values = tuple(dict.fromkeys(str(v) for v in self.values if isinstance(v, str) and v))
             if not values:
@@ -223,6 +288,9 @@ class Condition:
         if self.at:
             where = (" " + ATS[self.at]) if self.at in ATS else f" at {self.at[len(TP_PREFIX):]}"
         label = field_label(self.field) + where
+        if is_gate(self.field):
+            missing = " (no nanowell gate by that name)" if self.box == () else ""
+            return f"{label}: {GATE_OPS[self.op]} “{self.values[0] if self.values else ''}”{missing}"
         if is_category(self.field):
             return f"{label} {CATEGORY_OPS[self.op]} {', '.join(self.values)}"
         if is_flag(self.field):
@@ -235,7 +303,7 @@ class Condition:
 
     def to_config(self) -> dict:
         out = {"field": self.field, "op": self.op}
-        if is_category(self.field):
+        if is_category(self.field) or is_gate(self.field):
             out["values"] = list(self.values)
         elif not is_flag(self.field):
             out["a"] = self.a
@@ -336,6 +404,63 @@ def restore(block) -> Subset:
         return Subset()
 
 
+# ── scatter gates ────────────────────────────────────────────────────────────
+def _nanowell_key(column) -> str | None:
+    return column[len(_NW_PREFIX):] if isinstance(column, str) and column.startswith(_NW_PREFIX) else None
+
+
+def nanowell_gates(gates) -> list[tuple[str, tuple]]:
+    """``(name, box)`` of every named gate in *gates* (the scatter's gate dicts) drawn on two nanowell metrics, in
+    the scatter's order; *box* is ``(x key, y key, x0, y0, x1, y1)`` with the corners in order."""
+    out = []
+    for gate in gates or ():
+        name = str(gate.get("name") or "")
+        x_key, y_key = _nanowell_key(gate.get("x_col")), _nanowell_key(gate.get("y_col"))
+        if not name or x_key is None or y_key is None:
+            continue
+        try:
+            x0, x1 = sorted((float(gate["x0"]), float(gate["x1"])))
+            y0, y1 = sorted((float(gate["y0"]), float(gate["y1"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+        out.append((name, (x_key, y_key, x0, y0, x1, y1)))
+    return out
+
+
+def bind_gates(subset: Subset, gates) -> Subset:
+    """*subset* with each gate condition's box read from *gates* as they are now (``()`` for a name no nanowell gate
+    has). Equal to *subset* (the box is not compared), so the page's subset is unchanged by binding it."""
+    if not any(is_gate(c.field) for c in subset.conditions):
+        return subset
+    boxes = dict(nanowell_gates(gates))
+    return Subset(tuple(replace(c, box=boxes.get(c.values[0] if c.values else "", ())) if is_gate(c.field) else c
+                        for c in subset.conditions), subset.match)
+
+
+def _metric_values(metrics: pd.DataFrame, key: str) -> np.ndarray:
+    """A nanowell metric as the nanowell scatter plots it: the metrics column, or *occupied* (holds ≥ 1 cell) from
+    the count, as ``observation_compute`` derives it."""
+    if key == "occupied" and "n" in metrics:
+        n = pd.to_numeric(metrics["n"], errors="coerce").to_numpy(dtype=float)
+        return np.where(np.isnan(n), np.nan, (n >= 1).astype(float))
+    if key not in metrics:
+        return np.full(len(metrics), np.nan)
+    return pd.to_numeric(metrics[key], errors="coerce").to_numpy(dtype=float)
+
+
+def _gate_values(metrics: pd.DataFrame, c: Condition) -> np.ndarray:
+    """Per row: 1 where the row's point passes *c* (inside the box for *inside*), 0 where it fails, NaN where the
+    point has no value on an axis or the gate is not there."""
+    if not c.box:
+        return np.full(len(metrics), np.nan)
+    x_key, y_key, x0, y0, x1, y1 = c.box
+    x, y = _metric_values(metrics, x_key), _metric_values(metrics, y_key)
+    with np.errstate(invalid="ignore"):
+        inside = (x >= x0) & (x <= x1) & (y >= y0) & (y <= y1)
+    passed = inside if c.op == "in" else ~inside
+    return np.where(np.isnan(x) | np.isnan(y), np.nan, passed.astype(float))
+
+
 # ── evaluation ───────────────────────────────────────────────────────────────
 def geometry_of(data, wells) -> dict:
     """``well -> (lattice kind, pitch µm or None)`` for *wells*, read from their grid records."""
@@ -399,7 +524,41 @@ def _timepoint_rows(metrics: pd.DataFrame, at: str) -> np.ndarray:
     return (metrics["timepoint"].astype(str) == at[len(TP_PREFIX):]).to_numpy()
 
 
+def _row_flag(metrics: pd.DataFrame, name: str) -> np.ndarray:
+    """1 / 0 per row for the per-timepoint property *name* (:data:`ROW_FLAGS`); NaN on every row when the table
+    lacks the column it is read from, so a table without it decides nothing rather than everything."""
+    def column(key):
+        return metrics[key] if key in metrics else None
+
+    if name in ("found", "tp_unaddressed", "occluded", "no_count"):
+        # The run's own state, before Cell Gating or the rim-focus rule overwrite it (``site_metrics``).
+        state = column("run_state")
+        if state is None:
+            return np.full(len(metrics), np.nan)
+        if name == "found":
+            hit = state.isin(_RECORDED)
+        elif name == "tp_unaddressed":
+            hit = state.isin((UNADDRESSED, NOT_LOCATED))
+        elif name == "occluded":
+            hit = state.isin((OCCLUDED, CLIPPED))
+        else:
+            count = column("n_cells")
+            no_count = (pd.to_numeric(count, errors="coerce").isna() if count is not None
+                        else pd.Series(True, index=metrics.index))
+            hit = state.isin(MEASURABLE) & no_count
+        return hit.to_numpy(dtype=float)
+    if name == "field_left_out":
+        state = column("state")
+        return np.full(len(metrics), np.nan) if state is None else (state == FIELD_EXCLUDED).to_numpy(dtype=float)
+    ok = column({"identity_out": "identity_ok", "rim_out_of_focus": "rim_focus_ok"}[name])
+    if ok is None:
+        return np.full(len(metrics), np.nan)
+    return 1.0 - ok.map(_flag_value).to_numpy(dtype=float)
+
+
 def _row_values(metrics: pd.DataFrame, name: str) -> np.ndarray:
+    if name in ROW_FLAGS:
+        return _row_flag(metrics, name)
     if name not in metrics:
         return np.full(len(metrics), np.nan, dtype=object if is_category(name) else float)
     if is_category(name):
@@ -410,7 +569,7 @@ def _row_values(metrics: pd.DataFrame, name: str) -> np.ndarray:
 
 
 def _per_timepoint(metrics: pd.DataFrame, codes: np.ndarray, n_sites: int, c: Condition) -> np.ndarray:
-    result = _compare(_row_values(metrics, c.field), c)
+    result = _gate_values(metrics, c) if is_gate(c.field) else _compare(_row_values(metrics, c.field), c)
     frame = pd.DataFrame({"site": codes, "v": result})
     if c.at in ("any", "every"):
         grouped = frame.groupby("site")["v"]

@@ -36,7 +36,7 @@ CASES = [("measured", 2.0, False, False, ""),
          ("measured", 2.0, False, True, "")]
 
 
-def _render(colour: str):
+def _render(colour: str, *, values: bool = True):
     from review.features.nanowell.array_compute import ArrayScene, ArraySites
     from review.features.nanowell.renderer import render_array
     from review.features.nanowell.state import ArrayLayers
@@ -50,7 +50,7 @@ def _render(colour: str):
     fig = Figure(figsize=(14, 4), dpi=100)
     FigureCanvasAgg(fig)
     dimmed = frozenset(("A01", k, 0) for k, c in enumerate(CASES) if c[3])
-    drawn = render_array(fig, scene, ArrayLayers(image="off", colour=colour, addresses=False, values=True),
+    drawn = render_array(fig, scene, ArrayLayers(image="off", colour=colour, addresses=False, values=values),
                          label="Count fold change", dimmed=dimmed)
     return drawn
 
@@ -109,3 +109,34 @@ def test_the_key_names_every_cause_on_the_array(colour):
     # And the key fits on the figure, however many rows it takes.
     renderer = drawn.ax.figure.canvas.get_renderer()
     assert key.get_window_extent(renderer).y1 <= drawn.ax.figure.bbox.height + 0.5
+
+
+def test_each_reason_for_no_value_is_its_own_mark_without_the_words():
+    """Reported: the key's "no value" entries all drew the same plain grey ring, and so did the nanowells — only
+    the tag written inside each told the reasons apart, and with *Values* off there is none. Each reason now draws
+    its own hatch on the array, with the words gone."""
+    marks = _marks(_render("metric", values=False))
+    bare = [k for k, c in enumerate(CASES) if c[4]]
+    rings = {marks[k][0] for k in bare}
+    assert len(rings) == len(bare), {CASES[k][4]: marks[k][0] for k in bare}
+    others = {marks[k][0] for k in range(len(CASES)) if k not in bare}
+    assert not rings & others
+
+
+@pytest.mark.parametrize("colour", ["metric", "state"])
+def test_every_key_swatch_is_drawn_differently(colour):
+    """Every entry of the key is a swatch no other entry draws (ring colour, dash, hatch), so each reads as its own
+    mark — not four grey rings with four different labels."""
+    from matplotlib.colors import to_hex as hex_of
+
+    drawn = _render(colour)
+    (key,) = [a for a in drawn.ax.artists if a.get_gid() == "nw-array-key"]
+    swatches = {}
+    for handle, text in zip(key.legend_handles, key.get_texts(), strict=True):
+        # The dash pattern, not ``get_linestyle()``: the ring the legend draws reports "solid" whatever its dashes.
+        dash = handle._dash_pattern[1]
+        look = (hex_of(handle.get_edgecolor()), tuple(round(v, 1) for v in dash) if dash else (),
+                handle.get_hatch() or "",
+                round(float(handle.get_alpha() or 1.0), 2))
+        swatches.setdefault(look, []).append(text.get_text())
+    assert [labels for labels in swatches.values() if len(labels) > 1] == []

@@ -205,6 +205,12 @@ def test_the_log_scale_rows_are_not_offered(qtbot, monkeypatch):
     assert "X limits" in labels, labels
 
 
+def test_the_colour_limits_row_is_offered_on_the_nanowells_figure(qtbot, monkeypatch):
+    _app, sb = _sidebar(qtbot, monkeypatch, kind="_nw_fig")
+    assert "Colour limits" in _row_labels(sb, "Limits & Scale")
+    assert {"c_lim_min", "c_lim_max"} <= set(sb._getters)
+
+
 def test_the_log_scale_rows_are_still_offered_on_a_line_plot(
         qtbot, monkeypatch):
     _app, sb = _sidebar(qtbot, monkeypatch, kind="_line_fig")
@@ -376,6 +382,9 @@ _PREFS_THAT_SHOULD_DO_NOTHING = [
     ("log_axes", "y_log", True),
     ("log_axes", "x_log_base", "2"),
     ("log_axes", "y_log_base", "2"),
+    # The cells hold 5 to 500: either end moved inside that range would recolour the grid if the pass reached it.
+    ("colour_limits", "c_lim_min", "200"),
+    ("colour_limits", "c_lim_max", "50"),
 ]
 
 

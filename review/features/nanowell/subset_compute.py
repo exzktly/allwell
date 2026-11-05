@@ -17,7 +17,14 @@ condition here, and its presets are still one click away (:meth:`Subset.starting
 * ``owner`` — the imaging field (tile) the run cut the nanowell from, at a timepoint as a metric is;
 * ``fused`` — whether the nanowell lay on a tile seam at a timepoint (no one tile held it with margin, so it was
   measured from a crop blended from the tiles covering it, ``pipeline.nanowell_seams``), so the nanowells on the
-  seams can be kept alone or left out.
+  seams can be kept alone or left out;
+* the nanowell's per-timepoint properties (:data:`ROW_FLAGS`), each a yes/no read from its own column so that no
+  one of them stands in for another: whether the run *found* the nanowell, whether the well's timepoint was not
+  addressed at all, whether the nanowell was occluded or clipped, whether the identity check contradicted its
+  address, whether the rim-focus rule flagged its rim, whether its field is left out (Cell Gating, QC triage, the
+  chosen FOVs), and whether the run measured it without a count. *Found by the run at every timepoint: yes* keeps
+  only the nanowells tracked through the whole dataset; *at any timepoint: no* on a defect keeps those it never
+  touched.
 
 A numeric field is compared with ``≥``, ``≤``, ``=``, *between* two values or *not between* them (both bounds
 inclusive); the imaging field *is one of* or *is not one of* a set of tiles; *on a tile seam* is *yes* or *no*.
@@ -46,6 +53,9 @@ import numpy as np
 import pandas as pd
 
 from review.features.nanowell import starting_cells_compute as sc
+from review.features.nanowell.collect import (
+    CLIPPED, EMPTY, FIELD_EXCLUDED, MEASURABLE, MEASURED, NOT_LOCATED, OCCLUDED, UNADDRESSED,
+)
 from review.features.nanowell.distribution_compute import METRICS, PER_NANOWELL
 from review.features.nanowell.series_compute import baseline_timepoint
 from review.features.nanowell.views_compute import lattice_kind, lattice_ring, lattice_xy, well_pitch
@@ -62,6 +72,22 @@ POSITION_FIELDS = {"ring": "Ring (steps from the centre)", "distance_um": "Dista
 TILE = "owner"
 #: Whether the nanowell lay on a tile seam at a timepoint: the site table's ``fused`` flag.
 SEAM = "fused"
+#: The nanowell's per-timepoint properties, each tested *yes* or *no* at a timepoint: field -> label. Each is read
+#: from its own column (:func:`_row_flag`), so they are independent: a nanowell in a field Cell Gating leaves out is
+#: still *found* when the run found it, and one whose identity was contradicted is still *found* too.
+ROW_FLAGS = {
+    "found": "Found by the run",
+    "tp_unaddressed": "Timepoint not addressed",
+    "occluded": "Occluded or clipped",
+    "identity_out": "Identity contradicted",
+    "rim_out_of_focus": "Rim out of focus",
+    "field_left_out": "In a field left out",
+    "no_count": "Measured without a count",
+}
+#: Which group of the editor each property is listed under.
+_ROW_FLAG_GROUPS = {"found": "Tracking", "tp_unaddressed": "Tracking", "identity_out": "Tracking"}
+#: The states in which the run recorded a row for the nanowell, i.e. found it (``collect``'s pipeline states).
+_RECORDED = (MEASURED, EMPTY, OCCLUDED, CLIPPED)
 #: The fields whose values are whole numbers: their bounds are typed without decimals.
 INTEGER_FIELDS = frozenset({START, "n", "ring", "nw_q", "nw_r"})
 #: Fold changes are measured from the baseline, so a condition on one depends on the Baseline control.
@@ -93,13 +119,13 @@ def metric_of(column: str) -> tuple[str, str | None] | None:
 
 
 def is_known_field(name) -> bool:
-    return isinstance(name, str) and (name in (START, TILE, SEAM) or name in POSITION_FIELDS
+    return isinstance(name, str) and (name in (START, TILE, SEAM) or name in POSITION_FIELDS or name in ROW_FLAGS
                                       or metric_of(name) is not None)
 
 
 def per_timepoint(name: str) -> bool:
     """Whether *name* has a value per timepoint, and so is tested *at* one."""
-    if name in (TILE, SEAM):
+    if name in (TILE, SEAM) or name in ROW_FLAGS:
         return True
     metric = metric_of(name)
     return metric is not None and metric[0] not in PER_NANOWELL
@@ -111,7 +137,7 @@ def is_category(name: str) -> bool:
 
 def is_flag(name: str) -> bool:
     """Whether *name* is a yes/no field, tested with *yes* or *no* and no bound."""
-    return name == SEAM
+    return name == SEAM or name in ROW_FLAGS
 
 
 def field_label(name: str) -> str:
@@ -121,6 +147,8 @@ def field_label(name: str) -> str:
         return "Imaging field"
     if name == SEAM:
         return "On a tile seam"
+    if name in ROW_FLAGS:
+        return ROW_FLAGS[name]
     if name in POSITION_FIELDS:
         return POSITION_FIELDS[name]
     metric = metric_of(name)
@@ -132,7 +160,8 @@ def field_label(name: str) -> str:
 
 def field_choices(channels=()) -> list[tuple[str, str, str]]:
     """Every field a condition can test for a dataset with *channels*: ``(field, label, group)`` in the editor's
-    order — the cells at the start, the metrics (each channel metric once per channel), the position, the tile."""
+    order — the cells at the start, the metrics (each channel metric once per channel), the position, the tile and
+    seam, then the per-timepoint properties."""
     out = [(START, field_label(START), "Cells")]
     for key, (_label, needs) in METRICS.items():
         if key == "occupancy_class":
@@ -142,6 +171,9 @@ def field_choices(channels=()) -> list[tuple[str, str, str]]:
     out += [(name, label, "Position") for name, label in POSITION_FIELDS.items()]
     out.append((TILE, field_label(TILE), "Imaging"))
     out.append((SEAM, field_label(SEAM), "Imaging"))
+    for group in ("Tracking", "Quality"):
+        out += [(name, label, group) for name, label in ROW_FLAGS.items()
+                if _ROW_FLAG_GROUPS.get(name, "Quality") == group]
     return out
 
 
@@ -399,7 +431,41 @@ def _timepoint_rows(metrics: pd.DataFrame, at: str) -> np.ndarray:
     return (metrics["timepoint"].astype(str) == at[len(TP_PREFIX):]).to_numpy()
 
 
+def _row_flag(metrics: pd.DataFrame, name: str) -> np.ndarray:
+    """1 / 0 per row for the per-timepoint property *name* (:data:`ROW_FLAGS`); NaN on every row when the table
+    lacks the column it is read from, so a table without it decides nothing rather than everything."""
+    def column(key):
+        return metrics[key] if key in metrics else None
+
+    if name in ("found", "tp_unaddressed", "occluded", "no_count"):
+        # The run's own state, before Cell Gating or the rim-focus rule overwrite it (``site_metrics``).
+        state = column("run_state")
+        if state is None:
+            return np.full(len(metrics), np.nan)
+        if name == "found":
+            hit = state.isin(_RECORDED)
+        elif name == "tp_unaddressed":
+            hit = state.isin((UNADDRESSED, NOT_LOCATED))
+        elif name == "occluded":
+            hit = state.isin((OCCLUDED, CLIPPED))
+        else:
+            count = column("n_cells")
+            no_count = (pd.to_numeric(count, errors="coerce").isna() if count is not None
+                        else pd.Series(True, index=metrics.index))
+            hit = state.isin(MEASURABLE) & no_count
+        return hit.to_numpy(dtype=float)
+    if name == "field_left_out":
+        state = column("state")
+        return np.full(len(metrics), np.nan) if state is None else (state == FIELD_EXCLUDED).to_numpy(dtype=float)
+    ok = column({"identity_out": "identity_ok", "rim_out_of_focus": "rim_focus_ok"}[name])
+    if ok is None:
+        return np.full(len(metrics), np.nan)
+    return 1.0 - ok.map(_flag_value).to_numpy(dtype=float)
+
+
 def _row_values(metrics: pd.DataFrame, name: str) -> np.ndarray:
+    if name in ROW_FLAGS:
+        return _row_flag(metrics, name)
     if name not in metrics:
         return np.full(len(metrics), np.nan, dtype=object if is_category(name) else float)
     if is_category(name):

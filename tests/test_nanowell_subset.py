@@ -316,3 +316,20 @@ def test_a_seam_condition_is_built_in_the_editor(page):
     row.at_cb.setCurrentIndex(row.at_cb.findData("every"))
     st = page.state.feature_slice("nanowell")
     assert st.subset == ss.Subset((C("fused", "no", at="every"),))
+
+
+def test_a_per_timepoint_property_is_built_in_the_editor_and_the_figure_draws_it(page):
+    """A nanowell property (``subset_compute.ROW_FLAGS``) is offered as yes / no at a timepoint, like the seam, and
+    reaches the figure: *Occluded or clipped at every timepoint: no* leaves out A01 q6, occluded at t_c."""
+    editor = _editor(page)
+    editor.add_btn.click()
+    row = editor.rows[0]
+    row.field_cb.setCurrentIndex(row.field_cb.findData("occluded"))
+    assert [row.op_cb.itemData(i) for i in range(row.op_cb.count())] == ["yes", "no"]
+    assert not row.a_spin.isVisibleTo(page.window) and row.at_cb.isVisibleTo(page.window)
+    row.op_cb.setCurrentIndex(row.op_cb.findData("no"))
+    row.at_cb.setCurrentIndex(row.at_cb.findData("every"))
+    st = page.state.feature_slice("nanowell")
+    assert st.subset == ss.Subset((C("occluded", "no", at="every"),))
+    assert any(t.startswith("Subset: Occluded or clipped at every timepoint: no: 9 of 10 nanowells kept — 1 outside")
+               for t in _texts(page))

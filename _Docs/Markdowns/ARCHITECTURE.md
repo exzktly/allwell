@@ -12330,11 +12330,19 @@ lattice_ring`) and `distance_um` (the hypotenuse of `lattice_xy` at the well's m
 the well's own lattice kind from its grid record (`geometry_of`), and `nw_q` / `nw_r`; `owner`, the imaging
 field (tile) the run cut the nanowell from; and `fused` — *On a tile seam* — the site table's flag for a nanowell no
 one tile held with margin, counted from a blended crop (a seam site, or one within the margin of the scan's outer
-edge), so the seam nanowells can be kept alone or left out. A numeric field is compared by `ge` / `le` / `eq` / `between` /
+edge), so the seam nanowells can be kept alone or left out; and the nanowell's per-timepoint properties
+(`ROW_FLAGS`): `found` (the run recorded the nanowell — its `run_state` is `measured`, `empty`, `occluded` or
+`clipped`), `tp_unaddressed` (`run_state` is `unaddressed` or `not_located`: the whole timepoint failed for the
+well), `occluded` (`occluded` or `clipped`), `identity_out` (not `identity_ok`), `rim_out_of_focus` (not
+`rim_focus_ok`), `field_left_out` (`state` is `field_excluded`) and `no_count` (a measurable `run_state` with no
+`n_cells`). Each is read from its own column by `_row_flag` so that none stands in for another: `run_state` is
+`state` as `_addressed_grid` left it, copied by `site_metrics` before Cell Gating (`field_excluded`) and the
+rim-focus rule (`out_of_focus`) overwrite `state`, so a nanowell in a field left out is still `found`. A table
+without the column a property reads answers no value on every row rather than *no*. A numeric field is compared by `ge` / `le` / `eq` / `between` /
 `outside` (bounds inclusive; a `between` of one value is stored as `eq`, so two spellings of one subset compare
-equal); `owner` by `in` / `not_in` a set of tiles; `fused` by `yes` / `no` (`FLAG_OPS`, no bound; a cell read as a
+equal); `owner` by `in` / `not_in` a set of tiles; `fused` and the `ROW_FLAGS` by `yes` / `no` (`FLAG_OPS`, no bound; a cell read as a
 bool or its text, `_flag_value`, and missing is no value). A per-timepoint field (a metric with a value per
-timepoint, `owner` and `fused`) is read *at* a timepoint: `baseline` (the row at the count's `baseline_timepoint`), `earliest` / `latest`
+timepoint, `owner`, `fused` and the `ROW_FLAGS`) is read *at* a timepoint: `baseline` (the row at the count's `baseline_timepoint`), `earliest` / `latest`
 (the well's), `tp:<label>`, `any` or `every`; a per-nanowell field carries no `at`. `Condition.validated` is the one
 canonical form and the one place a condition is refused (an unknown field, an op the field cannot take, a range
 upside down, a fractional bound on a whole-number field, a tile condition with no tile).

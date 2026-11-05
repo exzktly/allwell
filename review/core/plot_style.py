@@ -1740,11 +1740,12 @@ def _fit_axis_label(label, room: float, measure) -> None:
 
 
 def _unfit_titles(fig) -> None:
-    """Give every title and x-label back the text its renderer wrote — leaving
+    """Give every title and axis label back the text its renderer wrote — leaving
     phone layout, the desk's width needs none of the phone's breaks."""
     margin_fit.restore(fig)
+    fig._aw_margin_fitted = False
     for ax in fig.axes:
-        for text_artist in (ax.title, ax.xaxis.label):
+        for text_artist in (ax.title, ax.xaxis.label, ax.yaxis.label):
             if getattr(text_artist, _FITTED, None) == (
                     text_artist.get_text(), float(text_artist.get_fontsize())):
                 text, size = getattr(text_artist, _UNBROKEN)
@@ -1765,23 +1766,22 @@ def _fit_labels_to_phone(fig) -> None:
         # runs (it widens the left margin for larger tick labels), so the room
         # the title will have is the axes', not the figure's.
         _fit_title(ax.title, ax.bbox.width, renderer)
-        ylab = ax.yaxis.label
-        if ylab.get_text():
-            h = ylab.get_window_extent(renderer).height
-            room = ax.bbox.height
-            if getattr(ax, "_aw_colorbar", False):
-                # A colour bar is short and its label is not bound to it: it
-                # is centred on the bar and may run as far as the figure does
-                # on the nearer side. Breaking it to the bar's length gave a
-                # five-line label, which is five lines of width the figure's
-                # right-hand margin does not have.
-                centre = (ax.bbox.y0 + ax.bbox.y1) / 2
-                room = max(room, 2 * min(centre, fig.bbox.height - centre))
-            ylab.set_text(_break_to_fit(ylab.get_text(), h, room))
-        _fit_axis_label(
-            ax.xaxis.label, ax.bbox.width,
-            lambda label, text: renderer.get_text_width_height_descent(
-                text, label.get_fontproperties(), ismath=False)[0])
+        def along(label, text):
+            # The text's own length: a rotated label's extent is its height.
+            return renderer.get_text_width_height_descent(
+                text, label.get_fontproperties(), ismath=False)[0]
+
+        room = ax.bbox.height
+        if getattr(ax, "_aw_colorbar", False):
+            # A colour bar is short and its label is not bound to it: it is
+            # centred on the bar and may run as far as the figure does on the
+            # nearer side. Breaking it to the bar's length gave a five-line
+            # label, which is five lines of width the figure's right-hand
+            # margin does not have.
+            centre = (ax.bbox.y0 + ax.bbox.y1) / 2
+            room = max(room, 2 * min(centre, fig.bbox.height - centre))
+        _fit_axis_label(ax.yaxis.label, room, along)
+        _fit_axis_label(ax.xaxis.label, ax.bbox.width, along)
 
 
 def _refit_on_resize(ctx, fig, canvas) -> None:
@@ -1859,6 +1859,11 @@ def _fit_ticks(fig) -> None:
     from review.core.tick_fit import fit_tick_labels
     with swallow("fit a plot's tick labels to its panels"):
         fit_tick_labels(fig)
+    # The tick fit changes the text the margins were measured against, and a
+    # divider-placed figure (``margin_fit``) has no engine to measure it again.
+    if getattr(fig, "_aw_margin_fitted", False):
+        with swallow("keep a divider-placed plot's text inside its figure"):
+            margin_fit.inset_for_overhang(fig)
 
 
 def _apply_layout_engine(fig, prefs: dict) -> None:
@@ -1890,7 +1895,9 @@ def _apply_layout_engine(fig, prefs: dict) -> None:
             with swallow("keep a divider-placed plot's text inside its figure"):
                 fig.set_layout_engine(None)
                 margin_fit.inset_for_overhang(fig)
+            fig._aw_margin_fitted = True
             return
+        fig._aw_margin_fitted = False
         reserved = None
         with swallow("measure the text written on a phone plot's figure"):
             reserved = _figure_text_band(fig)

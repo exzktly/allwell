@@ -302,3 +302,24 @@ def test_a_footer_stamped_after_the_layout_is_kept_clear_of_the_x_label(phone, m
     fig.canvas.draw()
     assert _overlap_px(footer.get_window_extent(renderer),
                        ax.xaxis.label.get_window_extent(renderer)) <= 0
+
+
+def test_a_y_label_is_broken_afresh_each_fit_not_kept_from_an_earlier_one():
+    """A y-label broken for a small figure kept its breaks once the figure grew,
+    because only a label with no line break was ever measured: the Heat Map's
+    colour-bar label stayed three lines wide after the figure had room for one."""
+    fig = Figure(figsize=(3, 2), dpi=100)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(111)
+    ax.set_ylabel("GFP Mean Intensity (mean above threshold)", fontsize=12)
+    plot_style._fit_labels_to_phone(fig)
+    assert "\n" in ax.yaxis.label.get_text()
+    fig.set_size_inches(3, 12)
+    ax.set_position((0.2, 0.05, 0.7, 0.9))
+    plot_style._fit_labels_to_phone(fig)
+    assert ax.yaxis.label.get_text() == "GFP Mean Intensity (mean above threshold)"
+    fig.set_size_inches(3, 2)
+    ax.set_position((0.2, 0.2, 0.7, 0.6))
+    plot_style._fit_labels_to_phone(fig)
+    plot_style._unfit_titles(fig)
+    assert ax.yaxis.label.get_text() == "GFP Mean Intensity (mean above threshold)"

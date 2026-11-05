@@ -50,32 +50,47 @@ def restore(fig) -> None:
             setattr(ax, _HOME, None)
 
 
+#: How many times the overhang is measured again after the axes have moved.
+#: Moving an axes changes its tick labels' own width a little (a divider's bar
+#: is a share of the grid, and a label is placed from its tick labels), so one
+#: measurement leaves a few pixels hanging.
+_PASSES = 3
+
+
+def _apply(placed, home, lo, hi, dl, dr) -> bool:
+    """Map the span *lo*..*hi* of the *home* positions into what is left after
+    the margins *dl* and *dr*; ``False`` when nothing would be left."""
+    scale = (hi - lo - dl - dr) / (hi - lo) if hi > lo else 0.0
+    if scale <= 0.05:
+        return False
+    for ax, pos in zip(placed, home):
+        # The span the axes occupy is mapped into what is left of it, so axes
+        # that sit side by side (a plot and its colour bar) keep their
+        # arrangement and the outermost edge moves by exactly the overhang.
+        ax.set_position(Bbox.from_extents(lo + dl + (pos.x0 - lo) * scale, pos.y0,
+                                          lo + dl + (pos.x1 - lo) * scale, pos.y1))
+    return True
+
+
 def inset_for_overhang(fig) -> None:
     """Move every in-grid axes in from the side that text hangs off the figure."""
     restore(fig)
     renderer = fig.canvas.get_renderer()
     width = fig.bbox.width
-    if width <= 0:
-        return
-    left, right = _tight_extents(fig, renderer)
-    if left <= 0 and right <= 0:
-        return
-    left, right = (left + _PAD * width if left > 0 else 0.0,
-                   right + _PAD * width if right > 0 else 0.0)
-    dl, dr = left / width, right / width
     placed = [ax for ax in fig.axes if ax.get_subplotspec() is not None]
-    if not placed:
+    if width <= 0 or not placed:
         return                             # a divider's axes follow their parent
-    lo = min(ax.get_position(original=True).x0 for ax in placed)
-    hi = max(ax.get_position(original=True).x1 for ax in placed)
-    scale = (hi - lo - dl - dr) / (hi - lo) if hi > lo else 0.0
-    if scale <= 0.05:
-        return                             # nothing left to draw in: leave it
-    for ax in placed:
-        pos = ax.get_position(original=True)
-        # The span the axes occupy is mapped into what is left of it, so axes
-        # that sit side by side (a plot and its colour bar) keep their
-        # arrangement and the outermost edge moves by exactly the overhang.
-        setattr(ax, _HOME, pos.frozen())
-        ax.set_position(Bbox.from_extents(lo + dl + (pos.x0 - lo) * scale, pos.y0,
-                                          lo + dl + (pos.x1 - lo) * scale, pos.y1))
+    home = [ax.get_position(original=True).frozen() for ax in placed]
+    lo, hi = min(p.x0 for p in home), max(p.x1 for p in home)
+    dl = dr = 0.0
+    for _ in range(_PASSES):
+        left, right = _tight_extents(fig, renderer)
+        if left <= 0 and right <= 0:
+            break
+        dl += (left + _PAD * width) / width if left > 0 else 0.0
+        dr += (right + _PAD * width) / width if right > 0 else 0.0
+        if not _apply(placed, home, lo, hi, dl, dr):
+            _apply(placed, home, lo, hi, 0.0, 0.0)
+            break
+        for ax, pos in zip(placed, home):
+            setattr(ax, _HOME, pos)

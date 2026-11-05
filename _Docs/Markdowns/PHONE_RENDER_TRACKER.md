@@ -71,8 +71,8 @@ Each is checked by H4/H5 where it can be, or by a targeted test where it cannot
 | D3 | Home → QC Triage: the row of action buttons is truncated ("Segm", "ccep") (upright) | `todo` | |
 | D4 | Home → Pipeline Info: the Value column is scrolled out of sight (upright) | `todo` | |
 | D5 | Plotting → Scatter Plot: the x-axis label is cut off at the right (upright) | `todo` | |
-| D6 | Nanowells → Trajectories, Position, Array: footer lines cut off at the right; Position's x-axis label cut off; Extremes' title cut off; Identity's message cut off at both edges (upright) | `todo` | |
-| D7 | Nanowells → Distribution and Trajectories: the baseline legend overlaps the panel titles (upright) | `todo` | |
+| D6 | Nanowells → Trajectories, Position, Array: footer lines cut off at the right; Position's x-axis label cut off; Extremes' title cut off; Identity's message cut off at both edges (upright) | `wip` | footer/label/title cases fixed in `renderer.py` by figure width in points; `tests/test_nanowell_page_on_a_phone.py` pins footer wrapping by width whatever the mode; harness: all D6 `figure` findings gone on nanowell and mini. Identity/QC message cut-off did not reproduce in any run (declined as not reproduced). |
+| D7 | Nanowells → Distribution and Trajectories: the baseline legend overlaps the panel titles (upright) | `wip` | occupancy key sized in points above the titles; harness: Distribution/Trajectories legend overlaps gone sideways and upright; final run (`after3`) shows no overlap findings. |
 | D8 | Plotting → Heat Map: the column numbers "10 11 12" run together and the grid is a few cells at the top of a tall canvas (upright) | `todo` | |
 | D9 | Spatial: the per-well "No cells…" messages run into each other (upright) | `todo` | |
 | D10 | The page-menu button for "Validate & Repair" shows "Validate ̲Repair": the ampersand is read as a keyboard mnemonic | `done` | `tests/test_phone_datasets_shell.py` (fails when `_menu_text` returns the name unchanged); harness: finding gone on mini, phone upright and sideways. |
@@ -86,6 +86,8 @@ Each is checked by H4/H5 where it can be, or by a targeted test where it cannot
 | D18 | Plotting → Bar Plots: the "n/a" marks overlap the "Fraction of Cells Above Threshold" title, at the desk (found by the harness) | `todo` | |
 | D19 | Home → Cell Gating: the wrapped "analysed before border…" notice needs 32 px and has 21, so its second line is cut off, at the desk (found by the harness) | `todo` | |
 | D20 | Multivariate: neighbouring tick labels overlap (upright) (found by the harness) | `todo` | |
-| D21 | Nanowells, with a nanowell dataset: Array's per-nanowell labels overlap each other (desk, upright, sideways); Array's colorbar label and Statistics' y label sit on the figure's edge; Extremes' crop captions overlap; Distribution's tick labels run into the baseline legend (upright); Position's footer is cut off sideways too (found by the harness) | `todo` | |
+| D21 | Nanowells, with a nanowell dataset: Array's per-nanowell labels overlap each other (desk, upright, sideways); Array's colorbar label and Statistics' y label sit on the figure's edge; Extremes' crop captions overlap; Distribution's tick labels run into the baseline legend (upright); Position's footer is cut off sideways too (found by the harness) | `wip` | Array labels skip any that would overlap (footer counts them), colourbar room and Statistics margin from points; tests in `tests/test_nanowell_page.py`; harness: gone at all three screens. Remaining `ticks` on Distribution/Trajectories reproduces on `edb51e2` and is not part of D21. |
 | D22 | Plotting → Distribution: the x-axis label overlaps the footnote beneath it (upright) (found by the harness) | `todo` | |
 | D23 | Image Browser → Playground at the desk: content up to 650 px wide in a 349 px viewport with no scroll bar (found by the harness; D2's desk half) | `todo` | |
+
+| D24 | Nanowells → Distribution and Trajectories: neighbouring tick labels overlap on every screen (reproduces on `edb51e2`; found by the harness) | `todo` | |

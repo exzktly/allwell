@@ -189,8 +189,8 @@ empty plot's hint (the plate is under Wells, a finger taps), the Image
 Table's `_phone_fit` says where its builder is, and the Nanowells page reads the
 mode only in `review/features/nanowell/_phone.py`, which holds the decisions (the
 site detail takes the page, the crop strip wraps to its shape) so the controller
-and the tab view only call it — and its renderer is told `wrap_footer` by the
-controller and never reads the mode. A page that has to follow a layout change
+and the tab view only call it — and its renderer never reads the mode: it wraps
+every footer, and sizes its legends and labels, from the figure's own width in points. A page that has to follow a layout change
 for as long as it lives does it with `phone_layout.follow(owner, fn)`, which holds
 the owner weakly and drops the listener once the owner or its C++ object is gone.
 

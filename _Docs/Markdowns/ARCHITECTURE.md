@@ -12860,7 +12860,12 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   `no value: no cells at baseline ("0 at base") · 3`, the commonest three and then `other reasons` — from
   `ArrayScene.why` (`array_compute.no_value_reasons`, `(q, r) -> label` from `series_compute.exclusion_reason` worded
   by `distribution_compute.reason_label`, so the key and the Distribution footer give the same cause), and the
-  quoted tag (`_array_key.reason_tag`) is what each such nanowell writes inside itself with *Values* on, so the
+  quoted tag (`_array_key.reason_tag`) is what each such nanowell writes inside itself with *Values* on. Each
+  reason is also a mark of its own (`_array_key.no_value_marks`, `REASON_HATCHES`): the commonest keeps the plain
+  grey ring, the next a vertical hatch, then a back-diagonal, then stars for `other reasons` — none a hatch a state
+  draws — and `_fill_by_metric` draws each reason's nanowells with the hatch its key entry shows, so the reasons are
+  told apart on the array with *Values* off, when no tag is written, and no two key swatches look alike
+  (`tests/test_nanowell_array_marks_are_distinct.py` reads both off the drawn artists). So the
   reason of any one nanowell can be read off the array: a fold change on a nanowell full of cells is undefined
   whenever its baseline had none or was not measurable, and a bare "no value" read as "not measured". It is a
   standalone legend (`ax.add_artist`), so the export-style pass sizes its text but never moves it. The Array

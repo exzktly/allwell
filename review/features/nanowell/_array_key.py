@@ -99,6 +99,30 @@ def reason_tag(reason: str) -> str:
     return reason if len(reason) <= 10 else reason[:9] + "…"
 
 
+#: The mark of each reason a measured nanowell has no value, by its rank in :func:`_why` (most common first, ``other``
+#: last): the first keeps the plain grey ring, the rest a hatch inside it — vertical, back-diagonal (the mirror of
+#: *occluded*'s), stars; circles were tried and read as *rim out of focus*'s dots at a swatch's size. None of these is a hatch a state draws
+#: (``renderer._STATE_STYLE``), so a reason's ring is never mistaken for a state's, and each reason's swatch in the
+#: key matches the nanowells it counts — which are told apart on the array even with *Values* off, when no tag is
+#: written inside them.
+REASON_HATCHES = ("", "||", "\\\\\\\\", "**")
+
+
+def no_value_marks(sites, bare, why: dict) -> list[tuple[str, int, object, str]]:
+    """``(reason, count, mask, hatch)`` for each reason the *bare* nanowells (measured, no value) have none, in
+    :func:`_why`'s order: *mask* picks that reason's nanowells (``other`` takes every reason past the third), and
+    *hatch* is its mark (:data:`REASON_HATCHES`). The array draws each mask with its hatch and the key draws the same
+    hatch beside the reason, so the two cannot disagree."""
+    ranked = _why(sites, bare, why)
+    named = {reason for reason, _n in ranked if reason != "other"}
+    reasons = np.array([why.get((q, r)) or "" for _w, q, r in sites.sites], dtype=object)
+    out = []
+    for k, (reason, n) in enumerate(ranked):
+        mask = bare & (~np.isin(reasons, list(named)) if reason == "other" else reasons == reason)
+        out.append((reason, n, mask, REASON_HATCHES[min(k, len(REASON_HATCHES) - 1)]))
+    return out
+
+
 def _no_value_entries(sites, bare, why: dict) -> list[str]:
     """One "no value" label per reason, each ending with its count: ``no value: no cells at baseline ("0 at base") · 3``
     — the reason in full, then in quotes the tag the nanowells carry inside them (``reason_tag``) — so the reason
@@ -144,7 +168,10 @@ def key_entries(sites, *, colour: str, styles: dict, why: dict | None = None, di
         has = np.isfinite(np.asarray(sites.values, dtype=float))
         bare = ~has & np.isin(states, ["measured", "empty"])
         if bare.any():
-            entries += [KeyEntry(label, Colors.plot_undefined_ink) for label in _no_value_entries(sites, bare, why or {})]
+            labels = _no_value_entries(sites, bare, why or {})
+            marks = no_value_marks(sites, bare, why or {})
+            entries += [KeyEntry(label, Colors.plot_undefined_ink, hatch=hatch)
+                        for label, (_reason, _n, _mask, hatch) in zip(labels, marks, strict=True)]
         for state, (hatch, style) in styles.items():
             n = int(carrying(~has & (states == state), hatch).sum())
             if n:

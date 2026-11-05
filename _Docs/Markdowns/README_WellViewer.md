@@ -6443,7 +6443,9 @@ the sentence names it.
     *baseline occluded* / *baseline rim out of focus* when the baseline could not be measured. The key has one entry
     per reason (the commonest three, then *other reasons*), each with a short tag in quotes — *no value: no cells
     at baseline ("0 at base") · 3* — and with **Values** on each such nanowell writes that tag inside itself, so you
-    can read the reason of the one you are looking at. Every key entry ends with its count. The outline's width follows the nanowell's size on screen (about
+    can read the reason of the one you are looking at. Each reason also has its own ring, shown beside it in the
+    key: the commonest a plain grey ring, the next with vertical lines, then back-diagonal lines, then stars for
+    *other reasons* — so the reasons can be told apart with **Values** off too. Every key entry ends with its count. The outline's width follows the nanowell's size on screen (about
     6 % of its diameter, never under 2.5 or over 8 screen pixels), so it stays visible zoomed out and on a phone. Either way a nanowell on a tile seam is dashed in purple and
     the square marks the central one. *Addresses* writes each nanowell's `q,r` inside it once it is drawn
     large enough, and *Values* writes its value of the chosen **Metric** (three significant figures; under the

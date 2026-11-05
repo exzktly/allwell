@@ -26,7 +26,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from review.features.nanowell._array_key import KEY_COLUMNS, draw_key, key_entries, reason_tag, state_word
+from review.features.nanowell._array_key import (KEY_COLUMNS, draw_key, key_entries, no_value_marks, reason_tag,
+                                                  state_word)
 from review.features.nanowell.array_compute import padded
 from review.features.nanowell.background_compute import short_clause
 from review.features.nanowell.crop_grid_compute import grid_shape, shown_timepoints
@@ -1541,7 +1542,7 @@ def _draw_nanowells(fig, ax, drawn, scene, layers, *, label: str, selected) -> N
     outline = outline_width_px(diameter_px) * 72.0 / fig.dpi
     fused = np.asarray(sites.fused, dtype=bool)
     if layers.colour == "metric":
-        _fill_by_metric(fig, ax, sites, fused, outline, label)
+        _fill_by_metric(fig, ax, sites, fused, outline, label, why=scene.why)
     else:
         _outline_by_state(ax, sites, fused, outline)
     if fused.any():                                      # dashed in the fused colour whatever else it is
@@ -1586,8 +1587,10 @@ def _dim_nanowells(ax, sites, dimmed) -> None:
     theme_paired_colours(coll, screen=(screen, "none"), publication=(publication, "none"))
 
 
-def _fill_by_metric(fig, ax, sites, fused, outline: float, label: str) -> None:
-    """Filled by the metric with a colour bar; one without a value a grey outline styled by its state."""
+def _fill_by_metric(fig, ax, sites, fused, outline: float, label: str, *, why: dict | None = None) -> None:
+    """Filled by the metric with a colour bar; one without a value a grey outline styled by its state, or — measured
+    with no value — by why it has none (*why*, ``_array_key.no_value_marks``), so each reason the key names is a
+    mark of its own on the array."""
     from ui.theme import Colors
 
     _bg, ink, muted = _inks(ax)
@@ -1604,7 +1607,10 @@ def _fill_by_metric(fig, ax, sites, fused, outline: float, label: str) -> None:
         bar.ax.tick_params(labelsize=_PREF_PT * GRID_TYPE_SCALE, colors=muted)
     states = np.array(sites.state, dtype=object)
     grey = Colors.plot_undefined_ink
-    _state_marks(ax, sites, fused, outline, ~has & np.isin(states, ["measured", "empty"]), "", "solid", grey)
+    bare = ~has & np.isin(states, ["measured", "empty"])
+    if bare.any():
+        for _reason, _n, mask, hatch in no_value_marks(sites, bare, why or {}):
+            _state_marks(ax, sites, fused, outline, mask, hatch, "solid", grey)
     for state, (hatch, style) in _STATE_STYLE.items():
         _state_marks(ax, sites, fused, outline, ~has & (states == state), hatch, style, grey)
 

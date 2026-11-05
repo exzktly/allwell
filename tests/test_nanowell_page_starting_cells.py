@@ -166,11 +166,14 @@ def test_custom_opens_the_editor_and_a_starting_cells_range_is_typed_in_it(page)
     st = page.state.feature_slice("nanowell")
     assert st.subset == ss.Subset()                              # choosing Custom changes nothing yet
     editor.add_btn.click()
+    assert st.subset == ss.Subset()                              # written, not applied
+    editor.apply_btn.click()
     assert st.subset == ss.Subset.starting(1, None)
     row = editor.rows[0]
     row.op_cb.setCurrentIndex(row.op_cb.findData("between"))
     row.a_spin.setValue(2)
     row.b_spin.setValue(3)
+    editor.apply_btn.click()
     assert st.subset == ss.Subset.starting(2, 3)
     assert page.widgets.get("_nw_subset_cb").currentData() == "custom"
     assert _dots(page) == [("A01", 1), ("A01", 3), ("A01", 7)]

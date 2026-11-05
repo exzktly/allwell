@@ -4,9 +4,10 @@ The band carries a combo with the Starting cells presets the page has always off
 cells ≥1*, *1*, *1–2*, *≥2*) and *Custom subset…*, and an **Edit…** button that shows the editor under the band.
 The editor holds any number of conditions — a field (the cells at the start, a metric, the ring or distance from the
 centre, the address, the imaging field), the timepoint a per-timepoint field is read at, a comparison and its
-value(s) — and whether a nanowell must meet *all* of them or *any*. Every edit that makes a subset is applied at
-once; one that does not (a range upside down, a tile condition with no tile) is said under the conditions and
-changes nothing, so the figure never shows a subset other than the one written.
+value(s) — and whether a nanowell must meet *all* of them or *any*. Edits change only the conditions written in
+the editor, and the line under them says they are not applied yet; **Apply** makes them the page's subset (one
+redraw), **Reset** puts back the subset in use. A draft that is not a subset (a range upside down, a tile condition
+with no tile) says why, and Apply waits until it is fixed.
 
 Every control writes through :mod:`.controller`; nothing here filters. The editor is a panel in the page, never a
 dialog, so nothing modal is reached from it.
@@ -45,6 +46,8 @@ _SUBSET_TIP = ("Which nanowells every view draws and summarises. The presets kee
                "hiding them, and Save nanowell data… keeps every row and flags them.\n"
                "For clonality, use the Earliest baseline: a count taken later may follow a division.")
 _EDIT_TIP = "Show the subset's conditions: add, change or remove any of them, and name and save the subset."
+_APPLY_TIP = "Use the conditions as written: every view redraws with them."
+_RESET_TIP = "Put back the conditions of the subset in use, discarding the edits not applied."
 _NAME_TIP = ("A name for the subset as written, kept with this dataset: it is listed in the Subset box from then on, "
              "one click to use again. Saving under a name already kept replaces that subset.")
 _SAVE_TIP = "Keep the subset as written under the name typed beside it, in this dataset."
@@ -308,6 +311,17 @@ class SubsetEditor(QFrame):
         foot.addWidget(self.add_btn)
         foot.addWidget(self.clear_btn)
         foot.addStretch(1)
+        # Edits change the conditions written here only; Apply draws them, Reset puts back the subset in use. A plate
+        # redrawn on every keystroke recomputed every view for each half-typed bound.
+        self.reset_btn = QPushButton("Reset")
+        self.reset_btn.setProperty("variant", "secondary")
+        self.reset_btn.setToolTip(_RESET_TIP)
+        self.reset_btn.clicked.connect(self.reset)
+        self.apply_btn = QPushButton("Apply")
+        self.apply_btn.setToolTip(_APPLY_TIP)
+        self.apply_btn.clicked.connect(self.apply)
+        foot.addWidget(self.reset_btn)
+        foot.addWidget(self.apply_btn)
         lay.addLayout(foot)
         self.status = QLabel("")
         self.status.setObjectName("InfoHint")
@@ -360,7 +374,10 @@ class SubsetEditor(QFrame):
         st = self._state()
         active = st is not None and st.subset.is_active()
         typed, name = " ".join(self.name_edit.text().split()), self.current_name()
-        self.save_btn.setEnabled(active and bool(typed))
+        waiting = getattr(self, "rows", None) is not None and self.pending()
+        self.save_btn.setEnabled(active and bool(typed) and not waiting)
+        self.save_btn.setToolTip(_SAVE_TIP + ("\n\nApply the changes first: Save keeps the subset in use."
+                                              if waiting else ""))
         self.rename_btn.setEnabled(bool(name) and bool(typed) and typed != name)
         self.delete_btn.setEnabled(bool(name))
 
@@ -405,16 +422,56 @@ class SubsetEditor(QFrame):
     def written(self) -> ss.Subset:
         return ss.Subset(tuple(r.condition() for r in self.rows), self.match_cb.currentData() or "all")
 
-    def changed(self) -> None:
-        """Apply the subset as written, or say why it is not one and change nothing."""
+    def _draft(self) -> tuple[ss.Subset | None, str]:
+        """``(the subset as written, "")``, or ``(None, why it is not one)``."""
         try:
-            subset = self.written().validated()
+            return self.written().validated(), ""
         except ValueError as exc:
-            self._say(f"Not applied: {exc}.", warn=True)
+            return None, str(exc)
+
+    def pending(self) -> bool:
+        """Whether the conditions as written differ from the subset in use (and so wait for Apply or Reset)."""
+        st = self._state()
+        draft, why = self._draft()
+        return bool(why) or (st is not None and draft != st.subset)
+
+    def changed(self) -> None:
+        """An edit: say what the conditions as written are and whether they wait for Apply — or why they are not a
+        subset yet. Nothing is drawn until Apply."""
+        draft, why = self._draft()
+        if why:
+            self._say(f"Not a subset yet: {why}. Apply waits until it is fixed; Reset puts back the subset in use.",
+                      warn=True)
+        elif self.pending():
+            said = "No conditions: every nanowell." if not draft.is_active() else draft.label()
+            self._say(f"Not applied yet — {said}. Apply to draw it, or Reset.", warn=True)
+        else:
+            self._say_subset(draft)
+        self._enable_edits()
+
+    def apply(self) -> None:
+        """Make the conditions as written the page's subset; every view redraws once."""
+        draft, why = self._draft()
+        if why:
+            self._say(f"Not applied: {why}.", warn=True)
             return
-        self.shown = subset
-        nwc.set_subset(self._ctx, subset)
-        self._say_subset(subset)
+        self.shown = draft
+        nwc.set_subset(self._ctx, draft)
+        self._say_subset(draft)
+        self._fill_name()
+        self._enable_edits()
+
+    def reset(self) -> None:
+        """Rebuild the rows from the subset in use, discarding the edits not applied."""
+        self.shown = None
+        self.refresh(self._state())
+
+    def _enable_edits(self) -> None:
+        draft, why = self._draft()
+        pending = self.pending()
+        self.apply_btn.setEnabled(pending and not why)
+        self.reset_btn.setEnabled(pending)
+        self._enable_names()
 
     def add(self) -> None:
         if len(self.rows) >= ss.MAX_CONDITIONS:
@@ -448,11 +505,12 @@ class SubsetEditor(QFrame):
         dataset's channels changed, so a value being typed is never pulled from under the cursor."""
         data = getattr(st, "data", None)
         channels = tuple(data.channels) if data is not None else ()
-        if st.subset == self.shown and channels == self._channels and len(self.rows) == len(st.subset.conditions):
+        if st.subset == self.shown and channels == self._channels:
+            # The subset in use is the one the rows started from: keep the rows, and any edits not yet applied.
             for row in self.rows:
                 row.fill_gates()                         # a gate drawn, renamed or deleted on the scatter since
-            self._say_subset(st.subset)
             self._fill_name()
+            self.changed()
             return
         self._channels = channels
         for row in self.rows:
@@ -467,6 +525,7 @@ class SubsetEditor(QFrame):
         self.shown = st.subset
         self._say_subset(st.subset)
         self._fill_name()
+        self._enable_edits()
 
     def _say_subset(self, subset: ss.Subset) -> None:
         # Bound, so a condition naming a gate that is no longer drawn says so here too.

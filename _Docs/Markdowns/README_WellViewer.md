@@ -6196,8 +6196,11 @@ the sentence names it.
     renamed, the condition says "no nanowell gate by that name" and keeps no nanowell until you choose a gate
     again. Gates drawn over a cell metric are not offered, since they place cells rather than nanowells.
 
-  A number is compared with ≥, ≤, =, *between* or *not between* (both ends included). Every change is applied as
-  you make it; a range typed upside down is said under the conditions and changes nothing until it is fixed.
+  A number is compared with ≥, ≤, =, *between* or *not between* (both ends included). Edits change only the
+  conditions written in the editor: the line under them says *Not applied yet* and what they are, and nothing is
+  redrawn until you press **Apply**. **Reset** puts back the conditions of the subset in use. A range typed upside
+  down is said under the conditions, and Apply waits until it is fixed. Choosing a quick choice or a saved subset in
+  the Subset box replaces any edits not applied.
   Distribution, Trajectories, Position and Extremes then draw, summarise and rank only the nanowells in the subset,
   and every figure says what the subset is and how many nanowells it kept of how many — and how many were outside
   it or had no value for a condition (a count that was occluded, a timepoint the nanowell was not seen at, a well
@@ -6211,7 +6214,8 @@ the sentence names it.
   and the figure counts those nanowells.
 
   **Saving a subset by name.** The editor's **Name** box names the subset as written: type a name and press
-  **Save** (or Enter) to keep it in this dataset. Saved subsets are listed by name in the Subset box, between the
+  **Save** (or Enter) to keep it in this dataset. Save keeps the subset in use, so it waits while edits are not
+  applied: press **Apply** first. Saved subsets are listed by name in the Subset box, between the
   quick choices and *Custom subset…*; choosing one makes it the subset again. The box shows a saved subset's name
   only while its conditions are exactly the saved ones — change one and it reads *Custom subset…*, with the saved
   one left as it was (save under the same name to replace it). **Rename** gives the saved subset in use the name

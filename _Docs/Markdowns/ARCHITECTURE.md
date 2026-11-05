@@ -13129,9 +13129,14 @@ tooltip — is not on the page's own band. The control band holds Metric, Along 
 combo of the Starting cells presets — All nanowells, ≥1, 1, 1–2, ≥2 — and *Custom subset…*, with an **Edit…** button,
 on every view, the combo outlined in the accent through the `filterActive` QSS property while a subset is set; the
 editor, `SubsetEditor`, is a panel the page places under the band — never a dialog — with one `_ConditionRow` per
-condition, *all* / *any*, *Add condition* and *Clear*; each edit that makes a valid subset is applied at once
-through `controller.set_subset`, and one that does not is said in the panel's `Warn` line and changes nothing; the
-rows are rebuilt from the page's state only when it holds another subset or the dataset's channels changed), Timepoint (on
+condition, *all* / *any*, *Add condition*, *Clear*, *Reset* and *Apply*; an edit changes only the draft the rows
+hold — `SubsetEditor.changed` says in the panel's `Warn` line that it is not applied yet (or why it is not a subset
+yet) — and *Apply* passes the draft through `controller.set_subset` once, so the page redraws once per Apply rather
+than per keystroke; *Reset* rebuilds the rows from the page's subset; Apply and Reset are enabled only while the draft
+differs from the subset in use (`pending`), Apply only while it is a valid subset, and *Save* only while nothing is
+pending, since it keeps the subset in use; the rows are rebuilt from the page's state only when it holds another
+subset than the one they started from (a preset or saved subset chosen in the box, a restore) or the dataset's
+channels changed, so a refresh from any other control keeps a draft), Timepoint (on
 *Along x: Wells*, Position, Extremes and the Array view), *vs* (on *Along x: Wells*), Well (on the one-well views),
 the Array view's Image combo, Positions switch,
 *Layers* menu (each switch, the colouring, and *Show as* for the presets), *Fit* / *1:1* and the anchor's

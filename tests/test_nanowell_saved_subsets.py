@@ -117,6 +117,8 @@ def test_a_subset_saved_by_name_is_listed_and_choosing_it_draws_it(page):  # noq
     _choose(page, "Ring at start")
     assert st.subset == RING and _dots(page) == ring
     editor.add_btn.click()                                     # one condition more: no longer the saved one
+    assert combo.currentText() == "Ring at start"              # until it is applied
+    editor.apply_btn.click()
     assert combo.currentData() == "custom" and st.saved_subsets["Ring at start"] == RING
 
 

@@ -144,17 +144,23 @@ def tally(metrics: pd.DataFrame | None, wells=None) -> FocusTally:
     """Count, over *wells* (every well when ``None``), what the rim focus rule flagged and what it could not judge."""
     if metrics is None or not len(metrics) or "rim_focus_ok" not in metrics:
         return FocusTally()
-    rows = metrics if wells is None else metrics[metrics["well"].isin(list(wells))]
-    if not len(rows):
+    # The columns read are masked one at a time rather than the rows taken first: taking the rows copied every
+    # column of the page's metrics, which on a sixteen-well plate was most of a second per redraw.
+    at = (np.ones(len(metrics), dtype=bool) if wells is None
+          else metrics["well"].isin(list(wells)).to_numpy())
+    if not at.any():
         return FocusTally()
-    focus = pd.to_numeric(rows["focus"], errors="coerce") if "focus" in rows else pd.Series(np.nan, index=rows.index)
-    soft = rows["rim_focus_ok"].eq(False)
-    measurable = rows["recorded_state"].isin(MEASURABLE)
+    focus = (pd.to_numeric(metrics["focus"], errors="coerce") if "focus" in metrics
+             else pd.Series(np.nan, index=metrics.index))
+    soft = metrics["rim_focus_ok"].eq(False).to_numpy() & at
+    measurable = metrics["recorded_state"].isin(MEASURABLE).to_numpy() & at
+    unref = metrics["rim_focus_ref"].isna().to_numpy()
+    has_focus = focus.notna().to_numpy()
     return FocusTally(flagged=int(soft.sum()),
-                      nanowells=int(rows.loc[soft, ["well", "nw_q", "nw_r"]].drop_duplicates().shape[0]),
-                      unjudged=int((measurable & focus.isna()).sum()),
-                      unreferenced=int((measurable & focus.notna() & rows["rim_focus_ref"].isna()).sum()),
-                      recorded=bool(focus.notna().any()))
+                      nanowells=int(metrics.loc[soft, ["well", "nw_q", "nw_r"]].drop_duplicates().shape[0]),
+                      unjudged=int((measurable & ~has_focus).sum()),
+                      unreferenced=int((measurable & has_focus & unref).sum()),
+                      recorded=bool((has_focus & at).any()))
 
 
 def note(metrics: pd.DataFrame | None, rule: RimFocusRule | None, wells=None) -> str:

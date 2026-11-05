@@ -42,7 +42,7 @@ from review.features.nanowell.crop_grid_compute import POPOUT_GRIDS, POPOUT_MAX_
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
     ArrayDrawn, render_array, render_crop_grid, render_crop_strip, render_distribution, render_extremes, render_message,
-    render_position, render_site_detail, render_trajectories,
+    redraw_selection_rings, render_position, render_site_detail, render_trajectories,
 )
 from review.features.nanowell.state import (
     IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS,
@@ -290,8 +290,8 @@ def page_groups(ctx) -> dict:
     """``group -> wells`` for the page: replicate sets over the active wells only (gap G9 of the plan)."""
     st = _state(ctx)
     excluded = set(st.excluded_wells) if st is not None else set()
-    have = [w for w in active_wells(ctx) if (st is None or st.data is None or w in set(st.data.wells))
-            and w not in excluded]
+    loaded = set(st.data.wells) if st is not None and st.data is not None else None
+    have = [w for w in active_wells(ctx) if (loaded is None or w in loaded) and w not in excluded]
     return replicate_groups(ctx, have) if have else {}
 
 
@@ -2154,9 +2154,42 @@ def clear_selection(ctx) -> None:
 
 
 def selection_changed(ctx) -> None:
-    """The nanowells selected for the site detail changed: save, and redraw both figures."""
+    """The nanowells selected for the site detail changed: save, and redraw both figures — on the Distribution view
+    only the rings that mark the selection, when the figure on screen is current (:func:`_move_selection_rings`)."""
     _save_soon(ctx)
-    redraw(ctx)
+    if not _move_selection_rings(ctx):
+        redraw(ctx)
+
+
+def _move_selection_rings(ctx) -> bool:
+    """Re-ring the selected nanowells on the Distribution figure as drawn and redraw the site detail; ``False``
+    (nothing done) when the figure cannot be trusted to be current, so the caller redraws it whole.
+
+    The selection changes nothing else on that figure (``renderer.render_distribution`` reads it for the rings
+    alone), and every other change to what it shows goes through :func:`redraw`. So the drawn figure is current
+    unless the last redraw stopped short of drawing it: the page or its card hidden (phone layout hides the figure
+    behind the detail), another view drawn since (the figure was cleared, so the hit map's axes are gone from it),
+    a load running, or the metrics on hand stale for the baseline, rim focus rule, Cell Gating or the drawn wells —
+    the cases where :func:`redraw` fetches before it draws. Each of those falls back to the full redraw."""
+    from review.core.plot_style import apply_export_style_to_current
+
+    st = _state(ctx)
+    fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")
+    card = ctx.widgets.get_or_none("_nw_card")
+    if (st is None or st.view != "distribution" or st.hits is None or not st.hits.entries or st.computing
+            or fig is None or canvas is None or card is None or card.isHidden() or not canvas.isVisible()
+            or _page_deleted(ctx)):
+        return False
+    if any(entry[0] not in fig.axes for entry in st.hits.entries):
+        return False
+    if (st.metrics is None or st.loaded_for is None or st.loaded_for[1] != st.baseline
+            or st.gated_for != gate_version(ctx) or st.focus_for != focus_rule(ctx).key() or unread_wells(ctx)):
+        return False
+    redraw_selection_rings(st.hits, [tuple(s) for s in st.selected_sites])
+    apply_export_style_to_current(ctx, fig, canvas)
+    canvas.draw_idle()
+    redraw_detail(ctx)
+    return True
 
 
 def _save_soon(ctx) -> None:

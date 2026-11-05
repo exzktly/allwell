@@ -482,12 +482,35 @@ def _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink):
     coll.set_gid("nw-dots")
     sites = [swarm.sites[i] for i in idx]
     hits.entries.append((ax, x, layout.y, sites))
-    for xi, yi, s in zip(x, layout.y, sites):
+    _ring_selected(ax, x, layout.y, sites, rings)
+    return layout
+
+
+#: The gid of the ring drawn round a selected nanowell's dot on the Distribution view.
+RING_GID = "nw-selected-ring"
+
+
+def _ring_selected(ax, xs, ys, sites, rings) -> None:
+    for xi, yi, s in zip(xs, ys, sites):
         colour = rings.get(tuple(s))
         if colour is not None:
             ax.scatter([xi], [yi], s=(DOT_PT * 2.6) ** 2, facecolors="none", edgecolors=colour, linewidths=1.6,
-                       zorder=5)
-    return layout
+                       zorder=5).set_gid(RING_GID)
+
+
+def redraw_selection_rings(hits: HitMap, selected=()) -> None:
+    """Move the Distribution view's selection rings to *selected* on the figure as drawn, leaving every other artist
+    alone. The rings are the only thing on that figure the selection changes, so selecting a nanowell or closing
+    the site detail need not rebuild the model and draw every dot again — on a sixteen-well plate over ten
+    timepoints that full redraw took seconds. Draws exactly what :func:`render_distribution` would, through the
+    same :func:`_ring_selected`, at the positions the hit map recorded."""
+    rings = {tuple(site): colour for site, colour in zip(map(tuple, selected), selection_colours())}
+    for ax in {id(entry[0]): entry[0] for entry in hits.entries}.values():
+        for coll in [c for c in ax.collections if c.get_gid() == RING_GID]:
+            coll.remove()
+    if rings:
+        for ax, xs, ys, sites in hits.entries:
+            _ring_selected(ax, xs, ys, sites, rings)
 
 
 def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:

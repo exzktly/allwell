@@ -388,6 +388,9 @@ def _time_panels(model, frame, column, reasons, groups, channels) -> None:
     summary = (well_summary(frame, column, channels, reasons=reasons, responding_above=model.responding_above)
                if len(frame) else None)
     labels = _time_axis(model, frame)
+    # One split of the frame into its (timepoint, well) cells, rather than a mask over every row for each pair: the
+    # masks made a sixteen-well, ten-timepoint plate cost seconds per redraw.
+    cells = dict(iter(frame.groupby(["timepoint", "well"], sort=False))) if len(frame) else {}
     for name, members in groups.items():
         rows = frame[frame["well"].isin(members)]
         tps = _order(rows)
@@ -398,11 +401,11 @@ def _time_panels(model, frame, column, reasons, groups, channels) -> None:
                       ticks=[(float(i), labels.get(tp, str(tp))) for i, tp in enumerate(tps)])
         for i, tp in enumerate(tps):
             for j, well in enumerate(members):
-                sel = (rows["timepoint"] == tp) & (rows["well"] == well)
-                if not sel.any():
+                part = cells.get((tp, well))
+                if part is None or not len(part):
                     continue
                 x = i + (j - (k - 1) / 2) * width
-                panel.swarms.append(_swarm(rows[sel], column, reasons[rows.index[sel]], label=tp, well=well, x=x,
+                panel.swarms.append(_swarm(part, column, reasons[part.index], label=tp, well=well, x=x,
                                            group=name))
         if summary is not None:
             for j, well in enumerate(members):

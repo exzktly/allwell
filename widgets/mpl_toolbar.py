@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
+from widgets import form_registry
 from widgets.icon_button import IconButton
 from util.aw_safe import swallowed
 
@@ -179,6 +180,7 @@ if _HAVE_MPL:
             except Exception:
                 swallowed()
             self.setStyleSheet(self._qss())
+            form_registry.declare(self, "toolbar")
 
         def closeEvent(self, event):  # Qt naming
             self._detach_canvas()
@@ -368,7 +370,7 @@ if __name__ == "__main__":
     if MplToolbar is None:
         lay.addWidget(QLabel("matplotlib is not installed — MplToolbar unavailable."))
     else:
-        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as _FC
+        from widgets.canvas import make_canvas
         from matplotlib.figure import Figure as _F
         fig = _F(figsize=(5, 3), layout="constrained")
         ax = fig.add_subplot(111)
@@ -376,7 +378,7 @@ if __name__ == "__main__":
         xs = [i * 0.1 for i in range(120)]
         ax.plot(xs, [math.sin(x) for x in xs], linewidth=1.6)
         ax.set_xlabel("x"); ax.set_ylabel("sin x")
-        canvas = _FC(fig)
+        canvas = make_canvas(fig)
         lay.addWidget(canvas, 1)
         lay.addWidget(MplToolbar(canvas))
 

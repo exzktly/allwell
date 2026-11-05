@@ -45,6 +45,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from ui import theme
+from widgets import form_registry
 from widgets.checkbox_fit import fit_checkbox_width
 from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 
@@ -198,6 +199,7 @@ class ControlBand(QWidget):
         # ``setMinimumHeight`` is enforced by the widget itself, which every
         # layout respects.
         self.setMinimumHeight(self.band_height())
+        form_registry.declare(self, "controls")
 
     # ── building ────────────────────────────────────────────────────────────
     def add_scope(self, label: str, *widgets: QWidget,

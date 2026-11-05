@@ -23,6 +23,15 @@ from core import phone_layout
 from core.safe import swallow
 from review.features.image_browser.image_table import facet_view
 
+def empty_hint() -> str:
+    """What the placeholder under an empty Image Table says to do. In phone layout
+    the builder is not above the placeholder but behind ⚙ Controls, and "above"
+    sent the reader looking at an empty page."""
+    if phone_layout.is_on():
+        return "Open ⚙ Controls to choose channels, then press Generate."
+    return "Choose wells/channels above, then press Generate."
+
+
 #: The smallest a fitted cell may be, in pixels: below this a field of view is
 #: a smudge, and the grid should scroll rather than shrink further.
 MIN_CELL_PX = 80

@@ -40,8 +40,9 @@ def show_focus_distribution(ctx, dist) -> None:
     is owed an answer, and "no cell here carried a measurable outline" is an
     answer — and a finding about the frame.
     """
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
+
+    from widgets.canvas import make_canvas
 
     popup = getattr(ctx.runtime.review, "focus_curve_popup", None)
     if popup is None or not popup.isVisible():
@@ -51,7 +52,7 @@ def show_focus_distribution(ctx, dist) -> None:
         layout = QVBoxLayout(popup)
         layout.setContentsMargins(8, 8, 8, 8)
         fig = Figure(figsize=(7.8, 4.4), dpi=100)
-        canvas = FigureCanvas(fig)
+        canvas = make_canvas(fig)
         layout.addWidget(canvas)
         from widgets.mpl_toolbar import MplToolbar
         layout.addWidget(MplToolbar(canvas, popup))

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QLabel, QWidget
 
+from widgets import form_registry
+
 
 def info_icon(parent: QWidget, info: str) -> QLabel:
     """An ``ⓘ`` label for *parent* whose tooltip (and WhatsThis) is *info*.
@@ -26,4 +28,5 @@ def info_icon(parent: QWidget, info: str) -> QLabel:
     lbl.setObjectName("InfoHint")
     lbl.setToolTip(info)
     lbl.setWhatsThis(info)
+    form_registry.declare(lbl, "hint")
     return lbl

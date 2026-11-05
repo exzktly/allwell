@@ -329,3 +329,18 @@ def test_a_taller_stage_rail_beside_the_plate_is_room_the_plate_may_take(qtbot):
     assert dash.rail_height_beside_plate(plate) == 0          # the plate is the taller
     dash.setStacked(False)
     assert dash.rail_height_beside_plate(plate) == 0          # the desk: no fit at all
+
+
+def test_the_run_log_wraps_on_a_phone_and_not_at_the_desk(tab):
+    """The log is Analyze's, so its phone form is Analyze's phone view's: the
+    shell is not handed it. Wrong implementation: nothing sets the mode, which a
+    log left at NoWrap would pass in the desk half only."""
+    from PySide6.QtWidgets import QTextEdit
+
+    assert tab._log.lineWrapMode() == QTextEdit.NoWrap
+    phone_layout.set_on(True)
+    _pump()
+    assert tab._log.lineWrapMode() == QTextEdit.WidgetWidth
+    phone_layout.set_on(False)
+    _pump()
+    assert tab._log.lineWrapMode() == QTextEdit.NoWrap

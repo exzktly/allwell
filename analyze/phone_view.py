@@ -142,9 +142,20 @@ class AnalyzePhoneView:
 
     def _on_layout(self, on: bool) -> None:
         try:
+            self._wrap_log(on)
             self.set_on(on)
         except RuntimeError:
             swallowed()  # the pane went before phone layout did
+
+    def _wrap_log(self, on: bool) -> None:
+        """The run log wraps on a phone. Wrapped, a log trimmed at its block cap
+        re-anchors a scrolled-up reader slightly off (the trim fix-up counts a
+        block as one line; ARCHITECTURE §6.1); reading the end of an error line
+        on a phone is worth that."""
+        from PySide6.QtWidgets import QTextEdit
+        log = getattr(self._tab, "_log", None)
+        if log is not None:
+            log.setLineWrapMode(QTextEdit.WidgetWidth if on else QTextEdit.NoWrap)
 
     def set_on(self, on: bool) -> None:
         on = bool(on)

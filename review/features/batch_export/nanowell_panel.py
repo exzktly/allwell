@@ -55,6 +55,7 @@ from widgets.spin_box import SpinBox
 # Nanowells is a removable feature: every symbol comes through a lazy proxy, so a build without it still imports
 # this module (the tab does not offer the mode there — ``tab_view._offered_modes``).
 _draw_view = _lazy("review.features.nanowell.controller", "draw_view")
+_swarm_spacing_of = _lazy("review.features.nanowell.controller", "swarm_spacing_of")
 _resolve_metric = _lazy("review.features.nanowell.controller", "resolve_metric")
 _batch_array_layers = _lazy("review.features.nanowell.controller", "batch_array_layers")
 _named_groups = _lazy("review.features.nanowell.controller", "named_groups")
@@ -489,7 +490,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                    moving=settings["moving"], baseline_moving=settings["baseline_moving"],
                                    well=well or "", well_timepoint=shown if well else "",
                                    note=note, tableless=tableless, responding_above=cut,
-                                   subset=settings["subset"], names=_well_names(self._ctx, wells))
+                                   subset=settings["subset"], names=_well_names(self._ctx, wells),
+                                   swarm_spacing=_swarm_spacing_of(self._ctx))
                     self._figure_view = {"view": view, "metric": drawn, "axis": settings["axis"],
                                          "baseline": settings["baseline"], "cohort": settings["cohort"],
                                          "moving": settings["moving"],

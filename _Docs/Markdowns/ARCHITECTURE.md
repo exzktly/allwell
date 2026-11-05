@@ -167,8 +167,54 @@ scale, the screen-shape test; any pane may read the flag without importing the
 shell. `ui/phone_shell.py` is the Qt half — `PhoneShell`, owned by `AllWellApp` —
 and imports no pane: `AllWellApp._build_phone_shell` hands it a `PhoneHandles`
 naming every widget it rearranges and the callables it drives (the mode, the
-navigator, the band, the run dashboards, the logs, the status text, a relayout),
-so a pane that moves a widget changes one line there.
+navigator, the band, the run dashboards, the status text, a relayout),
+so a pane that moves a widget changes one line there. What a pane's own widgets
+become is the pane's: Analyze's phone view wraps its run log, and the feature
+registry says which Review pages a phone does not offer (`FeatureDescriptor.on_phone`,
+read through `FeatureRegistry.hidden_on_phone` into `phone_hidden_sections`;
+every top-level page must state it, which a test holds).
+
+**Which layers know about phone layout.** Data and drawing never do: no
+`renderer.py`, `collect.py`, `*_compute.py`, and nothing under `domain/`,
+`services/`, `pipeline/` or `util/` imports the flag or the shell; their sizes
+arrive as arguments (`tests/test_phone_mode_stays_in_views.py`). The tokens
+(`core/phone_layout.py`, `ui/theme.py`) and the chrome (`ui/phone_shell.py`,
+`ui/phone_drawer.py`, `ui/phone_window.py`, `ui/phone_fit.py`) read it freely.
+A view reads it only from a `_phone.py` or `phone_view.py` beside it; every
+other read, in `allwell.py` and three `review/core/` helpers (plot style, the
+split toggle, the rail toggle), is on a roster in that test with a written
+reason, and the roster only shrinks. Wording that differs by mode lives in a
+`_phone.py` beside what it words: `review/core/empty_state_phone.py` rewords an
+empty plot's hint (the plate is under Wells, a finger taps), the Image
+Table's `_phone_fit` says where its builder is, and the Nanowells page reads the
+mode only in `review/features/nanowell/_phone.py`, which holds the decisions (the
+site detail takes the page, the crop strip wraps to its shape) so the controller
+and the tab view only call it — and its renderer is told `wrap_footer` by the
+controller and never reads the mode. A page that has to follow a layout change
+for as long as it lives does it with `phone_layout.follow(owner, fn)`, which holds
+the owner weakly and drops the listener once the owner or its C++ object is gone.
+
+**Widgets declare their phone form.** `widgets/form_registry.py` records which
+widgets have an alternate form and of what *kind* (`"stepper"`, `"toolbar"`,
+`"controls"`, `"canvas"`, `"hint"`, or `"custom"` for a form a view registers with an
+`apply(on)` callable). It lives in `widgets/` because the classes that declare
+are there, and it knows kinds, not phones: it imports nothing from the
+application and names no layout, which `test_the_form_registry_knows_kinds_and_not_phones`
+holds. `PhoneShell` listens (`_listen_for_declarations`, weakly, so a closed
+window leaves no listener). A declaration is made inside the widget's
+constructor, so while phone layout is on the shell only installs its event
+filter on the widget and the form is applied on the widget's first Show.
+`_adapt_kind` reads that declared kind (`ControlBand`, `MplToolbar`, `Stepper`,
+every plot canvas — built only through
+`widgets.canvas.make_canvas`, which a guard enforces — every ⓘ from
+`widgets.info_icon`, and the Image Table's controls block declare theirs). The
+shell recognises no widget by its class name, its object name or a duck type;
+`test_the_shell_recognises_no_more_widgets_by_name_than_the_budget` holds that
+at zero, counting the spellings a name could come back in.
+`tests/test_phone_layout_snapshot.py` records what the window shows in phone
+layout (every page, upright, sideways and at the large text size) against
+`tests/fixtures/phone_snapshot_baseline.json`, which is the check that a change
+to how widgets are found has not changed what is seen.
 
 **The phone point.** Every size in phone layout is written in phone points
 (`u`): the short side of the screen's geometry divided by 390, the width in
@@ -205,9 +251,9 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    look, both resets, copy analysis, reveal folder — three of them destructive, a
    fat-finger target, none for reading results — plus Refresh, Help and the
    status bar, whose jobs move to the ⋯ menu and the side rail), turns the mode
-   bar to labels only (`ModeBar.setCompact`), stacks the run dashboards, wraps
-   the analysis log, and hides Review CSV and Batch Export from the rail's
-   sections (`phone_hidden_sections`) — both are desk work;
+   bar to labels only (`ModeBar.setCompact`), stacks the run dashboards, and hides
+   Review CSV and Batch Export from the rail's sections (`phone_hidden_sections`,
+   from `on_phone=False` on their descriptors) — both are desk work;
 2. closes the side rail — or, on the way out, restores the left panel's desk
    state;
 3. restyles at the phone's type scale and touch unit (§8) — the only slow step,
@@ -216,8 +262,8 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    neither changes. Nearly all of it is `QApplication.setStyleSheet`
    re-polishing every widget: a near-empty stylesheet still costs most of it,
    so the cost scales with the widget count, not with the sheet. Widgets
-   that take a different *form* on a phone — a stepper's − / +, an Analyze form
-   row's stacked label — take it after the restyle on the way in and give it up
+   that take a different *form* on a phone — a stepper's − / +, a plot's DPI and
+   height — take it after the restyle on the way in and give it up
    before the restyle on the way out, and give it up for the length of the two
    restyles made *inside* phone layout too, a text-size change and the phone
    turning (`PhoneShell._restyle_in_place`) — so the rescale pass only ever
@@ -246,26 +292,33 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    the same treatment: a plot its DPI and height, a window of its own its
    phone form (below, *Windows of their own*), a control band its place in the Controls sheet, a matplotlib toolbar
    its absence (pan and zoom are modes a VNC drag fights with), a stepper its
-   − / +, a form row its stacking — and makes an ⓘ answer a tap with its text,
+   − / + — and makes an ⓘ answer a tap with its text,
    since nothing hovers on a phone. `_PhoneEventFilter` is installed **on those
    widgets only** (`_phone_relevant` names them), never on the application: an
    application-wide filter handed every event of every object in the process to
    Python, and on Windows it died with a native access violation on the filter's
    first line, called from `app.exec()` with an event for an object being torn
-   down. `PhoneShell._sweep` finds widgets built after the switch — every
+   down. A widget that declares a form (`widgets.form_registry`) is watched the
+   moment it is declared, if phone layout is on, and adapted on its first Show.
+   What no declaration reaches, `PhoneShell._sweep` finds — every
    `_SWEEP_MS` (300 ms), at once when a window gains focus (a dialog opening),
    and at once on a page change (`PhoneShell.page_changed`, wired to the
    `currentChanged` of the stack the window hands it as `PhoneHandles.pages`,
    Review's notebook, and called by the page menu), with one more sweep on the
    next turn of the loop for a page that builds its body only once shown. It
-   looks only at widgets no sweep has seen, by a mark on each one
+   looks at three things and walks no widget in Python: the top-level windows
+   (a dialog, a pop-out, a combo box's popup — Qt builds some, so they cannot
+   declare themselves), the scroll areas under each (one C++ `findChildren`;
+   every scroll area scrolls by a drag, and about 64 places build one, so they
+   are not declared), and the declared widgets built while phone layout was
+   off. It acts only on what no sweep has seen, by a mark on each one
    (`_awPhoneSeen`) — not by the widget count, which a canvas deleted and
    another built between two ticks leaves unchanged, and not by address, which
-   the allocator hands straight to the replacement. Reading the marks costs
-   about 6 ms at 4,300 widgets; a forced sweep that looks at everything about
-   25 ms. For each relevant widget it installs the filter, marks the widget
-   `_awPhoneWatched`, and adapts it if it is already showing. Leaving phone
-   layout removes every filter and mark;
+   the allocator hands straight to the replacement. On the mini dataset, a
+   tick costs about 11 ms and a forced sweep about 47 ms. For each relevant
+   widget it installs the filter, marks the widget `_awPhoneWatched`, and
+   adapts it if it is already showing. Leaving phone layout removes every
+   filter and mark;
 5. maximizes the window (phone) or restores the desk geometry it remembered —
    only one remembered on a desk-shaped screen.
 
@@ -487,9 +540,9 @@ place each time, `PhoneShell._foot_strip`) so its **Done ✕** stays where the
 thumb opened it, or a 390 pt right-hand panel sideways — as wide as the phone held upright, so whatever
 fits the sheet upright fits the panel (`LANDSCAPE_SHEET_PT`; at 360 pt the Image
 Table's LUT rows overflowed it). A page whose controls are not a `ControlBand`
-marks the block that holds them with the `phoneControls` property and gives it a
-`setStacked`; `_current_band` takes a band with controls first and a marked block
-otherwise, and the same lend, stack and give-back apply to either. Whether
+declares the block that holds them as `"controls"` (`widgets.form_registry`) and
+gives it a `setStacked`; `_current_band` takes a band with controls first and a
+declared block otherwise, and the same lend, stack and give-back apply to either. Whether
 ⚙ Controls shows is decided in `refresh()`, which follows the notebook's page
 changes — but a lazily built page (Image Browser) has no controls yet at that
 signal, since it builds on being shown. So `adapt()`, which hides a page's
@@ -531,7 +584,7 @@ Display and anything else Actions. The page keeps owning visibility: a row, a
 cell and a section follow the show / hide of the widget the page shows and hides
 (`_Mirror`), so `show_slot` reshapes the form. The band's row margins are dropped
 while it is a form, since the sheet pads its content, and `heightForWidth`
-answers from the form. A page's own block of controls (`phoneControls`, the
+answers from the form. A page's own block of controls (declared `controls`, the
 Image Table's builder) keeps its `setStacked` form. The sheet's buttons, combos
 and fields are 48 pt (`QWidget#Drawer[phoneSheet="true"]` in the touch block). The sheet's height is measured off the controls lent
 into it, and at `open` they still have their page's width, so the estimate is
@@ -598,7 +651,7 @@ kept in an attribute on the main window.
 through the action strip, neither of which is a `ControlBand` (its band is empty),
 and at the desk both sit above the grid — on a phone, two screens of drag-and-drop
 before the first image. So the two share one host, `tab_view._TableControls`,
-marked `phoneControls`: in phone layout it is hidden from the page, which opens on
+declared as `controls`: in phone layout it is hidden from the page, which opens on
 the grid, and ⚙ Controls lends it to the sheet. Stacked, the action strip
 (Generate, crop, the ON threshold, Save, zoom) comes first, and
 `builder_view.builder_set_stacked` turns the shelf's header row and its Rows /
@@ -674,8 +727,8 @@ and the page's wins, so a swipe on the log moved the page and not the log. A log
 with nothing to scroll leaves the drag to the page.
 
 **Plot pages scroll by a swipe on the plot** (`PhoneShell._swipe_plot_area`, run
-from `size_canvas` — so on the switch, on Show and from the sweep, and a plot
-built later gets it): the scroll area holding a canvas on a page `band_roots`
+from `size_canvas` — so on the switch and on a canvas's Show, the canvas having
+declared itself, and a plot built later gets it): the scroll area holding a canvas on a page `band_roots`
 names is marked `_awSwipePlots`, and the guard then lets a drag on its plot
 scroll the page. A tap still reaches the plot; a drag on a plot no longer reaches
 matplotlib in phone layout, where its pan and zoom are already hidden. A plot
@@ -6829,6 +6882,27 @@ re-seeds them on every panel open from `_resync_plot_state_segments`, and both
 are persisted in the bar view state (`_snapshot_bar`; `_apply_bar` →
 `_restore_bar_geometry`, which drops an out-of-range value on its own).
 
+The two figures that draw a beeswarm — the Bar figure and the Nanowells figure
+(`_draws_beeswarm`) — get a **Beeswarm** section (`_build_beeswarm_section`)
+with one *Point spacing* row in the same Auto-switch-plus-stepper shape. It
+writes `PlotState.swarm_spacing`, a multiple of one dot's width (0.0 = Auto),
+and redraws, since where a dot goes is decided by the layout rather than by a
+restyle. The Bar plot reads it through `barplot.renderer.swarm_pitch`, which
+turns it into an x distance in data units from the Marker size pref (the size
+the style pass gives these dots) and the axes' width on the page, and hands it
+to `_beeswarm_jitter(pitch=…)`: Auto stretches each column's swarm to fill its
+slot, a set pitch draws every column at that spacing, compressed to the slot
+only where it would overflow into the next column. The Nanowells page reads it
+through `nanowell.controller.swarm_spacing_of`, which both `draw_view` callers
+(the page and Batch Export's Nanowells mode) pass as `swarm_spacing`;
+`render_distribution(spacing=…)` lays the Distribution view's dots out at that
+multiple of `DOT_PT` while drawing them at `DOT_PT`, so less than 1.0 overlaps
+them and fits more in a slot before the "+N" overflow count. It is persisted
+and restored beside the bar geometry, and `_resync_swarm_spacing` re-seeds the
+row on every panel open. `tests/test_beeswarm_point_spacing.py` pins the
+positions, the renderer → packing boundary, and that both `draw_view` calls
+pass the setting.
+
 The Line and Response figures carry the same control over their own fields
 (`line_color_mode`, `response_color_mode`), and the Response segment's first
 value is *Colour* rather than *Plate* — its curves are palette-coloured values
@@ -6916,7 +6990,7 @@ owning its own invariants (behaviour lives *in* the type, not just data):
 | `ChannelState` | active channel / metric / ratio catalogue / threshold range — `set_active_channel` keeps `active_val_col` consistent | `core/channel_state.py` |
 | `SelectionState` | plate selection + the saved-selections ("v2") model; composes `domain/selections_format.py`, the shared half | `core/selection_state.py` |
 | `DatasetState` | data dir, well paths, the row cache (a `data/row_cache.RowCache`, bounded by a memory budget, so iterating it yields the wells held rather than the plate), `summaries` (a `data/well_summary.WellSummary` per opened well, which the timepoint / FOV lists are rebuilt from), `rows_version` (a monotonic tick over the row cache's *contents*, bumped through `note_rows_changed` by every path that changes what a cached frame holds — a projected verdict column, a gating rewrite, a curation override, a frame replaced after a write-back, and `begin_load`, because two plates can carry the same well tokens and the memos are keyed on the token; it ticks on change and never on a fresh insert, since bumping per well during a cold load would write each entry under a key the next well's load immediately invalidated), canonical timepoint / FOV lists, `pipeline_info`, and the crop: the rectangle (`crop_region`) plus the frames it filters (`crop_scope_wells` / `_fovs` / `_tps`, where `None` means *every* value of that field and an empty set means none). The scope is persisted with the region and cleared on a dataset swap — it names one plate's wells, and carrying it into the next either quietly filters nothing or filters the wrong thing | `core/dataset_state.py` |
-| `PlotState` | SEM/SD, per-FOV, legend, draw order, fold-change normalization, the bar **significance-bracket** toggle (`show_significance`, N7), the Bar plot's **Bars** geometry (`bar_width`, 0.0 = automatic, and `bar_group_spacing`, read through `barplot.collect.bar_geometry_settings`), and the shared **focus timepoint** (`focus_timepoint`, N5 — the one cross-tab timepoint the Heat Map / Distribution combos read/write, synced via `core/timepoint_sync.py`), and the **time-axis label correction** (`time_scale`, 1.0 = off, and `time_offset`, 0.0 = off — see `core/plot_style.py` above, and read together through `time_rescale.rescale_for`), and the three plot **colour modes** (`bar_color_mode` and `line_color_mode`, each `"plate"` or `"grey"`, and `response_color_mode`, `"series"` or `"grey"` — resolved through `domain/bar_colors.py`, `domain/line_colors.py` and `domain/response_colors.py`. Three fields rather than one because grey means something different on each tab, and one shared field would have made picking a mode on any of them change all three; the Response default is not spelled `"plate"` because that figure's coloured mode is not a plate colour), and the **value-label overlay** (`show_value_labels`, off by default, and `value_label_format`, empty = a format chosen per value — see `core/plot_annotations.py` above), and what each significance bracket says (`significance_label_mode`, `"stars"` by default — see `domain/significance.py` above). Beside the dataclass, **`error_bar_settings(ctx)` is the one reading of the Properties → Statistics error controls** — `(err_kind, ci_scale, draw_err)` from `bar_err_kind` and `bar_show_mode` — with `spread_kind_label` for what a `±` drawn under it is called. It lives here rather than beside the bars because the panel is app-wide and offers **four** kinds while `use_sem` records two: a surface reading the boolean alone renders `ci95` as a plain SEM and `none` as a SEM too, so it draws a different interval from the bar beside it and labels it wrongly. `barplot/collect.bar_err_settings` is the Bar tab's name for it and holds no logic; the Heat Map's per-cell `±` asks it directly | `core/plot_state.py` |
+| `PlotState` | SEM/SD, per-FOV, legend, draw order, fold-change normalization, the bar **significance-bracket** toggle (`show_significance`, N7), the Bar plot's **Bars** geometry (`bar_width`, 0.0 = automatic, and `bar_group_spacing`, read through `barplot.collect.bar_geometry_settings`), the beeswarm **Point spacing** (`swarm_spacing`, 0.0 = Auto, read by `barplot.renderer.swarm_pitch` and `nanowell.controller.swarm_spacing_of`), and the shared **focus timepoint** (`focus_timepoint`, N5 — the one cross-tab timepoint the Heat Map / Distribution combos read/write, synced via `core/timepoint_sync.py`), and the **time-axis label correction** (`time_scale`, 1.0 = off, and `time_offset`, 0.0 = off — see `core/plot_style.py` above, and read together through `time_rescale.rescale_for`), and the three plot **colour modes** (`bar_color_mode` and `line_color_mode`, each `"plate"` or `"grey"`, and `response_color_mode`, `"series"` or `"grey"` — resolved through `domain/bar_colors.py`, `domain/line_colors.py` and `domain/response_colors.py`. Three fields rather than one because grey means something different on each tab, and one shared field would have made picking a mode on any of them change all three; the Response default is not spelled `"plate"` because that figure's coloured mode is not a plate colour), and the **value-label overlay** (`show_value_labels`, off by default, and `value_label_format`, empty = a format chosen per value — see `core/plot_annotations.py` above), and what each significance bracket says (`significance_label_mode`, `"stars"` by default — see `domain/significance.py` above). Beside the dataclass, **`error_bar_settings(ctx)` is the one reading of the Properties → Statistics error controls** — `(err_kind, ci_scale, draw_err)` from `bar_err_kind` and `bar_show_mode` — with `spread_kind_label` for what a `±` drawn under it is called. It lives here rather than beside the bars because the panel is app-wide and offers **four** kinds while `use_sem` records two: a surface reading the boolean alone renders `ci95` as a plain SEM and `none` as a SEM too, so it draws a different interval from the bar beside it and labels it wrongly. `barplot/collect.bar_err_settings` is the Bar tab's name for it and holds no logic; the Heat Map's per-cell `±` asks it directly | `core/plot_state.py` |
 | `StatsState` | Statistics-tab comparison groups + the structured **pairwise** results (`pairwise`, N7 — fed to the Bar plot's significance brackets). **The store is keyed by run context, not a single list.** `runs` maps `(val_col, target_t, stat)` to that configuration's records, so several comparisons coexist and each figure looks up its own; `pairwise` is a derived view of the most recent run, kept for the saved-plot capture and for callers that want exactly one. Those three fields are what decide whether a stored run describes the bars in front of you — the column they are drawn from, the timepoint they are drawn at, and which panel the statistic belongs on — so two runs differing only in statistic are a Mean comparison and a Fraction comparison of the same bars, and both are drawn. A record carrying a `val_col` but no `target_t` keys with `None` in the timepoint slot rather than becoming contextless: that is how older records behaved before the store existed (checked against the channel, not against the time), and treating them as matching anything drew a CY5 comparison over GFP bars. The timepoint half of the lookup goes through `domain.tp_match.tp_close` like every other timepoint comparison in the app, so a fractional timepoint that a combo rounded on its way through the widget still matches the run that was stored for it. `invalidate_stats_run` is now a documented no-op. With one stored run it had to clear — a comparison that no longer matched the tab's selectors was one nobody could account for, an empty results panel beside a plot still carrying its asterisks. Keyed, a run under GFP/t=24/mean stays a true comparison of GFP at t=24 however the tab's selectors move, and clearing would make the feature impossible: running a *second* comparison requires changing a selector, so a handler that emptied the store on every change would delete the first run on the way to the second. The results *text* still clears, which is `stats_on_test_change`'s job — that panel shows one run, and the run it shows is the one the current configuration produced. `stats_update_tp_menu` is the counterpart rule: it repopulates the Timepoint combo through `set_combo_values`, which blocks signals and keeps the user's selection when the new list still holds it, and falls back to the earliest entry only when it does not. An unconditional reset there ran on every channel switch and every arrival at the tab, silently moving the tested timepoint and leaving the next run's brackets gated out. The fallback deliberately does *not* suppress its change signal: when the previous timepoint is genuinely gone the tested timepoint really has moved, so letting `stats_on_test_change` clear the run is the right outcome. The group-statistics result cache lives in core (`AppState.stats_cache`), not here. | `features/stats/state.py` |
 | `ReviewImageState` / `PreviewState` | Review-image view transform + caches; the armed drag-delete scope (`delete_scope_wells` / `_fovs` / `_tps`, where `None` means "the displayed one" and an empty set means "none" — the inverse of `ImageTableState`'s empty-means-all, and never persisted, so a wide scope cannot survive a restart or a dataset swap); preview image maps (`fluor` / `overlay` / `mask`) shared by the Segmentation review-image and Image Table | `features/image_browser/review_image/state.py` |
 | `ImageViewState` | Cross-view image display shared by the image viewers. The per-channel display LUT (`lut_by_channel`), so a brightness tuned in Review Image is the default an *auto* Image Table row inherits (per-row edits override). The **Cell Browser** participates too: its `LUT ▾` popover edits the same `lut_by_channel` (blank = auto per crop), and a per-channel **display colour** (`tint_by_channel`, `get_tint`/`set_tint`) overrides the additive composite tint a channel is painted with (`worker.resolve_channel_tint` — override wins, else the fixed per-index palette) | `core/image_view_state.py` |
@@ -19627,6 +19701,7 @@ The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which u
 | `FooterScrollArea` (`widgets/footer_scroll_area.py`) | A `QScrollArea` with a pinned footer under the viewport; the viewport is shortened by the footer's height, which follows the footer's contents. The Analyze run footer. |
 | `ValueCombo` (`widgets/value_combo.py`) | A combo of `(value, label)` items, read and written by `value()` / `setValue()`, so the label can be copy while the value stays an argument. The Analyze correction and Cellpose-model combos. |
 | `RailNav` | The left-rail section navigator. |
+| `form_registry` (`widgets/form_registry.py`) | Which widgets have an alternate form, and of what kind: `declare(widget, kind)` from a constructor, `register(widget, apply)` for a view's own form, `declared(kind)` for the live ones, `add_listener` for whoever applies them (phone layout's shell). Kinds, not layouts — it imports nothing from the application. Held weakly; liveness is `shiboken6.isValid`, because a wrapper outlives its C++ widget. §2 *Phone layout*. |
 | `info_icon` (`widgets/info_icon.py`) | The `ⓘ` hover-for-more marker, styled by the `#InfoHint` QSS rule. A function rather than a class — it returns a configured `QLabel`. Shared by the Analyze form (`AnalyzeFormChromeMixin._info_icon` delegates to it) and the Playground's threshold rows, so the app has one "there is an explanation here" affordance rather than a copy per pane. Sets WhatsThis as well as the tooltip, which is the route that works for someone who cannot hold a hover. |
 | `SchemaPicker` (`widgets/schema_picker.py`) | The filename-schema builder: a separator box, one dropdown per filename position, and the colon-delimited schema string the two of them write. The dropdowns and the string are two views of one value and sync both ways, each write blocking the other's signals so they cannot chase each other. Vocabulary and validity come from `util.schema` — the module the pipeline parses schemas with — so the picker offers exactly the fields the pipeline understands, reads a string the way `parse_schema` reads it (empty tokens collapse, rather than the dropdowns showing a layout the run will not use), and reports errors in `validate_schema`'s own wording. `schema()` returns the typed string in preference to the dropdowns, since the string can express more positions than there are dropdowns. `row_factory(parent, label) -> cell` is the layout seam: the Analyze form passes its own `_row` so the picker sits inside that form's label column, and the Datasets pane's Zip Loose Folder page takes the default plain row. Mounted by both, because both ask the user about the same filenames — Zip Loose Folder produces the archives Analyze then reads. **Detection is opt-in**: passing `detect_label` builds a *Detect from filenames* button as the picker's first row, in the field column, with the two-register readout beneath it and the rows it fills below that, and a host that will not answer `detectRequested` therefore never shows a button that does nothing. `setDetection(text, note=…, problem=…)` takes sentences the picker neither composes nor understands; the neutral half is muted body text and the note is a `QLabel#Notice` panel, so a result the reader must not skim past differs in outline and not only in hue. |
 | `SegmentedControl`, `ChipGroup`, `Stepper`, `StyledSlider`, `ToggleSwitch` | Form controls; each exposes `bindingAdapter()` returning `(getter, setter, change_signal)` for the Export Style sidebar's binding loop. |

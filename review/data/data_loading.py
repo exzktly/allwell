@@ -1468,6 +1468,7 @@ def _beeswarm_jitter(
     x_center: float = 0.0,
     max_spread: float = 0.35,
     n_bins: int = 40,
+    pitch: float | None = None,
 ) -> tuple[list[float], list[float]]:
     """Standard (non-overlapping) beeswarm x-positions for a column.
 
@@ -1483,6 +1484,14 @@ def _beeswarm_jitter(
     Placement runs in a normalised space (y scaled to ``[0, 1]``, dot diameter
     ``d = 1/n_bins``); the resulting offsets are then scaled so the densest part
     of the column just fills ``max_spread`` (its half-slot width). Deterministic.
+
+    *pitch* is Properties → Beeswarm → Point spacing set by hand: the x
+    distance, in data units, that one packing diameter ``d`` is drawn at. The
+    swarm is then drawn at that fixed spacing instead of being stretched to
+    fill the column, so a column of a few cells stays narrow and the spacing is
+    the same in every column. A swarm that would be wider than ``max_spread``
+    at that spacing is still compressed to it — the slot is the column's, and
+    a swarm drawn past it would run into its neighbour. ``None`` is Auto.
     """
     arr = np.asarray(values, dtype=float)
     n = arr.size
@@ -1556,7 +1565,12 @@ def _beeswarm_jitter(
         placed_y.append(y)
 
     m = float(np.max(np.abs(offs)))
-    if m > 0.0:
+    if pitch is not None and pitch > 0.0:
+        offs *= pitch / d
+        m *= pitch / d
+        if m > max_spread:
+            offs *= max_spread / m
+    elif m > 0.0:
         offs *= max_spread / m
     xs = x_center + offs
     return xs.tolist(), arr.tolist()

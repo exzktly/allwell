@@ -232,8 +232,14 @@ _FOOTER_BASE = 0.035
 _LINE = 0.03
 
 
-def render_distribution(fig, model: DistributionModel, *, selected=()) -> HitMap:
-    """Draw *model* on *fig* (cleared first) and return where every dot went."""
+def render_distribution(fig, model: DistributionModel, *, selected=(), wrap_footer: bool = False,
+                        spacing: float = 1.0) -> HitMap:
+    """Draw *model* on *fig* (cleared first) and return where every dot went.
+
+    *spacing* is Properties → Beeswarm → Point spacing: the distance between neighbouring dots as a multiple of a
+    dot's size, so 1.0 (Auto) packs them edge to edge, less overlaps them and fits more in a slot, more leaves gaps
+    between them. The dots themselves stay ``DOT_PT`` across; only where they are placed changes."""
+    spacing = spacing if spacing > 0 else 1.0
     fig.clear()
     hits = HitMap()
     panels = model.panels[:MAX_PANELS]
@@ -254,7 +260,7 @@ def render_distribution(fig, model: DistributionModel, *, selected=()) -> HitMap
     densities = hidden = 0
     for i, (ax, panel) in enumerate(zip(axes, panels)):
         _prepare_axes(ax, scale)
-        d, u = _draw_panel(fig, ax, model, panel, hits, rings, inks, ylim=shared)
+        d, u = _draw_panel(fig, ax, model, panel, hits, rings, inks, ylim=shared, spacing=spacing)
         densities, hidden = densities + d, hidden + u
         if i % cols:
             ax.tick_params(labelleft=False)
@@ -264,20 +270,18 @@ def render_distribution(fig, model: DistributionModel, *, selected=()) -> HitMap
             _ink(ax.set_xlabel(model.x_label, color=inks[1], labelpad=ax._aw_gutter_pt))
     _footer(fig, model, inks, panels, densities, hidden,
             crowded=any(getattr(ax, "_aw_crowded", False) for ax in axes),
-            counts_hidden=any(getattr(ax, "_aw_counts_hidden", False) for ax in axes))
+            counts_hidden=any(getattr(ax, "_aw_counts_hidden", False) for ax in axes),
+            wrap_footer=wrap_footer)
     return hits
 
 
-def _wrapped_for_phone(fig, lines: list) -> tuple[list, int]:
-    """*lines* broken to the figure's width in phone layout, and how many of them the first line became.
+def _wrapped_to_figure(fig, lines: list) -> tuple[list, int]:
+    """*lines* broken to the figure's width, and how many of them the first line became.
 
     At a desk every footer line fits its figure; on a phone the longer ones ran off the right edge ("Timepoints: 0 h
-    t00 · 1 h t01 · …"). Each piece becomes a line of its own, so the footer's spacing and the room it reserves follow.
-    A character of the footer's type is taken as about 0.55 of its size wide."""
-    from core import phone_layout
-
-    if not phone_layout.is_on():
-        return lines, 1
+    t00 · 1 h t01 · …"), so the caller asks for the wrap (``render_distribution(wrap_footer=True)``). Each piece
+    becomes a line of its own, so the footer's spacing and the room it reserves follow. A character of the footer's
+    type is taken as about 0.55 of its size wide."""
     import textwrap
 
     width_pt = fig.get_size_inches()[0] * 72 * (1 - 0.07 - 0.02)
@@ -312,7 +316,7 @@ def _members_per_tick(model, panel) -> int:
     return max((len({s.well for s in panel.swarms if round(s.x) == round(t[0])}) for t in panel.ticks), default=1)
 
 
-def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple[int, int]:
+def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None, spacing: float = 1.0) -> tuple[int, int]:
     """Draw one panel; return how many of its sub-swarms were drawn as densities (U2), and how many dots with a
     value did not fit their slot (each swarm's are counted under it; the footer gives the total).
 
@@ -366,7 +370,7 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
         if density:
             _draw_density(ax, swarm, half, ink, fill=model.decoration.inks.get(swarm.group))
         else:
-            layout = _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink)
+            layout = _draw_swarm(ax, model, swarm, half, dot_w * spacing, dot_h * spacing, hits, rings, ink)
             hidden += layout.n_hidden
             if layout.n_hidden and not crowded:
                 # Under the swarm, below its exclusions: one line per swarm, so it can never overprint a
@@ -461,7 +465,10 @@ def _draw_centres(ax, model, panel, ink) -> None:
 
 
 def _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink):
-    """Draw one swarm's dots; return its :class:`SwarmLayout` (what was drawn, and what did not fit)."""
+    """Draw one swarm's dots; return its :class:`SwarmLayout` (what was drawn, and what did not fit).
+
+    *dot_w* and *dot_h* are the pitch the dots are laid out at — a dot's size times the Point spacing — not the size
+    they are drawn at, which is always ``DOT_PT``."""
     from widgets.plot_card import theme_paired_colours
 
     layout = swarm_layout(swarm.values, half_width=half, dot_w=dot_w, dot_h=dot_h, integer=model.integer)
@@ -530,7 +537,7 @@ def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:
 
 
 def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden: int, *,
-            crowded: bool = False, counts_hidden: bool = False) -> None:
+            crowded: bool = False, counts_hidden: bool = False, wrap_footer: bool = False) -> None:
     """The sums the figure owes the reader, over the panels drawn; what was left out is stated beside them."""
 
     _bg, ink, muted = inks
@@ -567,7 +574,7 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     if densities:
         lines.append("Sets of more than four wells are drawn as densities with each well's median; select fewer "
                      "wells to see and click single nanowells.")
-    lines, line1_parts = _wrapped_for_phone(fig, lines)
+    lines, line1_parts = _wrapped_to_figure(fig, lines) if wrap_footer else (lines, 1)
     if len(lines) > _FOOTER_LINES:
         # Every line here is owed to the reader — a panel not drawn, values not drawn as dots — so the footer
         # grows to hold them rather than cutting the last (roll-up review X11).

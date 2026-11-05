@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
+from widgets.canvas import make_canvas
 from widgets.icon_button import IconButton
 from widgets.mpl_toolbar import MplToolbar
 from util.aw_safe import swallowed
@@ -59,9 +60,7 @@ try:  # matplotlib is a project dependency; degrade gracefully if absent.
     # still override, but the app-wide default is transparent.
     matplotlib.rcParams["legend.framealpha"] = 0.0
     matplotlib.rcParams["legend.facecolor"] = "none"
-    from matplotlib.backends.backend_qtagg import (
-        FigureCanvasQTAgg as _FigureCanvas, NavigationToolbar2QT as _NavToolbar,
-    )
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as _NavToolbar
     from matplotlib.figure import Figure as _Figure
     _HAVE_MPL = True
 except Exception:  # pragma: no cover
@@ -254,7 +253,7 @@ if _HAVE_MPL:
             # Back-reference so plot renderers (e.g. review.plot_style.apply_ax_style)
             # can look up the active card from any axes via ``ax.figure._plot_card``.
             self.figure._plot_card = self  # type: ignore[attr-defined]
-            self.canvas = _FigureCanvas(self.figure)
+            self.canvas = make_canvas(self.figure)
             self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
             # Hidden real toolbar — we reuse its handlers, not its UI.

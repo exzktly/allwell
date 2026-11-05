@@ -713,7 +713,7 @@ def redraw(ctx) -> None:
         responding_above=st.thresholds.get(metric_column(metric, channel)),
         subset=page_subset(ctx, st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
         gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
-        names=_page_names(ctx, st.view, well), **array)
+        names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx), **array)
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
@@ -848,6 +848,16 @@ def set_display_range(ctx, low, high) -> None:
     redraw(ctx)
 
 
+def swarm_spacing_of(ctx) -> float:
+    """Properties → Beeswarm → Point spacing, as a multiple of a dot's size; 0.0 is Auto.
+
+    The one reading of ``PlotState.swarm_spacing`` for the page and Batch Export's Nanowells mode, so a batch
+    figure is laid out at the spacing the page shows."""
+    plot = getattr(getattr(ctx, "state", None), "plot", None)
+    value = float(getattr(plot, "swarm_spacing", 0.0) or 0.0)
+    return value if value > 0 else 0.0
+
+
 def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
               note: str = "", tableless=(), selected=(), responding_above: float | None = None, moving: int = 0,
@@ -855,7 +865,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
               stats_cache: dict | None = None, gate=None,
-              decoration: Decoration | None = None, names: dict | None = None) -> tuple[object, object]:
+              decoration: Decoration | None = None, names: dict | None = None,
+              swarm_spacing: float = 0.0) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -878,6 +889,10 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     (``_identity_controller.draw_identity``), with *identity* the page's inputs to it — its mode, the sidecar and
     montages it holds — or, without them, the distance map from the sidecar on disk; its model is the
     ``_identity_render.IdentityDrawn``. It has no metric, so the metric, Subset and grouping are not used.
+
+    *swarm_spacing* is Properties → Beeswarm → Point spacing (``PlotState.swarm_spacing``, read by
+    :func:`swarm_spacing_of`): how far apart the Distribution view's dots are laid out, as a multiple of a dot's
+    size, with 0 meaning Auto — edge to edge, the spacing the view has always used.
 
     The Statistics view tests the samples the Distribution view draws *Along x: Wells* at *timepoint*
     (:func:`statistics_result`): the wells' nanowells (*stats_unit* ``nanowells``) or the groups' well medians
@@ -988,7 +1003,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if model.empty:
         render_message(fig, model.empty, gid="nw-moving-empty")
         return None, model
-    return render_distribution(fig, model, selected=selected), model
+    return render_distribution(fig, model, selected=selected, spacing=swarm_spacing), model
 
 
 def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels) -> str:

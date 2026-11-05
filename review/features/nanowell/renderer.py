@@ -279,8 +279,13 @@ def _fit_text(text: str, width_pt: float, size_pt: float, *, em: float = _GLYPH_
     return "\n".join(textwrap.wrap(text, chars)) or text
 
 
-def render_distribution(fig, model: DistributionModel, *, selected=()) -> HitMap:
-    """Draw *model* on *fig* (cleared first) and return where every dot went."""
+def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: float = 1.0) -> HitMap:
+    """Draw *model* on *fig* (cleared first) and return where every dot went.
+
+    *spacing* is Properties → Beeswarm → Point spacing: the distance between neighbouring dots as a multiple of a
+    dot's size, so 1.0 (Auto) packs them edge to edge, less overlaps them and fits more in a slot, more leaves gaps
+    between them. The dots themselves stay ``DOT_PT`` across; only where they are placed changes."""
+    spacing = spacing if spacing > 0 else 1.0
     fig.clear()
     hits = HitMap()
     panels = model.panels[:MAX_PANELS]
@@ -302,7 +307,7 @@ def render_distribution(fig, model: DistributionModel, *, selected=()) -> HitMap
     densities = hidden = 0
     for i, (ax, panel) in enumerate(zip(axes, panels)):
         _prepare_axes(ax, scale)
-        d, u = _draw_panel(fig, ax, model, panel, hits, rings, inks, ylim=shared)
+        d, u = _draw_panel(fig, ax, model, panel, hits, rings, inks, ylim=shared, spacing=spacing)
         densities, hidden = densities + d, hidden + u
         if i % cols:
             ax.tick_params(labelleft=False)
@@ -358,7 +363,7 @@ def _members_per_tick(model, panel) -> int:
     return max((len({s.well for s in panel.swarms if round(s.x) == round(t[0])}) for t in panel.ticks), default=1)
 
 
-def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple[int, int]:
+def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None, spacing: float = 1.0) -> tuple[int, int]:
     """Draw one panel; return how many of its sub-swarms were drawn as densities (U2), and how many dots with a
     value did not fit their slot (each swarm's are counted under it; the footer gives the total).
 
@@ -412,7 +417,7 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None) -> tuple
         if density:
             _draw_density(ax, swarm, half, ink, fill=model.decoration.inks.get(swarm.group))
         else:
-            layout = _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink)
+            layout = _draw_swarm(ax, model, swarm, half, dot_w * spacing, dot_h * spacing, hits, rings, ink)
             hidden += layout.n_hidden
             if layout.n_hidden and not crowded:
                 # Under the swarm, below its exclusions: one line per swarm, so it can never overprint a
@@ -507,7 +512,10 @@ def _draw_centres(ax, model, panel, ink) -> None:
 
 
 def _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink):
-    """Draw one swarm's dots; return its :class:`SwarmLayout` (what was drawn, and what did not fit)."""
+    """Draw one swarm's dots; return its :class:`SwarmLayout` (what was drawn, and what did not fit).
+
+    *dot_w* and *dot_h* are the pitch the dots are laid out at — a dot's size times the Point spacing — not the size
+    they are drawn at, which is always ``DOT_PT``."""
     from widgets.plot_card import theme_paired_colours
 
     layout = swarm_layout(swarm.values, half_width=half, dot_w=dot_w, dot_h=dot_h, integer=model.integer)

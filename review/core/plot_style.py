@@ -1227,7 +1227,7 @@ def colour_mapped(fig) -> list:
     for ax in fig.axes:
         if getattr(ax, "_aw_colorbar", False):
             continue
-        for artist in (*ax.images, *ax.collections):
+        for artist in (*getattr(ax, "images", ()), *getattr(ax, "collections", ())):
             if getattr(artist, "colorbar", None) is None or getattr(artist, "_aw_owns_clim", False):
                 continue
             if artist.get_array() is None:

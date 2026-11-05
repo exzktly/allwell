@@ -205,12 +205,6 @@ def test_the_log_scale_rows_are_not_offered(qtbot, monkeypatch):
     assert "X limits" in labels, labels
 
 
-def test_the_colour_limits_row_is_not_offered_on_the_heat_map(qtbot, monkeypatch):
-    """The heat map's colour range is Display ▾'s own; a second control would fight it."""
-    _app, sb = _sidebar(qtbot, monkeypatch, kind="_heatmap_fig")
-    assert "Colour limits" not in _row_labels(sb, "Limits & Scale")
-
-
 def test_the_colour_limits_row_is_offered_on_the_nanowells_figure(qtbot, monkeypatch):
     _app, sb = _sidebar(qtbot, monkeypatch, kind="_nw_fig")
     assert "Colour limits" in _row_labels(sb, "Limits & Scale")

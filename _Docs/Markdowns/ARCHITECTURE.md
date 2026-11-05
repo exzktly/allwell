@@ -20081,12 +20081,18 @@ or a non-positive low end on a `LogNorm` leaves the plot's own. The keys are in
 `AXIS_LIMIT_PREF_KEYS`, so they are per figure, cleared by **Auto scale** and
 dropped on a dataset switch with the X and Y limits, but they are not in the
 per-panel buckets: a colour scale belongs to the figure, not to a subplot. The
-Heat Map marks its image `_aw_owns_clim`, because Display ▾ owns its range
-(Auto / Global / typed, and the log norm), and the row is hidden there through
-the `colour_limits` facet of `_STYLE_FACETS_A_FIGURE_LACKS`
-(`tests/test_properties_hides_what_it_cannot_do.py` re-measures that it changes
-nothing). `tests/test_colour_limits.py` covers the pass, the Array view's
-filled nanowells through `render_array`, and the real sidebar's two fields.
+row is offered only on the figures in `properties_view._COLOUR_SCALE_FIGURES`
+(Nanowells, Spatial, Multivariate), each with what it colours: a bar, line or
+scatter plot keys its colours with a legend, so the row would move nothing
+there. The roster is held against what it lists — the feature packages whose
+code makes a colour bar — so a new one fails rather than going without the row.
+The Heat Map, the one exemption, marks its image `_aw_owns_clim`, because Display
+▾ owns its range (Auto / Global / typed, and the log norm), and carries a
+`colour_limits` facet in `_STYLE_FACETS_A_FIGURE_LACKS`
+(`tests/test_properties_hides_what_it_cannot_do.py` re-measures that the keys
+change nothing there). `tests/test_colour_limits.py` covers the pass, the Array
+view's filled nanowells through `render_array`, the real sidebar's two fields
+and Auto scale, and the roster.
 
 **The store is replaced, not edited, so nothing may hold a piece of it.**
 `view_state.restore` rebuilds `axis_prefs` as `{str(k): dict(v)}` and

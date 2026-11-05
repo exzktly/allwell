@@ -133,6 +133,19 @@ _STYLE_FACETS_A_FIGURE_LACKS: dict[str, dict[str, str]] = {
 }
 
 
+#: The figures that draw a colour scale with a colour bar, so Limits & Scale offers them **Colour limits**
+#: (``plot_style._apply_colour_limits``), each with what it colours. A positive roster rather than a facet the
+#: others lack: a bar, line or scatter plot keys its colours with a legend, never a colour bar, and offering the row
+#: there would be a control that moves nothing. The Heat Map draws one but its range is Display ▾'s (the
+#: ``colour_limits`` facet above). ``tests/test_colour_limits.py`` holds the roster to the renderers: each listed
+#: figure's renderer makes a colour bar, and the bar, line and scatter renderers make none.
+_COLOUR_SCALE_FIGURES: dict[str, str] = {
+    "_nw_fig": "the Array view's nanowells filled by the metric, the Identity view's distance map",
+    "_sp_fig": "the Spatial map's points coloured by a measurement",
+    "_mv_fig": "the Multivariate correlation and loading matrices",
+}
+
+
 #: The same features, named by *tab* rather than by figure, for the reset path
 #: (``_redraw_active_plot``), which dispatches on the tab in view.
 _FEATURES_THAT_REDRAW_THEMSELVES = tuple(
@@ -1241,7 +1254,7 @@ class ExportStyleSidebar(QWidget):
             self._bind_getter_setter(f"{lim_key}_min", lo_edit)
             self._bind_getter_setter(f"{lim_key}_max", hi_edit)
             kit.add_row(s_lim, label, kit.hrow(lo_edit, QLabel("…"), hi_edit, spacing=sp.xs))
-        if self._supports("colour_limits"):
+        if self._offers_colour_limits():
             # MATLAB's ``clim``: the range of the figure's colour scale — the Array view's filled nanowells, the
             # Spatial and Multivariate maps — wherever a colour bar keys it (``plot_style._apply_colour_limits``).
             # A restyle, not a redraw: ``set_clim`` recolours the drawn artists and their colour bar follows.
@@ -1942,6 +1955,11 @@ class ExportStyleSidebar(QWidget):
     def _is_heatmap_fig(self) -> bool:
         """True only for the Heat Map figure (the cell-value format applies there)."""
         return getattr(self._app, "_heatmap_fig", None) is self._fig
+
+    def _offers_colour_limits(self) -> bool:
+        """Whether this figure draws a colour scale the Colour limits row can set (:data:`_COLOUR_SCALE_FIGURES`)."""
+        return self._supports("colour_limits") and any(
+            getattr(self._app, attr, None) is self._fig for attr in _COLOUR_SCALE_FIGURES)
 
     def _supports(self, facet: str) -> bool:
         """Whether this figure has the thing *facet* names.

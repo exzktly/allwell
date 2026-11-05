@@ -138,3 +138,31 @@ def test_typing_in_the_properties_bar_recolours_the_figure(qtbot, monkeypatch):
     sb._autoscale_axes()
     assert lo.text() == "" and hi.text() == ""
     assert coll.get_clim() == (1.0, 9.0)
+
+
+#: Which feature package draws each figure the Colour limits row is offered on.
+_FEATURE_OF = {"_nw_fig": "nanowell", "_sp_fig": "spatial", "_mv_fig": "multivariate"}
+
+
+def test_the_row_is_offered_exactly_where_a_colour_bar_is_drawn():
+    """``_COLOUR_SCALE_FIGURES`` held against what it is a list of: the features whose code makes a colour bar. A
+    new feature that draws one, and is not in the roster, fails here rather than going without the row; the Heat
+    Map is the one exemption, its range being Display ▾'s (``_aw_owns_clim``)."""
+    from pathlib import Path
+
+    from review.features.export.properties_view import _COLOUR_SCALE_FIGURES
+
+    root = Path(__file__).resolve().parents[1] / "review" / "features"
+    drawing = {pkg.name for pkg in root.iterdir() if pkg.is_dir()
+               and any("colorbar(" in f.read_text(encoding="utf-8") for f in pkg.rglob("*.py"))}
+    assert drawing - {"heatmap"} == {_FEATURE_OF[attr] for attr in _COLOUR_SCALE_FIGURES}
+
+
+@pytest.mark.parametrize("kind", ["_line_fig", "_bar_fig", "_scatter_fig", "_heatmap_fig"])
+def test_a_figure_without_a_colour_scale_is_not_offered_the_row(qtbot, monkeypatch, kind):
+    pytest.importorskip("PySide6")
+    from tests.test_properties_hides_what_it_cannot_do import _row_labels, _sidebar
+
+    _app, sb = _sidebar(qtbot, monkeypatch, kind=kind)
+    assert "Colour limits" not in _row_labels(sb, "Limits & Scale")
+    assert not {"c_lim_min", "c_lim_max"} & set(sb._getters)

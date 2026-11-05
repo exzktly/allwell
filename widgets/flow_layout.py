@@ -228,6 +228,8 @@ class FlowLayout(QLayout):
         """
         for i, item in enumerate(self._items):
             if item.widget() is widget:
+                if i == len(self._items) - 1:
+                    return True                          # already last: no relayout
                 self._items.append(self._items.pop(i))
                 self.invalidate()
                 return True
@@ -239,6 +241,8 @@ class FlowLayout(QLayout):
         items = [item.widget() for item in self._items]
         if widget not in items or before not in items or widget is before:
             return False
+        if items.index(widget) == items.index(before) - 1:
+            return True                                  # already there: no relayout
         moved = self._items.pop(items.index(widget))
         index = [item.widget() for item in self._items].index(before)
         self._items.insert(index, moved)

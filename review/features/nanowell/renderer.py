@@ -29,6 +29,7 @@ import numpy as np
 from review.features.nanowell._array_key import (KEY_COLUMNS, draw_key, key_entries, no_value_marks, reason_tag,
                                                   state_word)
 from review.features.nanowell.array_compute import padded
+from review.features.nanowell import array_hover_compute as ahc
 from review.features.nanowell.background_compute import short_clause
 from review.features.nanowell.crop_grid_compute import grid_shape, shown_timepoints
 from review.features.nanowell.beeswarm_compute import swarm_layout
@@ -1310,6 +1311,11 @@ class ArrayDrawn:
     rendered: object = None          # full_montage_compute.Rendered, when the image is the raw tiles
     fit: tuple | None = None         # the region *Fit* shows, at the axes' shape: what the zoom readout is against
     sites: object = None             # the scene's nanowells (``ArraySites``), drawn or not: what a double-click finds
+    scene: object = None             # the scene drawn (``array_compute.ArrayScene``): what a hover reads
+    label: str = ""                  # what the nanowells are coloured by, as the figure names it
+    #: ``(q, r) -> row`` of the nanowell table at the scene's timepoint, built at the first hover
+    #: (``array_hover_compute.rows_by_address``).
+    rows: dict | None = None
 
 
 def _image_extent(image) -> tuple[float, float, float, float]:
@@ -1440,7 +1446,8 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
                         bottom=_FOOTER_BASE + (len(lines) + len(notes)
                                                + (1 if layers.addresses or layers.values else 0) + 0.5) * _LINE)
     ax = drawn.ax
-    drawn.sites = scene.sites
+    drawn.sites, drawn.scene, drawn.label = scene.sites, scene, label
+    ax._aw_hover_label = _hover_label(scene)
     _bg, ink, muted = _inks(ax)
     if image is not None:
         _draw_image(ax, drawn, image)
@@ -1473,6 +1480,19 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     if layers.record:
         _draw_record(fig, scene.record, right + 0.08, ink, muted)
     return drawn
+
+
+def _hover_label(scene):
+    """What the canvas's readout chip leads with over a nanowell: its address, state and value
+    (``array_hover_compute.short_text``); nothing off the nanowells."""
+    def label(x, y) -> str | None:
+        k = ahc.site_at(scene.sites, x, y)
+        if k is None:
+            return None
+        site = scene.sites.sites[k]
+        return ahc.short_text(site, scene.sites.values[k], str(scene.sites.state[k]),
+                              scene.why.get((site[1], site[2]), ""))
+    return label
 
 
 def _array_axes(fig, scene, image, region, *, right: float, bottom: float, top: float = 0.92) -> ArrayDrawn:

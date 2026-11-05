@@ -234,13 +234,17 @@ def test_the_editor_builds_a_subset_of_two_conditions_and_the_figure_draws_it(pa
     row.at_cb.setCurrentIndex(row.at_cb.findData("latest"))
     row.a_spin.setValue(3)
     st = page.state.feature_slice("nanowell")
+    assert st.subset == ss.Subset() and editor.apply_btn.isEnabled()  # written, not drawn until Apply
+    editor.apply_btn.click()
     assert st.subset == ss.Subset((C("n0", "ge", 1), C("count_fc", "ge", 3.0, at="latest")))
+    assert not editor.apply_btn.isEnabled() and not editor.reset_btn.isEnabled()
     assert _dots(page) == [("A01", 0), ("A01", 3), ("A01", 4), ("A01", 7), ("B01", 1)]
     assert any(t.startswith("Subset: Starting cells ≥1 and Count fold change at the latest timepoint ≥3")
                for t in _texts(page))
     assert page.widgets.get("_nw_subset_cb").currentData() == "custom"
     assert page.widgets.get("_nw_subset_cb").property("filterActive") is True
     editor.match_cb.setCurrentIndex(editor.match_cb.findData("any"))
+    editor.apply_btn.click()
     assert st.subset.match == "any" and ("A01", 1) in _dots(page)    # 2 cells at the start: meets the first
 
 
@@ -250,9 +254,12 @@ def test_a_range_typed_upside_down_is_said_and_changes_nothing(page):
     st = page.state.feature_slice("nanowell")
     row = editor.rows[0]
     row.op_cb.setCurrentIndex(row.op_cb.findData("between"))         # starts as 1–1: a range, never upside down
+    editor.apply_btn.click()
     assert st.subset == ss.Subset.starting(1, 1)
     before = st.subset
     row.a_spin.setValue(5)
+    assert not editor.apply_btn.isEnabled()                          # not a subset: nothing to apply
+    editor.apply_btn.click()
     assert st.subset == before
     assert editor.status.objectName() == "Warn" and "lower bound (5) is above the upper (1)" in editor.status.text()
 
@@ -261,10 +268,13 @@ def test_removing_and_clearing_conditions_brings_every_nanowell_back(page):
     editor = _editor(page)
     editor.add_btn.click()
     editor.add_btn.click()
+    editor.apply_btn.click()
     st = page.state.feature_slice("nanowell")
     editor.rows[0].remove_btn.click()
+    editor.apply_btn.click()
     assert len(st.subset.conditions) == 1
     editor.clear_btn.click()
+    editor.apply_btn.click()
     assert st.subset == ss.Subset() and ("A01", 5) in _dots(page)
     assert page.widgets.get("_nw_subset_cb").property("filterActive") is False
 
@@ -291,14 +301,16 @@ def test_an_imaging_field_condition_is_built_from_the_tiles_the_run_recorded(pag
     row.field_cb.setCurrentIndex(row.field_cb.findData("owner"))
     assert row.tiles_btn.isVisibleTo(page.window) and not row.a_spin.isVisibleTo(page.window)
     st = page.state.feature_slice("nanowell")
-    assert st.subset == ss.Subset((C("n0", "ge", 1),))                  # no tile ticked yet: not applied
+    assert st.subset == ss.Subset() and not editor.apply_btn.isEnabled()   # no tile ticked yet: nothing to apply
     assert editor.status.objectName() == "Warn"
     tiles = [a for a in row.tiles_menu.actions() if a.isCheckable()]
     assert [a.text() for a in tiles] == ["F0"]
     tiles[0].setChecked(True)
+    editor.apply_btn.click()
     assert st.subset == ss.Subset((C("owner", "in", values=("F0",), at="baseline"),))
     assert len(_dots(page)) == 10              # every nanowell: an occluded one still records the tile it was on
     row.op_cb.setCurrentIndex(row.op_cb.findData("not_in"))
+    editor.apply_btn.click()
     assert any(t.startswith("No nanowell of the drawn wells is in the subset (Imaging field at baseline is not one "
                             "of F0)") for t in _texts(page))
 
@@ -314,6 +326,7 @@ def test_a_seam_condition_is_built_in_the_editor(page):
     assert row.at_cb.isVisibleTo(page.window)
     row.op_cb.setCurrentIndex(row.op_cb.findData("no"))
     row.at_cb.setCurrentIndex(row.at_cb.findData("every"))
+    editor.apply_btn.click()
     st = page.state.feature_slice("nanowell")
     assert st.subset == ss.Subset((C("fused", "no", at="every"),))
 
@@ -329,7 +342,53 @@ def test_a_per_timepoint_property_is_built_in_the_editor_and_the_figure_draws_it
     assert not row.a_spin.isVisibleTo(page.window) and row.at_cb.isVisibleTo(page.window)
     row.op_cb.setCurrentIndex(row.op_cb.findData("no"))
     row.at_cb.setCurrentIndex(row.at_cb.findData("every"))
+    editor.apply_btn.click()
     st = page.state.feature_slice("nanowell")
     assert st.subset == ss.Subset((C("occluded", "no", at="every"),))
     assert any(t.startswith("Subset: Occluded or clipped at every timepoint: no: 9 of 10 nanowells kept — 1 outside")
                for t in _texts(page))
+
+
+# ── Apply and Reset ──────────────────────────────────────────────────────────
+# Asked for: "add an apply/reset button so that it updates only then, not after every change". Every edit used to
+# redraw every view at once, including for each half-typed bound.
+def test_edits_redraw_nothing_until_apply(page, monkeypatch):
+    redraws = []
+    real = nwc.redraw
+    monkeypatch.setattr(nwc, "redraw", lambda ctx, *a, **k: (redraws.append(1), real(ctx, *a, **k))[1])
+    editor = _editor(page)
+    before = _dots(page)
+    editor.add_btn.click()
+    row = editor.rows[0]
+    row.a_spin.setValue(2)
+    row.op_cb.setCurrentIndex(row.op_cb.findData("le"))
+    assert redraws == [] and _dots(page) == before
+    assert editor.status.text().startswith("Not applied yet — Starting cells ≤2")
+    editor.apply_btn.click()
+    assert len(redraws) == 1 and page.state.feature_slice("nanowell").subset == ss.Subset((C("n0", "le", 2),))
+
+
+def test_reset_puts_back_the_subset_in_use(page):
+    st = page.state.feature_slice("nanowell")
+    nwc.set_subset(page, ss.Subset((C("n0", "ge", 2), C("ring", "le", 9))).validated())
+    editor = _editor(page)
+    editor.rows[0].a_spin.setValue(5)
+    editor.rows[1].remove_btn.click()
+    editor.add_btn.click()
+    assert editor.reset_btn.isEnabled()
+    editor.reset_btn.click()
+    assert [r.condition().validated() for r in editor.rows] == list(st.subset.conditions)
+    assert not editor.reset_btn.isEnabled() and not editor.apply_btn.isEnabled()
+
+
+def test_a_draft_survives_another_control_redrawing_the_page(page):
+    """The rows are rebuilt from the page only when the subset in use changed — not when an unrelated control
+    refreshes the band, or edits not yet applied would vanish."""
+    editor = _editor(page)
+    editor.add_btn.click()
+    editor.rows[0].a_spin.setValue(3)
+    page.widgets.get("_nw_refresh_controls")()
+    nwc.redraw(page)
+    assert [r.condition().validated() for r in editor.rows] == [C("n0", "ge", 3).validated()] and editor.apply_btn.isEnabled()
+    nwc.set_starting_cells(page, 1, 1)                          # a preset chosen in the box: the draft gives way
+    assert [r.condition().validated() for r in editor.rows] == list(ss.Subset.starting(1, 1).conditions)

@@ -336,8 +336,6 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_baseline_cb", baseline_cb)
     grp_baseline = band.add_scope("Baseline", baseline_cb)
 
-    start = build_subset_control(ctx, band, timepoint_text)
-
     cohort_box = QCheckBox("Fixed cohort")
     cohort_box.setToolTip(_COHORT_TIP)
     cohort_box.toggled.connect(lambda on: nwc.set_cohort(ctx, on))
@@ -363,6 +361,12 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_baseline_moving_spin", baseline_moving_spin)
     grp_baseline_moving = band.add_scope("Baseline average (timepoints, 1 = off)", baseline_moving_spin)
 
+    # The Subset last on the data row: it narrows the nanowells rather than choosing what is measured of them.
+    start = build_subset_control(ctx, band, timepoint_text)
+    # The Array view's rows: what is measured (above) · which well and timepoint, and its anchor · how it is drawn.
+    # Shown only there (``_refresh_array_controls``); the other views flow their controls on as before.
+    data_row_end = band.add_break()
+
     # The anchor walk's controls lead the view's own controls, in the place of Well and Timepoint, which the walk
     # drives and its label names ("3 of 17 · B04 at 24h"): the walk adds nothing to the band's width.
     queue = build_queue_controls(ctx, band)
@@ -386,6 +390,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     exclusion.excluded_group = band.add_scope("", exclusion.excluded, trailing=True)
 
     array_controls = _build_array_controls(ctx, band)
+    array_controls.groups.append(data_row_end)
+    # *Excluded (n)* names wells, so on the Array view it ends the well row; elsewhere it stays last in the band.
+    array_controls.band, array_controls.excluded_group = band, exclusion.excluded_group
     identity = build_identity_controls(ctx, band)
     statistics = build_statistics_controls(ctx, band)
     qc_controls = build_qc_controls(ctx, band)
@@ -1082,6 +1089,8 @@ def _refresh_array_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
         action.setEnabled(layers.nanowells)
     for group in c.groups:
         group.setVisible(on_view)
+    if c.band is not None:
+        c.band.place_trailing(c.excluded_group, c.well_row_end if on_view else None)
     c.overlays_btn.setChecked(not st.overlays_hidden)
     c.notes_btn.setChecked(layers.notes)
     if not on_view:
@@ -1124,13 +1133,27 @@ def _refresh_array_greying(ctx, st, c: SimpleNamespace, lattice: bool) -> None:
 
 
 def _build_array_controls(ctx, band) -> SimpleNamespace:
-    """The Array view's controls, ordered where → how drawn → edit: on the band Positions, Image, Layers and the
-    anchor's three buttons (Well and Timepoint lead them, in the page's Where item); under the figure, beside its
-    navigation buttons (:func:`mount_array_canvas_tools`), the zoom and *Overlays* — viewing actions on the picture
-    rather than settings of it."""
+    """The Array view's controls, on rows by what they act on: the anchor's three buttons end the well row (Well and
+    Timepoint lead them, in the page's Where item, since an anchor is set for that well at that timepoint), then a
+    row break, then the picture's row — Positions, Image and Layers; under the figure, beside its navigation buttons
+    (:func:`mount_array_canvas_tools`), the zoom and *Overlays* — viewing actions on the picture rather than settings
+    of it. The page's data controls (Metric to Subset) are the first row, ended by the page's own break."""
     from widgets.segmented_control import SegmentedControl
 
     reg = ctx.widgets
+    # The anchor's buttons end the well row: an anchor is set for the well and timepoint just chosen.
+    anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
+    anchor_btn.setCheckable(True)
+    anchor_btn.setProperty("variant", "toggle")         # "secondary" paints checked and unchecked the same
+    anchor_btn.toggled.connect(lambda on: nwc.set_anchor_mode(ctx, on))
+    clear_anchor_btn = _button("Clear anchor", _CLEAR_ANCHOR_TIP, lambda: nwc.clear_anchor(ctx))
+    # Shorter here than on the QC view, where it has room: every button beside it already says "anchor".
+    rerun_btn = _button("Re-run wells…", _RERUN_TIP, lambda: nwc.rerun_anchored(ctx))
+    reg.register("_nw_anchor_btn", anchor_btn)
+    reg.register("_nw_clear_anchor_btn", clear_anchor_btn)
+    reg.register("_nw_rerun_btn", rerun_btn)
+    grp_anchor = band.add_scope("", anchor_btn, clear_anchor_btn, rerun_btn)
+    well_row_end = band.add_break()
     # Positions before Image: Lattice is what greys the image, so the cause reads before its effect.
     positions_seg = SegmentedControl()
     for key, label in _POSITIONS:
@@ -1187,20 +1210,10 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
 
     reg.register("_nw_refresh_zoom", refresh_zoom)
 
-    anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
-    anchor_btn.setCheckable(True)
-    anchor_btn.setProperty("variant", "toggle")         # "secondary" paints checked and unchecked the same
-    anchor_btn.toggled.connect(lambda on: nwc.set_anchor_mode(ctx, on))
-    clear_anchor_btn = _button("Clear anchor", _CLEAR_ANCHOR_TIP, lambda: nwc.clear_anchor(ctx))
-    # Shorter here than on the QC view, where it has room: every button beside it already says "anchor".
-    rerun_btn = _button("Re-run wells…", _RERUN_TIP, lambda: nwc.rerun_anchored(ctx))
-    reg.register("_nw_anchor_btn", anchor_btn)
-    reg.register("_nw_clear_anchor_btn", clear_anchor_btn)
-    reg.register("_nw_rerun_btn", rerun_btn)
-    grp_anchor = band.add_scope("", anchor_btn, clear_anchor_btn, rerun_btn)
     return SimpleNamespace(
         image_cb=image_cb, positions_seg=positions_seg, layer_actions=layer_actions, colour_actions=colour_actions,
-        groups=[grp_positions, grp_image, grp_layers], grp_anchor=grp_anchor, one_btn=one_btn,
+        groups=[grp_positions, grp_image, grp_layers, well_row_end], grp_anchor=grp_anchor, well_row_end=well_row_end,
+        band=None, excluded_group=None, one_btn=one_btn,
         image_channel_cb=image_channel_cb, range_btn=range_btn, canvas_tools=(out_btn, zoom_lbl, in_btn, fit_btn,
                                                                               one_btn),
         anchor_btn=anchor_btn, clear_anchor_btn=clear_anchor_btn, rerun_btn=rerun_btn, overlays_btn=overlays_btn,

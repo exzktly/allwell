@@ -85,6 +85,7 @@ def test_the_editor_names_a_scatter_gate_and_the_figure_draws_its_nanowells(page
     assert row.gate_cb.isVisibleTo(page.window) and not row.a_spin.isVisibleTo(page.window)
     assert [row.gate_cb.itemData(i) for i in range(row.gate_cb.count())] == ["Mid"]
     row.at_cb.setCurrentIndex(row.at_cb.findData("any"))
+    editor.apply_btn.click()
     st = page.state.feature_slice("nanowell")
     assert st.subset == ss.Subset((C("gate", "in", values=("Mid",), at="any"),))
     assert _dots(page) == [("A01", 1), ("A01", 3), ("A01", 7)]

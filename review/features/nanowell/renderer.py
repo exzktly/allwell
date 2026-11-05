@@ -652,7 +652,7 @@ def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None)
     # nothing of an axes added by hand (``plot_style._figure_text_band``). A blank line of the key's own height at
     # the key's own place tells it the band is taken, so the panels' titles start below the key rather than under it.
     fig.text(0.98, bottom + height / 2, " ", fontsize=ANNOTATION_PT + 0.5, ha="right", va="center", alpha=0.0,
-             gid="nw-legend-band")
+             color=_inks(key)[1], gid="nw-legend-band")
     key.set_axis_off()
     key.set_xlim(0, 10)
     key.set_ylim(0, 1)

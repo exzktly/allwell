@@ -83,6 +83,22 @@ def test_a_squeeze_label_is_one_line_when_there_is_room_and_wraps_when_there_is_
     assert squeeze.heightForWidth(squeeze.minimumSizeHint().width()) > plain.sizeHint().height()
 
 
+def test_a_squeeze_label_is_measured_in_the_font_the_stylesheet_gives_it(qapp):
+    """A layout asks for the size hint before the label is shown, and the application stylesheet's font only
+    reaches a label when it is polished: measured before that, the text is sized in a smaller font than it is
+    drawn in. The suite's other tests leave the real stylesheet on the application, which is how this showed."""
+    from widgets.squeeze_label import SqueezeWrapLabel
+    before = qapp.styleSheet()
+    qapp.setStyleSheet("QLabel { font-size: 24px; }")
+    try:
+        text = "MCHERRY Channel:"
+        plain, squeeze = QLabel(text), SqueezeWrapLabel(text)
+        assert abs(squeeze.sizeHint().width() - plain.sizeHint().width()) <= 2
+        assert squeeze.sizeHint().width() > QLabel(text).fontMetrics().horizontalAdvance(text) + 20
+    finally:
+        qapp.setStyleSheet(before)
+
+
 # ── CappedLabel ─────────────────────────────────────────────────────────────
 
 def test_a_capped_label_reserves_the_height_of_the_width_it_is_drawn_at(qapp):

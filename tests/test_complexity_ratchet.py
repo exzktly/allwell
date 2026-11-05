@@ -35,7 +35,9 @@ THRESHOLD = 40
 # FLAT zip-up is _zip_up_in_place.
 # 696 -> 686: process_microscopy.main (52 -> 42) lost its folder-mode and
 # loose-image branches when the pipeline became zips-only.
-TOTAL_ALLOWLISTED_CC_BUDGET = 682
+# 682 -> 681: one allowlisted function lost a point of complexity in the page-render fixes (the ratchet reports
+# only the total, so no single function is named here).
+TOTAL_ALLOWLISTED_CC_BUDGET = 681
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,

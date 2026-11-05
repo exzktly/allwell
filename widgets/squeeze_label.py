@@ -29,6 +29,10 @@ class SqueezeWrapLabel(QLabel):
 
     def sizeHint(self) -> QSize:  # Qt naming
         """The text on one line (its widest line, if it holds line breaks)."""
+        # A layout asks before the label is shown, and a label's font comes from the application stylesheet
+        # when it is polished: measured before that, the text is sized in the unstyled font and drawn in a
+        # larger one, cut off.
+        self.ensurePolished()
         metrics = self.fontMetrics()
         lines = self.text().split("\n")
         margins = self.contentsMargins()

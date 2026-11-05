@@ -199,6 +199,15 @@ class PlotState:
     # Preferences rather than plate facts, so a new dataset keeps them.
     bar_width: float = 0.0
     bar_group_spacing: float = 0.2
+    # Properties → Beeswarm → Point spacing: how far apart neighbouring
+    # beeswarm dots are drawn, as a multiple of one dot's width (1.0 edge to
+    # edge, less overlaps, more leaves a gap), or 0.0 for Auto. Auto is each
+    # plot's own layout: the Bar plot's Beeswarm / All points dots stretch to
+    # fill their column, the Nanowells Distribution view's sit edge to edge.
+    # Read by ``barplot.renderer.swarm_pitch`` and
+    # ``nanowell.controller.swarm_spacing_of``, so the Batch Export figures of
+    # both draw at the same spacing. A preference, so a new dataset keeps it.
+    swarm_spacing: float = 0.0
     # ``bar_color_mode``: what the bar / violin / beeswarm fills are coloured
     # by — "plate" (the default: each column takes the plate-picker colour of
     # its well or replicate group, so the plate is the legend) or "grey" (one

@@ -4472,6 +4472,27 @@ settings for this:
 Both apply to the Batch Export bar figures too, and are saved with the view
 state.
 
+#### Beeswarm point spacing
+
+The Properties sidebar of the **Bar Plots** tab (Beeswarm and All points) and
+of the **Nanowells** page (Distribution view) has a **Beeswarm** section with
+one setting, **Point spacing**:
+
+- **Auto** (the default) is each plot's own layout. On the Bar plot each
+  column's swarm is stretched to fill its column, so a column of a few cells is
+  spread as wide as one of thousands. On the Nanowells page the dots sit edge
+  to edge.
+- Switch Auto off to set the spacing yourself, as a multiple of one dot's width:
+  **1.0** makes neighbouring dots touch, lower packs them tighter (they
+  overlap), higher spreads them out. On the Bar plot every column is then drawn
+  at the same spacing, so a sparse column stays narrow; a swarm too wide for
+  its column at that spacing is still squeezed to fit it. The spacing follows
+  **Lines & Markers → Marker size**. On the Nanowells page a lower spacing fits
+  more dots in each slot before the "+N" count of dots that did not fit.
+
+It applies to the matching Batch Export figures too, and is saved with the view
+state.
+
 #### Line colours — Plate or Grey
 
 The Line Graphs tab has the same **Colours** section, with the same two modes,

@@ -3260,7 +3260,14 @@ choice applies once, when the menu closes.
   choose the source of the inclusion decision —
   the per-channel **intensity minimum** (the `Include ≥` column below), or the
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
-  drawn a gate there, the scatter option is greyed out and says so.
+  drawn a gate there, the scatter option is greyed out and says so. A gate drawn
+  on nanowell metrics (on the nanowell scatter, or on the "Nanowell ▸" axes)
+  keeps every cell whose own nanowell lies inside it at that cell's timepoint.
+  The nanowell values it reads count every cell the other gates keep, *before*
+  the scatter gates: a nanowell's count is made of the cells the analysis
+  includes, so reading it after the gate would let the gate change the count it
+  is judging. A plot of the gated data therefore shows the left-out nanowells
+  with fewer cells than the gate saw.
 
   **Exclude fields the run flagged** sits under the debris gate and works on
   whole fields of view rather than on single cells. While a run processes a
@@ -6155,7 +6162,13 @@ the sentence names it.
     an image blended from the tiles covering it (a nanowell near the scan's outer edge counts too). Read at a
     timepoint like a metric: *no* *at every timepoint* leaves out every nanowell that was ever on a seam; *yes*
     *at any timepoint* keeps only those. Datasets analysed before seam nanowells were counted have them with no
-    count.
+    count;
+  - **scatter gate** — *inside* or *outside* a gate you drew on the Scatter Plot over two nanowell metrics (with
+    Observations set to Nanowells, or on its "Nanowell ▸" axes). Read at a timepoint like a metric: each nanowell at
+    a timepoint is one point on that scatter, and *inside* means the point lies in the box. The condition follows
+    the gate: move or resize it on the Scatter Plot and the subset changes with it. If the gate is deleted or
+    renamed, the condition says "no nanowell gate by that name" and keeps no nanowell until you choose a gate
+    again. Gates drawn over a cell metric are not offered, since they place cells rather than nanowells.
 
   A number is compared with ≥, ≤, =, *between* or *not between* (both ends included). Every change is applied as
   you make it; a range typed upside down is said under the conditions and changes nothing until it is fixed.

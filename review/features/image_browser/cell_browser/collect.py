@@ -28,6 +28,7 @@ from review.data.data_loading import (
     resolve_value_series,
 )
 from review.data.metric_labels import split_metric_col
+from review.data.observations import nanowell_gate_values
 from review.domain.metric_registry import intensity_keys
 from review.core.lazy import lazy as _lazy
 from domain.tp_match import tp_close_mask
@@ -237,6 +238,12 @@ def _passes_criteria(df, criteria: list[Criterion], ratios) -> np.ndarray:
     return mask
 
 
+def _gate_nanowell_values(ctx, gate_mode: bool, gates) -> pd.DataFrame | None:
+    """The nanowell rows a gate on a nanowell metric reads in gate mode (``observations.nanowell_gate_values``),
+    else ``None``."""
+    return nanowell_gate_values(ctx, gates) if gate_mode and gates else None
+
+
 def cell_browser_source_wells(ctx) -> list[str]:
     """Wells the Cell Browser draws from — it MIRRORS what the plotting tabs draw.
 
@@ -372,12 +379,14 @@ def collect_cells(
     # the gate at draw time; that decoupled the panes, which is the opposite of
     # what's wanted.)
     selected = cell_browser_source_wells(ctx)
+    # A gate drawn on a nanowell metric reads each cell's own nanowell's value, as Cell Gating applies it.
+    nanowell_values = _gate_nanowell_values(ctx, gate_mode, gates)
     for well in selected:
         df = get_rows(ctx, well)
         if df is None or df.empty:
             continue
         if gate_mode:
-            mask = (compute_gate_inclusion(df, gates, ratios) if gates
+            mask = (compute_gate_inclusion(df, gates, ratios, nanowell_values) if gates
                     else np.zeros(len(df), dtype=bool))
             # Mirror the scatter cloud exactly: the per-cell scatter pre-filters
             # by df_included_mask (QC / crop / cell-gating "Included") before

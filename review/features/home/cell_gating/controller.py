@@ -121,6 +121,22 @@ def gating_pass_config(ctx) -> dict:
     }
 
 
+def nanowell_values_for(ctx, config: dict) -> pd.DataFrame | None:
+    """The nanowell rows *config*'s gates read (``observations.nanowell_gate_values``), or ``None`` when no gate the
+    pass applies is drawn on a nanowell metric. GUI thread only: :class:`GatingWorker` takes it at construction."""
+    from review.data.observations import nanowell_gate_values
+
+    gates = [*(config["gating_gates"] if config["use_scatter"] else []),
+             *(config["thresh_gates"] if config["use_thresh"] else [])]
+    try:
+        return nanowell_gate_values(ctx, gates)
+    except Exception:
+        # A gate that cannot be read against its nanowells includes no cell, which the summary's count shows;
+        # the rest of the pass still runs.
+        swallowed()
+        return None
+
+
 class GatingWorker(QThread):
     """Apply cell-gating thresholds to every cached well row off the GUI thread.
 
@@ -140,6 +156,9 @@ class GatingWorker(QThread):
         super().__init__(parent)
         self._ctx = ctx
         self._cancelled = False
+        #: The nanowell rows a gate on a nanowell metric reads, taken here on the GUI thread: the Nanowells
+        #: feature computes them and its memo is not for a worker (``nanowell_values_for``).
+        self._nanowell_values = nanowell_values_for(ctx, gating_pass_config(ctx))
         #: Set once the pass has stopped writing to the cached frames and is
         #: about to report its end — the moment a GUI-thread reader of those
         #: frames may go ahead (``_gating_pass_writing``), even though the
@@ -164,6 +183,7 @@ class GatingWorker(QThread):
     def _run_inner(self) -> None:
         debug = _debug_flags.cell_gating_debug_enabled()
         config = gating_pass_config(self._ctx)
+        config["nanowell_values"] = self._nanowell_values
         fluor_gates = config["fluor_gates"]
         # Recorded before the first well is written, so a well evicted and
         # re-read at any point during or after this pass is gated the same way

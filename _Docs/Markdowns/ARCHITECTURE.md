@@ -12333,8 +12333,19 @@ one tile held with margin, counted from a blended crop (a seam site, or one with
 edge), so the seam nanowells can be kept alone or left out. A numeric field is compared by `ge` / `le` / `eq` / `between` /
 `outside` (bounds inclusive; a `between` of one value is stored as `eq`, so two spellings of one subset compare
 equal); `owner` by `in` / `not_in` a set of tiles; `fused` by `yes` / `no` (`FLAG_OPS`, no bound; a cell read as a
-bool or its text, `_flag_value`, and missing is no value). A per-timepoint field (a metric with a value per
-timepoint, `owner` and `fused`) is read *at* a timepoint: `baseline` (the row at the count's `baseline_timepoint`), `earliest` / `latest`
+bool or its text, `_flag_value`, and missing is no value); `gate` — *Scatter gate* — by `in` / `not_in`
+(`GATE_OPS`) one gate named in `values`. A gate condition is stored by the gate's name only: its box lives in
+`Condition.box` (never saved, never compared), filled by `bind_gates(subset, scatter_gates)` from
+`nanowell_gates` — the named scatter gates whose two axes are both `nw::<key>` columns, corners put in order — or
+`()` when no such gate has the name, which `_gate_values` answers as no value and `Condition.text` names. The page
+evaluates only a bound subset: `controller.page_subset(ctx, st)` binds `st.subset` against
+`ctx.state.cell_gating.scatter_gates` at each draw, badge and *Save nanowell data…* (`export_long_csv(subset=)`), so
+a gate moved on the Scatter Plot moves the subset at the next draw. The point is read from the page's own metrics
+frame (`_metric_values`; `occupied` derived from `n` as `observation_compute` derives it), the values the nanowell
+scatter plots, so no gating loop arises. `field_choices(gates=)` offers the field only while such a gate exists;
+the editor row picks the gate in `gate_cb` (`controller.subset_gates`), keeping a vanished name as "(gone)".
+`tests/test_nanowell_subset_scatter_gates.py`. A per-timepoint field (a metric with a value per
+timepoint, `owner`, `fused` and `gate`) is read *at* a timepoint: `baseline` (the row at the count's `baseline_timepoint`), `earliest` / `latest`
 (the well's), `tp:<label>`, `any` or `every`; a per-nanowell field carries no `at`. `Condition.validated` is the one
 canonical form and the one place a condition is refused (an unknown field, an op the field cannot take, a range
 upside down, a fractional bound on a whole-number field, a tile condition with no tile).
@@ -14266,6 +14277,23 @@ gate with them) and as `axes_cols` (so a gate shows only on its own pair). A gat
 is therefore the same box on the cell scatter's "Nanowell ▸ count" × "Nanowell ▸ brightness" and on no other pair;
 its label's percentage is of each group's plotted nanowells. The redraw also rebuilds an armed gate selector, as the
 cell redraw does. The **Apply gates** filter does not thin nanowell points. `tests/test_scatter_gates_on_nanowell_observations.py`.
+The Nanowells page's *Subset* can name such a gate (`nanowell/subset_compute`, *The subset*).
+
+**Applying a nanowell gate to cells.** `gating.compute_gate_inclusion(df, gates, ratios, nanowell_values)` joins
+each `nw::<key>` axis a gate names onto a copy of the cell rows (`observations.join_nanowell_columns`, on
+`(well, timepoint, nw_q, nw_r)`, the cell's own nanowell at its timepoint; no address or no row is NaN) before
+testing the box; without *nanowell_values* such a gate contributes nothing, as any gate on a missing column does.
+The values come from `observations.nanowell_gate_values(ctx, gates)`, which asks the Nanowells feature for every
+well's rows with `scatter_gates=False` (`observation_compute.nanowell_observations` → `controller.gate_tally`, which
+then also leaves `Gate_Pass` out of the cells it counts, and puts the flag in its memo key). A nanowell's count is
+the included cells and `Gate_Pass` is one of the layers deciding that, so a gate on a count judged against the gated
+count would move what it judges: every nanowell left out reads 0 on the next pass, and a box reaching 0 takes them
+back. `GatingWorker` takes the values at construction on the GUI thread (`cell_gating.controller.nanowell_values_for`;
+the feature's memo is not for a worker) and adds them to the pass's configuration as `nanowell_values`, which
+`apply_fluor_gating` passes on and the gating projector re-applies to a reloaded well. `gating_input_columns` reads
+the address columns for an `nw::` axis instead of the axis itself. The Cell Browser's gate source passes the same
+values. `with_nanowell_columns` (the plotted join) is the same join over the plotted members' table.
+`tests/test_cell_gating_reads_nanowell_gates.py`.
 
 The band's Fold change menu normalises cell plots; a nanowell figure does not apply it and says so in its footer
 (`FOLD_CHANGE_NOT_APPLIED`) — the per-nanowell fold changes are metrics of their own, against the page's Baseline.

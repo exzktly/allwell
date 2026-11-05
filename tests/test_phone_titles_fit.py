@@ -218,3 +218,58 @@ def test_a_shrunk_title_fits_even_where_text_does_not_scale_with_its_size():
                  for line in title.get_text().split("\n"))
     assert title.get_text().count("\n") == 1
     assert widest <= room, f"the shrunk title is {widest:.1f} px in a {room:.0f} px room"
+
+
+XLABEL = "GFP Mean Intensity  (log₁₀, +1)"
+
+
+def _xlabel_figure(width_in: float = 2.4):
+    fig = Figure(figsize=(width_in, 3), dpi=100)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(111)
+    ax.set_xlabel(XLABEL, fontsize=14)
+    fig.subplots_adjust(left=0.1, right=0.9)
+    return fig, ax
+
+
+def _label_overhang(fig, ax) -> float:
+    """Pixels of the x-label outside the figure, either side."""
+    ext = ax.xaxis.label.get_window_extent(fig.canvas.get_renderer())
+    return max(0.0, -ext.x0, ext.x1 - fig.bbox.width)
+
+
+def test_an_x_label_wider_than_its_axes_is_broken_inside_the_figure():
+    """The Scatter page's x-label ran off the right edge of a phone-width figure."""
+    fig, ax = _xlabel_figure()
+    # The axes sit off-centre in the figure, as they do beside tick labels, so
+    # a label centred on them overruns one edge.
+    ax.set_position((0.3, 0.3, 0.65, 0.6))
+    assert _label_overhang(fig, ax) > 0, "the fixture must overflow to prove anything"
+    plot_style._fit_labels_to_phone(fig)
+    label = ax.xaxis.label
+    assert "\n" in label.get_text()
+    assert label.get_text().split() == XLABEL.split()
+    assert _label_overhang(fig, ax) == 0.0
+    assert label.get_fontsize() == 14.0
+
+
+def test_an_x_label_that_fits_is_left_alone():
+    fig, ax = _xlabel_figure(width_in=8)
+    plot_style._fit_labels_to_phone(fig)
+    assert ax.xaxis.label.get_text() == XLABEL
+
+
+def test_leaving_phone_layout_gives_the_x_label_its_one_line_back():
+    fig, ax = _xlabel_figure()
+    plot_style._fit_labels_to_phone(fig)
+    assert "\n" in ax.xaxis.label.get_text()
+    plot_style._unfit_titles(fig)
+    assert ax.xaxis.label.get_text() == XLABEL
+
+
+def test_a_second_fit_does_not_break_an_already_broken_x_label_again():
+    fig, ax = _xlabel_figure()
+    plot_style._fit_labels_to_phone(fig)
+    once = ax.xaxis.label.get_text()
+    plot_style._fit_labels_to_phone(fig)
+    assert ax.xaxis.label.get_text() == once

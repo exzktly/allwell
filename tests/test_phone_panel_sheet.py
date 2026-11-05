@@ -23,6 +23,22 @@ from review.core import phone_panel_sheet
 from widgets.drawer import Drawer
 
 
+#: The windows ``_window`` built, held strongly until the test is torn down.
+#: ``qtbot.addWidget`` keeps only a weak reference, and a Drawer's callbacks make a
+#: reference cycle through its window, so once the test function returned nothing
+#: but the garbage collector could free the window — a visible, Python-owned
+#: top-level widget — and a collection that fired while pytest-qt was still
+#: processing paint events deleted it mid-paint and crashed the worker. Held
+#: here, it is closed by qtbot at teardown, at a time of its choosing.
+_WINDOWS: list = []
+
+
+@pytest.fixture(autouse=True)
+def _hold_windows_until_teardown():
+    yield
+    _WINDOWS.clear()
+
+
 @pytest.fixture
 def phone():
     phone_layout.set_on(True)
@@ -34,6 +50,7 @@ def _window(qtbot):
     """A window shaped like a plot tab: the figure, then a dock holding a
     360 px fixed-width panel, plus an open ⚙ Controls sheet over it."""
     win = QWidget()
+    _WINDOWS.append(win)
     qtbot.addWidget(win)
     win.resize(390, 780)
     lay = QHBoxLayout(win)
@@ -118,6 +135,7 @@ def test_mounting_a_panel_in_phone_layout_never_squeezes_the_plot(qtbot, phone):
     from review.core.ui_helpers import make_plot_with_right_dock, mount_widget_in_plot_dock
 
     win = QWidget()
+    _WINDOWS.append(win)
     qtbot.addWidget(win)
     win.resize(390, 780)
     plot_area, _plot_layout, dock = make_plot_with_right_dock(win)

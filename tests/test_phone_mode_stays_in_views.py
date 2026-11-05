@@ -1,23 +1,29 @@
 """Phone layout stays in the layers that are entitled to know about it.
 
-``_Docs/Markdowns/PHONE_FORM_TRACKER.md`` §2.2 names five layers and says which
-may read the phone-layout flag. Three rules hold that table in place, and a
-fourth is added by the rows that follow:
+ARCHITECTURE.md's *Phone layout* names the layers and says which may read the
+phone-layout flag. These rules hold that in place:
 
-1. **Data and drawing never read the mode** (P0.2). A renderer, a collector, a
+1. **Data and drawing never read the mode.** A renderer, a collector, a
    ``*_compute.py`` or anything under ``domain/``, ``services/``, ``pipeline/``
    or ``util/`` receives its sizes as arguments. A bare ``if is_on():`` there is
    how a second mode spreads through code that should not know there is one.
-2. **Reads of the mode outside the sanctioned layers only go down** (P0.4). The
+2. **Reads of the mode outside the sanctioned layers only go down.** The
    sanctioned layers are ``ui/``, ``core/``, the ``*_phone.py`` /
    ``*phone_view.py`` siblings and ``review/core/phone_panel_sheet.py``. A read
    anywhere else is on a roster keyed by *file and function* with a written
    reason, and an entry that no longer describes a real read fails the test, so
    the roster can only shrink.
-3. **The shell recognises widgets by what they declare, not by their name**
-   (P0.5). ``ui/phone_shell.py`` still finds some widgets by class name, object
-   name or a ``draw_idle`` duck type; each of those is counted, the budget only
-   goes down, and the migration ends at zero.
+3. **The shell recognises widgets by what they declare, not by their name.**
+   ``ui/phone_shell.py`` finds no widget by class name, object name or a
+   ``draw_idle`` duck type; every spelling those could come back in is counted
+   and the count is held at zero.
+4. **The form registry knows kinds, not phones** (``widgets/form_registry.py``
+   imports nothing from the application and names no layout).
+5. **Every plot canvas is built through ``widgets.canvas.make_canvas``**, so it
+   declares itself.
+6. **Every top-level Review page states whether a phone is offered it**
+   (``FeatureDescriptor.on_phone``), so a new page cannot become phone-visible by
+   being forgotten.
 
 Every file is read through ``tests._repo_scan.parse_source`` and the roots come
 from ``tests._repo_scan``. The scan functions take their file list as an
@@ -60,11 +66,11 @@ SANCTIONED_FILES = (
     "review/core/phone_panel_sheet.py",
     # The Image Table's phone form, owned by the Image Table: it listens to the
     # mode and refits its own grid. One of the five views that already own
-    # their phone form (PHONE_FORM_TRACKER.md §1.1).
+    # their phone form ().
     "review/features/image_browser/image_table/_phone_fit.py",
 )
 
-#: The one module whose recognition-by-name P0.5 counts.
+#: The one module whose recognition by name is counted.
 SHELL = "ui/phone_shell.py"
 
 #: ``ui/phone_shell.py``'s recognition by name, counted by site: none. A widget
@@ -301,7 +307,7 @@ def form_registry_violations(path: Path) -> list[str]:
 
 #: The one module allowed to construct a matplotlib canvas. Every plot canvas is
 #: built through ``make_canvas`` so that it declares itself to the phone shell
-#: (PHONE_FORM_TRACKER.md P3.1) instead of being found by a duck type.
+#: () instead of being found by a duck type.
 CANVAS_BUILDER = "widgets/canvas.py"
 
 
@@ -350,7 +356,7 @@ def test_data_and_drawing_layers_never_read_the_mode():
     assert not offenders, (
         "renderers, collectors, *_compute.py and domain/, services/, pipeline/, util/ "
         "receive their sizes as arguments and never import the phone-layout mode "
-        "(PHONE_FORM_TRACKER.md §2.2):\n  " + "\n  ".join(offenders))
+        "():\n  " + "\n  ".join(offenders))
 
 
 def test_every_read_of_the_mode_outside_the_sanctioned_layers_is_rostered():
@@ -358,7 +364,7 @@ def test_every_read_of_the_mode_outside_the_sanctioned_layers_is_rostered():
     assert not offenders, (
         "a read of phone_layout outside ui/, core/, *_phone.py and *phone_view.py needs a "
         "MODE_READ_ROSTER entry with a reason — or belongs in one of those layers instead "
-        "(PHONE_FORM_TRACKER.md §2.2):\n  " + "\n  ".join(offenders))
+        "():\n  " + "\n  ".join(offenders))
 
 
 def test_the_roster_describes_only_real_reads():
@@ -374,7 +380,7 @@ def test_the_shell_recognises_no_more_widgets_by_name_than_the_budget():
     assert len(sites) <= RECOGNISED_BY_NAME_BUDGET, (
         f"{len(sites)} sites recognise a widget by name, against a budget of "
         f"{RECOGNISED_BY_NAME_BUDGET}. A widget declares its kind where it is built "
-        f"(PHONE_FORM_TRACKER.md §2.3); do not add a name to the shell:\n  " + listing)
+        f"(); do not add a name to the shell:\n  " + listing)
     assert len(sites) == RECOGNISED_BY_NAME_BUDGET, (
         f"the shell now recognises {len(sites)} widgets by name and the budget says "
         f"{RECOGNISED_BY_NAME_BUDGET}: lower RECOGNISED_BY_NAME_BUDGET to {len(sites)} "
@@ -386,14 +392,14 @@ def test_the_form_registry_knows_kinds_and_not_phones():
     assert not offenders, (
         f"{FORM_REGISTRY} is a widgets/ module that records which widgets have an alternate form; "
         "it must import nothing from the application and name no layout "
-        "(PHONE_FORM_TRACKER.md §2.3):\n  " + "\n  ".join(offenders))
+        "():\n  " + "\n  ".join(offenders))
 
 
 def test_every_plot_canvas_is_built_through_make_canvas():
     offenders = direct_canvas_constructions(python_sources())
     assert not offenders, (
         f"build a plot canvas with widgets.canvas.make_canvas, not a FigureCanvas call, so it "
-        f"declares itself to phone layout (PHONE_FORM_TRACKER.md P3.1); {len(offenders)} site(s):\n  "
+        f"declares itself to phone layout (); {len(offenders)} site(s):\n  "
         + "\n  ".join(offenders))
 
 
@@ -401,7 +407,7 @@ def test_every_top_level_page_states_whether_phone_layout_offers_it():
     from review.features import registry
     undecided = pages_without_a_phone_decision(registry.build_feature_registry())
     assert not undecided, (
-        f"set on_phone=True or False on these FeatureDescriptors (PHONE_FORM_TRACKER.md P4.2): {undecided}")
+        f"set on_phone=True or False on these FeatureDescriptors (): {undecided}")
 
 
 def test_phone_layout_hides_review_csv_and_batch_export_and_nothing_else():

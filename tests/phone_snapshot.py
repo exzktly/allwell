@@ -1,6 +1,6 @@
 """A deterministic description of what a window shows in phone layout.
 
-PHONE_FORM_TRACKER.md P0.1. The migration moves *how* widgets are found and
+The migration moves *how* widgets are found and
 given their phone form, and must not change what a person sees. This reduces a
 window to one comparable record per visible widget — its class, name, place and
 size, font, minimum height, and the state the phone forms set (a stepper's

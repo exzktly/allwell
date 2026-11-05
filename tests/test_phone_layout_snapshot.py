@@ -1,13 +1,13 @@
 """What the window shows in phone layout, compared with a recorded baseline.
 
-PHONE_FORM_TRACKER.md P0.1. The phone-form migration changes how widgets are
+The phone-form migration changes how widgets are
 found and given their phone form; it must not change what a person sees. This
 puts a window with the mini dataset loaded into phone layout, snapshots every
 page of every mode (and a few sideways and at the large text size), and
 compares each snapshot with ``tests/fixtures/phone_snapshot_baseline.json``.
 
-A difference is read, not regenerated away: a row of the tracker is not done
-while this shows a difference it cannot explain. To take a new baseline on
+A difference is read, not regenerated away: a change to how phone layout finds
+its widgets is not finished while this shows a difference it cannot explain. To take a new baseline on
 purpose — a row whose change is meant to move a widget — run
 
     ALLWELL_WRITE_PHONE_SNAPSHOT=1 scripts/test.sh tests/test_phone_layout_snapshot.py -m ""

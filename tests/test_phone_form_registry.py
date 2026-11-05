@@ -1,6 +1,6 @@
 """``widgets/form_registry``: kinds declared where a widget is built.
 
-PHONE_FORM_TRACKER.md P1.1. Real widgets throughout. Each test names the wrong
+Real widgets throughout. Each test names the wrong
 implementation it rules out.
 """
 
@@ -150,7 +150,7 @@ def test_a_removed_listener_is_not_called(qapp):
     assert seen == []
 
 
-# ── the shell listens (P1.2) ────────────────────────────────────────────────
+# ── the shell listens ────────────────────────────────────────────────
 
 class _TouchWidget(QWidget):
     """A widget the way ``Stepper`` is: a touch form it can be put in, declared
@@ -250,7 +250,7 @@ def test_a_shell_that_is_gone_leaves_no_listener(qapp):
     assert len(fr._listeners) == before
 
 
-# ── the shared kinds declare themselves (P2) ────────────────────────────────
+# ── the shared kinds declare themselves ────────────────────────────────
 
 def test_a_stepper_built_after_the_switch_takes_its_touch_form_without_a_sweep(qapp, shell):
     """The real ``Stepper``, with nothing recognising it by name. Wrong
@@ -306,7 +306,7 @@ def test_a_control_band_built_after_the_switch_is_hidden_in_its_page_and_found_a
     assert shell._current_band() is band
 
 
-# ── canvases (P3) ───────────────────────────────────────────────────────────
+# ── canvases ───────────────────────────────────────────────────────────
 
 def test_make_canvas_builds_a_qt_canvas_that_declares_itself(qapp):
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -377,7 +377,7 @@ def test_an_info_icon_built_after_the_switch_answers_a_tap_without_a_sweep(qapp,
     assert shown == ["What this number means"]
 
 
-# ── what is left of the sweep (P5) ──────────────────────────────────────────
+# ── what is left of the sweep ──────────────────────────────────────────
 
 def test_the_sweep_finds_a_scroll_area_under_a_window_and_visits_no_plain_widget(qapp, shell):
     """A scroll area is not declared (64 places build one, and Qt builds more),
@@ -414,7 +414,7 @@ def test_the_sweep_watches_a_widget_declared_while_phone_layout_was_off(qapp, sh
     assert w.property("_awPhoneWatched")
 
 
-# ── wording that differs by mode lives beside the view that owns it (P6) ────
+# ── wording that differs by mode lives beside the view that owns it ────
 
 def test_the_image_table_s_empty_hint_points_at_controls_only_on_a_phone(qapp):
     """Where the builder is: above the placeholder at the desk, behind ⚙ Controls

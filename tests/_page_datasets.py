@@ -113,8 +113,12 @@ def prepare(win, qapp, kind: str, page: str) -> None:
     elif kind == "mini" and page == "Statistics":
         from review.domain.batch_models import BarGroup
 
+        from review.features.stats import controller as stats
+
         win._review._app_state.stats.groups = [BarGroup("Ctrl", solo_wells=["A01", "A02"]),
                                                BarGroup("Drug", solo_wells=["B01", "B02"])]
+        stats.stats_refresh_group_list(ctx)
+        stats.stats_refresh_map(ctx)
         ctx.runtime.stats.run()
     elif kind == "mini" and page == "Multivariate":
         from review.features.multivariate import controller as mvctl

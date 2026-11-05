@@ -170,7 +170,11 @@ def figure_text_overlap(window: QWidget) -> list[Finding]:
         try:
             canvas.draw()
             renderer = canvas.get_renderer()
-            boxes = [(t.get_text()[:30], t.get_window_extent(renderer)) for t in _figure_texts(canvas.figure)]
+            legend_entries = {id(t) for ax in canvas.figure.axes if ax.get_legend() is not None
+                              for t in ax.get_legend().get_texts()}
+            # A legend's own entries sit inside its box by design: the box stands for them.
+            boxes = [(t.get_text()[:30], t.get_window_extent(renderer))
+                     for t in _figure_texts(canvas.figure) if id(t) not in legend_entries]
             for ax in canvas.figure.axes:
                 legend = ax.get_legend()
                 if legend is not None:
@@ -203,7 +207,7 @@ def wide_tables(window: QWidget) -> list[Finding]:
         try:
             if isinstance(w, QAbstractItemView):
                 bar = w.horizontalScrollBar()
-                if bar.isVisibleTo(window) and bar.maximum() > 0:
+                if bar.isVisibleTo(window) and bar.maximum() > SCROLL_SLACK_PX:
                     found.append(Finding("table", _name(w), f"needs {bar.maximum()}px of sideways scroll to show its columns"))
         except RuntimeError:
             continue

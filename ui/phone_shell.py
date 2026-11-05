@@ -1404,34 +1404,35 @@ class PhoneShell(QObject):
             self._sweep(force=True)
 
     def _sweep(self, *, force: bool) -> None:
-        """Watch and adapt every widget phone layout cares about that is not
-        watched yet. Only widgets no sweep has looked at before are looked at,
-        unless *force*: a re-shown widget is already watched, so only new
-        widgets need finding.
+        """Watch and adapt what phone layout cares about that is not watched yet.
 
-        New is a mark on the widget itself (``_awPhoneSeen``), not the widget
-        count and not its address. A canvas deleted and another built between
-        two ticks leaves the count unchanged, and a count-only check never
-        watched the new one; the allocator hands the new widget the old one's
-        address as often as not, so an address set misses it the same way.
-        Reading the marks costs about 6 ms at 4,300 widgets."""
+        Three things are looked at, none of them by walking every widget in
+        Python. The **top-level windows** (a dialog, a pop-out, a menu, a combo
+        box's popup — Qt builds some of these and no All-Well code runs when it
+        does, which is why they cannot declare themselves); the **scroll areas**
+        under each, found by one C++ ``findChildren`` (every scroll area scrolls
+        by a drag, and 64 places build one, so declaring them would be a
+        forgotten-site waiting to happen); and the **declared** widgets the
+        listener has not watched, which are the ones built while phone layout was
+        off.
+
+        Only what no sweep has looked at before is acted on, unless *force*: a
+        re-shown widget is already watched. New is a mark on the widget itself
+        (``_awPhoneSeen``), not a count and not an address — a canvas deleted and
+        another built between two ticks leaves the count unchanged, and the
+        allocator hands the new widget the old one's address as often as not."""
         if not phone_layout.is_on():
             return
-        widgets = QApplication.allWidgets()
-        if not force:
-            fresh = []
-            for w in widgets:
-                try:
-                    if not w.property(_P_SEEN):
-                        fresh.append(w)
-                except RuntimeError:
-                    swallowed()  # deleted while the list was walked
-            if not fresh:
-                return
-            widgets = fresh
         from PySide6.QtWidgets import QAbstractScrollArea
-        for w in widgets:
+        candidates: list[QWidget] = []
+        for top in QApplication.topLevelWidgets():
+            candidates.append(top)
+            candidates.extend(top.findChildren(QAbstractScrollArea))
+        candidates.extend(form_registry.declared())
+        for w in dict.fromkeys(candidates):
             try:
+                if not force and w.property(_P_SEEN):
+                    continue
                 w.setProperty(_P_SEEN, True)
                 # Every scroll area built after the switch — a page built
                 # lazily, a dialog, a popover, a combo box's list — scrolls by
@@ -1452,7 +1453,7 @@ class PhoneShell(QObject):
                 swallowed()  # deleted while the list was walked
 
     def _adapt_all(self, on: bool) -> None:
-        for w in list(QApplication.allWidgets()):
+        for w in form_registry.declared():
             try:
                 self.adapt(w, on)
             except RuntimeError:

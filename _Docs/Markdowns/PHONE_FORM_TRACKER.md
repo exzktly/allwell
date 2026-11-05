@@ -286,9 +286,12 @@ a scratch script that built `AllWellApp(None)` and called `shell.set_on(True)`:
 | `_adapt_all(True)` | 80.2 ms |
 | Widgets carrying `_awPhoneWatched`, so with an event filter on them | 120 |
 
-The unforced sweep costs about three times what ARCHITECTURE.md says (6 ms), so
-roughly 6 % of the main thread's time is spent re-finding widgets while phone
-layout is on. The switch time is dominated by the stylesheet re-polish, which
+The unforced sweep cost about three times what ARCHITECTURE.md said (6 ms), so
+roughly 6 % of the main thread's time was spent re-finding widgets while phone
+layout was on. After P5.1 (same method, same fixture): `_sweep(force=False)`
+10.6 ms, `_sweep(force=True)` 47.2 ms, `_adapt_all(True)` 61.0 ms, 120 watched
+widgets, `set_on(True)` 10.6 s. `_adapt_all` still includes `_grab_scrolling`,
+which walks every widget once per switch. The switch time is dominated by the stylesheet re-polish, which
 this plan does not touch.
 
 Fifteen phone test files, about 300 tests. `tests/test_phone_layout_app.py` is
@@ -657,8 +660,8 @@ test asserts 0.
 
 | Id | Item | State | Evidence |
 |---|---|---|---|
-| P5.1 | The sweep looks only at top-level windows and their scroll areas | `blocked` | blocked on Q1 |
-| P5.2 | Drag-to-scroll applied per window and per declared page | `blocked` | blocked on Q1 |
+| P5.1 | The sweep looks only at top-level windows and their scroll areas | `wip` | `_sweep` walks `QApplication.topLevelWidgets()`, the scroll areas under each (one C++ `findChildren(QAbstractScrollArea)`) and `form_registry.declared()`; `_adapt_all` iterates the declared widgets. Costs on the P0.3 fixture: tick 18.4 -> 10.6 ms, forced 109.4 -> 47.2 ms, `_adapt_all(True)` 80.2 -> 61.0 ms. Tests `test_the_sweep_finds_a_scroll_area_under_a_window_and_visits_no_plain_widget` and `test_the_sweep_watches_a_widget_declared_while_phone_layout_was_off`; mutations: dropping the `findChildren` line and dropping the declared list each failed one. STOPPED HERE: the layout snapshot and `test_phone_layout_app.py` were still running against this tree when it was committed; the row is `done` only when both pass |
+| P5.2 | Drag-to-scroll applied per window and per declared page | `declined` | Q1 showed drag-to-scroll cannot be applied from declarations: scroll areas are built in 64 places plus Qt's own (combo popups, standard dialogs), and drag-scroll is universal, not a per-kind form, so declaring them would be a forgotten-site risk that cannot reach Qt's. They stay in the sweep, now found by a C++ `findChildren` under each top-level window (P5.1). `grab_every_scroll_area` still runs once per switch and restyle |
 
 **P5.1** — `_sweep` iterates `QApplication.topLevelWidgets()` and, for each
 window `phone_window.kind` accepts, that window's scroll areas — not
@@ -718,8 +721,8 @@ a separate phone view needs a written reason.
 
 | Id | Question | State | Answer |
 |---|---|---|---|
-| Q1 | Once P4 has merged, what does the 300 ms sweep still find that no declaration covers? | `todo` | |
-| Q2 | Does `_PhoneEventFilter` remain necessary once every kind is declared? | `todo` | |
+| Q1 | Once P4 has merged, what does the 300 ms sweep still find that no declaration covers? | `done` | Instrumented `_sweep` in a scratch script (not committed) and drove all 53 snapshot scenarios; tallied what it met that was new. Every widget with a form of its own was already declared (canvas 9, controls 7, form rows 69, hints 10, stepper 1, toolbars 8): the sweep found them redundantly. What no declaration covers: **scroll areas** (QListView 387 and QHeaderView 9 — combo popups and Qt's own; QScrollArea 32, QPlainTextEdit 8, QListWidget 5, QTableWidget 3, QTextEdit 3, and eight All-Well scroll classes such as HomeScroll and SampleMapScroll) and **windows** (a QDialog, and parentless widgets met before they were parented). Scroll areas are built in 64 places in the app plus 6 subclasses and by Qt, and drag-to-scroll is a universal behaviour (`drag_scroll_eligible`: every area except those whose drag means something), not a per-kind form — declaring them would be a 70-site sweep with the same forgotten-site silent failure, and could not cover Qt's. So no new P2/P3 row. P5 goes ahead as written, because the main window is itself a top-level window and its scroll areas are found by a C++ `findChildren(QAbstractScrollArea)` under each top-level, not by walking every widget in Python |
+| Q2 | Does `_PhoneEventFilter` remain necessary once every kind is declared? | `done` | Yes, it stays. The filter does two things no declaration can: it is the Show hook on which every declared kind and every window is adapted (a declaration is made inside a constructor, so the widget cannot be adapted there), and it reads the ⓘ tap. What it no longer does is recognise anything: it dispatches to `fit_popup_window` for a window and to `adapt` for the rest, and `adapt` reads the declared kind |
 
 **Q1** — instrument `_sweep` (a scratch edit, not committed) to log the class
 and object name of every widget it adapts or watches that carries no declared

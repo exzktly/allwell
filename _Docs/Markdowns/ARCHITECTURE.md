@@ -288,20 +288,27 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    application-wide filter handed every event of every object in the process to
    Python, and on Windows it died with a native access violation on the filter's
    first line, called from `app.exec()` with an event for an object being torn
-   down. `PhoneShell._sweep` finds widgets built after the switch — every
+   down. A widget that declares a form (`widgets.form_registry`) is watched the
+   moment it is declared, if phone layout is on, and adapted on its first Show.
+   What no declaration reaches, `PhoneShell._sweep` finds — every
    `_SWEEP_MS` (300 ms), at once when a window gains focus (a dialog opening),
    and at once on a page change (`PhoneShell.page_changed`, wired to the
    `currentChanged` of the stack the window hands it as `PhoneHandles.pages`,
    Review's notebook, and called by the page menu), with one more sweep on the
    next turn of the loop for a page that builds its body only once shown. It
-   looks only at widgets no sweep has seen, by a mark on each one
+   looks at three things and walks no widget in Python: the top-level windows
+   (a dialog, a pop-out, a combo box's popup — Qt builds some, so they cannot
+   declare themselves), the scroll areas under each (one C++ `findChildren`;
+   every scroll area scrolls by a drag, and about 64 places build one, so they
+   are not declared), and the declared widgets built while phone layout was
+   off. It acts only on what no sweep has seen, by a mark on each one
    (`_awPhoneSeen`) — not by the widget count, which a canvas deleted and
    another built between two ticks leaves unchanged, and not by address, which
-   the allocator hands straight to the replacement. Reading the marks costs
-   about 6 ms at 4,300 widgets; a forced sweep that looks at everything about
-   25 ms. For each relevant widget it installs the filter, marks the widget
-   `_awPhoneWatched`, and adapts it if it is already showing. Leaving phone
-   layout removes every filter and mark;
+   the allocator hands straight to the replacement. On the mini dataset, a
+   tick costs about 11 ms and a forced sweep about 47 ms. For each relevant
+   widget it installs the filter, marks the widget `_awPhoneWatched`, and
+   adapts it if it is already showing. Leaving phone layout removes every
+   filter and mark;
 5. maximizes the window (phone) or restores the desk geometry it remembered —
    only one remembered on a desk-shaped screen.
 

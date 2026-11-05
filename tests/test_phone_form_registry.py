@@ -410,3 +410,40 @@ def test_an_info_icon_built_after_the_switch_answers_a_tap_without_a_sweep(qapp,
                       Qt.LeftButton, Qt.NoButton, Qt.NoModifier)
     assert shell._filter.eventFilter(icon, tap) is True
     assert shown == ["What this number means"]
+
+
+# ── what is left of the sweep (P5) ──────────────────────────────────────────
+
+def test_the_sweep_finds_a_scroll_area_under_a_window_and_visits_no_plain_widget(qapp, shell):
+    """A scroll area is not declared (64 places build one, and Qt builds more),
+    so the sweep must still find one built after the switch — and, now that it
+    does not walk every widget, it must not touch a plain widget at all.
+    Wrong implementation: a sweep that looks only at top-level windows and not
+    at what is under them (the main window's own scroll areas), or one that
+    still marks every widget it meets."""
+    from PySide6.QtWidgets import QScrollArea, QScroller
+
+    area = QScrollArea(shell._win)
+    inner = QWidget()
+    area.setWidget(inner)
+    plain = QWidget(shell._win)
+    area.show()
+    _pump(qapp)
+    shell._sweep(force=False)
+    assert QScroller.hasScroller(area.viewport()), "the scroll area was not given its drag"
+    assert area.property("_awPhoneSeen") is True
+    assert plain.property("_awPhoneSeen") is None, "the sweep still visits widgets nobody declared"
+
+
+def test_the_sweep_watches_a_widget_declared_while_phone_layout_was_off(qapp, shell):
+    """The listener only watches while the layout is on; the switch's forced
+    sweep is what finds the rest. Wrong implementation: a sweep that no longer
+    reads the declared list."""
+    from core import phone_layout
+
+    phone_layout.set_on(False)
+    w = _TouchWidget(shell._win)                   # declared at the desk: not watched
+    assert not w.property("_awPhoneWatched")
+    phone_layout.set_on(True)
+    shell._sweep(force=True)
+    assert w.property("_awPhoneWatched")

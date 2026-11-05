@@ -297,7 +297,7 @@ def _want_crops(ctx, st, sites) -> None:
                deliver=lambda found: st.crops.update(found))
 
 
-def _tile_at(st, event):
+def _tile_at(st, event) -> tuple | None:
     """The composite's ``(x, y, site, rank)`` under the pointer (within half a tile pitch of its centre), or ``None``."""
     if not st.popout_tiles or event.inaxes is None or event.xdata is None or event.ydata is None:
         return None

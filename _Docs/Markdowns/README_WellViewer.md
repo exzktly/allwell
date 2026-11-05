@@ -6217,8 +6217,11 @@ the sentence names it.
     renamed, the condition says "no nanowell gate by that name" and keeps no nanowell until you choose a gate
     again. Gates drawn over a cell metric are not offered, since they place cells rather than nanowells.
 
-  A number is compared with ≥, ≤, =, *between* or *not between* (both ends included). Every change is applied as
-  you make it; a range typed upside down is said under the conditions and changes nothing until it is fixed.
+  A number is compared with ≥, ≤, =, *between* or *not between* (both ends included). Edits change only the
+  conditions written in the editor: the line under them says *Not applied yet* and what they are, and nothing is
+  redrawn until you press **Apply**. **Reset** puts back the conditions of the subset in use. A range typed upside
+  down is said under the conditions, and Apply waits until it is fixed. Choosing a quick choice or a saved subset in
+  the Subset box replaces any edits not applied.
   Distribution, Trajectories, Position and Extremes then draw, summarise and rank only the nanowells in the subset,
   and every figure says what the subset is and how many nanowells it kept of how many — and how many were outside
   it or had no value for a condition (a count that was occluded, a timepoint the nanowell was not seen at, a well
@@ -6230,6 +6233,18 @@ the sentence names it.
   box is outlined while a subset is set, and the subset is kept with the page's settings. For clonality use the
   *Earliest* baseline: a count taken later — at a first measurable or a named timepoint — may follow a division,
   and the figure counts those nanowells.
+
+  **Saving a subset by name.** The editor's **Name** box names the subset as written: type a name and press
+  **Save** (or Enter) to keep it in this dataset. Save keeps the subset in use, so it waits while edits are not
+  applied: press **Apply** first. Saved subsets are listed by name in the Subset box, between the
+  quick choices and *Custom subset…*; choosing one makes it the subset again. The box shows a saved subset's name
+  only while its conditions are exactly the saved ones — change one and it reads *Custom subset…*, with the saved
+  one left as it was (save under the same name to replace it). **Rename** gives the saved subset in use the name
+  typed; **Delete** forgets it, and the figure keeps using its conditions until you choose another. Each dataset
+  keeps its own saved subsets (up to 50, names up to 60 characters), in its `persistence.json` with the page's
+  other settings. The same conditions are saved under one name only: saving them again under another says which
+  name already has them. **Reset view** puts the page's controls back to their defaults and keeps the saved
+  subsets.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
 - **Names.** Wells and groups are called what every other tab calls them: a replicate group by its name, a well by
   the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two
@@ -6436,11 +6451,13 @@ the sentence names it.
   values, two samples holding the same constant), never a number. More than 15 comparisons are not run: choose
   a control under **vs** or exclude wells. *Save figure* saves the figure and its report together.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
-  a QC picture and a full-resolution montage each did. The band's first row holds the page's data controls
-  (Metric, Channel, Baseline, Subset, Rim focus); its second holds the view's own, in the order you use them:
-  **Well** and **Timepoint** together, then **Positions**, **Image**, **Layers**, and **Set anchor**, **Clear
-  anchor** and **Re-run wells…** (*Re-run anchored wells…* on the QC view). The zoom and **Overlays** sit under
-  the figure, beside its navigation buttons:
+  a QC picture and a full-resolution montage each did. The band's controls are on three rows by what they act
+  on: the first holds the page's data controls (Metric, Channel, Baseline, Rim focus, Subset); the second the
+  well — **Well** and **Timepoint** together, then **Set anchor**, **Clear anchor** and **Re-run wells…**
+  (*Re-run anchored wells…* on the QC view), since an anchor is set for that well at that timepoint; the third
+  how the picture is drawn — **Positions**, **Image** and **Layers**. In a narrow window a row wraps onto a
+  second line of its own rather than mixing with the next row. The zoom and **Overlays** sit under the figure,
+  beside its navigation buttons:
   - **Image** — what is drawn under the nanowells: *Off*; *Run montage*, the downsampled stitched phase
     montage the run kept (read in the background: the footer says *Reading the montage…* meanwhile); or *Full
     resolution*, drawn from the raw images in `in/` where the run placed each tile — of the channel chosen in the
@@ -6525,6 +6542,13 @@ the sentence names it.
   down is sent as the scroll wheel, so it zooms the view; a pinch is the viewer zooming its own picture of the
   desktop and never reaches All-Well. The swipe zooms about the pointer when the pointer is on the image, and
   about the view's centre when it was last left elsewhere on the figure.
+
+  Hover over a nanowell to see what its row of the nanowell table says at this timepoint: its address and
+  ring, its state (and why, when it has no value), the value it is coloured by, its cell count and
+  confluence, each channel's fluorescence, its fold changes from the baseline and growth rate, its rim focus
+  against the well's sharpest rims with the verdict (in focus, out of focus, or why it was not judged), the
+  identity check, and where it sits. The readout beside the pointer also leads with the nanowell's address,
+  state and value. A value the nanowell does not have reads *no value*, never 0.
 
   Click a nanowell to open its site detail, as on the beeswarm (with **Set anchor** on, a click sets the anchor
   instead). Double-click a nanowell to centre it, zoom until it fills the view and open its site detail —

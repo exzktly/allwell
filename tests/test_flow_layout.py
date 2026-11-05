@@ -96,3 +96,60 @@ def test_the_visibility_watcher_keeps_no_per_instance_state(qapp):
     )
     # And it still does its job: consumes nothing, raises nothing.
     assert watcher.eventFilter(label, QEvent(QEvent.Hide)) is False
+
+
+def _build_with_breaks(qapp, layout_items, rect_w):
+    """*layout_items*: a ``(w, h)`` per label, ``"|"`` per ``flow_break``. Returns the host, labels and breaks."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QLabel, QWidget
+    from widgets.flow_layout import FlowLayout, flow_break
+
+    host = QWidget()
+    fl = FlowLayout(host, h_spacing=6, v_spacing=4)
+    labels, breaks = [], []
+    for it in layout_items:
+        if it == "|":
+            brk = flow_break(host)
+            fl.addWidget(brk)
+            breaks.append(brk)
+            continue
+        lbl = QLabel("x", host)
+        lbl.setFixedSize(*it)
+        fl.addWidget(lbl)
+        labels.append(lbl)
+    host.show()
+    qapp.processEvents()
+    fl.setGeometry(QRect(0, 0, rect_w, 200))
+    return host, fl, labels, breaks
+
+
+def test_a_break_starts_a_new_line_with_room_to_spare_and_adds_no_empty_line(qapp):
+    """Three 40 px items fit one 1000 px line; a break after the first puts the other two on the next line, and a
+    second break straight after it (or one at the start) adds no empty line between."""
+    _host, fl, (a, b, c), _breaks = _build_with_breaks(qapp, ["|", (40, 20), "|", "|", (40, 20), (40, 20)], 1000)
+    assert b.y() == c.y() == a.y() + 20 + 4                            # one line down, not two
+    assert b.x() == a.x() == 0 and c.x() > b.x()
+    assert fl.heightForWidth(1000) == 2 * 20 + 4
+
+
+def test_a_hidden_break_lets_the_items_flow_together_again(qapp):
+    _host, fl, (a, b), (brk,) = _build_with_breaks(qapp, [(40, 20), "|", (40, 20)], 1000)
+    from PySide6.QtCore import QRect
+
+    assert b.y() > a.y()
+    brk.hide()
+    qapp.processEvents()
+    fl.setGeometry(QRect(0, 0, 1000, 200))
+    assert b.y() == a.y() and b.x() > a.x()
+
+
+def test_a_break_with_nothing_shown_after_it_adds_no_gap(qapp):
+    """A break that ends up last — the last item, or every item after it hidden — must not add a line's spacing."""
+    from PySide6.QtCore import QRect
+
+    _host, fl, (a, b), _breaks = _build_with_breaks(qapp, [(40, 20), "|", (40, 20)], 1000)
+    assert fl.heightForWidth(1000) == 2 * 20 + 4
+    b.hide()
+    qapp.processEvents()
+    fl.setGeometry(QRect(0, 0, 1000, 200))
+    assert fl.heightForWidth(1000) == 20

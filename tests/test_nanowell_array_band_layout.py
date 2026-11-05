@@ -1,4 +1,4 @@
-"""The Array view's band, measured: two rows at 1500 px with the app's stylesheet, walking or not, and no control
+"""The Array view's band, measured: three rows of related controls at 1500 px with the app's stylesheet, walking or not, and no control
 moving when a layer, a colouring, a preset, the positions, the image or the overlays change.
 
 Asked for: "the arrays tab needs a UX expert to fix the menu and buttons across the top; they're a mess" — the band
@@ -59,19 +59,74 @@ def _settle(qtbot, ctx, width: int) -> None:
     QApplication.processEvents()
 
 
-def test_the_array_band_is_two_rows_at_1500_px(qc_page, themed, qtbot):
+def _row_of(ctx, name: str) -> int:
+    """Which of the band's rows (``_rows``) the control *name* sits on."""
+    host = _band(ctx)._scope_host
+    widget = ctx.widgets.get(name)
+    while widget.parentWidget() is not host:
+        widget = widget.parentWidget()
+    tops = _rows(ctx)
+    return max(k for k, top in enumerate(tops) if widget.y() >= top - 16)
+
+
+#: The Array view's rows, by what the controls act on (asked for: "clean up / group on rows related controls in
+#: array. They're a mess" — the data controls, the well, the anchor and the picture's layers had shared rows, and
+#: the wrap split them wherever the width ran out).
+_ARRAY_ROWS = (("_nw_metric_cb", "_nw_channel_cb", "_nw_baseline_cb", "_nw_rim_focus_box", "_nw_subset_cb"),
+               ("_nw_well_cb", "_nw_tp_cb", "_nw_anchor_btn", "_nw_clear_anchor_btn", "_nw_rerun_btn"),
+               ("_nw_positions_seg", "_nw_image_cb", "_nw_layers_btn"))
+
+
+@pytest.mark.parametrize("width", [1500, 1200])
+def test_the_array_band_is_three_rows_of_related_controls(qc_page, themed, qtbot, width):
+    """Data · well and its anchor · the picture, each on its own row, at a wide and a narrower window: a row that
+    does not fit wraps within itself and never takes the next row's controls onto it."""
+    ctx = qc_page
+    _settle(qtbot, ctx, width)
+    rows = [{_row_of(ctx, name) for name in names} for names in _ARRAY_ROWS]
+    # In this order, and no two groups share a row: each group's last row is above the next group's first.
+    assert all(max(a) < min(b) for a, b in zip(rows, rows[1:])), rows
+    if width == 1500:
+        assert rows == [{0}, {1}, {2}], rows                           # wide enough: one row each
+
+
+def test_the_excluded_chip_ends_the_well_row_on_the_array_view(qc_page, themed, qtbot):
+    """*Excluded (n)* names wells: on the Array view it sits at the end of the well row, not after the picture's
+    controls, and on another view it is back at the end of the band."""
+    from review.features.nanowell import controller as nwc
+
+    ctx = qc_page
+    nwc.set_well_excluded(ctx, "A01", True)
+    _settle(qtbot, ctx, 1500)
+    chip = ctx.widgets.get("_nw_excluded_wells_btn")
+    assert chip.isVisibleTo(ctx.window)
+    assert _row_of(ctx, "_nw_excluded_wells_btn") == _row_of(ctx, "_nw_anchor_btn")
+    host = _band(ctx)._scope_host
+    order = [host.layout().itemAt(i).widget() for i in range(host.layout().count())]
+    group = chip.parentWidget() if chip.parentWidget() is not host else chip
+    assert order.index(group) < order.index(ctx.widgets.get("_nw_positions_seg").parentWidget())
+    nwc.set_view(ctx, "distribution")
+    QApplication.processEvents()
+    order = [host.layout().itemAt(i).widget() for i in range(host.layout().count())]
+    assert order[-1] is group
+
+
+def test_the_row_breaks_are_the_array_view_s_alone(qc_page, themed, qtbot):
+    """On another view the same band flows as it did: the breaks are hidden, so Distribution's controls are not
+    split across rows the Array view needs."""
+    from review.features.nanowell import controller as nwc
+
     ctx = qc_page
     _settle(qtbot, ctx, 1500)
-    assert len(_rows(ctx)) == 2, _rows(ctx)
-    # Row 1 holds the page's data controls, row 2 the view's own.
-    metric, positions = ctx.widgets.get("_nw_metric_cb"), ctx.widgets.get("_nw_positions_seg")
     host = _band(ctx)._scope_host
-    assert metric.mapTo(host, QPoint()).y() < positions.mapTo(host, QPoint()).y()
-    well_y, positions_y = ctx.widgets.get("_nw_well_cb").mapTo(host, QPoint()).y(), positions.mapTo(host, QPoint()).y()
-    assert abs(well_y - positions_y) <= 16                           # one row (taller items centre a few px higher)
+    breaks = [w for w in host.children() if getattr(w, "objectName", lambda: "")() == "FlowBreak"]
+    assert len(breaks) == 2 and all(b.isVisibleTo(host) for b in breaks)
+    nwc.set_view(ctx, "distribution")
+    QApplication.processEvents()
+    assert not any(b.isVisibleTo(host) for b in breaks)
 
 
-def test_a_walk_keeps_the_array_band_to_two_rows(qc_page, themed, qtbot):
+def test_a_walk_keeps_the_array_band_to_three_rows(qc_page, themed, qtbot):
     from review.features.nanowell import _anchor_queue as aq
     from review.features.nanowell import anchor_queue_compute as aqc
 
@@ -84,7 +139,7 @@ def test_a_walk_keeps_the_array_band_to_two_rows(qc_page, themed, qtbot):
     ctx.widgets.get("_nw_queue_lbl").setText("12 of 47 · B04 at 24h")
     _settle(qtbot, ctx, 1500)
     assert aq.active_queue(ctx) is queue and ctx.widgets.get("_nw_queue_lbl").isVisibleTo(ctx.window)
-    assert len(_rows(ctx)) == 2, _rows(ctx)
+    assert len(_rows(ctx)) == 3, _rows(ctx)
     st.anchor_queue = None
 
 

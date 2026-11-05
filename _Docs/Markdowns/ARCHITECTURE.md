@@ -2151,7 +2151,13 @@ control that *narrows* the data rather than choosing which data is shown, so it
 reads last; but `add_scope` appends in call order and each tab's builder runs in
 its own order, which left Threshold mid-row with Timepoints after it. The flag
 keeps the rule with the control instead of asking every builder to remember to
-call it last. `FlowLayout.move_to_end` does the reordering — `removeWidget`
+call it last. A page that wants its controls on rows of related controls adds
+`ControlBand.add_break()` between them: a `flow_layout.flow_break` item ends the
+flow's line while it is shown — the new line starts at the next item shown, so a
+break with nothing shown after it adds no gap — takes no room, adds no empty line
+when the line is already empty, and is skipped while hidden (so a page can keep rows on one view
+and let them flow on another); the phone form (`control_band_form.BandForm`)
+skips it, being one row per control already. `FlowLayout.move_to_end` does the reordering — `removeWidget`
 followed by `addWidget` cannot, because Qt deletes the `QWidgetItem` that
 `takeAt` returns and the re-add would then operate on a dead object.
 
@@ -12448,6 +12454,27 @@ timepoint, `owner`, `fused`, the `ROW_FLAGS` and `gate`) is read *at* a timepoin
 canonical form and the one place a condition is refused (an unknown field, an op the field cannot take, a range
 upside down, a fractional bound on a whole-number field, a tile condition with no tile).
 
+**Saved subsets** (`subset_compute.clean_name` / `with_saved` / `renamed` / `saved_name_of` / `saved_from_config`,
+`NanowellState.saved_subsets`). A dataset keeps up to `MAX_SAVED` subsets by name — `name -> Subset`, in the order
+saved, each name trimmed and at most `MAX_NAME` characters — in the page's block of its
+`persistence.json` (`saved_subsets`, through `to_config` / `apply_config`, so `review/persistence/nanowell.py` reads
+and writes it with the rest of the page and each dataset has its own). Saving under a name already kept replaces
+that subset in its place; a subset with no conditions is not saved; the same conditions are kept under one name only
+(saving them under a second is refused, naming the first, since the box could show only one name and Rename or Delete
+would act on the other); on restore an entry whose name or subset is not one, or that repeats an earlier entry's
+conditions, is dropped rather than restored as a different subset under that name. Reset view
+(`reset_scopes.reset_view`) returns the page's choices to their defaults and keeps the saved subsets: they are a
+library the user built in the dataset, not a view setting. The page's *Subset* stays the one
+source of what is drawn: a saved subset is a name for a `Subset` value, and `saved_name_of` names the page's subset
+only while it equals a saved one, so an edited copy is the page's own and the saved one is untouched. The Subset
+combo (`subset_view._fill_combo`) lists the saved names between the presets and *Custom subset…*, rebuilt only when
+the names change, with data `saved:<name>`; choosing one calls `controller.apply_saved_subset`. The editor's name
+row — a name box, *Save* (`controller.save_subset`), *Rename* (`rename_saved_subset`, enabled for a saved subset in
+use and a different name) and *Delete* (`delete_saved_subset`, which leaves the page's subset as it is) — says each
+result in the editor's status line and refills the name box only when the saved name in use changes and the box
+still holds the previous name or nothing — a new name typed for a draft survives Apply, which is how a draft is saved
+under a new name (Save waits while edits are pending). `tests/test_nanowell_saved_subsets.py`.
+
 Each condition answers 1, 0 or NaN per nanowell (`_site_answers`, vectorised over the metrics frame by site number);
 NaN is "no value", never zero — an occluded baseline, a well with no recorded pitch, a timepoint the nanowell was
 not seen at. *At any timepoint* is 1 when some value passes, 0 when every value it has fails; *at every timepoint*
@@ -12966,6 +12993,27 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   figure is `array_notes`, each line only when it applies to what is drawn (the fused sentence only with a fused
   nanowell, the tile colours only with tiles), and is written only with `notes` on, under the footer's lines (which stay where they are with Notes off, straight under the array), in room `render_array` reserves for it whether `notes` is on or off: turning Notes on never moves, shrinks or covers the array (a box drawn over the array's foot was tried and hid its bottom row). It returns an `ArrayDrawn` (the hit map, the axes, the
   region shown and its size in pixels, and the tiles' `Rendered`), which the page keeps on `state.drawn`.
+- **Hovering a nanowell** (`array_hover_compute.py`, Qt-free). `site_at` finds the nanowell whose disc (its
+  `radius_um`, in the scene's frame) holds the pointer — the nearest centre where discs overlap, none between them.
+  Two surfaces read it. The canvas's readout chip (`widgets/mpl_toolbar`, which reads `axes._aw_hover_label`) leads
+  with `short_text` — `nanowell 3,-2 · measured · 4.2`, or `no value` and its reason — set by
+  `renderer._hover_label` from the scene alone. The full card is `hover_text`, which `controller.on_motion` (through
+  `_array_hover`) shows as a `QToolTip` while no button is held, and hides on a drag, off the nanowells and off the
+  axes: the address and ring, the timepoint and its hours, the state (and the run's own state when Cell Gating or the
+  rim-focus rule overwrote it, `run_state`) with the fused / partially-visible / count-disagreement flags and the
+  row's `reason`, the shown metric's value as the figure labels it (`ArrayDrawn.label`) or why it has none
+  (`ArrayScene.why`), the count and confluence (with the run's own count when the state leaves none), the occupancy
+  class and baseline count, each channel's cell and nanowell fluorescence, every fold change from the baseline and the
+  growth rate, the rim focus against the well's sharp rims and the page's rule's verdict (`focus_line`: in focus, out
+  of focus, rule off, or why it was not judged — no rim fitted, fewer than `MIN_SITES` rims, a state that is not
+  judged), the identity check, and where it sits (position, radius, visible share, owner tile). Every number is
+  read from the `site_metrics` row, never recomputed, so the card cannot disagree with a figure; a value the row does
+  not define is written `no value`, never `0`. The rows of the well at the timepoint drawn are indexed once per draw
+  (`rows_by_address`, kept on `ArrayDrawn.rows`, which a redraw replaces), so a pointer move reads a dict rather than
+  filtering the table: by address, and a nanowell the run placed but could not address (drawn in the well frame as
+  `(well, None, None)`) by its measured place, which `row_for` looks up — so its card reads its row rather than saying
+  the table has none. Building the index took 37 ms on a 96-well × 400-nanowell × 10-timepoint table of 64 columns. `tests/test_nanowell_array_hover.py` drives the card through
+  `controller.on_motion` on a fixture where every nanowell and timepoint has its own count.
 - **Full resolution** (`full_montage_compute`, Qt-free): every tile from `in/<well>.zip` (the member
   `image_compute._member_for` finds) at the grid record's `left_um`/`top_um`, at the x pixel size, in the
   record's order with a later tile covering an earlier one in the overlap — no blending, so every pixel is a
@@ -12982,24 +13030,31 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   tile's TIFF header, and the tiles layer takes it from there. Moving to another well or timepoint, turning the
   image off or loading another dataset cancels the store's reads at their next tile and lets its pixels go
   (`state.release_tiles`).
-- **The controls** (`tab_view._build_array_controls`, `_refresh_array_controls`). The band reads in two tiers: the
-  page's data controls first (Metric, Channel, Baseline, Subset, Rim focus — the same on every view), then the view's
-  own, ordered where → how drawn → edit: the *Where* item (`_nw_where_group`: Well with Exclude, and Timepoint, one
-  flow item so they never wrap apart; `tab_view._show_where` shows either part per view and measures the item
-  again), Positions (before Image, because Lattice is what greys it), Image with its channel and Range, Layers, and
-  Set anchor / Clear anchor / *Re-run wells…* with no caption (the QC view's copy keeps the long label). *Excluded
-  (n)* is a trailing item, so its coming and going moves nothing. The zoom (−, readout, +, *Fit*, *1:1*),
+- **The controls** (`tab_view._build_array_controls`, `_refresh_array_controls`). On the Array view the band is
+  three rows, by what the controls act on, kept apart by two row breaks (`ControlBand.add_break`, a
+  `flow_layout.flow_break` item that ends the flow's line while shown and is skipped while hidden): the page's data
+  controls (Metric, Channel, Baseline, Rim focus, Subset — the same on every view, the Subset last because it narrows
+  the nanowells rather than choosing what is measured of them); the well — the *Where* item (`_nw_where_group`: Well
+  with Exclude, and Timepoint, one flow item so they never wrap apart; `tab_view._show_where` shows either part per
+  view and measures the item again) and Set anchor / Clear anchor / *Re-run wells…* with no caption (the QC view's
+  copy keeps the long label), since an anchor is set for that well at that timepoint; and the picture — Positions
+  (before Image, because Lattice is what greys it), Image with its channel and Range, and Layers. The breaks are in
+  the view's `groups`, so on every other view they are hidden and the band flows as one zone. A row too wide for the
+  window wraps within itself and never takes the next row's controls. *Excluded (n)* is a trailing item, so its
+  coming and going moves nothing: last in the band on every other view, and on the Array view placed at the end of
+  the well row, just before its break (`ControlBand.place_trailing`, through `FlowLayout.move_before`), since it names
+  wells. The zoom (−, readout, +, *Fit*, *1:1*),
   *Overlays* and *Notes* are viewing actions rather than settings, so they sit under the figure in the card's own toolbar,
   after its navigation buttons (`mount_array_canvas_tools`, through `MplToolbar.add_group`, each group behind its
   own separator and shown with the view's other controls); on the Array view that toolbar's *Reset view* is *Fit*
   (`MplToolbar.setHomeHandler`), because matplotlib's home returns to the limits of a first draw the view's own
-  region has replaced. At 1500 px the band is two rows, walking or not. Every control that cannot act is greyed with
+  region has replaced. At 1500 px the band is three rows, walking or not. Every control that cannot act is greyed with
   its reason after its own tooltip (`tab_view._grey`, `_refresh_array_greying`): Image on Lattice; the image
   channel and Range unless Image is Full resolution; *1:1* with no image pixel; Set anchor with the first clause
   of `anchor_controls`' predicate that fails (`controller.anchor_unavailable_reason`); Clear anchor and Re-run
   wells… with nothing to clear or re-run. Nothing is hidden by a layer choice, and
   `tests/test_nanowell_array_band_layout.py` (UI lane) holds every control's position fixed across layers,
-  colourings, images, positions and Overlays, and the row count at 1500 px. The theme's `secondary` buttons carry
+  colourings, images, positions and Overlays, that the three groups keep to their own rows in order at 1500 and 1200 px, and that the breaks are hidden on another view. The theme's `secondary` buttons carry
   their own `:disabled` rule: the `[variant="secondary"]` selector outranks a bare `:disabled`, so without it a
   greyed secondary button painted as an enabled one, app-wide.
 - **Moving around and clicking** (`controller.on_click` / `on_motion` / `on_release` / `on_scroll`, connected on
@@ -13158,13 +13213,20 @@ the new dataset's bookkeeping; each worker bridge is kept on the state until it 
 
 **The page** (`tab_view.build_nanowell_tab`, `controller`). The view switch — the seven views, as a tab strip
 (`build_view_bar`) in the shell's mode band where every page's sub-tabs sit (§6a), each tab carrying its view's
-tooltip — is not on the page's own band. The control band holds Metric, Along x, Baseline, *Subset* (`subset_view.build_subset_control`: a
-combo of the Starting cells presets — All nanowells, ≥1, 1, 1–2, ≥2 — and *Custom subset…*, with an **Edit…** button,
+tooltip — is not on the page's own band. The control band holds, in this order, Metric, Channel, Along x, Baseline, *Fixed cohort*, Rim focus, the two moving averages, then *Subset* — last of the data controls, since it narrows the nanowells rather than choosing what is measured of them (`subset_view.build_subset_control`: a
+combo of the Starting cells presets — All nanowells, ≥1, 1, 1–2, ≥2 — the subsets saved by name in this dataset, and *Custom subset…*, with an **Edit…** button,
 on every view, the combo outlined in the accent through the `filterActive` QSS property while a subset is set; the
 editor, `SubsetEditor`, is a panel the page places under the band — never a dialog — with one `_ConditionRow` per
-condition, *all* / *any*, *Add condition* and *Clear*; each edit that makes a valid subset is applied at once
-through `controller.set_subset`, and one that does not is said in the panel's `Warn` line and changes nothing; the
-rows are rebuilt from the page's state only when it holds another subset or the dataset's channels changed), Timepoint (on
+condition, *all* / *any*, *Add condition*, *Clear*, *Reset* and *Apply*; an edit changes only the draft the rows
+hold — `SubsetEditor.changed` says in the panel's `Warn` line that it is not applied yet (or why it is not a subset
+yet) — and *Apply* passes the draft through `controller.set_subset` once, so the page redraws once per Apply rather
+than per keystroke; *Reset* rebuilds the rows from the page's subset; Apply and Reset are enabled only while the rows have
+been edited since they were built from the page's subset or applied (`pending`, against `_built`, the conditions as
+the rows wrote them then — not against the page's subset, which a row cannot always show exactly: a bound past the
+spin box's decimals or range would read as an edit nobody made, one Reset could never clear), Apply only while it is a valid subset, and *Save* only while nothing is
+pending, since it keeps the subset in use; the rows are rebuilt from the page's state only when it holds another
+subset than the one they started from (a preset or saved subset chosen in the box, a restore) or the dataset's
+channels changed, so a refresh from any other control keeps a draft), Timepoint (on
 *Along x: Wells*, Position, Extremes and the Array view), *vs* (on *Along x: Wells*), Well (on the one-well views),
 the Array view's Image combo, Positions switch,
 *Layers* menu (each switch, the colouring, and *Show as* for the presets), *Fit* / *1:1* and the anchor's

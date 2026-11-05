@@ -398,7 +398,11 @@ def reset_view(ctx) -> None:
 
     nw = ctx.state.feature_slice("nanowell")
     if nw is not None:
-        nw.apply_config({})                 # the page's choices only; its tables belong to the dataset
+        # The page's choices only: its tables belong to the dataset, and so do the subsets saved in it by name — a
+        # library the user built, not a view setting, so a view reset keeps them.
+        saved = dict(getattr(nw, "saved_subsets", {}) or {})
+        nw.apply_config({})
+        nw.saved_subsets = saved
         _save(ctx, "nanowell")
 
     _notify(ctx.runtime.image_table.reset_cb, "the Image Table grid")

@@ -1936,7 +1936,7 @@ def draw_popout(ctx) -> None:
         wnc.draw_window_popout(ctx, st, fig)
         canvas.draw_idle()
         return
-    st.popout_hits = {}
+    st.popout_hits, st.popout_tiles = {}, []
     site = crops_site(st)
     if site is None:
         render_message(fig, "Select a nanowell on the plot to see its crops here.", gid="nw-popout-empty")

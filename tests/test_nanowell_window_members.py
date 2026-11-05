@@ -153,5 +153,5 @@ def test_the_page_keeps_its_windows_and_pop_out_choices():
     restored.apply_config(state.to_config())
     assert restored.windows == {wc.window_key("count_fc", "time"): window} and restored.popout_source == "window"
     damaged = NanowellState()
-    damaged.apply_config({"windows": {"k": {"lo": 1}}, "popout_source": "nonsense", "popout_layout": "hex"})
+    damaged.apply_config({"windows": {"k": {"lo": 1}}, "popout_source": "nonsense", "popout_layout": "nonsense"})
     assert (damaged.windows, damaged.popout_source, damaged.popout_layout) == ({}, "selected", "rows")

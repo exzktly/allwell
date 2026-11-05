@@ -229,6 +229,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_window_page.py": "drawing a Distribution window on the real page: the drag, the band and rings, a click still selecting",
     "test_nanowell_window_popout.py": "the Distribution window in the pop-out: its rows, pages, clicks and controls",
     "test_nanowell_composite_layout.py": "the window's hex composite: one patch per well, tiles by rank on a spiral, pages",
+    "test_nanowell_composite_render.py": "drawing the composite: tiles, the missing placeholder, one brightness scale, provenance on click",
     "test_nanowell_extremes_layout.py": "The Extremes montage laid out to fill its figure, the timepoints it shows chosen, and each …",
     "test_nanowell_fiducial_reason.py": "An unaddressed timepoint says why the central square was refused (tracker F1)",
     "test_nanowell_figures_read.py": "The Nanowells page's figures read at the size they are drawn: type scaled to the panel, …",

@@ -85,3 +85,34 @@ def test_a_figure_that_declares_tight_layout_keeps_it_through_the_style_pass():
     fig._aw_tight_layout = False
     plot_style._apply_layout_engine(fig, {})
     assert fig.get_layout_engine() is None
+
+
+def test_text_hanging_off_the_top_edge_is_brought_inside_too():
+    """Held sideways the Heat Map's top column ticks and title are taller than the
+    margin the renderer left above the grid."""
+    fig = Figure(figsize=(9.1, 4.3), dpi=100)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(111)
+    fig.subplots_adjust(top=0.88, bottom=0.10, left=0.10, right=0.94)
+    make_axes_locatable(ax).append_axes("right", size="4%", pad=0.08)
+    ax.imshow(np.arange(96.0).reshape(8, 12), aspect="equal")
+    ax.set_xticks(range(12))
+    ax.xaxis.tick_top()
+    ax.tick_params(labelsize=22)
+    ax.set_title("GFP — Mean above threshold — t = 0 h", fontsize=22)
+    renderer = fig.canvas.get_renderer()
+    assert ax.get_tightbbox(renderer).y1 > fig.bbox.height, "the fixture must overhang to prove anything"
+    margin_fit.inset_for_overhang(fig)
+    assert ax.get_tightbbox(renderer).y1 <= fig.bbox.height + 0.5
+
+
+def test_only_a_divider_counts_as_placing_axes_not_a_colour_bar():
+    """Every ``fig.colorbar`` axes carries matplotlib's own locator; treating that
+    as a divider took constrained layout away from every plot with a colour bar."""
+    fig, _ax, _cax = _heat_figure()
+    assert margin_fit.divider_placed(fig)
+    plain = Figure(figsize=(4, 4))
+    FigureCanvasAgg(plain)
+    pax = plain.add_subplot(111)
+    plain.colorbar(pax.imshow(np.arange(4.0).reshape(2, 2)), ax=pax)
+    assert not margin_fit.divider_placed(plain)

@@ -24,6 +24,10 @@ from review.core import margin_fit
 
 _logger = logging.getLogger("review")
 
+#: The share of the room a colour bar's label may fill on one line: text does
+#: not scale exactly with its size, and a label that just fits is cut by a pixel.
+_LABEL_FILL = 0.9
+
 _PLOT_FONT_REGISTERED = False  # matplotlib font-manager registration runs once
 
 
@@ -1779,7 +1783,7 @@ def _fit_labels_to_phone(fig) -> None:
             # label, which is five lines of width the figure's right-hand
             # margin does not have.
             centre = (ax.bbox.y0 + ax.bbox.y1) / 2
-            room = max(room, 2 * min(centre, fig.bbox.height - centre))
+            room = max(room, 2 * min(centre, fig.bbox.height - centre)) * _LABEL_FILL
         _fit_axis_label(ax.yaxis.label, room, along)
         _fit_axis_label(ax.xaxis.label, ax.bbox.width, along)
 
@@ -1858,7 +1862,14 @@ def _fit_ticks(fig) -> None:
     layout has settled; a figure that cannot be measured keeps its labels."""
     from review.core.tick_fit import fit_tick_labels
     with swallow("fit a plot's tick labels to its panels"):
-        fit_tick_labels(fig)
+        # Twice, laying the figure out in between: a label that wraps or
+        # shrinks changes the margins the engine gives the axes, and so the
+        # room the labels were measured against.
+        for _ in range(2):
+            fit_tick_labels(fig)
+            engine = fig.get_layout_engine()
+            if engine is not None:
+                engine.execute(fig)
     # The tick fit changes the text the margins were measured against, and a
     # divider-placed figure (``margin_fit``) has no engine to measure it again.
     if getattr(fig, "_aw_margin_fitted", False):
@@ -1888,7 +1899,7 @@ def _apply_layout_engine(fig, prefs: dict) -> None:
             _fit_labels_to_phone(fig)
         except Exception:
             swallowed()  # an unmeasurable label keeps its one line
-        if any(ax.get_axes_locator() is not None for ax in fig.axes):
+        if margin_fit.divider_placed(fig):
             # A divider places these axes and ignores the engine, so constrained
             # layout would only move the ones it can reach; ``margin_fit`` makes
             # the room the divider's colour bar needs instead.

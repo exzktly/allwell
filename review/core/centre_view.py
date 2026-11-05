@@ -129,7 +129,7 @@ def build_centre(win, parent: QWidget) -> None:
     # "Plotting"), so a build profile that drops one drops its sub-tab with no
     # edit here. Falls back to the canonical order if none are declared.
     _PLOT_SUBTABS = win._features.sub_leaves("Plotting") or [
-        "Bar Plots", "Line Graphs", "Scatter Plot", "Distribution", "Heat Map",
+        "Heat Map", "Bar Plots", "Line Graphs", "Scatter Plot", "Distribution",
     ]
 
     # Sidebars referenced by data-load + tab-switch logic must exist

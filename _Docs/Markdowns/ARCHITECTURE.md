@@ -1994,7 +1994,7 @@ and registers every centre page. The current page-list:
 | Section | Tab | Sub-pages |
 |---------|-----|-----------|
 | Home | **Home** | Overview / Cell Gating / Sample Map (Replicates · Variables · Well Labels) / Ratios / Pipeline Info |
-| Analysis | **Plotting** | Bar Plots / Line Graphs / Scatter Plot / Distribution / Heat Map / Response Curves |
+| Analysis | **Plotting** | Heat Map / Bar Plots / Line Graphs / Response Curves / Scatter Plot / Distribution |
 | Analysis | **Statistics** | — |
 | Analysis | **Multivariate** | — (higher-dimensional analysis: correlation / PCA·UMAP·t-SNE / clustering / faceting) |
 | Analysis | **Spatial** | — (neighbourhood / colony-level spatial analysis; §5.11) |

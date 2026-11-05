@@ -11,9 +11,11 @@ checks are the defects a manual sweep found, written as measurements:
 * ``window`` — a widget that extends past the window's right edge outside any scroll area;
 * ``figure`` — matplotlib text (a title, an axis label, a note) that falls outside its figure;
 * ``overlap`` — matplotlib text that overlaps other text (a legend over a panel title);
+* ``ticks`` — neighbouring tick labels that run into each other ("10 11 12" drawn as "101112");
 * ``sliver`` — a scrollable area squeezed to a fraction of the window;
 * ``table`` — an item view that needs a sideways scroll to show its columns;
-* ``menu`` — the phone's page menu naming a page that is not the one on screen.
+* ``menu`` — the phone's page button naming a page that is not the one on screen, or showing a name whose
+  ampersand Qt read as a keyboard mnemonic ("Validate & Repair" drawn as "Validate ̲Repair").
 
 Each tolerance is calibrated so the **desktop** is clean on a data-filled app: a check that
 fires at the desk is a false alarm or a desk defect, and either way gets looked at.
@@ -34,6 +36,8 @@ from PySide6.QtWidgets import (
 TEXT_SLACK_PX = 6
 WRAPPED_SLACK_PX = 8
 SCROLL_SLACK_PX = 8
+#: A table that is 24 px wider than its viewport has a scroll bar for it and loses nothing a reader needs.
+TABLE_SLACK_PX = 24
 #: A scrollable area shorter than this fraction of the window is a sliver.
 SLIVER_FRACTION = 0.30
 
@@ -188,6 +192,30 @@ def figure_text_overlap(window: QWidget) -> list[Finding]:
     return found
 
 
+def figure_tick_overlap(window: QWidget) -> list[Finding]:
+    """Tick labels that run into their neighbours ("10 11 12" drawn as "101112"). Only ticks inside the axis
+    limits are drawn, so only those are compared."""
+    found = []
+    for canvas in _canvases(window):
+        try:
+            canvas.draw()
+            renderer = canvas.get_renderer()
+            for ax in canvas.figure.axes:
+                for axis, lo_hi in ((ax.xaxis, ax.get_xlim()), (ax.yaxis, ax.get_ylim())):
+                    lo, hi = sorted(lo_hi)
+                    drawn = [(tick.get_loc(), label.get_window_extent(renderer)) for tick, label in
+                             zip(axis.get_major_ticks(), axis.get_majorticklabels())
+                             if label.get_visible() and label.get_text().strip() and lo <= tick.get_loc() <= hi]
+                    drawn.sort(key=lambda item: item[0])
+                    for (_a_loc, a), (_b_loc, b) in zip(drawn, drawn[1:]):
+                        if min(a.x1, b.x1) - max(a.x0, b.x0) > 1.5 and min(a.y1, b.y1) - max(a.y0, b.y0) > 1.5:
+                            found.append(Finding("ticks", "FigureCanvas", "neighbouring tick labels overlap"))
+                            break
+        except Exception as exc:
+            found.append(Finding("ticks", "FigureCanvas", f"could not be measured: {exc}"))
+    return found
+
+
 def scroll_slivers(window: QWidget) -> list[Finding]:
     found, limit = [], window.height() * SLIVER_FRACTION
     for w in visible_widgets(window):
@@ -207,7 +235,7 @@ def wide_tables(window: QWidget) -> list[Finding]:
         try:
             if isinstance(w, QAbstractItemView):
                 bar = w.horizontalScrollBar()
-                if bar.isVisibleTo(window) and bar.maximum() > SCROLL_SLACK_PX:
+                if bar.isVisibleTo(window) and bar.maximum() > TABLE_SLACK_PX:
                     found.append(Finding("table", _name(w), f"needs {bar.maximum()}px of sideways scroll to show its columns"))
         except RuntimeError:
             continue
@@ -215,20 +243,28 @@ def wide_tables(window: QWidget) -> list[Finding]:
 
 
 def stale_page_menu(window: QWidget, shell) -> list[Finding]:
-    """In Review, the phone's page button names the page whose tab is current."""
+    """The phone's page button: in Review it names the page whose tab is current, and in any mode its text keeps
+    every ampersand of the name it shows (a single ``&`` is a mnemonic to Qt and is not drawn)."""
     try:
         button = shell.page_button
-        bar = shell._current_page_bar()
-        if bar is None or not button.isVisibleTo(window) or window._review.currentMode() != "review":
+        if not button.isVisibleTo(window):
             return []
-        shown, current = _plain(button.text()).replace("▾", "").strip(), bar.tabText(bar.currentIndex())
-        return [] if shown == current else [Finding("menu", "page button", f"says {shown!r} while {current!r} is on screen")]
+        found = []
+        raw = button.text()
+        if re.search(r"(?<!&)&(?!&)", raw):
+            found.append(Finding("menu", "page button", f"{raw!r} has an ampersand Qt will read as a mnemonic"))
+        bar = shell._current_page_bar()
+        if bar is not None and window._review.currentMode() == "review":
+            shown, current = _plain(raw).replace("▾", "").strip(), bar.tabText(bar.currentIndex())
+            if shown != current:
+                found.append(Finding("menu", "page button", f"says {shown!r} while {current!r} is on screen"))
+        return found
     except (RuntimeError, AttributeError):
         return []
 
 
 CHECKS = (clipped_text, clipped_scroll_content, off_window, figure_text_outside, figure_text_overlap,
-          scroll_slivers, wide_tables)
+          figure_tick_overlap, scroll_slivers, wide_tables)
 
 
 def check_window(window: QWidget, shell=None) -> list[Finding]:

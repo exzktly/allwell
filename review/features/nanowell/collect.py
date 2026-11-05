@@ -132,7 +132,17 @@ class NanowellData:
 
     @property
     def wells(self) -> list[str]:
-        return sorted(self.sites["well"].unique()) if len(self.sites) else []
+        """The wells with rows in :attr:`sites`, sorted. Read many times per redraw (``controller.page_groups``,
+        ``tableless_wells``, …), and ``unique`` over every row of a sixteen-well plate is milliseconds each time, so
+        the answer is kept for the frame it was computed from: a table replaced, or one whose length changed, is
+        computed again. A copy is returned, so a caller's edit never reaches the kept list."""
+        sites = self.sites
+        key = (id(sites), len(sites))
+        kept = self.__dict__.get("_wells_for")
+        if kept is None or kept[0] != key:
+            kept = (key, sorted(sites["well"].unique()) if len(sites) else [])
+            self.__dict__["_wells_for"] = kept
+        return list(kept[1])
 
     def timepoints(self, well: str | None = None) -> list[str]:
         """Timepoints in time order (by ``time_h``, unknown times last, then by label)."""

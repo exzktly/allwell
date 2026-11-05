@@ -43,7 +43,7 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Home](#home) (Overview · Cell Gating · Sample Map — Replicates · Variables · Well Labels — · Ratios · Pipeline Info · QC Triage)
    - [The Review window at a glance](#the-review-window-at-a-glance)
    - [Controls shared by every tab](#controls-shared-by-every-tab)
-   - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Response Curves](#response-curves) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
+   - Plotting: [Heat Map](#heat-map) · [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Response Curves](#response-curves) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution)
    - [Statistics](#statistics) · [Multivariate analysis](#multivariate-analysis) · [Spatial analysis](#spatial-analysis)
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
    - [Saved Plots](#saved-plots) · [Batch export](#batch-export)
@@ -4885,7 +4885,7 @@ shift slightly after this fix.
 
 **What it shows.** Per-well summaries of a metric at one or more timepoints, as
 grouped **bars**, a **violin** of the per-cell distribution, or a **beeswarm**
-of individual cells. This is the default Plotting sub-tab.
+of individual cells.
 
 - **Needs** — at least one selected well and a channel. The **Timepoints**
   button (reads e.g. `Timepoints: 3/8 selected`) fills from the selected wells'
@@ -5548,6 +5548,7 @@ Plots, Line Graphs, Response Curves, the Scatter Wells view or the Heat Map.
 
 **What it shows.** A custom-layout heatmap of one metric across wells — you
 place cells in a grid that mirrors your plate or your experimental design.
+This is the first Plotting sub-tab, and the one Plotting opens on.
 
 - **Needs** — a well selection and a channel; a **Timepoint** chosen from the
   dropdown.

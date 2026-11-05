@@ -433,6 +433,16 @@ part of the form; cross-cutting behaviour → `review/core/`; a reusable widget
 with no All-Well knowledge → `widgets/`; something every pane shares and none owns
 → `ui/`; something that has to happen before the app exists → `startup/`.
 
+**A widget with a different form in phone layout declares it where it is built**
+(`widgets.form_registry.declare(self, "<kind>")` in its constructor; a plot
+canvas is built with `widgets.canvas.make_canvas`), and `ui/phone_shell.py`
+reads the declaration — it recognises no widget by class name, object name or
+duck type, which `tests/test_phone_mode_stays_in_views.py` holds at zero. Code
+that only needs a different size or arrangement never reads `phone_layout`
+itself outside `ui/`, `core/` and a `*_phone.py` / `phone_view.py` beside the
+view; a separate `phone_view.py` is for a phone whose *interaction* differs, and
+its docstring says why.
+
 **Never at the root.** The only reason to add a root module is that it is a
 command *a person is meant to type*, and then it goes in
 `tests/test_root_holds_only_entry_points.py::ROOT_MODULES` with the reason

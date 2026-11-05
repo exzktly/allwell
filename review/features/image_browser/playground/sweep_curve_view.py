@@ -50,8 +50,9 @@ def show_threshold_curve(ctx, curve, *, on_pick=None, picked=None) -> None:
     *on_pick(threshold)* is called with the sampled threshold nearest a press
     on the line; *picked* is the threshold to ring on the curve, if any.
     """
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
+
+    from widgets.canvas import make_canvas
 
     popup = getattr(ctx.runtime.playground, "sweep_curve_popup", None)
     if popup is None or not popup.isVisible():
@@ -61,7 +62,7 @@ def show_threshold_curve(ctx, curve, *, on_pick=None, picked=None) -> None:
         layout = QVBoxLayout(popup)
         layout.setContentsMargins(8, 8, 8, 8)
         fig = Figure(figsize=(7.8, 4.4), dpi=100)
-        canvas = FigureCanvas(fig)
+        canvas = make_canvas(fig)
         layout.addWidget(canvas)
         from widgets.mpl_toolbar import MplToolbar
         layout.addWidget(MplToolbar(canvas, popup))

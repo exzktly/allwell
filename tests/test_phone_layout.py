@@ -708,24 +708,6 @@ def test_a_stacked_dashboard_is_the_page_and_says_what_a_tapped_well_is(qapp):
     d.hide()
 
 
-def test_a_form_row_stacks_its_label_and_gets_its_pin_back(qapp):
-    from PySide6.QtWidgets import QBoxLayout, QHBoxLayout
-    from ui.phone_shell import PhoneShell
-    row = QWidget()
-    row.setObjectName("AnalyzeFormRow")
-    lay = QHBoxLayout(row)
-    label = QLabel("Nucleus probability")
-    label.setFixedWidth(110)
-    lay.addWidget(label)
-    lay.addWidget(QLineEdit())
-    PhoneShell._stack_form_row(None, row, True)
-    assert lay.direction() == QBoxLayout.TopToBottom
-    assert label.maximumWidth() > 110
-    PhoneShell._stack_form_row(None, row, False)
-    assert lay.direction() == QBoxLayout.LeftToRight
-    assert (label.minimumWidth(), label.maximumWidth()) == (110, 110)
-
-
 def test_a_title_too_wide_for_a_phone_is_broken_into_full_lines():
     from review.core.plot_style import _break_to_fit
     text = "GFP Mean Intensity (above threshold) ± SEM — t = 0 h"
@@ -776,13 +758,17 @@ def test_plots_get_220_points_per_row_of_axes_and_their_own_height_back(qapp):
 
 
 def test_a_matplotlib_toolbar_shown_in_phone_layout_is_hidden(qapp, app_sheet):
-    class MplToolbar(QWidget):      # matched by class name, as the app's is
-        pass
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+
+    from widgets.mpl_toolbar import MplToolbar      # the real one: it declares its own kind
 
     win = _window()
     QVBoxLayout(win)
     shell = _shell(win)
-    bar = MplToolbar(win)
+    canvas = FigureCanvasQTAgg(Figure())
+    canvas.setParent(win)
+    bar = MplToolbar(canvas, win)
     win.layout().addWidget(bar)
     bar.show()
     phone_layout.set_on(True)
@@ -802,16 +788,19 @@ def test_an_info_hint_answers_a_tap_with_its_text(qapp, monkeypatch):
     from ui.phone_shell import _PhoneEventFilter
     shown = []
     monkeypatch.setattr(QToolTip, "showText", lambda *a: shown.append(a[1]))
-    hint = QLabel("ⓘ")
-    hint.setObjectName("InfoHint")
-    hint.setToolTip("What this number means")
+    from widgets.info_icon import info_icon
+    host = QWidget()
+    hint = info_icon(host, "What this number means")       # the app's factory: it declares itself
     filt = _PhoneEventFilter(QObject())
     tap = QMouseEvent(QEvent.MouseButtonRelease, QPointF(2, 2), QPointF(2, 2),
                       Qt.LeftButton, Qt.NoButton, Qt.NoModifier)
     assert filt.eventFilter(hint, tap) is True
     assert shown == ["What this number means"]
-    hint.setObjectName("Plain")
-    assert filt.eventFilter(hint, tap) is False
+    # A label that only borrows the ⓘ look (a status line) is not a hint, tooltip or not.
+    styled = QLabel("a status line", host)
+    styled.setObjectName("InfoHint")
+    styled.setToolTip("not a hint")
+    assert filt.eventFilter(styled, tap) is False
     assert shown == ["What this number means"]
 
 
@@ -1517,7 +1506,7 @@ def test_the_page_menu_lists_this_section_s_pages_and_never_the_sections(qapp, a
 def test_an_empty_plot_s_hint_says_where_the_plate_is_on_a_phone():
     """At the desk the plate is in the rail at the left; on a phone it is under
     Wells at the foot, and Saved selections are in ☰."""
-    from review.core.ui_helpers import phone_wording
+    from review.core.empty_state_phone import phone_wording
     desk = "Click wells on the plate at the left, or open Saved selections below it."
     assert phone_wording(desk) == desk
     phone_layout.set_on(True)
@@ -1667,11 +1656,13 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     names them — is watched. The drift this rejects: a type taught to
     ``adapt`` but not to the watch list is never watched, so a widget built
     after the switch never gets its phone form, and nothing fails."""
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
     from matplotlib.figure import Figure
 
     from ui import phone_shell as ps
+    from widgets import form_registry
+    from widgets.canvas import make_canvas
     from widgets.control_band import ControlBand
+    from widgets.info_icon import info_icon
     from widgets.mpl_toolbar import MplToolbar
     from widgets.stepper import Stepper
 
@@ -1679,14 +1670,14 @@ def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
     for meth in ps.PhoneShell._ADAPTERS.values():
         assert callable(getattr(ps.PhoneShell, meth, None)), meth
     host = QWidget()
-    canvas = FigureCanvasQTAgg(Figure())
-    canvas.setParent(host)
-    row = QWidget(host)
-    row.setObjectName("AnalyzeFormRow")
+    canvas = make_canvas(Figure(), host)
     block = QWidget(host)
-    block.setProperty("phoneControls", True)
+    form_registry.declare(block, "controls")
     block.setStacked = lambda _on: None
-    widgets = [ControlBand(host), MplToolbar(canvas, host), Stepper(host), row, block]
+    custom = QWidget(host)
+    form_registry.register(custom, lambda _on: None)      # a view's own form
+    widgets = [ControlBand(host), MplToolbar(canvas, host), Stepper(host), block, custom, canvas,
+               info_icon(host, "An explanation")]
     named = {ps._adapt_kind(w) for w in widgets}
     assert named == set(ps.ADAPTED_KINDS), named
     assert all(ps._phone_relevant(w) for w in widgets)
@@ -1720,3 +1711,39 @@ def test_the_rail_drawer_lends_the_current_mode_s_panel_and_gives_all_back(qapp)
     assert {m for m, p in panels.items() if not p.isHidden()} == {"analyze", "datasets"}
     assert not any(drawer.is_lent(p) for p in panels.values())
     host.deleteLater()
+
+
+# ── following the layout for as long as an owner lives ──────────────────────
+
+def test_follow_calls_back_while_the_owner_lives_and_leaves_when_it_is_gone(qapp):
+    """``phone_layout.follow``: a page-lifetime listener. Wrong implementations: one that never removes itself (a
+    process-wide listener keeping a deleted page's callbacks alive and calling into it), and one that checks only the
+    Python wrapper (which outlives the C++ widget and then raises on first use)."""
+    import gc
+
+    from PySide6.QtCore import QObject
+
+    seen = []
+    owner = QObject()
+    before = len(phone_layout._listeners)
+    phone_layout.follow(owner, seen.append)
+    assert len(phone_layout._listeners) == before + 1
+    phone_layout.set_on(True)
+    phone_layout.set_on(False)
+    assert seen == [True, False]
+    # The C++ object is deleted while the wrapper is still referenced: the next layout change drops the listener
+    # without calling it.
+    import shiboken6
+    shiboken6.delete(owner)
+    phone_layout.set_on(True)
+    phone_layout.set_on(False)
+    assert seen == [True, False], "the listener was called for a deleted owner"
+    assert len(phone_layout._listeners) == before
+    # And a collected owner is dropped the same way.
+    gone = QObject()
+    phone_layout.follow(gone, seen.append)
+    del gone
+    gc.collect()
+    phone_layout.set_on(True)
+    phone_layout.set_on(False)
+    assert seen == [True, False] and len(phone_layout._listeners) == before

@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import logging
 import re
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -48,10 +49,13 @@ from PySide6.QtWidgets import (
     QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QLabel,
     QLineEdit, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
+import shiboken6
 
 from core import phone_layout
 from core.safe import swallowed
 from ui import phone_window, theme
+from widgets import form_registry
+from widgets.control_band import ControlBand
 
 _LOG = logging.getLogger(__name__)
 
@@ -113,9 +117,6 @@ class PhoneHandles:
     #: landscape), the rule between dashboard and log, and the dashboard.
     analyze_body: object | None = None
     analyze_rule: QWidget | None = None
-    #: Logs that wrap in phone layout (a sideways-scrolled log on a phone
-    #: hides the end of every error line, which is the part that matters).
-    logs: Callable[[], list] = lambda: []
     #: The status line's text ("4 well(s) | 72 nuclei"), shown at the top of
     #: the side rail since the status bar is gone on a phone.
     status_text: Callable[[], str] | None = None
@@ -470,8 +471,8 @@ def scale_canvas(canvas, factor: float) -> None:
 
 
 def _canvases():
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-    return [w for w in QApplication.allWidgets() if isinstance(w, FigureCanvasQTAgg)]
+    """Every live plot canvas — each declared itself when it was built."""
+    return form_registry.declared("canvas")
 
 
 def scale_canvases(factor: float) -> int:
@@ -485,50 +486,31 @@ def scale_canvases(factor: float) -> int:
     return len(canvases)
 
 
-def _is_phone_controls(w: QWidget) -> bool:
-    """A page's block of controls that is not a ``ControlBand`` but goes to the
-    Controls sheet like one: marked with the ``phoneControls`` property, and
-    carrying ``setStacked`` for its one-column form."""
-    return bool(w.property("phoneControls")) and hasattr(w, "setStacked")
-
-
-#: The widgets ``PhoneShell.adapt`` gives a phone form, by kind — the one
-#: roster of them. ``adapt`` dispatches on the kind :func:`_adapt_kind` names
+#: The kinds of widget ``PhoneShell.adapt`` gives a phone form — the one roster
+#: of them. A widget declares its kind where it is built
+#: (``widgets.form_registry``); ``adapt`` dispatches on it
 #: (``PhoneShell._ADAPTERS``) and :func:`_phone_relevant` watches every widget
 #: that has one, so a kind added here is both watched and adapted; a kind that
 #: ``_ADAPTERS`` lacks fails ``tests/test_phone_layout.py``.
-_KIND_BY_CLASS = {"ControlBand": "controls", "MplToolbar": "toolbar",
-                  "Stepper": "stepper"}
-_KIND_BY_OBJECT_NAME = {"AnalyzeFormRow": "form_row"}
 ADAPTED_KINDS = frozenset(
-    ("controls", *_KIND_BY_CLASS.values(), *_KIND_BY_OBJECT_NAME.values()))
+    ("controls", "toolbar", "stepper", "canvas", "hint", form_registry.CUSTOM))
 
 
 def _adapt_kind(w: QWidget) -> str | None:
-    """Which kind of phone form ``PhoneShell.adapt`` gives *w*, or ``None``
-    for a widget it leaves alone: a page's controls (a ``ControlBand`` or a
-    ``phoneControls`` block), a plot toolbar, a stepper, an Analyze form row."""
-    kind = _KIND_BY_CLASS.get(type(w).__name__)
-    if kind is not None:
-        return kind
-    if _is_phone_controls(w):
-        return "controls"
-    return _KIND_BY_OBJECT_NAME.get(w.objectName())
+    """Which kind of phone form ``PhoneShell.adapt`` gives *w*, or ``None`` for a
+    widget it leaves alone: the kind the widget declared with
+    ``widgets.form_registry`` — a page's controls, a plot toolbar, a stepper, a
+    plot canvas, an ⓘ, or a form a view registered for itself."""
+    declared = form_registry.kind_of(w)
+    return declared if declared in ADAPTED_KINDS else None
 
 
 def _phone_relevant(w: QWidget) -> bool:
     """Whether phone layout acts on *w* when it is shown: whatever
-    :func:`_adapt_kind` names, plus the three the event filter acts on
-    itself — a plot canvas (its DPI), a window of its own (a dialog, a
-    pop-out: its phone form, :func:`ui.phone_window.kind`) and an ⓘ hint (a
-    tap). Everything else is left alone and never watched."""
-    if _adapt_kind(w) is not None:
-        return True
-    if getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure"):
-        return True
-    if phone_window.kind(w) is not None:
-        return True
-    return w.objectName() == "InfoHint"
+    :func:`_adapt_kind` names, plus a window of its own (a dialog, a pop-out: its
+    phone form, :func:`ui.phone_window.kind`). Everything else is left alone and
+    never watched."""
+    return _adapt_kind(w) is not None or phone_window.kind(w) is not None
 
 
 class _RefitOnLayout(QObject):
@@ -592,8 +574,8 @@ class _DragOwnerGuard(QObject):
 
 
 def _is_canvas(w: QWidget) -> bool:
-    """A matplotlib canvas, recognised without importing matplotlib."""
-    return getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure")
+    """A plot canvas: one built through ``widgets.canvas.make_canvas``."""
+    return form_registry.kind_of(w) == "canvas"
 
 
 def _handles_own_drag(w: QWidget) -> bool:
@@ -762,8 +744,8 @@ class _FitOnShow(QObject):
 class _PhoneEventFilter(QObject):
     """While phone layout is on, the things built or shown later get it too:
     a plot its DPI, a window of its own its phone form, a page's control band a
-    place in the Controls sheet, a stepper its − / +, a toolbar its absence, a
-    form row its stacking; and an ⓘ answers a tap, since nothing hovers.
+    place in the Controls sheet, a stepper its − / +, a toolbar its absence; and
+    an ⓘ answers a tap, since nothing hovers.
 
     **Installed on those widgets only, never on the application.** It used to
     be an application-wide filter, so every event of every object in the
@@ -782,7 +764,7 @@ class _PhoneEventFilter(QObject):
     def eventFilter(self, obj, event) -> bool:  # Qt naming
         t = event.type()
         if t == QEvent.MouseButtonRelease and isinstance(obj, QLabel) \
-                and obj.objectName() == "InfoHint" and obj.toolTip():
+                and form_registry.kind_of(obj) == "hint" and obj.toolTip():
             from PySide6.QtWidgets import QToolTip
             QToolTip.showText(obj.mapToGlobal(obj.rect().bottomLeft()), obj.toolTip(), obj)
             return True
@@ -790,9 +772,6 @@ class _PhoneEventFilter(QObject):
             return False
         if phone_window.kind(obj) is not None:
             self._shell.fit_popup_window(obj)
-        elif getattr(type(obj), "draw_idle", None) is not None and hasattr(obj, "figure"):
-            scale_canvas(obj, self._shell.plot_factor())
-            self._shell.size_canvas(obj, True)
         else:
             self._shell.adapt(obj)
         return False
@@ -928,6 +907,36 @@ class PhoneShell(QObject):
         self._landscape: bool | None = None
         self._build_controls()
         self._load_settings()
+        self._listen_for_declarations()
+
+    # ── declarations ──────────────────────────────────────────────────────
+    def _listen_for_declarations(self) -> None:
+        """Hear every widget that declares a form (``widgets.form_registry``).
+        The listener holds the shell weakly and leaves the registry when the
+        shell is gone, so a window torn down does not keep a listener alive."""
+        ref = weakref.ref(self)
+
+        def _listener(widget: QWidget, kind: str) -> None:
+            shell = ref()
+            if shell is None or not shiboken6.isValid(shell):
+                form_registry.remove_listener(_listener)
+                return
+            shell._on_declared(widget, kind)
+
+        # No ``destroyed`` connection: a Python callback run while Qt tears the
+        # shell down inside a garbage collection crashed a test worker natively.
+        # The listener leaves the registry the next time it is called instead.
+        form_registry.add_listener(_listener)
+
+    def _on_declared(self, widget: QWidget, _kind: str) -> None:
+        """A widget declared its form — from inside its constructor, so it is
+        not finished: only watch it. It is adapted on its first Show, as a
+        widget built after the switch always was."""
+        if not phone_layout.is_on() or widget.property(_P_WATCHED):
+            return
+        widget.setProperty(_P_SEEN, True)
+        widget.installEventFilter(self._filter)
+        widget.setProperty(_P_WATCHED, True)
 
     # ── settings ──────────────────────────────────────────────────────────
     def _store(self):
@@ -1226,7 +1235,7 @@ class PhoneShell(QObject):
             self._h.set_navigator(False)
         else:
             self._restore_navigator()
-        # Steppers and form rows take their phone form *after* the restyle has
+        # Steppers take their phone form *after* the restyle has
         # scaled their desk sizes, and give it up *before* the restyle scales
         # them back — so the rescale pass only ever sees desk-shaped widgets.
         if not on:
@@ -1275,13 +1284,6 @@ class PhoneShell(QObject):
         bar = self._h.mode_bar
         if bar is not None and hasattr(bar, "setCompact"):
             bar.setCompact(on, pad=self.pt(MODE_PAD_PT))
-        from PySide6.QtWidgets import QTextEdit
-        for log in self._h.logs():
-            # Wrapped, a log trimmed at its block cap re-anchors a scrolled-up
-            # reader slightly off (the trim fix-up counts a block as one line;
-            # ARCHITECTURE §6.1). Reading the end of an error line on a phone
-            # is worth that.
-            log.setLineWrapMode(QTextEdit.WidgetWidth if on else QTextEdit.NoWrap)
         self._options_badge.setInset(self.pt(2) if on else 0)
         for w in self._phone_only():
             w.setVisible(on)
@@ -1318,7 +1320,30 @@ class PhoneShell(QObject):
 
     #: ``adapt``'s dispatch: one method per kind in :data:`ADAPTED_KINDS`.
     _ADAPTERS = {"controls": "_adapt_controls", "toolbar": "_adapt_toolbar",
-                 "stepper": "_adapt_stepper", "form_row": "_stack_form_row"}
+                 "stepper": "_adapt_stepper",
+                 "canvas": "_adapt_canvas", "hint": "_adapt_hint",
+                 form_registry.CUSTOM: "_adapt_custom"}
+
+    @staticmethod
+    def _adapt_hint(w: QWidget, on: bool) -> None:
+        """An ⓘ answers a tap with its text, since nothing hovers on a phone.
+        The tap itself is read by :class:`_PhoneEventFilter`, which this kind
+        gets installed on; there is nothing to set on the widget."""
+
+    def _adapt_canvas(self, w: QWidget, on: bool) -> None:
+        """A plot is drawn at the phone's DPI and tall enough for its rows of
+        axes. Leaving phone layout is `scale_canvases` and `_size_canvases`."""
+        if on:
+            scale_canvas(w, self.plot_factor())
+            self.size_canvas(w, True)
+
+    @staticmethod
+    def _adapt_custom(w: QWidget, on: bool) -> None:
+        """A widget whose view registered a form of its own
+        (``form_registry.register``) is handed the mode."""
+        apply = form_registry.custom_apply(w)
+        if apply is not None:
+            apply(on)
 
     def _adapt_controls(self, w: QWidget, on: bool) -> None:
         """A page's controls go to the Controls sheet: hidden in the page."""
@@ -1379,35 +1404,35 @@ class PhoneShell(QObject):
             self._sweep(force=True)
 
     def _sweep(self, *, force: bool) -> None:
-        """Watch and adapt every widget phone layout cares about that is not
-        watched yet. Only widgets no sweep has looked at before are looked at,
-        unless *force*: a re-shown widget is already watched, so only new
-        widgets need finding.
+        """Watch and adapt what phone layout cares about that is not watched yet.
 
-        New is a mark on the widget itself (``_awPhoneSeen``), not the widget
-        count and not its address. A canvas deleted and another built between
-        two ticks leaves the count unchanged, and a count-only check never
-        watched the new one; the allocator hands the new widget the old one's
-        address as often as not, so an address set misses it the same way.
-        Reading the marks costs about 6 ms at 4,300 widgets."""
+        Three things are looked at, none of them by walking every widget in
+        Python. The **top-level windows** (a dialog, a pop-out, a menu, a combo
+        box's popup — Qt builds some of these and no All-Well code runs when it
+        does, which is why they cannot declare themselves); the **scroll areas**
+        under each, found by one C++ ``findChildren`` (every scroll area scrolls
+        by a drag, and 64 places build one, so declaring them would be a
+        forgotten-site waiting to happen); and the **declared** widgets the
+        listener has not watched, which are the ones built while phone layout was
+        off.
+
+        Only what no sweep has looked at before is acted on, unless *force*: a
+        re-shown widget is already watched. New is a mark on the widget itself
+        (``_awPhoneSeen``), not a count and not an address — a canvas deleted and
+        another built between two ticks leaves the count unchanged, and the
+        allocator hands the new widget the old one's address as often as not."""
         if not phone_layout.is_on():
             return
-        widgets = QApplication.allWidgets()
-        if not force:
-            fresh = []
-            for w in widgets:
-                try:
-                    if not w.property(_P_SEEN):
-                        fresh.append(w)
-                except RuntimeError:
-                    swallowed()  # deleted while the list was walked
-            if not fresh:
-                return
-            widgets = fresh
-        factor = self.plot_factor()
         from PySide6.QtWidgets import QAbstractScrollArea
-        for w in widgets:
+        candidates: list[QWidget] = []
+        for top in QApplication.topLevelWidgets():
+            candidates.append(top)
+            candidates.extend(top.findChildren(QAbstractScrollArea))
+        candidates.extend(form_registry.declared())
+        for w in dict.fromkeys(candidates):
             try:
+                if not force and w.property(_P_SEEN):
+                    continue
                 w.setProperty(_P_SEEN, True)
                 # Every scroll area built after the switch — a page built
                 # lazily, a dialog, a popover, a combo box's list — scrolls by
@@ -1422,46 +1447,18 @@ class PhoneShell(QObject):
                     continue        # its Show will reach the filter
                 if phone_window.kind(w) is not None:
                     self.fit_popup_window(w)
-                elif getattr(type(w), "draw_idle", None) is not None and hasattr(w, "figure"):
-                    scale_canvas(w, factor)
-                    self.size_canvas(w, True)
                 else:
                     self.adapt(w)
             except RuntimeError:
                 swallowed()  # deleted while the list was walked
 
     def _adapt_all(self, on: bool) -> None:
-        for w in list(QApplication.allWidgets()):
+        for w in form_registry.declared():
             try:
                 self.adapt(w, on)
             except RuntimeError:
                 swallowed()  # deleted while the list was walked
         self._grab_scrolling(on)
-
-    def _stack_form_row(self, row: QWidget, on: bool) -> None:
-        """A label above its field on a phone, beside it at the desk."""
-        from PySide6.QtWidgets import QBoxLayout
-        lay = row.layout()
-        if not isinstance(lay, QBoxLayout) or lay.count() == 0:
-            return
-        if row.property("stackedAtDesk"):
-            return              # label-above-field at the desk too; nothing to do
-        label = lay.itemAt(0).widget()
-        want = QBoxLayout.TopToBottom if on else QBoxLayout.LeftToRight
-        if lay.direction() == want:
-            return
-        lay.setDirection(want)
-        if label is None:
-            return
-        if on:
-            row.setProperty("_awLabelPin", [label.minimumWidth(), label.maximumWidth()])
-            label.setMinimumWidth(0)
-            label.setMaximumWidth(_QWIDGETSIZE_MAX)
-        else:
-            pin = row.property("_awLabelPin")
-            if pin:
-                label.setMinimumWidth(int(pin[0]))
-                label.setMaximumWidth(int(pin[1]))
 
     def _grab_scrolling(self, on: bool) -> None:
         """Let a drag scroll everything that scrolls, the way a thumb expects.
@@ -1824,17 +1821,16 @@ class PhoneShell(QObject):
     # ── the Controls sheet ────────────────────────────────────────────────
     def _current_band(self) -> QWidget | None:
         """The controls of the Review page on screen: its control band, if that
-        has controls, or else a block the page marked ``phoneControls`` (the
+        has controls, or else a block the page declared as controls (the
         Image Table's builder and action strip, whose band is empty)."""
         marked = None
-        for w in QApplication.allWidgets():
-            band = type(w).__name__ == "ControlBand"
-            if not (band or _is_phone_controls(w)) or not self._band_managed(w):
+        for w in form_registry.declared("controls"):
+            if not self._band_managed(w):
                 continue
             parent = w.parentWidget()
             if w is not self._sheet_band and (parent is None or not parent.isVisible()):
                 continue
-            if not band:
+            if not isinstance(w, ControlBand):
                 marked = w
             elif (w.scope_count() + w.action_count()) > 0:
                 return w
@@ -1947,7 +1943,7 @@ class PhoneShell(QObject):
         holder.layout().insertWidget(0, band)
         # A control band is read down as a form — one control per row, label
         # column, Data / Display / Actions; a page's own block of controls
-        # (``phoneControls``) takes its own stacked form.
+        # (declared as ``controls``) takes its own stacked form.
         if hasattr(band, "setForm"):
             band.setForm(True, label_width=self.pt(phone_layout.SHEET_LABEL_PT),
                          row_height=self.pt(phone_layout.TOUCH_ROW_PT),

@@ -63,8 +63,9 @@ def _cell_gating_show_opt_curve_popup(
     clicks just repaint the existing axes, so the user can iterate on
     wells / timepoints / range and watch the curve update.
     """
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
+
+    from widgets.canvas import make_canvas
 
     ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
     values_a = _valid_values_for_channel(
@@ -119,7 +120,7 @@ def _cell_gating_show_opt_curve_popup(
         layout = QVBoxLayout(popup)
         layout.setContentsMargins(8, 8, 8, 8)
         fig = Figure(figsize=(7.8, 4.4), dpi=100)
-        canvas = FigureCanvas(fig)
+        canvas = make_canvas(fig)
         layout.addWidget(canvas)
         # Wire the matplotlib toolbar so the user can pan/zoom/save the
         # curve while keeping the popup non-modal.

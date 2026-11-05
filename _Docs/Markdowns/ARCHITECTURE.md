@@ -167,8 +167,54 @@ scale, the screen-shape test; any pane may read the flag without importing the
 shell. `ui/phone_shell.py` is the Qt half — `PhoneShell`, owned by `AllWellApp` —
 and imports no pane: `AllWellApp._build_phone_shell` hands it a `PhoneHandles`
 naming every widget it rearranges and the callables it drives (the mode, the
-navigator, the band, the run dashboards, the logs, the status text, a relayout),
-so a pane that moves a widget changes one line there.
+navigator, the band, the run dashboards, the status text, a relayout),
+so a pane that moves a widget changes one line there. What a pane's own widgets
+become is the pane's: Analyze's phone view wraps its run log, and the feature
+registry says which Review pages a phone does not offer (`FeatureDescriptor.on_phone`,
+read through `FeatureRegistry.hidden_on_phone` into `phone_hidden_sections`;
+every top-level page must state it, which a test holds).
+
+**Which layers know about phone layout.** Data and drawing never do: no
+`renderer.py`, `collect.py`, `*_compute.py`, and nothing under `domain/`,
+`services/`, `pipeline/` or `util/` imports the flag or the shell; their sizes
+arrive as arguments (`tests/test_phone_mode_stays_in_views.py`). The tokens
+(`core/phone_layout.py`, `ui/theme.py`) and the chrome (`ui/phone_shell.py`,
+`ui/phone_drawer.py`, `ui/phone_window.py`, `ui/phone_fit.py`) read it freely.
+A view reads it only from a `_phone.py` or `phone_view.py` beside it; every
+other read, in `allwell.py` and three `review/core/` helpers (plot style, the
+split toggle, the rail toggle), is on a roster in that test with a written
+reason, and the roster only shrinks. Wording that differs by mode lives in a
+`_phone.py` beside what it words: `review/core/empty_state_phone.py` rewords an
+empty plot's hint (the plate is under Wells, a finger taps), the Image
+Table's `_phone_fit` says where its builder is, and the Nanowells page reads the
+mode only in `review/features/nanowell/_phone.py`, which holds the decisions (the
+site detail takes the page, the crop strip wraps to its shape) so the controller
+and the tab view only call it — and its renderer is told `wrap_footer` by the
+controller and never reads the mode. A page that has to follow a layout change
+for as long as it lives does it with `phone_layout.follow(owner, fn)`, which holds
+the owner weakly and drops the listener once the owner or its C++ object is gone.
+
+**Widgets declare their phone form.** `widgets/form_registry.py` records which
+widgets have an alternate form and of what *kind* (`"stepper"`, `"toolbar"`,
+`"controls"`, `"canvas"`, `"hint"`, or `"custom"` for a form a view registers with an
+`apply(on)` callable). It lives in `widgets/` because the classes that declare
+are there, and it knows kinds, not phones: it imports nothing from the
+application and names no layout, which `test_the_form_registry_knows_kinds_and_not_phones`
+holds. `PhoneShell` listens (`_listen_for_declarations`, weakly, so a closed
+window leaves no listener). A declaration is made inside the widget's
+constructor, so while phone layout is on the shell only installs its event
+filter on the widget and the form is applied on the widget's first Show.
+`_adapt_kind` reads that declared kind (`ControlBand`, `MplToolbar`, `Stepper`,
+every plot canvas — built only through
+`widgets.canvas.make_canvas`, which a guard enforces — every ⓘ from
+`widgets.info_icon`, and the Image Table's controls block declare theirs). The
+shell recognises no widget by its class name, its object name or a duck type;
+`test_the_shell_recognises_no_more_widgets_by_name_than_the_budget` holds that
+at zero, counting the spellings a name could come back in.
+`tests/test_phone_layout_snapshot.py` records what the window shows in phone
+layout (every page, upright, sideways and at the large text size) against
+`tests/fixtures/phone_snapshot_baseline.json`, which is the check that a change
+to how widgets are found has not changed what is seen.
 
 **The phone point.** Every size in phone layout is written in phone points
 (`u`): the short side of the screen's geometry divided by 390, the width in
@@ -205,9 +251,9 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    look, both resets, copy analysis, reveal folder — three of them destructive, a
    fat-finger target, none for reading results — plus Refresh, Help and the
    status bar, whose jobs move to the ⋯ menu and the side rail), turns the mode
-   bar to labels only (`ModeBar.setCompact`), stacks the run dashboards, wraps
-   the analysis log, and hides Review CSV and Batch Export from the rail's
-   sections (`phone_hidden_sections`) — both are desk work;
+   bar to labels only (`ModeBar.setCompact`), stacks the run dashboards, and hides
+   Review CSV and Batch Export from the rail's sections (`phone_hidden_sections`,
+   from `on_phone=False` on their descriptors) — both are desk work;
 2. closes the side rail — or, on the way out, restores the left panel's desk
    state;
 3. restyles at the phone's type scale and touch unit (§8) — the only slow step,
@@ -216,8 +262,8 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    neither changes. Nearly all of it is `QApplication.setStyleSheet`
    re-polishing every widget: a near-empty stylesheet still costs most of it,
    so the cost scales with the widget count, not with the sheet. Widgets
-   that take a different *form* on a phone — a stepper's − / +, an Analyze form
-   row's stacked label — take it after the restyle on the way in and give it up
+   that take a different *form* on a phone — a stepper's − / +, a plot's DPI and
+   height — take it after the restyle on the way in and give it up
    before the restyle on the way out, and give it up for the length of the two
    restyles made *inside* phone layout too, a text-size change and the phone
    turning (`PhoneShell._restyle_in_place`) — so the rescale pass only ever
@@ -246,26 +292,33 @@ header row are hidden and the way back is the ⋯ menu's *Desktop layout*. `Phon
    the same treatment: a plot its DPI and height, a window of its own its
    phone form (below, *Windows of their own*), a control band its place in the Controls sheet, a matplotlib toolbar
    its absence (pan and zoom are modes a VNC drag fights with), a stepper its
-   − / +, a form row its stacking — and makes an ⓘ answer a tap with its text,
+   − / + — and makes an ⓘ answer a tap with its text,
    since nothing hovers on a phone. `_PhoneEventFilter` is installed **on those
    widgets only** (`_phone_relevant` names them), never on the application: an
    application-wide filter handed every event of every object in the process to
    Python, and on Windows it died with a native access violation on the filter's
    first line, called from `app.exec()` with an event for an object being torn
-   down. `PhoneShell._sweep` finds widgets built after the switch — every
+   down. A widget that declares a form (`widgets.form_registry`) is watched the
+   moment it is declared, if phone layout is on, and adapted on its first Show.
+   What no declaration reaches, `PhoneShell._sweep` finds — every
    `_SWEEP_MS` (300 ms), at once when a window gains focus (a dialog opening),
    and at once on a page change (`PhoneShell.page_changed`, wired to the
    `currentChanged` of the stack the window hands it as `PhoneHandles.pages`,
    Review's notebook, and called by the page menu), with one more sweep on the
    next turn of the loop for a page that builds its body only once shown. It
-   looks only at widgets no sweep has seen, by a mark on each one
+   looks at three things and walks no widget in Python: the top-level windows
+   (a dialog, a pop-out, a combo box's popup — Qt builds some, so they cannot
+   declare themselves), the scroll areas under each (one C++ `findChildren`;
+   every scroll area scrolls by a drag, and about 64 places build one, so they
+   are not declared), and the declared widgets built while phone layout was
+   off. It acts only on what no sweep has seen, by a mark on each one
    (`_awPhoneSeen`) — not by the widget count, which a canvas deleted and
    another built between two ticks leaves unchanged, and not by address, which
-   the allocator hands straight to the replacement. Reading the marks costs
-   about 6 ms at 4,300 widgets; a forced sweep that looks at everything about
-   25 ms. For each relevant widget it installs the filter, marks the widget
-   `_awPhoneWatched`, and adapts it if it is already showing. Leaving phone
-   layout removes every filter and mark;
+   the allocator hands straight to the replacement. On the mini dataset, a
+   tick costs about 11 ms and a forced sweep about 47 ms. For each relevant
+   widget it installs the filter, marks the widget `_awPhoneWatched`, and
+   adapts it if it is already showing. Leaving phone layout removes every
+   filter and mark;
 5. maximizes the window (phone) or restores the desk geometry it remembered —
    only one remembered on a desk-shaped screen.
 
@@ -487,9 +540,9 @@ place each time, `PhoneShell._foot_strip`) so its **Done ✕** stays where the
 thumb opened it, or a 390 pt right-hand panel sideways — as wide as the phone held upright, so whatever
 fits the sheet upright fits the panel (`LANDSCAPE_SHEET_PT`; at 360 pt the Image
 Table's LUT rows overflowed it). A page whose controls are not a `ControlBand`
-marks the block that holds them with the `phoneControls` property and gives it a
-`setStacked`; `_current_band` takes a band with controls first and a marked block
-otherwise, and the same lend, stack and give-back apply to either. Whether
+declares the block that holds them as `"controls"` (`widgets.form_registry`) and
+gives it a `setStacked`; `_current_band` takes a band with controls first and a
+declared block otherwise, and the same lend, stack and give-back apply to either. Whether
 ⚙ Controls shows is decided in `refresh()`, which follows the notebook's page
 changes — but a lazily built page (Image Browser) has no controls yet at that
 signal, since it builds on being shown. So `adapt()`, which hides a page's
@@ -531,7 +584,7 @@ Display and anything else Actions. The page keeps owning visibility: a row, a
 cell and a section follow the show / hide of the widget the page shows and hides
 (`_Mirror`), so `show_slot` reshapes the form. The band's row margins are dropped
 while it is a form, since the sheet pads its content, and `heightForWidth`
-answers from the form. A page's own block of controls (`phoneControls`, the
+answers from the form. A page's own block of controls (declared `controls`, the
 Image Table's builder) keeps its `setStacked` form. The sheet's buttons, combos
 and fields are 48 pt (`QWidget#Drawer[phoneSheet="true"]` in the touch block). The sheet's height is measured off the controls lent
 into it, and at `open` they still have their page's width, so the estimate is
@@ -598,7 +651,7 @@ kept in an attribute on the main window.
 through the action strip, neither of which is a `ControlBand` (its band is empty),
 and at the desk both sit above the grid — on a phone, two screens of drag-and-drop
 before the first image. So the two share one host, `tab_view._TableControls`,
-marked `phoneControls`: in phone layout it is hidden from the page, which opens on
+declared as `controls`: in phone layout it is hidden from the page, which opens on
 the grid, and ⚙ Controls lends it to the sheet. Stacked, the action strip
 (Generate, crop, the ON threshold, Save, zoom) comes first, and
 `builder_view.builder_set_stacked` turns the shelf's header row and its Rows /
@@ -674,8 +727,8 @@ and the page's wins, so a swipe on the log moved the page and not the log. A log
 with nothing to scroll leaves the drag to the page.
 
 **Plot pages scroll by a swipe on the plot** (`PhoneShell._swipe_plot_area`, run
-from `size_canvas` — so on the switch, on Show and from the sweep, and a plot
-built later gets it): the scroll area holding a canvas on a page `band_roots`
+from `size_canvas` — so on the switch and on a canvas's Show, the canvas having
+declared itself, and a plot built later gets it): the scroll area holding a canvas on a page `band_roots`
 names is marked `_awSwipePlots`, and the guard then lets a drag on its plot
 scroll the page. A tap still reaches the plot; a drag on a plot no longer reaches
 matplotlib in phone layout, where its pan and zoom are already hidden. A plot
@@ -19627,6 +19680,7 @@ The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which u
 | `FooterScrollArea` (`widgets/footer_scroll_area.py`) | A `QScrollArea` with a pinned footer under the viewport; the viewport is shortened by the footer's height, which follows the footer's contents. The Analyze run footer. |
 | `ValueCombo` (`widgets/value_combo.py`) | A combo of `(value, label)` items, read and written by `value()` / `setValue()`, so the label can be copy while the value stays an argument. The Analyze correction and Cellpose-model combos. |
 | `RailNav` | The left-rail section navigator. |
+| `form_registry` (`widgets/form_registry.py`) | Which widgets have an alternate form, and of what kind: `declare(widget, kind)` from a constructor, `register(widget, apply)` for a view's own form, `declared(kind)` for the live ones, `add_listener` for whoever applies them (phone layout's shell). Kinds, not layouts — it imports nothing from the application. Held weakly; liveness is `shiboken6.isValid`, because a wrapper outlives its C++ widget. §2 *Phone layout*. |
 | `info_icon` (`widgets/info_icon.py`) | The `ⓘ` hover-for-more marker, styled by the `#InfoHint` QSS rule. A function rather than a class — it returns a configured `QLabel`. Shared by the Analyze form (`AnalyzeFormChromeMixin._info_icon` delegates to it) and the Playground's threshold rows, so the app has one "there is an explanation here" affordance rather than a copy per pane. Sets WhatsThis as well as the tooltip, which is the route that works for someone who cannot hold a hover. |
 | `SchemaPicker` (`widgets/schema_picker.py`) | The filename-schema builder: a separator box, one dropdown per filename position, and the colon-delimited schema string the two of them write. The dropdowns and the string are two views of one value and sync both ways, each write blocking the other's signals so they cannot chase each other. Vocabulary and validity come from `util.schema` — the module the pipeline parses schemas with — so the picker offers exactly the fields the pipeline understands, reads a string the way `parse_schema` reads it (empty tokens collapse, rather than the dropdowns showing a layout the run will not use), and reports errors in `validate_schema`'s own wording. `schema()` returns the typed string in preference to the dropdowns, since the string can express more positions than there are dropdowns. `row_factory(parent, label) -> cell` is the layout seam: the Analyze form passes its own `_row` so the picker sits inside that form's label column, and the Datasets pane's Zip Loose Folder page takes the default plain row. Mounted by both, because both ask the user about the same filenames — Zip Loose Folder produces the archives Analyze then reads. **Detection is opt-in**: passing `detect_label` builds a *Detect from filenames* button as the picker's first row, in the field column, with the two-register readout beneath it and the rows it fills below that, and a host that will not answer `detectRequested` therefore never shows a button that does nothing. `setDetection(text, note=…, problem=…)` takes sentences the picker neither composes nor understands; the neutral half is muted body text and the note is a `QLabel#Notice` panel, so a result the reader must not skim past differs in outline and not only in hue. |
 | `SegmentedControl`, `ChipGroup`, `Stepper`, `StyledSlider`, `ToggleSwitch` | Form controls; each exposes `bindingAdapter()` returning `(getter, setter, change_signal)` for the Export Style sidebar's binding loop. |

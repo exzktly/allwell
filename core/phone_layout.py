@@ -130,6 +130,36 @@ def remove_listener(fn: Callable[[bool], None]) -> None:
         _listeners.remove(fn)
 
 
+def follow(owner, fn: Callable[[bool], None]) -> None:
+    """Call ``fn(on)`` whenever phone layout turns on or off, for as long as
+    *owner* — a ``QObject``, usually a page's card — lives.
+
+    The listener list is process-wide, so a listener that outlived its page would
+    keep it alive and touch widgets that are gone. This holds *owner* only
+    weakly, and takes the listener out the next time it is called after *owner*
+    is collected or its C++ object is deleted (the Python wrapper can outlive
+    it, and then any call on it raises ``RuntimeError``). *fn* is held strongly
+    until then, so it may close over the owner's children but should not own the
+    owner itself."""
+    import weakref
+
+    ref = weakref.ref(owner)
+
+    def _listener(on: bool) -> None:
+        live = ref()
+        if live is not None:
+            try:
+                live.objectName()               # raises once the C++ object is gone
+            except RuntimeError:
+                live = None
+        if live is None:
+            remove_listener(_listener)
+            return
+        fn(on)
+
+    add_listener(_listener)
+
+
 def is_phone_shaped(width: int, height: int) -> bool:
     """Does a screen of this available size look like a phone?
 

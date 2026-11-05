@@ -603,7 +603,7 @@ def build_ui(win) -> None:
     win.installEventFilter(win._rail_toggle_filter)
     build_sidebar(win, win._sidebar_main_frame)
     # An empty plot's hint names where the plate is, which phone layout moves.
-    from review.core.ui_helpers import follow_phone_layout
+    from review.core.empty_state_phone import follow_phone_layout
     follow_phone_layout(win)
 
     # Centre stack — wraps the existing plots widget so allwell can

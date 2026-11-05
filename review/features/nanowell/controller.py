@@ -32,6 +32,7 @@ from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell.decorate_compute import Decoration, decoration_for
 from review.features.nanowell import _anchor_queue as aq
+from review.features.nanowell import _phone as nw_phone
 from review.features.nanowell import _qc_controller as qcc
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
@@ -987,7 +988,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if model.empty:
         render_message(fig, model.empty, gid="nw-moving-empty")
         return None, model
-    return render_distribution(fig, model, selected=selected), model
+    return render_distribution(fig, model, selected=selected, wrap_footer=nw_phone.on_phone()), model
 
 
 def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels) -> str:
@@ -1961,25 +1962,10 @@ def save_popout_figure(ctx) -> None:
     ctx.figures.save(fig, save_name(site, popout_channels(st)))
 
 
-def _strip_cols(fig, crops) -> int:
-    """The crop strip's columns: one row at a desk (``0``), and in phone layout as many rows as make each crop
-    largest in the strip's own figure (``crop_grid_compute.strip_columns``)."""
-    from core import phone_layout
-
-    from .crop_grid_compute import strip_columns
-
-    if not crops or not phone_layout.is_on():
-        return 0
-    width, height = fig.get_size_inches()
-    return strip_columns(len(crops), width * 0.94, height * 0.78)
-
-
 def refit_crop_strip(ctx) -> None:
     """Lay the crop strip out again for its new size — in phone layout only, where its columns follow its shape."""
-    from core import phone_layout
-
     st = _state(ctx)
-    if not phone_layout.is_on() or st is None or not st.selected_sites or _page_deleted(ctx):
+    if not nw_phone.on_phone() or st is None or not st.selected_sites or _page_deleted(ctx):
         return
     redraw_detail(ctx)
 
@@ -2019,7 +2005,7 @@ def redraw_detail(ctx) -> None:
     strip_fig, strip_canvas = ctx.widgets.get_or_none("_nw_strip_fig"), ctx.widgets.get_or_none("_nw_strip_canvas")
     if strip_fig is not None and strip_canvas is not None:
         render_crop_strip(strip_fig, crops, first, cells=st.crop_cells, image_channel=image_channel,
-                          display_range=display_range(ctx), cols=_strip_cols(strip_fig, crops))
+                          display_range=display_range(ctx), cols=nw_phone.strip_columns_for(strip_fig, crops))
         strip_canvas.draw_idle()
 
 

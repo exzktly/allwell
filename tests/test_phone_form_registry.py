@@ -1,0 +1,454 @@
+"""``widgets/form_registry``: kinds declared where a widget is built.
+
+Real widgets throughout. Each test names the wrong
+implementation it rules out.
+"""
+
+from __future__ import annotations
+
+import gc
+
+import pytest
+from PySide6.QtWidgets import QWidget
+
+from widgets import form_registry as fr
+
+
+@pytest.fixture(autouse=True)
+def _clean_registry():
+    """A test sees only its own declarations and listeners."""
+    before = list(fr._listeners)
+    fr._declared.clear()
+    yield
+    fr._listeners[:] = before
+    fr._declared.clear()
+
+
+def _pump(qapp, n=5):
+    from PySide6.QtCore import QCoreApplication, QEvent
+    for _ in range(n):
+        qapp.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_declaring_stores_the_kind_on_the_widget(qapp):
+    """A registry that kept the kind only in a Python dict would lose it for a
+    second wrapper of the same widget."""
+    w = QWidget()
+    assert fr.kind_of(w) is None
+    fr.declare(w, "stepper")
+    assert fr.kind_of(w) == "stepper"
+    assert w.property("formKind") == "stepper"
+
+
+def test_a_listener_is_told_once_with_the_widget_and_its_kind(qapp):
+    """Not called per listener-add, not called twice for one declaration."""
+    seen = []
+    fr.add_listener(lambda w, k: seen.append((w, k)))
+    w = QWidget()
+    fr.declare(w, "toolbar")
+    fr.declare(w, "toolbar")                      # the same kind again: nothing new to say
+    assert seen == [(w, "toolbar")]
+
+
+def test_declaring_another_kind_tells_the_listeners_again(qapp):
+    seen = []
+    fr.add_listener(lambda w, k: seen.append(k))
+    w = QWidget()
+    fr.declare(w, "toolbar")
+    fr.declare(w, "controls")
+    assert seen == ["toolbar", "controls"]
+    assert fr.kind_of(w) == "controls"
+
+
+def test_a_listener_added_later_is_not_replayed(qapp):
+    """The shell asks :func:`declared` for what exists; a replay would adapt a
+    widget twice."""
+    w = QWidget()
+    fr.declare(w, "stepper")
+    seen = []
+    fr.add_listener(lambda w, k: seen.append(k))
+    assert seen == []
+    assert fr.declared("stepper") == [w]
+
+
+def test_a_listener_that_raises_does_not_break_the_constructor_or_the_others(qapp):
+    seen = []
+
+    def bad(_w, _k):
+        raise RuntimeError("boom")
+
+    fr.add_listener(bad)
+    fr.add_listener(lambda w, k: seen.append(k))
+    w = QWidget()
+    fr.declare(w, "stepper")                      # must not raise
+    assert seen == ["stepper"]
+    assert fr.kind_of(w) == "stepper"
+
+
+def test_declared_lists_by_kind_in_declaration_order(qapp):
+    a, b, c = QWidget(), QWidget(), QWidget()
+    fr.declare(a, "stepper")
+    fr.declare(b, "toolbar")
+    fr.declare(c, "stepper")
+    assert fr.declared("stepper") == [a, c]
+    assert fr.declared("toolbar") == [b]
+    assert fr.declared() == [a, b, c]
+    assert fr.declared("canvas") == []
+
+
+def test_a_deleted_widget_leaves_declared_even_while_its_wrapper_lives(qapp):
+    """The wrapper can outlive the C++ widget; a list that only checked the
+    wrapper would hand the shell a widget that raises on first use."""
+    parent = QWidget()
+    child = QWidget(parent)
+    fr.declare(child, "stepper")
+    assert fr.declared("stepper") == [child]
+    child.deleteLater()
+    _pump(qapp)
+    assert fr.declared("stepper") == []
+    # The unfiltered list is the one that needs the validity check: a kind
+    # filter drops a dead widget by itself, because its kind reads as None.
+    assert fr.declared() == []
+    assert fr.kind_of(child) is None              # a dead widget has no kind, and no exception
+
+
+def test_a_collected_widget_leaves_declared(qapp):
+    """The registry must not keep a page alive."""
+    w = QWidget()
+    fr.declare(w, "stepper")
+    del w
+    gc.collect()
+    assert fr.declared() == []
+
+
+def test_register_records_an_apply_callable_under_kind_custom(qapp):
+    calls = []
+    w = QWidget()
+    fr.register(w, calls.append)
+    assert fr.kind_of(w) == "custom"
+    fr.custom_apply(w)(True)
+    fr.custom_apply(w)(False)
+    assert calls == [True, False]
+    assert fr.custom_apply(QWidget()) is None
+
+
+def test_an_empty_kind_is_refused(qapp):
+    with pytest.raises(ValueError):
+        fr.declare(QWidget(), "")
+
+
+def test_a_removed_listener_is_not_called(qapp):
+    seen = []
+
+    def listener(w, k):
+        seen.append(k)
+
+    fr.add_listener(listener)
+    fr.remove_listener(listener)
+    fr.declare(QWidget(), "stepper")
+    assert seen == []
+
+
+# ── the shell listens ────────────────────────────────────────────────
+
+class _TouchWidget(QWidget):
+    """A widget the way ``Stepper`` is: a touch form it can be put in, declared
+    at the end of its constructor."""
+
+    def __init__(self, parent=None, *, declare=True):
+        super().__init__(parent)
+        self._touch = False
+        if declare:
+            fr.declare(self, "stepper")
+
+    def setTouchMode(self, on):
+        self._touch = bool(on)
+
+    def isTouchMode(self):
+        return self._touch
+
+
+@pytest.fixture
+def shell(qapp):
+    """A real ``PhoneShell`` with the phone flag on and **no sweep running**, so
+    the only thing that can adapt a widget is what the declaration set up."""
+    from core import phone_layout
+    from ui.phone_shell import PhoneHandles, PhoneShell
+
+    host = QWidget()
+    host.resize(400, 700)
+    shell = PhoneShell(host, PhoneHandles())
+    shell.desk_button.setParent(host)
+    shell._rail_status.setParent(host)
+    shell._sweep_timer.stop()
+    host.show()                                   # children get Show events only under a shown parent
+    phone_layout.set_on(True)
+    try:
+        yield shell
+    finally:
+        phone_layout.set_on(False)
+        host.close()
+        host.deleteLater()
+
+
+def test_a_widget_declared_after_the_switch_is_adapted_when_it_is_shown(qapp, shell):
+    """The case the 300 ms sweep exists for — a page built after the switch —
+    with the sweep off. Wrong implementation: a shell that listens but only
+    remembers the widget, or one that adapts inside the constructor (the
+    widget's own ``__init__`` had not finished, so ``_touch`` was not there)."""
+    w = _TouchWidget(shell._win)
+    assert not w.isTouchMode(), "the shell adapted a widget inside its own constructor"
+    w.show()
+    _pump(qapp)
+    assert w.isTouchMode()
+
+
+def test_a_widget_that_is_not_declared_is_left_alone_with_the_sweep_off(qapp, shell):
+    """Rules out a pass: the first test would also pass if every widget with a
+    ``setTouchMode`` were adapted by something else."""
+    w = _TouchWidget(shell._win, declare=False)
+    w.show()
+    _pump(qapp)
+    assert not w.isTouchMode()
+
+
+def test_nothing_is_watched_while_the_desk_layout_is_on(qapp, shell):
+    from core import phone_layout
+    phone_layout.set_on(False)
+    w = _TouchWidget(shell._win)
+    w.show()
+    _pump(qapp)
+    assert not w.isTouchMode()
+    assert not w.property("_awPhoneWatched")
+
+
+def test_a_declared_kind_is_read_before_any_class_name(qapp, shell):
+    """A widget the shell would not recognise by name still has its kind
+    adapted, and a registered custom form is handed the mode both ways."""
+    from ui.phone_shell import _adapt_kind
+    calls = []
+    w = QWidget(shell._win)
+    fr.register(w, calls.append)
+    assert _adapt_kind(w) == "custom"
+    shell.adapt(w, True)
+    shell.adapt(w, False)
+    assert calls == [True, False]
+
+
+def test_a_shell_that_is_gone_leaves_no_listener(qapp):
+    from ui.phone_shell import PhoneHandles, PhoneShell
+    before = len(fr._listeners)
+    host = QWidget()
+    shell = PhoneShell(host, PhoneHandles())
+    assert len(fr._listeners) == before + 1
+    del shell
+    host.deleteLater()
+    _pump(qapp)
+    gc.collect()
+    fr.declare(QWidget(), "stepper")              # a stale listener removes itself when called
+    assert len(fr._listeners) == before
+
+
+# ── the shared kinds declare themselves ────────────────────────────────
+
+def test_a_stepper_built_after_the_switch_takes_its_touch_form_without_a_sweep(qapp, shell):
+    """The real ``Stepper``, with nothing recognising it by name. Wrong
+    implementation: a stepper that does not declare, which the sweep used to
+    find by its class name and now nothing does."""
+    from widgets.stepper import Stepper
+
+    st = Stepper(shell._win, value=3.0, minimum=0.0, maximum=10.0)
+    assert fr.kind_of(st) == "stepper"
+    assert not st.isTouchMode()
+    st.show()
+    _pump(qapp)
+    assert st.isTouchMode()
+
+
+def test_a_plot_toolbar_built_after_the_switch_is_hidden_without_a_sweep(qapp, shell):
+    """The real ``MplToolbar`` on a real canvas. Pan and zoom are modes a VNC drag
+    fights with, so on a phone it is not shown (Reset is in Controls)."""
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+
+    from widgets.mpl_toolbar import MplToolbar
+
+    canvas = FigureCanvasQTAgg(Figure())
+    canvas.setParent(shell._win)
+    tb = MplToolbar(canvas, shell._win)
+    assert fr.kind_of(tb) == "toolbar"
+    tb.show()
+    _pump(qapp)
+    assert not tb.isVisible()
+
+
+def test_a_control_band_built_after_the_switch_is_hidden_in_its_page_and_found_as_the_page_s_controls(qapp, shell):
+    """The real ``ControlBand`` with something in it. Hidden in the page because
+    the Controls sheet shows it; and ``_current_band`` — which used to find it by
+    class name — still finds it. Wrong implementation: a band that does not
+    declare, which both the sweep and the sheet then ignore."""
+    from PySide6.QtWidgets import QLabel, QVBoxLayout
+
+    from widgets.control_band import ControlBand
+
+    page = QWidget(shell._win)
+    QVBoxLayout(page)
+    shell._h.band_roots = lambda: [page]
+    band = ControlBand(page)
+    band.add_scope("Channel", QLabel("GFP"))
+    page.layout().addWidget(band)
+    assert fr.kind_of(band) == "controls"
+    page.show()
+    _pump(qapp)
+    assert band.isHidden()
+    band.show()                                    # what the Controls sheet will do to it
+    assert shell._current_band() is band
+
+
+# ── canvases ───────────────────────────────────────────────────────────
+
+def test_make_canvas_builds_a_qt_canvas_that_declares_itself(qapp):
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+
+    from widgets.canvas import make_canvas
+
+    host = QWidget()
+    fig = Figure()
+    canvas = make_canvas(fig, host)
+    assert isinstance(canvas, FigureCanvasQTAgg) and canvas.figure is fig
+    assert canvas.parentWidget() is host
+    assert fr.kind_of(canvas) == "canvas"
+    assert fr.declared("canvas") == [canvas]
+
+
+def test_a_plot_card_s_canvas_declares_itself(qapp):
+    """The wrong implementation: a card that still builds its canvas directly."""
+    from widgets.plot_card import PlotCard
+
+    card = PlotCard()
+    assert fr.kind_of(card.canvas) == "canvas"
+
+
+def test_a_canvas_built_after_the_switch_is_drawn_at_the_phone_dpi_and_height_without_a_sweep(qapp, shell):
+    """The case the sweep exists for — a plot on a page built after the switch —
+    with nothing recognising the canvas by type. Wrong implementation: a shell
+    that dropped the canvas branch and did not add the kind to its adapters."""
+    from matplotlib.figure import Figure
+
+    from ui.phone_shell import PLOT_ROW_PT
+    from widgets.canvas import make_canvas
+
+    fig = Figure()
+    fig.add_subplot(111)
+    canvas = make_canvas(fig, shell._win)
+    factor = shell.plot_factor()
+    assert factor > 1.0, "a phone-point canvas is drawn larger than the desk's"
+    assert getattr(fig, "_aw_dpi_factor", 1.0) == 1.0
+    assert canvas.minimumHeight() < shell.pt(PLOT_ROW_PT)
+    canvas.show()
+    _pump(qapp)
+    assert fig._aw_dpi_factor == factor
+    assert fig.dpi == pytest.approx(fig._aw_dpi_base * factor * (canvas.device_pixel_ratio or 1.0))
+    assert canvas.minimumHeight() >= shell.pt(PLOT_ROW_PT)
+
+
+def test_an_info_icon_built_after_the_switch_answers_a_tap_without_a_sweep(qapp, shell, monkeypatch):
+    """The app's own ⓘ factory, on a shown page, with the sweep off: it is watched
+    because it declared itself, and the tap reaches the filter installed on it.
+    Wrong implementation: an icon that does not declare, which nothing watches."""
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QToolTip
+
+    from widgets.info_icon import info_icon
+
+    shown = []
+    monkeypatch.setattr(QToolTip, "showText", lambda *a: shown.append(a[1]))
+    icon = info_icon(shell._win, "What this number means")
+    assert fr.kind_of(icon) == "hint"
+    icon.show()
+    _pump(qapp)
+    assert icon.property("_awPhoneWatched")
+    tap = QMouseEvent(QEvent.MouseButtonRelease, QPointF(2, 2), QPointF(2, 2),
+                      Qt.LeftButton, Qt.NoButton, Qt.NoModifier)
+    assert shell._filter.eventFilter(icon, tap) is True
+    assert shown == ["What this number means"]
+
+
+# ── what is left of the sweep ──────────────────────────────────────────
+
+def test_the_sweep_finds_a_scroll_area_under_a_window_and_visits_no_plain_widget(qapp, shell):
+    """A scroll area is not declared (64 places build one, and Qt builds more),
+    so the sweep must still find one built after the switch — and, now that it
+    does not walk every widget, it must not touch a plain widget at all.
+    Wrong implementation: a sweep that looks only at top-level windows and not
+    at what is under them (the main window's own scroll areas), or one that
+    still marks every widget it meets."""
+    from PySide6.QtWidgets import QScrollArea, QScroller
+
+    area = QScrollArea(shell._win)
+    inner = QWidget()
+    area.setWidget(inner)
+    plain = QWidget(shell._win)
+    area.show()
+    _pump(qapp)
+    shell._sweep(force=False)
+    assert QScroller.hasScroller(area.viewport()), "the scroll area was not given its drag"
+    assert area.property("_awPhoneSeen") is True
+    assert plain.property("_awPhoneSeen") is None, "the sweep still visits widgets nobody declared"
+
+
+def test_the_sweep_watches_a_widget_declared_while_phone_layout_was_off(qapp, shell):
+    """The listener only watches while the layout is on; the switch's forced
+    sweep is what finds the rest. Wrong implementation: a sweep that no longer
+    reads the declared list."""
+    from core import phone_layout
+
+    phone_layout.set_on(False)
+    w = _TouchWidget(shell._win)                   # declared at the desk: not watched
+    assert not w.property("_awPhoneWatched")
+    phone_layout.set_on(True)
+    shell._sweep(force=True)
+    assert w.property("_awPhoneWatched")
+
+
+# ── wording that differs by mode lives beside the view that owns it ────
+
+def test_the_image_table_s_empty_hint_points_at_controls_only_on_a_phone(qapp):
+    """Where the builder is: above the placeholder at the desk, behind ⚙ Controls
+    on a phone. The wrong implementation is the pair of strings swapped, or a
+    hint that never reads the mode."""
+    from core import phone_layout
+    from review.features.image_browser.image_table._phone_fit import empty_hint
+
+    assert empty_hint() == "Choose wells/channels above, then press Generate."
+    phone_layout.set_on(True)
+    try:
+        assert empty_hint() == "Open ⚙ Controls to choose channels, then press Generate."
+    finally:
+        phone_layout.set_on(False)
+
+
+def test_the_image_table_controller_writes_the_hint_the_phone_module_returns(qapp):
+    """The call the app makes, not only the helper: with a dataset loaded and no
+    table yet, the placeholder is given ``empty_hint()``. Wrong implementation: a
+    controller that went back to its own strings, which the helper's test passes."""
+    from types import SimpleNamespace
+
+    from core import phone_layout
+    from review.features.image_browser.image_table._phone_fit import empty_hint
+    from review.features.image_browser.image_table.controller import image_table_refresh_empty_state
+
+    said = {}
+    empty = SimpleNamespace(setText=lambda t: said.update(text=t), setHint=lambda h: said.update(hint=h))
+    ctx = SimpleNamespace(
+        runtime=SimpleNamespace(image_table=SimpleNamespace(empty_state=empty)),
+        state=SimpleNamespace(dataset=SimpleNamespace(well_paths={"A01": "x"})))
+    phone_layout.set_on(True)
+    try:
+        image_table_refresh_empty_state(ctx)
+        assert said["hint"] == empty_hint() == "Open ⚙ Controls to choose channels, then press Generate."
+    finally:
+        phone_layout.set_on(False)

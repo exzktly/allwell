@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
+from widgets import form_registry
 
 
 def control_row_height() -> int:
@@ -176,6 +177,7 @@ class Stepper(QFrame):
         self.setStyleSheet(self._build_qss())
         self.setValue(value)
         self._update_size()
+        form_registry.declare(self, "stepper")
 
     # ── value API ────────────────────────────────────────────────────────
     def value(self) -> float:

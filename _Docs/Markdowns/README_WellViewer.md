@@ -6232,6 +6232,11 @@ the sentence names it.
   rather than averaged over fewer timepoints. With *Fixed cohort* ticked too, the cohort is chosen from the
   measured values and then averaged. The footer states the window.
 
+  A window longer than the series allows leaves nothing to draw — for example a window of 3 on a plate with
+  two timepoints, a fold change whose baseline has fewer timepoints after it than the window, or *Along x:
+  Wells* at the first timepoint. The figure then says so in place of the plot, with the reason and the longest
+  window that would draw something (or that none would, in which case set the window to 1).
+
   For a **fold change**, each window starts *after* the baseline timepoint: a window that included the baseline
   would average in its fold change of exactly 1 and pull the first values after it towards 1, and one that
   reached before it would mix in values from before the reference point. Those timepoints are counted as

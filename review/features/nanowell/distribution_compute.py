@@ -209,6 +209,9 @@ class DistributionModel:
     #: ``nanowells`` unit; a well missing from it prints itself. (A sub-swarm under a group prints the bare well:
     #: the group's name is on the tick above it.)
     well_names: dict = field(default_factory=dict)
+    #: Set when the moving average left no value of the drawn ones (``moving_compute.nothing_left_text``): the
+    #: figure says this in place of an empty plot.
+    empty: str = ""
 
     def swarms(self):
         return [s for p in self.panels for s in p.swarms]
@@ -345,7 +348,9 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
         frame, reasons, kept, sites = fixed_cohort(frame, column, reasons)
         model.notes.append(f"Fixed cohort: only the {kept:,} of {sites:,} nanowells with a value at every timepoint "
                            "of their well are used; the rest are counted as outside the fixed cohort.")
+    averaged_over = None
     if moving_compute.is_on(moving) and metric not in PER_NANOWELL:
+        averaged_over = frame
         frame, reasons = moving_compute.apply(frame, column, reasons, moving)
         model.notes.append(moving_compute.describe(moving, column, baseline_moving)
                            + " The rest are counted among the exclusions.")
@@ -353,6 +358,12 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
         _time_panels(model, frame, column, reasons, groups, channels)
     else:
         _wells_panel(model, frame, column, reasons, groups, timepoint, control, channels)
+    if averaged_over is not None and not any(len(s.values) for s in model.swarms()):
+        model.empty = moving_compute.nothing_left_text(averaged_over, column, moving,
+                                                       timepoint=model.timepoint if axis == WELLS else "",
+                                                       baseline_window=baseline_moving)
+        if model.empty:
+            model.notes.append(model.empty)
     _notes(model, metric, time_source)
     return model
 

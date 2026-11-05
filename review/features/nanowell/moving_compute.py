@@ -281,3 +281,60 @@ def apply(frame: pd.DataFrame, column: str, reasons: pd.Series, window: int,
     reasons = reasons.copy()
     reasons[why != ""] = why[why != ""]
     return frame, reasons
+
+
+#: Why a moving average left nothing, by the reason most of the values went under (:func:`nothing_left_text`).
+_WHY_NOTHING = {
+    EARLY_REASON: "each value needs its own timepoint and the {before} before it, and {where_early}",
+    BASELINE_REASON: "a fold change's window must start after the baseline, so it needs {window} timepoints after "
+                     "the baseline, and {where_baseline}",
+    GAP_REASON: "every window holds a timepoint with no value",
+    IDENTITY_REASON: "every window holds a timepoint whose nanowells are not joinable to the others",
+}
+
+
+def _values_at(frame: pd.DataFrame, values: pd.Series, timepoint: str) -> int:
+    if timepoint:
+        values = values[frame["timepoint"].astype(str).eq(str(timepoint))]
+    return int(values.notna().sum())
+
+
+def nothing_left_text(frame: pd.DataFrame, column: str, window: int, *, timepoint: str = "",
+                      baseline_window: int = 0) -> str:
+    """The sentence a figure shows instead of an empty plot when the moving average over *window* leaves none of
+    the values *frame* holds, or ``""`` when it leaves some (or is off, or there was nothing to average).
+
+    *frame* is what the average is taken over (the baseline's own window and the fixed cohort already applied);
+    *timepoint*, when given, is the one timepoint the figure draws (*Along x: Wells*, Statistics). The average
+    never shortens a window (the module docstring says why), so a window longer than the drawn series allows
+    leaves an empty figure — a short time course, a fold change whose baseline leaves few timepoints after it, an
+    early timepoint along wells. Said in place of the plot, with the reason most values went under and the
+    longest window that would leave something, so it is not read as a dataset with no values; then
+    :func:`describe`'s sentence (*baseline_window* as it takes it), which the plot's footer would have carried."""
+    window = clamp_window(window)
+    if not window or column not in frame or not len(frame):
+        return ""
+    values = pd.to_numeric(frame[column], errors="coerce")
+    if not _values_at(frame, values, timepoint):
+        return ""
+    means, why = averaged(frame, column, values, window)
+    if _values_at(frame, means, timepoint):
+        return ""
+    drawn = why if not timepoint else why[frame["timepoint"].astype(str).eq(str(timepoint))]
+    counts = drawn[drawn != ""].value_counts()
+    reason = str(counts.index[0]) if len(counts) else GAP_REASON
+    because = _WHY_NOTHING.get(reason, _WHY_NOTHING[GAP_REASON]).format(
+        before=window - 1, window=window,
+        where_early=(f"{timepoint} has fewer than {window - 1} before it in its well" if timepoint
+                     else f"no well has {window} timepoints"),
+        where_baseline=f"{timepoint} has fewer" if timepoint else "no nanowell has that many")
+    where = f" at {timepoint}" if timepoint else ""
+    text = f"Moving average over {window} timepoints: no value is left to draw{where} — {because}."
+    for shorter in range(window - 1, 1, -1):
+        kept = _values_at(frame, averaged(frame, column, values, shorter)[0], timepoint)
+        if kept:
+            text += f" A window of {shorter} leaves {kept:,} value{'' if kept == 1 else 's'}."
+            break
+    else:
+        text += " No shorter window leaves one either; set the window to 1 to turn the average off."
+    return text + "\n\n" + describe(window, column, baseline_window)

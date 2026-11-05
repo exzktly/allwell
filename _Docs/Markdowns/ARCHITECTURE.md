@@ -12317,6 +12317,18 @@ on top of that, both in `moving_compute`:
   changes from the averaged baseline; `distribution_model`, `wells_summary` and `trajectory_panels` all take
   `baseline_moving=…`.
 
+*When the window leaves nothing.* Because a window is never shortened, a window longer than the drawn series
+allows leaves every value out: *N* timepoints need at least *N* in the well for a measured value and *N* after the
+baseline for a fold change (so a two-timepoint plate with the *Earliest* baseline has no fold-change window at
+all), and *Along x: Wells* or Statistics at a timepoint with fewer than *N − 1* before it — the first, say, which
+the Array view's choice of the seeding timepoint carries over — has none either. An empty plot over such data read
+as a dataset with no values, so `moving_compute.nothing_left_text` names it instead: the reason most values went
+under, the longest shorter window that would leave something (and how many values), then `describe`'s sentence.
+`distribution_model` sets it as `DistributionModel.empty` (and in its notes, which the Statistics report carries)
+when no swarm holds a value, and `draw_view` draws it with `render_message` (gid `nw-moving-empty`) in place of the
+beeswarm; Trajectories does the same when no line is left (`controller._moving_left_nothing`). It is said only when
+the values were there before the average, so a figure emptied by something else keeps its own message.
+
 A ratio over a baseline that is constant per nanowell averages the same whichever is divided first.
 `log2_count_fc` is averaged as logs — the mean of log₂((n + 1) / (n₀ + 1)), a geometric mean of the ratios, not
 the log of their mean — and the footer says so.

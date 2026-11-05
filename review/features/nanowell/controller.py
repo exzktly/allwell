@@ -935,6 +935,10 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                       baseline_moving=baseline_moving)
         for panel in panels:
             panel.name = names.get(panel.well, "")
+        empty = _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels)
+        if empty:
+            render_message(fig, empty, gid="nw-moving-empty")
+            return None, None
         render_trajectories(fig, panels,
                             cohort=cohort, label=_label(metric, channel, data), time_source=data.time_source,
                             note=" ".join(filter(None, [mvc.describe(moving, column, baseline_moving), note])))
@@ -980,7 +984,22 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                               f"{', '.join(tableless)}.")
     if note:
         model.notes.insert(0, note)
+    if model.empty:
+        render_message(fig, model.empty, gid="nw-moving-empty")
+        return None, model
     return render_distribution(fig, model, selected=selected), model
+
+
+def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels) -> str:
+    """Trajectories' sentence in place of an empty figure when the moving average left no line to draw, or ``""``
+    (``moving_compute.nothing_left_text``)."""
+    if not mvc.is_on(moving) or any(p.lines for p in panels):
+        return ""
+    rows = metrics[metrics["well"].isin(list(wells))]
+    if column not in rows:
+        return ""
+    rows, _reasons = mvc.rebase(rows, column, pd.Series("", index=rows.index, dtype=object), baseline_moving)
+    return mvc.nothing_left_text(rows, column, moving, baseline_window=baseline_moving)
 
 
 #: The Distribution model's notes the Statistics view carries: what changes which values were compared (the fixed

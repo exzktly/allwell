@@ -149,3 +149,48 @@ def test_a_card_for_a_nanowell_with_no_row_says_so_rather_than_inventing_one():
     card = hover_text(None, ("A01", 0, 0), timepoint="t_a", state="absent")
     assert card.split("\n") == ["A01 · nanowell 0,0 · t_a", "State: absent",
                                 "The nanowell table has no row for it at this timepoint."]
+
+
+# ── the real page ────────────────────────────────────────────────────────────
+# The tests above drive ``controller.on_motion`` with a stand-in context. This one goes through what the app does: the
+# page's own canvas, the motion handler ``tab_view`` connects to it, and a matplotlib motion event at a nanowell's
+# pixel — so a broken connection, a stale ``st.drawn`` or a handler the page never reaches fails here.
+from tests.test_nanowell_full_montage import montage_page  # noqa: E402,F401
+from tests.test_nanowell_page_array_layers import qc_page  # noqa: E402,F401
+
+
+def test_the_page_s_canvas_shows_the_card_of_the_nanowell_under_the_pointer(qc_page, monkeypatch):  # noqa: F811
+    from matplotlib.backend_bases import MouseEvent
+    from PySide6 import QtWidgets
+
+    ctx = qc_page
+    shown = {"text": "unset"}
+    monkeypatch.setattr(QtWidgets.QToolTip, "showText", staticmethod(lambda _pos, text, *_a: shown.update(text=text)))
+    monkeypatch.setattr(QtWidgets.QToolTip, "hideText", staticmethod(lambda: shown.update(text=None)))
+    st = ctx.state.feature_slice("nanowell")
+    canvas = ctx.widgets.get("_nw_canvas")
+    drawn = st.drawn
+    canvas.draw()
+    sites = drawn.sites
+    checked, counted = 0, 0
+    for k, (well, q, r) in enumerate(sites.sites):
+        if q is None:
+            continue
+        checked += 1
+        x_px, y_px = drawn.ax.transData.transform((sites.x[k], sites.y[k]))
+        event = MouseEvent("motion_notify_event", canvas, x_px, y_px)
+        canvas.callbacks.process(event.name, event)
+        row = st.metrics[(st.metrics["well"] == well) & (st.metrics["timepoint"] == drawn.scene.timepoint)
+                         & (st.metrics["nw_q"] == q) & (st.metrics["nw_r"] == r)].iloc[0]
+        card = shown["text"].split("\n")
+        assert card[0].startswith(f"A01 · nanowell {q},{r}") and f" · {drawn.scene.timepoint}" in card[0]
+        assert any(line.startswith("Cells: ") for line in card)
+        n = row["n"]
+        if n == n:                                               # a count: the card says this nanowell's
+            assert f"Cells: {n:.3g}" in shown["text"]
+            counted += 1
+    assert checked == 4 and counted >= 1, (checked, counted)       # the fixture's four placed nanowells
+    x_px, y_px = drawn.ax.transData.transform((sites.x.max() + 10 * sites.radius.max(), sites.y.max()))
+    event = MouseEvent("motion_notify_event", canvas, x_px, y_px)
+    canvas.callbacks.process(event.name, event)
+    assert shown["text"] is None                                  # off every nanowell: hidden

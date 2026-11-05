@@ -13125,8 +13125,8 @@ the new dataset's bookkeeping; each worker bridge is kept on the state until it 
 
 **The page** (`tab_view.build_nanowell_tab`, `controller`). The view switch — the seven views, as a tab strip
 (`build_view_bar`) in the shell's mode band where every page's sub-tabs sit (§6a), each tab carrying its view's
-tooltip — is not on the page's own band. The control band holds Metric, Along x, Baseline, *Subset* (`subset_view.build_subset_control`: a
-combo of the Starting cells presets — All nanowells, ≥1, 1, 1–2, ≥2 — and *Custom subset…*, with an **Edit…** button,
+tooltip — is not on the page's own band. The control band holds, in this order, Metric, Channel, Along x, Baseline, *Fixed cohort*, Rim focus, the two moving averages, then *Subset* — last of the data controls, since it narrows the nanowells rather than choosing what is measured of them (`subset_view.build_subset_control`: a
+combo of the Starting cells presets — All nanowells, ≥1, 1, 1–2, ≥2 — the subsets saved by name in this dataset, and *Custom subset…*, with an **Edit…** button,
 on every view, the combo outlined in the accent through the `filterActive` QSS property while a subset is set; the
 editor, `SubsetEditor`, is a panel the page places under the band — never a dialog — with one `_ConditionRow` per
 condition, *all* / *any*, *Add condition*, *Clear*, *Reset* and *Apply*; an edit changes only the draft the rows

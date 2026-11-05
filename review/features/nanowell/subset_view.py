@@ -264,6 +264,7 @@ class SubsetEditor(QFrame):
         #: The subset the rows describe: rebuilt from the page's state only when that is another subset.
         self.shown: ss.Subset | None = None
         self._channels: tuple = ()
+        self.rows: list[_ConditionRow] = []
         lay = QVBoxLayout(self)
         head = QHBoxLayout()
         head.addWidget(QLabel("Use the nanowells that meet"))
@@ -327,7 +328,6 @@ class SubsetEditor(QFrame):
         self.status.setObjectName("InfoHint")
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
-        self.rows: list[_ConditionRow] = []
 
     def _name_button(self, text: str, tip: str, slot) -> QPushButton:
         button = QPushButton(text)
@@ -374,7 +374,7 @@ class SubsetEditor(QFrame):
         st = self._state()
         active = st is not None and st.subset.is_active()
         typed, name = " ".join(self.name_edit.text().split()), self.current_name()
-        waiting = getattr(self, "rows", None) is not None and self.pending()
+        waiting = self.pending()
         self.save_btn.setEnabled(active and bool(typed) and not waiting)
         self.save_btn.setToolTip(_SAVE_TIP + ("\n\nApply the changes first: Save keeps the subset in use."
                                               if waiting else ""))
@@ -543,12 +543,13 @@ class SubsetEditor(QFrame):
             self.status.style().polish(self.status)
 
 
-def _fill_combo(combo, names: list) -> None:
+def _fill_combo(combo, names: list, listed: list) -> None:
     """The Subset combo's entries: the Starting cells presets, the subsets saved in this dataset by name, then
-    *Custom subset…*. Rebuilt only when the saved names change, so a refresh never empties the open list."""
-    if getattr(combo, "_aw_saved_names", None) == names:
+    *Custom subset…*. *listed* is the names the combo lists now, kept by the control: the entries are rebuilt only
+    when the saved names change, so a refresh never empties the open list."""
+    if listed == names and combo.count():
         return
-    combo._aw_saved_names = list(names)
+    listed[:] = names
     combo.clear()
     for key, _label, _lo, _hi in sc.PRESETS:
         combo.addItem(_PRESET_LABELS[key], key)
@@ -567,7 +568,9 @@ def build_subset_control(ctx, band, tp_text) -> SimpleNamespace:
     reg = ctx.widgets
     combo = QComboBox()
     combo.setToolTip(_SUBSET_TIP)
-    _fill_combo(combo, [])
+    #: The saved names the combo lists now (``_fill_combo``).
+    listed: list = []
+    _fill_combo(combo, [], listed)
     edit_btn = QToolButton()
     edit_btn.setText("Edit…")
     edit_btn.setCheckable(True)
@@ -596,7 +599,7 @@ def build_subset_control(ctx, band, tp_text) -> SimpleNamespace:
     def refresh(st) -> None:
         blocked = combo.blockSignals(True)
         try:
-            _fill_combo(combo, list(st.saved_subsets))
+            _fill_combo(combo, list(st.saved_subsets), listed)
             name = ss.saved_name_of(st.saved_subsets, st.subset)
             preset = SAVED_PREFIX + name if name else preset_of(st.subset)
             if combo.currentData() != sc.CUSTOM or preset != "any" or st.subset.is_active():

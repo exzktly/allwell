@@ -17,6 +17,8 @@ import json
 import os
 import re
 import sys
+import tempfile
+import traceback
 from pathlib import Path
 
 
@@ -73,15 +75,23 @@ def run_case(kind: str, screen: str, workdir: Path) -> list[dict]:
 
 def main(argv: list[str]) -> int:
     kind, screen, out = argv
-    workdir = Path(out).parent / f"{kind}-{screen}-data"
-    workdir.mkdir(parents=True, exist_ok=True)
+    # A directory of its own for every run: the datasets are written with mkdir(parents=True), so one left over
+    # from an earlier run (next to a reused output path) made the next run fail.
+    workdir = Path(tempfile.mkdtemp(prefix=f"pages-{kind}-{screen}-"))
     pages = run_case(kind, screen, workdir)
     Path(out).write_text(json.dumps(pages), encoding="utf-8")
     return 0
 
 
 if __name__ == "__main__":
-    code = main(sys.argv[1:])
+    try:
+        code = main(sys.argv[1:])
+    except BaseException:
+        traceback.print_exc()
+        code = 1
     sys.stdout.flush()
-    # A full app does not tear down cleanly in-process; the result is on disk.
+    sys.stderr.flush()
+    # A full app does not tear down cleanly in-process: a failure left to unwind hangs in interpreter
+    # shutdown with the widgets still alive, and whoever waits for the process waits for ever. Say what
+    # happened, then leave at once — on success and on failure alike.
     os._exit(code)

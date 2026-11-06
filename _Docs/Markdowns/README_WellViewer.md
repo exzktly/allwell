@@ -6620,7 +6620,8 @@ reading below the threshold is the one left out as out of focus; *not judged* wh
 not fitted* where the rim was not found), **Labels** (each crop's timepoint
 and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
 Extremes view follow them. A second row shapes the montage and saves it. **Timepoints** chooses which of the
-nanowell's timepoints are panels (fewer panels are drawn larger). *All* shows every one again; *None* clears every
+nanowell's timepoints are panels (fewer panels are drawn larger); the menu stays open while you tick several, as
+**Channels**' does. *All* shows every one again; *None* clears every
 tick, so you can tick just the two or three you want from nothing — until one is ticked the pop-out says no timepoint
 is chosen rather than drawing an empty figure (unticking the last one does the same).
 **Channels** adds channels beside the image channel — tick EGFP while the image channel is phase, say — each drawn as
@@ -6668,15 +6669,21 @@ A row whose crops are not yet cut says so; one that cannot be cut says why.
 **Layout: Hex** draws the same nanowells all at once as an **artificial hex array — a composite, not a well**. Each
 source well has its own labelled patch, and inside a patch the nanowells are placed by rank, the first at the patch's
 centre and the rest spiralling outward, so a position says nothing about where a nanowell sat in its well. Tiles are
-drawn apart inside a dashed frame, each with a mark along its foot in its well's colour, and the title says it is not a
-real array. Every tile is its nanowell's crop at one size and all are on one brightness scale, so wells of different
-exposure compare. It shows 91 nanowells a page (◀ ▶ turn it), drawn once for each timepoint ticked in
-**Timepoints**, side by side — the same tile at the same place in every copy, all on the one brightness scale, so a
-change over time reads as a change in the picture. **Grid** lays the copies out as it lays out the crops (*One row* puts
-them all across). Pick the timepoints to compare with *None* and a tick or two. A tile with no image at a timepoint is a
-**hatched hexagon**, never a blank, and the caption counts those by reason. Pointing at a tile names its nanowell in the status bar (*Tile 37 · A03
-3,-2*); a click selects it, so the side panel follows. The composite is only a view: it is not a well of the plate, joins no
-selection, and is never exported as one. While the pop-out shows the window — Rows or Hex — **Go to nanowell** is hidden, since the
+drawn apart inside a dashed frame, and the title says it is not a real array. Each tile has a coloured **stripe** along
+its foot: the colour of its source well, which is the colour that well's name is written in above its patch (the
+caption says so too), so a tile can be told to its well at a glance. Every tile is its nanowell's crop at one size and
+all are on one brightness scale, so wells of different exposure compare. It shows 91 nanowells a page (◀ ▶ turn it),
+drawn once for each timepoint ticked in **Timepoints**, side by side in one row — the same tile at the same place in
+every copy, all on the one brightness scale, so a change over time reads as a change in the picture. Pick the
+timepoints to compare with *None* and a tick or two; the menu stays open while you tick. **Scroll** over the
+composite to zoom about the pointer: every copy zooms together, and the zoom holds while crops arrive, until another
+page, window or layout is shown. **Cells** draws each tile's counted cells as dots. **Channels** and **Grid** are not
+offered here: the composite draws the image channel alone, and its copies always sit in one row. A tile with no image
+at a timepoint is a **hatched hexagon**, never a blank, and the caption counts those by reason. Pointing at a tile names
+its nanowell in the status bar (*Tile 37 · A03 3,-2*) and shows the same card the Array view shows for a nanowell —
+state, counts, fluorescence, fold changes, rim focus — at the timepoint of the copy under the pointer; a click selects
+it, so the side panel follows. The composite is only a view: it is not a well of the plate, joins no selection, and is
+never exported as one. While the pop-out shows the window — Rows or Hex — **Go to nanowell** is hidden, since the
 figure is of many nanowells rather than one.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind cell fluorescence) of the wells it

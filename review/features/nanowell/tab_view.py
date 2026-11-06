@@ -922,6 +922,7 @@ def _popout_window(ctx):
     card.plotThemeChanged.connect(lambda _m: nwc.draw_popout(ctx))
     card.canvas.mpl_connect("button_press_event", lambda event: wnc.on_popout_click(ctx, event))
     card.canvas.mpl_connect("motion_notify_event", lambda event: wnc.on_popout_motion(ctx, event))
+    card.canvas.mpl_connect("scroll_event", lambda event: wnc.on_popout_scroll(ctx, event))
     refresh = ctx.widgets.get_or_none("_nw_refresh_controls")
     if callable(refresh):
         refresh()                                        # the new controls start on the page's settings

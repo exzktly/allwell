@@ -1,6 +1,7 @@
 """The **Nanowell crops** pop-out's second row of controls: what its grid shows, and saving it.
 
-**Timepoints** chooses which of the timepoints are panels (**All**, **None**, or a tick each), **Channels** adds channels beside the page's
+**Timepoints** chooses which of the timepoints are panels (**All**, **None**, or a tick each, the menu staying open
+while several are ticked), **Channels** adds channels beside the page's
 image channel (a row of crops each), **Grid** sets the shape the panels are laid out in, and **Save ▾** saves,
 copies or files the figure. Each writes one ``NanowellState`` field through the controller
 (``set_popout_timepoints``, ``set_popout_channels``, ``set_popout_grid``, ``save_popout_figure``); the rules those
@@ -10,7 +11,7 @@ fields follow are ``crop_grid_compute``'s.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QMenu, QToolButton
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QMenu, QToolButton, QWidgetAction
 
 from review.features.nanowell import controller as nwc
 from review.features.nanowell.crop_grid_compute import POPOUT_MAX_COLS, grid_label
@@ -43,6 +44,29 @@ def _menu_button(parent, name: str, tip: str, ctx) -> tuple[QToolButton, QMenu]:
 
 def _state(ctx):
     return ctx.state.feature_slice("nanowell")
+
+
+class _RowCheckBox(QCheckBox):
+    """A menu entry's checkbox that a click anywhere on its row ticks. A plain ``QCheckBox`` answers only on its box
+    and label, and the menu takes a click on the rest of the row as choosing the entry, which closes it."""
+
+    def hitButton(self, pos) -> bool:  # noqa: N802 — Qt's name
+        return self.rect().contains(pos)
+
+
+def _check_entry(menu: QMenu, text: str, *, checked: bool, enabled: bool, data, on_toggle) -> QWidgetAction:
+    """A checkbox inside *menu*: ticking it does not close the menu, so several can be ticked in one opening — the
+    Scatter tab's timepoint picker works the same way. The action carries *data*; its checkbox is its default
+    widget."""
+    box = _RowCheckBox(text, menu)
+    box.setChecked(checked)
+    box.toggled.connect(on_toggle)
+    action = QWidgetAction(menu)
+    action.setDefaultWidget(box)
+    action.setEnabled(enabled)                          # the action's state is what Qt gives its widget
+    action.setData(data)
+    menu.addAction(action)
+    return action
 
 
 def _timepoints(st) -> list:
@@ -101,11 +125,8 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
         shown = shown_tps(st)
         times = st.data.times_h if st is not None and st.data is not None else {}
         for tp in _timepoints(st):
-            action = owned_action(tps_menu, timepoint_text(tp, times))
-            action.setCheckable(True)
-            action.setChecked(tp in shown)
-            action.setData(tp)
-            action.toggled.connect(lambda on, tp=tp: toggle_tp(tp, on))
+            _check_entry(tps_menu, timepoint_text(tp, times), checked=tp in shown, enabled=True, data=tp,
+                         on_toggle=lambda on, tp=tp: toggle_tp(tp, on))
 
     def toggle_channel(channel: str, on: bool) -> None:
         st = _state(ctx)
@@ -119,12 +140,9 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
         drawn = nwc.popout_channels(st)
         for channel in _channels(st):
             first = channel == drawn[0]
-            action = owned_action(ch_menu, _channel_name(st, channel) + (" (image channel)" if first else ""))
-            action.setCheckable(True)
-            action.setChecked(channel in drawn)
-            action.setEnabled(not first)
-            action.setData(channel)
-            action.toggled.connect(lambda on, channel=channel: toggle_channel(channel, on))
+            _check_entry(ch_menu, _channel_name(st, channel) + (" (image channel)" if first else ""),
+                         checked=channel in drawn, enabled=not first, data=channel,
+                         on_toggle=lambda on, channel=channel: toggle_channel(channel, on))
 
     def rebuild_grid() -> None:
         st = _state(ctx)
@@ -149,6 +167,11 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
         ch_btn.setText("Channels: 1" if len(drawn) == 1 else f"Channels: {len(drawn)}")
         ch_btn.setEnabled(len(_channels(st)) > 1)
         grid_btn.setText(grid_label(st.popout_grid, st.popout_cols) if st is not None else "Grid: auto")
+        # The hex composite draws the image channel alone, one composite per timepoint in a row: Channels and Grid
+        # would change nothing there, so they are not offered.
+        hex_shown = st is not None and st.popout_source == "window" and st.popout_layout == "hex"
+        ch_btn.setVisible(not hex_shown)
+        grid_btn.setVisible(not hex_shown)
 
     tps_menu.aboutToShow.connect(rebuild_tps)
     ch_menu.aboutToShow.connect(rebuild_channels)

@@ -12744,16 +12744,29 @@ per-crop µm scale is needed), all on one `renderer.crop_scale`, a hatched hexag
 counted in the caption), a foot mark in `ui.theme.WELL_COLORS_TUPLE[patch % 96]`, patch labels, a dashed frame and a
 title that says it is not a real array. `draw_window_popout` branches on the layout, fetches the page's crops through
 `_want_crops` (shared with the rows), and draws the composite once per timepoint the pop-out's **Timepoints** menu shows
-(`crop_grid_compute.shown_timepoints` of `NanowellState.popout_tps`), side by side on the **Grid** shape
-(`crop_grid_compute.grid_shape(1, n, popout_grid, popout_cols)`; `_composite_render._panel_rects` turns it into one
-axes per timepoint, titled with it). Every panel holds the same tiles at the same data coordinates, so the tiles'
+(`crop_grid_compute.shown_timepoints` of `NanowellState.popout_tps`), side by side in one row
+(`_composite_render._panel_rects`, one axes per timepoint, titled with it; each axes carries `_aw_composite_tp` and its
+unzoomed `_aw_composite_home`). Every panel holds the same tiles at the same data coordinates, so the tiles'
 `(x, y, site, rank)` kept on `NanowellState.popout_tiles` serve `on_popout_click` (nearest tile within half a pitch →
-`_select`) and `on_popout_motion` (status bar) in whichever panel the pointer is; one `crop_scale` spans every tile of
-every panel, so a change over time is a change in the picture. The page size and count follow the layout
-(`_window_controller.page_size`).
+`_select`) and `on_popout_motion` in whichever panel the pointer is; the motion handler names the nanowell in the
+status bar and shows the Array view's hover card for it (`tile_card` → `array_hover_compute.hover_text`, read at the
+panel's `_aw_composite_tp`) as a tooltip. One `crop_scale` spans every tile of every panel, so a change over time is a
+change in the picture. With Cells on (`NanowellState.crop_cells`) each tile's `Crop.cells` are drawn as dots, mapped
+from crop pixels into the tile's extent (`_tile_cells`: pixel `i`'s centre at `i + 0.5` of `2 * TILE / width`), and the
+caption counts them and names tiles of a well with no cell table. The stripe along each tile's foot is its source
+well's `WELL_COLORS_TUPLE` colour, and the patch label above it is written in that colour — the stripe's key — which
+the caption states. `on_popout_scroll` (the pop-out canvas's `scroll_event`) zooms every composite axes alike about the
+pointer by `zoom_compute.wheel_limits`, held against `_aw_composite_home`, and keeps the limits on
+`NanowellState.composite_view` so `render_composite(view=…)` redraws them when crops arrive; `_store` (a new or edited
+window), `set_popout_layout` and a page step clear it. The page size and count follow the layout
+(`_window_controller.page_size`). `popout_view`'s refresh hides **Channels** and **Grid** while the hex composite is
+shown: it draws the image channel alone, in one row.
 
 **Timepoints: All / None.** The pop-out's Timepoints menu (`popout_view.build_popout_view_controls`) opens with *All*
 (`controller.set_popout_timepoints(ctx, [])`) and *None* (`set_popout_no_timepoints`), then a tick per timepoint.
+Each tick, there and in **Channels**, is a checkbox inside the menu (`popout_view._check_entry`, a `QWidgetAction`
+whose `_RowCheckBox` answers a click anywhere on its row), so the menu stays open while several are ticked — a plain
+checkable action closes it on every click, and so does a click on the bare part of a stock `QCheckBox`'s row.
 `popout_tps` empty means every timepoint, so *None* is its own persisted flag, `NanowellState.popout_tps_none`; every
 pop-out draw path — one nanowell, the window's rows, the hex composite — renders `controller.NO_TIMEPOINTS_SAID`
 (gid `nw-popout-no-timepoints`) instead of a figure while it is set, and the button reads *Timepoints: none*.

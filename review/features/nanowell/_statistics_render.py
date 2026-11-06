@@ -16,7 +16,7 @@ import math
 import numpy as np
 
 from review.features.nanowell import statistics_compute as sc
-from review.features.nanowell.renderer import GRID_TYPE_SCALE, _ink, _inks, _no_offset, _prepare_axes
+from review.features.nanowell.renderer import _PREF_PT, GRID_TYPE_SCALE, _ink, _inks, _no_offset, _prepare_axes
 
 #: The report's type size, and the smallest it is shrunk to before lines are left out (and counted) instead.
 REPORT_PT, REPORT_MIN_PT = 7.5, 5.5
@@ -28,6 +28,10 @@ _LEADING = 1.4
 #: A monospace character's advance, in ems.
 _CHAR_EM = 0.6
 _LEFT, _RIGHT = 0.09, 0.97
+#: What the y axis takes to the plot's left, in points: the axis label's line, a five-character tick number ("-0.25")
+#: and the ticks' and label's pads, at the type the plot is drawn in. A share of the figure's width left a narrow
+#: figure's label across its edge.
+_Y_AXIS_PT = _PREF_PT * GRID_TYPE_SCALE * (1.2 + 5 * 0.6) + 12.0
 
 
 def _colour(i: int, sample, unit: str) -> str:
@@ -86,7 +90,8 @@ def render_statistics(fig, result: sc.StatisticsResult, *, note: str = "") -> No
         _ink(fig.text(0.02, y, text, fontsize=size, family="monospace", color=muted if muted_line else ink, gid=gid,
                       fontweight="bold" if gid == sc.GID_HEADER and i == 0 else "normal"), muted=muted_line)
     if plotted:
-        ax = fig.add_axes([_LEFT, top + 0.11, _RIGHT - _LEFT, max(0.15, 0.94 - top - 0.11)])
+        left = max(_LEFT, _Y_AXIS_PT / width_pt)
+        ax = fig.add_axes([left, top + 0.11, _RIGHT - left, max(0.15, 0.94 - top - 0.11)])
         _prepare_axes(ax, GRID_TYPE_SCALE)
         if result.test["key"] == "ks":
             _ecdfs(ax, result, ink)

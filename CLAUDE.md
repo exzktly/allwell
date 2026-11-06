@@ -146,6 +146,13 @@ the container**:
   touch the UI. A test that drives a control and asserts what reached a spec,
   argv, state or file is *behaviour* and must not join the roster, or CI stops
   running it.
+- **Every page, every screen, with data** (`tests/test_every_page_renders.py`, ~4
+  minutes, slow lane): three datasets × desk / phone upright / phone sideways, each
+  case in a subprocess, on a patched screen of the real size (Qt's offscreen 800×800
+  is no screen a person has). Run it with `scripts/test.sh
+  tests/test_every_page_renders.py -m ""` whenever a page's layout or a plot's
+  fit changes; `ALLWELL_PAGE_SHOTS=<dir>` saves a PNG per page. ARCHITECTURE.md
+  §10.4 has the mechanism.
 - **Full-app tests** (~440 tests): anything using the `viewer_app`
   / `loaded_app` / `loaded_app_shape` / `image_table_app` fixtures, auto-marked
   `slow` by `conftest.py`. Each builds a real `ReviewApp` (~1,800 QObjects)

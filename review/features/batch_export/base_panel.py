@@ -532,8 +532,14 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
             return
         if avail is None:
             avail = self._viewport_width()
-        need = (self._split_left.minimumSizeHint().width()
-                + self._split_right.minimumSizeHint().width() + 24)
+        # Each side's *effective* minimum: an explicit ``setMinimumWidth`` (the
+        # group editor's ``_LEFT_MIN_W``) overrides the size hint, so reading the
+        # hint alone under-counted the side-by-side width by the difference and
+        # the panel stayed side by side in a viewport it did not fit, with no
+        # horizontal scroll bar to reach the rest.
+        need = (self._effective_min_width(self._split_left)
+                + self._effective_min_width(self._split_right)
+                + self._split_sep.sizeHint().width() + 24)
         stacked_now = (self._split_outer.direction()
                        == QBoxLayout.Direction.TopToBottom)
         if not stacked_now and avail < need:
@@ -551,6 +557,12 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         # Right panel fills leftover horizontal space when side-by-side; when
         # stacked it should sit at its natural height (no vertical slack grab).
         self._split_outer.setStretch(self._split_right_index, 0 if stack else 1)
+
+    @staticmethod
+    def _effective_min_width(widget: QWidget) -> int:
+        """The narrowest *widget* can be laid out: its explicit minimum width
+        when one is set, else its minimum size hint — whichever is larger."""
+        return max(widget.minimumWidth(), widget.minimumSizeHint().width())
 
     def _viewport_width(self) -> int:
         """Width available to the panel: the enclosing QScrollArea's viewport,

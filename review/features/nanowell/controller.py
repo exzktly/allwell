@@ -1007,8 +1007,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if model.empty:
         render_message(fig, model.empty, gid="nw-moving-empty")
         return None, model
-    return render_distribution(fig, model, selected=selected, wrap_footer=nw_phone.on_phone(),
-                               spacing=swarm_spacing), model
+    return render_distribution(fig, model, selected=selected, spacing=swarm_spacing), model
 
 
 def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels) -> str:

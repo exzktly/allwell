@@ -1,4 +1,4 @@
-"""The Array view's band, measured: three rows of related controls at 1500 px with the app's stylesheet, walking or not, and no control
+"""The Nanowells band, measured: three rows of related controls on every view at 1500 px with the app's stylesheet, walking or not, and no control
 moving when a layer, a colouring, a preset, the positions, the image or the overlays change.
 
 Asked for: "the arrays tab needs a UX expert to fix the menu and buttons across the top; they're a mess" — the band
@@ -69,61 +69,69 @@ def _row_of(ctx, name: str) -> int:
     return max(k for k, top in enumerate(tops) if widget.y() >= top - 16)
 
 
-#: The Array view's rows, by what the controls act on (asked for: "clean up / group on rows related controls in
-#: array. They're a mess" — the data controls, the well, the anchor and the picture's layers had shared rows, and
-#: the wrap split them wherever the width ran out).
-_ARRAY_ROWS = (("_nw_metric_cb", "_nw_channel_cb", "_nw_baseline_cb", "_nw_rim_focus_box", "_nw_subset_cb"),
-               ("_nw_well_cb", "_nw_tp_cb", "_nw_anchor_btn", "_nw_clear_anchor_btn", "_nw_rerun_btn"),
-               ("_nw_positions_seg", "_nw_image_cb", "_nw_layers_btn"))
+#: The band's rows, the same on every view (asked for, twice: "organize the controls because their grouping is
+#: illogical and a mess"): *Measure* — which number and how it is normalised; *Scope* — of which nanowells, then which
+#: well and timepoint; *View* — how this view shows it, its actions last. One entry per view: the controls of each row
+#: that the view shows.
+_MEASURE = ("_nw_metric_cb", "_nw_channel_cb", "_nw_baseline_cb")
+_AVERAGES = ("_nw_baseline_moving_spin", "_nw_moving_spin")
+_POPULATION = ("_nw_rim_focus_box", "_nw_subset_cb")
+_WHERE = ("_nw_well_cb", "_nw_tp_cb")
+_ROWS_BY_VIEW = {
+    "array": (_MEASURE, _POPULATION + _WHERE,
+              ("_nw_positions_seg", "_nw_image_cb", "_nw_layers_btn", "_nw_anchor_btn", "_nw_clear_anchor_btn",
+               "_nw_rerun_btn")),
+    "distribution": (_MEASURE + _AVERAGES, _POPULATION + ("_nw_cohort_box",),
+                     ("_nw_axis_seg", "_nw_responding_edit")),
+    "statistics": (_MEASURE + _AVERAGES, _POPULATION + ("_nw_cohort_box", "_nw_tp_cb"), ("_nw_control_cb",)),
+    "qc": (_MEASURE, _POPULATION, ("_nw_qc_wells_seg", "_nw_qc_walk_btn", "_nw_queue_btn", "_nw_qc_rerun_btn")),
+    "extremes": (_MEASURE, _POPULATION + _WHERE, ("_nw_extremes_spin", "_nw_extremes_metrics_box")),
+    "trajectories": (_MEASURE + _AVERAGES, _POPULATION + ("_nw_cohort_box",)),
+    "position": (_MEASURE, _POPULATION + ("_nw_tp_cb",)),
+}
 
 
 @pytest.mark.parametrize("width", [1500, 1200])
-def test_the_array_band_is_three_rows_of_related_controls(qc_page, themed, qtbot, width):
-    """Data · well and its anchor · the picture, each on its own row, at a wide and a narrower window: a row that
-    does not fit wraps within itself and never takes the next row's controls onto it."""
+@pytest.mark.parametrize("view", sorted(_ROWS_BY_VIEW))
+def test_every_view_keeps_the_same_three_rows(qc_page, themed, qtbot, width, view):
+    """Measure · Scope · View, each on its own row in that order on every view, at a wide and a narrower window: a
+    row that does not fit wraps within itself and never takes the next row's controls onto it."""
+    from review.features.nanowell import controller as nwc
+
     ctx = qc_page
+    nwc.set_view(ctx, view)
     _settle(qtbot, ctx, width)
-    rows = [{_row_of(ctx, name) for name in names} for names in _ARRAY_ROWS]
-    # In this order, and no two groups share a row: each group's last row is above the next group's first.
-    assert all(max(a) < min(b) for a, b in zip(rows, rows[1:])), rows
-    if width == 1500:
-        assert rows == [{0}, {1}, {2}], rows                           # wide enough: one row each
+    rows = [{_row_of(ctx, name) for name in names} for names in _ROWS_BY_VIEW[view]]
+    assert rows == [{k} for k in range(len(rows))], (view, rows)        # one row each, in order, none shared
 
 
-def test_the_excluded_chip_ends_the_well_row_on_the_array_view(qc_page, themed, qtbot):
-    """*Excluded (n)* names wells: on the Array view it sits at the end of the well row, not after the picture's
-    controls, and on another view it is back at the end of the band."""
+def test_the_excluded_chip_ends_the_scope_row(qc_page, themed, qtbot):
+    """*Excluded (n)* names wells: it sits at the end of the Scope row, after the well it was set from, on every
+    view — never after the View row's controls."""
     from review.features.nanowell import controller as nwc
 
     ctx = qc_page
     nwc.set_well_excluded(ctx, "A01", True)
-    _settle(qtbot, ctx, 1500)
-    chip = ctx.widgets.get("_nw_excluded_wells_btn")
-    assert chip.isVisibleTo(ctx.window)
-    assert _row_of(ctx, "_nw_excluded_wells_btn") == _row_of(ctx, "_nw_anchor_btn")
-    host = _band(ctx)._scope_host
-    order = [host.layout().itemAt(i).widget() for i in range(host.layout().count())]
-    group = chip.parentWidget() if chip.parentWidget() is not host else chip
-    assert order.index(group) < order.index(ctx.widgets.get("_nw_positions_seg").parentWidget())
-    nwc.set_view(ctx, "distribution")
-    QApplication.processEvents()
-    order = [host.layout().itemAt(i).widget() for i in range(host.layout().count())]
-    assert order[-1] is group
+    for view in ("array", "distribution"):
+        nwc.set_view(ctx, view)
+        _settle(qtbot, ctx, 1500)
+        chip = ctx.widgets.get("_nw_excluded_wells_btn")
+        assert chip.isVisibleTo(ctx.window)
+        assert _row_of(ctx, "_nw_excluded_wells_btn") == _row_of(ctx, "_nw_subset_cb"), view
 
 
-def test_the_row_breaks_are_the_array_view_s_alone(qc_page, themed, qtbot):
-    """On another view the same band flows as it did: the breaks are hidden, so Distribution's controls are not
-    split across rows the Array view needs."""
+def test_the_row_breaks_are_shown_on_every_view(qc_page, themed, qtbot):
     from review.features.nanowell import controller as nwc
+    from review.features.nanowell.state import VIEWS
 
     ctx = qc_page
-    _settle(qtbot, ctx, 1500)
     host = _band(ctx)._scope_host
     breaks = [w for w in host.children() if getattr(w, "objectName", lambda: "")() == "FlowBreak"]
-    assert len(breaks) == 2 and all(b.isVisibleTo(host) for b in breaks)
-    nwc.set_view(ctx, "distribution")
-    QApplication.processEvents()
-    assert not any(b.isVisibleTo(host) for b in breaks)
+    assert len(breaks) == 2
+    for view in VIEWS:
+        nwc.set_view(ctx, view)
+        QApplication.processEvents()
+        assert all(b.isVisibleTo(host) for b in breaks), view
 
 
 def test_a_walk_keeps_the_array_band_to_three_rows(qc_page, themed, qtbot):

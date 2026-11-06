@@ -46,7 +46,8 @@ def build_qc_controls(ctx, band) -> SimpleNamespace:
     wells_seg.setToolTip(WELLS_TIP)
     wells_seg.currentChanged.connect(lambda idx: qcc.set_wells(ctx, _WELLS[idx][0]))
     reg.register("_nw_qc_wells_seg", wells_seg)
-    grp_wells = band.add_scope("Wells", wells_seg)
+    # "Show", not "Wells": it filters the list the view draws, and "Wells" read as the Well control beside it.
+    grp_wells = band.add_scope("Show", wells_seg)
 
     # The page's one action: primary, and saying what it walks, so the option beside it visibly changes something.
     queue_btn = _button("Resolve", QUEUE_TIP, lambda: aq.start(ctx), variant="primary")

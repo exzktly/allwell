@@ -6595,7 +6595,7 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   desktop and never reaches All-Well. The swipe zooms about the pointer when the pointer is on the image, and
   about the view's centre when it was last left elsewhere on the figure.
 
-  Hover over a nanowell to see what its row of the nanowell table says at this timepoint: its address and
+  Rest the pointer on a nanowell for a second to see what its row of the nanowell table says at this timepoint: its address and
   ring, its state (and why, when it has no value), the value it is coloured by, its cell count and
   confluence, each channel's fluorescence, its fold changes from the baseline and growth rate, its rim focus
   against the well's sharpest rims with the verdict (in focus, out of focus, or why it was not judged), the
@@ -6701,7 +6701,8 @@ small for a line of numbers. The crops are cut a timepoint at a time, the first 
 fill in one after another, and a timepoint you have not ticked is never cut: to see one timepoint quickly, tick only
 that one. A tile still being cut is a hatched hexagon that the caption counts as *not cut yet*. A tile with no image
 at a timepoint is a **hatched hexagon**, never a blank, and the caption counts those by reason. Pointing at a tile names
-its nanowell in the status bar (*Tile 37 · A03 3,-2*) and shows the same card the Array view shows for a nanowell —
+its nanowell in the status bar (*Tile 37 · A03 3,-2*) and, once the pointer has rested on it for a second, shows the
+same card the Array view shows for a nanowell —
 state, counts, fluorescence, fold changes, rim focus — at the timepoint of the copy under the pointer; a click selects
 it, so the side panel follows. The composite is only a view: it is not a well of the plate, joins no selection, and is
 never exported as one. While the pop-out shows the window — Rows or Hex — **Go to nanowell** is hidden, since the

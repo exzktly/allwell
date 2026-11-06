@@ -1564,17 +1564,19 @@ def on_motion(ctx, event) -> None:
 def _array_hover(ctx, st, event) -> None:
     """The card for the nanowell under the pointer on the Array view, as a tooltip (``array_hover_compute``): its
     address, state, the shown value or why it has none, counts, fluorescence, fold changes, rim focus, identity and
-    place. Hidden off the nanowells, while dragging (*event* ``None``), and off the array's axes."""
-    from PySide6.QtGui import QCursor
-    from PySide6.QtWidgets import QToolTip
-
+    place — once the pointer has rested on the nanowell for a second (``_nw_hover_tip``, a
+    ``widgets.delayed_tooltip.DelayedToolTip``). Hidden off the nanowells, while dragging (*event* ``None``), and off
+    the array's axes."""
+    tip = ctx.widgets.get_or_none("_nw_hover_tip")
+    if tip is None:
+        return
     drawn = st.drawn
     scene = getattr(drawn, "scene", None)
     k = None
     if event is not None and scene is not None and event.inaxes is drawn.ax and event.xdata is not None:
         k = ahc.site_at(scene.sites, event.xdata, event.ydata)
     if k is None:
-        QToolTip.hideText()
+        tip.clear()
         return
     if drawn.rows is None:
         drawn.rows = ahc.rows_by_address(st.metrics, scene.well, scene.timepoint)
@@ -1584,7 +1586,7 @@ def _array_hover(ctx, st, event) -> None:
                           value=scene.sites.values[k], label=drawn.label,
                           why=scene.why.get((site[1], site[2]), ""), channels=list(st.data.channels),
                           rule=st.rim_focus_rule(), name=scene.name, state=str(scene.sites.state[k]))
-    QToolTip.showText(QCursor.pos(), text, ctx.widgets.get_or_none("_nw_canvas"))
+    tip.point((scene.well, scene.timepoint, tuple(site)), text)
 
 
 def on_release(ctx, event) -> None:

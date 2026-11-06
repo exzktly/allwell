@@ -636,25 +636,25 @@ def _set_composite_view(ctx, st, fig, xlim, ylim) -> None:
 
 def on_popout_motion(ctx, event) -> None:
     """Pointing at a composite tile names its real nanowell in the status bar and shows the Array view's card for it
-    at the timepoint of the panel under the pointer (``array_hover_compute.hover_text``); off a tile the card goes."""
-    from PySide6.QtGui import QCursor
-    from PySide6.QtWidgets import QToolTip
-
+    at the timepoint of the panel under the pointer (``array_hover_compute.hover_text``), once the pointer has rested
+    on the tile for a second (``_nw_popout_hover_tip``); off a tile, or while dragging, the card goes."""
     st = _state(ctx)
+    tip = ctx.widgets.get_or_none("_nw_popout_hover_tip")
     if st is not None and _pan(ctx, st, event):
-        QToolTip.hideText()                              # dragging: no card under a moving picture
+        if tip is not None:
+            tip.clear()                                  # dragging: no card under a moving picture
         return
     tile = _tile_at(st, event) if st is not None else None
     if tile is None:
-        if st is not None and st.popout_tiles:
-            QToolTip.hideText()
+        if tip is not None:
+            tip.clear()
         return
     well, q, r = tile[2]
     ctx.notify.set_status(f"Tile {tile[3]} · {well} {q},{r}")
-    text = tile_card(st, tile[2], getattr(event.inaxes, "_aw_composite_tp", None))
-    if text:
-        QToolTip.showText(QCursor.pos(), f"Tile {tile[3]} of the composite\n{text}",
-                          ctx.widgets.get_or_none("_nw_popout_canvas"))
+    timepoint = getattr(event.inaxes, "_aw_composite_tp", None)
+    text = tile_card(st, tile[2], timepoint)
+    if tip is not None and text:
+        tip.point((timepoint, tuple(tile[2])), f"Tile {tile[3]} of the composite\n{text}")
 
 
 def tile_card(st, site, timepoint) -> str:

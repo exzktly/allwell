@@ -379,6 +379,7 @@ def test_pointing_at_a_tile_shows_the_array_view_s_card_at_that_panel_s_timepoin
     st = _open_hex(page, qtbot)
     shown = []
     monkeypatch.setattr(QToolTip, "showText", lambda _pos, text, *_a: shown.append(text))
+    page.widgets.get("_nw_popout_hover_tip").setDelay(0)               # the card, not its wait
     fig = page.widgets.get("_nw_popout_fig")
     second = fig.axes[1]
     tile = st.popout_tiles[0]
@@ -394,7 +395,8 @@ def test_pointing_at_a_tile_shows_the_array_view_s_card_at_that_panel_s_timepoin
     expected = ahc.hover_text(rows.get((q, r)), tile[2], timepoint=timepoint, channels=list(st.data.channels),
                               rule=st.rim_focus_rule())
     assert timepoint != fig.axes[0]._aw_composite_tp
-    assert shown and shown[-1] == f"Tile {tile[3]} of the composite\n{expected}"
+    qtbot.waitUntil(lambda: bool(shown), timeout=2000)
+    assert shown[-1] == f"Tile {tile[3]} of the composite\n{expected}"
 
 
 def test_labels_off_leaves_out_each_panel_s_timepoint_and_the_caption_but_not_the_wells_names():
@@ -711,3 +713,19 @@ def test_the_corner_combo_writes_the_page_s_values_at_each_panel_s_timepoint(pag
     assert "Corner: each tile's Cell count at its panel's timepoint." in caption
     combo.setCurrentIndex(combo.findData(wnc.NO_LABEL))
     assert not [t for ax in fig.axes for t in ax.texts if t.get_gid() == "nw-composite-value"]
+
+
+def test_the_tile_s_card_waits_for_the_pointer_to_rest(page, qtbot, monkeypatch):  # noqa: F811
+    """Asked for: a one-second delay before the hover card, on the real pop-out canvas at its real delay."""
+    from PySide6.QtWidgets import QToolTip
+
+    st = _open_hex(page, qtbot)
+    shown = []
+    monkeypatch.setattr(QToolTip, "showText", lambda _pos, text, *_a: shown.append(text))
+    canvas, point = _tile_point(page, st, st.popout_tiles[0])
+    QApplication.sendEvent(canvas, QMouseEvent(QEvent.MouseMove, QPointF(point), QPointF(canvas.mapToGlobal(point)),
+                                               Qt.NoButton, Qt.NoButton, Qt.NoModifier))
+    qtbot.wait(500)
+    assert shown == []                                               # half a second in: nothing yet
+    qtbot.waitUntil(lambda: bool(shown), timeout=1500)
+    assert shown[-1].startswith(f"Tile {st.popout_tiles[0][3]} of the composite")

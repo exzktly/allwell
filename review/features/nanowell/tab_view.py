@@ -54,6 +54,7 @@ from review.features.nanowell.statistics_view import (
     build_statistics_controls, fill_control_combo, refresh_statistics_controls,
 )
 from widgets.control_band import ControlBand
+from widgets.delayed_tooltip import DelayedToolTip
 from widgets.labeled_combo import LabeledComboBox
 from widgets.owned_action import owned_action
 from widgets.spin_box import SpinBox
@@ -482,6 +483,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     card.canvas.mpl_connect("button_release_event", lambda event: nwc.on_release(ctx, event))
     card.canvas.mpl_connect("motion_notify_event", lambda event: nwc.on_motion(ctx, event))
     card.canvas.mpl_connect("scroll_event", lambda event: nwc.on_scroll(ctx, event))
+    reg.register("_nw_hover_tip", DelayedToolTip(card.canvas))     # a nanowell's card, after a second's rest
     # The Array view fits the region it shows to its axes' shape when it draws, so square pixels and round nanowells
     # hold only at that size; a resize (the window, the site detail opening beside it, the band re-flowing) re-fits
     # it, once the resizing has settled.
@@ -934,6 +936,7 @@ def _popout_window(ctx):
     card.canvas.mpl_connect("button_release_event", lambda event: wnc.on_popout_release(ctx, event))
     card.canvas.mpl_connect("motion_notify_event", lambda event: wnc.on_popout_motion(ctx, event))
     card.canvas.mpl_connect("scroll_event", lambda event: wnc.on_popout_scroll(ctx, event))
+    ctx.widgets.register("_nw_popout_hover_tip", DelayedToolTip(card.canvas))
     refresh = ctx.widgets.get_or_none("_nw_refresh_controls")
     if callable(refresh):
         refresh()                                        # the new controls start on the page's settings

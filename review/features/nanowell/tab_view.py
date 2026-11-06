@@ -72,8 +72,12 @@ _IMAGES = (("off", "Off"), ("montage", "Run montage"), ("tiles", "Full resolutio
 _POSITIONS = (("measured", "Measured"), ("lattice", "Lattice"))
 #: The Array view's switchable layers, in the order its Layers menu lists them, with what each draws.
 #: The band's *Notes* button: the Layers menu's *Notes*, where it can be found.
-_NOTES_TIP = ("How to read the array — the positions, the fill and outlines, the tile colours — under the array, in room kept for it so the array never moves. "
-              "Off, the footer keeps the counts and anything that went wrong. The same switch as Layers → Notes.")
+#: The views whose footer the *Notes* switch shortens.
+NOTES_VIEWS = ("array", "distribution")
+_NOTES_TIP = ("The footer in full. On the Array view: how to read the array — the positions, the fill and outlines, the "
+              "tile colours — under it, in room kept for it so the array never moves. On the Distribution view: the "
+              "notes on the times, the Subset, the cohort, how the line is drawn. Off, the footer keeps the counts, "
+              "what the figure does not draw, and how many notes there are. The same switch as Layers → Notes.")
 _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or outlined by its state."),
            ("addresses", "Addresses", "Each nanowell's q,r, wherever it is drawn large enough to hold it."),
            ("values", "Values", "Each nanowell's value of the Metric, written inside it (under its q,r when "
@@ -1065,10 +1069,11 @@ def _show_where(group, well_part, tp_cb, shows_well: bool, shows_tp: bool, *, wa
 
 def mount_array_canvas_tools(ctx, card, c: SimpleNamespace) -> None:
     """Put the Array view's zoom, *Overlays* and *Notes* under the figure, after its navigation buttons, each group behind a
-    separator; shown with the view's other controls. On the Array view *Reset view* is *Fit*: the view keeps its
+    separator; shown with the view's other controls, *Notes* on the Distribution view too. On the Array view *Reset view* is *Fit*: the view keeps its
     own region (``state.region``), which matplotlib's home does not know."""
     toolbar = card.toolbar
-    c.groups += [toolbar.add_group(*c.canvas_tools), toolbar.add_group(c.overlays_btn, c.notes_btn)]
+    c.groups += [toolbar.add_group(*c.canvas_tools), toolbar.add_group(c.overlays_btn)]
+    c.notes_group = toolbar.add_group(c.notes_btn)    # its own group: the Distribution view has Notes too
 
     def home() -> None:
         st = ctx.state.feature_slice("nanowell")
@@ -1115,6 +1120,8 @@ def _refresh_array_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
         action.setEnabled(layers.nanowells)
     for group in c.groups:
         group.setVisible(on_view)
+    if getattr(c, "notes_group", None) is not None:
+        c.notes_group.setVisible(st.view in NOTES_VIEWS)
     c.overlays_btn.setChecked(not st.overlays_hidden)
     c.notes_btn.setChecked(layers.notes)
     if not on_view:

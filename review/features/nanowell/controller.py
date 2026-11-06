@@ -716,7 +716,8 @@ def redraw(ctx) -> None:
         responding_above=st.thresholds.get(metric_column(metric, channel)),
         subset=page_subset(ctx, st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
         gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
-        names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx), **array)
+        names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx),
+        notes_below=not st.layers.notes, **array)
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
@@ -870,7 +871,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
               stats_cache: dict | None = None, gate=None,
               decoration: Decoration | None = None, names: dict | None = None,
-              swarm_spacing: float = 0.0) -> tuple[object, object]:
+              swarm_spacing: float = 0.0, notes_below: bool = False) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -998,16 +999,16 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         model.identity_marks = {(w, tp): v for w in wells for tp, v in timepoint_marks(data, w).items()}
         legend = marks_legend(model.identity_marks.values())
         if legend:
-            model.notes.append(legend)
+            model.alerts.append(legend)                  # the key to marks on the figure: never folded away
     if tableless:
-        model.notes.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
-                              f"{', '.join(tableless)}.")
+        model.alerts.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
+                               f"{', '.join(tableless)}.")
     if note:
-        model.notes.insert(0, note)
+        model.alerts.insert(0, note)
     if model.empty:
         render_message(fig, model.empty, gid="nw-moving-empty")
         return None, model
-    return render_distribution(fig, model, selected=selected, spacing=swarm_spacing), model
+    return render_distribution(fig, model, selected=selected, spacing=swarm_spacing, notes_below=notes_below), model
 
 
 def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels) -> str:

@@ -438,8 +438,7 @@ class NanowellState:
         self.windows = _windows_from(config.get("windows"))
         self.popout_source = _choice(config.get("popout_source"), POPOUT_SOURCES, fresh.popout_source)
         self.popout_layout = _choice(config.get("popout_layout"), POPOUT_LAYOUTS, fresh.popout_layout)
-        colour = config.get("composite_colour")
-        self.composite_colour = colour if isinstance(colour, str) else fresh.composite_colour
+        self.composite_colour = _text(config.get("composite_colour"), fresh.composite_colour)
         self.display_ranges = _display_ranges_from(config.get("display_ranges"))
         tps = config.get("extremes_tps")
         self.extremes_tps = [str(tp) for tp in tps if isinstance(tp, str)] if isinstance(tps, list) else []
@@ -463,6 +462,11 @@ def _windows_from(block) -> dict:
     damaged one restores as no window rather than as half of one."""
     return {k: w for k, b in (block.items() if isinstance(block, dict) else ())
             if isinstance(k, str) and (w := DistributionWindow.from_config(b)) is not None}
+
+
+def _text(value, fallback: str) -> str:
+    """*value* when it is a string, else *fallback*: a stored choice whose meaning is checked where it is used."""
+    return value if isinstance(value, str) else fallback
 
 
 def _choice(value, allowed, default):

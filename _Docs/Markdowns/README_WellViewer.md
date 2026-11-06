@@ -6349,11 +6349,17 @@ the sentence names it.
 
 **Reading the figure**
 
+- The footer under the figure is short until you turn on **Notes** (the button under the figure, the same switch as
+  on the Array view). Off, it is one line of counts — ending in how many notes there are to read — and anything the
+  figure leaves out or marks: wells selected without a nanowell table, excluded fields, gated cells, rims out of
+  focus, what the Subset kept, and the key to the identity marks. On, it adds the notes on how to read the figure:
+  the times, how the line is drawn, the packing of whole-number values, the fraction responding, a fixed cohort.
+  Saved and copied figures follow the switch; Batch Export always writes the notes.
 - Dots are coloured by the number of cells in the nanowell at baseline: an open ring for 0, then 1, 2 and 3+
   (the key at the top right names the baseline). Grey ("?") is a nanowell whose count at baseline is unknown.
   Saved and copied figures use the white-background shades of the same key.
 - Counts and occupancy are whole numbers, so hundreds of nanowells share a value; their dots are packed into
-  a band within ±0.4 of the value, starting on the value itself, and the footer says so.
+  a band within ±0.4 of the value, starting on the value itself, and the footer's notes say so.
 - A swarm with more dots than its slot can hold says how many were not drawn under it — "+N at 0", or
   "+N at 0–4" — beside its exclusions. Every nanowell with a value is either a dot or counted there. When the
   window is too narrow to write those under each swarm, only the number used is written above it and the footer

@@ -190,7 +190,10 @@ class DistributionModel:
     timepoint: str = ""
     control: str = ""
     baseline: str = "earliest"
-    notes: list = field(default_factory=list)          # sentences printed in the footer
+    notes: list = field(default_factory=list)          # sentences printed in the footer: how to read the figure
+    #: Sentences printed in the footer whatever the page's *Notes* switch: what the figure leaves out (wells with no
+    #: table, excluded fields, gated cells, rims out of focus, the Subset's count) and the key to marks drawn on it.
+    alerts: list = field(default_factory=list)
     x_label: str = ""                                  # what the x axis is, written once under the bottom row
     time_note: str = ""                                # the timepoint names at their hours, the footer's last note
     #: The cut the user set for this metric (tracker I9), or ``None``: then no fraction responding is computed.

@@ -297,8 +297,13 @@ def _fit_text(text: str, width_pt: float, size_pt: float, *, em: float = _GLYPH_
     return "\n".join(textwrap.wrap(text, chars)) or text
 
 
-def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: float = 1.0) -> HitMap:
+def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: float = 1.0,
+                        notes_below: bool = False) -> HitMap:
     """Draw *model* on *fig* (cleared first) and return where every dot went.
+
+    *notes_below* is the page with its **Notes** switch off: the footer keeps only the counts and what the figure does
+    not draw, and says how many notes there are and how to read them — written in full, the notes had grown to eight
+    lines and left the panels a sliver of the figure. Off (Notes on, and Batch Export), every note is written.
 
     *spacing* is Properties → Beeswarm → Point spacing: the distance between neighbouring dots as a multiple of a
     dot's size, so 1.0 (Auto) packs them edge to edge, less overlaps them and fits more in a slot, more leaves gaps
@@ -308,7 +313,7 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
     hits = HitMap()
     panels = model.panels[:MAX_PANELS]
     rows, cols = _grid(len(panels))
-    bottom = 0.10 + _FOOTER_BASE + _line_step(fig) * _FOOTER_LINES
+    bottom = 0.10 + _FOOTER_BASE + _line_step(fig) * (1 if notes_below else _FOOTER_LINES)
     top, key_bottom, key_h = _head_room(fig, floor_top=0.86, title_pt=_PANEL_TITLE_PT)
     _adjust(fig, left=0.07, right=0.98, top=top, bottom=bottom, wspace=0.12 if rows * cols > 1 else 0.2,
                         hspace=0.62)
@@ -337,7 +342,7 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
     _footer(fig, model, inks, panels, densities, hidden,
             crowded=any(getattr(ax, "_aw_crowded", False) for ax in axes),
             counts_hidden=any(getattr(ax, "_aw_counts_hidden", False) for ax in axes),
-            key_at=(key_bottom, key_h))
+            key_at=(key_bottom, key_h), notes_below=notes_below)
     return hits
 
 
@@ -604,8 +609,11 @@ def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:
 
 
 def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden: int, *,
-            crowded: bool = False, counts_hidden: bool = False, key_at: tuple[float, float] | None = None) -> None:
-    """The sums the figure owes the reader, over the panels drawn; what was left out is stated beside them."""
+            crowded: bool = False, counts_hidden: bool = False, key_at: tuple[float, float] | None = None,
+            notes_below: bool = False) -> None:
+    """The sums the figure owes the reader, over the panels drawn; what was left out is stated beside them. With
+    *notes_below* the model's notes are left out and the first line counts them; its alerts — what the figure leaves
+    out, the key to its marks — are written either way."""
 
     _bg, ink, muted = inks
     drawn = [s for p in panels for s in p.swarms]
@@ -621,7 +629,13 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     line1 = (f"{unit} used {used:,} of {roster:,} · excluded {sum(excluded.values()):,}"
              + (": " + " · ".join(f"{k} {v:,}" for k, v in excluded.items()) if excluded else "")
              + f" · wells {len(wells)}")
-    lines = [line1] + list(model.notes)
+    alerts = list(getattr(model, "alerts", ()) or ())
+    if notes_below and model.notes:
+        n = len(model.notes)
+        lines = [line1 + f" · {n} note{'s' if n != 1 else ''}: turn on Notes to read {'them' if n != 1 else 'it'}"]
+        lines += alerts
+    else:
+        lines = [line1] + alerts + list(model.notes)
     left_out = model.panels[len(panels):]
     if left_out:
         n = sum(s.n_roster for p in left_out for s in p.swarms)

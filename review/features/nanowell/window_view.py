@@ -21,8 +21,9 @@ _RULE_TIP = ("Over several timepoints: keep a nanowell only if it is inside the 
 _PANEL_TIP = "Cover only the panel the window was drawn in, rather than every panel."
 _POPOUT_TIP = "Show the nanowells inside the window in the pop-out, as rows of crops over time."
 _SUBSET_TIP = ("Keep only the nanowells inside the window: they are added to the Subset, applied at once, and the "
-               "others leave the Distribution (and every view the Subset governs). A window drawn next on what "
-               "remains narrows it further; the Subset's editor lists each and removes it.")
+               "others leave the Distribution (and every view the Subset governs). The Subset holds one window at a "
+               "time: drawing another box takes this one out first, so the new box selects from every nanowell. The "
+               "Subset's editor lists it and removes it.")
 _CLEAR_TIP = "Clear the window"
 #: The widest the strip's Low and High fields grow, in pixels: a number of a few digits.
 _FIELD_MAX_W = 80

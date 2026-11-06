@@ -6389,10 +6389,12 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
 - There is one window per metric and axis, kept with the page's settings. Another metric or axis hides it; coming back
   shows it again.
 - **Open in pop-out** shows the nanowells inside the window in the pop-out (see *Nanowell crops*).
-- **Use as Subset** keeps only the nanowells inside the window: they are added to the page's **Subset** as one more
+- **Use as Subset** keeps only the nanowells inside the window: they are added to the page's **Subset** as a
   condition, *Distribution window: inside “Window 1” (N nanowells)*, applied at once, so the Distribution — and every view
-  the Subset governs — loses the others. The window is then cleared. Draw another on what remains and press the button
-  again to narrow further (*Window 2*, …). The list of nanowells is frozen when you press the button; it does not follow
+  the Subset governs — loses the others. The window is then cleared. **The Subset holds one window at a time**: drawing
+  another box takes the earlier window out of the Subset first (the status bar says so), so the new box selects from
+  every nanowell rather than from what the last one kept, and pressing the button again replaces it. Your other Subset
+  conditions stay. The list of nanowells is frozen when you press the button; it does not follow
   the window afterwards. It cannot narrow a Subset that keeps nanowells meeting *any* of several conditions — the strip
   says so; set the Subset to *all* first. The Subset's editor lists each window as a row you can switch between
   *inside* and *outside* or remove (**×**, then **Apply**), which brings the other nanowells back.

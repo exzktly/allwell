@@ -14,6 +14,7 @@ from collections import Counter
 
 from matplotlib.patches import Rectangle, RegularPolygon
 
+from review.features.nanowell.crop_grid_compute import grid_shape
 from review.features.nanowell.renderer import _ink, _inks, crop_scale
 
 #: Half of a tile's side, in pitch units: tiles are 0.92 across, so a gap shows between neighbours.
@@ -76,7 +77,6 @@ def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, displa
     *crops* is ``(well, q, r) -> {timepoint: Crop}`` for the nanowells cut so far; *n_total* is how many nanowells the
     window holds (the composite is one page of them), *note* the sentence the caption leads with. Every tile of every
     panel is on one brightness scale, so a change over time reads as a change in the picture."""
-    from review.features.nanowell.crop_grid_compute import grid_shape
     from ui.theme import WELL_COLORS_TUPLE
 
     timepoints = [str(timepoints)] if isinstance(timepoints, str) else [str(tp) for tp in timepoints]

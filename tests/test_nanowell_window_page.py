@@ -179,16 +179,42 @@ def test_use_as_subset_filters_the_distribution_itself(page, qtbot):
     assert not page.widgets.get("_nw_window_label").parent().isVisible()
 
 
-def test_a_second_window_stacks_and_narrows_further(page, qtbot):
+def test_one_window_gate_at_a_time_a_second_box_selects_from_every_nanowell(page, qtbot, monkeypatch):
+    """The Subset holds one window gate. The first window keeps A01 (1,0) and B01 (0,0); a second box over t_a at 1.5-2.5
+    cells holds neither of them (4 and 3 cells there), so stacked on the first it would hold nothing — drawn against
+    every nanowell it holds A01 (0,0) and B01 (3,0), the two with 2 cells at t_a."""
     st = _drawn(page, qtbot)
     qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
-    _drag(page, _first_panel(page), (0.6, 3.5), (1.4, 4.5))                 # only the t_a column, 3.5-4.5 cells
-    assert set(wnc.current(st)[1].sites()) == {("A01", 1, 0)}
+    assert _drawn_sites(st) == {("A01", 1, 0), ("B01", 0, 0)}
+    said = []
+    monkeypatch.setattr(page.notify, "set_status", said.append)
+    _drag(page, _first_panel(page), (0.6, 1.5), (1.4, 2.5))                 # only the t_a column, 1.5-2.5 cells
+    assert _subset_windows(st) == [] and said[-1].startswith("The earlier window was taken out of the Subset")
+    assert set(wnc.current(st)[1].sites()) == {("A01", 0, 0), ("B01", 3, 0)}
+    assert ("A01", 0, 0) in _drawn_sites(st) and ("A01", 2, 0) in _drawn_sites(st)       # every nanowell back
+    window = next(iter(st.windows.values()))
+    assert window.n_at_drawing == 2 and wnc.strip_text(st).find("changed since") == -1
     qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
-    first, second = _subset_windows(st)
-    assert (first.values, second.values) == (("Window 1",), ("Window 2",))
-    assert set(second.sites) == {("A01", 1, 0)} and _drawn_sites(st) == {("A01", 1, 0)}
-    assert st.subset.match == "all"
+    (only,) = _subset_windows(st)
+    assert only.values == ("Window 1",) and set(only.sites) == {("A01", 0, 0), ("B01", 3, 0)}
+    assert _drawn_sites(st) == {("A01", 0, 0), ("B01", 3, 0)}
+
+
+def test_use_as_subset_replaces_a_window_gate_already_in_the_subset_and_keeps_the_rest(page, qtbot, monkeypatch):
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell import subset_compute as ss
+
+    st = _drawn(page, qtbot)
+    members = set(wnc.current(st)[1].sites())
+    other = ss.Condition("n", "ge", 0, at="latest")
+    stale = ss.Condition(ss.WINDOW, "in", values=("Window 1",), sites=(("A01", 3, 0),))
+    assert nwc.set_subset(page, ss.Subset((other, stale), "all"))           # the window stays drawn over it
+    said = []
+    monkeypatch.setattr(page.notify, "set_status", said.append)
+    qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
+    kept_other, (only,) = st.subset.conditions[0], _subset_windows(st)
+    assert kept_other == other and len(st.subset.conditions) == 2
+    assert set(only.sites) == members and said[-1].endswith("It replaces the earlier window.")
 
 
 def test_use_as_subset_refuses_when_the_subset_keeps_nanowells_meeting_any_of_several_conditions(page, qtbot,

@@ -109,8 +109,15 @@ def on_release(ctx, st, event) -> None:
         ctx.notify.set_status("The window covers no column: drag across the dots you want.")
         nwc.redraw(ctx)
         return
+    panel = model.panels[index].title
+    if _drop_window_gate(ctx, st):
+        # One window gate at a time: the new box selects from every nanowell, not from what the last one kept.
+        # Dropping the gate redraws, so the members are read off the model drawn without it.
+        ctx.notify.set_status("The earlier window was taken out of the Subset: this one selects from every "
+                              "nanowell.")
+        model = st.window_model
     draft = wc.DistributionWindow(model.column, model.axis, keys, float(min(y0, y1)), float(max(y0, y1)),
-                                  panel=model.panels[index].title, drawn_under=wc.settings_key(st))
+                                  panel=panel, drawn_under=wc.settings_key(st))
     _store(ctx, st, replace(draft, n_at_drawing=len(wc.members(model, draft).rows)))
 
 
@@ -185,6 +192,19 @@ def strip_text(st) -> str:
 
 
 # ── Use as Subset ────────────────────────────────────────────────────────────
+def _without_window_gate(subset):
+    """*subset* with its window conditions taken out: the Subset holds one window gate at a time."""
+    return ss.Subset(tuple(c for c in subset.conditions if not ss.is_window(c.field)), subset.match)
+
+
+def _drop_window_gate(ctx, st) -> bool:
+    """Take the window condition out of the page's Subset (and redraw); whether there was one."""
+    kept = _without_window_gate(st.subset)
+    if len(kept.conditions) == len(st.subset.conditions):
+        return False
+    return bool(_nwc().set_subset(ctx, kept))
+
+
 def _window_name(subset) -> str:
     """``Window k`` for the smallest k not already the name of a window condition in *subset*."""
     taken = {c.values[0] for c in subset.conditions if ss.is_window(c.field) and c.values}
@@ -192,17 +212,29 @@ def _window_name(subset) -> str:
 
 
 def use_window_as_subset(ctx) -> None:
-    """**Use as Subset**: freeze the nanowells inside the window into the page's Subset as one more condition
+    """**Use as Subset**: freeze the nanowells inside the window into the page's Subset as its window condition
     (``subset_compute.WINDOW``), applied at once, so the Distribution — and every view the Subset governs — loses the
-    nanowells outside it. The window is then cleared; one drawn next on the narrowed figure stacks. It refuses, and
-    says why, when the Subset keeps nanowells that meet *any* of several conditions (a window could not narrow it),
-    when it already holds the most conditions, when the window holds none or too many nanowells."""
+    nanowells outside it. The Subset holds **one window gate at a time**: a window condition already in it is
+    replaced, not narrowed further (a box drawn while one is applied has already taken it out, ``on_release``). The
+    window is then cleared. It refuses, and says why, when the Subset's other conditions keep nanowells that meet
+    *any* of several (a window could not narrow it), when they already hold the most conditions, when the window
+    holds none or too many nanowells."""
     st = _state(ctx)
     window, result = current(st) if st is not None else (None, None)
     if window is None:
         return
     nwc = _nwc()
-    subset = st.subset
+    before = st.subset
+    subset = _without_window_gate(before)
+    had_gate = len(subset.conditions) != len(before.conditions)
+    if had_gate:
+        # The window's members are read off the figure drawn without the old gate, or replacing it would keep only
+        # what both hold — stacking by another name. (A window kept for another metric can come back under a gate.)
+        nwc.set_subset(ctx, subset)
+        window, result = current(st)
+        if window is None:
+            nwc.set_subset(ctx, before)
+            return
     sites = tuple(result.sites())
     if not sites:
         refusal = "No nanowell is inside the window, so there is nothing to keep."
@@ -217,6 +249,8 @@ def use_window_as_subset(ctx) -> None:
     else:
         refusal = ""
     if refusal:
+        if had_gate:
+            nwc.set_subset(ctx, before)                  # refused: the Subset is put back as it was
         ctx.notify.set_status(refusal)
         return
     name = _window_name(subset)
@@ -225,7 +259,8 @@ def use_window_as_subset(ctx) -> None:
     st.windows.pop(key, None)
     st.window_page = 0
     if nwc.set_subset(ctx, ss.Subset(subset.conditions + (condition,), "all")):
-        ctx.notify.set_status(f"“{name}” is now part of the Subset: {len(sites):,} nanowells kept.")
+        ctx.notify.set_status(f"“{name}” is now part of the Subset: {len(sites):,} nanowells kept."
+                              + (" It replaces the earlier window." if had_gate else ""))
     else:
         st.windows[key] = window                         # not a subset after all: the window stays as it was
     nwc._call(ctx, "_nw_window_refresh")

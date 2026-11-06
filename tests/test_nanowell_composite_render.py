@@ -719,13 +719,19 @@ def test_the_tile_s_card_waits_for_the_pointer_to_rest(page, qtbot, monkeypatch)
     """Asked for: a one-second delay before the hover card, on the real pop-out canvas at its real delay."""
     from PySide6.QtWidgets import QToolTip
 
+    import time
+
     st = _open_hex(page, qtbot)
     shown = []
-    monkeypatch.setattr(QToolTip, "showText", lambda _pos, text, *_a: shown.append(text))
+    monkeypatch.setattr(QToolTip, "showText", lambda _pos, text, *_a: shown.append((time.monotonic(), text)))
     canvas, point = _tile_point(page, st, st.popout_tiles[0])
+    # Timed, not slept: on a busy runner a "half-second" wait can itself run past the second, so the test measures
+    # when the card showed against when the pointer arrived.
+    arrived = time.monotonic()
     QApplication.sendEvent(canvas, QMouseEvent(QEvent.MouseMove, QPointF(point), QPointF(canvas.mapToGlobal(point)),
                                                Qt.NoButton, Qt.NoButton, Qt.NoModifier))
-    qtbot.wait(500)
-    assert shown == []                                               # half a second in: nothing yet
-    qtbot.waitUntil(lambda: bool(shown), timeout=1500)
-    assert shown[-1].startswith(f"Tile {st.popout_tiles[0][3]} of the composite")
+    assert shown == []                                               # not on the move itself
+    qtbot.waitUntil(lambda: bool(shown), timeout=5000)
+    at, text = shown[-1]
+    assert at - arrived >= 0.95, at - arrived                        # it waited the second
+    assert text.startswith(f"Tile {st.popout_tiles[0][3]} of the composite")

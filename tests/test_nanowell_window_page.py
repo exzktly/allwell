@@ -337,3 +337,45 @@ def test_the_distribution_s_footer_is_in_its_details_field_not_the_figure(page, 
     render_distribution(own, st.model)
     written = " ".join(t.get_text() for t in own.texts)
     assert footer.counts in written and all(a[:30] in written for a in footer.alerts)
+
+
+def test_the_window_strip_fits_a_phone_width_every_control_whole_and_the_sentence_unclipped(page, qtbot):
+    """Reported: the bar a dragged window opens — its sentence and its controls — did not render properly on a phone.
+    It was one row of a wrapping sentence and eight controls, so at phone width each was squeezed or cut. The sentence
+    has its own line and the controls wrap beneath it."""
+    from PySide6.QtWidgets import QApplication, QLabel
+
+    _drawn(page, qtbot)
+    strip = page.widgets.get("_nw_window_label").parentWidget()
+    strip.setMinimumWidth(0)
+    for width in (360, 300):
+        strip.setFixedWidth(width)
+        QApplication.processEvents()
+        strip.layout().activate()
+        QApplication.processEvents()
+        names = ("_nw_window_lo", "_nw_window_hi", "_nw_window_rule_cb", "_nw_window_panel_box",
+                 "_nw_window_popout_btn", "_nw_window_subset_btn", "_nw_window_clear_btn")
+        for name in names:
+            widget = page.widgets.get(name)
+            if widget.isHidden():
+                continue
+            box = widget.rect().translated(widget.mapTo(strip, widget.rect().topLeft()))
+            assert box.left() >= 0 and box.right() <= width, (width, name, box)         # not cut at either side
+            assert box.bottom() <= strip.height(), (width, name, box.bottom(), strip.height())   # height reserved
+            assert widget.width() >= widget.minimumSizeHint().width(), (width, name)    # not squeezed under its text
+        label = page.widgets.get("_nw_window_label")
+        assert label.height() >= label.heightForWidth(label.width()), (width, label.height())     # sentence whole
+        assert label.width() >= width - 2                                                # on a line of its own
+        captions = [w for w in strip.findChildren(QLabel) if w.text() in ("Low", "High")]
+        for caption in captions:                                                          # each beside its own field
+            field = page.widgets.get("_nw_window_lo" if caption.text() == "Low" else "_nw_window_hi")
+            same_line = abs(caption.mapTo(strip, caption.rect().center()).y()
+                            - field.mapTo(strip, field.rect().center()).y()) <= 3
+            assert same_line and caption.mapTo(strip, caption.rect().center()).x() < field.mapTo(
+                strip, field.rect().center()).x()
+    phone_height = strip.height()
+    strip.setFixedWidth(1400)
+    QApplication.processEvents()
+    strip.layout().activate()
+    QApplication.processEvents()
+    assert phone_height > strip.height() + 15                                  # at 300 px it wrapped onto more lines

@@ -12747,7 +12747,11 @@ changing would otherwise make the window's strip report a settings change), and 
 on the status bar when the subset is *any* over several conditions, holds `MAX_CONDITIONS`, or the window holds none or
 too many nanowells. `subset_view._ConditionRow` shows the condition frozen: the field locked, a label *“Window 1” · N
 nanowells*, *inside | outside* editable, and `condition()` returns the stored condition with the chosen op so the sites
-survive an edit. The strip's button is `_nw_window_subset_btn`. Tests: `test_nanowell_window_subset.py` (pure) and the
+survive an edit. The strip's button is `_nw_window_subset_btn`. The strip itself (`window_view.build_window_strip`) is
+a column: the sentence on a line of its own the strip's width, and under it a `FlowLayout` of the controls
+(`sync_flow_height`, as the crops header does), each Low / High caption grouped with its box, so at phone width the
+controls wrap onto as many lines as they need instead of one row cutting each to a few letters
+(`test_nanowell_window_page.py::test_the_window_strip_fits_a_phone_width_every_control_whole_and_the_sentence_unclipped`). Tests: `test_nanowell_window_subset.py` (pure) and the
 *Use as Subset* cases of `test_nanowell_window_page.py` (a real drag and button press; one gate at a time, a second
 box selecting from every nanowell; replacing a gate already there; the refusal; the editor).
 

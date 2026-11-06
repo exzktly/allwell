@@ -1,9 +1,10 @@
 """The window's nanowells packed into a **composite**: an artificial hex array of tiles, one per nanowell, grouped
-into one patch per source well and placed by rank inside each patch.
+into one patch per source well and placed in order inside each patch.
 
-It is not a well. Its positions say nothing about where a nanowell sits in its well: rank 1 of each well is at its
-patch's centre and the rest spiral outward in rank order (:func:`spiral`). Patches are laid out left to right in
-rows, in the order of each well's best-ranked member. Every tile keeps its real nanowell (``source``), which is what
+It is not a well. Its positions say nothing about where a nanowell sits in its well: each patch is a hexagon filled
+**row by row from its top left** (:func:`reading_order`), in the order chosen — the window's rank by default, or a
+metric's value, ascending or descending (the pop-out's **Sort**). Patches are laid out left to right in rows, in the
+order of each well's first member. Every tile keeps its real nanowell (``source``), which is what
 a hover names and a click selects. Positions are in **pitch units**: neighbouring tiles' centres are 1 apart.
 
 Qt-free.
@@ -38,6 +39,16 @@ def spiral(n: int) -> list:
     return out
 
 
+def reading_order(n: int) -> list:
+    """The first *n* axial addresses ``(q, r)`` of the smallest hexagon that holds them, in reading order: the top
+    row left to right, then the next row down (``y`` runs down the composite)."""
+    k = radius_for(n)
+    cells = [(q, r) for q in range(-k, k + 1) for r in range(-k, k + 1) if max(abs(q), abs(r), abs(q + r)) <= k]
+    xs, ys = lattice_xy([q for q, _ in cells], [r for _, r in cells], 1.0)
+    ordered = sorted(zip(cells, xs, ys), key=lambda c: (round(float(c[2]), 6), float(c[1])))
+    return [cell for cell, _x, _y in ordered][:n]
+
+
 def radius_for(n: int) -> int:
     """The smallest ring count whose hexagon holds *n* tiles: 1 + 3k(k + 1) >= n."""
     k = 0
@@ -61,18 +72,38 @@ class Composite:
     patches: list = field(default_factory=list)      # (well, label x, label y), label above the patch
     n_wells: int = 0
 
+    #: What the tiles are placed by, for the title: "rank" or a metric's sentence.
+    placed_by: str = "rank"
+
     def title(self, n_total: int) -> str:
         return (f"Composite of {len(self.tiles):,} of {n_total:,} nanowells from {self.n_wells} "
-                f"well{'s' if self.n_wells != 1 else ''} — not a real array; places assigned by rank within each well")
+                f"well{'s' if self.n_wells != 1 else ''} — not a real array; placed by {self.placed_by} within each "
+                "well, from the top left")
 
 
-def composite(rows) -> Composite:
-    """The composite of *rows* (``ExtremeRow``, ranked), one patch per well."""
+def sort_key(values: dict | None, descending: bool):
+    """The order of the composite's members: by *values* (``site -> number``), largest first when *descending*,
+    a member without a finite value last; ties, and every member when *values* is ``None``, by the window's rank."""
+    def key(row):
+        if values is None:
+            return (0, 0.0, row.rank)
+        v = values.get(tuple(row.site))
+        if v is None or not math.isfinite(v):
+            return (1, 0.0, row.rank)
+        return (0, -v if descending else v, row.rank)
+
+    return key
+
+
+def composite(rows, *, values: dict | None = None, descending: bool = True, placed_by: str = "rank") -> Composite:
+    """The composite of *rows* (``ExtremeRow``, ranked), one patch per well, each filled in reading order by
+    :func:`sort_key` — the window's rank unless *values* are given."""
+    order = sort_key(values, descending)
     by_well: dict = {}
-    for row in rows:
+    for row in sorted(rows, key=order):
         by_well.setdefault(row.site[0], []).append(row)
-    wells = sorted(by_well, key=lambda w: min(r.rank for r in by_well[w]))
-    out = Composite(n_wells=len(wells))
+    wells = list(by_well)                                # in the order of each well's first member
+    out = Composite(n_wells=len(wells), placed_by=placed_by)
     if not wells:
         return out
     radius = max(radius_for(len(v)) for v in by_well.values())
@@ -80,8 +111,8 @@ def composite(rows) -> Composite:
     per_row = max(1, math.ceil(math.sqrt(len(wells))))
     for p, well in enumerate(wells):
         cx, cy = (p % per_row) * step, (p // per_row) * step
-        members = sorted(by_well[well], key=lambda r: r.rank)
-        slots = spiral(len(members))
+        members = by_well[well]
+        slots = reading_order(len(members))
         xs, ys = lattice_xy([q for q, _ in slots], [r for _, r in slots], 1.0)
         for row, x, y in zip(members, xs, ys):
             out.tiles.append(CompositeTile(cx + float(x), cy + float(y), tuple(row.site), row.rank, p))

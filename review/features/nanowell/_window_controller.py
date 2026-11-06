@@ -350,6 +350,65 @@ def composite_colouring(ctx, st, wells) -> tuple[dict, tuple, str]:
     return inks, tuple((well, inks[well]) for well in wells), "Source well"
 
 
+#: **Sort**'s first choice: the window's own rank, the order its members already have.
+BY_RANK = ""
+
+
+def composite_sort_choices() -> list:
+    """``(label, key)`` for **Sort**: the window's rank, then every metric the page's Metric menu offers."""
+    from review.features.nanowell.distribution_compute import METRICS
+
+    return [("Window rank", BY_RANK)] + [(label, key) for key, (label, _needs) in METRICS.items()]
+
+
+def set_composite_sort(ctx, key) -> None:
+    """**Sort**: what the hex composite's tiles are placed by (:func:`composite_sort_choices`); the zoom starts over,
+    the tiles having moved."""
+    if isinstance(key, str):
+        _nwc()._set_popout(ctx, composite_sort=key, composite_view=None)
+
+
+def set_composite_desc(ctx, descending) -> None:
+    """**Sort**'s order: largest first, or smallest first."""
+    _nwc()._set_popout(ctx, composite_desc=bool(descending), composite_view=None)
+
+
+def composite_order(ctx, st, sites, timepoint) -> tuple[dict | None, str]:
+    """``(site -> value, sentence)`` the composite's tiles are placed by: ``(None, "rank")`` by the window's rank;
+    else the chosen metric's value of each nanowell in *sites* at *timepoint* (its one value for a per-nanowell
+    metric), read from the page's metrics, and the sentence naming it — the metric the page could resolve, with its
+    channel, and the order. A metric that cannot be read (a fluorescence metric with no channel) falls back to rank
+    and the sentence says why."""
+    from review.features.nanowell.distribution_compute import METRICS, PER_NANOWELL, metric_column
+
+    key = st.composite_sort
+    if key not in METRICS or st.metrics is None or st.data is None:
+        return None, "rank"
+    nwc = _nwc()
+    metric, channel, note = nwc.resolve_metric("distribution", key, nwc.page_channel_name(ctx), st.data.channels)
+    if metric != key:
+        return None, f"rank ({note.rstrip('.')})"
+    column = metric_column(metric, channel)
+    frame = st.metrics
+    if column not in frame.columns:
+        return None, f"rank ({METRICS[key][0]} is not in the nanowell tables)"
+    wanted = {tuple(s) for s in sites}
+    if metric in PER_NANOWELL:
+        rows = frame[frame["tp_order"] == 0]
+    else:
+        rows = frame[frame["timepoint"].astype(str) == str(timepoint)]
+    values = {}
+    for well, q, r, v in zip(rows["well"], rows["nw_q"], rows["nw_r"], rows[column]):
+        if not (math.isfinite(q) and math.isfinite(r)):
+            continue                                     # placed but never addressed: not a window member
+        site = (str(well), int(q), int(r))
+        if site in wanted:
+            values[site] = float(v)
+    label = nwc._label(metric, channel, st.data)
+    at = "" if metric in PER_NANOWELL else f" at {timepoint}"
+    return values, f"{label}{at}, {'largest' if st.composite_desc else 'smallest'} first"
+
+
 def set_popout_layout(ctx, layout: str) -> None:
     """**Layout** of the window's nanowells (``state.POPOUT_LAYOUTS``); the pages start over."""
     if layout in POPOUT_LAYOUTS:
@@ -390,9 +449,11 @@ def draw_window_popout(ctx, st, fig) -> None:
         return
     st.window_page = min(max(st.window_page, 0), page_count(st) - 1)
     if st.popout_layout == "hex":
-        comp = cc.composite(cc.page(rows, st.window_page))
-        sites = [t.source for t in comp.tiles]
+        members = cc.page(rows, st.window_page)
         shown_tps = shown_timepoints(st.data.timepoints(), st.popout_tps)
+        values, placed_by = composite_order(ctx, st, [row.site for row in members], shown_tps[0])
+        comp = cc.composite(members, values=values, descending=st.composite_desc, placed_by=placed_by)
+        sites = [t.source for t in comp.tiles]
         _want_crops(ctx, st, sites, shown_tps)
         inks, key, key_title = composite_colouring(ctx, st, [well for well, _x, _y in comp.patches])
         st.popout_tiles = render_composite(

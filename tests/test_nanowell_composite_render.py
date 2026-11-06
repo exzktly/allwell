@@ -584,3 +584,59 @@ def test_cells_are_drawn_as_their_traced_outlines_and_a_cell_without_one_as_a_do
     caption = _artists(fig, "nw-composite-caption")[0].get_text()
     assert f"Outlines and dots: the {2 * len(comp.tiles)} cells" in caption
     assert f"({len(comp.tiles)} a dot: the run kept no outline of it)" in caption
+
+
+# ── Sort ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+def test_sort_places_the_tiles_by_the_metric_from_the_top_left_in_the_order_chosen(page, qtbot):  # noqa: F811
+    """Through the real combos: sorted by cell count at the first timepoint shown, each well's tiles read from its
+    patch's top left in that order — the counts are read back from the page's own table, not the test's. The window
+    takes nearly every nanowell, so a well holds several whose counts at the first timepoint run against their rank
+    (A01's ranks by its latest count are q1, q2, q0, with first counts 2, 0, 1): a sort that kept the rank order fails."""
+    st = _loaded(qtbot, page)
+    _drag(page, _first_panel(page), (-0.4, -0.5), (1.4, 4.5))
+    wnc.open_window_popout(page)
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(1)
+    qtbot.waitUntil(lambda: bool(st.popout_tiles), timeout=10000)
+    timepoint = str(st.data.timepoints()[0])
+    sort, order = page.widgets.get("_nw_popout_sort_cb"), page.widgets.get("_nw_popout_order_cb")
+    assert not sort.isHidden() and sort.currentData() == wnc.BY_RANK
+    sort.setCurrentIndex(sort.findData("n"))
+    assert st.composite_sort == "n"
+    rows = st.metrics[st.metrics["timepoint"].astype(str) == timepoint]
+    counts = {(str(w), int(q), int(r)): float(v) for w, q, r, v in zip(rows["well"], rows["nw_q"], rows["nw_r"],
+                                                                       rows["n"])}
+
+    def reading(well):
+        mine = [t for t in st.popout_tiles if t[2][0] == well]
+        return [t[2] for t in sorted(mine, key=lambda t: (round(t[1], 9), t[0]))]
+
+    wells = {t[2][0] for t in st.popout_tiles}
+    assert max(len(reading(w)) for w in wells) >= 3
+    by_rank = sorted((t for t in st.popout_tiles if t[2][0] == "A01"), key=lambda t: t[3])
+    assert [counts[t[2]] for t in by_rank] != sorted((counts[t[2]] for t in by_rank), reverse=True)
+    for well in wells:
+        got = [counts[s] for s in reading(well)]
+        assert got == sorted(got, reverse=True)
+    order.setCurrentIndex(order.findData(False))
+    assert st.composite_desc is False
+    for well in wells:
+        got = [counts[s] for s in reading(well)]
+        assert got == sorted(got)
+    title = [t.get_text() for t in page.widgets.get("_nw_popout_fig").texts if t.get_gid() == "nw-composite-title"][0]
+    assert f"placed by Cell count at {timepoint}, smallest first" in title
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(0)                    # Rows: not offered
+    assert sort.isHidden() and order.isHidden()
+
+
+def test_a_metric_that_cannot_be_read_places_by_rank_and_says_why():
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    metrics = pd.DataFrame({"well": ["A01"], "nw_q": [0.0], "nw_r": [0.0], "timepoint": ["T1"], "tp_order": [0],
+                            "n": [3.0]})
+    st = SimpleNamespace(composite_sort="nope", metrics=metrics, data=SimpleNamespace(channels=[]),
+                         composite_desc=True)
+    assert wnc.composite_order(None, st, [("A01", 0, 0)], "T1") == (None, "rank")
+    labels = [label for label, _k in wnc.composite_sort_choices()]
+    assert labels[0] == "Window rank" and "Cell count" in labels

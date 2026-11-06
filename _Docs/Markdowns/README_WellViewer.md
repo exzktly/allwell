@@ -6675,8 +6675,11 @@ Save controls apply as they do to one nanowell, and a click on a row selects its
 A row whose crops are not yet cut says so; one that cannot be cut says why.
 
 **Layout: Hex** draws the same nanowells all at once as an **artificial hex array — a composite, not a well**. Each
-source well has its own labelled patch, and inside a patch the nanowells are placed by rank, the first at the patch's
-centre and the rest spiralling outward, so a position says nothing about where a nanowell sat in its well. Tiles are
+source well has its own labelled patch, and inside a patch the nanowells fill the hexagon **row by row from its top
+left**, so a position says nothing about where a nanowell sat in its well. **Sort** (beside **Colour**) chooses the
+order: *Window rank* (the default), or any of the page's metrics at the first timepoint shown, with **Descending**
+(largest first) or **Ascending**; a nanowell with no value sorts last, and the title says what the tiles are placed
+by. The wells' patches follow the same order. Tiles are
 drawn apart inside a dashed frame, and the title says it is not a real array. Each tile has a coloured **stripe**
 along its foot, and **Colour** (beside **Layout**, in the Hex layout) chooses what it says: *Source well*, any of the
 plate's sample variables (each well's value of it, in the same colour that value has on every plot — a well left

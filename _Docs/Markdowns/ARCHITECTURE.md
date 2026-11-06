@@ -12748,10 +12748,17 @@ survive an edit. The strip's button is `_nw_window_subset_btn`. Tests: `test_nan
 box selecting from every nanowell; replacing a gate already there; the refusal; the editor).
 
 **The hex composite** (`composite_compute`, `_composite_render`) is the pop-out's second layout of the window's
-nanowells (`NanowellState.popout_layout` ∈ `POPOUT_LAYOUTS`, `"hex"`). `composite_compute.composite(rows)` is pure: one
-patch per source well, ordered by each well's best rank, each filled from its centre outward in rank order along
-`spiral` (ring `k` walked from `(0, -k)` counter-clockwise), the patches laid out left to right in rows of
-`ceil(sqrt(n_wells))` with one empty ring between them, all in pitch units (neighbouring tile centres 1 apart);
+nanowells (`NanowellState.popout_layout` ∈ `POPOUT_LAYOUTS`, `"hex"`). `composite_compute.composite(rows, values=…, descending=…)`
+is pure: the members are ordered by `sort_key` — the window's rank, or a value per site (largest first when
+`descending`, a member without a finite value last, ties by rank) — one patch per source well in the order of each
+well's first member, each patch a hexagon filled in that order **row by row from its top left** (`reading_order`:
+the smallest hexagon holding the members, its cells sorted by `y` then `x`), the patches laid out left to right in rows
+of `ceil(sqrt(n_wells))` with one empty ring between them, all in pitch units (neighbouring tile centres 1 apart);
+`Composite.placed_by` names the order for the title. The pop-out's **Sort** (`NanowellState.composite_sort`, `""` the
+window's rank or a `distribution_compute.METRICS` key; `composite_desc`; both persisted; `_nw_popout_sort_cb` /
+`_nw_popout_order_cb`, hex layout only) is resolved by `_window_controller.composite_order`: the metric through
+`controller.resolve_metric` and `metric_column`, read from `NanowellState.metrics` at the first timepoint shown (a
+per-nanowell metric at `tp_order` 0), falling back to rank with the reason in the title when it cannot be read;
 `page` takes `COMPOSITE_PAGE` (91, a radius-5 hexagon) ranks at a time. `Composite` and `CompositeTile(x, y, source,
 rank, patch)` carry **no well id**: a tile's `source` is the real `(well, q, r)` it stands for, and nothing of the
 composite reaches `NanowellState.well`, the plate selection, the CSV export or Batch Export (`tests/

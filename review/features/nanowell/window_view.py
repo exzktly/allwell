@@ -1,19 +1,21 @@
 """The Distribution window's strip and the pop-out's controls for it.
 
-The **strip** is a row between the control band and the figure, shown on the Distribution view while a window exists
-for the metric and axis drawn: the sentence ``_window_controller.strip_text`` writes, typed **Low** and **High**
-fields (precision, and a way to edit on a phone, where dragging is clumsy), the *every | any timepoint* choice,
-**This panel only**, **Open in pop-out** and **✕**. Each control writes the window through the controller; the strip
-reads it back through ``_nw_window_refresh``.
+The **strip** sits between the control band and the figure, shown on the Distribution view while a window exists
+for the metric and axis drawn: the sentence ``_window_controller.strip_text`` writes, on a line of its own the width of
+the strip, and beneath it the controls — typed **Low** and **High** fields (precision, and a way to edit on a phone,
+where dragging is clumsy), the *every | any timepoint* choice, **This panel only**, **Open in pop-out**, **Use as
+Subset** and **✕** — in a flow that wraps onto as many lines as the width needs, so none is cut off on a phone. Each
+control writes the window through the controller; the strip reads it back through ``_nw_window_refresh``.
 """
 
 from __future__ import annotations
 
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QToolButton,
-                               QWidget)
+                               QVBoxLayout, QWidget)
 
 from review.features.nanowell import _window_controller as wnc
 from review.features.nanowell.state import POPOUT_LAYOUTS
+from widgets.flow_layout import FlowLayout, sync_flow_height
 
 _RANGE_TIP = "The window's range of the metric, both ends inclusive. Type a number and press Enter."
 _RULE_TIP = ("Over several timepoints: keep a nanowell only if it is inside the range at every covered timepoint, or "
@@ -38,33 +40,47 @@ def build_window_strip(ctx, parent) -> QWidget:
     ``_nw_window_panel_box``, ``_nw_window_popout_btn``, ``_nw_window_clear_btn`` and ``_nw_window_refresh``."""
     strip = QWidget(parent)
     strip.setObjectName("NanowellWindowStrip")
-    row = QHBoxLayout(strip)
-    row.setContentsMargins(0, 0, 0, 0)
+    # The sentence takes the strip's whole width on a line of its own, and the controls flow beneath it, wrapping onto
+    # as many lines as the width needs: one row of a sentence and eight controls was cut off at phone width. Each
+    # caption travels with its field, so a wrap never strands "Low" from its box.
+    column = QVBoxLayout(strip)
+    column.setContentsMargins(0, 0, 0, 0)
+    column.setSpacing(2)
     label = QLabel("", strip)
     label.setWordWrap(True)
-    low, high = QLineEdit(strip), QLineEdit(strip)
+    column.addWidget(label)
+    controls_host = QWidget(strip)
+    row = FlowLayout(controls_host, h_spacing=8)
+    sync_flow_height(controls_host)
+    column.addWidget(controls_host)
+    low, high = QLineEdit(controls_host), QLineEdit(controls_host)
     for field in (low, high):
         field.setToolTip(_RANGE_TIP)
         field.setMaximumWidth(_FIELD_MAX_W)
-    rule = QComboBox(strip)
+    rule = QComboBox(controls_host)
     rule.addItem("every timepoint", "every")
     rule.addItem("any timepoint", "any")
     rule.setToolTip(_RULE_TIP)
-    panel_only = QCheckBox("This panel only", strip)
+    panel_only = QCheckBox("This panel only", controls_host)
     panel_only.setToolTip(_PANEL_TIP)
-    popout = QPushButton("Open in pop-out", strip)
+    popout = QPushButton("Open in pop-out", controls_host)
     popout.setProperty("variant", "secondary")
     popout.setToolTip(_POPOUT_TIP)
-    use_subset = QPushButton("Use as Subset", strip)
+    use_subset = QPushButton("Use as Subset", controls_host)
     use_subset.setProperty("variant", "secondary")
     use_subset.setToolTip(_SUBSET_TIP)
-    clear = QPushButton("✕", strip)
+    clear = QPushButton("✕", controls_host)
     clear.setProperty("variant", "secondary")
     clear.setToolTip(_CLEAR_TIP)
-    row.addWidget(label, 1)
     for caption, field in (("Low", low), ("High", high)):
-        row.addWidget(QLabel(caption, strip))
-        row.addWidget(field)
+        pair = QWidget(controls_host)
+        inner = QHBoxLayout(pair)
+        inner.setContentsMargins(0, 0, 0, 0)
+        inner.setSpacing(4)
+        inner.addWidget(QLabel(caption, pair))
+        inner.addWidget(field)
+        field.setParent(pair)
+        row.addWidget(pair)
     for widget in (rule, panel_only, popout, use_subset, clear):
         row.addWidget(widget)
     controls = (low, high, rule, panel_only)

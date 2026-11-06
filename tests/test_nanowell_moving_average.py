@@ -269,7 +269,7 @@ def test_the_distribution_the_summary_and_trajectories_agree_on_the_baseline_s_w
     assert list(swarms["t4"].values) == pytest.approx([1.8]) and list(swarms["t5"].values) == pytest.approx([2.2])
     assert swarms["t4"].excluded == {"baseline window has a gap": 1, "baseline occluded": 1,
                                      "no cells at baseline": 1}
-    assert any("measured values at the baseline timepoint and the 1 before it" in n for n in model.notes)
+    assert any("measured values at the baseline timepoint and the 1 before it" in n for n in model.alerts)
     table = wells_summary(metrics, ["A01"], "count_fc", channels=data.channels, moving=2,
                           baseline_moving=2).set_index("timepoint")
     assert table.loc["t5", "median"] == pytest.approx(2.2) and table.loc["t5", "n_used"] == 1
@@ -295,7 +295,7 @@ def test_a_window_longer_than_the_series_says_so_instead_of_drawing_nothing(tmp_
         "Moving average over 4 timepoints: no value is left to draw — a fold change's window must start after the "
         "baseline, so it needs 4 timepoints after the baseline, and no nanowell has that many. A window of 3 leaves "
         "2 values.\n\nEach value is the mean")
-    assert model.empty in model.notes                                    # Statistics carries it from the notes
+    assert model.empty in model.alerts                                   # Statistics carries it from the alerts
     # A window that leaves something sets nothing.
     assert distribution_model(metrics, "count_fc", channels=data.channels, groups={"A01": ["A01"]},
                               time_source=data.time_source, moving=3, baseline="tp:t2").empty == ""
@@ -356,7 +356,7 @@ def test_the_distribution_draws_the_averages_and_counts_every_value_it_left_out(
         assert len(s.values) + s.n_excluded == s.n_roster == 4
     (x0, m0), (x1, m1) = model.panels[0].medians["A01"]
     assert (x0, x1, m1) == (0.0, 1.0, 1.5) and math.isnan(m0)           # no median at t_c: nothing was averaged
-    assert any(n.startswith("Moving average over 2 timepoints:") for n in model.notes)
+    assert any(n.startswith("Moving average over 2 timepoints:") for n in model.alerts)
 
 
 def test_the_cohort_is_decided_on_the_measured_values_before_the_average(page, qtbot):  # noqa: F811

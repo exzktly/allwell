@@ -6350,10 +6350,11 @@ the sentence names it.
 **Reading the figure**
 
 - The footer under the figure is short until you turn on **Notes** (the button under the figure, the same switch as
-  on the Array view). Off, it is one line of counts — ending in how many notes there are to read — and anything the
-  figure leaves out or marks: wells selected without a nanowell table, excluded fields, gated cells, rims out of
-  focus, what the Subset kept, and the key to the identity marks. On, it adds the notes on how to read the figure:
-  the times, how the line is drawn, the packing of whole-number values, the fraction responding, a fixed cohort.
+  on the Array view). Off, it is one line of counts — ending in how many notes there are to read — and everything that
+  changes or leaves out what is drawn (wells selected without a nanowell table, excluded fields, gated cells, rims
+  out of focus, what the Subset kept, a fixed cohort, a moving average), the fraction responding once you set a cut,
+  and the keys to the figure (the timepoint names under the hours axis, the identity marks). On, it adds the notes on
+  how to read it: how whole-number values are packed, how the line is drawn, how wells compare with the control.
   Saved and copied figures follow the switch; Batch Export always writes the notes.
 - Dots are coloured by the number of cells in the nanowell at baseline: an open ring for 0, then 1, 2 and 3+
   (the key at the top right names the baseline). Grey ("?") is a nanowell whose count at baseline is unknown.

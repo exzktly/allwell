@@ -6892,14 +6892,16 @@ re-seeds them on every panel open from `_resync_plot_state_segments`, and both
 are persisted in the bar view state (`_snapshot_bar`; `_apply_bar` →
 `_restore_bar_geometry`, which drops an out-of-range value on its own).
 
-**The Distribution footer folds its notes behind *Notes*.** `DistributionModel` carries two lists: `notes`, how to
-read the figure (the times, how the line is drawn, packing, the fraction responding, a fixed cohort or moving average
-— what `distribution_compute._notes` writes, and what the Statistics report carries by `_STATS_NOTES` prefix), and
-`alerts`, what the figure leaves out or marks (the page's note — excluded fields, Cell Gating, rim focus, the Subset's
-count — wells selected without a table, and the identity marks' key), which `controller.draw_view` puts there. The
+**The Distribution footer folds its notes behind *Notes*.** `DistributionModel` carries two lists. `notes` say how to
+read the figure and change nothing in it: the packing of whole-number values, how the line is drawn, the per-well
+comparison with the control, that no fraction responding is computed without a cut, the Colour by note (whose legend
+is drawn anyway). `alerts` are everything else: what changes or leaves out the values drawn — a fixed cohort, a moving
+average and an empty result of one, and from `controller.draw_view` the page's note (excluded fields, Cell Gating, rim
+focus, the Subset's count) and wells selected without a table — the results stated beside them (the fraction
+responding at a cut), and the keys to what is drawn (the identity marks, the timepoint names under an axis of hours,
+where those hours came from). The Statistics report carries its `_STATS_NOTES` prefixes from both. The
 page draws with `notes_below=not NanowellState.layers.notes`, the Array view's own *Notes* switch: off, the footer is
-the counts line, ending in how many notes there are, and the alerts, and the panels keep the room the notes took —
-written in full they had grown to eight lines. `render_distribution(notes_below=False)`, Batch Export's call, writes
+the counts line, ending in how many notes there are, and the alerts, and the panels keep the room the notes took. `render_distribution(notes_below=False)`, Batch Export's call, writes
 everything. The switch's toolbar group (`mount_array_canvas_tools`, `c.notes_group`) shows on `tab_view.NOTES_VIEWS`.
 Tests: `test_nanowell_window_page.py::test_notes_off_folds_the_distribution_s_notes_but_never_its_alerts`,
 `::test_alerts_are_written_with_notes_off`.

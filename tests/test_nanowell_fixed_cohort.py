@@ -33,7 +33,7 @@ def test_the_cohort_keeps_the_nanowells_measured_at_every_timepoint_and_counts_t
     assert late.excluded == {"outside the fixed cohort": 1}
     assert len(late.values) + late.n_excluded == late.n_roster == 4
     assert "Fixed cohort: only the 3 of 4 nanowells with a value at every timepoint of their well are used; the " \
-           "rest are counted as outside the fixed cohort." in model.notes
+           "rest are counted as outside the fixed cohort." in model.alerts
 
 
 def test_the_checkbox_sets_the_cohort_and_the_figure_says_so(page, qtbot):  # noqa: F811

@@ -317,7 +317,8 @@ def test_notes_off_folds_the_distribution_s_notes_but_never_its_alerts(page, qtb
     short = [t.get_text() for t in fig.texts if t.get_gid() in ("nw-footer", "nw-footer-used")]
     panels_bottom = fig.subplotpars.bottom
     assert not st.layers.notes and st.model.notes and st.model.alerts
-    assert not any("packed within ±0.4" in t or t.startswith("Timepoints:") for t in short)
+    assert not any("packed within ±0.4" in t or t.startswith("The line joins") for t in short)
+    assert any(t.startswith("Timepoints:") for t in short)               # the key to the hours axis: an alert
     assert any(t.startswith("Starting cells ≥1") for t in short)                          # the Subset's count: an alert
     n = len(st.model.notes)
     used = " ".join(t.get_text() for t in fig.texts if t.get_gid() == "nw-footer-used")

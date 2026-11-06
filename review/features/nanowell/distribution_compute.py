@@ -191,8 +191,10 @@ class DistributionModel:
     control: str = ""
     baseline: str = "earliest"
     notes: list = field(default_factory=list)          # sentences printed in the footer: how to read the figure
-    #: Sentences printed in the footer whatever the page's *Notes* switch: what the figure leaves out (wells with no
-    #: table, excluded fields, gated cells, rims out of focus, the Subset's count) and the key to marks drawn on it.
+    #: Sentences printed in the footer whatever the page's *Notes* switch: what changes or leaves out the values drawn
+    #: (wells with no table, excluded fields, gated cells, rims out of focus, the Subset's count, a fixed cohort, a
+    #: moving average), the results stated beside them (the fraction responding at a cut), and the keys to what is
+    #: drawn (the identity marks, the timepoint names under an axis of hours, where those hours came from).
     alerts: list = field(default_factory=list)
     x_label: str = ""                                  # what the x axis is, written once under the bottom row
     time_note: str = ""                                # the timepoint names at their hours, the footer's last note
@@ -349,13 +351,13 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
         frame, reasons = _rebased(frame, column, reasons, moving, baseline_moving)
     if cohort and metric not in PER_NANOWELL:
         frame, reasons, kept, sites = fixed_cohort(frame, column, reasons)
-        model.notes.append(f"Fixed cohort: only the {kept:,} of {sites:,} nanowells with a value at every timepoint "
+        model.alerts.append(f"Fixed cohort: only the {kept:,} of {sites:,} nanowells with a value at every timepoint "
                            "of their well are used; the rest are counted as outside the fixed cohort.")
     averaged_over = None
     if moving_compute.is_on(moving) and metric not in PER_NANOWELL:
         averaged_over = frame
         frame, reasons = moving_compute.apply(frame, column, reasons, moving)
-        model.notes.append(moving_compute.describe(moving, column, baseline_moving)
+        model.alerts.append(moving_compute.describe(moving, column, baseline_moving)
                            + " The rest are counted among the exclusions.")
     if axis == TIME:
         _time_panels(model, frame, column, reasons, groups, channels)
@@ -366,7 +368,7 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
                                                        timepoint=model.timepoint if axis == WELLS else "",
                                                        baseline_window=baseline_moving)
         if model.empty:
-            model.notes.append(model.empty)
+            model.alerts.append(model.empty)
     _notes(model, metric, time_source)
     return model
 
@@ -490,21 +492,23 @@ def _notes(model: DistributionModel, metric: str, time_source: str | None) -> No
         if any(math.isfinite(s.vs_control) for p in model.panels for s in p.stats):
             model.notes.append("The comparison with the control is per well (mean of well medians over the "
                                "control's); nanowells are not replicates.")
-    elif any(n.startswith("Fixed cohort") for n in model.notes):
+    elif any(n.startswith("Fixed cohort") for n in model.alerts):
         model.notes.append("The line joins each well's median over its fixed cohort, the same nanowells at every "
                            "timepoint.")
     else:
         model.notes.append("The line joins each well's median over the nanowells with a value at that timepoint.")
-    model.notes.append(responding_note(model))
+    # A cut set is a result, written whatever the page's Notes switch; "not computed" is only how to get one.
+    (model.notes if model.responding_above is None else model.alerts).append(responding_note(model))
     if model.decoration.colours:
         model.notes.append(f"Dots coloured by {model.decoration.colour_name or 'a sample variable'} (Decorate); "
                            "the occupancy colours return when Colour by is off.")
+    # The timepoint names are the key to an axis of hours, and where the times came from is what that axis means.
     if model.time_note:
-        model.notes.append(model.time_note)
+        model.alerts.append(model.time_note)
     if time_source == "label":
-        model.notes.append("Times are read from the timepoint labels, not the acquisition record.")
+        model.alerts.append("Times are read from the timepoint labels, not the acquisition record.")
     elif time_source is None:
-        model.notes.append("Times are unknown; timepoints are in label order.")
+        model.alerts.append("Times are unknown; timepoints are in label order.")
 
 
 def format_cut(value: float) -> str:

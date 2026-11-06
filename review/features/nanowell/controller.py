@@ -1041,7 +1041,7 @@ def statistics_result(model, groups: dict, *, unit: str, test: str, control: str
     cohort, the moving average, the baseline, an excluded well) changes the key, including one that leaves every
     value as it was: ticking the cohort over nanowells that all have a value changes the report's note only."""
     samples = sc.samples_from_model(model, groups, unit)
-    notes = [n for n in model.notes if n.startswith(_STATS_NOTES)]
+    notes = [n for n in [*model.alerts, *model.notes] if n.startswith(_STATS_NOTES)]
     key = (unit, test, control, model.column, model.label, model.timepoint, tuple(notes),
            tuple((s.name, s.label, s.wells, s.values.tobytes(), s.n_roster, tuple(sorted(s.excluded.items())),
                   s.without_value) for s in samples))

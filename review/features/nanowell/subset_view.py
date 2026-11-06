@@ -15,6 +15,7 @@ dialog, so nothing modal is reached from it.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 from PySide6.QtWidgets import (
@@ -63,6 +64,8 @@ _AT_TIP = ("The timepoint the value is read at: the baseline (the count's), the 
            "timepoint, or at any / every timepoint of the well (every: the nanowell needs a passing value at each).")
 _OP_TIP = "How the value is compared. Both bounds of a range are included."
 _TILES_TIP = "The imaging fields (tiles) the condition names."
+_WINDOW_TIP = ("The nanowells a Distribution window held when it was turned into a subset (Use as Subset). The list is "
+               "frozen; choose inside to keep them or outside to keep the rest, and remove the row to bring the others back.")
 _GATE_TIP = ("A gate drawn on the Scatter Plot over two nanowell metrics (Observations: Nanowells, or the "
              "\"Nanowell ▸\" axes). Inside: the nanowell's point at the chosen timepoint lies in the box. The box "
              "is read from the scatter each time, so moving the gate there moves the subset.")
@@ -123,12 +126,17 @@ class _ConditionRow(QWidget):
         self.tiles_btn.setMenu(self.tiles_menu)
         self.gate_cb = QComboBox()
         self.gate_cb.setToolTip(_GATE_TIP)
+        # A window condition is a frozen list of nanowells (``subset_compute.WINDOW``): it cannot be built here, so the
+        # row names it and keeps its sites, and only inside | outside can be changed.
+        self._frozen = condition if ss.is_window(condition.field) else None
+        self.window_label = QLabel()
+        self.window_label.setToolTip(_WINDOW_TIP)
         self.remove_btn = QToolButton()
         self.remove_btn.setText("×")
         self.remove_btn.setToolTip("Remove this condition")
         self.remove_btn.setProperty("variant", "secondary")
-        for w in (self.field_cb, self.at_cb, self.op_cb, self.gate_cb, self.a_spin, self.and_label, self.b_spin,
-                  self.tiles_btn, self.remove_btn):
+        for w in (self.field_cb, self.at_cb, self.op_cb, self.gate_cb, self.window_label, self.a_spin, self.and_label,
+                  self.b_spin, self.tiles_btn, self.remove_btn):
             row.addWidget(w)
         row.addStretch(1)
         self._show(condition)
@@ -152,6 +160,9 @@ class _ConditionRow(QWidget):
         _select(self.at_cb, c.at or "baseline")
         self._fill_tiles(c.values if ss.is_category(c.field) else ())
         self.fill_gates(c.values[0] if ss.is_gate(c.field) and c.values else None)
+        if self._frozen is not None:
+            self.field_cb.setEnabled(False)
+            self.window_label.setText(f"“{c.values[0] if c.values else ''}” · {len(c.sites):,} nanowells")
         self._visibility()
 
     def _fill_ops(self, name: str, op: str) -> None:
@@ -210,10 +221,12 @@ class _ConditionRow(QWidget):
         name = self.field_cb.currentData()
         category = ss.is_category(name)
         gate = ss.is_gate(name)
+        window = self._frozen is not None
+        self.window_label.setVisible(window)
         ranged = self.op_cb.currentData() in ("between", "outside")
         self.at_cb.setVisible(ss.per_timepoint(name))
         self.gate_cb.setVisible(gate)
-        category = category or gate                      # no bound to type for either
+        category = category or gate or window            # no bound to type for any of these
         self.a_spin.setVisible(not category and not ss.is_flag(name))
         self.and_label.setVisible(not category and ranged)
         self.b_spin.setVisible(not category and ranged)
@@ -241,6 +254,8 @@ class _ConditionRow(QWidget):
 
     def condition(self) -> ss.Condition:
         """The condition as written (not yet validated)."""
+        if self._frozen is not None:
+            return replace(self._frozen, op=self.op_cb.currentData())
         name = self.field_cb.currentData()
         whole = name in ss.INTEGER_FIELDS
 

@@ -154,3 +154,106 @@ def test_another_metric_hides_the_window_and_the_first_brings_it_back(page, qtbo
     nwc.set_metric(page, "n")
     qtbot.waitUntil(lambda: st.window_model is not None and st.window_model.column == "n", timeout=5000)
     assert strip.isVisible() and all(len(patches) == 1 for patches in _bands(page).values())
+
+
+# ── Use as Subset ────────────────────────────────────────────────────────────
+def _drawn_sites(st):
+    """Every nanowell the Distribution figure's model holds, drawn or not."""
+    return {site for swarm in st.window_model.swarms() for site in swarm.sites}
+
+
+def _subset_windows(st):
+    from review.features.nanowell import subset_compute as ss
+
+    return [c for c in st.subset.conditions if ss.is_window(c.field)]
+
+
+def test_use_as_subset_filters_the_distribution_itself(page, qtbot):
+    st = _drawn(page, qtbot)
+    members = set(wnc.current(st)[1].sites())
+    assert members == {("A01", 1, 0), ("B01", 0, 0)} and len(_drawn_sites(st)) > 2
+    qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
+    (condition,) = _subset_windows(st)
+    assert (condition.values, condition.op, set(condition.sites)) == (("Window 1",), "in", members)
+    assert st.windows == {} and _drawn_sites(st) == members
+    assert not page.widgets.get("_nw_window_label").parent().isVisible()
+
+
+def test_a_second_window_stacks_and_narrows_further(page, qtbot):
+    st = _drawn(page, qtbot)
+    qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
+    _drag(page, _first_panel(page), (0.6, 3.5), (1.4, 4.5))                 # only the t_a column, 3.5-4.5 cells
+    assert set(wnc.current(st)[1].sites()) == {("A01", 1, 0)}
+    qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
+    first, second = _subset_windows(st)
+    assert (first.values, second.values) == (("Window 1",), ("Window 2",))
+    assert set(second.sites) == {("A01", 1, 0)} and _drawn_sites(st) == {("A01", 1, 0)}
+    assert st.subset.match == "all"
+
+
+def test_use_as_subset_refuses_when_the_subset_keeps_nanowells_meeting_any_of_several_conditions(page, qtbot,
+                                                                                                    monkeypatch):
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell import subset_compute as ss
+
+    st = _loaded(qtbot, page)
+    either = ss.Subset((ss.Condition("n", "ge", 0, at="latest"), ss.Condition("n", "le", 9, at="earliest")), "any")
+    assert nwc.set_subset(page, either)
+    qtbot.waitUntil(lambda: st.window_model is not None and not st.computing, timeout=10000)
+    _drag(page, _first_panel(page), (-0.4, 1.5), (1.4, 4.5))
+    said = []
+    monkeypatch.setattr(page.notify, "set_status", said.append)
+    qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
+    assert said[-1].startswith("The subset keeps nanowells that meet any condition, so a window could not narrow it")
+    assert st.subset == either and len(st.windows) == 1
+
+
+def test_the_subset_editor_lists_the_window_and_removing_it_brings_the_others_back(page, qtbot):
+    st = _drawn(page, qtbot)
+    qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
+    editor = page.widgets.get("_nw_subset_editor")
+    (row,) = editor.rows
+    assert row.window_label.text() == "“Window 1” · 2 nanowells" and not row.field_cb.isEnabled()
+    assert editor.written().conditions[0].sites == (("A01", 1, 0), ("B01", 0, 0))      # the row keeps its nanowells
+    editor.remove(row)
+    editor.apply()
+    assert _subset_windows(st) == [] and len(_drawn_sites(st)) > 2
+
+
+def test_a_subset_of_one_condition_set_to_any_is_narrowed_under_all(page, qtbot):
+    """With one condition *any* and *all* mean the same, so a window may narrow it; the new subset is under *all*, or
+    the window would widen the subset instead (a nanowell meeting either condition would be kept)."""
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell import subset_compute as ss
+
+    st = _loaded(qtbot, page)
+    assert nwc.set_subset(page, ss.Subset((ss.Condition("n", "ge", 0, at="latest"),), "any"))
+    qtbot.waitUntil(lambda: st.window_model is not None and not st.computing, timeout=10000)
+    _drag(page, _first_panel(page), (-0.4, 1.5), (1.4, 4.5))
+    qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
+    assert st.subset.match == "all" and len(st.subset.conditions) == 2
+    assert _drawn_sites(st) == {("A01", 1, 0), ("B01", 0, 0)}
+
+
+# ── controls the strip offers, pressed ───────────────────────────────────────
+def test_this_panel_only_restricts_the_window_to_the_panel_it_was_drawn_in(page, qtbot):
+    st = _drawn(page, qtbot)
+    assert {site[0] for site in wnc.current(st)[1].sites()} == {"A01", "B01"}
+    page.widgets.get("_nw_window_panel_box").setChecked(True)
+    window = next(iter(st.windows.values()))
+    assert window.panel_only is True
+    assert {site[0] for site in wnc.current(st)[1].sites()} == {window.panel[:3]} == {"A01"}
+    bands = [len(patches) for patches in _bands(page).values()]
+    assert sorted(bands) == [0, 1]                                         # only the first panel carries the band
+
+
+def test_a_setting_changed_after_the_window_was_drawn_is_named_in_the_strip(page, qtbot):
+    from review.features.nanowell import controller as nwc
+
+    st = _drawn(page, qtbot)
+    label = page.widgets.get("_nw_window_label")
+    assert "changed since the window was drawn" not in label.text()
+    nwc.set_cohort(page, True)
+    qtbot.waitUntil(lambda: st.window_model is not None and not st.computing and "Fixed cohort" in label.text(),
+                    timeout=10000)
+    assert "Fixed cohort changed since the window was drawn: 2 → " in label.text()

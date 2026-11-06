@@ -11,11 +11,13 @@ module.
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import replace
 
 from review.features.nanowell import composite_compute as cc
 from review.features.nanowell import controller as _controller
+from review.features.nanowell import subset_compute as ss
 from review.features.nanowell import window_compute as wc
 from review.features.nanowell._composite_render import render_composite
 from review.features.nanowell._window_render import DRAG_GID, draw_drag, draw_window
@@ -179,6 +181,55 @@ def strip_text(st) -> str:
     said = wc.label_text(window, result, hidden, model.axis)
     changed = wc.changed_sentence(window, wc.settings_key(st), len(result.rows))
     return f"{said} {changed}".strip()
+
+
+# ── Use as Subset ────────────────────────────────────────────────────────────
+def _window_name(subset) -> str:
+    """``Window k`` for the smallest k not already the name of a window condition in *subset*."""
+    taken = {c.values[0] for c in subset.conditions if ss.is_window(c.field) and c.values}
+    return next(f"Window {k}" for k in itertools.count(1) if f"Window {k}" not in taken)
+
+
+def use_window_as_subset(ctx) -> None:
+    """**Use as Subset**: freeze the nanowells inside the window into the page's Subset as one more condition
+    (``subset_compute.WINDOW``), applied at once, so the Distribution — and every view the Subset governs — loses the
+    nanowells outside it. The window is then cleared; one drawn next on the narrowed figure stacks. It refuses, and
+    says why, when the Subset keeps nanowells that meet *any* of several conditions (a window could not narrow it),
+    when it already holds the most conditions, when the window holds none or too many nanowells."""
+    st = _state(ctx)
+    window, result = current(st) if st is not None else (None, None)
+    if window is None:
+        return
+    nwc = _nwc()
+    subset = st.subset
+    sites = tuple(result.sites())
+    if not sites:
+        refusal = "No nanowell is inside the window, so there is nothing to keep."
+    elif subset.match == "any" and len(subset.conditions) > 1:
+        refusal = ("The subset keeps nanowells that meet any condition, so a window could not narrow it: set it to all "
+                   "first.")
+    elif len(subset.conditions) >= ss.MAX_CONDITIONS:
+        refusal = f"A subset holds at most {ss.MAX_CONDITIONS} conditions."
+    elif len(sites) > ss.MAX_WINDOW_SITES:
+        refusal = (f"The window holds {len(sites):,} nanowells; a subset keeps at most {ss.MAX_WINDOW_SITES:,} in "
+                   "one window.")
+    else:
+        refusal = ""
+    if refusal:
+        ctx.notify.set_status(refusal)
+        return
+    name = _window_name(subset)
+    condition = ss.Condition(ss.WINDOW, "in", values=(name,), sites=sites)
+    key = wc.window_key(st.window_model.column, st.window_model.axis)
+    st.windows.pop(key, None)
+    st.window_page = 0
+    if nwc.set_subset(ctx, ss.Subset(subset.conditions + (condition,), "all")):
+        ctx.notify.set_status(f"“{name}” is now part of the Subset: {len(sites):,} nanowells kept.")
+    else:
+        st.windows[key] = window                         # not a subset after all: the window stays as it was
+    nwc._call(ctx, "_nw_window_refresh")
+    nwc._call(ctx, "_nw_popout_window_refresh")
+    nwc.draw_popout(ctx)
 
 
 # ── the pop-out ──────────────────────────────────────────────────────────────

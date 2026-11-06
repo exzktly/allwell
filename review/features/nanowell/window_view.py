@@ -20,6 +20,9 @@ _RULE_TIP = ("Over several timepoints: keep a nanowell only if it is inside the 
              "if it is inside at any one of them. Both counts are in the sentence.")
 _PANEL_TIP = "Cover only the panel the window was drawn in, rather than every panel."
 _POPOUT_TIP = "Show the nanowells inside the window in the pop-out, as rows of crops over time."
+_SUBSET_TIP = ("Keep only the nanowells inside the window: they are added to the Subset, applied at once, and the "
+               "others leave the Distribution (and every view the Subset governs). A window drawn next on what "
+               "remains narrows it further; the Subset's editor lists each and removes it.")
 _CLEAR_TIP = "Clear the window"
 #: The widest the strip's Low and High fields grow, in pixels: a number of a few digits.
 _FIELD_MAX_W = 80
@@ -51,6 +54,9 @@ def build_window_strip(ctx, parent) -> QWidget:
     popout = QPushButton("Open in pop-out", strip)
     popout.setProperty("variant", "secondary")
     popout.setToolTip(_POPOUT_TIP)
+    use_subset = QPushButton("Use as Subset", strip)
+    use_subset.setProperty("variant", "secondary")
+    use_subset.setToolTip(_SUBSET_TIP)
     clear = QPushButton("✕", strip)
     clear.setProperty("variant", "secondary")
     clear.setToolTip(_CLEAR_TIP)
@@ -58,7 +64,7 @@ def build_window_strip(ctx, parent) -> QWidget:
     for caption, field in (("Low", low), ("High", high)):
         row.addWidget(QLabel(caption, strip))
         row.addWidget(field)
-    for widget in (rule, panel_only, popout, clear):
+    for widget in (rule, panel_only, popout, use_subset, clear):
         row.addWidget(widget)
     controls = (low, high, rule, panel_only)
 
@@ -93,6 +99,7 @@ def build_window_strip(ctx, parent) -> QWidget:
     rule.currentIndexChanged.connect(lambda _i: wnc.set_window_rule(ctx, rule.currentData()))
     panel_only.toggled.connect(lambda on: wnc.set_window_panel_only(ctx, on))
     popout.clicked.connect(lambda _=False: wnc.open_window_popout(ctx))
+    use_subset.clicked.connect(lambda _=False: wnc.use_window_as_subset(ctx))
     clear.clicked.connect(lambda _=False: wnc.clear_window(ctx))
     reg = ctx.widgets
     reg.register("_nw_window_label", label)
@@ -101,6 +108,7 @@ def build_window_strip(ctx, parent) -> QWidget:
     reg.register("_nw_window_rule_cb", rule)
     reg.register("_nw_window_panel_box", panel_only)
     reg.register("_nw_window_popout_btn", popout)
+    reg.register("_nw_window_subset_btn", use_subset)
     reg.register("_nw_window_clear_btn", clear)
     reg.register("_nw_window_refresh", refresh)
     strip.hide()

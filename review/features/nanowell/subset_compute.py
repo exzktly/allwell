@@ -25,6 +25,9 @@ condition here, and its presets are still one click away (:meth:`Subset.starting
   chosen FOVs), and whether the run measured it without a count. *Found by the run at every timepoint: yes* keeps
   only the nanowells tracked through the whole dataset; *at any timepoint: no* on a defect keeps those it never
   touched;
+* ``window_sites`` — whether the nanowell is *inside* or *outside* the set of nanowells a Distribution window held
+  when it was turned into a subset (**Use as Subset**). The set is frozen on the condition, with the name it was
+  given (``Window 1``); a nanowell not on the list is decided against, never "no value";
 * ``gate`` — whether the nanowell lies *inside* or *outside* a gate drawn on the Scatter Plot's nanowell scatter (or
   on its "Nanowell ▸" axes), at a timepoint as a metric is. A nanowell at a timepoint is one point on that scatter,
   so it is inside when its two metrics there fall in the box. The condition names the gate; its box and axes are
@@ -81,6 +84,12 @@ TILE = "owner"
 SEAM = "fused"
 #: Whether the nanowell's point on the nanowell scatter lies in a gate drawn there, at a timepoint.
 GATE = "gate"
+#: Whether the nanowell is one of the sites a Distribution window held when *Use as Subset* froze it. The sites are
+#: kept on the condition (:attr:`Condition.sites`), not looked up: the Subset filters the figure the window is drawn
+#: on, so a window bound to its own figure would depend on its own output.
+WINDOW = "window_sites"
+#: The most nanowells one window condition holds: they are saved with the page, so the block is bounded.
+MAX_WINDOW_SITES = 20_000
 #: The prefix a scatter gate's axis carries when it is a nanowell metric (``review.domain.observation``).
 _NW_PREFIX = "nw::"
 #: The nanowell's per-timepoint properties, each tested *yes* or *no* at a timepoint: field -> label. Each is read
@@ -131,7 +140,7 @@ def metric_of(column: str) -> tuple[str, str | None] | None:
 
 
 def is_known_field(name) -> bool:
-    return isinstance(name, str) and (name in (START, TILE, SEAM, GATE) or name in POSITION_FIELDS or name in ROW_FLAGS
+    return isinstance(name, str) and (name in (START, TILE, SEAM, GATE, WINDOW) or name in POSITION_FIELDS or name in ROW_FLAGS
                                       or metric_of(name) is not None)
 
 
@@ -157,6 +166,11 @@ def is_gate(name: str) -> bool:
     return name == GATE
 
 
+def is_window(name: str) -> bool:
+    """Whether *name* tests a frozen Distribution window: *inside* or *outside* its list of nanowells."""
+    return name == WINDOW
+
+
 def field_label(name: str) -> str:
     if name == START:
         return "Starting cells"
@@ -166,6 +180,8 @@ def field_label(name: str) -> str:
         return "On a tile seam"
     if name == GATE:
         return "Scatter gate"
+    if name == WINDOW:
+        return "Distribution window"
     if name in ROW_FLAGS:
         return ROW_FLAGS[name]
     if name in POSITION_FIELDS:
@@ -200,7 +216,7 @@ def field_choices(channels=(), *, gates: bool = False) -> list[tuple[str, str, s
 
 
 def ops_for(name: str) -> dict:
-    if is_gate(name):
+    if is_gate(name) or is_window(name):
         return GATE_OPS
     return CATEGORY_OPS if is_category(name) else FLAG_OPS if is_flag(name) else NUMERIC_OPS
 
@@ -213,6 +229,22 @@ def _uses_baseline(name: str, at: str) -> bool:
 
 
 # ── conditions ───────────────────────────────────────────────────────────────
+def _window_sites(sites) -> tuple:
+    """*sites* as a window condition keeps them — ``(well, q, r)`` each, sorted, without repeats — or ``ValueError``:
+    a site that is not a well and two whole numbers, none at all, or more than :data:`MAX_WINDOW_SITES`."""
+    out = set()
+    for site in sites or ():
+        if not (isinstance(site, (tuple, list)) and len(site) == 3 and isinstance(site[0], str) and site[0]
+                and all(isinstance(v, int) and not isinstance(v, bool) for v in site[1:])):
+            raise ValueError(f"a window's nanowell is (well, q, r), not {site!r}")
+        out.add((site[0], int(site[1]), int(site[2])))
+    if not out:
+        raise ValueError("a window condition holds at least one nanowell")
+    if len(out) > MAX_WINDOW_SITES:
+        raise ValueError(f"a window condition holds at most {MAX_WINDOW_SITES:,} nanowells")
+    return tuple(sorted(out))
+
+
 def _number(value, whole: bool):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ValueError(f"a bound must be a number, not {value!r}")
@@ -241,6 +273,8 @@ class Condition:
     #: gate has the name; ``None`` until :func:`bind_gates` has looked. Never saved and never compared: the
     #: condition is the gate's *name*, and its box is read from the scatter each time the subset is evaluated.
     box: tuple | None = field(default=None, compare=False, repr=False)
+    #: A window condition's nanowells, ``(well, q, r)`` each, sorted and without repeats; ``()`` for every other field.
+    sites: tuple = ()
 
     def validated(self) -> Condition:
         """This condition in its one canonical form, or ``ValueError`` saying why it is not a condition."""
@@ -253,6 +287,11 @@ class Condition:
             at = self.at or "baseline"
             if at not in ATS and not (at.startswith(TP_PREFIX) and len(at) > len(TP_PREFIX)):
                 raise ValueError(f"no timepoint {at!r}")
+        if is_window(self.field):
+            names = [v for v in self.values if isinstance(v, str) and v]
+            if len(names) != 1:
+                raise ValueError("a window condition has one name")
+            return Condition(self.field, self.op, None, None, "", (names[0],), sites=_window_sites(self.sites))
         if is_gate(self.field):
             names = [v for v in self.values if isinstance(v, str) and v]
             if len(names) != 1:
@@ -288,6 +327,8 @@ class Condition:
         if self.at:
             where = (" " + ATS[self.at]) if self.at in ATS else f" at {self.at[len(TP_PREFIX):]}"
         label = field_label(self.field) + where
+        if is_window(self.field):
+            return f"{label}: {GATE_OPS[self.op]} “{self.values[0] if self.values else ''}” ({len(self.sites):,} nanowells)"
         if is_gate(self.field):
             missing = " (no nanowell gate by that name)" if self.box == () else ""
             return f"{label}: {GATE_OPS[self.op]} “{self.values[0] if self.values else ''}”{missing}"
@@ -303,7 +344,10 @@ class Condition:
 
     def to_config(self) -> dict:
         out = {"field": self.field, "op": self.op}
-        if is_category(self.field) or is_gate(self.field):
+        if is_window(self.field):
+            out["values"] = list(self.values)
+            out["sites"] = [list(site) for site in self.sites]
+        elif is_category(self.field) or is_gate(self.field):
             out["values"] = list(self.values)
         elif not is_flag(self.field):
             out["a"] = self.a
@@ -317,9 +361,11 @@ class Condition:
     def from_config(cls, block) -> Condition:
         if not isinstance(block, dict):
             raise ValueError("a condition is a mapping")
-        values = block.get("values")
+        values, sites = block.get("values"), block.get("sites")
         return cls(block.get("field"), block.get("op"), block.get("a"), block.get("b"), block.get("at") or "",
-                   tuple(values) if isinstance(values, list) else ()).validated()
+                   tuple(values) if isinstance(values, list) else (),
+                   sites=tuple(tuple(s) if isinstance(s, list) else s for s in sites)
+                   if isinstance(sites, list) else ()).validated()
 
 
 @dataclass(frozen=True)
@@ -538,6 +584,17 @@ def _gate_values(metrics: pd.DataFrame, c: Condition) -> np.ndarray:
     return np.where(np.isnan(x) | np.isnan(y), np.nan, passed.astype(float))
 
 
+def _window_values(sites: pd.DataFrame, c: Condition) -> np.ndarray:
+    """Per nanowell: 1 where it passes the window condition *c* (on the list for *inside*, off it for *outside*), 0
+    where it fails. Never undecided: a nanowell is on the list or it is not, and one with no address is not."""
+    listed = frozenset(c.sites)
+    q = pd.to_numeric(sites["nw_q"], errors="coerce")
+    r = pd.to_numeric(sites["nw_r"], errors="coerce")
+    on = np.array([bool(ok) and (str(w), int(a), int(b)) in listed
+                   for w, a, b, ok in zip(sites["well"], q.fillna(0), r.fillna(0), q.notna() & r.notna())])
+    return (on if c.op == "in" else ~on).astype(float)
+
+
 # ── evaluation ───────────────────────────────────────────────────────────────
 def geometry_of(data, wells) -> dict:
     """``well -> (lattice kind, pitch µm or None)`` for *wells*, read from their grid records."""
@@ -680,6 +737,8 @@ def _site_answers(metrics: pd.DataFrame, subset: Subset, data=None) -> tuple[pd.
     for j, c in enumerate(subset.conditions):
         if per_timepoint(c.field):
             answers[:, j] = _per_timepoint(metrics, codes, n, c)
+        elif is_window(c.field):
+            answers[:, j] = _window_values(sites, c)
         elif c.field in POSITION_FIELDS:
             answers[:, j] = _compare(_position_values(sites, c.field, geometry), c)
         else:

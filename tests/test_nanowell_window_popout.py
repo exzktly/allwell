@@ -124,3 +124,22 @@ def test_a_pop_out_still_on_the_selected_nanowell_has_nothing_to_click(page, qtb
     qtbot.waitUntil(lambda: bool(st.popout_hits), timeout=10000)
     wnc.set_popout_source(page, "selected")
     assert st.popout_hits == {} and any("Select a nanowell" in t for t in _texts(page))
+
+
+def test_the_pager_buttons_and_the_show_choice_work_on_the_page(page, qtbot, spied, monkeypatch):  # noqa: F811
+    st = _loaded(qtbot, page)
+    window = DistributionWindow("n", "time", ("t_c", "t_a"), 0, 9)
+    rows = [WindowRow(("A01", i, 0), i + 1, float(30 - i), {}) for i in range(30)]
+    monkeypatch.setattr(wnc, "current", lambda _st: (window, WindowResult(rows, "t_a", 30, 30)))
+    wnc.open_window_popout(page)
+    prev, label, following = (page.widgets.get(n) for n in ("_nw_popout_page_prev", "_nw_popout_page_label",
+                                                            "_nw_popout_page_next"))
+    assert label.text() == "Page 1 of 2" and following.isVisibleTo(page.widgets.get("_nw_popout"))
+    qtbot.mouseClick(following, Qt.LeftButton)
+    assert st.window_page == 1 and label.text() == "Page 2 of 2" and spied[-1][0][0][0] == "Rows 25–30 of 30"
+    qtbot.mouseClick(prev, Qt.LeftButton)
+    assert st.window_page == 0 and spied[-1][0][0][0] == "Rows 1–24 of 30"
+    source = page.widgets.get("_nw_popout_source_cb")
+    assert source.itemText(1) == "Window (30)"
+    source.setCurrentIndex(0)                                             # This nanowell
+    assert st.popout_source == "selected" and not following.isVisibleTo(page.widgets.get("_nw_popout"))

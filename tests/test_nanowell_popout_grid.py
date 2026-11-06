@@ -83,6 +83,16 @@ def test_the_pop_out_s_choices_are_kept_with_the_page_and_a_bad_value_is_dropped
     assert (again.popout_tps, again.popout_channels, again.popout_grid, again.popout_cols) == ([], [], "auto", 0)
 
 
+def test_timepoints_none_is_kept_with_the_page_and_only_a_true_value_sets_it():
+    st = NanowellState()
+    st.popout_tps_none = True
+    again = NanowellState()
+    again.apply_config(st.to_config())
+    assert again.popout_tps_none is True
+    again.apply_config({"popout_tps_none": "yes"})
+    assert again.popout_tps_none is False
+
+
 # ── through the real pop-out ─────────────────────────────────────────────────
 pytest.importorskip("PySide6")
 
@@ -136,7 +146,18 @@ def _panels(ctx):
     return sorted(out)
 
 
-def test_timepoints_chooses_the_panels_and_the_last_one_cannot_be_taken_away(page, qtbot, channel_crops):  # noqa: F811
+def _menu_entry(ctx, text):
+    for action in ctx.widgets.get("_nw_popout_tps_menu").actions():
+        if action.text() == text:
+            return action
+    raise AssertionError(f"no entry {text!r} in the Timepoints menu")
+
+
+def _said(ctx):
+    return [t.get_text() for ax in ctx.widgets.get("_nw_popout_fig").axes for t in ax.texts]
+
+
+def test_timepoints_chooses_the_panels_and_the_last_tick_taken_away_is_none(page, qtbot, channel_crops):  # noqa: F811
     st = _open(qtbot, page)
     assert page.widgets.get("_nw_popout_tps_btn").text() == "Timepoints: all"
     _action(page, "_nw_popout_tps_menu", "t_a").trigger()              # a checkable entry: trigger unticks it
@@ -144,11 +165,25 @@ def test_timepoints_chooses_the_panels_and_the_last_one_cannot_be_taken_away(pag
     assert [p[2] for p in _panels(page)] == ["t_c"]
     assert page.widgets.get("_nw_popout_tps_btn").text() == "Timepoints: 1 of 2"
     page.widgets.get("_nw_popout_rebuild_menus")()
-    assert not _action(page, "_nw_popout_tps_menu", "t_c").isEnabled()
-    for action in page.widgets.get("_nw_popout_tps_menu").actions():
-        if action.text() == "All timepoints":
-            action.trigger()
-    assert st.popout_tps == [] and sorted(p[2] for p in _panels(page)) == ["t_a", "t_c"]
+    _action(page, "_nw_popout_tps_menu", "t_c").trigger()              # the last tick: no panel, said so
+    assert (st.popout_tps, st.popout_tps_none) == ([], True)
+    assert _panels(page) == [] and nwc.NO_TIMEPOINTS_SAID in _said(page)
+    page.widgets.get("_nw_popout_rebuild_menus")()
+    _menu_entry(page, "All").trigger()
+    assert (st.popout_tps, st.popout_tps_none) == ([], False)
+    assert sorted(p[2] for p in _panels(page)) == ["t_a", "t_c"]
+
+
+def test_none_clears_every_tick_and_a_tick_from_none_shows_that_timepoint_alone(page, qtbot, channel_crops):  # noqa: F811
+    st = _open(qtbot, page)
+    _menu_entry(page, "None").trigger()
+    assert page.widgets.get("_nw_popout_tps_btn").text() == "Timepoints: none"
+    assert _panels(page) == [] and nwc.NO_TIMEPOINTS_SAID in _said(page)
+    page.widgets.get("_nw_popout_rebuild_menus")()
+    assert not any(_action(page, "_nw_popout_tps_menu", tp).isChecked() for tp in ("t_a", "t_c"))
+    _action(page, "_nw_popout_tps_menu", "t_c").trigger()              # unticked: trigger ticks it
+    assert (st.popout_tps, st.popout_tps_none) == (["t_c"], False)
+    assert [p[2] for p in _panels(page)] == ["t_c"]
 
 
 def test_channels_adds_a_row_per_channel_each_on_its_own_scale(page, qtbot, channel_crops):  # noqa: F811

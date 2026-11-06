@@ -21,6 +21,7 @@ from review.features.nanowell import subset_compute as ss
 from review.features.nanowell import window_compute as wc
 from review.features.nanowell._composite_render import render_composite
 from review.features.nanowell._window_render import DRAG_GID, draw_drag, draw_window
+from review.features.nanowell.crop_grid_compute import shown_timepoints
 from review.features.nanowell.renderer import DENSITY_ABOVE, MAX_PANELS, render_message, render_site_rows
 from review.features.nanowell.state import POPOUT_LAYOUTS, POPOUT_SOURCES
 
@@ -244,13 +245,6 @@ def page_count(st) -> int:
     return max(1, -(-len(result.rows) // page_size(st))) if result is not None else 1
 
 
-def composite_timepoint(st, result) -> str:
-    """The timepoint the composite is drawn at: the one stepped to, else the window's ranking timepoint (a
-    per-nanowell metric has none: then the first timepoint)."""
-    timepoints = [str(tp) for tp in st.data.timepoints()]
-    return st.composite_tp if st.composite_tp in timepoints else (result.rank_key or timepoints[0])
-
-
 def open_window_popout(ctx) -> None:
     """**Open in pop-out**: show the window's nanowells there, from the first page, and bring the window forward."""
     st = _state(ctx)
@@ -290,8 +284,9 @@ def step_window_page(ctx, delta: int) -> None:
 def draw_window_popout(ctx, st, fig) -> None:
     """The pop-out in Window mode: the nanowells inside the window, ranked as ``window_compute.members`` ranks them,
     as rows of crops over time (a page of :data:`WINDOW_PAGE`) or as the hex composite (a page of
-    ``composite_compute.COMPOSITE_PAGE`` tiles at one timepoint). The crops of the page are cut on a worker, all in one
-    pass, and each row or tile says so until its crops arrive."""
+    ``composite_compute.COMPOSITE_PAGE`` tiles, drawn once per timepoint the **Timepoints** menu shows, side by side on
+    the **Grid** shape). With **Timepoints: None** it says that instead of drawing. The crops of the page are cut on
+    a worker, all in one pass, and each row or tile says so until its crops arrive."""
     st.popout_hits, st.popout_tiles = {}, []
     window, result = current(st)
     if window is None:
@@ -303,6 +298,9 @@ def draw_window_popout(ctx, st, fig) -> None:
         render_message(fig, strip_text(st) + " No nanowell is inside it.", gid="nw-popout-window-empty")
         return
     nwc = _nwc()
+    if st.popout_tps_none:
+        render_message(fig, nwc.NO_TIMEPOINTS_SAID, gid="nw-popout-no-timepoints")
+        return
     st.window_page = min(max(st.window_page, 0), page_count(st) - 1)
     if st.popout_layout == "hex":
         comp = cc.composite(cc.page(rows, st.window_page))
@@ -310,8 +308,8 @@ def draw_window_popout(ctx, st, fig) -> None:
         _want_crops(ctx, st, sites)
         st.popout_tiles = render_composite(
             fig, comp, {s: nwc.gated_crops(st, s, st.crops[s]) for s in sites if s in st.crops},
-            composite_timepoint(st, result), n_total=len(rows), display_range=nwc.display_range(ctx),
-            note=strip_text(st))
+            shown_timepoints(st.data.timepoints(), st.popout_tps), n_total=len(rows),
+            display_range=nwc.display_range(ctx), note=strip_text(st), grid=st.popout_grid, cols=st.popout_cols)
         return
     first = st.window_page * WINDOW_PAGE
     shown = rows[first:first + WINDOW_PAGE]
@@ -377,15 +375,3 @@ def on_popout_motion(ctx, event) -> None:
         well, q, r = tile[2]
         ctx.notify.set_status(f"Tile {tile[3]} · {well} {q},{r}")
 
-
-def step_composite_tp(ctx, delta: int) -> None:
-    """◀ ▶ beside the composite: move *delta* timepoints, kept within the dataset's."""
-    st = _state(ctx)
-    result = current(st)[1] if st is not None else None
-    if result is None:
-        return
-    timepoints = [str(tp) for tp in st.data.timepoints()]
-    at = timepoints.index(composite_timepoint(st, result))
-    st.composite_tp = timepoints[min(max(at + delta, 0), len(timepoints) - 1)]
-    _nwc()._call(ctx, "_nw_popout_window_refresh")
-    _nwc().draw_popout(ctx)

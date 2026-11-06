@@ -12736,11 +12736,22 @@ the same multiple of its own nanowell's radius, so equal tiles show every nanowe
 per-crop µm scale is needed), all on one `renderer.crop_scale`, a hatched hexagon for a tile with no image (its reason
 counted in the caption), a foot mark in `ui.theme.WELL_COLORS_TUPLE[patch % 96]`, patch labels, a dashed frame and a
 title that says it is not a real array. `draw_window_popout` branches on the layout, fetches the page's crops through
-`_want_crops` (shared with the rows), draws at `composite_timepoint` (`NanowellState.composite_tp`, else the window's ranking
-timepoint, else the first), and keeps the tiles' `(x, y, site, rank)` on `NanowellState.popout_tiles` for
-`on_popout_click` (nearest tile within half a pitch → `_select`) and `on_popout_motion` (status bar). The page size and
-count follow the layout (`_window_controller.page_size`). The timepoint stepper is
-`_nw_popout_tp_prev` / `_nw_popout_tp_label` / `_nw_popout_tp_next` in `window_view.build_popout_window_controls`.
+`_want_crops` (shared with the rows), and draws the composite once per timepoint the pop-out's **Timepoints** menu shows
+(`crop_grid_compute.shown_timepoints` of `NanowellState.popout_tps`), side by side on the **Grid** shape
+(`crop_grid_compute.grid_shape(1, n, popout_grid, popout_cols)`; `_composite_render._panel_rects` turns it into one
+axes per timepoint, titled with it). Every panel holds the same tiles at the same data coordinates, so the tiles'
+`(x, y, site, rank)` kept on `NanowellState.popout_tiles` serve `on_popout_click` (nearest tile within half a pitch →
+`_select`) and `on_popout_motion` (status bar) in whichever panel the pointer is; one `crop_scale` spans every tile of
+every panel, so a change over time is a change in the picture. The page size and count follow the layout
+(`_window_controller.page_size`).
+
+**Timepoints: All / None.** The pop-out's Timepoints menu (`popout_view.build_popout_view_controls`) opens with *All*
+(`controller.set_popout_timepoints(ctx, [])`) and *None* (`set_popout_no_timepoints`), then a tick per timepoint.
+`popout_tps` empty means every timepoint, so *None* is its own persisted flag, `NanowellState.popout_tps_none`; every
+pop-out draw path — one nanowell, the window's rows, the hex composite — renders `controller.NO_TIMEPOINTS_SAID`
+(gid `nw-popout-no-timepoints`) instead of a figure while it is set, and the button reads *Timepoints: none*.
+Unticking the last timepoint sets it too; a tick or *All* clears it. Tests: `test_nanowell_popout_grid.py` (the menu)
+and `test_nanowell_composite_render.py` (side by side, the Grid shape, the hex layout following the menu).
 
 **The crop store is bounded.** `NanowellState.crops` is a `crop_cache_compute.CropCache` — at most `CROPS_KEPT` (400)
 nanowells, the oldest inserted going first, never a key in `protected` (the page on screen and the selected nanowell,

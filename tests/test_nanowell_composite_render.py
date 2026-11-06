@@ -42,7 +42,7 @@ def _crop(low, high):
     return Crop(rng.uniform(low, high, (12, 12)), "tile", "an owner tile")
 
 
-def _draw(crops, **kwargs):
+def _draw(crops, **kwargs):  # one timepoint, as the composite was first drawn
     comp = cc.composite(_rows())
     fig = Figure(figsize=(9.0, 6.0))
     render_composite(fig, comp, crops, "T1", n_total=7, **kwargs)
@@ -129,13 +129,46 @@ def test_pointing_at_a_tile_names_its_nanowell(page, qtbot, monkeypatch):  # noq
     assert said and said[-1] == f"Tile {tile[3]} · {well} {q},{r}"
 
 
-def test_the_stepper_moves_the_composite_through_the_timepoints(page, qtbot):  # noqa: F811
+def test_one_composite_per_timepoint_side_by_side_each_at_its_own_timepoint():
+    """Two timepoints are two panels across, each drawing its own timepoint's crops — T1's run 0-100 and T2's
+    1000-1100, so a panel drawing the other timepoint's crops would hold the other values — on one scale."""
+    comp = cc.composite(_rows())
+    crops = {t.source: {"T1": _crop(0, 100), "T2": _crop(1000, 1100)} for t in comp.tiles}
+    fig = Figure(figsize=(9.0, 6.0))
+    render_composite(fig, comp, crops, ["T1", "T2"], n_total=7)
+    left, right = fig.axes
+    assert left.get_position().x0 < right.get_position().x0
+    assert abs(left.get_position().y0 - right.get_position().y0) < 1e-9          # side by side, one row
+    assert [ax.get_title() for ax in fig.axes] == ["T1", "T2"]
+    means = [[float(im.get_array().mean()) for im in ax.images] for ax in fig.axes]
+    assert len(means[0]) == len(means[1]) == len(comp.tiles)
+    assert max(means[0]) < 100 and min(means[1]) > 1000
+    assert len({tuple(im.get_clim()) for ax in fig.axes for im in ax.images}) == 1
+    title = [t.get_text() for t in fig.texts if t.get_gid() == "nw-composite-title"][0]
+    assert title.endswith(" · 2 timepoints")
+
+
+def test_the_grid_choice_lays_the_composites_out():
+    comp = cc.composite(_rows())
+    fig = Figure(figsize=(9.0, 6.0))
+    render_composite(fig, comp, {}, ["T1", "T2", "T3"], n_total=7, grid="column")
+    xs = {round(ax.get_position().x0, 6) for ax in fig.axes}
+    ys = [ax.get_position().y0 for ax in fig.axes]
+    assert len(xs) == 1 and ys == sorted(ys, reverse=True)                     # one column, T1 at the top
+
+
+def test_the_hex_layout_draws_the_timepoints_menu_s_choice_and_has_no_stepper(page, qtbot):  # noqa: F811
+    from review.features.nanowell import controller as nwc
+
     st = _open_hex(page, qtbot)
-    title = lambda: [t.get_text() for t in page.widgets.get("_nw_popout_fig").texts  # noqa: E731
-                     if t.get_gid() == "nw-composite-title"][0]
+    fig = page.widgets.get("_nw_popout_fig")
     timepoints = [str(tp) for tp in st.data.timepoints()]
-    start = wnc.composite_timepoint(st, wnc.current(st)[1])
-    assert title().endswith(f" · {start}")
-    qtbot.mouseClick(page.widgets.get("_nw_popout_tp_prev"), Qt.LeftButton)
-    expected = timepoints[max(timepoints.index(start) - 1, 0)]
-    assert expected != start and title().endswith(f" · {expected}")
+    assert len(timepoints) > 1 and page.widgets.get_or_none("_nw_popout_tp_prev") is None
+    assert [ax.get_title() for ax in fig.axes] == timepoints              # All: one composite per timepoint
+    nwc.set_popout_timepoints(page, [timepoints[-1]])
+    assert len(fig.axes) == 1
+    title = [t.get_text() for t in fig.texts if t.get_gid() == "nw-composite-title"][0]
+    assert title.endswith(f" · {timepoints[-1]}")
+    nwc.set_popout_no_timepoints(page)
+    assert nwc.NO_TIMEPOINTS_SAID in [t.get_text() for ax in fig.axes for t in ax.texts] + [t.get_text() for t in fig.texts]
+    assert st.popout_tiles == []

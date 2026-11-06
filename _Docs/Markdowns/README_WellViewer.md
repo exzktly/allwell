@@ -6607,7 +6607,9 @@ reading below the threshold is the one left out as out of focus; *not judged* wh
 not fitted* where the rim was not found), **Labels** (each crop's timepoint
 and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
 Extremes view follow them. A second row shapes the montage and saves it. **Timepoints** chooses which of the
-nanowell's timepoints are panels (fewer panels are drawn larger; *All timepoints* shows every one again).
+nanowell's timepoints are panels (fewer panels are drawn larger). *All* shows every one again; *None* clears every
+tick, so you can tick just the two or three you want from nothing — until one is ticked the pop-out says no timepoint
+is chosen rather than drawing an empty figure (unticking the last one does the same).
 **Channels** adds channels beside the image channel — tick EGFP while the image channel is phase, say — each drawn as
 a row of crops of its own on its own brightness scale (that channel's **Range** when it has one, else its own 1st to
 99th percentile), and the caption names each channel's scale. **Grid** sets the shape: *Auto* (one channel wraps into
@@ -6655,9 +6657,11 @@ source well has its own labelled patch, and inside a patch the nanowells are pla
 centre and the rest spiralling outward, so a position says nothing about where a nanowell sat in its well. Tiles are
 drawn apart inside a dashed frame, each with a mark along its foot in its well's colour, and the title says it is not a
 real array. Every tile is its nanowell's crop at one size and all are on one brightness scale, so wells of different
-exposure compare. It shows 91 nanowells a page (◀ ▶ turn it) at one timepoint — the window's latest covered one at first;
-the timepoint ◀ ▶ beside it step through the others. A tile with no image at that timepoint is a **hatched hexagon**, never
-a blank, and the caption counts those by reason. Pointing at a tile names its nanowell in the status bar (*Tile 37 · A03
+exposure compare. It shows 91 nanowells a page (◀ ▶ turn it), drawn once for each timepoint ticked in
+**Timepoints**, side by side — the same tile at the same place in every copy, all on the one brightness scale, so a
+change over time reads as a change in the picture. **Grid** lays the copies out as it lays out the crops (*One row* puts
+them all across). Pick the timepoints to compare with *None* and a tick or two. A tile with no image at a timepoint is a
+**hatched hexagon**, never a blank, and the caption counts those by reason. Pointing at a tile names its nanowell in the status bar (*Tile 37 · A03
 3,-2*); a click selects it, so the side panel follows. The composite is only a view: it is not a well of the plate, joins no
 selection, and is never exported as one.
 

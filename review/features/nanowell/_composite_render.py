@@ -22,22 +22,22 @@ TILE = 0.46
 _MARK = 0.08
 
 
-def render_composite(fig, comp, crops: dict, timepoint: str, *, n_total: int, display_range=None,
-                     note: str = "") -> list:
-    """Draw *comp* (``composite_compute.Composite``) at *timepoint* on *fig* (cleared first); returns
-    ``[(x, y, site, rank)]`` for turning a pointer position into a tile.
+def _panel_rects(shape, n: int) -> list:
+    """Figure-fraction ``[left, bottom, width, height]`` of each of *n* panels on *shape*
+    (``crop_grid_compute.GridShape`` of one channel), inside the band between the title and the caption."""
+    left, bottom, width, height = 0.02, 0.10, 0.96, 0.80
+    cell_w, cell_h = width / shape.cols, height / shape.rows
+    rects = []
+    for k in range(n):
+        row, col = shape.place(0, k)
+        rects.append([left + col * cell_w, bottom + (shape.rows - 1 - row) * cell_h, cell_w, cell_h * 0.94])
+    return rects
 
-    *crops* is ``(well, q, r) -> {timepoint: Crop}`` for the nanowells cut so far; *n_total* is how many nanowells the
-    window holds (the composite is one page of them), *note* the sentence the caption leads with."""
-    from ui.theme import WELL_COLORS_TUPLE
 
-    fig.clear()
-    ax = fig.add_axes([0.02, 0.10, 0.96, 0.80])
-    ax.set_axis_off()
-    ax._aw_image_panel = True                            # pixel for pixel: no typed axis range on it
+def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, colours) -> None:
+    """One composite at *timepoint* on *ax*: its tiles (or the hatched placeholder, counted into *missing*), the
+    patch marks and labels, and the dashed frame."""
     _bg, ink, faint = _inks(ax)
-    scale = crop_scale([(crops.get(t.source) or {}).get(timepoint) for t in comp.tiles], display_range)
-    missing: Counter = Counter()
     for tile in comp.tiles:
         crop = (crops.get(tile.source) or {}).get(timepoint)
         if crop is not None and crop.image is not None:
@@ -51,8 +51,7 @@ def render_composite(fig, comp, crops: dict, timepoint: str, *, n_total: int, di
             ax.add_patch(RegularPolygon((tile.x, tile.y), 6, radius=0.5, fill=False, hatch="////", linewidth=0.6,
                                         edgecolor=faint, gid="nw-composite-missing"))
         ax.add_patch(Rectangle((tile.x - TILE, tile.y + TILE - _MARK), 2 * TILE, _MARK, linewidth=0,
-                               facecolor=WELL_COLORS_TUPLE[tile.patch % len(WELL_COLORS_TUPLE)],
-                               gid="nw-composite-well"))
+                               facecolor=colours[tile.patch % len(colours)], gid="nw-composite-well"))
     for well, x, y in comp.patches:
         _ink(ax.text(x, y, well, ha="center", va="bottom", fontsize=8, color=ink, gid="nw-composite-patch"))
     if comp.tiles:
@@ -66,7 +65,38 @@ def render_composite(fig, comp, crops: dict, timepoint: str, *, n_total: int, di
         ax.set_xlim(left - 0.2, right + 0.2)
         ax.set_ylim(bottom + 0.2, top - 0.2)             # y down: the smaller y is the top
     ax.set_aspect("equal")
-    _ink(fig.text(0.02, 0.97, comp.title(n_total) + f" · {timepoint}", va="top", fontsize=10, color=ink,
+
+
+def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, display_range=None, note: str = "",
+                     grid: str = "auto", cols: int = 0) -> list:
+    """Draw *comp* (``composite_compute.Composite``) on *fig* (cleared first), once per timepoint of *timepoints*,
+    side by side on the pop-out's grid shape *grid* / *cols* (``crop_grid_compute.grid_shape``); returns
+    ``[(x, y, site, rank)]`` for turning a pointer position into a tile — every panel puts a tile at the same place.
+
+    *crops* is ``(well, q, r) -> {timepoint: Crop}`` for the nanowells cut so far; *n_total* is how many nanowells the
+    window holds (the composite is one page of them), *note* the sentence the caption leads with. Every tile of every
+    panel is on one brightness scale, so a change over time reads as a change in the picture."""
+    from review.features.nanowell.crop_grid_compute import grid_shape
+    from ui.theme import WELL_COLORS_TUPLE
+
+    timepoints = [str(timepoints)] if isinstance(timepoints, str) else [str(tp) for tp in timepoints]
+    timepoints = timepoints or [""]                      # a figure always has a panel; callers pass at least one
+    fig.clear()
+    scale = crop_scale([(crops.get(t.source) or {}).get(tp) for tp in timepoints for t in comp.tiles], display_range)
+    missing: Counter = Counter()
+    several = len(timepoints) > 1
+    shape = grid_shape(1, len(timepoints), grid, cols)
+    ink = faint = None
+    for timepoint, rect in zip(timepoints, _panel_rects(shape, len(timepoints))):
+        ax = fig.add_axes(rect)
+        ax.set_axis_off()
+        ax._aw_image_panel = True                        # pixel for pixel: no typed axis range on it
+        _bg, ink, faint = _inks(ax)
+        _draw_panel(ax, comp, crops, timepoint, scale, missing, WELL_COLORS_TUPLE)
+        if several:
+            _ink(ax.set_title(timepoint, fontsize=9, color=ink, gid="nw-composite-tp"))
+    said_tps = timepoints[0] if not several else f"{len(timepoints)} timepoints"
+    _ink(fig.text(0.02, 0.97, comp.title(n_total) + f" · {said_tps}", va="top", fontsize=10, color=ink,
                   gid="nw-composite-title"))
     said = "Each tile is its nanowell's crop at one size; every tile on " + scale.said() + "."
     if missing:

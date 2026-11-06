@@ -23,6 +23,28 @@ BUTTON_STEP = WHEEL_STEP ** 2
 ZOOM_OUT_LIMIT, ZOOM_IN_LIMIT = 0.25, 500.0
 
 
+#: Qt's ``angleDelta`` per wheel notch: eighths of a degree, 15 degrees a notch.
+ANGLE_PER_NOTCH = 120.0
+
+
+def notches(event) -> float:
+    """How many wheel notches a matplotlib ``scroll_event`` turned (positive away from the user), from the Qt event
+    behind it. matplotlib's own ``event.step`` is notches only where Qt gives no pixel delta: on macOS a trackpad or
+    a Magic Mouse sends ``pixelDelta``, and matplotlib passes those **pixels** on as the step, so one swipe event of 20
+    pixels zoomed by ``WHEEL_STEP ** 20`` — about 87 times at once. ``angleDelta`` is in eighths of a degree on every
+    platform and device, so it is read instead whenever the event carries it."""
+    gui = getattr(event, "guiEvent", None)
+    angle = getattr(gui, "angleDelta", None)
+    if callable(angle):
+        try:
+            delta = angle().y()
+        except (AttributeError, RuntimeError, TypeError):
+            delta = None
+        if delta is not None:
+            return float(delta) / ANGLE_PER_NOTCH
+    return float(getattr(event, "step", 0.0) or 0.0)
+
+
 def held_factor(now: float | None, factor: float) -> float:
     """*factor* (under 1 zooms in) shortened so the zoom after it stays within :data:`ZOOM_OUT_LIMIT` and
     :data:`ZOOM_IN_LIMIT` of the full view, where *now* is the zoom before it (1 is the full view, 2 shows half the

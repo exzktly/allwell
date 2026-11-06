@@ -268,7 +268,8 @@ class NanowellState:
     window_model: object = None             # the DistributionModel last drawn, which windows are read against
     popout_hits: dict = field(default_factory=dict)   # the pop-out's crop axes -> (well, q, r), for a click
     popout_tiles: list = field(default_factory=list)  # the hex composite's (x, y, site, rank) per tile, for a pointer
-    composite_view: tuple | None = None     # the hex composite's (xlim, ylim) as the wheel left it; None: unzoomed
+    composite_view: tuple | None = None     # the hex composite's (xlim, ylim) as the wheel or a drag left it
+    popout_press: tuple | None = None       # a held press on the pop-out: (axes, x, y, xlim, ylim, moved)
     # The Array view's interaction, never persisted: where it is zoomed to (``(left, top, right, bottom)`` in the
     # frame it draws, for the ``(well, positions)`` in ``region_for``), the press a drag or click started with,
     # whether a click sets the anchor, and what the last draw put on screen (``renderer.ArrayDrawn``).
@@ -358,7 +359,7 @@ class NanowellState:
         self.anchor_mode, self.array_message = False, ""
         self.extreme_axes = {}
         self.window_page, self.window_press, self.window_model, self.popout_hits = 0, None, None, {}
-        self.popout_tiles, self.composite_view = [], None
+        self.popout_tiles, self.composite_view, self.popout_press = [], None, None
         self.identity_sidecars, self.identity_frames, self.identity_drawn = {}, {}, None
         self.identity_zoom, self.identity_zoom_for, self.identity_press = {}, None, None
         self.stats_cache = None

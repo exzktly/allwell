@@ -32,13 +32,30 @@ def _panel_rects(n: int) -> list:
     return [[left + k * cell_w, bottom, cell_w, height * 0.94] for k in range(n)]
 
 
+def _to_tile(tile, shape, points) -> np.ndarray:
+    """Crop pixel positions ``(column, row)`` (N × 2) in the composite's coordinates on *tile*: the crop's pixels fill
+    the tile's extent, pixel ``i``'s centre at ``i + 0.5`` of ``2 * TILE / width``."""
+    h, w = shape[:2]
+    pts = np.asarray(points, dtype=float).reshape(-1, 2)
+    return np.column_stack([tile.x - TILE + (pts[:, 0] + 0.5) * (2 * TILE / w),
+                            tile.y - TILE + (pts[:, 1] + 0.5) * (2 * TILE / h)])
+
+
 def _tile_cells(tile, crop) -> np.ndarray:
-    """*crop*'s counted cells (pixel ``(column, row)``) in the composite's coordinates on *tile*: the crop's pixels
-    fill the tile's extent, pixel ``i``'s centre at ``i + 0.5`` of ``2 * TILE / width``."""
-    h, w = crop.image.shape[:2]
-    cells = np.asarray(crop.cells, dtype=float).reshape(-1, 2)
-    return np.column_stack([tile.x - TILE + (cells[:, 0] + 0.5) * (2 * TILE / w),
-                            tile.y - TILE + (cells[:, 1] + 0.5) * (2 * TILE / h)])
+    """*crop*'s counted cells' centres in the composite's coordinates on *tile* (:func:`_to_tile`)."""
+    return _to_tile(tile, crop.image.shape, crop.cells)
+
+
+def _tile_outlines(tile, crop) -> tuple[list, np.ndarray]:
+    """``(lines, dotted)`` for *crop*'s counted cells on *tile*: each traced outline (``Crop.outlines``, the pixels the
+    run counted the cell on) as composite-coordinate lines, and a mask of the cells drawn as a dot instead — every one
+    when the well kept no outlines, else those it kept none of — as ``renderer._draw_crop_cells`` draws a crop."""
+    n = len(crop.cells)
+    outlines = crop.outlines if crop.outlines is not None and len(crop.outlines) == n else None
+    if outlines is None:
+        return [], np.ones(n, dtype=bool)
+    lines = [_to_tile(tile, crop.image.shape, line) for o in outlines if o for line in o]
+    return lines, np.array([not o for o in outlines], dtype=bool)
 
 
 def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, colours, cells: Counter | None) -> None:
@@ -47,8 +64,10 @@ def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, 
     frame."""
     from ui.nanowell_sites import CELL_COLOUR, CELL_EDGE_COLOUR
 
+    from matplotlib.collections import LineCollection
+
     _bg, _ink_colour, faint = _inks(ax)
-    dots = []
+    dots, outlines = [], []
     for tile in comp.tiles:
         crop = (crops.get(tile.source) or {}).get(timepoint)
         if crop is not None and crop.image is not None:
@@ -59,8 +78,12 @@ def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, 
                 if crop.cells is None:
                     cells["no_table"] += 1               # no cell table: none could be read, not "no cells"
                 elif len(crop.cells):
-                    dots.append(_tile_cells(tile, crop))
+                    lines, dotted = _tile_outlines(tile, crop)
+                    outlines.extend(lines)
+                    if dotted.any():
+                        dots.append(_tile_cells(tile, crop)[dotted])
                     cells["drawn"] += len(crop.cells)
+                    cells["outlined"] += int((~dotted).sum())
         else:
             why = (crop.note if crop is not None else "not cut yet" if tile.source not in crops
                    else f"no image at {timepoint}")
@@ -69,6 +92,12 @@ def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, 
                                         edgecolor=faint, gid="nw-composite-missing"))
         ax.add_patch(Rectangle((tile.x - TILE, tile.y + TILE - _MARK), 2 * TILE, _MARK, linewidth=0,
                                facecolor=colours[tile.patch % len(colours)], gid="nw-composite-well"))
+    if outlines:
+        # The rim colour under the fill colour, so an outline reads on a bright cell and a dark floor alike.
+        ax.add_collection(LineCollection(outlines, colors=CELL_EDGE_COLOUR, linewidths=1.2, zorder=5,
+                                         gid="nw-composite-outlines-rim"))
+        ax.add_collection(LineCollection(outlines, colors=CELL_COLOUR, linewidths=0.6, zorder=5,
+                                         gid="nw-composite-outlines"))
     if dots:
         xy = np.vstack(dots)
         ax.scatter(xy[:, 0], xy[:, 1], s=CELL_DOT_PT2 / 3, c=CELL_COLOUR, edgecolors=CELL_EDGE_COLOUR, linewidths=0.3,
@@ -97,8 +126,9 @@ def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, displa
                      cells: bool = False, view=None, labels: bool = True) -> list:
     """Draw *comp* (``composite_compute.Composite``) on *fig* (cleared first), once per timepoint of *timepoints*,
     side by side in one row; returns ``[(x, y, site, rank)]`` for turning a pointer position into a tile — every
-    panel puts a tile at the same place. *cells* draws each tile's counted cells as dots; *view* ``(xlim, ylim)`` is
-    the zoom the wheel left (``_window_controller.on_popout_scroll``), applied to every panel alike. *labels* off (the
+    panel puts a tile at the same place. *cells* draws each tile's counted cells — traced outlines, a dot where the run
+    kept none; *view* ``(xlim, ylim)`` is the zoom or pan the pointer left (``_window_controller``), applied to every
+    panel alike. *labels* off (the
     pop-out's **Labels**) leaves out each panel's timepoint and the caption; the title and the wells' names, which
     are the stripes' key, stay.
 
@@ -132,7 +162,12 @@ def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, displa
     said = ("Each tile is its nanowell's crop at one size; every tile on " + scale.said() + ". The stripe under a "
             "tile is its source well's colour, the colour of that well's name above its patch. Scroll to zoom.")
     if tally is not None:
-        said += f" Dots: the {tally['drawn']:,} cells the run counted in these nanowells."
+        outlined, drawn = tally["outlined"], tally["drawn"]
+        what = ("Outlines" if drawn and outlined == drawn else "Outlines and dots" if outlined else "Dots")
+        said += f" {what}: the {drawn:,} cells the run counted in these nanowells"
+        if drawn and outlined < drawn:
+            said += f" ({drawn - outlined:,} a dot: the run kept no outline of it)"
+        said += "."
         if tally["no_table"]:
             said += f" {tally['no_table']} tile(s) of a well with no cell table, so no dots there."
     if missing:

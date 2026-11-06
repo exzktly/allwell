@@ -86,7 +86,8 @@ def on_scroll(ctx, st, event) -> None:
     """The wheel: zoom the panel under the pointer about the pointer, one ``WHEEL_STEP`` a notch. Off every panel,
     a view with one panel zooms it about its centre (over VNC a swipe arrives wherever the pointer was left)."""
     drawn = st.identity_drawn
-    if drawn is None or not drawn.zoomable or not event.step:
+    steps = zc.notches(event)
+    if drawn is None or not drawn.zoomable or not steps:
         return
     name = _panel(drawn, event.inaxes)
     ax = drawn.axes.get(name) if name else None
@@ -100,7 +101,7 @@ def on_scroll(ctx, st, event) -> None:
     else:
         return
     home = drawn.home.get(name)
-    xlim, ylim = zc.wheel_limits(ax.get_xlim(), ax.get_ylim(), at, event.step, home[0] if home else None)
+    xlim, ylim = zc.wheel_limits(ax.get_xlim(), ax.get_ylim(), at, steps, home[0] if home else None)
     _apply(st, drawn, name, xlim, ylim)
     _repaint(ctx)
 

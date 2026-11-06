@@ -54,7 +54,7 @@ from review.features.nanowell.state import (
 from review.features.nanowell.series_compute import (crop_metric_lines, long_format, rim_focus_text, site_metrics,
                                                      site_series)
 from review.features.nanowell.zoom_compute import (  # noqa: F401 — the band and its tests read them here
-    BUTTON_STEP, WHEEL_STEP, ZOOM_IN_LIMIT, ZOOM_OUT_LIMIT, held_factor,
+    BUTTON_STEP, WHEEL_STEP, ZOOM_IN_LIMIT, ZOOM_OUT_LIMIT, held_factor, notches,
 )
 
 log = logging.getLogger("review")
@@ -1624,14 +1624,15 @@ def on_scroll(ctx, event) -> None:
         idc.on_scroll(ctx, event)                # every Identity sub-view zooms its own panels
         return
     drawn = st.drawn if st is not None and st.view == "array" else None
-    if drawn is None or drawn.region is None or not event.step:
+    steps = notches(event)
+    if drawn is None or drawn.region is None or not steps:
         return
     if event.inaxes is drawn.ax and event.xdata is not None:
         at = (event.xdata, event.ydata)
     else:
         x0, y0, x1, y1 = drawn.region
         at = ((x0 + x1) / 2, (y0 + y1) / 2)
-    _zoom_to(ctx, st, WHEEL_STEP ** event.step, at)
+    _zoom_to(ctx, st, WHEEL_STEP ** steps, at)
 
 
 # ── the anchor ───────────────────────────────────────────────────────────────

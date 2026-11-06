@@ -410,3 +410,92 @@ def test_crops_for_sites_cuts_only_the_timepoints_asked_for(monkeypatch):
     cut_rows.clear()
     ic.crops_for_sites(None, metrics, [("A01", 0, 0)])
     assert cut_rows == [("A01", "T0"), ("A01", "T1"), ("A01", "T2")]
+
+
+# ── a trackpad's scroll, panning by a drag, the cells' outlines ──────────────────────────────────────────────────
+def test_a_trackpad_swipe_zooms_one_notch_not_one_notch_per_pixel(page, qtbot):  # noqa: F811
+    """A Mac trackpad sends a pixel delta beside the angle delta, and matplotlib hands the pixels on as the step: a
+    20-pixel swipe event zoomed by 0.8 ** 20, about 87 times at once. One notch's angle must zoom one notch."""
+    from PySide6.QtGui import QWheelEvent
+
+    from review.features.nanowell.zoom_compute import WHEEL_STEP
+
+    st = _open_hex(page, qtbot)
+    fig = page.widgets.get("_nw_popout_fig")
+    home = fig.axes[0].get_xlim()
+    canvas, point = _tile_point(page, st, st.popout_tiles[0])
+    event = QWheelEvent(QPointF(point), QPointF(canvas.mapToGlobal(point)), QPoint(0, 20), QPoint(0, 120),
+                        Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+    QApplication.sendEvent(canvas, event)
+    width = abs(fig.axes[0].get_xlim()[1] - fig.axes[0].get_xlim()[0])
+    assert width == pytest.approx(abs(home[1] - home[0]) * WHEEL_STEP, rel=1e-6)
+
+
+def test_notches_reads_the_angle_and_falls_back_to_the_step():
+    from types import SimpleNamespace
+
+    from review.features.nanowell.zoom_compute import notches
+
+    angle = lambda y: SimpleNamespace(angleDelta=lambda: SimpleNamespace(y=lambda: y))  # noqa: E731
+    assert notches(SimpleNamespace(step=20.0, guiEvent=angle(60))) == 0.5
+    assert notches(SimpleNamespace(step=-1.0, guiEvent=angle(-120))) == -1.0
+    assert notches(SimpleNamespace(step=2.0, guiEvent=None)) == 2.0
+
+
+def _drag_canvas(canvas, start, end):
+    from PySide6.QtTest import QTest
+
+    QTest.mousePress(canvas, Qt.LeftButton, Qt.NoModifier, start)
+    middle = QPoint((start.x() + end.x()) // 2, (start.y() + end.y()) // 2)
+    for at in (middle, end):
+        QApplication.sendEvent(canvas, QMouseEvent(QEvent.MouseMove, QPointF(at), QPointF(canvas.mapToGlobal(at)),
+                                                   Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+    QTest.mouseRelease(canvas, Qt.LeftButton, Qt.NoModifier, end)
+
+
+def test_a_drag_pans_every_panel_and_selects_nothing_and_a_click_still_selects(page, qtbot):  # noqa: F811
+    st = _open_hex(page, qtbot)
+    fig = page.widgets.get("_nw_popout_fig")
+    selected = list(st.selected_sites)
+    home_x, home_y = fig.axes[0].get_xlim(), fig.axes[0].get_ylim()
+    canvas, point = _tile_point(page, st, st.popout_tiles[0])
+    _drag_canvas(canvas, point, QPoint(point.x() + 40, point.y() + 30))           # right and down on screen
+    (x0, x1), (y0, y1) = fig.axes[0].get_xlim(), fig.axes[0].get_ylim()
+    assert x0 < home_x[0] and x1 < home_x[1]                 # the picture moved right: the view went left
+    assert y0 < home_y[0] and y1 < home_y[1]                 # moved down (y runs down): the view went up
+    assert x1 - x0 == pytest.approx(home_x[1] - home_x[0])   # panned, not zoomed
+    assert {ax.get_xlim() for ax in fig.axes} == {fig.axes[0].get_xlim()}
+    assert st.selected_sites == selected and st.composite_view is not None
+    from review.features.nanowell import controller as nwc
+    nwc.draw_popout(page)                                     # crops arriving keep the pan
+    assert page.widgets.get("_nw_popout_fig").axes[0].get_xlim() == pytest.approx((x0, x1))
+    tile = st.popout_tiles[0]
+    canvas, point = _tile_point(page, st, tile)
+    QTest.mouseClick(canvas, Qt.LeftButton, Qt.NoModifier, point)
+    assert st.selected_sites == [[*tile[2]]]
+
+
+def test_cells_are_drawn_as_their_traced_outlines_and_a_cell_without_one_as_a_dot():
+    from matplotlib.collections import LineCollection
+
+    from review.features.nanowell._composite_render import TILE
+
+    comp = cc.composite(_rows())
+    square = [np.array([[1.0, 1.0], [3.0, 1.0], [3.0, 3.0], [1.0, 3.0], [1.0, 1.0]])]
+    crop = Crop(np.zeros((10, 10)), "tile", "", np.array([[2.0, 2.0], [7.0, 7.0]]), outlines=[square, None])
+    crops = {t.source: {"T1": crop} for t in comp.tiles}
+    fig = Figure(figsize=(9.0, 6.0))
+    render_composite(fig, comp, crops, "T1", n_total=7, cells=True)
+    ax = fig.axes[0]
+    fills = [c for c in ax.collections if c.get_gid() == "nw-composite-outlines"]
+    assert len(fills) == 1, "the cells' outlines were not drawn"
+    fill = fills[0]
+    assert isinstance(fill, LineCollection) and len(fill.get_segments()) == len(comp.tiles)
+    tile = comp.tiles[0]
+    first = fill.get_segments()[0]
+    assert first[0].tolist() == pytest.approx([tile.x - TILE + 1.5 * 2 * TILE / 10, tile.y - TILE + 1.5 * 2 * TILE / 10])
+    (dots,) = [c for c in ax.collections if c.get_gid() == "nw-composite-cells"]
+    assert len(dots.get_offsets()) == len(comp.tiles)                         # only the cell with no outline
+    caption = _artists(fig, "nw-composite-caption")[0].get_text()
+    assert f"Outlines and dots: the {2 * len(comp.tiles)} cells" in caption
+    assert f"({len(comp.tiles)} a dot: the run kept no outline of it)" in caption

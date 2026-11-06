@@ -6677,8 +6677,10 @@ all are on one brightness scale, so wells of different exposure compare. It show
 drawn once for each timepoint ticked in **Timepoints**, side by side in one row — the same tile at the same place in
 every copy, all on the one brightness scale, so a change over time reads as a change in the picture. Pick the
 timepoints to compare with *None* and a tick or two; the menu stays open while you tick. **Scroll** over the
-composite to zoom about the pointer: every copy zooms together, and the zoom holds while crops arrive, until another
-page, window or layout is shown. **Cells** draws each tile's counted cells as dots, and **Labels** off leaves out each
+composite to zoom about the pointer, and **drag** to pan: every copy moves together, and the view holds while crops
+arrive, until another page, window or layout is shown. A click (a press that does not move) still selects the tile's
+nanowell. **Cells** draws each tile's counted cells as their traced outlines — a dot only for a cell the run kept no
+outline of, which the caption counts — and **Labels** off leaves out each
 copy's timepoint and the caption (the wells' names stay, as the stripes' key). **Channels**, **Grid** and **Metrics**
 are not offered here: the composite draws the image channel alone, its copies always sit in one row, and a tile is too
 small for a line of numbers. The crops are cut a timepoint at a time, the first timepoint shown first, so the copies

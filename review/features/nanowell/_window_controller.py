@@ -25,7 +25,7 @@ from review.features.nanowell._window_render import DRAG_GID, draw_drag, draw_wi
 from review.features.nanowell.crop_grid_compute import shown_timepoints
 from review.features.nanowell.renderer import DENSITY_ABOVE, MAX_PANELS, render_message, render_site_rows
 from review.features.nanowell.state import POPOUT_LAYOUTS, POPOUT_SOURCES
-from review.features.nanowell.zoom_compute import wheel_limits
+from review.features.nanowell.zoom_compute import notches, pan_limits, wheel_limits
 
 #: Rows of the window's nanowells the pop-out shows at a time.
 WINDOW_PAGE = 24
@@ -426,17 +426,64 @@ def _tile_at(st, event) -> tuple | None:
     return best if math.hypot(best[0] - event.xdata, best[1] - event.ydata) <= 0.5 else None
 
 
-def on_popout_click(ctx, event) -> None:
-    """A click on a crop of the pop-out's window rows, or on a tile of its composite, selects that real nanowell (the
-    site detail follows)."""
+def on_popout_press(ctx, event) -> None:
+    """A press on the pop-out: remember where, until the release says whether it was a click or — on the hex
+    composite — a drag that panned it (``controller.CLICK_SLOP_PX``, the Distribution figure's rule)."""
     st = _state(ctx)
-    if st is None or event.button != 1:
+    if st is None or event.button != 1 or event.inaxes is None:
+        return
+    ax = event.inaxes
+    st.popout_press = (ax, float(event.x), float(event.y), tuple(ax.get_xlim()), tuple(ax.get_ylim()), False)
+
+
+def on_popout_release(ctx, event) -> None:
+    """The end of a press: a click (it never moved past the slop) on a crop of the window's rows, or on a tile of the
+    composite, selects that real nanowell (the site detail follows); a drag has already panned."""
+    st = _state(ctx)
+    if st is None:
+        return
+    press, st.popout_press = st.popout_press, None
+    if press is None or press[5] or event.button != 1:
         return
     tile = _tile_at(st, event)
     if tile is not None:
         _nwc()._select(ctx, tile[2])
     elif event.inaxes in st.popout_hits:
         _nwc()._select(ctx, st.popout_hits[event.inaxes])
+
+
+def _pan(ctx, st, event) -> bool:
+    """While a press on the hex composite is held and has moved past the slop, pan every panel alike so the picture
+    follows the pointer, and keep the view on ``NanowellState.composite_view``; whether this move panned."""
+    press = st.popout_press
+    if press is None or event.x is None:
+        return False
+    ax, x, y, xlim0, ylim0, moved = press
+    if getattr(ax, "_aw_composite_home", None) is None:
+        return False
+    if not moved and abs(event.x - x) + abs(event.y - y) <= _nwc().CLICK_SLOP_PX:
+        return False
+    st.popout_press = (ax, x, y, xlim0, ylim0, True)
+    box = ax.bbox
+    # Data units per pixel of the limits the press began on: the picture moves with the pointer, so the limits move
+    # the other way (``zoom_compute.pan_limits``).
+    dx = (event.x - x) * (xlim0[1] - xlim0[0]) / max(box.width, 1.0)
+    dy = (event.y - y) * (ylim0[1] - ylim0[0]) / max(box.height, 1.0)
+    xlim, ylim = pan_limits(xlim0, ylim0, dx, dy)
+    _set_composite_view(ctx, st, ax.figure, xlim, ylim)
+    return True
+
+
+def _set_composite_view(ctx, st, fig, xlim, ylim) -> None:
+    """Put every composite panel of *fig* on *xlim*, *ylim*, keep it for the redraws to come, and draw."""
+    st.composite_view = (tuple(xlim), tuple(ylim))
+    for other in fig.axes:
+        if getattr(other, "_aw_composite_home", None) is not None:
+            other.set_xlim(*xlim)
+            other.set_ylim(*ylim)
+    canvas = ctx.widgets.get_or_none("_nw_popout_canvas")
+    if canvas is not None:
+        canvas.draw_idle()
 
 
 def on_popout_motion(ctx, event) -> None:
@@ -446,6 +493,9 @@ def on_popout_motion(ctx, event) -> None:
     from PySide6.QtWidgets import QToolTip
 
     st = _state(ctx)
+    if st is not None and _pan(ctx, st, event):
+        QToolTip.hideText()                              # dragging: no card under a moving picture
+        return
     tile = _tile_at(st, event) if st is not None else None
     if tile is None:
         if st is not None and st.popout_tiles:
@@ -472,22 +522,14 @@ def tile_card(st, site, timepoint) -> str:
 
 def on_popout_scroll(ctx, event) -> None:
     """The wheel over the hex composite zooms every panel alike about the pointer, as the Array view's wheel does
-    (``zoom_compute.wheel_limits``, held within its zoom limits of the unzoomed view); the zoom is kept on
-    ``NanowellState.composite_view`` so the crops arriving on a worker redraw it where it was."""
+    (``zoom_compute.wheel_limits`` by ``zoom_compute.notches`` — a trackpad's pixels are not notches — held within its
+    zoom limits of the unzoomed view); the zoom is kept on ``NanowellState.composite_view`` so the crops arriving on a
+    worker redraw it where it was."""
     st = _state(ctx)
     ax = event.inaxes
     home = getattr(ax, "_aw_composite_home", None)
-    if st is None or home is None or not event.step or event.xdata is None:
+    steps = notches(event)
+    if st is None or home is None or not steps or event.xdata is None:
         return
-    xlim, ylim = wheel_limits(ax.get_xlim(), ax.get_ylim(), (event.xdata, event.ydata), event.step,
-                              home_xlim=home[0])
-    st.composite_view = None if abs((xlim[1] - xlim[0]) - (home[0][1] - home[0][0])) < 1e-9 else (xlim, ylim)
-    fig = ax.figure
-    for other in fig.axes:
-        if getattr(other, "_aw_composite_home", None) is not None:
-            other.set_xlim(*xlim)
-            other.set_ylim(*ylim)
-    canvas = ctx.widgets.get_or_none("_nw_popout_canvas")
-    if canvas is not None:
-        canvas.draw_idle()
-
+    xlim, ylim = wheel_limits(ax.get_xlim(), ax.get_ylim(), (event.xdata, event.ydata), steps, home_xlim=home[0])
+    _set_composite_view(ctx, st, ax.figure, xlim, ylim)

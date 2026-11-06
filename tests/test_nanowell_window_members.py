@@ -155,3 +155,18 @@ def test_the_page_keeps_its_windows_and_pop_out_choices():
     damaged = NanowellState()
     damaged.apply_config({"windows": {"k": {"lo": 1}}, "popout_source": "nonsense", "popout_layout": "nonsense"})
     assert (damaged.windows, damaged.popout_source, damaged.popout_layout) == ({}, "selected", "rows")
+
+
+def test_along_wells_a_window_across_two_neighbouring_groups_keeps_the_nanowells_of_both():
+    """Along wells each nanowell has one value, in its own group's column. Required to be inside at *every* covered
+    column, a window over two groups kept nothing — no nanowell is in both — under either rule."""
+    g1 = [_swarm("A01", "A01", -0.1, [1.0, 3.0], group="G1"), _swarm("A02", "A02", 0.1, [3.5], group="G1")]
+    g2 = [_swarm("B01", "B01", 0.9, [2.5, 9.0], group="G2")]
+    model = DistributionModel("n", "n", "Cell count", "wells", True, [Panel("P", g1 + g2, [(0.0, "G1"), (1.0, "G2")])],
+                              timepoint="T1")
+    assert wc.snap(model, 0, -0.4, 1.4) == ("G1", "G2")
+    for rule in wc.RULES:
+        window = DistributionWindow("n", "wells", ("G1", "G2"), 2.0, 4.0, rule=rule)
+        result = wc.members(model, window)
+        assert sorted(result.sites()) == [("A01", 1, 0), ("A02", 0, 0), ("B01", 0, 0)]
+        assert (result.n_every, result.n_any) == (3, 3)

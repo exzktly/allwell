@@ -155,8 +155,13 @@ def members(model, window: DistributionWindow) -> WindowResult:
             anyof.append(site)
             if hit >= required:
                 every.append(site)
+    if model.axis == WELLS:
+        # Along wells a nanowell has one value, in its own group's column, so "inside at every covered column" can
+        # only hold when the window covers one column: across two neighbouring groups it held for no nanowell at all.
+        # Inside the range in its own column is the whole test, and every and any are the same set.
+        every = anyof
     result.n_every, result.n_any = len(every), len(anyof)
-    chosen = every if window.rule == "every" or model.axis == WELLS else anyof
+    chosen = every if window.rule == "every" else anyof
     rank_values: dict = {}
     for _i, panel in panels:
         for s in panel.swarms:

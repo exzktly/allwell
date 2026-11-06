@@ -12683,7 +12683,11 @@ then. `snap` turns a drag's x span into keys: column `i` is `(i − 0.5, i + 0.5
 overlaps it, so a dot's offset inside its column never decides. `members(model, window)` walks the
 `DistributionModel`'s swarms, never the dots drawn, so a nanowell in a density panel (`renderer.DENSITY_ABOVE`) or
 packed into a "+N" overflow is a member like any other; it counts both rules (`n_every`, `n_any`; a nanowell with no
-value at a covered timepoint its panel has is not an *every* member), ranks the chosen rule's members by the value at
+value at a covered timepoint its panel has is not an *every* member). Along wells a nanowell has one value, in its own
+group's column, so membership is that value inside the range and the two rules are the same set — requiring it inside
+at every covered column would keep no nanowell at all from a window across two groups
+(`test_nanowell_window_members.py::test_along_wells_a_window_across_two_neighbouring_groups_keeps_the_nanowells_of_both`).
+It ranks the chosen rule's members by the value at
 the latest covered column (a member with none there last, ties by well, `q`, `r`) into `WindowRow`s — the fields of
 `extremes_compute.ExtremeRow`, a class of their own because `extremes_compute` imports `state`, which imports this
 module — and reports `covered` columns per panel. `not_drawn` counts members with no dot in a covered column by

@@ -324,17 +324,59 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_channel_cb", channel_cb)
     grp_channel = band.add_scope("Channel", channel_cb)
 
+    # The band is three rows on every view, so a control is found in the same row whichever view is open:
+    #   1. the central selections — what is drawn: Metric, Channel, Well, Timepoint, and the Array's Positions;
+    #   2. which nanowells count and how their values are normalised: Rim focus, Fixed cohort, Subset, Exclude,
+    #      Baseline and its average, the moving average, Responding above;
+    #   3. viewing — how the open view shows it: its image, layers, comparisons and actions (anchors, Resolve, …).
+    # Row breaks keep the rows apart; a row too wide wraps within itself, and a row with nothing shown on a view
+    # takes no room.
+    # The anchor walk's controls stand in the place of Well and Timepoint, which the walk drives and its label names
+    # ("3 of 17 · B04 at 24h"): the walk adds nothing to the band's width.
+    queue = build_queue_controls(ctx, band)
+    well_cb = QComboBox()
+    well_cb.setToolTip(_WELL_TIP)
+    well_cb.currentIndexChanged.connect(lambda _i: nwc.set_well(ctx, well_cb.currentData() or ""))
+    reg.register("_nw_well_cb", well_cb)
+    exclusion = build_exclude_controls(ctx, well_cb)
+    # The Plotting tabs' timepoint control (Distribution, Heat Map): a LabeledComboBox painting its own
+    # "Timepoint:" prefix, the timepoints in time order and named by their hours. One control for every view that
+    # draws one timepoint — the Array view's included, which had a slider of its own.
+    tp_cb = LabeledComboBox("Timepoint")
+    tp_cb.setToolTip(_TP_TIP)
+    tp_cb.currentIndexChanged.connect(lambda _i: nwc.set_timepoint(ctx, tp_cb.currentData() or ""))
+    reg.register("_nw_tp_cb", tp_cb)
+    # *Where*: the well and the timepoint, one flow item, so "A01 at 5 h" never wraps apart.
+    well_part = _well_part(band, well_cb)
+    grp_where = band.add_scope("", well_part, tp_cb)
+    reg.register("_nw_where_group", grp_where)
+    positions_seg, grp_positions = _build_positions_control(ctx, band)
+    selection_row_end = band.add_break()
+
+    rim_focus = build_rim_focus_controls(ctx)
+    band.add_scope("", rim_focus.box, rim_focus.spin)
+
+    cohort_box = QCheckBox("Fixed cohort")
+    cohort_box.setToolTip(_COHORT_TIP)
+    cohort_box.toggled.connect(lambda on: nwc.set_cohort(ctx, on))
+    reg.register("_nw_cohort_box", cohort_box)
+    grp_cohort = band.add_scope("", cohort_box)
+
+    # The Subset after the quality filters: it narrows the nanowells rather than choosing what is measured of them.
+    start = build_subset_control(ctx, band, timepoint_text)
+    # Exclude takes the chosen well out of the page: a narrowing like the Subset, so it sits beside it.
+    grp_exclude = band.add_scope("", exclusion.exclude)
+    reg.register("_nw_exclude_group", grp_exclude)
+    # Shown only while a well is excluded: trailing, so its coming and going moves nothing else; placed after
+    # Exclude once the band is built.
+    exclusion.excluded_group = band.add_scope("", exclusion.excluded, trailing=True)
+
     baseline_cb = _combo(_BASELINES, _BASELINE_TIP)
     baseline_cb.currentIndexChanged.connect(
         lambda _i: nwc.set_page_baseline(ctx, baseline_cb.currentData() or "earliest"))
     reg.register("_nw_baseline_cb", baseline_cb)
     grp_baseline = band.add_scope("Baseline", baseline_cb)
 
-    # The band is three rows on every view, each answering one question, so a control is found in the same row
-    # whichever view is open: *Measure* — which number, and how it is normalised and smoothed; *Scope* — of which
-    # nanowells, then which well and timepoint (general to specific); *View* — how this view shows it, its actions
-    # last. Row breaks keep the rows apart; a row too wide wraps within itself, and a row with nothing shown on a
-    # view takes no room.
     baseline_moving_spin = SpinBox()
     baseline_moving_spin.setRange(1, MAX_WINDOW)     # 1 is off, as on the endpoint's window
     baseline_moving_spin.setToolTip(_BASELINE_MOVING_TIP)
@@ -351,44 +393,16 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_moving_spin", moving_spin)
     grp_moving = band.add_scope("Moving average", moving_spin)
 
-    measure_row_end = band.add_break()
+    responding_edit = QLineEdit()
+    responding_edit.setPlaceholderText("not set")
+    responding_edit.setToolTip(_RESPONDING_TIP)
+    responding_edit.setFixedWidth(_RESPONDING_W)
+    responding_edit.editingFinished.connect(lambda: nwc.set_responding_above(ctx, responding_edit.text()))
+    reg.register("_nw_responding_edit", responding_edit)
+    grp_responding = band.add_scope("Responding above", responding_edit)
+    filter_row_end = band.add_break()
 
-    rim_focus = build_rim_focus_controls(ctx)
-    band.add_scope("", rim_focus.box, rim_focus.spin)
-
-    cohort_box = QCheckBox("Fixed cohort")
-    cohort_box.setToolTip(_COHORT_TIP)
-    cohort_box.toggled.connect(lambda on: nwc.set_cohort(ctx, on))
-    reg.register("_nw_cohort_box", cohort_box)
-    grp_cohort = band.add_scope("", cohort_box)
-
-    # The Subset after the quality filters: it narrows the nanowells rather than choosing what is measured of them.
-    start = build_subset_control(ctx, band, timepoint_text)
-
-    # The anchor walk's controls lead the view's own controls, in the place of Well and Timepoint, which the walk
-    # drives and its label names ("3 of 17 · B04 at 24h"): the walk adds nothing to the band's width.
-    queue = build_queue_controls(ctx, band)
-    well_cb = QComboBox()
-    well_cb.setToolTip(_WELL_TIP)
-    well_cb.currentIndexChanged.connect(lambda _i: nwc.set_well(ctx, well_cb.currentData() or ""))
-    reg.register("_nw_well_cb", well_cb)
-    exclusion = build_exclude_controls(ctx, well_cb)
-    # The Plotting tabs' timepoint control (Distribution, Heat Map): a LabeledComboBox painting its own
-    # "Timepoint:" prefix, the timepoints in time order and named by their hours. One control for every view that
-    # draws one timepoint — the Array view's included, which had a slider of its own.
-    tp_cb = LabeledComboBox("Timepoint")
-    tp_cb.setToolTip(_TP_TIP)
-    tp_cb.currentIndexChanged.connect(lambda _i: nwc.set_timepoint(ctx, tp_cb.currentData() or ""))
-    reg.register("_nw_tp_cb", tp_cb)
-    # *Where*: the well and the timepoint, one flow item, so "A01 at 5 h" never wraps apart.
-    well_part = _well_part(band, well_cb, exclusion.exclude)
-    grp_where = band.add_scope("", well_part, tp_cb)
-    reg.register("_nw_where_group", grp_where)
-    # Shown only while a well is excluded: pinned last, so its coming and going moves nothing else.
-    exclusion.excluded_group = band.add_scope("", exclusion.excluded, trailing=True)
-    scope_row_end = band.add_break()
-
-    array_controls = _build_array_controls(ctx, band)
+    array_controls = _build_array_controls(ctx, band, positions_seg, grp_positions)
     identity = build_identity_controls(ctx, band)
     statistics = build_statistics_controls(ctx, band)
     qc_controls = build_qc_controls(ctx, band)
@@ -420,14 +434,6 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_axis_seg", axis_seg)
     grp_axis = band.add_scope("Along x", axis_seg)
 
-    responding_edit = QLineEdit()
-    responding_edit.setPlaceholderText("not set")
-    responding_edit.setToolTip(_RESPONDING_TIP)
-    responding_edit.setFixedWidth(_RESPONDING_W)
-    responding_edit.editingFinished.connect(lambda: nwc.set_responding_above(ctx, responding_edit.text()))
-    reg.register("_nw_responding_edit", responding_edit)
-    grp_responding = band.add_scope("Responding above", responding_edit)
-
     control_cb = QComboBox()
     control_cb.setToolTip(_CONTROL_TIP)
     control_cb.currentIndexChanged.connect(lambda _i: nwc.set_control(ctx, control_cb.currentData() or ""))
@@ -444,9 +450,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             ctx, cell_scope, unavailable="Select wells with nanowell tables first."))
     band.add_action(export_btn)
     band.add_action(make_properties_button(ctx, band, "nanowell"))
-    # *Excluded (n)* names wells: it ends the Scope row, after the well it was set from, on every view.
-    band.place_trailing(exclusion.excluded_group, scope_row_end)
-    reg.register("_nw_band_breaks", (measure_row_end, scope_row_end))
+    # *Excluded (n)* names wells: it follows Exclude on the second row, on every view.
+    band.place_trailing(exclusion.excluded_group, grp_baseline)
+    reg.register("_nw_band_breaks", (selection_row_end, filter_row_end))
     layout.addWidget(band)
     layout.addWidget(start.editor)                  # the Subset's conditions, under the band when shown
     # The Resolve walk's guide card, between the band and the figure it explains: shown only while a walk runs.
@@ -622,7 +628,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
                         or view in RANKED_WELL_VIEWS or view in ONE_WELL_VIEWS)
             shows_well = view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS
             _show_where(grp_where, well_part, tp_cb, shows_well, shows_tp,
-                        walking=view == walk_view)
+                        walking=view == walk_view, exclude=grp_exclude)
             exclusion.refresh(st, well_cb)
             extremes_spin.setValue(st.extremes_n)
             extremes_cells.setChecked(st.crop_cells)
@@ -1023,8 +1029,8 @@ def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
     return button, layer_actions, colour_actions
 
 
-def _well_part(band, well_cb, exclude) -> QWidget:
-    """*Well* [combo] [Exclude], bundled so the Where item can show it, or only the timepoint beside it."""
+def _well_part(band, well_cb) -> QWidget:
+    """*Well* [combo], bundled so the Where item can show it, or only the timepoint beside it."""
     from ui import theme
 
     part = QWidget(band)
@@ -1036,14 +1042,17 @@ def _well_part(band, well_cb, exclude) -> QWidget:
     caption.setObjectName("Muted")
     row.addWidget(caption)
     row.addWidget(well_cb)
-    row.addWidget(exclude)
     return part
 
 
-def _show_where(group, well_part, tp_cb, shows_well: bool, shows_tp: bool, *, walking: bool) -> None:
+def _show_where(group, well_part, tp_cb, shows_well: bool, shows_tp: bool, *, walking: bool,
+                exclude: QWidget | None = None) -> None:
     """The Where item: the well and the timepoint where the view draws them, the item gone when it draws neither or
     while the anchor walk stands in its place. The flow layout sees only the item, so it is asked to measure it
-    again when what it holds changes."""
+    again when what it holds changes. *exclude* (the Exclude item, on the band's second row) acts on the Well's well,
+    so it is shown exactly when the Well is."""
+    if exclude is not None:
+        exclude.setVisible(shows_well and not walking)
     changed = well_part.isVisibleTo(group) != shows_well or tp_cb.isVisibleTo(group) != shows_tp
     well_part.setVisible(shows_well)
     tp_cb.setVisible(shows_tp)
@@ -1146,22 +1155,28 @@ def _refresh_array_greying(ctx, st, c: SimpleNamespace, lattice: bool) -> None:
     _grey(c.rerun_btn, _RERUN_TIP, None if can_rerun else "No well has an anchor yet.")
 
 
-def _build_array_controls(ctx, band) -> SimpleNamespace:
-    """The Array view's controls. On the band's *View* row: Positions, Image and Layers — how the picture is drawn —
-    then Set anchor / Clear anchor / *Re-run wells…*, the actions on it, last. Under the figure, beside its navigation
-    buttons (:func:`mount_array_canvas_tools`), the zoom and *Overlays* — viewing actions on the picture rather than
-    settings of it. Well and Timepoint are on the *Scope* row above, in the page's Where item."""
+def _build_positions_control(ctx, band):
+    """The Array view's *Positions* (Measured | Lattice): which nanowell positions the view draws — a central
+    selection, so it sits on the band's first row beside the well and timepoint. Returns the control and its item."""
     from widgets.segmented_control import SegmentedControl
 
-    reg = ctx.widgets
-    # Positions before Image: Lattice is what greys the image, so the cause reads before its effect.
     positions_seg = SegmentedControl()
     for key, label in _POSITIONS:
         positions_seg.addSegment(text=label, data=key)
     positions_seg.setToolTip(_POSITIONS_TIP)
     positions_seg.currentChanged.connect(lambda idx: nwc.set_layer(ctx, "positions", _POSITIONS[idx][0]))
-    reg.register("_nw_positions_seg", positions_seg)
-    grp_positions = band.add_scope("Positions", positions_seg)
+    ctx.widgets.register("_nw_positions_seg", positions_seg)
+    return positions_seg, band.add_scope("Positions", positions_seg)
+
+
+def _build_array_controls(ctx, band, positions_seg, grp_positions) -> SimpleNamespace:
+    """The Array view's controls. On the band's *Viewing* row: Image and Layers — how the picture is drawn — then
+    Set anchor / Clear anchor / *Re-run wells…*. *Positions* (``positions_seg`` in ``grp_positions``, built by
+    :func:`_build_positions_control`) is on the first row with the well and timepoint, and is shown and hidden with
+    the rest of the view's controls. Under the figure, beside its navigation buttons
+    (:func:`mount_array_canvas_tools`), the zoom and *Overlays* — viewing actions on the picture rather than settings
+    of it."""
+    reg = ctx.widgets
 
     image_cb = _combo(_IMAGES, _IMAGE_TIP)
     image_cb.currentIndexChanged.connect(lambda _i: nwc.set_layer(ctx, "image", image_cb.currentData() or "off"))

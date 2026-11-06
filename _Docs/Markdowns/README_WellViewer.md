@@ -6026,6 +6026,19 @@ The **Nanowells** page (under **Assays** on the rail, beside smFISH) draws a dat
 Nanowells): one dot per nanowell, so you see how the nanowells of a well spread, how that spread changes over
 time, and how wells and replicate groups compare. A dataset without nanowell tables shows a page saying so.
 
+The controls across the top of the page are on three rows, and each row means the same thing on every view, so a
+control is found in the same place whichever view is open:
+
+1. **Measure** — which number: **Metric**, **Channel**, **Baseline**, and on the views that draw values over time
+   (or test them) **Baseline average** and **Moving average**.
+2. **Scope** — of which nanowells, from the broadest choice to the narrowest: **Rim focus**, **Fixed cohort**
+   (where it applies), the **Subset**, then the **Well** and **Timepoint** on the views that show one. *Excluded
+   (n)* ends this row while a well is excluded.
+3. **View** — how the open view shows it: its own settings first (*Along x*, *Compare*, *Positions*, *Image*, …),
+   its actions last (*Set anchor*, *Resolve*, *Re-run…*). Position and Trajectories have no row of their own.
+
+In a narrow window a row wraps onto a second line of its own rather than mixing with the next row.
+
 #### Nanowell plates in the other tabs
 
 A nanowell dataset also opens in every other Review tab, which read it like this:
@@ -6418,13 +6431,13 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
 
   A timepoint that was not addressed is shown as such even when the identity check calls it inconclusive: the
   anchor is what fixes it. The title says how many timepoints need a look and in how many wells, and the legend
-  counts every state on the plate. **Wells** chooses the rows: *Needing a look* (the default) shows only wells with
+  counts every state on the plate. **Show** chooses the rows: *Needing a look* (the default) shows only wells with
   something to look at and says how many it left out; *All* shows every well. On a large plate the rows are banded
   by plate row and labelled by its letter; pointing at a cell names it in the readout, and its tooltip says what
   the state means and what a click does. **Click a cell** that needs a look to resolve it: it opens where it is
   fixed, with a card saying what is wrong, what to click and where, and what happens next, and the walk goes on to
   the next timepoint of the same class (see *Setting the anchor by hand*). A confirmed or reference cell opens on
-  **Identity**. Beside **Wells**, **Problem ▾** chooses the class of problem to resolve, each listed with its count
+  **Identity**. Beside **Show**, **Problem ▾** chooses the class of problem to resolve, each listed with its count
   (until you choose, the worst class on the plate); **Resolve** — the highlighted button, which says what it will
   walk (*Resolve: 330 timepoints*) — steps through that class from its first timepoint; the **One per well** box
   narrows the walk to each well's first (*Resolve: 61 wells*); and **Re-run anchored wells…** puts the anchors to
@@ -6484,12 +6497,10 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   values, two samples holding the same constant), never a number. More than 15 comparisons are not run: choose
   a control under **vs** or exclude wells. *Save figure* saves the figure and its report together.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
-  a QC picture and a full-resolution montage each did. The band's controls are on three rows by what they act
-  on: the first holds the page's data controls (Metric, Channel, Baseline, Rim focus, Subset); the second the
-  well — **Well** and **Timepoint** together, then **Set anchor**, **Clear anchor** and **Re-run wells…**
-  (*Re-run anchored wells…* on the QC view), since an anchor is set for that well at that timepoint; the third
-  how the picture is drawn — **Positions**, **Image** and **Layers**. In a narrow window a row wraps onto a
-  second line of its own rather than mixing with the next row. The zoom and **Overlays** sit under the figure,
+  a QC picture and a full-resolution montage each did. Its **Well** and **Timepoint** are on the band's Scope
+  row; its View row holds how the picture is drawn — **Positions**, **Image** and **Layers** — then its actions,
+  **Set anchor**, **Clear anchor** and **Re-run wells…** (*Re-run anchored wells…* on the QC view). The zoom and
+  **Overlays** sit under the figure,
   beside its navigation buttons:
   - **Image** — what is drawn under the nanowells: *Off*; *Run montage*, the downsampled stitched phase
     montage the run kept (read in the background: the footer says *Reading the montage…* meanwhile); or *Full

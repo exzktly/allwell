@@ -13125,20 +13125,22 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   tile's TIFF header, and the tiles layer takes it from there. Moving to another well or timepoint, turning the
   image off or loading another dataset cancels the store's reads at their next tile and lets its pixels go
   (`state.release_tiles`).
-- **The controls** (`tab_view._build_array_controls`, `_refresh_array_controls`). On the Array view the band is
-  three rows, by what the controls act on, kept apart by two row breaks (`ControlBand.add_break`, a
-  `flow_layout.flow_break` item that ends the flow's line while shown and is skipped while hidden): the page's data
-  controls (Metric, Channel, Baseline, Rim focus, Subset — the same on every view, the Subset last because it narrows
-  the nanowells rather than choosing what is measured of them); the well — the *Where* item (`_nw_where_group`: Well
-  with Exclude, and Timepoint, one flow item so they never wrap apart; `tab_view._show_where` shows either part per
-  view and measures the item again) and Set anchor / Clear anchor / *Re-run wells…* with no caption (the QC view's
-  copy keeps the long label), since an anchor is set for that well at that timepoint; and the picture — Positions
-  (before Image, because Lattice is what greys it), Image with its channel and Range, and Layers. The breaks are in
-  the view's `groups`, so on every other view they are hidden and the band flows as one zone. A row too wide for the
-  window wraps within itself and never takes the next row's controls. *Excluded (n)* is a trailing item, so its
-  coming and going moves nothing: last in the band on every other view, and on the Array view placed at the end of
-  the well row, just before its break (`ControlBand.place_trailing`, through `FlowLayout.move_before`), since it names
-  wells. The zoom (−, readout, +, *Fit*, *1:1*),
+- **The controls** (`tab_view.build_nanowell_tab`, `_build_array_controls`, `_refresh_array_controls`). The page's
+  band is three rows on every view, each answering one question, kept apart by two row breaks
+  (`ControlBand.add_break`, a `flow_layout.flow_break` item that ends the flow's line while shown; registered as
+  `_nw_band_breaks`, and never hidden): *Measure* — Metric, Channel, Baseline, then Baseline average and Moving
+  average where they apply (cause before effect: the quantity, its normalisation, its smoothing); *Scope* — Rim
+  focus, Fixed cohort, the Subset, then the *Where* item (`_nw_where_group`: Well with Exclude, and Timepoint, one
+  flow item so they never wrap apart; `tab_view._show_where` shows either part per view and measures the item
+  again), general to specific, with the anchor walk's controls in the Where item's place while one runs; *View* —
+  the open view's own controls in build order (Array, Identity, Statistics, QC, Extremes, then Along x and
+  Responding above, vs, Group by), each view's settings before its actions. A row with nothing shown takes no
+  room, so Position and Trajectories are two rows. A row too wide for the window wraps within itself and never
+  takes the next row's controls. On the Array view the View row is Positions (before Image, because Lattice is
+  what greys it), Image with its channel and Range, Layers, then Set anchor / Clear anchor / *Re-run wells…* with
+  no caption (the QC view's copy keeps the long label). *Excluded (n)* is a trailing item, so its coming and going
+  moves nothing; it is placed at the end of the Scope row, just before its break, on every view
+  (`ControlBand.place_trailing`, through `FlowLayout.move_before`), since it names wells. The zoom (−, readout, +, *Fit*, *1:1*),
   *Overlays* and *Notes* are viewing actions rather than settings, so they sit under the figure in the card's own toolbar,
   after its navigation buttons (`mount_array_canvas_tools`, through `MplToolbar.add_group`, each group behind its
   own separator and shown with the view's other controls); on the Array view that toolbar's *Reset view* is *Fit*
@@ -13149,7 +13151,7 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   of `anchor_controls`' predicate that fails (`controller.anchor_unavailable_reason`); Clear anchor and Re-run
   wells… with nothing to clear or re-run. Nothing is hidden by a layer choice, and
   `tests/test_nanowell_array_band_layout.py` (UI lane) holds every control's position fixed across layers,
-  colourings, images, positions and Overlays, that the three groups keep to their own rows in order at 1500 and 1200 px, and that the breaks are hidden on another view. The theme's `secondary` buttons carry
+  colourings, images, positions and Overlays, that every view keeps its Measure, Scope and View controls to their own rows in order at 1500 and 1200 px, and that the breaks are shown on every view. The theme's `secondary` buttons carry
   their own `:disabled` rule: the `[variant="secondary"]` selector outranks a bare `:disabled`, so without it a
   greyed secondary button painted as an enabled one, app-wide.
 - **Moving around and clicking** (`controller.on_click` / `on_motion` / `on_release` / `on_scroll`, connected on

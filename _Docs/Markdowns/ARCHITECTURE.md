@@ -12706,6 +12706,26 @@ crop's axes to its nanowell for `on_popout_click`. `render_site_rows` is the one
 Extremes draws its two blocks through it (`render_extremes` supplies the blocks, title and sentences; its figure is pinned
 by `tests/test_nanowell_site_rows.py`), the window draws one, with `with_well` naming each row's well and the model's own
 `format` writing a value (`WindowRows.format`: a fold change with `×`, any other metric as the bare number).
+**The hex composite** (`composite_compute`, `_composite_render`) is the pop-out's second layout of the window's
+nanowells (`NanowellState.popout_layout` ∈ `POPOUT_LAYOUTS`, `"hex"`). `composite_compute.composite(rows)` is pure: one
+patch per source well, ordered by each well's best rank, each filled from its centre outward in rank order along
+`spiral` (ring `k` walked from `(0, -k)` counter-clockwise), the patches laid out left to right in rows of
+`ceil(sqrt(n_wells))` with one empty ring between them, all in pitch units (neighbouring tile centres 1 apart);
+`page` takes `COMPOSITE_PAGE` (91, a radius-5 hexagon) ranks at a time. `Composite` and `CompositeTile(x, y, source,
+rank, patch)` carry **no well id**: a tile's `source` is the real `(well, q, r)` it stands for, and nothing of the
+composite reaches `NanowellState.well`, the plate selection, the CSV export or Batch Export (`tests/
+test_nanowell_composite_render.py::test_the_composite_has_no_well_id` and the click test; only `_window_controller` imports
+the two modules). `_composite_render.render_composite` draws one `imshow` per tile at its own extent (each crop is cut at
+the same multiple of its own nanowell's radius, so equal tiles show every nanowell at one nanowell-relative scale; no
+per-crop µm scale is needed), all on one `renderer.crop_scale`, a hatched hexagon for a tile with no image (its reason
+counted in the caption), a foot mark in `ui.theme.WELL_COLORS_TUPLE[patch % 96]`, patch labels, a dashed frame and a
+title that says it is not a real array. `draw_window_popout` branches on the layout, fetches the page's crops through
+`_want_crops` (shared with the rows), draws at `composite_timepoint` (`NanowellState.composite_tp`, else the window's ranking
+timepoint, else the first), and keeps the tiles' `(x, y, site, rank)` on `NanowellState.popout_tiles` for
+`on_popout_click` (nearest tile within half a pitch → `_select`) and `on_popout_motion` (status bar). The page size and
+count follow the layout (`_window_controller.page_size`). The timepoint stepper is
+`_nw_popout_tp_prev` / `_nw_popout_tp_label` / `_nw_popout_tp_next` in `window_view.build_popout_window_controls`.
+
 **The crop store is bounded.** `NanowellState.crops` is a `crop_cache_compute.CropCache` — at most `CROPS_KEPT` (400)
 nanowells, the oldest inserted going first, never a key in `protected` (the page on screen and the selected nanowell,
 set by `draw_window_popout`) — because the window's pop-out pages through hundreds of nanowells and the store was never

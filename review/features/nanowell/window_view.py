@@ -108,8 +108,10 @@ def build_window_strip(ctx, parent) -> QWidget:
 
 
 _SOURCE_TIP = "What the pop-out shows: the selected nanowell over time, or the nanowells inside the Distribution window."
-_LAYOUT_TIP = "How the window's nanowells are laid out: one row of crops over time for each (Rows)."
+_LAYOUT_TIP = ("How the window's nanowells are laid out: one row of crops over time for each (Rows), or all at once "
+               "at one timepoint as an artificial hex array, a patch for each source well (Hex).")
 _LAYOUT_NAMES = {"rows": "Rows", "hex": "Hex"}
+_TP_TIP = "The timepoint the hex composite is drawn at."
 
 
 def build_popout_window_controls(ctx, window) -> QHBoxLayout:
@@ -129,13 +131,20 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     following.setText("▶")
     page = QLabel("", window)
     pager = (prev, page, following)
+    tp_prev, tp_next = QToolButton(window), QToolButton(window)
+    tp_prev.setText("◀")
+    tp_next.setText("▶")
+    tp_label = QLabel("", window)
+    tp_prev.setToolTip(_TP_TIP)
+    tp_next.setToolTip(_TP_TIP)
+    stepper = (tp_prev, tp_label, tp_next)
     row = QHBoxLayout()
     row.addWidget(QLabel("Show", window))
     row.addWidget(source)
     row.addWidget(QLabel("Layout", window))
     row.addWidget(layout)
     row.addStretch(1)
-    for widget in pager:
+    for widget in pager + stepper:
         row.addWidget(widget)
 
     def refresh() -> None:
@@ -157,17 +166,27 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
         page.setText(f"Page {st.window_page + 1} of {pages}")
         for widget in pager:
             widget.setVisible(in_window and pages > 1)
+        result = wnc.current(st)[1]
+        for widget in stepper:
+            widget.setVisible(in_window and st.popout_layout == "hex" and result is not None and st.data is not None)
+        if result is not None and st.data is not None and st.data.timepoints():
+            tp_label.setText(wnc.composite_timepoint(st, result))
 
     source.currentIndexChanged.connect(lambda _i: wnc.set_popout_source(ctx, source.currentData()))
     layout.currentIndexChanged.connect(lambda _i: wnc.set_popout_layout(ctx, layout.currentData()))
     prev.clicked.connect(lambda _=False: wnc.step_window_page(ctx, -1))
     following.clicked.connect(lambda _=False: wnc.step_window_page(ctx, 1))
+    tp_prev.clicked.connect(lambda _=False: wnc.step_composite_tp(ctx, -1))
+    tp_next.clicked.connect(lambda _=False: wnc.step_composite_tp(ctx, 1))
     reg = ctx.widgets
     reg.register("_nw_popout_source_cb", source)
     reg.register("_nw_popout_layout_cb", layout)
     reg.register("_nw_popout_page_prev", prev)
     reg.register("_nw_popout_page_label", page)
     reg.register("_nw_popout_page_next", following)
+    reg.register("_nw_popout_tp_prev", tp_prev)
+    reg.register("_nw_popout_tp_label", tp_label)
+    reg.register("_nw_popout_tp_next", tp_next)
     reg.register("_nw_popout_window_refresh", refresh)
     refresh()
     return row

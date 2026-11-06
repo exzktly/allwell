@@ -628,9 +628,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
                         or view in RANKED_WELL_VIEWS or view in ONE_WELL_VIEWS)
             shows_well = view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS
             _show_where(grp_where, well_part, tp_cb, shows_well, shows_tp,
-                        walking=view == walk_view)
-            # Exclude acts on the Well's well, so it is offered where the Well is, and not while the walk drives it.
-            grp_exclude.setVisible(shows_well and view != walk_view)
+                        walking=view == walk_view, exclude=grp_exclude)
             exclusion.refresh(st, well_cb)
             extremes_spin.setValue(st.extremes_n)
             extremes_cells.setChecked(st.crop_cells)
@@ -1046,10 +1044,14 @@ def _well_part(band, well_cb) -> QWidget:
     return part
 
 
-def _show_where(group, well_part, tp_cb, shows_well: bool, shows_tp: bool, *, walking: bool) -> None:
+def _show_where(group, well_part, tp_cb, shows_well: bool, shows_tp: bool, *, walking: bool,
+                exclude: QWidget | None = None) -> None:
     """The Where item: the well and the timepoint where the view draws them, the item gone when it draws neither or
     while the anchor walk stands in its place. The flow layout sees only the item, so it is asked to measure it
-    again when what it holds changes."""
+    again when what it holds changes. *exclude* (the Exclude item, on the band's second row) acts on the Well's well,
+    so it is shown exactly when the Well is."""
+    if exclude is not None:
+        exclude.setVisible(shows_well and not walking)
     changed = well_part.isVisibleTo(group) != shows_well or tp_cb.isVisibleTo(group) != shows_tp
     well_part.setVisible(shows_well)
     tp_cb.setVisible(shows_tp)

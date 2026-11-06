@@ -185,6 +185,9 @@ class NanowellState:
     popout_source: str = "selected"
     #: How the pop-out lays out the window's nanowells: rows of crops over time, or the hex composite.
     popout_layout: str = "rows"
+    #: What the hex composite's stripes are coloured by: ``""`` each tile's source well, a sample variable's id its
+    #: well's value of that variable, ``"none"`` no stripe (``_window_controller.composite_colouring``).
+    composite_colour: str = ""
     #: The **Display range** of each image channel, ``channel key -> (low, high)`` in the raw image's units
     #: (``controller.display_key``): the window every picture of that channel on the page is drawn with — the crop
     #: strip, the pop-out, the Extremes montage and the Array view's full resolution. The page's own and kept with
@@ -381,6 +384,7 @@ class NanowellState:
                 "popout_grid": self.popout_grid, "popout_cols": self.popout_cols,
                 "windows": {k: w.to_config() for k, w in self.windows.items()},
                 "popout_source": self.popout_source, "popout_layout": self.popout_layout,
+                "composite_colour": self.composite_colour,
                 "display_ranges": {k: [lo, hi] for k, (lo, hi) in self.display_ranges.items()},
                 "subset": self.subset.to_config(), "saved_subsets": saved_to_config(self.saved_subsets),
                 "layers": self.layers.to_config(),
@@ -434,6 +438,8 @@ class NanowellState:
         self.windows = _windows_from(config.get("windows"))
         self.popout_source = _choice(config.get("popout_source"), POPOUT_SOURCES, fresh.popout_source)
         self.popout_layout = _choice(config.get("popout_layout"), POPOUT_LAYOUTS, fresh.popout_layout)
+        colour = config.get("composite_colour")
+        self.composite_colour = colour if isinstance(colour, str) else fresh.composite_colour
         self.display_ranges = _display_ranges_from(config.get("display_ranges"))
         tps = config.get("extremes_tps")
         self.extremes_tps = [str(tp) for tp in tps if isinstance(tp, str)] if isinstance(tps, list) else []

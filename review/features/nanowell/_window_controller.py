@@ -302,6 +302,54 @@ def set_popout_source(ctx, source: str) -> None:
         _nwc()._set_popout(ctx, popout_source=source)
 
 
+#: **Colour**'s two choices that are not a variable: each tile's source well, and no stripe.
+BY_WELL, NO_COLOUR = "", "none"
+
+
+def composite_colour_choices(ctx) -> list:
+    """``(label, key)`` for **Colour**: *Source well*, each of the plate's sample variables, then *None*."""
+    vset = getattr(getattr(ctx.state, "selection", None), "variables", None)
+    variables = list(getattr(vset, "variables", ()) or ())
+    return [("Source well", BY_WELL)] + [(v.name, v.id) for v in variables] + [("None", NO_COLOUR)]
+
+
+def composite_colour_key(ctx, st) -> str:
+    """The choice in force: the one kept, or *Source well* when it names a variable that no longer exists."""
+    keys = {key for _label, key in composite_colour_choices(ctx)}
+    return st.composite_colour if st.composite_colour in keys else BY_WELL
+
+
+def set_composite_colour(ctx, key) -> None:
+    """**Colour**: what the hex composite's stripes are coloured by (:func:`composite_colour_choices`)."""
+    if isinstance(key, str):
+        _nwc()._set_popout(ctx, composite_colour=key)
+
+
+def composite_colouring(ctx, st, wells) -> tuple[dict, tuple, str]:
+    """``(well -> colour, ((label, colour), …), title)`` for the composite's stripes and their key, over *wells*.
+
+    By well, each well its own rank colour (``ui.theme.WELL_COLORS_TUPLE``, in patch order); by a sample variable,
+    each well's value of it in the ink that value has on every plot (``variable_series.member_inks`` — a well left
+    unfilled, or a set whose wells disagree, gets the inks and names those have there), the key listing only the
+    values drawn; *None*, nothing. A variable deleted since it was chosen colours by well and says so."""
+    from ui.theme import WELL_COLORS_TUPLE
+
+    key = composite_colour_key(ctx, st)
+    if key == NO_COLOUR:
+        return {}, (), ""
+    if key != BY_WELL:
+        from review.domain.variable_series import legend_entries, member_bands, member_inks
+
+        members = {well: [well] for well in wells}
+        inks = member_inks(ctx, "nanowell", key, members)
+        if inks:
+            bands = member_bands(ctx, "nanowell", key, members)
+            name = next((label for label, k in composite_colour_choices(ctx) if k == key), "")
+            return inks, tuple(legend_entries(ctx, key, set(bands.values()))), name
+    inks = {well: WELL_COLORS_TUPLE[i % len(WELL_COLORS_TUPLE)] for i, well in enumerate(wells)}
+    return inks, tuple((well, inks[well]) for well in wells), "Source well"
+
+
 def set_popout_layout(ctx, layout: str) -> None:
     """**Layout** of the window's nanowells (``state.POPOUT_LAYOUTS``); the pages start over."""
     if layout in POPOUT_LAYOUTS:
@@ -346,8 +394,10 @@ def draw_window_popout(ctx, st, fig) -> None:
         sites = [t.source for t in comp.tiles]
         shown_tps = shown_timepoints(st.data.timepoints(), st.popout_tps)
         _want_crops(ctx, st, sites, shown_tps)
+        inks, key, key_title = composite_colouring(ctx, st, [well for well, _x, _y in comp.patches])
         st.popout_tiles = render_composite(
             fig, comp, _page_crops(st, sites, shown_tps), shown_tps, n_total=len(rows),
+            inks=inks, key=key, key_title=key_title,
             display_range=nwc.display_range(ctx), note=strip_text(st), cells=st.crop_cells, view=st.composite_view,
             labels=st.popout_labels)
         return

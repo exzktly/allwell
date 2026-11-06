@@ -12759,9 +12759,15 @@ change in the picture. With Cells on (`NanowellState.crop_cells`) each tile's co
 a crop's: each traced outline (`Crop.outlines`) as a line, a dark rim under the cell colour, and a dot only for a cell
 the run kept no outline of (`_tile_outlines`); every point is mapped from crop pixels into the tile's extent
 (`_to_tile`: pixel `i`'s centre at `i + 0.5` of `2 * TILE / width`). The caption says outlines, dots or both, counts
-the dots and why, and names tiles of a well with no cell table. The stripe along each tile's foot is its source
-well's `WELL_COLORS_TUPLE` colour, and the patch label above it is written in that colour — the stripe's key — which
-the caption states. `on_popout_scroll` (the pop-out canvas's `scroll_event`) zooms every composite axes alike about the
+the dots and why, and names tiles of a well with no cell table. The stripe along each tile's foot is coloured by **Colour**
+(`NanowellState.composite_colour`, persisted; the pop-out's `_nw_popout_colour_cb`, shown in the hex layout only):
+*Source well* (each well its `WELL_COLORS_TUPLE` rank colour in patch order), a sample variable (each well's value in
+the ink `variable_series.member_inks` gives it on every plot, an unfilled well or a disagreeing set inked and named
+as there), or *None* (no stripe). `_window_controller.composite_colouring` resolves it to `well -> colour` and the key's
+`(label, colour)` entries — only the values drawn, from `variable_series.legend_entries` — and a variable deleted since
+it was chosen falls back to *Source well*, the key's title saying so. `_composite_render._draw_key` draws the key under
+the title (`nw-composite-key`, up to eight entries a row, the panels lowered for each row past the first), and the
+caption names what the stripe is; the wells' names above the patches are plain text. `on_popout_scroll` (the pop-out canvas's `scroll_event`) zooms every composite axes alike about the
 pointer by `zoom_compute.wheel_limits`, held against `_aw_composite_home`; a press held and moved past
 `controller.CLICK_SLOP_PX` pans them alike (`on_popout_press` / `on_popout_motion` → `_pan`, `zoom_compute.pan_limits`
 from the limits the press began on), and only a release that never moved selects (`on_popout_release`). Both keep the

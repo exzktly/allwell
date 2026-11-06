@@ -213,21 +213,103 @@ def test_cells_on_draws_each_tile_s_counted_cells_and_the_caption_counts_them():
     assert f"Dots: the {2 * (len(comp.tiles) - 1)} cells" in caption and "1 tile(s) of a well with no cell table" in caption
 
 
-def test_each_patch_label_is_its_stripe_s_colour_and_the_caption_says_so():
-    from matplotlib.colors import to_rgba
+def _stripes(ax):
+    """``tile centre x -> stripe colour`` for one panel."""
+    from matplotlib.colors import to_hex
+
+    return {round(p.get_x() + p.get_width() / 2, 6): to_hex(p.get_facecolor())
+            for p in ax.patches if p.get_gid() == "nw-composite-well"}
+
+
+def _key(fig):
+    keys = [leg for leg in fig.legends if leg.get_gid() == "nw-composite-key"]
+    if not keys:
+        return None
+    return keys[0].get_title().get_text(), [t.get_text() for t in keys[0].get_texts()]
+
+
+def test_by_well_each_well_s_tiles_share_a_stripe_and_the_key_names_the_wells():
+    from matplotlib.colors import to_hex
 
     fig, comp = _draw({})
-    ax = fig.axes[0]
-    stripes = {}
-    for patch in ax.patches:
-        if patch.get_gid() == "nw-composite-well":
-            stripes.setdefault(round(patch.get_x() + patch.get_width() / 2, 6), to_rgba(patch.get_facecolor()))
-    labels = {t.get_text(): to_rgba(t.get_color()) for t in ax.texts if t.get_gid() == "nw-composite-patch"}
+    stripes = _stripes(fig.axes[0])
+    by_well = {}
     for tile in comp.tiles:
-        well = comp.patches[tile.patch][0]
-        assert stripes[round(tile.x, 6)] == labels[well]
-    assert labels["A01"] != labels["B02"]
-    assert "The stripe under a tile is its source well's colour" in _artists(fig, "nw-composite-caption")[0].get_text()
+        by_well.setdefault(comp.patches[tile.patch][0], set()).add(stripes[round(tile.x, 6)])
+    assert all(len(c) == 1 for c in by_well.values()) and by_well["A01"] != by_well["B02"]
+    assert _key(fig) == ("Stripe: Source well", ["A01", "B02"])
+    swatches = [to_hex(h.get_facecolor()) for h in fig.legends[0].legend_handles]
+    assert swatches == [next(iter(by_well["A01"])), next(iter(by_well["B02"]))]
+    assert "The stripe under a tile is its source well, keyed under the title" in _artists(
+        fig, "nw-composite-caption")[0].get_text()
+
+
+def test_given_inks_colour_the_stripes_and_empty_inks_draw_none_and_no_key():
+    comp = cc.composite(_rows())
+    fig = Figure(figsize=(9.0, 6.0))
+    render_composite(fig, comp, {}, "T1", n_total=7, inks={"A01": "#ff0000", "B02": "#0000ff"},
+                     key=(("U2OS", "#ff0000"), ("HeLa", "#0000ff")), key_title="Cell line")
+    stripes = _stripes(fig.axes[0])
+    for tile in comp.tiles:
+        assert stripes[round(tile.x, 6)] == ("#ff0000" if tile.source[0] == "A01" else "#0000ff")
+    assert _key(fig) == ("Stripe: Cell line", ["U2OS", "HeLa"])
+    assert "its well's Cell line" in _artists(fig, "nw-composite-caption")[0].get_text()
+    bare = Figure(figsize=(9.0, 6.0))
+    render_composite(bare, comp, {}, "T1", n_total=7, inks={}, key=())
+    assert _stripes(bare.axes[0]) == {} and _key(bare) is None
+    assert "stripe" not in _artists(bare, "nw-composite-caption")[0].get_text()
+
+
+def test_colouring_by_a_variable_takes_each_well_s_value_ink_from_variable_series():
+    """The wells are assigned against the variable's order — A01 holds its second value — so a colouring that inked
+    wells in patch order, or values in assignment order, would differ from the one every plot uses."""
+    from types import SimpleNamespace
+
+    from review.domain import variable_series as vs
+    from tests.test_nanowell_page_variables import _Ctx
+
+    ctx = _Ctx()
+    st = SimpleNamespace(composite_colour="line")
+    wells = ["A01", "B02", "C01"]
+    inks, key, title = wnc.composite_colouring(ctx, st, wells)
+    assert inks == vs.member_inks(ctx, "nanowell", "line", {w: [w] for w in wells})
+    assert inks["B02"] == inks["C01"] != inks["A01"]
+    assert [label for label, _c in key] == ["HeLa", "U2OS"] and title == "Cell line"
+    assert dict(key)["U2OS"] == inks["A01"]
+    st.composite_colour = "dose"                                   # C01 left unfilled: its own ink and name
+    inks, key, _title = wnc.composite_colouring(ctx, st, wells)
+    assert set(inks) == set(wells) and len(key) == 3
+    st.composite_colour = "gone"                                    # a variable deleted since: by well, said so
+    inks, key, title = wnc.composite_colouring(ctx, st, wells)
+    assert title == "Source well" and [label for label, _c in key] == wells
+    st.composite_colour = wnc.NO_COLOUR
+    assert wnc.composite_colouring(ctx, st, wells) == ({}, (), "")
+    labels = [label for label, _k in wnc.composite_colour_choices(ctx)]
+    assert labels == ["Source well", "Cell line", "Dose", "None"]
+
+
+def test_the_colour_choice_is_kept_with_the_page():
+    from review.features.nanowell.state import NanowellState
+
+    st = NanowellState()
+    st.composite_colour = "line"
+    again = NanowellState()
+    again.apply_config(st.to_config())
+    assert again.composite_colour == "line"
+    again.apply_config({"composite_colour": 3})
+    assert again.composite_colour == ""
+
+
+def test_colour_is_offered_only_for_the_hex_and_none_takes_the_stripes_away(page, qtbot):  # noqa: F811
+    st = _open_hex(page, qtbot)
+    combo = page.widgets.get("_nw_popout_colour_cb")
+    fig = page.widgets.get("_nw_popout_fig")
+    assert not combo.isHidden() and combo.currentData() == wnc.BY_WELL
+    assert _stripes(fig.axes[0]) and _key(fig)[0] == "Stripe: Source well"
+    combo.setCurrentIndex(combo.findData(wnc.NO_COLOUR))
+    assert st.composite_colour == wnc.NO_COLOUR and _stripes(fig.axes[0]) == {} and _key(fig) is None
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(0)                    # Rows: no stripes to colour
+    assert combo.isHidden()
 
 
 def test_the_cells_box_draws_the_cells_on_the_hex_composite(page, qtbot, monkeypatch):  # noqa: F811

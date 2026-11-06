@@ -121,13 +121,17 @@ _LAYOUT_TIP = ("How the window's nanowells are laid out: one row of crops over t
                "as an artificial hex array, a patch for each source well, once per timepoint chosen in Timepoints, side by "
                "side (Hex).")
 _LAYOUT_NAMES = {"rows": "Rows", "hex": "Hex"}
+_COLOUR_TIP = ("What the stripe under each tile of the hex composite says, keyed under the title: the tile's source "
+               "well, its well's value of a sample variable (the same colours that variable has on every plot), or "
+               "nothing.")
 
 
 def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     """The pop-out's row for the window: **Show** (this nanowell | the window), **Layout**, and ◀ Page k of n ▶. The
     hex composite's timepoints are the **Timepoints** menu's, drawn side by side (``popout_view``), so there is no
     stepper here. While the window is shown, the row above's **Go to nanowell** is hidden: it names one nanowell, and
-    the figure is of many from several wells. Registers ``_nw_popout_source_cb``, ``_nw_popout_layout_cb``, ``_nw_popout_page_prev``,
+    the figure is of many from several wells. **Colour** (the hex layout only) chooses what the composite's stripes say.
+    Registers ``_nw_popout_source_cb``, ``_nw_popout_layout_cb``, ``_nw_popout_colour_cb``, ``_nw_popout_page_prev``,
     ``_nw_popout_page_label``, ``_nw_popout_page_next`` and ``_nw_popout_window_refresh``."""
     source = QComboBox(window)
     source.addItem("This nanowell", "selected")
@@ -137,6 +141,9 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     for key in POPOUT_LAYOUTS:
         layout.addItem(_LAYOUT_NAMES[key], key)
     layout.setToolTip(_LAYOUT_TIP)
+    colour = QComboBox(window)
+    colour.setToolTip(_COLOUR_TIP)
+    colour_caption = QLabel("Colour", window)
     prev, following = QToolButton(window), QToolButton(window)
     prev.setText("◀")
     following.setText("▶")
@@ -147,6 +154,8 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     row.addWidget(source)
     row.addWidget(QLabel("Layout", window))
     row.addWidget(layout)
+    row.addWidget(colour_caption)
+    row.addWidget(colour)
     row.addStretch(1)
     for widget in pager:
         row.addWidget(widget)
@@ -157,15 +166,21 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
             return
         in_window = st.popout_source == "window"
         result = wnc.current(st)[1]
-        blocked = [w.blockSignals(True) for w in (source, layout)]
+        blocked = [w.blockSignals(True) for w in (source, layout, colour)]
         try:
             source.setItemText(1, f"Window ({len(result.rows):,})" if result is not None and result.rows else "Window")
             source.setCurrentIndex(source.findData(st.popout_source))
             layout.setCurrentIndex(layout.findData(st.popout_layout))
             layout.setEnabled(in_window)
+            colour.clear()
+            for label, key in wnc.composite_colour_choices(ctx):
+                colour.addItem(label, key)
+            colour.setCurrentIndex(max(0, colour.findData(wnc.composite_colour_key(ctx, st))))
         finally:
-            for widget, was in zip((source, layout), blocked):
+            for widget, was in zip((source, layout, colour), blocked):
                 widget.blockSignals(was)
+        for widget in (colour_caption, colour):
+            widget.setVisible(in_window and st.popout_layout == "hex")
         pages = wnc.page_count(st)
         page.setText(f"Page {st.window_page + 1} of {pages}")
         for widget in pager:
@@ -176,11 +191,13 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
 
     source.currentIndexChanged.connect(lambda _i: wnc.set_popout_source(ctx, source.currentData()))
     layout.currentIndexChanged.connect(lambda _i: wnc.set_popout_layout(ctx, layout.currentData()))
+    colour.currentIndexChanged.connect(lambda _i: wnc.set_composite_colour(ctx, colour.currentData()))
     prev.clicked.connect(lambda _=False: wnc.step_window_page(ctx, -1))
     following.clicked.connect(lambda _=False: wnc.step_window_page(ctx, 1))
     reg = ctx.widgets
     reg.register("_nw_popout_source_cb", source)
     reg.register("_nw_popout_layout_cb", layout)
+    reg.register("_nw_popout_colour_cb", colour)
     reg.register("_nw_popout_page_prev", prev)
     reg.register("_nw_popout_page_label", page)
     reg.register("_nw_popout_page_next", following)

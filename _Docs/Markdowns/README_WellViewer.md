@@ -6670,9 +6670,10 @@ A row whose crops are not yet cut says so; one that cannot be cut says why.
 **Layout: Hex** draws the same nanowells all at once as an **artificial hex array — a composite, not a well**. Each
 source well has its own labelled patch, and inside a patch the nanowells are placed by rank, the first at the patch's
 centre and the rest spiralling outward, so a position says nothing about where a nanowell sat in its well. Tiles are
-drawn apart inside a dashed frame, and the title says it is not a real array. Each tile has a coloured **stripe** along
-its foot: the colour of its source well, which is the colour that well's name is written in above its patch (the
-caption says so too), so a tile can be told to its well at a glance. Every tile is its nanowell's crop at one size and
+drawn apart inside a dashed frame, and the title says it is not a real array. Each tile has a coloured **stripe**
+along its foot, and **Colour** (beside **Layout**, in the Hex layout) chooses what it says: *Source well*, any of the
+plate's sample variables (each well's value of it, in the same colour that value has on every plot — a well left
+unfilled is named as such), or *None* for no stripe. A key under the title names each colour drawn. Every tile is its nanowell's crop at one size and
 all are on one brightness scale, so wells of different exposure compare. It shows 91 nanowells a page (◀ ▶ turn it),
 drawn once for each timepoint ticked in **Timepoints**, side by side in one row — the same tile at the same place in
 every copy, all on the one brightness scale, so a change over time reads as a change in the picture. Pick the

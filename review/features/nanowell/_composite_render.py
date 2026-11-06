@@ -3,8 +3,9 @@ layout, with a patch label for each source well.
 
 It is drawn to be read as what it is — an artificial array, not a well. Tiles are apart with a gap between them, the
 whole sits in a dashed frame, nothing is drawn under it (no montage, no central-square mark), the title says it is not a
-real array, and each tile carries a thin stripe along its foot in its source well's colour — the colour that well's
-label above its patch is written in, which the caption says, so the stripe has its key on the figure. Every tile is on **one** brightness
+real array, and each tile carries a thin stripe along its foot coloured by what the pop-out's **Colour** chose — its
+source well, or its well's value of a sample variable — with a key under the title naming each colour drawn (or no
+stripe at all). Every tile is on **one** brightness
 scale. A tile with no image at the timepoint is a hatched hexagon, and the caption counts those by reason: degraded
 output must not look like good output.
 """
@@ -24,12 +25,38 @@ TILE = 0.46
 _MARK = 0.08
 
 
-def _panel_rects(n: int) -> list:
-    """Figure-fraction ``[left, bottom, width, height]`` of *n* panels side by side in one row, inside the band
-    between the title and the caption."""
-    left, bottom, width, height = 0.02, 0.10, 0.96, 0.80
+def _panel_rects(n: int, top: float = 0.852) -> list:
+    """Figure-fraction ``[left, bottom, width, height]`` of *n* panels side by side in one row, between the caption
+    and *top* (lowered under a key of more than one row)."""
+    left, bottom, width = 0.02, 0.10, 0.96
     cell_w = width / max(1, n)
-    return [[left + k * cell_w, bottom, cell_w, height * 0.94] for k in range(n)]
+    return [[left + k * cell_w, bottom, cell_w, max(top - bottom, 0.2)] for k in range(n)]
+
+
+#: The most entries in one row of the stripes' key, and the height a row takes, as a fraction of the figure.
+_KEY_COLUMNS, _KEY_ROW = 8, 0.04
+
+
+def _draw_key(fig, key, title: str, ink) -> float:
+    """The stripes' key under the title — a swatch and a label per colour drawn — and the top the panels keep below
+    it."""
+    import math
+
+    from matplotlib.patches import Patch
+
+    if not key:
+        return 0.852
+    columns = min(len(key), _KEY_COLUMNS)
+    rows = math.ceil(len(key) / columns)
+    legend = fig.legend([Patch(facecolor=colour, edgecolor="none") for _label, colour in key],
+                        [label for label, _colour in key], loc="upper left", bbox_to_anchor=(0.02, 0.935),
+                        ncol=columns, fontsize=7, frameon=False, handlelength=1.2, handleheight=0.6,
+                        columnspacing=1.0, title=f"Stripe: {title}", title_fontsize=7, alignment="left")
+    legend.set_gid("nw-composite-key")
+    for text in legend.get_texts() + [legend.get_title()]:
+        _ink(text)
+        text.set_color(ink)
+    return 0.852 - rows * _KEY_ROW
 
 
 def _to_tile(tile, shape, points) -> np.ndarray:
@@ -58,15 +85,16 @@ def _tile_outlines(tile, crop) -> tuple[list, np.ndarray]:
     return lines, np.array([not o for o in outlines], dtype=bool)
 
 
-def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, colours, cells: Counter | None) -> None:
+def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, inks: dict,
+                cells: Counter | None) -> None:
     """One composite at *timepoint* on *ax*: its tiles (or the hatched placeholder, counted into *missing*), each
-    tile's counted cells when *cells* is a tally (``None``: Cells off), the patch stripes and labels, and the dashed
-    frame."""
+    tile's counted cells when *cells* is a tally (``None``: Cells off), each tile's stripe in its well's colour of
+    *inks* (``well -> colour``; none drawn for a well it lacks), the wells' names and the dashed frame."""
     from ui.nanowell_sites import CELL_COLOUR, CELL_EDGE_COLOUR
 
     from matplotlib.collections import LineCollection
 
-    _bg, _ink_colour, faint = _inks(ax)
+    _bg, ink, faint = _inks(ax)
     dots, outlines = [], []
     for tile in comp.tiles:
         crop = (crops.get(tile.source) or {}).get(timepoint)
@@ -90,8 +118,10 @@ def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, 
             missing[why] += 1
             ax.add_patch(RegularPolygon((tile.x, tile.y), 6, radius=0.5, fill=False, hatch="////", linewidth=0.6,
                                         edgecolor=faint, gid="nw-composite-missing"))
-        ax.add_patch(Rectangle((tile.x - TILE, tile.y + TILE - _MARK), 2 * TILE, _MARK, linewidth=0,
-                               facecolor=colours[tile.patch % len(colours)], gid="nw-composite-well"))
+        colour = inks.get(comp.patches[tile.patch][0])
+        if colour is not None:
+            ax.add_patch(Rectangle((tile.x - TILE, tile.y + TILE - _MARK), 2 * TILE, _MARK, linewidth=0,
+                                   facecolor=colour, gid="nw-composite-well"))
     if outlines:
         # The rim colour under the fill colour, so an outline reads on a bright cell and a dark floor alike.
         ax.add_collection(LineCollection(outlines, colors=CELL_EDGE_COLOUR, linewidths=1.2, zorder=5,
@@ -102,11 +132,8 @@ def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, 
         xy = np.vstack(dots)
         ax.scatter(xy[:, 0], xy[:, 1], s=CELL_DOT_PT2 / 3, c=CELL_COLOUR, edgecolors=CELL_EDGE_COLOUR, linewidths=0.3,
                    zorder=5, gid="nw-composite-cells")
-    for p, (well, x, y) in enumerate(comp.patches):
-        # Written in the colour of its tiles' stripes: the label is the stripe's key. Not theme-inked, so a capture
-        # flipped to publication keeps it.
-        ax.text(x, y, well, ha="center", va="bottom", fontsize=8, fontweight="bold", color=colours[p % len(colours)],
-                gid="nw-composite-patch")
+    for well, x, y in comp.patches:
+        _ink(ax.text(x, y, well, ha="center", va="bottom", fontsize=8, color=ink, gid="nw-composite-patch"))
     if comp.tiles:
         xs = [t.x for t in comp.tiles]
         ys = [t.y for t in comp.tiles]
@@ -123,20 +150,25 @@ def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, 
 
 
 def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, display_range=None, note: str = "",
-                     cells: bool = False, view=None, labels: bool = True) -> list:
+                     cells: bool = False, view=None, labels: bool = True, inks: dict | None = None, key=None,
+                     key_title: str = "Source well") -> list:
     """Draw *comp* (``composite_compute.Composite``) on *fig* (cleared first), once per timepoint of *timepoints*,
     side by side in one row; returns ``[(x, y, site, rank)]`` for turning a pointer position into a tile — every
     panel puts a tile at the same place. *cells* draws each tile's counted cells — traced outlines, a dot where the run
     kept none; *view* ``(xlim, ylim)`` is the zoom or pan the pointer left (``_window_controller``), applied to every
-    panel alike. *labels* off (the
-    pop-out's **Labels**) leaves out each panel's timepoint and the caption; the title and the wells' names, which
-    are the stripes' key, stay.
+    panel alike. *labels* off (the pop-out's **Labels**) leaves out each panel's timepoint and the caption; the title,
+    the wells' names and the stripes' key stay. *inks* (``well -> colour``) colours each tile's stripe and *key*
+    (``(label, colour)`` pairs, titled *key_title*) is their key under the title; with *inks* ``None`` each well takes
+    its rank colour in patch order and the key names the wells, and with *inks* empty no stripe is drawn.
 
     *crops* is ``(well, q, r) -> {timepoint: Crop}`` for the nanowells cut so far; *n_total* is how many nanowells the
     window holds (the composite is one page of them), *note* the sentence the caption leads with. Every tile of every
     panel is on one brightness scale, so a change over time reads as a change in the picture."""
     from ui.theme import WELL_COLORS_TUPLE
 
+    if inks is None:
+        inks = {well: WELL_COLORS_TUPLE[i % len(WELL_COLORS_TUPLE)] for i, (well, _x, _y) in enumerate(comp.patches)}
+        key = tuple((well, inks[well]) for well, _x, _y in comp.patches)
     timepoints = [str(timepoints)] if isinstance(timepoints, str) else [str(tp) for tp in timepoints]
     timepoints = timepoints or [""]                      # a figure always has a panel; callers pass at least one
     fig.clear()
@@ -144,13 +176,14 @@ def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, displa
     missing: Counter = Counter()
     tally: Counter | None = Counter() if cells else None
     several = len(timepoints) > 1
-    ink = faint = None
-    for timepoint, rect in zip(timepoints, _panel_rects(len(timepoints))):
+    _bg, ink, faint = _inks(fig)
+    top = _draw_key(fig, key if inks else (), key_title, ink)
+    for timepoint, rect in zip(timepoints, _panel_rects(len(timepoints), top)):
         ax = fig.add_axes(rect)
         ax.set_axis_off()
         ax._aw_image_panel = True                        # pixel for pixel: no typed axis range on it
         _bg, ink, faint = _inks(ax)
-        _draw_panel(ax, comp, crops, timepoint, scale, missing, WELL_COLORS_TUPLE, tally)
+        _draw_panel(ax, comp, crops, timepoint, scale, missing, inks, tally)
         if view is not None:
             ax.set_xlim(*view[0])
             ax.set_ylim(*view[1])
@@ -159,8 +192,11 @@ def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, displa
     said_tps = timepoints[0] if not several else f"{len(timepoints)} timepoints"
     _ink(fig.text(0.02, 0.97, comp.title(n_total) + f" · {said_tps}", va="top", fontsize=10, color=ink,
                   gid="nw-composite-title"))
-    said = ("Each tile is its nanowell's crop at one size; every tile on " + scale.said() + ". The stripe under a "
-            "tile is its source well's colour, the colour of that well's name above its patch. Scroll to zoom.")
+    said = "Each tile is its nanowell's crop at one size; every tile on " + scale.said() + "."
+    if inks:
+        what = "source well" if key_title == "Source well" else f"well's {key_title}"
+        said += f" The stripe under a tile is its {what}, keyed under the title."
+    said += " Scroll to zoom, drag to pan."
     if tally is not None:
         outlined, drawn = tally["outlined"], tally["drawn"]
         what = ("Outlines" if drawn and outlined == drawn else "Outlines and dots" if outlined else "Dots")

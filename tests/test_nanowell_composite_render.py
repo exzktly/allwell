@@ -325,7 +325,10 @@ def test_the_cells_box_draws_the_cells_on_the_hex_composite(page, qtbot, monkeyp
     fig = page.widgets.get("_nw_popout_fig")
     dots = lambda: sum(len(c.get_offsets()) for ax in fig.axes for c in ax.collections  # noqa: E731
                        if c.get_gid() == "nw-composite-cells")
-    qtbot.waitUntil(lambda: bool([im for ax in fig.axes for im in ax.images]), timeout=10000)
+    # The crops are cut a timepoint per pass: wait for every panel, not the first, or the count below is of
+    # whichever timepoints happen to have arrived (CI's slower runner caught one of two).
+    qtbot.waitUntil(lambda: fig.axes and all(len(ax.images) == len(st.popout_tiles) for ax in fig.axes),
+                    timeout=10000)
     assert dots() == 0
     page.widgets.get("_nw_popout_cells_box").click()
     n_tiles = len(st.popout_tiles)

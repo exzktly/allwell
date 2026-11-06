@@ -22,6 +22,7 @@ from review.features.nanowell import subset_compute as ss
 from review.features.nanowell import window_compute as wc
 from review.features.nanowell._composite_render import render_composite
 from review.features.nanowell._window_render import DRAG_GID, draw_drag, draw_window
+from review.features.nanowell.distribution_compute import METRICS, PER_NANOWELL, metric_column
 from review.features.nanowell.crop_grid_compute import shown_timepoints
 from review.features.nanowell.renderer import DENSITY_ABOVE, MAX_PANELS, render_message, render_site_rows
 from review.features.nanowell.state import POPOUT_LAYOUTS, POPOUT_SOURCES
@@ -356,8 +357,6 @@ BY_RANK = ""
 
 def composite_sort_choices() -> list:
     """``(label, key)`` for **Sort**: the window's rank, then every metric the page's Metric menu offers."""
-    from review.features.nanowell.distribution_compute import METRICS
-
     return [("Window rank", BY_RANK)] + [(label, key) for key, (label, _needs) in METRICS.items()]
 
 
@@ -379,8 +378,6 @@ def composite_order(ctx, st, sites, timepoint) -> tuple[dict | None, str]:
     metric), read from the page's metrics, and the sentence naming it — the metric the page could resolve, with its
     channel, and the order. A metric that cannot be read (a fluorescence metric with no channel) falls back to rank
     and the sentence says why."""
-    from review.features.nanowell.distribution_compute import METRICS, PER_NANOWELL, metric_column
-
     key = st.composite_sort
     if key not in METRICS or st.metrics is None or st.data is None:
         return None, "rank"

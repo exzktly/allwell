@@ -16,9 +16,41 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
+
+#: The Parameter column never takes less than this, however narrow the page.
+_PARAM_COLUMN_MIN_W = 120
+
+
+class _ParameterColumnFit(QObject):
+    """Keeps the Parameter column from pushing the Value column out of view.
+
+    The column is sized to its widest key, and the raw ``pipeline_info.json``
+    dump has long ones — on a phone-width page that was most of the tree, and
+    the Value column, the part worth reading, sat past the right edge. The
+    column takes its natural width up to half the viewport (a long key then
+    elides) and the Value column keeps the rest, at any width.
+    """
+
+    def __init__(self, tree: QTreeWidget) -> None:
+        super().__init__(tree)
+        self._tree = tree
+        tree.viewport().installEventFilter(self)
+
+    def fit(self) -> None:
+        tree = self._tree
+        tree.resizeColumnToContents(0)
+        cap = max(_PARAM_COLUMN_MIN_W, tree.viewport().width() // 2)
+        if tree.columnWidth(0) > cap:
+            tree.setColumnWidth(0, cap)
+
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
+        if event.type() == QEvent.Resize:
+            self.fit()
+        return False
 
 
 def _raw_pipeline_info(ctx) -> dict:
@@ -90,6 +122,7 @@ def build_pipeline_info_subtab(ctx, parent: QWidget) -> None:
         f"background:{_c.accent}; color:{_c.ink_dark}; }}"
     )
     tree.header().setStretchLastSection(True)
+    fitter = _ParameterColumnFit(tree)
     layout.addWidget(tree, 1)
 
     ctx.widgets.register("_pipeline_info_tree", tree)
@@ -186,7 +219,7 @@ def build_pipeline_info_subtab(ctx, parent: QWidget) -> None:
             _add_node(raw_node, k, info[k])
         raw_node.setExpanded(False)
 
-        tree.resizeColumnToContents(0)
+        fitter.fit()
 
     reload_ib.clicked.connect(lambda _=False: _refresh())
     # Live-callback stamp (AppRuntime's sanctioned case): Home's sub-tab switch

@@ -166,6 +166,52 @@ def test_heat_map_placeholder_retracts_when_its_layout_is_filled(loaded_app):
 
 
 @pytest.mark.slow
+def test_heat_map_placeholder_retracts_on_a_dataset_with_no_timepoints(loaded_app):
+    """The retraction must not depend on there being a timepoint to draw.
+
+    A dataset whose rows carry no ``timepoint_hours`` gives the Heat Map no timepoint, and its draw then
+    ends early with "No timepoints loaded." on the canvas. The refresh of the placeholder sat at the foot
+    of the full draw, so filling the layout left "No wells on this heat map." standing over it.
+    """
+    from PySide6.QtWidgets import QStackedWidget
+
+    from review.features.heatmap.controller import active_layout
+    from review.features.heatmap.sidebar_view import _on_autopopulate
+    from tests.fixtures.mini_dataset import WELLS
+
+    app = loaded_app
+    ctx = app._ctx
+    _open(app, "Plotting")
+    app._plotting_notebook.setCurrentByName("Heat Map")
+    app._drain_pending_centre_builders()
+
+    stack = ctx.widgets.get_or_none("_heatmap_canvas")
+    while stack is not None and not (
+        isinstance(stack, QStackedWidget) and stack.objectName() == "PlotEmptyStateStack"
+    ):
+        stack = stack.parentWidget()
+    assert stack is not None, "the heat map canvas is not inside an empty-state stack"
+
+    from review.core.ui_helpers import refresh_empty_state_pages
+    from review.features.heatmap.sidebar_view import _ensure_sidebar_layout
+
+    ctx.runtime.heatmap.layouts = []
+    _ensure_sidebar_layout(ctx).cells.clear()          # the empty layout the sidebar seeds
+    ctx.state.heatmap.tp_values = []
+    ctx.widgets.get("_heatmap_tp_cb").clear()          # no timepoint to select
+    app._set_selected_wells(set(WELLS), commit=True)
+    ctx.features.redraw(ctx, "Heat Map")
+    refresh_empty_state_pages(app)
+    assert stack.currentIndex() == 0, "an empty layout should show the placeholder"
+
+    _on_autopopulate(ctx)
+    assert active_layout(ctx).cells, "auto-populate should have filled the layout"
+    assert stack.currentIndex() == 1, (
+        "the layout is populated, so the placeholder that told the user to populate it must be gone, "
+        "even though there is no timepoint to draw")
+
+
+@pytest.mark.slow
 def test_spatial_placeholder_retracts_at_summary_level(loaded_app):
     """Spatial's reason is level-dependent, so a level change must re-run it.
 

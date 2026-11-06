@@ -221,6 +221,28 @@ def test_the_lead_in_carries_that_indent_onto_the_widget(qtbot):
     lbl = _lead_in(parent, "Always applied:")
     assert lbl.contentsMargins().left() == SECTION_HEADER_MARGINS[0]
 
+
+def test_the_tab_can_shrink_to_a_phone_width_viewport(loaded_app, qtbot):
+    """Nothing on the tab holds it wider than a phone's 414 px viewport.
+
+    The tab scrolls vertically only, so whatever the content's minimum width is
+    past the viewport is unreachable. It was 770 px — the threshold table's
+    fixed 160 px channel column and non-wrapping 240 px headers, two radio
+    labels that would not wrap, and three rows of buttons — and 466 px with
+    only some of those fixed; asserted on the content's minimum so a single
+    one coming back fails it.
+    """
+    from PySide6.QtWidgets import QScrollArea
+
+    ctx = loaded_app._ctx
+    parent = _build(ctx, qtbot)
+    parent.resize(414, 900)
+    parent.show()
+    scroll = parent.findChild(QScrollArea)
+    assert scroll is not None
+    assert scroll.widget().minimumSizeHint().width() <= 414
+
+
 def test_pressing_optimize_writes_the_cutoff_the_scan_chose(loaded_app, qtbot,
                                                             monkeypatch):
     """The button, pressed, end to end — not the helper underneath it.

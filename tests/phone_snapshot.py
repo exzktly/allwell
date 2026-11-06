@@ -146,7 +146,7 @@ def _review_pages(win, qapp, take, *, first_page_only: bool) -> None:
             take(f"review/{key}/{bar.tabText(i)}")
 
 
-def collect(win, qapp) -> dict[str, dict[str, dict]]:
+def collect(win, qapp, screen=None) -> dict[str, dict[str, dict]]:
     """Put a loaded window in phone layout and snapshot every page of every
     mode, upright; then the first page of each section and both Analyze views
     sideways; then two pages at the large text size, which restyles the window
@@ -154,7 +154,12 @@ def collect(win, qapp) -> dict[str, dict[str, dict]]:
     moves). Returns ``{scenario: snapshot}``.
 
     The caller has loaded a dataset into ``win._review`` and left the window
-    at the desk. Phone layout is left on."""
+    at the desk. Phone layout is left on.
+
+    *screen* is a ``tests._screens.FakeScreen`` standing for the phone, upright, with the window
+    placed on it: sideways is then the phone turned (``screen.turn``), which is what a person does.
+    Without one the screen is whatever Qt reports, and sideways is forced by overriding the shell's
+    own question, which is the only way to get it on a square screen."""
     shell = win._phone
     out: dict[str, dict[str, dict]] = {}
 
@@ -176,6 +181,11 @@ def collect(win, qapp) -> dict[str, dict[str, dict]]:
 
     shell.desk_button.click()
     _pump(qapp, 60)
+    if screen is not None:
+        # Going into phone layout maximizes the window, and a maximized window takes the size of the
+        # *real* screen, not the fake one.
+        from tests._screens import place
+        place(win, screen.rect, qapp)
 
     _review_pages(win, qapp, lambda n: take(n), first_page_only=False)
     win._on_titlebar_mode_seg(2)
@@ -191,9 +201,15 @@ def collect(win, qapp) -> dict[str, dict[str, dict]]:
         _pump(qapp)
         take(f"analyze/{view}")
 
-    # Sideways: this offscreen screen is square, so the shape is forced.
+    # Sideways.
     real = shell.is_landscape
-    shell.is_landscape = lambda: True
+    if screen is None:
+        shell.is_landscape = lambda: True
+    else:
+        from tests._screens import PHONE_SIDEWAYS, PHONE_UPRIGHT, place
+        upright = screen.rect
+        screen.turn(PHONE_SIDEWAYS)
+        place(win, PHONE_SIDEWAYS, qapp)
     try:
         shell._apply_sizes()
         _pump(qapp)
@@ -206,6 +222,9 @@ def collect(win, qapp) -> dict[str, dict[str, dict]]:
         _review_pages(win, qapp, lambda n: take(f"sideways/{n}"), first_page_only=True)
     finally:
         shell.is_landscape = real
+        if screen is not None:
+            screen.turn(upright)
+            place(win, PHONE_UPRIGHT, qapp)
         shell._apply_sizes()
         _pump(qapp)
 

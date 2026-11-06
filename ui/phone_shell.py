@@ -66,6 +66,17 @@ PHONE_MIN_W, PHONE_MIN_H = 320, 400
 #: Qt's QWIDGETSIZE_MAX — what lifts a size pin.
 _QWIDGETSIZE_MAX = 16_777_215
 
+
+def _menu_text(name: str) -> str:
+    """*name* as button or menu text. Qt reads a single ``&`` as a keyboard mnemonic, drops it and underlines the
+    next letter ("Validate & Repair" drew as "Validate ̲Repair"), so every ``&`` of a page or tool name is doubled."""
+    return name.replace("&", "&&")
+
+
+def _button_label(name: str) -> str:
+    """The page button's text: the page or tool on screen, and the caret that says it opens a menu."""
+    return f"{_menu_text(name)} ▾"
+
 #: How long the restyle overlay outlives the restyle. Taps made during the
 #: freeze are queued and delivered once the event loop resumes; the overlay
 #: must still be there to receive them, or a second tap on the ☰ menu's
@@ -2104,11 +2115,11 @@ class PhoneShell(QObject):
         # else, so a section without pages has none: changing section is ☰'s.
         self.page_button.setVisible((review and bar is not None) or tools or views)
         if views:
-            self.page_button.setText(f"{self._h.page_view()} ▾")
+            self.page_button.setText(_button_label(self._h.page_view()))
         elif tools:
-            self.page_button.setText(f"{self._h.current_tool()} ▾")
+            self.page_button.setText(_button_label(self._h.current_tool()))
         elif bar is not None:
-            self.page_button.setText(f"{bar.tabText(bar.currentIndex())} ▾")
+            self.page_button.setText(_button_label(bar.tabText(bar.currentIndex())))
         self.controls_button.setVisible(review and self._current_band() is not None)
         wells_open = self._wells_sheet is not None and self._wells_sheet.isOpen()
         self.wells_button.setVisible(review and (wells_open or bool(self._well_picker())))
@@ -2163,7 +2174,7 @@ class PhoneShell(QObject):
         if bar is not None:
             self._menu_caption(self._current_section_label())
             for i in range(bar.count()):
-                act = QAction(bar.tabText(i), self._page_menu, checkable=True)
+                act = QAction(_menu_text(bar.tabText(i)), self._page_menu, checkable=True)
                 act.setChecked(i == bar.currentIndex())
                 act.setEnabled(bar.isTabEnabled(i))
                 act.triggered.connect(lambda _c=False, b=bar, idx=i: self._pick_page(b, idx))
@@ -2205,7 +2216,7 @@ class PhoneShell(QObject):
     def _fill_named_menu(self, names, current: str, pick) -> None:
         group = QActionGroup(self._page_menu)
         for name in names:
-            act = QAction(name, self._page_menu, checkable=True)
+            act = QAction(_menu_text(name), self._page_menu, checkable=True)
             act.setChecked(name == current)
             act.triggered.connect(lambda _c=False, n=name: pick(n))
             group.addAction(act)
@@ -2217,7 +2228,7 @@ class PhoneShell(QObject):
 
     def _refresh_tool_label(self) -> None:
         if self._h.mode() == "datasets" and self.page_button.isVisible():
-            self.page_button.setText(f"{self._h.current_tool()} ▾")
+            self.page_button.setText(_button_label(self._h.current_tool()))
 
     def _pick_tool(self, name: str) -> None:
         self._h.show_tool(name)

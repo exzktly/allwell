@@ -63,3 +63,45 @@ def test_autofit_baseline_dips_below_zero_for_negative_means():
     (m_lo, m_hi), _, _ = _render(items)
     assert m_lo <= -0.6      # mean-spread of the negative bar (-0.5-0.1)
     assert m_hi >= 2.2       # tallest positive bar + error
+
+
+def _na_marks_clear_of_panel_top(figsize, items):
+    """Gap in points between each ``n/a`` mark's top and its panel's top edge."""
+    fig, axes = plt.subplots(3, 1, figsize=figsize)
+    render_bar_items(
+        ax_mean=axes[0], ax_frac=axes[1], use_groups=False, items=items,
+        threshold=0.5, warn_color="#ffaa00", border_color="#888888",
+        placeholder_color="#444444", disabled_well_color="#666666",
+        err_bar_color="#ff0000", ax_n=axes[2],
+    )
+    fig.canvas.draw()
+    gaps = []
+    for ax in axes:
+        marks = [t for t in ax.texts if t.get_text() == "n/a"]
+        assert marks, "the panel should carry an n/a mark for the NaN spread"
+        for t in marks:
+            gaps.append((ax.bbox.y1 - t.get_window_extent().y1) * 72.0 / fig.dpi)
+    plt.close(fig)
+    return gaps
+
+
+def test_na_mark_stays_inside_the_panel_whatever_its_height():
+    """A bar at the fraction cap carries an ``n/a`` that must not leave the panel.
+
+    A fraction of 1.0 sat at the 1.05 cap, so the mark drawn 7 pt above it landed
+    over the panel's title. The room is a length in points, so it is checked on
+    a tall and on a short figure; a fixed share of the axis passes one of them.
+    """
+    nan = float("nan")
+    items = [_item("A01", 100.0, nan, 1.0, nan, 5.0, nan),
+             _item("B02", 50.0, nan, 0.4, nan, 3.0, nan)]
+    for figsize in ((6, 9), (6, 3.5)):
+        gaps = _na_marks_clear_of_panel_top(figsize, items)
+        assert min(gaps) >= -0.5, (figsize, gaps)
+
+
+def test_no_mark_means_no_extra_headroom():
+    """Bars whose spread is computed keep the ordinary fit — no room is reserved."""
+    items = [_item("A01", 100.0, 10.0, 1.0, 0.0, 5.0, 1.0)]
+    _, (f_lo, f_hi), _ = _render(items)
+    assert f_hi <= 1.05

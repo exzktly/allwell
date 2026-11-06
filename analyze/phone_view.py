@@ -10,7 +10,11 @@ In phone layout :class:`AnalyzePhoneView` rearranges the same widgets — nothin
 is rebuilt — into two views, picked from the page button (``PhoneShell``):
 
 * **Settings** — the run dashboard reduced to its headline and overall bar
-  (``PlateProgress.setCompact``), then the form, filling the page;
+  (``PlateProgress.setCompact``), then the form, filling the page. Sideways
+  the strip goes too: the pane is ~430 px tall there, and the strip, the
+  pinned footer and the run bar left the form's scroll area 108 px — a
+  sliver. Progress, one tap away, is where a run is watched, and a run
+  starting shows it;
 * **Progress** — the full dashboard (stacked) and the log, fitted to the page
   with no scrolling of the page itself. At full phone width the plate alone
   is ~540 px tall, more than a short screen has to spare once the dashboard's
@@ -75,6 +79,21 @@ class _RefitOnLayout(QObject):
         return False
 
 
+class _RefitOnPaneShape(QObject):
+    """Re-applies the Settings view when the pane turns between upright and
+    sideways: whether the run strip fits above the form depends on it, and the
+    shell (which imports no pane) does not tell the view."""
+
+    def __init__(self, tab: QWidget, view: AnalyzePhoneView) -> None:
+        super().__init__(tab)
+        self._view = view
+
+    def eventFilter(self, obj, ev) -> bool:  # Qt naming
+        if isinstance(ev, QEvent) and ev.type() == QEvent.Resize:
+            self._view.pane_resized()
+        return False
+
+
 class _RunStartWatcher(QObject):
     """Shows Progress when a run starts: the Stop button turning enabled is
     the one signal every way of starting a run shares (Run, the queue, a
@@ -103,6 +122,8 @@ class AnalyzePhoneView:
         self._fitting = False
         self._watched: QWidget | None = None
         self._log_min: int | None = None
+        self._strip_hidden = False
+        tab.installEventFilter(_RefitOnPaneShape(tab, self))
         stop = getattr(tab, "_stop_btn", None)
         if stop is not None:
             stop.installEventFilter(_RunStartWatcher(stop, self))
@@ -121,6 +142,16 @@ class AnalyzePhoneView:
             return
         self._view = name
         if self._on:
+            self._apply_view()
+
+    def sideways(self) -> bool:
+        """The pane is wider than it is tall: a phone held sideways."""
+        tab = self._tab
+        return tab.width() > tab.height()
+
+    def pane_resized(self) -> None:
+        if (self._on and self._view == SETTINGS
+                and self.sideways() != self._strip_hidden):
             self._apply_view()
 
     def run_started(self) -> None:
@@ -194,6 +225,8 @@ class AnalyzePhoneView:
         home, self._home = self._home, None
         self._on = False
         right.setMaximumHeight(_QWIDGETSIZE_MAX)
+        right.setVisible(True)
+        self._strip_hidden = False
         self._release_fit()
         self._tab._dashboard.setCompact(False)
         form.setProperty(PANEL_IS_PAGE, None)
@@ -234,10 +267,14 @@ class AnalyzePhoneView:
                     w.setVisible(False)
             if right.layout() is not None:
                 right.layout().activate()
+            self._strip_hidden = self.sideways()
+            right.setVisible(not self._strip_hidden)
             strip = right.sizeHint().height()
             right.setMaximumHeight(strip)
             splitter.setSizes([strip, _QWIDGETSIZE_MAX])
         else:
+            self._strip_hidden = False
+            right.setVisible(True)
             right.setMaximumHeight(_QWIDGETSIZE_MAX)
             tab._on_toggle_raw_log(tab._raw_log_cb.isChecked())
             if not getattr(tab, "_running", False):

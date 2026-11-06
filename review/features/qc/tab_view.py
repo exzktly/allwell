@@ -41,6 +41,8 @@ from .params import QCParams
 from review.domain.qc_params import _pos
 from core.safe import swallowed
 from ui import theme
+from widgets.capped_label import CappedLabel
+from widgets.flow_layout import FlowLayout, flow_group
 
 # Pixel geometry for this module's controls (ARCHITECTURE §8: named once, never
 # written inline at a call site).
@@ -250,7 +252,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     fq_head_layout.addWidget(fq_cb)
     fq_head_layout.addStretch(1)
     fq_layout.addWidget(fq_head)
-    fq_status = QLabel("", fq)
+    fq_status = CappedLabel("", fq)
     fq_status.setWordWrap(True)
     fq_status.setMaximumWidth(_FQ_TEXT_W)
     fq_layout.addWidget(fq_status)
@@ -258,7 +260,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # the same whether or not the box is ticked — the flags are reported
     # either way — which left the panel saying nothing at all about what
     # ticking it did.
-    fq_effect = QLabel("", fq)
+    fq_effect = CappedLabel("", fq)
     fq_effect.setObjectName("Muted")
     fq_effect.setWordWrap(True)
     fq_effect.setMaximumWidth(_FQ_TEXT_W)
@@ -292,16 +294,16 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     foc_layout.setContentsMargins(0, 6, 0, 0)
     foc_layout.setSpacing(2)
     foc_head = QWidget(foc)
-    foc_head_layout = QHBoxLayout(foc_head)
+    # A flow row: the checkbox, its cut and the curve button together are wider
+    # than a phone, and a horizontal row would hold the whole page that wide.
+    foc_head_layout = FlowLayout(foc_head)
     foc_head_layout.setContentsMargins(0, 0, 0, 0)
     foc_cb = QCheckBox("Exclude out-of-focus cells", foc_head)
     foc_cb.setChecked(bool(params.exclude_soft_cells))
     foc_cb.setToolTip(_FOCUS_TOOLTIP)
     foc_head_layout.addWidget(foc_cb)
-    foc_head_layout.addSpacing(8)
     foc_below = QLabel("below", foc_head)
     foc_below.setObjectName("Muted")
-    foc_head_layout.addWidget(foc_below)
     # The cut sits ON the checkbox's own row rather than under it: it is the
     # checkbox's operand, and every other number on this panel that qualifies
     # a rule sits beside the rule. A row of its own read as a fifth debris
@@ -320,8 +322,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         "saturated plate reads sharper than it is.\n"
         "Distribution… beside this box draws the selected well's own curve "
         "with a live count of what a cut would keep and drop.")
-    foc_head_layout.addWidget(foc_edit)
-    foc_head_layout.addSpacing(8)
+    # "below" stays glued to the box it qualifies when the row wraps.
+    foc_head_layout.addWidget(flow_group(foc_head, foc_below, foc_edit))
     # The evidence for the number, beside the box it goes in. The Playground
     # draws one FIELD of one channel; the cut applies to the whole dataset, so
     # a per-WELL curve is the one that answers "what will this do to my data".
@@ -338,13 +340,12 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     foc_curve_btn.clicked.connect(
         lambda _=False: _show_well_focus_curve(ctx))
     foc_head_layout.addWidget(foc_curve_btn)
-    foc_head_layout.addStretch(1)
     foc_layout.addWidget(foc_head)
-    foc_status = QLabel("", foc)
+    foc_status = CappedLabel("", foc)
     foc_status.setWordWrap(True)
     foc_status.setMaximumWidth(_FQ_TEXT_W)
     foc_layout.addWidget(foc_status)
-    foc_effect = QLabel("", foc)
+    foc_effect = CappedLabel("", foc)
     foc_effect.setObjectName("Muted")
     foc_effect.setWordWrap(True)
     foc_effect.setMaximumWidth(_FQ_TEXT_W)
@@ -376,7 +377,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     brd_cb.setChecked(bool(params.exclude_border_cells))
     brd_cb.setToolTip(_BORDER_TOOLTIP)
     brd_layout.addWidget(brd_cb)
-    brd_status = QLabel("", brd)
+    brd_status = CappedLabel("", brd)
     brd_status.setObjectName("Muted")
     brd_status.setWordWrap(True)
     brd_status.setMaximumWidth(_FQ_TEXT_W)

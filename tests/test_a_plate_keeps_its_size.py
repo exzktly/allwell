@@ -135,3 +135,74 @@ def test_a_plate_still_scales_down_in_a_narrow_container(qapp):
     assert widths == sorted(widths, reverse=True), widths
     assert heights == sorted(heights, reverse=True), heights
     assert len(set(heights)) > 1, "the height stopped tracking the width"
+
+
+def _drawn_header_labels(plate):
+    """Every column number and row letter the plate paints, as ``(text, rect,
+    advance, line height)`` in the font the painter held when it drew it.
+
+    Asserted at the painter — the boundary — not through a helper the fix adds:
+    a plate paints its labels from ``paintEvent`` and nothing else says what
+    reached the screen."""
+    import widgets.well_plate_selector as wps
+    from PySide6.QtGui import QFontMetricsF, QPainter
+
+    drawn = []
+
+    class _Spy(QPainter):
+        def drawText(self, *args):  # Qt naming
+            if len(args) == 3 and isinstance(args[2], str):
+                metrics = QFontMetricsF(self.font())
+                drawn.append((args[2], args[0], metrics.horizontalAdvance(args[2]), metrics.height()))
+            return super().drawText(*args)
+
+    real = wps.QPainter
+    wps.QPainter = _Spy
+    try:
+        plate.grab()  # the plate paints itself into a pixmap, through the module's QPainter
+    finally:
+        wps.QPainter = real
+    return [d for d in drawn if d[0].isdigit() or d[0] in "ABCDEFGH"]
+
+
+def _own_metrics(plate):
+    """The grid's own font, measured the way the spy measures the painted one."""
+    from PySide6.QtGui import QFontMetricsF
+    return QFontMetricsF(plate._grid.font())
+
+
+def test_the_column_numbers_and_row_letters_fit_a_shrunk_plate(qapp):
+    """A plate fitted small (Analyze's phone Progress view) kept drawing its labels at the widget's font: "10 11 12"
+    ran together and the letters A–H stood on one another. Each label must fit the pitch it is centred in.
+
+    Fixture: the plate is made small enough that the widget's own font is wider than a column — at the default size
+    "12" is ~12 px and the pitch here is ~11 px — so a plate that draws at its own font fails."""
+    plate = WellPlateSelector()
+    # Capped the way Analyze's fit caps it (analyze/phone_view.py): a plate has a floor of its own, so a bare
+    # resize() leaves it roomier than this.
+    plate.setMaximumSize(150, plate.heightForWidth(150))
+    plate.resize(150, plate.heightForWidth(150))
+    plate.show()
+    qapp.processEvents()
+    _lab, cell, _ox, _oy = plate._grid._metrics()
+    own = _own_metrics(plate)
+    assert own.horizontalAdvance("12") > cell, "fixture too roomy: the plate's own font already fits a column"
+
+    labels = _drawn_header_labels(plate)
+    assert len(labels) == 12 + 8, f"expected 12 column numbers and 8 row letters, drew {len(labels)}"
+    for text, rect, advance, height in labels:
+        if text.isdigit():
+            assert advance <= rect.width() + 0.5, f"column {text!r} is {advance:.1f}px wide in a {rect.width():.1f}px column"
+        else:
+            assert height <= rect.height() + 0.5, f"row {text!r} is {height:.1f}px tall in a {rect.height():.1f}px row"
+
+
+def test_a_roomy_plate_keeps_its_labels_at_the_widget_font(qapp):
+    """The shrink is for a plate that needs it: at full size the labels are drawn at the widget's own size."""
+    plate = WellPlateSelector()
+    plate.resize(520, 360)
+    plate.show()
+    qapp.processEvents()
+    labels = _drawn_header_labels(plate)
+    own = _own_metrics(plate)
+    assert {round(a, 1) for text, _r, a, _h in labels if text == "12"} == {round(own.horizontalAdvance("12"), 1)}

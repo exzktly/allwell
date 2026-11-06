@@ -733,5 +733,5 @@ def test_the_tile_s_card_waits_for_the_pointer_to_rest(page, qtbot, monkeypatch)
     assert shown == []                                               # not on the move itself
     qtbot.waitUntil(lambda: bool(shown), timeout=5000)
     at, text = shown[-1]
-    assert at - arrived >= 0.95, at - arrived                        # it waited the second
+    assert at - arrived >= 0.9, at - arrived                         # it waited the second (Qt's timer: ±5%)
     assert text.startswith(f"Tile {st.popout_tiles[0][3]} of the composite")

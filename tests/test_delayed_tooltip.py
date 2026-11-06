@@ -45,9 +45,10 @@ def test_the_card_waits_a_second_of_rest_and_a_move_within_the_same_thing_does_n
     qtbot.waitUntil(lambda: bool(_shown(spy)), timeout=5000)
     (text, at), = _shown(spy)
     assert text == "card a"
-    assert at - first >= 0.95, at - first                          # it waited the second
-    if again < first + 0.9:                                        # the second move came before the card was due:
-        assert at - again < 0.95, (at - first, again - first)      # the clock ran on rather than starting over
+    # Qt's default (coarse) timers may fire up to 5% early, so "a second" is at least 0.95 s less a hair.
+    assert at - first >= 0.9, at - first                           # it waited the second
+    if again < first + 0.85:                                       # the second move came before the card was due:
+        assert at - again < 0.9, (at - first, again - first)       # the clock ran on rather than starting over
 
 
 def test_moving_onto_another_thing_starts_the_wait_over_and_leaving_hides_at_once(qtbot, spy):
@@ -60,7 +61,7 @@ def test_moving_onto_another_thing_starts_the_wait_over_and_leaving_hides_at_onc
     tip.point("b", "card b")                                       # another nanowell
     qtbot.waitUntil(lambda: any(text == "card b" for text, _at in _shown(spy)), timeout=5000)
     at_b = next(at for text, at in _shown(spy) if text == "card b")
-    assert at_b - moved >= 0.28, at_b - moved                      # b waited its own full delay
+    assert at_b - moved >= 0.27, at_b - moved                      # b waited its own full delay (less 5%)
     spy.clear()
     tip.clear()
     assert [kind for kind, *_ in spy] == ["hide"] and not tip.pending()

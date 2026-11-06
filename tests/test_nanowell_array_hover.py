@@ -98,8 +98,11 @@ def _card(array, q, r, monkeypatch, *, press=None):
     st = NanowellState()
     st.view, st.drawn, st.metrics, st.data, st.focus_rule, st.press = (
         "array", array.drawn, array.metrics, array.data, array.rule, press)
+    # The card itself, not its second's wait (``widgets.delayed_tooltip``, tested on its own): a tip that shows at once.
+    tip = SimpleNamespace(point=lambda _key, text: QtWidgets.QToolTip.showText(None, text),
+                          clear=lambda: QtWidgets.QToolTip.hideText())
     ctx = SimpleNamespace(state=SimpleNamespace(feature_slice=lambda _name: st),
-                          widgets=SimpleNamespace(get_or_none=lambda _name: None))
+                          widgets=SimpleNamespace(get_or_none=lambda name: tip if name == "_nw_hover_tip" else None))
     x, y, _r = _at(array.drawn, q, r)
     controller.on_motion(ctx, SimpleNamespace(inaxes=array.drawn.ax, xdata=x, ydata=y, x=5.0, y=5.0))
     return shown["text"]
@@ -169,6 +172,7 @@ def test_the_page_s_canvas_shows_the_card_of_the_nanowell_under_the_pointer(qc_p
     monkeypatch.setattr(QtWidgets.QToolTip, "hideText", staticmethod(lambda: shown.update(text=None)))
     st = ctx.state.feature_slice("nanowell")
     canvas = ctx.widgets.get("_nw_canvas")
+    ctx.widgets.get("_nw_hover_tip").setDelay(0)                    # the card, not its wait: shown on the next turn
     drawn = st.drawn
     canvas.draw()
     sites = drawn.sites
@@ -180,6 +184,7 @@ def test_the_page_s_canvas_shows_the_card_of_the_nanowell_under_the_pointer(qc_p
         x_px, y_px = drawn.ax.transData.transform((sites.x[k], sites.y[k]))
         event = MouseEvent("motion_notify_event", canvas, x_px, y_px)
         canvas.callbacks.process(event.name, event)
+        QtWidgets.QApplication.processEvents()
         row = st.metrics[(st.metrics["well"] == well) & (st.metrics["timepoint"] == drawn.scene.timepoint)
                          & (st.metrics["nw_q"] == q) & (st.metrics["nw_r"] == r)].iloc[0]
         card = shown["text"].split("\n")

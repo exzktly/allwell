@@ -35,6 +35,7 @@ from review.features.nanowell.anchor_queue_view import (
 from review.features.nanowell.resolve_view import build_resolve_guide, refresh_resolve_guide
 from review.features.nanowell.exclude_view import build_exclude_controls
 from review.features.nanowell.rim_focus_view import build_rim_focus_controls
+from review.features.nanowell.details_view import build_details_panel
 from review.features.nanowell.variables_view import build_variable_controls
 from review.features.nanowell.window_view import build_popout_window_controls, build_window_strip
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
@@ -54,6 +55,7 @@ from review.features.nanowell.statistics_view import (
     build_statistics_controls, fill_control_combo, refresh_statistics_controls,
 )
 from widgets.control_band import ControlBand
+from widgets.delayed_tooltip import DelayedToolTip
 from widgets.labeled_combo import LabeledComboBox
 from widgets.owned_action import owned_action
 from widgets.spin_box import SpinBox
@@ -72,12 +74,10 @@ _IMAGES = (("off", "Off"), ("montage", "Run montage"), ("tiles", "Full resolutio
 _POSITIONS = (("measured", "Measured"), ("lattice", "Lattice"))
 #: The Array view's switchable layers, in the order its Layers menu lists them, with what each draws.
 #: The band's *Notes* button: the Layers menu's *Notes*, where it can be found.
-#: The views whose footer the *Notes* switch shortens.
-NOTES_VIEWS = ("array", "distribution")
-_NOTES_TIP = ("The footer in full. On the Array view: how to read the array — the positions, the fill and outlines, the "
-              "tile colours — under it, in room kept for it so the array never moves. On the Distribution view: the "
-              "notes on the times, the Subset, the cohort, how the line is drawn. Off, the footer keeps the counts, "
-              "what the figure does not draw, and how many notes there are. The same switch as Layers → Notes.")
+#: The views whose footer the *Notes* switch shortens (the Distribution's footer is in its Details field instead).
+NOTES_VIEWS = ("array",)
+_NOTES_TIP = ("How to read the array — the positions, the fill and outlines, the tile colours — under the array, in room kept for it so the array never moves. "
+              "Off, the footer keeps the counts and anything that went wrong. The same switch as Layers → Notes.")
 _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or outlined by its state."),
            ("addresses", "Addresses", "Each nanowell's q,r, wherever it is drawn large enough to hold it."),
            ("values", "Values", "Each nanowell's value of the Metric, written inside it (under its q,r when "
@@ -482,6 +482,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     card.canvas.mpl_connect("button_release_event", lambda event: nwc.on_release(ctx, event))
     card.canvas.mpl_connect("motion_notify_event", lambda event: nwc.on_motion(ctx, event))
     card.canvas.mpl_connect("scroll_event", lambda event: nwc.on_scroll(ctx, event))
+    reg.register("_nw_hover_tip", DelayedToolTip(card.canvas))     # a nanowell's card, after a second's rest
     # The Array view fits the region it shows to its axes' shape when it draws, so square pixels and round nanowells
     # hold only at that size; a resize (the window, the site detail opening beside it, the band re-flowing) re-fits
     # it, once the resizing has settled.
@@ -532,6 +533,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     splitter.setStretchFactor(0, 3)
     splitter.setStretchFactor(1, 2)
     layout.addWidget(wrap_with_empty_state(ctx.window, splitter, icon="hexagon", reason=nwc.nanowell_empty_reason), 1)
+    layout.addWidget(build_details_panel(ctx, plot_area))  # the Distribution's footer, out of its figure
 
     show_detail = nw_phone.detail_placement(card, detail, detail_layout, strip_card,
                                             redraw_figure=lambda: nwc.redraw(ctx),
@@ -555,6 +557,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
                 *qc_controls.signalling)
 
     def refresh_controls() -> None:
+        nwc._call(ctx, "_nw_details_refresh")            # shown on the Distribution view only
         channel = nwc.page_channel(ctx)
         blocked = [w.blockSignals(True) for w in controls]
         try:
@@ -934,6 +937,7 @@ def _popout_window(ctx):
     card.canvas.mpl_connect("button_release_event", lambda event: wnc.on_popout_release(ctx, event))
     card.canvas.mpl_connect("motion_notify_event", lambda event: wnc.on_popout_motion(ctx, event))
     card.canvas.mpl_connect("scroll_event", lambda event: wnc.on_popout_scroll(ctx, event))
+    ctx.widgets.register("_nw_popout_hover_tip", DelayedToolTip(card.canvas))
     refresh = ctx.widgets.get_or_none("_nw_refresh_controls")
     if callable(refresh):
         refresh()                                        # the new controls start on the page's settings
@@ -1069,11 +1073,11 @@ def _show_where(group, well_part, tp_cb, shows_well: bool, shows_tp: bool, *, wa
 
 def mount_array_canvas_tools(ctx, card, c: SimpleNamespace) -> None:
     """Put the Array view's zoom, *Overlays* and *Notes* under the figure, after its navigation buttons, each group behind a
-    separator; shown with the view's other controls, *Notes* on the Distribution view too. On the Array view *Reset view* is *Fit*: the view keeps its
+    separator; shown with the view's other controls. On the Array view *Reset view* is *Fit*: the view keeps its
     own region (``state.region``), which matplotlib's home does not know."""
     toolbar = card.toolbar
     c.groups += [toolbar.add_group(*c.canvas_tools), toolbar.add_group(c.overlays_btn)]
-    c.notes_group = toolbar.add_group(c.notes_btn)    # its own group: the Distribution view has Notes too
+    c.notes_group = toolbar.add_group(c.notes_btn)
 
     def home() -> None:
         st = ctx.state.feature_slice("nanowell")

@@ -12,6 +12,7 @@ output must not look like good output.
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 
 import numpy as np
@@ -85,6 +86,25 @@ def _tile_outlines(tile, crop) -> tuple[list, np.ndarray]:
     return lines, np.array([not o for o in outlines], dtype=bool)
 
 
+def corner_text(value) -> str:
+    """A tile's corner label: a whole number as one, any other to three significant figures, ``—`` with no value."""
+    if value is None or not math.isfinite(value):
+        return "—"
+    return f"{value:.0f}" if float(value).is_integer() else f"{value:.3g}"
+
+
+def _draw_corners(ax, comp, values: dict) -> None:
+    """*values* (``site -> number``) written in each tile's top-left corner, white on a dark rim so it reads on a bright
+    crop and a dark one alike; a tile without a value says ``—`` rather than nothing."""
+    from matplotlib import patheffects
+
+    rim = [patheffects.withStroke(linewidth=1.6, foreground="black")]
+    for tile in comp.tiles:
+        ax.text(tile.x - TILE + 0.05, tile.y - TILE + 0.05, corner_text(values.get(tile.source)), fontsize=6,
+                color="white", ha="left", va="top", zorder=6, path_effects=rim, clip_on=True,
+                gid="nw-composite-value")
+
+
 def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, inks: dict,
                 cells: Counter | None) -> None:
     """One composite at *timepoint* on *ax*: its tiles (or the hatched placeholder, counted into *missing*), each
@@ -140,18 +160,21 @@ def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, 
         left, right = min(xs) - 0.9, max(xs) + 0.9
         top = min(ys + [y for _well, _x, y in comp.patches]) - 0.9      # the patch labels sit inside the frame
         bottom = max(ys) + 0.9
-        ax.add_patch(Rectangle((left, top), right - left, bottom - top, fill=False, linestyle="--", edgecolor=faint,
-                               linewidth=0.8, gid="nw-composite-frame"))
-        ax.set_xlim(left - 0.2, right + 0.2)
-        ax.set_ylim(bottom + 0.2, top - 0.2)             # y down: the smaller y is the top
+        ax.set_xlim(left, right)
+        ax.set_ylim(bottom, top)                         # y down: the smaller y is the top
     ax.set_aspect("equal")
+    # The frame is the panel's own edge, in axes coordinates: drawn around the data's extent it left the view as soon
+    # as the wheel zoomed in, and a panel without it no longer read as one timepoint's composite. Unzoomed the panel
+    # is exactly that extent (the limits above, the aspect fitting the box to them).
+    ax.add_patch(Rectangle((0, 0), 1, 1, transform=ax.transAxes, fill=False, linestyle="--", edgecolor=faint,
+                           linewidth=0.8, clip_on=False, gid="nw-composite-frame"))
     ax._aw_composite_home = (tuple(ax.get_xlim()), tuple(ax.get_ylim()))   # the unzoomed view, for the wheel
     ax._aw_composite_tp = timepoint                      # which timepoint a pointer over this panel is at
 
 
 def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, display_range=None, note: str = "",
                      cells: bool = False, view=None, labels: bool = True, inks: dict | None = None, key=None,
-                     key_title: str = "Source well") -> list:
+                     key_title: str = "Source well", corner: dict | None = None, corner_said: str = "") -> list:
     """Draw *comp* (``composite_compute.Composite``) on *fig* (cleared first), once per timepoint of *timepoints*,
     side by side in one row; returns ``[(x, y, site, rank)]`` for turning a pointer position into a tile — every
     panel puts a tile at the same place. *cells* draws each tile's counted cells — traced outlines, a dot where the run
@@ -159,7 +182,9 @@ def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, displa
     panel alike. *labels* off (the pop-out's **Labels**) leaves out each panel's timepoint and the caption; the title,
     the wells' names and the stripes' key stay. *inks* (``well -> colour``) colours each tile's stripe and *key*
     (``(label, colour)`` pairs, titled *key_title*) is their key under the title; with *inks* ``None`` each well takes
-    its rank colour in patch order and the key names the wells, and with *inks* empty no stripe is drawn.
+    its rank colour in patch order and the key names the wells, and with *inks* empty no stripe is drawn. *corner*
+    (``{timepoint: {site: value}}``) writes each tile's value at its panel's timepoint in the tile's corner, and
+    *corner_said* is the caption's sentence about it.
 
     *crops* is ``(well, q, r) -> {timepoint: Crop}`` for the nanowells cut so far; *n_total* is how many nanowells the
     window holds (the composite is one page of them), *note* the sentence the caption leads with. Every tile of every
@@ -184,6 +209,8 @@ def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, displa
         ax._aw_image_panel = True                        # pixel for pixel: no typed axis range on it
         _bg, ink, faint = _inks(ax)
         _draw_panel(ax, comp, crops, timepoint, scale, missing, inks, tally)
+        if corner and timepoint in corner:
+            _draw_corners(ax, comp, corner[timepoint])
         if view is not None:
             ax.set_xlim(*view[0])
             ax.set_ylim(*view[1])
@@ -196,6 +223,8 @@ def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, displa
     if inks:
         what = "source well" if key_title == "Source well" else f"well's {key_title}"
         said += f" The stripe under a tile is its {what}, keyed under the title."
+    if corner_said:
+        said += " " + corner_said
     said += " Scroll to zoom, drag to pan."
     if tally is not None:
         outlined, drawn = tally["outlined"], tally["drawn"]

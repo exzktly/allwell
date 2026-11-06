@@ -188,6 +188,14 @@ class NanowellState:
     #: What the hex composite's stripes are coloured by: ``""`` each tile's source well, a sample variable's id its
     #: well's value of that variable, ``"none"`` no stripe (``_window_controller.composite_colouring``).
     composite_colour: str = ""
+    #: What the hex composite's tiles are placed by, filling each patch from its top left: ``""`` the window's rank,
+    #: else a page metric (``distribution_compute.METRICS``) at the first timepoint shown, largest first when
+    #: ``composite_desc`` (``_window_controller.composite_order``).
+    composite_sort: str = ""
+    composite_desc: bool = True
+    #: The page metric written in each hex tile's corner at its panel's timepoint; ``""`` none
+    #: (``_window_controller.composite_labels``).
+    composite_label: str = ""
     #: The **Display range** of each image channel, ``channel key -> (low, high)`` in the raw image's units
     #: (``controller.display_key``): the window every picture of that channel on the page is drawn with — the crop
     #: strip, the pop-out, the Extremes montage and the Array view's full resolution. The page's own and kept with
@@ -384,7 +392,8 @@ class NanowellState:
                 "popout_grid": self.popout_grid, "popout_cols": self.popout_cols,
                 "windows": {k: w.to_config() for k, w in self.windows.items()},
                 "popout_source": self.popout_source, "popout_layout": self.popout_layout,
-                "composite_colour": self.composite_colour,
+                "composite_colour": self.composite_colour, "composite_sort": self.composite_sort,
+                "composite_desc": self.composite_desc, "composite_label": self.composite_label,
                 "display_ranges": {k: [lo, hi] for k, (lo, hi) in self.display_ranges.items()},
                 "subset": self.subset.to_config(), "saved_subsets": saved_to_config(self.saved_subsets),
                 "layers": self.layers.to_config(),
@@ -439,6 +448,9 @@ class NanowellState:
         self.popout_source = _choice(config.get("popout_source"), POPOUT_SOURCES, fresh.popout_source)
         self.popout_layout = _choice(config.get("popout_layout"), POPOUT_LAYOUTS, fresh.popout_layout)
         self.composite_colour = _text(config.get("composite_colour"), fresh.composite_colour)
+        self.composite_sort = _text(config.get("composite_sort"), fresh.composite_sort)
+        self.composite_desc = config.get("composite_desc") is not False
+        self.composite_label = _text(config.get("composite_label"), fresh.composite_label)
         self.display_ranges = _display_ranges_from(config.get("display_ranges"))
         tps = config.get("extremes_tps")
         self.extremes_tps = [str(tp) for tp in tps if isinstance(tp, str)] if isinstance(tps, list) else []

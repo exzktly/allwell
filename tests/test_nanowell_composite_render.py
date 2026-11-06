@@ -379,6 +379,7 @@ def test_pointing_at_a_tile_shows_the_array_view_s_card_at_that_panel_s_timepoin
     st = _open_hex(page, qtbot)
     shown = []
     monkeypatch.setattr(QToolTip, "showText", lambda _pos, text, *_a: shown.append(text))
+    page.widgets.get("_nw_popout_hover_tip").setDelay(0)               # the card, not its wait
     fig = page.widgets.get("_nw_popout_fig")
     second = fig.axes[1]
     tile = st.popout_tiles[0]
@@ -394,7 +395,8 @@ def test_pointing_at_a_tile_shows_the_array_view_s_card_at_that_panel_s_timepoin
     expected = ahc.hover_text(rows.get((q, r)), tile[2], timepoint=timepoint, channels=list(st.data.channels),
                               rule=st.rim_focus_rule())
     assert timepoint != fig.axes[0]._aw_composite_tp
-    assert shown and shown[-1] == f"Tile {tile[3]} of the composite\n{expected}"
+    qtbot.waitUntil(lambda: bool(shown), timeout=2000)
+    assert shown[-1] == f"Tile {tile[3]} of the composite\n{expected}"
 
 
 def test_labels_off_leaves_out_each_panel_s_timepoint_and_the_caption_but_not_the_wells_names():
@@ -584,3 +586,152 @@ def test_cells_are_drawn_as_their_traced_outlines_and_a_cell_without_one_as_a_do
     caption = _artists(fig, "nw-composite-caption")[0].get_text()
     assert f"Outlines and dots: the {2 * len(comp.tiles)} cells" in caption
     assert f"({len(comp.tiles)} a dot: the run kept no outline of it)" in caption
+
+
+# ── Sort ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+def test_sort_places_the_tiles_by_the_metric_from_the_top_left_in_the_order_chosen(page, qtbot):  # noqa: F811
+    """Through the real combos: sorted by cell count at the first timepoint shown, each well's tiles read from its
+    patch's top left in that order — the counts are read back from the page's own table, not the test's. The window
+    takes nearly every nanowell, so a well holds several whose counts at the first timepoint run against their rank
+    (A01's ranks by its latest count are q1, q2, q0, with first counts 2, 0, 1): a sort that kept the rank order fails."""
+    st = _loaded(qtbot, page)
+    _drag(page, _first_panel(page), (-0.4, -0.5), (1.4, 4.5))
+    wnc.open_window_popout(page)
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(1)
+    qtbot.waitUntil(lambda: bool(st.popout_tiles), timeout=10000)
+    timepoint = str(st.data.timepoints()[0])
+    sort, order = page.widgets.get("_nw_popout_sort_cb"), page.widgets.get("_nw_popout_order_cb")
+    assert not sort.isHidden() and sort.currentData() == wnc.BY_RANK
+    sort.setCurrentIndex(sort.findData("n"))
+    assert st.composite_sort == "n"
+    rows = st.metrics[st.metrics["timepoint"].astype(str) == timepoint]
+    counts = {(str(w), int(q), int(r)): float(v) for w, q, r, v in zip(rows["well"], rows["nw_q"], rows["nw_r"],
+                                                                       rows["n"])}
+
+    def reading(well):
+        mine = [t for t in st.popout_tiles if t[2][0] == well]
+        return [t[2] for t in sorted(mine, key=lambda t: (round(t[1], 9), t[0]))]
+
+    wells = {t[2][0] for t in st.popout_tiles}
+    assert max(len(reading(w)) for w in wells) >= 3
+    by_rank = sorted((t for t in st.popout_tiles if t[2][0] == "A01"), key=lambda t: t[3])
+    assert [counts[t[2]] for t in by_rank] != sorted((counts[t[2]] for t in by_rank), reverse=True)
+    for well in wells:
+        got = [counts[s] for s in reading(well)]
+        assert got == sorted(got, reverse=True)
+    order.setCurrentIndex(order.findData(False))
+    assert st.composite_desc is False
+    for well in wells:
+        got = [counts[s] for s in reading(well)]
+        assert got == sorted(got)
+    title = [t.get_text() for t in page.widgets.get("_nw_popout_fig").texts if t.get_gid() == "nw-composite-title"][0]
+    assert f"placed by Cell count at {timepoint}, smallest first" in title
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(0)                    # Rows: not offered
+    assert sort.isHidden() and order.isHidden()
+
+
+def test_a_metric_that_cannot_be_read_places_by_rank_and_says_why():
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    metrics = pd.DataFrame({"well": ["A01"], "nw_q": [0.0], "nw_r": [0.0], "timepoint": ["T1"], "tp_order": [0],
+                            "n": [3.0]})
+    st = SimpleNamespace(composite_sort="nope", metrics=metrics, data=SimpleNamespace(channels=[]),
+                         composite_desc=True)
+    assert wnc.composite_order(None, st, [("A01", 0, 0)], "T1") == (None, "rank")
+    labels = [label for label, _k in wnc.composite_sort_choices()]
+    assert labels[0] == "Window rank" and "Cell count" in labels
+
+
+def test_the_dashed_frame_stays_on_each_panel_s_edge_when_zoomed_and_panned(page, qtbot):  # noqa: F811
+    """Reported: on zoom the dashed edge outlining each timepoint's composite disappeared — it was drawn around the
+    data, so zooming in moved it out of view. It is the panel's own edge now, whatever the zoom or pan."""
+    st = _open_hex(page, qtbot)
+    fig = page.widgets.get("_nw_popout_fig")
+    canvas, point = _tile_point(page, st, st.popout_tiles[0])
+
+    def frames_on_edge():
+        for ax in fig.axes:
+            (frame,) = [p for p in ax.patches if p.get_gid() == "nw-composite-frame"]
+            corners = frame.get_window_extent()
+            box = ax.get_window_extent()
+            assert corners.bounds == pytest.approx(box.bounds, abs=1.0)
+        return True
+
+    assert frames_on_edge()
+    for _ in range(4):
+        _wheel(canvas, point)
+    assert abs(fig.axes[0].get_xlim()[1] - fig.axes[0].get_xlim()[0]) < abs(
+        fig.axes[0]._aw_composite_home[0][1] - fig.axes[0]._aw_composite_home[0][0]) * 0.5
+    assert frames_on_edge()
+    _drag_canvas(canvas, point, QPoint(point.x() + 30, point.y() + 20))
+    assert frames_on_edge()
+
+
+# ── Corner: a metric in each tile's corner ───────────────────────────────────────────────────────────────────────
+def test_corner_writes_each_tile_s_value_at_its_panel_s_timepoint():
+    from review.features.nanowell._composite_render import TILE, corner_text
+
+    comp = cc.composite(_rows())
+    sites = [t.source for t in comp.tiles]
+    corner = {"T1": {s: float(i) for i, s in enumerate(sites)}, "T2": {s: 2.5 * i for i, s in enumerate(sites[:-1])}}
+    fig = Figure(figsize=(9.0, 6.0))
+    render_composite(fig, comp, {}, ["T1", "T2"], n_total=7, corner=corner, corner_said="Corner: each tile's n.")
+    for ax, tp in zip(fig.axes, ("T1", "T2")):
+        written = {}
+        for text in (t for t in ax.texts if t.get_gid() == "nw-composite-value"):
+            x, y = text.get_position()                                       # each tile's own top-left corner
+            tile = min(comp.tiles, key=lambda t: abs(t.x - TILE - x) + abs(t.y - TILE - y))
+            assert abs(tile.x - TILE - x) < 0.1 and abs(tile.y - TILE - y) < 0.1
+            written[tile.source] = text.get_text()
+        assert written == {s: corner_text(corner[tp].get(s)) for s in sites}
+    assert corner_text(3.0) == "3" and corner_text(2.5) == "2.5" and corner_text(1.23456) == "1.23"
+    assert corner_text(float("nan")) == corner_text(None) == "—"
+    assert "Corner: each tile's n." in _artists(fig, "nw-composite-caption")[0].get_text()
+    bare = Figure(figsize=(9.0, 6.0))
+    render_composite(bare, comp, {}, "T1", n_total=7)
+    assert not [t for t in bare.axes[0].texts if t.get_gid() == "nw-composite-value"]
+
+
+def test_the_corner_combo_writes_the_page_s_values_at_each_panel_s_timepoint(page, qtbot):  # noqa: F811
+    st = _open_hex(page, qtbot)
+    combo = page.widgets.get("_nw_popout_label_cb")
+    assert not combo.isHidden() and combo.currentData() == wnc.NO_LABEL
+    combo.setCurrentIndex(combo.findData("n"))
+    assert st.composite_label == "n"
+    fig = page.widgets.get("_nw_popout_fig")
+    assert len(fig.axes) > 1
+    for ax in fig.axes:
+        tp = ax._aw_composite_tp
+        rows = st.metrics[st.metrics["timepoint"].astype(str) == tp]
+        counts = {(str(w), int(q), int(r)): v for w, q, r, v in zip(rows["well"], rows["nw_q"], rows["nw_r"], rows["n"])}
+        texts = sorted(t.get_text() for t in ax.texts if t.get_gid() == "nw-composite-value")
+        expected = sorted(f"{counts[t[2]]:.0f}" for t in st.popout_tiles)
+        assert texts == expected
+    caption = [t.get_text() for t in fig.texts if t.get_gid() == "nw-composite-caption"][0]
+    assert "Corner: each tile's Cell count at its panel's timepoint." in caption
+    combo.setCurrentIndex(combo.findData(wnc.NO_LABEL))
+    assert not [t for ax in fig.axes for t in ax.texts if t.get_gid() == "nw-composite-value"]
+
+
+def test_the_tile_s_card_waits_for_the_pointer_to_rest(page, qtbot, monkeypatch):  # noqa: F811
+    """Asked for: a one-second delay before the hover card, on the real pop-out canvas at its real delay."""
+    from PySide6.QtWidgets import QToolTip
+
+    import time
+
+    st = _open_hex(page, qtbot)
+    shown = []
+    monkeypatch.setattr(QToolTip, "showText", lambda _pos, text, *_a: shown.append((time.monotonic(), text)))
+    canvas, point = _tile_point(page, st, st.popout_tiles[0])
+    # Timed, not slept: on a busy runner a "half-second" wait can itself run past the second, so the test measures
+    # when the card showed against when the pointer arrived.
+    arrived = time.monotonic()
+    QApplication.sendEvent(canvas, QMouseEvent(QEvent.MouseMove, QPointF(point), QPointF(canvas.mapToGlobal(point)),
+                                               Qt.NoButton, Qt.NoButton, Qt.NoModifier))
+    assert shown == []                                               # not on the move itself
+    qtbot.waitUntil(lambda: bool(shown), timeout=5000)
+    at, text = shown[-1]
+    assert at - arrived >= 0.9, at - arrived                         # it waited the second (Qt's timer: ±5%)
+    assert text.startswith(f"Tile {st.popout_tiles[0][3]} of the composite")

@@ -89,10 +89,27 @@ def _loaded(qtbot, ctx):
     return st
 
 
+def _details(ctx):
+    """The Distribution's footer as its Details field holds it: ``(counts, [alert or note lines])``."""
+    st = ctx.state.feature_slice("nanowell")
+    footer = getattr(getattr(st, "hits", None), "footer", None)
+    if footer is None or st.view != "distribution":
+        return None
+    return footer.counts, [*footer.warnings, *footer.alerts, *footer.notes]
+
+
 def _texts(ctx, gid=None):
+    """The figure's texts with *gid* — and for the Distribution's footer, which is in its Details field rather than
+    the figure, the field's lines: ``nw-footer-used`` the counts, ``nw-footer`` the alerts and notes."""
     fig = ctx.widgets.get("_nw_fig")
     found = list(fig.texts) + [t for ax in fig.axes for t in ax.texts]
-    return [t.get_text() for t in found if gid is None or t.get_gid() == gid]
+    out = [t.get_text() for t in found if gid is None or t.get_gid() == gid]
+    details = _details(ctx) if gid in (None, "nw-footer", "nw-footer-used") else None
+    if details is not None:
+        counts, lines = details
+        out += [counts] if gid in (None, "nw-footer-used") else []
+        out += lines if gid in (None, "nw-footer") else []
+    return out
 
 
 # ── V1b: states ──────────────────────────────────────────────────────────────
@@ -171,11 +188,6 @@ def test_the_figure_s_own_numbers_add_up_to_the_roster(page, qtbot):
     assert (sum(used), sum(excluded)) == (u, e) == (14, 2) and roster == 16 and u + e == roster
     assert match.group(4) == "occluded 2" and match.group(5) == "2"
     assert page.widgets.get("_nw_canvas").isVisible()                          # the figure, not a placeholder
-    # How to read the figure is a note: folded away with Notes off (the default), counted on the counts line, and
-    # written in full with it on.
-    assert not any("packed within ±0.4" in t for t in _texts(page, "nw-footer"))
-    assert re.search(r" · \d+ notes: turn on Notes to read them$", _texts(page, "nw-footer-used")[0])
-    nwc.set_layer(page, "notes", True)
     assert any("packed within ±0.4" in t for t in _texts(page, "nw-footer"))
 
 
@@ -186,8 +198,8 @@ def test_choosing_a_metric_in_the_real_combo_redraws_with_its_label(page, qtbot)
     fig = page.widgets.get("_nw_fig")
     assert fig.axes[0].get_ylabel() == "Confluence fold change"
     footer = next(t for t in _texts(page, "nw-footer-used"))
-    assert footer.startswith("Nanowell × timepoint values used 10 of 16 · excluded 6: no confluence at baseline 3 · "
-                             "occluded 2 · baseline occluded 1 · wells 2 · ")
+    assert footer == ("Nanowell × timepoint values used 10 of 16 · excluded 6: no confluence at baseline 3 · "
+                      "occluded 2 · baseline occluded 1 · wells 2")
 
 
 def test_a_shared_channel_the_tables_lack_falls_back_to_the_page_s_channel_rather_than_greying(page, qtbot):
@@ -389,8 +401,9 @@ def test_a_capture_paints_the_dots_and_the_ink_for_white(page, qtbot):
     assert on_screen <= {c.lower() for c in Colors.occupancy_ramp + (Colors.occupancy_unknown,)}
     with card._publication_capture():
         captured = {to_hex(c) for coll in dots for c in coll.get_edgecolors()}
-        footer = next(t for t in fig.texts if t.get_gid() == "nw-footer-used")
-        assert to_hex(footer.get_color()) != to_hex(Colors.text_primary) or CPub.bg != Colors.plot_bg
+        # The footer is in the Details field now; the y label is the figure's own ink.
+        label = fig.axes[0].yaxis.label
+        assert to_hex(label.get_color()) != to_hex(Colors.text_primary) or CPub.bg != Colors.plot_bg
     assert captured <= {c.lower() for c in CPub.occupancy_ramp + (Colors.occupancy_unknown,)}
     assert captured != on_screen
 

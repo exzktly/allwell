@@ -60,6 +60,8 @@ class HitMap:
     entries: list = field(default_factory=list)   # (ax, x_data, y_data, sites)
     panels: list = field(default_factory=list)    # (axes, index into model.panels): which axes drew which panel
     values: list = field(default_factory=list)    # per entry, the values of the dots it holds (the window's rings)
+    #: The footer the page shows under the figure instead of in it (``render_distribution(footer_out=True)``).
+    footer: object = None
 
     def nearest(self, ax, x_px: float, y_px: float, radius_px: float):
         """The site of the drawn dot nearest the display point on *ax*, within *radius_px*, or ``None``."""
@@ -298,22 +300,20 @@ def _fit_text(text: str, width_pt: float, size_pt: float, *, em: float = _GLYPH_
 
 
 def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: float = 1.0,
-                        notes_below: bool = False) -> HitMap:
+                        footer_out: bool = False) -> HitMap:
     """Draw *model* on *fig* (cleared first) and return where every dot went.
 
-    *notes_below* is the page with its **Notes** switch off: the footer keeps only the counts and what the figure does
-    not draw, and says how many notes there are and how to read them — written in full, the notes had grown to eight
-    lines and left the panels a sliver of the figure. Off (Notes on, and Batch Export), every note is written.
-
-    *spacing* is Properties → Beeswarm → Point spacing: the distance between neighbouring dots as a multiple of a
-    dot's size, so 1.0 (Auto) packs them edge to edge, less overlaps them and fits more in a slot, more leaves gaps
-    between them. The dots themselves stay ``DOT_PT`` across; only where they are placed changes."""
+    *footer_out* is the page: the footer — the counts, what the figure leaves out or marks, how to read it — is not
+    written in the figure but returned as ``HitMap.footer`` (a :class:`Footer`), which the page shows in its **Details**
+    field under the figure, and the panels take the room it took. Off (Batch Export, a figure saved on its own), the
+    footer is written in the figure, every line of it.
+"""
     spacing = spacing if spacing > 0 else 1.0
     fig.clear()
     hits = HitMap()
     panels = model.panels[:MAX_PANELS]
     rows, cols = _grid(len(panels))
-    bottom = 0.10 + _FOOTER_BASE + _line_step(fig) * (1 if notes_below else _FOOTER_LINES)
+    bottom = 0.10 if footer_out else 0.10 + _FOOTER_BASE + _line_step(fig) * _FOOTER_LINES
     top, key_bottom, key_h = _head_room(fig, floor_top=0.86, title_pt=_PANEL_TITLE_PT)
     _adjust(fig, left=0.07, right=0.98, top=top, bottom=bottom, wspace=0.12 if rows * cols > 1 else 0.2,
                         hspace=0.62)
@@ -339,10 +339,12 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
             _ink(ax.set_ylabel(_wrap_label(model.label, rows), color=inks[1]))
         if i + cols >= len(panels) and model.x_label:
             _ink(ax.set_xlabel(model.x_label, color=inks[1], labelpad=ax._aw_gutter_pt))
-    _footer(fig, model, inks, panels, densities, hidden,
+    footer = _footer(fig, model, inks, panels, densities, hidden,
             crowded=any(getattr(ax, "_aw_crowded", False) for ax in axes),
             counts_hidden=any(getattr(ax, "_aw_counts_hidden", False) for ax in axes),
-            key_at=(key_bottom, key_h), notes_below=notes_below)
+            key_at=(key_bottom, key_h), footer_out=footer_out)
+    if footer_out:
+        hits.footer = footer
     return hits
 
 
@@ -608,12 +610,26 @@ def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:
                      zorder=4)[0])
 
 
+@dataclass
+class Footer:
+    """The Distribution footer as data: the counts line, what changes, leaves out or marks what is drawn (``alerts``,
+    the model's), how to read it (``notes``), and what this drawing could not fit (``warnings``: panels not drawn,
+    dots not drawn, densities)."""
+    counts: str = ""
+    alerts: list = field(default_factory=list)
+    notes: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
+
+    def lines(self) -> list:
+        """In the figure's order: the counts, the alerts, the notes, and last what this drawing left out."""
+        return [self.counts, *self.alerts, *self.notes, *self.warnings]
+
+
 def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden: int, *,
             crowded: bool = False, counts_hidden: bool = False, key_at: tuple[float, float] | None = None,
-            notes_below: bool = False) -> None:
-    """The sums the figure owes the reader, over the panels drawn; what was left out is stated beside them. With
-    *notes_below* the model's notes are left out and the first line counts them; its alerts — what the figure leaves
-    out, the key to its marks — are written either way."""
+            footer_out: bool = False) -> Footer:
+    """The sums the figure owes the reader, over the panels drawn, with what was left out stated beside them — as a
+    :class:`Footer`, written in the figure unless *footer_out*; the figure's key is drawn either way."""
 
     _bg, ink, muted = inks
     drawn = [s for p in panels for s in p.swarms]
@@ -629,32 +645,31 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     line1 = (f"{unit} used {used:,} of {roster:,} · excluded {sum(excluded.values()):,}"
              + (": " + " · ".join(f"{k} {v:,}" for k, v in excluded.items()) if excluded else "")
              + f" · wells {len(wells)}")
-    alerts = list(getattr(model, "alerts", ()) or ())
-    if notes_below and model.notes:
-        n = len(model.notes)
-        lines = [line1 + f" · {n} note{'s' if n != 1 else ''}: turn on Notes to read {'them' if n != 1 else 'it'}"]
-        lines += alerts
-    else:
-        lines = [line1] + alerts + list(model.notes)
+    alerts = []                                          # what this drawing could not fit, written last
     left_out = model.panels[len(panels):]
     if left_out:
         n = sum(s.n_roster for p in left_out for s in p.swarms)
-        lines.append(f"{len(left_out)} more panel(s) not drawn ({n:,} values, not in the counts above); "
-                     "select fewer wells to see them.")
+        alerts.append(f"{len(left_out)} more panel(s) not drawn ({n:,} values, not in the counts above); "
+                      "select fewer wells to see them.")
     if counts_hidden:
-        lines.append("Too narrow to write each swarm's count, exclusions and undrawn dots beside it; the totals above "
-                     "count them.")
+        alerts.append("Too narrow to write each swarm's count, exclusions and undrawn dots beside it; the totals above "
+                      "count them.")
     elif crowded:
-        lines.append("Too narrow to write each swarm's exclusions and undrawn dots under it; the totals above count "
-                     "them.")
+        alerts.append("Too narrow to write each swarm's exclusions and undrawn dots under it; the totals above count "
+                      "them.")
     if hidden and crowded:
-        lines.append(f"{hidden:,} values in all are used but not drawn as dots, for lack of room.")
+        alerts.append(f"{hidden:,} values in all are used but not drawn as dots, for lack of room.")
     elif hidden:
-        lines.append(f"+N under a swarm: {hidden:,} values in all are used but not drawn as dots, for lack of "
-                     "room; widen the window or select fewer wells to see them.")
+        alerts.append(f"+N under a swarm: {hidden:,} values in all are used but not drawn as dots, for lack of "
+                      "room; widen the window or select fewer wells to see them.")
     if densities:
-        lines.append("Sets of more than four wells are drawn as densities with each well's median; select fewer "
-                     "wells to see and click single nanowells.")
+        alerts.append("Sets of more than four wells are drawn as densities with each well's median; select fewer "
+                      "wells to see and click single nanowells.")
+    footer = Footer(line1, list(getattr(model, "alerts", ()) or ()), list(model.notes), alerts)
+    if footer_out:
+        _figure_key(fig, model, key_at)
+        return footer
+    lines = footer.lines()
     lines, line1_parts = _wrapped_to_figure(fig, lines)
     step = _line_step(fig)
     if len(lines) > _FOOTER_LINES:
@@ -665,6 +680,12 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
         first = (len(lines) - 1 - i) < line1_parts
         _ink(fig.text(0.07, _FOOTER_BASE + i * step, text, fontsize=FOOTER_PT, color=ink if first else muted,
                       gid="nw-footer-used" if first else "nw-footer"), muted=not first)
+    _figure_key(fig, model, key_at)
+    return footer
+
+
+def _figure_key(fig, model: DistributionModel, key_at) -> None:
+    """The key the dots' colours decode by, at the figure's top right: it stays in the figure wherever the footer is."""
     if model.decoration.colours:
         # Coloured by a sample variable: the dots decode by its values, and the occupancy key would decode colours
         # the figure no longer contains.

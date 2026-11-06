@@ -285,64 +285,55 @@ def test_a_setting_changed_after_the_window_was_drawn_is_named_in_the_strip(page
     assert "Fixed cohort changed since the window was drawn: 2 → " in label.text()
 
 
-def test_a_short_figure_with_a_subset_s_footer_still_draws(page, qtbot):
-    """Use as Subset, take the window out, apply an ordinary condition — and the page is short. Every line the footer
-    owes then needed more height than the figure had, and matplotlib raised ``bottom cannot be >= top``, leaving the
-    Distribution undrawn. The panels now keep a share of the figure and the footer's lines are all still written."""
-    from review.features.nanowell import controller as nwc
-    from review.features.nanowell import subset_compute as ss
+def test_a_short_figure_with_a_long_footer_still_draws():
+    """Reported: after Use as Subset and an ordinary condition, the page raised ``bottom cannot be >= top`` — on a
+    short figure, every line the footer owed asked for more height than there was. The page's footer is in its
+    Details field now; a figure that writes its own (Batch Export) keeps the panels a share of the figure and every
+    line."""
+    from matplotlib.figure import Figure
 
-    st = _drawn(page, qtbot)
-    qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
-    assert nwc.set_subset(page, ss.Subset((ss.Condition("n0", "ge", 1),), "all"))
-    fig = page.widgets.get("_nw_fig")
-    fig.set_size_inches(8.0, 2.0, forward=False)
-    nwc.redraw(page)                                       # raised ValueError before
+    from review.features.nanowell import distribution_compute as dc
+    from review.features.nanowell.renderer import render_distribution
+    model = dc.DistributionModel("n", "n", "Cell count", "time", True, [], alerts=[f"Alert {i}." for i in range(8)])
+    fig = Figure(figsize=(8.0, 2.0))
+    render_distribution(fig, model)                                      # raised ValueError before
     assert fig.subplotpars.top - fig.subplotpars.bottom >= 0.12 - 1e-9
-    assert st.hits is not None and st.hits.panels
-    assert any(t.get_text().startswith("Starting cells ≥1 (count at the earliest timepoint)") for t in fig.texts)
+    written = [t.get_text() for t in fig.texts if t.get_gid() == "nw-footer"]
+    assert all(f"Alert {i}." in written for i in range(8))
 
 
-def test_notes_off_folds_the_distribution_s_notes_but_never_its_alerts(page, qtbot):
-    """Reported: so many notes on the Distribution that the plot had almost no room. With Notes off (the default) the
-    footer is the counts, what the figure leaves out and the key to its marks; how to read it is counted and folded
-    away, and the panels take the room. A well selected without a table is an alert: hidden behind a switch, a figure
-    missing a well would read as complete."""
+def test_the_distribution_s_footer_is_in_its_details_field_not_the_figure(page, qtbot):
+    """Asked for: every line under the Distribution in a collapsible field, so the plot has the room. Collapsed, the
+    field still says the counts and how many alerts and notes it holds, so what the figure leaves out is never out of
+    sight; a figure that writes its own footer (Batch Export, ``footer_out`` off) still writes every line."""
+    from matplotlib.figure import Figure
+
     from review.features.nanowell import controller as nwc
     from review.features.nanowell import subset_compute as ss
+    from review.features.nanowell.renderer import render_distribution
 
     st = _loaded(qtbot, page)
     assert nwc.set_subset(page, ss.Subset((ss.Condition("n0", "ge", 1),), "all"))
     fig = page.widgets.get("_nw_fig")
-    short = [t.get_text() for t in fig.texts if t.get_gid() in ("nw-footer", "nw-footer-used")]
-    panels_bottom = fig.subplotpars.bottom
-    assert not st.layers.notes and st.model.notes and st.model.alerts
-    assert not any("packed within ±0.4" in t or t.startswith("The line joins") for t in short)
-    assert any(t.startswith("Timepoints:") for t in short)               # the key to the hours axis: an alert
-    assert any(t.startswith("Starting cells ≥1") for t in short)                          # the Subset's count: an alert
-    n = len(st.model.notes)
-    used = " ".join(t.get_text() for t in fig.texts if t.get_gid() == "nw-footer-used")
-    assert used.endswith(f"{n} notes: turn on Notes to read them")
-    page.widgets.get("_nw_notes_btn").click()
-    full = [t.get_text() for t in fig.texts if t.get_gid() in ("nw-footer", "nw-footer-used")]
-    assert st.layers.notes and any("packed within ±0.4" in t for t in full) and len(full) > len(short)
-    assert fig.subplotpars.bottom > panels_bottom                                          # the notes take room
-    card = page.widgets.get("_nw_card")
-    assert page.widgets.get("_nw_notes_btn").isVisibleTo(card)                             # offered on this view
-    nwc.set_view(page, "trajectories")
-    assert not page.widgets.get("_nw_notes_btn").isVisibleTo(card)
-
-
-def test_alerts_are_written_with_notes_off():
-    from review.features.nanowell import distribution_compute as dc
-    from review.features.nanowell.renderer import render_distribution
-    from matplotlib.figure import Figure
-
-    model = dc.DistributionModel("n", "n", "Cell count", "time", True, [], notes=["How to read it."],
-                                 alerts=["Selected without a nanowell table, so not drawn: C03."])
-    fig = Figure(figsize=(8, 5))
-    render_distribution(fig, model, notes_below=True)
-    texts = [t.get_text() for t in fig.texts]
-    assert any(t.startswith("Selected without a nanowell table") for t in texts)
-    assert not any("How to read it." in t for t in texts)
-    assert any(t.endswith(" · 1 note: turn on Notes to read it") for t in texts)
+    assert not [t for t in fig.texts if (t.get_gid() or "").startswith("nw-footer")]       # none in the figure
+    assert fig.subplotpars.bottom == pytest.approx(0.10)                                    # the panels have the room
+    footer = st.hits.footer
+    assert footer.alerts and footer.notes
+    assert any(a.startswith("Starting cells ≥1") for a in footer.alerts)
+    summary, body = page.widgets.get("_nw_details_summary"), page.widgets.get("_nw_details_body")
+    button = page.widgets.get("_nw_details_btn")
+    assert summary.isVisibleTo(page.widgets.get("_nw_card").parentWidget().parentWidget()) or not summary.isHidden()
+    n_alerts = len(footer.alerts) + len(footer.warnings)
+    assert summary.text() == (f"{footer.counts} · ⚠ {n_alerts} alert{'s' if n_alerts != 1 else ''} · "
+                              f"{len(footer.notes)} notes")
+    assert summary.objectName() == "Warn" and body.isHidden() and not button.isChecked()
+    button.click()                                                                          # open it
+    lines = body.text().split("\n")
+    assert not body.isHidden()
+    assert lines == [f"⚠ {a}" for a in [*footer.warnings, *footer.alerts]] + [f"• {n}" for n in footer.notes]
+    nwc.set_view(page, "array")
+    assert summary.parentWidget().isHidden()                                                 # Distribution only
+    own = Figure(figsize=(8, 5))
+    render_distribution(own, st.model)
+    written = " ".join(t.get_text() for t in own.texts)
+    assert footer.counts in written and all(a[:30] in written for a in footer.alerts)

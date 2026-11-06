@@ -22,6 +22,7 @@ from review.features.nanowell import subset_compute as ss
 from review.features.nanowell import window_compute as wc
 from review.features.nanowell._composite_render import render_composite
 from review.features.nanowell._window_render import DRAG_GID, draw_drag, draw_window
+from review.features.nanowell.distribution_compute import METRICS, PER_NANOWELL, metric_column
 from review.features.nanowell.crop_grid_compute import shown_timepoints
 from review.features.nanowell.renderer import DENSITY_ABOVE, MAX_PANELS, render_message, render_site_rows
 from review.features.nanowell.state import POPOUT_LAYOUTS, POPOUT_SOURCES
@@ -52,6 +53,7 @@ def current(st):
 def after_draw(ctx, st, model) -> None:
     """Called by ``controller.redraw`` after a view is drawn; on the Distribution view, keep the model the figure was
     drawn from and draw the window on it. (The check is here, not in ``redraw``, which is at the complexity cap.)"""
+    _nwc()._call(ctx, "_nw_details_refresh")            # the footer the figure no longer writes
     if st.view != "distribution":
         return
     st.window_model = model
@@ -350,6 +352,100 @@ def composite_colouring(ctx, st, wells) -> tuple[dict, tuple, str]:
     return inks, tuple((well, inks[well]) for well in wells), "Source well"
 
 
+#: **Sort**'s first choice: the window's own rank, the order its members already have.
+BY_RANK = ""
+
+
+def composite_sort_choices() -> list:
+    """``(label, key)`` for **Sort**: the window's rank, then every metric the page's Metric menu offers."""
+    return [("Window rank", BY_RANK)] + [(label, key) for key, (label, _needs) in METRICS.items()]
+
+
+def set_composite_sort(ctx, key) -> None:
+    """**Sort**: what the hex composite's tiles are placed by (:func:`composite_sort_choices`); the zoom starts over,
+    the tiles having moved."""
+    if isinstance(key, str):
+        _nwc()._set_popout(ctx, composite_sort=key, composite_view=None)
+
+
+def set_composite_desc(ctx, descending) -> None:
+    """**Sort**'s order: largest first, or smallest first."""
+    _nwc()._set_popout(ctx, composite_desc=bool(descending), composite_view=None)
+
+
+def metric_values(ctx, st, key: str, sites, timepoint) -> tuple[dict | None, str, str]:
+    """``(site -> value, label, why_not)`` of the page metric *key* for each nanowell in *sites* at *timepoint* (its
+    one value for a per-nanowell metric), read from the page's metrics. *label* names the metric as the page does
+    (with its channel); ``None`` values and a sentence *why_not* when it cannot be read — no such metric, no metrics,
+    a fluorescence metric with no channel, a column the tables lack. Shared by **Sort** and **Corner**."""
+    if key not in METRICS or st.metrics is None or st.data is None:
+        return None, "", ""
+    nwc = _nwc()
+    metric, channel, note = nwc.resolve_metric("distribution", key, nwc.page_channel_name(ctx), st.data.channels)
+    if metric != key:
+        return None, "", note.rstrip(".")
+    column = metric_column(metric, channel)
+    frame = st.metrics
+    if column not in frame.columns:
+        return None, "", f"{METRICS[key][0]} is not in the nanowell tables"
+    wanted = {tuple(s) for s in sites}
+    if metric in PER_NANOWELL:
+        rows = frame[frame["tp_order"] == 0]
+    else:
+        rows = frame[frame["timepoint"].astype(str) == str(timepoint)]
+    values = {}
+    for well, q, r, v in zip(rows["well"], rows["nw_q"], rows["nw_r"], rows[column]):
+        if not (math.isfinite(q) and math.isfinite(r)):
+            continue                                     # placed but never addressed: not a window member
+        site = (str(well), int(q), int(r))
+        if site in wanted:
+            values[site] = float(v)
+    return values, nwc._label(metric, channel, st.data), ""
+
+
+def composite_order(ctx, st, sites, timepoint) -> tuple[dict | None, str]:
+    """``(site -> value, sentence)`` the composite's tiles are placed by: ``(None, "rank")`` by the window's rank;
+    else the chosen metric's value of each nanowell at *timepoint* (:func:`metric_values`) and the sentence naming it
+    and the order. A metric that cannot be read falls back to rank and the sentence says why."""
+    key = st.composite_sort
+    values, label, why = metric_values(ctx, st, key, sites, timepoint)
+    if values is None:
+        return None, f"rank ({why})" if why else "rank"
+    at = "" if key in PER_NANOWELL else f" at {timepoint}"
+    return values, f"{label}{at}, {'largest' if st.composite_desc else 'smallest'} first"
+
+
+#: **Corner**'s first choice: no number in the tiles' corners.
+NO_LABEL = ""
+
+
+def composite_label_choices() -> list:
+    """``(label, key)`` for **Corner**: none, then every metric the page's Metric menu offers."""
+    return [("No label", NO_LABEL)] + [(label, key) for key, (label, _needs) in METRICS.items()]
+
+
+def set_composite_label(ctx, key) -> None:
+    """**Corner**: the metric written in each tile's corner (:func:`composite_label_choices`)."""
+    if isinstance(key, str):
+        _nwc()._set_popout(ctx, composite_label=key)
+
+
+def composite_labels(ctx, st, sites, timepoints) -> tuple[dict, str]:
+    """``({timepoint: {site: value}}, sentence)`` for **Corner**: the chosen metric at each panel's own timepoint, and
+    the caption's sentence naming it — or why it could not be read. ``({}, "")`` with no label chosen."""
+    key = st.composite_label
+    if key not in METRICS:
+        return {}, ""
+    out, label, why = {}, "", ""
+    for tp in timepoints:
+        values, label, why = metric_values(ctx, st, key, sites, tp)
+        if values is None:
+            return {}, f"No corner labels: {why}." if why else ""
+        out[str(tp)] = values
+    at = "" if key in PER_NANOWELL else " at its panel's timepoint"
+    return out, f"Corner: each tile's {label}{at}."
+
+
 def set_popout_layout(ctx, layout: str) -> None:
     """**Layout** of the window's nanowells (``state.POPOUT_LAYOUTS``); the pages start over."""
     if layout in POPOUT_LAYOUTS:
@@ -390,14 +486,17 @@ def draw_window_popout(ctx, st, fig) -> None:
         return
     st.window_page = min(max(st.window_page, 0), page_count(st) - 1)
     if st.popout_layout == "hex":
-        comp = cc.composite(cc.page(rows, st.window_page))
-        sites = [t.source for t in comp.tiles]
+        members = cc.page(rows, st.window_page)
         shown_tps = shown_timepoints(st.data.timepoints(), st.popout_tps)
+        values, placed_by = composite_order(ctx, st, [row.site for row in members], shown_tps[0])
+        corner, corner_said = composite_labels(ctx, st, [row.site for row in members], shown_tps)
+        comp = cc.composite(members, values=values, descending=st.composite_desc, placed_by=placed_by)
+        sites = [t.source for t in comp.tiles]
         _want_crops(ctx, st, sites, shown_tps)
         inks, key, key_title = composite_colouring(ctx, st, [well for well, _x, _y in comp.patches])
         st.popout_tiles = render_composite(
             fig, comp, _page_crops(st, sites, shown_tps), shown_tps, n_total=len(rows),
-            inks=inks, key=key, key_title=key_title,
+            inks=inks, key=key, key_title=key_title, corner=corner, corner_said=corner_said,
             display_range=nwc.display_range(ctx), note=strip_text(st), cells=st.crop_cells, view=st.composite_view,
             labels=st.popout_labels)
         return
@@ -538,25 +637,25 @@ def _set_composite_view(ctx, st, fig, xlim, ylim) -> None:
 
 def on_popout_motion(ctx, event) -> None:
     """Pointing at a composite tile names its real nanowell in the status bar and shows the Array view's card for it
-    at the timepoint of the panel under the pointer (``array_hover_compute.hover_text``); off a tile the card goes."""
-    from PySide6.QtGui import QCursor
-    from PySide6.QtWidgets import QToolTip
-
+    at the timepoint of the panel under the pointer (``array_hover_compute.hover_text``), once the pointer has rested
+    on the tile for a second (``_nw_popout_hover_tip``); off a tile, or while dragging, the card goes."""
     st = _state(ctx)
+    tip = ctx.widgets.get_or_none("_nw_popout_hover_tip")
     if st is not None and _pan(ctx, st, event):
-        QToolTip.hideText()                              # dragging: no card under a moving picture
+        if tip is not None:
+            tip.clear()                                  # dragging: no card under a moving picture
         return
     tile = _tile_at(st, event) if st is not None else None
     if tile is None:
-        if st is not None and st.popout_tiles:
-            QToolTip.hideText()
+        if tip is not None:
+            tip.clear()
         return
     well, q, r = tile[2]
     ctx.notify.set_status(f"Tile {tile[3]} · {well} {q},{r}")
-    text = tile_card(st, tile[2], getattr(event.inaxes, "_aw_composite_tp", None))
-    if text:
-        QToolTip.showText(QCursor.pos(), f"Tile {tile[3]} of the composite\n{text}",
-                          ctx.widgets.get_or_none("_nw_popout_canvas"))
+    timepoint = getattr(event.inaxes, "_aw_composite_tp", None)
+    text = tile_card(st, tile[2], timepoint)
+    if tip is not None and text:
+        tip.point((timepoint, tuple(tile[2])), f"Tile {tile[3]} of the composite\n{text}")
 
 
 def tile_card(st, site, timepoint) -> str:

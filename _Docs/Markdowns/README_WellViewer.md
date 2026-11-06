@@ -6349,18 +6349,19 @@ the sentence names it.
 
 **Reading the figure**
 
-- The footer under the figure is short until you turn on **Notes** (the button under the figure, the same switch as
-  on the Array view). Off, it is one line of counts — ending in how many notes there are to read — and everything that
-  changes or leaves out what is drawn (wells selected without a nanowell table, excluded fields, gated cells, rims
-  out of focus, what the Subset kept, a fixed cohort, a moving average), the fraction responding once you set a cut,
-  and the keys to the figure (the timepoint names under the hours axis, the identity marks). On, it adds the notes on
-  how to read it: how whole-number values are packed, how the line is drawn, how wells compare with the control.
-  Saved and copied figures follow the switch; Batch Export always writes the notes.
+- The figure's footer is in the **Details** field under it rather than on the figure, so the panels have the
+  room. Collapsed, its header is the line of counts and how many alerts and notes it holds — in the warning colour
+  when there are alerts. **Details ▸** opens it: the alerts first (wells selected without a nanowell table, excluded
+  fields, gated cells, rims out of focus, what the Subset kept, a fixed cohort or moving average, the fraction
+  responding at your cut, the timepoint names under the hours axis, the identity marks, and anything the figure had
+  no room to draw), then the notes on how to read it (how whole-number values are packed, how the line is drawn). The
+  key to the dots' colours stays on the figure. Batch Export writes the whole footer on its figures, which have no
+  field beside them.
 - Dots are coloured by the number of cells in the nanowell at baseline: an open ring for 0, then 1, 2 and 3+
   (the key at the top right names the baseline). Grey ("?") is a nanowell whose count at baseline is unknown.
   Saved and copied figures use the white-background shades of the same key.
 - Counts and occupancy are whole numbers, so hundreds of nanowells share a value; their dots are packed into
-  a band within ±0.4 of the value, starting on the value itself, and the footer's notes say so.
+  a band within ±0.4 of the value, starting on the value itself, and the notes in **Details** say so.
 - A swarm with more dots than its slot can hold says how many were not drawn under it — "+N at 0", or
   "+N at 0–4" — beside its exclusions. Every nanowell with a value is either a dot or counted there. When the
   window is too narrow to write those under each swarm, only the number used is written above it and the footer
@@ -6595,7 +6596,7 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   desktop and never reaches All-Well. The swipe zooms about the pointer when the pointer is on the image, and
   about the view's centre when it was last left elsewhere on the figure.
 
-  Hover over a nanowell to see what its row of the nanowell table says at this timepoint: its address and
+  Rest the pointer on a nanowell for a second to see what its row of the nanowell table says at this timepoint: its address and
   ring, its state (and why, when it has no value), the value it is coloured by, its cell count and
   confluence, each channel's fluorescence, its fold changes from the baseline and growth rate, its rim focus
   against the well's sharpest rims with the verdict (in focus, out of focus, or why it was not judged), the
@@ -6675,9 +6676,15 @@ Save controls apply as they do to one nanowell, and a click on a row selects its
 A row whose crops are not yet cut says so; one that cannot be cut says why.
 
 **Layout: Hex** draws the same nanowells all at once as an **artificial hex array — a composite, not a well**. Each
-source well has its own labelled patch, and inside a patch the nanowells are placed by rank, the first at the patch's
-centre and the rest spiralling outward, so a position says nothing about where a nanowell sat in its well. Tiles are
-drawn apart inside a dashed frame, and the title says it is not a real array. Each tile has a coloured **stripe**
+source well has its own labelled patch, and inside a patch the nanowells fill the hexagon **row by row from its top
+left**, so a position says nothing about where a nanowell sat in its well. **Sort** (beside **Colour**) chooses the
+order: *Window rank* (the default), or any of the page's metrics at the first timepoint shown, with **Descending**
+(largest first) or **Ascending**; a nanowell with no value sorts last, and the title says what the tiles are placed
+by. The wells' patches follow the same order. **Corner** writes a metric of your choice — cell count, confluence, a fluorescence, a
+fold change — in each tile's top-left corner, at the timepoint of the panel the tile is in (a dash where the nanowell
+has no value there); the caption names it. Zoom in to read it on a full page. Tiles are
+drawn apart inside a dashed frame — the edge of each timepoint's panel, so it stays put when you zoom or pan — and the
+title says it is not a real array. Each tile has a coloured **stripe**
 along its foot, and **Colour** (beside **Layout**, in the Hex layout) chooses what it says: *Source well*, any of the
 plate's sample variables (each well's value of it, in the same colour that value has on every plot — a well left
 unfilled is named as such), or *None* for no stripe. A key under the title names each colour drawn. Every tile is its nanowell's crop at one size and
@@ -6695,7 +6702,8 @@ small for a line of numbers. The crops are cut a timepoint at a time, the first 
 fill in one after another, and a timepoint you have not ticked is never cut: to see one timepoint quickly, tick only
 that one. A tile still being cut is a hatched hexagon that the caption counts as *not cut yet*. A tile with no image
 at a timepoint is a **hatched hexagon**, never a blank, and the caption counts those by reason. Pointing at a tile names
-its nanowell in the status bar (*Tile 37 · A03 3,-2*) and shows the same card the Array view shows for a nanowell —
+its nanowell in the status bar (*Tile 37 · A03 3,-2*) and, once the pointer has rested on it for a second, shows the
+same card the Array view shows for a nanowell —
 state, counts, fluorescence, fold changes, rim focus — at the timepoint of the copy under the pointer; a click selects
 it, so the side panel follows. The composite is only a view: it is not a well of the plate, joins no selection, and is
 never exported as one. While the pop-out shows the window — Rows or Hex — **Go to nanowell** is hidden, since the

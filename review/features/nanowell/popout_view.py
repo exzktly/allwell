@@ -1,6 +1,6 @@
 """The **Nanowell crops** pop-out's second row of controls: what its grid shows, and saving it.
 
-**Timepoints** chooses which of the nanowell's timepoints are panels, **Channels** adds channels beside the page's
+**Timepoints** chooses which of the timepoints are panels (**All**, **None**, or a tick each), **Channels** adds channels beside the page's
 image channel (a row of crops each), **Grid** sets the shape the panels are laid out in, and **Save ▾** saves,
 copies or files the figure. Each writes one ``NanowellState`` field through the controller
 (``set_popout_timepoints``, ``set_popout_channels``, ``set_popout_grid``, ``save_popout_figure``); the rules those
@@ -16,8 +16,9 @@ from review.features.nanowell import controller as nwc
 from review.features.nanowell.crop_grid_compute import POPOUT_MAX_COLS, grid_label
 from widgets.owned_action import owned_action
 
-_TPS_TIP = ("Which of the nanowell's timepoints the pop-out shows, one panel each. Fewer panels are drawn larger. "
-            "All timepoints clears the choice.")
+_TPS_TIP = ("Which of the timepoints the pop-out shows, one panel each (in the Hex layout, one composite each, side "
+            "by side). Fewer panels are drawn larger. All shows every timepoint; None clears every tick, so a few can "
+            "be ticked from nothing.")
 _CHANNELS_TIP = ("Channels drawn beside the image channel, a row of crops each, every row on a brightness scale of "
                  "its own (the channel's Display range when it has one). The image channel is always drawn first.")
 _GRID_TIP = ("The shape of the pop-out's grid. Auto: one channel wraps into a near-square grid, several take a row "
@@ -74,6 +75,8 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
     grid_btn, grid_menu = _menu_button(window, "grid", _GRID_TIP, ctx)
 
     def shown_tps(st) -> set:
+        if st is None or st.popout_tps_none:
+            return set()
         tps = _timepoints(st)
         chosen = set(st.popout_tps) & set(tps)
         return chosen or set(tps)
@@ -83,14 +86,17 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
         tps = _timepoints(st)
         shown = shown_tps(st) | {tp} if on else shown_tps(st) - {tp}
         if not shown:
-            return                                    # the last panel cannot be taken away
+            nwc.set_popout_no_timepoints(ctx)         # the last tick taken away is None, said on the figure
+            return
         nwc.set_popout_timepoints(ctx, [] if shown >= set(tps) else [t for t in tps if t in shown])
 
     def rebuild_tps() -> None:
         st = _state(ctx)
         tps_menu.clear()
-        every = owned_action(tps_menu, "All timepoints")
+        every = owned_action(tps_menu, "All")
         every.triggered.connect(lambda _=False: nwc.set_popout_timepoints(ctx, []))
+        nothing = owned_action(tps_menu, "None")
+        nothing.triggered.connect(lambda _=False: nwc.set_popout_no_timepoints(ctx))
         tps_menu.addSeparator()
         shown = shown_tps(st)
         times = st.data.times_h if st is not None and st.data is not None else {}
@@ -98,7 +104,6 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
             action = owned_action(tps_menu, timepoint_text(tp, times))
             action.setCheckable(True)
             action.setChecked(tp in shown)
-            action.setEnabled(not (tp in shown and len(shown) == 1))
             action.setData(tp)
             action.toggled.connect(lambda on, tp=tp: toggle_tp(tp, on))
 
@@ -138,7 +143,8 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
         st = _state(ctx)
         tps = _timepoints(st)
         shown = shown_tps(st)
-        tps_btn.setText("Timepoints: all" if len(shown) >= len(tps) else f"Timepoints: {len(shown)} of {len(tps)}")
+        tps_btn.setText("Timepoints: none" if not shown else "Timepoints: all" if len(shown) >= len(tps)
+                        else f"Timepoints: {len(shown)} of {len(tps)}")
         drawn = nwc.popout_channels(st)
         ch_btn.setText("Channels: 1" if len(drawn) == 1 else f"Channels: {len(drawn)}")
         ch_btn.setEnabled(len(_channels(st)) > 1)

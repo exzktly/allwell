@@ -12713,14 +12713,21 @@ tuple of `(well, q, r)` (`_window_sites` validates it: strings and whole numbers
 `MAX_WINDOW_SITES`, 20,000). It is frozen, not bound live as a `gate` condition is, because the Subset filters the very
 figure the window is drawn on. `_window_values` answers 1 or 0 for every nanowell — a nanowell off the list is decided
 against, never "no value" — and `to_config` / `from_config` carry the name and the sites (a malformed site list refuses
-the whole block, as a bad condition does). `use_window_as_subset` appends the condition to `st.subset` under *all* and
-sets it through `controller.set_subset` (what *Apply* calls), so every view redraws once; it clears the window first
-(the Subset changing would otherwise make the window's strip report a settings change), and refuses with a sentence
+the whole block, as a bad condition does). **The Subset holds one window gate at a time.** `on_release` takes any
+window condition out of `st.subset` (`_drop_window_gate`, through `controller.set_subset`, whose redraw is synchronous)
+before it builds the new window, so the box's members — and its `n_at_drawing` and `drawn_under` — are read off the
+figure drawn without the old gate, and the status bar says the earlier window was taken out. `use_window_as_subset`
+likewise drops a window condition still in the Subset (a window kept for another metric can come back under one)
+before reading the members, putting the Subset back if it then refuses; otherwise replacing the gate would keep only
+what both hold. It appends the condition to the remaining conditions under *all* and sets it through
+`controller.set_subset` (what *Apply* calls), so every view redraws once; it clears the window first (the Subset
+changing would otherwise make the window's strip report a settings change), and refuses with a sentence
 on the status bar when the subset is *any* over several conditions, holds `MAX_CONDITIONS`, or the window holds none or
 too many nanowells. `subset_view._ConditionRow` shows the condition frozen: the field locked, a label *“Window 1” · N
 nanowells*, *inside | outside* editable, and `condition()` returns the stored condition with the chosen op so the sites
 survive an edit. The strip's button is `_nw_window_subset_btn`. Tests: `test_nanowell_window_subset.py` (pure) and the
-*Use as Subset* cases of `test_nanowell_window_page.py` (a real drag and button press; stacking; the refusal; the editor).
+*Use as Subset* cases of `test_nanowell_window_page.py` (a real drag and button press; one gate at a time, a second
+box selecting from every nanowell; replacing a gate already there; the refusal; the editor).
 
 **The hex composite** (`composite_compute`, `_composite_render`) is the pop-out's second layout of the window's
 nanowells (`NanowellState.popout_layout` ∈ `POPOUT_LAYOUTS`, `"hex"`). `composite_compute.composite(rows)` is pure: one
@@ -12736,11 +12743,24 @@ the same multiple of its own nanowell's radius, so equal tiles show every nanowe
 per-crop µm scale is needed), all on one `renderer.crop_scale`, a hatched hexagon for a tile with no image (its reason
 counted in the caption), a foot mark in `ui.theme.WELL_COLORS_TUPLE[patch % 96]`, patch labels, a dashed frame and a
 title that says it is not a real array. `draw_window_popout` branches on the layout, fetches the page's crops through
-`_want_crops` (shared with the rows), draws at `composite_timepoint` (`NanowellState.composite_tp`, else the window's ranking
-timepoint, else the first), and keeps the tiles' `(x, y, site, rank)` on `NanowellState.popout_tiles` for
-`on_popout_click` (nearest tile within half a pitch → `_select`) and `on_popout_motion` (status bar). The page size and
-count follow the layout (`_window_controller.page_size`). The timepoint stepper is
-`_nw_popout_tp_prev` / `_nw_popout_tp_label` / `_nw_popout_tp_next` in `window_view.build_popout_window_controls`.
+`_want_crops` (shared with the rows), and draws the composite once per timepoint the pop-out's **Timepoints** menu shows
+(`crop_grid_compute.shown_timepoints` of `NanowellState.popout_tps`), side by side on the **Grid** shape
+(`crop_grid_compute.grid_shape(1, n, popout_grid, popout_cols)`; `_composite_render._panel_rects` turns it into one
+axes per timepoint, titled with it). Every panel holds the same tiles at the same data coordinates, so the tiles'
+`(x, y, site, rank)` kept on `NanowellState.popout_tiles` serve `on_popout_click` (nearest tile within half a pitch →
+`_select`) and `on_popout_motion` (status bar) in whichever panel the pointer is; one `crop_scale` spans every tile of
+every panel, so a change over time is a change in the picture. The page size and count follow the layout
+(`_window_controller.page_size`).
+
+**Timepoints: All / None.** The pop-out's Timepoints menu (`popout_view.build_popout_view_controls`) opens with *All*
+(`controller.set_popout_timepoints(ctx, [])`) and *None* (`set_popout_no_timepoints`), then a tick per timepoint.
+`popout_tps` empty means every timepoint, so *None* is its own persisted flag, `NanowellState.popout_tps_none`; every
+pop-out draw path — one nanowell, the window's rows, the hex composite — renders `controller.NO_TIMEPOINTS_SAID`
+(gid `nw-popout-no-timepoints`) instead of a figure while it is set, and the button reads *Timepoints: none*.
+Unticking the last timepoint sets it too; a tick or *All* clears it. Tests: `test_nanowell_popout_grid.py` (the menu)
+and `test_nanowell_composite_render.py` (side by side, the Grid shape, the hex layout following the menu).
+`window_view.build_popout_window_controls`'s refresh hides `_nw_popout_go_to_btn` while `popout_source` is
+`"window"`: the button names one nanowell and the figure is of many.
 
 **The crop store is bounded.** `NanowellState.crops` is a `crop_cache_compute.CropCache` — at most `CROPS_KEPT` (400)
 nanowells, the oldest inserted going first, never a key in `protected` (the page on screen and the selected nanowell,

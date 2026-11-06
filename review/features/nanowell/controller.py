@@ -1939,6 +1939,8 @@ def draw_popout(ctx) -> None:
     site = crops_site(st)
     if site is None:
         render_message(fig, "Select a nanowell on the plot to see its crops here.", gid="nw-popout-empty")
+    elif st.popout_tps_none:
+        render_message(fig, NO_TIMEPOINTS_SAID, gid="nw-popout-no-timepoints")
     else:
         image_channel = page_image_channel(st)
         if site not in st.crops:
@@ -1980,9 +1982,18 @@ def _popout_more(ctx, st, site) -> list:
     return out
 
 
+#: What the pop-out says, in place of a figure, under **Timepoints: None**.
+NO_TIMEPOINTS_SAID = "No timepoint is chosen: tick one in Timepoints, or choose All."
+
+
 def set_popout_timepoints(ctx, timepoints) -> None:
-    """Show these timepoints in the pop-out (every one when empty)."""
-    _set_popout(ctx, popout_tps=[str(tp) for tp in timepoints])
+    """Show these timepoints in the pop-out (every one when empty) — **All**, or a tick in **Timepoints**."""
+    _set_popout(ctx, popout_tps=[str(tp) for tp in timepoints], popout_tps_none=False)
+
+
+def set_popout_no_timepoints(ctx) -> None:
+    """**None** in **Timepoints**: show no timepoint, and say so, until one is ticked or **All** chosen."""
+    _set_popout(ctx, popout_tps=[], popout_tps_none=True)
 
 
 def set_popout_channels(ctx, channels) -> None:

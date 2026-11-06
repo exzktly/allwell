@@ -21,8 +21,9 @@ _RULE_TIP = ("Over several timepoints: keep a nanowell only if it is inside the 
 _PANEL_TIP = "Cover only the panel the window was drawn in, rather than every panel."
 _POPOUT_TIP = "Show the nanowells inside the window in the pop-out, as rows of crops over time."
 _SUBSET_TIP = ("Keep only the nanowells inside the window: they are added to the Subset, applied at once, and the "
-               "others leave the Distribution (and every view the Subset governs). A window drawn next on what "
-               "remains narrows it further; the Subset's editor lists each and removes it.")
+               "others leave the Distribution (and every view the Subset governs). The Subset holds one window at a "
+               "time: drawing another box takes this one out first, so the new box selects from every nanowell. The "
+               "Subset's editor lists it and removes it.")
 _CLEAR_TIP = "Clear the window"
 #: The widest the strip's Low and High fields grow, in pixels: a number of a few digits.
 _FIELD_MAX_W = 80
@@ -117,15 +118,17 @@ def build_window_strip(ctx, parent) -> QWidget:
 
 _SOURCE_TIP = "What the pop-out shows: the selected nanowell over time, or the nanowells inside the Distribution window."
 _LAYOUT_TIP = ("How the window's nanowells are laid out: one row of crops over time for each (Rows), or all at once "
-               "at one timepoint as an artificial hex array, a patch for each source well (Hex).")
+               "as an artificial hex array, a patch for each source well, once per timepoint chosen in Timepoints, side by "
+               "side (Hex).")
 _LAYOUT_NAMES = {"rows": "Rows", "hex": "Hex"}
-_TP_TIP = "The timepoint the hex composite is drawn at."
 
 
 def build_popout_window_controls(ctx, window) -> QHBoxLayout:
-    """The pop-out's row for the window: **Show** (this nanowell | the window), **Layout**, and ◀ Page k of n ▶.
-    Registers ``_nw_popout_source_cb``, ``_nw_popout_layout_cb``, ``_nw_popout_page_prev``, ``_nw_popout_page_label``,
-    ``_nw_popout_page_next`` and ``_nw_popout_window_refresh``."""
+    """The pop-out's row for the window: **Show** (this nanowell | the window), **Layout**, and ◀ Page k of n ▶. The
+    hex composite's timepoints are the **Timepoints** menu's, drawn side by side (``popout_view``), so there is no
+    stepper here. While the window is shown, the row above's **Go to nanowell** is hidden: it names one nanowell, and
+    the figure is of many from several wells. Registers ``_nw_popout_source_cb``, ``_nw_popout_layout_cb``, ``_nw_popout_page_prev``,
+    ``_nw_popout_page_label``, ``_nw_popout_page_next`` and ``_nw_popout_window_refresh``."""
     source = QComboBox(window)
     source.addItem("This nanowell", "selected")
     source.addItem("Window", "window")
@@ -139,20 +142,13 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     following.setText("▶")
     page = QLabel("", window)
     pager = (prev, page, following)
-    tp_prev, tp_next = QToolButton(window), QToolButton(window)
-    tp_prev.setText("◀")
-    tp_next.setText("▶")
-    tp_label = QLabel("", window)
-    tp_prev.setToolTip(_TP_TIP)
-    tp_next.setToolTip(_TP_TIP)
-    stepper = (tp_prev, tp_label, tp_next)
     row = QHBoxLayout()
     row.addWidget(QLabel("Show", window))
     row.addWidget(source)
     row.addWidget(QLabel("Layout", window))
     row.addWidget(layout)
     row.addStretch(1)
-    for widget in pager + stepper:
+    for widget in pager:
         row.addWidget(widget)
 
     def refresh() -> None:
@@ -174,27 +170,20 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
         page.setText(f"Page {st.window_page + 1} of {pages}")
         for widget in pager:
             widget.setVisible(in_window and pages > 1)
-        result = wnc.current(st)[1]
-        for widget in stepper:
-            widget.setVisible(in_window and st.popout_layout == "hex" and result is not None and st.data is not None)
-        if result is not None and st.data is not None and st.data.timepoints():
-            tp_label.setText(wnc.composite_timepoint(st, result))
+        go_to = ctx.widgets.get_or_none("_nw_popout_go_to_btn")
+        if go_to is not None:
+            go_to.setVisible(not in_window)              # one nanowell's button: no meaning over the window's many
 
     source.currentIndexChanged.connect(lambda _i: wnc.set_popout_source(ctx, source.currentData()))
     layout.currentIndexChanged.connect(lambda _i: wnc.set_popout_layout(ctx, layout.currentData()))
     prev.clicked.connect(lambda _=False: wnc.step_window_page(ctx, -1))
     following.clicked.connect(lambda _=False: wnc.step_window_page(ctx, 1))
-    tp_prev.clicked.connect(lambda _=False: wnc.step_composite_tp(ctx, -1))
-    tp_next.clicked.connect(lambda _=False: wnc.step_composite_tp(ctx, 1))
     reg = ctx.widgets
     reg.register("_nw_popout_source_cb", source)
     reg.register("_nw_popout_layout_cb", layout)
     reg.register("_nw_popout_page_prev", prev)
     reg.register("_nw_popout_page_label", page)
     reg.register("_nw_popout_page_next", following)
-    reg.register("_nw_popout_tp_prev", tp_prev)
-    reg.register("_nw_popout_tp_label", tp_label)
-    reg.register("_nw_popout_tp_next", tp_next)
     reg.register("_nw_popout_window_refresh", refresh)
     refresh()
     return row

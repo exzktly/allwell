@@ -6402,10 +6402,12 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
 - There is one window per metric and axis, kept with the page's settings. Another metric or axis hides it; coming back
   shows it again.
 - **Open in pop-out** shows the nanowells inside the window in the pop-out (see *Nanowell crops*).
-- **Use as Subset** keeps only the nanowells inside the window: they are added to the page's **Subset** as one more
+- **Use as Subset** keeps only the nanowells inside the window: they are added to the page's **Subset** as a
   condition, *Distribution window: inside “Window 1” (N nanowells)*, applied at once, so the Distribution — and every view
-  the Subset governs — loses the others. The window is then cleared. Draw another on what remains and press the button
-  again to narrow further (*Window 2*, …). The list of nanowells is frozen when you press the button; it does not follow
+  the Subset governs — loses the others. The window is then cleared. **The Subset holds one window at a time**: drawing
+  another box takes the earlier window out of the Subset first (the status bar says so), so the new box selects from
+  every nanowell rather than from what the last one kept, and pressing the button again replaces it. Your other Subset
+  conditions stay. The list of nanowells is frozen when you press the button; it does not follow
   the window afterwards. It cannot narrow a Subset that keeps nanowells meeting *any* of several conditions — the strip
   says so; set the Subset to *all* first. The Subset's editor lists each window as a row you can switch between
   *inside* and *outside* or remove (**×**, then **Apply**), which brings the other nanowells back.
@@ -6618,7 +6620,9 @@ reading below the threshold is the one left out as out of focus; *not judged* wh
 not fitted* where the rim was not found), **Labels** (each crop's timepoint
 and the caption; the title stays) and **Go to nanowell**. They are the page's settings, so the strip and the
 Extremes view follow them. A second row shapes the montage and saves it. **Timepoints** chooses which of the
-nanowell's timepoints are panels (fewer panels are drawn larger; *All timepoints* shows every one again).
+nanowell's timepoints are panels (fewer panels are drawn larger). *All* shows every one again; *None* clears every
+tick, so you can tick just the two or three you want from nothing — until one is ticked the pop-out says no timepoint
+is chosen rather than drawing an empty figure (unticking the last one does the same).
 **Channels** adds channels beside the image channel — tick EGFP while the image channel is phase, say — each drawn as
 a row of crops of its own on its own brightness scale (that channel's **Range** when it has one, else its own 1st to
 99th percentile), and the caption names each channel's scale. **Grid** sets the shape: *Auto* (one channel wraps into
@@ -6666,11 +6670,14 @@ source well has its own labelled patch, and inside a patch the nanowells are pla
 centre and the rest spiralling outward, so a position says nothing about where a nanowell sat in its well. Tiles are
 drawn apart inside a dashed frame, each with a mark along its foot in its well's colour, and the title says it is not a
 real array. Every tile is its nanowell's crop at one size and all are on one brightness scale, so wells of different
-exposure compare. It shows 91 nanowells a page (◀ ▶ turn it) at one timepoint — the window's latest covered one at first;
-the timepoint ◀ ▶ beside it step through the others. A tile with no image at that timepoint is a **hatched hexagon**, never
-a blank, and the caption counts those by reason. Pointing at a tile names its nanowell in the status bar (*Tile 37 · A03
+exposure compare. It shows 91 nanowells a page (◀ ▶ turn it), drawn once for each timepoint ticked in
+**Timepoints**, side by side — the same tile at the same place in every copy, all on the one brightness scale, so a
+change over time reads as a change in the picture. **Grid** lays the copies out as it lays out the crops (*One row* puts
+them all across). Pick the timepoints to compare with *None* and a tick or two. A tile with no image at a timepoint is a
+**hatched hexagon**, never a blank, and the caption counts those by reason. Pointing at a tile names its nanowell in the status bar (*Tile 37 · A03
 3,-2*); a click selects it, so the side panel follows. The composite is only a view: it is not a well of the plate, joins no
-selection, and is never exported as one.
+selection, and is never exported as one. While the pop-out shows the window — Rows or Hex — **Go to nanowell** is hidden, since the
+figure is of many nanowells rather than one.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind cell fluorescence) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it

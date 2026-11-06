@@ -12706,6 +12706,22 @@ crop's axes to its nanowell for `on_popout_click`. `render_site_rows` is the one
 Extremes draws its two blocks through it (`render_extremes` supplies the blocks, title and sentences; its figure is pinned
 by `tests/test_nanowell_site_rows.py`), the window draws one, with `with_well` naming each row's well and the model's own
 `format` writing a value (`WindowRows.format`: a fold change with `×`, any other metric as the bare number).
+**Use as Subset** (`_window_controller.use_window_as_subset`, `subset_compute.WINDOW`) turns a window into a Subset
+condition. The condition is field `window_sites` (`Distribution window`, ops *inside* / *outside*, `GATE_OPS`) holding a
+name in `values` (`Window k`, the smallest k unused: `_window_name`) and the members in `Condition.sites`, a sorted
+tuple of `(well, q, r)` (`_window_sites` validates it: strings and whole numbers only, at least one, at most
+`MAX_WINDOW_SITES`, 20,000). It is frozen, not bound live as a `gate` condition is, because the Subset filters the very
+figure the window is drawn on. `_window_values` answers 1 or 0 for every nanowell — a nanowell off the list is decided
+against, never "no value" — and `to_config` / `from_config` carry the name and the sites (a malformed site list refuses
+the whole block, as a bad condition does). `use_window_as_subset` appends the condition to `st.subset` under *all* and
+sets it through `controller.set_subset` (what *Apply* calls), so every view redraws once; it clears the window first
+(the Subset changing would otherwise make the window's strip report a settings change), and refuses with a sentence
+on the status bar when the subset is *any* over several conditions, holds `MAX_CONDITIONS`, or the window holds none or
+too many nanowells. `subset_view._ConditionRow` shows the condition frozen: the field locked, a label *“Window 1” · N
+nanowells*, *inside | outside* editable, and `condition()` returns the stored condition with the chosen op so the sites
+survive an edit. The strip's button is `_nw_window_subset_btn`. Tests: `test_nanowell_window_subset.py` (pure) and the
+*Use as Subset* cases of `test_nanowell_window_page.py` (a real drag and button press; stacking; the refusal; the editor).
+
 **The hex composite** (`composite_compute`, `_composite_render`) is the pop-out's second layout of the window's
 nanowells (`NanowellState.popout_layout` ∈ `POPOUT_LAYOUTS`, `"hex"`). `composite_compute.composite(rows)` is pure: one
 patch per source well, ordered by each well's best rank, each filled from its centre outward in rank order along

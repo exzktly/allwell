@@ -15,6 +15,7 @@ import itertools
 import math
 from dataclasses import replace
 
+from review.features.nanowell import array_hover_compute as ahc
 from review.features.nanowell import composite_compute as cc
 from review.features.nanowell import controller as _controller
 from review.features.nanowell import subset_compute as ss
@@ -24,6 +25,7 @@ from review.features.nanowell._window_render import DRAG_GID, draw_drag, draw_wi
 from review.features.nanowell.crop_grid_compute import shown_timepoints
 from review.features.nanowell.renderer import DENSITY_ABOVE, MAX_PANELS, render_message, render_site_rows
 from review.features.nanowell.state import POPOUT_LAYOUTS, POPOUT_SOURCES
+from review.features.nanowell.zoom_compute import wheel_limits
 
 #: Rows of the window's nanowells the pop-out shows at a time.
 WINDOW_PAGE = 24
@@ -137,7 +139,7 @@ def _store(ctx, st, window) -> None:
         st.windows.pop(key, None)
     else:
         st.windows[key] = window
-    st.window_page = 0
+    st.window_page, st.composite_view = 0, None
     nwc = _nwc()
     nwc._save_soon(ctx)
     nwc.redraw(ctx)
@@ -303,7 +305,7 @@ def set_popout_source(ctx, source: str) -> None:
 def set_popout_layout(ctx, layout: str) -> None:
     """**Layout** of the window's nanowells (``state.POPOUT_LAYOUTS``); the pages start over."""
     if layout in POPOUT_LAYOUTS:
-        _nwc()._set_popout(ctx, popout_layout=layout, window_page=0)
+        _nwc()._set_popout(ctx, popout_layout=layout, window_page=0, composite_view=None)
 
 
 def step_window_page(ctx, delta: int) -> None:
@@ -311,7 +313,9 @@ def step_window_page(ctx, delta: int) -> None:
     st = _state(ctx)
     if st is None:
         return
-    st.window_page = min(max(st.window_page + delta, 0), page_count(st) - 1)
+    page = min(max(st.window_page + delta, 0), page_count(st) - 1)
+    if page != st.window_page:
+        st.window_page, st.composite_view = page, None   # another page is another composite: drawn unzoomed
     _nwc()._call(ctx, "_nw_popout_window_refresh")
     _nwc().draw_popout(ctx)
 
@@ -319,8 +323,8 @@ def step_window_page(ctx, delta: int) -> None:
 def draw_window_popout(ctx, st, fig) -> None:
     """The pop-out in Window mode: the nanowells inside the window, ranked as ``window_compute.members`` ranks them,
     as rows of crops over time (a page of :data:`WINDOW_PAGE`) or as the hex composite (a page of
-    ``composite_compute.COMPOSITE_PAGE`` tiles, drawn once per timepoint the **Timepoints** menu shows, side by side on
-    the **Grid** shape). With **Timepoints: None** it says that instead of drawing. The crops of the page are cut on
+    ``composite_compute.COMPOSITE_PAGE`` tiles, drawn once per timepoint the **Timepoints** menu shows, side by side in
+    one row, at the zoom the wheel left, ``NanowellState.composite_view``). With **Timepoints: None** it says that instead of drawing. The crops of the page are cut on
     a worker, all in one pass, and each row or tile says so until its crops arrive."""
     st.popout_hits, st.popout_tiles = {}, []
     window, result = current(st)
@@ -344,7 +348,8 @@ def draw_window_popout(ctx, st, fig) -> None:
         st.popout_tiles = render_composite(
             fig, comp, {s: nwc.gated_crops(st, s, st.crops[s]) for s in sites if s in st.crops},
             shown_timepoints(st.data.timepoints(), st.popout_tps), n_total=len(rows),
-            display_range=nwc.display_range(ctx), note=strip_text(st), grid=st.popout_grid, cols=st.popout_cols)
+            display_range=nwc.display_range(ctx), note=strip_text(st), cells=st.crop_cells, view=st.composite_view,
+            labels=st.popout_labels)
         return
     first = st.window_page * WINDOW_PAGE
     shown = rows[first:first + WINDOW_PAGE]
@@ -403,10 +408,54 @@ def on_popout_click(ctx, event) -> None:
 
 
 def on_popout_motion(ctx, event) -> None:
-    """Pointing at a composite tile names its real nanowell in the status bar."""
+    """Pointing at a composite tile names its real nanowell in the status bar and shows the Array view's card for it
+    at the timepoint of the panel under the pointer (``array_hover_compute.hover_text``); off a tile the card goes."""
+    from PySide6.QtGui import QCursor
+    from PySide6.QtWidgets import QToolTip
+
     st = _state(ctx)
     tile = _tile_at(st, event) if st is not None else None
-    if tile is not None:
-        well, q, r = tile[2]
-        ctx.notify.set_status(f"Tile {tile[3]} · {well} {q},{r}")
+    if tile is None:
+        if st is not None and st.popout_tiles:
+            QToolTip.hideText()
+        return
+    well, q, r = tile[2]
+    ctx.notify.set_status(f"Tile {tile[3]} · {well} {q},{r}")
+    text = tile_card(st, tile[2], getattr(event.inaxes, "_aw_composite_tp", None))
+    if text:
+        QToolTip.showText(QCursor.pos(), f"Tile {tile[3]} of the composite\n{text}",
+                          ctx.widgets.get_or_none("_nw_popout_canvas"))
+
+
+def tile_card(st, site, timepoint) -> str:
+    """The Array view's hover card for the real nanowell *site* at *timepoint* (``""`` without one): its address,
+    state, counts, fluorescence, fold changes, rim focus and place, read from its row of the nanowell table."""
+    if timepoint is None or st.metrics is None or st.data is None:
+        return ""
+    well, q, r = site
+    rows = ahc.rows_by_address(st.metrics, well, str(timepoint))
+    return ahc.hover_text(ahc.row_for(rows, site, None, None), site, timepoint=str(timepoint),
+                          channels=list(st.data.channels), rule=st.rim_focus_rule())
+
+
+def on_popout_scroll(ctx, event) -> None:
+    """The wheel over the hex composite zooms every panel alike about the pointer, as the Array view's wheel does
+    (``zoom_compute.wheel_limits``, held within its zoom limits of the unzoomed view); the zoom is kept on
+    ``NanowellState.composite_view`` so the crops arriving on a worker redraw it where it was."""
+    st = _state(ctx)
+    ax = event.inaxes
+    home = getattr(ax, "_aw_composite_home", None)
+    if st is None or home is None or not event.step or event.xdata is None:
+        return
+    xlim, ylim = wheel_limits(ax.get_xlim(), ax.get_ylim(), (event.xdata, event.ydata), event.step,
+                              home_xlim=home[0])
+    st.composite_view = None if abs((xlim[1] - xlim[0]) - (home[0][1] - home[0][0])) < 1e-9 else (xlim, ylim)
+    fig = ax.figure
+    for other in fig.axes:
+        if getattr(other, "_aw_composite_home", None) is not None:
+            other.set_xlim(*xlim)
+            other.set_ylim(*ylim)
+    canvas = ctx.widgets.get_or_none("_nw_popout_canvas")
+    if canvas is not None:
+        canvas.draw_idle()
 

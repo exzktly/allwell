@@ -274,6 +274,21 @@ def _head_room(fig, *, floor_top: float, title_pt: float = _TITLE_PT) -> tuple[f
     return top, min(0.995 - key_h, max(0.955, top + title_pt / h_pt)), key_h
 
 
+#: The least height, as a fraction of the figure, the panels keep when a footer grows: on a short figure the lines a
+#: footer owes the reader can need more room than there is, and matplotlib refuses a bottom at or above the top.
+_MIN_PANEL_SHARE = 0.12
+
+
+def _adjust(fig, **params) -> None:
+    """``fig.subplots_adjust(**params)``, with *bottom* held at least :data:`_MIN_PANEL_SHARE` below the top (the
+    one given, else the figure's own). A footer that would need more keeps every line and is drawn over the panels'
+    lowest part rather than raising ``bottom cannot be >= top`` and leaving the page undrawn."""
+    if "bottom" in params:
+        top = params.get("top", fig.subplotpars.top)
+        params["bottom"] = min(params["bottom"], top - _MIN_PANEL_SHARE)
+    fig.subplots_adjust(**params)
+
+
 def _fit_text(text: str, width_pt: float, size_pt: float, *, em: float = _GLYPH_EM) -> str:
     """*text* broken into lines that fit *width_pt* at *size_pt*; every word kept."""
     import textwrap
@@ -295,7 +310,7 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
     rows, cols = _grid(len(panels))
     bottom = 0.10 + _FOOTER_BASE + _line_step(fig) * _FOOTER_LINES
     top, key_bottom, key_h = _head_room(fig, floor_top=0.86, title_pt=_PANEL_TITLE_PT)
-    fig.subplots_adjust(left=0.07, right=0.98, top=top, bottom=bottom, wspace=0.12 if rows * cols > 1 else 0.2,
+    _adjust(fig, left=0.07, right=0.98, top=top, bottom=bottom, wspace=0.12 if rows * cols > 1 else 0.2,
                         hspace=0.62)
     axes = [fig.add_subplot(rows, cols, i + 1) for i in range(len(panels))] if panels else []
     rings = {tuple(site): colour for site, colour in zip(map(tuple, selected), selection_colours())}
@@ -631,7 +646,7 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     if len(lines) > _FOOTER_LINES:
         # Every line here is owed to the reader — a panel not drawn, values not drawn as dots — so the footer
         # grows to hold them rather than cutting the last (roll-up review X11).
-        fig.subplots_adjust(bottom=0.10 + _FOOTER_BASE + step * len(lines))
+        _adjust(fig, bottom=0.10 + _FOOTER_BASE + step * len(lines))
     for i, text in enumerate(reversed(lines)):
         first = (len(lines) - 1 - i) < line1_parts
         _ink(fig.text(0.07, _FOOTER_BASE + i * step, text, fontsize=FOOTER_PT, color=ink if first else muted,
@@ -1979,7 +1994,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
     shown = panels[:MAX_PANELS]
     rows, cols = _grid(len(shown))
     top, key_bottom, key_h = _head_room(fig, floor_top=0.88)
-    fig.subplots_adjust(left=0.07, right=0.98, top=top, bottom=0.10 + _FOOTER_BASE + 2 * _line_step(fig), wspace=0.12,
+    _adjust(fig, left=0.07, right=0.98, top=top, bottom=0.10 + _FOOTER_BASE + 2 * _line_step(fig), wspace=0.12,
                         hspace=0.42)
     axes = [fig.add_subplot(rows, cols, i + 1) for i in range(len(shown))]
     inks = _inks(axes[0] if axes else fig.add_subplot(1, 1, 1))
@@ -2066,7 +2081,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
     # time axis's label), as the Distribution view's footer does; each line is broken to the figure's width.
     lines, _first = _wrapped_to_figure(fig, lines)
     step = _line_step(fig)
-    fig.subplots_adjust(bottom=0.10 + _FOOTER_BASE + step * max(2, len(lines)))
+    _adjust(fig, bottom=0.10 + _FOOTER_BASE + step * max(2, len(lines)))
     for i, text in enumerate(reversed(lines)):
         _ink(fig.text(0.07, _FOOTER_BASE + i * step, text, fontsize=FOOTER_PT, color=muted, gid="nw-traj-footer"),
              muted=True)
@@ -2138,7 +2153,7 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
     ring_label = _fit_text("Ring (lattice steps from the central nanowell)", _figure_pt(fig)[0] * (0.88 - 0.08),
                            _PREF_PT * SINGLE_TYPE_SCALE)
     extra = (ring_label.count("\n") * 1.2 * _PREF_PT * SINGLE_TYPE_SCALE) / max(_figure_pt(fig)[1], 1.0)
-    fig.subplots_adjust(left=0.08, right=0.88, top=0.90,
+    _adjust(fig, left=0.08, right=0.88, top=0.90,
                         bottom=0.10 + extra + _FOOTER_BASE + step * max(1, len(lines)))
     for panel in (ax, share):
         _prepare_axes(panel, SINGLE_TYPE_SCALE)

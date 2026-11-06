@@ -130,9 +130,11 @@ def _open(qtbot, ctx):
 
 
 def _action(ctx, menu_key, data):
+    """The entry of *data* in a menu: a Timepoints or Channels entry is the checkbox inside it (ticking one leaves the
+    menu open), a Grid entry the action itself."""
     for action in ctx.widgets.get(menu_key).actions():
         if action.data() == data:
-            return action
+            return getattr(action, "defaultWidget", lambda: None)() or action
     raise AssertionError(f"no entry {data!r} in {menu_key}")
 
 
@@ -160,12 +162,12 @@ def _said(ctx):
 def test_timepoints_chooses_the_panels_and_the_last_tick_taken_away_is_none(page, qtbot, channel_crops):  # noqa: F811
     st = _open(qtbot, page)
     assert page.widgets.get("_nw_popout_tps_btn").text() == "Timepoints: all"
-    _action(page, "_nw_popout_tps_menu", "t_a").trigger()              # a checkable entry: trigger unticks it
+    _action(page, "_nw_popout_tps_menu", "t_a").click()              # a checkbox entry: a click unticks it
     assert st.popout_tps == ["t_c"]
     assert [p[2] for p in _panels(page)] == ["t_c"]
     assert page.widgets.get("_nw_popout_tps_btn").text() == "Timepoints: 1 of 2"
     page.widgets.get("_nw_popout_rebuild_menus")()
-    _action(page, "_nw_popout_tps_menu", "t_c").trigger()              # the last tick: no panel, said so
+    _action(page, "_nw_popout_tps_menu", "t_c").click()              # the last tick: no panel, said so
     assert (st.popout_tps, st.popout_tps_none) == ([], True)
     assert _panels(page) == [] and nwc.NO_TIMEPOINTS_SAID in _said(page)
     page.widgets.get("_nw_popout_rebuild_menus")()
@@ -181,7 +183,7 @@ def test_none_clears_every_tick_and_a_tick_from_none_shows_that_timepoint_alone(
     assert _panels(page) == [] and nwc.NO_TIMEPOINTS_SAID in _said(page)
     page.widgets.get("_nw_popout_rebuild_menus")()
     assert not any(_action(page, "_nw_popout_tps_menu", tp).isChecked() for tp in ("t_a", "t_c"))
-    _action(page, "_nw_popout_tps_menu", "t_c").trigger()              # unticked: trigger ticks it
+    _action(page, "_nw_popout_tps_menu", "t_c").click()              # unticked: a click ticks it
     assert (st.popout_tps, st.popout_tps_none) == (["t_c"], False)
     assert [p[2] for p in _panels(page)] == ["t_c"]
 
@@ -191,7 +193,7 @@ def test_channels_adds_a_row_per_channel_each_on_its_own_scale(page, qtbot, chan
     channel = st.data.image_channels[0]
     image_channel = _action(page, "_nw_popout_channels_menu", "")
     assert image_channel.isChecked() and not image_channel.isEnabled()  # the image channel is always drawn
-    _action(page, "_nw_popout_channels_menu", channel).trigger()
+    _action(page, "_nw_popout_channels_menu", channel).click()
     assert st.popout_channels == [channel] and channel in channel_crops
     qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 4, timeout=10000)
     phase_scale = tuple(round(v, 3) for v in np.percentile(np.concatenate([a.ravel() for a in PHASE.values()]), [1, 99]))
@@ -206,7 +208,7 @@ def test_channels_adds_a_row_per_channel_each_on_its_own_scale(page, qtbot, chan
 def test_grid_lays_the_panels_out_in_the_shape_chosen(page, qtbot, channel_crops):  # noqa: F811
     st = _open(qtbot, page)
     channel = st.data.image_channels[0]
-    _action(page, "_nw_popout_channels_menu", channel).trigger()
+    _action(page, "_nw_popout_channels_menu", channel).click()
     qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 4, timeout=10000)
     page.widgets.get("_nw_popout_rebuild_menus")()
     _action(page, "_nw_popout_grid_menu", ("column", 0)).trigger()
@@ -221,7 +223,7 @@ def test_grid_lays_the_panels_out_in_the_shape_chosen(page, qtbot, channel_crops
 def test_save_figure_saves_the_pop_out_s_figure_under_the_nanowell_s_name(page, qtbot, channel_crops, monkeypatch):  # noqa: F811
     st = _open(qtbot, page)
     channel = st.data.image_channels[0]
-    _action(page, "_nw_popout_channels_menu", channel).trigger()
+    _action(page, "_nw_popout_channels_menu", channel).click()
     saved = []
     monkeypatch.setattr(type(page.figures), "save", lambda self, fig, name: saved.append((fig, name)))
     entries = {a.text(): a for a in page.widgets.get("_nw_popout_save_menu").actions() if a.text()}
@@ -229,3 +231,30 @@ def test_save_figure_saves_the_pop_out_s_figure_under_the_nanowell_s_name(page, 
     entries["Save figure…"].trigger()
     assert saved == [(page.widgets.get("_nw_popout_fig"), f"A01_q1_r0_phase_{channel}_over_time.png")]
     assert page.widgets.get("_nw_popout_save_btn").window() is page.widgets.get("_nw_popout")
+
+
+def test_the_timepoints_menu_stays_open_while_several_are_ticked(page, qtbot, channel_crops):  # noqa: F811
+    """A real click on an entry of the open menu, as a person ticks it: the menu must still be open for the next."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    st = _open(qtbot, page)
+    menu = page.widgets.get("_nw_popout_tps_menu")
+    nwc.set_popout_no_timepoints(page)
+    menu.popup(QPoint(0, 0))
+    qtbot.waitUntil(menu.isVisible, timeout=5000)
+
+    def click(tp, *, far_right=False):
+        # Where a person clicks an entry: on its label, or anywhere along its row. The menu routes the click to
+        # whatever is there — the entry's checkbox, or for a plain checkable action the action, which closes it.
+        action = next(a for a in menu.actions() if a.data() == tp)
+        rect = menu.actionGeometry(action)
+        at = QPoint(rect.right() - 4 if far_right else rect.left() + 12, rect.center().y())
+        target = menu.childAt(at) or menu
+        QTest.mouseClick(target, Qt.LeftButton, Qt.NoModifier, target.mapFrom(menu, at) if target is not menu else at)
+
+    click("t_a")
+    assert menu.isVisible() and st.popout_tps == ["t_a"]
+    click("t_c", far_right=True)                                      # both ticked is every timepoint
+    assert menu.isVisible() and (st.popout_tps, st.popout_tps_none) == ([], False)
+    menu.close()

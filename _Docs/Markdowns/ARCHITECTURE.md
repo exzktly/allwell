@@ -12683,7 +12683,11 @@ then. `snap` turns a drag's x span into keys: column `i` is `(i − 0.5, i + 0.5
 overlaps it, so a dot's offset inside its column never decides. `members(model, window)` walks the
 `DistributionModel`'s swarms, never the dots drawn, so a nanowell in a density panel (`renderer.DENSITY_ABOVE`) or
 packed into a "+N" overflow is a member like any other; it counts both rules (`n_every`, `n_any`; a nanowell with no
-value at a covered timepoint its panel has is not an *every* member), ranks the chosen rule's members by the value at
+value at a covered timepoint its panel has is not an *every* member). Along wells a nanowell has one value, in its own
+group's column, so membership is that value inside the range and the two rules are the same set — requiring it inside
+at every covered column would keep no nanowell at all from a window across two groups
+(`test_nanowell_window_members.py::test_along_wells_a_window_across_two_neighbouring_groups_keeps_the_nanowells_of_both`).
+It ranks the chosen rule's members by the value at
 the latest covered column (a member with none there last, ties by well, `q`, `r`) into `WindowRow`s — the fields of
 `extremes_compute.ExtremeRow`, a class of their own because `extremes_compute` imports `state`, which imports this
 module — and reports `covered` columns per panel. `not_drawn` counts members with no dot in a covered column by
@@ -12744,16 +12748,38 @@ per-crop µm scale is needed), all on one `renderer.crop_scale`, a hatched hexag
 counted in the caption), a foot mark in `ui.theme.WELL_COLORS_TUPLE[patch % 96]`, patch labels, a dashed frame and a
 title that says it is not a real array. `draw_window_popout` branches on the layout, fetches the page's crops through
 `_want_crops` (shared with the rows), and draws the composite once per timepoint the pop-out's **Timepoints** menu shows
-(`crop_grid_compute.shown_timepoints` of `NanowellState.popout_tps`), side by side on the **Grid** shape
-(`crop_grid_compute.grid_shape(1, n, popout_grid, popout_cols)`; `_composite_render._panel_rects` turns it into one
-axes per timepoint, titled with it). Every panel holds the same tiles at the same data coordinates, so the tiles'
+(`crop_grid_compute.shown_timepoints` of `NanowellState.popout_tps`), side by side in one row
+(`_composite_render._panel_rects`, one axes per timepoint, titled with it; each axes carries `_aw_composite_tp` and its
+unzoomed `_aw_composite_home`). Every panel holds the same tiles at the same data coordinates, so the tiles'
 `(x, y, site, rank)` kept on `NanowellState.popout_tiles` serve `on_popout_click` (nearest tile within half a pitch →
-`_select`) and `on_popout_motion` (status bar) in whichever panel the pointer is; one `crop_scale` spans every tile of
-every panel, so a change over time is a change in the picture. The page size and count follow the layout
-(`_window_controller.page_size`).
+`_select`) and `on_popout_motion` in whichever panel the pointer is; the motion handler names the nanowell in the
+status bar and shows the Array view's hover card for it (`tile_card` → `array_hover_compute.hover_text`, read at the
+panel's `_aw_composite_tp`) as a tooltip. One `crop_scale` spans every tile of every panel, so a change over time is a
+change in the picture. With Cells on (`NanowellState.crop_cells`) each tile's `Crop.cells` are drawn as dots, mapped
+from crop pixels into the tile's extent (`_tile_cells`: pixel `i`'s centre at `i + 0.5` of `2 * TILE / width`), and the
+caption counts them and names tiles of a well with no cell table. The stripe along each tile's foot is its source
+well's `WELL_COLORS_TUPLE` colour, and the patch label above it is written in that colour — the stripe's key — which
+the caption states. `on_popout_scroll` (the pop-out canvas's `scroll_event`) zooms every composite axes alike about the
+pointer by `zoom_compute.wheel_limits`, held against `_aw_composite_home`, and keeps the limits on
+`NanowellState.composite_view` so `render_composite(view=…)` redraws them when crops arrive; `_store` (a new or edited
+window), `set_popout_layout` and a page step clear it. The page size and count follow the layout
+(`_window_controller.page_size`). `popout_view`'s refresh hides **Channels**, **Grid** and **Metrics** while the hex
+composite is shown: it draws the image channel alone, in one row, on tiles too small for a line of numbers.
+**Labels** reaches it (`render_composite(labels=NanowellState.popout_labels)`): off, each panel's timepoint and the
+caption are left out, while the title and the wells' names — the stripes' key — stay.
+
+**A footer never squeezes the panels out.** The Distribution, Trajectories and single-panel figures grow their
+footer by a line for every sentence they owe (a panel not drawn, a Subset, values not drawn as dots), and on a short
+figure that once asked for a `bottom` at or above the panels' `top`, which matplotlib refuses with `bottom cannot be >=
+top` — the page went undrawn. Every one of those adjustments goes through `renderer._adjust`, which holds `bottom` at
+least `_MIN_PANEL_SHARE` (0.12 of the figure) below the top; the footer keeps all its lines and is drawn over the
+panels' lowest part instead (`test_nanowell_window_page.py::test_a_short_figure_with_a_subset_s_footer_still_draws`).
 
 **Timepoints: All / None.** The pop-out's Timepoints menu (`popout_view.build_popout_view_controls`) opens with *All*
 (`controller.set_popout_timepoints(ctx, [])`) and *None* (`set_popout_no_timepoints`), then a tick per timepoint.
+Each tick, there and in **Channels**, is a checkbox inside the menu (`popout_view._check_entry`, a `QWidgetAction`
+whose `_RowCheckBox` answers a click anywhere on its row), so the menu stays open while several are ticked — a plain
+checkable action closes it on every click, and so does a click on the bare part of a stock `QCheckBox`'s row.
 `popout_tps` empty means every timepoint, so *None* is its own persisted flag, `NanowellState.popout_tps_none`; every
 pop-out draw path — one nanowell, the window's rows, the hex composite — renders `controller.NO_TIMEPOINTS_SAID`
 (gid `nw-popout-no-timepoints`) instead of a figure while it is set, and the button reads *Timepoints: none*.

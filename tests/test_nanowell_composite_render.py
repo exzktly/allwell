@@ -148,13 +148,13 @@ def test_one_composite_per_timepoint_side_by_side_each_at_its_own_timepoint():
     assert title.endswith(" · 2 timepoints")
 
 
-def test_the_grid_choice_lays_the_composites_out():
+def test_the_composites_sit_in_one_row_however_many_timepoints():
     comp = cc.composite(_rows())
     fig = Figure(figsize=(9.0, 6.0))
-    render_composite(fig, comp, {}, ["T1", "T2", "T3"], n_total=7, grid="column")
-    xs = {round(ax.get_position().x0, 6) for ax in fig.axes}
-    ys = [ax.get_position().y0 for ax in fig.axes]
-    assert len(xs) == 1 and ys == sorted(ys, reverse=True)                     # one column, T1 at the top
+    render_composite(fig, comp, {}, ["T1", "T2", "T3", "T4", "T5"], n_total=7)
+    ys = {round(ax.get_position().y0, 6) for ax in fig.axes}
+    xs = [ax.get_position().x0 for ax in fig.axes]
+    assert len(ys) == 1 and xs == sorted(xs) and [ax.get_title() for ax in fig.axes] == ["T1", "T2", "T3", "T4", "T5"]
 
 
 def test_the_hex_layout_draws_the_timepoints_menu_s_choice_and_has_no_stepper(page, qtbot):  # noqa: F811
@@ -183,3 +183,155 @@ def test_go_to_nanowell_is_hidden_while_the_pop_out_shows_the_window(page, qtbot
     assert st.popout_layout == "rows" and go_to.isHidden()
     page.widgets.get("_nw_popout_source_cb").setCurrentIndex(0)                    # This nanowell
     assert st.popout_source == "selected" and not go_to.isHidden()
+
+
+# ── the follow-ups: cells, zoom, the hover card, the controls hex has no use for, the stripe's key ──────────────────
+def test_a_cell_lands_at_its_pixel_inside_its_tile():
+    """A 10-pixel crop fills a tile 2 × TILE across, so pixel 4.5 (between the middle two) is the tile's centre and
+    pixel 0's centre is half a pixel in from its left edge."""
+    from review.features.nanowell._composite_render import TILE, _tile_cells
+
+    tile = cc.CompositeTile(3.0, -2.0, ("A01", 0, 0), 1, 0)
+    crop = Crop(np.zeros((10, 10)), "tile", "", np.array([[4.5, 4.5], [0.0, 9.0]]))
+    xy = _tile_cells(tile, crop)
+    assert xy[0].tolist() == pytest.approx([3.0, -2.0])
+    assert xy[1].tolist() == pytest.approx([3.0 - TILE + 0.5 * 2 * TILE / 10, -2.0 - TILE + 9.5 * 2 * TILE / 10])
+
+
+def test_cells_on_draws_each_tile_s_counted_cells_and_the_caption_counts_them():
+    comp = cc.composite(_rows())
+    crops = {t.source: {"T1": Crop(np.zeros((10, 10)), "tile", "", np.array([[1.0, 1.0], [5.0, 6.0]]))}
+             for t in comp.tiles}
+    crops[comp.tiles[0].source] = {"T1": Crop(np.zeros((10, 10)), "tile", "", None)}       # no cell table
+    off, _comp = _draw(crops)
+    on = Figure(figsize=(9.0, 6.0))
+    render_composite(on, comp, crops, "T1", n_total=7, cells=True)
+    assert _artists(off, "nw-composite-cells") == []
+    (dots,) = [c for c in on.axes[0].collections if c.get_gid() == "nw-composite-cells"]
+    assert len(dots.get_offsets()) == 2 * (len(comp.tiles) - 1)
+    caption = _artists(on, "nw-composite-caption")[0].get_text()
+    assert f"Dots: the {2 * (len(comp.tiles) - 1)} cells" in caption and "1 tile(s) of a well with no cell table" in caption
+
+
+def test_each_patch_label_is_its_stripe_s_colour_and_the_caption_says_so():
+    from matplotlib.colors import to_rgba
+
+    fig, comp = _draw({})
+    ax = fig.axes[0]
+    stripes = {}
+    for patch in ax.patches:
+        if patch.get_gid() == "nw-composite-well":
+            stripes.setdefault(round(patch.get_x() + patch.get_width() / 2, 6), to_rgba(patch.get_facecolor()))
+    labels = {t.get_text(): to_rgba(t.get_color()) for t in ax.texts if t.get_gid() == "nw-composite-patch"}
+    for tile in comp.tiles:
+        well = comp.patches[tile.patch][0]
+        assert stripes[round(tile.x, 6)] == labels[well]
+    assert labels["A01"] != labels["B02"]
+    assert "The stripe under a tile is its source well's colour" in _artists(fig, "nw-composite-caption")[0].get_text()
+
+
+def test_the_cells_box_draws_the_cells_on_the_hex_composite(page, qtbot, monkeypatch):  # noqa: F811
+    from tests.test_nanowell_crop_cells import CELLS
+    from review.features.nanowell import controller as nwc
+
+    def crops(_data, _metrics, site, **_kw):
+        return {tp: Crop(np.zeros((10, 10)), "tile", "F0", np.array(xy)) for tp, xy in CELLS.items()}
+
+    monkeypatch.setattr(nwc, "site_crops", crops)
+    monkeypatch.setattr(nwc, "crops_for_sites", lambda d, m, sites, **kw: {tuple(s): crops(d, m, s) for s in sites})
+    st = _open_hex(page, qtbot)
+    fig = page.widgets.get("_nw_popout_fig")
+    dots = lambda: sum(len(c.get_offsets()) for ax in fig.axes for c in ax.collections  # noqa: E731
+                       if c.get_gid() == "nw-composite-cells")
+    qtbot.waitUntil(lambda: bool([im for ax in fig.axes for im in ax.images]), timeout=10000)
+    assert dots() == 0
+    page.widgets.get("_nw_popout_cells_box").click()
+    n_tiles = len(st.popout_tiles)
+    assert st.crop_cells and dots() == n_tiles * sum(len(v) for v in CELLS.values())
+
+
+def test_grid_and_channels_are_not_offered_for_the_hex_layout(page, qtbot):  # noqa: F811
+    st = _open_hex(page, qtbot)
+    grid, channels = page.widgets.get("_nw_popout_grid_btn"), page.widgets.get("_nw_popout_channels_btn")
+    assert grid.isHidden() and channels.isHidden()
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(0)                    # Rows
+    assert st.popout_layout == "rows" and not grid.isHidden() and not channels.isHidden()
+
+
+def _wheel(canvas, point, notches=1):
+    from PySide6.QtGui import QWheelEvent
+
+    event = QWheelEvent(QPointF(point), QPointF(canvas.mapToGlobal(point)), QPoint(0, 0), QPoint(0, 120 * notches),
+                        Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+    QApplication.sendEvent(canvas, event)
+
+
+def test_the_wheel_zooms_every_panel_alike_and_the_zoom_outlasts_a_redraw(page, qtbot):  # noqa: F811
+    from review.features.nanowell import controller as nwc
+
+    st = _open_hex(page, qtbot)
+    fig = page.widgets.get("_nw_popout_fig")
+    assert len(fig.axes) > 1
+    home = fig.axes[0].get_xlim()
+    canvas, point = _tile_point(page, st, st.popout_tiles[0])
+    _wheel(canvas, point)
+    width = lambda ax: abs(ax.get_xlim()[1] - ax.get_xlim()[0])  # noqa: E731
+    assert width(fig.axes[0]) < abs(home[1] - home[0]) * 0.9
+    assert {round(width(ax), 6) for ax in fig.axes} == {round(width(fig.axes[0]), 6)}
+    zoomed = fig.axes[0].get_xlim()
+    nwc.draw_popout(page)                                                         # crops arriving redraw it
+    assert page.widgets.get("_nw_popout_fig").axes[0].get_xlim() == pytest.approx(zoomed)
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(0)
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(1)                   # another layout: unzoomed again
+    assert st.composite_view is None and page.widgets.get("_nw_popout_fig").axes[0].get_xlim() == pytest.approx(home)
+
+
+def test_pointing_at_a_tile_shows_the_array_view_s_card_at_that_panel_s_timepoint(page, qtbot, monkeypatch):  # noqa: F811
+    from PySide6.QtWidgets import QToolTip
+
+    from review.features.nanowell import array_hover_compute as ahc
+
+    st = _open_hex(page, qtbot)
+    shown = []
+    monkeypatch.setattr(QToolTip, "showText", lambda _pos, text, *_a: shown.append(text))
+    fig = page.widgets.get("_nw_popout_fig")
+    second = fig.axes[1]
+    tile = st.popout_tiles[0]
+    canvas = page.widgets.get("_nw_popout_canvas")
+    px, py = second.transData.transform((tile[0], tile[1]))
+    ratio = canvas.devicePixelRatioF()
+    point = QPoint(int(round(px / ratio)), int(round(canvas.height() - py / ratio)))
+    QApplication.sendEvent(canvas, QMouseEvent(QEvent.MouseMove, QPointF(point), QPointF(canvas.mapToGlobal(point)),
+                                               Qt.NoButton, Qt.NoButton, Qt.NoModifier))
+    well, q, r = tile[2]
+    timepoint = second._aw_composite_tp
+    rows = ahc.rows_by_address(st.metrics, well, timepoint)
+    expected = ahc.hover_text(rows.get((q, r)), tile[2], timepoint=timepoint, channels=list(st.data.channels),
+                              rule=st.rim_focus_rule())
+    assert timepoint != fig.axes[0]._aw_composite_tp
+    assert shown and shown[-1] == f"Tile {tile[3]} of the composite\n{expected}"
+
+
+def test_labels_off_leaves_out_each_panel_s_timepoint_and_the_caption_but_not_the_wells_names():
+    comp = cc.composite(_rows())
+    on, off = Figure(figsize=(9.0, 6.0)), Figure(figsize=(9.0, 6.0))
+    render_composite(on, comp, {}, ["T1", "T2"], n_total=7)
+    render_composite(off, comp, {}, ["T1", "T2"], n_total=7, labels=False)
+    assert [ax.get_title() for ax in on.axes] == ["T1", "T2"] and [ax.get_title() for ax in off.axes] == ["", ""]
+    gids = lambda fig: [t.get_gid() for t in fig.texts]  # noqa: E731
+    assert "nw-composite-caption" in gids(on) and "nw-composite-caption" not in gids(off)
+    assert "nw-composite-title" in gids(off)
+    assert sorted(t.get_text() for t in off.axes[0].texts if t.get_gid() == "nw-composite-patch") == ["A01", "B02"]
+
+
+def test_the_labels_box_reaches_the_hex_composite_and_metrics_is_not_offered_there(page, qtbot):  # noqa: F811
+    st = _open_hex(page, qtbot)
+    fig = page.widgets.get("_nw_popout_fig")
+    metrics = page.widgets.get("_nw_popout_metrics_box")
+    assert metrics.isHidden()
+    assert any(t.get_gid() == "nw-composite-caption" for t in fig.texts)
+    page.widgets.get("_nw_popout_labels_box").click()
+    assert st.popout_labels is False and not any(t.get_gid() == "nw-composite-caption" for t in fig.texts)
+    assert all(ax.get_title() == "" for ax in fig.axes)
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(0)                    # Rows: Metrics is back
+    assert not metrics.isHidden()

@@ -6029,13 +6029,14 @@ time, and how wells and replicate groups compare. A dataset without nanowell tab
 The controls across the top of the page are on three rows, and each row means the same thing on every view, so a
 control is found in the same place whichever view is open:
 
-1. **Measure** — which number: **Metric**, **Channel**, **Baseline**, and on the views that draw values over time
-   (or test them) **Baseline average** and **Moving average**.
-2. **Scope** — of which nanowells, from the broadest choice to the narrowest: **Rim focus**, **Fixed cohort**
-   (where it applies), the **Subset**, then the **Well** and **Timepoint** on the views that show one. *Excluded
-   (n)* ends this row while a well is excluded.
-3. **View** — how the open view shows it: its own settings first (*Along x*, *Compare*, *Positions*, *Image*, …),
-   its actions last (*Set anchor*, *Resolve*, *Re-run…*). Position and Trajectories have no row of their own.
+1. **What is drawn** — the central selections: **Metric**, **Channel**, then the **Well** and **Timepoint** on
+   the views that show one, and on Array its **Positions**.
+2. **Which nanowells, and how they are normalised** — **Rim focus**, **Fixed cohort** (where it applies), the
+   **Subset**, **Exclude** (on the views with a Well; *Excluded (n)* follows it while a well is excluded), then
+   **Baseline**, and where they apply **Baseline average**, **Moving average** and Distribution's **Responding
+   above**.
+3. **Viewing** — how the open view shows it: *Along x*, *Image*, *Layers*, *Compare*, *Show*, … and its actions
+   (*Set anchor*, *Resolve*, *Re-run…*). Position and Trajectories have no row of their own.
 
 In a narrow window a row wraps onto a second line of its own rather than mixing with the next row.
 
@@ -6497,9 +6498,9 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   values, two samples holding the same constant), never a number. More than 15 comparisons are not run: choose
   a control under **vs** or exclude wells. *Save figure* saves the figure and its report together.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
-  a QC picture and a full-resolution montage each did. Its **Well** and **Timepoint** are on the band's Scope
-  row; its View row holds how the picture is drawn — **Positions**, **Image** and **Layers** — then its actions,
-  **Set anchor**, **Clear anchor** and **Re-run wells…** (*Re-run anchored wells…* on the QC view). The zoom and
+  a QC picture and a full-resolution montage each did. Its **Well**, **Timepoint** and **Positions** are on the
+  band's first row; its viewing row holds how the picture is drawn — **Image** and **Layers** — then **Set
+  anchor**, **Clear anchor** and **Re-run wells…** (*Re-run anchored wells…* on the QC view). The zoom and
   **Overlays** sit under the figure,
   beside its navigation buttons:
   - **Image** — what is drawn under the nanowells: *Off*; *Run montage*, the downsampled stitched phase

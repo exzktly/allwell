@@ -41,9 +41,10 @@ def test_well_and_timepoint_are_one_item_and_the_timepoint_stands_alone_where_no
     where = ctx.widgets.get("_nw_where_group")
     well, tp = ctx.widgets.get("_nw_well_cb"), ctx.widgets.get("_nw_tp_cb")
     assert where.isAncestorOf(well) and where.isAncestorOf(tp)
-    assert _shown(ctx, "_nw_well_cb") and _shown(ctx, "_nw_tp_cb")
+    assert _shown(ctx, "_nw_well_cb") and _shown(ctx, "_nw_tp_cb") and _shown(ctx, "_nw_exclude_well_btn")
     nwc.set_view(ctx, "position")                                     # one timepoint, every well
     assert where.isVisibleTo(ctx.window) and _shown(ctx, "_nw_tp_cb") and not _shown(ctx, "_nw_well_cb")
+    assert not _shown(ctx, "_nw_exclude_well_btn")                  # it acts on the Well's well: none drawn here
     nwc.set_view(ctx, "trajectories")                                 # neither
     assert not where.isVisibleTo(ctx.window)
 
@@ -140,6 +141,7 @@ def test_the_walk_takes_the_place_of_well_and_timepoint_and_gives_them_back(qc_v
     assert not _shown(ctx, "_nw_well_cb") and not _shown(ctx, "_nw_tp_cb")
     assert not ctx.widgets.get("_nw_where_group").isVisibleTo(ctx.window)
     assert not _shown(ctx, "_nw_rerun_btn")
+    assert not _shown(ctx, "_nw_exclude_well_btn")                  # the walk drives the well, as for the Well
     QTest.keyClick(window, Qt.Key_Right)                              # the keys still reach the walk
     qtbot.waitUntil(lambda: st.anchor_pending is None and not st.computing, timeout=20000)
     assert st.anchor_queue.index == 1

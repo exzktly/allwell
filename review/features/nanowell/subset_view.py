@@ -331,7 +331,6 @@ class SubsetEditor(QFrame):
         self.clear_btn.clicked.connect(self.clear)
         foot.addWidget(self.add_btn)
         foot.addWidget(self.clear_btn)
-        foot.addStretch(1)
         # Edits change the conditions written here only; Apply draws them, Reset puts back the subset in use. A plate
         # redrawn on every keystroke recomputed every view for each half-typed bound.
         self.reset_btn = QPushButton("Reset")
@@ -342,7 +341,8 @@ class SubsetEditor(QFrame):
         self.apply_btn.setToolTip(_APPLY_TIP)
         self.apply_btn.clicked.connect(self.apply)
         foot.addWidget(self.reset_btn)
-        foot.addWidget(self.apply_btn)
+        foot.addWidget(self.apply_btn)          # beside Add condition and Clear: the row's four edits read together
+        foot.addStretch(1)
         lay.addLayout(foot)
         self.status = QLabel("")
         self.status.setObjectName("InfoHint")

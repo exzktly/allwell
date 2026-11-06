@@ -392,3 +392,16 @@ def test_a_draft_survives_another_control_redrawing_the_page(page):
     assert [r.condition().validated() for r in editor.rows] == [C("n0", "ge", 3).validated()] and editor.apply_btn.isEnabled()
     nwc.set_starting_cells(page, 1, 1)                          # a preset chosen in the box: the draft gives way
     assert [r.condition().validated() for r in editor.rows] == list(ss.Subset.starting(1, 1).conditions)
+
+
+def test_reset_and_apply_sit_beside_add_condition_and_clear(page):  # noqa: F811
+    """The editor's four buttons read as one group at the left of their row: Add condition, Clear, Reset, Apply, then
+    the space — Reset and Apply were pushed to the far end, away from the edits they act on."""
+    editor = _editor(page)
+    outer = editor.layout()
+    (row,) = [outer.itemAt(i).layout() for i in range(outer.count()) if outer.itemAt(i).layout() is not None
+              and outer.itemAt(i).layout().indexOf(editor.add_btn) >= 0]
+    items = [row.itemAt(j) for j in range(row.count())]
+    assert [item.widget() for item in items[:4]] == [editor.add_btn, editor.clear_btn, editor.reset_btn,
+                                                     editor.apply_btn]
+    assert items[4].spacerItem() is not None and len(items) == 5

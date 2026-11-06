@@ -6349,18 +6349,19 @@ the sentence names it.
 
 **Reading the figure**
 
-- The footer under the figure is short until you turn on **Notes** (the button under the figure, the same switch as
-  on the Array view). Off, it is one line of counts — ending in how many notes there are to read — and everything that
-  changes or leaves out what is drawn (wells selected without a nanowell table, excluded fields, gated cells, rims
-  out of focus, what the Subset kept, a fixed cohort, a moving average), the fraction responding once you set a cut,
-  and the keys to the figure (the timepoint names under the hours axis, the identity marks). On, it adds the notes on
-  how to read it: how whole-number values are packed, how the line is drawn, how wells compare with the control.
-  Saved and copied figures follow the switch; Batch Export always writes the notes.
+- The figure's footer is in the **Details** field under it rather than on the figure, so the panels have the
+  room. Collapsed, its header is the line of counts and how many alerts and notes it holds — in the warning colour
+  when there are alerts. **Details ▸** opens it: the alerts first (wells selected without a nanowell table, excluded
+  fields, gated cells, rims out of focus, what the Subset kept, a fixed cohort or moving average, the fraction
+  responding at your cut, the timepoint names under the hours axis, the identity marks, and anything the figure had
+  no room to draw), then the notes on how to read it (how whole-number values are packed, how the line is drawn). The
+  key to the dots' colours stays on the figure. Batch Export writes the whole footer on its figures, which have no
+  field beside them.
 - Dots are coloured by the number of cells in the nanowell at baseline: an open ring for 0, then 1, 2 and 3+
   (the key at the top right names the baseline). Grey ("?") is a nanowell whose count at baseline is unknown.
   Saved and copied figures use the white-background shades of the same key.
 - Counts and occupancy are whole numbers, so hundreds of nanowells share a value; their dots are packed into
-  a band within ±0.4 of the value, starting on the value itself, and the footer's notes say so.
+  a band within ±0.4 of the value, starting on the value itself, and the notes in **Details** say so.
 - A swarm with more dots than its slot can hold says how many were not drawn under it — "+N at 0", or
   "+N at 0–4" — beside its exclusions. Every nanowell with a value is either a dot or counted there. When the
   window is too narrow to write those under each swarm, only the number used is written above it and the footer

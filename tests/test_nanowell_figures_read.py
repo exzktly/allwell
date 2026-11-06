@@ -18,7 +18,7 @@ pytest.importorskip("PySide6")
 
 from review.features.nanowell import controller as nwc  # noqa: E402
 from review.features.nanowell import renderer  # noqa: E402
-from tests.test_nanowell_page import _loaded, page  # noqa: E402,F401
+from tests.test_nanowell_page import _texts, _loaded, page  # noqa: E402,F401
 
 
 def _panels(ctx):
@@ -38,7 +38,7 @@ def test_over_time_the_ticks_are_hours_under_one_time_label_and_the_names_are_in
     for ax in panels:
         assert [t.get_text() for t in ax.get_xticklabels()] == ["0", "5"]      # not "0 h · t_c", "5 h · t_a"
         assert ax.get_xlabel() == "Time (h)"                                   # one row: every panel is the bottom
-    footer = [t.get_text() for t in page.widgets.get("_nw_fig").texts if t.get_gid() == "nw-footer"]
+    footer = _texts(page, "nw-footer")                              # the Details field under the figure
     assert "Timepoints: 0 h t_c · 5 h t_a." in footer
 
 

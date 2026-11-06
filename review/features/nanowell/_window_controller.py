@@ -53,6 +53,7 @@ def current(st):
 def after_draw(ctx, st, model) -> None:
     """Called by ``controller.redraw`` after a view is drawn; on the Distribution view, keep the model the figure was
     drawn from and draw the window on it. (The check is here, not in ``redraw``, which is at the complexity cap.)"""
+    _nwc()._call(ctx, "_nw_details_refresh")            # the footer the figure no longer writes
     if st.view != "distribution":
         return
     st.window_model = model

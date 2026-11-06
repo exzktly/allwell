@@ -22,7 +22,7 @@ from review.features.nanowell import subset_compute as ss  # noqa: E402
 from review.features.nanowell.collect import load_nanowell_data  # noqa: E402
 from review.features.nanowell.series_compute import site_metrics  # noqa: E402
 from review.features.nanowell.state import NanowellState  # noqa: E402
-from tests.test_nanowell_page import _loaded, _page, _write_nanowell_dataset  # noqa: E402
+from tests.test_nanowell_page import _details, _loaded, _page, _write_nanowell_dataset  # noqa: E402
 
 #: A01: q0–q7 hold 1, 2, 1, 3, 1, 0, ?, 2 cells at t_c (q6 occluded there, 1 cell at t_a); count fold changes at
 #: t_d are q0 4, q1 1, q2 1, q3 3, q4 3, q5 seeded later, q6 none, q7 4. B01: two single-cell nanowells.
@@ -112,8 +112,13 @@ def page(qtbot, tmp_path, monkeypatch):
 
 
 def _texts(ctx, fig="_nw_fig"):
+    """The figure's texts — and on the page's figure, the Distribution footer its Details field holds."""
     figure = ctx.widgets.get(fig)
-    return [t.get_text() for t in list(figure.texts) + [t for ax in figure.axes for t in ax.texts]]
+    out = [t.get_text() for t in list(figure.texts) + [t for ax in figure.axes for t in ax.texts]]
+    details = _details(ctx) if fig == "_nw_fig" else None
+    if details is not None:
+        out += [details[0], *details[1]]
+    return out
 
 
 def _choose(ctx, key):

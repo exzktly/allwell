@@ -717,7 +717,7 @@ def redraw(ctx) -> None:
         subset=page_subset(ctx, st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
         gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
         names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx),
-        notes_below=not st.layers.notes, **array)
+        footer_out=True, **array)
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
@@ -871,7 +871,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
               stats_cache: dict | None = None, gate=None,
               decoration: Decoration | None = None, names: dict | None = None,
-              swarm_spacing: float = 0.0, notes_below: bool = False) -> tuple[object, object]:
+              swarm_spacing: float = 0.0, footer_out: bool = False) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -1008,7 +1008,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if model.empty:
         render_message(fig, model.empty, gid="nw-moving-empty")
         return None, model
-    return render_distribution(fig, model, selected=selected, spacing=swarm_spacing, notes_below=notes_below), model
+    return render_distribution(fig, model, selected=selected, spacing=swarm_spacing, footer_out=footer_out), model
 
 
 def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels) -> str:

@@ -807,13 +807,57 @@ The same list, on the Phase 2 tip. PR 2: title *"Nanowells: the Distribution win
 
 §1's retargeting procedure, then the checks of §5 on the merged result, then push.
 
-## 8. Phase 3 — Use as Subset (not started; not part of the current request)
+## 8. Phase 3 — Use as Subset (PR 3)
 
-Decided, for a later session: **Use as Subset** on the strip freezes the current members into a new Subset
-condition kind `window_sites` (`subset_compute`), holding the site list and a name (`Window 1`, `Window 2`, …);
-a row passes iff its `(well, q, r)` is in the list. It is not live-bound, so it cannot depend on the figure it
-filters. Windows drawn on the filtered figure stack as further conditions; each is listed and removable in the
-Subset editor. Rows S1 and S2 below stay `todo` until a session is asked to do this phase.
+Branch `claude/distribution-window-subset`, from the tip of `claude/distribution-window-composite`; PR 3 is stacked on
+PR 2 and carries the same retargeting sentence (*"This targets `claude/distribution-window-composite` rather than
+`main`; once #<PR 2> merges, retarget it to `main` before merging."*). PR 3 deletes this tracker, because it closes the
+last row, and says so in its body.
+
+**Decisions (final).**
+
+1. **The window is frozen into the Subset.** *Use as Subset* on the strip adds one condition to the page's Subset whose
+   test is *"this nanowell is one of these sites"*: field `window_sites` (`subset_compute.WINDOW`), label *Distribution
+   window*, ops *inside* / *outside* (the gate's `GATE_OPS`). It holds a name (`Window 1`, `Window 2`, … the smallest
+   number not already used by a window condition) in `values` and the members in a new `Condition.sites` field, a tuple
+   of `(well, q, r)`. It is **not** live-bound: the Subset filters the figure the window is drawn on, so a bound window
+   would depend on its own output.
+2. **It applies at once.** The subset is set through `controller.set_subset` (what *Apply* calls), so the Distribution
+   — and every view the Subset governs — redraws without the nanowells outside the window. The window itself is then
+   cleared (its job is done, and the Subset changing would otherwise make its strip claim a settings change); a new
+   window drawn on the narrowed figure stacks as a further condition.
+3. **Stacking is "all".** The new condition is added to the existing conditions. A Subset whose match is *any* with more
+   than one condition cannot be narrowed that way, so *Use as Subset* then refuses and says so (*"The subset keeps
+   nanowells that meet any condition, so a window could not narrow it: set it to all first."*); with one condition or
+   none the match is set to *all*. At `MAX_CONDITIONS` it refuses and says so. A window of more than
+   `MAX_WINDOW_SITES` (20,000) nanowells refuses and says so, because the sites are saved with the page.
+4. **A nanowell not on the list is decided against**, never "no value": membership is a definite answer, so the
+   *outside* count is right and *Found by the run*-style undecided counts are untouched.
+5. **The Subset editor lists it** as a row: the field is shown and locked, the *inside | outside* choice stays editable,
+   a label gives *“Window 1” · 143 nanowells*, and **×** removes it (through Apply, like any row). It is not offered in
+   the editor's field list (it cannot be built there, only from a window).
+6. **Saved with the page and in named subsets**: `Condition.to_config` writes `values: [name]` and `sites: [[well, q,
+   r], …]`; `from_config` takes them back, and a malformed site list refuses the whole block, as a bad condition does.
+7. **The strip's button** is registered `_nw_window_subset_btn`, text *Use as Subset*, beside *Open in pop-out*.
+
+**Steps.** S1 — `subset_compute` (condition, evaluation, text, config) with its pure tests in
+`tests/test_nanowell_window_subset.py`; S2 — the strip button, `_window_controller.use_window_as_subset`, the editor
+row, and the real-page tests; D1c — README (the strip's *Use as Subset*, the Subset's window row) and ARCHITECTURE;
+then delete this file.
+
+**Tests.** (S1, pure, on a hand-built metrics frame with two wells and three timepoints, built so that the nanowells in
+the list are not the first ones in the frame and one listed nanowell has no value for a metric): *inside* keeps exactly
+the listed sites and *outside* exactly the others, whatever their other values; a site list for a well not in the frame
+changes nothing for the others; `to_config` → `from_config` round-trips the sites and name; a malformed site (a
+string, two numbers, a boolean) is refused; more than `MAX_WINDOW_SITES` is refused; the label reads *Distribution
+window: inside “Window 1” (3 nanowells)*; stacked with a metric condition under *all* the result is the intersection.
+(S2, on the real page): a drag, then the button, leaves `st.subset` with one `window_sites` condition holding exactly the
+window's members and `st.windows` empty, and the Distribution's swarms hold only those nanowells; a second drag and
+button press stacks a second condition named `Window 2` and narrows further; the button refuses with its sentence
+when the match is *any* over two conditions; the editor shows the row with its label and removing it and pressing
+Apply restores the nanowells. Mutations: membership inverted (*inside* keeping the others); the sites dropped from
+`to_config`; the window not cleared after use; the match not forced to *all*; the editor row losing its sites on
+`condition()`.
 
 ## 9. Rows
 
@@ -834,8 +878,9 @@ States: `todo`, `done` (with the test and the mutation that proved it), `decline
 | H3 | drawing the composite, hover, click, timepoint stepper | H3 | done | `tests/test_nanowell_composite_render.py`, 7 tests (the tile/missing counts and caption reasons; one clim across wells of 0–100 and 1000–1100; the title; no well id; a real click on a tile; a real `QMouseEvent` move naming the tile in the status bar; the stepper). Mutations, each an `AssertionError` naming its test: a scale per tile; no missing placeholder; the tile click removed; the stepper unconnected; hover silent. `QTest.mouseMove` delivers nothing under the offscreen platform (it also delivered nothing during W3's drags), so the hover test sends the move as a `QMouseEvent` to the canvas |
 | H4 | the composite reaches no well field, CSV or Batch Export | H4 | done | `test_the_composite_has_no_well_id` and the click test (`st.well` and the plate selection unchanged after a click on a tile). `grep -rn -i composite review/features/batch_export review/features/export review/features/nanowell/collect.py review/features/nanowell/controller.py` finds nothing; only `_window_controller.py` and `_composite_render.py` import the composite modules |
 | D1b | docs, Phase 2 | D1 | done | README_WellViewer.md: *Layout: Hex* in the pop-out's Window mode; ARCHITECTURE.md: *The hex composite* paragraph (layout, isolation, drawing, the pop-out branch, the stepper and why no per-crop µm fields); `test_doc_version_sync.py` passes |
-| S1 | `window_sites` Subset condition | Phase 3 | todo | |
-| S2 | Use as Subset; stacked windows in the Subset editor | Phase 3 | todo | |
+| S1 | `window_sites` Subset condition: evaluation, text, config | S1 | todo | |
+| S2 | Use as Subset: the strip's button, stacking, the editor's row | S2 | todo | |
+| D1c | docs, Phase 3; delete this tracker | D1 | todo | |
 
 ---
 

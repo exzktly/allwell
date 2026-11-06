@@ -140,11 +140,14 @@ def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, 
         left, right = min(xs) - 0.9, max(xs) + 0.9
         top = min(ys + [y for _well, _x, y in comp.patches]) - 0.9      # the patch labels sit inside the frame
         bottom = max(ys) + 0.9
-        ax.add_patch(Rectangle((left, top), right - left, bottom - top, fill=False, linestyle="--", edgecolor=faint,
-                               linewidth=0.8, gid="nw-composite-frame"))
-        ax.set_xlim(left - 0.2, right + 0.2)
-        ax.set_ylim(bottom + 0.2, top - 0.2)             # y down: the smaller y is the top
+        ax.set_xlim(left, right)
+        ax.set_ylim(bottom, top)                         # y down: the smaller y is the top
     ax.set_aspect("equal")
+    # The frame is the panel's own edge, in axes coordinates: drawn around the data's extent it left the view as soon
+    # as the wheel zoomed in, and a panel without it no longer read as one timepoint's composite. Unzoomed the panel
+    # is exactly that extent (the limits above, the aspect fitting the box to them).
+    ax.add_patch(Rectangle((0, 0), 1, 1, transform=ax.transAxes, fill=False, linestyle="--", edgecolor=faint,
+                           linewidth=0.8, clip_on=False, gid="nw-composite-frame"))
     ax._aw_composite_home = (tuple(ax.get_xlim()), tuple(ax.get_ylim()))   # the unzoomed view, for the wheel
     ax._aw_composite_tp = timepoint                      # which timepoint a pointer over this panel is at
 

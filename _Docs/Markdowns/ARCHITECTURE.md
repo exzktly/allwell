@@ -12754,7 +12754,9 @@ is pure: the members are ordered by `sort_key` — the window's rank, or a value
 well's first member, each patch a hexagon filled in that order **row by row from its top left** (`reading_order`:
 the smallest hexagon holding the members, its cells sorted by `y` then `x`), the patches laid out left to right in rows
 of `ceil(sqrt(n_wells))` with one empty ring between them, all in pitch units (neighbouring tile centres 1 apart);
-`Composite.placed_by` names the order for the title. The pop-out's **Sort** (`NanowellState.composite_sort`, `""` the
+`Composite.placed_by` names the order for the title. The dashed frame (`nw-composite-frame`) is drawn in each panel's axes coordinates, the
+panel's own edge, and the unzoomed limits are the tiles' extent exactly, so it outlines the composite at home and
+stays on the panel's edge under any zoom or pan. The pop-out's **Sort** (`NanowellState.composite_sort`, `""` the
 window's rank or a `distribution_compute.METRICS` key; `composite_desc`; both persisted; `_nw_popout_sort_cb` /
 `_nw_popout_order_cb`, hex layout only) is resolved by `_window_controller.composite_order`: the metric through
 `controller.resolve_metric` and `metric_column`, read from `NanowellState.metrics` at the first timepoint shown (a

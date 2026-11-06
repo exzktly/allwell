@@ -6680,7 +6680,8 @@ left**, so a position says nothing about where a nanowell sat in its well. **Sor
 order: *Window rank* (the default), or any of the page's metrics at the first timepoint shown, with **Descending**
 (largest first) or **Ascending**; a nanowell with no value sorts last, and the title says what the tiles are placed
 by. The wells' patches follow the same order. Tiles are
-drawn apart inside a dashed frame, and the title says it is not a real array. Each tile has a coloured **stripe**
+drawn apart inside a dashed frame — the edge of each timepoint's panel, so it stays put when you zoom or pan — and the
+title says it is not a real array. Each tile has a coloured **stripe**
 along its foot, and **Colour** (beside **Layout**, in the Hex layout) chooses what it says: *Source well*, any of the
 plate's sample variables (each well's value of it, in the same colour that value has on every plot — a well left
 unfilled is named as such), or *None* for no stripe. A key under the title names each colour drawn. Every tile is its nanowell's crop at one size and

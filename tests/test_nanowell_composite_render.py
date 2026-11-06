@@ -640,3 +640,28 @@ def test_a_metric_that_cannot_be_read_places_by_rank_and_says_why():
     assert wnc.composite_order(None, st, [("A01", 0, 0)], "T1") == (None, "rank")
     labels = [label for label, _k in wnc.composite_sort_choices()]
     assert labels[0] == "Window rank" and "Cell count" in labels
+
+
+def test_the_dashed_frame_stays_on_each_panel_s_edge_when_zoomed_and_panned(page, qtbot):  # noqa: F811
+    """Reported: on zoom the dashed edge outlining each timepoint's composite disappeared — it was drawn around the
+    data, so zooming in moved it out of view. It is the panel's own edge now, whatever the zoom or pan."""
+    st = _open_hex(page, qtbot)
+    fig = page.widgets.get("_nw_popout_fig")
+    canvas, point = _tile_point(page, st, st.popout_tiles[0])
+
+    def frames_on_edge():
+        for ax in fig.axes:
+            (frame,) = [p for p in ax.patches if p.get_gid() == "nw-composite-frame"]
+            corners = frame.get_window_extent()
+            box = ax.get_window_extent()
+            assert corners.bounds == pytest.approx(box.bounds, abs=1.0)
+        return True
+
+    assert frames_on_edge()
+    for _ in range(4):
+        _wheel(canvas, point)
+    assert abs(fig.axes[0].get_xlim()[1] - fig.axes[0].get_xlim()[0]) < abs(
+        fig.axes[0]._aw_composite_home[0][1] - fig.axes[0]._aw_composite_home[0][0]) * 0.5
+    assert frames_on_edge()
+    _drag_canvas(canvas, point, QPoint(point.x() + 30, point.y() + 20))
+    assert frames_on_edge()

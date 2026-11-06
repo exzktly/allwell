@@ -344,46 +344,78 @@ def draw_window_popout(ctx, st, fig) -> None:
     if st.popout_layout == "hex":
         comp = cc.composite(cc.page(rows, st.window_page))
         sites = [t.source for t in comp.tiles]
-        _want_crops(ctx, st, sites)
+        shown_tps = shown_timepoints(st.data.timepoints(), st.popout_tps)
+        _want_crops(ctx, st, sites, shown_tps)
         st.popout_tiles = render_composite(
-            fig, comp, {s: nwc.gated_crops(st, s, st.crops[s]) for s in sites if s in st.crops},
-            shown_timepoints(st.data.timepoints(), st.popout_tps), n_total=len(rows),
+            fig, comp, _page_crops(st, sites, shown_tps), shown_tps, n_total=len(rows),
             display_range=nwc.display_range(ctx), note=strip_text(st), cells=st.crop_cells, view=st.composite_view,
             labels=st.popout_labels)
         return
     first = st.window_page * WINDOW_PAGE
     shown = rows[first:first + WINDOW_PAGE]
     sites = [row.site for row in shown]
-    _want_crops(ctx, st, sites)
+    timepoints = [str(tp) for tp in st.data.timepoints()]
+    columns = nwc.extremes_columns(timepoints, result.rank_key, st.popout_tps)
+    # The ranking column first: it orders the rows, so it is the one to fill in first.
+    _want_crops(ctx, st, sites, sorted(columns, key=lambda tp: tp != result.rank_key))
     image_channel = nwc.page_image_channel(st)
     metric, channel, _note = nwc.resolve_metric("distribution", st.metric, nwc.page_channel_name(ctx),
                                                 st.data.channels)
     label = nwc._label(metric, channel, st.data)
-    timepoints = [str(tp) for tp in st.data.timepoints()]
     model = wc.WindowRows(result.rank_key, st.window_model.column, timepoints)
     st.popout_hits = render_site_rows(
         fig, model, [(f"Rows {first + 1}–{first + len(shown)} of {len(rows):,}", shown)],
-        {s: nwc.gated_crops(st, s, st.crops[s]) for s in sites if s in st.crops},
+        _page_crops(st, sites, columns),
         label=label, empty=strip_text(st), title=f"Distribution window · {label}", head=strip_text(st),
         cells=st.crop_cells, numbers=st.crop_metrics, image_channel=image_channel,
         display_range=nwc.display_range(ctx),
-        timepoints=nwc.extremes_columns(timepoints, result.rank_key, st.popout_tps),
+        timepoints=columns,
         metrics=nwc.crop_metrics(st, sites, channel) if st.crop_metrics else None, with_well=True)
 
 
-def _want_crops(ctx, st, sites) -> None:
-    """Keep the crops of *sites* (the page on screen) in the store and cut those it lacks on a worker, in one pass."""
+#: What a page's tile or row says at a timepoint whose crops are still being cut.
+NOT_CUT_YET = "not cut yet"
+
+
+def _cut(st, site, timepoint) -> bool:
+    """Whether *site*'s crop at *timepoint* has been cut, here or as part of the nanowell's every timepoint."""
+    return site in st.crops or st.window_crops.has(site, timepoint)
+
+
+def _page_crops(st, sites, timepoints) -> dict:
+    """``site -> {timepoint: Crop}`` for the page, each nanowell's crops from whichever store holds them, with a
+    "not cut yet" placeholder at a timepoint still being cut — so a crop on its way never reads as "no image"."""
     nwc = _nwc()
-    st.crops.protected = set(sites) | {tuple(s) for s in st.selected_sites}
-    missing = tuple(sorted(s for s in sites if s not in st.crops))
-    if not missing:
+    out = {}
+    for site in sites:
+        held = st.crops.get(site) if site in st.crops else st.window_crops.get(site)
+        crops = dict(nwc.gated_crops(st, site, held) or {}) if held is not None else {}
+        for tp in timepoints:
+            if not _cut(st, site, tp):
+                crops[tp] = nwc.Crop(None, "", NOT_CUT_YET)
+        out[site] = crops
+    return out
+
+
+def _want_crops(ctx, st, sites, timepoints) -> None:
+    """Keep the crops of *sites* (the page on screen) and cut the ones it lacks on a worker, **one timepoint at a
+    time** in the order of *timepoints*: each pass reads every page nanowell at that timepoint (each tile decoded
+    once), is drawn as soon as it arrives, and the next starts from that redraw. Cutting the whole page over every
+    timepoint in one pass showed nothing until all of it was done — a page of the hex composite is 91 nanowells."""
+    nwc = _nwc()
+    st.crops.protected = st.window_crops.protected = set(sites) | {tuple(s) for s in st.selected_sites}
+    for tp in timepoints:
+        missing = tuple(sorted(s for s in sites if not _cut(st, s, tp)))
+        if missing:
+            break
+    else:
         return
     data, metrics, image_channel = st.data, st.metrics, nwc.page_image_channel(st)
-    nwc._fetch(ctx, "window_crops", missing,
-               lambda: nwc.crops_for_sites(data, metrics, missing, channel=image_channel),
-               failed=lambda message: {s: {"": nwc.Crop(None, "", f"The crops could not be cut: {message}")}
+    nwc._fetch(ctx, "window_crops", (tp, missing),
+               lambda: nwc.crops_for_sites(data, metrics, missing, channel=image_channel, timepoints=[tp]),
+               failed=lambda message: {s: {tp: nwc.Crop(None, "", f"The crops could not be cut: {message}")}
                                        for s in missing},
-               deliver=lambda found: st.crops.update(found))
+               deliver=lambda found: st.window_crops.add({**{s: {} for s in missing}, **found}, [tp]))
 
 
 def _tile_at(st, event) -> tuple | None:

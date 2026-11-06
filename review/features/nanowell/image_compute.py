@@ -246,9 +246,10 @@ def site_crops(data, metrics, site, *, pad: float = 1.4, channel: str = "") -> d
     return crops_for_sites(data, metrics, [(well, q, r)], pad=pad, channel=channel).get((well, q, r), {})
 
 
-def crops_for_sites(data, metrics, sites, *, pad: float = 1.4, channel: str = "") -> dict:
-    """``(well, q, r) -> {timepoint: Crop}`` for every nanowell in *sites*, each over every timepoint of its well, cut
-    from the phase image or, with *channel*, from that fluorescence channel's image.
+def crops_for_sites(data, metrics, sites, *, pad: float = 1.4, channel: str = "", timepoints=None) -> dict:
+    """``(well, q, r) -> {timepoint: Crop}`` for every nanowell in *sites*, each over every timepoint of its well — or
+    only over *timepoints* when given — cut from the phase image or, with *channel*, from that fluorescence channel's
+    image.
 
     The same crops :func:`site_crops` cuts one nanowell at a time, read in one pass: each well's input archive is
     opened once, and the rows are taken in (timepoint, owner tile) order so an owner tile shared by several of
@@ -263,6 +264,9 @@ def crops_for_sites(data, metrics, sites, *, pad: float = 1.4, channel: str = ""
         return out
     keys = list(zip(metrics["well"], metrics["nw_q"], metrics["nw_r"]))
     picked = metrics[[(w, q, r) in wanted for w, q, r in keys]]
+    if timepoints is not None:
+        only = {str(tp) for tp in timepoints}
+        picked = picked[picked["timepoint"].astype(str).isin(only)]
     for well, rows in picked.groupby("well", sort=True):
         records = rows.sort_values("tp_order").to_dict("records")
         # Timepoint first, then owner tile: rows that share a tile at a timepoint come one after another.

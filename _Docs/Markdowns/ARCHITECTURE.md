@@ -12791,7 +12791,22 @@ and `test_nanowell_composite_render.py` (side by side, the Grid shape, the hex l
 **The crop store is bounded.** `NanowellState.crops` is a `crop_cache_compute.CropCache` — at most `CROPS_KEPT` (400)
 nanowells, the oldest inserted going first, never a key in `protected` (the page on screen and the selected nanowell,
 set by `draw_window_popout`) — because the window's pop-out pages through hundreds of nanowells and the store was never
-pruned; everything that empties it makes a new one. Tests: `test_nanowell_window_members.py` (pure),
+pruned; everything that empties it makes a new one.
+
+**The window's crops are cut a timepoint at a time.** A page of the hex composite is 91 nanowells, and cutting them
+over every timepoint in one worker pass showed nothing until every tile of every timepoint had been decoded. The
+window's layouts keep their crops in `NanowellState.window_crops`, a `crop_cache_compute.TimepointCropCache`, whose
+`cut_at` records which timepoints of each nanowell have been cut (a timepoint cut where the nanowell has no row is cut
+all the same, so "cut, nothing there" is never "not cut yet"). `_window_controller._want_crops(ctx, st, sites,
+timepoints)` starts one pass — `image_compute.crops_for_sites(…, timepoints=[tp])` for every page nanowell not yet cut at
+the first such `tp`, each tile decoded once — and the redraw that pass's arrival triggers starts the next, so the
+timepoints shown fill in one after another, in the order shown (the hex: the Timepoints menu's; the rows: the ranking
+column first), and a timepoint nobody shows is never cut. `_page_crops` reads each nanowell from `st.crops` when that
+holds its every timepoint, else from `window_crops`, and puts a `NOT_CUT_YET` placeholder at a timepoint still being
+cut, so a tile on its way says *not cut yet* rather than *no image*. It is a store of its own because the site detail,
+the strip and the Extremes view read an entry of `st.crops` as complete. `set_image_channel` and
+`NanowellState.reset_data` empty both. Tests: `test_nanowell_composite_render.py` (the passes and their order, the placeholder,
+`crops_for_sites`' filter), `test_nanowell_window_members.py` (pure),
 `test_nanowell_window_page.py` and `test_nanowell_window_popout.py` (the real page: a real drag, the strip's controls,
 the pop-out's rows, pages and clicks).
 

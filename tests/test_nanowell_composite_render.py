@@ -335,3 +335,78 @@ def test_the_labels_box_reaches_the_hex_composite_and_metrics_is_not_offered_the
     assert all(ax.get_title() == "" for ax in fig.axes)
     page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(0)                    # Rows: Metrics is back
     assert not metrics.isHidden()
+
+
+# ── cutting the window's crops a timepoint at a time ─────────────────────────────────────────────────────────────
+def _recording_cutter(monkeypatch):
+    """``crops_for_sites`` replaced by one that records the timepoints each pass asked for and cuts only those."""
+    from review.features.nanowell import controller as nwc
+
+    asked = []
+
+    def cut(data, _metrics, sites, *, timepoints=None, **_kw):
+        asked.append(list(timepoints) if timepoints is not None else None)        # None: every timepoint at once
+        tps = timepoints if timepoints is not None else [str(tp) for tp in data.timepoints()]
+        return {tuple(s): {tp: _crop(0, 100) for tp in tps} for s in sites}
+
+    monkeypatch.setattr(nwc, "crops_for_sites", cut)
+    return asked
+
+
+def test_the_hex_cuts_only_the_timepoints_it_shows_one_pass_each_in_their_order(page, qtbot, monkeypatch):  # noqa: F811
+    """A page of the composite is 91 nanowells. Cut over every timepoint in one pass, nothing showed until every tile
+    of every timepoint was decoded; now the timepoints shown are cut one pass each, in the order shown, and a
+    timepoint nobody shows is never cut."""
+    from review.features.nanowell import controller as nwc
+
+    asked = _recording_cutter(monkeypatch)
+    st = _loaded(qtbot, page)
+    timepoints = [str(tp) for tp in st.data.timepoints()]
+    nwc.set_popout_timepoints(page, [timepoints[-1]])
+    _drag(page, _first_panel(page), (-0.4, 1.5), (1.4, 4.5))
+    wnc.open_window_popout(page)
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(1)
+    fig = page.widgets.get("_nw_popout_fig")
+    qtbot.waitUntil(lambda: bool([im for ax in fig.axes for im in ax.images]), timeout=10000)
+    assert asked == [[timepoints[-1]]]                                  # only the timepoint shown
+    nwc.set_popout_timepoints(page, [])                                 # All: the others, one pass each, in order
+    qtbot.waitUntil(lambda: len(asked) == len(timepoints), timeout=10000)
+    assert asked == [[timepoints[-1]]] + [[tp] for tp in timepoints if tp != timepoints[-1]]
+    qtbot.waitUntil(lambda: all(ax.images for ax in fig.axes), timeout=10000)
+    assert all(len(ax.images) == len(st.popout_tiles) for ax in fig.axes)
+
+
+def test_a_timepoint_still_being_cut_says_so_and_one_cut_with_nothing_there_says_no_image():
+    from types import SimpleNamespace
+
+    from review.features.nanowell.crop_cache_compute import CropCache, TimepointCropCache
+
+    st = SimpleNamespace(crops=CropCache(), window_crops=TimepointCropCache(), gate=None, metrics=None)
+    a, b = ("A01", 0, 0), ("B02", 1, 0)
+    st.window_crops.add({a: {"T1": _crop(0, 100)}, b: {}}, ["T1"])             # T1 cut; B02 has no row there
+    crops = wnc._page_crops(st, [a, b], ["T1", "T2"])
+    assert crops[a]["T1"].image is not None
+    assert "T1" not in crops[b]                                                 # cut, nothing there: "no image"
+    assert crops[a]["T2"].note == crops[b]["T2"].note == wnc.NOT_CUT_YET         # still to be cut
+    fig = Figure(figsize=(9.0, 6.0))
+    comp = cc.composite([WindowRow(a, 1, 1.0, {}), WindowRow(b, 2, 1.0, {})])
+    render_composite(fig, comp, crops, ["T1", "T2"], n_total=2)
+    caption = [t.get_text() for t in fig.texts if t.get_gid() == "nw-composite-caption"][0]
+    assert "2 not cut yet" in caption and "1 no image at T1" in caption
+
+
+def test_crops_for_sites_cuts_only_the_timepoints_asked_for(monkeypatch):
+    import pandas as pd
+
+    from review.features.nanowell import image_compute as ic
+
+    cut_rows = []
+    monkeypatch.setattr(ic, "_cut_well", lambda _d, well, records, *_a, **_k: cut_rows.extend(
+        (well, r["timepoint"]) for r in records))
+    metrics = pd.DataFrame({"well": ["A01"] * 3, "nw_q": [0] * 3, "nw_r": [0] * 3,
+                            "timepoint": ["T0", "T1", "T2"], "tp_order": [0, 1, 2]})
+    ic.crops_for_sites(None, metrics, [("A01", 0, 0)], timepoints=["T1"])
+    assert cut_rows == [("A01", "T1")]
+    cut_rows.clear()
+    ic.crops_for_sites(None, metrics, [("A01", 0, 0)])
+    assert cut_rows == [("A01", "T0"), ("A01", "T1"), ("A01", "T2")]

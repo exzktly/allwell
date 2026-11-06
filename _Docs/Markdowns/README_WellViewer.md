@@ -6680,7 +6680,9 @@ composite to zoom about the pointer: every copy zooms together, and the zoom hol
 page, window or layout is shown. **Cells** draws each tile's counted cells as dots, and **Labels** off leaves out each
 copy's timepoint and the caption (the wells' names stay, as the stripes' key). **Channels**, **Grid** and **Metrics**
 are not offered here: the composite draws the image channel alone, its copies always sit in one row, and a tile is too
-small for a line of numbers. A tile with no image
+small for a line of numbers. The crops are cut a timepoint at a time, the first timepoint shown first, so the copies
+fill in one after another, and a timepoint you have not ticked is never cut: to see one timepoint quickly, tick only
+that one. A tile still being cut is a hatched hexagon that the caption counts as *not cut yet*. A tile with no image
 at a timepoint is a **hatched hexagon**, never a blank, and the caption counts those by reason. Pointing at a tile names
 its nanowell in the status bar (*Tile 37 · A03 3,-2*) and shows the same card the Array view shows for a nanowell —
 state, counts, fluorescence, fold changes, rim focus — at the timepoint of the copy under the pointer; a click selects

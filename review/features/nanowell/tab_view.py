@@ -128,12 +128,12 @@ _MOVING_TIP = ("Moving average: each nanowell's value at a timepoint becomes the
                "and the ones before it, this many in all (timepoints, not hours). A value is averaged only when the "
                "nanowell has a value at every timepoint of its window, so the first timepoints and any window with "
                "a gap have none; they are counted among the exclusions. For a fold change the window starts after "
-               "the baseline, so the baseline's own value of 1 is never averaged in. Off draws each timepoint as "
-               "measured.")
+               "the baseline, so the baseline's own value of 1 is never averaged in. 1 is off: each timepoint is "
+               "drawn as measured.")
 _BASELINE_MOVING_TIP = (
     "Baseline average: a fold change's baseline becomes the mean of the nanowell's measured values at the baseline "
     "timepoint and the ones before it, this many in all — never after it, which may already carry the treatment. "
-    "Off, the baseline is its one measured value and only the endpoint is averaged. Like the endpoint's window it is "
+    "1 is off: the baseline is its one measured value and only the endpoint is averaged. Like the endpoint's window it is "
     "used only when every timepoint of it has a value; the others are counted among the exclusions.")
 #: Why the baseline's window is greyed, when it is.
 _BASELINE_MOVING_OFF = {
@@ -324,28 +324,23 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_channel_cb", channel_cb)
     grp_channel = band.add_scope("Channel", channel_cb)
 
-    axis_seg = SegmentedControl()
-    for key, label in _AXES:
-        axis_seg.addSegment(text=label, data=key)
-    axis_seg.setToolTip(_AXIS_TIP)
-    axis_seg.currentChanged.connect(lambda idx: nwc.set_axis(ctx, _AXES[idx][0]))
-    reg.register("_nw_axis_seg", axis_seg)
-    grp_axis = band.add_scope("Along x", axis_seg)
-
     baseline_cb = _combo(_BASELINES, _BASELINE_TIP)
     baseline_cb.currentIndexChanged.connect(
         lambda _i: nwc.set_page_baseline(ctx, baseline_cb.currentData() or "earliest"))
     reg.register("_nw_baseline_cb", baseline_cb)
     grp_baseline = band.add_scope("Baseline", baseline_cb)
 
-    cohort_box = QCheckBox("Fixed cohort")
-    cohort_box.setToolTip(_COHORT_TIP)
-    cohort_box.toggled.connect(lambda on: nwc.set_cohort(ctx, on))
-    reg.register("_nw_cohort_box", cohort_box)
-    grp_cohort = band.add_scope("", cohort_box)
-
-    rim_focus = build_rim_focus_controls(ctx)
-    band.add_scope("", rim_focus.box, rim_focus.spin)
+    # The band is three rows on every view, each answering one question, so a control is found in the same row
+    # whichever view is open: *Measure* — which number, and how it is normalised and smoothed; *Scope* — of which
+    # nanowells, then which well and timepoint (general to specific); *View* — how this view shows it, its actions
+    # last. Row breaks keep the rows apart; a row too wide wraps within itself, and a row with nothing shown on a
+    # view takes no room.
+    baseline_moving_spin = SpinBox()
+    baseline_moving_spin.setRange(1, MAX_WINDOW)     # 1 is off, as on the endpoint's window
+    baseline_moving_spin.setToolTip(_BASELINE_MOVING_TIP)
+    baseline_moving_spin.valueChanged.connect(lambda value: nwc.set_baseline_moving(ctx, value))
+    reg.register("_nw_baseline_moving_spin", baseline_moving_spin)
+    grp_baseline_moving = band.add_scope("Baseline average", baseline_moving_spin)
 
     moving_spin = SpinBox()
     # 1 is off: a window of one timepoint averages nothing. The box holds the bare number and its label says what
@@ -354,20 +349,21 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     moving_spin.setToolTip(_MOVING_TIP)
     moving_spin.valueChanged.connect(lambda value: nwc.set_moving(ctx, value))
     reg.register("_nw_moving_spin", moving_spin)
-    grp_moving = band.add_scope("Moving average (timepoints, 1 = off)", moving_spin)
+    grp_moving = band.add_scope("Moving average", moving_spin)
 
-    baseline_moving_spin = SpinBox()
-    baseline_moving_spin.setRange(1, MAX_WINDOW)     # 1 is off, as on the endpoint's window
-    baseline_moving_spin.setToolTip(_BASELINE_MOVING_TIP)
-    baseline_moving_spin.valueChanged.connect(lambda value: nwc.set_baseline_moving(ctx, value))
-    reg.register("_nw_baseline_moving_spin", baseline_moving_spin)
-    grp_baseline_moving = band.add_scope("Baseline average (timepoints, 1 = off)", baseline_moving_spin)
+    measure_row_end = band.add_break()
 
-    # The Subset last on the data row: it narrows the nanowells rather than choosing what is measured of them.
+    rim_focus = build_rim_focus_controls(ctx)
+    band.add_scope("", rim_focus.box, rim_focus.spin)
+
+    cohort_box = QCheckBox("Fixed cohort")
+    cohort_box.setToolTip(_COHORT_TIP)
+    cohort_box.toggled.connect(lambda on: nwc.set_cohort(ctx, on))
+    reg.register("_nw_cohort_box", cohort_box)
+    grp_cohort = band.add_scope("", cohort_box)
+
+    # The Subset after the quality filters: it narrows the nanowells rather than choosing what is measured of them.
     start = build_subset_control(ctx, band, timepoint_text)
-    # The Array view's rows: what is measured (above) · which well and timepoint, and its anchor · how it is drawn.
-    # Shown only there (``_refresh_array_controls``); the other views flow their controls on as before.
-    data_row_end = band.add_break()
 
     # The anchor walk's controls lead the view's own controls, in the place of Well and Timepoint, which the walk
     # drives and its label names ("3 of 17 · B04 at 24h"): the walk adds nothing to the band's width.
@@ -390,11 +386,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_where_group", grp_where)
     # Shown only while a well is excluded: pinned last, so its coming and going moves nothing else.
     exclusion.excluded_group = band.add_scope("", exclusion.excluded, trailing=True)
+    scope_row_end = band.add_break()
 
     array_controls = _build_array_controls(ctx, band)
-    array_controls.groups.append(data_row_end)
-    # *Excluded (n)* names wells, so on the Array view it ends the well row; elsewhere it stays last in the band.
-    array_controls.band, array_controls.excluded_group = band, exclusion.excluded_group
     identity = build_identity_controls(ctx, band)
     statistics = build_statistics_controls(ctx, band)
     qc_controls = build_qc_controls(ctx, band)
@@ -417,6 +411,14 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     grp_extremes = band.add_scope("Largest & smallest", extremes_spin, extremes_tps.button, extremes_cells,
                                   extremes_numbers, extremes_image,
                                   build_display_range_button(ctx, "_nw_extremes_range_btn"))
+
+    axis_seg = SegmentedControl()
+    for key, label in _AXES:
+        axis_seg.addSegment(text=label, data=key)
+    axis_seg.setToolTip(_AXIS_TIP)
+    axis_seg.currentChanged.connect(lambda idx: nwc.set_axis(ctx, _AXES[idx][0]))
+    reg.register("_nw_axis_seg", axis_seg)
+    grp_axis = band.add_scope("Along x", axis_seg)
 
     responding_edit = QLineEdit()
     responding_edit.setPlaceholderText("not set")
@@ -442,6 +444,9 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             ctx, cell_scope, unavailable="Select wells with nanowell tables first."))
     band.add_action(export_btn)
     band.add_action(make_properties_button(ctx, band, "nanowell"))
+    # *Excluded (n)* names wells: it ends the Scope row, after the well it was set from, on every view.
+    band.place_trailing(exclusion.excluded_group, scope_row_end)
+    reg.register("_nw_band_breaks", (measure_row_end, scope_row_end))
     layout.addWidget(band)
     layout.addWidget(start.editor)                  # the Subset's conditions, under the band when shown
     # The Resolve walk's guide card, between the band and the figure it explains: shown only while a walk runs.
@@ -1099,8 +1104,6 @@ def _refresh_array_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
         action.setEnabled(layers.nanowells)
     for group in c.groups:
         group.setVisible(on_view)
-    if c.band is not None:
-        c.band.place_trailing(c.excluded_group, c.well_row_end if on_view else None)
     c.overlays_btn.setChecked(not st.overlays_hidden)
     c.notes_btn.setChecked(layers.notes)
     if not on_view:
@@ -1143,27 +1146,13 @@ def _refresh_array_greying(ctx, st, c: SimpleNamespace, lattice: bool) -> None:
 
 
 def _build_array_controls(ctx, band) -> SimpleNamespace:
-    """The Array view's controls, on rows by what they act on: the anchor's three buttons end the well row (Well and
-    Timepoint lead them, in the page's Where item, since an anchor is set for that well at that timepoint), then a
-    row break, then the picture's row — Positions, Image and Layers; under the figure, beside its navigation buttons
-    (:func:`mount_array_canvas_tools`), the zoom and *Overlays* — viewing actions on the picture rather than settings
-    of it. The page's data controls (Metric to Subset) are the first row, ended by the page's own break."""
+    """The Array view's controls. On the band's *View* row: Positions, Image and Layers — how the picture is drawn —
+    then Set anchor / Clear anchor / *Re-run wells…*, the actions on it, last. Under the figure, beside its navigation
+    buttons (:func:`mount_array_canvas_tools`), the zoom and *Overlays* — viewing actions on the picture rather than
+    settings of it. Well and Timepoint are on the *Scope* row above, in the page's Where item."""
     from widgets.segmented_control import SegmentedControl
 
     reg = ctx.widgets
-    # The anchor's buttons end the well row: an anchor is set for the well and timepoint just chosen.
-    anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
-    anchor_btn.setCheckable(True)
-    anchor_btn.setProperty("variant", "toggle")         # "secondary" paints checked and unchecked the same
-    anchor_btn.toggled.connect(lambda on: nwc.set_anchor_mode(ctx, on))
-    clear_anchor_btn = _button("Clear anchor", _CLEAR_ANCHOR_TIP, lambda: nwc.clear_anchor(ctx))
-    # Shorter here than on the QC view, where it has room: every button beside it already says "anchor".
-    rerun_btn = _button("Re-run wells…", _RERUN_TIP, lambda: nwc.rerun_anchored(ctx))
-    reg.register("_nw_anchor_btn", anchor_btn)
-    reg.register("_nw_clear_anchor_btn", clear_anchor_btn)
-    reg.register("_nw_rerun_btn", rerun_btn)
-    grp_anchor = band.add_scope("", anchor_btn, clear_anchor_btn, rerun_btn)
-    well_row_end = band.add_break()
     # Positions before Image: Lattice is what greys the image, so the cause reads before its effect.
     positions_seg = SegmentedControl()
     for key, label in _POSITIONS:
@@ -1220,10 +1209,22 @@ def _build_array_controls(ctx, band) -> SimpleNamespace:
 
     reg.register("_nw_refresh_zoom", refresh_zoom)
 
+    # The anchor's buttons last: actions on the picture, after the settings that say how it is drawn.
+    anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
+    anchor_btn.setCheckable(True)
+    anchor_btn.setProperty("variant", "toggle")         # "secondary" paints checked and unchecked the same
+    anchor_btn.toggled.connect(lambda on: nwc.set_anchor_mode(ctx, on))
+    clear_anchor_btn = _button("Clear anchor", _CLEAR_ANCHOR_TIP, lambda: nwc.clear_anchor(ctx))
+    # Shorter here than on the QC view, where it has room: every button beside it already says "anchor".
+    rerun_btn = _button("Re-run wells…", _RERUN_TIP, lambda: nwc.rerun_anchored(ctx))
+    reg.register("_nw_anchor_btn", anchor_btn)
+    reg.register("_nw_clear_anchor_btn", clear_anchor_btn)
+    reg.register("_nw_rerun_btn", rerun_btn)
+    grp_anchor = band.add_scope("", anchor_btn, clear_anchor_btn, rerun_btn)
+
     return SimpleNamespace(
         image_cb=image_cb, positions_seg=positions_seg, layer_actions=layer_actions, colour_actions=colour_actions,
-        groups=[grp_positions, grp_image, grp_layers, well_row_end], grp_anchor=grp_anchor, well_row_end=well_row_end,
-        band=None, excluded_group=None, one_btn=one_btn,
+        groups=[grp_positions, grp_image, grp_layers], grp_anchor=grp_anchor, one_btn=one_btn,
         image_channel_cb=image_channel_cb, range_btn=range_btn, canvas_tools=(out_btn, zoom_lbl, in_btn, fit_btn,
                                                                               one_btn),
         anchor_btn=anchor_btn, clear_anchor_btn=clear_anchor_btn, rerun_btn=rerun_btn, overlays_btn=overlays_btn,

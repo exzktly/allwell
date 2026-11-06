@@ -58,6 +58,8 @@ _OCCUPANCY_INDEX = {"0": 0, "1": 1, "2": 2, "3+": 3}
 class HitMap:
     """Where each drawn dot is, for turning a click into a nanowell: per axes, display-space points and sites."""
     entries: list = field(default_factory=list)   # (ax, x_data, y_data, sites)
+    panels: list = field(default_factory=list)    # (axes, index into model.panels): which axes drew which panel
+    values: list = field(default_factory=list)    # per entry, the values of the dots it holds (the window's rings)
 
     def nearest(self, ax, x_px: float, y_px: float, radius_px: float):
         """The site of the drawn dot nearest the display point on *ax*, within *radius_px*, or ``None``."""
@@ -308,6 +310,7 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
     densities = hidden = 0
     for i, (ax, panel) in enumerate(zip(axes, panels)):
         _prepare_axes(ax, scale)
+        hits.panels.append((ax, i))
         d, u = _draw_panel(fig, ax, model, panel, hits, rings, inks, ylim=shared, spacing=spacing)
         densities, hidden = densities + d, hidden + u
         if i % cols:
@@ -538,6 +541,7 @@ def _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink):
     coll.set_gid("nw-dots")
     sites = [swarm.sites[i] for i in idx]
     hits.entries.append((ax, x, layout.y, sites))
+    hits.values.append(swarm.values[idx])
     _ring_selected(ax, x, layout.y, sites, rings)
     return layout
 
@@ -1151,43 +1155,64 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
     """The *N* nanowells with the largest fold change and the *N* with the smallest, each a row of its crops at the
     timepoints shown; returns ``{axes: (well, q, r)}`` so a click on a row selects its nanowell.
 
-    *model* is ``extremes_compute.ExtremesModel``; *crops* is ``(well, q, r) -> {timepoint: Crop}`` for the
-    nanowells cut so far — a row not yet cut says so in each panel. *timepoints* are the columns (the well's every
-    timepoint when ``None``). Every crop is drawn on **one** brightness scale, as the enlarged crops are, so a
+    *model* is ``extremes_compute.ExtremesModel``. Drawn by :func:`render_site_rows`, which the Distribution
+    window's pop-out draws through as well; this supplies the two blocks, the title and the sentences about the
+    ranking."""
+    blocks = [(f"Largest {len(model.largest)}", model.largest), (f"Smallest {len(model.smallest)}", model.smallest)]
+    empty = f"No nanowell in {model.well} has a {label.lower()} at {model.timepoint}, so none can be ranked."
+    if model.excluded:
+        empty += " " + _sentence(caption(model, label).split("; ", 1)[-1]) + "."
+    return render_site_rows(
+        fig, model, blocks, crops, label=label, empty=empty,
+        title=f"{model.name or model.well} · the nanowells with the largest and smallest {label.lower()}",
+        head=caption(model, label), note=note, cells=cells, timepoints=timepoints, metrics=metrics, numbers=numbers,
+        image_channel=image_channel, display_range=display_range)
+
+
+def render_site_rows(fig, model, blocks, crops: dict, *, label: str, empty: str, title: str, head: str,
+                     note: str = "", cells: bool = False, timepoints=None, metrics: dict | None = None,
+                     numbers: bool = True, image_channel: str = "", display_range=None,
+                     with_well: bool = False) -> dict:
+    """Blocks of nanowells, each a row of its crops at the timepoints shown; returns ``{axes: (well, q, r)}`` so a
+    click on a row selects its nanowell. Extremes draws two blocks (the largest and the smallest of one well); the
+    Distribution window draws one (the nanowells inside it, from any number of wells, *with_well* naming each row's).
+
+    *model* gives the montage its ``timepoint`` (the column the rows are ranked at, marked), ``column`` (what a
+    value is formatted as) and ``timepoints`` (the columns when none are chosen); *blocks* is
+    ``[(title, rows)]``, a row having ``site``, ``rank``, ``value`` and ``values`` (``timepoint -> value``);
+    *crops* is ``(well, q, r) -> {timepoint: Crop}`` for the nanowells cut so far — a row not yet cut says so in each
+    panel. *empty* is what the figure says when there is nothing to draw, *title* its title and *head* the first
+    sentence of its caption. Every crop is drawn on **one** brightness scale, as the enlarged crops are, so a
     nanowell that fills with cells reads brighter than one that empties. Each row is labelled with its rank, address
-    and the fold change it was ranked by; under each crop is the fold change at its timepoint and *metrics*
+    and the value it was ranked by; under each crop is the value at its timepoint and *metrics*
     (``site -> {timepoint: [items]}``, ``series_compute.crop_metric_lines``) packed to the crop's width, and the
     ranking timepoint's column is marked.
 
     The montage is laid out in inches to fill the figure (:func:`_extremes_layout`): square crops as large as the
-    figure holds, the Largest and Smallest blocks side by side whenever that gives larger crops than one above the
-    other, the whole centred."""
+    figure holds, blocks side by side whenever that gives larger crops than one above the other, the whole
+    centred."""
     fig.clear()
     _bg, ink, faint = _inks(fig.add_subplot(111))
     fig.clear()
-    blocks = [(f"Largest {len(model.largest)}", model.largest), (f"Smallest {len(model.smallest)}", model.smallest)]
-    blocks = [(title, rows) for title, rows in blocks if rows]
+    blocks = [(block_title, rows) for block_title, rows in blocks if rows]
     columns = [tp for tp in (timepoints if timepoints is not None else model.timepoints) if tp in model.timepoints]
     if not blocks or not columns:
-        said = f"No nanowell in {model.well} has a {label.lower()} at {model.timepoint}, so none can be ranked."
-        if model.excluded:
-            said += " " + _sentence(caption(model, label).split("; ", 1)[-1]) + "."
-        render_message(fig, said, gid="nw-extremes-missing")
+        render_message(fig, empty, gid="nw-extremes-missing")
         return {}
     metrics = metrics or {}
-    every = [crop for row in model.largest + model.smallest
+    every = [crop for _t, rows in blocks for row in rows
              for tp, crop in (crops.get(row.site) or {}).items() if tp in columns or tp == ""]
     # The title is broken to the figure's width, and the montage starts below however many lines that is.
-    heading = _fit_text(f"{model.name or model.well} · the nanowells with the largest and smallest {label.lower()}",
-                      fig.get_size_inches()[0] * 72 * 0.96, _EXT_TITLE_PT)
+    heading = _fit_text(title, fig.get_size_inches()[0] * 72 * 0.96, _EXT_TITLE_PT)
     heading_h = 0.2 + (heading.count("\n") + 1) * _EXT_TITLE_PT * 1.25 / 72
     layout = _extremes_layout(fig, blocks, len(columns), max(_EXT_TOP, heading_h + 0.05))
     draw = _ExtremesDrawing(fig, layout, model, metrics, crop_scale(every, display_range), cells, ink, faint)
-    draw.numbers = numbers
+    draw.numbers, draw.with_well = numbers, with_well
     hits: dict = {}
-    for k, (title, rows) in enumerate(blocks):
+    for k, (block_title, rows) in enumerate(blocks):
         bx, by = draw.block_origin(k, blocks, len(columns))
-        draw.block_header(bx, by, f"{title} · {label} at {model.timepoint}", columns)
+        draw.block_header(bx, by, f"{block_title} · {label}" + (f" at {model.timepoint}" if model.timepoint else ""),
+                          columns)
         for i, row in enumerate(rows):
             y_crop_top = by - _EXT_HEADER - i * draw.row_h
             draw.row_label(bx, y_crop_top, row)
@@ -1199,7 +1224,7 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
                     draw.crop_text(ax, row, tp)
     _ink(fig.text(0.02, 1 - 0.2 / draw.h_in, heading, fontsize=_EXT_TITLE_PT, color=ink, va="top",
                   gid="nw-extremes-title"))
-    _ink(fig.text(0.02, 0.012, draw.caption(label, columns, note, image_channel), fontsize=7, color=faint,
+    _ink(fig.text(0.02, 0.012, draw.caption(head, columns, note, image_channel), fontsize=7, color=faint,
                   gid="nw-extremes-caption", wrap=True), muted=True)
     return hits
 
@@ -1219,12 +1244,19 @@ class _ExtremesDrawing:
         self.pending = False
         self.metrics_cut = False                         # some crop had more metrics than its line holds
         self.numbers = True                              # the numbers are written on the crops (Metrics box)
+        self.with_well = False                           # the row labels name the well (rows from several wells)
         self.tally: dict = {}
 
     def text(self, x_in: float, y_in: float, said: str, *, color, **kw):
         """Figure text at a position in inches."""
         return _ink(self.fig.text(x_in / self.w_in, y_in / self.h_in, said, color=color, **kw),
                     muted=color == self.faint)
+
+    def value_text(self, value: float) -> str:
+        """A row's value as the figure writes it: the model's own ``format`` when it has one (the window's rows are
+        any metric, not only a fold change), else a fold change (``extremes_compute.format_value``)."""
+        own = getattr(self.model, "format", None)
+        return own(value) if own is not None else format_value(self.model.column, value)
 
     def block_origin(self, k: int, blocks, n_columns: int) -> tuple[float, float]:
         """The top-left corner of block *k*, the montage centred both ways in the room between title and caption."""
@@ -1250,7 +1282,8 @@ class _ExtremesDrawing:
 
     def row_label(self, bx: float, y_crop_top: float, row) -> None:
         self.text(bx + _EXT_LABELS_W - 0.08, y_crop_top - self.layout.side / 2,
-                  f"#{row.rank}  q {row.site[1]}, r {row.site[2]}\n{format_value(self.model.column, row.value)}",
+                  (f"#{row.rank}  {row.site[0]} " if self.with_well else f"#{row.rank}  ")
+                  + f"q {row.site[1]}, r {row.site[2]}\n{self.value_text(row.value)}",
                   color=self.ink, ha="right", va="center", fontsize=_EXT_LABEL_PT, gid="nw-extremes-row")
 
     def crop(self, x0: float, y_crop_top: float, site_crops, tp: str):
@@ -1288,7 +1321,7 @@ class _ExtremesDrawing:
         ranked = tp == self.model.timepoint
         side_pt = self.layout.side * 72
         band = {"boxstyle": "square,pad=0.15", "facecolor": _inks(ax)[0], "alpha": 0.62, "linewidth": 0}
-        _ink(ax.text(0.03, 0.97, format_value(self.model.column, row.values.get(tp, math.nan)),
+        _ink(ax.text(0.03, 0.97, self.value_text(row.values.get(tp, math.nan)),
                      transform=ax.transAxes, ha="left", va="top", fontsize=_EXT_VALUE_PT,
                      fontweight="bold" if ranked else "normal", color=self.ink, bbox=band, zorder=6,
                      gid="nw-extremes-value"))
@@ -1302,7 +1335,7 @@ class _ExtremesDrawing:
             _ink(ax.text(0.5, 0.02, line, transform=ax.transAxes, ha="center", va="bottom", fontsize=_EXT_METRIC_PT,
                          color=self.ink, bbox=band, zorder=6, gid="nw-extremes-metrics"))
 
-    def caption(self, label: str, columns, note: str, image_channel: str = "") -> str:
+    def caption(self, head: str, columns, note: str, image_channel: str = "") -> str:
         """What the montage says about itself: the ranking, where the crops came from, the cells, the timepoints left
         out, and the metrics when they had to be."""
         sources = self.sources
@@ -1311,7 +1344,7 @@ class _ExtremesDrawing:
                   "cut from each owner tile, or the montage where it had to be" if sources else
                   "still being cut" if self.pending else "none could be cut")
         hidden = [tp for tp in self.model.timepoints if tp not in columns]
-        said = [caption(self.model, label) + ".",
+        said = [head + ".",
                 f"Crops of the {_of_channel(image_channel)}, {origin}; every crop on {self.scale.said()}."
                 + "".join(f" {_sentence(n_)}." for n_ in sorted(self.notes))
                 + (f" {_sentence(_cells_clause(self.tally))}." if self.tally else "")

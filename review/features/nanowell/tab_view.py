@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from review.features.export.service import export_cell_data_from
 from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import _phone as nw_phone
+from review.features.nanowell import _window_controller as wnc
 from review.features.nanowell import controller as nwc
 from review.features.nanowell.cell_scope_compute import cell_scope
 from review.features.nanowell.distribution_compute import (
@@ -35,6 +36,7 @@ from review.features.nanowell.resolve_view import build_resolve_guide, refresh_r
 from review.features.nanowell.exclude_view import build_exclude_controls
 from review.features.nanowell.rim_focus_view import build_rim_focus_controls
 from review.features.nanowell.variables_view import build_variable_controls
+from review.features.nanowell.window_view import build_popout_window_controls, build_window_strip
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
 from review.features.nanowell.popout_view import build_popout_view_controls
 from review.features.nanowell.qc_view import build_qc_controls, refresh_qc_controls
@@ -445,6 +447,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     # The Resolve walk's guide card, between the band and the figure it explains: shown only while a walk runs.
     guide = build_resolve_guide(ctx, plot_area)
     layout.addWidget(guide.frame)
+    layout.addWidget(build_window_strip(ctx, plot_area))
 
     # ── the figures ─────────────────────────────────────────────────────────
     splitter = QSplitter(Qt.Horizontal, plot_area)
@@ -624,6 +627,10 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             popout_refresh = ctx.widgets.get_or_none("_nw_popout_refresh")
             if callable(popout_refresh):
                 popout_refresh()
+            for name in ("_nw_window_refresh", "_nw_popout_window_refresh"):
+                window_refresh = ctx.widgets.get_or_none(name)
+                if callable(window_refresh):
+                    window_refresh()
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
             variables.refresh(view)
         finally:
@@ -898,6 +905,7 @@ def _popout_window(ctx):
     layout.setContentsMargins(0, 0, 0, 0)
     layout.addLayout(_popout_controls(ctx, window))
     layout.addLayout(build_popout_view_controls(ctx, window, timepoint_text))
+    layout.addLayout(build_popout_window_controls(ctx, window))
     card = PlotCard(window, figsize=(_FIG_W, _FIG_H * 0.8), constrained=False, header=False)
     card.setFigureTitle("")
     layout.addWidget(card)
@@ -907,6 +915,7 @@ def _popout_window(ctx):
     ctx.widgets.register("_nw_popout_fig", card.figure)
     ctx.widgets.register("_nw_popout_canvas", card.canvas)
     card.plotThemeChanged.connect(lambda _m: nwc.draw_popout(ctx))
+    card.canvas.mpl_connect("button_press_event", lambda event: wnc.on_popout_click(ctx, event))
     refresh = ctx.widgets.get_or_none("_nw_refresh_controls")
     if callable(refresh):
         refresh()                                        # the new controls start on the page's settings

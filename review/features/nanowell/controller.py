@@ -35,12 +35,14 @@ from review.features.nanowell.decorate_compute import Decoration, decoration_for
 from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import _phone as nw_phone
 from review.features.nanowell import _qc_controller as qcc
+from review.features.nanowell import _window_controller as wnc
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
 from review.features.nanowell import subset_compute as ss
 from review.features.nanowell import statistics_compute as sc
 from review.features.nanowell._statistics_render import render_statistics
 from review.features.nanowell.crop_grid_compute import POPOUT_GRIDS, POPOUT_MAX_COLS, save_name, shown_channels
+from review.features.nanowell.crop_cache_compute import CropCache
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
     ArrayDrawn, render_array, render_crop_grid, render_crop_strip, render_distribution, render_extremes, render_message,
@@ -725,6 +727,7 @@ def redraw(ctx) -> None:
         _call(ctx, "_nw_refresh_zoom")
     elif model is not None:
         st.model = model
+        wnc.after_draw(ctx, st, model)
     from review.core.plot_style import apply_export_style_to_current
 
     apply_export_style_to_current(ctx, fig, canvas)
@@ -1539,6 +1542,9 @@ def on_motion(ctx, event) -> None:
     if st is not None and st.view == "identity":
         idc.on_motion(ctx, event)
         return
+    if st is not None and st.view == "distribution":
+        wnc.on_motion(ctx, st, event)
+        return
     if st is not None and st.press is None and st.view == "array":
         _array_hover(ctx, st, event)
         return
@@ -1586,6 +1592,9 @@ def on_release(ctx, event) -> None:
     st = _state(ctx)
     if st is not None and st.view == "identity":
         idc.on_release(ctx, event)
+        return
+    if st is not None and st.view == "distribution":
+        wnc.on_release(ctx, st, event)
         return
     press = st.press if st is not None else None
     if press is None:
@@ -1922,6 +1931,11 @@ def draw_popout(ctx) -> None:
     fig, canvas = ctx.widgets.get_or_none("_nw_popout_fig"), ctx.widgets.get_or_none("_nw_popout_canvas")
     if st is None or window is None or fig is None or canvas is None or not window.isVisible():
         return
+    if st.popout_source == "window":
+        wnc.draw_window_popout(ctx, st, fig)
+        canvas.draw_idle()
+        return
+    st.popout_hits = {}
     site = crops_site(st)
     if site is None:
         render_message(fig, "Select a nanowell on the plot to see its crops here.", gid="nw-popout-empty")
@@ -1992,6 +2006,7 @@ def _set_popout(ctx, **values) -> None:
         setattr(st, name, value)
     _save_soon(ctx)
     _call(ctx, "_nw_popout_refresh")
+    _call(ctx, "_nw_popout_window_refresh")
     draw_popout(ctx)
 
 
@@ -2000,6 +2015,9 @@ def save_popout_figure(ctx) -> None:
     st = _state(ctx)
     fig = ctx.widgets.get_or_none("_nw_popout_fig")
     if st is None or fig is None:
+        return
+    if st.popout_source == "window":
+        ctx.figures.save(fig, f"distribution_window_rows_{st.metric}")
         return
     site = crops_site(st)
     if site is None:
@@ -2098,7 +2116,7 @@ MONTAGES_KEPT = 6
 
 
 #: The reads that cut crops, which are of the page's image channel.
-_CROP_KINDS = ("crops", "extreme_crops")
+_CROP_KINDS = ("crops", "extreme_crops", "window_crops")
 
 
 def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
@@ -2144,7 +2162,7 @@ def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
         if kind == "popout_crops":
             while len(st.popout_crops) > POPOUT_CROPS_KEPT:
                 st.popout_crops.pop(next(iter(st.popout_crops)))
-        {"crops": redraw_detail, "popout_crops": draw_popout}.get(kind, redraw)(ctx)
+        {"crops": redraw_detail, "popout_crops": draw_popout, "window_crops": draw_popout}.get(kind, redraw)(ctx)
 
     def on_failed(message) -> None:
         log.warning("Nanowells: %s for %s could not be read: %s", kind, key, message)
@@ -2156,9 +2174,10 @@ def _fetch(ctx, kind: str, key, job, *, failed, deliver=None) -> None:
 
 
 def on_click(ctx, event) -> None:
-    """A press on the figure. On the Distribution figure: select the nanowell under it (one at a time), or clear the
-    selection on empty space. On the Array view a press starts a drag or a click, which
-    :func:`on_release` tells apart. The plate selection is never touched."""
+    """A press on the figure. On the Array view and the Distribution figure a press starts a drag or a click, which
+    :func:`on_release` tells apart: a click on the Distribution figure selects the nanowell under it (one at a time), or
+    clears the selection on empty space, and a drag draws a window (``_window_controller``). The plate selection is
+    never touched."""
     st = _state(ctx)
     if st is not None and st.view == "qc":
         qcc.on_click(ctx, event)
@@ -2175,6 +2194,9 @@ def on_click(ctx, event) -> None:
             focus_nanowell_at(ctx, event)
             return
         _array_press(st, event)
+        return
+    if st is not None and st.view == "distribution":
+        wnc.on_press(ctx, st, event)             # a click or a window, which the release tells apart
         return
     if st is None or event.inaxes is None or event.button != 1:
         return
@@ -2497,7 +2519,7 @@ def set_image_channel(ctx, channel: str) -> None:
     if st is None or st.image_channel == (channel or ""):
         return
     st.image_channel = channel or ""
-    st.crops = {}
+    st.crops = CropCache()
     st.fetching = {tag for tag in st.fetching if tag[0] not in _CROP_KINDS}
     st.release_tiles()
     _save_soon(ctx)

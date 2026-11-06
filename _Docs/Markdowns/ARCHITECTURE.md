@@ -12637,7 +12637,7 @@ sets every tick label to the Properties size, so `QcDrawn.relabel` puts the matr
 the real page with nothing selected: the view bar, a real click on a cell, and leaving Array mid-walk.
 
 **The Extremes view** (`extremes_compute`, `renderer.render_extremes`, `controller._draw_extremes`) is a montage
-of one well's nanowells with the largest and the smallest fold change of the Metric. `extremes_compute.extremes`
+of one well's nanowells with the largest and the smallest fold change of the Metric, drawn through `renderer.render_site_rows` (below, under the Distribution window). `extremes_compute.extremes`
 ranks the page well's nanowells by one metrics column at one timepoint — `shown_timepoint` gives the well's
 timepoints and starts at its latest, as *Along x: Wells* does (U13) — and takes `NanowellState.extremes_n`
 (persisted, 1 to `EXTREMES_MAX_N`, the *Largest & smallest* spin box) from each end, ties in address order so
@@ -12673,6 +12673,45 @@ row's nanowell, which opens the site detail. The crops of the nanowells not yet 
 read in one worker fetch (`_fetch(…, deliver=…)` merges the result into `st.crops`, the store the site detail
 reads) through `image_compute.crops_for_sites`; a failed read stores its reason under `""`, which each panel
 of those rows prints. Batch Export does not offer this view, since it reads the input archives.
+
+**The Distribution window** (`window_compute`, `_window_controller`, `_window_render`, `window_view`) selects
+nanowells by where their values fall on the Distribution figure and shows them in the pop-out. `window_compute` is
+Qt-free: a `DistributionWindow` is a metric column, an axis, a tuple of column *keys* (`column_key`: the timepoint
+`Swarm.label` along time, the group `Swarm.group` along wells), an inclusive `[lo, hi]`, the panel title it was drawn
+in with a `panel_only` flag, a rule (`every` | `any`) and the `settings_key` it was drawn under with the member count
+then. `snap` turns a drag's x span into keys: column `i` is `(i − 0.5, i + 0.5)` and a column is covered when the span
+overlaps it, so a dot's offset inside its column never decides. `members(model, window)` walks the
+`DistributionModel`'s swarms, never the dots drawn, so a nanowell in a density panel (`renderer.DENSITY_ABOVE`) or
+packed into a "+N" overflow is a member like any other; it counts both rules (`n_every`, `n_any`; a nanowell with no
+value at a covered timepoint its panel has is not an *every* member), ranks the chosen rule's members by the value at
+the latest covered column (a member with none there last, ties by well, `q`, `r`) into `WindowRow`s — the fields of
+`extremes_compute.ExtremeRow`, a class of their own because `extremes_compute` imports `state`, which imports this
+module — and reports `covered` columns per panel. `not_drawn` counts members with no dot in a covered column by
+reason from the figure's `HitMap` (`panels`: which axes drew which panel; `values`: the values of each entry's dots).
+`NanowellState.windows` (`window_key(column, axis)` → window, persisted; `_windows_from` drops a damaged block) holds one
+window per metric and axis; `window_model` is the `DistributionModel` last drawn, which `_window_controller.current`
+reads membership against, and `controller.redraw` hands it over through `_window_controller.after_draw`, which also
+draws the band and rings (`_window_render.draw_window`, gids `nw-window-band` / `nw-window-ring`, `Colors.accent`).
+**A press on the Distribution figure selects on release.** `controller.on_click` / `on_motion` / `on_release` delegate
+to `_window_controller` on this view: the press is kept in `NanowellState.window_press`; a release within
+`CLICK_SLOP_PX` is the click it always was (`_select`), and a longer drag becomes a window, drawn dashed while it is
+dragged and stored through `_store`, which saves and redraws. Hand-rolled rather than matplotlib's selectors, which
+the figure's clearing on every redraw would destroy. `window_view.build_window_strip` is the strip (`NanowellWindowStrip`)
+above the figure and `_nw_window_refresh` keeps it on the window; the pop-out's **Show** / **Layout** / pager row is
+`window_view.build_popout_window_controls` (`_nw_popout_window_refresh`). In the pop-out's Window mode
+(`NanowellState.popout_source`, `popout_layout`, persisted; `window_page` not) `controller.draw_popout` calls
+`_window_controller.draw_window_popout`: one page of `WINDOW_PAGE` (24) rows through `renderer.render_site_rows`, the
+page's crops cut in one worker fetch (`_fetch` kind `window_crops`, `crops_for_sites`), `popout_hits` mapping each
+crop's axes to its nanowell for `on_popout_click`. `render_site_rows` is the one montage of ranked nanowells over time:
+Extremes draws its two blocks through it (`render_extremes` supplies the blocks, title and sentences; its figure is pinned
+by `tests/test_nanowell_site_rows.py`), the window draws one, with `with_well` naming each row's well and the model's own
+`format` writing a value (`WindowRows.format`: a fold change with `×`, any other metric as the bare number).
+**The crop store is bounded.** `NanowellState.crops` is a `crop_cache_compute.CropCache` — at most `CROPS_KEPT` (400)
+nanowells, the oldest inserted going first, never a key in `protected` (the page on screen and the selected nanowell,
+set by `draw_window_popout`) — because the window's pop-out pages through hundreds of nanowells and the store was never
+pruned; everything that empties it makes a new one. Tests: `test_nanowell_window_members.py` (pure),
+`test_nanowell_window_page.py` and `test_nanowell_window_popout.py` (the real page: a real drag, the strip's controls,
+the pop-out's rows, pages and clicks).
 
 **The Statistics view** (`statistics_compute`, `_statistics_render.render_statistics`, `statistics_view`,
 `controller.statistics_result`) tests whether wells, or groups of wells, differ in the page's metric at one timepoint,

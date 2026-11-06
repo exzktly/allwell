@@ -310,3 +310,28 @@ def test_pointing_at_a_tile_shows_the_array_view_s_card_at_that_panel_s_timepoin
                               rule=st.rim_focus_rule())
     assert timepoint != fig.axes[0]._aw_composite_tp
     assert shown and shown[-1] == f"Tile {tile[3]} of the composite\n{expected}"
+
+
+def test_labels_off_leaves_out_each_panel_s_timepoint_and_the_caption_but_not_the_wells_names():
+    comp = cc.composite(_rows())
+    on, off = Figure(figsize=(9.0, 6.0)), Figure(figsize=(9.0, 6.0))
+    render_composite(on, comp, {}, ["T1", "T2"], n_total=7)
+    render_composite(off, comp, {}, ["T1", "T2"], n_total=7, labels=False)
+    assert [ax.get_title() for ax in on.axes] == ["T1", "T2"] and [ax.get_title() for ax in off.axes] == ["", ""]
+    gids = lambda fig: [t.get_gid() for t in fig.texts]  # noqa: E731
+    assert "nw-composite-caption" in gids(on) and "nw-composite-caption" not in gids(off)
+    assert "nw-composite-title" in gids(off)
+    assert sorted(t.get_text() for t in off.axes[0].texts if t.get_gid() == "nw-composite-patch") == ["A01", "B02"]
+
+
+def test_the_labels_box_reaches_the_hex_composite_and_metrics_is_not_offered_there(page, qtbot):  # noqa: F811
+    st = _open_hex(page, qtbot)
+    fig = page.widgets.get("_nw_popout_fig")
+    metrics = page.widgets.get("_nw_popout_metrics_box")
+    assert metrics.isHidden()
+    assert any(t.get_gid() == "nw-composite-caption" for t in fig.texts)
+    page.widgets.get("_nw_popout_labels_box").click()
+    assert st.popout_labels is False and not any(t.get_gid() == "nw-composite-caption" for t in fig.texts)
+    assert all(ax.get_title() == "" for ax in fig.axes)
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(0)                    # Rows: Metrics is back
+    assert not metrics.isHidden()

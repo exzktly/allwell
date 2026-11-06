@@ -6677,8 +6677,10 @@ drawn once for each timepoint ticked in **Timepoints**, side by side in one row 
 every copy, all on the one brightness scale, so a change over time reads as a change in the picture. Pick the
 timepoints to compare with *None* and a tick or two; the menu stays open while you tick. **Scroll** over the
 composite to zoom about the pointer: every copy zooms together, and the zoom holds while crops arrive, until another
-page, window or layout is shown. **Cells** draws each tile's counted cells as dots. **Channels** and **Grid** are not
-offered here: the composite draws the image channel alone, and its copies always sit in one row. A tile with no image
+page, window or layout is shown. **Cells** draws each tile's counted cells as dots, and **Labels** off leaves out each
+copy's timepoint and the caption (the wells' names stay, as the stripes' key). **Channels**, **Grid** and **Metrics**
+are not offered here: the composite draws the image channel alone, its copies always sit in one row, and a tile is too
+small for a line of numbers. A tile with no image
 at a timepoint is a **hatched hexagon**, never a blank, and the caption counts those by reason. Pointing at a tile names
 its nanowell in the status bar (*Tile 37 · A03 3,-2*) and shows the same card the Array view shows for a nanowell —
 state, counts, fluorescence, fold changes, rim focus — at the timepoint of the copy under the pointer; a click selects

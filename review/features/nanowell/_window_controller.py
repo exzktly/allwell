@@ -348,7 +348,8 @@ def draw_window_popout(ctx, st, fig) -> None:
         st.popout_tiles = render_composite(
             fig, comp, {s: nwc.gated_crops(st, s, st.crops[s]) for s in sites if s in st.crops},
             shown_timepoints(st.data.timepoints(), st.popout_tps), n_total=len(rows),
-            display_range=nwc.display_range(ctx), note=strip_text(st), cells=st.crop_cells, view=st.composite_view)
+            display_range=nwc.display_range(ctx), note=strip_text(st), cells=st.crop_cells, view=st.composite_view,
+            labels=st.popout_labels)
         return
     first = st.window_page * WINDOW_PAGE
     shown = rows[first:first + WINDOW_PAGE]

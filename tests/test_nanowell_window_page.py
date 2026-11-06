@@ -283,3 +283,21 @@ def test_a_setting_changed_after_the_window_was_drawn_is_named_in_the_strip(page
     qtbot.waitUntil(lambda: st.window_model is not None and not st.computing and "Fixed cohort" in label.text(),
                     timeout=10000)
     assert "Fixed cohort changed since the window was drawn: 2 → " in label.text()
+
+
+def test_a_short_figure_with_a_subset_s_footer_still_draws(page, qtbot):
+    """Use as Subset, take the window out, apply an ordinary condition — and the page is short. Every line the footer
+    owes then needed more height than the figure had, and matplotlib raised ``bottom cannot be >= top``, leaving the
+    Distribution undrawn. The panels now keep a share of the figure and the footer's lines are all still written."""
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell import subset_compute as ss
+
+    st = _drawn(page, qtbot)
+    qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
+    assert nwc.set_subset(page, ss.Subset((ss.Condition("n0", "ge", 1),), "all"))
+    fig = page.widgets.get("_nw_fig")
+    fig.set_size_inches(8.0, 2.0, forward=False)
+    nwc.redraw(page)                                       # raised ValueError before
+    assert fig.subplotpars.top - fig.subplotpars.bottom >= 0.12 - 1e-9
+    assert st.hits is not None and st.hits.panels
+    assert any(t.get_text().startswith("Starting cells ≥1 (count at the earliest timepoint)") for t in fig.texts)

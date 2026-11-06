@@ -94,11 +94,13 @@ def _draw_panel(ax, comp, crops: dict, timepoint: str, scale, missing: Counter, 
 
 
 def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, display_range=None, note: str = "",
-                     cells: bool = False, view=None) -> list:
+                     cells: bool = False, view=None, labels: bool = True) -> list:
     """Draw *comp* (``composite_compute.Composite``) on *fig* (cleared first), once per timepoint of *timepoints*,
     side by side in one row; returns ``[(x, y, site, rank)]`` for turning a pointer position into a tile — every
     panel puts a tile at the same place. *cells* draws each tile's counted cells as dots; *view* ``(xlim, ylim)`` is
-    the zoom the wheel left (``_window_controller.on_popout_scroll``), applied to every panel alike.
+    the zoom the wheel left (``_window_controller.on_popout_scroll``), applied to every panel alike. *labels* off (the
+    pop-out's **Labels**) leaves out each panel's timepoint and the caption; the title and the wells' names, which
+    are the stripes' key, stay.
 
     *crops* is ``(well, q, r) -> {timepoint: Crop}`` for the nanowells cut so far; *n_total* is how many nanowells the
     window holds (the composite is one page of them), *note* the sentence the caption leads with. Every tile of every
@@ -122,7 +124,7 @@ def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, displa
         if view is not None:
             ax.set_xlim(*view[0])
             ax.set_ylim(*view[1])
-        if several:
+        if several and labels:
             _ink(ax.set_title(timepoint, fontsize=9, color=ink, gid="nw-composite-tp"))
     said_tps = timepoints[0] if not several else f"{len(timepoints)} timepoints"
     _ink(fig.text(0.02, 0.97, comp.title(n_total) + f" · {said_tps}", va="top", fontsize=10, color=ink,
@@ -135,6 +137,7 @@ def render_composite(fig, comp, crops: dict, timepoints, *, n_total: int, displa
             said += f" {tally['no_table']} tile(s) of a well with no cell table, so no dots there."
     if missing:
         said += " No image: " + ", ".join(f"{n} {why}" for why, n in missing.most_common()) + "."
-    _ink(fig.text(0.02, 0.012, " ".join(filter(None, [note, said])), fontsize=7, color=faint, wrap=True,
-                  gid="nw-composite-caption"), muted=True)
+    if labels:
+        _ink(fig.text(0.02, 0.012, " ".join(filter(None, [note, said])), fontsize=7, color=faint, wrap=True,
+                      gid="nw-composite-caption"), muted=True)
     return [(t.x, t.y, t.source, t.rank) for t in comp.tiles]

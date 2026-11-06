@@ -167,11 +167,14 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
         ch_btn.setText("Channels: 1" if len(drawn) == 1 else f"Channels: {len(drawn)}")
         ch_btn.setEnabled(len(_channels(st)) > 1)
         grid_btn.setText(grid_label(st.popout_grid, st.popout_cols) if st is not None else "Grid: auto")
-        # The hex composite draws the image channel alone, one composite per timepoint in a row: Channels and Grid
-        # would change nothing there, so they are not offered.
+        # The hex composite draws the image channel alone, one composite per timepoint in a row, on tiles too small
+        # for a line of numbers: Channels, Grid and Metrics would change nothing there, so they are not offered.
         hex_shown = st is not None and st.popout_source == "window" and st.popout_layout == "hex"
         ch_btn.setVisible(not hex_shown)
         grid_btn.setVisible(not hex_shown)
+        metrics_box = ctx.widgets.get_or_none("_nw_popout_metrics_box")
+        if metrics_box is not None:
+            metrics_box.setVisible(not hex_shown)
 
     tps_menu.aboutToShow.connect(rebuild_tps)
     ch_menu.aboutToShow.connect(rebuild_channels)

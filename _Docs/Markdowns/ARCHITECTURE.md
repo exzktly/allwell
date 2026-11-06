@@ -12759,8 +12759,17 @@ the caption states. `on_popout_scroll` (the pop-out canvas's `scroll_event`) zoo
 pointer by `zoom_compute.wheel_limits`, held against `_aw_composite_home`, and keeps the limits on
 `NanowellState.composite_view` so `render_composite(view=…)` redraws them when crops arrive; `_store` (a new or edited
 window), `set_popout_layout` and a page step clear it. The page size and count follow the layout
-(`_window_controller.page_size`). `popout_view`'s refresh hides **Channels** and **Grid** while the hex composite is
-shown: it draws the image channel alone, in one row.
+(`_window_controller.page_size`). `popout_view`'s refresh hides **Channels**, **Grid** and **Metrics** while the hex
+composite is shown: it draws the image channel alone, in one row, on tiles too small for a line of numbers.
+**Labels** reaches it (`render_composite(labels=NanowellState.popout_labels)`): off, each panel's timepoint and the
+caption are left out, while the title and the wells' names — the stripes' key — stay.
+
+**A footer never squeezes the panels out.** The Distribution, Trajectories and single-panel figures grow their
+footer by a line for every sentence they owe (a panel not drawn, a Subset, values not drawn as dots), and on a short
+figure that once asked for a `bottom` at or above the panels' `top`, which matplotlib refuses with `bottom cannot be >=
+top` — the page went undrawn. Every one of those adjustments goes through `renderer._adjust`, which holds `bottom` at
+least `_MIN_PANEL_SHARE` (0.12 of the figure) below the top; the footer keeps all its lines and is drawn over the
+panels' lowest part instead (`test_nanowell_window_page.py::test_a_short_figure_with_a_subset_s_footer_still_draws`).
 
 **Timepoints: All / None.** The pop-out's Timepoints menu (`popout_view.build_popout_view_controls`) opens with *All*
 (`controller.set_popout_timepoints(ctx, [])`) and *None* (`set_popout_no_timepoints`), then a tick per timepoint.

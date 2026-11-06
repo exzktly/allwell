@@ -12760,7 +12760,12 @@ stays on the panel's edge under any zoom or pan. The pop-out's **Sort** (`Nanowe
 window's rank or a `distribution_compute.METRICS` key; `composite_desc`; both persisted; `_nw_popout_sort_cb` /
 `_nw_popout_order_cb`, hex layout only) is resolved by `_window_controller.composite_order`: the metric through
 `controller.resolve_metric` and `metric_column`, read from `NanowellState.metrics` at the first timepoint shown (a
-per-nanowell metric at `tp_order` 0), falling back to rank with the reason in the title when it cannot be read;
+per-nanowell metric at `tp_order` 0, through `metric_values`, which **Corner** shares), falling back to rank with the
+reason in the title when it cannot be read. **Corner** (`NanowellState.composite_label`, persisted;
+`_nw_popout_label_cb`) is resolved by `composite_labels` into `{timepoint: {site: value}}`, each panel's at its own
+timepoint, and `_composite_render._draw_corners` writes `corner_text(value)` (a whole number as one, else three
+significant figures, `—` with no value) in each tile's top-left corner, white on a dark stroke (`nw-composite-value`);
+the caption names the metric;
 `page` takes `COMPOSITE_PAGE` (91, a radius-5 hexagon) ranks at a time. `Composite` and `CompositeTile(x, y, source,
 rank, patch)` carry **no well id**: a tile's `source` is the real `(well, q, r)` it stands for, and nothing of the
 composite reaches `NanowellState.well`, the plate selection, the CSV export or Batch Export (`tests/

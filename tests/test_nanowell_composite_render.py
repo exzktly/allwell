@@ -665,3 +665,49 @@ def test_the_dashed_frame_stays_on_each_panel_s_edge_when_zoomed_and_panned(page
     assert frames_on_edge()
     _drag_canvas(canvas, point, QPoint(point.x() + 30, point.y() + 20))
     assert frames_on_edge()
+
+
+# ── Corner: a metric in each tile's corner ───────────────────────────────────────────────────────────────────────
+def test_corner_writes_each_tile_s_value_at_its_panel_s_timepoint():
+    from review.features.nanowell._composite_render import TILE, corner_text
+
+    comp = cc.composite(_rows())
+    sites = [t.source for t in comp.tiles]
+    corner = {"T1": {s: float(i) for i, s in enumerate(sites)}, "T2": {s: 2.5 * i for i, s in enumerate(sites[:-1])}}
+    fig = Figure(figsize=(9.0, 6.0))
+    render_composite(fig, comp, {}, ["T1", "T2"], n_total=7, corner=corner, corner_said="Corner: each tile's n.")
+    for ax, tp in zip(fig.axes, ("T1", "T2")):
+        written = {}
+        for text in (t for t in ax.texts if t.get_gid() == "nw-composite-value"):
+            x, y = text.get_position()                                       # each tile's own top-left corner
+            tile = min(comp.tiles, key=lambda t: abs(t.x - TILE - x) + abs(t.y - TILE - y))
+            assert abs(tile.x - TILE - x) < 0.1 and abs(tile.y - TILE - y) < 0.1
+            written[tile.source] = text.get_text()
+        assert written == {s: corner_text(corner[tp].get(s)) for s in sites}
+    assert corner_text(3.0) == "3" and corner_text(2.5) == "2.5" and corner_text(1.23456) == "1.23"
+    assert corner_text(float("nan")) == corner_text(None) == "—"
+    assert "Corner: each tile's n." in _artists(fig, "nw-composite-caption")[0].get_text()
+    bare = Figure(figsize=(9.0, 6.0))
+    render_composite(bare, comp, {}, "T1", n_total=7)
+    assert not [t for t in bare.axes[0].texts if t.get_gid() == "nw-composite-value"]
+
+
+def test_the_corner_combo_writes_the_page_s_values_at_each_panel_s_timepoint(page, qtbot):  # noqa: F811
+    st = _open_hex(page, qtbot)
+    combo = page.widgets.get("_nw_popout_label_cb")
+    assert not combo.isHidden() and combo.currentData() == wnc.NO_LABEL
+    combo.setCurrentIndex(combo.findData("n"))
+    assert st.composite_label == "n"
+    fig = page.widgets.get("_nw_popout_fig")
+    assert len(fig.axes) > 1
+    for ax in fig.axes:
+        tp = ax._aw_composite_tp
+        rows = st.metrics[st.metrics["timepoint"].astype(str) == tp]
+        counts = {(str(w), int(q), int(r)): v for w, q, r, v in zip(rows["well"], rows["nw_q"], rows["nw_r"], rows["n"])}
+        texts = sorted(t.get_text() for t in ax.texts if t.get_gid() == "nw-composite-value")
+        expected = sorted(f"{counts[t[2]]:.0f}" for t in st.popout_tiles)
+        assert texts == expected
+    caption = [t.get_text() for t in fig.texts if t.get_gid() == "nw-composite-caption"][0]
+    assert "Corner: each tile's Cell count at its panel's timepoint." in caption
+    combo.setCurrentIndex(combo.findData(wnc.NO_LABEL))
+    assert not [t for ax in fig.axes for t in ax.texts if t.get_gid() == "nw-composite-value"]

@@ -6679,7 +6679,9 @@ source well has its own labelled patch, and inside a patch the nanowells fill th
 left**, so a position says nothing about where a nanowell sat in its well. **Sort** (beside **Colour**) chooses the
 order: *Window rank* (the default), or any of the page's metrics at the first timepoint shown, with **Descending**
 (largest first) or **Ascending**; a nanowell with no value sorts last, and the title says what the tiles are placed
-by. The wells' patches follow the same order. Tiles are
+by. The wells' patches follow the same order. **Corner** writes a metric of your choice — cell count, confluence, a fluorescence, a
+fold change — in each tile's top-left corner, at the timepoint of the panel the tile is in (a dash where the nanowell
+has no value there); the caption names it. Zoom in to read it on a full page. Tiles are
 drawn apart inside a dashed frame — the edge of each timepoint's panel, so it stays put when you zoom or pan — and the
 title says it is not a real array. Each tile has a coloured **stripe**
 along its foot, and **Colour** (beside **Layout**, in the Hex layout) chooses what it says: *Source well*, any of the

@@ -372,23 +372,21 @@ def set_composite_desc(ctx, descending) -> None:
     _nwc()._set_popout(ctx, composite_desc=bool(descending), composite_view=None)
 
 
-def composite_order(ctx, st, sites, timepoint) -> tuple[dict | None, str]:
-    """``(site -> value, sentence)`` the composite's tiles are placed by: ``(None, "rank")`` by the window's rank;
-    else the chosen metric's value of each nanowell in *sites* at *timepoint* (its one value for a per-nanowell
-    metric), read from the page's metrics, and the sentence naming it — the metric the page could resolve, with its
-    channel, and the order. A metric that cannot be read (a fluorescence metric with no channel) falls back to rank
-    and the sentence says why."""
-    key = st.composite_sort
+def metric_values(ctx, st, key: str, sites, timepoint) -> tuple[dict | None, str, str]:
+    """``(site -> value, label, why_not)`` of the page metric *key* for each nanowell in *sites* at *timepoint* (its
+    one value for a per-nanowell metric), read from the page's metrics. *label* names the metric as the page does
+    (with its channel); ``None`` values and a sentence *why_not* when it cannot be read — no such metric, no metrics,
+    a fluorescence metric with no channel, a column the tables lack. Shared by **Sort** and **Corner**."""
     if key not in METRICS or st.metrics is None or st.data is None:
-        return None, "rank"
+        return None, "", ""
     nwc = _nwc()
     metric, channel, note = nwc.resolve_metric("distribution", key, nwc.page_channel_name(ctx), st.data.channels)
     if metric != key:
-        return None, f"rank ({note.rstrip('.')})"
+        return None, "", note.rstrip(".")
     column = metric_column(metric, channel)
     frame = st.metrics
     if column not in frame.columns:
-        return None, f"rank ({METRICS[key][0]} is not in the nanowell tables)"
+        return None, "", f"{METRICS[key][0]} is not in the nanowell tables"
     wanted = {tuple(s) for s in sites}
     if metric in PER_NANOWELL:
         rows = frame[frame["tp_order"] == 0]
@@ -401,9 +399,50 @@ def composite_order(ctx, st, sites, timepoint) -> tuple[dict | None, str]:
         site = (str(well), int(q), int(r))
         if site in wanted:
             values[site] = float(v)
-    label = nwc._label(metric, channel, st.data)
-    at = "" if metric in PER_NANOWELL else f" at {timepoint}"
+    return values, nwc._label(metric, channel, st.data), ""
+
+
+def composite_order(ctx, st, sites, timepoint) -> tuple[dict | None, str]:
+    """``(site -> value, sentence)`` the composite's tiles are placed by: ``(None, "rank")`` by the window's rank;
+    else the chosen metric's value of each nanowell at *timepoint* (:func:`metric_values`) and the sentence naming it
+    and the order. A metric that cannot be read falls back to rank and the sentence says why."""
+    key = st.composite_sort
+    values, label, why = metric_values(ctx, st, key, sites, timepoint)
+    if values is None:
+        return None, f"rank ({why})" if why else "rank"
+    at = "" if key in PER_NANOWELL else f" at {timepoint}"
     return values, f"{label}{at}, {'largest' if st.composite_desc else 'smallest'} first"
+
+
+#: **Corner**'s first choice: no number in the tiles' corners.
+NO_LABEL = ""
+
+
+def composite_label_choices() -> list:
+    """``(label, key)`` for **Corner**: none, then every metric the page's Metric menu offers."""
+    return [("No label", NO_LABEL)] + [(label, key) for key, (label, _needs) in METRICS.items()]
+
+
+def set_composite_label(ctx, key) -> None:
+    """**Corner**: the metric written in each tile's corner (:func:`composite_label_choices`)."""
+    if isinstance(key, str):
+        _nwc()._set_popout(ctx, composite_label=key)
+
+
+def composite_labels(ctx, st, sites, timepoints) -> tuple[dict, str]:
+    """``({timepoint: {site: value}}, sentence)`` for **Corner**: the chosen metric at each panel's own timepoint, and
+    the caption's sentence naming it — or why it could not be read. ``({}, "")`` with no label chosen."""
+    key = st.composite_label
+    if key not in METRICS:
+        return {}, ""
+    out, label, why = {}, "", ""
+    for tp in timepoints:
+        values, label, why = metric_values(ctx, st, key, sites, tp)
+        if values is None:
+            return {}, f"No corner labels: {why}." if why else ""
+        out[str(tp)] = values
+    at = "" if key in PER_NANOWELL else " at its panel's timepoint"
+    return out, f"Corner: each tile's {label}{at}."
 
 
 def set_popout_layout(ctx, layout: str) -> None:
@@ -449,13 +488,14 @@ def draw_window_popout(ctx, st, fig) -> None:
         members = cc.page(rows, st.window_page)
         shown_tps = shown_timepoints(st.data.timepoints(), st.popout_tps)
         values, placed_by = composite_order(ctx, st, [row.site for row in members], shown_tps[0])
+        corner, corner_said = composite_labels(ctx, st, [row.site for row in members], shown_tps)
         comp = cc.composite(members, values=values, descending=st.composite_desc, placed_by=placed_by)
         sites = [t.source for t in comp.tiles]
         _want_crops(ctx, st, sites, shown_tps)
         inks, key, key_title = composite_colouring(ctx, st, [well for well, _x, _y in comp.patches])
         st.popout_tiles = render_composite(
             fig, comp, _page_crops(st, sites, shown_tps), shown_tps, n_total=len(rows),
-            inks=inks, key=key, key_title=key_title,
+            inks=inks, key=key, key_title=key_title, corner=corner, corner_said=corner_said,
             display_range=nwc.display_range(ctx), note=strip_text(st), cells=st.crop_cells, view=st.composite_view,
             labels=st.popout_labels)
         return

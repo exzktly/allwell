@@ -124,6 +124,8 @@ _LAYOUT_NAMES = {"rows": "Rows", "hex": "Hex"}
 _SORT_TIP = ("The order the hex composite's tiles are placed in, filling each well's patch row by row from its top "
              "left: the window's rank, or a metric's value at the first timepoint shown. The title says which.")
 _ORDER_TIP = "Largest first (descending) or smallest first (ascending)."
+_LABEL_TIP = ("A metric written in each tile's top-left corner, at the timepoint of the panel it is in (a dash where "
+              "the nanowell has no value). Zoom in to read it on a full page.")
 _COLOUR_TIP = ("What the stripe under each tile of the hex composite says, keyed under the title: the tile's source "
                "well, its well's value of a sample variable (the same colours that variable has on every plot), or "
                "nothing.")
@@ -134,7 +136,7 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     hex composite's timepoints are the **Timepoints** menu's, drawn side by side (``popout_view``), so there is no
     stepper here. While the window is shown, the row above's **Go to nanowell** is hidden: it names one nanowell, and
     the figure is of many from several wells. **Colour** (the hex layout only) chooses what the composite's stripes say, and **Sort** and its
-    order what its tiles are placed by.
+    order what its tiles are placed by, **Corner** the metric written in each tile's corner.
     Registers ``_nw_popout_source_cb``, ``_nw_popout_layout_cb``, ``_nw_popout_colour_cb``, ``_nw_popout_page_prev``,
     ``_nw_popout_page_label``, ``_nw_popout_page_next`` and ``_nw_popout_window_refresh``."""
     source = QComboBox(window)
@@ -157,7 +159,12 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     order.addItem("Descending", True)
     order.addItem("Ascending", False)
     sort_caption = QLabel("Sort", window)
-    hex_only = (colour_caption, colour, sort_caption, sort, order)
+    corner = QComboBox(window)
+    corner.setToolTip(_LABEL_TIP)
+    for label, key in wnc.composite_label_choices():
+        corner.addItem(label, key)
+    corner_caption = QLabel("Corner", window)
+    hex_only = (colour_caption, colour, sort_caption, sort, order, corner_caption, corner)
     prev, following = QToolButton(window), QToolButton(window)
     prev.setText("◀")
     following.setText("▶")
@@ -173,6 +180,8 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     row.addWidget(sort_caption)
     row.addWidget(sort)
     row.addWidget(order)
+    row.addWidget(corner_caption)
+    row.addWidget(corner)
     row.addStretch(1)
     for widget in pager:
         row.addWidget(widget)
@@ -183,7 +192,7 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
             return
         in_window = st.popout_source == "window"
         result = wnc.current(st)[1]
-        blocked = [w.blockSignals(True) for w in (source, layout, colour, sort, order)]
+        blocked = [w.blockSignals(True) for w in (source, layout, colour, sort, order, corner)]
         try:
             source.setItemText(1, f"Window ({len(result.rows):,})" if result is not None and result.rows else "Window")
             source.setCurrentIndex(source.findData(st.popout_source))
@@ -195,8 +204,9 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
             colour.setCurrentIndex(max(0, colour.findData(wnc.composite_colour_key(ctx, st))))
             sort.setCurrentIndex(max(0, sort.findData(st.composite_sort)))
             order.setCurrentIndex(order.findData(bool(st.composite_desc)))
+            corner.setCurrentIndex(max(0, corner.findData(st.composite_label)))
         finally:
-            for widget, was in zip((source, layout, colour, sort, order), blocked):
+            for widget, was in zip((source, layout, colour, sort, order, corner), blocked):
                 widget.blockSignals(was)
         for widget in hex_only:
             widget.setVisible(in_window and st.popout_layout == "hex")
@@ -213,6 +223,7 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     colour.currentIndexChanged.connect(lambda _i: wnc.set_composite_colour(ctx, colour.currentData()))
     sort.currentIndexChanged.connect(lambda _i: wnc.set_composite_sort(ctx, sort.currentData()))
     order.currentIndexChanged.connect(lambda _i: wnc.set_composite_desc(ctx, order.currentData()))
+    corner.currentIndexChanged.connect(lambda _i: wnc.set_composite_label(ctx, corner.currentData()))
     prev.clicked.connect(lambda _=False: wnc.step_window_page(ctx, -1))
     following.clicked.connect(lambda _=False: wnc.step_window_page(ctx, 1))
     reg = ctx.widgets
@@ -221,6 +232,7 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     reg.register("_nw_popout_colour_cb", colour)
     reg.register("_nw_popout_sort_cb", sort)
     reg.register("_nw_popout_order_cb", order)
+    reg.register("_nw_popout_label_cb", corner)
     reg.register("_nw_popout_page_prev", prev)
     reg.register("_nw_popout_page_label", page)
     reg.register("_nw_popout_page_next", following)

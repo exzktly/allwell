@@ -12799,7 +12799,11 @@ as there), or *None* (no stripe). `_window_controller.composite_colouring` resol
 `(label, colour)` entries — only the values drawn, from `variable_series.legend_entries` — and a variable deleted since
 it was chosen falls back to *Source well*, the key's title saying so. `_composite_render._draw_key` draws the key under
 the title (`nw-composite-key`, up to eight entries a row, the panels lowered for each row past the first), and the
-caption names what the stripe is; the wells' names above the patches are plain text. `on_popout_scroll` (the pop-out canvas's `scroll_event`) zooms every composite axes alike about the
+caption names what the stripe is; the wells' names above the patches are plain text. The pop-out's three control rows share one widget (`tab_view._popout_window`), folded by `window_view.build_popout_chrome`'s
+**Hide controls** toggle, which sits above them with **Reset zoom** and so stays visible when they are hidden. **Reset zoom**
+(`_window_controller.reset_composite_zoom`: `composite_view = None`, redraw) is shown for the hex layout in Window mode and
+enabled while `composite_view` is set; `_nw_popout_zoom_refresh` keeps it so, called by the wheel and pan
+(`_set_composite_view`), by every hex draw and by `window_view`'s refresh. `on_popout_scroll` (the pop-out canvas's `scroll_event`) zooms every composite axes alike about the
 pointer by `zoom_compute.wheel_limits`, held against `_aw_composite_home`; a press held and moved past
 `controller.CLICK_SLOP_PX` pans them alike (`on_popout_press` / `on_popout_motion` → `_pan`, `zoom_compute.pan_limits`
 from the limits the press began on), and only a release that never moved selects (`on_popout_release`). Both keep the

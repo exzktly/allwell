@@ -185,6 +185,9 @@ class NanowellState:
     popout_source: str = "selected"
     #: How the pop-out lays out the window's nanowells: rows of crops over time, or the hex composite.
     popout_layout: str = "rows"
+    #: What the hex composite's stripes are coloured by: ``""`` each tile's source well, a sample variable's id its
+    #: well's value of that variable, ``"none"`` no stripe (``_window_controller.composite_colouring``).
+    composite_colour: str = ""
     #: The **Display range** of each image channel, ``channel key -> (low, high)`` in the raw image's units
     #: (``controller.display_key``): the window every picture of that channel on the page is drawn with — the crop
     #: strip, the pop-out, the Extremes montage and the Array view's full resolution. The page's own and kept with
@@ -268,7 +271,8 @@ class NanowellState:
     window_model: object = None             # the DistributionModel last drawn, which windows are read against
     popout_hits: dict = field(default_factory=dict)   # the pop-out's crop axes -> (well, q, r), for a click
     popout_tiles: list = field(default_factory=list)  # the hex composite's (x, y, site, rank) per tile, for a pointer
-    composite_view: tuple | None = None     # the hex composite's (xlim, ylim) as the wheel left it; None: unzoomed
+    composite_view: tuple | None = None     # the hex composite's (xlim, ylim) as the wheel or a drag left it
+    popout_press: tuple | None = None       # a held press on the pop-out: (axes, x, y, xlim, ylim, moved)
     # The Array view's interaction, never persisted: where it is zoomed to (``(left, top, right, bottom)`` in the
     # frame it draws, for the ``(well, positions)`` in ``region_for``), the press a drag or click started with,
     # whether a click sets the anchor, and what the last draw put on screen (``renderer.ArrayDrawn``).
@@ -358,7 +362,7 @@ class NanowellState:
         self.anchor_mode, self.array_message = False, ""
         self.extreme_axes = {}
         self.window_page, self.window_press, self.window_model, self.popout_hits = 0, None, None, {}
-        self.popout_tiles, self.composite_view = [], None
+        self.popout_tiles, self.composite_view, self.popout_press = [], None, None
         self.identity_sidecars, self.identity_frames, self.identity_drawn = {}, {}, None
         self.identity_zoom, self.identity_zoom_for, self.identity_press = {}, None, None
         self.stats_cache = None
@@ -380,6 +384,7 @@ class NanowellState:
                 "popout_grid": self.popout_grid, "popout_cols": self.popout_cols,
                 "windows": {k: w.to_config() for k, w in self.windows.items()},
                 "popout_source": self.popout_source, "popout_layout": self.popout_layout,
+                "composite_colour": self.composite_colour,
                 "display_ranges": {k: [lo, hi] for k, (lo, hi) in self.display_ranges.items()},
                 "subset": self.subset.to_config(), "saved_subsets": saved_to_config(self.saved_subsets),
                 "layers": self.layers.to_config(),
@@ -433,6 +438,7 @@ class NanowellState:
         self.windows = _windows_from(config.get("windows"))
         self.popout_source = _choice(config.get("popout_source"), POPOUT_SOURCES, fresh.popout_source)
         self.popout_layout = _choice(config.get("popout_layout"), POPOUT_LAYOUTS, fresh.popout_layout)
+        self.composite_colour = _text(config.get("composite_colour"), fresh.composite_colour)
         self.display_ranges = _display_ranges_from(config.get("display_ranges"))
         tps = config.get("extremes_tps")
         self.extremes_tps = [str(tp) for tp in tps if isinstance(tp, str)] if isinstance(tps, list) else []
@@ -456,6 +462,11 @@ def _windows_from(block) -> dict:
     damaged one restores as no window rather than as half of one."""
     return {k: w for k, b in (block.items() if isinstance(block, dict) else ())
             if isinstance(k, str) and (w := DistributionWindow.from_config(b)) is not None}
+
+
+def _text(value, fallback: str) -> str:
+    """*value* when it is a string, else *fallback*: a stored choice whose meaning is checked where it is used."""
+    return value if isinstance(value, str) else fallback
 
 
 def _choice(value, allowed, default):

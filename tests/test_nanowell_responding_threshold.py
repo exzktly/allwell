@@ -99,8 +99,9 @@ def test_a_cut_typed_on_the_page_is_stated_with_each_well_s_fraction_and_drawn(p
     st = _loaded(qtbot, page)
     edit = page.widgets.get("_nw_responding_edit")
     assert edit.isVisible() and edit.text() == ""
-    assert "Fraction responding is not computed: no threshold is set for Cell count (Responding above)." \
-        in _footer(page)
+    # With no cut there is nothing to state but how to get one: a note, folded away until Notes is on. A cut is a
+    # result and is written whatever the switch.
+    assert not any(line.startswith("Fraction responding") for line in _footer(page))
     assert _cut_lines(page) == []
 
     _type(page, "2")

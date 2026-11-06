@@ -213,21 +213,103 @@ def test_cells_on_draws_each_tile_s_counted_cells_and_the_caption_counts_them():
     assert f"Dots: the {2 * (len(comp.tiles) - 1)} cells" in caption and "1 tile(s) of a well with no cell table" in caption
 
 
-def test_each_patch_label_is_its_stripe_s_colour_and_the_caption_says_so():
-    from matplotlib.colors import to_rgba
+def _stripes(ax):
+    """``tile centre x -> stripe colour`` for one panel."""
+    from matplotlib.colors import to_hex
+
+    return {round(p.get_x() + p.get_width() / 2, 6): to_hex(p.get_facecolor())
+            for p in ax.patches if p.get_gid() == "nw-composite-well"}
+
+
+def _key(fig):
+    keys = [leg for leg in fig.legends if leg.get_gid() == "nw-composite-key"]
+    if not keys:
+        return None
+    return keys[0].get_title().get_text(), [t.get_text() for t in keys[0].get_texts()]
+
+
+def test_by_well_each_well_s_tiles_share_a_stripe_and_the_key_names_the_wells():
+    from matplotlib.colors import to_hex
 
     fig, comp = _draw({})
-    ax = fig.axes[0]
-    stripes = {}
-    for patch in ax.patches:
-        if patch.get_gid() == "nw-composite-well":
-            stripes.setdefault(round(patch.get_x() + patch.get_width() / 2, 6), to_rgba(patch.get_facecolor()))
-    labels = {t.get_text(): to_rgba(t.get_color()) for t in ax.texts if t.get_gid() == "nw-composite-patch"}
+    stripes = _stripes(fig.axes[0])
+    by_well = {}
     for tile in comp.tiles:
-        well = comp.patches[tile.patch][0]
-        assert stripes[round(tile.x, 6)] == labels[well]
-    assert labels["A01"] != labels["B02"]
-    assert "The stripe under a tile is its source well's colour" in _artists(fig, "nw-composite-caption")[0].get_text()
+        by_well.setdefault(comp.patches[tile.patch][0], set()).add(stripes[round(tile.x, 6)])
+    assert all(len(c) == 1 for c in by_well.values()) and by_well["A01"] != by_well["B02"]
+    assert _key(fig) == ("Stripe: Source well", ["A01", "B02"])
+    swatches = [to_hex(h.get_facecolor()) for h in fig.legends[0].legend_handles]
+    assert swatches == [next(iter(by_well["A01"])), next(iter(by_well["B02"]))]
+    assert "The stripe under a tile is its source well, keyed under the title" in _artists(
+        fig, "nw-composite-caption")[0].get_text()
+
+
+def test_given_inks_colour_the_stripes_and_empty_inks_draw_none_and_no_key():
+    comp = cc.composite(_rows())
+    fig = Figure(figsize=(9.0, 6.0))
+    render_composite(fig, comp, {}, "T1", n_total=7, inks={"A01": "#ff0000", "B02": "#0000ff"},
+                     key=(("U2OS", "#ff0000"), ("HeLa", "#0000ff")), key_title="Cell line")
+    stripes = _stripes(fig.axes[0])
+    for tile in comp.tiles:
+        assert stripes[round(tile.x, 6)] == ("#ff0000" if tile.source[0] == "A01" else "#0000ff")
+    assert _key(fig) == ("Stripe: Cell line", ["U2OS", "HeLa"])
+    assert "its well's Cell line" in _artists(fig, "nw-composite-caption")[0].get_text()
+    bare = Figure(figsize=(9.0, 6.0))
+    render_composite(bare, comp, {}, "T1", n_total=7, inks={}, key=())
+    assert _stripes(bare.axes[0]) == {} and _key(bare) is None
+    assert "stripe" not in _artists(bare, "nw-composite-caption")[0].get_text()
+
+
+def test_colouring_by_a_variable_takes_each_well_s_value_ink_from_variable_series():
+    """The wells are assigned against the variable's order — A01 holds its second value — so a colouring that inked
+    wells in patch order, or values in assignment order, would differ from the one every plot uses."""
+    from types import SimpleNamespace
+
+    from review.domain import variable_series as vs
+    from tests.test_nanowell_page_variables import _Ctx
+
+    ctx = _Ctx()
+    st = SimpleNamespace(composite_colour="line")
+    wells = ["A01", "B02", "C01"]
+    inks, key, title = wnc.composite_colouring(ctx, st, wells)
+    assert inks == vs.member_inks(ctx, "nanowell", "line", {w: [w] for w in wells})
+    assert inks["B02"] == inks["C01"] != inks["A01"]
+    assert [label for label, _c in key] == ["HeLa", "U2OS"] and title == "Cell line"
+    assert dict(key)["U2OS"] == inks["A01"]
+    st.composite_colour = "dose"                                   # C01 left unfilled: its own ink and name
+    inks, key, _title = wnc.composite_colouring(ctx, st, wells)
+    assert set(inks) == set(wells) and len(key) == 3
+    st.composite_colour = "gone"                                    # a variable deleted since: by well, said so
+    inks, key, title = wnc.composite_colouring(ctx, st, wells)
+    assert title == "Source well" and [label for label, _c in key] == wells
+    st.composite_colour = wnc.NO_COLOUR
+    assert wnc.composite_colouring(ctx, st, wells) == ({}, (), "")
+    labels = [label for label, _k in wnc.composite_colour_choices(ctx)]
+    assert labels == ["Source well", "Cell line", "Dose", "None"]
+
+
+def test_the_colour_choice_is_kept_with_the_page():
+    from review.features.nanowell.state import NanowellState
+
+    st = NanowellState()
+    st.composite_colour = "line"
+    again = NanowellState()
+    again.apply_config(st.to_config())
+    assert again.composite_colour == "line"
+    again.apply_config({"composite_colour": 3})
+    assert again.composite_colour == ""
+
+
+def test_colour_is_offered_only_for_the_hex_and_none_takes_the_stripes_away(page, qtbot):  # noqa: F811
+    st = _open_hex(page, qtbot)
+    combo = page.widgets.get("_nw_popout_colour_cb")
+    fig = page.widgets.get("_nw_popout_fig")
+    assert not combo.isHidden() and combo.currentData() == wnc.BY_WELL
+    assert _stripes(fig.axes[0]) and _key(fig)[0] == "Stripe: Source well"
+    combo.setCurrentIndex(combo.findData(wnc.NO_COLOUR))
+    assert st.composite_colour == wnc.NO_COLOUR and _stripes(fig.axes[0]) == {} and _key(fig) is None
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(0)                    # Rows: no stripes to colour
+    assert combo.isHidden()
 
 
 def test_the_cells_box_draws_the_cells_on_the_hex_composite(page, qtbot, monkeypatch):  # noqa: F811
@@ -243,7 +325,10 @@ def test_the_cells_box_draws_the_cells_on_the_hex_composite(page, qtbot, monkeyp
     fig = page.widgets.get("_nw_popout_fig")
     dots = lambda: sum(len(c.get_offsets()) for ax in fig.axes for c in ax.collections  # noqa: E731
                        if c.get_gid() == "nw-composite-cells")
-    qtbot.waitUntil(lambda: bool([im for ax in fig.axes for im in ax.images]), timeout=10000)
+    # The crops are cut a timepoint per pass: wait for every panel, not the first, or the count below is of
+    # whichever timepoints happen to have arrived (CI's slower runner caught one of two).
+    qtbot.waitUntil(lambda: fig.axes and all(len(ax.images) == len(st.popout_tiles) for ax in fig.axes),
+                    timeout=10000)
     assert dots() == 0
     page.widgets.get("_nw_popout_cells_box").click()
     n_tiles = len(st.popout_tiles)
@@ -410,3 +495,92 @@ def test_crops_for_sites_cuts_only_the_timepoints_asked_for(monkeypatch):
     cut_rows.clear()
     ic.crops_for_sites(None, metrics, [("A01", 0, 0)])
     assert cut_rows == [("A01", "T0"), ("A01", "T1"), ("A01", "T2")]
+
+
+# ── a trackpad's scroll, panning by a drag, the cells' outlines ──────────────────────────────────────────────────
+def test_a_trackpad_swipe_zooms_one_notch_not_one_notch_per_pixel(page, qtbot):  # noqa: F811
+    """A Mac trackpad sends a pixel delta beside the angle delta, and matplotlib hands the pixels on as the step: a
+    20-pixel swipe event zoomed by 0.8 ** 20, about 87 times at once. One notch's angle must zoom one notch."""
+    from PySide6.QtGui import QWheelEvent
+
+    from review.features.nanowell.zoom_compute import WHEEL_STEP
+
+    st = _open_hex(page, qtbot)
+    fig = page.widgets.get("_nw_popout_fig")
+    home = fig.axes[0].get_xlim()
+    canvas, point = _tile_point(page, st, st.popout_tiles[0])
+    event = QWheelEvent(QPointF(point), QPointF(canvas.mapToGlobal(point)), QPoint(0, 20), QPoint(0, 120),
+                        Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+    QApplication.sendEvent(canvas, event)
+    width = abs(fig.axes[0].get_xlim()[1] - fig.axes[0].get_xlim()[0])
+    assert width == pytest.approx(abs(home[1] - home[0]) * WHEEL_STEP, rel=1e-6)
+
+
+def test_notches_reads_the_angle_and_falls_back_to_the_step():
+    from types import SimpleNamespace
+
+    from review.features.nanowell.zoom_compute import notches
+
+    angle = lambda y: SimpleNamespace(angleDelta=lambda: SimpleNamespace(y=lambda: y))  # noqa: E731
+    assert notches(SimpleNamespace(step=20.0, guiEvent=angle(60))) == 0.5
+    assert notches(SimpleNamespace(step=-1.0, guiEvent=angle(-120))) == -1.0
+    assert notches(SimpleNamespace(step=2.0, guiEvent=None)) == 2.0
+
+
+def _drag_canvas(canvas, start, end):
+    from PySide6.QtTest import QTest
+
+    QTest.mousePress(canvas, Qt.LeftButton, Qt.NoModifier, start)
+    middle = QPoint((start.x() + end.x()) // 2, (start.y() + end.y()) // 2)
+    for at in (middle, end):
+        QApplication.sendEvent(canvas, QMouseEvent(QEvent.MouseMove, QPointF(at), QPointF(canvas.mapToGlobal(at)),
+                                                   Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+    QTest.mouseRelease(canvas, Qt.LeftButton, Qt.NoModifier, end)
+
+
+def test_a_drag_pans_every_panel_and_selects_nothing_and_a_click_still_selects(page, qtbot):  # noqa: F811
+    st = _open_hex(page, qtbot)
+    fig = page.widgets.get("_nw_popout_fig")
+    selected = list(st.selected_sites)
+    home_x, home_y = fig.axes[0].get_xlim(), fig.axes[0].get_ylim()
+    canvas, point = _tile_point(page, st, st.popout_tiles[0])
+    _drag_canvas(canvas, point, QPoint(point.x() + 40, point.y() + 30))           # right and down on screen
+    (x0, x1), (y0, y1) = fig.axes[0].get_xlim(), fig.axes[0].get_ylim()
+    assert x0 < home_x[0] and x1 < home_x[1]                 # the picture moved right: the view went left
+    assert y0 < home_y[0] and y1 < home_y[1]                 # moved down (y runs down): the view went up
+    assert x1 - x0 == pytest.approx(home_x[1] - home_x[0])   # panned, not zoomed
+    assert {ax.get_xlim() for ax in fig.axes} == {fig.axes[0].get_xlim()}
+    assert st.selected_sites == selected and st.composite_view is not None
+    from review.features.nanowell import controller as nwc
+    nwc.draw_popout(page)                                     # crops arriving keep the pan
+    assert page.widgets.get("_nw_popout_fig").axes[0].get_xlim() == pytest.approx((x0, x1))
+    tile = st.popout_tiles[0]
+    canvas, point = _tile_point(page, st, tile)
+    QTest.mouseClick(canvas, Qt.LeftButton, Qt.NoModifier, point)
+    assert st.selected_sites == [[*tile[2]]]
+
+
+def test_cells_are_drawn_as_their_traced_outlines_and_a_cell_without_one_as_a_dot():
+    from matplotlib.collections import LineCollection
+
+    from review.features.nanowell._composite_render import TILE
+
+    comp = cc.composite(_rows())
+    square = [np.array([[1.0, 1.0], [3.0, 1.0], [3.0, 3.0], [1.0, 3.0], [1.0, 1.0]])]
+    crop = Crop(np.zeros((10, 10)), "tile", "", np.array([[2.0, 2.0], [7.0, 7.0]]), outlines=[square, None])
+    crops = {t.source: {"T1": crop} for t in comp.tiles}
+    fig = Figure(figsize=(9.0, 6.0))
+    render_composite(fig, comp, crops, "T1", n_total=7, cells=True)
+    ax = fig.axes[0]
+    fills = [c for c in ax.collections if c.get_gid() == "nw-composite-outlines"]
+    assert len(fills) == 1, "the cells' outlines were not drawn"
+    fill = fills[0]
+    assert isinstance(fill, LineCollection) and len(fill.get_segments()) == len(comp.tiles)
+    tile = comp.tiles[0]
+    first = fill.get_segments()[0]
+    assert first[0].tolist() == pytest.approx([tile.x - TILE + 1.5 * 2 * TILE / 10, tile.y - TILE + 1.5 * 2 * TILE / 10])
+    (dots,) = [c for c in ax.collections if c.get_gid() == "nw-composite-cells"]
+    assert len(dots.get_offsets()) == len(comp.tiles)                         # only the cell with no outline
+    caption = _artists(fig, "nw-composite-caption")[0].get_text()
+    assert f"Outlines and dots: the {2 * len(comp.tiles)} cells" in caption
+    assert f"({len(comp.tiles)} a dot: the run kept no outline of it)" in caption

@@ -301,3 +301,48 @@ def test_a_short_figure_with_a_subset_s_footer_still_draws(page, qtbot):
     assert fig.subplotpars.top - fig.subplotpars.bottom >= 0.12 - 1e-9
     assert st.hits is not None and st.hits.panels
     assert any(t.get_text().startswith("Starting cells ≥1 (count at the earliest timepoint)") for t in fig.texts)
+
+
+def test_notes_off_folds_the_distribution_s_notes_but_never_its_alerts(page, qtbot):
+    """Reported: so many notes on the Distribution that the plot had almost no room. With Notes off (the default) the
+    footer is the counts, what the figure leaves out and the key to its marks; how to read it is counted and folded
+    away, and the panels take the room. A well selected without a table is an alert: hidden behind a switch, a figure
+    missing a well would read as complete."""
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell import subset_compute as ss
+
+    st = _loaded(qtbot, page)
+    assert nwc.set_subset(page, ss.Subset((ss.Condition("n0", "ge", 1),), "all"))
+    fig = page.widgets.get("_nw_fig")
+    short = [t.get_text() for t in fig.texts if t.get_gid() in ("nw-footer", "nw-footer-used")]
+    panels_bottom = fig.subplotpars.bottom
+    assert not st.layers.notes and st.model.notes and st.model.alerts
+    assert not any("packed within ±0.4" in t or t.startswith("The line joins") for t in short)
+    assert any(t.startswith("Timepoints:") for t in short)               # the key to the hours axis: an alert
+    assert any(t.startswith("Starting cells ≥1") for t in short)                          # the Subset's count: an alert
+    n = len(st.model.notes)
+    used = " ".join(t.get_text() for t in fig.texts if t.get_gid() == "nw-footer-used")
+    assert used.endswith(f"{n} notes: turn on Notes to read them")
+    page.widgets.get("_nw_notes_btn").click()
+    full = [t.get_text() for t in fig.texts if t.get_gid() in ("nw-footer", "nw-footer-used")]
+    assert st.layers.notes and any("packed within ±0.4" in t for t in full) and len(full) > len(short)
+    assert fig.subplotpars.bottom > panels_bottom                                          # the notes take room
+    card = page.widgets.get("_nw_card")
+    assert page.widgets.get("_nw_notes_btn").isVisibleTo(card)                             # offered on this view
+    nwc.set_view(page, "trajectories")
+    assert not page.widgets.get("_nw_notes_btn").isVisibleTo(card)
+
+
+def test_alerts_are_written_with_notes_off():
+    from review.features.nanowell import distribution_compute as dc
+    from review.features.nanowell.renderer import render_distribution
+    from matplotlib.figure import Figure
+
+    model = dc.DistributionModel("n", "n", "Cell count", "time", True, [], notes=["How to read it."],
+                                 alerts=["Selected without a nanowell table, so not drawn: C03."])
+    fig = Figure(figsize=(8, 5))
+    render_distribution(fig, model, notes_below=True)
+    texts = [t.get_text() for t in fig.texts]
+    assert any(t.startswith("Selected without a nanowell table") for t in texts)
+    assert not any("How to read it." in t for t in texts)
+    assert any(t.endswith(" · 1 note: turn on Notes to read it") for t in texts)

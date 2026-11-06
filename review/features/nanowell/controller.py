@@ -54,7 +54,7 @@ from review.features.nanowell.state import (
 from review.features.nanowell.series_compute import (crop_metric_lines, long_format, rim_focus_text, site_metrics,
                                                      site_series)
 from review.features.nanowell.zoom_compute import (  # noqa: F401 — the band and its tests read them here
-    BUTTON_STEP, WHEEL_STEP, ZOOM_IN_LIMIT, ZOOM_OUT_LIMIT, held_factor,
+    BUTTON_STEP, WHEEL_STEP, ZOOM_IN_LIMIT, ZOOM_OUT_LIMIT, held_factor, notches,
 )
 
 log = logging.getLogger("review")
@@ -716,7 +716,8 @@ def redraw(ctx) -> None:
         responding_above=st.thresholds.get(metric_column(metric, channel)),
         subset=page_subset(ctx, st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
         gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
-        names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx), **array)
+        names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx),
+        notes_below=not st.layers.notes, **array)
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
@@ -870,7 +871,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
               stats_cache: dict | None = None, gate=None,
               decoration: Decoration | None = None, names: dict | None = None,
-              swarm_spacing: float = 0.0) -> tuple[object, object]:
+              swarm_spacing: float = 0.0, notes_below: bool = False) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -998,16 +999,16 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         model.identity_marks = {(w, tp): v for w in wells for tp, v in timepoint_marks(data, w).items()}
         legend = marks_legend(model.identity_marks.values())
         if legend:
-            model.notes.append(legend)
+            model.alerts.append(legend)                  # the key to marks on the figure: never folded away
     if tableless:
-        model.notes.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
-                              f"{', '.join(tableless)}.")
+        model.alerts.insert(0, f"Selected without a nanowell table, so not drawn and not in any group's statistic: "
+                               f"{', '.join(tableless)}.")
     if note:
-        model.notes.insert(0, note)
+        model.alerts.insert(0, note)
     if model.empty:
         render_message(fig, model.empty, gid="nw-moving-empty")
         return None, model
-    return render_distribution(fig, model, selected=selected, spacing=swarm_spacing), model
+    return render_distribution(fig, model, selected=selected, spacing=swarm_spacing, notes_below=notes_below), model
 
 
 def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels) -> str:
@@ -1040,7 +1041,7 @@ def statistics_result(model, groups: dict, *, unit: str, test: str, control: str
     cohort, the moving average, the baseline, an excluded well) changes the key, including one that leaves every
     value as it was: ticking the cohort over nanowells that all have a value changes the report's note only."""
     samples = sc.samples_from_model(model, groups, unit)
-    notes = [n for n in model.notes if n.startswith(_STATS_NOTES)]
+    notes = [n for n in [*model.alerts, *model.notes] if n.startswith(_STATS_NOTES)]
     key = (unit, test, control, model.column, model.label, model.timepoint, tuple(notes),
            tuple((s.name, s.label, s.wells, s.values.tobytes(), s.n_roster, tuple(sorted(s.excluded.items())),
                   s.without_value) for s in samples))
@@ -1624,14 +1625,15 @@ def on_scroll(ctx, event) -> None:
         idc.on_scroll(ctx, event)                # every Identity sub-view zooms its own panels
         return
     drawn = st.drawn if st is not None and st.view == "array" else None
-    if drawn is None or drawn.region is None or not event.step:
+    steps = notches(event)
+    if drawn is None or drawn.region is None or not steps:
         return
     if event.inaxes is drawn.ax and event.xdata is not None:
         at = (event.xdata, event.ydata)
     else:
         x0, y0, x1, y1 = drawn.region
         at = ((x0 + x1) / 2, (y0 + y1) / 2)
-    _zoom_to(ctx, st, WHEEL_STEP ** event.step, at)
+    _zoom_to(ctx, st, WHEEL_STEP ** steps, at)
 
 
 # ── the anchor ───────────────────────────────────────────────────────────────

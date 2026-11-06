@@ -50,16 +50,18 @@ def test_well_and_timepoint_are_one_item_and_the_timepoint_stands_alone_where_no
 
 
 def test_the_zoom_and_overlays_sit_under_the_figure_on_the_array_view_only(qc_page):
+    """…and Notes on the Array and Distribution views, both of whose footers it shortens."""
     from review.features.nanowell import controller as nwc
 
     ctx = qc_page
     toolbar = ctx.widgets.get("_nw_card").toolbar
-    names = ("_nw_zoom_out_btn", "_nw_zoom_lbl", "_nw_zoom_in_btn", "_nw_fit_btn", "_nw_one_btn", "_nw_overlays_btn",
-             "_nw_notes_btn")
-    assert all(toolbar.isAncestorOf(ctx.widgets.get(n)) for n in names)
-    assert all(_shown(ctx, n) for n in names)
+    names = ("_nw_zoom_out_btn", "_nw_zoom_lbl", "_nw_zoom_in_btn", "_nw_fit_btn", "_nw_one_btn", "_nw_overlays_btn")
+    assert all(toolbar.isAncestorOf(ctx.widgets.get(n)) for n in (*names, "_nw_notes_btn"))
+    assert all(_shown(ctx, n) for n in (*names, "_nw_notes_btn"))
     nwc.set_view(ctx, "distribution")
-    assert not any(_shown(ctx, n) for n in names)
+    assert not any(_shown(ctx, n) for n in names) and _shown(ctx, "_nw_notes_btn")
+    nwc.set_view(ctx, "trajectories")
+    assert not _shown(ctx, "_nw_notes_btn")
 
 
 def test_reset_view_under_the_figure_is_fit_on_the_array_view(qc_page, qtbot):

@@ -171,6 +171,11 @@ def test_the_figure_s_own_numbers_add_up_to_the_roster(page, qtbot):
     assert (sum(used), sum(excluded)) == (u, e) == (14, 2) and roster == 16 and u + e == roster
     assert match.group(4) == "occluded 2" and match.group(5) == "2"
     assert page.widgets.get("_nw_canvas").isVisible()                          # the figure, not a placeholder
+    # How to read the figure is a note: folded away with Notes off (the default), counted on the counts line, and
+    # written in full with it on.
+    assert not any("packed within ±0.4" in t for t in _texts(page, "nw-footer"))
+    assert re.search(r" · \d+ notes: turn on Notes to read them$", _texts(page, "nw-footer-used")[0])
+    nwc.set_layer(page, "notes", True)
     assert any("packed within ±0.4" in t for t in _texts(page, "nw-footer"))
 
 
@@ -181,8 +186,8 @@ def test_choosing_a_metric_in_the_real_combo_redraws_with_its_label(page, qtbot)
     fig = page.widgets.get("_nw_fig")
     assert fig.axes[0].get_ylabel() == "Confluence fold change"
     footer = next(t for t in _texts(page, "nw-footer-used"))
-    assert footer == ("Nanowell × timepoint values used 10 of 16 · excluded 6: no confluence at baseline 3 · "
-                      "occluded 2 · baseline occluded 1 · wells 2")
+    assert footer.startswith("Nanowell × timepoint values used 10 of 16 · excluded 6: no confluence at baseline 3 · "
+                             "occluded 2 · baseline occluded 1 · wells 2 · ")
 
 
 def test_a_shared_channel_the_tables_lack_falls_back_to_the_page_s_channel_rather_than_greying(page, qtbot):

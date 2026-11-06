@@ -6349,11 +6349,18 @@ the sentence names it.
 
 **Reading the figure**
 
+- The footer under the figure is short until you turn on **Notes** (the button under the figure, the same switch as
+  on the Array view). Off, it is one line of counts — ending in how many notes there are to read — and everything that
+  changes or leaves out what is drawn (wells selected without a nanowell table, excluded fields, gated cells, rims
+  out of focus, what the Subset kept, a fixed cohort, a moving average), the fraction responding once you set a cut,
+  and the keys to the figure (the timepoint names under the hours axis, the identity marks). On, it adds the notes on
+  how to read it: how whole-number values are packed, how the line is drawn, how wells compare with the control.
+  Saved and copied figures follow the switch; Batch Export always writes the notes.
 - Dots are coloured by the number of cells in the nanowell at baseline: an open ring for 0, then 1, 2 and 3+
   (the key at the top right names the baseline). Grey ("?") is a nanowell whose count at baseline is unknown.
   Saved and copied figures use the white-background shades of the same key.
 - Counts and occupancy are whole numbers, so hundreds of nanowells share a value; their dots are packed into
-  a band within ±0.4 of the value, starting on the value itself, and the footer says so.
+  a band within ±0.4 of the value, starting on the value itself, and the footer's notes say so.
 - A swarm with more dots than its slot can hold says how many were not drawn under it — "+N at 0", or
   "+N at 0–4" — beside its exclusions. Every nanowell with a value is either a dot or counted there. When the
   window is too narrow to write those under each swarm, only the number used is written above it and the footer
@@ -6670,15 +6677,18 @@ A row whose crops are not yet cut says so; one that cannot be cut says why.
 **Layout: Hex** draws the same nanowells all at once as an **artificial hex array — a composite, not a well**. Each
 source well has its own labelled patch, and inside a patch the nanowells are placed by rank, the first at the patch's
 centre and the rest spiralling outward, so a position says nothing about where a nanowell sat in its well. Tiles are
-drawn apart inside a dashed frame, and the title says it is not a real array. Each tile has a coloured **stripe** along
-its foot: the colour of its source well, which is the colour that well's name is written in above its patch (the
-caption says so too), so a tile can be told to its well at a glance. Every tile is its nanowell's crop at one size and
+drawn apart inside a dashed frame, and the title says it is not a real array. Each tile has a coloured **stripe**
+along its foot, and **Colour** (beside **Layout**, in the Hex layout) chooses what it says: *Source well*, any of the
+plate's sample variables (each well's value of it, in the same colour that value has on every plot — a well left
+unfilled is named as such), or *None* for no stripe. A key under the title names each colour drawn. Every tile is its nanowell's crop at one size and
 all are on one brightness scale, so wells of different exposure compare. It shows 91 nanowells a page (◀ ▶ turn it),
 drawn once for each timepoint ticked in **Timepoints**, side by side in one row — the same tile at the same place in
 every copy, all on the one brightness scale, so a change over time reads as a change in the picture. Pick the
 timepoints to compare with *None* and a tick or two; the menu stays open while you tick. **Scroll** over the
-composite to zoom about the pointer: every copy zooms together, and the zoom holds while crops arrive, until another
-page, window or layout is shown. **Cells** draws each tile's counted cells as dots, and **Labels** off leaves out each
+composite to zoom about the pointer, and **drag** to pan: every copy moves together, and the view holds while crops
+arrive, until another page, window or layout is shown. A click (a press that does not move) still selects the tile's
+nanowell. **Cells** draws each tile's counted cells as their traced outlines — a dot only for a cell the run kept no
+outline of, which the caption counts — and **Labels** off leaves out each
 copy's timepoint and the caption (the wells' names stay, as the stripes' key). **Channels**, **Grid** and **Metrics**
 are not offered here: the composite draws the image channel alone, its copies always sit in one row, and a tile is too
 small for a line of numbers. The crops are cut a timepoint at a time, the first timepoint shown first, so the copies

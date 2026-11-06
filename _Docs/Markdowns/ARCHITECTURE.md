@@ -6892,6 +6892,20 @@ re-seeds them on every panel open from `_resync_plot_state_segments`, and both
 are persisted in the bar view state (`_snapshot_bar`; `_apply_bar` →
 `_restore_bar_geometry`, which drops an out-of-range value on its own).
 
+**The Distribution footer folds its notes behind *Notes*.** `DistributionModel` carries two lists. `notes` say how to
+read the figure and change nothing in it: the packing of whole-number values, how the line is drawn, the per-well
+comparison with the control, that no fraction responding is computed without a cut, the Colour by note (whose legend
+is drawn anyway). `alerts` are everything else: what changes or leaves out the values drawn — a fixed cohort, a moving
+average and an empty result of one, and from `controller.draw_view` the page's note (excluded fields, Cell Gating, rim
+focus, the Subset's count) and wells selected without a table — the results stated beside them (the fraction
+responding at a cut), and the keys to what is drawn (the identity marks, the timepoint names under an axis of hours,
+where those hours came from). The Statistics report carries its `_STATS_NOTES` prefixes from both. The
+page draws with `notes_below=not NanowellState.layers.notes`, the Array view's own *Notes* switch: off, the footer is
+the counts line, ending in how many notes there are, and the alerts, and the panels keep the room the notes took. `render_distribution(notes_below=False)`, Batch Export's call, writes
+everything. The switch's toolbar group (`mount_array_canvas_tools`, `c.notes_group`) shows on `tab_view.NOTES_VIEWS`.
+Tests: `test_nanowell_window_page.py::test_notes_off_folds_the_distribution_s_notes_but_never_its_alerts`,
+`::test_alerts_are_written_with_notes_off`.
+
 The two figures that draw a beeswarm — the Bar figure and the Nanowells figure
 (`_draws_beeswarm`) — get a **Beeswarm** section (`_build_beeswarm_section`)
 with one *Point spacing* row in the same Auto-switch-plus-stepper shape. It
@@ -12755,13 +12769,23 @@ unzoomed `_aw_composite_home`). Every panel holds the same tiles at the same dat
 `_select`) and `on_popout_motion` in whichever panel the pointer is; the motion handler names the nanowell in the
 status bar and shows the Array view's hover card for it (`tile_card` → `array_hover_compute.hover_text`, read at the
 panel's `_aw_composite_tp`) as a tooltip. One `crop_scale` spans every tile of every panel, so a change over time is a
-change in the picture. With Cells on (`NanowellState.crop_cells`) each tile's `Crop.cells` are drawn as dots, mapped
-from crop pixels into the tile's extent (`_tile_cells`: pixel `i`'s centre at `i + 0.5` of `2 * TILE / width`), and the
-caption counts them and names tiles of a well with no cell table. The stripe along each tile's foot is its source
-well's `WELL_COLORS_TUPLE` colour, and the patch label above it is written in that colour — the stripe's key — which
-the caption states. `on_popout_scroll` (the pop-out canvas's `scroll_event`) zooms every composite axes alike about the
-pointer by `zoom_compute.wheel_limits`, held against `_aw_composite_home`, and keeps the limits on
-`NanowellState.composite_view` so `render_composite(view=…)` redraws them when crops arrive; `_store` (a new or edited
+change in the picture. With Cells on (`NanowellState.crop_cells`) each tile's counted cells are drawn as the strip draws
+a crop's: each traced outline (`Crop.outlines`) as a line, a dark rim under the cell colour, and a dot only for a cell
+the run kept no outline of (`_tile_outlines`); every point is mapped from crop pixels into the tile's extent
+(`_to_tile`: pixel `i`'s centre at `i + 0.5` of `2 * TILE / width`). The caption says outlines, dots or both, counts
+the dots and why, and names tiles of a well with no cell table. The stripe along each tile's foot is coloured by **Colour**
+(`NanowellState.composite_colour`, persisted; the pop-out's `_nw_popout_colour_cb`, shown in the hex layout only):
+*Source well* (each well its `WELL_COLORS_TUPLE` rank colour in patch order), a sample variable (each well's value in
+the ink `variable_series.member_inks` gives it on every plot, an unfilled well or a disagreeing set inked and named
+as there), or *None* (no stripe). `_window_controller.composite_colouring` resolves it to `well -> colour` and the key's
+`(label, colour)` entries — only the values drawn, from `variable_series.legend_entries` — and a variable deleted since
+it was chosen falls back to *Source well*, the key's title saying so. `_composite_render._draw_key` draws the key under
+the title (`nw-composite-key`, up to eight entries a row, the panels lowered for each row past the first), and the
+caption names what the stripe is; the wells' names above the patches are plain text. `on_popout_scroll` (the pop-out canvas's `scroll_event`) zooms every composite axes alike about the
+pointer by `zoom_compute.wheel_limits`, held against `_aw_composite_home`; a press held and moved past
+`controller.CLICK_SLOP_PX` pans them alike (`on_popout_press` / `on_popout_motion` → `_pan`, `zoom_compute.pan_limits`
+from the limits the press began on), and only a release that never moved selects (`on_popout_release`). Both keep the
+limits on `NanowellState.composite_view` so `render_composite(view=…)` redraws them when crops arrive; `_store` (a new or edited
 window), `set_popout_layout` and a page step clear it. The page size and count follow the layout
 (`_window_controller.page_size`). `popout_view`'s refresh hides **Channels**, **Grid** and **Metrics** while the hex
 composite is shown: it draws the image channel alone, in one row, on tiles too small for a line of numbers.
@@ -12940,7 +12964,10 @@ text, and off every picture it does not belong to.
 Every mode zooms and pans: the scroll wheel zooms about the pointer and a drag pans, through the canvas wiring the
 Array view uses (`controller.on_scroll` routes Identity events to `_identity_zoom`). The limit arithmetic is Qt-free
 in `zoom_compute` (`wheel_limits`, `pan_limits`, `linked`, `held_factor`), shared with the Array view, whose zoom
-constants live there too. Side by side's two images share one initial extent and move together, as do Diagnostics'
+constants live there too. Every wheel on the page — the Array view, Identity and the pop-out's hex composite — reads
+its notches through `zoom_compute.notches`, from Qt's `angleDelta` (eighths of a degree on every device), never from
+matplotlib's `event.step`: where Qt gives a pixel delta, as a Mac trackpad or Magic Mouse does, matplotlib passes the
+**pixels** on as the step, and one 20-pixel swipe event zoomed by `WHEEL_STEP ** 20`, about 87 times at once. Side by side's two images share one initial extent and move together, as do Diagnostics'
 two crops; the surface zooms alone. The zoom (`NanowellState.identity_zoom`, never persisted) is kept across a redraw
 of the same well, timepoint and mode (montages arriving, a setting changed) and dropped when any of the three
 changes; a Blink frame flip leaves it alone.

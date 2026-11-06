@@ -172,3 +172,14 @@ def test_the_hex_layout_draws_the_timepoints_menu_s_choice_and_has_no_stepper(pa
     nwc.set_popout_no_timepoints(page)
     assert nwc.NO_TIMEPOINTS_SAID in [t.get_text() for ax in fig.axes for t in ax.texts] + [t.get_text() for t in fig.texts]
     assert st.popout_tiles == []
+
+
+def test_go_to_nanowell_is_hidden_while_the_pop_out_shows_the_window(page, qtbot):  # noqa: F811
+    """Go to nanowell names one nanowell; over the window's many, from several wells, it has nothing to go to."""
+    st = _open_hex(page, qtbot)
+    go_to = page.widgets.get("_nw_popout_go_to_btn")
+    assert go_to.isHidden()
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(0)                    # Rows: still the window
+    assert st.popout_layout == "rows" and go_to.isHidden()
+    page.widgets.get("_nw_popout_source_cb").setCurrentIndex(0)                    # This nanowell
+    assert st.popout_source == "selected" and not go_to.isHidden()

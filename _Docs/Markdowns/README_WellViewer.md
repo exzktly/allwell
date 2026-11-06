@@ -6663,7 +6663,8 @@ change over time reads as a change in the picture. **Grid** lays the copies out 
 them all across). Pick the timepoints to compare with *None* and a tick or two. A tile with no image at a timepoint is a
 **hatched hexagon**, never a blank, and the caption counts those by reason. Pointing at a tile names its nanowell in the status bar (*Tile 37 · A03
 3,-2*); a click selects it, so the side panel follows. The composite is only a view: it is not a well of the plate, joins no
-selection, and is never exported as one.
+selection, and is never exported as one. While the pop-out shows the window — Rows or Hex — **Go to nanowell** is hidden, since the
+figure is of many nanowells rather than one.
 
 **What is read.** The page reads the nanowell tables (and the per-cell CSVs behind cell fluorescence) of the wells it
 draws, and only those: opening it with nothing selected reads nothing, and each well is read the first time it

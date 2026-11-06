@@ -125,7 +125,8 @@ _LAYOUT_NAMES = {"rows": "Rows", "hex": "Hex"}
 def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     """The pop-out's row for the window: **Show** (this nanowell | the window), **Layout**, and ◀ Page k of n ▶. The
     hex composite's timepoints are the **Timepoints** menu's, drawn side by side (``popout_view``), so there is no
-    stepper here. Registers ``_nw_popout_source_cb``, ``_nw_popout_layout_cb``, ``_nw_popout_page_prev``,
+    stepper here. While the window is shown, the row above's **Go to nanowell** is hidden: it names one nanowell, and
+    the figure is of many from several wells. Registers ``_nw_popout_source_cb``, ``_nw_popout_layout_cb``, ``_nw_popout_page_prev``,
     ``_nw_popout_page_label``, ``_nw_popout_page_next`` and ``_nw_popout_window_refresh``."""
     source = QComboBox(window)
     source.addItem("This nanowell", "selected")
@@ -168,6 +169,9 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
         page.setText(f"Page {st.window_page + 1} of {pages}")
         for widget in pager:
             widget.setVisible(in_window and pages > 1)
+        go_to = ctx.widgets.get_or_none("_nw_popout_go_to_btn")
+        if go_to is not None:
+            go_to.setVisible(not in_window)              # one nanowell's button: no meaning over the window's many
 
     source.currentIndexChanged.connect(lambda _i: wnc.set_popout_source(ctx, source.currentData()))
     layout.currentIndexChanged.connect(lambda _i: wnc.set_popout_layout(ctx, layout.currentData()))

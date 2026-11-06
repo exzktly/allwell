@@ -12752,6 +12752,8 @@ pop-out draw path — one nanowell, the window's rows, the hex composite — ren
 (gid `nw-popout-no-timepoints`) instead of a figure while it is set, and the button reads *Timepoints: none*.
 Unticking the last timepoint sets it too; a tick or *All* clears it. Tests: `test_nanowell_popout_grid.py` (the menu)
 and `test_nanowell_composite_render.py` (side by side, the Grid shape, the hex layout following the menu).
+`window_view.build_popout_window_controls`'s refresh hides `_nw_popout_go_to_btn` while `popout_source` is
+`"window"`: the button names one nanowell and the figure is of many.
 
 **The crop store is bounded.** `NanowellState.crops` is a `crop_cache_compute.CropCache` — at most `CROPS_KEPT` (400)
 nanowells, the oldest inserted going first, never a key in `protected` (the page on screen and the selected nanowell,

@@ -55,11 +55,7 @@ from services.remote_suspend import (
 )
 from services.remote_commands import (
     _BATCH_DONE_RE,
-    BATCH_DONE,
     BATCH_READY,
-    BATCH_REANCHOR,
-    BATCH_SKIP,
-    BATCH_STAGED,
     HOLD_DIR,
     _batch_driver_snippet,
     _compose_driver_cmd, _handover_driver_body, batch_pipeline_argv, pack_for_login_shell,
@@ -678,19 +674,10 @@ class _BatchedRemoteProcess:
         # driver swaps in a half-uploaded batch and reports it finished. Never `keep/`: the wells an earlier attempt
         # held are sorted by `adopt_earlier_holds` below (tracker F4).
         before = "stopping before anything is launched"
-        flags = [self._batch_flag(t, i) for i in range(1, total + 1)
-                 for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP, BATCH_STAGED)]
-        operands = [paths.suspend_request, *flags]
-        try:
-            clear_argv = handshake_clear_argv(run_dir, operands)
-        except ValueError as exc:
-            self._log(f"[remote] ERROR refusing to clear the handshake files: {exc}; {before}\n")
-            self._returncode = 1
-            return False
         if not (checked(self, ["mkdir", "-p", run_dir], f"create the run directory {run_dir}", then=before)
-                and checked(self, clear_argv,
+                and checked(self, handshake_clear_argv(run_dir),
                             "clear the handshake files a previous run of this dataset left "
-                            f"({len(operands)} files in {run_dir})", then=before)):
+                            f"(every `.aw_batch_*` file and the suspend request in {run_dir})", then=before)):
             self._returncode = 1
             return False
         # Whatever input archives the remote already holds — in `in/`, in a staged batch, or in an earlier

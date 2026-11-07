@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from matplotlib.patches import Rectangle
 
+from review.features.nanowell import window_compute as wc
 from review.features.nanowell.renderer import DOT_PT
 
 BAND_GID, RING_GID, DRAG_GID = "nw-window-band", "nw-window-ring", "nw-window-drag"
@@ -17,16 +18,15 @@ def draw_window(hits, window, result) -> None:
     members = set(result.sites())
     by_panel = dict(hits.panels)
     for ax, index in hits.panels:
-        cols = result.covered.get(index)
-        if not cols:
-            continue
-        ax.add_patch(Rectangle((min(cols) - 0.5, window.lo), max(cols) - min(cols) + 1.0, window.hi - window.lo,
-                               facecolor=Colors.accent, alpha=0.12, edgecolor=Colors.accent, linewidth=1.0,
-                               zorder=1.5, gid=BAND_GID))
+        # One band per covered slot: the swarms the window was drawn around, not the whole columns they sit in.
+        for lo, hi in wc.merged_spans(result.spans.get(index, [])):
+            ax.add_patch(Rectangle((lo, window.lo), hi - lo, window.hi - window.lo,
+                                   facecolor=Colors.accent, alpha=0.12, edgecolor=Colors.accent, linewidth=1.0,
+                                   zorder=1.5, gid=BAND_GID))
     for (ax, xs, ys, sites), values in zip(hits.entries, hits.values):
-        cols = result.covered.get(by_panel.get(ax), set())
+        spans = result.spans.get(by_panel.get(ax), [])
         keep = [k for k, (x, s, v) in enumerate(zip(xs, sites, values))
-                if tuple(s) in members and round(float(x)) in cols and window.lo <= v <= window.hi]
+                if tuple(s) in members and wc.in_spans(float(x), spans) and window.lo <= v <= window.hi]
         if keep:
             ax.scatter([xs[k] for k in keep], [ys[k] for k in keep], s=(DOT_PT * 2.0) ** 2, facecolors="none",
                        edgecolors=Colors.accent, linewidths=1.0, zorder=4).set_gid(RING_GID)

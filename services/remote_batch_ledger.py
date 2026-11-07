@@ -26,6 +26,7 @@ from __future__ import annotations
 import re
 import threading
 
+from services.remote_run_id import SUSPEND_REQUEST
 from services.remote_wait_snippets import BATCH_OVER_BUDGET
 from services.remote_wire import _RE_WELL_DONE
 from util.well_token import canonical_well_label
@@ -166,22 +167,22 @@ def failed_batches_line(proc, failed: dict[int, int], batches, n_batches: int) -
             f"completed.\n")
 
 
-def handshake_clear_argv(run_dir: str, operands: list[str]) -> list[str]:
-    """The command that clears a run's handshake flags, or ``ValueError`` if any operand is not one.
+def handshake_clear_argv(run_dir: str) -> list[str]:
+    """The command that clears a run's handshake flags: a ``find`` of the run directory's own top level, as long as
+    the run directory's name however many batches there are.
 
-    Every operand must be a file *directly inside* ``run_dir``: nothing else is a handshake flag, and an operand that
-    is the run directory, its parent, the staging root or a home folder is exactly what this command must never be
-    handed. ``rm -f`` and not ``-rf``: the flags are files, so ``-f`` clears them all the same, and it cannot remove a
-    directory whatever an operand turns out to name -- it says "Is a directory" and the run stops, where ``-rf``
-    would have emptied it.
+    It used to be one ``rm -rf`` naming every flag of every batch -- 486 operands, 32 000 characters, for a 96-batch run --
+    and a command that long does not reliably reach the host whole (``remote_commands.pack_for_login_shell`` is the same
+    problem's other fix). A host's log showed ``rm: cannot remove '/data/home/<user>'``: the command had been cut where
+    one operand began, leaving ``"$HOME"``, and ``rm -rf`` on that is the user's home folder.
+
+    ``-maxdepth 1 -type f`` with ``-name '.aw_batch_*'`` / ``.aw_suspend_request`` can only ever match the handshake files
+    directly inside ``run_dir``: not a directory, not ``keep/``, not the run directory, its parent or a home folder, and
+    whatever a truncation does to the command line it has no operand to turn into one. It also clears a flag of a
+    batch beyond this run's count, which an earlier, longer run of the dataset may have left.
     """
-    prefix = run_dir.rstrip("/") + "/"
-    stray = [o for o in operands
-             if not o.startswith(prefix) or not (name := o[len(prefix):]) or "/" in name or name in (".", "..")]
-    if stray:
-        raise ValueError(f"{len(stray)} of {len(operands)} handshake paths are not files directly inside {run_dir}: "
-                         f"{', '.join(stray[:3])}")
-    return ["rm", "-f", *operands]
+    return ["find", run_dir, "-maxdepth", "1", "-type", "f",
+            "(", "-name", ".aw_batch_*", "-o", "-name", SUSPEND_REQUEST, ")", "-delete"]
 
 
 def checked(proc, argv: list[str], what: str, *, then: str) -> bool:

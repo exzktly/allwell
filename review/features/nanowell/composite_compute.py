@@ -3,8 +3,9 @@ into one patch per source well and placed in order inside each patch.
 
 It is not a well. Its positions say nothing about where a nanowell sits in its well: each patch is a hexagon filled
 **row by row from its top left** (:func:`reading_order`), in the order chosen — the window's rank by default, or a
-metric's value, ascending or descending (the pop-out's **Sort**). Patches are laid out left to right in rows, in the
-order of each well's first member. Every tile keeps its real nanowell (``source``), which is what
+metric's value at the latest timepoint shown, ascending or descending (the pop-out's **Sort**), over every member
+before the page is cut (:func:`ordered`). Patches are laid out left to right in rows, in the order of each well's first
+member. Every tile keeps its real nanowell (``source``), which is what
 a hover names and a click selects. Positions are in **pitch units**: neighbouring tiles' centres are 1 apart.
 
 Qt-free.
@@ -118,6 +119,12 @@ def composite(rows, *, values: dict | None = None, descending: bool = True, plac
             out.tiles.append(CompositeTile(cx + float(x), cy + float(y), tuple(row.site), row.rank, p))
         out.patches.append((well, float(cx), float(cy) - radius - 0.9))
     return out
+
+
+def ordered(rows, values: dict | None, descending: bool) -> list:
+    """*rows* in the order **Sort** asks for (:func:`sort_key`), before they are cut into pages: a page is then the
+    next run of that order, not a run of ranks sorted among themselves."""
+    return sorted(rows, key=sort_key(values, descending))
 
 
 def page(rows, index: int, size: int = COMPOSITE_PAGE) -> list:

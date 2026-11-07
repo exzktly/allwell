@@ -40,6 +40,8 @@ off one signal regardless of which mode is running.
 
 from __future__ import annotations
 
+import zipfile
+
 import os
 import threading
 from collections.abc import Callable
@@ -188,6 +190,25 @@ def convert_to_new_destination(
     return f"Wrote {written_wells} well(s) into {dest_in}."
 
 
+def archive_falls_short(archive: Path, tifs) -> str:
+    """What the written *archive* lacks of *tifs*, or ``""`` when it holds every one of them, at its size, with data
+    that reads back intact (``ZipFile.testzip``: every member's CRC). The check made before originals are deleted."""
+    try:
+        with zipfile.ZipFile(archive) as zf:
+            bad = zf.testzip()
+            sizes = {i.filename: i.file_size for i in zf.infolist()}
+    except (OSError, zipfile.BadZipFile) as exc:
+        return f"could not be read back ({exc})"
+    if bad is not None:
+        return f"its member {bad} does not read back intact"
+    for t in tifs:
+        if t.name not in sizes:
+            return f"it does not hold {t.name}"
+        if sizes[t.name] != t.stat().st_size:
+            return f"its {t.name} is {sizes[t.name]:,} bytes, not {t.stat().st_size:,}"
+    return ""
+
+
 def _zip_well_folders(
     folder: Path,
     *,
@@ -259,6 +280,12 @@ def _zip_well_folders(
                 zf.write(t, arcname=t.name)
                 on_file(done, len(tifs))
         fraction.finish()
+        # The originals are the user's only copy: the archive is read back and checked -- every TIF in it, at its
+        # size, its data intact -- before one is removed. A failure keeps them all and stops the run.
+        problem = archive_falls_short(target, tifs)
+        if problem:
+            raise ValueError(f"{well}: the archive {target.name} was written but {problem}; "
+                             f"its {len(tifs)} original TIF(s) were kept.")
         # Only the TIFs the archive holds are dropped. This runs against the
         # user's own dataset folder, and the archive takes ``.tif``/``.tiff``
         # only — removing the folder as a unit took every companion file,

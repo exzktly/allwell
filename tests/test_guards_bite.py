@@ -6007,3 +6007,45 @@ def test_phone_guard_catches_a_page_with_no_phone_decision_and_clears_a_decided_
     # A sub-leaf has no rail entry of its own and is not asked.
     leaf = FeatureRegistry([FeatureDescriptor(name="Leaf", parent="Plotting")])
     assert module.pages_without_a_phone_decision(leaf) == []
+
+
+# ── recursive deletes outside the delete layer ───────────────────────────────
+#
+# A user's remote home folder was emptied by an `rm -rf` the app built. Each
+# shape here is a way to spell a recursive delete the layer cannot see.
+
+RECURSIVE_DELETE_SEEN = {
+    "shell-string": 'SCRIPT = "cd x && rm -rf \\"$d\\""\n',
+    "shell-fr-flags": 'def f(d):\n    return f"rm -fr -- {d}"\n',
+    "shell-split-flags": 'def f(d):\n    return "rm -f -r " + d\n',
+    "find-exec-rm": 'def f(d):\n    return f"find {d} -mindepth 1 -exec rm -rf {{}} +"\n',
+    "find-delete-argv": 'def f(d):\n    return ["find", d, "-delete"]\n',
+    "rm-argv-not-routed": 'import subprocess\ndef f(d):\n    subprocess.run(["rm", "-rf", d])\n',
+    "rm-argv-to-bootstrap-ssh": 'def f(alias, d):\n    _ssh_run(alias, ["rm", "-r", d])\n',
+    "rmtree-attr": 'import shutil\ndef f(d):\n    shutil.rmtree(d)\n',
+    "rmtree-aliased": 'def f(d):\n    from shutil import rmtree as gone\n    gone(d)\n',
+}
+
+RECURSIVE_DELETE_CLEAR = {
+    "routed-through-the-cache": 'def f(cache, d):\n    cache._ssh_run(["rm", "-rf", d], check=False)\n',
+    "routed-through-checked": 'def f(proc, d):\n    checked(proc, ["rm", "-rf", d], "clear", then="stop")\n',
+    "plain-rm-file": 'def f(cache, d):\n    return ["rm", "-f", "--", d]\n',
+    "docstring": 'def f():\n    """It used to `rm -rf` the run directory."""\n',
+    "a-word-like-it": 'MSG = "confirm what auto-delete would remove, then rm-free"\n',
+    "safe-rmtree": 'from util.safe_delete import safe_rmtree\ndef f(d, root):\n    safe_rmtree(d, inside=root)\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(RECURSIVE_DELETE_SEEN))
+def test_recursive_delete_guard_catches(shape):
+    import ast
+    from tests.test_every_recursive_delete_goes_through_the_layer import violations
+    assert violations(ast.parse(RECURSIVE_DELETE_SEEN[shape]), "probe.py"), f"the {shape} spelling walked past the guard"
+
+
+@pytest.mark.parametrize("shape", sorted(RECURSIVE_DELETE_CLEAR))
+def test_recursive_delete_guard_clears(shape):
+    import ast
+    from tests.test_every_recursive_delete_goes_through_the_layer import violations
+    found = violations(ast.parse(RECURSIVE_DELETE_CLEAR[shape]), "probe.py")
+    assert not found, f"the guard fired on a legitimate {shape}: {found}"

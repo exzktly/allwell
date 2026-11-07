@@ -166,6 +166,24 @@ def failed_batches_line(proc, failed: dict[int, int], batches, n_batches: int) -
             f"completed.\n")
 
 
+def handshake_clear_argv(run_dir: str, operands: list[str]) -> list[str]:
+    """The command that clears a run's handshake flags, or ``ValueError`` if any operand is not one.
+
+    Every operand must be a file *directly inside* ``run_dir``: nothing else is a handshake flag, and an operand that
+    is the run directory, its parent, the staging root or a home folder is exactly what this command must never be
+    handed. ``rm -f`` and not ``-rf``: the flags are files, so ``-f`` clears them all the same, and it cannot remove a
+    directory whatever an operand turns out to name -- it says "Is a directory" and the run stops, where ``-rf``
+    would have emptied it.
+    """
+    prefix = run_dir.rstrip("/") + "/"
+    stray = [o for o in operands
+             if not o.startswith(prefix) or not (name := o[len(prefix):]) or "/" in name or name in (".", "..")]
+    if stray:
+        raise ValueError(f"{len(stray)} of {len(operands)} handshake paths are not files directly inside {run_dir}: "
+                         f"{', '.join(stray[:3])}")
+    return ["rm", "-f", *operands]
+
+
 def checked(proc, argv: list[str], what: str, *, then: str) -> bool:
     """Run one control command whose result matters; ``False`` (and an ERROR naming *what* failed and *then* what
     the run does about it) when it did not succeed.

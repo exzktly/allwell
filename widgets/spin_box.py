@@ -47,7 +47,7 @@ right this measures nothing and changes nothing. ``tests/test_spin_boxes_keep_th
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QTimer, Signal
+from PySide6.QtCore import SIGNAL, QEvent, QObject, QTimer, Signal
 from PySide6.QtGui import QFont, QValidator
 from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox, QStyle, QStyleOptionFrame
 
@@ -81,9 +81,16 @@ class _HoldsItsNumber:
         self._commit_pause.setSingleShot(True)
         self._commit_pause.setInterval(TYPING_PAUSE_MS)
         self._commit_pause.timeout.connect(self._commit_if_acceptable)
-        self.lineEdit().textEdited.connect(lambda _text: self._commit_pause.start())
+        #
+        # Both field signals are connected with the string-signature form, not ``field.textEdited.connect``. The
+        # field is the spin box's own C++ child, and PySide6 (6.7) keeps a reference to the wrapper of a C++-created
+        # sender for every new-style connection on it and never drops it, so each box leaked its field's wrapper
+        # past the window's close — ``tests/test_a_closed_review_app_is_freed.py`` counted six per window. The
+        # string form makes the same connection without that reference.
+        field = self.lineEdit()
+        QObject.connect(field, SIGNAL("textEdited(QString)"), lambda _text: self._commit_pause.start())
         # Typed but not yet in force: italics until it commits or is put back.
-        self.lineEdit().textChanged.connect(lambda _text: self._show_pending())
+        QObject.connect(field, SIGNAL("textChanged(QString)"), lambda _text: self._show_pending())
         self.valueChanged.connect(lambda _value: self._show_pending())
         # Width the style took from the text field that the hint did not count (module docstring).
         self._extra = 0

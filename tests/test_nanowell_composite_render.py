@@ -9,6 +9,8 @@ page's well or the plate selection.
 
 from __future__ import annotations
 
+import math
+
 import dataclasses
 
 import numpy as np
@@ -590,42 +592,55 @@ def test_cells_are_drawn_as_their_traced_outlines_and_a_cell_without_one_as_a_do
 
 # ── Sort ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 def test_sort_places_the_tiles_by_the_metric_from_the_top_left_in_the_order_chosen(page, qtbot):  # noqa: F811
-    """Through the real combos: sorted by cell count at the first timepoint shown, each well's tiles read from its
-    patch's top left in that order — the counts are read back from the page's own table, not the test's. The window
-    takes nearly every nanowell, so a well holds several whose counts at the first timepoint run against their rank
-    (A01's ranks by its latest count are q1, q2, q0, with first counts 2, 0, 1): a sort that kept the rank order fails."""
+    """Through the real combos, sorted by **count fold change**: each well's tiles read from its patch's top left in
+    that order, at the *latest* timepoint shown -- the values read back from the page's own table, not the test's.
+
+    Reported: "there appears to be no rhyme or reason to the sorting order when using count fold change asc/desc".
+    The sort read the first timepoint shown, which with every timepoint shown is the baseline, where every count fold
+    change is n(baseline) / n(baseline) = 1: every tile tied, the order fell back to the window's rank, and ascending
+    and descending were the same order. The assertions below fail for that: at the baseline the values are all equal,
+    so the test first checks that they are not, at the timepoint it expects the sort to use."""
     st = _loaded(qtbot, page)
     _drag(page, _first_panel(page), (-0.4, -0.5), (1.4, 4.5))
     wnc.open_window_popout(page)
     page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(1)
     qtbot.waitUntil(lambda: bool(st.popout_tiles), timeout=10000)
-    timepoint = str(st.data.timepoints()[0])
+    first, latest = str(st.data.timepoints()[0]), str(st.data.timepoints()[-1])
     sort, order = page.widgets.get("_nw_popout_sort_cb"), page.widgets.get("_nw_popout_order_cb")
     assert not sort.isHidden() and sort.currentData() == wnc.BY_RANK
-    sort.setCurrentIndex(sort.findData("n"))
-    assert st.composite_sort == "n"
-    rows = st.metrics[st.metrics["timepoint"].astype(str) == timepoint]
-    counts = {(str(w), int(q), int(r)): float(v) for w, q, r, v in zip(rows["well"], rows["nw_q"], rows["nw_r"],
-                                                                       rows["n"])}
+    sort.setCurrentIndex(sort.findData("count_fc"))
+    assert st.composite_sort == "count_fc"
+
+    def fold(tp):
+        rows = st.metrics[st.metrics["timepoint"].astype(str) == tp]
+        return {(str(w), int(q), int(r)): float(v) for w, q, r, v in zip(rows["well"], rows["nw_q"], rows["nw_r"],
+                                                                         rows["count_fc"])}
+
+    at_first, values = fold(first), fold(latest)
+    shown = [t[2] for t in st.popout_tiles]
+    assert {at_first[s] for s in shown if math.isfinite(at_first[s])} == {1.0}       # the baseline: all ties
+    assert len({values[s] for s in shown if math.isfinite(values[s])}) >= 2            # the latest: a real order
 
     def reading(well):
         mine = [t for t in st.popout_tiles if t[2][0] == well]
         return [t[2] for t in sorted(mine, key=lambda t: (round(t[1], 9), t[0]))]
 
+    def finite_then_nan(got, reverse):
+        finite = [v for v in got if math.isfinite(v)]
+        return finite == sorted(finite, reverse=reverse) and all(math.isnan(v) for v in got[len(finite):])
+
     wells = {t[2][0] for t in st.popout_tiles}
     assert max(len(reading(w)) for w in wells) >= 3
-    by_rank = sorted((t for t in st.popout_tiles if t[2][0] == "A01"), key=lambda t: t[3])
-    assert [counts[t[2]] for t in by_rank] != sorted((counts[t[2]] for t in by_rank), reverse=True)
     for well in wells:
-        got = [counts[s] for s in reading(well)]
-        assert got == sorted(got, reverse=True)
+        assert finite_then_nan([values[s] for s in reading(well)], reverse=True)
+    descending = {w: reading(w) for w in wells}
     order.setCurrentIndex(order.findData(False))
     assert st.composite_desc is False
     for well in wells:
-        got = [counts[s] for s in reading(well)]
-        assert got == sorted(got)
+        assert finite_then_nan([values[s] for s in reading(well)], reverse=False)
+    assert any(reading(w) != descending[w] for w in wells)                          # the order really flipped
     title = [t.get_text() for t in page.widgets.get("_nw_popout_fig").texts if t.get_gid() == "nw-composite-title"][0]
-    assert f"placed by Cell count at {timepoint}, smallest first" in title
+    assert f"at {latest}, smallest first" in title
     page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(0)                    # Rows: not offered
     assert sort.isHidden() and order.isHidden()
 

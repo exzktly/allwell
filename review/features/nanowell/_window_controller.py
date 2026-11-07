@@ -488,9 +488,13 @@ def draw_window_popout(ctx, st, fig) -> None:
         return
     st.window_page = min(max(st.window_page, 0), page_count(st) - 1)
     if st.popout_layout == "hex":
-        members = cc.page(rows, st.window_page)
         shown_tps = shown_timepoints(st.data.timepoints(), st.popout_tps)
-        values, placed_by = composite_order(ctx, st, [row.site for row in members], shown_tps[0])
+        # Sorted at the *latest* timepoint shown, over every member before the page is cut. At the first one -- the
+        # baseline, when every timepoint is shown -- every fold change is 1 (n(t) / n(baseline) with t the baseline),
+        # so a sort by count fold change tied everywhere, fell back to the window's rank, and read the same ascending
+        # and descending; and a sort within one page of ranks left the pages in rank order.
+        values, placed_by = composite_order(ctx, st, [row.site for row in rows], shown_tps[-1])
+        members = cc.page(cc.ordered(rows, values, st.composite_desc), st.window_page)
         corner, corner_said = composite_labels(ctx, st, [row.site for row in members], shown_tps)
         comp = cc.composite(members, values=values, descending=st.composite_desc, placed_by=placed_by)
         sites = [t.source for t in comp.tiles]

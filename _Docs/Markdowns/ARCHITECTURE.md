@@ -12776,9 +12776,14 @@ panel's own edge, and the unzoomed limits are the tiles' extent exactly, so it o
 stays on the panel's edge under any zoom or pan. The pop-out's **Sort** (`NanowellState.composite_sort`, `""` the
 window's rank or a `distribution_compute.METRICS` key; `composite_desc`; both persisted; `_nw_popout_sort_cb` /
 `_nw_popout_order_cb`, hex layout only) is resolved by `_window_controller.composite_order`: the metric through
-`controller.resolve_metric` and `metric_column`, read from `NanowellState.metrics` at the first timepoint shown (a
-per-nanowell metric at `tp_order` 0, through `metric_values`, which **Corner** shares), falling back to rank with the
-reason in the title when it cannot be read. **Corner** (`NanowellState.composite_label`, persisted;
+`controller.resolve_metric` and `metric_column`, read from `NanowellState.metrics` at the **latest** timepoint shown
+(a per-nanowell metric at `tp_order` 0, through `metric_values`, which **Corner** shares), falling back to rank with the
+reason in the title when it cannot be read. The latest, because at the first -- the baseline, when every timepoint is
+shown -- every fold change is 1 and a sort by one tied everywhere, falling back to rank in both directions. The whole
+window is ordered (`composite_compute.ordered`) before `page` cuts it, so page 1 holds the largest (or smallest) of all
+the members, not the first page of ranks sorted among themselves
+(`test_nanowell_composite_render.py::test_sort_places_the_tiles_by_the_metric_from_the_top_left_in_the_order_chosen`,
+`test_nanowell_window_popout.py::test_the_composite_s_first_page_holds_the_largest_values_of_the_whole_window`). **Corner** (`NanowellState.composite_label`, persisted;
 `_nw_popout_label_cb`) is resolved by `composite_labels` into `{timepoint: {site: value}}`, each panel's at its own
 timepoint, and `_composite_render._draw_corners` writes `corner_text(value)` (a whole number as one, else three
 significant figures, `—` with no value) in each tile's top-left corner, white on a dark stroke (`nw-composite-value`);

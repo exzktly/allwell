@@ -143,3 +143,25 @@ def test_the_pager_buttons_and_the_show_choice_work_on_the_page(page, qtbot, spi
     assert source.itemText(1) == "Window (30)"
     source.setCurrentIndex(0)                                             # This nanowell
     assert st.popout_source == "selected" and not following.isVisibleTo(page.widgets.get("_nw_popout"))
+
+
+def test_the_composite_s_first_page_holds_the_largest_values_of_the_whole_window(page, qtbot, monkeypatch):  # noqa: F811
+    """A sort by value used to be applied after the page of ranks was cut, so page 1 of a 200-nanowell window held the
+    first 91 by rank, sorted among themselves -- the largest values could be on page 3. Through the real pop-out path,
+    with the window and the metric's values stood in."""
+    st = _loaded(qtbot, page)
+    window = DistributionWindow("n", "time", ("t_c", "t_a"), 0, 9)
+    rows = [WindowRow(("A01", i, 0), i + 1, 0.0, {}) for i in range(200)]
+    values = {row.site: float((i * 37) % 200) for i, row in enumerate(rows)}            # against the rank
+    monkeypatch.setattr(wnc, "current", lambda _st: (window, WindowResult(rows, "t_a", 200, 200)))
+    monkeypatch.setattr(wnc, "composite_order", lambda _ctx, _st, sites, _tp: (
+        {s: values[s] for s in sites}, "Cell count, largest first"))
+    monkeypatch.setattr(wnc, "_want_crops", lambda *_a, **_k: None)      # no crops to cut for stand-in nanowells
+    placed: list = []
+    real = wnc.cc.composite
+    monkeypatch.setattr(wnc.cc, "composite", lambda members, **kw: placed.append(list(members)) or real(members, **kw))
+    st.popout_layout, st.composite_desc, st.window_page = "hex", True, 0
+    wnc.open_window_popout(page)
+    qtbot.waitUntil(lambda: bool(placed), timeout=10000)
+    largest = sorted(rows, key=lambda r: -values[r.site])[:wnc.cc.COMPOSITE_PAGE]
+    assert {r.site for r in placed[-1]} == {r.site for r in largest}

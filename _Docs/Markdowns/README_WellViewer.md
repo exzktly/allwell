@@ -2052,6 +2052,16 @@ last touched 731 s ago by the file server's clock) and the run using it had not
 been heard from for 10 min either (its claim last touched 655 s ago by the file
 server's clock)* — and **Resume** continues from the wells that finished.
 
+**Restarting after a crash does not wait for the crashed run's claim.** A run
+claims the node with a marker naming the All-Well that made it. When All-Well
+on the same computer finds a claim left by a copy of itself that is no longer
+running, the next run takes the node over at once (*the claim left by an
+All-Well that is no longer running (process 41022 on this computer) was taken
+over*), and Manage Remotes says so instead of *In use by a run*. If the crashed
+run's step is still running on the node, the new run waits for it and names
+it; a run never shares the node. A claim made from another computer is waited
+for, up to the 10 minutes above.
+
 Quitting releases the nodes that window asked for. A node it only *found* — one
 another window asked for — is not its to cancel: this window stops keeping it
 alive and, if nobody else is, it ends two minutes later.

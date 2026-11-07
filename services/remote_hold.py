@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 
 from services.remote_config import RemoteHost, parse_slurm_time, render_slurm_time
 from services.remote_heartbeat import _UploadHeartbeat
+from services.remote_hold_owner import claim_owner, orphaned_by, takeover_script
 from services.remote_jobs import _only_my_job
 from services.run_evidence import APP_SILENT_RELEASE
 from services.slurm_ids import HOLDS_DIRNAME
@@ -430,13 +431,14 @@ def submit_script(paths: HoldPaths, script_text: str, options: list[str], *, lim
 
 def state_script(paths: HoldPaths) -> str:
     """Shell that prints everything the app knows about the hold, section by section (:func:`parse_state`)."""
-    q = {name: _remote_quote(getattr(paths, name)) for name in ("job", "granted", "status", "ended")}
+    q = {name: _remote_quote(getattr(paths, name)) for name in ("job", "granted", "status", "ended", "busy")}
     return (f'echo "##job"; cat {q["job"]} 2>/dev/null; echo\n'
             f'_aw_job=$(cat {q["job"]} 2>/dev/null)\n'
             f'echo "##scontrol"; [ -n "$_aw_job" ] && scontrol show job -o "$_aw_job" 2>&1; echo\n'
             f'echo "##granted"; cat {q["granted"]} 2>/dev/null\n'
             f'echo "##status"; cat {q["status"]} 2>/dev/null\n'
             f'echo "##ended"; cat {q["ended"]} 2>/dev/null\n'
+            f'echo "##busy"; cat {q["busy"]} 2>/dev/null\n'
             # The node's own clock: `granted_at` was written by the node, so the time left is read on the node's
             # clock too and no two machines' clocks are compared.
             'echo "##now"; date +%s\n'
@@ -483,6 +485,9 @@ class HoldState:
     gres: str = ""
     #: The node's clock when the state was read (epoch seconds), for :attr:`time_left_s`.
     now_s: int = 0
+    #: Who holds the run's claim on the node (:func:`services.remote_hold_owner.claim_owner`), ``""`` when none does
+    #: or the claim names nobody.
+    busy_by: str = ""
 
     @property
     def live(self) -> bool:
@@ -500,7 +505,7 @@ def _sections(text: str) -> dict[str, str]:
     out: dict[str, str] = {}
     current = None
     for line in text.splitlines():
-        if line.startswith("##") and line[2:] in ("job", "scontrol", "granted", "status", "ended", "now"):
+        if line.startswith("##") and line[2:] in ("job", "scontrol", "granted", "status", "ended", "busy", "now"):
             current = line[2:]
             out[current] = ""
         elif current is not None:
@@ -565,7 +570,8 @@ def parse_state(text: str) -> HoldState:
                   gpus=granted.get("gpus", ""), cpus=granted.get("cpus", ""),
                   granted_at=_int(granted.get("granted_at", "")), limit_s=_int(granted.get("limit_s", "")),
                   idle_s=_int(status.get("idle_s", "")), slurm_state=slurm_state,
-                  slurm_reason=sc.get("Reason", ""), gres=_job_gres(sc), now_s=_int(s.get("now", "")))
+                  slurm_reason=sc.get("Reason", ""), gres=_job_gres(sc), now_s=_int(s.get("now", "")),
+                  busy_by=s.get("busy", ""))
     ended = s.get("ended", "")
     if ended:
         return HoldState(phase="ended", ended_reason=ended, **common)
@@ -977,14 +983,17 @@ def live_nodes() -> list[GrantedNode]:
 
 # ── a run's claim on the node ───────────────────────────────────────────────────────────────────────────────────────
 
-def claim_script(paths: HoldPaths, *, stale_s: int = MID_BATCH_HEARTBEAT_STALE_S) -> str:
+def claim_script(paths: HoldPaths, *, owner: str = "", stale_s: int = MID_BATCH_HEARTBEAT_STALE_S) -> str:
     """Shell that takes the node for one run: creates the ``busy`` marker, atomically (``set -C`` makes the create fail
-    if it exists, so two windows cannot both win). A marker older than *stale_s* is a run whose app died and is
-    removed first — the hold script reads it as not busy by the same rule. Prints ``AW_LEASED`` or ``AW_BUSY``."""
+    if it exists, so two windows cannot both win), holding *owner* (:func:`services.remote_hold_owner.claim_owner`).
+    A marker older than *stale_s* is a run whose app died and is removed first — the hold script reads it as not busy
+    by the same rule. Prints ``AW_LEASED``, or ``AW_BUSY`` followed by the marker's owner on the next line, so a claim
+    left by a crashed window on this computer can be taken over without waiting for it to go stale."""
     b = _remote_quote(paths.busy)
     return (f'[ -d {_remote_quote(paths.dir)} ] || {{ echo AW_NOHOLD; exit 0; }}\n'
             f'if [ -e {b} ] && [ -n "$(find {b} -mmin +{max(1, stale_s // 60)} 2>/dev/null)" ]; then rm -f {b}; fi\n'
-            f'if ( set -C; : > {b} ) 2>/dev/null; then echo AW_LEASED; else echo AW_BUSY; fi\n'
+            f"if ( set -C; printf '%s\\n' {_remote_quote(owner)} > {b} ) 2>/dev/null; then echo AW_LEASED; "
+            f"else echo AW_BUSY; cat {b} 2>/dev/null; fi\n"
             "exit 0\n")
 
 
@@ -1094,7 +1103,8 @@ def claim_node(host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str],
         log_fn("[remote] WARN granted node: could not tell whether this host has a granted node, so this run asks "
                "for a node of its own.\n")
         return None
-    wait_s, began, said = queue_wait_seconds(host), clock(), False
+    wait_s, began, said = queue_wait_seconds(host), clock(), ""
+    me = claim_owner()
     while True:
         if state.phase in ("none", "ended"):
             if state.phase == "ended":
@@ -1102,7 +1112,11 @@ def claim_node(host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str],
                        f"{state.ended_reason}; this run asks for a node of its own.\n")
             return None
         if state.phase in ("granted", "busy", "queued", "starting"):
-            answer = (node._script(claim_script(node.paths)).stdout or "").strip()
+            answer, _, holder = (node._script(claim_script(node.paths, owner=me)).stdout or "").strip().partition("\n")
+            why = "busy with another run" if answer == "AW_BUSY" else "not claimable"
+            gone = orphaned_by(holder) if answer == "AW_BUSY" else None
+            if gone is not None:
+                answer, why = _take_over(node, state, holder, me, gone, log_fn)
             if answer == "AW_LEASED":
                 if state.phase in ("queued", "starting"):
                     log_fn(f"[remote] granted node: job {state.job_id} is still being granted; this run has claimed "
@@ -1110,12 +1124,11 @@ def claim_node(host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str],
                 else:
                     log_fn(f"[remote] granted node: using {_node_words(state)}, job {state.job_id}.\n")
                 return NodeLease(node, state, log_fn=log_fn)
-            why = "busy with another run" if answer == "AW_BUSY" else "not claimable"
         else:
             why = "not readable just now"
-        if not said:
+        if said != why:
             log_fn(f"[remote] scheduler: the granted node is {why}; waiting for it.\n")
-            said = True
+            said = why
         if stop_event is not None and stop_event.is_set():
             raise HoldError("the run was stopped while it waited for the granted node.")
         if wait_s and clock() - began > wait_s:
@@ -1123,6 +1136,27 @@ def claim_node(host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str],
                                      "wait; no node of its own is asked for beside it.")
         sleep(HOLD_POLL_S)
         state = node.state()
+
+
+def _take_over(node: GrantedNode, state: HoldState, holder: str, me: str, gone_pid: int,
+               log_fn: Callable[[str], None]) -> tuple[str, str]:
+    """Take over the claim *holder* left by the All-Well process *gone_pid* on this computer, which is not running.
+    Returns the claim's answer (``AW_LEASED`` when taken) and, when not, why the node is still waited for."""
+    answer = (node._script(takeover_script(node.paths.busy, holder, me, state.job_id)).stdout or "").strip()
+    if answer == "AW_LEASED":
+        log_fn(f"[remote] granted node: the claim left by an All-Well that is no longer running (process {gone_pid} "
+               "on this computer) was taken over; it was not waited out.\n")
+        return answer, ""
+    if answer.startswith("AW_STEP"):
+        step = answer.partition(" ")[2] or "?"
+        return answer, (f"still running step {step} of the run started by an All-Well that is no longer running "
+                        f"(process {gone_pid} on this computer); a run never shares the node, so this one waits for "
+                        "that step to end")
+    if answer == "AW_UNKNOWN":
+        return answer, (f"claimed by an All-Well that is no longer running (process {gone_pid} on this computer), "
+                        "and the scheduler could not say whether its run's step is still on the node; the claim "
+                        f"lapses {MID_BATCH_HEARTBEAT_STALE_S // 60} min after that All-Well's last heartbeat")
+    return answer, "busy with another run"
 
 
 class GrantedRun:
@@ -1340,7 +1374,11 @@ def describe_state(state: HoldState, idle_release_min: int) -> list[str]:
         left = state.time_left_s
         lines.append(f"Granted {_duration(state.now_s - state.granted_at)} ago"
                      + (f" · {_duration(left)} left" if left is not None else ""))
-    if state.phase == "busy":
+    gone = orphaned_by(state.busy_by) if state.phase == "busy" else None
+    if gone is not None:
+        lines.append(f"Claimed by an All-Well that is no longer running (process {gone} on this computer) — the "
+                     "next run takes the node over, unless that run's step is still on it.")
+    elif state.phase == "busy":
         lines.append("In use by a run.")
     elif idle_release_min:
         lines.append(f"Idle {_duration(state.idle_s)} — released after {idle_release_min} min idle.")

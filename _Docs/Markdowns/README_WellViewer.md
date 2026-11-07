@@ -6700,7 +6700,7 @@ fold change — in each tile's top-left corner, at the timepoint of the panel th
 has no value there); the caption names it. Zoom in to read it on a full page. Tiles are
 drawn apart inside a dashed frame — the edge of each timepoint's panel, so it stays put when you zoom or pan — and the
 title says it is not a real array. Each tile has a coloured **stripe**
-along its foot, and **Colour** (beside **Layout**, in the Hex layout) chooses what it says: *Source well*, any of the
+along its foot, and **Colour** (beside **Layout**, in the Hex layout) chooses what it says: *Source well* (a well keeps its colour on every page and whatever the Sort), any of the
 plate's sample variables (each well's value of it, in the same colour that value has on every plot — a well left
 unfilled is named as such), or *None* for no stripe. A key under the title names each colour drawn. Every tile is its nanowell's crop at one size and
 all are on one brightness scale, so wells of different exposure compare. It shows 91 nanowells a page (◀ ▶ turn it),

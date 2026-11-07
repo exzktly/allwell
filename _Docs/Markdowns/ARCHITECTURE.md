@@ -12837,7 +12837,7 @@ the run kept no outline of (`_tile_outlines`); every point is mapped from crop p
 (`_to_tile`: pixel `i`'s centre at `i + 0.5` of `2 * TILE / width`). The caption says outlines, dots or both, counts
 the dots and why, and names tiles of a well with no cell table. The stripe along each tile's foot is coloured by **Colour**
 (`NanowellState.composite_colour`, persisted; the pop-out's `_nw_popout_colour_cb`, shown in the hex layout only):
-*Source well* (each well its `WELL_COLORS_TUPLE` rank colour in patch order), a sample variable (each well's value in
+*Source well* (each well the `WELL_COLORS_TUPLE` colour of its place among the whole window's wells in rank order, so it is the same on every page and under every Sort), a sample variable (each well's value in
 the ink `variable_series.member_inks` gives it on every plot, an unfilled well or a disagreeing set inked and named
 as there), or *None* (no stripe). `_window_controller.composite_colouring` resolves it to `well -> colour` and the key's
 `(label, colour)` entries — only the values drawn, from `variable_series.legend_entries` — and a variable deleted since

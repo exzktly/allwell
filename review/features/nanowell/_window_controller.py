@@ -328,10 +328,11 @@ def set_composite_colour(ctx, key) -> None:
         _nwc()._set_popout(ctx, composite_colour=key)
 
 
-def composite_colouring(ctx, st, wells) -> tuple[dict, tuple, str]:
+def composite_colouring(ctx, st, wells, every=()) -> tuple[dict, tuple, str]:
     """``(well -> colour, ((label, colour), …), title)`` for the composite's stripes and their key, over *wells*.
 
-    By well, each well its own rank colour (``ui.theme.WELL_COLORS_TUPLE``, in patch order); by a sample variable,
+    By well, each well its own colour (``ui.theme.WELL_COLORS_TUPLE``, by its place among *every* — the whole
+    window's wells in rank order — then *wells*), the same on every page and under every Sort; by a sample variable,
     each well's value of it in the ink that value has on every plot (``variable_series.member_inks`` — a well left
     unfilled, or a set whose wells disagree, gets the inks and names those have there), the key listing only the
     values drawn; *None*, nothing. A variable deleted since it was chosen colours by well and says so."""
@@ -349,7 +350,10 @@ def composite_colouring(ctx, st, wells) -> tuple[dict, tuple, str]:
             bands = member_bands(ctx, "nanowell", key, members)
             name = next((label for label, k in composite_colour_choices(ctx) if k == key), "")
             return inks, tuple(legend_entries(ctx, key, set(bands.values()))), name
-    inks = {well: WELL_COLORS_TUPLE[i % len(WELL_COLORS_TUPLE)] for i, well in enumerate(wells)}
+    # A well's colour is its place among the whole window's wells (*every*, in the window's rank order), so it is
+    # the same on every page and under every Sort; the key names only the wells on this page.
+    order = {well: i for i, well in enumerate(dict.fromkeys([*every, *wells]))}
+    inks = {well: WELL_COLORS_TUPLE[order[well] % len(WELL_COLORS_TUPLE)] for well in wells}
     return inks, tuple((well, inks[well]) for well in wells), "Source well"
 
 
@@ -506,7 +510,8 @@ def draw_window_popout(ctx, st, fig) -> None:
         comp = cc.composite(members, values=values, descending=st.composite_desc, placed_by=placed_by)
         sites = [t.source for t in comp.tiles]
         _want_crops(ctx, st, sites, shown_tps)
-        inks, key, key_title = composite_colouring(ctx, st, [well for well, _x, _y in comp.patches])
+        inks, key, key_title = composite_colouring(ctx, st, [well for well, _x, _y in comp.patches],
+                                                   every=[row.site[0] for row in rows])
         st.popout_tiles = render_composite(
             fig, comp, _page_crops(st, sites, shown_tps), shown_tps, n_total=len(rows),
             inks=inks, key=key, key_title=key_title, corner=corner, corner_said=corner_said,

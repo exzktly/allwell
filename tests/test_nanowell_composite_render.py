@@ -288,6 +288,23 @@ def test_colouring_by_a_variable_takes_each_well_s_value_ink_from_variable_serie
     assert labels == ["Source well", "Cell line", "Dose", "None"]
 
 
+def test_by_well_a_well_keeps_its_stripe_colour_on_every_page_and_under_every_sort():
+    """By source well, a well's colour is its place among the wells of the whole window, not among the patches of
+    the page drawn: B02 is the window's second well, so it is the second colour on a page where it is the only well,
+    and on a page whose sort puts it first. Indexed by patch, it took the first colour on both, A01's colour."""
+    from types import SimpleNamespace
+
+    from ui.theme import WELL_COLORS_TUPLE
+
+    ctx = SimpleNamespace(state=SimpleNamespace(selection=None))
+    st = SimpleNamespace(composite_colour=wnc.BY_WELL)
+    window = ["A01", "A01", "B02", "C03", "B02"]                       # the window's rows' wells, in rank order
+    for page_wells in (["B02"], ["B02", "A01"], ["C03", "B02"]):
+        inks, key, title = wnc.composite_colouring(ctx, st, page_wells, every=window)
+        assert inks == {w: WELL_COLORS_TUPLE[["A01", "B02", "C03"].index(w)] for w in page_wells}
+        assert key == tuple((w, inks[w]) for w in page_wells) and title == "Source well"
+
+
 def test_the_colour_choice_is_kept_with_the_page():
     from review.features.nanowell.state import NanowellState
 

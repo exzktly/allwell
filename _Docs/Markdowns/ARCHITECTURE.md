@@ -21923,6 +21923,11 @@ you're in before you type the command.
   `images`) on those three screens, nine cases, each in a **subprocess of its own**
   (`python -m tests._page_render_case <dataset> <screen> <out.json>`, three at a
   time), because a process that builds nine full apps slows to minutes a page.
+  Each case first gives the application the bundled fonts every launch uses
+  (`allwell.use_bundled_fonts`, which `main` calls too), so a page is measured in
+  the face the app ships, not in whatever the machine's fontconfig makes of the
+  generic "Sans Serif" — DejaVu Sans on the CI runner, where a page button and a
+  scroll content wider than the ones a user sees were reported as defects.
   `tests/_page_tour.py` visits every Review section and page, the Datasets tools
   and Analyze's views, and the phone's own chrome, after
   `_page_datasets.prepare` has given each page the choices that make it draw data

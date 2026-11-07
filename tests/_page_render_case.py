@@ -36,7 +36,11 @@ def run_case(kind: str, screen: str, workdir: Path) -> list[dict]:
     from widgets.empty_state import EmptyState
 
     qapp = QApplication.instance() or QApplication([])
-    from allwell import AllWellApp
+    from allwell import AllWellApp, use_bundled_fonts
+
+    # The fonts every launch uses (``allwell.main``), so the pages are measured in the face the app ships rather
+    # than in whatever this machine's fontconfig makes of "Sans Serif" — DejaVu Sans on the CI runner.
+    use_bundled_fonts(qapp)
 
     rect, phone = SCREENS[screen], is_phone(screen)
     shots = os.environ.get("ALLWELL_PAGE_SHOTS")

@@ -242,5 +242,6 @@ def test_the_per_well_remote_delete_pipes_its_script_to_bash(monkeypatch, tmp_pa
     f._delete_well_files_on_remote("A01")
 
     assert seen["argv"][-2:] == ["bash", "-s"]
-    assert seen["input"] == (b"rm -f -- /r/in/A01.zip /r/out/A01_out.zip "
-                             b"/r/out/*_A01.csv /r/out/*_A01.csv.gz\n")
+    # One { … } group (remote_transport.guard_script), so a script cut in transfer runs nothing.
+    assert seen["input"] == (b"{\nrm -f -- /r/in/A01.zip /r/out/A01_out.zip "
+                             b"/r/out/*_A01.csv /r/out/*_A01.csv.gz\n}\n")

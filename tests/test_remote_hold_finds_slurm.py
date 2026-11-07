@@ -62,8 +62,8 @@ def test_without_the_prelude_the_submit_script_fails_as_reported(cluster):
     assert result.returncode == 127
     assert "sbatch: command not found" in result.stderr
     # ...and it is the `sbatch` line, the one the report named.
+    # The report said line 126; the hold script has grown since, so the line is read off the script, not pinned.
     (line,) = re.findall(r"line (\d+): sbatch: command not found", result.stderr)
-    assert line == "126"
     assert _submit(host).splitlines()[int(line) - 1].lstrip().startswith("_aw_out=$(sbatch")
 
 

@@ -301,7 +301,7 @@ def test_a_leftover_job_is_cancelled_but_a_live_one_is_not(monkeypatch, tmp_path
     seen = {}
 
     def fake_run(argv, **kw):
-        seen["script"] = argv[-1]
+        seen["script"] = unpack_login_shell_command(argv[-1])     # sent packed, as every command line is
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
     monkeypatch.setattr("subprocess.run", fake_run)
@@ -337,7 +337,7 @@ def test_neither_cancel_path_will_touch_another_user_s_job(monkeypatch):
     scripts = []
 
     def fake_run(argv, **kw):
-        scripts.append(argv[-1])
+        scripts.append(unpack_login_shell_command(argv[-1]))
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
     monkeypatch.setattr("subprocess.run", fake_run)

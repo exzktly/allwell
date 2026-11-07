@@ -23,6 +23,7 @@ import shlex
 from dataclasses import dataclass
 
 from pipeline.parallelism import CELLPOSE_METHODS, CELLPOSE_WORKERS_PER_GPU, expected_workers
+from services.remote_srun_retry import one_task
 
 #: The key under which a run's options carry the batch size it actually runs with, beside the user's own
 #: ``remote_batch_size`` (which stays as typed, ``0`` included).
@@ -69,11 +70,15 @@ def _gpus_value(spec: str) -> int | None:
 
 
 def launcher_resources(launcher: str) -> LauncherResources:
-    """The CPUs, GPUs and ``--exclusive`` a scheduler command (``srun …``) asks for."""
+    """The CPUs, GPUs and ``--exclusive`` a scheduler command (``srun …``) asks for — read from the command as the
+    run will launch it. :func:`services.remote_srun_retry.one_task` folds a ``--ntasks`` into ``--cpus-per-task`` and
+    ``--gpus-per-task`` (``-n 4 -c 4`` runs one task on 16 CPUs), so the tokens are folded the same way first: a
+    second reading of the raw ``-c`` would count a quarter of the node's workers and size the batches for them."""
     try:
         tokens = shlex.split(launcher or "")
     except ValueError:
         tokens = (launcher or "").split()
+    tokens = one_task(tokens)
     cpus = gpus = None
     exclusive = False
     gpus_per_task = None
@@ -104,7 +109,7 @@ def launcher_resources(launcher: str) -> LauncherResources:
             exclusive = True
         i += 1
     if gpus is None and gpus_per_task is not None:
-        gpus = gpus_per_task                            # every launch runs one task (remote_srun_retry.one_task)
+        gpus = gpus_per_task                            # one task, its --ntasks already folded in above
     return LauncherResources(cpus=cpus, gpus=gpus, exclusive=exclusive)
 
 

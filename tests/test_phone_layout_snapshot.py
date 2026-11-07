@@ -20,8 +20,9 @@ The numbers depend on the Qt version, the application font and the screen, so
 the baseline records those and the test skips, saying so, on a machine whose
 fingerprint differs. It is a full-app test (marked ``slow``), so the PR gate
 never runs it; the slow lane (``.github/workflows/slow-lane.yml``) does, and
-installs the system ``fonts-inter`` package so the runner resolves the same font
-the baseline was recorded under and compares rather than skipping.
+installs the system ``fonts-inter`` package and a fontconfig rule that prefers it
+for sans-serif, so the runner resolves the same font the baseline was recorded
+under and compares rather than skipping.
 """
 
 from __future__ import annotations

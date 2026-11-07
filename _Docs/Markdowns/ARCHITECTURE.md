@@ -219,8 +219,9 @@ to how widgets are found has not changed what is seen. The baseline records a
 fingerprint — the Qt version, the screen and the font fontconfig actually resolves
 for the application — and the test skips, naming the difference, on a machine
 whose fingerprint differs. The slow-lane job installs the system `fonts-inter`
-package so the runner resolves the same Inter the baseline was taken under and the
-snapshot compares there.
+package and a `conf.d` rule that prefers Inter for sans-serif (a stock runner ranks
+DejaVu Sans first even with Inter installed), so the runner resolves the same Inter
+the baseline was taken under and the snapshot compares there.
 
 **The phone point.** Every size in phone layout is written in phone points
 (`u`): the short side of the screen's geometry divided by 390, the width in

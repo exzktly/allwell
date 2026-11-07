@@ -87,6 +87,7 @@ UI_LANE_FILES: dict[str, str] = {
     "test_wrap_checkbox.py": "a wrapping checkbox reports its height",
     "test_narrow_page_widgets.py": "wrapping radio / capped label / dock and Batch Export stacking / Triage buttons at a phone width",
     "test_section_header_layout.py": "a section title keeps one line while it fits",
+    "test_toast_stays_in_its_window.py": "a toast follows its window's resize and wraps to its width",
     # ── theme tokens and the stylesheet (ui/theme.py) ──────────────────────
     "test_theme_accent_pairing.py": "accent2 moves with accent in every theme",
     "test_theme_icon_assets.py": "every icon URL in the stylesheet exists",

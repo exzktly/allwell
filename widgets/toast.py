@@ -4,6 +4,13 @@ A frameless top-level popup (status dot + message) that fades in near the
 bottom-right of a parent window, lingers, then fades out. Token-styled with a
 soft drop shadow.
 
+The toast is a window of its own, so nothing lays it out with its host: it is
+never wider than the host (a message too long for it wraps), and it places
+itself again whenever the host or the host's window is resized or moved while
+it shows — entering phone layout shrinks the window under a toast shown at the
+desk, which otherwise stayed where the desk window's corner had been, past the
+phone window's right edge.
+
 Usage
 -----
 ::
@@ -24,7 +31,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 from PySide6.QtCore import (
-    QEasingCurve, QPointF, QPropertyAnimation, QTimer, Qt,
+    QEasingCurve, QEvent, QPointF, QPropertyAnimation, QTimer, Qt,
 )
 from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QWidget,
@@ -34,6 +41,9 @@ from ui import theme
 from widgets._support import with_alpha
 from widgets.status_dot import StatusDot
 from util.aw_safe import swallowed
+
+
+_QWIDGETSIZE_MAX = 16_777_215  # Qt's QWIDGETSIZE_MAX
 
 
 class Toast(QWidget):
@@ -79,8 +89,13 @@ class Toast(QWidget):
 
     # ── public ───────────────────────────────────────────────────────────
     def popup(self) -> None:
-        self.adjustSize()
+        self._fit()
         self._place()
+        if self._host is not None:
+            # Follow the host while showing: its own resizes, and its window's moves.
+            self._host.installEventFilter(self)
+            if self._host.window() is not self._host:
+                self._host.window().installEventFilter(self)
         self.setWindowOpacity(0.0)
         self.show()
         self.raise_()
@@ -108,7 +123,37 @@ class Toast(QWidget):
         t.popup()
         return t
 
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() in (QEvent.Resize, QEvent.Move) and self.isVisible():
+            self._fit()
+            self._place()
+        return False
+
     # ── internals ────────────────────────────────────────────────────────
+    def _room(self) -> int:
+        """The widest the toast may be: its host's width (the screen's, with no visible host), less a margin."""
+        if self._host is not None and self._host.isVisible():
+            width = self._host.width()
+        else:
+            from PySide6.QtGui import QGuiApplication
+            width = QGuiApplication.primaryScreen().availableGeometry().width()
+        return max(1, width - 2 * theme.Spacing.lg)
+
+    def _fit(self) -> None:
+        """Size to the message on one line, or wrap it to the host's width when one line is wider than that."""
+        room = self._room()
+        self._label.setWordWrap(False)
+        self.setMinimumWidth(0)
+        self.setMaximumWidth(_QWIDGETSIZE_MAX)
+        self.adjustSize()
+        if self.width() > room:
+            self._label.setWordWrap(True)
+            self.setFixedWidth(room)
+            self.layout().invalidate()                   # the label's height-for-width changed with its wrap
+            # A window's adjustSize does not ask its layout for the height at a width, so the wrapped
+            # label would keep one line's height.
+            self.resize(room, max(self.layout().heightForWidth(room), self.minimumSizeHint().height()))
+
     def _place(self) -> None:
         margin = theme.Spacing.lg
         if self._host is not None and self._host.isVisible():
@@ -116,7 +161,8 @@ class Toast(QWidget):
             bottom_right = self._host.mapToGlobal(
                 QPointF(geo.width(), geo.height()).toPoint()
             )
-            x = bottom_right.x() - self.width() - margin
+            x = max(bottom_right.x() - self.width() - margin,
+                    self._host.mapToGlobal(QPointF(0, 0).toPoint()).x() + margin)
             y = bottom_right.y() - self.height() - margin
         else:
             from PySide6.QtGui import QGuiApplication

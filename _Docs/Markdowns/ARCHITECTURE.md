@@ -22159,7 +22159,20 @@ the app's own classes — loaded and empty, in both runs; RSS still moves by a
 few megabytes per construction and by a different amount each run (1.8 to
 4.9 MB loaded), so it is reported, not budgeted.
 `test_a_closed_window_leaves_no_wrapper_and_no_app_object_behind` holds the
-zeros, compared by type so a regression names what leaked. **Under pytest the full-app fixtures still accumulate**, because `qtbot` holds
+zeros, compared by type so a regression names what leaked. Two PySide and
+matplotlib behaviours are behind the shapes that test has caught since. A
+new-style connection on a signal of a C++-created child — a spin box's own text
+field, `lineEdit().textEdited.connect(...)` — keeps that child's Python wrapper
+alive for good, so `widgets/spin_box.py` connects its field with the
+string-signature form (`QObject.connect(field, SIGNAL(...), ...)`), and
+`tests/test_spin_boxes_commit_typed_values_once.py` counts the wrappers a deleted
+box leaves. And matplotlib's `draw_idle` queues its draw with a receiver-less
+`QTimer.singleShot`, which arrives even after the canvas is deleted; Heat Map
+draws its empty state as it is built, with the window, so a window closed in the
+same turn raised from the event loop, and pytest — keeping the unraisable
+exception and its frames — kept the window alive.
+`widgets.canvas.make_canvas` gives every canvas a queued draw that checks the
+canvas still exists and holds it weakly (`tests/test_canvas_deferred_draw.py`). **Under pytest the full-app fixtures still accumulate**, because `qtbot` holds
 every app it is handed for the life of the test, and deleting the app's widgets
 from a teardown fixture segfaults the interpreter *after* the tests themselves
 have passed — which is why `conftest.py`'s widget reaper (below) exempts anything

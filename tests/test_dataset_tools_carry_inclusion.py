@@ -115,3 +115,21 @@ def test_merge_plates_says_when_an_override_file_cannot_be_read(tmp_path):
     said: list[str] = []
     mp_apply.execute_plan(mpc.build_plate_merge_plan(ds1, ds2, dest), log=said.append)
     assert any("could not be read" in line and "cell overrides" in line for line in said)
+
+
+def test_merge_plates_renames_the_crop_scope_and_says_when_one_plate_had_no_crop(tmp_path):
+    """Review N2: the crop's scope names wells, and was carried unrenamed. Dataset 1 holds no crop here, so dataset 2's
+    crop scoped to its A01 is the one carried; A01 is E01 in the merge, so carrying the scope unrenamed would crop
+    dataset 1's A01 and leave E01 uncropped. Dataset 1 having no crop of its own is said in the log."""
+    ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h"])
+    build_dataset(ds2, wells=["A01"], timepoints=["0h"])
+    crop = {"region": [10, 20, 300, 400], "scope": {"wells": ["A01"], "fovs": None, "tps": ["0h"]}}
+    _persist(ds1, qc=None, crop=None)
+    _persist(ds2, qc=None, crop=crop)
+    plan = mpc.build_plate_merge_plan(ds1, ds2, dest, well_map={"A01": "E01"})
+    said: list[str] = []
+    mp_apply.execute_plan(plan, log=said.append)
+    assert _read(dest)["crop_region"] == {"region": [10, 20, 300, 400],
+                                          "scope": {"wells": ["E01"], "fovs": None, "tps": ["0h"]}}
+    assert any("dataset 1 had no crop region of its own" in line for line in said)

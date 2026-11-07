@@ -78,3 +78,24 @@ def test_a_narrow_answer_is_remembered(ctx, monkeypatch):
     again = every_well(ctx, "probe", None, len, columns=("mcherry_mean_intensity",))
     assert first == again == {WELL: 32}
     assert len(reads) == 1 and reads[0] is not None, reads
+
+
+def test_an_answer_read_across_an_invalidation_is_not_remembered(ctx):
+    """A read that straddles an edit is not kept.
+
+    ``per_well`` runs on a worker (``review.core.background_read``) while the window's thread goes on: a QC or crop
+    edit there clears the statistics cache without moving ``rows_version``. An answer the worker computed from the
+    rows as they were before that edit, stored after the clear under the same key, was then served to every later
+    ask — the redraw the edit itself triggers included. Here the edit happens inside the compute, which is exactly
+    the window between the read and the store.
+    """
+    verdict = {"counted": 32}
+
+    def compute(df):
+        answer = verdict["counted"]
+        verdict["counted"] = 0                    # the edit: fewer cells count from now on…
+        ctx.state.stats_cache.invalidate()        # …and the window's thread clears the cache for it
+        return answer
+
+    assert per_well(ctx, "probe", WELL, None, compute) == 32     # the straddling read answers for itself
+    assert per_well(ctx, "probe", WELL, None, lambda df: verdict["counted"]) == 0

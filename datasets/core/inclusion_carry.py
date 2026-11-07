@@ -14,8 +14,10 @@ timepoints it carries.
 
 Two sources can disagree: the QC limits and the crop are one setting per dataset, so the destination takes the
 first source's and says, by name, which other source's differed — a merged plate cannot hold both, and silently
-picking one would be the very substitution this module exists to prevent. Field exclusions are per field, so
-every source's are kept, renamed. Anything left behind is counted in the emitted line. Qt-free.
+picking one would be the very substitution this module exists to prevent. A source with no such setting of its own
+is named too, since the first source's then applies to its wells as well. The crop's scope names wells and
+timepoints, so it is renamed through the first source's renaming like a field exclusion. Field exclusions are per
+field, so every source's are kept, renamed. Anything left behind is counted in the emitted line. Qt-free.
 """
 
 from __future__ import annotations
@@ -33,6 +35,10 @@ LEGACY_QC_FILENAME = "qc_params.json"
 #: The sections that are one setting per dataset, and how a line names each.
 SINGLE_SECTIONS = (("qc_params", "QC limits"), ("crop_region", "crop region"))
 FIELD_SECTION = "field_exclusions"
+CROP_SECTION = "crop_region"
+#: The crop's scope keys that name wells and timepoints (``review/persistence/crop_region``), renamed like a field
+#: exclusion; ``fovs`` keeps its labels, which no tool renames.
+_CROP_SCOPE_RENAMES = (("wells", "well"), ("tps", "timepoint"))
 
 
 @dataclass(frozen=True)
@@ -77,15 +83,23 @@ def carry_inclusion(sources, dest_out_dir: Path, emit: Callable[[str], None]) ->
     carried: dict = {}
     said: list[str] = []
     for section, name in SINGLE_SECTIONS:
-        held = [(source.label, doc[section]) for source, doc in docs if doc.get(section) is not None]
+        held = [(source, doc[section]) for source, doc in docs if doc.get(section) is not None]
         if not held:
             continue
-        carried[section] = held[0][1]
+        first, value = held[0]
+        if section == CROP_SECTION:
+            value = _renamed_crop(value, first, emit)
+        carried[section] = value
         said.append(f"the {name}")
-        differing = [label for label, value in held[1:] if value != held[0][1]]
+        differing = [source.label for source, other in held[1:] if other != held[0][1]]
         if differing:
-            emit(f"Warning: {', '.join(differing)} had different {name} from {held[0][0]}; the new dataset uses "
-                 f"{held[0][0]}'s. Check them on Home ▸ Cell Gating before comparing the plates.")
+            emit(f"Warning: {', '.join(differing)} had different {name} from {first.label}; the new dataset uses "
+                 f"{first.label}'s. Check them on Home ▸ Cell Gating before comparing the plates.")
+        holders = {id(source) for source, _value in held}
+        lacking = [source.label for source, _doc in docs if id(source) not in holders]
+        if lacking:
+            emit(f"Warning: {', '.join(lacking)} had no {name} of its own; the new dataset applies {first.label}'s "
+                 f"to its wells too. Check them on Home ▸ Cell Gating before comparing the plates.")
     records, dropped = _renamed_fields(docs)
     if records or any(FIELD_SECTION in doc for _source, doc in docs):
         carried[FIELD_SECTION] = records
@@ -106,6 +120,30 @@ def carry_inclusion(sources, dest_out_dir: Path, emit: Callable[[str], None]) ->
     write_json_atomic(dest, {**existing, **carried})
     emit("Carried " + ", ".join(said) + f" ({PERSISTENCE_FILENAME}), so the same cells count in the new dataset.")
     return carried
+
+
+def _renamed_crop(crop, source: InclusionSource, emit: Callable[[str], None]):
+    """*crop* (a ``crop_region`` section) with its scope's wells and timepoints under the destination's names.
+
+    The scope is part of what the crop means: carried unrenamed, a crop scoped to dataset 2's ``A1`` would filter
+    whatever the destination calls ``A1`` and leave the renamed well uncropped. A scope value the tool did not carry
+    is dropped and counted; ``None`` (every value) stays ``None``. The older bare-list shape has no scope."""
+    if not isinstance(crop, dict) or not isinstance(crop.get("scope"), dict):
+        return crop
+    scope = dict(crop["scope"])
+    dropped = 0
+    for key, kind in _CROP_SCOPE_RENAMES:
+        values = scope.get(key)
+        if not isinstance(values, (list, tuple)):
+            continue
+        rename = source.well if kind == "well" else source.timepoint
+        mapped = [rename(str(v)) for v in values]
+        dropped += sum(1 for m in mapped if m is None)
+        scope[key] = sorted({m for m in mapped if m is not None})
+    if dropped:
+        emit(f"{dropped} well(s) or timepoint(s) the crop region was scoped to are not in this dataset, and were "
+             "dropped from its scope.")
+    return {**crop, "scope": scope}
 
 
 def _renamed_fields(docs) -> tuple[list[dict], int]:

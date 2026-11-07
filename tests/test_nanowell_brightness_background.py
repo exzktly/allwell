@@ -63,3 +63,20 @@ def test_a_run_from_before_the_column_keeps_its_raw_brightness_and_says_so(tmp_p
     assert _brightness(out) == pytest.approx(20.0)
     assert load_nanowell_data(out).fluor_backgrounds == {"A01": bc.NONE}
     assert site_backgrounds(out.parent, ["A01"]) == {"A01": bc.NONE}
+
+
+def test_a_well_from_before_the_column_keeps_its_raw_brightness_beside_one_measured_after(tmp_path):
+    # Two wells, one measured with the column and one from before it (a subset re-run, or two datasets joined).
+    # Read together, the old well's missing level must not blank its brightness: it keeps the cells' raw mean, as
+    # its "background included" label says, while the new well's has the level taken off.
+    out = _dataset(tmp_path, {"A01": [_row("t_c", 0, 0, n=2, c=0.2, gfp=100.0, bg=8.0)],
+                              "A02": [_row("t_c", 0, 0, n=2, c=0.2, gfp=100.0, bg=8.0)]},
+                   starts={"t_c": STARTS["t_c"]}, cells=CELLS)
+    pd.DataFrame({**CELLS, "well": ["A02"] * 2}).to_csv(out / "measurements_A02.csv", index=False)
+    table = out / "nanowells" / "A02.csv"
+    pd.read_csv(table).drop(columns=["GFP_background"]).to_csv(table, index=False)
+    data = load_nanowell_data(out)
+    assert data.fluor_backgrounds == {"A01": bc.FLOOR, "A02": bc.NONE}
+    metrics = site_metrics(data).set_index("well")
+    assert metrics.loc["A01", "brightness_GFP"] == pytest.approx(20.0 - 8.0)
+    assert metrics.loc["A02", "brightness_GFP"] == pytest.approx(20.0)

@@ -136,6 +136,21 @@ def test_text_that_is_not_a_number_is_put_back(page, qtbot):
     assert page.widgets.get("_nw_window_lo").text() == f"{before.lo:.6g}"
 
 
+def test_leaving_a_bound_field_without_typing_changes_nothing(page, qtbot):
+    """The fields show each bound to six significant figures, and Qt sends editingFinished when focus merely leaves
+    a field. Clicking into Low and away rewrote the dragged window to the rounded bounds, saved it, and sent the
+    pop-out back to its first page. Nothing typed is nothing changed; a typed bound still applies."""
+    st = _drawn(page, qtbot)
+    before = next(iter(st.windows.values()))
+    assert f"{before.lo:.6g}" != repr(before.lo)                   # a dragged bound that six figures round
+    st.window_page = 1
+    page.widgets.get("_nw_window_lo").editingFinished.emit()
+    page.widgets.get("_nw_window_hi").editingFinished.emit()
+    assert next(iter(st.windows.values())) == before and st.window_page == 1
+    _type(page, "2", "3")
+    assert (next(iter(st.windows.values())).lo, next(iter(st.windows.values())).hi) == (2.0, 3.0)
+
+
 def test_any_widens_the_window(page, qtbot):
     st = _drawn(page, qtbot)
     page.widgets.get("_nw_window_rule_cb").setCurrentIndex(1)

@@ -196,6 +196,8 @@ def _needs_zipping_plan(found: NonZipInput, where: str) -> InputPlan:
         parts.append(f"{len(found.loose)} loose image(s)")
     if found.stranded:
         parts.append(f"{len(found.stranded)} well folder(s) with no zip")
+    if found.nested:
+        parts.append(f"{len(found.nested)} folder(s) of images that are not well folders")
     return InputPlan(
         NEEDS_ZIPPING, None, None, len(found.loose),
         f"⚠ {where} holds {' and '.join(parts)}. Analyze reads per-well zips — "
@@ -267,8 +269,9 @@ def plan_input_layout(raw: Path) -> InputPlan:
         found = non_zip_input(raw, [])
     except OSError as exc:
         return _unreadable_plan(raw, exc)
-    if found.loose or (found.stranded and not has_in):
-        return _needs_zipping_plan(found if not has_in else found._replace(stranded=[]),
+    # Likewise any other folder of images at the root: beside ``in/`` the root also holds ``out/``.
+    if found.loose or ((found.stranded or found.nested) and not has_in):
+        return _needs_zipping_plan(found if not has_in else found._replace(stranded=[], nested=[]),
                                    f"{raw.name}/")
     if has_in:
         return _plan_grouped_root(in_sub, raw / "out", named_in=False)

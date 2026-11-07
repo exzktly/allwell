@@ -151,6 +151,20 @@ def test_a_committed_change_is_classified_against_its_base(tmp_path, edit, expec
     assert cs.scope("main", root)[0] == expected
 
 
+@pytest.mark.parametrize("committed", [True, False], ids=["committed", "staged"])
+def test_code_moved_into_the_documents_is_still_a_code_change(tmp_path, committed):
+    """``git diff --name-only`` detects renames by default and then lists only the new path, so moving a module
+    into ``_Docs/Markdowns/`` read as a docs-only change: lint skipped, only the docs lane run, and the module's
+    importers never asked about. The deleted path is a change too."""
+    root = _repo(tmp_path)
+    _git(root, "config", "diff.renames", "true")   # git's default, stated so a user's config cannot hide the case
+    _git(root, "mv", "app.py", "_Docs/Markdowns/app.md")
+    if committed:
+        _git(root, "commit", "-qm", "move")
+    assert "app.py" in cs.changed_paths("main", root)
+    assert cs.scope("main", root)[0] == cs.CODE
+
+
 def test_an_uncommitted_change_counts_and_an_unknown_base_runs_everything(tmp_path):
     root = _repo(tmp_path)
     _write(root, "app.py", "X = 3\n")

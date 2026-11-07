@@ -26,6 +26,7 @@ from review.features.nanowell.distribution_compute import METRICS, PER_NANOWELL,
 from review.features.nanowell.crop_grid_compute import shown_timepoints
 from review.features.nanowell.renderer import DENSITY_ABOVE, MAX_PANELS, render_message, render_site_rows
 from review.features.nanowell.state import POPOUT_LAYOUTS, POPOUT_SOURCES
+from review.features.nanowell.views_compute import numeric_values
 from review.features.nanowell.zoom_compute import notches, pan_limits, wheel_limits
 
 #: Rows of the window's nanowells the pop-out shows at a time.
@@ -164,7 +165,8 @@ def set_window_range(ctx, lo: float, hi: float) -> None:
     if window is None or not (math.isfinite(lo) and math.isfinite(hi)):
         return
     lo, hi = min(lo, hi), max(lo, hi)
-    _store(ctx, st, replace(window, lo=lo, hi=hi))
+    if (lo, hi) != (window.lo, window.hi):               # the same range again: nothing to save or start over
+        _store(ctx, st, replace(window, lo=lo, hi=hi))
 
 
 def set_window_rule(ctx, rule: str) -> None:
@@ -329,10 +331,11 @@ def set_composite_colour(ctx, key) -> None:
         _nwc()._set_popout(ctx, composite_colour=key)
 
 
-def composite_colouring(ctx, st, wells) -> tuple[dict, tuple, str]:
+def composite_colouring(ctx, st, wells, every=()) -> tuple[dict, tuple, str]:
     """``(well -> colour, ((label, colour), …), title)`` for the composite's stripes and their key, over *wells*.
 
-    By well, each well its own rank colour (``ui.theme.WELL_COLORS_TUPLE``, in patch order); by a sample variable,
+    By well, each well its own colour (``ui.theme.WELL_COLORS_TUPLE``, by its place among *every* — the whole
+    window's wells in rank order — then *wells*), the same on every page and under every Sort; by a sample variable,
     each well's value of it in the ink that value has on every plot (``variable_series.member_inks`` — a well left
     unfilled, or a set whose wells disagree, gets the inks and names those have there), the key listing only the
     values drawn; *None*, nothing. A variable deleted since it was chosen colours by well and says so."""
@@ -350,7 +353,10 @@ def composite_colouring(ctx, st, wells) -> tuple[dict, tuple, str]:
             bands = member_bands(ctx, "nanowell", key, members)
             name = next((label for label, k in composite_colour_choices(ctx) if k == key), "")
             return inks, tuple(legend_entries(ctx, key, set(bands.values()))), name
-    inks = {well: WELL_COLORS_TUPLE[i % len(WELL_COLORS_TUPLE)] for i, well in enumerate(wells)}
+    # A well's colour is its place among the whole window's wells (*every*, in the window's rank order), so it is
+    # the same on every page and under every Sort; the key names only the wells on this page.
+    order = {well: i for i, well in enumerate(dict.fromkeys([*every, *wells]))}
+    inks = {well: WELL_COLORS_TUPLE[order[well] % len(WELL_COLORS_TUPLE)] for well in wells}
     return inks, tuple((well, inks[well]) for well in wells), "Source well"
 
 
@@ -396,11 +402,14 @@ def metric_values(ctx, st, key: str, sites, timepoint) -> tuple[dict | None, str
     else:
         rows = frame[frame["timepoint"].astype(str) == str(timepoint)]
     values = {}
-    for well, q, r, v in zip(rows["well"], rows["nw_q"], rows["nw_r"], rows[column]):
+    # As numbers: the occupancy class is stored as "0" / "1" / "2" / "3+" (its lower bound, 3+ as 3), and a value
+    # that is not a number — NA, a class nobody could count — is no value rather than a raise.
+    numbers = numeric_values(rows, column)
+    for well, q, r, v in zip(rows["well"], rows["nw_q"], rows["nw_r"], numbers):
         if not (math.isfinite(q) and math.isfinite(r)):
             continue                                     # placed but never addressed: not a window member
         site = (str(well), int(q), int(r))
-        if site in wanted:
+        if site in wanted and math.isfinite(v):
             values[site] = float(v)
     return values, nwc._label(metric, channel, st.data), ""
 
@@ -415,6 +424,15 @@ def composite_order(ctx, st, sites, timepoint) -> tuple[dict | None, str]:
         return None, f"rank ({why})" if why else "rank"
     at = "" if key in PER_NANOWELL else f" at {timepoint}"
     return values, f"{label}{at}, {'largest' if st.composite_desc else 'smallest'} first"
+
+
+def composite_page(ctx, st, rows, timepoint) -> tuple[list, dict | None, str]:
+    """``(members, values, sentence)`` for the composite page on screen: the window's *rows* put in the order
+    **Sort** chose (:func:`composite_order`, read at *timepoint*) over the **whole** window, then page
+    ``st.window_page`` of that order — so "largest first" puts the window's largest on the first page, not the
+    largest of the window's first ranks. Placed by rank, the order is the window's own."""
+    values, placed_by = composite_order(ctx, st, [row.site for row in rows], timepoint)
+    return cc.page(cc.ordered(rows, values, st.composite_desc), st.window_page), values, placed_by
 
 
 #: **Corner**'s first choice: no number in the tiles' corners.
@@ -493,13 +511,13 @@ def draw_window_popout(ctx, st, fig) -> None:
         # baseline, when every timepoint is shown -- every fold change is 1 (n(t) / n(baseline) with t the baseline),
         # so a sort by count fold change tied everywhere, fell back to the window's rank, and read the same ascending
         # and descending; and a sort within one page of ranks left the pages in rank order.
-        values, placed_by = composite_order(ctx, st, [row.site for row in rows], shown_tps[-1])
-        members = cc.page(cc.ordered(rows, values, st.composite_desc), st.window_page)
+        members, values, placed_by = composite_page(ctx, st, rows, shown_tps[-1])
         corner, corner_said = composite_labels(ctx, st, [row.site for row in members], shown_tps)
         comp = cc.composite(members, values=values, descending=st.composite_desc, placed_by=placed_by)
         sites = [t.source for t in comp.tiles]
         _want_crops(ctx, st, sites, shown_tps)
-        inks, key, key_title = composite_colouring(ctx, st, [well for well, _x, _y in comp.patches])
+        inks, key, key_title = composite_colouring(ctx, st, [well for well, _x, _y in comp.patches],
+                                                   every=[row.site[0] for row in rows])
         st.popout_tiles = render_composite(
             fig, comp, _page_crops(st, sites, shown_tps), shown_tps, n_total=len(rows),
             inks=inks, key=key, key_title=key_title, corner=corner, corner_said=corner_said,

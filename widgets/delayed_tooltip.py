@@ -4,14 +4,16 @@ A canvas that shows a card for whatever is under the pointer, on every move, fla
 pointer crosses a dense picture. This holds each card until the pointer has rested on the same thing for *delay_ms*
 (one second by default): :meth:`point` names what is under the pointer and the card it would show, :meth:`clear`
 says nothing is. Moving within the same thing neither restarts the wait nor re-shows the card; moving onto something
-else starts the wait over; leaving hides the card at once.
+else starts the wait over; leaving hides the card at once — :meth:`clear`, or the pointer leaving the widget (or the
+widget hiding), which the tooltip watches itself: a canvas whose pointer has left it reports no further move, so a
+card still waiting would otherwise show wherever the pointer had gone.
 
 Qt only, no application knowledge.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QToolTip
 
@@ -30,6 +32,13 @@ class DelayedToolTip(QObject):
         self._timer.setSingleShot(True)
         self._timer.setInterval(int(delay_ms))
         self._timer.timeout.connect(self._show)
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 — Qt's name
+        """The pointer left the widget, or the widget hid: no card for what was under the pointer."""
+        if watched is self._widget and event.type() in (QEvent.Leave, QEvent.Hide):
+            self.clear()
+        return False
 
     def point(self, key, text: str) -> None:
         """The pointer is over *key*, whose card is *text*: show it once the pointer has rested there."""

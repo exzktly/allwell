@@ -11,8 +11,10 @@ changed ``.py`` file — application module, test helper or test file alike —
 this compares its syntax tree where the branch left the base with the tree now,
 and names the definitions that changed: top-level functions, classes,
 assignments and imports (an import by the name it binds), and each class's own
-members (``Colors.run_done``), with docstrings and comments ignored. Inside the
-module the set widens to every definition that refers to a changed one. It then
+members (``Colors.run_done``), with docstrings and comments ignored; a changed
+method names its class too, since it is called on an instance of it. Inside the
+module the set widens to every definition that refers to a changed one — so a
+subclass whose bases name that class is affected with it. It then
 follows the change outwards through every first-party module that imports the
 changed one: in each importer, the definitions that refer to an affected name
 are affected in turn, and so on until nothing new is reached. A string constant
@@ -50,7 +52,11 @@ application module reads at run time (fonts, icons, profiles), and anything a
 test reaches by a path it builds rather than names. CI runs every gated lane on
 each push to ``main``, which is where such a miss is caught.
 
-    python scripts/lane_needed.py <gate> [--base REF]   # exit 0: run it; 1: skip
+    python scripts/lane_needed.py <gate> [--base REF]   # exit 0: run it; 3: skip; anything else: run it whole
+
+"Skip" has an exit status of its own, :data:`SKIP`, because Python exits 1 on an exception raised while the script
+loads (``tests/_lanes.py`` failing to import, say), before ``main`` can catch anything. Every caller reads 3 as
+"skip" and any other failure as "run the whole lane".
     python scripts/lane_needed.py <gate> --surface      # print the modules the roster imports directly
 
 The comparison is ``REF...HEAD`` (default ``origin/main``) plus, locally, the
@@ -406,7 +412,15 @@ def affected_names(old: str | None, new: str | None) -> set[str] | None:
                if key not in before or key not in after or dump(before[key]) != dump(after[key])}
     if any(key.endswith(f".{_WHOLE}") for key in changed):
         return None
-    return _widen({_leaf(key) for key in changed}, after)
+    seeds = {_leaf(key) for key in changed}
+    # A method is called on an instance of its class, so a changed method changes the class for everything that
+    # names it — a subclass's bases, a factory that builds one — as :func:`_wanted` already says for importers.
+    # A data member stays narrow: changing one colour token does not reach every user of the palette.
+    for key in changed:
+        node = after.get(key, before.get(key))
+        if "." in key and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            seeds.add(key.split(".", 1)[0])
+    return _widen(seeds, after)
 
 
 def _reads_wholesale(tree: ast.AST, scope: set[str]) -> bool:
@@ -734,6 +748,10 @@ def _python_files(root: Path) -> list[str]:
     return sorted(p for p in set(out) if (root / p).is_file())
 
 
+#: The exit status that means "nothing reached: skip the lane". Not 1, which is what Python exits with when the
+#: script fails while loading; a caller reads any status but 0 and this one as "run the whole lane".
+SKIP = 3
+
 #: What :func:`reach_all` and :func:`select` report when a change cannot be narrowed to particular test files: the
 #: whole lane runs.
 ALL = "*"
@@ -906,13 +924,17 @@ def pytest_config_change(old_source: str | None, new_source: str | None) -> str:
 
 
 def changed_paths(base: str, root: Path = REPO) -> list[str] | None:
-    """Paths changed on this branch against *base*, plus the working tree; None if git cannot say."""
+    """Paths changed on this branch against *base*, plus the working tree; None if git cannot say.
+
+    ``--no-renames``: with rename detection on (git's default) a moved file is listed by its new path only, so a
+    module moved into ``_Docs/Markdowns/`` read as a docs-only change and its importers were never asked about.
+    A rename is a deletion and an addition, and both paths are changes."""
     try:
         committed = subprocess.run(
-            ["git", "diff", "--name-only", f"{base}...HEAD"], cwd=root,
+            ["git", "diff", "--name-only", "--no-renames", f"{base}...HEAD"], cwd=root,
             capture_output=True, text=True, encoding="utf-8", check=True).stdout.split()
         working = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD"], cwd=root,
+            ["git", "diff", "--name-only", "--no-renames", "HEAD"], cwd=root,
             capture_output=True, text=True, encoding="utf-8", check=True).stdout.split()
         untracked = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"], cwd=root,
@@ -1133,18 +1155,18 @@ def main(argv: list[str]) -> int:
 
     try:
         chosen = select(args.gate, args.base)
-    except Exception as exc:  # noqa: BLE001 — exit 1 means "skip": an error must never be read as that
+    except Exception as exc:  # noqa: BLE001 — an error must never be read as "skip"
         chosen = {ALL: f"could not decide ({type(exc).__name__}: {exc}), so the whole lane runs"}
     if args.files:
         # The files go to stdout for scripts/test.sh and preflight to read; the account of why goes to stderr.
         _report(args.gate, chosen, sys.stderr)
         print("ALL" if ALL in chosen else "\n".join(sorted(chosen)))
-        return 0 if chosen else 1
+        return 0 if chosen else SKIP
     return _report(args.gate, chosen, sys.stdout)
 
 
 def _report(gate: str, chosen: dict[str, str], stream) -> int:
-    """Say what *chosen* means for the lane on *stream*; the exit status: 0 to run it, 1 to skip it."""
+    """Say what *chosen* means for the lane on *stream*; the exit status: 0 to run it, :data:`SKIP` to skip it."""
     def say(line: str) -> None:
         print(line, file=stream)
 
@@ -1161,7 +1183,7 @@ def _report(gate: str, chosen: dict[str, str], stream) -> int:
             say(f"   … and {len(chosen) - 15} more")
         return 0
     say(f"{label}: not needed — no changed path can reach it")
-    return 1
+    return SKIP
 
 
 if __name__ == "__main__":

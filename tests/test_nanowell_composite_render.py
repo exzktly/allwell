@@ -290,6 +290,23 @@ def test_colouring_by_a_variable_takes_each_well_s_value_ink_from_variable_serie
     assert labels == ["Source well", "Cell line", "Dose", "None"]
 
 
+def test_by_well_a_well_keeps_its_stripe_colour_on_every_page_and_under_every_sort():
+    """By source well, a well's colour is its place among the wells of the whole window, not among the patches of
+    the page drawn: B02 is the window's second well, so it is the second colour on a page where it is the only well,
+    and on a page whose sort puts it first. Indexed by patch, it took the first colour on both, A01's colour."""
+    from types import SimpleNamespace
+
+    from ui.theme import WELL_COLORS_TUPLE
+
+    ctx = SimpleNamespace(state=SimpleNamespace(selection=None))
+    st = SimpleNamespace(composite_colour=wnc.BY_WELL)
+    window = ["A01", "A01", "B02", "C03", "B02"]                       # the window's rows' wells, in rank order
+    for page_wells in (["B02"], ["B02", "A01"], ["C03", "B02"]):
+        inks, key, title = wnc.composite_colouring(ctx, st, page_wells, every=window)
+        assert inks == {w: WELL_COLORS_TUPLE[["A01", "B02", "C03"].index(w)] for w in page_wells}
+        assert key == tuple((w, inks[w]) for w in page_wells) and title == "Source well"
+
+
 def test_the_colour_choice_is_kept_with_the_page():
     from review.features.nanowell.state import NanowellState
 
@@ -657,6 +674,60 @@ def test_a_metric_that_cannot_be_read_places_by_rank_and_says_why():
     assert wnc.composite_order(None, st, [("A01", 0, 0)], "T1") == (None, "rank")
     labels = [label for label, _k in wnc.composite_sort_choices()]
     assert labels[0] == "Window rank" and "Cell count" in labels
+
+
+def test_occupancy_sorts_and_labels_by_its_class_s_number_and_a_nanowell_without_one_goes_last():
+    """Occupancy at baseline is stored as the strings "0" / "1" / "2" / "3+" with ``NA`` where there was no count at
+    baseline (``series_compute``). Sort and Corner offer it like every other metric, and reading it with ``float``
+    raised on "3+" and on ``NA``. The classes are given against the rank order, so placing by rank would differ."""
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    metrics = pd.DataFrame({"well": ["A01"] * 4, "nw_q": [0.0, 1.0, 2.0, 3.0], "nw_r": [0.0] * 4,
+                            "timepoint": ["T1"] * 4, "tp_order": [0] * 4,
+                            "occupancy_class": pd.Series(["1", "3+", pd.NA, "0"], dtype="object")})
+    sites = [("A01", q, 0) for q in range(4)]
+    st = SimpleNamespace(composite_sort="occupancy_class", composite_label="occupancy_class", metrics=metrics,
+                         data=SimpleNamespace(channels=[]), composite_desc=True, channel="")
+    ctx = SimpleNamespace(state=SimpleNamespace(feature_slice=lambda _name: st,
+                                                channel=SimpleNamespace(active_channel="")))
+    try:
+        values, said = wnc.composite_order(ctx, st, sites, "T1")
+    except (ValueError, TypeError) as exc:                         # the defect: "3+" and NA are not floats
+        raise AssertionError(f"reading Occupancy for Sort raised {exc!r}") from exc
+    assert values == {("A01", 0, 0): 1.0, ("A01", 1, 0): 3.0, ("A01", 3, 0): 0.0}
+    assert said == "Occupancy at baseline (cells), largest first"
+    rows = [WindowRow(site, rank, 1.0, {}) for rank, site in enumerate(sites, start=1)]
+    placed = [t.source for t in cc.composite(rows, values=values, descending=True).tiles]
+    assert placed == [("A01", 1, 0), ("A01", 0, 0), ("A01", 3, 0), ("A01", 2, 0)]
+    corner, corner_said = wnc.composite_labels(ctx, st, sites, ["T1"])
+    assert corner == {"T1": values} and corner_said == "Corner: each tile's Occupancy at baseline (cells)."
+
+
+def test_sort_orders_the_whole_window_before_it_is_cut_into_pages():
+    """A window of two pages whose largest cell counts sit at its *last* ranks: sorted largest first, page 1 holds
+    the window's 91 largest, in order, and page 2 the rest. Sorting each page of the window's rank order on its own
+    put ranks 1–91 on page 1 — none of the window's largest values — under a title saying "largest first"."""
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    n = cc.COMPOSITE_PAGE + 40
+    sites = [("A01", q, 0) for q in range(n)]
+    metrics = pd.DataFrame({"well": ["A01"] * n, "nw_q": [float(q) for q in range(n)], "nw_r": [0.0] * n,
+                            "timepoint": ["T1"] * n, "tp_order": [0] * n, "n": [float(q) for q in range(n)]})
+    st = SimpleNamespace(composite_sort="n", metrics=metrics, data=SimpleNamespace(channels=[]),
+                         composite_desc=True, channel="", window_page=0)
+    ctx = SimpleNamespace(state=SimpleNamespace(feature_slice=lambda _name: st,
+                                                channel=SimpleNamespace(active_channel="")))
+    rows = [WindowRow(site, rank, 1.0, {}) for rank, site in enumerate(sites, start=1)]   # rank 1 holds the fewest
+    members, values, said = wnc.composite_page(ctx, st, rows, "T1")
+    assert [row.site[1] for row in members] == list(range(n - 1, n - 1 - cc.COMPOSITE_PAGE, -1))
+    assert values[members[0].site] == float(n - 1) and said == "Cell count at T1, largest first"
+    st.window_page = 1
+    members, _values, _said = wnc.composite_page(ctx, st, rows, "T1")
+    assert [row.site[1] for row in members] == list(range(n - 1 - cc.COMPOSITE_PAGE, -1, -1))
 
 
 def test_the_dashed_frame_stays_on_each_panel_s_edge_when_zoomed_and_panned(page, qtbot):  # noqa: F811

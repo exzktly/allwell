@@ -55,6 +55,7 @@ from pipeline.field_quality_record import (
     merge_fetched_field_quality,
     read_field_quality_block,
 )
+from pipeline.completeness import run_reached_its_end
 # Stdlib-only: the failure records in errors/ (pipeline.io is imported lazily, by its writers alone).
 from pipeline.error_records import mirror_retirements, retire_force_notes
 from pipeline.run_report import (
@@ -278,7 +279,8 @@ def run_client_side_completeness_check(
     verdict reaches the log at warning level (``LogFnLogger``). *suspended*
     records a Suspend's wind-down as one rather than as a broken plate.
     *ended_early* records any other early end — a Stop, a lost node or
-    heartbeat, a pipeline that exited non-zero — so the wells the run never
+    heartbeat, a pipeline that stopped before its end
+    (``pipeline.completeness.run_reached_its_end``) — so the wells the run never
     reached are told apart from wells it skipped
     (``pipeline.completeness.build_block``).
     """
@@ -1521,6 +1523,8 @@ class FetchedOutputVerifier:
         prior_user_blocks = read_user_blocks(info_path)
         sidecar_ok = self._rsync_optional(
             f"{self.host.ssh_alias}:{run.remote_output_dir}/pipeline_info.json", info_path, log_fn=log)
+        # Whether the remote pipeline reached its own end, read before anything below edits the sidecar.
+        reached_end = sidecar_ok and run_reached_its_end(info_path)
         if merge_fetched_run_report(info_path, prior_run_report):
             log("[remote] merged this run's completeness records into the "
                 "existing pipeline_info run_report.\n")
@@ -1566,13 +1570,17 @@ class FetchedOutputVerifier:
         # fields the very next line repairs. Runs before the `ok` gate too — a
         # run that came back short is exactly the one whose record is worth
         # having, and the shortfall is what the record is for.
-        # `ended_early` from the pipeline's own exit status: a Stop, a suspend, a
-        # lost node or heartbeat, or a crash all end here with `ok` False, and a
-        # well the run never reached then reads as "not reached" on Home rather
-        # than as one the run was asked to process and silently skipped.
+        # `ended_early`: a Stop, a suspend, a lost node or heartbeat, or a crash
+        # all end here with `ok` False, and a well the run never reached then
+        # reads as "not reached" on Home rather than as one the run was asked to
+        # process and silently skipped. But `ok` alone is not that question: the
+        # pipeline also exits non-zero after visiting every well when any of
+        # them failed, and a well whose worker died there is input-only on disk
+        # too (`pipeline.completeness.run_reached_its_end`).
+        ended_early = not ok and not reached_end
         completeness = run_client_side_completeness_check(
             run.local_input_dir, run.local_output_dir, log_fn=log, suspended=suspended,
-            ended_early=not ok)
+            ended_early=ended_early)
 
         if not ok:
             log("[remote] pipeline returned non-zero — skipping cleanup, leaving remote state.\n")
@@ -1597,7 +1605,7 @@ class FetchedOutputVerifier:
                 # well the retry recovered whole failed verification anyway (row B8).
                 completeness = run_client_side_completeness_check(
                     run.local_input_dir, run.local_output_dir, log_fn=log, suspended=suspended,
-                    ended_early=not ok)
+                    ended_early=ended_early)
         missing = [*missing, *short_reanchored]      # the remote holds their only re-anchored copy
         if not sidecar_ok:
             missing.append("this run's pipeline_info.json could not be pulled, so the local one describes another "

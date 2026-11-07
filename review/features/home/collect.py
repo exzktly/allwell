@@ -303,7 +303,7 @@ def run_ended_early(ctx) -> bool:
     """Whether the run that wrote the record stopped before its end.
 
     Read from the record's ``ended_early`` (written by the client-side check
-    after a remote run, from the pipeline's exit status) or ``suspended``,
+    after a remote run that stopped before its end) or ``suspended``,
     which implies it and is the only one older records carry. ``False`` for a
     record the Validate tool wrote, which cannot know how the run ended.
     """

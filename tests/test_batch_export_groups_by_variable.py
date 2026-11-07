@@ -109,6 +109,38 @@ def test_adding_twice_does_not_add_a_set_twice():
     assert grp.solo_wells == ["A03", "A04"]
 
 
+def test_a_set_joining_whole_takes_its_split_well_off_the_solo_list(monkeypatch):
+    """A well split off as a solo well by one value, then pulled in with its whole set by another, is in the group
+    once: as a member of the set. Left on the solo list as well, the pooled bar export drew it twice — inside the
+    set's mean and as its own bar — counting its cells twice."""
+    from types import SimpleNamespace
+
+    import review.features.barplot.collect as bar_collect
+
+    vset, vid, ids = _plate()
+    vset, dose = sv.new_variable(vset, "Dose")
+    vset = sv.add_value(vset, dose, "10")
+    ten = vset.by_id(dose).values[0].id
+    vset = sv.assign(vset, dose, ["A03", "B01"], ten)   # all of Mix is 10; only A03 of it is HeLa
+    grp = BarGroup("G")
+    add_membership(grp, membership_for_value(vset, vid, ids["HeLa"], LOADED, _sets()))
+    assert "A03" in grp.solo_wells                         # Mix split: A03 joined alone
+    add_membership(grp, membership_for_value(vset, dose, ten, LOADED, _sets()))
+    assert [r.name for r in grp.members] == ["R1", "Mix"]
+    assert grp.solo_wells == ["A04"]
+
+    monkeypatch.setattr(bar_collect, "replicate_display_label", lambda _ctx, r: r.name)
+    monkeypatch.setattr(bar_collect, "well_display_label", lambda _ctx, w: w)
+    ctx = SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(well_paths=dict.fromkeys(LOADED))))
+    members = bar_collect.batch_members(ctx, grp, pool_replicates=True)
+    assert [(key, wells) for key, _d, wells, _r, _c in members] == [
+        ("R1", ["A01", "A02"]), ("Mix", ["A03", "B01"]), ("A04", ["A04"])]
+    # A group saved before the editor kept the two apart still carries both; the pooled export draws A03 once.
+    saved = BarGroup("Old", members=[ReplicateSet("Mix", ["A03", "B01"])], solo_wells=["A03", "A04"])
+    members = bar_collect.batch_members(ctx, saved, pool_replicates=True)
+    assert [(key, wells) for key, _d, wells, _r, _c in members] == [("Mix", ["A03", "B01"]), ("A04", ["A04"])]
+
+
 def test_removing_keeps_a_set_that_also_holds_other_values():
     vset, vid, ids = _plate()
     grp = BarGroup("G", members=[ReplicateSet("R1", ["A01", "A02"]),

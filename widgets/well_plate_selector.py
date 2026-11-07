@@ -59,6 +59,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
+from widgets import form_registry
 from widgets._support import with_alpha
 
 _ROW_LETTERS = "ABCDEFGH"
@@ -231,6 +232,7 @@ class _PlateGrid(QWidget):
         #: is not enough on its own: the corner is deliberately live there, for
         #: the group plates whose host wires ``cornerToggled`` to show/hide all.
         self._report_only = False
+        form_registry.declare_drag_owner(self)   # a drag on the grid selects wells (``set_report_only``)
         self._drag_active = False
         self._drag_adding = True
         self._drag_visited: set[tuple[int, int]] = set()
@@ -608,6 +610,7 @@ class _PlateGrid(QWidget):
         """
         self._report_only = bool(on)
         self.setCursor(Qt.ArrowCursor if on else Qt.PointingHandCursor)
+        form_registry.declare_drag_owner(self, not self._report_only)
         self.update()
 
     def is_report_only(self) -> bool:
@@ -1724,6 +1727,7 @@ class WellPlateSelector(QWidget):
         root.setSpacing(theme.Spacing.sm)
 
         self._grid = _PlateGrid(self)
+        form_registry.declare_drag_owner(self)   # as its grid does (``setReportOnly``)
         self._grid.selectionChanged.connect(self._on_grid_changed)
         self._grid.selectionDragFinished.connect(self.selectionDragFinished)
         self._grid.rowHeaderActivated.connect(self.rowHeaderActivated)
@@ -1909,6 +1913,7 @@ class WellPlateSelector(QWidget):
     def setReportOnly(self, on: bool) -> None:
         """See ``_PlateGrid.set_report_only``."""
         self._grid.set_report_only(on)
+        form_registry.declare_drag_owner(self, not self._grid.is_report_only())
 
     def isReportOnly(self) -> bool:
         """True for a read-out plate (``setReportOnly``): a press on it selects

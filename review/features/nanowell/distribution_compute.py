@@ -27,7 +27,7 @@ import pandas as pd
 
 from review.features.nanowell import background_compute, moving_compute
 from review.features.nanowell.decorate_compute import Decoration, band_spans, order_groups, sub_band_spans
-from review.features.nanowell.series_compute import exclusion_reason
+from review.features.nanowell.series_compute import NO_BASELINE_TIMEPOINT, exclusion_reason
 from review.features.nanowell.summary_compute import LOG_METRICS, group_summary, well_summary
 
 TIME, WELLS = "time", "wells"
@@ -91,6 +91,8 @@ _REASON_LABELS = {
     "no signal above background at baseline": "no signal at baseline",
     "fewer than three timepoints with cells and a time": "< 3 timepoints with cells",
     "no count at baseline": "no count at baseline",
+    # A named-timepoint baseline on a well never imaged at that timepoint (reached as "baseline <this>").
+    NO_BASELINE_TIMEPOINT: "timepoint not in this well",
     COHORT_REASON: "outside the fixed cohort",
     moving_compute.EARLY_REASON: "before the first full moving window",
     moving_compute.GAP_REASON: "moving window has a gap",

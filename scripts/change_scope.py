@@ -85,8 +85,8 @@ def classify(paths: list[str] | None, version_lines_only: bool = True) -> str:
 def version_diff_lines(base: str, root: Path = REPO) -> list[str] | None:
     """The added and removed lines of version.py against *base* (committed and working tree); None if git fails."""
     lines: list[str] = []
-    for args in (["git", "diff", "-U0", f"{base}...HEAD", "--", VERSION_FILE],
-                 ["git", "diff", "-U0", "HEAD", "--", VERSION_FILE]):
+    for args in (["git", "diff", "-U0", "--no-renames", f"{base}...HEAD", "--", VERSION_FILE],
+                 ["git", "diff", "-U0", "--no-renames", "HEAD", "--", VERSION_FILE]):
         try:
             out = subprocess.run(args, cwd=root, capture_output=True, text=True,
                                  encoding="utf-8", check=True).stdout

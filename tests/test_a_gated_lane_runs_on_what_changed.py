@@ -194,6 +194,44 @@ def test_every_reached_lane_test_is_reported_and_no_other(lane, monkeypatch, tmp
     assert set(lane.reach_all("g", {"pkg/core.py": {"unused"}}, tree)) == {"tests/test_other.py"}
 
 
+MIXIN_BEFORE = """
+class _Holds:
+    def fixup(self, text):
+        return text.strip()
+
+    def other(self):
+        return 0
+
+
+class Box(_Holds):
+    pass
+
+
+def make():
+    return Box()
+"""
+
+
+def test_a_changed_method_reaches_the_subclasses_and_users_of_its_class_in_the_same_module(lane, monkeypatch,
+                                                                                         tmp_path):
+    """``widgets/spin_box.py`` is the shape: ``SpinBox(_HoldsItsNumber, QSpinBox)`` inherits ``fixup``, and the
+    tests import ``SpinBox`` only. A method change seeded only the method's own name, so nothing in the module that
+    names the class — a subclass's bases, a factory — was affected, and a broken ``fixup`` selected none of the five
+    tests it failed. Across modules the class was already taken as reached (``_wanted``); inside its own module it
+    was not. A data member stays narrow: ``Colors.run_done`` does not reach every user of ``Colors``."""
+    after = MIXIN_BEFORE.replace("return text.strip()", "return text")
+    names = lane.affected_names(MIXIN_BEFORE, after)
+    assert names == {"fixup", "_Holds", "Box", "make"}, names
+    tree = _tree(lane, monkeypatch, tmp_path, {
+        "pkg/__init__.py": "",
+        "pkg/box.py": after,
+        "tests/test_sub.py": "from pkg.box import Box\n\ndef test_it():\n    assert Box().fixup(' a ')\n",
+        "tests/test_factory.py": "from pkg import box\n\ndef test_it():\n    assert box.make()\n",
+    }, roster=("test_sub.py", "test_factory.py"))
+    found = lane.reach_all("g", {"pkg/box.py": names}, tree)
+    assert set(found) == {"tests/test_sub.py", "tests/test_factory.py"}, found
+
+
 def test_an_autouse_fixture_or_hook_runs_the_whole_lane(lane, monkeypatch, tmp_path):
     tree = _tree(lane, monkeypatch, tmp_path, {
         "tests/conftest.py": "import pytest\n\n@pytest.fixture(autouse=True)\ndef _guard():\n    yield\n\n"
@@ -431,7 +469,7 @@ def test_the_scripts_that_choose_the_lanes_start_none_of_them(tmp_path, script):
     for gate in ("nanowell-e2e", "nanowell-features", "remote"):
         done = subprocess.run(["python", "scripts/lane_needed.py", gate, "--base", "main"], cwd=root,
                               capture_output=True, text=True)
-        assert done.returncode == 1, (gate, done.stdout, done.stderr)
+        assert done.returncode == 3, (gate, done.stdout, done.stderr)
         assert "not needed" in done.stdout
 
 
@@ -521,6 +559,22 @@ def test_the_whole_lane_runs_when_asked_or_when_the_harness_changes(tmp_path, ho
     _git(root, "commit", "-qm", "change")
     done = _run_lane(root, **({"ALLWELL_FULL_LANE": "1"} if how == "full-lane" else {}))
     assert "test_b ran" in done.stdout, done.stdout + done.stderr
+
+
+@pytest.mark.parametrize("lane_args", [["--remote"], []], ids=["remote", "fast"])
+def test_a_selector_that_fails_to_load_runs_the_lane_rather_than_skipping_it(tmp_path, lane_args):
+    """``lane_needed.py`` exits ``SKIP`` (3) for "nothing reached"; Python exits 1 on an exception raised while the
+    script loads — ``tests/_lanes.py`` with an undefined name in it, say. When 1 meant "skip", that crash printed a
+    traceback and then ``no tests to run``, exit 0, for the gated lanes and the fast lane alike."""
+    root = _scratch_lane_repo(tmp_path)
+    with (root / "tests" / "_lanes.py").open("a", encoding="utf-8") as fh:
+        fh.write("\nBROKEN = UNDEFINED_NAME\n")
+    full = {**os.environ, "ALLWELL_SCOPE_BASE": "main", "ALLWELL_TEST_WORKERS": "0"}
+    full.pop("ALLWELL_FULL_LANE", None)
+    done = subprocess.run(["bash", "scripts/test.sh", *lane_args, "-p", "no:cacheprovider"], cwd=root,
+                          capture_output=True, text=True, env=full)
+    assert "no tests to run" not in done.stderr, done.stderr
+    assert "running the whole" in done.stderr, done.stderr
 
 
 # ── the fast lane ────────────────────────────────────────────────────────────

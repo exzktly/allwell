@@ -250,6 +250,10 @@ class NanowellState:
     loaded_wells: frozenset = frozenset()
     well_parts: dict = field(default_factory=dict)
     parts_for: object = None
+    #: Counts the times the tables were let go (:meth:`reset_data`). A load lands its reads into ``well_parts``
+    #: only while this is what it was when the load started: the same folder loaded again (a re-run) has new
+    #: files, so ``parts_for`` alone cannot tell a read made before the reload from one made after it.
+    parts_epoch: int = 0
     #: ``observation_compute.nanowell_observations``'s memo: (folder, wells, baseline, focus, gating) -> ObservationTable.
     observation_memo: dict = field(default_factory=dict)
     computing: bool = False                 # a load or recompute is running on a worker
@@ -362,6 +366,7 @@ class NanowellState:
         self.data, self.metrics, self.load_error, self.loaded_for = None, None, "", None
         self.gate, self.gated_for, self.focus_for = None, None, None
         self.loaded_wells, self.well_parts, self.parts_for = frozenset(), {}, None
+        self.parts_epoch += 1
         self.observation_memo = {}
         self.crops, self.montages, self.fetching, self.fetch_bridges = CropCache(), {}, set(), []
         self.window_crops = TimepointCropCache()

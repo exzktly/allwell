@@ -12,6 +12,7 @@ The fixture's counts are ``test_nanowell_page_starting_cells``'s. The gate is dr
 
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
 pytest.importorskip("PySide6")
@@ -95,3 +96,28 @@ def test_the_editor_names_a_scatter_gate_and_the_figure_draws_its_nanowells(page
     page.state.cell_gating.scatter_gates[0].update({"x0": 0.5, "x1": 1.5})          # counts of 1 at t_c
     nwc.redraw(page)
     assert _dots(page) == [("A01", 0), ("A01", 2), ("A01", 4), ("B01", 0), ("B01", 1)]
+
+
+def test_a_gate_condition_judges_a_nanowell_on_the_counts_cell_gating_judged_its_cells_on(tmp_path):
+    """Review N3. Cell Gating judges a gate on nanowell metrics against counts taken without the scatter-gate layer
+    (``observations.nanowell_gate_values``); the page's own counts are taken after it. A01 q3 holds 3 cells at t_c,
+    outside "Low" (0–1 cells), so the gate leaves all three out and the page counts 0 there — inside "Low". The
+    condition must read the 3 Cell Gating judged, as ``controller._metrics_of`` keeps it beside the page's count."""
+    import numpy as np
+
+    from review.features.nanowell import cell_gate_compute as cg
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell.collect import load_nanowell_data
+    from tests.test_nanowell_page import _write_nanowell_dataset
+    from tests.test_nanowell_page_starting_cells import COUNTS
+
+    data = load_nanowell_data(_write_nanowell_dataset(tmp_path, counts=COUNTS))
+    cells = pd.DataFrame({"well": "A01", "timepoint": "t_c", "nw_q": 3.0, "nw_r": 0.0, "x_mean_intensity": [1.0] * 3})
+    gated = cg.tally([("A01", cells, np.zeros(3, dtype=bool))])          # Gate_Pass = 0 on all three
+    ungated = cg.tally([("A01", cells, np.ones(3, dtype=bool))])         # the scatter-gate layer left out
+    metrics = nwc._metrics_of(data, "earliest", gated, None, ungated)
+    at_q3 = (metrics["well"] == "A01") & (metrics["nw_q"] == 3) & (metrics["timepoint"] == "t_c")
+    assert metrics.loc[at_q3, "n"].tolist() == [0.0]                      # the page's count, after the gate
+    low = {"x0": 0.0, "x1": 1.0, "y0": -0.5, "y1": 0.5, "x_col": "nw::n", "y_col": "nw::tp_order", "name": "Low"}
+    kept, _ = _sites(metrics, _bound(C("gate", "in", values=("Low",), at="earliest"), gates=(low,)))
+    assert kept == [("A01", 0), ("A01", 2), ("A01", 4), ("A01", 5), ("B01", 0), ("B01", 1)]

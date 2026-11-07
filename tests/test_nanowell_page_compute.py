@@ -147,11 +147,11 @@ def test_a_channel_metric_takes_the_shared_selector_s_channel():
 
 def test_every_reason_the_data_layer_can_give_has_a_figure_label():
     from review.features.nanowell.collect import MEASURABLE, NOT_LOCATED, UNADDRESSED
-    from review.features.nanowell.series_compute import ABSENT, _NEVER
+    from review.features.nanowell.series_compute import ABSENT, NO_BASELINE_TIMEPOINT, _NEVER
 
     states = ["occluded", "clipped", UNADDRESSED, NOT_LOCATED, ABSENT]
     value_reasons = ["fused (no count)", "no count", "no confluence", "no cells", "no fluorescence"]
-    reasons = (states + value_reasons + [f"baseline {s}" for s in states + [_NEVER]]
+    reasons = (states + value_reasons + [f"baseline {s}" for s in states + [_NEVER, NO_BASELINE_TIMEPOINT]]
                + [f"baseline: {v}" for v in value_reasons]
                + ["seeded later", "empty at baseline", "no confluence at baseline",
                   "no signal above background at baseline", "fewer than three timepoints with cells and a time",

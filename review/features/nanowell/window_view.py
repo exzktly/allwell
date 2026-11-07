@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineE
 
 from review.features.nanowell import _window_controller as wnc
 from review.features.nanowell.state import POPOUT_LAYOUTS
-from widgets.flow_layout import FlowLayout, sync_flow_height
+from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 
 _RANGE_TIP = "The window's range of the metric, both ends inclusive. Type a number and press Enter."
 _RULE_TIP = ("Over several timepoints: keep a nanowell only if it is inside the range at every covered timepoint, or "
@@ -181,25 +181,23 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     for label, key in wnc.composite_label_choices():
         corner.addItem(label, key)
     corner_caption = QLabel("Corner", window)
-    hex_only = (colour_caption, colour, sort_caption, sort, order, corner_caption, corner)
     prev, following = QToolButton(window), QToolButton(window)
     prev.setText("◀")
     following.setText("▶")
     page = QLabel("", window)
     pager = (prev, page, following)
     row = QHBoxLayout()
-    row.addWidget(QLabel("Show", window))
-    row.addWidget(source)
-    row.addWidget(QLabel("Layout", window))
-    row.addWidget(layout)
-    row.addWidget(colour_caption)
-    row.addWidget(colour)
-    row.addWidget(sort_caption)
-    row.addWidget(sort)
-    row.addWidget(order)
-    row.addWidget(corner_caption)
-    row.addWidget(corner)
-    row.addStretch(1)
+    show_caption, layout_caption = QLabel("Show", window), QLabel("Layout", window)
+    row.addWidget(flow_group(window, show_caption, source))
+    layout_group = flow_group(window, layout_caption, layout)
+    row.addWidget(layout_group)
+    # Each caption travels with its box in a group, and a group is hidden whole so no caption is left without its box;
+    # the controls inside are hidden with it, so each reads as hidden to whoever holds it.
+    hex_groups = (flow_group(window, colour_caption, colour), flow_group(window, sort_caption, sort, order),
+                  flow_group(window, corner_caption, corner))
+    hex_only = (colour_caption, colour, sort_caption, sort, order, corner_caption, corner)
+    for group in hex_groups:
+        row.addWidget(group)
     for widget in pager:
         row.addWidget(widget)
 
@@ -214,7 +212,8 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
             source.setItemText(1, f"Window ({len(result.rows):,})" if result is not None and result.rows else "Window")
             source.setCurrentIndex(source.findData(st.popout_source))
             layout.setCurrentIndex(layout.findData(st.popout_layout))
-            layout.setEnabled(in_window)
+            for widget in (layout_group, layout_caption, layout):   # a layout for the window's nanowells: none for one
+                widget.setVisible(in_window)
             colour.clear()
             for label, key in wnc.composite_colour_choices(ctx):
                 colour.addItem(label, key)
@@ -225,7 +224,7 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
         finally:
             for widget, was in zip((source, layout, colour, sort, order, corner), blocked):
                 widget.blockSignals(was)
-        for widget in hex_only:
+        for widget in hex_groups + hex_only:
             widget.setVisible(in_window and st.popout_layout == "hex")
         pages = wnc.page_count(st)
         page.setText(f"Page {st.window_page + 1} of {pages}")

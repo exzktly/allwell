@@ -12803,7 +12803,7 @@ as there), or *None* (no stripe). `_window_controller.composite_colouring` resol
 `(label, colour)` entries — only the values drawn, from `variable_series.legend_entries` — and a variable deleted since
 it was chosen falls back to *Source well*, the key's title saying so. `_composite_render._draw_key` draws the key under
 the title (`nw-composite-key`, up to eight entries a row, the panels lowered for each row past the first), and the
-caption names what the stripe is; the wells' names above the patches are plain text. The pop-out's three control rows share one widget (`tab_view._popout_window`), folded by `window_view.build_popout_chrome`'s
+caption names what the stripe is; the wells' names above the patches are plain text. The pop-out's controls (image, panels and window builders, each still a box layout of its own) are moved by `tab_view._flow_controls` into one wrapping `FlowLayout` toolbar that closes with Go to nanowell and Save, so they take as few lines as the width allows; each caption travels with its box in a `flow_group`, and a group is hidden whole. The toolbar is one widget (`tab_view._popout_window`), folded by `window_view.build_popout_chrome`'s
 **Hide controls** toggle, which sits above them with **Reset zoom** and so stays visible when they are hidden. **Reset zoom**
 (`_window_controller.reset_composite_zoom`: `composite_view = None`, redraw) is shown for the hex layout in Window mode and
 enabled while `composite_view` is set; `_nw_popout_zoom_refresh` keeps it so, called by the wheel and pan

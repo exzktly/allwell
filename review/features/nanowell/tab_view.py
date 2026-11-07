@@ -921,12 +921,12 @@ def _popout_window(ctx):
     window.setWindowTitle("Nanowell crops")
     layout = QVBoxLayout(window)
     layout.setContentsMargins(0, 0, 0, 0)
-    rows = QWidget(window)                              # the control rows, folded away together by the chrome bar
-    rows_layout = QVBoxLayout(rows)
-    rows_layout.setContentsMargins(0, 0, 0, 0)
-    rows_layout.addLayout(_popout_controls(ctx, window))
-    rows_layout.addLayout(build_popout_view_controls(ctx, window, timepoint_text))
-    rows_layout.addLayout(build_popout_window_controls(ctx, window))
+    # One wrapping toolbar rather than three stacked rows: the controls pack onto as few lines as the width allows,
+    # in the order image → panels → window → actions, and folded away together by the chrome bar.
+    rows = _flow_controls(window, _popout_controls(ctx, window),
+                          build_popout_view_controls(ctx, window, timepoint_text),
+                          build_popout_window_controls(ctx, window),
+                          last=(ctx.widgets.get("_nw_popout_go_to_btn"), ctx.widgets.get("_nw_popout_save_btn")))
     layout.addLayout(build_popout_chrome(ctx, window, rows))
     layout.addWidget(rows)
     card = PlotCard(window, figsize=(_FIG_W, _FIG_H * 0.8), constrained=False, header=False)
@@ -947,6 +947,30 @@ def _popout_window(ctx):
     if callable(refresh):
         refresh()                                        # the new controls start on the page's settings
     return window
+
+
+def _flow_controls(window, *rows, last=()) -> QWidget:
+    """The widgets of each box layout in *rows*, moved in order into one wrapping toolbar. A layout's stretch is
+    dropped (a flow has no right edge to push against) and a row's widgets stay in the order it added them, so the
+    builders keep describing their own controls and this decides how they are arranged."""
+    from widgets.flow_layout import FlowLayout, sync_flow_height
+
+    host = QWidget(window)
+    host.setObjectName("NanowellPopoutControls")
+    flow = FlowLayout(host, margin=8, h_spacing=8, v_spacing=6)
+    sync_flow_height(host)
+    widgets = []
+    for row in rows:
+        while row.count():
+            widget = row.takeAt(0).widget()
+            if widget is not None:
+                widgets.append(widget)
+    # Actions (Go to nanowell, Save) close the toolbar whichever row built them; the rest keep the order built.
+    closing = [w for w in widgets if w in last]
+    for widget in [w for w in widgets if w not in last] + closing:
+        widget.setParent(host)
+        flow.addWidget(widget)
+    return host
 
 
 def _popout_controls(ctx, window) -> QHBoxLayout:
@@ -987,6 +1011,9 @@ class _PopoutWindow(QDialog):
 
     def show_raised(self) -> None:
         self.show()
+        # The controls flow onto as many lines as the width allows, which Qt works out on the next event-loop turn;
+        # doing it now means the window opens with its controls placed and the figure sized to the room they leave.
+        self.layout().activate()
         self.raise_()
         self.activateWindow()
 

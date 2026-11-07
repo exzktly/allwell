@@ -765,6 +765,7 @@ def test_hide_controls_folds_every_control_row_and_show_controls_brings_them_bac
     _open_hex(page, qtbot)
     window = page.widgets.get("_nw_popout")
     window.show()
+    QApplication.processEvents()                                                # the controls flow onto their lines
     toggle = page.widgets.get("_nw_popout_controls_btn")
     rows = ("_nw_popout_image_channel_cb", "_nw_popout_tps_btn", "_nw_popout_layout_cb", "_nw_popout_sort_cb")
     card = page.widgets.get("_nw_popout_card")
@@ -777,4 +778,5 @@ def test_hide_controls_folds_every_control_row_and_show_controls_brings_them_bac
     assert card.height() > shown_height                                         # the figure took the room
     toggle.click()
     QApplication.processEvents()
-    assert all(page.widgets.get(n).isVisibleTo(window) for n in rows) and card.height() == shown_height
+    assert all(page.widgets.get(n).isVisibleTo(window) for n in rows)
+    qtbot.waitUntil(lambda: card.height() == shown_height, timeout=3000)       # the flow re-wraps on the next turn

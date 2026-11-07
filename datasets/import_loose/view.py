@@ -503,6 +503,13 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         self._forget_scan()                # the same path re-picked may hold new files
         self._on_readout_input_changed()
 
+    def scanned_wells(self) -> tuple[str, ...]:
+        """The wells the page's last scan found, for a run to draw while its
+        own worker is still walking the folder. Empty when nothing has been
+        scanned or nothing matched -- "not known", not "none to zip"."""
+        preview = self._preview
+        return tuple(preview.wells) if preview is not None else ()
+
     def confirm_counts(self) -> str:
         """The opening clause of the in-place confirmation — what this run will
         actually touch, from the scan the page already has.

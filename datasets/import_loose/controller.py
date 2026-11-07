@@ -58,6 +58,15 @@ class ImportLooseController(DatasetToolController):
             return
         self.page.clear_log()
         self.page.dashboard.reset()
+        # The worker walks the folder itself before it reports its wells, which
+        # on a large plate on a share is minutes of an empty grid under a
+        # progress bar. The page has already scanned this folder with these
+        # settings (a queued job's ``show_job`` does on the way in), so draw
+        # those wells pending now; ``_on_wells_planned`` replaces them with the
+        # run's own once the worker has them.
+        seeded = self.page.scanned_wells()
+        if seeded:
+            self.page.dashboard.set_wells(seeded)
         self.page.dashboard.set_headline("Scanning…")
         self.page.dashboard.setVisible(True)
         self.page.set_running(True)
@@ -112,6 +121,10 @@ class ImportLooseController(DatasetToolController):
         self._launch()
 
     def _on_wells_planned(self, wells: list) -> None:
+        # Reset first: the plate may be holding the page's pre-run guess, and a
+        # well only the guess had must not stay drawn. No well has reported
+        # progress yet -- the worker plans before it writes anything.
+        self.page.dashboard.reset()
         self.page.dashboard.set_wells(wells)
         self.page.dashboard.set_headline(f"Zipping {len(wells)} well(s)…")
 

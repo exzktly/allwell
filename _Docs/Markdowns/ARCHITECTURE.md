@@ -18206,7 +18206,13 @@ Conversion progress is a per-well plate map
 `PlateProgress` row above) in the same Analyze-style graphical shape
 `ConcatDashboard`/`MergePlatesDashboard`/`ValidateDashboard` use, rather than
 a plain progress bar: `ImportLooseWorker.wellsPlanned` seeds the plate with
-the wells `scan_folder` already found for the preview, and `wellStage`
+the wells the run's own `scan_folder` found. The worker walks the folder before
+it reports them, so `ImportLooseController._launch` draws the wells the page's
+preview scan found (`ImportLoosePage.scanned_wells`, pending) in the meantime,
+and `_on_wells_planned` resets the plate and replaces them with the run's —
+without that, a queued run, whose `show_job` has just scanned the folder, shows
+an empty grid under the progress bar for the length of the worker's walk
+(`tests/test_import_loose_plate_while_scanning.py`). `wellStage`
 colours each one `pending` → `writing` → `done` as its zip actually lands on
 disk, marking `done` with a terminal `✓` (accessibility — colour alone doesn't
 distinguish success-green from `pending`'s text-muted grey). A `writing` well
@@ -19123,7 +19129,14 @@ Qt event loop. Four layers:
   via `stop_current`; a running row's ⋯ menu leads with *Stop this job*,
   `stopClicked` → `QueueBridge.stop_job`, for one), `+ Add job` — a menu
   of all seven kinds, each opening a new-job session on that tool's page —
-  and `Clear completed` at the right. Under it sits a one-line state tally
+  `Clear completed` and `Clear all` at the right. `Clear completed` keeps what
+  still waits (`JobQueue.clearable_ids`); `Clear all` removes every job that is
+  not running (`JobQueue.removable_ids` / `clear_all`, through `remove` per id
+  like the other), after `JobQueueController._on_clear_all` has asked — the
+  question counts each state it will drop and defaults to No — and is enabled
+  only while `set_summary` sees a non-running job. A running job is left for the
+  reason `QueueBridge.remove_job` refuses it: its worker still has a row to
+  report to. Under it sits a one-line state tally
   (states with no jobs are omitted; "0 failed" is not news) and the load-time
   `repair_notes`. The empty-queue hint is a plain caption, deliberately not
   `widgets.empty_state.EmptyState`: that widget is `Expanding/Expanding`,

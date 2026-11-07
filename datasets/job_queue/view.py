@@ -66,6 +66,7 @@ class JobQueuePage(QWidget):
     stopRequested = Signal()
     stopJobRequested = Signal(str)
     clearCompletedRequested = Signal()
+    clearAllRequested = Signal()
     addKindRequested = Signal(str)
     removeRequested = Signal(str)
     moveUpRequested = Signal(str)
@@ -198,6 +199,16 @@ class JobQueuePage(QWidget):
             "blocked. Pending and running jobs are left alone.")
         self._clear_btn.clicked.connect(self.clearCompletedRequested)
         hl.addWidget(self._clear_btn)
+
+        # The blunt one, beside the careful one. Clear completed keeps what is
+        # still waiting; this empties the queue, so the controller asks first.
+        self._clear_all_btn = QPushButton("Clear all", self)
+        self._clear_all_btn.setEnabled(False)
+        self._clear_all_btn.setToolTip(
+            "Remove every job from the queue, waiting or finished, after "
+            "asking. A job that is running is left alone — stop it first.")
+        self._clear_all_btn.clicked.connect(self.clearAllRequested)
+        hl.addWidget(self._clear_all_btn)
         return header
 
     def _build_summary(self) -> QWidget:
@@ -352,6 +363,10 @@ class JobQueuePage(QWidget):
                  for state, word in _STATE_WORD.items() if counts.get(state)]
         self._summary.setText("  ·  ".join(parts))
         self._summary.setVisible(bool(parts))
+        # Offered only while there is something it would remove: a running job
+        # is the one thing it leaves.
+        self._clear_all_btn.setEnabled(
+            any(n for state, n in counts.items() if state != JobState.RUNNING))
 
     def set_repair_notes(self, notes: list[str]) -> None:
         self._notes.setText("  ".join(notes))

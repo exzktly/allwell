@@ -17,7 +17,7 @@ import logging
 import threading
 from collections.abc import Callable
 
-from services.remote_batch_ledger import fail, ledger_of, unreported_after_success
+from services.remote_batch_ledger import driver_ended, fail, ledger_of, unreported_after_success
 from services.remote_batch_resume import download_adopted
 from services.remote_batch_staging import prune_staged
 from services.remote_handoff import hand_off_and_wait
@@ -79,7 +79,7 @@ def _halted(proc, index: int, n_batches: int, when: str) -> bool:
         proc._returncode = 130
         return True
     if proc._driver_lost.is_set():
-        fail(proc, f"[remote] ERROR the allocation ended {when} batch {index}/{n_batches} — no more batches will "
+        fail(proc, f"[remote] ERROR {driver_ended(proc)} {when} batch {index}/{n_batches} — no more batches will "
                    f"run; the finished wells are still being downloaded\n")
         proc._returncode = proc._returncode or 1
         return True
@@ -129,7 +129,7 @@ def _judge_upload(proc, index: int, n_batches: int, sent_bytes: int, rc: int) ->
             proc._returncode = 130
             return Step.ENDED
         if proc._driver_lost.is_set():
-            fail(proc, f"[remote] ERROR the allocation ended while batch {index}/{n_batches} was uploading — no "
+            fail(proc, f"[remote] ERROR {driver_ended(proc)} while batch {index}/{n_batches} was uploading — no "
                        f"more batches will run; the finished wells are still being downloaded\n")
             proc._returncode = proc._returncode or 1
             return Step.ENDED

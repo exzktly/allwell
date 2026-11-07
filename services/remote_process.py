@@ -78,7 +78,9 @@ from services.slurm_ids import is_step_launcher, launcher_job_id
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_handoff import chase_handoff, watch_of
-from services.remote_batch_ledger import checked, fail, failed_batches_line, handshake_clear_argv, ledger_of
+from services.remote_batch_ledger import (
+    checked, driver_ended, fail, failed_batches_line, handshake_clear_argv, ledger_of, note_driver_line,
+)
 from services.remote_batch_step import (
     Step, abandon_upload_ahead, peak_batches, run_batch, upload_ahead_mode, well_removed)
 from services.remote_batch_resume import (
@@ -875,9 +877,11 @@ class _BatchedRemoteProcess:
         stream is already being read, so that costs no extra ssh and has no
         poll interval to wait out.
         """
+        self._driver_started, self._driver_last_line = False, ""
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
+                note_driver_line(self, line)
                 note_remote_scratch(self, line)
                 watch_of(self).observe(line)
                 ledger_of(self).observe(line)
@@ -965,7 +969,7 @@ class _BatchedRemoteProcess:
                 self._returncode = 130
                 return False
             if self._driver_lost.is_set():
-                fail(self, "[remote] ERROR the allocation ended while the empty-well reference was uploading — no "
+                fail(self, f"[remote] ERROR {driver_ended(self)} while the empty-well reference was uploading — no "
                            "batch will run\n")
                 self._returncode = 1
                 return False
@@ -1002,7 +1006,7 @@ class _BatchedRemoteProcess:
         # No code came back. Either the user stopped the run, or the allocation
         # is gone — a walltime expiry, a node failure, somebody else's scancel.
         if self._driver_lost.is_set() and not self._stop.is_set():
-            fail(self, f"[remote] ERROR the allocation ended during batch {index}/{n_batches} — no more batches "
+            fail(self, f"[remote] ERROR {driver_ended(self)} during batch {index}/{n_batches} — no more batches "
                        f"will run; the finished wells are still being downloaded\n")
             self._returncode = self._returncode or 1
         else:

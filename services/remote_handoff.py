@@ -39,7 +39,7 @@ import threading
 import time
 from collections.abc import Callable
 
-from services.remote_batch_ledger import fail
+from services.remote_batch_ledger import driver_ended, fail
 from services.remote_commands import BATCH_READY
 from services.remote_suspend import _AnySet
 
@@ -221,7 +221,7 @@ def _ended_by(proc, index: int, n_batches: int) -> int | None:
         return 130
     lost = getattr(proc, "_driver_lost", None)
     if lost is not None and lost.is_set():
-        fail(proc, f"[remote] ERROR the allocation ended while batch {index}/{n_batches} was being handed to the "
+        fail(proc, f"[remote] ERROR {driver_ended(proc)} while batch {index}/{n_batches} was being handed to the "
                    f"driver — no more batches will run; {KEPT}\n")
         return 1
     return None

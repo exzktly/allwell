@@ -615,7 +615,8 @@ def _launch(launcher: str, inner: str, remote_pidfile: str, *, queue_wait_s: int
             # node, and only then fail with srun's bare "execve(): …: No such
             # file or directory". A saved host is not re-checked by the dialog.
             raise ValueError(stray)
-        return wrap_srun_launch(
+        # The wrapper runs `srun` (and `sinfo`, `squeue`) in this same shell: found the same way as below.
+        return _program_on_path(shlex.split(launcher)[0]) + wrap_srun_launch(
             launcher, shlex.quote(inner), _remote_quote(remote_pidfile),
             _remote_quote(f"{remote_pidfile}.srun-err"), queue_wait_s=queue_wait_s)
     words = shlex.split(launcher)
@@ -631,8 +632,9 @@ def _program_on_path(program: str) -> str:
 
     The launch runs in the shell ``sshd`` starts for one command: neither a login nor an interactive shell, so it never
     reads ``/etc/profile`` or ``~/.bash_profile``, which is where a cluster puts Slurm on ``PATH`` when it is not in
-    ``/usr/bin``. A run on a granted node execs a bare ``srun`` (``remote_hold.step_launcher``, when the host's
-    scheduler command names no path), and on such a host that was ``bash: line 1: exec: srun: not found``.
+    ``/usr/bin``. A host's scheduler command is a bare ``srun …`` unless someone typed a path, and a run on its granted
+    node (``remote_hold.step_launcher``) or on a node it asks for (``remote_srun_retry.wrap_srun_launch``) runs that
+    ``srun`` here; on such a host that was ``bash: line 1: exec: srun: not found``.
     ``remote_hold.slurm_path_prelude`` answers the same question for the control scripts; ``PATH`` is read from the
     login shell's output by a marker, because a profile may print a banner. Empty for a program named by its path,
     which needs no ``PATH``, and nothing changes where *program* is found already."""

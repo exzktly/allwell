@@ -208,3 +208,17 @@ def test_the_run_and_the_node_test_launch_with_the_hosts_srun():
     for rel in ("services/remote_runner.py", "analyze/granted_node_panel.py"):
         text = (REPO_ROOT / rel).read_text(encoding="utf-8")
         assert "step_launcher(" in text and "srun=srun_program(" in text, rel
+
+
+def test_a_run_that_asks_for_its_own_node_finds_a_bare_srun_through_the_users_login_shell(cluster, tmp_path):
+    """The ordinary scheduled launch (``wrap_srun_launch``) runs the host's bare ``srun`` in the same shell, and a
+    host's scheduler command is a bare ``srun …`` unless someone typed a path."""
+    from services.remote_commands import _launch
+
+    _srun_stub(cluster)
+    cluster.env["SHELL"] = _login_shell(tmp_path, bin_dir=cluster.bin, banner="motd")
+    host = RemoteHost(**HOST)
+    result = cluster._ssh_script(_launch(host.launch_command, "true", str(cluster.fake / "run.pid")), check=False)
+    assert "srun: not found" not in result.stderr and "srun: command not found" not in result.stderr, result.stderr
+    assert _srun_calls(cluster), result.stderr
+    assert _srun_calls(cluster)[-1].startswith("--partition=gpu "), _srun_calls(cluster)

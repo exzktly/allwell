@@ -109,6 +109,36 @@ def ledger_of(proc) -> BatchLedger:
         return ledger
 
 
+#: Lines that only a batch driver which started prints: its own, or the scheduler's grant inside the allocation
+#: (``remote_srun_retry.ALLOCATION_GRANTED``, which the inner script prints first thing).
+_DRIVER_STARTED = ("[remote] batch-driver:", "[remote] scheduler: allocation granted")
+
+
+def note_driver_line(proc, line: str) -> None:
+    """Keep what :func:`driver_ended` needs from one line of the driver's stream: whether it started, and its last
+    words."""
+    text = line.strip()
+    if not text:
+        return
+    proc._driver_last_line = text
+    if text.startswith(_DRIVER_STARTED):
+        proc._driver_started = True
+
+
+def driver_ended(proc) -> str:
+    """What ended the batch driver's stream, said in the error that reports it: ``the allocation ended``, or -- when
+    the driver never printed a line of its own -- that the run could not start, with the host's last line.
+
+    A launch that dies at once (``bash: line 1: exec: srun: not found``, exit 127) used to be reported as the
+    allocation ending while the empty-well reference uploaded: the real cause was in the log, and the error named
+    another. A process the reader never watched (``_driver_started`` unset) is taken as started."""
+    if getattr(proc, "_driver_started", True):
+        return "the allocation ended"
+    last = getattr(proc, "_driver_last_line", "")
+    return (f"the run could not start on the remote ({last})" if last
+            else "the run could not start on the remote (it printed nothing)")
+
+
 def fail(proc, message: str) -> None:
     """Log *message*, a reason the batched run is ending or failing, and keep it for the run's headline."""
     proc._log(message)

@@ -214,7 +214,8 @@ class _Remote:
         def launched(argv):
             script = unpack_login_shell_command(argv[-1])
             self.events.append(("launch", script))
-            match = re.match(r'echo \$\$ > "\$HOME"(\S+?);', script)
+            # After the PATH lookup a launch may start with (``remote_commands._program_on_path``).
+            match = re.search(r'echo \$\$ > "\$HOME"(\S+?);', script)
             if match and "--jobid" in script:
                 self.fake.path("~" + match.group(1) + ".slurm").write_text(f"{HOLD}.3\n")
                 self.cluster.add_step(f"{HOLD}.3")

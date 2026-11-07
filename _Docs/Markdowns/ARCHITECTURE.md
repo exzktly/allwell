@@ -13566,7 +13566,7 @@ footer names it; the run montage is drawn as saved, and its footer says the rang
 included), so a well selected again reads nothing and a deselection neither reads nor recomputes; the worker
 reads into its own copy of the parts, which `done` merges into `well_parts` whether or not its request is still the
 current one — a part is the well's files as read, valid for every baseline and gate, so a load overtaken by a newer
-selection still spares the next one its reads. A selection change on the shown page redraws at once from the wells
+selection still spares the next one its reads. The one exception is a load that started before the tables were let go (`reset_data`, which bumps `state.parts_epoch`): the same folder loaded again after a re-run has new files, so a load from before it lands none of its reads. A selection change on the shown page redraws at once from the wells
 already read and asks for the new ones once the selection has been still for `tab_view.LOAD_DEBOUNCE_MS` (250 ms;
 `queue_load` restarts the page's `_nw_load_timer`, whose timeout runs `run_queued_load`), so a run of clicks on the
 plate starts one load rather than one per click; while it waits, `load_queued` makes `nanowell_empty_reason` say

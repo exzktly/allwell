@@ -573,6 +573,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
     # A gate drawn on nanowell metrics is judged on counts without the scatter-gate layer; the subset's gate
     # conditions read the same (``_metrics_of``). Decided here, on the GUI thread, from the gates as they are now.
     nanowell_gated = bool(ss.nanowell_gates(getattr(ctx.state.cell_gating, "scatter_gates", None) or []))
+    epoch = st.parts_epoch                               # the tables' generation this load reads
     st.computing, st.pending_for, st.load_progress = True, (key, wells, version), None
     same_wells = wanted <= st.loaded_wells and st.loaded_for is not None and st.loaded_for[0] == key[0]
     previous = st.data if same_wells else None
@@ -617,10 +618,11 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
 
     def done(result):
         data, metrics, error, read, gate = result
-        if st.parts_for == key[0]:
+        if st.parts_for == key[0] and st.parts_epoch == epoch:
             # The wells read are kept whichever request read them: a part is the well's files as read, valid for
             # every baseline and gate, so a superseded load's reads spare the next load reading them again. Merged
-            # rather than replaced, so a part another load (or the overlay's read) added meanwhile is kept too.
+            # rather than replaced, so a part another load (or the overlay's read) added meanwhile is kept too. Not
+            # across a reload of the same folder (``parts_epoch``): those reads are of the files before it.
             st.well_parts = {**read, **st.well_parts}
         if request != st.request:
             return                                       # a newer request has been made; this one is stale

@@ -1344,6 +1344,16 @@ QPushButton[variant="secondary"]:disabled, QToolButton[variant="secondary"]:disa
     background-color: {c.panel};
     border-color: {c.border_subtle};
 }}
+/* Same specificity trap as `:disabled` above: the variant rule's own background beats the plain
+   `:hover` / `:pressed` rules, so a secondary button (every "+ Queue") gave no sign it had been
+   pressed. */
+QPushButton[variant="secondary"]:hover, QToolButton[variant="secondary"]:hover {{
+    background-color: {c.hover};
+    border-color: {c.border};
+}}
+QPushButton[variant="secondary"]:pressed, QToolButton[variant="secondary"]:pressed {{
+    background-color: {c.active};
+}}
 
 QPushButton[variant="danger"], QToolButton[variant="danger"] {{
     background-color: transparent;
@@ -1352,6 +1362,9 @@ QPushButton[variant="danger"], QToolButton[variant="danger"] {{
 }}
 QPushButton[variant="danger"]:hover, QToolButton[variant="danger"]:hover {{
     background-color: {c.panel};
+}}
+QPushButton[variant="danger"]:pressed, QToolButton[variant="danger"]:pressed {{
+    background-color: {c.active};
 }}
 
 QPushButton[variant="muted"], QToolButton[variant="muted"], QLabel[variant="muted"] {{

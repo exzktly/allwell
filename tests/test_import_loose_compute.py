@@ -36,7 +36,6 @@ def test_scan_reports_wells_fovs_timepoints_channels(tmp_path):
     assert preview.channels == ("GFP",)
     assert preview.matched == 8
     assert preview.unparsed_files == ()
-    assert preview.unreadable_count == 0
 
 
 def test_wrong_separator_reports_everything_unparsed_no_exception(tmp_path):
@@ -56,6 +55,8 @@ def test_invalid_well_token_is_unparsed_not_matched(tmp_path):
 
 
 def test_dangling_symlink_counted_not_crashed_on(tmp_path):
+    """The executor drops a broken link and counts it. The preview does not look
+    (see tests/test_import_loose_scan_cost.py); it must still not crash on one."""
     _write_loose(tmp_path, ["A01"])
     target = tmp_path / "gone.tif"
     target.write_bytes(b"img")
@@ -63,9 +64,11 @@ def test_dangling_symlink_counted_not_crashed_on(tmp_path):
     link.symlink_to(target)
     target.unlink()
 
-    preview = ilc.scan_folder(tmp_path, filename_schema=SCHEMA, filename_sep=SEP)
-    assert preview.unreadable_count == 1
-    assert "48h" not in preview.timepoints
+    ilc.scan_folder(tmp_path, filename_schema=SCHEMA, filename_sep=SEP)
+    by_well, unreadable = ilc.group_files_by_well_counting(
+        tmp_path, filename_schema=SCHEMA, filename_sep=SEP)
+    assert unreadable == 1
+    assert link not in by_well["A01"]
 
 
 def test_non_tif_files_ignored(tmp_path):

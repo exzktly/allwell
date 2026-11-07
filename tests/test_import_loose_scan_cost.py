@@ -6,7 +6,9 @@ the folder on the GUI thread, and on a share every ``stat`` is a round trip.
 Three causes, each pinned here by what it asks the filesystem or the scanner:
 
 * ``scan_folder`` called ``os.path.isfile`` on every matched file and
-  ``Path.is_dir`` on every top-level entry -- two ``stat`` calls per file.
+  ``Path.is_dir`` on every top-level entry -- two ``stat`` calls per file. The
+  preview now asks no entry anything; the run (``group_files_by_well_counting``)
+  still drops a broken symlink and reports the count in its log.
 * ``_on_in_place_toggled`` called ``refresh_readout()`` with no scan to hand it,
   which walked the folder again for an answer the page already held.
 * **Detect from filenames** wrote the separator and then the schema, and each
@@ -66,19 +68,56 @@ def test_a_scan_stats_no_file_in_the_folder(tmp_path, monkeypatch):
     preview = compute.scan_folder(
         tmp_path / "plate", filename_schema=_SCHEMA, filename_sep="_")
     assert preview.matched == n
-    # One stat per file was the cost. Zero is the claim: a regular file's type
-    # comes with the directory listing.
     assert calls == {"stat": 0, "lstat": 0}
 
 
-def test_a_dangling_symlink_is_still_counted_unreadable(tmp_path):
+def test_a_scan_asks_no_entry_what_kind_of_file_it_is(tmp_path, monkeypatch):
+    """Zero ``stat`` on a local disk proves little: there the listing carries
+    each entry's type and ``is_dir`` / ``is_file`` are free. On a share that
+    reports no types each is a ``stat``. So count the *questions*."""
+    n = _plate(tmp_path / "plate")
+    asked = {"is_dir": 0, "is_file": 0, "is_symlink": 0}
+    real_scandir = os.scandir
+
+    class _Entry:
+        def __init__(self, entry):
+            self._e = entry
+            self.name, self.path = entry.name, entry.path
+
+        def __getattr__(self, attr):
+            if attr in asked:
+                asked[attr] += 1
+            return getattr(self._e, attr)
+
+    class _Scan:
+        def __init__(self, it):
+            self._it = it
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._it.close()
+
+        def __iter__(self):
+            return (_Entry(e) for e in self._it)
+
+    monkeypatch.setattr(os, "scandir", lambda p: _Scan(real_scandir(p)))
+    preview = compute.scan_folder(
+        tmp_path / "plate", filename_schema=_SCHEMA, filename_sep="_")
+    assert preview.matched == n
+    assert asked == {"is_dir": 0, "is_file": 0, "is_symlink": 0}
+
+
+def test_the_run_still_drops_and_counts_a_dangling_symlink(tmp_path):
     folder = tmp_path / "plate"
     n = _plate(folder)
     os.symlink(tmp_path / "nowhere.tif", folder / "Exp_GFP_C03_F000_1h.tif")
-    preview = compute.scan_folder(folder, filename_schema=_SCHEMA, filename_sep="_")
-    assert preview.unreadable_count == 1
-    assert preview.matched == n
-    assert "C03" not in preview.wells
+    by_well, unreadable = compute.group_files_by_well_counting(
+        folder, filename_schema=_SCHEMA, filename_sep="_")
+    assert unreadable == 1
+    assert sum(len(v) for v in by_well.values()) == n
+    assert "C03" not in by_well
 
 
 def test_existing_well_folders_still_found_among_loose_files(tmp_path):
@@ -152,3 +191,15 @@ def test_detect_from_filenames_walks_the_folder_once(qapp, tmp_path, scans):
     assert page.filename_sep() == "_"
     assert page.filename_schema() == _SCHEMA
     assert len(scans) == 1
+
+
+def test_a_new_destination_run_reports_the_broken_symlink_it_skipped(tmp_path):
+    from datasets.import_loose.apply import convert_to_new_destination
+    folder = tmp_path / "plate"
+    _plate(folder)
+    os.symlink(tmp_path / "nowhere.tif", folder / "Exp_GFP_C03_F000_1h.tif")
+    lines: list[str] = []
+    convert_to_new_destination(
+        folder, tmp_path / "out", filename_schema=_SCHEMA, filename_sep="_",
+        log=lines.append)
+    assert any("1 unreadable file(s) (broken symlinks) skipped" in ln for ln in lines)

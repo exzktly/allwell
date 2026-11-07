@@ -372,8 +372,6 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             preview = self._scan()
         self._preview = preview
         lines = [preview.summary()]
-        if preview.unreadable_count:
-            lines.append(f"{preview.unreadable_count} unreadable file(s) (broken symlinks) skipped.")
         if preview.unparsed_files and preview.matched:
             # Only worth saying when some files *did* match — with nothing
             # matched the summary has already said so, and "would be left

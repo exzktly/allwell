@@ -109,11 +109,22 @@ BASELINE = "tests/fixtures/phone_snapshot_baseline.json"
 def fingerprint(qapp) -> dict:
     """What a snapshot's numbers depend on besides the code: the Qt version, the
     application font and the offscreen screen. A baseline taken under another
-    fingerprint says nothing about this machine's geometry."""
+    fingerprint says nothing about this machine's geometry.
+
+    The font is recorded twice: the family the application *asks for* and the
+    face fontconfig *gives* it. The tests never run ``allwell.main``, so the
+    bundled Inter is not registered and the request is the generic
+    ``Sans Serif`` everywhere — which resolves to the system Inter where the
+    ``fonts-inter`` package is installed and to DejaVu Sans on a stock Ubuntu
+    runner. With only the request recorded, the two fingerprints matched and
+    every text-sized widget on every page was reported as a layout change."""
     from PySide6 import QtCore
+    from PySide6.QtGui import QFontInfo
     rect = qapp.primaryScreen().availableGeometry()
     return {"schema": SCHEMA, "qt": QtCore.qVersion(),
-            "font": qapp.font().family(), "screen": [rect.width(), rect.height()]}
+            "font": qapp.font().family(),
+            "resolved_font": QFontInfo(qapp.font()).family(),
+            "screen": [rect.width(), rect.height()]}
 
 
 def _pump(qapp, n: int = 20) -> None:

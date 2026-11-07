@@ -21845,7 +21845,12 @@ you're in before you type the command.
     `tests/_lanes.py`, the pytest configuration, a conftest hook or autouse
     fixture, a conftest change that cannot be narrowed, a diff that cannot be
     computed; a file joining the lane's roster selects that file. Nothing
-    reached runs nothing. `scripts/test.sh --nanowell`, `--nanowell-features`
+    reached runs nothing, and says so with an exit status of its own,
+    `lane_needed.SKIP` (3): Python exits 1 when the script fails while it
+    loads (a `tests/_lanes.py` that does not import), so `scripts/test.sh`,
+    `scripts/preflight.sh` and CI's gate steps read 3 as "skip" and any other
+    failure as "run the whole lane", and CI's `ruff` and fast-lane scope steps
+    read a failing `scripts/change_scope.py` as `code`. `scripts/test.sh --nanowell`, `--nanowell-features`
     and `--remote` ask the gate themselves and say on stderr how many files
     they run and why; `ALLWELL_FULL_LANE=1`, or naming test files, runs exactly
     what was asked. `scripts/preflight.sh` computes each lane's selection once

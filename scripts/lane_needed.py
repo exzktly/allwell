@@ -52,7 +52,11 @@ application module reads at run time (fonts, icons, profiles), and anything a
 test reaches by a path it builds rather than names. CI runs every gated lane on
 each push to ``main``, which is where such a miss is caught.
 
-    python scripts/lane_needed.py <gate> [--base REF]   # exit 0: run it; 1: skip
+    python scripts/lane_needed.py <gate> [--base REF]   # exit 0: run it; 3: skip; anything else: run it whole
+
+"Skip" has an exit status of its own, :data:`SKIP`, because Python exits 1 on an exception raised while the script
+loads (``tests/_lanes.py`` failing to import, say), before ``main`` can catch anything. Every caller reads 3 as
+"skip" and any other failure as "run the whole lane".
     python scripts/lane_needed.py <gate> --surface      # print the modules the roster imports directly
 
 The comparison is ``REF...HEAD`` (default ``origin/main``) plus, locally, the
@@ -744,6 +748,10 @@ def _python_files(root: Path) -> list[str]:
     return sorted(p for p in set(out) if (root / p).is_file())
 
 
+#: The exit status that means "nothing reached: skip the lane". Not 1, which is what Python exits with when the
+#: script fails while loading; a caller reads any status but 0 and this one as "run the whole lane".
+SKIP = 3
+
 #: What :func:`reach_all` and :func:`select` report when a change cannot be narrowed to particular test files: the
 #: whole lane runs.
 ALL = "*"
@@ -1143,18 +1151,18 @@ def main(argv: list[str]) -> int:
 
     try:
         chosen = select(args.gate, args.base)
-    except Exception as exc:  # noqa: BLE001 — exit 1 means "skip": an error must never be read as that
+    except Exception as exc:  # noqa: BLE001 — an error must never be read as "skip"
         chosen = {ALL: f"could not decide ({type(exc).__name__}: {exc}), so the whole lane runs"}
     if args.files:
         # The files go to stdout for scripts/test.sh and preflight to read; the account of why goes to stderr.
         _report(args.gate, chosen, sys.stderr)
         print("ALL" if ALL in chosen else "\n".join(sorted(chosen)))
-        return 0 if chosen else 1
+        return 0 if chosen else SKIP
     return _report(args.gate, chosen, sys.stdout)
 
 
 def _report(gate: str, chosen: dict[str, str], stream) -> int:
-    """Say what *chosen* means for the lane on *stream*; the exit status: 0 to run it, 1 to skip it."""
+    """Say what *chosen* means for the lane on *stream*; the exit status: 0 to run it, :data:`SKIP` to skip it."""
     def say(line: str) -> None:
         print(line, file=stream)
 
@@ -1171,7 +1179,7 @@ def _report(gate: str, chosen: dict[str, str], stream) -> int:
             say(f"   … and {len(chosen) - 15} more")
         return 0
     say(f"{label}: not needed — no changed path can reach it")
-    return 1
+    return SKIP
 
 
 if __name__ == "__main__":

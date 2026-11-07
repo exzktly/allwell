@@ -127,7 +127,7 @@ if [[ -n "$GATE" && -z "${ALLWELL_FULL_LANE:-}" ]]; then
         last=$(( ${#SELECTED[@]} - 1 ))
         status="${SELECTED[$last]#__status=}"
         unset "SELECTED[$last]"
-        if [[ "$status" == "1" ]]; then
+        if [[ "$status" == "3" ]]; then   # lane_needed.SKIP; any other failure runs the lane whole
             echo "scripts/test.sh: nothing this change touches reaches the $GATE lane — no tests to run" \
                  "(ALLWELL_FULL_LANE=1 runs it anyway)" >&2
             exit 0
@@ -180,7 +180,7 @@ if [[ -z "${ALLWELL_FULL_LANE:-}" && ( "$MARK" == "$FAST" || "$MARK" == "$FAST a
                 last=$(( ${#SELECTED[@]} - 1 ))
                 status="${SELECTED[$last]#__status=}"
                 unset "SELECTED[$last]"
-                if [[ "$status" == "1" ]]; then
+                if [[ "$status" == "3" ]]; then   # lane_needed.SKIP; any other failure runs the lane whole
                     echo "scripts/test.sh: nothing this change touches reaches a fast-lane test — no tests to run" \
                          "(ALLWELL_FULL_LANE=1 runs the lane anyway)" >&2
                     exit 0

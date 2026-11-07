@@ -32,6 +32,18 @@ from services.remote_transport import _remote_join  # noqa: E402
 from services.subprocess_text import TEXT_UTF8  # noqa: E402
 from util.bounded_run import run_bounded  # noqa: E402
 
+#: OpenSSH's notice that the server offers no post-quantum key exchange: printed on every connection by a new client
+#: talking to an older server, and nothing to do with what this probe measures, so it is shown once, not per line.
+_NOISE = ("post-quantum", "store now, decrypt later", "server may need to be upgraded", "openssh.com/pq.html")
+
+
+def _errors(stderr: str) -> str:
+    """*stderr* without OpenSSH's post-quantum notice, last 160 characters."""
+    kept = [ln for ln in (stderr or "").splitlines()
+            if ln.strip() and not any(n in ln.lower() for n in _NOISE) and ln.strip().strip("*").strip()]
+    return " | ".join(kept)[-160:]
+
+
 LENGTHS = (2000, 4000, 6000, 7000, 7500, 8000, 8100, 8150, 8190, 8200, 8300, 9000, 12000, 16000, 24000, 33000)
 
 
@@ -41,8 +53,10 @@ def _send(host, command: str) -> subprocess.CompletedProcess:
     return run_bounded(argv, capture_output=True, timeout=60, **TEXT_UTF8)
 
 
-def length_probe(host) -> None:
+def length_probe(host) -> int | None:
+    """The first payload length that did not arrive whole, or ``None``."""
     print("Length probe: characters sent in the payload -> characters the host received")
+    first_cut = None
     for n in LENGTHS:
         command = f"printf %s {'A' * n} | wc -c"
         try:
@@ -52,12 +66,16 @@ def length_probe(host) -> None:
             continue
         got = (out.stdout or "").strip()
         verdict = "whole" if got == str(n) else "CUT OR CHANGED"
+        if verdict != "whole" and first_cut is None:
+            first_cut = n
         shown = got if len(got) <= 12 else f"{got[:8]}... ({len(got):,} chars of output: the | wc -c never arrived)"
         print(f"  {n:>6} (command {len(command):,} chars): host saw {shown or '-'}  {verdict}  "
-              f"exit {out.returncode}{'  ' + out.stderr.strip()[-160:] if out.stderr.strip() else ''}")
+              f"exit {out.returncode}{'  ' + _errors(out.stderr) if _errors(out.stderr) else ''}")
+    return first_cut
 
 
-def shape_probe(host, operands: int = 170) -> None:
+def shape_probe(host, operands: int = 170) -> str:
+    """The last operand the host received ("" when none came back)."""
     run_dir = remote_run_dir(host, "probe0123456789ab")       # a run directory's shape; nothing is written there
     names = [f"{run_dir}/.aw_batch_{i}_{k}" for i in range(1, operands // 5 + 1)
              for k in ("ready", "done", "reanchor", "skip", "staged")]
@@ -66,9 +84,10 @@ def shape_probe(host, operands: int = 170) -> None:
     lines = (out.stdout or "").strip().splitlines()
     print(f"Shape probe: {len(names)} operands, command {len(command):,} chars")
     print(f"  host received {lines[0] if lines else '-'} operand(s); the last: {lines[1] if len(lines) > 1 else '-'}")
-    print(f"  exit {out.returncode}{'  ' + out.stderr.strip()[-200:] if out.stderr.strip() else ''}")
+    print(f"  exit {out.returncode}{'  ' + _errors(out.stderr) if _errors(out.stderr) else ''}")
     if len(lines) > 1 and not lines[1].endswith("_staged"):
         print("  -> the command was CUT: the last operand is not the last one sent.")
+    return lines[1] if len(lines) > 1 else ""
 
 
 def main(argv: list[str]) -> int:
@@ -79,8 +98,14 @@ def main(argv: list[str]) -> int:
     host = hosts[argv[1]]
     print(f"ssh: {resolve_ssh_binary()}   host: {host.name} ({host.ssh_alias})   python: {sys.version.split()[0]} "
           f"on {sys.platform}")
-    length_probe(host)
-    shape_probe(host)
+    print("(OpenSSH's post-quantum key-exchange notice, if your ssh prints one, is left out: it is harmless and "
+          "unrelated.)")
+    first_cut = length_probe(host)
+    last = shape_probe(host)
+    print()
+    print("SUMMARY: " + (f"the first payload that did not arrive whole was {first_cut:,} characters"
+                         if first_cut else "every length arrived whole")
+          + f"; the old command's last operand to arrive: {last or 'none'}")
     return 0
 
 

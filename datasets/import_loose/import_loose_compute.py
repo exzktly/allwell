@@ -139,6 +139,34 @@ class _WalkResult:
     unparsed_files: list
 
 
+def _iter_files(top: str, recursive: bool):
+    """Every non-directory entry under *top*, top-down, as a ``DirEntry``.
+
+    The listing ``os.walk`` would produce (a symlink to a directory counts as a
+    directory and is not descended into; an unreadable directory is skipped),
+    but yielding the ``DirEntry`` itself so a caller can ask it about the file
+    without a second ``stat``.
+    """
+    try:
+        it = os.scandir(top)
+    except OSError:
+        return
+    subdirs: list[str] = []
+    with it:
+        for entry in it:
+            try:
+                is_dir = entry.is_dir()
+            except OSError:
+                is_dir = False
+            if is_dir:
+                if recursive and not entry.is_symlink():
+                    subdirs.append(entry.path)
+            else:
+                yield entry
+    for sub in subdirs:
+        yield from _iter_files(sub, recursive)
+
+
 def _walk(
     search_dir: Path, *, schema: list[str], sep: str, recursive: bool,
 ) -> _WalkResult:
@@ -158,32 +186,34 @@ def _walk(
     unreadable = 0
     unparsed: list[str] = []
 
-    for root, _dirs, files in os.walk(search_dir):
-        for fname in files:
-            if not fname.lower().endswith(_IMAGE_SUFFIXES):
-                continue
-            examined += 1
-            stem = os.path.splitext(fname)[0]
-            parts = stem.split(sep)
-            well = None
-            if well_idx is not None and well_idx < len(parts):
-                well = canonical_well_label(parts[well_idx])
-            if well is None:
-                unparsed.append(os.path.join(root, fname))
-                continue
-            full = os.path.join(root, fname)
-            if not os.path.isfile(full):
-                unreadable += 1
-                continue
-            by_well.setdefault(well, []).append(Path(full))
-            if fov_idx is not None and fov_idx < len(parts):
-                fovs.add(parts[fov_idx])
-            if tp_idx is not None and tp_idx < len(parts):
-                timepoints.add(parts[tp_idx])
-            if channel_idx is not None and channel_idx < len(parts):
-                channels.add(parts[channel_idx])
-        if not recursive:
-            break
+    for entry in _iter_files(str(search_dir), recursive):
+        fname = entry.name
+        if not fname.lower().endswith(_IMAGE_SUFFIXES):
+            continue
+        examined += 1
+        stem = os.path.splitext(fname)[0]
+        parts = stem.split(sep)
+        well = None
+        if well_idx is not None and well_idx < len(parts):
+            well = canonical_well_label(parts[well_idx])
+        if well is None:
+            unparsed.append(entry.path)
+            continue
+        # ``DirEntry.is_file`` answers from the type the directory listing
+        # already carried, so a regular file costs no system call; only a
+        # symlink (the dangling kind this check exists for) is followed. The
+        # ``os.path.isfile`` it replaces was one ``stat`` per matched file --
+        # a network round trip each on the share a plate usually sits on.
+        if not entry.is_file():
+            unreadable += 1
+            continue
+        by_well.setdefault(well, []).append(Path(entry.path))
+        if fov_idx is not None and fov_idx < len(parts):
+            fovs.add(parts[fov_idx])
+        if tp_idx is not None and tp_idx < len(parts):
+            timepoints.add(parts[tp_idx])
+        if channel_idx is not None and channel_idx < len(parts):
+            channels.add(parts[channel_idx])
 
     return _WalkResult(
         by_well=by_well, fovs=fovs, timepoints=timepoints, channels=channels,
@@ -202,24 +232,28 @@ def existing_well_folders(search_dir: Path) -> tuple[str, ...]:
     """
     wells: list[str] = []
     try:
-        entries = sorted(Path(search_dir).iterdir())
+        with os.scandir(search_dir) as it:
+            # The name is tested before the entry is asked whether it is a
+            # directory: a loose-TIF folder is mostly thousands of file names
+            # that are not wells, and ``is_dir`` on each was a ``stat`` apiece.
+            candidates = sorted(
+                (e for e in it if canonical_well_label(e.name)),
+                key=lambda e: e.name)
     except OSError:
         return ()
-    for entry in entries:
-        if not entry.is_dir():
-            continue
-        well = canonical_well_label(entry.name)
-        if not well:
-            continue
+    for entry in candidates:
         try:
-            has_tifs = any(
-                f.is_file() and f.suffix.lower() in _IMAGE_SUFFIXES
-                for f in entry.iterdir()
-            )
+            if not entry.is_dir():
+                continue
+            with os.scandir(entry.path) as inner:
+                has_tifs = any(
+                    f.is_file() and os.path.splitext(f.name)[1].lower() in _IMAGE_SUFFIXES
+                    for f in inner
+                )
         except OSError:
             continue
         if has_tifs:
-            wells.append(well)
+            wells.append(canonical_well_label(entry.name))
     return tuple(wells)
 
 

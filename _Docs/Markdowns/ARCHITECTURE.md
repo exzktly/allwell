@@ -18168,7 +18168,13 @@ counts — that updates on every schema/separator keystroke, so a mismatch is
 caught before conversion rather than mid-run. One `scan_folder` per change feeds
 both the readout and the plate preview: they ask the same question of the same
 folder with the same arguments, and walking a plate twice per keystroke is a
-stall on the GUI thread. The schema is described with the shared `SchemaPicker`
+stall on the GUI thread. The page keeps the last scan keyed on
+`(source, schema, separator)` and reuses it for anything that asks the same
+question again — ticking *Group in place* re-renders the readout from it rather
+than walking the folder — and drops it wherever the disk can have moved: a
+source pick, the Detect button, a run starting. *Detect from filenames* writes
+the separator and the schema with the picker's signals blocked and scans once.
+The schema is described with the shared `SchemaPicker`
 (see the widgets table), the same control the Analyze form's Filename schema
 section mounts: this page's whole output is a dataset Analyze reads next, so the
 two ask about the same filenames with the same vocabulary.
@@ -18219,14 +18225,17 @@ empty "Ready — 0 well(s)" plate, which would read as "broken" rather than
 
 The preview (`import_loose_compute.scan_folder`) mirrors
 `well_plate_zipper._extract_well_from_filename`'s rule exactly — schema-index
-lookup, `canonical_well_label`, and `os.path.isfile` to drop dangling
+lookup, `canonical_well_label`, and `DirEntry.is_file` to drop dangling
 symlinks the way `os.walk` lists them — rather than calling
 `well_plate_zipper.group_by_well` directly, which `print()`s unconditionally (a
 scan banner, a per-5000-files progress line, a completion line) for the
 command line and would otherwise pollute this app's own captured output.
 `scan_folder` and the executor's `group_files_by_well` share one `_walk`
-helper, so the preview and what actually gets grouped out of the loose TIFs
-can't disagree. Both walk loose files only; the well folders an in-place run
+helper, which lists the folder with `os.scandir` and asks each `DirEntry` about
+itself: a regular file costs no `stat` (its type arrives with the listing), so a
+scan of ~10^5 loose TIFs on a network share is one directory read rather than
+two round trips per file (`tests/test_import_loose_scan_cost.py`). So the preview and what actually
+gets grouped out of the loose TIFs can't disagree. Both walk loose files only; the well folders an in-place run
 also converts are counted separately, by `existing_well_folders` — see the
 in-place scope note below.
 

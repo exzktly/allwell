@@ -98,6 +98,13 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         #: holds archives rather than loose images, so a second run has nothing
         #: to do and would replace this run's result with a failure.
         self._done_in_place = False
+        #: ``(source, schema, separator)`` the last scan was taken with, and its
+        #: result. The scan walks the whole folder on the GUI thread, so a
+        #: question the page has already answered for these inputs -- the
+        #: "Group in place" box being ticked, say -- reads this instead of
+        #: walking a plate's worth of files again. ``None`` means "scan afresh".
+        self._scan_key = None
+        self._scan_result = None
         self._build_ui()
         self.refresh_readout()
 
@@ -289,6 +296,9 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         self._queue_btn.setEnabled(not running and self._can_run())
         self._run_btn.setText("Zipping…" if running else "▶  Zip folder")
         if running:
+            # The run changes the folder; whatever scan the page holds is about
+            # to describe a tree that no longer exists.
+            self._forget_scan()
             self._open_btn.setVisible(False)
             set_variant(self._run_btn, "primary")
         # Locked alongside the run (ImportLooseController._launch captures
@@ -392,12 +402,22 @@ class ImportLoosePage(LogPanelMixin, QWidget):
 
     # ── internals ────────────────────────────────────────────────────────────
     def _scan(self):
-        """One walk of the source folder with the current schema + separator."""
-        return scan_folder(
-            self.source_path(),
-            filename_schema=self.filename_schema(),
-            filename_sep=self.filename_sep(),
-        )
+        """One walk of the source folder with the current schema + separator,
+        or the previous walk's result when none of those has changed since.
+
+        The cache is dropped (:meth:`_forget_scan`) wherever the disk can have
+        moved under the page: a source pick, the Detect button, a run starting.
+        """
+        key = (self.source_path(), self.filename_schema(), self.filename_sep())
+        if key != self._scan_key or self._scan_result is None:
+            self._scan_result = scan_folder(
+                key[0], filename_schema=key[1], filename_sep=key[2])
+            self._scan_key = key
+        return self._scan_result
+
+    def _forget_scan(self) -> None:
+        self._scan_key = None
+        self._scan_result = None
 
     def _on_readout_input_changed(self, *_args) -> None:
         # One scan feeds both the readout and the plate. They ask the same
@@ -463,18 +483,26 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             return
         verdict = detection_for_grouping(guess)
         if verdict.apply:
-            self._schema_picker.setSeparator(guess.separator)
-            self._schema_picker.setSchema(guess.schema_str)
+            # Both setters emit ``changed``, and each emission is a full walk of
+            # the folder on the UI thread -- the separator's, with the old
+            # schema, was a scan whose answer was thrown away one line later.
+            # Silence the picker while both are written and scan once.
+            blocked = self._schema_picker.blockSignals(True)
+            try:
+                self._schema_picker.setSeparator(guess.separator)
+                self._schema_picker.setSchema(guess.schema_str)
+            finally:
+                self._schema_picker.blockSignals(blocked)
         self._schema_picker.setDetection(verdict.message, problem=verdict.problem)
-        # No explicit re-scan: `setSchema` above emits `changed`, which is
-        # already connected to `_on_readout_input_changed`. Calling it again
-        # walked the folder a second time on every press — irrelevant on a test
-        # fixture, a second pass over 10^5 files on the UI thread in the field.
-        # A press that applies nothing changes no input, so nothing is owed.
+        if verdict.apply:
+            # A press that applies nothing changes no input, so nothing is owed.
+            self._forget_scan()
+            self._on_readout_input_changed()
 
     def _on_source_changed(self) -> None:
         set_variant(self._run_btn, "primary")
         self._done_in_place = False        # a different folder, a fresh verdict
+        self._forget_scan()                # the same path re-picked may hold new files
         self._on_readout_input_changed()
 
     def confirm_counts(self) -> str:

@@ -924,13 +924,17 @@ def pytest_config_change(old_source: str | None, new_source: str | None) -> str:
 
 
 def changed_paths(base: str, root: Path = REPO) -> list[str] | None:
-    """Paths changed on this branch against *base*, plus the working tree; None if git cannot say."""
+    """Paths changed on this branch against *base*, plus the working tree; None if git cannot say.
+
+    ``--no-renames``: with rename detection on (git's default) a moved file is listed by its new path only, so a
+    module moved into ``_Docs/Markdowns/`` read as a docs-only change and its importers were never asked about.
+    A rename is a deletion and an addition, and both paths are changes."""
     try:
         committed = subprocess.run(
-            ["git", "diff", "--name-only", f"{base}...HEAD"], cwd=root,
+            ["git", "diff", "--name-only", "--no-renames", f"{base}...HEAD"], cwd=root,
             capture_output=True, text=True, encoding="utf-8", check=True).stdout.split()
         working = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD"], cwd=root,
+            ["git", "diff", "--name-only", "--no-renames", "HEAD"], cwd=root,
             capture_output=True, text=True, encoding="utf-8", check=True).stdout.split()
         untracked = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"], cwd=root,

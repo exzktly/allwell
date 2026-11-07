@@ -21895,7 +21895,9 @@ you're in before you type the command.
 - **Change scope** (`scripts/change_scope.py`). Before the fast lane runs, the
   change is classified against its base (`origin/main`, or
   `$ALLWELL_SCOPE_BASE`; committed, uncommitted and untracked paths, through
-  `lane_needed.changed_paths`) into one of three scopes, and the fast lane and
+  `lane_needed.changed_paths`, which lists a rename as both its old and its new
+  path, so a module moved into `_Docs/Markdowns/` is still a code change) into
+  one of three scopes, and the fast lane and
   lint follow it:
   - **version-only**: every changed path is `version.py`, and every changed
     line in it is the `__version__ = "..."` assignment. No test runs and lint is

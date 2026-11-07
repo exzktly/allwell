@@ -368,6 +368,23 @@ def _wrapped_to_figure(fig, lines: list, *, left: float = 0.07, size_pt: float =
     return out, first
 
 
+#: The most of a figure's height its footer may take, as a share: past it the panels would be a sliver, or — the footer
+#: reserving room it cannot have — written over them.
+_FOOTER_MAX_SHARE = 0.38
+
+
+def _footer_that_fits(fig, lines: list, share: float = _FOOTER_MAX_SHARE) -> list:
+    """*lines* (already broken to the figure's width) cut to what *share* of the figure's height holds: the leading
+    lines, then one saying how many were left out and how to read them. A phone's figure is a few hundred points tall
+    and its footer is many lines of its narrow width, which was drawn over the panels' lowest part, the time axis
+    included; a figure with room for every line is returned whole."""
+    fit = max(2, int(share / _line_step(fig)))
+    if len(lines) <= fit:
+        return lines
+    left_out = len(lines) - (fit - 1)
+    return lines[:fit - 1] + [f"… {left_out} more line{'s' if left_out != 1 else ''}: enlarge the card to read them."]
+
+
 def _wrap_label(label: str, rows: int) -> str:
     """A y label short enough for its panel: on a grid of more than one row it is broken onto at most three lines.
 
@@ -2115,6 +2132,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
     # The panels sit above however many lines the footer holds (two were reserved, and four or five ran into the
     # time axis's label), as the Distribution view's footer does; each line is broken to the figure's width.
     lines, _first = _wrapped_to_figure(fig, lines)
+    lines = _footer_that_fits(fig, lines)
     step = _line_step(fig)
     _adjust(fig, bottom=0.10 + _FOOTER_BASE + step * max(2, len(lines)))
     for i, text in enumerate(reversed(lines)):
@@ -2183,6 +2201,7 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
     if note:
         lines.insert(0, note)
     lines, _first = _wrapped_to_figure(fig, lines, left=0.08)
+    lines = _footer_that_fits(fig, lines)
     step = _line_step(fig)
     # The ring label is broken to the width of the axes it sits under, and the second line is room the axes give up.
     ring_label = _fit_text("Ring (lattice steps from the central nanowell)", _figure_pt(fig)[0] * (0.88 - 0.08),

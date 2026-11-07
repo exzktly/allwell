@@ -890,7 +890,7 @@ def _crops_header(ctx, parent) -> QWidget:
                       "follows the selection.")
     button.clicked.connect(lambda _=False: nwc.pop_out_crops(ctx))
     ctx.widgets.register("_nw_popout_btn", button)
-    ctx.widgets.register("_nw_open_popout", lambda: _popout_window(ctx).show_raised())
+    ctx.widgets.register("_nw_open_popout", lambda: _open_popout(ctx))
     row.addWidget(title)
     row.addWidget(_cells_box(ctx, "_nw_strip_cells_box"))
     row.addWidget(_image_channel_combo(ctx, "_nw_strip_image_channel_cb"))
@@ -908,6 +908,18 @@ def _go_to_button(ctx, name: str, parent) -> QPushButton:
     button.clicked.connect(lambda _=False: nwc.go_to_site_in_blink(ctx))
     ctx.widgets.register(name, button)
     return button
+
+
+def _open_popout(ctx) -> None:
+    """Show the pop-out. A window first opened at a desk and opened again after phone layout came on folds its controls
+    away once, as one built on a phone does; the person's own Show / Hide controls choice stands after that."""
+    window = _popout_window(ctx)
+    if nw_phone.on_phone() and not getattr(window, "_folded_for_phone", False):
+        toggle = ctx.widgets.get_or_none("_nw_popout_controls_btn")
+        if toggle is not None:
+            toggle.setChecked(True)
+    window._folded_for_phone = nw_phone.on_phone() or getattr(window, "_folded_for_phone", False)
+    window.show_raised()
 
 
 def _popout_window(ctx):
@@ -928,7 +940,14 @@ def _popout_window(ctx):
                           build_popout_view_controls(ctx, window, timepoint_text),
                           build_popout_window_controls(ctx, window),
                           last=(ctx.widgets.get("_nw_popout_go_to_btn"), ctx.widgets.get("_nw_popout_save_btn")))
-    layout.addLayout(build_popout_chrome(ctx, window, rows))
+    for combo in rows.findChildren(QComboBox):
+        # A combo sizes to its longest entry (a metric's whole name), which made the row wider than a phone; it takes
+        # room for twelve characters and elides the rest, its list still showing every entry in full.
+        combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(12)
+    # On a phone the figure is what the window is for and a screen is short, so the controls start folded away behind
+    # "Show controls": opened first they filled the window and left the figure off the screen.
+    layout.addLayout(build_popout_chrome(ctx, window, rows, hidden=nw_phone.on_phone()))
     layout.addWidget(rows)
     card = PlotCard(window, figsize=(_FIG_W, _FIG_H * 0.8), constrained=False, header=False)
     card.setFigureTitle("")

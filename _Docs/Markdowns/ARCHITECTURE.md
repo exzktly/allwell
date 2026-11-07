@@ -943,7 +943,7 @@ axes, which `set_position` turns off, without which the engine moves nothing, an
 keeping the panels out of the band the figure's own text takes below the
 renderer's bottom margin or above its top one (`_figure_text_band`, passed to the
 engine as its `rect`: constrained layout ignores figure-level text, so the
-Nanowells page's footer was drawn across its lowest dots) — and
+Nanowells page's footer was drawn across its lowest dots; a text whose `gid` ends in `footer` is banded whatever `subplotpars.bottom` says, since the engine leaves that stale) — and
 `_fit_labels_to_phone` fits every title into its axes' width (`_fit_title`): one
 line when it fits, else **two lines and never more** — broken at " — " when the
 title has that clause (so "— t = 0 h" stays together), else at the space that
@@ -12803,7 +12803,7 @@ as there), or *None* (no stripe). `_window_controller.composite_colouring` resol
 `(label, colour)` entries — only the values drawn, from `variable_series.legend_entries` — and a variable deleted since
 it was chosen falls back to *Source well*, the key's title saying so. `_composite_render._draw_key` draws the key under
 the title (`nw-composite-key`, up to eight entries a row, the panels lowered for each row past the first), and the
-caption names what the stripe is; the wells' names above the patches are plain text. The pop-out's controls (image, panels and window builders, each still a box layout of its own) are moved by `tab_view._flow_controls` into one wrapping `FlowLayout` toolbar that closes with Go to nanowell and Save, so they take as few lines as the width allows; each caption travels with its box in a `flow_group`, and a group is hidden whole. The toolbar is one widget (`tab_view._popout_window`), folded by `window_view.build_popout_chrome`'s
+caption names what the stripe is; the wells' names above the patches are plain text. In phone layout the pop-out opens with its controls folded (`build_popout_chrome(hidden=...)`, `tab_view._open_popout` folds one first opened at a desk), so the figure is the first thing in the window; its combos take room for twelve characters, so the Hex layout's row no longer outruns the width. Trajectories and Position cut a footer that would take more than `renderer._FOOTER_MAX_SHARE` of the figure's height to its leading lines plus one saying how many were left out (`_footer_that_fits`); a Distribution footer goes to Details instead. Test detection's controls and the Saved Plots card's buttons wrap or split onto lines rather than setting a minimum width wider than a phone, and Home ▸ Cell Gating's **Jump to the CDFs** button scrolls to the figure under its controls. The pop-out's controls (image, panels and window builders, each still a box layout of its own) are moved by `tab_view._flow_controls` into one wrapping `FlowLayout` toolbar that closes with Go to nanowell and Save, so they take as few lines as the width allows; each caption travels with its box in a `flow_group`, and a group is hidden whole. The toolbar is one widget (`tab_view._popout_window`), folded by `window_view.build_popout_chrome`'s
 **Hide controls** toggle, which sits above them with **Reset zoom** and so stays visible when they are hidden. **Reset zoom**
 (`_window_controller.reset_composite_zoom`: `composite_view = None`, redraw) is shown for the hex layout in Window mode and
 enabled while `composite_view` is set; `_nw_popout_zoom_refresh` keeps it so, called by the wheel and pan

@@ -265,10 +265,11 @@ _RESET_ZOOM_TIP = ("Back to the whole composite: undoes the wheel's zoom and a d
                    "already whole; the Hex layout only.")
 
 
-def build_popout_chrome(ctx, window, rows) -> QHBoxLayout:
+def build_popout_chrome(ctx, window, rows, hidden: bool = False) -> QHBoxLayout:
     """The bar above the pop-out's control rows, always visible: **Hide controls** (and **Show controls**) folds
     the rows away — the figure takes the whole window — and **Reset zoom** returns the hex composite to the whole
-    of it after the wheel or a drag moved it. *rows* is the widget holding the control rows.
+    of it after the wheel or a drag moved it. *rows* is the widget holding the control rows, folded away from the start
+    when *hidden* (a phone's window opens on the figure).
 
     Registers ``_nw_popout_controls_btn``, ``_nw_popout_reset_zoom_btn`` and ``_nw_popout_zoom_refresh`` (the reset
     button shown for the hex layout in Window mode and enabled while the view is not whole — the controller calls it
@@ -298,7 +299,8 @@ def build_popout_chrome(ctx, window, rows) -> QHBoxLayout:
     reg.register("_nw_popout_controls_btn", toggle)
     reg.register("_nw_popout_reset_zoom_btn", reset)
     reg.register("_nw_popout_zoom_refresh", zoom_refresh)
-    set_hidden(False)
+    toggle.setChecked(hidden)
+    set_hidden(hidden)
     zoom_refresh()
     bar = QHBoxLayout()
     bar.addWidget(toggle)

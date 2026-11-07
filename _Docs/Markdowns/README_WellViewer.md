@@ -6682,7 +6682,9 @@ Save controls apply as they do to one nanowell, and a click on a row selects its
 A row whose crops are not yet cut says so; one that cannot be cut says why.
 
 The pop-out's bar of controls can be folded away: **Hide controls** (top left of the pop-out) gives the figure the whole
-window and becomes **Show controls**; **Reset zoom** stays in view either way.
+window and becomes **Show controls**; **Reset zoom** stays in view either way. On a phone the pop-out opens with its controls already folded, so the figure is what you see first; tap **Show controls** to change what it draws.
+
+Home ▸ Cell Gating has a **Jump to the CDFs** button at the top that scrolls to the cumulative distributions, which sit under the gate controls. On a phone's Nanowells ▸ Trajectories and Position, a footer too long for the figure is cut and ends with a line saying how many lines were left out; enlarge the card to read them.
 
 **Layout: Hex** draws the same nanowells all at once as an **artificial hex array — a composite, not a well**. Each
 source well has its own labelled patch, and inside a patch the nanowells fill the hexagon **row by row from its top

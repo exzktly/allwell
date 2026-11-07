@@ -226,7 +226,10 @@ first even with Inter installed) and WenQuanYi Zen Hei, the face the baseline dr
 `ⓘ` from, so the runner matches and compares. The dataset is built at one fixed
 path (`SNAPSHOT_DATASET`), not under pytest's numbered temp directory: its path is
 drawn on the Analyze form and Home's cards, and a path of another length wrapped
-those lines differently.
+those lines differently. A geometry field that moved by one pixel is not reported
+(`phone_snapshot.GEOMETRY_TOLERANCE_PX`): with the same fonts the runner still
+rounds some glyph advances a pixel the other way; two pixels, any other field, and a
+widget that appears or goes are (`tests/test_phone_snapshot_diff.py`).
 
 **The phone point.** Every size in phone layout is written in phone points
 (`u`): the short side of the screen's geometry divided by 390, the width in

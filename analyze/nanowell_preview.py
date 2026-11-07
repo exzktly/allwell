@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.worker_bridge import run_off_thread
+from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 from ui.nanowell_sites import FUSED_COLOUR, MIN_LABEL_DIAMETER_PX, STATE_COLOURS, gray_qimage, paint_site
 from util.nanowell_anchors import origin_phrase
 
@@ -161,7 +162,9 @@ class NanowellPreviewWindow(QWidget):
         self._bridge = None
         self._result = None
         layout = QVBoxLayout(self)
-        top = QHBoxLayout()
+        controls = QWidget(self)
+        top = FlowLayout(controls, h_spacing=8)
+        sync_flow_height(controls)
         self._well_cb = QComboBox(self)
         self._well_cb.addItems(sorted(wells))
         self._tp_cb = QComboBox(self)
@@ -175,21 +178,21 @@ class NanowellPreviewWindow(QWidget):
         self._sites_cb.setChecked(True)
         self._sites_cb.setToolTip("Draw each nanowell's coloured outline and address over the montage. Off, the "
                                   "montage alone, to see the edges the outlines would cover.")
-        top.addWidget(QLabel("Well", self))
-        top.addWidget(self._well_cb)
-        top.addWidget(QLabel("Timepoint", self))
-        top.addWidget(self._tp_cb)
-        top.addWidget(self._run_btn)
-        top.addStretch(1)
-        top.addWidget(self._sites_cb)
-        top.addWidget(QLabel("Zoom", self))
-        top.addWidget(self._zoom_cb)
-        layout.addLayout(top)
+        # The controls flow onto as many lines as the width allows, each caption kept with its box: one fixed row of
+        # nine controls made a phone's window a column of one control per line, with the montage half a screen down.
+        for combo in (self._well_cb, self._tp_cb, self._zoom_cb):
+            combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(6)
+        for item in (flow_group(self, "Well", self._well_cb), flow_group(self, "Timepoint", self._tp_cb),
+                     self._run_btn, self._sites_cb, flow_group(self, "Zoom", self._zoom_cb)):
+            top.addWidget(item)
+        layout.addWidget(controls)
         self._summary = QLabel("Choose a well and a timepoint, then Run.", self)
         self._summary.setWordWrap(True)
         self._summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self._summary)
         self._legend = QLabel(self._legend_html(), self)
+        self._legend.setWordWrap(True)
         layout.addWidget(self._legend)
         self._montage_label = QLabel(self)
         self._montage_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)

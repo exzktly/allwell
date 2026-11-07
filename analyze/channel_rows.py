@@ -137,6 +137,7 @@ class AnalyzeChannelRowsMixin:
         feedback said it would succeed.
         """
         self._refresh_schema_preview()
+        self._refresh_seg_channel_options()
         self._refresh_segmentation_hints()
 
     def _refresh_storage_rows(self) -> None:

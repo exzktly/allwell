@@ -1910,7 +1910,9 @@ def _figure_text_band(fig) -> tuple | None:
         if text.get_transform() != fig.transFigure:
             continue
         extent = text.get_window_extent(renderer)
-        if y < pars.bottom:
+        if y < pars.bottom or str(text.get_gid() or "").endswith("footer"):
+            # A footer is named as one: a renderer's ``subplots_adjust`` margin is not what ``pars.bottom`` still says
+            # once an engine has laid the figure out, and the lines above it were counted as panel text.
             bottom = max(bottom, extent.y1 / height)
         elif y > pars.top:
             top = min(top, extent.y0 / height)

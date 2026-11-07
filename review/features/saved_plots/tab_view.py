@@ -588,8 +588,10 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
         details.addWidget(summary)
         v.addWidget(details)
 
-    # Actions
+    # Actions, on two lines: ordering and restoring above, then Rename, Export and Delete. One row of seven buttons set
+    # the card's minimum width, which on a phone was wider than the screen and cut the plot off at the right.
     actions = QHBoxLayout()
+    more = QHBoxLayout()
     up_btn = QPushButton("▲", card)
     up_btn.setProperty("variant", "secondary")
     up_btn.setToolTip("Move up")
@@ -611,17 +613,19 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
     rename_btn = QPushButton("Rename", card)
     rename_btn.setProperty("variant", "secondary")
     rename_btn.clicked.connect(lambda _=False, _id=rec.id, _t=rec.title: _rename(ctx, _id, _t))
-    actions.addWidget(rename_btn)
+    more.addWidget(rename_btn)
     export_btn = QPushButton("Export…", card)
     export_btn.setProperty("variant", "secondary")
     export_btn.clicked.connect(lambda _=False, _id=rec.id: C.export_saved_plot(ctx, _id))
-    actions.addWidget(export_btn)
-    actions.addStretch(1)
+    more.addWidget(export_btn)
+    more.addStretch(1)
     del_btn = QPushButton("Delete", card)
     del_btn.setProperty("variant", "secondary")
     del_btn.clicked.connect(lambda _=False, _id=rec.id: C.delete_saved_plot(ctx, _id))
-    actions.addWidget(del_btn)
+    more.addWidget(del_btn)
+    actions.addStretch(1)
     v.addLayout(actions)
+    v.addLayout(more)
 
     return card
 

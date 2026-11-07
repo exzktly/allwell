@@ -173,6 +173,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     _build_inclusion_section(ctx, control_frame, cf_layout)
     _build_fraction_on_section(ctx, control_frame, cf_layout)
     _build_readout_section(ctx, control_frame, cf_layout)
+    root.addWidget(_jump_row(ctx, parent, outer_scroll))
     root.addWidget(control_frame)
 
     # QC edits rewrite QC_Pass without running the gating pass, and the QC
@@ -202,6 +203,28 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # Paint the themed empty state now so the canvas is never a bare white
     # block before a dataset loads (it only gets painted on data otherwise).
     _cell_gating_plot_cdf(ctx)
+
+
+def _jump_row(ctx, parent: QWidget, scroll: QScrollArea) -> QWidget:
+    """A button at the top of the page that scrolls to the CDFs, which sit under every control they are read against —
+    on a phone that is more than two screens down, and nothing at the top said the plot was there at all."""
+    button = QPushButton("Jump to the CDFs ↓", parent)
+    button.setProperty("variant", "secondary")
+    button.setToolTip("Scroll down to the cumulative distributions the thresholds below are read against.")
+
+    def jump() -> None:
+        target = ctx.widgets.get_or_none("_cell_gating_plot_scroll")
+        if target is not None:
+            scroll.verticalScrollBar().setValue(target.mapTo(scroll.widget(), target.rect().topLeft()).y())
+
+    button.clicked.connect(lambda _=False: jump())
+    ctx.widgets.register("_cell_gating_jump_cdf_btn", button)
+    host = QWidget(parent)
+    row = QHBoxLayout(host)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.addWidget(button)
+    row.addStretch(1)
+    return host
 
 
 def _lead_in(parent: QWidget, text: str) -> QLabel:

@@ -89,17 +89,27 @@ if command[:2] == ["bash", "-s"]:
     script = stdin_bytes.decode("utf-8", "replace")
 else:
     script = " ".join(command)
+# The app packs every command line (``remote_transport.pack_for_login_shell``); faults and the log are about the
+# command the host runs, so they read it decoded. What runs below is still the packed text, as on a real host.
+subject = script
+import base64 as _b64, gzip as _gz, re as _re
+_packed = _re.search(r"printf %s ([A-Za-z0-9+/=]+) \| base64 -d \| gzip -dc", script)
+if _packed:
+    try:
+        subject = _gz.decompress(_b64.b64decode(_packed.group(1))).decode("utf-8", "replace")
+    except Exception:
+        pass
 with open(os.path.join(ctl, "ssh_log"), "a", encoding="utf-8") as fh:
-    fh.write(script.replace("\n", "\\n") + "\n")
+    fh.write(subject.replace("\n", "\\n") + "\n")
 try:
     with open(os.path.join(ctl, "ssh_fail"), encoding="utf-8") as fh:
         patterns = [ln.rstrip("\n") for ln in fh if ln.strip()]
 except FileNotFoundError:
     patterns = []
-if any(all(part.strip() in script for part in p.split("&&")) for p in patterns):
+if any(all(part.strip() in subject for part in p.split("&&")) for p in patterns):
     sys.stderr.write("ssh: connect to host standin port 22: Connection timed out\n")
     sys.exit(255)
-action = take_rule(ctl, "ssh_rules", script)
+action = take_rule(ctl, "ssh_rules", subject)
 if action == "fail":
     sys.stderr.write("ssh: connect to host standin port 22: Connection timed out\n")
     sys.exit(255)

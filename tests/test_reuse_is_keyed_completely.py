@@ -200,8 +200,10 @@ REUSE_CONTRACTS = {
     "nanowell_masks.mask_key": {
         "identity": (
             "the segmenter itself: for Cellpose its model, the diameter it "
-            "resizes to, the Cellpose and Torch versions, the device kind and "
-            "the code between Cellpose and the labels. Another segmenter's "
+            "resizes to, the Cellpose and Torch versions, the device kind, the "
+            "precision the model runs in (bfloat16 or float32: two GPUs of one "
+            "kind can differ) and the code between Cellpose and the "
+            "labels (tests/test_nanowell_masks.py). Another segmenter's "
             "masks for the same pixels are another segmentation"),
         "pixels": (
             "the input's bytes. Everything upstream that changes what the "

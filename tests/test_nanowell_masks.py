@@ -6,6 +6,7 @@ was set segments nothing again — is ``test_nanowell_mask_reuse_run.py``.
 
 from __future__ import annotations
 
+import json
 import logging
 
 import numpy as np
@@ -163,15 +164,24 @@ def test_labels_round_trip_in_the_smallest_type_that_holds_them(tmp_path):
     np.testing.assert_array_equal(reread.wrap(segment, "0h")(_image(shape=(4, 4))), big)
 
 
+def _stub_torch(monkeypatch, *, bf16: bool = False, version: str = "2.3.0"):
+    """A stand-in for Torch (not installed here): its version, and whether its GPU computes in bfloat16."""
+    import sys
+    from types import SimpleNamespace
+
+    torch = SimpleNamespace(__version__=version, cuda=SimpleNamespace(is_bf16_supported=lambda: bf16))
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    return torch
+
+
 def test_cellposes_identity_names_what_decides_its_labels(monkeypatch):
     """The production segmenter declares an identity, and each part of it changes it (stubbed: no Torch here)."""
-    import sys
     from types import SimpleNamespace
 
     from pipeline import cellpose, nanowell_measure as nm
 
     device = SimpleNamespace(type="cpu")
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(__version__="2.3.0"))
+    _stub_torch(monkeypatch)
     monkeypatch.setattr(cellpose, "_cellpose_device", lambda: (device, "stub"))
     base = nm.cellpose_segmenter(20.0, model_type="cpsam").cache_identity()
     assert base == nm.cellpose_segmenter(20.0, model_type="cpsam").cache_identity()
@@ -180,11 +190,76 @@ def test_cellposes_identity_names_what_decides_its_labels(monkeypatch):
     device.type = "cuda"
     assert nm.cellpose_segmenter(20.0, model_type="cpsam").cache_identity() != base
     device.type = "cpu"
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(__version__="2.4.0"))
+    _stub_torch(monkeypatch, version="2.4.0")
     assert nm.cellpose_segmenter(20.0, model_type="cpsam").cache_identity() != base
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(__version__="2.3.0"))
+    _stub_torch(monkeypatch)
     monkeypatch.setattr(masks, "code_digest", lambda *m: "edited")
     assert nm.cellpose_segmenter(20.0, model_type="cpsam").cache_identity() != base
+
+
+def _precision_of(identity: str):
+    return json.loads(identity).get("precision")
+
+
+def test_the_precision_is_part_of_cellpose_s_identity_without_loading_the_model(monkeypatch):
+    """Two GPUs of one device kind run the same model in different precisions — bfloat16 on an Ampere card,
+    float32 on a T4 — and give different labels for the same crop, so masks sent between hosts
+    (``services.remote_registration``) must not be answered across that line. The precision is the one
+    ``cellpose.planned_precision`` decides, read with no model built: a re-run every crop of which is a kept mask
+    never loads Cellpose."""
+    from types import SimpleNamespace
+
+    from pipeline import cellpose, nanowell_measure as nm
+
+    def no_model(*_a, **_k):
+        raise AssertionError("working out the identity loaded the Cellpose model")
+
+    monkeypatch.setattr(cellpose, "_cellpose_model", no_model)
+    monkeypatch.setattr(cellpose, "_CELLPOSE_MODELS", {})
+    monkeypatch.setattr(cellpose, "cellpose_major", lambda version=None: 4)
+    monkeypatch.setattr(cellpose, "_cellpose_device", lambda: (SimpleNamespace(type="cuda"), "stub"))
+    _stub_torch(monkeypatch, bf16=True)
+    assert _precision_of(nm.cellpose_segmenter(20.0, model_type="cpsam").cache_identity()) == "bfloat16"
+    _stub_torch(monkeypatch, bf16=False)                # a T4: the same device kind, float32 with TF32
+    assert _precision_of(nm.cellpose_segmenter(20.0, model_type="cpsam").cache_identity()) == "float32+tf32"
+    _stub_torch(monkeypatch, bf16=True, version="2.0.1")   # below BF16_MIN_TORCH
+    assert _precision_of(nm.cellpose_segmenter(20.0, model_type="cpsam").cache_identity()) == "float32+tf32"
+    monkeypatch.setattr(cellpose, "_cellpose_device", lambda: (SimpleNamespace(type="cpu"), "stub"))
+    assert _precision_of(nm.cellpose_segmenter(20.0, model_type="cpsam").cache_identity()) == "float32"
+
+
+def test_a_model_that_fell_back_to_float32_writes_its_masks_under_float32(monkeypatch, tmp_path):
+    """A GPU that offers bfloat16 plans it, but a model whose bfloat16 first pass failed is rebuilt in float32
+    (``cellpose._bfloat16_or_float32``) and records so. The masks it makes are float32 masks: they are written
+    under the float32 identity, so a later lookup by that identity finds them and a bfloat16 one does not."""
+    from types import SimpleNamespace
+
+    from pipeline import cellpose, nanowell_measure as nm
+
+    models: dict = {}
+    monkeypatch.setattr(cellpose, "_CELLPOSE_MODELS", models)
+    monkeypatch.setattr(cellpose, "cellpose_major", lambda version=None: 4)
+    monkeypatch.setattr(cellpose, "_cellpose_device", lambda: (SimpleNamespace(type="cuda"), "stub"))
+    _stub_torch(monkeypatch, bf16=True)
+    segment = nm.cellpose_segmenter(20.0, model_type="cpsam")
+    planned = segment.cache_identity()
+    assert _precision_of(planned) == "bfloat16"
+
+    def fake_segment(image, *, diameter, lowhigh=None, max_size_fraction=None, **_options):
+        # The first call builds the model, which falls back: what _cellpose_model leaves behind.
+        models["cpsam"] = SimpleNamespace(**{cellpose.PRECISION_ATTR: "float32+tf32"})
+        return (np.asarray(image) > 0.5).astype(np.int32) * 3
+
+    monkeypatch.setattr(cellpose, "_segment_cellpose", fake_segment)
+    store = _store(tmp_path)
+    labels = store.wrap(segment, "0h")(_image(), lowhigh=(0.1, 0.9), max_size_fraction=1.0)
+    store.save()
+
+    built = segment.cache_identity()
+    assert _precision_of(built) == "float32+tf32"
+    kept = _store(tmp_path)._prior
+    assert set(kept) == {masks.mask_key(built, _image(), (0.1, 0.9), 1.0)}
+    np.testing.assert_array_equal(masks._unpack(kept[masks.mask_key(built, _image(), (0.1, 0.9), 1.0)][1]), labels)
 
 
 def test_the_code_digest_moves_when_a_function_s_code_does(tmp_path, monkeypatch):

@@ -11959,11 +11959,21 @@ when `mask_key` matches: the input's bytes, dtype and shape, `lowhigh`, `max_siz
 `cache_identity`. Anything upstream that changes what the segmenter sees — template, levels, crop window,
 registration, images — changes the bytes and misses, so no reuse rests on an argument that the input should be
 the same. Cellpose's identity (`nanowell_measure.cellpose_segmenter`) is the diameter it resizes to, its options,
-the Cellpose and Torch versions, the device kind and `code_digest` of `pipeline.cellpose` and
+the Cellpose and Torch versions, the device kind, the precision the model runs in, and `code_digest` of
+`pipeline.cellpose` and
 `pipeline.cellpose_masks` (the compiled code, with each function's default arguments and every module constant of a
 plain type, since a code object holds neither — the run leaves Cellpose's `flow_threshold` and `cellprob_threshold`
 at their signature defaults — so an edit there retires every mask without a version to remember); a
-segmenter with no identity — every test stand-in — is never cached. What is stored is the segmenter's raw labels,
+segmenter with no identity — every test stand-in — is never cached. The precision is `cellpose.planned_precision`
+(bfloat16 on a GPU that computes in it under Cellpose 4 and a recent enough Torch, float32 with TF32 on any other
+GPU, float32 on the CPU), the one decision `cellpose._build_model` builds by, so the key is worked out with no model
+loaded and a re-run answered wholly from kept masks never loads Cellpose: an A10G runs bfloat16 and a T4 float32,
+and masks sent between hosts of one device kind are not answered across that line. Once a worker has built its
+model the identity reads the precision the model records (`cellpose.PRECISION_ATTR`, `built_precision`), which
+differs from the plan only when a bfloat16 model's first pass failed and it was rebuilt in float32 (logged as a
+warning by `_bfloat16_or_float32`); `MaskStore.wrap` asks for the identity again after each segmenter call and
+writes what it just made under the identity after the call, so a fallen-back model's masks are kept as float32
+masks. What is stored is the segmenter's raw labels,
 before `segment_sites` drops a neighbour's objects or renumbers, so everything after it is recomputed. Each entry
 records its timepoint; a save keeps the entries this run used and those of timepoints it never segmented, and
 drops the rest. The run log names, per well, how many segmenter inputs were answered. Measured on the synthetic

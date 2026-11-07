@@ -36,6 +36,9 @@ class CellposeUnavailable(RuntimeError):
 # Per-worker Cellpose models, keyed by model name, so a run can choose a model
 # without silently reusing another model's cache. Lazy.
 _CELLPOSE_MODELS: dict[str, object] = {}
+#: The attribute :func:`_build_model` stamps on each model it builds: the precision its network runs in
+#: (``bfloat16``, ``float32+tf32`` or ``float32``), read by the kept masks' key (``nanowell_measure.cellpose_segmenter``).
+PRECISION_ATTR = "_aw_precision"
 
 #: The models each major version of Cellpose ships, by the name a run asks for. The two families do not overlap and
 #: cannot be installed side by side: Cellpose 4 replaced every Cellpose 3 model with Cellpose-SAM, and its
@@ -134,17 +137,43 @@ def _cellpose_model(model_type: str = DEFAULT_MODEL):
     return model
 
 
-def _build_model(cp_models, key: str, major: int | None, device):
-    """``(model, description suffix)``: *key*'s Cellpose model built on *device*. The suffix names the precision
-    the model runs in, and TF32 where it was switched on."""
-    suffix = ", TF32" if _allow_tf32(device) else ""
-    if major is not None and major >= 4:
-        # bfloat16 halves the weights' memory, on a GPU that computes in it; elsewhere float32 (an older
-        # GPU without bfloat16, or the CPU, where it is slow).
-        import torch
+def planned_precision(device, major: int | None = None) -> str:
+    """The precision a Cellpose model built on *device* runs in, decided without building it: ``bfloat16`` on a GPU
+    that computes in it under Cellpose 4 and a Torch of at least ``BF16_MIN_TORCH`` (bfloat16 halves the weights'
+    memory); else ``float32+tf32`` on a GPU (:func:`_allow_tf32`) and ``float32`` on the CPU, where bfloat16 is slow.
+    *major* is the Cellpose major version, :func:`cellpose_major` when ``None``.
 
-        bf16 = (device.type == "cuda" and bool(torch.cuda.is_bf16_supported())
-                and _torch_at_least(torch.__version__, BF16_MIN_TORCH))
+    The one decision :func:`_build_model` builds by and the kept masks' key names
+    (``nanowell_measure.cellpose_segmenter``), so the key needs no model loaded. A bfloat16 model whose first pass
+    fails is rebuilt in float32 (:func:`_bfloat16_or_float32`); the built model records what it really runs in
+    (``PRECISION_ATTR``), and the key reads that once the model exists (:func:`built_precision`)."""
+    if getattr(device, "type", None) != "cuda":
+        return "float32"
+    import torch
+
+    major = cellpose_major() if major is None else major
+    if (major is not None and major >= 4 and bool(torch.cuda.is_bf16_supported())
+            and _torch_at_least(torch.__version__, BF16_MIN_TORCH)):
+        return "bfloat16"
+    return "float32+tf32"
+
+
+def built_precision(model_type: str | None = None) -> str | None:
+    """The precision this worker's already-built *model_type* model records (``PRECISION_ATTR``); ``None`` while it
+    has not been built. Never builds it."""
+    key = str(model_type or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    model = _CELLPOSE_MODELS.get(key)
+    return None if model is None else getattr(model, PRECISION_ATTR, None)
+
+
+def _build_model(cp_models, key: str, major: int | None, device):
+    """``(model, description suffix)``: *key*'s Cellpose model built on *device*, in :func:`planned_precision`'s
+    precision. The suffix names the precision the model runs in, and TF32 where it was switched on."""
+    tf32 = _allow_tf32(device)
+    suffix = ", TF32" if tf32 else ""
+    float32 = "float32+tf32" if tf32 else "float32"
+    if major is not None and major >= 4:
+        bf16 = planned_precision(device, major) == "bfloat16"
 
         def build(half: bool):
             return cp_models.CellposeModel(gpu=device.type == "cuda", device=device, pretrained_model=key,
@@ -152,8 +181,13 @@ def _build_model(cp_models, key: str, major: int | None, device):
         model = build(bf16)
         if bf16:
             model, bf16 = _bfloat16_or_float32(model, lambda: build(False), key)
+        # What the model was built in, after the fallback: the same crop gives other labels in bfloat16 than in
+        # float32, and two GPUs of one device kind can differ here (an A10G runs bfloat16, a T4 cannot).
+        setattr(model, PRECISION_ATTR, "bfloat16" if bf16 else float32)
         return model, f"{suffix}, {'bfloat16' if bf16 else 'float32'}"
-    return cp_models.CellposeModel(model_type=key, gpu=device.type == "cuda", device=device), suffix
+    model = cp_models.CellposeModel(model_type=key, gpu=device.type == "cuda", device=device)
+    setattr(model, PRECISION_ATTR, float32)
+    return model, suffix
 
 
 #: Seconds a worker waits before trying again to load its Cellpose model onto a GPU that ran out of memory during

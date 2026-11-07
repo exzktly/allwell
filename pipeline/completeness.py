@@ -828,6 +828,27 @@ def utc_iso(epoch: float | None) -> str:
     return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def run_reached_its_end(info_path) -> bool:
+    """Whether the run that wrote *info_path* — a sidecar just pulled from a remote run — reached its own end.
+
+    A run rewrites the sidecar when it starts, keeping only the user-side blocks
+    (``pipeline.sidecar.USER_SIDE_BLOCKS``, which deliberately leave ``run_check``
+    out), and :func:`record_run_check` writes ``run_check`` — the
+    ``--no_run_check`` stub included — once every well has been visited, just
+    before the exit code is chosen. So the block's presence says the run got
+    there, whatever that exit code was: the pipeline also exits non-zero after
+    a complete pass when a well failed. Only meaningful for this run's own
+    sidecar; a local one left by an earlier run describes that run.
+    """
+    import json
+
+    try:
+        info = json.loads(Path(info_path).read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(info, dict) and isinstance(info.get("run_check"), dict)
+
+
 def failed_groups_by_well(info_path) -> dict:
     """Which FOV-groups the run recorded as failed, per well.
 
@@ -921,8 +942,9 @@ def record_run_check(
 
     *ended_early* says the run stopped before its end (see :func:`build_block`).
     The pipeline's own end-of-run call never passes it — reaching this call is
-    reaching the end — but the client-side check after a remote run does, from
-    the remote pipeline's exit status.
+    reaching the end — but the client-side check after a remote run does, when
+    the remote pipeline exited non-zero without having written its own
+    end-of-run block (:func:`run_reached_its_end`).
 
     *atomic_writer* is injected — ``pipeline.io._safe_atomic_text_write``, the
     same shape ``run_report.merge_into_pipeline_info`` takes — so this module

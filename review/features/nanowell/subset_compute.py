@@ -560,15 +560,39 @@ def bind_gates(subset: Subset, gates) -> Subset:
                         for c in subset.conditions), subset.match)
 
 
+#: The prefix of a metrics column that holds a nanowell metric as Cell Gating judges a scatter gate on it: counted
+#: without the scatter-gate layer (``controller.gate_tally(scatter_gates=False)``, as
+#: ``review/data/observations.nanowell_gate_values`` counts it). The page's own columns are counted after that layer,
+#: so a gate that leaves out every cell of a nanowell reads that nanowell's count as 0 there — inside a box over low
+#: counts, although the gate rejected it. :func:`_metric_values` reads these columns first (:func:`with_gate_values`).
+GATE_VALUE_PREFIX = "gate_value::"
+
+
+def with_gate_values(metrics: pd.DataFrame, ungated: pd.DataFrame | None, columns) -> pd.DataFrame:
+    """*metrics* with each of *columns* of *ungated* (the same site metrics, counted without the scatter-gate layer,
+    row for row) beside it under :data:`GATE_VALUE_PREFIX`; *metrics* unchanged when *ungated* is ``None``."""
+    if ungated is None or not len(metrics):
+        return metrics
+    present = [c for c in columns if c in ungated.columns]
+    extra = pd.DataFrame({GATE_VALUE_PREFIX + c: ungated[c].to_numpy() for c in present}, index=metrics.index)
+    return pd.concat([metrics, extra], axis=1)
+
+
 def _metric_values(metrics: pd.DataFrame, key: str) -> np.ndarray:
-    """A nanowell metric as the nanowell scatter plots it: the metrics column, or *occupied* (holds ≥ 1 cell) from
-    the count, as ``observation_compute`` derives it."""
-    if key == "occupied" and "n" in metrics:
-        n = pd.to_numeric(metrics["n"], errors="coerce").to_numpy(dtype=float)
+    """A nanowell metric as a scatter gate is judged on it: the :data:`GATE_VALUE_PREFIX` column when the metrics
+    carry one, else the metrics column, or *occupied* (holds ≥ 1 cell) from the count, as ``observation_compute``
+    derives it."""
+    def column(name):
+        own = GATE_VALUE_PREFIX + name
+        return own if own in metrics else name if name in metrics else None
+
+    if key == "occupied" and column("n") is not None:
+        n = pd.to_numeric(metrics[column("n")], errors="coerce").to_numpy(dtype=float)
         return np.where(np.isnan(n), np.nan, (n >= 1).astype(float))
-    if key not in metrics:
+    name = column(key)
+    if name is None:
         return np.full(len(metrics), np.nan)
-    return pd.to_numeric(metrics[key], errors="coerce").to_numpy(dtype=float)
+    return pd.to_numeric(metrics[name], errors="coerce").to_numpy(dtype=float)
 
 
 def _gate_values(metrics: pd.DataFrame, c: Condition) -> np.ndarray:

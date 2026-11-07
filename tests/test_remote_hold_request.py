@@ -27,7 +27,9 @@ from services.remote_hold import (
     cancel_script,
     hold_paths,
     parse_partition_limit,
+    StepTarget,
     parse_state,
+    step_launcher,
     sbatch_options,
 )
 from services.remote_srun_retry import BOOT_RETRY_PAUSE_S
@@ -310,6 +312,9 @@ def test_a_partition_limit_is_seconds_or_none(text, seconds):
     ("TresPerJob=gres/gpu:2", "gpu:2"),                  # sbatch --gpus=2
     ("TresPerTask=gres/gpu:1", "gpu:1"),                 # --gpus-per-task=1
     ("TresPerNode=gres/gpu:1 TresPerJob=gres/gpu:4", "gpu:1"),     # per-node wins
+    ("TresPerTask=cpu=8", ""),                           # --cpus-per-task=8 on Slurm 23.11+: not a GRES
+    ("TresPerTask=cpu=8,gres/gpu:1", "gpu:1"),           # --cpus-per-task with --gpus-per-task
+    ("TresPerNode=cpu=4 TresPerTask=gres/gpu:1", "gpu:1"),         # a field with no GRES is passed over
 ])
 def test_a_gpu_asked_for_any_way_is_asked_for_again_by_the_step(scontrol, gres):
     """Wrong implementation: reading only TresPerNode. A step does not inherit the GPU on Slurm 21.08+, so it would run
@@ -317,6 +322,15 @@ def test_a_gpu_asked_for_any_way_is_asked_for_again_by_the_step(scontrol, gres):
     state = parse_state(_state_text(scontrol=f"JobId=4001 JobState=RUNNING Reason=None NodeList=n1 {scontrol}",
                                     granted=GRANTED))
     assert state.gres == gres
+
+
+def test_a_cpu_only_granted_node_launches_its_step_with_no_gres():
+    """Wrong implementation: ``TresPerTask=cpu=8`` taken whole as GRES, which made every step on a CPU-only granted
+    node launch with ``--gres=cpu=8`` — rejected by srun (review tracker N15)."""
+    state = parse_state(_state_text(scontrol="JobId=4001 JobState=RUNNING Reason=None NodeList=n1 NumCPUs=8 "
+                                             "TresPerTask=cpu=8", granted=GRANTED))
+    launcher = step_launcher(StepTarget.from_state(state))
+    assert "--gres" not in launcher and "--jobid=4001" in launcher
 
 
 def test_a_scheduler_that_did_not_answer_is_neither_ended_nor_a_reason_to_request_another(cluster, nodes):

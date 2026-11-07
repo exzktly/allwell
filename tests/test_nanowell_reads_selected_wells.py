@@ -352,3 +352,36 @@ def test_a_selection_is_read_while_the_page_s_band_is_elsewhere(counted, qtbot):
     _select(qtbot, ctx, {"B01"})
     assert reads == ["A01", "B01"]
     assert nwc.nanowell_empty_reason(ctx) is None and nwc.page_wells(ctx) == ["B01"]
+
+
+def test_a_load_from_before_the_dataset_was_loaded_again_never_lands_its_wells(monkeypatch):
+    """The same folder loaded again (a re-run finished and Review reopened it) while a page load was still running.
+    The old load lands after the new one started: the well it read is the files as they were before the re-run, and
+    keeping it would hand those old tables to every later load that reuses what was read. The real call order —
+    load, ``nw_on_dataset_loaded``, load, the old result, the new one — with the worker stubbed so each result lands
+    exactly when the test says. The old and new parts differ, so keeping either one in place of the other shows."""
+    from types import SimpleNamespace
+
+    import core.worker_bridge as wb
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell.state import NanowellState
+
+    landed = []
+    monkeypatch.setattr(wb, "run_off_thread", lambda job, on_done, **_kw: landed.append(on_done) or SimpleNamespace())
+    for name in ("sync_focus_rule", "_call", "_refresh_empty", "redraw", "_apply_pending_anchor", "_load_config"):
+        monkeypatch.setattr(nwc, name, lambda *_a, **_k: None)
+    monkeypatch.setattr(nwc, "active_wells", lambda _ctx: ["A01"])
+    monkeypatch.setattr(nwc, "gate_version", lambda _ctx: 0)
+    st = NanowellState()
+    widgets = {"_nw_canvas": object(), "_nw_page_visible": lambda: True}
+    ctx = SimpleNamespace(state=SimpleNamespace(feature_slice=lambda _name: st,
+                                                dataset=SimpleNamespace(data_dir="/data/plate1"),
+                                                cell_gating=SimpleNamespace(scatter_gates=[])),
+                          widgets=SimpleNamespace(get_or_none=widgets.get))
+    nwc.ensure_loaded(ctx)                                  # reads the files as they were before the re-run
+    nwc.nw_on_dataset_loaded(ctx)                           # the same folder again: starts the second load
+    assert len(landed) == 2
+    landed[0]((None, None, "", {"A01": "before the re-run"}, None))
+    assert st.well_parts == {}
+    landed[1]((None, None, "", {"A01": "after the re-run"}, None))
+    assert st.well_parts == {"A01": "after the re-run"}

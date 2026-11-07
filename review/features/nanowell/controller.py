@@ -51,8 +51,8 @@ from review.features.nanowell.renderer import (
 from review.features.nanowell.state import (
     IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS,
 )
-from review.features.nanowell.series_compute import (crop_metric_lines, long_format, rim_focus_text, site_metrics,
-                                                     site_series)
+from review.features.nanowell.series_compute import (crop_metric_lines, long_format, metric_kinds, rim_focus_text,
+                                                     site_metrics, site_series)
 from review.features.nanowell.zoom_compute import (  # noqa: F401 — the band and its tests read them here
     BUTTON_STEP, WHEEL_STEP, ZOOM_IN_LIMIT, ZOOM_OUT_LIMIT, held_factor, notches,
 )
@@ -436,14 +436,23 @@ def _call(ctx, name: str) -> None:
         fn()
 
 
-def _metrics_of(data, baseline: str, gate=None, focus=None) -> pd.DataFrame | None:
+def _metrics_of(data, baseline: str, gate=None, focus=None, ungated=None) -> pd.DataFrame | None:
     """The metrics of *data*, ``None`` with no data; with no well read yet (nothing selected) an empty table, so
-    the page counts as loaded and says what to select rather than reading on."""
+    the page counts as loaded and says what to select rather than reading on.
+
+    *ungated* is the tally counted without the scatter-gate layer (``gate_tally(scatter_gates=False)``), given when a
+    gate is drawn on nanowell metrics: the metrics it gives are kept beside the page's own
+    (``subset_compute.with_gate_values``), so a *Subset* condition on that gate judges each nanowell on the values
+    Cell Gating judged its cells on."""
     if data is None:
         return None
     if not len(data.sites):
         return pd.DataFrame(columns=["well", "timepoint", "nw_q", "nw_r", "state"])
-    return site_metrics(data, baseline, gate, focus)
+    metrics = site_metrics(data, baseline, gate, focus)
+    if ungated is not None:
+        columns = [c for c in metric_kinds(data.channels) if c != "occupancy_class"]
+        metrics = ss.with_gate_values(metrics, site_metrics(data, baseline, ungated, focus), columns)
+    return metrics
 
 
 def gate_version(ctx) -> int:
@@ -561,6 +570,10 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         return
     st.request += 1
     request, baseline, focus = st.request, st.baseline, st.rim_focus_rule()
+    # A gate drawn on nanowell metrics is judged on counts without the scatter-gate layer; the subset's gate
+    # conditions read the same (``_metrics_of``). Decided here, on the GUI thread, from the gates as they are now.
+    nanowell_gated = bool(ss.nanowell_gates(getattr(ctx.state.cell_gating, "scatter_gates", None) or []))
+    epoch = st.parts_epoch                               # the tables' generation this load reads
     st.computing, st.pending_for, st.load_progress = True, (key, wells, version), None
     same_wells = wanted <= st.loaded_wells and st.loaded_for is not None and st.loaded_for[0] == key[0]
     previous = st.data if same_wells else None
@@ -579,14 +592,16 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         # while this runs moves the version, and the next draw asks again (``redraw``).
         if previous is not None:
             gate = gate_tally(ctx, previous, on_well=counter("gating"))
-            return previous, _metrics_of(previous, baseline, gate, focus), "", parts, gate
+            ungated = gate_tally(ctx, previous, scatter_gates=False) if nanowell_gated else None
+            return previous, _metrics_of(previous, baseline, gate, focus, ungated), "", parts, gate
         try:
             data = (load_nanowell_data(Path(data_dir), wells=sorted(wells), parts=parts, on_well=counter("tables"))
                     if data_dir else None)
         except NanowellSchemeError as exc:
             return None, None, str(exc), parts, None
         gate = gate_tally(ctx, data, on_well=counter("gating"))
-        return data, _metrics_of(data, baseline, gate, focus), "", parts, gate
+        ungated = gate_tally(ctx, data, scatter_gates=False) if nanowell_gated else None
+        return data, _metrics_of(data, baseline, gate, focus, ungated), "", parts, gate
 
     stage_now = ["tables"]
 
@@ -603,10 +618,11 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
 
     def done(result):
         data, metrics, error, read, gate = result
-        if st.parts_for == key[0]:
+        if st.parts_for == key[0] and st.parts_epoch == epoch:
             # The wells read are kept whichever request read them: a part is the well's files as read, valid for
             # every baseline and gate, so a superseded load's reads spare the next load reading them again. Merged
-            # rather than replaced, so a part another load (or the overlay's read) added meanwhile is kept too.
+            # rather than replaced, so a part another load (or the overlay's read) added meanwhile is kept too. Not
+            # across a reload of the same folder (``parts_epoch``): those reads are of the files before it.
             st.well_parts = {**read, **st.well_parts}
         if request != st.request:
             return                                       # a newer request has been made; this one is stale

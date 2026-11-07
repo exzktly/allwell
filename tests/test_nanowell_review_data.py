@@ -272,6 +272,21 @@ def test_a_well_without_the_named_baseline_timepoint_has_no_fold_change_and_says
     assert set(occupancy) == {f"baseline {NO_BASELINE_TIMEPOINT}"}
 
 
+def test_a_well_without_the_named_baseline_timepoint_still_draws_its_distribution(tmp_path):
+    """The Distribution figure labels that reason rather than raising ``KeyError`` on it (review tracker N1)."""
+    from review.features.nanowell import distribution_compute as dc
+
+    wells = {"A01": [_row("t_c", 0, 0, n=1, c=0.1), _row("t_a", 0, 0, n=2, c=0.2)],
+             "B01": [_row("t_c", 0, 0, n=3, c=0.3)]}
+    data = load_nanowell_data(_dataset(tmp_path, wells, starts={k: STARTS[k] for k in ("t_c", "t_a")}))
+    metrics = site_metrics(data, baseline_at("t_a"))
+    model = dc.distribution_model(metrics, "count_fc", channels=list(data.channels),
+                                  groups={"A01": ["A01"], "B01": ["B01"]}, baseline=baseline_at("t_a"))
+    b01 = next(p for p in model.panels if p.title == "B01")
+    assert b01.swarms[0].excluded == {f"baseline {NO_BASELINE_TIMEPOINT}": 1}
+    assert dc.reason_label(f"baseline {NO_BASELINE_TIMEPOINT}") == "baseline timepoint not in this well"
+
+
 def test_a_baseline_that_is_neither_a_rule_nor_a_timepoint_is_refused(tmp_path):
     data = load_nanowell_data(_dataset(tmp_path, {"A01": _series_well()}))
     for bad in ("latest", "tp:", "t_d"):

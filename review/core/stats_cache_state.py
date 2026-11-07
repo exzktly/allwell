@@ -49,6 +49,11 @@ class StatsCacheState:
     #: populations). A surface that computes from the included cells outside this cache — the Nanowells page's
     #: gated counts — records the version it computed at and recomputes when it moves.
     population_version: int = 0
+    #: Raised by every invalidation, whatever it keeps. A result computed off the window's thread
+    #: (``review.data.plate_scan.per_well`` under ``review.core.background_read``) is stored only if this has not
+    #: moved since its read began: an edit that clears ``cache`` without moving ``rows_version`` (QC, crop, the
+    #: other verdict layers) would otherwise be followed by the store of an answer read before it.
+    epoch: int = 0
 
     def invalidate(self, *, keep_populations: bool = False) -> None:
         """Drop every result; drop the populations too unless *keep_populations*.
@@ -58,6 +63,7 @@ class StatsCacheState:
         unit, none of which a population is a function of.
         """
         self.cache.clear()
+        self.epoch += 1
         if not keep_populations:
             self.populations.clear()
             self.population_version += 1

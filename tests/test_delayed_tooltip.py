@@ -69,3 +69,19 @@ def test_moving_onto_another_thing_starts_the_wait_over_and_leaving_hides_at_onc
     tip.clear()                                                    # left before the card was due
     qtbot.wait(400)
     assert _shown(spy) == []
+
+
+@pytest.mark.parametrize("event_type", ["Leave", "Hide"])
+def test_the_pointer_leaving_the_widget_or_the_widget_hiding_cancels_a_card_not_yet_shown(qtbot, spy, event_type):
+    """The pointer passes over a nanowell and leaves the canvas before the card is due. Matplotlib sends no motion
+    event outside its canvas, so nothing called :meth:`clear`, and the card showed a second later wherever the pointer
+    had gone, naming a nanowell no longer under it. The widget's own Leave (or Hide) now cancels it."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    widget = QWidget()
+    qtbot.addWidget(widget)
+    tip = DelayedToolTip(widget, delay_ms=100)
+    tip.point("a", "card a")
+    QCoreApplication.sendEvent(widget, QEvent(getattr(QEvent, event_type)))
+    qtbot.wait(400)
+    assert _shown(spy) == [] and not tip.pending()

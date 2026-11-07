@@ -9,8 +9,9 @@ the files (input present, nothing written) and wrong about why: the run never
 got to them.
 
 On disk the two cases are identical, so only the run can tell them apart. The
-client-side check after a remote run now records ``ended_early`` from the
-pipeline's exit status, and Home words those wells as not reached. A run that
+client-side check after a remote run records ``ended_early`` when the pipeline
+exited non-zero without writing its end-of-run block, and Home words those
+wells as not reached. A run that
 ended cleanly keeps the old wording, because there a well with no output really
 is one the run was given and wrote nothing for.
 """
@@ -97,6 +98,52 @@ def test_verification_records_the_pipeline_s_exit_status_as_the_early_end(tmp_pa
                         lambda *a, **k: seen.append(k.get("ended_early")) or {})
     verifier.verify(ok, log=lambda _m: None)
     assert seen and seen[0] is (not ok)
+
+
+@pytest.mark.parametrize("ok,reached_end,sidecar_ok,expected", [
+    # The pipeline exits 1 whenever a well failed — after visiting every well and writing its end-of-run
+    # ``run_check`` (a ``--no_run_check`` stub on a remote run). That run reached its end: a well its worker died
+    # in (out of memory, a native crash) is input-only on disk, and "not reached — finish the run" sends the user
+    # to resume a run that has nothing left to do instead of to the well that failed.
+    (False, True, True, False),
+    # No end-of-run block in this run's sidecar (the run start drops it): stopped, lost, suspended in flight.
+    (False, False, True, True),
+    # A sidecar that could not be pulled is the previous run's, so its block says nothing about this run.
+    (False, True, False, True),
+    (True, True, True, False),
+])
+def test_a_run_that_reached_its_end_and_exited_non_zero_did_not_end_early(tmp_path, monkeypatch, ok, reached_end,
+                                                                           sidecar_ok, expected):
+    from services import remote_fetch
+
+    info = {"schema": "exp:channel:well:fov:timepoint", "separator": "_"}
+    if reached_end:
+        info["run_check"] = {"version": 1, "skipped": True, "skipped_reason": "--no_run_check", "wells": {}}
+
+    def _pull(src, dest, **_k):
+        if str(src).endswith("pipeline_info.json"):
+            if not sidecar_ok:
+                return False
+            Path(dest).write_text(json.dumps(info))
+        return True
+
+    run = SimpleNamespace(local_output_dir=tmp_path, remote_output_dir="/r/out", local_input_dir=tmp_path,
+                          incremental=False, nanowell=False, expected_wells=set(), force_wells=frozenset(),
+                          force=False)
+    if not sidecar_ok:   # the local sidecar left from the previous run, which did reach its end
+        (tmp_path / "pipeline_info.json").write_text(json.dumps(
+            {**info, "run_check": {"version": 1, "skipped": True, "wells": {}}}))
+    verifier = remote_fetch.FetchedOutputVerifier(SimpleNamespace(ssh_alias="gpu"), run, None, threading.Event())
+    seen = []
+    monkeypatch.setattr(verifier, "_rsync_optional", _pull)
+    monkeypatch.setattr(verifier, "_verify_local_manifest", lambda *, log: [])
+    monkeypatch.setattr(verifier, "_reconcile_fetch", lambda *, log: "")
+    monkeypatch.setattr(remote_fetch, "pull_nanowell_results", lambda v, *, log: [])
+    monkeypatch.setattr(remote_fetch, "refresh_pipeline_info_available_from_outputs", lambda *a, **k: None)
+    monkeypatch.setattr(remote_fetch, "run_client_side_completeness_check",
+                        lambda *a, **k: seen.append(k.get("ended_early")) or {})
+    verifier.verify(ok, log=lambda _m: None)
+    assert seen == [expected]
 
 
 # ── what Home says ──────────────────────────────────────────────────────────

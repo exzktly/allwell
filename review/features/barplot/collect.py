@@ -972,14 +972,18 @@ def batch_members(ctx, group, *, pool_replicates: bool):
     from review.domain.plate_layout import WELL_COLORS as _WELL_COLORS
     members: list[tuple[str, str, list[str], str | None, str]] = []
     if pool_replicates:
+        placed: set = set()
         for i, rset in enumerate(group.members):
             valid = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
             if not valid:
                 continue
+            placed.update(valid)
             members.append((rset.name, replicate_display_label(ctx, rset), valid, rset.name,
                             _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
+        # A solo well a member set already pools is drawn once, inside the set: as a bar of its own as well, its
+        # cells would count twice (the expanded branch below, and the Nanowells panel, skip it the same way).
         for w in group.solo_wells:
-            if w not in ctx.state.dataset.well_paths:
+            if w not in ctx.state.dataset.well_paths or w in placed:
                 continue
             members.append((w, well_display_label(ctx, w), [w], None,
                             _WELL_COLORS[len(members) % len(_WELL_COLORS)]))

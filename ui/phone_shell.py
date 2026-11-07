@@ -538,15 +538,10 @@ class _RefitOnLayout(QObject):
         return False
 
 
-#: Widgets whose own drag means something — a plate's drag selects wells, a
-#: slider's moves its handle. Named by class: the plate's grid is private to
-#: ``widgets/well_plate_selector.py``.
-_DRAG_OWNERS = ("WellPlateSelector", "_PlateGrid")
-
-
 class _DragOwnerGuard(QObject):
     """On a viewport that scrolls by a drag: a drag that starts on a plate or
-    a slider is left to it. Qt asks the viewport before it starts scrolling
+    a slider is left to it — a plate being whatever declared that it owns its
+    drag (``widgets.form_registry.declare_drag_owner``), never a class name. Qt asks the viewport before it starts scrolling
     (``QScrollPrepareEvent``); refused, the press reaches the widget under it
     as if no gesture were there. Grabbed without this, a swipe starting on a
     plate neither selected wells nor scrolled.
@@ -572,7 +567,7 @@ class _DragOwnerGuard(QObject):
         while w is not None and w is not obj:
             if _is_canvas(w):
                 owns = not plots_swipe
-            elif type(w).__name__ in _DRAG_OWNERS:
+            elif form_registry.owns_drag(w) is not None:
                 owns = _plate_owns_drag(w)
             else:
                 owns = (isinstance(w, QAbstractSlider) or _handles_own_drag(w)
@@ -625,11 +620,10 @@ def _plate_owns_drag(w: QWidget) -> bool:
     """A plate keeps a drag that starts on it — unless it is a read-out
     (``setReportOnly``), which selects nothing. Analyze's run dashboard is one,
     and in phone layout it fills most of the Progress page: owning the drag
-    there left almost nowhere to scroll the page from."""
-    if type(w).__name__ not in _DRAG_OWNERS:
-        return False
-    is_report_only = getattr(w, "isReportOnly", None) or getattr(w, "is_report_only", None)
-    return not (callable(is_report_only) and is_report_only())
+    there left almost nowhere to scroll the page from. The plate says which
+    itself, where it is built and whenever it becomes a read-out
+    (``widgets.form_registry.declare_drag_owner``)."""
+    return form_registry.owns_drag(w) is True
 
 
 #: Set on a viewport while :func:`set_drag_scroll` has it scrolling by a drag.

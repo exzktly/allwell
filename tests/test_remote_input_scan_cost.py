@@ -88,10 +88,15 @@ def test_a_directory_named_like_an_archive_is_not_a_well_archive(tmp_path):
     assert list(_well_zips_in(root)) == []
     assert find_well_zips(root) == []
 
-    # A real archive beside it is still found, by all three.
+    # A real archive beside it is still found, by all three. The expanded folder's images are read by no run, so
+    # while it holds them the plate is refused rather than run without them (``input_layout.non_zip_input``'s
+    # folders that are not well folders); emptied, the plate runs.
     import zipfile
+    from services.input_resolution_service import NEEDS_ZIPPING
     with zipfile.ZipFile(root / "A02.zip", "w") as zf:
         zf.writestr("exp_GFP_A02_f1_t0.tif", b"II*\0")
-    assert plan_input_layout(root).action == GROUPED
+    assert plan_input_layout(root).action == NEEDS_ZIPPING
     assert [p.name for p in _well_zips_in(root)] == ["A02.zip"]
     assert [w for w, _p in find_well_zips(root)] == ["A02"]
+    (root / "A01.zip" / "exp_GFP_A01_f1_t0.tif").unlink()
+    assert plan_input_layout(root).action == GROUPED

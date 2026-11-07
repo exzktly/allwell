@@ -64,7 +64,7 @@ import pandas as pd
 
 from pipeline.nanowell_identity import CONTRADICTED, NOT_CHECKED
 from review.domain import nanowell_rim_focus
-from review.features.nanowell import cell_gate_compute
+from review.features.nanowell import background_compute, cell_gate_compute
 from review.features.nanowell.collect import (
     IDENTITY_CONTRADICTED, MEASURABLE, NOT_LOCATED, UNADDRESSED, NanowellData,
 )
@@ -261,6 +261,11 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
         frame[f"brightness_{ch}"] = frame[f"brightness_{ch}"].where(measurable)
         frame[f"signal_{ch}"] = frame[f"{ch}_integrated"].where(measurable)
     cell_gate_compute.apply(frame, gate, data.channels)
+    # Wells whose run wrote no ``<channel>_background`` column. Read beside wells that did (a subset re-run after
+    # the column existed, or datasets joined), their rows carry NaN in the column, which is not "no level here"
+    # but "no level measured at all": their brightness stays the cells' raw mean, as their label says.
+    raw_wells = [w for w, mode in (getattr(data, "fluor_backgrounds", None) or {}).items()
+                 if mode == background_compute.NONE]
     for ch in data.channels:
         # The cells' mean less the level the run took off the nanowell's fluorescence, so both metrics are measured
         # above the same background (``background_compute``). After the gate, which recomputes the mean from the
@@ -268,7 +273,8 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
         # site the run left without a level (an empty well with none at that timepoint) has no brightness either.
         level = frame.get(f"{ch}_background")
         if level is not None:
-            frame[f"brightness_{ch}"] = frame[f"brightness_{ch}"] - pd.to_numeric(level, errors="coerce")
+            level = pd.to_numeric(level, errors="coerce").mask(frame["well"].isin(raw_wells), 0.0)
+            frame[f"brightness_{ch}"] = frame[f"brightness_{ch}"] - level
     base = {}
     for value in ["n", "c"] + [f"{kind}_{ch}" for ch in data.channels for kind in ("brightness", "signal")]:
         mask = _baseline_rows(frame, baseline, value)

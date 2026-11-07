@@ -105,10 +105,49 @@ def test_the_beeswarm_renderer_hands_the_pitch_to_the_packing(stub_ctx, monkeypa
     for offsets in auto:
         assert np.max(np.abs(offsets)) == pytest.approx(0.35)          # Auto stretches to the column
     fixed, calls = _drawn(1.0)
-    assert [pitch for pitch, _ in calls] == [0.002, 0.002]
-    for offsets, (_pitch, packed) in zip(fixed, calls):
+    # Each column packed as it is drawn, then once more on the page once the y range is known (``_pack_on_page``):
+    # the dots drawn are the second packing's.
+    assert [pitch for pitch, _ in calls] == [0.002] * 4
+    for offsets, (_pitch, packed) in zip(fixed, calls[2:]):
         assert np.allclose(offsets, packed)                            # the dots are the packing's
         assert np.max(np.abs(offsets)) < 0.35                          # not stretched back to the column
+
+
+def test_a_set_spacing_holds_on_screen_in_a_tight_column_and_a_spread_one(stub_ctx, monkeypatch):
+    """At spacing 1.0 no two dots of a column overlap on the page, whatever the column's own range.
+
+    The packing used to measure a dot's height as 1/40 of *each column's own* value range, and only its width in
+    page units. A column whose cells sit in a narrow band of the shared axis was then packed as though its cells
+    were spread over the whole height, and drawn as a narrow swarm of dots piled onto each other. The fixture gives
+    the two columns ranges five times apart, so a per-column height cannot be right for both.
+    """
+    import pandas as pd
+
+    from review.features.barplot import renderer as rnd
+    from tests.test_bar_color_mode_per_cell import _PLATE, _VAL_COL, _WELLS, _axes
+
+    spreads = {"A01": 20.0, "A02": 4.0}
+
+    def _frame(_ctx, well):
+        rng = np.random.default_rng(1)
+        n = 60
+        return pd.DataFrame({"timepoint_hours": np.zeros(n), _VAL_COL: rng.normal(50.0, spreads[well], n),
+                             "fov": np.repeat(["f1", "f2", "f3"], n // 3), "area_px": np.full(n, 200.0)})
+
+    monkeypatch.setattr(rnd, "get_rows", _frame)
+    stub_ctx.state.plot.swarm_spacing = 1.0
+    axm, axf, _ = _axes()
+    rnd.draw_beeswarm(stub_ctx, axm, axf, _WELLS, list(_PLATE), list(_WELLS), [0.0, 0.0], "0", 10.0)
+    dot_px = 5.0 * axm.figure.dpi / 72.0          # the stub has no style store: the default 5 pt marker
+    dots = [c for c in axm.collections if getattr(c, "_aw_marker_collection", False)]
+    assert len(dots) == 2
+    closest = []
+    for c in dots:
+        px = axm.transData.transform(np.asarray(c.get_offsets()))
+        gaps = np.sqrt(((px[:, None] - px[None]) ** 2).sum(-1))
+        np.fill_diagonal(gaps, np.inf)
+        closest.append(round(float(gaps.min() / dot_px), 2))
+    assert min(closest) >= 0.99, closest
 
 
 # ── the Nanowells Distribution view ───────────────────────────────────────

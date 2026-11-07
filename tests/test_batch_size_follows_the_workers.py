@@ -50,6 +50,10 @@ def test_the_estimate_is_what_the_pipeline_starts(monkeypatch, cpus, gpus, metho
     ("srun -c 4 --gres=gpu", LauncherResources(4, 1)),
     ("srun --partition=cpu", LauncherResources(None, None)),
     ("srun --exclusive --gres=gpu:4", LauncherResources(None, 4, exclusive=True)),
+    # --ntasks folded as the launch folds it (remote_srun_retry.one_task): one task on n × c CPUs, n × g GPUs
+    ("srun -p cpu -n 4 -c 4", LauncherResources(16, None)),
+    ("srun -p cpu --ntasks=8", LauncherResources(8, None)),
+    ("srun -p gpu -n 2 -c 8 --gpus-per-task=1", LauncherResources(16, 2)),
 ])
 def test_what_the_scheduler_command_asks_for(launcher, expected):
     assert launcher_resources(launcher) == expected
@@ -102,6 +106,21 @@ def test_cpu_only_changes_nothing_for_a_stardist_run():
     n, _ = resolve_batch_size({"remote_batch_size": "0", "segmentation_method": "stardist_nuclei", "cpu_only": True},
                               _host("srun --gres=gpu:1 -c 33"))
     assert n == 8                                    # 32 // 4: StarDist is never capped by the GPUs
+
+
+@pytest.mark.parametrize("launcher", [
+    "srun -p cpu -n 4 -c 4", "srun -p cpu --ntasks=8", "srun -p gpu -n 2 -c 8 --gpus-per-task=1",
+    "srun -c 8 --gres=gpu:2", "srun -n 3 -c 2 --gpus-per-task=2",
+])
+def test_the_batch_size_reads_the_launcher_the_run_actually_launches(launcher):
+    """Wrong implementation: the raw ``-c`` read beside a ``--ntasks`` (review tracker N16). ``one_task`` runs one task
+    on n × c CPUs, so a second parse that ignores ``-n`` sized batches for a quarter of the workers the node starts."""
+    import shlex
+
+    from services.remote_srun_retry import one_task
+
+    launched = "srun " + shlex.join(one_task(shlex.split(launcher))[1:])
+    assert launcher_resources(launcher) == launcher_resources(launched)
 
 
 def test_a_positive_batch_size_is_the_users():

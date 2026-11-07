@@ -946,9 +946,11 @@ same way, so you never have to pick the inner one:
   `<selected folder>/out`.
 
 **Loose images and per-well folders are not analysis input.** If the selected
-folder (or its `in/`) holds loose images, or `A01/`-style folders of images with
-no matching `A01.zip`, the line under the folder field says how many of each it
-found, in red, and Run refuses with the same message. Convert them first with
+folder (or its `in/`) holds loose images, `A01/`-style folders of images with
+no matching `A01.zip`, or any other folder with images in it (a `TimePoint_1/`
+export, images a level or more down inside a well folder), the line under the
+folder field says how many of each it found, in red, and Run refuses with the
+same message. Convert them first with
 the Datasets pane's [Zip Loose Folder](#zip-loose-folder) tool, then open the
 folder it produces. Analyze never moves, groups or deletes anything in your
 input folder. That includes adding images to a plate you have already run:
@@ -3059,7 +3061,8 @@ What is on it:
   flag an odd well), measurements whose output archive is gone (cyan), staged
   but never processed (warm grey). If the run
   ended early — you stopped or suspended it, the remote host lost its node or
-  its connection to the app, or the pipeline exited with an error — the grey
+  its connection to the app, or the pipeline crashed before it had been
+  through every well — the grey
   wells are called *Not reached — run ended early* instead, because the run
   never got to them rather than skipping them; **Finish this run** processes
   them. (After Datasets → Validate rescans the folder, they go back to "staged,
@@ -4498,7 +4501,9 @@ one setting, **Point spacing**:
 - Switch Auto off to set the spacing yourself, as a multiple of one dot's width:
   **1.0** makes neighbouring dots touch, lower packs them tighter (they
   overlap), higher spreads them out. On the Bar plot every column is then drawn
-  at the same spacing, so a sparse column stays narrow; a swarm too wide for
+  at the same spacing, up and down as well as across, so a sparse column stays
+  narrow and a column of near-identical values spreads sideways rather than
+  piling its dots on top of each other; a swarm too wide for
   its column at that spacing is still squeezed to fit it. The spacing follows
   **Lines & Markers → Marker size**. On the Nanowells page a lower spacing fits
   more dots in each slot before the "+N" count of dots that did not fit.
@@ -6711,7 +6716,7 @@ fold change — in each tile's top-left corner, at the timepoint of the panel th
 has no value there); the caption names it. Zoom in to read it on a full page. Tiles are
 drawn apart inside a dashed frame — the edge of each timepoint's panel, so it stays put when you zoom or pan — and the
 title says it is not a real array. Each tile has a coloured **stripe**
-along its foot, and **Colour** (beside **Layout**, in the Hex layout) chooses what it says: *Source well*, any of the
+along its foot, and **Colour** (beside **Layout**, in the Hex layout) chooses what it says: *Source well* (a well keeps its colour on every page and whatever the Sort), any of the
 plate's sample variables (each well's value of it, in the same colour that value has on every plot — a well left
 unfilled is named as such), or *None* for no stripe. A key under the title names each colour drawn. Every tile is its nanowell's crop at one size and
 all are on one brightness scale, so wells of different exposure compare. It shows 91 nanowells a page (◀ ▶ turn it),

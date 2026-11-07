@@ -113,7 +113,7 @@ elif (( QUICK == 0 )); then
         local last=$(( ${#files[@]} - 1 ))
         status="${files[$last]#__status=}"
         unset "files[$last]"
-        if [[ "$status" == "1" ]]; then
+        if [[ "$status" == "3" ]]; then   # lane_needed.SKIP; any other failure runs the lane whole
             echo "   skipped"
         elif [[ "$status" != "0" || "${files[*]:-}" == "ALL" || ${#files[@]} -eq 0 ]]; then
             ALLWELL_FULL_LANE=1 run_lane "$name" "$flag"

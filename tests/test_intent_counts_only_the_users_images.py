@@ -345,6 +345,48 @@ def test_an_input_with_no_archive_stops_the_run(tmp_path):
         refuse_non_zip_input(d, [])
 
 
+def test_images_in_a_folder_that_is_not_a_well_stop_the_run(tmp_path):
+    """A MetaXpress-style ``TimePoint_1/`` beside the archives is read by nothing.
+
+    Its name is no well, so it is neither a stranded nor a twin well folder; a
+    run that went ahead would analyse A01 and report success without it."""
+    from pipeline.input_layout import find_well_zips, non_zip_input, refuse_non_zip_input
+
+    d = _plate_with_one_archive(tmp_path)
+    (d / "TimePoint_1").mkdir()
+    (d / "TimePoint_1" / "P_DAPI_A02_F1_T1.tif").write_bytes(b"x")
+    (d / "TimePoint_1" / "._P_DAPI_A02_F1_T1.tif").write_bytes(b"x")   # a sidecar, not the user's data
+    (d / "__MACOSX").mkdir()
+    (d / "__MACOSX" / "P_DAPI_A03_F1_T1.tif").write_bytes(b"x")        # skipped, as in every other check
+
+    assert non_zip_input(d, find_well_zips(d)).problems() == [
+        "1 folder(s) of images that are not well folders: TimePoint_1/ (1 image(s))"]
+    with pytest.raises(SystemExit) as caught:
+        refuse_non_zip_input(d, find_well_zips(d))
+
+    said = str(caught.value)
+    assert "1 folder(s) of images that are not well folders: TimePoint_1/ (1 image(s))" in said, said
+
+
+def test_images_nested_in_a_well_folder_stop_the_run(tmp_path):
+    """A well folder whose images sit one level down is as stranded as one
+    holding them directly: the run reads neither."""
+    from pipeline.input_layout import find_well_zips, non_zip_input, refuse_non_zip_input
+
+    d = _plate_with_one_archive(tmp_path)
+    (d / "B02" / "TimePoint_1").mkdir(parents=True)
+    (d / "B02" / "TimePoint_1" / "P_DAPI_B02_F1_T1.tif").write_bytes(b"x")
+    (d / "B02" / "TimePoint_1" / "P_DAPI_B02_F2_T1.tif").write_bytes(b"x")
+
+    assert non_zip_input(d, find_well_zips(d)).problems() == [
+        "1 well folder(s) with no <WELL>.zip: B02/ (2 image(s))"]
+    with pytest.raises(SystemExit) as caught:
+        refuse_non_zip_input(d, find_well_zips(d))
+
+    said = str(caught.value)
+    assert "well folder(s) with no <WELL>.zip: B02/ (2 image(s))" in said, said
+
+
 def test_a_redundant_folder_beside_its_archive_still_runs(tmp_path):
     """A folder an earlier version left beside its own well's archive is the
     archive's twin, not new input. Refusing it would refuse every plate those

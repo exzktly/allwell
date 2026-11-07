@@ -294,6 +294,25 @@ def test_a_drag_on_a_status_plate_scrolls_the_page(qtbot):
     apply_plate_geometry(picker, role="picker")
     assert not _plate_owns_drag(status) and not _plate_owns_drag(status._grid)
     assert _plate_owns_drag(picker) and _plate_owns_drag(picker._grid)
+    status.setReportOnly(False)                          # a read-out made a control again keeps its drags
+    assert _plate_owns_drag(status) and _plate_owns_drag(status._grid)
+
+
+def test_a_plate_is_known_by_what_it_declares_not_by_its_class_name(qtbot):
+    """The shell found a plate by ``type(w).__name__ in ("WellPlateSelector", "_PlateGrid")``, so a view's own
+    subclass of the plate — a different name, the same drag — lost every drag that started on its frame to the
+    page's scroll. It declares instead (``form_registry.declare_drag_owner``), and the shell reads that."""
+    from ui.phone_shell import _plate_owns_drag
+    from widgets.well_plate_selector import WellPlateSelector
+
+    class PaintPlate(WellPlateSelector):
+        pass
+
+    plate = PaintPlate()
+    qtbot.addWidget(plate)
+    assert _plate_owns_drag(plate)
+    plate.setReportOnly(True)
+    assert not _plate_owns_drag(plate)
 
 
 def test_sideways_the_stage_rail_sits_beside_the_plate_without_its_bars(qtbot):

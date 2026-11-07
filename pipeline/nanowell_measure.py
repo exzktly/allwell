@@ -968,8 +968,18 @@ def cellpose_segmenter(diameter_px: float = 0.0, **options):
 
     def cache_identity() -> str:
         """What decides this segmenter's labels beyond its input (``pipeline.nanowell_masks``): the diameter it
-        resizes to, its options (the model), the Cellpose and Torch versions, the device kind (a GPU's reduced
-        precision is not a CPU's), and the code between Cellpose and the labels. Worked out once, on first use."""
+        resizes to, its options (the model), the Cellpose and Torch versions, the device kind, the precision the
+        model runs in, and the code between Cellpose and the labels. Everything but the precision is worked out
+        once, on first use.
+
+        The precision is bfloat16 on one GPU and float32 on another of the same kind, and the same crop gives other
+        labels in each. It is ``cellpose.planned_precision`` — decided without loading the model, so a re-run whose
+        every crop is answered from kept masks never loads Cellpose — until this worker has built the model, and from
+        then the precision the built model records (``cellpose.built_precision``), which differs only when a
+        bfloat16 model's first pass failed and it was rebuilt in float32. The store asks again after each segmenter
+        call (``MaskStore.wrap``), so masks made by such a model are written under the precision they were made in."""
+        from pipeline import cellpose
+
         if not identity:
             import torch
 
@@ -982,11 +992,14 @@ def cellpose_segmenter(diameter_px: float = 0.0, **options):
                 cellpose_version = version("cellpose")
             except PackageNotFoundError:      # an install without metadata still segments; its masks are its own
                 cellpose_version = "unknown"
-            identity.append(json.dumps({"diameter_px": float(diameter_px), "options": options,
-                                        "cellpose": cellpose_version, "torch": torch.__version__,
-                                        "device": cellpose._cellpose_device()[0].type,
-                                        "code": code_digest(cellpose, cellpose_masks)}, sort_keys=True, default=str))
-        return identity[0]
+            device = cellpose._cellpose_device()[0]
+            identity.append(({"diameter_px": float(diameter_px), "options": options,
+                              "cellpose": cellpose_version, "torch": torch.__version__, "device": device.type,
+                              "code": code_digest(cellpose, cellpose_masks)},
+                             cellpose.planned_precision(device)))
+        base, planned = identity[0]
+        precision = cellpose.built_precision(options.get("model_type")) or planned
+        return json.dumps({**base, "precision": precision}, sort_keys=True, default=str)
     segment.accepts_range = True              # segment_sites hands it the tile's scale for each crop
     segment.accepts_size_cap = True           # and lifts the area cap on a mask for a crop
     segment.segment_many = segment_many       # and several crops at once (CROP_BATCH)

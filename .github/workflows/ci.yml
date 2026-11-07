@@ -65,7 +65,10 @@ jobs:
           if [[ "${{ github.event_name }}" != "pull_request" ]]; then
             echo "scope=code" >> "$GITHUB_OUTPUT"; echo "push to ${{ github.ref_name }}: always lint"
           else
-            echo "scope=$(python scripts/change_scope.py --base "origin/${{ github.base_ref }}")" >> "$GITHUB_OUTPUT"
+            # A classifier that fails, or answers anything but a scope, lints everything.
+            scope=$(python scripts/change_scope.py --base "origin/${{ github.base_ref }}") || scope=code
+            case "$scope" in version-only|docs-only|code) ;; *) scope=code ;; esac
+            echo "scope=$scope" >> "$GITHUB_OUTPUT"
           fi
       - name: Install ruff
         if: steps.scope.outputs.scope == 'code'
@@ -98,7 +101,10 @@ jobs:
             echo "push to ${{ github.ref_name }} or a full-ci label: the whole lane"
           else
             echo "ALLWELL_SCOPE_BASE=origin/${{ github.base_ref }}" >> "$GITHUB_ENV"
-            echo "scope=$(python scripts/change_scope.py --base "origin/${{ github.base_ref }}")" >> "$GITHUB_OUTPUT"
+            # A classifier that fails, or answers anything but a scope, runs the lane as code.
+            scope=$(python scripts/change_scope.py --base "origin/${{ github.base_ref }}") || scope=code
+            case "$scope" in version-only|docs-only|code) ;; *) scope=code ;; esac
+            echo "scope=$scope" >> "$GITHUB_OUTPUT"
           fi
       # PySide6 needs system GL/EGL libraries even under the offscreen QPA.
       - name: Install Qt system libraries
@@ -168,11 +174,20 @@ jobs:
           if [[ "${{ github.event_name }}" != "pull_request" || "${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}" == "true" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "ALLWELL_FULL_LANE=1" >> "$GITHUB_ENV"
             echo "push to ${{ github.ref_name }} or a full-ci label: the whole lane"
-          elif python scripts/lane_needed.py nanowell-e2e --base "origin/${{ github.base_ref }}"; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "ALLWELL_SCOPE_BASE=origin/${{ github.base_ref }}" >> "$GITHUB_ENV"
           else
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            # Exit 0: run what it selects; 3 (lane_needed.SKIP): nothing reached; anything else is a failure
+            # to decide (1 is a crash while the script loads), which runs the whole lane rather than skipping it.
+            status=0
+            python scripts/lane_needed.py nanowell-e2e --base "origin/${{ github.base_ref }}" || status=$?
+            if [[ "$status" == "3" ]]; then
+              echo "run=false" >> "$GITHUB_OUTPUT"
+            elif [[ "$status" == "0" ]]; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+              echo "ALLWELL_SCOPE_BASE=origin/${{ github.base_ref }}" >> "$GITHUB_ENV"
+            else
+              echo "run=true" >> "$GITHUB_OUTPUT"; echo "ALLWELL_FULL_LANE=1" >> "$GITHUB_ENV"
+              echo "::warning::scripts/lane_needed.py nanowell-e2e failed (exit $status): running the whole lane"
+            fi
           fi
       - name: Install Qt system libraries
         if: steps.gate.outputs.run == 'true'
@@ -215,11 +230,20 @@ jobs:
           if [[ "${{ github.event_name }}" != "pull_request" || "${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}" == "true" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "ALLWELL_FULL_LANE=1" >> "$GITHUB_ENV"
             echo "push to ${{ github.ref_name }} or a full-ci label: the whole lane"
-          elif python scripts/lane_needed.py nanowell-features --base "origin/${{ github.base_ref }}"; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "ALLWELL_SCOPE_BASE=origin/${{ github.base_ref }}" >> "$GITHUB_ENV"
           else
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            # Exit 0: run what it selects; 3 (lane_needed.SKIP): nothing reached; anything else is a failure
+            # to decide (1 is a crash while the script loads), which runs the whole lane rather than skipping it.
+            status=0
+            python scripts/lane_needed.py nanowell-features --base "origin/${{ github.base_ref }}" || status=$?
+            if [[ "$status" == "3" ]]; then
+              echo "run=false" >> "$GITHUB_OUTPUT"
+            elif [[ "$status" == "0" ]]; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+              echo "ALLWELL_SCOPE_BASE=origin/${{ github.base_ref }}" >> "$GITHUB_ENV"
+            else
+              echo "run=true" >> "$GITHUB_OUTPUT"; echo "ALLWELL_FULL_LANE=1" >> "$GITHUB_ENV"
+              echo "::warning::scripts/lane_needed.py nanowell-features failed (exit $status): running the whole lane"
+            fi
           fi
       - name: Can this change reach the remote tests?
         id: remote
@@ -227,11 +251,20 @@ jobs:
           if [[ "${{ github.event_name }}" != "pull_request" || "${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}" == "true" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "ALLWELL_FULL_LANE=1" >> "$GITHUB_ENV"
             echo "push to ${{ github.ref_name }} or a full-ci label: the whole lane"
-          elif python scripts/lane_needed.py remote --base "origin/${{ github.base_ref }}"; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "ALLWELL_SCOPE_BASE=origin/${{ github.base_ref }}" >> "$GITHUB_ENV"
           else
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            # Exit 0: run what it selects; 3 (lane_needed.SKIP): nothing reached; anything else is a failure
+            # to decide (1 is a crash while the script loads), which runs the whole lane rather than skipping it.
+            status=0
+            python scripts/lane_needed.py remote --base "origin/${{ github.base_ref }}" || status=$?
+            if [[ "$status" == "3" ]]; then
+              echo "run=false" >> "$GITHUB_OUTPUT"
+            elif [[ "$status" == "0" ]]; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+              echo "ALLWELL_SCOPE_BASE=origin/${{ github.base_ref }}" >> "$GITHUB_ENV"
+            else
+              echo "run=true" >> "$GITHUB_OUTPUT"; echo "ALLWELL_FULL_LANE=1" >> "$GITHUB_ENV"
+              echo "::warning::scripts/lane_needed.py remote failed (exit $status): running the whole lane"
+            fi
           fi
       - name: Install Qt system libraries
         if: steps.nanowell.outputs.run == 'true' || steps.remote.outputs.run == 'true'

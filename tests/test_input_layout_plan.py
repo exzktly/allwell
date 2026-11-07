@@ -257,3 +257,16 @@ def test_the_pipeline_s_own_archive_lookups_read_an_upper_case_zip(tmp_path):
         zf.writestr("exp_NIR_A01_1_T01.tif", b"\x00" * 5000)
     assert _input_archive_for(grouped, "A01") == grouped / "A01.ZIP"
     assert sample_image_bytes(grouped, (".tif",)) == 5000
+
+
+def test_a_folder_of_images_that_is_not_a_well_is_refused_before_run(tmp_path):
+    """The readout gives the pipeline's verdict on a non-well folder of images
+    inside ``in/``: Run would otherwise skip it and report success."""
+    root = tmp_path / "plate"
+    (root / "in" / "TimePoint_1").mkdir(parents=True)
+    with zipfile.ZipFile(root / "in" / "A01.zip", "w") as zf:
+        zf.writestr("P_DAPI_A01_F1_T1.tif", b"x")
+    (root / "in" / "TimePoint_1" / "P_DAPI_A02_F1_T1.tif").write_bytes(b"x")
+    plan = plan_input_layout(root)
+    assert plan.action == NEEDS_ZIPPING, plan
+    assert "1 folder(s) of images that are not well folders" in plan.message, plan.message

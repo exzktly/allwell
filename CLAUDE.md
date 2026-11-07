@@ -44,7 +44,8 @@ scripts/test.sh --nanowell                     # the nanowell end-to-end lane (g
 scripts/test.sh --nanowell-features            # the other nanowell tests (gated)
 scripts/test.sh --remote                       # the remote / HPC tests (gated)
 python scripts/lane_needed.py <gate>           # nanowell-e2e | nanowell-features | remote: which of its test files
-                                               # this branch reaches, and why (exit 0 = run, 1 = nothing reached)
+                                               # this branch reaches, and why (exit 0 = run, 3 = nothing reached,
+                                               # anything else = could not decide: callers run it whole)
 python scripts/change_scope.py                 # version-only / docs-only / code: what the fast lane runs
 ALLWELL_FULL_LANE=1 scripts/test.sh            # the whole fast lane, whatever the change
 scripts/test.sh --ui                           # only the GUI layout / appearance tests

@@ -1469,6 +1469,7 @@ def _beeswarm_jitter(
     max_spread: float = 0.35,
     n_bins: int = 40,
     pitch: float | None = None,
+    dot_height: float | None = None,
 ) -> tuple[list[float], list[float]]:
     """Standard (non-overlapping) beeswarm x-positions for a column.
 
@@ -1492,6 +1493,14 @@ def _beeswarm_jitter(
     the same in every column. A swarm that would be wider than ``max_spread``
     at that spacing is still compressed to it — the slot is the column's, and
     a swarm drawn past it would run into its neighbour. ``None`` is Auto.
+
+    *dot_height* goes with *pitch*: the y distance, in data units, of the same
+    packing diameter on the page. Given both, the packing runs in page units —
+    y divided by *dot_height*, a diameter of 1 — so two dots closer than one
+    diameter on the page never share a place, whatever the column's own range.
+    Without it the diameter is ``1/n_bins`` of the column's own range, which a
+    column holding a narrow band of a shared axis turns into dots piled onto
+    each other at any spacing.
     """
     arr = np.asarray(values, dtype=float)
     n = arr.size
@@ -1503,8 +1512,13 @@ def _beeswarm_jitter(
     lo = float(arr.min())
     hi = float(arr.max())
     span = hi - lo if hi > lo else 1.0
-    yn = (arr - lo) / span                       # normalised y in [0, 1]
-    d = 1.0 / float(max(n_bins, 1))              # dot diameter (normalised)
+    on_page = pitch is not None and pitch > 0.0 and dot_height is not None and dot_height > 0.0
+    if on_page:
+        yn = (arr - lo) / float(dot_height)      # y in dot diameters on the page
+        d = 1.0
+    else:
+        yn = (arr - lo) / span                   # normalised y in [0, 1]
+        d = 1.0 / float(max(n_bins, 1))          # dot diameter (normalised)
     d2 = d * d
 
     # Very dense columns can't be packed without overlap (and the swarm loop is

@@ -9,7 +9,10 @@ changes; this one is keyed on the segmenter's *input*, which it does not.
 **What a mask is keyed on.** Exactly what decides the segmenter's output: the image it is given (its bytes, dtype
 and shape), the range it is told to scale by (``lowhigh``), the area cap it is given (``max_size_fraction``),
 and the segmenter's identity (``cache_identity``: for Cellpose its model, the cell diameter it is resized to,
-the Cellpose version, the device kind, and a digest of the code that calls it — :func:`code_digest`). Anything
+the Cellpose version, the device kind, the precision the model runs in, and a digest of the code that calls
+it — :func:`code_digest`). A segmenter whose identity moves while it runs (Cellpose's precision, when the model it
+builds falls back from bfloat16 to float32) has the masks it just made written under the identity after the call,
+the one they were made under. Anything
 upstream that changes what the segmenter would see — the template the rim is divided by, the levels a
 nanowell is shifted to, where a crop is cut, the registration — changes the bytes, so the key misses and the
 crop is segmented again. Nothing is reused on the strength of an argument that the input "should be" the same.
@@ -221,15 +224,23 @@ class MaskStore:
         def ident() -> str:
             return identity() if callable(identity) else str(identity)
 
+        def written_key(asked: str, before: str, image, lowhigh, max_size_fraction) -> str:
+            """The key a mask just made is kept under: the one it was looked up by, unless the segmenter's identity
+            moved while it ran (Cellpose's precision, once the model it built fell back from bfloat16 to float32),
+            in which case the labels are the new identity's and are written under it."""
+            after = ident()
+            return asked if after == before else mask_key(after, image, lowhigh, max_size_fraction)
+
         def call(image, lowhigh=None, max_size_fraction=None):
-            key = mask_key(ident(), image, lowhigh, max_size_fraction)
+            before = ident()
+            key = mask_key(before, image, lowhigh, max_size_fraction)
             found = self._get(key, timepoint)
             if found is not None:
                 return found
             kwargs = {k: v for k, v in (("lowhigh", lowhigh), ("max_size_fraction", max_size_fraction))
                       if v is not None}
             labels = np.asarray(segment(image, **kwargs))
-            self._put(key, timepoint, labels)
+            self._put(written_key(key, before, image, lowhigh, max_size_fraction), timepoint, labels)
             return labels
 
         for name in ("accepts_range", "accepts_size_cap"):
@@ -238,7 +249,8 @@ class MaskStore:
         many = getattr(segment, "segment_many", None)
         if many is not None:
             def segment_many(images, lowhigh, max_size_fraction=None):
-                keys = [mask_key(ident(), image, lowhigh, max_size_fraction) for image in images]
+                before = ident()
+                keys = [mask_key(before, image, lowhigh, max_size_fraction) for image in images]
                 out = [self._get(key, timepoint) for key in keys]
                 todo = [k for k, o in enumerate(out) if o is None]
                 if todo:
@@ -246,7 +258,8 @@ class MaskStore:
                     found = many([images[k] for k in todo], lowhigh, **kwargs)
                     for k, labels in zip(todo, found):
                         out[k] = np.asarray(labels)
-                        self._put(keys[k], timepoint, out[k])
+                        self._put(written_key(keys[k], before, images[k], lowhigh, max_size_fraction), timepoint,
+                                  out[k])
                 return out
             call.segment_many = segment_many
         return call

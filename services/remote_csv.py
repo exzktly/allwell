@@ -15,7 +15,7 @@ from pathlib import Path
 from util.aw_safe import swallow
 from util.csv_gz import gz_path, is_gz_csv_name, plain_path
 from util.bounded_run import run_bounded
-from services.remote_transport import guard_script
+from services.remote_transport import _remote_quote, guard_script
 
 
 def compress_remote_csvs(host, remote_output_dir: str, well: str,
@@ -29,8 +29,10 @@ def compress_remote_csvs(host, remote_output_dir: str, well: str,
     connection leaves a complete plain file and never a lone partial. Failure is
     logged and the plain CSV is fetched as it is.
     """
+    # The directory quoted (a space or a ``*`` in it must not change which files the loop reaches and removes); only
+    # the pattern after it is left for the shell to expand.
     script = (
-        f'for f in {remote_output_dir}/*_{well}.csv; do\n'
+        f'for f in {_remote_quote(remote_output_dir)}/*_{well}.csv; do\n'
         f'  [ -f "$f" ] || continue\n'
         f'  if gzip -c -- "$f" > "$f.gz.part" && mv -f -- "$f.gz.part" "$f.gz"; then\n'
         f'    rm -f -- "$f"\n'

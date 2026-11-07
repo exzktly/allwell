@@ -108,6 +108,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # The per-user folder for local logs and caches; pipeline.scan_cache asks
     # it where the CZI scan cache lives, so the worker needs it too.
     "util/state_dir.py",
+    # The local half of the delete layer: ``pipeline.stardist_cache`` and ``pipeline.io`` remove what they made
+    # through it, on the worker as well as here.
+    "util/safe_delete.py",
     "util/well_token.py",
     # Free-space primitives + the single wording for a volume that filled. The
     # retry shield below rewrites an ENOSPC through it, so a remote run that

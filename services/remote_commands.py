@@ -334,7 +334,10 @@ def _batch_driver_snippet(run_dir: str, n_batches: int, argv: list[str],
         # by a pass that was replayed (`.aw_batch_<i>_staged` says so) — and
         # removing it would delete the batch's input and, in a final pass, the
         # held archives.
-        f'if [ -d {staged} ]; then rm -rf {in_q} && mv {staged} {in_q} '
+        # Not through ``aw_rm``: the function would push the longest launch past MAX_COMMAND_LINE (8,268 measured).
+        # The target is ``<run dir>/in``, composed by ``remote_run_paths`` with nothing read from a journal, and the
+        # launch is packed, so it cannot arrive cut. ``--one-file-system`` keeps it off any mount inside.
+        f'if [ -d {staged} ]; then rm -rf --one-file-system -- {in_q} && mv {staged} {in_q} '
         f'&& {{ : > {staged_flag} || true; }}; '
         f'elif [ -f {staged_flag} ] && [ -d {in_q} ]; then '
         f'echo "[remote] batch-driver: batch $_aw_i: its input is already in place"; '

@@ -662,7 +662,8 @@ def pull_small_file(host: "RemoteHost", remote_path: str, dest: Path, *,
 
 def delete_remote_paths(host: "RemoteHost", paths: Iterable[str], *,
                         what: str, log_fn: Callable[[str], None]) -> bool:
-    """``rm -f`` *paths* (globs allowed) on *host*; *what* names them in the log.
+    """Remove *paths* (a ``*`` pattern allowed in the last component) on *host*, through the delete layer; *what*
+    names them in the log.
     Whether the ``rm`` succeeded.
 
     Non-fatal: a failure is logged and returns False, because every caller has a
@@ -676,7 +677,16 @@ def delete_remote_paths(host: "RemoteHost", paths: Iterable[str], *,
     ``missing operand`` every time. The stdin pipe avoids the shell-quoting
     round-trip entirely.
     """
-    script = "rm -f -- " + " ".join(paths) + "\n"
+    # Through the delete layer: each path's directory quoted, its last component a plain name or ``*`` pattern, every
+    # target strictly inside the staging directory -- checked here and again on the host (``remote_delete``). The
+    # paths used to be joined unquoted, so a space or a ``*`` in a directory name changed what was removed.
+    from services.remote_delete import command
+
+    try:
+        script = command(host.remote_staging_dir, list(paths))
+    except ValueError as exc:
+        log_fn(f"[remote] warn: did not remove {what}: {exc}\n")
+        return False
     try:
         result = ssh_control(host, ["bash", "-s"], stdin=script.encode("utf-8"),
                              check=False, timeout_s=30, what=f"rm -f ({what})")

@@ -802,6 +802,32 @@ def probe_host(alias: str, *, ssh_key_path: str = "") -> HostProbe:
 # ── install steps ─────────────────────────────────────────────────────────
 
 
+#: The file the bootstrap writes into the miniforge it installs. Only a ``~/miniforge3`` holding it is ever removed:
+#: one without it is someone's own conda, with their own environments, whether or not this probe found it on the PATH.
+MINIFORGE_MARKER = ".allwell-installed"
+
+#: Shell: remove ``$MINIFORGE_DIR`` only when this app installed it; otherwise say so and exit 3 (*stop*) or carry on
+#: (*keep*). Used by the install (a clean reinstall) and by ``--force``.
+_MINIFORGE_REMOVAL = r"""
+if [ -d "$MINIFORGE_DIR" ]; then
+    if [ -f "$MINIFORGE_DIR/__MARKER__" ]; then
+        echo "[bootstrap-remote] removing the miniforge All-Well installed at $MINIFORGE_DIR" >&2
+        rm -rf --one-file-system -- "$MINIFORGE_DIR"
+    else
+        echo "[bootstrap-remote] NOT removing $MINIFORGE_DIR: All-Well did not install it (it has no __MARKER__)," \
+             "so it may be your own conda and its environments. Remove or rename it yourself if you meant to." >&2
+        __ON_FOREIGN__
+    fi
+fi
+""".replace("__MARKER__", MINIFORGE_MARKER)
+
+
+def miniforge_removal_shell(*, on_foreign: str) -> str:
+    """:data:`_MINIFORGE_REMOVAL` with *on_foreign* (``"exit 3"`` or ``":"``) for a miniforge this app did not
+    install."""
+    return _MINIFORGE_REMOVAL.replace("__ON_FOREIGN__", on_foreign)
+
+
 def install_miniforge_if_missing(
     alias: str, probe: HostProbe, force: bool, *, ssh_key_path: str = "",
 ) -> None:
@@ -818,10 +844,7 @@ def install_miniforge_if_missing(
     install_script = r"""
 set -euo pipefail
 MINIFORGE_DIR="$HOME/miniforge3"
-if [ -d "$MINIFORGE_DIR" ]; then
-    echo "[bootstrap-remote] removing existing miniforge dir for clean install" >&2
-    rm -rf "$MINIFORGE_DIR"
-fi
+""" + miniforge_removal_shell(on_foreign="exit 3") + r"""
 UNAME="$(uname -s)-$(uname -m)"
 INSTALLER="/tmp/miniforge-${UNAME}.sh"
 URL="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-${UNAME}.sh"
@@ -834,8 +857,9 @@ else
     exit 1
 fi
 bash "$INSTALLER" -b -p "$MINIFORGE_DIR"
+touch "$MINIFORGE_DIR/__MARKER__"
 rm -f "$INSTALLER"
-"""
+""".replace("__MARKER__", MINIFORGE_MARKER)
     say("Installing miniforge on remote (this is the big one-time download)…")
     _ssh_run(
         alias, ["bash", "-s"],
@@ -867,7 +891,7 @@ if [ -n "$AW_PREFIX" ]; then
     case "$AW_PREFIX" in
         */envs/"$ENV_NAME")
             echo "[bootstrap-remote] --force: removing env at $AW_PREFIX" >&2
-            rm -rf "$AW_PREFIX"
+            rm -rf --one-file-system -- "$AW_PREFIX"
             ;;
         *)
             echo "[bootstrap-remote] --force: refusing to remove unexpected" \
@@ -876,8 +900,14 @@ if [ -n "$AW_PREFIX" ]; then
     esac
 fi
 done
-echo "[bootstrap-remote] --force: removing ~/miniforge3 and ~/allwell" >&2
-rm -rf ~/miniforge3 ~/allwell
+MINIFORGE_DIR="$HOME/miniforge3"
+""" + miniforge_removal_shell(on_foreign=":") + r"""
+# The app's own code versions, not ~/allwell as a whole: the project folder is where the app syncs its code, and
+# anything else in it is not the app's to remove.
+if [ -d "$HOME/allwell/code" ] && [ ! -L "$HOME/allwell/code" ]; then
+    echo "[bootstrap-remote] --force: removing All-Well's code versions in ~/allwell/code" >&2
+    rm -rf --one-file-system -- "$HOME/allwell/code"
+fi
 """.replace("__ENVS__", f"{ENV_NAME} {CELLPOSE_ENV_NAME}")
     )
 

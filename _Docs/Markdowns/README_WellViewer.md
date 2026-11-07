@@ -1862,6 +1862,13 @@ too old for it (525 or later is needed). A package that is installed but no
 longer imports counts as missing, and a bootstrap whose last install failed
 runs it again rather than reporting the host ready.
 
+Bootstrap removes only what it installed. A `~/miniforge3` on the host that All-Well
+did not install — your own conda, with your own environments — is never removed:
+if the bootstrap would need to replace it, it stops and says so, and you remove or
+rename it yourself if that is what you meant. `--force` removes the `allwell` and
+`allwell-cellpose` environments and All-Well's code folder (`~/allwell/code`), not
+the rest of `~/allwell` and not a miniforge it did not install.
+
 Before a remote run starts the pipeline it checks the environment can run it:
 not only that it exists, but that the last Bootstrap's install into it did not
 fail and is not still running, and that its Python can import what the pipeline
@@ -5179,11 +5186,14 @@ still exported (see below).
   this file is the first thing to read.
 - **Zip Loose Folder in place: the folders go away as they are packed** — the
   in-place mode groups your images into per-well folders and packs each into a
-  `<well>.zip`; each folder is deleted as soon as its own archive is written, so
-  the source folder never holds two full copies of the plate. A folder is kept in
-  two cases: it contained no TIFs (nothing was packed, so nothing replaces it),
-  or that well already had a zip from an earlier run (that archive is yours and
-  was not checked against the folder). If a run dies partway, the wells already
+  `<well>.zip`; each folder's TIFs are deleted as soon as its own archive is
+  written and read back holding every one of them, at its size, with its data
+  intact, so the source folder never holds two full copies of the plate. If the
+  archive does not read back whole, that well's TIFs are all kept and the run
+  stops with an error naming the well. A folder is kept in two cases: it contained
+  no TIFs (nothing was packed, so nothing replaces it), or that well already had a
+  zip from an earlier run (that archive is yours and was not checked against the
+  folder). If a run dies partway, the wells already
   packed keep their archives — run it again and it picks up from there.
 - **"N well(s) are incomplete" at load** — those wells' results cover fewer
   fields of view than their input holds: FOV-groups failed during the analysis

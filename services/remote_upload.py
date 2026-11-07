@@ -314,13 +314,23 @@ class DatasetCache:
         (``remote_transport.ssh_control``). ``check=True`` failures raise with
         ssh's own words in the message.
         """
-        # Nothing is deleted outside the staging directory, whatever built the path (``rm_refusal``).
+        # Nothing is deleted outside the staging directory, whatever built the path: refused here on the strings
+        # (``rm_refusal``), and sent through the delete layer, which checks again on the host what they resolve to.
         refusal = rm_refusal(self.host, remote_argv)
         if refusal:
             _LOG.error("[remote] %s", refusal)
             if check:
                 raise RuntimeError(refusal)
             return subprocess.CompletedProcess(list(remote_argv), RM_REFUSED_EXIT, "", refusal)
+        if remote_argv and str(remote_argv[0]).rsplit("/", 1)[-1] == "rm":
+            from services.remote_delete import remote_delete
+
+            targets = [str(a) for a in remote_argv[1:] if not str(a).startswith("-")]
+            result = remote_delete(self, self.host.remote_staging_dir, targets, timeout_s=timeout_s)
+            if check and result.returncode != 0:
+                raise RuntimeError(f"could not remove {', '.join(targets)}: "
+                                   f"{(result.stderr or '').strip() or f'exit {result.returncode}'}")
+            return result
         # The tilde-aware joiner, so ``mkdir -p ~/foo`` reaches the remote
         # shell as ``mkdir -p "$HOME"/foo``, not as a literal ``~`` directory.
         return ssh_control(self.host, [_remote_join(remote_argv)], check=check,

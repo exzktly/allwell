@@ -100,12 +100,14 @@ def sync_pipeline_code(host: RemoteHost, cache, root: Path, files: Iterable[str]
 def _prune_old_versions(host: RemoteHost, cache, target: str, log: Callable[[str], None]) -> None:
     """Mark *target* as just used, then remove version directories nobody has
     synced into for :data:`CODE_KEEP_DAYS`. Failure costs disk, never a run."""
+    from services.remote_delete import exec_sh
+
     root = f"{host.remote_project_dir}/{CODE_SUBDIR}"
     touched = cache._ssh_run(["touch", target], check=False)
     pruned = cache._ssh_run(
         ["find", root, "-mindepth", "1", "-maxdepth", "1", "-type", "d",
          "-mtime", f"+{CODE_KEEP_DAYS}", "!", "-name", target.rsplit("/", 1)[-1],
-         "-exec", "rm", "-rf", "{}", "+"], check=False)
+         *exec_sh(root)], check=False)              # through the delete layer: only inside the code directory
     for what, r in (("mark the code version in use", touched),
                     ("remove old code versions", pruned)):
         if r.returncode != 0:

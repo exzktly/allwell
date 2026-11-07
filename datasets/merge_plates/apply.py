@@ -441,7 +441,7 @@ def execute_plan(
 
     if plan.dest_is_restart:
         emit("Destination has leftover files from an earlier attempt — clearing.")
-        clear_destination(plan.dest)
+        clear_destination(plan.dest, sources=(plan.ds1, plan.ds2))
 
     plan.dest.root.mkdir(parents=True, exist_ok=True)
     marker_path = plan.dest.root / IN_PROGRESS_MARKER

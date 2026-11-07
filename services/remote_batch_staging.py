@@ -47,7 +47,10 @@ def prune_argv(remote_dir: str, names: list[str]) -> list[str]:
     argv = ["find", remote_dir, "-mindepth", "1", "-maxdepth", "1", "("]
     for name in sorted(set(names)):
         argv += ["!", "-name", name]
-    return argv + [")", "-exec", "rm", "-rf", "{}", "+", "-o", "-print"]
+    from services.remote_delete import exec_sh
+
+    # Through the delete layer: what find found is removed only if it resolves inside *remote_dir* on the host.
+    return argv + [")", *exec_sh(remote_dir), "-o", "-print"]
 
 
 def prune_staged(cache: Any, remote_dir: str, zips: list[Path], label: str,

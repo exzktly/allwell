@@ -509,7 +509,7 @@ def unstamped_note(unstamped: int) -> str:
     )
 
 
-def clear_destination(dest: DatasetPaths) -> None:
+def clear_destination(dest: DatasetPaths, *, sources=()) -> None:
     """Remove a destination's ``in``/``out`` content (a failed prior attempt).
 
     Every Datasets feature rebuilds a destination from its source(s) fresh on
@@ -518,7 +518,21 @@ def clear_destination(dest: DatasetPaths) -> None:
     clear them first; otherwise a partially-written file (or a well from an
     earlier, differently-scoped attempt) would linger in the "finished"
     output.
+
+    Refused (``DeleteRefused``) when the destination and any of *sources* (the
+    datasets the run reads) are the same folder or one is inside the other:
+    clearing it would remove the very data the run is about to read, which no
+    page check reaches for a queued job. Each folder goes through
+    ``util.safe_delete.safe_rmtree``, so only ``in``/``out`` strictly inside the
+    destination can be removed, never something a link or junction points at.
     """
+    from util.safe_delete import DeleteRefused, safe_rmtree
+
+    root = Path(os.path.realpath(dest.root))
+    for src in sources:
+        s = Path(os.path.realpath(getattr(src, "root", src)))
+        if s == root or root in s.parents or s in root.parents:
+            raise DeleteRefused(f"refused to clear {dest.root}: it overlaps the source {getattr(src, 'root', src)}, "
+                                "whose data the run reads")
     for folder in (dest.in_dir, dest.out_dir):
-        if folder.exists():
-            shutil.rmtree(folder)
+        safe_rmtree(folder, inside=dest.root)

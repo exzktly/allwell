@@ -2302,11 +2302,6 @@ class AllWellApp(QMainWindow):
             return
         self._save_window_state()
         _save_review_before_close(self._review)
-        if self._review is not None and hasattr(self._review, "_cleanup_tmp"):
-            try:
-                self._review._cleanup_tmp()
-            except Exception:
-                swallowed()  # was: pass (silent except)
         # Stop any in-flight Analyze run — AnalyzeTab's own closeEvent never
         # fires (it's a child widget), so without this a mid-run quit leaks the
         # local subprocess / remote SLURM allocation + scratch (audit L1). Also

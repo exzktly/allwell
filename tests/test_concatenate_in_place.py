@@ -366,7 +366,7 @@ def test_a_review_open_undoes_a_crashed_append_before_reading(pair, caplog, monk
     archive = pair / "d1" / "in" / "A01.zip"
     original = _sha(archive)
     _crash_mid_append(archive)
-    ctx = SimpleNamespace(window=SimpleNamespace(_cleanup_tmp=lambda: None))
+    ctx = SimpleNamespace(window=SimpleNamespace())
     with caplog.at_level(logging.WARNING, logger="review"), pytest.raises(_Opened):
         load_controller.load_path(ctx, pair / "d1")
     assert _sha(archive) == original

@@ -372,6 +372,41 @@ def prepare_script(paths: HoldPaths) -> str:
     return f"mkdir -p {d} && rm -f {gone}\n"
 
 
+def slurm_path_prelude(launcher: str) -> str:
+    """Shell that puts the Slurm commands on ``PATH`` when the shell the control scripts run in has not got them.
+
+    The control scripts are piped to ``ssh <host> bash -s``: a shell that is neither a login shell nor interactive,
+    so it never reads ``/etc/profile`` or ``~/.bash_profile``, which is where a cluster puts Slurm on ``PATH``
+    (``module load slurm``, an ``/etc/profile.d`` file) when it is not in ``/usr/bin``. A run reaches ``srun`` by the
+    host's scheduler command and then ``bash -lc`` on the node, and *Test scheduler* is a run, so both work on a
+    host where a bare ``sbatch`` here is ``command not found`` — which is what *Request a node* reported, at the
+    ``sbatch`` line of the submit script.
+
+    Looked for in two places, only when ``sbatch`` is missing: beside the ``srun`` the host's scheduler command
+    names, when that is a path (``/opt/slurm/bin/srun`` — the one place that is certain to hold the same
+    installation), and otherwise in what a login shell of the user's own would have set ``PATH`` to. That last is
+    read from a login shell's output by a marker, because a profile may print (a banner, a ``module`` message) and
+    the scripts' own output is parsed.
+    """
+    try:
+        program = shlex.split(launcher)[0]
+    except (ValueError, IndexError):
+        program = ""
+    beside = ""
+    if "/" in program:
+        directory = program.rsplit("/", 1)[0] or "/"
+        beside = (f'  if [ -x {_remote_quote(directory + "/sbatch")} ]; then PATH={_remote_quote(directory)}:"$PATH"; fi\n')
+    return ("if ! command -v sbatch >/dev/null 2>&1; then\n"
+            + beside +
+            '  if ! command -v sbatch >/dev/null 2>&1; then\n'
+            '    _aw_lp=$("${SHELL:-bash}" -lc \'printf "AW_PATH=%s\\n" "$(printenv PATH)"\' 2>/dev/null'
+            " | sed -n 's/^AW_PATH=//p' | tail -n 1)\n"
+            '    [ -n "$_aw_lp" ] && PATH="$_aw_lp:$PATH"\n'
+            "  fi\n"
+            "fi\n"
+            "export PATH\n")
+
+
 def submit_script(paths: HoldPaths, script_text: str, options: list[str], *, limit_s: int) -> str:
     """Shell that writes the hold script, submits it with ``sbatch`` and records the job id.
 
@@ -660,7 +695,11 @@ class GrantedNode:
 
     # ── talking to the host ──────────────────────────────────────────────────────────────────────────────────────
     def _script(self, script: str, *, check: bool = False):
-        result = self._cache._ssh_script(script, check=check, timeout_s=CONTROL_TIMEOUT_S)
+        # Every control script, not only the submit: the state read (`scontrol`), the cancel (`scancel`) and the
+        # partition's limit (`sinfo`) are bare Slurm commands in the same kind of shell, and a hold that could be
+        # submitted but not read or cancelled would be worse than one that could not be asked for.
+        result = self._cache._ssh_script(slurm_path_prelude(self.host.launch_command) + script, check=check,
+                                         timeout_s=CONTROL_TIMEOUT_S)
         if getattr(result, "returncode", 0) != 0:
             said = (getattr(result, "stderr", "") or "").strip().splitlines()
             self.transcript.add(f"the host's answer was not ok (exit {result.returncode})"

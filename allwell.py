@@ -2469,6 +2469,8 @@ def main() -> None:
     # A window that stops responding writes every thread's stack to the boot log.
     _boot_diag.install_hang_recorder(app)
     _install_combobox_popup_widener()
+    from core import wheel_guard
+    wheel_guard.install(app)
     # Collapse both font-family tokens to single resolvable names so Qt's
     # QSS parser doesn't walk alias tables and warn at startup
     # ("qt.qpa.fonts: Populating font family aliases took NN ms. Replace

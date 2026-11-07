@@ -1111,8 +1111,10 @@ Any string  preserved as-is and sorted lexicographically
 The **Method**, with a one-line note under it saying when to use it (it turns
 red, and says what is missing, while the method cannot run); the
 **Segmentation channel** — the channel name the method segments, also
-quantified like any other — which is hidden for **Label-free**, since that
+quantified like any other. It is a dropdown of the channels listed under Channels above that can also be typed in: pick a listed channel, or type one the list does not hold (usually a nuclear stain), and a line under the field says which of the two it is. The **Cytoplasm channel** of StarDist + watershed works the same way. The field is hidden for **Label-free**, since that
 segments the channel marked Phase; then only the chosen method's own settings.
+
+Scrolling the mouse wheel over a dropdown or number box scrolls the page, not the value, until you have clicked into that field — so a long form such as this one can be scrolled with the pointer anywhere on it.
 
 - **Segmentation** — five methods (the pipeline's name in brackets):
   **StarDist — nuclei** (`stardist_nuclei`, the default), **StarDist +

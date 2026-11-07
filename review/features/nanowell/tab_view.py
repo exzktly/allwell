@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import shiboken6
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
@@ -943,6 +944,8 @@ def _popout_window(ctx):
     card.canvas.mpl_connect("motion_notify_event", lambda event: wnc.on_popout_motion(ctx, event))
     card.canvas.mpl_connect("scroll_event", lambda event: wnc.on_popout_scroll(ctx, event))
     ctx.widgets.register("_nw_popout_hover_tip", DelayedToolTip(card.canvas))
+    window.keep_above_after_choices([ctx.widgets.get_or_none(n) for n in (
+        "_nw_popout_tps_menu", "_nw_popout_channels_menu", "_nw_popout_grid_menu", "_nw_popout_save_menu")])
     refresh = ctx.widgets.get_or_none("_nw_refresh_controls")
     if callable(refresh):
         refresh()                                        # the new controls start on the page's settings
@@ -1008,6 +1011,31 @@ class _PopoutWindow(QDialog):
         # The title bar's minimise and maximise buttons. ``Qt.Dialog`` already holds the ``Qt.Window`` bit, so setting
         # that flag changed nothing and a dialog's title bar has neither: the hints themselves are what add them.
         self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)
+
+    def keep_above_after_choices(self, menus) -> None:
+        """Bring the window back to the front when a choice made in it closes a popup. A menu or a combo's list is a
+        window of its own, and when it closes the system hands activation to the app's main window — which, until
+        this, left the pop-out behind it after Timepoints, Channels, Grid, Save and every combo. Only a choice made
+        here raises it: clicking the main window directly (to pick another nanowell) must still bring that forward."""
+        # One zero-delay timer. A menu is reached through ``triggered`` (an entry chosen) and not ``aboutToHide``: a menu
+        # is hidden as the window is deleted, and a connection to that signal crashes the interpreter then. A menu
+        # left by a click outside it, or Escape, has no choice to follow.
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(0)                            # after the popup has closed and activation has moved
+        timer.timeout.connect(self.raise_if_open)
+        for menu in menus:
+            if menu is not None:
+                menu.triggered.connect(lambda _action: timer.start())
+        for combo in self.findChildren(QComboBox):
+            combo.activated.connect(lambda _i: timer.start())
+        for box in self.findChildren(QCheckBox):
+            box.toggled.connect(lambda _on: timer.start())
+
+    def raise_if_open(self) -> None:
+        if shiboken6.isValid(self) and self.isVisible():
+            self.raise_()
+            self.activateWindow()
 
     def show_raised(self) -> None:
         self.show()

@@ -49,7 +49,6 @@ class ImportPreview:
     channels: tuple[str, ...] = ()
     examined: int = 0
     matched: int = 0
-    unreadable_count: int = 0
     unparsed_files: tuple[str, ...] = field(default_factory=tuple)
     #: Images found *below* the top level when the top level held none. Only
     #: counted in that case — it is the difference between "your schema is
@@ -139,12 +138,60 @@ class _WalkResult:
     unparsed_files: list
 
 
+def _iter_files(top: str, recursive: bool, classify: bool = True):
+    """Every non-directory entry under *top*, top-down, as a ``DirEntry``.
+
+    The listing ``os.walk`` would produce (a symlink to a directory counts as a
+    directory and is not descended into; an unreadable directory is skipped),
+    but yielding the ``DirEntry`` itself so a caller can ask it about the file
+    without a second ``stat``.
+
+    ``classify=False`` (top level only) yields every entry without asking
+    whether it is a directory. On a filesystem that does not report entry types
+    that question is a ``stat`` per entry, and the one caller that passes it --
+    the preview -- only looks at names.
+    """
+    if not classify and not recursive:
+        try:
+            with os.scandir(top) as flat:
+                yield from flat
+        except OSError:
+            return
+        return
+    try:
+        it = os.scandir(top)
+    except OSError:
+        return
+    subdirs: list[str] = []
+    with it:
+        for entry in it:
+            try:
+                is_dir = entry.is_dir()
+            except OSError:
+                is_dir = False
+            if is_dir:
+                if recursive and not entry.is_symlink():
+                    subdirs.append(entry.path)
+            else:
+                yield entry
+    for sub in subdirs:
+        yield from _iter_files(sub, recursive)
+
+
 def _walk(
     search_dir: Path, *, schema: list[str], sep: str, recursive: bool,
+    check_readable: bool = True,
 ) -> _WalkResult:
     """The one directory walk both :func:`scan_folder` and
     :func:`group_files_by_well` build on, so the preview and the executor
-    can never disagree about what matched."""
+    match the same names.
+
+    *check_readable* is whether each matched entry is asked if it is a real
+    file, which is what drops a dangling symlink (and a directory named like an
+    image). The executor needs that; the preview does not and leaves it out,
+    because on a filesystem that reports no entry types it is a ``stat`` per
+    file, on the GUI thread, before the user has pressed anything.
+    """
     well_idx = _well_index(schema)
     fov_idx = _field_index(schema, "fov")
     tp_idx = _field_index(schema, "timepoint")
@@ -158,32 +205,32 @@ def _walk(
     unreadable = 0
     unparsed: list[str] = []
 
-    for root, _dirs, files in os.walk(search_dir):
-        for fname in files:
-            if not fname.lower().endswith(_IMAGE_SUFFIXES):
-                continue
-            examined += 1
-            stem = os.path.splitext(fname)[0]
-            parts = stem.split(sep)
-            well = None
-            if well_idx is not None and well_idx < len(parts):
-                well = canonical_well_label(parts[well_idx])
-            if well is None:
-                unparsed.append(os.path.join(root, fname))
-                continue
-            full = os.path.join(root, fname)
-            if not os.path.isfile(full):
-                unreadable += 1
-                continue
-            by_well.setdefault(well, []).append(Path(full))
-            if fov_idx is not None and fov_idx < len(parts):
-                fovs.add(parts[fov_idx])
-            if tp_idx is not None and tp_idx < len(parts):
-                timepoints.add(parts[tp_idx])
-            if channel_idx is not None and channel_idx < len(parts):
-                channels.add(parts[channel_idx])
-        if not recursive:
-            break
+    for entry in _iter_files(str(search_dir), recursive, classify=check_readable):
+        fname = entry.name
+        if not fname.lower().endswith(_IMAGE_SUFFIXES):
+            continue
+        examined += 1
+        stem = os.path.splitext(fname)[0]
+        parts = stem.split(sep)
+        well = None
+        if well_idx is not None and well_idx < len(parts):
+            well = canonical_well_label(parts[well_idx])
+        if well is None:
+            unparsed.append(entry.path)
+            continue
+        # ``DirEntry.is_file`` answers from the type the directory listing
+        # already carried where the filesystem reports one; otherwise it is a
+        # ``stat`` per file, which is why the preview does not ask.
+        if check_readable and not entry.is_file():
+            unreadable += 1
+            continue
+        by_well.setdefault(well, []).append(Path(entry.path))
+        if fov_idx is not None and fov_idx < len(parts):
+            fovs.add(parts[fov_idx])
+        if tp_idx is not None and tp_idx < len(parts):
+            timepoints.add(parts[tp_idx])
+        if channel_idx is not None and channel_idx < len(parts):
+            channels.add(parts[channel_idx])
 
     return _WalkResult(
         by_well=by_well, fovs=fovs, timepoints=timepoints, channels=channels,
@@ -202,24 +249,28 @@ def existing_well_folders(search_dir: Path) -> tuple[str, ...]:
     """
     wells: list[str] = []
     try:
-        entries = sorted(Path(search_dir).iterdir())
+        with os.scandir(search_dir) as it:
+            # The name is tested before the entry is asked whether it is a
+            # directory: a loose-TIF folder is mostly thousands of file names
+            # that are not wells, and ``is_dir`` on each was a ``stat`` apiece.
+            candidates = sorted(
+                (e for e in it if canonical_well_label(e.name)),
+                key=lambda e: e.name)
     except OSError:
         return ()
-    for entry in entries:
-        if not entry.is_dir():
-            continue
-        well = canonical_well_label(entry.name)
-        if not well:
-            continue
+    for entry in candidates:
         try:
-            has_tifs = any(
-                f.is_file() and f.suffix.lower() in _IMAGE_SUFFIXES
-                for f in entry.iterdir()
-            )
+            if not entry.is_dir():
+                continue
+            with os.scandir(entry.path) as inner:
+                has_tifs = any(
+                    f.is_file() and os.path.splitext(f.name)[1].lower() in _IMAGE_SUFFIXES
+                    for f in inner
+                )
         except OSError:
             continue
         if has_tifs:
-            wells.append(well)
+            wells.append(canonical_well_label(entry.name))
     return tuple(wells)
 
 
@@ -254,7 +305,10 @@ def scan_folder(
     ever groups the folder it's pointed at, not its subfolders.
     """
     schema = parse_schema(filename_schema)
-    result = _walk(Path(search_dir), schema=schema, sep=filename_sep, recursive=recursive)
+    result = _walk(
+        Path(search_dir), schema=schema, sep=filename_sep, recursive=recursive,
+        check_readable=False,
+    )
     matched = sum(len(v) for v in result.by_well.values())
     # Only when the top level held nothing: look one level further and count, so
     # the page can say "they are in subfolders" instead of blaming the schema.
@@ -270,7 +324,6 @@ def scan_folder(
         channels=tuple(sorted(result.channels)),
         examined=result.examined,
         matched=matched,
-        unreadable_count=result.unreadable_count,
         unparsed_files=tuple(result.unparsed_files),
         nested_count=nested,
         schema_fields=tuple(schema),
@@ -284,9 +337,21 @@ def group_files_by_well(
 ) -> dict[str, list[Path]]:
     """Every matched file, grouped by canonical well — the input the
     new-destination executor writes per-well zips from."""
+    return group_files_by_well_counting(
+        search_dir, filename_schema=filename_schema, filename_sep=filename_sep,
+        recursive=recursive)[0]
+
+
+def group_files_by_well_counting(
+    search_dir: Path | str, *, filename_schema: str, filename_sep: str,
+    recursive: bool = False,
+) -> tuple[dict[str, list[Path]], int]:
+    """:func:`group_files_by_well` plus how many name-matched entries were
+    skipped as not real files (dangling symlinks), so the run can say so --
+    the preview no longer checks each file and cannot."""
     schema = parse_schema(filename_schema)
     result = _walk(Path(search_dir), schema=schema, sep=filename_sep, recursive=recursive)
-    return result.by_well
+    return result.by_well, result.unreadable_count
 
 
 @dataclass(frozen=True)

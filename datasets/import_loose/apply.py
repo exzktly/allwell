@@ -53,7 +53,7 @@ from datasets.core.containers import WellFraction
 from datasets.core.dataset_paths import DatasetPaths, destination_has_content
 from datasets.import_loose.import_loose_compute import (
     existing_well_folders,
-    group_files_by_well,
+    group_files_by_well_counting,
 )
 
 
@@ -140,10 +140,14 @@ def convert_to_new_destination(
 
     _check_new_destination(dest_root)
 
-    by_well = group_files_by_well(
+    by_well, unreadable = group_files_by_well_counting(
         search_dir, filename_schema=filename_schema, filename_sep=filename_sep,
         recursive=recursive,
     )
+    if unreadable:
+        # The preview does not check each file, so this is where a broken
+        # symlink is first reported.
+        emit(f"  {unreadable} unreadable file(s) (broken symlinks) skipped.\n")
     if not by_well:
         raise ValueError(
             "No files matched the filename schema — check the schema and "

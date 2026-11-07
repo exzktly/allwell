@@ -9529,8 +9529,8 @@ goes through first.
    sends the resulting folder there.
 
 Files that don't match the schema are left alone and reported rather than
-guessed at; a broken symlink is skipped and counted rather than crashing the
-conversion.
+guessed at; a broken symlink is skipped rather than crashing the conversion
+(a new-destination run says how many in its log).
 
 ### Merge Plates
 

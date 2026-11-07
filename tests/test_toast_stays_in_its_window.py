@@ -57,3 +57,22 @@ def test_a_message_wider_than_its_window_wraps_inside_it(qapp):
     assert toast._label.height() >= 2 * toast._label.fontMetrics().height(), "the wrapped message is cut to one line"
     toast.close()
     host.close()
+
+
+def test_a_long_message_on_a_wide_window_is_placed_for_its_shown_width(qapp):
+    """Sized with ``adjustSize``, a toast already shown on a wide window came out 533px wide (two thirds of the
+    800px offscreen screen) when its host was resized, was placed for 533px, and was then widened by its own layout
+    to the message's 671px — past the host's right edge by the difference. Measured in the page-render test."""
+    host = _host(qapp, 1600)
+    toast = Toast(host, _LONG)
+    toast.popup()
+    qapp.processEvents()
+    assert toast.width() > 600, "premise: a message wider than two thirds of the 800px offscreen screen"
+    for width in (1500, 1550):
+        host.resize(width, 600)
+        qapp.processEvents()
+        left, right = _span(toast, host)
+        assert 0 <= left and right <= width, f"the toast spans {left}..{right} of a {width}px window"
+    assert not toast._label.wordWrap(), "a message that fits the window stays on one line"
+    toast.close()
+    host.close()

@@ -123,6 +123,12 @@ class Toast(QWidget):
         t.popup()
         return t
 
+    def resizeEvent(self, event) -> None:
+        # Whatever sizes it — its layout on show included — the toast is placed for the size it has.
+        super().resizeEvent(event)
+        if self.isVisible():
+            self._place()
+
     def eventFilter(self, watched, event) -> bool:
         if event.type() in (QEvent.Resize, QEvent.Move) and self.isVisible():
             self._fit()
@@ -140,19 +146,24 @@ class Toast(QWidget):
         return max(1, width - 2 * theme.Spacing.lg)
 
     def _fit(self) -> None:
-        """Size to the message on one line, or wrap it to the host's width when one line is wider than that."""
+        """Size to the message on one line, or wrap it to the host's width when one line is wider than that.
+
+        From the layout's own hint rather than ``adjustSize``, which caps a window at two thirds of the screen:
+        on the test's 800px offscreen screen a 671px toast was sized 533px wide, placed for that width, and
+        then widened by its layout on show — past the host's right edge by the difference."""
         room = self._room()
         self._label.setWordWrap(False)
         self.setMinimumWidth(0)
         self.setMaximumWidth(_QWIDGETSIZE_MAX)
-        self.adjustSize()
-        if self.width() > room:
-            self._label.setWordWrap(True)
-            self.setFixedWidth(room)
-            self.layout().invalidate()                   # the label's height-for-width changed with its wrap
-            # A window's adjustSize does not ask its layout for the height at a width, so the wrapped
-            # label would keep one line's height.
-            self.resize(room, max(self.layout().heightForWidth(room), self.minimumSizeHint().height()))
+        self.layout().invalidate()
+        hint = self.sizeHint()
+        if hint.width() <= room:
+            self.resize(hint)
+            return
+        self._label.setWordWrap(True)
+        self.setFixedWidth(room)
+        self.layout().invalidate()                   # the label's height-for-width changed with its wrap
+        self.resize(room, max(self.layout().heightForWidth(room), self.minimumSizeHint().height()))
 
     def _place(self) -> None:
         margin = theme.Spacing.lg

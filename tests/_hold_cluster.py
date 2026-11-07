@@ -52,11 +52,18 @@ _SINFO = r'''#!/bin/bash
 exit 0
 '''
 _SQUEUE = r'''#!/bin/bash
-# squeue -h -j <job> -o <fmt>, or squeue -h -s<job>.<step> -o %i; a step id given to -j is "Invalid job id", as in Slurm.
-fmt="%T"; jid=""; step=""
+# squeue -h -j <job> -o <fmt>, squeue -h --steps --jobs=<job> -o %i, or squeue -h -s<job>.<step> -o %i; a step id given to -j is "Invalid job id", as in Slurm.
+fmt="%T"; jid=""; step=""; steps_of=""; want_steps=""
 while [ $# -gt 0 ]; do
-  case "$1" in -j) jid="$2"; shift;; -o) fmt="$2"; shift;; -s*) step="${1#-s}";; esac; shift
+  case "$1" in -j) jid="$2"; shift;; --jobs=*) steps_of="${1#--jobs=}";; --steps) want_steps=1;; -o) fmt="$2"; shift;;
+    -s*) step="${1#-s}";; esac; shift
 done
+# squeue -h --steps --jobs=<job> -o %i: every running step of the job (only those a test added; no batch/extern).
+if [ -n "$want_steps" ] && [ -n "$steps_of" ]; then
+  [ -e "$FAKE/squeue.down" ] && { echo "squeue: error: Socket timed out on send/recv operation" >&2; exit 1; }
+  grep "^$steps_of\." "$FAKE/steps" 2>/dev/null
+  exit 0
+fi
 if [ -n "$step" ]; then
   [ -e "$FAKE/jobs/${step%%.*}" ] || { echo "slurm_load_job_step error: Invalid job id specified" >&2; exit 1; }
   grep -qx "$step" "$FAKE/steps" 2>/dev/null && echo "$step"
@@ -111,6 +118,12 @@ class Cluster:
         """A running step, ``<job>.<step>``, of a job already set."""
         with (self.fake / "steps").open("a", encoding="utf-8") as fh:
             fh.write(step_id + "\n")
+
+    def end_step(self, step_id: str) -> None:
+        """The step ``<job>.<step>`` has ended."""
+        steps = self.fake / "steps"
+        kept = [s for s in steps.read_text(encoding="utf-8").splitlines() if s != step_id] if steps.exists() else []
+        steps.write_text("".join(s + "\n" for s in kept), encoding="utf-8")
 
     def sbatch_calls(self) -> list[list[str]]:
         return [p.read_text(encoding="utf-8").splitlines() for p in sorted(self.fake.glob("sbatch.*.args"))]

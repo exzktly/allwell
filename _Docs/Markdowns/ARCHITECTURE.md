@@ -953,7 +953,11 @@ when every line fits and undone when one does not (Line Graphs and the Scatter
 Plot break their own titles). Each fit starts from the title as its renderer wrote
 it (`_UNBROKEN` / `_FITTED` on the `Text`), never from an earlier fit's breaks, and
 runs twice: once before constrained layout and once against the axes it settles
-on, since the engine widens the left margin for phone-sized tick labels. A figure's
+on, since the engine widens the left margin for phone-sized tick labels. A page
+that is not taken through the style pass fits its titles itself with the same
+rule, at any layout (`plot_style.fit_titles_to_axes`): Home's Cell Gating calls it
+between two `tight_layout`s, since its 2 × 2 grid of CDFs leaves each panel
+narrower than its title on a phone. A figure's
 canvas re-fits on every `resize_event` (`_refit_on_resize`, attached by
 `apply_export_style_to_current`) — which is how a plot drawn at the desk gets the
 phone fit when phone layout raises its DPI, and gets its own titles back when

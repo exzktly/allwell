@@ -231,6 +231,11 @@ def _cell_gating_plot_cdf(ctx) -> None:
         ctx.runtime.cell_gating.axes_stack.append(limits)
 
     fig.tight_layout(pad=1.3)
+    # The page is not taken through the style pass, so its titles are fitted here: on a phone each panel is
+    # narrower than its title. Laid out again for the fitted titles.
+    from review.core.plot_style import fit_titles_to_axes
+    fit_titles_to_axes(fig)
+    fig.tight_layout(pad=1.3)
     _note_thinned(fig, drawn_counts)
     ctx.runtime.cell_gating.canvas.draw_idle()
 

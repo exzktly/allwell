@@ -258,7 +258,10 @@ _aw_term() {{
 }}
 trap _aw_term TERM INT HUP
 
-_aw_gpus=$(nvidia-smi -L 2>/dev/null | sed -e 's/^GPU [0-9]*: //' -e 's/ (UUID.*$//' | paste -sd, - 2>/dev/null)
+# Only `GPU <n>: <name>` lines are GPUs. On a node with the NVIDIA tools and no GPU or driver, nvidia-smi prints
+# "NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver ..." to stdout and exits 9, and that
+# sentence used to become the node's GPU list.
+_aw_gpus=$(nvidia-smi -L 2>/dev/null | sed -n -e 's/^GPU [0-9][0-9]*: \\(.*\\)$/\\1/p' | sed -e 's/ (UUID.*$//' | paste -sd, - 2>/dev/null)
 _aw_write {q["granted"]} "node=$_aw_node
 gpus=$_aw_gpus
 cpus=${{SLURM_CPUS_ON_NODE:-}}

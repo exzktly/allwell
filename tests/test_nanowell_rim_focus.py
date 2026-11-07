@@ -244,3 +244,23 @@ def test_cell_pass_matches_on_text_timepoints_rounded_coordinates_and_negative_a
     assert rfc.cell_pass(cells, flagged).tolist() == [0, 1, 0, 1, 1, 1, 1, 0, 1]
     floats = cells.assign(timepoint=[24.0, 24, 1, 1, 1, 1, 1, 1, 24.0])
     assert rfc.cell_pass(floats, flagged).tolist() == [0, 0, 1, 1, 1, 1, 1, 1, 1]
+
+
+def test_a_blank_timepoint_is_judged_alike_on_the_page_in_the_site_table_and_on_the_cells():
+    """Review N4. A run with no timepoint in its filenames writes a blank label, read as NaN in the site table and as
+    "" on the cells. Twenty-five sharp rims and five soft ones: the page, the site-table judgement and the cells must
+    all leave out the same five nanowells — not none on the page, five in the table, and no cell."""
+    import pandas as pd
+
+    n = 30
+    site = pd.DataFrame({"timepoint": [np.nan] * n, "nw_q": np.arange(n), "nw_r": np.zeros(n), "state": "measured",
+                         "focus": np.r_[np.full(25, SHARP), np.full(5, SOFT)]})
+    rule = rfc.RimFocusRule(True, 0.75)
+    page = site.assign(well="A1", reason="")
+    rfc.flag(page, rule)
+    table = rfc.flag_sites(site, "A1", rule)
+    cells = pd.DataFrame({"well": "A1", "timepoint": [""] * n, "nw_q": np.arange(n).astype(float), "nw_r": 0.0})
+    soft = list(range(25, 30))
+    assert np.flatnonzero(~page["rim_focus_ok"].astype(bool).to_numpy()).tolist() == soft
+    assert np.flatnonzero(table["rim_focus_ok"].eq(False).to_numpy()).tolist() == soft
+    assert np.flatnonzero(rfc.cell_pass(cells, table).to_numpy() == 0).tolist() == soft

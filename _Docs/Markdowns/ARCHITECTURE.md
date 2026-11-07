@@ -5594,8 +5594,10 @@ every plate-wide narrow read, all on the calling thread, so `nanowell_focus_gate
 without re-reading, and a repeat projection judges nothing. That memo lasts one session, so every open reads every
 site table once: `_read_site_table` does it with `pyarrow.csv` (`_arrow_site_table`), which on a 60-well,
 12-timepoint plate took the reads from 4.1 s of the open to 0.7 s, and hands back the frame pandas' `usecols` read
-gave — same columns in file order, same dtypes, blank or `NA`-spelled text as `NaN` rather than `None`, since
-`flag_sites` spells the timepoint with `astype(str)`. A file pyarrow refuses (a row with too many fields), a table
+gave — same columns in file order, same dtypes, blank or `NA`-spelled text as `NaN` rather than `None`. Every side of
+the rule keys a timepoint through `nanowell_rim_focus.timepoint_text`, which spells a missing label `""` — what the
+cell rows hold for a run whose filenames carry no timepoint — so `flag`'s grouping on the page, `flag_sites` and
+`cell_pass` judge such a timepoint alike rather than dropping it, spelling it `"nan"`, and matching no cell. A file pyarrow refuses (a row with too many fields), a table
 with no rows, or a duplicated or non-numeric, non-text column goes to pandas as before;
 `tests/test_nanowell_site_table_read.py` holds a messy corpus equal frame for frame and asserts pyarrow did each
 read. Judging (`flag_sites`) is the cost that remains, about 1.5 s on that plate. The judged frame is shared between callers and must

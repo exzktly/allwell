@@ -99,6 +99,16 @@ def clamp_fraction(value) -> float | None:
     return float(value) if MIN_FRACTION <= value <= MAX_FRACTION else None
 
 
+def timepoint_text(values: pd.Series) -> pd.Series:
+    """*values* (timepoint labels) as the text every side of the rule keys on, a missing label as ``""``.
+
+    A run whose filenames carry no timepoint writes a blank label: the site table reads it as NaN and the cell rows
+    as ``""``. Keyed as read, the page's grouping dropped the NaN key (so no rim there was judged), ``astype(str)``
+    spelled it ``"nan"`` in :func:`flag_sites` (so rims were judged and flagged), and no cell matched ``"nan"`` (so
+    none was left out) — three answers about one timepoint."""
+    return values.where(values.notna(), "").astype(str)
+
+
 def flag(frame: pd.DataFrame, rule: RimFocusRule | None) -> None:
     """Mark the rows of *frame* (``series_compute._addressed_grid``) whose rim was out of focus, in place.
 
@@ -110,7 +120,7 @@ def flag(frame: pd.DataFrame, rule: RimFocusRule | None) -> None:
     frame["recorded_state"] = frame["state"]
     focus = pd.to_numeric(frame["focus"], errors="coerce") if "focus" in frame else pd.Series(np.nan, index=frame.index)
     focus = focus.where(np.isfinite(focus) & (focus > 0))
-    keys = [frame["well"], frame["timepoint"]]
+    keys = [frame["well"], timepoint_text(frame["timepoint"])]
     enough = focus.groupby(keys).transform("count") >= MIN_SITES
     reference = focus.groupby(keys).transform(lambda v: np.nanpercentile(v, REFERENCE_PERCENTILE)
                                               if v.notna().any() else np.nan)
@@ -203,7 +213,7 @@ def flag_sites(table: pd.DataFrame, well: str, rule: RimFocusRule | None) -> pd.
     rows = table[pd.to_numeric(table["nw_q"], errors="coerce").notna()
                  & pd.to_numeric(table["nw_r"], errors="coerce").notna()].copy()
     rows["well"] = well
-    rows["timepoint"] = rows["timepoint"].astype(str)
+    rows["timepoint"] = timepoint_text(rows["timepoint"])
     if "reason" not in rows:
         rows["reason"] = ""
     flag(rows, rule)
@@ -261,7 +271,7 @@ def _packed_keys(frame: pd.DataFrame, levels: tuple[dict, dict] | None):
     ``nw_r``, or ``-1`` for a row with no address, a coordinate out of range, or (with *levels* given) a well or
     timepoint the levels do not hold — none of which can match a flagged nanowell-timepoint."""
     wells, well_levels = _text_codes(frame["well"], None if levels is None else levels[0])
-    tps, tp_levels = _text_codes(frame["timepoint"], None if levels is None else levels[1])
+    tps, tp_levels = _text_codes(timepoint_text(frame["timepoint"]), None if levels is None else levels[1])
     q = pd.to_numeric(frame["nw_q"], errors="coerce").to_numpy(dtype=float).round()
     r = pd.to_numeric(frame["nw_r"], errors="coerce").to_numpy(dtype=float).round()
     valid = ((wells >= 0) & (tps >= 0) & np.isfinite(q) & np.isfinite(r)

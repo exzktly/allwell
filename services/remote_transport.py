@@ -803,6 +803,18 @@ UNPACK_FAILED_EXIT = 97
 _PACKED_RE = re.compile(r"printf %s ([A-Za-z0-9+/=]+) \| base64 -d \| gzip -dc")
 
 
+#: The longest command the app sends after ``ssh_argv(...)``. Git for Windows' ssh.exe cuts a longer one: measured on an
+#: affected machine (``scripts/ssh_command_line_probe.py``), a command of 8,168 characters arrived whole and one of
+#: 8,208 arrived as its first 8,186 -- and the old handshake clear, cut there, ended in a bare ``"$HOME"``. The cap is
+#: on the command itself, not on the whole Windows command line with ssh's options. The longest launch packs to
+#: ~7,700 (``tests/test_the_launch_command_survives_the_command_line.py``).
+MAX_COMMAND_LINE = 8_000
+
+
+class CommandTooLong(ValueError):
+    """A packed command is longer than :data:`MAX_COMMAND_LINE`: sent, it would arrive cut."""
+
+
 def pack_for_login_shell(script: str) -> str:
     """*script* as a short, quote-free command the login shell unpacks and runs.
 
@@ -826,13 +838,17 @@ def pack_for_login_shell(script: str) -> str:
     """
     blob = base64.b64encode(
         gzip.compress(script.encode("utf-8"), mtime=0)).decode("ascii")
-    return (
+    packed = (
         f"if _aw_s=$(printf %s {blob} | base64 -d | gzip -dc) "
         '&& [ -n "$_aw_s" ]; then eval "$_aw_s"; else '
         'echo "[remote] ERROR could not unpack the launch command — the remote '
         'needs base64 and gzip"; '
         f"exit {UNPACK_FAILED_EXIT}; fi"
     )
+    if len(packed) > MAX_COMMAND_LINE:
+        raise CommandTooLong(f"a {len(packed):,}-character command line would reach the host cut (the longest sent is "
+                             f"{MAX_COMMAND_LINE:,}); send it as a script on stdin instead")
+    return packed
 
 
 def unpack_login_shell_command(command: str) -> str:
@@ -919,9 +935,14 @@ def ssh_control(host: "RemoteHost", remote: list[str], *, check: bool,
         if stdin is not None:
             stdin = guard_script(stdin.decode("utf-8")).encode("utf-8")
     elif remote:
-        # Packed, so a command line re-parsed or cut on its way -- Git for Windows' ssh.exe re-parses long ones -- fails
-        # to decode and runs nothing, instead of running whatever prefix arrived.
-        remote = [pack_for_login_shell(" ".join(str(a) for a in remote))]
+        # Packed, so a command line re-parsed or cut on its way -- Git for Windows' ssh.exe cuts long ones -- fails
+        # to decode and runs nothing, instead of running whatever prefix arrived. One too long to pack under the
+        # limit goes as a grouped script on stdin, which has none.
+        command = " ".join(str(a) for a in remote)
+        try:
+            remote = [pack_for_login_shell(command)]
+        except CommandTooLong:
+            remote, stdin = ["bash", "-s"], guard_script(command).encode("utf-8")
     cmd = host.ssh_argv(allocate_tty=False) + list(remote)
     kw: dict = {"input": stdin} if stdin is not None else dict(TEXT_UTF8)
     for attempt in (1, 2):

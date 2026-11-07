@@ -158,3 +158,61 @@ def test_a_refused_rm_is_never_sent(monkeypatch):
     with pytest.raises(RuntimeError, match="refused"):
         cache._ssh_run(["rm", "-rf", "/data/home/zakary.singer"], check=True)
     assert sent == []
+
+
+# ── the measured limit ────────────────────────────────────────────────────────────────────────────────────────────
+
+#: Measured on the affected Windows machine (scripts/ssh_command_line_probe.py): a command line of 8,208 characters
+#: reached the host as its first 8,186.
+MEASURED_CUT = 8_186
+
+
+def test_the_old_handshake_clear_cut_where_that_machine_cuts_names_the_home_folder_last():
+    """The cause, reproduced from the measurement: the command the app sent before (one ``rm -rf`` naming every flag),
+    for a run id of the real shape and the default staging directory, cut at 8,186 characters, hands ``rm`` the bare
+    home folder as its last operand -- for any run of about twenty batches or more, since every operand is the same
+    length. ``printf`` stands in for ``rm``."""
+    from services.remote_commands import BATCH_DONE, BATCH_READY, BATCH_REANCHOR, BATCH_SKIP, BATCH_STAGED
+    from services.remote_run_id import remote_run_paths
+    from services.remote_transport import _remote_join
+
+    paths = remote_run_paths(HOST, "run-0123456789abcdef-fedcba9876543210")       # run- + 16 + - + 16: the real shape
+    flags = [f"{paths.run_dir}/{t.format(i=i)}" for i in range(1, 34)
+             for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP, BATCH_STAGED)]
+    old = _remote_join(["rm", "-rf", paths.suspend_request, *flags])
+    assert len(old) > MEASURED_CUT
+    out = subprocess.run(["bash", "-c", old[:MEASURED_CUT].replace("rm -rf", "printf '%s\\n'", 1)],
+                         capture_output=True, text=True, env={**os.environ, "HOME": "/data/home/someone"})
+    assert out.stdout.splitlines()[-1] == "/data/home/someone"
+
+
+def _incompressible(n: int) -> str:
+    import secrets
+
+    return "echo " + secrets.token_hex(n // 2)
+
+
+def test_no_packed_command_is_longer_than_the_limit():
+    from services.remote_transport import MAX_COMMAND_LINE, CommandTooLong
+
+    assert MAX_COMMAND_LINE < MEASURED_CUT                        # the measured cap is on the command itself
+    with pytest.raises(CommandTooLong):
+        pack_for_login_shell(_incompressible(20_000))
+    assert len(pack_for_login_shell(_incompressible(2_000))) <= MAX_COMMAND_LINE
+
+
+def test_a_control_command_too_long_to_pack_goes_as_a_grouped_script(monkeypatch):
+    from services.remote_transport import MAX_COMMAND_LINE
+
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append((list(cmd), kw.get("input")))
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    monkeypatch.setattr("services.remote_transport.run_bounded", fake_run)
+    command = _incompressible(20_000)
+    ssh_control(HOST, [command], check=False, timeout_s=5)
+    (argv, stdin), = seen
+    assert argv[-2:] == ["bash", "-s"] and stdin == guard_script(command).encode()
+    assert all(len(a) <= MAX_COMMAND_LINE for a in argv)

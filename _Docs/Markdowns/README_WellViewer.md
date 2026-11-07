@@ -9734,6 +9734,14 @@ that blocked jobs are still waiting on is kept too, and All-Well says so
 ("Kept “…” — 2 job(s) wait on it; Retry it to release them"): its **Retry** is
 what releases the chain.
 
+**Clear all** next to it empties the queue: every job that is not running goes,
+including the ones still waiting and the paused or interrupted ones. It asks
+first, says how many of each state it will remove, and defaults to **No**. A
+running job is left where it is (stop it first to remove it), the output any
+job already wrote stays on disk, and a paused or interrupted job can no longer
+be resumed from here once cleared. The button is greyed out when there is
+nothing it would remove.
+
 **Queuing the next step before the first has run.** Every job's **⋯** menu has
 **New job using this output**, which sets up a job that works on what this one
 will write — before it has written anything:

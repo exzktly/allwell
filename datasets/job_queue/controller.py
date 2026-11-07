@@ -219,6 +219,13 @@ class QueueBridge(QObject):
             self.queueChanged.emit()
         return removed
 
+    def clear_all(self) -> int:
+        removed = self._queue.clear_all()
+        if removed:
+            self._save()
+            self.queueChanged.emit()
+        return removed
+
     def set_chain(self, job_id: str, chain_from: str) -> bool:
         """Link (or, with an empty *chain_from*, unlink) a job.
 
@@ -621,6 +628,7 @@ class JobQueueController(QObject):
         self.page.stopRequested.connect(self._on_stop_requested)
         self.page.stopJobRequested.connect(self._on_stop_job)
         self.page.clearCompletedRequested.connect(self._on_clear_completed)
+        self.page.clearAllRequested.connect(self._on_clear_all)
         self.page.addKindRequested.connect(self.sessions.begin_new_job)
         self.page.editRequested.connect(self.sessions.begin_edit)
         self.page.duplicateRequested.connect(self._on_duplicate)
@@ -931,6 +939,50 @@ class JobQueueController(QObject):
                 "cleared that never wrote its output; they are held as "
                 "blocked until you choose their input: "
                 + ", ".join(orphaned[:3]), "warn")
+
+    def _on_clear_all(self) -> None:
+        """Empty the queue of everything not running, after asking.
+
+        Asked because, unlike Clear completed, this also drops jobs that have
+        not run — a queue someone spent an afternoon setting up — and nothing
+        brings them back. The question says how many of each kind go, so "yes"
+        is to a specific loss, and defaults to No.
+        """
+        queue = self.bridge.queue
+        counts = queue.counts()
+        running = counts.get(JobState.RUNNING, 0)
+        total = len(queue.removable_ids())
+        if not total:
+            self._notify("Nothing to clear.", "neutral")
+            return
+        if not self._confirm_clear_all(counts, total, running):
+            return
+        removed = self.bridge.clear_all()
+        text = f"Cleared {removed} job(s) from the queue."
+        if running:
+            text += " The running job was left alone."
+        self._notify(text, "neutral")
+
+    def _confirm_clear_all(self, counts: dict[str, int], total: int, running: int) -> bool:
+        from PySide6.QtWidgets import QMessageBox
+
+        parts = [f"{counts.get(state, 0)} {word}" for state, word in (
+            (JobState.PENDING, "waiting to run"), (JobState.BLOCKED, "blocked"),
+            (JobState.SUSPENDED, "paused"), (JobState.INTERRUPTED, "interrupted"),
+            (JobState.SUCCEEDED, "done"), (JobState.FAILED, "failed"),
+            (JobState.CANCELLED, "cancelled")) if counts.get(state)]
+        text = (f"Remove {total} job(s) from the queue?\n\n"
+                + ", ".join(parts) + ".\n\n"
+                "This can't be undone. Output a job already wrote stays on "
+                "disk, but a paused or interrupted job can no longer be "
+                "resumed from here.")
+        if running:
+            text += ("\n\nThe running job is not removed — stop it first if "
+                     "you want it gone too.")
+        answer = QMessageBox.question(
+            self.page, "Clear all jobs?", text,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return answer == QMessageBox.Yes
 
     def _successors_of_unfinished_clearable_jobs(self) -> list[str]:
         jobs = self.bridge.queue.jobs

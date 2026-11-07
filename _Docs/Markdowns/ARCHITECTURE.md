@@ -19129,7 +19129,14 @@ Qt event loop. Four layers:
   via `stop_current`; a running row's ⋯ menu leads with *Stop this job*,
   `stopClicked` → `QueueBridge.stop_job`, for one), `+ Add job` — a menu
   of all seven kinds, each opening a new-job session on that tool's page —
-  and `Clear completed` at the right. Under it sits a one-line state tally
+  `Clear completed` and `Clear all` at the right. `Clear completed` keeps what
+  still waits (`JobQueue.clearable_ids`); `Clear all` removes every job that is
+  not running (`JobQueue.removable_ids` / `clear_all`, through `remove` per id
+  like the other), after `JobQueueController._on_clear_all` has asked — the
+  question counts each state it will drop and defaults to No — and is enabled
+  only while `set_summary` sees a non-running job. A running job is left for the
+  reason `QueueBridge.remove_job` refuses it: its worker still has a row to
+  report to. Under it sits a one-line state tally
   (states with no jobs are omitted; "0 failed" is not news) and the load-time
   `repair_notes`. The empty-queue hint is a plain caption, deliberately not
   `widgets.empty_state.EmptyState`: that widget is `Expanding/Expanding`,

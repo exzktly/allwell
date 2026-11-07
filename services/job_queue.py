@@ -544,6 +544,28 @@ class JobQueue:
             self.remove(job_id)
         return len(doomed)
 
+    def removable_ids(self) -> list[str]:
+        """What Clear all removes: every job that is not in flight.
+
+        A running job has a worker that is writing to disk and reporting back
+        to the queue; removing its row would leave both with nothing to land
+        on, which is why :meth:`QueueBridge.remove_job` refuses it too. It has
+        to be stopped first.
+        """
+        return [j.id for j in self._jobs if j.state != JobState.RUNNING]
+
+    def clear_all(self) -> int:
+        """Drop every job that is not running, returning how many went.
+
+        Through :meth:`remove` per id, for the reason :meth:`clear_terminal`
+        gives. Nothing waits on a removed unfinished job and survives except a
+        running one, and a running job's inputs were settled before it started.
+        """
+        doomed = self.removable_ids()
+        for job_id in doomed:
+            self.remove(job_id)
+        return len(doomed)
+
     def clearable_ids(self) -> list[str]:
         """What Clear completed removes: jobs that ran, except a failed or
         cancelled job that blocked jobs still wait on — removing it took away

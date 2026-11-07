@@ -37,8 +37,11 @@ def test_the_page_builds_from_the_rail_and_draws_the_dataset(nanowell_app, qtbot
     ctx, st = _open(nanowell_app, qtbot)
     assert ctx.widgets.get_or_none("_nw_canvas") is not None
     assert not [r for r in caplog.records if "Nanowells" in r.getMessage()]   # the builder did not raise
-    texts = [t.get_text() for t in ctx.widgets.get("_nw_fig").texts]
-    assert any(t.startswith("Nanowell × timepoint values used 14 of 16") for t in texts)
+    # The Distribution's footer is in the Details field under the figure, not in the figure (PR #1250): read the
+    # field's header as the window shows it, so a field that is never refreshed fails here.
+    assert st.view == "distribution"
+    summary = ctx.widgets.get("_nw_details_summary").text()
+    assert summary.startswith("Nanowell × timepoint values used 14 of 16"), summary
 
 
 def test_every_view_draws_in_the_real_app_and_a_saved_plot_restores_the_view_and_well(nanowell_app, qtbot, caplog):

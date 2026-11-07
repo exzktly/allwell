@@ -46,6 +46,19 @@ _logger = logging.getLogger("review.centre_view")
 
 
 
+def _build_preview_picker(win) -> None:
+    """Fill the rail's preview frame, when this build has one.
+
+    The frame exists only because a present page declares it (Image Browser's
+    Segmentation sub-tab, a ``RailSection``), so a profile without Image
+    Browser has neither the frame nor the ``preview.build_picker`` service. It
+    is read through the widget registry rather than ``win.<key>``, which would
+    raise in that build before ``features.call`` could see the service is
+    absent."""
+    frame = win._ctx.widgets.get_or_none("_sidebar_preview_frame")
+    if frame is not None:
+        win._ctx.features.call("preview.build_picker", win, frame)
+
 
 def build_centre(win, parent: QWidget) -> None:
     layout = parent.layout()
@@ -135,8 +148,7 @@ def build_centre(win, parent: QWidget) -> None:
     # Sidebars referenced by data-load + tab-switch logic must exist
     # immediately even though the centre tab bodies that depend on them
     # are deferred.
-    win._ctx.features.call("preview.build_picker",
-                           win, win._sidebar_preview_frame)
+    _build_preview_picker(win)
 
     # Stable name -> tab QWidget map for builder closures to reach into.
     # Populated in two phases: plot sub-tab frames are inserted here before

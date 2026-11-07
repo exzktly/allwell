@@ -735,3 +735,46 @@ def test_the_tile_s_card_waits_for_the_pointer_to_rest(page, qtbot, monkeypatch)
     at, text = shown[-1]
     assert at - arrived >= 0.9, at - arrived                         # it waited the second (Qt's timer: ±5%)
     assert text.startswith(f"Tile {st.popout_tiles[0][3]} of the composite")
+
+
+# ── the pop-out's chrome: Reset zoom, and hiding the control rows ────────────────────────────────────────────────
+def test_reset_zoom_returns_the_whole_composite_and_is_greyed_while_it_is_whole(page, qtbot):  # noqa: F811
+    st = _open_hex(page, qtbot)
+    reset = page.widgets.get("_nw_popout_reset_zoom_btn")
+    fig = page.widgets.get("_nw_popout_fig")
+    home = fig.axes[0].get_xlim()
+    assert not reset.isHidden() and not reset.isEnabled()                     # whole: nothing to reset
+    canvas, point = _tile_point(page, st, st.popout_tiles[0])
+    _wheel(canvas, point)
+    assert st.composite_view is not None and reset.isEnabled()
+    assert abs(fig.axes[0].get_xlim()[1] - fig.axes[0].get_xlim()[0]) < abs(home[1] - home[0]) * 0.9
+    reset.click()
+    assert st.composite_view is None and not reset.isEnabled()
+    assert page.widgets.get("_nw_popout_fig").axes[0].get_xlim() == pytest.approx(home)
+    _drag_canvas(canvas, point, QPoint(point.x() + 30, point.y() + 20))       # a pan counts as moved too
+    assert reset.isEnabled()
+    reset.click()
+    assert page.widgets.get("_nw_popout_fig").axes[0].get_xlim() == pytest.approx(home)
+    page.widgets.get("_nw_popout_layout_cb").setCurrentIndex(0)               # Rows: no zoom to reset
+    assert reset.isHidden()
+
+
+def test_hide_controls_folds_every_control_row_and_show_controls_brings_them_back(page, qtbot):
+    from PySide6.QtWidgets import QApplication
+
+    _open_hex(page, qtbot)
+    window = page.widgets.get("_nw_popout")
+    window.show()
+    toggle = page.widgets.get("_nw_popout_controls_btn")
+    rows = ("_nw_popout_image_channel_cb", "_nw_popout_tps_btn", "_nw_popout_layout_cb", "_nw_popout_sort_cb")
+    card = page.widgets.get("_nw_popout_card")
+    assert toggle.text() == "Hide controls ▾" and all(page.widgets.get(n).isVisibleTo(window) for n in rows)
+    shown_height = card.height()
+    toggle.click()
+    QApplication.processEvents()
+    assert toggle.text() == "Show controls ▸" and not any(page.widgets.get(n).isVisibleTo(window) for n in rows)
+    assert toggle.isVisibleTo(window) and page.widgets.get("_nw_popout_reset_zoom_btn").isVisibleTo(window)
+    assert card.height() > shown_height                                         # the figure took the room
+    toggle.click()
+    QApplication.processEvents()
+    assert all(page.widgets.get(n).isVisibleTo(window) for n in rows) and card.height() == shown_height

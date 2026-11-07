@@ -37,7 +37,7 @@ from review.features.nanowell.exclude_view import build_exclude_controls
 from review.features.nanowell.rim_focus_view import build_rim_focus_controls
 from review.features.nanowell.details_view import build_details_panel
 from review.features.nanowell.variables_view import build_variable_controls
-from review.features.nanowell.window_view import build_popout_window_controls, build_window_strip
+from review.features.nanowell.window_view import build_popout_chrome, build_popout_window_controls, build_window_strip
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
 from review.features.nanowell.popout_view import build_popout_view_controls
 from review.features.nanowell.qc_view import build_qc_controls, refresh_qc_controls
@@ -921,9 +921,14 @@ def _popout_window(ctx):
     window.setWindowTitle("Nanowell crops")
     layout = QVBoxLayout(window)
     layout.setContentsMargins(0, 0, 0, 0)
-    layout.addLayout(_popout_controls(ctx, window))
-    layout.addLayout(build_popout_view_controls(ctx, window, timepoint_text))
-    layout.addLayout(build_popout_window_controls(ctx, window))
+    rows = QWidget(window)                              # the control rows, folded away together by the chrome bar
+    rows_layout = QVBoxLayout(rows)
+    rows_layout.setContentsMargins(0, 0, 0, 0)
+    rows_layout.addLayout(_popout_controls(ctx, window))
+    rows_layout.addLayout(build_popout_view_controls(ctx, window, timepoint_text))
+    rows_layout.addLayout(build_popout_window_controls(ctx, window))
+    layout.addLayout(build_popout_chrome(ctx, window, rows))
+    layout.addWidget(rows)
     card = PlotCard(window, figsize=(_FIG_W, _FIG_H * 0.8), constrained=False, header=False)
     card.setFigureTitle("")
     layout.addWidget(card)

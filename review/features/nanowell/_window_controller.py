@@ -499,6 +499,7 @@ def draw_window_popout(ctx, st, fig) -> None:
             inks=inks, key=key, key_title=key_title, corner=corner, corner_said=corner_said,
             display_range=nwc.display_range(ctx), note=strip_text(st), cells=st.crop_cells, view=st.composite_view,
             labels=st.popout_labels)
+        _nwc()._call(ctx, "_nw_popout_zoom_refresh")
         return
     first = st.window_page * WINDOW_PAGE
     shown = rows[first:first + WINDOW_PAGE]
@@ -623,9 +624,21 @@ def _pan(ctx, st, event) -> bool:
     return True
 
 
+def reset_composite_zoom(ctx) -> None:
+    """**Reset zoom**: the hex composite back to the whole of it, as it opens — the wheel's zoom and a drag's pan
+    forgotten. Does nothing when the view is already whole."""
+    st = _state(ctx)
+    if st is None or st.composite_view is None:
+        return
+    st.composite_view = None
+    _nwc().draw_popout(ctx)
+    _nwc()._call(ctx, "_nw_popout_zoom_refresh")
+
+
 def _set_composite_view(ctx, st, fig, xlim, ylim) -> None:
     """Put every composite panel of *fig* on *xlim*, *ylim*, keep it for the redraws to come, and draw."""
     st.composite_view = (tuple(xlim), tuple(ylim))
+    _nwc()._call(ctx, "_nw_popout_zoom_refresh")
     for other in fig.axes:
         if getattr(other, "_aw_composite_home", None) is not None:
             other.set_xlim(*xlim)

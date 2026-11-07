@@ -10,6 +10,7 @@ control writes the window through the controller; the strip reads it back throug
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QToolButton,
                                QVBoxLayout, QWidget)
 
@@ -230,6 +231,9 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
         page.setText(f"Page {st.window_page + 1} of {pages}")
         for widget in pager:
             widget.setVisible(in_window and pages > 1)
+        zoom = ctx.widgets.get_or_none("_nw_popout_zoom_refresh")
+        if callable(zoom):
+            zoom()
         go_to = ctx.widgets.get_or_none("_nw_popout_go_to_btn")
         if go_to is not None:
             go_to.setVisible(not in_window)              # one nanowell's button: no meaning over the window's many
@@ -255,3 +259,50 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     reg.register("_nw_popout_window_refresh", refresh)
     refresh()
     return row
+
+
+_HIDE_TIP = "Hide the pop-out's control rows to give the figure the whole window; show them again here."
+_RESET_ZOOM_TIP = ("Back to the whole composite: undoes the wheel's zoom and a drag's pan. Greyed while the view is "
+                   "already whole; the Hex layout only.")
+
+
+def build_popout_chrome(ctx, window, rows) -> QHBoxLayout:
+    """The bar above the pop-out's control rows, always visible: **Hide controls** (and **Show controls**) folds
+    the rows away — the figure takes the whole window — and **Reset zoom** returns the hex composite to the whole
+    of it after the wheel or a drag moved it. *rows* is the widget holding the control rows.
+
+    Registers ``_nw_popout_controls_btn``, ``_nw_popout_reset_zoom_btn`` and ``_nw_popout_zoom_refresh`` (the reset
+    button shown for the hex layout in Window mode and enabled while the view is not whole — the controller calls it
+    whenever the zoom, the layout or the source changes)."""
+    toggle = QToolButton(window)
+    toggle.setCheckable(True)
+    toggle.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    toggle.setProperty("variant", "secondary")
+    toggle.setToolTip(_HIDE_TIP)
+    reset = QPushButton("Reset zoom", window)
+    reset.setProperty("variant", "secondary")
+    reset.setToolTip(_RESET_ZOOM_TIP)
+
+    def set_hidden(hidden: bool) -> None:
+        rows.setVisible(not hidden)
+        toggle.setText("Show controls ▸" if hidden else "Hide controls ▾")
+
+    def zoom_refresh() -> None:
+        st = _state(ctx)
+        hex_shown = st is not None and st.popout_source == "window" and st.popout_layout == "hex"
+        reset.setVisible(hex_shown)
+        reset.setEnabled(hex_shown and st.composite_view is not None)
+
+    toggle.toggled.connect(set_hidden)
+    reset.clicked.connect(lambda _=False: wnc.reset_composite_zoom(ctx))
+    reg = ctx.widgets
+    reg.register("_nw_popout_controls_btn", toggle)
+    reg.register("_nw_popout_reset_zoom_btn", reset)
+    reg.register("_nw_popout_zoom_refresh", zoom_refresh)
+    set_hidden(False)
+    zoom_refresh()
+    bar = QHBoxLayout()
+    bar.addWidget(toggle)
+    bar.addStretch(1)
+    bar.addWidget(reset)
+    return bar

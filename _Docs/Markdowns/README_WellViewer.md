@@ -6681,6 +6681,9 @@ make a page; ◀ ▶ turn it. Every crop is on one brightness scale, the Timepoi
 Save controls apply as they do to one nanowell, and a click on a row selects its nanowell, so the side panel follows.
 A row whose crops are not yet cut says so; one that cannot be cut says why.
 
+The pop-out's bar of controls can be folded away: **Hide controls** (top left of the pop-out) gives the figure the whole
+window and becomes **Show controls**; **Reset zoom** stays in view either way.
+
 **Layout: Hex** draws the same nanowells all at once as an **artificial hex array — a composite, not a well**. Each
 source well has its own labelled patch, and inside a patch the nanowells fill the hexagon **row by row from its top
 left**, so a position says nothing about where a nanowell sat in its well. **Sort** (beside **Colour**) chooses the
@@ -6698,7 +6701,8 @@ all are on one brightness scale, so wells of different exposure compare. It show
 drawn once for each timepoint ticked in **Timepoints**, side by side in one row — the same tile at the same place in
 every copy, all on the one brightness scale, so a change over time reads as a change in the picture. Pick the
 timepoints to compare with *None* and a tick or two; the menu stays open while you tick. **Scroll** over the
-composite to zoom about the pointer, and **drag** to pan: every copy moves together, and the view holds while crops
+composite to zoom about the pointer, and **drag** to pan (**Reset zoom**, top right of the pop-out, returns the whole
+composite and is greyed while it is whole): every copy moves together, and the view holds while crops
 arrive, until another page, window or layout is shown. A click (a press that does not move) still selects the tile's
 nanowell. **Cells** draws each tile's counted cells as their traced outlines — a dot only for a cell the run kept no
 outline of, which the caption counts — and **Labels** off leaves out each

@@ -12824,6 +12824,12 @@ figure that once asked for a `bottom` at or above the panels' `top`, which matpl
 top` — the page went undrawn. Every one of those adjustments goes through `renderer._adjust`, which holds `bottom` at
 least `_MIN_PANEL_SHARE` (0.12 of the figure) below the top; the footer keeps all its lines and is drawn over the
 panels' lowest part instead (`test_nanowell_window_page.py::test_a_short_figure_with_a_subset_s_footer_still_draws`).
+`_adjust` also drops a layout engine an earlier style pass left on the figure before it adjusts: phone layout puts
+constrained layout on the canvas's figure, `fig.clear()` keeps it, and under it matplotlib ignores `subplots_adjust`,
+so `fig.subplotpars` would keep the margins of the view drawn before the phone was entered — and the phone pass reads
+that bottom to decide which figure text is footer (`plot_style._figure_text_band`), leaving the Position and
+Trajectories footers' upper lines under the x-axis label (`test_nanowell_footer_under_phone_engine.py`). The style
+pass sets the engine again once the renderer has drawn.
 
 **Timepoints: All / None.** The pop-out's Timepoints menu (`popout_view.build_popout_view_controls`) opens with *All*
 (`controller.set_popout_timepoints(ctx, [])`) and *None* (`set_popout_no_timepoints`), then a tick per timepoint.

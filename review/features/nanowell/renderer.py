@@ -284,7 +284,17 @@ _MIN_PANEL_SHARE = 0.12
 def _adjust(fig, **params) -> None:
     """``fig.subplots_adjust(**params)``, with *bottom* held at least :data:`_MIN_PANEL_SHARE` below the top (the
     one given, else the figure's own). A footer that would need more keeps every line and is drawn over the panels'
-    lowest part rather than raising ``bottom cannot be >= top`` and leaving the page undrawn."""
+    lowest part rather than raising ``bottom cannot be >= top`` and leaving the page undrawn.
+
+    A layout engine left on the figure by an earlier style pass is dropped first. Phone layout sets constrained
+    layout on the canvas's figure, and ``fig.clear()`` keeps it, so on every later draw matplotlib ignored this call
+    (warning once) and ``fig.subplotpars`` kept the margins of whatever was drawn before the phone was entered. The
+    phone pass reads those margins to decide which figure text is a footer to keep the panels clear of
+    (``plot_style._figure_text_band``), so a footer whose upper lines sat above the stale bottom was laid over the
+    x-axis label. The style pass sets the engine again after the renderer has drawn."""
+    engine = fig.get_layout_engine()
+    if engine is not None and not engine.adjust_compatible:
+        fig.set_layout_engine(None)
     if "bottom" in params:
         top = params.get("top", fig.subplotpars.top)
         params["bottom"] = min(params["bottom"], top - _MIN_PANEL_SHARE)

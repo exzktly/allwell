@@ -78,7 +78,8 @@ SHELL = "ui/phone_shell.py"
 #: reads the declaration; it recognises nothing by what a widget is called or by
 #: a duck type. The count is held at zero, and still counts the spellings a name
 #: could come back in: an entry in a ``_KIND_BY_CLASS`` / ``_KIND_BY_OBJECT_NAME``
-#: dict (plain or annotated), a comparison of ``type(w).__name__`` with a string,
+#: dict (plain or annotated), any comparison of a ``__name__`` attribute (with a
+#: string, ``in`` a tuple or set, or against a roster bound elsewhere),
 #: a comparison with ``"InfoHint"``, and the ``draw_idle`` duck type.
 RECOGNISED_BY_NAME_BUDGET = 0
 
@@ -242,10 +243,14 @@ def _is_string_equal_to(node: ast.AST, value: str) -> bool:
 
 
 def _compares_a_class_name(node: ast.Compare) -> bool:
-    """``type(w).__name__ == "ControlBand"`` — a widget found by its class name."""
-    sides = [node.left, *node.comparators]
-    return (any(isinstance(n, ast.Attribute) and n.attr == "__name__" for n in sides)
-            and any(isinstance(n, ast.Constant) and isinstance(n.value, str) for n in sides))
+    """``type(w).__name__ == "ControlBand"`` — a widget found by its class name — and every other comparison of a
+    ``__name__`` attribute: ``in`` a tuple or set of names, or against a roster bound elsewhere
+    (``type(w).__name__ in _DRAG_OWNERS``, which shipped while this counted only a string literal beside it)."""
+    return any(isinstance(n, ast.Attribute) and n.attr == "__name__" for n in [node.left, *node.comparators])
+
+
+def _against_a_string(node: ast.Compare) -> bool:
+    return any(isinstance(n, ast.Constant) and isinstance(n.value, str) for n in [node.left, *node.comparators])
 
 
 def recognised_by_name(tree: ast.AST) -> list[tuple[int, str]]:
@@ -264,7 +269,8 @@ def recognised_by_name(tree: ast.AST) -> list[tuple[int, str]]:
                 and any(_is_string_equal_to(n, "InfoHint") for n in [node.left, *node.comparators]):
             found.append((node.lineno, 'compares an object name to "InfoHint"'))
         elif isinstance(node, ast.Compare) and _compares_a_class_name(node):
-            found.append((node.lineno, "compares a class name to a string"))
+            found.append((node.lineno, "compares a class name to a string" if _against_a_string(node)
+                          else "compares a class name"))
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
                 and node.func.id == "getattr" and len(node.args) >= 2 \
                 and _is_string_equal_to(node.args[1], "draw_idle"):

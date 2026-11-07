@@ -210,7 +210,9 @@ every plot canvas — built only through
 `widgets.info_icon`, and the Image Table's controls block declare theirs). The
 shell recognises no widget by its class name, its object name or a duck type;
 `test_the_shell_recognises_no_more_widgets_by_name_than_the_budget` holds that
-at zero, counting the spellings a name could come back in.
+at zero, counting the spellings a name could come back in — any comparison of a
+`__name__` attribute among them, with a string, in a tuple or set, or against a
+roster bound elsewhere.
 `tests/test_phone_layout_snapshot.py` records what the window shows in phone
 layout (every page, upright, sideways — the screen turned — and at the large text
 size), on a 432×936 screen, against
@@ -710,14 +712,17 @@ Inside an area that scrolls, a drag that starts on a widget whose drag is its ow
 is left to it by `_DragOwnerGuard`, which every grabbed viewport carries
 (`set_drag_scroll` grabs and installs the guard together) and which refuses Qt's
 `QScrollPrepareEvent`, so the press reaches the widget as if no gesture were
-there: a plate (grabbed blindly, one neither selected wells nor scrolled), a
+there: a plate (grabbed blindly, one neither selected wells nor scrolled), which
+the shell knows by what the plate declares rather than by its class —
+`WellPlateSelector` and its grid call `widgets.form_registry.declare_drag_owner`
+where they are built, a Qt property `form_registry.owns_drag` reads — a
 slider, any widget whose class reads mouse moves itself (`_handles_own_drag`,
 derived from the class rather than listed, so the colour picker's square and hue
 strip, an Image Table chip and a widget written tomorrow are covered by having
 been written; Qt's own classes do not count), and a plot — except on a plot
 page's own scroll area, below. A report-only plate
-(`WellPlateSelector.isReportOnly`, the run dashboard's) selects nothing and does
-not keep the drag (`_plate_owns_drag`), so Analyze's Progress page, most of which
+(`WellPlateSelector.setReportOnly`, the run dashboard's) selects nothing and
+declares that it owns no drag, so `_plate_owns_drag` leaves the drag to the page, so Analyze's Progress page, most of which
 is that plate, scrolls from anywhere on it. A drag that starts inside a scroll
 area of its own that also scrolls by a drag and has vertical range to scroll — a
 log on Analyze's Progress page, a list in a form — is left to that area

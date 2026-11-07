@@ -5929,6 +5929,23 @@ def test_phone_guard_counts_every_way_the_shell_recognises_a_widget_by_name():
     assert module.recognised_by_name(ast.parse("def f():\n    return 1\n")) == []
 
 
+@pytest.mark.parametrize("compare", [
+    'type(w).__name__ in _DRAG_OWNERS',                  # the shape that shipped: a roster named elsewhere
+    'type(w).__name__ not in ("WellPlateSelector", "_PlateGrid")',
+    'type(w).__name__ in {"WellPlateSelector"}',
+    'w.__class__.__name__ == OWNER',
+], ids=["in-a-named-roster", "not-in-a-tuple", "in-a-set", "equal-to-a-name"])
+def test_phone_guard_counts_a_class_name_compared_with_a_roster(compare):
+    """``type(w).__name__ in _DRAG_OWNERS`` recognised the plate by class name in ``ui/phone_shell.py`` while the
+    guard read zero: it counted a comparison only when a string literal stood on the other side."""
+    import ast
+
+    module = importlib.import_module("tests.test_phone_mode_stays_in_views")
+    source = f'_DRAG_OWNERS = ("WellPlateSelector",)\nOWNER = "X"\n\ndef f(w):\n    return {compare}\n'
+    assert [what for _line, what in module.recognised_by_name(ast.parse(source))] == [
+        "compares a class name"], compare
+
+
 FORM_REGISTRY_VIOLATIONS = {
     "imports_core": "from core import phone_layout\n",
     "imports_ui": "import ui.theme\n",

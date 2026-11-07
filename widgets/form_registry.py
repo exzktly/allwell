@@ -21,6 +21,15 @@ registers an ``apply`` callable instead::
 
     form_registry.register(panel, panel_apply)     # kind "custom"
 
+A widget whose own drag means something — a plate's drag selects wells — says
+that here too, and keeps it current::
+
+    form_registry.declare_drag_owner(self, not report_only)
+
+so a container that scrolls by a drag leaves a drag starting on it to the
+widget, without knowing the widget's class. It is a Qt property, not a kind:
+owning a drag is not an alternate form, and nothing listens for it.
+
 Everything is held weakly. A widget that is deleted drops out of
 :func:`declared` — the live check is ``shiboken6.isValid``, because a wrapper can
 outlive the C++ widget it wraps.
@@ -42,6 +51,10 @@ CUSTOM = "custom"
 #: The Qt property the kind is stored in. A property, not a Python attribute, so
 #: it is there for whoever holds another wrapper of the same C++ widget.
 KIND_PROPERTY = "formKind"
+
+#: The Qt property :func:`declare_drag_owner` sets: whether a drag that starts on
+#: the widget is the widget's own. Absent on a widget that never said.
+OWNS_DRAG_PROPERTY = "ownsDrag"
 
 #: Every widget declared, in order. Weak: a registry that kept widgets alive
 #: would keep every page ever built.
@@ -120,3 +133,20 @@ def add_listener(fn: Callable[[QWidget, str], None]) -> None:
 def remove_listener(fn: Callable[[QWidget, str], None]) -> None:
     if fn in _listeners:
         _listeners.remove(fn)
+
+
+def declare_drag_owner(widget: QWidget, owns: bool = True) -> None:
+    """Say whether a drag that starts on *widget* is its own (a plate's drag
+    selects wells). Call it in the constructor, and again whenever the answer
+    changes — a plate made a read-out selects nothing and owns no drag."""
+    widget.setProperty(OWNS_DRAG_PROPERTY, bool(owns))
+
+
+def owns_drag(widget: QWidget) -> bool | None:
+    """What *widget* said with :func:`declare_drag_owner`, or ``None`` when it
+    never said (or the C++ widget is gone)."""
+    try:
+        value = widget.property(OWNS_DRAG_PROPERTY)
+    except RuntimeError:                      # the C++ widget is gone
+        return None
+    return value if isinstance(value, bool) else None

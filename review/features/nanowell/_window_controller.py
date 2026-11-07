@@ -26,6 +26,7 @@ from review.features.nanowell.distribution_compute import METRICS, PER_NANOWELL,
 from review.features.nanowell.crop_grid_compute import shown_timepoints
 from review.features.nanowell.renderer import DENSITY_ABOVE, MAX_PANELS, render_message, render_site_rows
 from review.features.nanowell.state import POPOUT_LAYOUTS, POPOUT_SOURCES
+from review.features.nanowell.views_compute import numeric_values
 from review.features.nanowell.zoom_compute import notches, pan_limits, wheel_limits
 
 #: Rows of the window's nanowells the pop-out shows at a time.
@@ -394,11 +395,14 @@ def metric_values(ctx, st, key: str, sites, timepoint) -> tuple[dict | None, str
     else:
         rows = frame[frame["timepoint"].astype(str) == str(timepoint)]
     values = {}
-    for well, q, r, v in zip(rows["well"], rows["nw_q"], rows["nw_r"], rows[column]):
+    # As numbers: the occupancy class is stored as "0" / "1" / "2" / "3+" (its lower bound, 3+ as 3), and a value
+    # that is not a number — NA, a class nobody could count — is no value rather than a raise.
+    numbers = numeric_values(rows, column)
+    for well, q, r, v in zip(rows["well"], rows["nw_q"], rows["nw_r"], numbers):
         if not (math.isfinite(q) and math.isfinite(r)):
             continue                                     # placed but never addressed: not a window member
         site = (str(well), int(q), int(r))
-        if site in wanted:
+        if site in wanted and math.isfinite(v):
             values[site] = float(v)
     return values, nwc._label(metric, channel, st.data), ""
 

@@ -644,6 +644,35 @@ def test_a_metric_that_cannot_be_read_places_by_rank_and_says_why():
     assert labels[0] == "Window rank" and "Cell count" in labels
 
 
+def test_occupancy_sorts_and_labels_by_its_class_s_number_and_a_nanowell_without_one_goes_last():
+    """Occupancy at baseline is stored as the strings "0" / "1" / "2" / "3+" with ``NA`` where there was no count at
+    baseline (``series_compute``). Sort and Corner offer it like every other metric, and reading it with ``float``
+    raised on "3+" and on ``NA``. The classes are given against the rank order, so placing by rank would differ."""
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    metrics = pd.DataFrame({"well": ["A01"] * 4, "nw_q": [0.0, 1.0, 2.0, 3.0], "nw_r": [0.0] * 4,
+                            "timepoint": ["T1"] * 4, "tp_order": [0] * 4,
+                            "occupancy_class": pd.Series(["1", "3+", pd.NA, "0"], dtype="object")})
+    sites = [("A01", q, 0) for q in range(4)]
+    st = SimpleNamespace(composite_sort="occupancy_class", composite_label="occupancy_class", metrics=metrics,
+                         data=SimpleNamespace(channels=[]), composite_desc=True, channel="")
+    ctx = SimpleNamespace(state=SimpleNamespace(feature_slice=lambda _name: st,
+                                                channel=SimpleNamespace(active_channel="")))
+    try:
+        values, said = wnc.composite_order(ctx, st, sites, "T1")
+    except (ValueError, TypeError) as exc:                         # the defect: "3+" and NA are not floats
+        raise AssertionError(f"reading Occupancy for Sort raised {exc!r}") from exc
+    assert values == {("A01", 0, 0): 1.0, ("A01", 1, 0): 3.0, ("A01", 3, 0): 0.0}
+    assert said == "Occupancy at baseline (cells), largest first"
+    rows = [WindowRow(site, rank, 1.0, {}) for rank, site in enumerate(sites, start=1)]
+    placed = [t.source for t in cc.composite(rows, values=values, descending=True).tiles]
+    assert placed == [("A01", 1, 0), ("A01", 0, 0), ("A01", 3, 0), ("A01", 2, 0)]
+    corner, corner_said = wnc.composite_labels(ctx, st, sites, ["T1"])
+    assert corner == {"T1": values} and corner_said == "Corner: each tile's Occupancy at baseline (cells)."
+
+
 def test_the_dashed_frame_stays_on_each_panel_s_edge_when_zoomed_and_panned(page, qtbot):  # noqa: F811
     """Reported: on zoom the dashed edge outlining each timepoint's composite disappeared — it was drawn around the
     data, so zooming in moved it out of view. It is the panel's own edge now, whatever the zoom or pan."""

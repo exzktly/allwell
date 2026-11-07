@@ -6405,6 +6405,8 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   nanowells are inside — over several timepoints, both **inside at every covered timepoint** and **at any** — and how
   many members have no dot on the figure, by reason: *in panels not drawn* (past the twelve a figure draws), *in
   densities*, *in overflow*. A nanowell with no value is never inside.
+- The bar is the sentence on a line of its own with the controls wrapping beneath it, so on a phone every control stays
+  whole and reachable.
 - **Low** and **High** take typed numbers (Enter to apply; a number the wrong way round is swapped, text that is not a
   number is put back), which is also the way to adjust a window on a phone. **every timepoint | any timepoint**
   chooses which of the two counts is the window's members: *every* needs a value inside the range at each covered

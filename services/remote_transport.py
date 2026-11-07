@@ -17,6 +17,8 @@ Callers import these names from here, never through ``remote_runner``.
 
 from __future__ import annotations
 
+import base64
+import gzip
 import logging
 import os
 import re
@@ -794,6 +796,105 @@ def recover_dead_master(host: "RemoteHost") -> bool:
     return True
 
 
+#: What the login shell prints, and the code it exits with, when the packed
+#: launch command cannot be unpacked (no ``base64`` or ``gzip`` on the remote).
+UNPACK_FAILED_EXIT = 97
+
+_PACKED_RE = re.compile(r"printf %s ([A-Za-z0-9+/=]+) \| base64 -d \| gzip -dc")
+
+
+def pack_for_login_shell(script: str) -> str:
+    """*script* as a short, quote-free command the login shell unpacks and runs.
+
+    The launch command is passed to ``ssh`` as one argument on the local
+    command line, and on Windows that line goes through ``list2cmdline`` and
+    then Git for Windows' ``ssh.exe``, which parses it again by its own rules
+    before sending it. The scripts grew past 8,000 characters — the conda guard,
+    the ``srun`` retry wrapper and, for a batched run, the driver loop — with
+    hundreds of quotes and seventeen lines, and a batched launch from Windows
+    then failed with ``bash: -c: line 17: syntax error: unexpected end of
+    file``: the last line, which holds most of the script, arrived with its
+    quoting unbalanced. A command that is short and contains only base64
+    characters cannot be truncated or re-quoted on the way.
+
+    The script is gzipped (a 9,000-character launch packs to about 3,500) and
+    run by ``eval`` in the login shell itself, so ``$$`` is still the login
+    shell's PID and ``exec`` still replaces it — the pidfile and the
+    ``kill -TERM`` cancel channel are unchanged. If ``base64`` or ``gzip`` is
+    missing the shell says so and exits :data:`UNPACK_FAILED_EXIT` rather than
+    evaluating nothing and exiting 0, which would read as a run that succeeded.
+    """
+    blob = base64.b64encode(
+        gzip.compress(script.encode("utf-8"), mtime=0)).decode("ascii")
+    return (
+        f"if _aw_s=$(printf %s {blob} | base64 -d | gzip -dc) "
+        '&& [ -n "$_aw_s" ]; then eval "$_aw_s"; else '
+        'echo "[remote] ERROR could not unpack the launch command — the remote '
+        'needs base64 and gzip"; '
+        f"exit {UNPACK_FAILED_EXIT}; fi"
+    )
+
+
+def unpack_login_shell_command(command: str) -> str:
+    """The script :func:`pack_for_login_shell` packed into *command*.
+
+    For tests and for diagnosis: the packed form is unreadable in a log or an
+    argv, so anything that needs to see what the remote runs reads it here.
+    """
+    m = _PACKED_RE.search(command)
+    if m is None:
+        raise ValueError("not a packed launch command")
+    return gzip.decompress(base64.b64decode(m.group(1))).decode("utf-8")
+
+
+def guard_script(script: str) -> str:
+    """*script* wrapped in one ``{ … }`` group, for a remote ``bash -s`` to read on its stdin.
+
+    ``bash -s`` runs each command as soon as it has read it, so a script whose transfer was cut -- a connection dropped
+    mid-send -- used to run its first half: the half that clears a folder without the half that checks it. A group is
+    parsed whole before any of it runs, so a cut script is a syntax error ("unexpected end of file") and runs nothing.
+    """
+    return "{\n" + script.rstrip("\n") + "\n}\n"
+
+
+#: The exit code a remote ``rm`` refused by :func:`rm_refusal` reports; ``ssh`` never sees it.
+RM_REFUSED_EXIT = 126
+
+
+def _norm_remote_path(path: str) -> str:
+    """*path* with repeated and trailing slashes taken out (``~/a//b/`` -> ``~/a/b``)."""
+    path = re.sub(r"/+", "/", str(path).strip())
+    return path.rstrip("/") if path not in ("/", "") else path
+
+
+def rm_refusal(host, remote_argv) -> str:
+    """Why an ``rm`` the app is about to send must not run, or ``""``.
+
+    Everything the app deletes on a host lives under that host's staging directory (runs, dataset caches, staged
+    batches, their flags), so every operand of an ``rm`` must be a path **strictly inside** it, written the way the
+    staging directory is (``~/.allwell-staging/...``), with no ``.`` or ``..`` component. The staging directory itself, a
+    home folder, ``/``, ``~`` and anything elsewhere are refused before a byte is sent. A remote home folder was emptied
+    by an ``rm -rf`` once; this is the check that would have refused it however the operand had been built.
+    """
+    argv = [str(a) for a in (remote_argv or [])]
+    if not argv or argv[0].rsplit("/", 1)[-1] != "rm":
+        return ""
+    root = _norm_remote_path(getattr(host, "remote_staging_dir", "") or "")
+    options_done = False
+    for arg in argv[1:]:
+        if not options_done and arg == "--":
+            options_done = True
+            continue
+        if not options_done and arg.startswith("-"):
+            continue
+        path = _norm_remote_path(arg)
+        parts = path.split("/")
+        if not root or not path.startswith(root + "/") or "." in parts or ".." in parts:
+            return (f"refused to remove {arg!r}: only paths inside this host's staging directory "
+                    f"({root or 'not set'}) are ever removed")
+    return ""
+
+
 def ssh_control(host: "RemoteHost", remote: list[str], *, check: bool,
                 timeout_s: float, stdin: bytes | None = None,
                 what: str = "") -> subprocess.CompletedProcess[str]:
@@ -813,8 +914,15 @@ def ssh_control(host: "RemoteHost", remote: list[str], *, check: bool,
     ``check=True`` raises :class:`RemoteCommandError`, whose message is what
     ssh or the remote printed.
     """
-    cmd = host.ssh_argv(allocate_tty=False) + list(remote)
     what = what or " ".join(str(a) for a in remote)[:80]
+    if list(remote) == ["bash", "-s"]:
+        if stdin is not None:
+            stdin = guard_script(stdin.decode("utf-8")).encode("utf-8")
+    elif remote:
+        # Packed, so a command line re-parsed or cut on its way -- Git for Windows' ssh.exe re-parses long ones -- fails
+        # to decode and runs nothing, instead of running whatever prefix arrived.
+        remote = [pack_for_login_shell(" ".join(str(a) for a in remote))]
+    cmd = host.ssh_argv(allocate_tty=False) + list(remote)
     kw: dict = {"input": stdin} if stdin is not None else dict(TEXT_UTF8)
     for attempt in (1, 2):
         try:

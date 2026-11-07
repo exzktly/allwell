@@ -28,7 +28,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 
-from services.remote_transport import _remote_quote
+from services.remote_transport import _remote_quote, pack_for_login_shell
 from services.slurm_ids import hold_check_shell, is_step, squeue_listing
 from services.subprocess_text import TEXT_UTF8
 from util.bounded_run import run_bounded
@@ -90,8 +90,8 @@ def probe(host, pidfile: str, *, scheduler: bool, job_hint: str = "",
     """
     name = getattr(host, "name", "") or getattr(host, "ssh_alias", "the host")
     try:
-        result = run_bounded(host.ssh_argv(allocate_tty=False) + [
-            _script(pidfile, job_hint, getattr(host, "remote_staging_dir", "~/.allwell-staging"))],
+        result = run_bounded(host.ssh_argv(allocate_tty=False) + [pack_for_login_shell(
+            _script(pidfile, job_hint, getattr(host, "remote_staging_dir", "~/.allwell-staging")))],
                                 capture_output=True, timeout=timeout_s, **TEXT_UTF8)
     except subprocess.TimeoutExpired:
         return Liveness(UNREACHABLE, f"{name} did not answer within {int(timeout_s)} s")
@@ -150,7 +150,7 @@ def cancel_pending(host, job_id: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> 
               '[ "$(squeue -h -j "$_jid" -o %T 2>/dev/null | head -n1)" = PENDING ] && '
               'scancel -u "$_aw_me" "$_jid" 2>/dev/null; echo AW_END')
     try:
-        result = run_bounded(host.ssh_argv(allocate_tty=False) + [script],
+        result = run_bounded(host.ssh_argv(allocate_tty=False) + [pack_for_login_shell(script)],
                                 capture_output=True, timeout=timeout_s, **TEXT_UTF8)
     except (subprocess.TimeoutExpired, OSError):
         return False

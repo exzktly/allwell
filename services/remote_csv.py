@@ -15,6 +15,7 @@ from pathlib import Path
 from util.aw_safe import swallow
 from util.csv_gz import gz_path, is_gz_csv_name, plain_path
 from util.bounded_run import run_bounded
+from services.remote_transport import guard_script
 
 
 def compress_remote_csvs(host, remote_output_dir: str, well: str,
@@ -41,7 +42,7 @@ def compress_remote_csvs(host, remote_output_dir: str, well: str,
     try:
         res = run_bounded(
             host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
-            input=script.encode("utf-8"), capture_output=True, timeout=600)
+            input=guard_script(script).encode("utf-8"), capture_output=True, timeout=600)
     except (subprocess.TimeoutExpired, OSError) as exc:
         log(f"[remote] ↓ {well}: WARN could not compress its CSV(s) on the "
             f"remote ({exc}); fetching them as they are.\n")

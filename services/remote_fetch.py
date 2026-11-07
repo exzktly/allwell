@@ -103,6 +103,7 @@ from services.remote_wire import (
     _well_xfer_line,
 )
 from services.remote_transport import (
+    guard_script,
     _fmt_secs, _rsync_ssh_transport,
     _rsync_with_retry,
     delete_remote_paths,
@@ -637,7 +638,7 @@ class Fetcher:
         try:
             result = run_bounded(
                 self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
-                input=script.encode("utf-8"),
+                input=guard_script(script).encode("utf-8"),
                 capture_output=True,
                 timeout=30,
             )

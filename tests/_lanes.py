@@ -329,6 +329,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_failed_run_is_rerun_on_the_same_granted_node.py": "Request a node, run, fail, run again: the same node, no second allocation, and the end of a run never cancels the node",
     "test_a_run_never_cancels_the_granted_node.py": "A run on a granted node ends its own step; no cancel, probe, sweep or clean-up of a run releases the node",
     "test_handshake_clear_never_removes_a_directory.py": "Clearing a batched run's handshake files: only files directly in the run dir, and rm -f so no directory can go",
+    "test_remote_commands_cannot_run_cut.py": "Every remote command line packed and every bash -s script grouped, so a cut or re-parsed one runs nothing; no rm outside the staging dir",
     "test_remote_hold_finds_slurm.py": "Requesting a granted node on a host whose Slurm tools are not on the control shell's PATH: the prelude that finds them, for every control script",
     "test_remote_hold_request.py": "Requesting a granted node: the sbatch sent, the queue wait, the boot retry, and giving the node back",
     "test_remote_hold_script.py": "The granted node's hold script, run under sh: release, idle, app-gone and time-limit endings, and what must not end it",

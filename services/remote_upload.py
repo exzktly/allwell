@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import logging
 import subprocess
 import threading
 import time
@@ -42,18 +43,22 @@ from services.remote_transport import (
     _fmt_secs,
     _iter_rsync_lines,
     _looks_like_rsync_filename,
+    RM_REFUSED_EXIT,
     _remote_join,
     _rsync_progress_flags,
     _rsync_ssh_transport,
     _rsync_supports_append_verify,
     end_transfer,
     names_ssh_failure,
+    rm_refusal,
     rsync_failure_is_transient,
     sleep_unless_stopped,
     spawn_transfer,
     ssh_control,
 )
 
+
+_LOG = logging.getLogger(__name__)
 
 # Ceiling on one short ssh control command (mkdir, touch, rm -rf). Generous
 # enough for an ``rm -rf`` of a run directory on a slow shared filesystem, and
@@ -309,6 +314,13 @@ class DatasetCache:
         (``remote_transport.ssh_control``). ``check=True`` failures raise with
         ssh's own words in the message.
         """
+        # Nothing is deleted outside the staging directory, whatever built the path (``rm_refusal``).
+        refusal = rm_refusal(self.host, remote_argv)
+        if refusal:
+            _LOG.error("[remote] %s", refusal)
+            if check:
+                raise RuntimeError(refusal)
+            return subprocess.CompletedProcess(list(remote_argv), RM_REFUSED_EXIT, "", refusal)
         # The tilde-aware joiner, so ``mkdir -p ~/foo`` reaches the remote
         # shell as ``mkdir -p "$HOME"/foo``, not as a literal ``~`` directory.
         return ssh_control(self.host, [_remote_join(remote_argv)], check=check,

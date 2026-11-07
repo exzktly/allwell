@@ -415,6 +415,15 @@ def _ssh_run(
     """
     sys.path.insert(0, str(REPO_ROOT))
     from services.remote_config import keepalive_options, known_hosts_options
+    from services.remote_transport import guard_script, pack_for_login_shell
+    # A script on stdin is grouped, and a command line packed, so neither runs if it arrives cut or re-parsed
+    # (``remote_transport.guard_script`` / ``pack_for_login_shell``): Git for Windows' ssh.exe re-parses long command
+    # lines, and a remote shell runs whatever prefix of a script reaches it.
+    if list(remote_argv) == ["bash", "-s"]:
+        if input is not None:
+            input = guard_script(input)
+    elif remote_argv:
+        remote_argv = [pack_for_login_shell(" ".join(str(a) for a in remote_argv))]
     cmd = [_ssh_binary(), *known_hosts_options()]
     if ssh_key_path:
         cmd += ["-i", str(Path(ssh_key_path).expanduser())]

@@ -33,7 +33,7 @@ from services.remote_run_id import (
     remote_run_dir,
 )
 from services.remote_scratch import source_fingerprint
-from services.remote_transport import _remote_quote
+from services.remote_transport import _remote_quote, pack_for_login_shell
 from services.slurm_ids import hold_check_shell, squeue_listing
 from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
 from services.subprocess_text import TEXT_UTF8
@@ -174,7 +174,7 @@ def _sweep(host: RemoteHost, targets, log: Callable[[str], None]) -> list[tuple[
                        for i, (pidfile, hb, _where) in enumerate(targets))
     try:
         result = run_bounded(
-            host.ssh_argv(allocate_tty=False) + [script],
+            host.ssh_argv(allocate_tty=False) + [pack_for_login_shell(script)],
             capture_output=True, timeout=30 + CANCEL_SETTLE_S, **TEXT_UTF8,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:

@@ -351,6 +351,37 @@ def swarm_pitch(ctx, ax, x_span: float) -> float | None:
     spacing is worked out from that same size and from the axes' width on the
     page over *x_span*, the x range this renderer gives the axes.
     """
+    spaced = _spaced_dot_px(ctx, ax)
+    if spaced is None:
+        return None
+    fig = ax.figure
+    width_px = ax.get_position().width * fig.get_size_inches()[0] * fig.dpi
+    if width_px <= 0.0 or x_span <= 0.0:
+        return None
+    return spaced * x_span / width_px
+
+
+def swarm_dot_height(ctx, ax) -> float | None:
+    """The y distance, in data units, the packing keeps between dot centres at the set Point spacing, or ``None``.
+
+    The vertical twin of :func:`swarm_pitch`, taken over the y range the axes shows once every column is drawn: the
+    packing needs a dot's height on the page as well as its width, or it measures a column's dots against that
+    column's own range. ``None`` on Auto, and on an axis that is not linear, where a dot's height in data units is
+    not one number.
+    """
+    spaced = _spaced_dot_px(ctx, ax)
+    if spaced is None or ax.get_yscale() != "linear":
+        return None
+    fig = ax.figure
+    height_px = ax.get_position().height * fig.get_size_inches()[1] * fig.dpi
+    lo, hi = ax.get_ylim()
+    if height_px <= 0.0 or hi == lo:
+        return None
+    return spaced * abs(hi - lo) / height_px
+
+
+def _spaced_dot_px(ctx, ax) -> float | None:
+    """Point spacing × one dot's width, in pixels, or ``None`` on Auto."""
     spacing = float(getattr(ctx.state.plot, "swarm_spacing", 0.0) or 0.0)
     if spacing <= 0.0:
         return None
@@ -360,10 +391,27 @@ def swarm_pitch(ctx, ax, x_span: float) -> float | None:
     except Exception:
         swallowed()  # a stub ctx with no style store draws at the default size
         dot_pt = 5.0
-    width_px = ax.get_position().width * fig.get_size_inches()[0] * fig.dpi
-    if width_px <= 0.0 or x_span <= 0.0:
-        return None
-    return spacing * max(dot_pt, 0.5) * fig.dpi / 72.0 * x_span / width_px
+    return spacing * max(dot_pt, 0.5) * fig.dpi / 72.0
+
+
+def _pack_on_page(ctx, ax, swarms, pitch, max_spread) -> None:
+    """Pack each column's dots again with their height on the page, once every column is drawn (a set spacing only).
+
+    A dot's height in data units depends on the y range the axes ends up showing, which only the last column
+    settles, so the first packing measured each column's dots against that column's own range: a column holding a
+    narrow band of the axis was packed as though spread over all of it and drawn as dots piled onto each other.
+    The y values are the dots' own; only their x offsets change.
+    """
+    if pitch is None or not swarms:
+        return
+    dot_height = swarm_dot_height(ctx, ax)
+    if dot_height is None:
+        return
+    for dots, centre in swarms:
+        ys = np.asarray(dots.get_offsets())[:, 1]
+        jx, _ = _beeswarm_jitter(ys.tolist(), x_center=centre, max_spread=max_spread, pitch=pitch,
+                                 dot_height=dot_height)
+        dots.set_offsets(np.column_stack([jx, ys]))
 
 
 def draw_beeswarm(
@@ -407,6 +455,7 @@ def draw_beeswarm(
     xlim_hi = (max(xs) + 0.6) if xs else 0.4
     pitch = swarm_pitch(ctx, ax_mean, xlim_hi - xlim_lo)
     columns: list[ColumnCells] = []
+    swarms: list = []          # (dots, column centre) — packed again on the page once the y range is known
 
     try:
         for i, (lbl, color) in enumerate(zip(wells, colors)):
@@ -446,6 +495,7 @@ def draw_beeswarm(
                 # were styled, so beeswarm dots silently ignored the
                 # user's Marker pref changes.
                 sc._aw_marker_collection = True
+                swarms.append((sc, float(xi)))
                 # Every cell's mean when the points are a sample of them.
                 m = cells.mean(spec) if cells.sampled else float(cell_vals.mean())
                 ax_mean.plot([xi - bar_w * 0.6, xi + bar_w * 0.6],
@@ -472,6 +522,7 @@ def draw_beeswarm(
                            ha="right" if n > 8 else "center",
                            fontsize=7)
         ax.set_xlim(xlim_lo, xlim_hi)
+    _pack_on_page(ctx, ax_mean, swarms, pitch, bar_w)
     _hdr_pad = _annotate_group_key_headers((ax_mean, ax_frac), xs, group_keys)
     # The per-cell fraction is raw whatever the fold-change state
     # says — it is ``n_above / n_total`` off the rows — which is why

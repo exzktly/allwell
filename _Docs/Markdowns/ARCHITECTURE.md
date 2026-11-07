@@ -6927,7 +6927,15 @@ turns it into an x distance in data units from the Marker size pref (the size
 the style pass gives these dots) and the axes' width on the page, and hands it
 to `_beeswarm_jitter(pitch=…)`: Auto stretches each column's swarm to fill its
 slot, a set pitch draws every column at that spacing, compressed to the slot
-only where it would overflow into the next column. The Nanowells page reads it
+only where it would overflow into the next column. A set spacing is a distance
+on the page in both directions: once every column is drawn and the y range is
+settled, `_pack_on_page` packs each column again with `swarm_dot_height` (the
+same spaced dot, in y data units over the axes' height) as
+`_beeswarm_jitter(dot_height=…)`, so the packing runs in dot diameters on the
+page rather than in `1/n_bins` of each column's own range, which piled the
+dots of a column holding a narrow band of the axis onto each other. A non-linear
+y axis keeps the column-range packing, since a dot's height there is not one
+number in data units. The Nanowells page reads it
 through `nanowell.controller.swarm_spacing_of`, which both `draw_view` callers
 (the page and Batch Export's Nanowells mode) pass as `swarm_spacing`;
 `render_distribution(spacing=…)` lays the Distribution view's dots out at that

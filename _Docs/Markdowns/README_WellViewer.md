@@ -4491,7 +4491,9 @@ one setting, **Point spacing**:
 - Switch Auto off to set the spacing yourself, as a multiple of one dot's width:
   **1.0** makes neighbouring dots touch, lower packs them tighter (they
   overlap), higher spreads them out. On the Bar plot every column is then drawn
-  at the same spacing, so a sparse column stays narrow; a swarm too wide for
+  at the same spacing, up and down as well as across, so a sparse column stays
+  narrow and a column of near-identical values spreads sideways rather than
+  piling its dots on top of each other; a swarm too wide for
   its column at that spacing is still squeezed to fit it. The spacing follows
   **Lines & Markers → Marker size**. On the Nanowells page a lower spacing fits
   more dots in each slot before the "+N" count of dots that did not fit.

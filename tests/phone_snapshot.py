@@ -84,9 +84,24 @@ def snapshot(window: QWidget, root: QWidget | None = None) -> dict[str, dict]:
     return records
 
 
+#: Geometry fields a snapshot may differ in by up to :data:`GEOMETRY_TOLERANCE_PX` without counting as a change.
+GEOMETRY_FIELDS = frozenset({"x", "y", "w", "h", "min_h"})
+#: Two machines with the same fonts, Qt and screen still round a glyph's advance differently by a pixel: the CI
+#: runner measured a page button 109 px wide against this baseline's 108, a label 74 against 75, and the widgets
+#: after them 1 px over. A pixel is a rounding difference, not a different layout; two are not.
+GEOMETRY_TOLERANCE_PX = 1
+
+
+def _differs(field: str, a, b) -> bool:
+    if field in GEOMETRY_FIELDS and isinstance(a, int) and isinstance(b, int):
+        return abs(a - b) > GEOMETRY_TOLERANCE_PX
+    return a != b
+
+
 def diff(before: dict[str, dict], after: dict[str, dict], limit: int = 12) -> list[str]:
     """The first *limit* differences between two snapshots, one line each:
-    a widget that appeared, one that went, and each field that changed."""
+    a widget that appeared, one that went, and each field that changed — a
+    geometry field only when it moved by more than :data:`GEOMETRY_TOLERANCE_PX`."""
     lines: list[str] = []
     for path in sorted(before.keys() | after.keys()):
         if path not in after:
@@ -96,7 +111,7 @@ def diff(before: dict[str, dict], after: dict[str, dict], limit: int = 12) -> li
         else:
             for field in sorted(before[path].keys() | after[path].keys()):
                 a, b = before[path].get(field), after[path].get(field)
-                if a != b:
+                if _differs(field, a, b):
                     lines.append(f"changed  {path}  {field}: {a!r} -> {b!r}")
     return lines[:limit] + ([f"... and {len(lines) - limit} more"] if len(lines) > limit else [])
 
@@ -109,11 +124,22 @@ BASELINE = "tests/fixtures/phone_snapshot_baseline.json"
 def fingerprint(qapp) -> dict:
     """What a snapshot's numbers depend on besides the code: the Qt version, the
     application font and the offscreen screen. A baseline taken under another
-    fingerprint says nothing about this machine's geometry."""
+    fingerprint says nothing about this machine's geometry.
+
+    The font is recorded twice: the family the application *asks for* and the
+    face fontconfig *gives* it. The tests never run ``allwell.main``, so the
+    bundled Inter is not registered and the request is the generic
+    ``Sans Serif`` everywhere — which resolves to the system Inter where the
+    ``fonts-inter`` package is installed and to DejaVu Sans on a stock Ubuntu
+    runner. With only the request recorded, the two fingerprints matched and
+    every text-sized widget on every page was reported as a layout change."""
     from PySide6 import QtCore
+    from PySide6.QtGui import QFontInfo
     rect = qapp.primaryScreen().availableGeometry()
     return {"schema": SCHEMA, "qt": QtCore.qVersion(),
-            "font": qapp.font().family(), "screen": [rect.width(), rect.height()]}
+            "font": qapp.font().family(),
+            "resolved_font": QFontInfo(qapp.font()).family(),
+            "screen": [rect.width(), rect.height()]}
 
 
 def _pump(qapp, n: int = 20) -> None:

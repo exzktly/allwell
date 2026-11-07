@@ -87,6 +87,7 @@ UI_LANE_FILES: dict[str, str] = {
     "test_wrap_checkbox.py": "a wrapping checkbox reports its height",
     "test_narrow_page_widgets.py": "wrapping radio / capped label / dock and Batch Export stacking / Triage buttons at a phone width",
     "test_section_header_layout.py": "a section title keeps one line while it fits",
+    "test_toast_stays_in_its_window.py": "a toast follows its window's resize and wraps to its width",
     # ── theme tokens and the stylesheet (ui/theme.py) ──────────────────────
     "test_theme_accent_pairing.py": "accent2 moves with accent in every theme",
     "test_theme_icon_assets.py": "every icon URL in the stylesheet exists",
@@ -236,6 +237,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_extremes_layout.py": "The Extremes montage laid out to fill its figure, the timepoints it shows chosen, and each …",
     "test_nanowell_fiducial_reason.py": "An unaddressed timepoint says why the central square was refused (tracker F1)",
     "test_nanowell_figures_read.py": "The Nanowells page's figures read at the size they are drawn: type scaled to the panel, …",
+    "test_nanowell_footer_under_phone_engine.py": "A Nanowells figure redrawn under the phone's layout engine keeps its whole footer out of the panels",
     "test_nanowell_fixed_cohort.py": "The fixed-cohort option (tracker I8): every line over time follows one set of nanowells",
     "test_nanowell_moving_average.py": "The moving average over time on Distribution and Trajectories (moving_compute)",
     "test_nanowell_brightness_background.py": "Cell fluorescence (mean per cell) is measured above the same background as …",

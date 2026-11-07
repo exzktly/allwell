@@ -126,7 +126,11 @@ def off_window(window: QWidget) -> list[Finding]:
                 parent = parent.parentWidget()
             if in_scroll_area or w.width() <= 4:
                 continue
-            right = QRect(w.mapTo(window, QPoint(0, 0)), w.size()).right()
+            # Through global coordinates rather than ``mapTo``: a popup that is a window of its own (a toast) is a
+            # child of the window but its ``pos()`` is global, so ``mapTo`` added the window's own place on the
+            # screen (and its parents' offsets) to it a second time.
+            origin = w.mapToGlobal(QPoint(0, 0)) - window.mapToGlobal(QPoint(0, 0))
+            right = QRect(origin, w.size()).right()
             if right > width + 2:
                 found.append(Finding("window", _name(w), f"right edge {right}px past a {width}px window"))
         except RuntimeError:

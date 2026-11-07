@@ -217,7 +217,19 @@ roster bound elsewhere.
 layout (every page, upright, sideways — the screen turned — and at the large text
 size), on a 432×936 screen, against
 `tests/fixtures/phone_snapshot_baseline.json`, which is the check that a change
-to how widgets are found has not changed what is seen.
+to how widgets are found has not changed what is seen. Its numbers depend on the
+machine as well as the code, so the baseline records a fingerprint — the Qt
+version, the screen and the font fontconfig actually resolves — and the test skips,
+naming the difference, where it differs. The slow-lane job installs Inter, a
+`conf.d` rule that prefers it for sans-serif (a stock runner ranks DejaVu Sans
+first even with Inter installed) and WenQuanYi Zen Hei, the face the baseline draws
+`ⓘ` from, so the runner matches and compares. The dataset is built at one fixed
+path (`SNAPSHOT_DATASET`), not under pytest's numbered temp directory: its path is
+drawn on the Analyze form and Home's cards, and a path of another length wrapped
+those lines differently. A geometry field that moved by one pixel is not reported
+(`phone_snapshot.GEOMETRY_TOLERANCE_PX`): with the same fonts the runner still
+rounds some glyph advances a pixel the other way; two pixels, any other field, and a
+widget that appears or goes are (`tests/test_phone_snapshot_diff.py`).
 
 **The phone point.** Every size in phone layout is written in phone points
 (`u`): the short side of the screen's geometry divided by 390, the width in
@@ -958,7 +970,11 @@ when every line fits and undone when one does not (Line Graphs and the Scatter
 Plot break their own titles). Each fit starts from the title as its renderer wrote
 it (`_UNBROKEN` / `_FITTED` on the `Text`), never from an earlier fit's breaks, and
 runs twice: once before constrained layout and once against the axes it settles
-on, since the engine widens the left margin for phone-sized tick labels. A figure's
+on, since the engine widens the left margin for phone-sized tick labels. A page
+that is not taken through the style pass fits its titles itself with the same
+rule, at any layout (`plot_style.fit_titles_to_axes`): Home's Cell Gating calls it
+between two `tight_layout`s, since its 2 × 2 grid of CDFs leaves each panel
+narrower than its title on a phone. A figure's
 canvas re-fits on every `resize_event` (`_refit_on_resize`, attached by
 `apply_export_style_to_current`) — which is how a plot drawn at the desk gets the
 phone fit when phone layout raises its DPI, and gets its own titles back when
@@ -1548,7 +1564,9 @@ review/
 │   │   plot_card_actions.py, figure_saver.py
 │   ├── tick_fit.py, margin_fit.py    ← fit a figure's tick labels and divider-placed axes to the
 │   │                                    room the figure was given, from the text as drawn; plot_style
-│   │                                    calls them once the layout has settled (pure matplotlib)
+│   │                                    calls them once the layout has settled, and the tick fit
+│   │                                    again after margin_fit's inset narrows the panels (pure
+│   │                                    matplotlib)
 │   ├── timepoint_sync.py             ← shared "focus timepoint" across plotting tabs
 │   ├── progress_jobs.py              ← run a panel edit's work on a QThread behind a
 │   │                                    ProgressPopup, one job at a time (§5.3, Cell Gating)
@@ -12886,6 +12904,12 @@ figure that once asked for a `bottom` at or above the panels' `top`, which matpl
 top` — the page went undrawn. Every one of those adjustments goes through `renderer._adjust`, which holds `bottom` at
 least `_MIN_PANEL_SHARE` (0.12 of the figure) below the top; the footer keeps all its lines and is drawn over the
 panels' lowest part instead (`test_nanowell_window_page.py::test_a_short_figure_with_a_subset_s_footer_still_draws`).
+`_adjust` also drops a layout engine an earlier style pass left on the figure before it adjusts: phone layout puts
+constrained layout on the canvas's figure, `fig.clear()` keeps it, and under it matplotlib ignores `subplots_adjust`,
+so `fig.subplotpars` would keep the margins of the view drawn before the phone was entered — and the phone pass reads
+that bottom to decide which figure text is footer (`plot_style._figure_text_band`), leaving the Position and
+Trajectories footers' upper lines under the x-axis label (`test_nanowell_footer_under_phone_engine.py`). The style
+pass sets the engine again once the renderer has drawn.
 
 **Timepoints: All / None.** The pop-out's Timepoints menu (`popout_view.build_popout_view_controls`) opens with *All*
 (`controller.set_popout_timepoints(ctx, [])`) and *None* (`set_popout_no_timepoints`), then a tick per timepoint.
@@ -20103,7 +20127,7 @@ The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which u
 | `lut_cmaps.lut_cmap` | Qt-free resolver that maps a LUT name to a matplotlib colormap: single-hue names (Reds/Greens/Blues/Purples/Oranges) become a **black→colour** `LinearSegmentedColormap` (so a dark background reads as "off"), Greys stays black→white, everything else is the builtin (`_r`-aware). Routed through `ui_helpers.make_fluor_thumb` / `lut_colormap_to_rgb` and `LutSelector._cmap_stops`, so thumbnails, the Image Table compose/composite/export paths, Playground, and the picker strip all flip together. |
 | `ContextBanner` (`widgets/context_banner.py`) | A strip of glyph + sentence + confirm + cancel saying a page is being used for something other than its own job — the Job Queue borrows a tool's page to set up or correct a queued job (§6b). Host-agnostic: it knows nothing about queues or jobs, and whoever shows it decides what confirming means. Deliberately not a dialog and it does not block the page beneath, since the point is that the user is editing that page. It is one `QHBoxLayout`, which is why it suits a *page* and not a rail: the Analyze pane's two folder banners (§6.5) answer the same brief in the 329-px sidebar and stack their text above their own action row instead. `EmptyState` is *not* a substitute for a one-line caption in the same situations — it is `Expanding/Expanding`, so a single sentence in one renders as a page-height bordered box. |
 | `removable_row` (`widgets/removable_row.py`) | **A list row whose remove button appears while the pointer is over it.** Built for the recent-datasets list, which two surfaces draw — Home's card and the no-dataset placeholder — and which wants the row itself to be the target with a small × on its right edge. Two decisions carry the widget. The ×'s **space is reserved in both states**: a control that appears by widening the row shifts the label at the instant the pointer arrives, so the button lives inside a fixed-width slot and only the button inside it is hidden. And **hover is counted, not sampled** — moving from the row onto the × is a Leave on one and an Enter on the other, so a handler hiding on any Leave removes the button exactly as the user reaches for it; Enter and Leave are counted across the row and every child, and the count is order-independent because Qt does not promise Enter-before-Leave across a parent/child crossing. `row_entry` and `row_remove_button` are named accessors, because a caller holding "the row at index 2" cannot otherwise tell a wrapped row from the bare widget an unremovable one returns, and a lookup spelled five ways is five places to fix. |
-| `Popover`, `Drawer`, `Toast`, `EmptyState` | Generic overlay primitives. `Drawer` slides in from `edge="right"` (default — the Help drawer) or `edge="bottom"` (a full-width panel sized by `height_hint`/`height_fraction` — the Application Log drawer, whose long lines the narrow right panel clipped). |
+| `Popover`, `Drawer`, `Toast`, `EmptyState` | Generic overlay primitives. `Drawer` slides in from `edge="right"` (default — the Help drawer) or `edge="bottom"` (a full-width panel sized by `height_hint`/`height_fraction` — the Application Log drawer, whose long lines the narrow right panel clipped). A `Toast` is a window of its own that nothing lays out with its host, so it sizes and places itself: never wider than the host (a longer message wraps), and placed again whenever the host or its window is resized or moved while it shows — entering phone layout under a toast otherwise left it at the desk window's corner. |
 | `FlowLayout` | A `QLayout` (not a widget) that reflows its children onto multiple lines instead of clipping — the standard Qt Flow Layout adapted to PySide6. Control rows that carry more widgets than fit at a narrow width (the plotting / image-review "TabCtrl" rows) use it so **Split View** halving the pane grows the row taller rather than hiding controls off the right edge. Four rules go with it. (1) A flow row skips hidden widgets when it places items, so *which* widgets are visible is an input to the layout, not merely a blanked slot — `_FlowItemVisibility` watches show/hide on every managed widget and invalidates the layout, without which a row that swaps one option group for another (the Multivariate tab's per-mode row) keeps the positions computed for the previous visible set and paints the newly-shown group on top of them. That watcher resolves the layout from its own `parent()` and keeps **no** per-instance state: its C++ object belongs to the layout, so it outlives the Python instance `__init__` ran on, and PySide builds a fresh wrapper for it once that instance is collected. Anything stashed on `self` is gone by then — a watcher that remembered its layout in an attribute raised `AttributeError` inside the Qt event loop on every subsequent show and hide, and the row stopped reflowing. (2) A label and the control it names must go in as one `flow_group` item, or the row can wrap between them. (3) A host whose row may wrap needs `sync_flow_height`, since a stacked page sizes the row from its one-line minimum and clips the second line otherwise. (4) Spacing is fixed — 14px horizontal, `theme.Spacing.xs` vertical — **not** derived from the platform style, and no call site overrides it. Deriving it asks `pixelMetric(PM_Layout*Spacing)`, which Qt documents as returning -1 on styles that implement the size-class-aware `layoutSpacing()` instead. Measured, the two styles are exact opposites: QMacStyle reports `pixelMetric = -1, layoutSpacing = 14`, Fusion reports `pixelMetric = 6, layoutSpacing = -1`. The layout clamps with `max(0, …)`, so on macOS every row that relied on the derived value packed its controls edge to edge, while CI (on Fusion) saw 6 and looked fine. The 14 is QMacStyle's own button-row spacing, adopted app-wide because it is the one number measured against a real control row — it is deliberately off the `theme.Spacing` scale. Passing `-1` still derives, but now asks both APIs and falls back to the defaults rather than to nothing. |
 | `MplToolbar` | The slim toolbar shown under every matplotlib figure (home / pan / zoom / save + coords readout). `add_group` appends a caller's widgets behind their own separator; `setHomeHandler` lets a figure that keeps its own view region make *Reset view* its own fit. |
 | `WrapCheckBox` | A checkbox whose label word-wraps, for the Analyze form's long-labelled options. A plain `QCheckBox` reports its full text width as its minimum, which pins the whole scroll-area sidebar that wide; this composites a text-less indicator with a wrapped `QLabel`. Because the label wraps, the composite's height depends on its width — and a `QWidget` inherits neither its child's `heightForWidth` nor a size policy advertising one, so it implements both. Without them a parent column sizes the row from a single line and a label that wraps to two spills over whatever sits below it. The indicator↔label gap is the app-wide checkbox `spacing` token (`theme.Spacing.sm`), not a hand-picked constant — the composite draws its own label, so a smaller gap read tighter to the box than every native checkbox beside it, and with no Fusion pin the app renders under the platform style (native QMacStyle on macOS, Fusion only on CI), where that shortfall put the first word on top of the indicator. Same lesson as `FlowLayout`'s spacing rule: a control gap comes from the token scale, never from an off-scale constant or the platform style. |
@@ -22022,6 +22046,11 @@ you're in before you type the command.
   `images`) on those three screens, nine cases, each in a **subprocess of its own**
   (`python -m tests._page_render_case <dataset> <screen> <out.json>`, three at a
   time), because a process that builds nine full apps slows to minutes a page.
+  Each case first gives the application the bundled fonts every launch uses
+  (`allwell.use_bundled_fonts`, which `main` calls too), so a page is measured in
+  the face the app ships, not in whatever the machine's fontconfig makes of the
+  generic "Sans Serif" — DejaVu Sans on the CI runner, where a page button and a
+  scroll content wider than the ones a user sees were reported as defects.
   `tests/_page_tour.py` visits every Review section and page, the Datasets tools
   and Analyze's views, and the phone's own chrome, after
   `_page_datasets.prepare` has given each page the choices that make it draw data

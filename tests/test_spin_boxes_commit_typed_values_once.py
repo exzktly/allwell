@@ -153,3 +153,36 @@ def test_a_properties_text_field_applies_when_finished(qtbot):
     panel._setters["y_lim_min"]("3")
     assert calls == ["-0.5", "3"]
     assert panel._getters["y_lim_min"]() == "3"
+
+
+@pytest.mark.parametrize("cls", [SpinBox, DoubleSpinBox])
+def test_a_deleted_box_leaves_no_field_wrapper_behind(qapp, cls):
+    """The pause and the italics listen to the box's own text field, a C++
+    child. Connected with ``field.textEdited.connect``, PySide6 kept that
+    field's Python wrapper alive for ever after the box was deleted — six per
+    closed Review window (``tests/test_a_closed_review_app_is_freed.py``).
+    Counted by type, as that test does, over boxes built and deleted inside a
+    parent the way a window's are."""
+    import gc
+
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+    def field_wrappers() -> int:
+        gc.collect()
+        return sum(1 for o in gc.get_objects() if type(o) is QLineEdit)
+
+    before = field_wrappers()
+    parent = QWidget()
+    layout = QVBoxLayout(parent)
+    for _ in range(3):
+        box = cls(parent)
+        layout.addWidget(box)
+        box.lineEdit().setText("5")
+    del box
+    parent.deleteLater()
+    del parent
+    for _ in range(3):
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        qapp.processEvents()
+    assert field_wrappers() - before == 0

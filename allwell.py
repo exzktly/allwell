@@ -2402,6 +2402,47 @@ def _phone_layout_at_startup(app) -> bool:
         return False
 
 
+def use_bundled_fonts(app) -> None:
+    """Make the bundled Inter / JetBrains Mono the application's fonts, as every launch does.
+
+    Called by :func:`main` before any widget exists, and by the page-render test
+    (``tests/_page_render_case.py``), which builds the window without ``main``. Left
+    out there, the test measured whatever face the machine's fontconfig gives the
+    generic "Sans Serif" — Inter in one container, DejaVu Sans on the CI runner —
+    rather than the face the app ships, and reported clipping no user sees.
+    """
+    # Collapse both font-family tokens to single resolvable names so Qt's
+    # QSS parser doesn't walk alias tables and warn at startup
+    # ("qt.qpa.fonts: Populating font family aliases took NN ms. Replace
+    # uses of missing font family ...").
+    #
+    # ``Typography.family`` is the proportional UI face, ``family_mono`` the
+    # fixed-pitch face. Prefer the bundled Inter / JetBrains Mono (consistent
+    # across platforms) and fall back to the OS default-app / fixed-pitch
+    # families when the bundled files are unavailable. The CSS-style generics
+    # ``sans-serif`` / ``monospace`` are NOT in Qt's font registry, so leaving
+    # them there triggers the alias walk on every widget that uses QSS.
+    from startup.app_fonts import register_qt_fonts as _register_qt_fonts
+    _ui_family, _mono_family = _register_qt_fonts()
+    try:
+        theme_v2.Typography.family = _ui_family or app.font().family()
+    except Exception:
+        theme_v2.Typography.family = _ui_family or ""
+    # Widgets that read the app default font directly (not just via QSS) should
+    # use the bundled face too — re-family the existing app font (keeps size).
+    if _ui_family:
+        _appfont = app.font()
+        _appfont.setFamily(_ui_family)
+        app.setFont(_appfont)
+    try:
+        from PySide6.QtGui import QFontDatabase as _QFontDatabase
+        theme_v2.Typography.family_mono = _mono_family or _QFontDatabase.systemFont(
+            _QFontDatabase.SystemFont.FixedFont
+        ).family()
+    except Exception:
+        theme_v2.Typography.family_mono = _mono_family or ""
+
+
 def main() -> None:
     # Restrict matplotlib to the bundled fonts BEFORE anything imports it (the
     # first plot pulls matplotlib.figure -> font_manager). Skips matplotlib's
@@ -2466,36 +2507,7 @@ def main() -> None:
     _install_combobox_popup_widener()
     from core import wheel_guard
     wheel_guard.install(app)
-    # Collapse both font-family tokens to single resolvable names so Qt's
-    # QSS parser doesn't walk alias tables and warn at startup
-    # ("qt.qpa.fonts: Populating font family aliases took NN ms. Replace
-    # uses of missing font family ...").
-    #
-    # ``Typography.family`` is the proportional UI face, ``family_mono`` the
-    # fixed-pitch face. Prefer the bundled Inter / JetBrains Mono (consistent
-    # across platforms) and fall back to the OS default-app / fixed-pitch
-    # families when the bundled files are unavailable. The CSS-style generics
-    # ``sans-serif`` / ``monospace`` are NOT in Qt's font registry, so leaving
-    # them there triggers the alias walk on every widget that uses QSS.
-    from startup.app_fonts import register_qt_fonts as _register_qt_fonts
-    _ui_family, _mono_family = _register_qt_fonts()
-    try:
-        theme_v2.Typography.family = _ui_family or app.font().family()
-    except Exception:
-        theme_v2.Typography.family = _ui_family or ""
-    # Widgets that read the app default font directly (not just via QSS) should
-    # use the bundled face too — re-family the existing app font (keeps size).
-    if _ui_family:
-        _appfont = app.font()
-        _appfont.setFamily(_ui_family)
-        app.setFont(_appfont)
-    try:
-        from PySide6.QtGui import QFontDatabase as _QFontDatabase
-        theme_v2.Typography.family_mono = _mono_family or _QFontDatabase.systemFont(
-            _QFontDatabase.SystemFont.FixedFont
-        ).family()
-    except Exception:
-        theme_v2.Typography.family_mono = _mono_family or ""
+    use_bundled_fonts(app)
     # Select the UI theme (dev-facing ALLWELL_THEME env var) BEFORE building any
     # widgets, so qss() and every widget's cached inline QSS pick up its tokens.
     _active_theme = (theme_v2.apply_theme(args.theme) if args.theme

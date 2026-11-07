@@ -1812,6 +1812,20 @@ def _unfit_titles(fig) -> None:
             setattr(text_artist, _FITTED, None)
 
 
+def fit_titles_to_axes(fig) -> None:
+    """Fit each axes' title of *fig* into its axes' width (:func:`_fit_title`), whatever the layout.
+
+    For a figure that is not taken through the style pass, which is where the phone fits every other plot's
+    titles: Home's Cell Gating draws a 2 x 2 grid of CDFs as wide as the page, and on a phone upright each panel is
+    about 116 px under a 10 pt title of 150-170 px, so the right-hand column's titles hung off the figure. A title
+    that already fits is left exactly as written, so at the desk nothing changes.
+    """
+    renderer = _renderer_of(fig)
+    for ax in fig.axes:
+        if ax.get_visible() and ax.title.get_text():
+            _fit_title(ax.title, ax.bbox.width, renderer)
+
+
 def _fit_labels_to_phone(fig) -> None:
     """Fit each title into its axes' width (:func:`_fit_title`), and break a
     y-label taller than its axes onto more lines — at phone sizes a plot's own
@@ -1953,6 +1967,10 @@ def _fit_ticks(fig) -> None:
     if getattr(fig, "_aw_margin_fitted", False):
         with swallow("keep a divider-placed plot's text inside its figure"):
             margin_fit.inset_for_overhang(fig)
+        # The inset narrows the panels the labels were just fitted to: on a phone the Heat Map's twelve column
+        # numbers were fitted to the grid's width before it, and "9 10 11 12" then ran into each other.
+        with swallow("fit a plot's tick labels to its inset panels"):
+            fit_tick_labels(fig)
     fit_panels()
 
 

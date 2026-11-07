@@ -375,7 +375,8 @@ def test_a_load_from_before_the_dataset_was_loaded_again_never_lands_its_wells(m
     st = NanowellState()
     widgets = {"_nw_canvas": object(), "_nw_page_visible": lambda: True}
     ctx = SimpleNamespace(state=SimpleNamespace(feature_slice=lambda _name: st,
-                                                dataset=SimpleNamespace(data_dir="/data/plate1")),
+                                                dataset=SimpleNamespace(data_dir="/data/plate1"),
+                                                cell_gating=SimpleNamespace(scatter_gates=[])),
                           widgets=SimpleNamespace(get_or_none=widgets.get))
     nwc.ensure_loaded(ctx)                                  # reads the files as they were before the re-run
     nwc.nw_on_dataset_loaded(ctx)                           # the same folder again: starts the second load

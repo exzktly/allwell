@@ -524,12 +524,27 @@ def _int(value: str) -> int:
 def _job_gres(scontrol: dict[str, str]) -> str:
     """``gpu:1`` from a job's ``TresPerNode=gres/gpu:1`` (Slurm 21.08+), ``TresPerJob`` (``--gpus``), ``TresPerTask``
     (``--gpus-per-task``) or ``Gres=gpu:1`` (older); ``""`` for none. A step does not inherit any of them on Slurm
-    21.08+, and one that asked for no GPU runs the pipeline on the CPU without saying so."""
-    raw = next((scontrol[k] for k in ("TresPerNode", "TresPerJob", "TresPerTask", "Gres")
-                if scontrol.get(k) not in (None, "", "(null)", "N/A")), "")
-    if raw in ("", "(null)", "N/A"):
-        return ""
-    return ",".join(item for item in (re.sub(r"^gres[/:]", "", part) for part in raw.split(",")) if item)
+    21.08+, and one that asked for no GPU runs the pipeline on the CPU without saying so.
+
+    Only GRES items are kept. These fields are TRES lists, and Slurm 23.11+ reports ``--cpus-per-task=8`` as
+    ``TresPerTask=cpu=8``: passed on as ``--gres=cpu=8`` it is a GRES srun rejects, so every step on a CPU-only
+    granted node would fail at launch. An item is GRES when it carries the ``gres/`` / ``gres:`` prefix, or is a
+    bare ``name:count`` with no ``=`` (the pre-21.08 spelling); ``cpu=8``, ``mem=4G`` and the like are dropped, and a
+    field holding nothing else is passed over for the next one."""
+    for key in ("TresPerNode", "TresPerJob", "TresPerTask", "Gres"):
+        raw = scontrol.get(key)
+        if raw in (None, "", "(null)", "N/A"):
+            continue
+        items = []
+        for part in raw.split(","):
+            part = part.strip()
+            if re.match(r"^gres[/:]", part):
+                items.append(re.sub(r"^gres[/:]", "", part))
+            elif part and "=" not in part:
+                items.append(part)
+        if items:
+            return ",".join(items)
+    return ""
 
 
 def parse_state(text: str) -> HoldState:

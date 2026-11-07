@@ -673,6 +673,31 @@ def test_occupancy_sorts_and_labels_by_its_class_s_number_and_a_nanowell_without
     assert corner == {"T1": values} and corner_said == "Corner: each tile's Occupancy at baseline (cells)."
 
 
+def test_sort_orders_the_whole_window_before_it_is_cut_into_pages():
+    """A window of two pages whose largest cell counts sit at its *last* ranks: sorted largest first, page 1 holds
+    the window's 91 largest, in order, and page 2 the rest. Sorting each page of the window's rank order on its own
+    put ranks 1–91 on page 1 — none of the window's largest values — under a title saying "largest first"."""
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    n = cc.COMPOSITE_PAGE + 40
+    sites = [("A01", q, 0) for q in range(n)]
+    metrics = pd.DataFrame({"well": ["A01"] * n, "nw_q": [float(q) for q in range(n)], "nw_r": [0.0] * n,
+                            "timepoint": ["T1"] * n, "tp_order": [0] * n, "n": [float(q) for q in range(n)]})
+    st = SimpleNamespace(composite_sort="n", metrics=metrics, data=SimpleNamespace(channels=[]),
+                         composite_desc=True, channel="", window_page=0)
+    ctx = SimpleNamespace(state=SimpleNamespace(feature_slice=lambda _name: st,
+                                                channel=SimpleNamespace(active_channel="")))
+    rows = [WindowRow(site, rank, 1.0, {}) for rank, site in enumerate(sites, start=1)]   # rank 1 holds the fewest
+    members, values, said = wnc.composite_page(ctx, st, rows, "T1")
+    assert [row.site[1] for row in members] == list(range(n - 1, n - 1 - cc.COMPOSITE_PAGE, -1))
+    assert values[members[0].site] == float(n - 1) and said == "Cell count at T1, largest first"
+    st.window_page = 1
+    members, _values, _said = wnc.composite_page(ctx, st, rows, "T1")
+    assert [row.site[1] for row in members] == list(range(n - 1 - cc.COMPOSITE_PAGE, -1, -1))
+
+
 def test_the_dashed_frame_stays_on_each_panel_s_edge_when_zoomed_and_panned(page, qtbot):  # noqa: F811
     """Reported: on zoom the dashed edge outlining each timepoint's composite disappeared — it was drawn around the
     data, so zooming in moved it out of view. It is the panel's own edge now, whatever the zoom or pan."""

@@ -419,6 +419,16 @@ def composite_order(ctx, st, sites, timepoint) -> tuple[dict | None, str]:
     return values, f"{label}{at}, {'largest' if st.composite_desc else 'smallest'} first"
 
 
+def composite_page(ctx, st, rows, timepoint) -> tuple[list, dict | None, str]:
+    """``(members, values, sentence)`` for the composite page on screen: the window's *rows* put in the order
+    **Sort** chose (:func:`composite_order`, read at *timepoint*) over the **whole** window, then page
+    ``st.window_page`` of that order — so "largest first" puts the window's largest on the first page, not the
+    largest of the window's first ranks. Placed by rank, the order is the window's own."""
+    values, placed_by = composite_order(ctx, st, [row.site for row in rows], timepoint)
+    ordered = sorted(rows, key=cc.sort_key(values, st.composite_desc)) if values is not None else list(rows)
+    return cc.page(ordered, st.window_page), values, placed_by
+
+
 #: **Corner**'s first choice: no number in the tiles' corners.
 NO_LABEL = ""
 
@@ -490,9 +500,8 @@ def draw_window_popout(ctx, st, fig) -> None:
         return
     st.window_page = min(max(st.window_page, 0), page_count(st) - 1)
     if st.popout_layout == "hex":
-        members = cc.page(rows, st.window_page)
         shown_tps = shown_timepoints(st.data.timepoints(), st.popout_tps)
-        values, placed_by = composite_order(ctx, st, [row.site for row in members], shown_tps[0])
+        members, values, placed_by = composite_page(ctx, st, rows, shown_tps[0])
         corner, corner_said = composite_labels(ctx, st, [row.site for row in members], shown_tps)
         comp = cc.composite(members, values=values, descending=st.composite_desc, placed_by=placed_by)
         sites = [t.source for t in comp.tiles]

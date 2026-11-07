@@ -12805,8 +12805,11 @@ stays on the panel's edge under any zoom or pan. The pop-out's **Sort** (`Nanowe
 window's rank or a `distribution_compute.METRICS` key; `composite_desc`; both persisted; `_nw_popout_sort_cb` /
 `_nw_popout_order_cb`, hex layout only) is resolved by `_window_controller.composite_order`: the metric through
 `controller.resolve_metric` and `metric_column`, read from `NanowellState.metrics` at the first timepoint shown (a
-per-nanowell metric at `tp_order` 0, through `metric_values`, which **Corner** shares), falling back to rank with the
-reason in the title when it cannot be read. **Corner** (`NanowellState.composite_label`, persisted;
+per-nanowell metric at `tp_order` 0, through `metric_values`, which **Corner** shares; values go through
+`views_compute.numeric_values`, so the occupancy class reads as its lower bound and a non-number as no value),
+falling back to rank with the reason in the title when it cannot be read. `composite_page` sorts the **whole** window
+by those values (`composite_compute.sort_key`) before `composite_compute.page` cuts it, so a page holds the next
+stretch of that order rather than one page of the window's rank re-sorted. **Corner** (`NanowellState.composite_label`, persisted;
 `_nw_popout_label_cb`) is resolved by `composite_labels` into `{timepoint: {site: value}}`, each panel's at its own
 timepoint, and `_composite_render._draw_corners` writes `corner_text(value)` (a whole number as one, else three
 significant figures, `—` with no value) in each tile's top-left corner, white on a dark stroke (`nw-composite-value`);

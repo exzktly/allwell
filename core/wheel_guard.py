@@ -2,15 +2,16 @@
 
 Qt gives a combo box or a spin box the wheel whenever the pointer is over it, so scrolling down a long form (the
 Analyze tab's) changed every field the pointer crossed on the way, with nothing saying so. The convention every
-browser settled on is used here: such a field takes the wheel only once it has the keyboard focus, which a click or a
-tab gives it. Until then the wheel goes to the scroll area the field sits in, as if the field were not there.
+browser settled on is used here: a number box takes the wheel only once it has the keyboard focus, which a click or a
+tab gives it, and a dropdown does not take it at all. Until then the wheel goes to the scroll area the field sits in, as if the field were not there. A dropdown never takes
+the wheel while closed, focus or not: it keeps the focus after a choice, and the next scroll would change it again.
 
 One filter on the application, so a field built tomorrow is covered without anyone remembering to ask.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, QPointF
+from PySide6.QtCore import QEvent, QObject, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QAbstractScrollArea, QAbstractSpinBox, QApplication, QComboBox, QWidget
 
@@ -20,14 +21,32 @@ _GUARDED = (QComboBox, QAbstractSpinBox)
 
 class _WheelGuard(QObject):
     def eventFilter(self, obj, event) -> bool:  # Qt's name
-        if event.type() != QEvent.Wheel or not isinstance(obj, _GUARDED) or obj.hasFocus():
+        if event.type() == QEvent.Show and isinstance(obj, _GUARDED):
+            take_no_focus_from_the_wheel(obj)
             return False
-        if isinstance(obj, QComboBox) and obj.view().isVisible():
-            return False                                   # the open list is the combo's own
+        if event.type() != QEvent.Wheel or not isinstance(obj, _GUARDED):
+            return False
+        # A number box takes the wheel once it has the keyboard focus. A dropdown never does: it keeps the focus after
+        # a choice, and "focused" then meant every dropdown the person had used went on changing under the pointer as
+        # the form was scrolled. Its open list is a window of its own and gets the wheel directly.
+        if isinstance(obj, QAbstractSpinBox) and obj.hasFocus():
+            return False
         area = _scroll_area_of(obj)
         if area is not None:
             _forward(event, area)
         return True                                        # the field never sees it
+
+
+def take_no_focus_from_the_wheel(widget: QWidget) -> None:
+    """Make *widget* take the keyboard focus from a click or a tab, not from the wheel.
+
+    These widgets default to ``Qt.WheelFocus``, and Qt gives a widget its focus on a real wheel event *before* any
+    filter sees it (``QApplication::notify``). The first tick of a trackpad scroll that reached a dropdown therefore
+    focused it, and the focus check below then let that tick and every later one change its value — the page stopped
+    scrolling the moment a dropdown came under the pointer. A synthetic event does not do this, which is how a test
+    sending one passed while the app did not."""
+    if widget.focusPolicy() == Qt.WheelFocus:
+        widget.setFocusPolicy(Qt.StrongFocus)
 
 
 def _scroll_area_of(widget: QWidget) -> QAbstractScrollArea | None:
@@ -53,3 +72,6 @@ def install(app: QApplication) -> None:
     if getattr(app, "_aw_wheel_guard", None) is None:
         app._aw_wheel_guard = _WheelGuard(app)
         app.installEventFilter(app._aw_wheel_guard)
+        for widget in app.allWidgets():
+            if isinstance(widget, _GUARDED):
+                take_no_focus_from_the_wheel(widget)

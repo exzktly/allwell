@@ -109,7 +109,8 @@ def on_release(ctx, st, event) -> None:
         return
     inverse = ax.transData.inverted()
     (x0, y0), (x1, y1) = inverse.transform((x, y)), inverse.transform((ex, ey))
-    keys = wc.snap(model, index, x0, x1)
+    slots = wc.snap_slots(model, index, x0, x1)
+    keys = tuple(dict.fromkeys(key for key, _well in slots))
     if not keys:
         ctx.notify.set_status("The window covers no column: drag across the dots you want.")
         nwc.redraw(ctx)
@@ -122,7 +123,8 @@ def on_release(ctx, st, event) -> None:
                               "nanowell.")
         model = st.window_model
     draft = wc.DistributionWindow(model.column, model.axis, keys, float(min(y0, y1)), float(max(y0, y1)),
-                                  panel=panel, drawn_under=wc.settings_key(st))
+                                  panel=panel, drawn_under=wc.settings_key(st),
+                                  slots=wc.partial_slots(model, index, slots))
     _store(ctx, st, replace(draft, n_at_drawing=len(wc.members(model, draft).rows)))
 
 
@@ -430,8 +432,7 @@ def composite_page(ctx, st, rows, timepoint) -> tuple[list, dict | None, str]:
     ``st.window_page`` of that order — so "largest first" puts the window's largest on the first page, not the
     largest of the window's first ranks. Placed by rank, the order is the window's own."""
     values, placed_by = composite_order(ctx, st, [row.site for row in rows], timepoint)
-    ordered = sorted(rows, key=cc.sort_key(values, st.composite_desc)) if values is not None else list(rows)
-    return cc.page(ordered, st.window_page), values, placed_by
+    return cc.page(cc.ordered(rows, values, st.composite_desc), st.window_page), values, placed_by
 
 
 #: **Corner**'s first choice: no number in the tiles' corners.
@@ -506,7 +507,11 @@ def draw_window_popout(ctx, st, fig) -> None:
     st.window_page = min(max(st.window_page, 0), page_count(st) - 1)
     if st.popout_layout == "hex":
         shown_tps = shown_timepoints(st.data.timepoints(), st.popout_tps)
-        members, values, placed_by = composite_page(ctx, st, rows, shown_tps[0])
+        # Sorted at the *latest* timepoint shown, over every member before the page is cut. At the first one -- the
+        # baseline, when every timepoint is shown -- every fold change is 1 (n(t) / n(baseline) with t the baseline),
+        # so a sort by count fold change tied everywhere, fell back to the window's rank, and read the same ascending
+        # and descending; and a sort within one page of ranks left the pages in rank order.
+        members, values, placed_by = composite_page(ctx, st, rows, shown_tps[-1])
         corner, corner_said = composite_labels(ctx, st, [row.site for row in members], shown_tps)
         comp = cc.composite(members, values=values, descending=st.composite_desc, placed_by=placed_by)
         sites = [t.source for t in comp.tiles]

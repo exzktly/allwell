@@ -462,14 +462,11 @@ def test_a_staging_folder_with_surrounding_spaces_is_refused_not_stripped(stagin
 
 def test_the_earlier_attempt_clean_up_honours_keep(staging):
     """``remote_reuse.clean_earlier_attempts``'s per-folder script leaves a kept folder alone."""
-    from services.remote_commands import HOLD_DIR
-    from services.remote_reuse import _REMOVE_IF_IDLE
-    from services.remote_run_id import LEGACY_UPLOAD_HEARTBEAT, UPLOAD_HEARTBEAT
+    from services.remote_reuse import remove_if_idle_script
     from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
 
-    script = _REMOVE_IF_IDLE.format(heartbeat=UPLOAD_HEARTBEAT, legacy=LEGACY_UPLOAD_HEARTBEAT,
-                                    stale=UPLOAD_HEARTBEAT_STALE_S, hold=HOLD_DIR)
     kept, plain = _run(staging, RUN), _run(staging, OWN)
+    script = remove_if_idle_script(str(kept.parent), stale=UPLOAD_HEARTBEAT_STALE_S)
     (kept / rs.RUN_EXPIRY).write_text("keep\n")
     out = subprocess.run([BASH, "-s"], input=script + f"_aw_clean {kept}\n_aw_clean {plain}\n",
                          capture_output=True, text=True, check=True).stdout

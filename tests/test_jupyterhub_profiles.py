@@ -134,7 +134,8 @@ def test_query_runs_snippet_over_ssh_and_parses():
         ok, profiles, _ = query_jupyterhub_profiles(host)
     assert ok and len(profiles) == 2
     # The remote command embeds the snippet and the configured path.
-    sent = run.call_args.args[0][-1]
+    from services.remote_commands import unpack_login_shell_command
+    sent = unpack_login_shell_command(run.call_args.args[0][-1])     # packed on the command line, as every command is
     assert "python3 -c" in sent
     assert "/opt/jh/jupyterhub_config.py" in sent
 

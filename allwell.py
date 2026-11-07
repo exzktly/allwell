@@ -2302,11 +2302,6 @@ class AllWellApp(QMainWindow):
             return
         self._save_window_state()
         _save_review_before_close(self._review)
-        if self._review is not None and hasattr(self._review, "_cleanup_tmp"):
-            try:
-                self._review._cleanup_tmp()
-            except Exception:
-                swallowed()  # was: pass (silent except)
         # Stop any in-flight Analyze run — AnalyzeTab's own closeEvent never
         # fires (it's a child widget), so without this a mid-run quit leaks the
         # local subprocess / remote SLURM allocation + scratch (audit L1). Also
@@ -2469,6 +2464,8 @@ def main() -> None:
     # A window that stops responding writes every thread's stack to the boot log.
     _boot_diag.install_hang_recorder(app)
     _install_combobox_popup_widener()
+    from core import wheel_guard
+    wheel_guard.install(app)
     # Collapse both font-family tokens to single resolvable names so Qt's
     # QSS parser doesn't walk alias tables and warn at startup
     # ("qt.qpa.fonts: Populating font family aliases took NN ms. Replace

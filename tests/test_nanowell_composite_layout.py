@@ -112,3 +112,27 @@ def test_the_wells_follow_the_sort_too():
     rows = [_row("A01", 0, 1), _row("B02", 0, 2)]
     comp = cc.composite(rows, values={("A01", 0, 0): 1.0, ("B02", 0, 0): 9.0})
     assert [well for well, _x, _y in comp.patches] == ["B02", "A01"]
+
+
+def test_the_sort_orders_every_member_before_the_page_is_cut():
+    """Sorted within one page of ranks, a sort by value left the pages in rank order: the largest values could sit on
+    page 3. ``ordered`` sorts them all first, so page 1 holds the largest."""
+    from review.features.nanowell.window_compute import WindowRow
+
+    rows = [WindowRow(("A01", i, 0), i + 1, 0.0, {}) for i in range(200)]
+    values = {row.site: float(i % 7) + i / 1000 for i, row in enumerate(rows)}       # against the rank
+    first = cc.page(cc.ordered(rows, values, True), 0)
+    top = sorted(rows, key=lambda r: -values[r.site])[:cc.COMPOSITE_PAGE]
+    assert [r.site for r in first] == [r.site for r in top]
+    assert [r.site for r in cc.page(cc.ordered(rows, values, False), 0)] == \
+        [r.site for r in sorted(rows, key=lambda r: values[r.site])[:cc.COMPOSITE_PAGE]]
+
+
+def test_values_that_all_tie_leave_the_rank_order_whichever_way_it_is_sorted():
+    """What the pop-out did when it sorted count fold change at the baseline: every value 1, so ascending and
+    descending gave the same, rank, order -- the reported "no rhyme or reason". Pinned so the reason is on record."""
+    from review.features.nanowell.window_compute import WindowRow
+
+    rows = [WindowRow(("A01", i, 0), i + 1, 0.0, {}) for i in range(10)]
+    ones = {row.site: 1.0 for row in rows}
+    assert cc.ordered(rows, ones, True) == cc.ordered(rows, ones, False) == rows

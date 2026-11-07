@@ -38,7 +38,6 @@ from __future__ import annotations
 import argparse
 from collections.abc import Iterable
 import logging
-import shutil
 import sys
 from pathlib import Path
 
@@ -565,11 +564,6 @@ class ReviewApp(QWidget):
 
     def _extract_well_token(self, label: str):
         return _extract_well_token(label)
-
-    def _cleanup_tmp(self) -> None:
-        if self._app_state.dataset.tmp_dir and self._app_state.dataset.tmp_dir.exists():
-            shutil.rmtree(self._app_state.dataset.tmp_dir, ignore_errors=True)
-        self._app_state.dataset.tmp_dir = None
 
     # ── Plate-map sidebar helpers ─────────────────────────────────────────────
 

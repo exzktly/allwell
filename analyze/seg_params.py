@@ -15,7 +15,12 @@ from __future__ import annotations
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from util.channel_roles import LABELFREE_METHODS, phase_role_conflicts
+from widgets.text_combo import TextCombo
 from widgets.value_combo import ValueCombo
+
+#: The widths of the Segmentation channel and Cytoplasm channel fields, in pixels.
+_SEG_CHANNEL_FIELD_W = 160
+_CYTOPLASM_FIELD_W = 120
 
 #: General-Cellpose models, ``(--cellpose_model value, label)``. The label says
 #: which Cellpose each model needs, which the old bare list left to a tooltip:
@@ -116,7 +121,11 @@ class AnalyzeSegParamsMixin:
         # StarDist + watershed: cytoplasm token + min nucleus area.
         ws = _page()
         cyto_cell = self._row(ws, "Cytoplasm channel")
-        self._cytoplasm_edit = self._entry(cyto_cell, "", width=80)
+        self._cytoplasm_edit = TextCombo(cyto_cell)
+        self._cytoplasm_edit.setFixedWidth(_CYTOPLASM_FIELD_W)
+        self._cytoplasm_edit.setToolTip("The cytoplasm stain as it appears in the filenames: type it, or pick one of the "
+                                        "channels listed above.")
+        cyto_cell.layout().addWidget(self._cytoplasm_edit)
         cyto_cell.layout().addStretch(1)
         self._cytoplasm_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
         area_cell = self._row(ws, "Min nucleus area")
@@ -451,6 +460,49 @@ class AnalyzeSegParamsMixin:
         stack.adjustSize()
         stack.updateGeometry()
 
+    def _build_segmentation_channel_field(self, row, section) -> None:
+        """The Segmentation channel field in *row*, with the line under it that says what the text is.
+
+        A dropdown of the channels listed above that is also a text field: the segmentation channel is usually a
+        separate one (a nuclear stain no row lists), so any name can be typed, and a listed channel can be picked."""
+        self._nuclear_token_edit = TextCombo(row)
+        self._nuclear_token_edit.setText("NIR")
+        self._nuclear_token_edit.setFixedWidth(_SEG_CHANNEL_FIELD_W)
+        self._nuclear_token_edit.setToolTip(
+            "The channel the cells are found in. Type its name as it appears in the filenames, or pick one of the "
+            "channels listed above. A name that is not listed above is a separate channel, used only to find the cells.")
+        row.layout().addWidget(self._nuclear_token_edit)
+        self._seg_channel_note = QLabel("", section)
+        self._seg_channel_note.setObjectName("Muted")
+        self._seg_channel_note.setWordWrap(True)
+        section.layout().addWidget(self._seg_channel_note)
+        self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_seg_channel_options())
+
+    def _refresh_seg_channel_options(self, phase_locked: bool | None = None) -> None:
+        """Offer the channels listed above in the segmentation and cytoplasm fields, and say whether the one typed is
+        among them. Without that the field read as asking for a new name or for one already entered, and nothing said
+        which: a name no row lists is a separate channel, the one the cells are found in."""
+        edit = getattr(self, "_nuclear_token_edit", None)
+        note = getattr(self, "_seg_channel_note", None)
+        if edit is None or note is None or not hasattr(self, "_fluor_rows"):
+            return
+        listed = self._fluor_tokens_list()
+        for field in (edit, getattr(self, "_cytoplasm_edit", None)):
+            if field is not None:
+                field.set_options(listed)
+        if phase_locked is None:
+            phase_locked = self._seg_method() == "cellpose_labelfree" if hasattr(self, "_seg_method_cb") else False
+        token = edit.text().strip()
+        if not token or phase_locked:
+            text = ""
+        elif token.lower() in {t.lower() for t in listed}:
+            text = f"{token} is also one of the channels listed above."
+        else:
+            text = (f"{token} is not one of the channels listed above: it is a separate channel, the one the cells are "
+                    "found in. Pick a listed channel from the dropdown to segment that one instead.")
+        note.setText(text)
+        note.setVisible(bool(text))
+
     def _refresh_segmentation_hints(self) -> None:
         # The hint label is built under the picker, before the method pages it
         # validates against; the section's own last call is the first that runs.
@@ -464,6 +516,7 @@ class AnalyzeSegParamsMixin:
         # The Label-free preset segments the Phase channel — the explicit
         # Segmentation-channel field doesn't apply there (it's taken at runtime).
         phase_locked = method == "cellpose_labelfree"
+        self._refresh_seg_channel_options(phase_locked)
         if hasattr(self, "_nuclear_row_widget"):
             # ``_row`` returns the right-hand cell; the words "Segmentation channel" are in its parent, so the parent
             # row is what is hidden. Hiding the cell alone left that label standing under the method selector with

@@ -227,7 +227,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         # the cell's parent, so hiding the cell alone (Label-free mode) left
         # "Segmentation channel" floating beside nothing.
         self._nuclear_row_widget = nuc_row.parentWidget()
-        self._nuclear_token_edit = self._entry(nuc_row, "NIR", width=160)
+        self._build_segmentation_channel_field(nuc_row, sec)
         self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_schema_preview())
         self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
 

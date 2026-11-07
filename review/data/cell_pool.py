@@ -661,7 +661,9 @@ def sweep_stale_spills() -> list[str]:
     removed = []
     # The app's own temp folder, and the system one earlier versions spilled to.
     roots = dict.fromkeys((str(gui_temp_dir()), tempfile.gettempdir()))
-    for path in (p for root in roots for p in glob.glob(os.path.join(root, SPILL_PREFIX + "*"))):
+    from util.safe_delete import DeleteRefused, safe_rmtree
+
+    for root, path in ((r, p) for r in roots for p in glob.glob(os.path.join(r, SPILL_PREFIX + "*"))):
         try:
             if not os.path.isdir(path) or os.path.islink(path):
                 continue
@@ -672,9 +674,9 @@ def sweep_stale_spills() -> list[str]:
                 continue
             if alive is None and time.time() - os.path.getmtime(path) < UNMARKED_STALE_S:
                 continue
-            shutil.rmtree(path)
+            safe_rmtree(path, inside=root)
             removed.append(path)
-        except OSError as exc:
+        except (OSError, DeleteRefused) as exc:
             _logger.debug("cell pool sweep skipped %s (%s)", path, exc)
     if removed:
         _logger.info("removed %d cell pool spill director%s left by processes that have exited",

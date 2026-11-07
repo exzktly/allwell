@@ -178,12 +178,12 @@ def _set_reference_aside(folder: Path) -> Path | None:
     One a previous pull set aside and never settled (the app stopped between the two) is the plate's and comes back
     first."""
     from pipeline.nanowell_reference import DIR_NAME
-    from shutil import rmtree as remove_tree
+    from util.safe_delete import safe_rmtree
 
     current, kept = folder / DIR_NAME, folder / f".{DIR_NAME}{_KEPT_SUFFIX}"
     if kept.is_dir():
         if current.exists():
-            remove_tree(current)
+            safe_rmtree(current, inside=folder)
         kept.rename(current)
     if not current.is_dir():
         return None
@@ -194,7 +194,7 @@ def _set_reference_aside(folder: Path) -> Path | None:
 def _settle_reference(folder: Path, kept: Path | None, pulled: bool, run, log) -> None:
     """Keep the empty reference the pull brought, or put back the one set aside (:func:`_set_reference_aside`)."""
     from pipeline import nanowell_reference as nref
-    from shutil import rmtree as remove_tree
+    from util.safe_delete import safe_rmtree
     from util.well_token import canonical_well_label
 
     current = folder / nref.DIR_NAME
@@ -206,7 +206,7 @@ def _settle_reference(folder: Path, kept: Path | None, pulled: bool, run, log) -
     whole = index is not None and all((current / name).is_file() for name in named)
     if index is not None and ours and whole:
         if kept is not None:
-            remove_tree(kept)
+            safe_rmtree(kept, inside=folder)
         return
     # A run that does not measure the reference well is sent this computer's reference, and the pull brings that
     # same copy back: nothing was refused, so nothing is said. Saying it was "not taken" on every such run was a
@@ -217,7 +217,7 @@ def _settle_reference(folder: Path, kept: Path | None, pulled: bool, run, log) -
                f"this run did not measure {well or 'its well'}" if index is not None else "the pull failed")
         log(f"[remote] the empty reference fetched back was not taken ({why}); the one here is kept.\n")
     if current.exists():
-        remove_tree(current)
+        safe_rmtree(current, inside=folder)
     if kept is not None:
         kept.rename(current)
 

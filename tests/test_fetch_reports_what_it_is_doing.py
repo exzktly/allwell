@@ -235,12 +235,18 @@ def test_the_per_well_remote_delete_pipes_its_script_to_bash(monkeypatch, tmp_pa
         return types.SimpleNamespace(returncode=0, stderr=b"")
     monkeypatch.setattr(rt.subprocess, "run", fake_run)
 
+    from services.remote_delete import command
+    from services.remote_transport import guard_script
+
     f = object.__new__(Fetcher)
-    f.host = RemoteHost(name="h", ssh_alias="h")
+    f.host = RemoteHost(name="h", ssh_alias="h", remote_staging_dir="/r")
     f.run = _run(tmp_path)
     f._log = lambda _m: None
     f._delete_well_files_on_remote("A01")
 
     assert seen["argv"][-2:] == ["bash", "-s"]
-    assert seen["input"] == (b"rm -f -- /r/in/A01.zip /r/out/A01_out.zip "
-                             b"/r/out/*_A01.csv /r/out/*_A01.csv.gz\n")
+    # Through the delete layer (``aw_rm`` under the staging directory), grouped so a script cut in transfer runs
+    # nothing.
+    wanted = command("/r", ["/r/in/A01.zip", "/r/out/A01_out.zip", "/r/out/*_A01.csv", "/r/out/*_A01.csv.gz"])
+    assert seen["input"] == guard_script(wanted).encode()
+    assert wanted.endswith("aw_rm /r /r/in/A01.zip /r/out/A01_out.zip /r/out/*_A01.csv /r/out/*_A01.csv.gz\n")

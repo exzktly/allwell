@@ -162,7 +162,6 @@ def load_path(ctx, path: Path) -> None:
     if not path.is_dir():
         QMessageBox.critical(app, "Not a directory", f"Expected a directory:\n{path}")
         return
-    app._cleanup_tmp()
     _recover_in_place_append(path)
     with _announce_opening(ctx, path):
         _load_path_announced(ctx, app, path)

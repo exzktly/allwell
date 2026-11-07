@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import shiboken6
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
@@ -889,7 +890,7 @@ def _crops_header(ctx, parent) -> QWidget:
                       "follows the selection.")
     button.clicked.connect(lambda _=False: nwc.pop_out_crops(ctx))
     ctx.widgets.register("_nw_popout_btn", button)
-    ctx.widgets.register("_nw_open_popout", lambda: _popout_window(ctx).show_raised())
+    ctx.widgets.register("_nw_open_popout", lambda: _open_popout(ctx))
     row.addWidget(title)
     row.addWidget(_cells_box(ctx, "_nw_strip_cells_box"))
     row.addWidget(_image_channel_combo(ctx, "_nw_strip_image_channel_cb"))
@@ -909,6 +910,18 @@ def _go_to_button(ctx, name: str, parent) -> QPushButton:
     return button
 
 
+def _open_popout(ctx) -> None:
+    """Show the pop-out. A window first opened at a desk and opened again after phone layout came on folds its controls
+    away once, as one built on a phone does; the person's own Show / Hide controls choice stands after that."""
+    window = _popout_window(ctx)
+    if nw_phone.on_phone() and not getattr(window, "_folded_for_phone", False):
+        toggle = ctx.widgets.get_or_none("_nw_popout_controls_btn")
+        if toggle is not None:
+            toggle.setChecked(True)
+    window._folded_for_phone = nw_phone.on_phone() or getattr(window, "_folded_for_phone", False)
+    window.show_raised()
+
+
 def _popout_window(ctx):
     """The pop-out crops window, built on first use and kept: a non-modal dialog owned by the app's window, so it
     stays above it and closes with it, holding one :class:`PlotCard` the controller draws the crops on."""
@@ -921,13 +934,20 @@ def _popout_window(ctx):
     window.setWindowTitle("Nanowell crops")
     layout = QVBoxLayout(window)
     layout.setContentsMargins(0, 0, 0, 0)
-    rows = QWidget(window)                              # the control rows, folded away together by the chrome bar
-    rows_layout = QVBoxLayout(rows)
-    rows_layout.setContentsMargins(0, 0, 0, 0)
-    rows_layout.addLayout(_popout_controls(ctx, window))
-    rows_layout.addLayout(build_popout_view_controls(ctx, window, timepoint_text))
-    rows_layout.addLayout(build_popout_window_controls(ctx, window))
-    layout.addLayout(build_popout_chrome(ctx, window, rows))
+    # One wrapping toolbar rather than three stacked rows: the controls pack onto as few lines as the width allows,
+    # in the order image → panels → window → actions, and folded away together by the chrome bar.
+    rows = _flow_controls(window, _popout_controls(ctx, window),
+                          build_popout_view_controls(ctx, window, timepoint_text),
+                          build_popout_window_controls(ctx, window),
+                          last=(ctx.widgets.get("_nw_popout_go_to_btn"), ctx.widgets.get("_nw_popout_save_btn")))
+    for combo in rows.findChildren(QComboBox):
+        # A combo sizes to its longest entry (a metric's whole name), which made the row wider than a phone; it takes
+        # room for twelve characters and elides the rest, its list still showing every entry in full.
+        combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(12)
+    # On a phone the figure is what the window is for and a screen is short, so the controls start folded away behind
+    # "Show controls": opened first they filled the window and left the figure off the screen.
+    layout.addLayout(build_popout_chrome(ctx, window, rows, hidden=nw_phone.on_phone()))
     layout.addWidget(rows)
     card = PlotCard(window, figsize=(_FIG_W, _FIG_H * 0.8), constrained=False, header=False)
     card.setFigureTitle("")
@@ -943,10 +963,36 @@ def _popout_window(ctx):
     card.canvas.mpl_connect("motion_notify_event", lambda event: wnc.on_popout_motion(ctx, event))
     card.canvas.mpl_connect("scroll_event", lambda event: wnc.on_popout_scroll(ctx, event))
     ctx.widgets.register("_nw_popout_hover_tip", DelayedToolTip(card.canvas))
+    window.keep_above_after_choices([ctx.widgets.get_or_none(n) for n in (
+        "_nw_popout_tps_menu", "_nw_popout_channels_menu", "_nw_popout_grid_menu", "_nw_popout_save_menu")])
     refresh = ctx.widgets.get_or_none("_nw_refresh_controls")
     if callable(refresh):
         refresh()                                        # the new controls start on the page's settings
     return window
+
+
+def _flow_controls(window, *rows, last=()) -> QWidget:
+    """The widgets of each box layout in *rows*, moved in order into one wrapping toolbar. A layout's stretch is
+    dropped (a flow has no right edge to push against) and a row's widgets stay in the order it added them, so the
+    builders keep describing their own controls and this decides how they are arranged."""
+    from widgets.flow_layout import FlowLayout, sync_flow_height
+
+    host = QWidget(window)
+    host.setObjectName("NanowellPopoutControls")
+    flow = FlowLayout(host, margin=8, h_spacing=8, v_spacing=6)
+    sync_flow_height(host)
+    widgets = []
+    for row in rows:
+        while row.count():
+            widget = row.takeAt(0).widget()
+            if widget is not None:
+                widgets.append(widget)
+    # Actions (Go to nanowell, Save) close the toolbar whichever row built them; the rest keep the order built.
+    closing = [w for w in widgets if w in last]
+    for widget in [w for w in widgets if w not in last] + closing:
+        widget.setParent(host)
+        flow.addWidget(widget)
+    return host
 
 
 def _popout_controls(ctx, window) -> QHBoxLayout:
@@ -985,8 +1031,36 @@ class _PopoutWindow(QDialog):
         # that flag changed nothing and a dialog's title bar has neither: the hints themselves are what add them.
         self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)
 
+    def keep_above_after_choices(self, menus) -> None:
+        """Bring the window back to the front when a choice made in it closes a popup. A menu or a combo's list is a
+        window of its own, and when it closes the system hands activation to the app's main window — which, until
+        this, left the pop-out behind it after Timepoints, Channels, Grid, Save and every combo. Only a choice made
+        here raises it: clicking the main window directly (to pick another nanowell) must still bring that forward."""
+        # One zero-delay timer. A menu is reached through ``triggered`` (an entry chosen) and not ``aboutToHide``: a menu
+        # is hidden as the window is deleted, and a connection to that signal crashes the interpreter then. A menu
+        # left by a click outside it, or Escape, has no choice to follow.
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(0)                            # after the popup has closed and activation has moved
+        timer.timeout.connect(self.raise_if_open)
+        for menu in menus:
+            if menu is not None:
+                menu.triggered.connect(lambda _action: timer.start())
+        for combo in self.findChildren(QComboBox):
+            combo.activated.connect(lambda _i: timer.start())
+        for box in self.findChildren(QCheckBox):
+            box.toggled.connect(lambda _on: timer.start())
+
+    def raise_if_open(self) -> None:
+        if shiboken6.isValid(self) and self.isVisible():
+            self.raise_()
+            self.activateWindow()
+
     def show_raised(self) -> None:
         self.show()
+        # The controls flow onto as many lines as the width allows, which Qt works out on the next event-loop turn;
+        # doing it now means the window opens with its controls placed and the figure sized to the room they leave.
+        self.layout().activate()
         self.raise_()
         self.activateWindow()
 

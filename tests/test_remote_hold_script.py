@@ -295,6 +295,41 @@ def test_the_granted_file_the_status_and_the_granted_line(hold, tmp_path):
     assert "job 4242 on gpu-node-1 (partition gpu)" in out.splitlines()[0]
 
 
+def test_a_node_without_a_gpu_reports_no_gpus_not_nvidia_smi_s_failure(hold, tmp_path):
+    """Reported: a granted node with no GPU "says nvidia-smi has failed". On a node with the NVIDIA tools but no GPU or
+    driver, ``nvidia-smi -L`` prints its failure sentence to stdout and exits 9; the script kept every stdout line, so
+    that sentence became the node's GPU list, and the app named the node by it. Only ``GPU <n>: <name>`` lines count."""
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    smi = fake / "nvidia-smi"
+    smi.write_text("#!/bin/sh\necho \"NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver. "
+                   "Make sure that the latest NVIDIA driver is installed and running.\"\nexit 9\n", encoding="utf-8")
+    smi.chmod(0o755)
+    h = hold(limit_s=86400, env={"PATH": f"{fake}{os.pathsep}{os.environ['PATH']}"})
+    time.sleep(1.5)
+    granted = dict(line.split("=", 1) for line in (h.dir / "granted").read_text(encoding="utf-8").splitlines())
+    assert granted["gpus"] == ""
+    assert granted["node"] == "gpu-node-1"
+    (h.dir / "release").touch()
+    out = h.wait()
+    assert "NVIDIA-SMI" not in out
+
+
+def test_two_gpus_are_both_named(hold, tmp_path):
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    smi = fake / "nvidia-smi"
+    smi.write_text("#!/bin/sh\necho 'GPU 0: NVIDIA A10G (UUID: GPU-abc)'\necho 'GPU 1: NVIDIA L4 (UUID: GPU-def)'\n",
+                   encoding="utf-8")
+    smi.chmod(0o755)
+    h = hold(limit_s=86400, env={"PATH": f"{fake}{os.pathsep}{os.environ['PATH']}"})
+    time.sleep(1.5)
+    granted = dict(line.split("=", 1) for line in (h.dir / "granted").read_text(encoding="utf-8").splitlines())
+    assert granted["gpus"] == "NVIDIA A10G,NVIDIA L4"
+    (h.dir / "release").touch()
+    h.wait()
+
+
 def test_the_status_file_reports_busy_then_how_long_the_node_has_been_idle(hold):
     h = hold()
     busy = h.dir / "busy"

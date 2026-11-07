@@ -112,7 +112,12 @@ class FakeRemote:
     _REAL_POPEN = staticmethod(subprocess.Popen)
 
     def _bash(self, script: str, stdin: bytes | None = None):
-        self.commands.append(script.strip())
+        # The app packs every command line it sends (``remote_transport.pack_for_login_shell``) and the real remote
+        # shell unpacks it, as ``bash -c`` does below; what a test asks about is the command, so that is recorded.
+        try:
+            self.commands.append(unpack_login_shell_command(script).strip())
+        except ValueError:
+            self.commands.append(script.strip())
         argv = ["bash", "-c", script] if stdin is None else ["bash", "-s"]
         proc = self._REAL_POPEN(
             argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,

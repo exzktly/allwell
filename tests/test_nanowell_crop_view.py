@@ -240,3 +240,31 @@ def test_the_pop_out_s_captions_end_with_the_rim_focus_and_the_extremes_montage_
     assert len(captions) == 2 and all(c.splitlines()[-1].endswith("rim 1 (not judged)") for c in captions), captions
     assert all("rim" not in line for lines in nwc.crop_metrics(st, [("A01", 1, 0)], None)[("A01", 1, 0)].values()
                for line in lines)
+
+
+def test_a_choice_made_in_the_pop_out_brings_it_back_to_the_front(page, qtbot, known_crops, monkeypatch):  # noqa: F811
+    """Reported: the pop-out dropped behind the main window after some menu choices. A closing menu or combo list hands
+    activation to the main window, so each choice made in the pop-out raises it again; the window is not raised when
+    nothing was chosen in it."""
+    from review.features.nanowell.tab_view import _PopoutWindow
+
+    _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    window = _press_pop_out(qtbot, page)
+    raised = []
+    monkeypatch.setattr(_PopoutWindow, "raise_", lambda self: raised.append("raise"))
+    monkeypatch.setattr(_PopoutWindow, "activateWindow", lambda self: raised.append("activate"))
+    qtbot.wait(50)
+    assert raised == []
+    for name in ("_nw_popout_tps_menu", "_nw_popout_channels_menu", "_nw_popout_grid_menu", "_nw_popout_save_menu"):
+        raised.clear()
+        menu = page.widgets.get(name)
+        menu.triggered.emit(menu.addAction("x"))
+        qtbot.waitUntil(lambda: raised == ["raise", "activate"], timeout=2000)
+    raised.clear()
+    page.widgets.get("_nw_popout_image_channel_cb").activated.emit(0)
+    qtbot.waitUntil(lambda: raised == ["raise", "activate"], timeout=2000)
+    raised.clear()
+    page.widgets.get("_nw_popout_labels_box").toggle()
+    qtbot.waitUntil(lambda: raised == ["raise", "activate"], timeout=2000)
+    assert window.isVisible()

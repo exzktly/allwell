@@ -27,6 +27,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from util.bounded_run import run_bounded
+from services.remote_transport import guard_script
 
 #: How long one listing may take. A listing is one ``readdir`` on the remote; a minute is a dead link, not a slow one.
 LISTING_TIMEOUT_S = 60
@@ -71,7 +72,7 @@ def list_remote_glob(
     try:
         result = run_bounded(
             host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
-            input=glob_script(path_glob, with_bytes=True).encode("utf-8"),
+            input=guard_script(glob_script(path_glob, with_bytes=True)).encode("utf-8"),
             capture_output=True, timeout=timeout,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:

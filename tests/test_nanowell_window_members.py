@@ -49,11 +49,15 @@ def _w(**kw):
     return DistributionWindow("count_fc", "time", **kw)
 
 
-def test_snap_takes_every_column_the_span_overlaps():
+def test_snap_takes_the_columns_whose_middle_the_span_overlaps_and_not_the_ones_it_grazes():
+    """It used to take every column the span touched at all, so a box drawn around one column's dots that strayed a
+    little past its edge took the neighbouring column whole -- what a user reported as points of neighbouring
+    distributions they had not drawn around. A column with one swarm is covered when the span reaches its middle half."""
     m = _time_model()
     assert wc.snap(m, 0, -0.2, 2.2) == ("T0", "T1", "T2")
-    assert wc.snap(m, 0, 0.6, 0.7) == ("T1",)
-    assert wc.snap(m, 0, 0.4, 0.6) == ("T0", "T1")
+    assert wc.snap(m, 0, 0.8, 1.2) == ("T1",)
+    assert wc.snap(m, 0, -0.3, 0.6) == ("T0",)         # past T0's edge into T1's column, short of its middle
+    assert wc.snap(m, 0, 0.4, 0.6) == ()                # between two columns: neither
     assert wc.snap(m, 0, 2.6, 3.0) == ()
 
 

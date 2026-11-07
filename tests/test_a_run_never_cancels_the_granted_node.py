@@ -25,7 +25,7 @@ import pytest
 from services.remote_config import RemoteHost
 from services.remote_jobs import close_remote_job
 from services.remote_liveness import ALIVE, GONE, cancel_pending, probe
-from services.remote_reuse import _REMOVE_IF_IDLE
+from services.remote_reuse import remove_if_idle_script
 from services.remote_run_id import UPLOAD_HEARTBEAT
 from services.remote_sweep import sweep_orphaned_allocation
 from tests import _remote_standins
@@ -234,10 +234,8 @@ def test_the_sweep_still_cancels_an_ordinary_leftover_job(cluster, host):
 
 def _clean(cluster, run_dir: str) -> str:
     """Run the clean-up shell on *run_dir* with the stand-in host's HOME; what it printed."""
-    from services.remote_commands import HOLD_DIR
-    from services.remote_run_id import LEGACY_UPLOAD_HEARTBEAT, UPLOAD_HEARTBEAT
 
-    fn = _REMOVE_IF_IDLE.format(hold=HOLD_DIR, heartbeat=UPLOAD_HEARTBEAT, legacy=LEGACY_UPLOAD_HEARTBEAT, stale=120)
+    fn = remove_if_idle_script(os.path.dirname(run_dir), stale=120)
     env = {**os.environ, "AW_STANDIN": str(cluster.root), "HOME": str(cluster.home)}
     done = subprocess.run(["bash", "-c", f'{fn}\n_aw_clean "{run_dir}"'], capture_output=True, text=True, env=env)
     return done.stdout.strip()

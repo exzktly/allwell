@@ -40,7 +40,6 @@ class DatasetState:
 
     data_dir: Path | None = None
     in_dir: Path | None = None
-    tmp_dir: Path | None = None
 
     well_paths: dict[str, Path] = field(default_factory=dict)
     # Bounded by a memory budget (``review/data/row_cache.py``): iterating it

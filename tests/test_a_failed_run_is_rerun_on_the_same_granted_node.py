@@ -83,7 +83,8 @@ class _Remote:
         def launched(argv):
             script = unpack_login_shell_command(argv[-1])
             self.commands.append(script)
-            match = re.match(r'echo \$\$ > "\$HOME"(\S+?);', script)
+            # After the PATH lookup a launch may start with (``remote_commands._program_on_path``).
+            match = re.search(r'echo \$\$ > "\$HOME"(\S+?);', script)
             if match and "--jobid" in script:
                 # What the launched command writes from inside the allocation: `<job>.<step>` in the sidecar.
                 self.steps += 1
@@ -168,7 +169,10 @@ def test_a_run_that_fails_leaves_the_node_and_the_rerun_lands_on_it(tmp_path, mo
     launches = [c for c in remote.commands if "/reservations/" not in c]
     assert not [c for c in remote.commands if "/reservations/" in c], (
         "an early request for a node of the run's own was made beside the granted one")
-    assert len(launches) == 1 and launches[0].startswith('echo $$ > "$HOME"/.allwell-staging/'), remote.commands
+    from services.remote_commands import _program_on_path
+
+    assert len(launches) == 1 and launches[0].startswith(
+        _program_on_path("srun") + 'echo $$ > "$HOME"/.allwell-staging/'), remote.commands
     assert f"exec srun --jobid={HOLD} --overlap --nodes=1 --ntasks=1 --cpus-per-task=8 --gres=gpu:1 bash -lc" in \
         launches[0], launches[0][:200]
     assert "--partition=gpu" not in launches[0] and "sinfo" not in launches[0]

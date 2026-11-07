@@ -34,6 +34,7 @@ from services.remote_hold import (
     can_request,
     describe_state,
     node_for,
+    srun_program,
     step_launcher,
 )
 from services.remote_upload import DatasetCache
@@ -208,7 +209,8 @@ class GrantedNodePanel(QWidget):
         from services.scheduler_probe import ProbeRun
 
         try:
-            probe = ProbeRun(host, launcher=step_launcher(StepTarget.from_state(state)))
+            probe = ProbeRun(host, launcher=step_launcher(StepTarget.from_state(state),
+                                                          srun=srun_program(host.launch_command)))
         except ValueError as exc:
             QMessageBox.warning(self, "Test the node", str(exc))
             return

@@ -29,7 +29,10 @@ ROSTER: dict[str, str] = {
         "purpose.",
     "services/remote_hold.py::GrantedNode._script":
         "Launches nothing: reads only the program word's directory, to find `sbatch` beside the `srun` it names "
-        "(`slurm_path_prelude`). A step of the node's job starts with the same `srun`, so the answer cannot differ.",
+        "(`slurm_path_prelude`). A step of the node's job starts with the same `srun` (`srun_program`), so the answer cannot differ.",
+    "analyze/granted_node_panel.py::GrantedNodePanel._on_test":
+        "Launches nothing of its own: reads only the program word (`srun_program`), so the probe's step of the "
+        "granted node starts with the `srun` the host's command names, as a run's does.",
     "services/scheduler_probe.py::ProbeRun.__init__":
         "The Test button probes the command as written in the form; a probe through the granted node passes its "
         "launcher in explicitly.",

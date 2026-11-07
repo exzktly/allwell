@@ -68,8 +68,13 @@ def test_the_runner_launches_as_a_step_only_while_a_node_is_granted():
 def test_a_step_is_started_plainly_not_through_the_node_asking_wrapper(compose):
     """Wrong implementation: wrapping it. The wrapper reads `sinfo`, excludes nodes, retries a boot and cancels a
     request that is not granted within the queue wait — none of which is a step's business."""
+    from services.remote_commands import _program_on_path
+
     cmd = compose(STEP)
-    assert cmd.startswith('echo $$ > "$HOME"/.allwell-staging/runs/r1/run.pid; exec srun --jobid=4001 --overlap ')
+    # Found first, when the launch shell cannot (``_program_on_path``; tests/test_remote_hold_finds_slurm.py), then
+    # started plainly.
+    assert cmd.startswith(_program_on_path("srun")
+                          + 'echo $$ > "$HOME"/.allwell-staging/runs/r1/run.pid; exec srun --jobid=4001 --overlap ')
     for wrapper_machinery in ("sinfo", "--test-only", "_aw_try", "_aw_awake", "--exclude"):
         assert wrapper_machinery not in cmd
     ordinary = compose(ORDINARY)

@@ -26,6 +26,7 @@ import pytest
 from services.remote_config import RemoteHost
 from services.remote_hold import (
     GrantedNode,
+    StepTarget,
     cancel_script,
     compose_hold_script,
     hold_paths,
@@ -141,3 +142,83 @@ def test_the_scripts_handed_to_the_host_all_start_with_the_prelude(cluster):
         node._script(script, check=False)
     prelude = slurm_path_prelude(host.launch_command)
     assert len(seen) == 2 and all(s.startswith(prelude) for s in seen)
+
+
+# ── a run on the granted node: its launch execs `srun` ───────────────────────────────────────────────────────────────
+#
+# Reported: `[remote] ERROR the allocation ended while the empty-well reference was uploading` after
+# `bash: line 1: exec: srun: not found`. A run on a granted node launches as a step of the hold job,
+# `srun --jobid=<id> --overlap …`, and that `srun` was always bare: the prelude above covers the control scripts, and
+# the launch had none. Requesting the node worked; no run could start on it.
+
+def _srun_stub(cluster) -> None:
+    """An ``srun`` in the stand-in's bin (off the control shell's PATH) that records its arguments."""
+    stub = cluster.bin / "srun"
+    stub.write_text(f'#!/bin/bash\nprintf "%s\\n" "$*" >> "{cluster.fake}/srun.calls"\n', encoding="utf-8")
+    stub.chmod(0o755)
+
+
+def _srun_calls(cluster) -> list[str]:
+    path = cluster.fake / "srun.calls"
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+
+def _step_launch(cluster, host: RemoteHost) -> str:
+    from services.remote_commands import _launch
+    from services.remote_hold import srun_program, step_launcher
+
+    launcher = step_launcher(StepTarget(job_id="4001", cpus=8), srun=srun_program(host.launch_command))
+    return _launch(launcher, "true", str(cluster.fake / "run.pid"))
+
+
+def test_a_step_on_the_granted_node_finds_a_bare_srun_through_the_users_login_shell(cluster, tmp_path):
+    _srun_stub(cluster)
+    cluster.env["SHELL"] = _login_shell(tmp_path, bin_dir=cluster.bin, banner="motd")
+    host = RemoteHost(**HOST)                               # "srun --partition=gpu ...": a bare srun
+    result = cluster._ssh_script(_step_launch(cluster, host), check=False)
+    assert "srun: not found" not in result.stderr, result.stderr
+    assert result.returncode == 0, result.stderr
+    (call,) = _srun_calls(cluster)
+    assert call.startswith("--jobid=4001 --overlap --nodes=1 --ntasks=1 --cpus-per-task=8 bash -lc ")
+
+
+def test_a_step_on_the_granted_node_uses_the_srun_the_scheduler_command_names(cluster):
+    """No login shell to ask here (``SHELL`` is a shell with no Slurm on its PATH): the path is what finds it."""
+    _srun_stub(cluster)
+    cluster.env["SHELL"] = "/bin/false"
+    host = RemoteHost(**{**HOST, "compute_launcher": f"{cluster.bin}/srun --partition=gpu --gres=gpu:1"})
+    launch = _step_launch(cluster, host)
+    assert f"exec {cluster.bin}/srun --jobid=4001 " in launch
+    result = cluster._ssh_script(launch, check=False)
+    assert result.returncode == 0, result.stderr
+    assert len(_srun_calls(cluster)) == 1
+
+
+def test_the_run_and_the_node_test_launch_with_the_hosts_srun():
+    """Both places that build a step launcher -- a run (``RemoteRunner.launcher``) and Manage Remotes' *Test* on the
+    granted node -- pass the host's ``srun``, so neither falls back to a bare one the host cannot find."""
+    from services.remote_hold import srun_program, step_launcher
+
+    assert srun_program("/opt/slurm/bin/srun --partition=gpu") == "/opt/slurm/bin/srun"
+    assert srun_program("srun --partition=gpu") == "srun"
+    assert srun_program("sbatch --wrap") == "srun"
+    assert step_launcher(StepTarget(job_id="7"), srun="/opt/slurm/bin/srun").startswith("/opt/slurm/bin/srun --jobid=7 ")
+    from tests._repo_scan import REPO_ROOT
+
+    for rel in ("services/remote_runner.py", "analyze/granted_node_panel.py"):
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert "step_launcher(" in text and "srun=srun_program(" in text, rel
+
+
+def test_a_run_that_asks_for_its_own_node_finds_a_bare_srun_through_the_users_login_shell(cluster, tmp_path):
+    """The ordinary scheduled launch (``wrap_srun_launch``) runs the host's bare ``srun`` in the same shell, and a
+    host's scheduler command is a bare ``srun …`` unless someone typed a path."""
+    from services.remote_commands import _launch
+
+    _srun_stub(cluster)
+    cluster.env["SHELL"] = _login_shell(tmp_path, bin_dir=cluster.bin, banner="motd")
+    host = RemoteHost(**HOST)
+    result = cluster._ssh_script(_launch(host.launch_command, "true", str(cluster.fake / "run.pid")), check=False)
+    assert "srun: not found" not in result.stderr and "srun: command not found" not in result.stderr, result.stderr
+    assert _srun_calls(cluster), result.stderr
+    assert _srun_calls(cluster)[-1].startswith("--partition=gpu "), _srun_calls(cluster)

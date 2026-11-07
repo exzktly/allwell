@@ -615,13 +615,35 @@ def _launch(launcher: str, inner: str, remote_pidfile: str, *, queue_wait_s: int
             # node, and only then fail with srun's bare "execve(): …: No such
             # file or directory". A saved host is not re-checked by the dialog.
             raise ValueError(stray)
-        return wrap_srun_launch(
+        # The wrapper runs `srun` (and `sinfo`, `squeue`) in this same shell: found the same way as below.
+        return _program_on_path(shlex.split(launcher)[0]) + wrap_srun_launch(
             launcher, shlex.quote(inner), _remote_quote(remote_pidfile),
             _remote_quote(f"{remote_pidfile}.srun-err"), queue_wait_s=queue_wait_s)
+    words = shlex.split(launcher)
     return (
-        f"echo $$ > {_remote_quote(remote_pidfile)}; "
-        f"exec {shlex.join(shlex.split(launcher))} bash -lc {shlex.quote(inner)}"
+        _program_on_path(words[0] if words else "")
+        + f"echo $$ > {_remote_quote(remote_pidfile)}; "
+        f"exec {shlex.join(words)} bash -lc {shlex.quote(inner)}"
     )
+
+
+def _program_on_path(program: str) -> str:
+    """Shell that, when the launch shell cannot find *program*, takes ``PATH`` from a login shell of the user's own.
+
+    The launch runs in the shell ``sshd`` starts for one command: neither a login nor an interactive shell, so it never
+    reads ``/etc/profile`` or ``~/.bash_profile``, which is where a cluster puts Slurm on ``PATH`` when it is not in
+    ``/usr/bin``. A host's scheduler command is a bare ``srun …`` unless someone typed a path, and a run on its granted
+    node (``remote_hold.step_launcher``) or on a node it asks for (``remote_srun_retry.wrap_srun_launch``) runs that
+    ``srun`` here; on such a host that was ``bash: line 1: exec: srun: not found``.
+    ``remote_hold.slurm_path_prelude`` answers the same question for the control scripts; ``PATH`` is read from the
+    login shell's output by a marker, because a profile may print a banner. Empty for a program named by its path,
+    which needs no ``PATH``, and nothing changes where *program* is found already."""
+    if not program or "/" in program:
+        return ""
+    return (f"command -v {shlex.quote(program)} >/dev/null 2>&1 || {{ "
+            "_aw_lp=$(\"${SHELL:-bash}\" -lc 'printf \"AW_PATH=%s\\n\" \"$(printenv PATH)\"' 2>/dev/null "
+            "| sed -n 's/^AW_PATH=//p' | tail -n 1); "
+            "[ -n \"$_aw_lp\" ] && PATH=\"$_aw_lp:$PATH\"; export PATH; }; ")
 
 
 # The packing lives in ``services.remote_transport`` now, beside ``ssh_control``, which packs every control command

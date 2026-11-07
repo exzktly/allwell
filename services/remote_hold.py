@@ -918,21 +918,34 @@ class StepTarget:
         return cls(job_id=state.job_id, node=state.node, cpus=_int(state.cpus), gres=state.gres)
 
 
-def step_launcher(target: StepTarget) -> str:
+def srun_program(launch_command: str) -> str:
+    """The ``srun`` a host's scheduler command names -- its path, when the command gives one -- else a bare ``srun``.
+
+    A host whose Slurm is not on the non-interactive shell's ``PATH`` is commonly configured with the full path
+    (``/opt/slurm/bin/srun …``), and its runs work by that path; a step on its granted node must use the same one."""
+    try:
+        first = shlex.split(launch_command or "")[0]
+    except (ValueError, IndexError):
+        return "srun"
+    return first if first.rsplit("/", 1)[-1] == "srun" else "srun"
+
+
+def step_launcher(target: StepTarget, *, srun: str = "srun") -> str:
     """The scheduler command a run uses on a granted node, in place of the host's ``srun …`` line: a step of the hold
-    job, one task on its node.
+    job, one task on its node. *srun* is the program to run it with: :func:`srun_program` of the host's command, so
+    a host that names Slurm by its path keeps it (a bare ``srun`` there was ``exec: srun: not found``).
 
     ``--overlap`` because the hold's batch script holds the job's CPUs while it waits (it only sleeps), and the
     step shares them. The job's CPU count and GRES are asked for explicitly: what a step inherits has varied with
     the Slurm version (``--exact`` and ``--whole`` changed the defaults), and asking for exactly what the job has is
     valid on all of them. A host's own ``--time`` is not here: the job's time limit governs a step.
     """
-    parts = ["srun", f"--jobid={target.job_id}", "--overlap", "--nodes=1", "--ntasks=1"]
+    parts = [srun or "srun", f"--jobid={target.job_id}", "--overlap", "--nodes=1", "--ntasks=1"]
     if target.cpus:
         parts.append(f"--cpus-per-task={target.cpus}")
     if target.gres:
         parts.append(f"--gres={target.gres}")
-    return " ".join(parts)
+    return shlex.join(parts)
 
 
 # ── the handle on a host's granted node, shared by Manage Remotes and every run ─────────────────────────────────────

@@ -971,6 +971,7 @@ def test_a_driver_lost_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
     monkeypatch.setattr("subprocess.Popen",
                         lambda argv, **kw: proc)
 
+    proc.say("[remote] batch-driver: waiting for batch 1 of 3\n")    # what a driver that started prints first
     worker = threading.Thread(target=p._run_batches, daemon=True)
     worker.start()
     assert uploading.wait(timeout=20), "batch 1 never started uploading"
@@ -985,6 +986,35 @@ def test_a_driver_lost_during_an_upload_ends_the_upload(tmp_path, monkeypatch):
     assert any(m.startswith("[remote] ERROR the allocation ended while batch 1/3 was uploading")
                for m in p._logged), p._logged
     assert not any("upload failed" in m for m in p._logged)
+
+
+def test_a_driver_that_never_started_is_reported_as_that_with_the_hosts_words(tmp_path, monkeypatch):
+    """Reported: a run on a granted node said "the allocation ended while the empty-well reference was uploading",
+    and the line before it was ``bash: line 1: exec: srun: not found``: the launch died at once, the driver never
+    ran, and the error named something else. A stream that ends before the driver printed a line of its own is a run
+    that could not start, and the error says so, with the host's last line."""
+    proc = _FakeProc()
+    ordering: list[str] = []
+    p = _batched(tmp_path, ["A01", "A02", "A03"])
+    _stub_runner(p, proc, ordering)
+    uploading = threading.Event()
+    _blocking_upload(p, ordering, uploading)
+    monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: proc)
+
+    proc.say("bash: line 1: exec: srun: not found\n")
+    worker = threading.Thread(target=p._run_batches, daemon=True)
+    worker.start()
+    assert uploading.wait(timeout=20), "batch 1 never started uploading"
+    proc.finish()
+
+    worker.join(timeout=20)
+    assert not worker.is_alive()
+    assert p._returncode == 1
+    errors = [m for m in p._logged if m.startswith("[remote] ERROR")]
+    assert errors and errors[0].startswith(
+        "[remote] ERROR the run could not start on the remote (bash: line 1: exec: srun: not found) while batch 1/3 "
+        "was uploading"), errors
+    assert not any("allocation ended" in m for m in p._logged), p._logged
 
 
 def test_handshake_files_that_cannot_be_cleared_stop_the_run_before_it_launches(tmp_path, monkeypatch):

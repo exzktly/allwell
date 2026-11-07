@@ -946,9 +946,11 @@ same way, so you never have to pick the inner one:
   `<selected folder>/out`.
 
 **Loose images and per-well folders are not analysis input.** If the selected
-folder (or its `in/`) holds loose images, or `A01/`-style folders of images with
-no matching `A01.zip`, the line under the folder field says how many of each it
-found, in red, and Run refuses with the same message. Convert them first with
+folder (or its `in/`) holds loose images, `A01/`-style folders of images with
+no matching `A01.zip`, or any other folder with images in it (a `TimePoint_1/`
+export, images a level or more down inside a well folder), the line under the
+folder field says how many of each it found, in red, and Run refuses with the
+same message. Convert them first with
 the Datasets pane's [Zip Loose Folder](#zip-loose-folder) tool, then open the
 folder it produces. Analyze never moves, groups or deletes anything in your
 input folder. That includes adding images to a plate you have already run:

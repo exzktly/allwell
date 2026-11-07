@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from util.aw_safe import swallow
-from util.dir_scan import files_in, subdirs_in
+from util.dir_scan import files_and_subdirs, files_in, subdirs_in
 from util.image_exts import is_run_input_member
 from util.well_token import canonical_well_label as _canonical_well_label, is_well_archive
 
@@ -100,28 +100,36 @@ def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
     return found
 
 
-def _well_folders(input_dir: Path) -> list[tuple[str, Path]]:
-    """The well-named subdirectories of *input_dir*, as ``(well, path)``."""
-    found: list[tuple[str, Path]] = []
+#: How many folder levels below a subfolder of the input are searched for images. A plate exported as
+#: ``TimePoint_1/`` or ``A01/TimePoint_1/`` puts them one level down; the bound keeps a mistaken root (a home
+#: folder) from being walked whole while the readout updates.
+NESTED_DEPTH = 4
+
+
+def _subfolders(input_dir: Path) -> list[Path]:
+    """The subdirectories of *input_dir* a person put there: hidden ones (``.git``) and ``_``-prefixed ones
+    (``__MACOSX``, scratch) left out, as every other check of the input leaves them out."""
     try:
         entries = subdirs_in(input_dir)
     except OSError:
-        return found
-    for p in entries:
-        if p.name.startswith(".") or p.name.startswith("_"):
-            continue
-        well = _canonical_well_label(p.name)
-        if well is not None:
-            found.append((well, p))
-    return sorted(found, key=lambda x: x[0])
-
-
-def _images_in(folder: Path) -> list[str]:
-    """The run-input image names directly inside *folder*, sorted."""
-    try:
-        return sorted(p.name for p in files_in(folder) if is_run_input_member(p.name))
-    except OSError:
         return []
+    return [p for p in entries if not p.name.startswith((".", "_"))]
+
+
+def _images_in(folder: Path, depth: int = NESTED_DEPTH) -> list[str]:
+    """The run-input images in *folder* and in its subfolders down to *depth* levels, as paths relative to
+    *folder*, sorted. One enumeration per folder (``files_and_subdirs``), no stat per image."""
+    found: list[str] = []
+    try:
+        files, dirs = files_and_subdirs(folder)
+    except OSError:
+        return found
+    found += [p.name for p in files if is_run_input_member(p.name)]
+    if depth > 0:
+        for sub in dirs:
+            if not sub.name.startswith((".", "_")):
+                found += [f"{sub.name}/{name}" for name in _images_in(sub, depth - 1)]
+    return sorted(found)
 
 
 def _note_folder_beside_archive(well: str, folder: Path, archive: Path, images: list[str]) -> None:
@@ -133,6 +141,7 @@ def _note_folder_beside_archive(well: str, folder: Path, archive: Path, images: 
             # Case-folded: on a case-insensitive volume the archive can hold
             # `IMG.TIF` where the folder holds `img.tif`, and they are the same file.
             held = {Path(n).name.lower() for n in zf.namelist()}
+        images = [Path(n).name for n in images]           # a nested image is compared by its own name
         readable = True
     if not readable:
         # An unreadable archive is a corrupt archive, not a stranded folder;
@@ -156,18 +165,21 @@ class NonZipInput(NamedTuple):
     """What a folder holds that a zips-only run would not read.
 
     *loose* is the input images directly inside it; *stranded* is its
-    well-named folders that hold images and have no ``<WELL>.zip`` beside them,
-    each as ``(folder_name, image_count)``; *twins* is the well-named folders
-    that sit beside their own well's archive, as ``(well, folder, archive)``.
+    well-named folders that hold images (directly or in subfolders) and have no
+    ``<WELL>.zip`` beside them, each as ``(folder_name, image_count)``; *twins*
+    is the well-named folders that sit beside their own well's archive, as
+    ``(well, folder, archive)``; *nested* is its other folders that hold images
+    (a ``TimePoint_1/`` export, say), each as ``(folder_name, image_count)``.
     """
 
     loose: list[str]
     stranded: list[tuple[str, int]]
     twins: list[tuple[str, Path, Path]]
+    nested: list[tuple[str, int]] = []
 
     @property
     def refused(self) -> bool:
-        return bool(self.loose or self.stranded)
+        return bool(self.loose or self.stranded or self.nested)
 
     def problems(self) -> list[str]:
         """One line per refused kind, naming the files."""
@@ -177,6 +189,9 @@ class NonZipInput(NamedTuple):
         if self.stranded:
             folders = [f"{name}/ ({n} image(s))" for name, n in self.stranded]
             out.append(f"{len(self.stranded)} well folder(s) with no <WELL>.zip: {_names(folders)}")
+        if self.nested:
+            folders = [f"{name}/ ({n} image(s))" for name, n in self.nested]
+            out.append(f"{len(self.nested)} folder(s) of images that are not well folders: {_names(folders)}")
         return out
 
 
@@ -195,16 +210,21 @@ def non_zip_input(input_dir: Path, well_zips) -> NonZipInput:
         loose = []
     stranded: list[tuple[str, int]] = []
     twins: list[tuple[str, Path, Path]] = []
-    for well, folder in _well_folders(input_dir):
+    nested: list[tuple[str, int]] = []
+    for folder in _subfolders(input_dir):
         images = _images_in(folder)
         if not images:
             continue
-        archive = zip_by_well.get(well)
-        if archive is None:
+        well = _canonical_well_label(folder.name)
+        archive = zip_by_well.get(well) if well is not None else None
+        if well is None:
+            nested.append((folder.name, len(images)))
+        elif archive is None:
             stranded.append((folder.name, len(images)))
         else:
             twins.append((well, folder, archive))
-    return NonZipInput(loose, stranded, twins)
+    twins.sort(key=lambda t: t[0])
+    return NonZipInput(loose, stranded, twins, nested)
 
 
 def refuse_non_zip_input(input_dir: Path, well_zips) -> None:

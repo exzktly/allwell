@@ -27,6 +27,9 @@ ROSTER: dict[str, str] = {
     "services/remote_hold.py::GrantedNode.request":
         "Translates the host's command into the options of the hold job: the one place a node is asked for on "
         "purpose.",
+    "services/remote_hold.py::GrantedNode._script":
+        "Launches nothing: reads only the program word's directory, to find `sbatch` beside the `srun` it names "
+        "(`slurm_path_prelude`). A step of the node's job starts with the same `srun`, so the answer cannot differ.",
     "services/scheduler_probe.py::ProbeRun.__init__":
         "The Test button probes the command as written in the form; a probe through the granted node passes its "
         "launcher in explicitly.",

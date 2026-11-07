@@ -296,6 +296,10 @@ def preflight_run_scratch(output_dir: Path, input_dir: Path, **kwargs) -> None:
 # sites (and the remote worker) are unchanged.
 # ---------------------------------------------------------------------------
 
+#: The name every directory :func:`remove_directory` may remove starts with.
+_REMOVABLE_PREFIX = "_tmp_"
+
+
 def remove_directory(path: Path, *, retries: int = 4, backoff: float = 0.5) -> None:
     """Remove *path* and all its contents, with retries for remote filesystems.
 
@@ -322,7 +326,14 @@ def remove_directory(path: Path, *, retries: int = 4, backoff: float = 0.5) -> N
     """
     import stat as _stat
 
-    if not path.exists():
+    path = Path(path)
+    if not os.path.lexists(path):
+        return
+    # Every directory this is for is one the pipeline named itself (``_tmp_extract_*``, ``_tmp_images_*``), so a
+    # path with any other name, or a link, is a caller's mistake and is refused rather than removed.
+    if not path.name.startswith(_REMOVABLE_PREFIX) or os.path.islink(path):
+        log.error("Refused to remove %s: only the pipeline's own %s* folders are removed here, and never a link.",
+                  path, _REMOVABLE_PREFIX)
         return
 
     def _on_rm_error(func, target, exc_info):

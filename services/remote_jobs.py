@@ -19,7 +19,7 @@ from collections.abc import Callable
 from services.remote_config import RemoteHost
 from services.remote_run_id import UPLOAD_HEARTBEAT
 from services.remote_run_state import _RemoteRun
-from services.remote_transport import _remote_quote
+from services.remote_transport import _remote_quote, pack_for_login_shell
 from services.slurm_ids import closed_words, hold_check_shell
 from services.subprocess_text import TEXT_UTF8
 from util.bounded_run import run_bounded
@@ -59,9 +59,9 @@ def kill_remote_pipeline(host: RemoteHost, run: _RemoteRun) -> None:
     pidfile_q = _remote_quote(run.remote_pidfile)
     try:
         run_bounded(
-            host.ssh_argv(allocate_tty=False) + [
+            host.ssh_argv(allocate_tty=False) + [pack_for_login_shell(
                 f"kill -TERM $(cat {pidfile_q} 2>/dev/null) 2>/dev/null || true"
-            ],
+            )],
             capture_output=True, timeout=10,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
@@ -119,7 +119,7 @@ def close_remote_job(
     )
     try:
         result = run_bounded(
-            host.ssh_argv(allocate_tty=False) + [cmd],
+            host.ssh_argv(allocate_tty=False) + [pack_for_login_shell(cmd)],
             capture_output=True, timeout=10, **TEXT_UTF8,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:

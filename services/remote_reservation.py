@@ -119,14 +119,18 @@ def _stale_reservations_script(root: str) -> str:
     """Shell that removes the reservation directories under *root* nobody has beaten for
     :data:`STALE_RESERVATION_MIN` minutes. ``find -L`` reads through a handed-over reservation's heartbeat link to
     the run's own, so a run still going — however long — keeps its reservation's files."""
+    from services.remote_delete import AW_RM
+
     root_q = _remote_quote(root)
     stale = STALE_RESERVATION_MIN
+    # Removed through the delete layer (``aw_rm``): only what resolves inside *root* on the host, a link as a link.
     return (
+        AW_RM +
         f'for _aw_d in {root_q}/*/; do [ -d "$_aw_d" ] || continue; '
         f'_aw_hb="${{_aw_d}}heartbeat"; '
         f'if [ -e "$_aw_hb" ]; then [ -n "$(find -L "$_aw_hb" -mmin +{stale} 2>/dev/null)" ] || continue; '
         f'else [ -n "$(find "$_aw_d" -maxdepth 0 -mmin +{stale} 2>/dev/null)" ] || continue; fi; '
-        f'rm -rf "$_aw_d"; done; true'
+        f'aw_rm {root_q} "$_aw_d"; done; true'
     )
 
 
@@ -155,12 +159,15 @@ def _release_script(paths: ReservationPaths) -> str:
     """Shell that ends a reservation nobody took: ``srun`` (or the login shell) killed, the job cancelled if it was
     granted, and its directory removed. The job id is the reservation's own — its directory has a random name — so it
     is cancelled without the ownership checks a run directory's sweep needs."""
+    from services.remote_delete import AW_RM
+
     pid_q, slurm_q = _remote_quote(paths.pidfile), _remote_quote(f"{paths.pidfile}.slurm")
     return (
+        AW_RM +
         f"kill -TERM $(cat {pid_q} 2>/dev/null) 2>/dev/null; "
         f'_aw_j=$(cat {slurm_q} 2>/dev/null); '
         f'if [ -n "$_aw_j" ] && command -v scancel >/dev/null 2>&1; then scancel "$_aw_j" 2>/dev/null; fi; '
-        f"rm -rf {_remote_quote(paths.dir)}; true"
+        f"aw_rm {_remote_quote(posixpath.dirname(paths.dir))} {_remote_quote(paths.dir)}; true"
     )
 
 

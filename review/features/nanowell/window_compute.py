@@ -1,9 +1,15 @@
 """The Distribution window: a box drawn on the Distribution figure, and the nanowells whose values fall inside it.
 
-**A window is a value range over whole columns.** Its y extent is a range of the metric, inclusive at both ends. Its
-x extent is snapped to the columns it overlaps (:func:`snap`) and stored as their keys: on *Along x: Time* a
-column is a timepoint (``Swarm.label``), on *Along x: Wells* a group (``Swarm.group``). A dot's horizontal offset
-inside its column is packing, not data, so it never decides anything.
+**A window is a value range over the swarms it was drawn around.** Its y extent is a range of the metric, inclusive
+at both ends. Its x extent is snapped to *slots* (:func:`snap_slots`): one swarm, which is one well at one column --
+on *Along x: Time* a column is a timepoint (``Swarm.label``), on *Along x: Wells* a group (``Swarm.group``), and a
+replicate group draws its wells side by side inside each column. A slot is covered when the drag overlaps the middle
+half of it, so a box drawn around one well's dots takes neither the well beside it in the same column nor a
+neighbouring column it merely grazes; snapping to whole columns took both, which is what a user reported. The window
+keeps the covered columns' keys, which -- unless *This panel only* -- it covers in every panel, as each panel is a group
+drawn on the same columns. A column the box covers only *part* of, in the panel it was drawn in, is narrowed to the
+wells it was drawn around: ``slots`` holds those ``(column key, well)`` pairs (:func:`partial_slots`). A dot's
+horizontal offset inside its slot is packing, not data, so it never decides anything.
 
 **Membership is read from the model, not from the drawing** (:func:`members`). Every nanowell with a value is in its
 swarm's ``values`` and ``sites``, whether it was drawn as a dot, packed into a "+N" overflow, or drawn inside a
@@ -49,11 +55,22 @@ class DistributionWindow:
     rule: str = "every"
     drawn_under: tuple = ()   # ``settings_key`` when the window was drawn
     n_at_drawing: int = 0     # the members it had then, for the "changed since" sentence
+    slots: tuple = ()         # ((column key, well), ...) for each column covered only in part: just those wells
+
+    def covers(self, swarm, axis: str) -> bool:
+        """Whether *swarm* is one this window was drawn around: its column is covered, and when that column was
+        covered only in part, its well is one of the ones the box was drawn around."""
+        key = column_key(swarm, axis)
+        if key not in self.keys:
+            return False
+        partial = {k for k, _well in self.slots}
+        return key not in partial or (key, str(swarm.well)) in self.slots
 
     def to_config(self) -> dict:
         return {"column": self.column, "axis": self.axis, "keys": list(self.keys), "lo": self.lo, "hi": self.hi,
                 "panel": self.panel, "panel_only": self.panel_only, "rule": self.rule,
-                "drawn_under": [list(p) for p in self.drawn_under], "n_at_drawing": self.n_at_drawing}
+                "drawn_under": [list(p) for p in self.drawn_under], "n_at_drawing": self.n_at_drawing,
+                "slots": [list(p) for p in self.slots]}
 
     @classmethod
     def from_config(cls, block) -> DistributionWindow | None:
@@ -65,9 +82,12 @@ class DistributionWindow:
                     or not (math.isfinite(lo) and math.isfinite(hi)) or lo > hi):
                 return None
             under = tuple((str(name), str(value)) for name, value in block.get("drawn_under", ()))
+            slots = tuple((str(key), str(well)) for key, well in block.get("slots", ()))
+            if any(key not in keys for key, _well in slots):
+                return None
             return cls(str(block["column"]), block["axis"], keys, lo, hi, str(block.get("panel", "")),
                        block.get("panel_only") is True, block.get("rule", "every"), under,
-                       int(block.get("n_at_drawing", 0)))
+                       int(block.get("n_at_drawing", 0)), slots)
         except (KeyError, TypeError, ValueError):
             return None
 
@@ -79,6 +99,7 @@ class WindowResult:
     n_every: int = 0
     n_any: int = 0
     covered: dict = field(default_factory=dict)    # panel index -> set of covered column indices (round(Swarm.x))
+    spans: dict = field(default_factory=dict)      # panel index -> [(lo, hi)] x extent of each covered slot
     missing_panel: bool = False                    # *This panel only*, and no panel has that title now
 
     def sites(self) -> list:
@@ -102,19 +123,55 @@ def settings_key(st) -> tuple:
             ("subset", repr(st.subset.to_config())))
 
 
-def snap(model, panel_index: int, x0: float, x1: float) -> tuple:
-    """The keys of the columns of panel *panel_index* that the x span ``[x0, x1]`` overlaps, in the panel's order. A
-    column ``i`` spans ``(i - 0.5, i + 0.5)``; an empty tuple when the span overlaps no column that has a swarm."""
+def slot_half_widths(panel) -> dict:
+    """Column index (``round(Swarm.x)``) -> half the width of one slot in it: half the spacing between the swarms the
+    column holds, or ``0.5`` (the whole column) when it holds one."""
+    by_col: dict = {}
+    for swarm in panel.swarms:
+        by_col.setdefault(round(swarm.x), set()).add(float(swarm.x))
+    out = {}
+    for col, xs in by_col.items():
+        xs = sorted(xs)
+        out[col] = min((b - a for a, b in zip(xs, xs[1:])), default=1.0) / 2
+    return out
+
+
+def slot_extent(swarm, half_widths: dict) -> tuple:
+    half = half_widths.get(round(swarm.x), 0.5)
+    return float(swarm.x) - half, float(swarm.x) + half
+
+
+def snap_slots(model, panel_index: int, x0: float, x1: float) -> tuple:
+    """``(column key, well)`` of each swarm of panel *panel_index* whose slot's middle half the x span ``[x0, x1]``
+    overlaps, in the panel's order; empty when it overlaps none."""
     lo, hi = min(x0, x1), max(x0, x1)
     panel = model.panels[panel_index]
-    keys = []
+    half = slot_half_widths(panel)
+    out: list = []
     for swarm in sorted(panel.swarms, key=lambda s: s.x):
-        i = round(swarm.x)
-        if lo < i + 0.5 and hi > i - 0.5:
-            key = column_key(swarm, model.axis)
-            if key not in keys:
-                keys.append(key)
-    return tuple(keys)
+        inner = half.get(round(swarm.x), 0.5) / 2
+        if lo < swarm.x + inner and hi > swarm.x - inner:
+            slot = (column_key(swarm, model.axis), str(swarm.well))
+            if slot not in out:
+                out.append(slot)
+    return tuple(out)
+
+
+def partial_slots(model, panel_index: int, slots: tuple) -> tuple:
+    """The members of *slots* (:func:`snap_slots`) whose column they do not cover whole in panel *panel_index*: what
+    a window keeps in ``slots``. A column covered whole is left to its key, which reaches every panel."""
+    wells_of: dict = {}
+    for swarm in model.panels[panel_index].swarms:
+        wells_of.setdefault(column_key(swarm, model.axis), set()).add(str(swarm.well))
+    covered: dict = {}
+    for key, well in slots:
+        covered.setdefault(key, set()).add(well)
+    return tuple((key, well) for key, well in slots if covered[key] != wells_of.get(key, set()))
+
+
+def snap(model, panel_index: int, x0: float, x1: float) -> tuple:
+    """The keys of the columns :func:`snap_slots` covers, in the panel's order."""
+    return tuple(dict.fromkeys(key for key, _well in snap_slots(model, panel_index, x0, x1)))
 
 
 def _key_order(model) -> list:
@@ -139,21 +196,29 @@ def members(model, window: DistributionWindow) -> WindowResult:
     result.missing_panel = window.panel_only and not panels
     every, anyof, series = [], [], {}
     for i, panel in panels:
-        mine = [s for s in panel.swarms if column_key(s, model.axis) in keys]
+        mine = [s for s in panel.swarms if window.covers(s, model.axis)]
         result.covered[i] = {round(s.x) for s in mine}
-        required = {column_key(s, model.axis) for s in mine}
+        half = slot_half_widths(panel)
+        result.spans[i] = [slot_extent(s, half) for s in mine]
+        # A nanowell has values only in its own well's swarms, so "inside at every covered column" asks about the
+        # columns covered *for its well*: a box over well A at one timepoint and well B at the next is not a column
+        # A's nanowells could ever be inside at.
+        required: dict = {}
+        for s in mine:
+            required.setdefault(str(s.well), set()).add(column_key(s, model.axis))
         inside: dict = {}
         for s in panel.swarms:
             key = column_key(s, model.axis)
+            covered = window.covers(s, model.axis)
             for site, value in zip(s.sites, s.values):
                 site = tuple(site)
                 if not per_nanowell:
                     series.setdefault(site, {})[str(s.label) if model.axis == TIME else model.timepoint] = float(value)
-                if key in keys and window.lo <= value <= window.hi:
+                if covered and window.lo <= value <= window.hi:
                     inside.setdefault(site, set()).add(key)
         for site, hit in inside.items():
             anyof.append(site)
-            if hit >= required:
+            if hit >= required.get(str(site[0]), set()):
                 every.append(site)
     if model.axis == WELLS:
         # Along wells a nanowell has one value, in its own group's column, so "inside at every covered column" can
@@ -230,8 +295,8 @@ def not_drawn(result: WindowResult, model, hits, *, max_panels: int, density_abo
     drawn = set()
     index_of = {id(ax): i for ax, i in getattr(hits, "panels", [])}
     for ax, xs, _ys, sites in getattr(hits, "entries", []):
-        cols = result.covered.get(index_of.get(id(ax), -1), set())
-        drawn.update(tuple(s) for x, s in zip(xs, sites) if round(float(x)) in cols)
+        spans = result.spans.get(index_of.get(id(ax), -1), [])
+        drawn.update(tuple(s) for x, s in zip(xs, sites) if in_spans(float(x), spans))
     panel_of = {}
     for i, panel in enumerate(model.panels):
         for s in panel.swarms:
@@ -249,6 +314,22 @@ def not_drawn(result: WindowResult, model, hits, *, max_panels: int, density_abo
         else:
             out["in overflow"] += 1
     return out
+
+
+def merged_spans(spans) -> list:
+    """*spans* with touching or overlapping extents joined: the bands a panel draws, one per run of covered slots."""
+    out: list = []
+    for lo, hi in sorted(spans):
+        if out and lo <= out[-1][1] + 1e-9:
+            out[-1] = (out[-1][0], max(out[-1][1], hi))
+        else:
+            out.append((lo, hi))
+    return out
+
+
+def in_spans(x: float, spans) -> bool:
+    """Whether *x* lies in one of the covered slots' extents (``WindowResult.spans``)."""
+    return any(lo <= x <= hi for lo, hi in spans)
 
 
 def _members_per_column(model, panel) -> int:

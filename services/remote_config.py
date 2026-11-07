@@ -1528,7 +1528,9 @@ def query_jupyterhub_profiles(
     path = host.jupyterhub_config_path.strip()
     if path:
         remote_cmd += f" {shlex.quote(path)}"
-    argv = host.ssh_argv(allocate_tty=False) + [remote_cmd]
+    from services.remote_transport import pack_for_login_shell      # lazily: remote_transport imports this module
+
+    argv = host.ssh_argv(allocate_tty=False) + [pack_for_login_shell(remote_cmd)]
     try:
         result = run_bounded(
             argv, capture_output=True, timeout=timeout, **TEXT_UTF8,

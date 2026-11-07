@@ -18,6 +18,10 @@ remote (``services.remote_finished_wells.list_remote_outputs``) and one definiti
 
 from __future__ import annotations
 
+import posixpath
+
+import re
+
 from collections.abc import Callable
 from pathlib import Path
 
@@ -143,8 +147,37 @@ _REMOVE_IF_IDLE = (
     "if [ -e \"$_f\" ]; then _hb=$(stat -c %Y \"$_f\" 2>/dev/null || "
     "stat -f %m \"$_f\" 2>/dev/null || echo 0); "
     "[ $(( $(date +%s) - _hb )) -le {stale} ] && _live=heartbeat; fi; done; "
-    "if [ -n \"$_live\" ]; then echo \"AW_LIVE $d $_live\"; else rm -rf \"$d\" && echo \"AW_GONE $d\"; fi; }}\n"
+    "if [ -n \"$_live\" ]; then echo \"AW_LIVE $d $_live\"; else aw_rm \"$_aw_runs\" \"$d\" && echo \"AW_GONE $d\"; fi; }}\n"
 )
+
+
+def remove_if_idle_script(runs_root: str, *, stale: int) -> str:
+    """The shell that defines ``_aw_clean <dir>`` (:data:`_REMOVE_IF_IDLE`) with what it needs: the delete layer's
+    ``aw_rm``, and *runs_root* as the root every removal must resolve inside. The one way to build it, for the
+    cleanup and for its tests."""
+    from services.remote_commands import HOLD_DIR
+    from services.remote_delete import AW_RM
+    from services.remote_run_id import LEGACY_UPLOAD_HEARTBEAT, UPLOAD_HEARTBEAT
+    from services.remote_transport import _remote_quote
+
+    return (AW_RM + f"_aw_runs={_remote_quote(runs_root)}\n"
+            + _REMOVE_IF_IDLE.format(heartbeat=UPLOAD_HEARTBEAT, legacy=LEGACY_UPLOAD_HEARTBEAT, stale=stale,
+                                     hold=HOLD_DIR))
+
+
+#: A run directory's name: ``run-`` and the run id (``remote_run_id``), letters, digits and dashes.
+_RUN_DIR_NAME = re.compile(r"^run-[A-Za-z0-9-]+$")
+
+
+def confine_to_runs(dirs: dict, runs_root: str) -> dict:
+    """The entries of *dirs* (run directory -> its output directory) that are run directories: directly inside
+    *runs_root*, named like a run, and passing the delete layer's check (``remote_delete.refusal``). The others are
+    what a malformed or foreign journal entry named, and are never removed."""
+    from services.remote_delete import refusal
+
+    return {d: out for d, out in dirs.items()
+            if not refusal(runs_root, d) and posixpath.dirname(d.rstrip("/")) == runs_root.rstrip("/")
+            and _RUN_DIR_NAME.match(posixpath.basename(d.rstrip("/")))}
 
 
 def clean_earlier_attempts(runner, *, log: Callable[[str], None]) -> None:
@@ -164,11 +197,9 @@ def clean_earlier_attempts(runner, *, log: Callable[[str], None]) -> None:
     The re-attached output directory this run wrote into is among them, and goes like the rest once verified.
     """
     from services import run_journal
-    from services.remote_commands import HOLD_DIR
     from services.remote_run_id import remote_run_dir
     from services.remote_transport import _remote_quote
     from services.remote_wait_snippets import UPLOAD_HEARTBEAT_STALE_S
-    from services.remote_run_id import LEGACY_UPLOAD_HEARTBEAT, UPLOAD_HEARTBEAT
 
     run = runner._run
     own = remote_run_dir(runner.host, run.run_id)
@@ -185,13 +216,22 @@ def clean_earlier_attempts(runner, *, log: Callable[[str], None]) -> None:
     for a in attempts:
         out = str(a.get("remote_output_dir") or "").rstrip("/")
         inp = str(a.get("remote_input_dir") or "").rstrip("/")
-        for d in (str(Path(out).parent) if out else "", str(Path(inp).parent) if Path(inp).name == "in" else ""):
+        # posixpath, not pathlib: these are the host's paths, and a WindowsPath turns their slashes round.
+        for d in (posixpath.dirname(out) if out else "", posixpath.dirname(inp) if posixpath.basename(inp) == "in" else ""):
             if d and d != own:
-                dirs.setdefault(d, out if str(Path(out).parent) == d else "")
-    removable = [d for d, out in dirs.items() if _all_brought_home(runner, out, log=log)]
+                dirs.setdefault(d, out if posixpath.dirname(out) == d else "")
+    # The directories come from the local run journal, so they are held to what a run directory is before anything
+    # is sent: directly inside ``<staging>/runs``, named like a run (``remote_delete.refusal``), and the host checks
+    # again what they resolve to (``aw_rm``). A journal entry naming anything else is reported, never removed.
+    runs_root = posixpath.dirname(own)
+    confined = confine_to_runs(dirs, runs_root)
+    for d in sorted(set(dirs) - set(confined)):
+        log(f"[remote] kept {d}: the run journal names it as an earlier attempt, but it is not a run directory "
+            f"under {runs_root}, so it is not this app's to remove.\n")
+    removable = [d for d, out in confined.items() if _all_brought_home(runner, out, log=log)]
     if not removable:
         return
-    script = (_REMOVE_IF_IDLE.format(heartbeat=UPLOAD_HEARTBEAT, legacy=LEGACY_UPLOAD_HEARTBEAT, stale=UPLOAD_HEARTBEAT_STALE_S, hold=HOLD_DIR)
+    script = (remove_if_idle_script(runs_root, stale=UPLOAD_HEARTBEAT_STALE_S)
               + "".join(f"_aw_clean {_remote_quote(d)}\n" for d in removable))
     result = runner._cache._ssh_script(script, check=False)
     for line in ((getattr(result, "stdout", "") or "") if result is not None else "").splitlines():

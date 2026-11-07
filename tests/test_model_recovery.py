@@ -22,6 +22,17 @@ from pathlib import Path
 import pipeline.stardist_cache as sd_cache
 
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _home_is_temporary(tmp_path, monkeypatch):
+    """The purge also reads ``~/.keras``: every test here gets a home folder of its own, so none can reach the real
+    one's Keras models."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+
+
 def _seed_cache(keras_home: Path) -> Path:
     model_dir = keras_home / "models" / "StarDist2D" / "2D_versatile_fluo"
     model_dir.mkdir(parents=True)
@@ -82,6 +93,23 @@ def test_purge_targets_only_model_cache(tmp_path, monkeypatch):
     assert str(model_dir) in removed
     assert not model_dir.exists()
     assert other.exists()
+
+
+def test_purge_leaves_every_other_keras_model(tmp_path, monkeypatch):
+    """``~/.keras/models`` holds every Keras model the person has; only StarDist's own download folders are the
+    app's. The purge once removed any ``.h5``/``.zip`` there and any folder holding a ``weights_best.h5`` -- a model
+    someone trained, or the whole ``models`` folder when one sat directly in it."""
+    monkeypatch.setenv("KERAS_HOME", str(tmp_path))
+    model_dir = _seed_cache(tmp_path)
+    models = tmp_path / "models"
+    theirs = [models / "my_classifier.h5", models / "weights_best.h5", models / "my_unet" / "weights_best.h5",
+              models / "archive.zip"]
+    for f in theirs:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"theirs")
+    removed = sd_cache._purge_stardist_cache()
+    assert removed == [str(model_dir)]
+    assert all(f.read_bytes() == b"theirs" for f in theirs)
 
 
 # ── download serialisation (the concurrent-download race that corrupts cache) ──

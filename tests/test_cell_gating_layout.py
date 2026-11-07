@@ -452,3 +452,21 @@ def test_the_optimizer_curve_popup_draws_without_raising(loaded_app, qtbot,
     labels = [ln.get_label() for ln in popup._fig.axes[0].lines]
     assert SEPARATION_SCORE_LABEL in labels, labels
     assert FOLD_CHANGE_SCORE_LABEL not in labels, labels
+
+
+def test_the_jump_button_scrolls_the_page_to_the_cdfs(loaded_app, qtbot):
+    """Reported on a phone: the CDFs sit under every control and were more than two screens down with nothing at the top
+    to say so. The button at the top scrolls the page to them; a button connected to nothing leaves the page at 0."""
+    ctx = loaded_app._ctx
+    parent = _build(ctx, qtbot)
+    parent.resize(430, 700)
+    parent.show()
+    qtbot.wait(100)
+    scroll = parent.findChild(type(ctx.widgets.get("_cell_gating_plot_scroll")))
+    outer = [s for s in parent.findChildren(type(scroll)) if s.widget() is not None and s.widget().layout() is not None
+             and s is not ctx.widgets.get("_cell_gating_plot_scroll")][0]
+    assert outer.verticalScrollBar().value() == 0 and outer.verticalScrollBar().maximum() > 0
+    target = ctx.widgets.get("_cell_gating_plot_scroll")
+    expected = target.mapTo(outer.widget(), target.rect().topLeft()).y()
+    ctx.widgets.get("_cell_gating_jump_cdf_btn").click()
+    assert outer.verticalScrollBar().value() == min(expected, outer.verticalScrollBar().maximum()) > 0

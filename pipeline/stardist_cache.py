@@ -101,9 +101,15 @@ def _purge_stardist_cache() -> list[str]:
     ``OSError: Unable to synchronously open file (truncated file: eof = …)``.
 
     Deletes any model folder containing a StarDist weights file (and stray
-    ``*.h5`` / partial download archives) under each keras cache root. Returns
-    the paths removed, for logging.
+    ``*.h5`` / partial download archives) under the folders StarDist itself
+    downloads into -- ``models/StarDist2D`` and ``models/StarDist3D`` of each
+    keras cache root -- and nowhere else: the rest of ``~/.keras/models`` is
+    every other Keras model the person has, and a ``.h5`` there is theirs.
+    Folders go through ``util.safe_delete`` (strictly inside the StarDist
+    folder, never a link). Returns the paths removed, for logging.
     """
+    from util.safe_delete import DeleteRefused, safe_rmtree
+
     roots: list[Path] = []
     kh = os.environ.get("KERAS_HOME")
     if kh:
@@ -111,8 +117,8 @@ def _purge_stardist_cache() -> list[str]:
     roots.append(Path(os.path.expanduser("~")) / ".keras")
     removed: list[str] = []
     seen: set[str] = set()
-    for models in (r / "models" for r in roots):
-        if not models.is_dir():
+    for models in (r / "models" / cls for r in roots for cls in ("StarDist2D", "StarDist3D")):
+        if not models.is_dir() or os.path.islink(models):
             continue
         targets: set[Path] = set()
         for p in models.rglob("*"):
@@ -130,11 +136,11 @@ def _purge_stardist_cache() -> list[str]:
             seen.add(key)
             try:
                 if t.is_dir():
-                    shutil.rmtree(t, ignore_errors=True)
+                    safe_rmtree(t, inside=models)
                 else:
                     t.unlink()
                 removed.append(key)
-            except OSError:
+            except (OSError, DeleteRefused):
                 swallowed("could not remove a stale StarDist cache entry")
     return removed
 

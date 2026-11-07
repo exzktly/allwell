@@ -1111,8 +1111,10 @@ Any string  preserved as-is and sorted lexicographically
 The **Method**, with a one-line note under it saying when to use it (it turns
 red, and says what is missing, while the method cannot run); the
 **Segmentation channel** — the channel name the method segments, also
-quantified like any other — which is hidden for **Label-free**, since that
+quantified like any other. It is a dropdown of the channels listed under Channels above that can also be typed in: pick a listed channel, or type one the list does not hold (usually a nuclear stain), and a line under the field says which of the two it is. The **Cytoplasm channel** of StarDist + watershed works the same way. The field is hidden for **Label-free**, since that
 segments the channel marked Phase; then only the chosen method's own settings.
+
+Scrolling the mouse wheel over a dropdown or number box scrolls the page, not the value, until you have clicked into that field — so a long form such as this one can be scrolled with the pointer anywhere on it.
 
 - **Segmentation** — five methods (the pipeline's name in brackets):
   **StarDist — nuclei** (`stardist_nuclei`, the default), **StarDist +
@@ -1861,6 +1863,13 @@ that the new environment's Torch cannot see the GPU, the host's NVIDIA driver is
 too old for it (525 or later is needed). A package that is installed but no
 longer imports counts as missing, and a bootstrap whose last install failed
 runs it again rather than reporting the host ready.
+
+Bootstrap removes only what it installed. A `~/miniforge3` on the host that All-Well
+did not install — your own conda, with your own environments — is never removed:
+if the bootstrap would need to replace it, it stops and says so, and you remove or
+rename it yourself if that is what you meant. `--force` removes the `allwell` and
+`allwell-cellpose` environments and All-Well's code folder (`~/allwell/code`), not
+the rest of `~/allwell` and not a miniforge it did not install.
 
 Before a remote run starts the pipeline it checks the environment can run it:
 not only that it exists, but that the last Bootstrap's install into it did not
@@ -5179,11 +5188,14 @@ still exported (see below).
   this file is the first thing to read.
 - **Zip Loose Folder in place: the folders go away as they are packed** — the
   in-place mode groups your images into per-well folders and packs each into a
-  `<well>.zip`; each folder is deleted as soon as its own archive is written, so
-  the source folder never holds two full copies of the plate. A folder is kept in
-  two cases: it contained no TIFs (nothing was packed, so nothing replaces it),
-  or that well already had a zip from an earlier run (that archive is yours and
-  was not checked against the folder). If a run dies partway, the wells already
+  `<well>.zip`; each folder's TIFs are deleted as soon as its own archive is
+  written and read back holding every one of them, at its size, with its data
+  intact, so the source folder never holds two full copies of the plate. If the
+  archive does not read back whole, that well's TIFs are all kept and the run
+  stops with an error naming the well. A folder is kept in two cases: it contained
+  no TIFs (nothing was packed, so nothing replaces it), or that well already had a
+  zip from an earlier run (that archive is yours and was not checked against the
+  folder). If a run dies partway, the wells already
   packed keep their archives — run it again and it picks up from there.
 - **"N well(s) are incomplete" at load** — those wells' results cover fewer
   fields of view than their input holds: FOV-groups failed during the analysis
@@ -6398,9 +6410,12 @@ Drag a rectangle on a Distribution panel to select the nanowells by where their 
 you can click — which includes the nanowells in a density and those counted under "+N at …", that no click reaches. A
 short press (a few pixels) is still a click and selects one nanowell; a longer drag draws a window.
 
-- The window is a **range of the metric** (both ends included) over **whole columns**: the timepoints along *Time*,
-  the groups along *Wells*. Its sides snap to the columns the drag overlaps, so where a dot sits sideways inside its
-  column never matters. A translucent band marks it on every panel it covers, and a ring marks each member's dot.
+- The window is a **range of the metric** (both ends included) over the **swarms you drew around**: a column is a
+  timepoint along *Time* or a group along *Wells*, and a replicate group draws each of its wells side by side inside
+  it. A swarm is taken when the box reaches its middle, so a box around one well's dots takes that well and not the
+  one beside it, and a box that strays a little past a column's edge does not take the next column. A box over a
+  whole column covers that column on every panel. Where a dot sits sideways inside its swarm never matters. A
+  translucent band marks what it covers, and a ring marks each member's dot.
 - A strip appears above the figure while a window exists for the metric and axis drawn. It says the range and how many
   nanowells are inside — over several timepoints, both **inside at every covered timepoint** and **at any** — and how
   many members have no dot on the figure, by reason: *in panels not drawn* (past the twelve a figure draws), *in
@@ -6682,14 +6697,16 @@ Save controls apply as they do to one nanowell, and a click on a row selects its
 A row whose crops are not yet cut says so; one that cannot be cut says why.
 
 The pop-out's bar of controls can be folded away: **Hide controls** (top left of the pop-out) gives the figure the whole
-window and becomes **Show controls**; **Reset zoom** stays in view either way.
+window and becomes **Show controls**; **Reset zoom** stays in view either way. On a phone the pop-out opens with its controls already folded, so the figure is what you see first; tap **Show controls** to change what it draws.
+
+Home ▸ Cell Gating has a **Jump to the CDFs** button at the top that scrolls to the cumulative distributions, which sit under the gate controls. On a phone's Nanowells ▸ Trajectories and Position, a footer too long for the figure is cut and ends with a line saying how many lines were left out; enlarge the card to read them.
 
 **Layout: Hex** draws the same nanowells all at once as an **artificial hex array — a composite, not a well**. Each
 source well has its own labelled patch, and inside a patch the nanowells fill the hexagon **row by row from its top
 left**, so a position says nothing about where a nanowell sat in its well. **Sort** (beside **Colour**) chooses the
-order: *Window rank* (the default), or any of the page's metrics at the first timepoint shown, with **Descending**
+order: *Window rank* (the default), or any of the page's metrics at the latest timepoint shown, with **Descending**
 (largest first) or **Ascending**; a nanowell with no value sorts last, and the title says what the tiles are placed
-by. The wells' patches follow the same order. **Corner** writes a metric of your choice — cell count, confluence, a fluorescence, a
+by. The order runs across the whole window, so the first page holds the largest (or smallest) of all its nanowells. The wells' patches follow the same order. **Corner** writes a metric of your choice — cell count, confluence, a fluorescence, a
 fold change — in each tile's top-left corner, at the timepoint of the panel the tile is in (a dash where the nanowell
 has no value there); the caption names it. Zoom in to read it on a full page. Tiles are
 drawn apart inside a dashed frame — the edge of each timepoint's panel, so it stays put when you zoom or pan — and the

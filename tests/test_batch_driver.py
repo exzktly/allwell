@@ -997,7 +997,7 @@ def test_handshake_files_that_cannot_be_cleared_stop_the_run_before_it_launches(
 
     def ssh_run(argv, *, check, **kw):
         ordering.append(" ".join(str(a) for a in argv[:2]))
-        rc = 1 if argv[0] == "rm" and any(str(a).endswith("_ready") for a in argv) else 0
+        rc = 1 if argv[0] == "find" and any(str(a).startswith(".aw_batch_") for a in argv) else 0
         return types.SimpleNamespace(stdout="", stderr="rm: cannot remove: Permission denied", returncode=rc)
 
     p._runner._cache._ssh_run = ssh_run
@@ -1009,9 +1009,9 @@ def test_handshake_files_that_cannot_be_cleared_stop_the_run_before_it_launches(
     assert p._returncode == 1
     assert not spawns, "a driver was launched over stale handshake files"
     assert not any(o.startswith("upload") for o in ordering)
-    # The message also says how many files it was clearing and where, so a log shows what the `rm` was handed.
+    # The message also says what it was clearing and where, so a log shows what the command was handed.
     assert re.search(r"\[remote\] ERROR could not clear the handshake files a previous run of this dataset left "
-                     r"\(\d+ files in \S+\) \(ssh exit 1: rm: cannot remove: Permission denied\); "
+                     r"\(every `\.aw_batch_\*` file and the suspend request in \S+\) \(ssh exit 1: rm: cannot remove: Permission denied\); "
                      r"stopping before anything is launched", "".join(p._logged)), p._logged
     assert p.failure_lines and "could not clear the handshake files" in p.failure_lines[0]
 

@@ -217,13 +217,7 @@ roster bound elsewhere.
 layout (every page, upright, sideways — the screen turned — and at the large text
 size), on a 432×936 screen, against
 `tests/fixtures/phone_snapshot_baseline.json`, which is the check that a change
-to how widgets are found has not changed what is seen. The baseline records a
-fingerprint — the Qt version, the screen and the font fontconfig actually resolves
-for the application — and the test skips, naming the difference, on a machine
-whose fingerprint differs. The slow-lane job installs the system `fonts-inter`
-package and a `conf.d` rule that prefers Inter for sans-serif (a stock runner ranks
-DejaVu Sans first even with Inter installed), so the runner resolves the same Inter
-the baseline was taken under and the snapshot compares there.
+to how widgets are found has not changed what is seen.
 
 **The phone point.** Every size in phone layout is written in phone points
 (`u`): the short side of the screen's geometry divided by 390, the width in

@@ -18,11 +18,13 @@ and say in the row what moved and why.
 
 The numbers depend on the Qt version, the application font and the screen, so
 the baseline records those and the test skips, saying so, on a machine whose
-fingerprint differs. It is a full-app test (marked ``slow``), so the PR gate
-never runs it; the slow lane (``.github/workflows/slow-lane.yml``) does, and
-installs the system ``fonts-inter`` package and a fontconfig rule that prefers it
-for sans-serif, so the runner resolves the same font the baseline was recorded
-under and compares rather than skipping.
+fingerprint differs. The PR gate never runs this file (it is a full-app test,
+marked ``slow``); the slow lane does, and skips the comparison there, because the
+runner resolves "Sans Serif" to DejaVu Sans. Installing Inter on the runner and
+preferring it was tried: the fingerprint then matched, and the comparison still
+differed (a Home Overview card 17 px lower, a page button 1 px wider) with or
+without the container's whole font set, so the residue is not a font. The local
+run is therefore this file's only real gate.
 """
 
 from __future__ import annotations

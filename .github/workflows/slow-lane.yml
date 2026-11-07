@@ -83,7 +83,12 @@ jobs:
           # cannot be fetched still fails it, loudly and by name.
           sudo apt-get update || echo "::warning::apt-get update reported errors \
             — if the install below cannot locate a package, the fetch above is why"
-          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3
+          # fonts-inter: the tests never call allwell.main, so the bundled Inter is not
+          # registered and Qt's generic "Sans Serif" is whatever fontconfig picks — DejaVu
+          # Sans on a bare runner. tests/test_phone_layout_snapshot.py fingerprints the
+          # resolved font and skips on a mismatch; with the same Ubuntu package the
+          # baseline was recorded under, it compares here instead of skipping.
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 fonts-inter
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip

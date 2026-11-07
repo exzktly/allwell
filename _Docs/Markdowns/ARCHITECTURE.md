@@ -215,7 +215,12 @@ at zero, counting the spellings a name could come back in.
 layout (every page, upright, sideways — the screen turned — and at the large text
 size), on a 432×936 screen, against
 `tests/fixtures/phone_snapshot_baseline.json`, which is the check that a change
-to how widgets are found has not changed what is seen.
+to how widgets are found has not changed what is seen. The baseline records a
+fingerprint — the Qt version, the screen and the font fontconfig actually resolves
+for the application — and the test skips, naming the difference, on a machine
+whose fingerprint differs. The slow-lane job installs the system `fonts-inter`
+package so the runner resolves the same Inter the baseline was taken under and the
+snapshot compares there.
 
 **The phone point.** Every size in phone layout is written in phone points
 (`u`): the short side of the screen's geometry divided by 390, the width in

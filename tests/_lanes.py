@@ -327,6 +327,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_manage_remotes_granted_node.py": "Manage Remotes' Granted node panel: Request, Release (asking first while a run uses the node), Test the node, and finding a node already granted",
     "test_a_failed_run_is_rerun_on_the_same_granted_node.py": "Request a node, run, fail, run again: the same node, no second allocation, and the end of a run never cancels the node",
     "test_a_run_never_cancels_the_granted_node.py": "A run on a granted node ends its own step; no cancel, probe, sweep or clean-up of a run releases the node",
+    "test_remote_hold_finds_slurm.py": "Requesting a granted node on a host whose Slurm tools are not on the control shell's PATH: the prelude that finds them, for every control script",
     "test_remote_hold_request.py": "Requesting a granted node: the sbatch sent, the queue wait, the boot retry, and giving the node back",
     "test_remote_hold_script.py": "The granted node's hold script, run under sh: release, idle, app-gone and time-limit endings, and what must not end it",
     "test_a_remote_run_says_how_it_ended.py": "A remote run says what ended it, and calls its job closed only once the host confirms it",

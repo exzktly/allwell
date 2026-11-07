@@ -1963,7 +1963,11 @@ Select a host in *Manage…* whose *Run compute* is *On a node it schedules* wit
 an `srun` scheduler command, and press **Request a node** in the *Granted node*
 box under the list. The app asks the scheduler for a node with that host's
 scheduler command (partition, GPUs, CPUs, memory, and `--exclusive` if ticked),
-waits for it like any job (*Queued…*, *Node starting…*), and shows the node, its
+waits for it like any job (*Queued…*, *Node starting…*) — finding Slurm's own
+commands (`sbatch`, `scontrol`, `scancel`) beside the `srun` your scheduler
+command names when that is a full path, and otherwise from the `PATH` your login
+shell sets, so a cluster that only adds Slurm to the path in its login profile
+works too — and shows the node, its
 GPUs, how long it has been granted and has left, and what will release it. From
 then on **every remote run on that host goes to the node** — runs from the Analyze
 form, Resume, and every job in the Datasets job queue — and none of them

@@ -82,7 +82,7 @@ from services.slurm_ids import is_step_launcher, launcher_job_id
 from services.remote_fetch_nanowells import held_wells, release_batch
 from services.remote_final_pass import adopt_earlier_holds, finish_with_final_pass
 from services.remote_handoff import chase_handoff, watch_of
-from services.remote_batch_ledger import checked, fail, failed_batches_line, ledger_of
+from services.remote_batch_ledger import checked, fail, failed_batches_line, handshake_clear_argv, ledger_of
 from services.remote_batch_step import (
     Step, abandon_upload_ahead, peak_batches, run_batch, upload_ahead_mode, well_removed)
 from services.remote_batch_resume import (
@@ -680,9 +680,17 @@ class _BatchedRemoteProcess:
         before = "stopping before anything is launched"
         flags = [self._batch_flag(t, i) for i in range(1, total + 1)
                  for t in (BATCH_READY, BATCH_DONE, BATCH_REANCHOR, BATCH_SKIP, BATCH_STAGED)]
+        operands = [paths.suspend_request, *flags]
+        try:
+            clear_argv = handshake_clear_argv(run_dir, operands)
+        except ValueError as exc:
+            self._log(f"[remote] ERROR refusing to clear the handshake files: {exc}; {before}\n")
+            self._returncode = 1
+            return False
         if not (checked(self, ["mkdir", "-p", run_dir], f"create the run directory {run_dir}", then=before)
-                and checked(self, ["rm", "-rf", paths.suspend_request, *flags],
-                            "clear the handshake files a previous run of this dataset left", then=before)):
+                and checked(self, clear_argv,
+                            "clear the handshake files a previous run of this dataset left "
+                            f"({len(operands)} files in {run_dir})", then=before)):
             self._returncode = 1
             return False
         # Whatever input archives the remote already holds — in `in/`, in a staged batch, or in an earlier

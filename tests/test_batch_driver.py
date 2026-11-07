@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import re
 import types
 from pathlib import Path
 
@@ -1008,8 +1009,10 @@ def test_handshake_files_that_cannot_be_cleared_stop_the_run_before_it_launches(
     assert p._returncode == 1
     assert not spawns, "a driver was launched over stale handshake files"
     assert not any(o.startswith("upload") for o in ordering)
-    assert ("[remote] ERROR could not clear the handshake files a previous run of this dataset left (ssh exit 1: "
-            "rm: cannot remove: Permission denied); stopping before anything is launched") in "".join(p._logged)
+    # The message also says how many files it was clearing and where, so a log shows what the `rm` was handed.
+    assert re.search(r"\[remote\] ERROR could not clear the handshake files a previous run of this dataset left "
+                     r"\(\d+ files in \S+\) \(ssh exit 1: rm: cannot remove: Permission denied\); "
+                     r"stopping before anything is launched", "".join(p._logged)), p._logged
     assert p.failure_lines and "could not clear the handshake files" in p.failure_lines[0]
 
 

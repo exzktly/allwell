@@ -18206,7 +18206,13 @@ Conversion progress is a per-well plate map
 `PlateProgress` row above) in the same Analyze-style graphical shape
 `ConcatDashboard`/`MergePlatesDashboard`/`ValidateDashboard` use, rather than
 a plain progress bar: `ImportLooseWorker.wellsPlanned` seeds the plate with
-the wells `scan_folder` already found for the preview, and `wellStage`
+the wells the run's own `scan_folder` found. The worker walks the folder before
+it reports them, so `ImportLooseController._launch` draws the wells the page's
+preview scan found (`ImportLoosePage.scanned_wells`, pending) in the meantime,
+and `_on_wells_planned` resets the plate and replaces them with the run's —
+without that, a queued run, whose `show_job` has just scanned the folder, shows
+an empty grid under the progress bar for the length of the worker's walk
+(`tests/test_import_loose_plate_while_scanning.py`). `wellStage`
 colours each one `pending` → `writing` → `done` as its zip actually lands on
 disk, marking `done` with a terminal `✓` (accessibility — colour alone doesn't
 distinguish success-green from `pending`'s text-muted grey). A `writing` well

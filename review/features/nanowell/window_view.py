@@ -105,6 +105,12 @@ def build_window_strip(ctx, parent) -> QWidget:
                 widget.blockSignals(was)
 
     def range_typed() -> None:
+        # Qt says editingFinished when focus merely leaves a field. The fields show the bounds to six figures, so
+        # reading them back unchanged would round a dragged window and start the pop-out's pages over: nothing
+        # typed is nothing changed.
+        window = wnc.current(_state(ctx))[0] if _state(ctx) is not None else None
+        if window is not None and (low.text(), high.text()) == (f"{window.lo:.6g}", f"{window.hi:.6g}"):
+            return
         try:
             lo, hi = float(low.text()), float(high.text())
         except ValueError:

@@ -163,7 +163,8 @@ def set_window_range(ctx, lo: float, hi: float) -> None:
     if window is None or not (math.isfinite(lo) and math.isfinite(hi)):
         return
     lo, hi = min(lo, hi), max(lo, hi)
-    _store(ctx, st, replace(window, lo=lo, hi=hi))
+    if (lo, hi) != (window.lo, window.hi):               # the same range again: nothing to save or start over
+        _store(ctx, st, replace(window, lo=lo, hi=hi))
 
 
 def set_window_rule(ctx, rule: str) -> None:

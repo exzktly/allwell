@@ -19,18 +19,18 @@ and say in the row what moved and why.
 The numbers depend on the Qt version, the application font and the screen, so
 the baseline records those and the test skips, saying so, on a machine whose
 fingerprint differs. The PR gate never runs this file (it is a full-app test,
-marked ``slow``); the slow lane does, and skips the comparison there, because the
-runner resolves "Sans Serif" to DejaVu Sans. Installing Inter on the runner and
-preferring it was tried: the fingerprint then matched, and the comparison still
-differed (a Home Overview card 17 px lower, a page button 1 px wider) with or
-without the container's whole font set, so the residue is not a font. The local
-run is therefore this file's only real gate.
+marked ``slow``); the slow lane does, and installs Inter, a fontconfig rule that
+prefers it for sans-serif, and the face the baseline draws ⓘ from, so the runner
+resolves the same fonts and compares rather than skipping. The dataset is built at
+one fixed path (:data:`SNAPSHOT_DATASET`), because its path is drawn on some pages
+and its length moves the lines that wrap.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -49,15 +49,24 @@ def phone_screen():
         yield screen
 
 
+#: Where the snapshot's dataset is built: the same path on every machine. The dataset's path reaches text the
+#: pages draw (the Analyze form's folder fields, Home's cards), and its length decides where those lines wrap — so a
+#: dataset under pytest's numbered temp directory (``/tmp/pytest-of-<user>/pytest-<n>/…``) measured differently on
+#: every machine and every run count: the CI runner's ``pytest-of-runner`` path put a Home card 17 px lower than the
+#: baseline, with identical fonts. Not under ``tempfile.gettempdir()``, which follows ``TMPDIR`` and so differs too.
+SNAPSHOT_DATASET = Path("/tmp/allwell-phone-snapshot/mini")
+
+
 @pytest.fixture(scope="module")
-def scenarios(qapp, tmp_path_factory, phone_screen):
+def scenarios(qapp, phone_screen):
     from allwell import AllWellApp
     from core import phone_layout
     from tests._screens import place
     from tests.fixtures.mini_dataset import build_mini_dataset
     from ui import theme
 
-    dataset = build_mini_dataset(tmp_path_factory.mktemp("phone_snapshot") / "mini")
+    shutil.rmtree(SNAPSHOT_DATASET.parent, ignore_errors=True)
+    dataset = build_mini_dataset(SNAPSHOT_DATASET)
     win = AllWellApp(None)
     win.show()
     place(win, phone_screen.rect, qapp)
@@ -70,6 +79,7 @@ def scenarios(qapp, tmp_path_factory, phone_screen):
     finally:
         phone_layout.set_on(False)
         theme.apply_ui_scale(1.0)
+        shutil.rmtree(SNAPSHOT_DATASET.parent, ignore_errors=True)
         win.close()
 
 

@@ -217,7 +217,16 @@ roster bound elsewhere.
 layout (every page, upright, sideways — the screen turned — and at the large text
 size), on a 432×936 screen, against
 `tests/fixtures/phone_snapshot_baseline.json`, which is the check that a change
-to how widgets are found has not changed what is seen.
+to how widgets are found has not changed what is seen. Its numbers depend on the
+machine as well as the code, so the baseline records a fingerprint — the Qt
+version, the screen and the font fontconfig actually resolves — and the test skips,
+naming the difference, where it differs. The slow-lane job installs Inter, a
+`conf.d` rule that prefers it for sans-serif (a stock runner ranks DejaVu Sans
+first even with Inter installed) and WenQuanYi Zen Hei, the face the baseline draws
+`ⓘ` from, so the runner matches and compares. The dataset is built at one fixed
+path (`SNAPSHOT_DATASET`), not under pytest's numbered temp directory: its path is
+drawn on the Analyze form and Home's cards, and a path of another length wrapped
+those lines differently.
 
 **The phone point.** Every size in phone layout is written in phone points
 (`u`): the short side of the screen's geometry divided by 390, the width in

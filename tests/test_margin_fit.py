@@ -116,3 +116,19 @@ def test_only_a_divider_counts_as_placing_axes_not_a_colour_bar():
     pax = plain.add_subplot(111)
     plain.colorbar(pax.imshow(np.arange(4.0).reshape(2, 2)), ax=pax)
     assert not margin_fit.divider_placed(plain)
+
+
+def test_tick_labels_are_fitted_again_after_the_inset_narrows_the_grid():
+    """The page-render sweep, nanowell on a phone upright: the Heat Map's twelve column numbers were fitted to the
+    grid's width, the inset for the colour bar's label then narrowed the grid, and "9 10 11 12" ran together.
+    At 21 pt on this fixture the labels clear the grid before the inset and collide after it."""
+    from review.core.tick_fit import _collide, _drawn
+
+    fig, ax, _cax = _heat_figure()
+    ax.set_xticks(range(12))
+    ax.set_xticklabels([str(i + 1) for i in range(12)], fontsize=21)
+    fig._aw_margin_fitted = True
+    plot_style._fit_ticks(fig)
+    renderer = fig.canvas.get_renderer()
+    assert not _collide(_drawn(ax.xaxis, renderer, ax.get_xlim()), renderer, fig), (
+        "the column numbers overlap once the grid is inset: they were fitted to the grid before the inset")

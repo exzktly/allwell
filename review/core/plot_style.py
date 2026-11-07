@@ -1951,6 +1951,10 @@ def _fit_ticks(fig) -> None:
     if getattr(fig, "_aw_margin_fitted", False):
         with swallow("keep a divider-placed plot's text inside its figure"):
             margin_fit.inset_for_overhang(fig)
+        # The inset narrows the panels the labels were just fitted to: on a phone the Heat Map's twelve column
+        # numbers were fitted to the grid's width before it, and "9 10 11 12" then ran into each other.
+        with swallow("fit a plot's tick labels to its inset panels"):
+            fit_tick_labels(fig)
     fit_panels()
 
 

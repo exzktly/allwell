@@ -1539,7 +1539,9 @@ review/
 │   │   plot_card_actions.py, figure_saver.py
 │   ├── tick_fit.py, margin_fit.py    ← fit a figure's tick labels and divider-placed axes to the
 │   │                                    room the figure was given, from the text as drawn; plot_style
-│   │                                    calls them once the layout has settled (pure matplotlib)
+│   │                                    calls them once the layout has settled, and the tick fit
+│   │                                    again after margin_fit's inset narrows the panels (pure
+│   │                                    matplotlib)
 │   ├── timepoint_sync.py             ← shared "focus timepoint" across plotting tabs
 │   ├── progress_jobs.py              ← run a panel edit's work on a QThread behind a
 │   │                                    ProgressPopup, one job at a time (§5.3, Cell Gating)

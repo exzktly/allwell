@@ -15,6 +15,9 @@ statistics cache outright (QC, crop and the other verdict layers, through
 ``recompute_qc_all`` and ``invalidate_stats_cache``). A per-well value is
 therefore exactly as fresh as the plotted mean beside it. The version is read
 into the key before computing, never after, for the reason that function gives.
+The cache's ``epoch`` is read then too: a verdict-layer edit clears the cache
+without moving the version, and a read running on a worker
+(``review.core.background_read``) across such an edit is not remembered.
 
 A *compute* must return something small and must not keep the frame: a result
 holding the rows would put the plate back in memory through the side door.
@@ -57,9 +60,13 @@ def per_well(ctx, kind: str, label: str, params: Hashable, compute: Callable, *,
         hit = store.cache.get(key, _MISSING)
         if hit is not _MISSING:
             return None if hit is _NONE else hit
+    # The cache's epoch is taken before the read, as the version is: a worker's read can straddle an edit on the
+    # window's thread that clears the cache without moving the version, and the answer it computed then describes
+    # the rows as they were. It is returned to its caller, which is superseded anyway, and never remembered.
+    epoch = getattr(store, "epoch", None)
     rows = get_rows(ctx, label) if columns is None else narrow_rows(ctx, label, set(columns))
     result = compute(rows)
-    if store is not None:
+    if store is not None and getattr(store, "epoch", None) == epoch:
         # ``None`` is remembered too: it is the answer for a well with nothing
         # to contribute (no values of the column, no rows), and not remembering
         # it re-read exactly those wells — every well, for a ratio column — on

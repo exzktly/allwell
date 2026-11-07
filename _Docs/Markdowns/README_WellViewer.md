@@ -6398,9 +6398,12 @@ Drag a rectangle on a Distribution panel to select the nanowells by where their 
 you can click — which includes the nanowells in a density and those counted under "+N at …", that no click reaches. A
 short press (a few pixels) is still a click and selects one nanowell; a longer drag draws a window.
 
-- The window is a **range of the metric** (both ends included) over **whole columns**: the timepoints along *Time*,
-  the groups along *Wells*. Its sides snap to the columns the drag overlaps, so where a dot sits sideways inside its
-  column never matters. A translucent band marks it on every panel it covers, and a ring marks each member's dot.
+- The window is a **range of the metric** (both ends included) over the **swarms you drew around**: a column is a
+  timepoint along *Time* or a group along *Wells*, and a replicate group draws each of its wells side by side inside
+  it. A swarm is taken when the box reaches its middle, so a box around one well's dots takes that well and not the
+  one beside it, and a box that strays a little past a column's edge does not take the next column. A box over a
+  whole column covers that column on every panel. Where a dot sits sideways inside its swarm never matters. A
+  translucent band marks what it covers, and a ring marks each member's dot.
 - A strip appears above the figure while a window exists for the metric and axis drawn. It says the range and how many
   nanowells are inside — over several timepoints, both **inside at every covered timepoint** and **at any** — and how
   many members have no dot on the figure, by reason: *in panels not drawn* (past the twelve a figure draws), *in

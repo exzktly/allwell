@@ -108,7 +108,8 @@ def on_release(ctx, st, event) -> None:
         return
     inverse = ax.transData.inverted()
     (x0, y0), (x1, y1) = inverse.transform((x, y)), inverse.transform((ex, ey))
-    keys = wc.snap(model, index, x0, x1)
+    slots = wc.snap_slots(model, index, x0, x1)
+    keys = tuple(dict.fromkeys(key for key, _well in slots))
     if not keys:
         ctx.notify.set_status("The window covers no column: drag across the dots you want.")
         nwc.redraw(ctx)
@@ -121,7 +122,8 @@ def on_release(ctx, st, event) -> None:
                               "nanowell.")
         model = st.window_model
     draft = wc.DistributionWindow(model.column, model.axis, keys, float(min(y0, y1)), float(max(y0, y1)),
-                                  panel=panel, drawn_under=wc.settings_key(st))
+                                  panel=panel, drawn_under=wc.settings_key(st),
+                                  slots=wc.partial_slots(model, index, slots))
     _store(ctx, st, replace(draft, n_at_drawing=len(wc.members(model, draft).rows)))
 
 

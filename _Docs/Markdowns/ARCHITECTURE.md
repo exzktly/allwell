@@ -12697,18 +12697,27 @@ nanowells by where their values fall on the Distribution figure and shows them i
 Qt-free: a `DistributionWindow` is a metric column, an axis, a tuple of column *keys* (`column_key`: the timepoint
 `Swarm.label` along time, the group `Swarm.group` along wells), an inclusive `[lo, hi]`, the panel title it was drawn
 in with a `panel_only` flag, a rule (`every` | `any`) and the `settings_key` it was drawn under with the member count
-then. `snap` turns a drag's x span into keys: column `i` is `(i − 0.5, i + 0.5)` and a column is covered when the span
-overlaps it, so a dot's offset inside its column never decides. `members(model, window)` walks the
+then, and `slots`. `snap_slots` turns a drag's x span into the *slots* it covers — one swarm, i.e. one well at one
+column, since a replicate group draws its wells side by side inside each column (`slot_half_widths`: half the spacing
+between a column's swarms, or the whole column for one) — a slot being covered when the span overlaps its middle half,
+so a box around one well's dots takes neither the well beside it nor a column it grazes; `snap` is their column keys.
+The keys reach every panel unless `panel_only`; a column covered only in part, in the panel drawn in, is narrowed to
+the wells drawn around by `slots` (`partial_slots`; `DistributionWindow.covers`; a saved window without `slots` covers
+its whole columns as before). A dot's offset inside its slot never decides
+(`tests/test_nanowell_window_slots.py`). `members(model, window)` walks the
 `DistributionModel`'s swarms, never the dots drawn, so a nanowell in a density panel (`renderer.DENSITY_ABOVE`) or
 packed into a "+N" overflow is a member like any other; it counts both rules (`n_every`, `n_any`; a nanowell with no
-value at a covered timepoint its panel has is not an *every* member). Along wells a nanowell has one value, in its own
+value at a covered timepoint its panel has is not an *every* member; *every* asks about the columns covered for the
+nanowell's own well, which a box over one well at one timepoint and another well at the next would otherwise fail for
+every nanowell). Along wells a nanowell has one value, in its own
 group's column, so membership is that value inside the range and the two rules are the same set — requiring it inside
 at every covered column would keep no nanowell at all from a window across two groups
 (`test_nanowell_window_members.py::test_along_wells_a_window_across_two_neighbouring_groups_keeps_the_nanowells_of_both`).
 It ranks the chosen rule's members by the value at
 the latest covered column (a member with none there last, ties by well, `q`, `r`) into `WindowRow`s — the fields of
 `extremes_compute.ExtremeRow`, a class of their own because `extremes_compute` imports `state`, which imports this
-module — and reports `covered` columns per panel. `not_drawn` counts members with no dot in a covered column by
+module — and reports `covered` columns and `spans` (each covered slot's x extent) per panel; `_window_render` draws
+one band per run of touching spans (`merged_spans`) and rings dots inside them. `not_drawn` counts members with no dot in a covered slot by
 reason from the figure's `HitMap` (`panels`: which axes drew which panel; `values`: the values of each entry's dots).
 `NanowellState.windows` (`window_key(column, axis)` → window, persisted; `_windows_from` drops a damaged block) holds one
 window per metric and axis; `window_model` is the `DistributionModel` last drawn, which `_window_controller.current`

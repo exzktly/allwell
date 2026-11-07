@@ -226,6 +226,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_display_range.py": "The Nanowells page's **Display range**: a *min* / *max* / **Auto** brightness window for …",
     "test_nanowell_edge_points_vectorised.py": "``nanowell_detect._edge_points`` is vectorised over its rays without changing a bit",
     "test_nanowell_site_rows.py": "Extremes and the Distribution window draw their rows of crops through one renderer",
+    "test_nanowell_window_slots.py": "a Distribution window drawn around one well's swarm takes that well, not the wells beside it or the column it grazes",
     "test_nanowell_window_members.py": "the Distribution window's members, every and any, snapping and its sentences, from hand-built models",
     "test_nanowell_window_page.py": "drawing a Distribution window on the real page: the drag, the band and rings, a click still selecting",
     "test_nanowell_window_popout.py": "the Distribution window in the pop-out: its rows, pages, clicks and controls",

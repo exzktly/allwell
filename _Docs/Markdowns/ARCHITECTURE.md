@@ -4494,7 +4494,12 @@ edits. Two rules make a value selection exact rather than approximate. A
 replicate set joins whole only when **every loaded well** of it holds the
 value; a set whose wells disagree contributes just its matching wells, as solo
 wells, and is named on a warning line under the row (`split_sets`), because
-pulling the set in would export wells under a value they do not hold. Removal
+pulling the set in would export wells under a value they do not hold. A well
+is in a group once: when a later value brings a split set in whole, its wells
+leave the solo list (`add_membership`), and the pooled bar export draws a solo
+well a member set already pools only inside that set (`barplot.collect.
+batch_members`, as the Nanowells panel's `_figure_groups` does), so a group
+saved with both never counts a well's cells twice. Removal
 is the mirror: a set wholly inside the value leaves, one that also holds other
 values is kept and named. Wells with no value join no Quick Setup group and are
 listed rather than dropped.

@@ -129,6 +129,10 @@ def add_membership(grp, membership: ValueMembership) -> int:
         if rset.name not in names:
             grp.members.append(rset)
             names.add(rset.name)
+    # A well an earlier value split off its set as a solo well is now pooled by that set, which has just joined
+    # whole: it leaves the solo list, or the group would hold it twice and a pooled export count its cells twice.
+    pooled = {w for m in grp.members for w in m.wells}
+    grp.solo_wells[:] = [w for w in grp.solo_wells if w not in pooled]
     in_group = set(grp.wells)
     for w in membership.solo_wells:
         if w not in in_group:

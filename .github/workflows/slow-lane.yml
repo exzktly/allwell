@@ -91,9 +91,13 @@ jobs:
           # first; the same rule here makes "Sans Serif" resolve to the same Inter, so
           # tests/test_phone_layout_snapshot.py (which fingerprints the resolved font and
           # skips on a mismatch) compares instead of skipping.
-          # fonts-wqy-zenhei: Inter has no ⓘ (U+24D8, every InfoHint); the baseline's machine
-          # draws it from WenQuanYi Zen Hei, so the fallback must be the same face here too.
-          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 fonts-inter fonts-wqy-zenhei
+          # The rest is the development container's font set: a glyph Inter lacks (ⓘ on every
+          # InfoHint, arrows, symbols) is drawn from whichever installed face covers it, and
+          # a different fallback face measured 5 px narrower per ⓘ and re-wrapped Home cards.
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 fonts-inter \
+            fonts-wqy-zenhei fonts-freefont-ttf fonts-liberation fonts-liberation2 \
+            fonts-crosextra-caladea fonts-crosextra-carlito fonts-ipafont-gothic \
+            fonts-jetbrains-mono fonts-noto-color-emoji fonts-tlwg-loma-otf fonts-unifont
           printf '%s\n' '<?xml version="1.0"?>' \
             '<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">' \
             '<fontconfig><alias><family>sans-serif</family><prefer><family>Inter</family></prefer></alias></fontconfig>' \

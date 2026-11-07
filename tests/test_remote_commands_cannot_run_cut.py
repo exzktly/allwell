@@ -44,7 +44,9 @@ def _home(tmp_path):
 
 def _run(shell, command, home, stdin=None):
     argv = [shell, "-s"] if stdin is not None else [shell, "-c", command]
-    return subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=30,
+    # In the stand-in home: a cut command that does run -- what these tests exist to catch -- acts there, not in the
+    # repository (a deliberately ungrouped script's prefix ``mkdir -`` once made a directory named "-" at its root).
+    return subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=30, cwd=str(home),
                           env={**os.environ, "HOME": str(home)})
 
 

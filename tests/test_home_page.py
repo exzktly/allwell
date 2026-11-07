@@ -346,21 +346,47 @@ def test_a_page_with_a_rail_body_still_gets_the_space(loaded_app, qapp):
     Growing the window is the direct question. The stretch-0 items — the dataset
     button, the nav, the separator, the plate slot — keep their heights, the
     trailing ``addStretch(0)`` keeps taking nothing, and the stretch-1 frame
-    takes the difference. That holds at any window size and through any change
-    to how tall the nav's list of sections happens to be.
+    takes the difference. That holds through any change to how tall the nav's
+    list of sections happens to be — but only while the column *fits* its
+    viewport. The rail is a scroll area: once the stretch-0 items plus the
+    frame's own minimum exceed the viewport, the column is laid out at its
+    minimum and scrolls, and there is no slack for anyone to take. Plotting
+    opens on Heat Map, whose layout configurator sits in the main frame (about
+    490px at its minimum), and in the 1000px window the column needs ~1,230px.
+    So the window is first grown until the column fits, and that is asserted
+    as a premise: a column that overflows is reported as overflowing, not
+    misreported as a spacer stealing the slack.
     """
     app = _laid_out(loaded_app, qapp)
     _goto(app, qapp, "Plotting")
     frame = app._sidebar_main_frame
     nav = app._section_nav
     plate = app._sidebar_plate_slot
+    column = frame.parentWidget()
+    viewport = column.parentWidget()
+
+    scroll = viewport.parentWidget()
+
+    # A margin past the bare shortfall: the plate's minimum depends on the
+    # column's width, which the vertical scroll bar takes from, so a window
+    # grown by exactly the shortfall can flap between fitting and not.
+    shortfall = column.minimumSizeHint().height() - viewport.height()
+    if shortfall > 0:
+        app.resize(_RAIL_W, app.height() + shortfall + 100)
+        for _ in range(15):
+            qapp.processEvents()
+    assert not scroll.verticalScrollBar().isVisible() and \
+        column.height() == viewport.height(), (
+            f"premise: the rail column (minimum {column.minimumSizeHint().height()}px) "
+            f"should fit its {viewport.height()}px viewport before the window grows; "
+            f"an overflowing column scrolls and has no slack to give the frame")
 
     assert frame.isVisible()
     before = frame.height()
     nav_before, plate_before = nav.height(), plate.height()
 
     _GROWTH = 200
-    app.resize(_RAIL_W, _RAIL_H + _GROWTH)
+    app.resize(_RAIL_W, app.height() + _GROWTH)
     for _ in range(15):
         qapp.processEvents()
 

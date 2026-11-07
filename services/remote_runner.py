@@ -99,7 +99,7 @@ from services.remote_suspend import request_suspend as _request_suspend
 from services.remote_code_sync import sync_pipeline_code
 from services.remote_commands import _compose_remote_cmd, _handover_job_body, pack_for_login_shell
 from services.remote_reservation import Reservation
-from services.remote_hold import HoldError, NodeLease, StepTarget, claim_node, step_launcher
+from services.remote_hold import HoldError, NodeLease, StepTarget, claim_node, srun_program, step_launcher
 from services.remote_srun_retry import queue_wait_seconds
 # Where a run lives, and whether an earlier one's output may be reused — the
 # addresses, the keys they are derived from, and the re-attach decision.
@@ -248,7 +248,9 @@ class RemoteRunner:
         if self.node_wait is not None:
             raise HoldError("the run reached its launch while its granted node was still being granted, without "
                             "waiting for it (a launch site that does not call await_granted_node).")
-        return step_launcher(self.step_target) if self.step_target is not None else self.host.launch_command
+        if self.step_target is not None:
+            return step_launcher(self.step_target, srun=srun_program(self.host.launch_command))
+        return self.host.launch_command
 
     def node_pending(self) -> bool:
         """Whether the run holds a claim on a granted node that is not granted yet."""

@@ -3352,7 +3352,7 @@ def test_close_remote_job_scancels_scheduled_host():
         )
         r.close_remote_job(log_fn=logs.append)
     run.assert_called_once()
-    sent = " ".join(run.call_args.args[0])
+    sent = unpack_login_shell_command(run.call_args.args[0][-1])     # packed, as every command line is
     assert "scancel" in sent
     assert ".slurm" in sent      # reads the recorded job-id sidecar
     assert any("cancelled lingering job 12345" in m for m in logs)

@@ -7,14 +7,14 @@ folder itself as what ``rm`` could not remove. The command had 486 operands and 
 launch commands); cut after the ``"$HOME"`` that begins an operand, what runs is ``rm -rf "$HOME"``. Only the launch
 commands were packed against that. Now every command line ``ssh_control`` and the other control paths send is packed,
 every ``bash -s`` script is one ``{ … }`` group, and every ``rm`` through ``DatasetCache._ssh_run`` must name a path
-strictly inside the staging directory.
+strictly inside the staging directory (the rule that every call site packs or groups is the fast-lane
+guard ``test_every_ssh_command_is_packed.py``).
 
 The cut tests run each prefix for real under the shells a host may have, with a home folder holding data.
 """
 
 from __future__ import annotations
 
-import ast
 import os
 import shutil
 import subprocess
@@ -29,7 +29,6 @@ from services.remote_transport import (
     rm_refusal,
     ssh_control,
 )
-from tests._repo_scan import parse_source, python_sources, rel
 
 SHELLS = [s for s in ("bash", "sh", "dash") if shutil.which(s)]
 #: A command that deletes the stand-in home's data, then leaves a mark that it ran to the end.
@@ -157,38 +156,3 @@ def test_a_refused_rm_is_never_sent(monkeypatch):
     with pytest.raises(RuntimeError, match="refused"):
         cache._ssh_run(["rm", "-rf", "/data/home/zakary.singer"], check=True)
     assert sent == []
-
-
-def _ssh_list_sites():
-    """``(path::function, the list added to ssh_argv(...))`` for every ``….ssh_argv(...) + [ … ]`` in the tree."""
-    out = []
-    for source in python_sources():
-        tree = parse_source(source)
-        for fn in ast.walk(tree):
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for node in ast.walk(fn):
-                if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) and isinstance(node.left, ast.Call)
-                        and isinstance(node.left.func, ast.Attribute) and node.left.func.attr == "ssh_argv"
-                        and isinstance(node.right, ast.List)):
-                    out.append((f"{rel(source)}::{fn.name}", node.right, fn))
-    return out
-
-
-def test_every_command_sent_after_ssh_argv_is_packed_or_a_grouped_script():
-    """The rule, for the next call site: what follows ``ssh_argv(...)`` is a ``pack_for_login_shell(…)`` or
-    ``["bash", "-s"]`` -- and a function sending ``bash -s`` groups its script with ``guard_script``."""
-    bad = []
-    for site, lst, fn in _ssh_list_sites():
-        elts = lst.elts
-        is_stdin = [getattr(e, "value", None) for e in elts] == ["bash", "-s"]
-        is_packed = (len(elts) == 1 and isinstance(elts[0], ast.Call)
-                     and getattr(elts[0].func, "id", getattr(elts[0].func, "attr", "")) == "pack_for_login_shell")
-        if is_stdin:
-            calls = {getattr(c.func, "id", getattr(c.func, "attr", "")) for c in ast.walk(fn) if isinstance(c, ast.Call)}
-            if "guard_script" not in calls:
-                bad.append(f"{site}: sends bash -s without guard_script")
-        elif not is_packed:
-            bad.append(f"{site}: sends an unpacked command line")
-    assert not bad, "\n".join(bad)
-    assert len(_ssh_list_sites()) >= 10                   # the scan sees the call sites it is about

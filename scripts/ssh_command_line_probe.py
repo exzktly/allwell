@@ -27,14 +27,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.remote_config import load_remotes, resolve_ssh_binary  # noqa: E402
+from services.remote_run_id import remote_run_dir  # noqa: E402
 from services.remote_transport import _remote_join  # noqa: E402
+from services.subprocess_text import TEXT_UTF8  # noqa: E402
+from util.bounded_run import run_bounded  # noqa: E402
 
 LENGTHS = (2000, 4000, 6000, 7000, 7500, 8000, 8100, 8150, 8190, 8200, 8300, 9000, 12000, 16000, 24000, 33000)
 
 
 def _send(host, command: str) -> subprocess.CompletedProcess:
-    argv = host.ssh_argv(allocate_tty=False) + [command]      # unpacked, as control commands were sent
-    return subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    # Unpacked on purpose: this measures what the app's packing now protects against. Read-only commands only.
+    argv = host.ssh_argv(allocate_tty=False) + [command]
+    return run_bounded(argv, capture_output=True, timeout=60, **TEXT_UTF8)
 
 
 def length_probe(host) -> None:
@@ -54,7 +58,7 @@ def length_probe(host) -> None:
 
 
 def shape_probe(host, operands: int = 170) -> None:
-    run_dir = f"{host.remote_staging_dir}/runs/probe0123456789ab"
+    run_dir = remote_run_dir(host, "probe0123456789ab")       # a run directory's shape; nothing is written there
     names = [f"{run_dir}/.aw_batch_{i}_{k}" for i in range(1, operands // 5 + 1)
              for k in ("ready", "done", "reanchor", "skip", "staged")]
     command = _remote_join(["printf", "%s\\n", *names]) + " | awk 'END { print NR; print $0 }'"

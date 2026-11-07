@@ -67,13 +67,43 @@ def test_the_wheel_over_an_unfocused_number_box_scrolls_the_form_and_leaves_the_
     assert spin.value() == 50 and area.verticalScrollBar().value() > 0
 
 
-def test_a_focused_dropdown_takes_the_wheel(form, qtbot):
+def test_a_dropdown_that_has_the_focus_still_leaves_the_wheel_to_the_form(form, qtbot):
+    """It keeps the focus after a choice is made in it, so focus cannot be what lets the wheel through: the next scroll
+    over a dropdown the person had used changed its value again, which is the behaviour reported as persisting."""
     area, combo, _spin = form
     combo.setFocus(Qt.MouseFocusReason)
     area.activateWindow()
     qtbot.waitUntil(combo.hasFocus, timeout=2000)
     _wheel(combo, -120)
-    assert combo.currentIndex() == 1, "a field the person clicked into ignored the wheel"
+    assert combo.currentIndex() == 0, "a focused dropdown took the wheel"
+    assert area.verticalScrollBar().value() > 0
+
+
+def test_a_focused_number_box_takes_the_wheel(form, qtbot):
+    area, _combo, spin = form
+    spin.setFocus(Qt.MouseFocusReason)
+    area.activateWindow()
+    qtbot.waitUntil(spin.hasFocus, timeout=2000)
+    _wheel(spin, 120)
+    assert spin.value() == 51, "a number box the person clicked into ignored the wheel"
+
+
+def test_a_guarded_field_takes_no_focus_from_the_wheel(form):
+    """Qt focuses a widget on a *real* wheel event before any filter runs, when its policy includes the wheel — which a
+    dropdown's and a number box's do by default. That focus then let the first tick of a trackpad scroll change the value
+    the moment a dropdown came under the pointer. A sent event is not a real one and cannot show it, so the policy that
+    causes it is what is asserted."""
+    _area, combo, spin = form
+    assert combo.focusPolicy() == Qt.StrongFocus and spin.focusPolicy() == Qt.StrongFocus   # click and tab, no wheel
+
+
+def test_a_field_built_later_gets_the_same_policy(form, qtbot):
+    area, _combo, _spin = form
+    late = QComboBox(area.widget())
+    assert late.focusPolicy() == Qt.WheelFocus           # Qt's default, until it is shown
+    late.show()
+    qtbot.waitExposed(late)
+    assert late.focusPolicy() == Qt.StrongFocus
 
 
 def test_the_app_installs_the_guard_at_startup():

@@ -12462,9 +12462,14 @@ bool or its text, `_flag_value`, and missing is no value); `gate` — *Scatter g
 `()` when no such gate has the name, which `_gate_values` answers as no value and `Condition.text` names. The page
 evaluates only a bound subset: `controller.page_subset(ctx, st)` binds `st.subset` against
 `ctx.state.cell_gating.scatter_gates` at each draw, badge and *Save nanowell data…* (`export_long_csv(subset=)`), so
-a gate moved on the Scatter Plot moves the subset at the next draw. The point is read from the page's own metrics
-frame (`_metric_values`; `occupied` derived from `n` as `observation_compute` derives it), the values the nanowell
-scatter plots, so no gating loop arises. `field_choices(gates=)` offers the field only while such a gate exists;
+a gate moved on the Scatter Plot moves the subset at the next draw. The point is read as Cell Gating reads it
+(`_metric_values`; `occupied` derived from `n` as `observation_compute` derives it): from the
+`GATE_VALUE_PREFIX` columns when the metrics carry them, else from the page's own. `controller._metrics_of` adds
+those columns (`with_gate_values`) whenever a gate is drawn on nanowell metrics, from a second
+`gate_tally(scatter_gates=False)` — the counts `observations.nanowell_gate_values` judges cells on — because the
+page's own counts are taken after the scatter-gate layer: a gate that leaves out every cell of a nanowell makes it
+count 0 there, which a box over low counts would otherwise read as inside. So a nanowell is inside the gate on the
+Subset exactly when Cell Gating found its cells inside, and no gating loop arises. `field_choices(gates=)` offers the field only while such a gate exists;
 the editor row picks the gate in `gate_cb` (`controller.subset_gates`), keeping a vanished name as "(gone)".
 `tests/test_nanowell_subset_scatter_gates.py`. A per-timepoint field (a metric with a value per
 timepoint, `owner`, `fused`, the `ROW_FLAGS` and `gate`) is read *at* a timepoint: `baseline` (the row at the count's `baseline_timepoint`), `earliest` / `latest`

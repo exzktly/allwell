@@ -21804,7 +21804,11 @@ you're in before you type the command.
     now and names the definitions that changed: top-level functions, classes,
     assignments and imports (an import by the name it binds), each class's own
     members, and an `if __name__ == "__main__":` block as a definition of its
-    own; docstrings and comments are ignored. It widens that set to every
+    own; docstrings and comments are ignored. A changed method also names its
+    class, since the method is called on an instance of it, so a subclass in
+    the same module (`SpinBox(_HoldsItsNumber, QSpinBox)` inheriting `fixup`)
+    and a factory that builds one are affected with it; a changed data member
+    (`Colors.run_done`) names only itself. It widens that set to every
     definition in the module that refers to one, then follows it outwards. In
     each module that imports the changed one, a definition is affected when it
     takes an affected name from it — `from m import f`, `m.f` on an alias of

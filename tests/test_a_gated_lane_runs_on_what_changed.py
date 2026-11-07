@@ -194,6 +194,44 @@ def test_every_reached_lane_test_is_reported_and_no_other(lane, monkeypatch, tmp
     assert set(lane.reach_all("g", {"pkg/core.py": {"unused"}}, tree)) == {"tests/test_other.py"}
 
 
+MIXIN_BEFORE = """
+class _Holds:
+    def fixup(self, text):
+        return text.strip()
+
+    def other(self):
+        return 0
+
+
+class Box(_Holds):
+    pass
+
+
+def make():
+    return Box()
+"""
+
+
+def test_a_changed_method_reaches_the_subclasses_and_users_of_its_class_in_the_same_module(lane, monkeypatch,
+                                                                                         tmp_path):
+    """``widgets/spin_box.py`` is the shape: ``SpinBox(_HoldsItsNumber, QSpinBox)`` inherits ``fixup``, and the
+    tests import ``SpinBox`` only. A method change seeded only the method's own name, so nothing in the module that
+    names the class — a subclass's bases, a factory — was affected, and a broken ``fixup`` selected none of the five
+    tests it failed. Across modules the class was already taken as reached (``_wanted``); inside its own module it
+    was not. A data member stays narrow: ``Colors.run_done`` does not reach every user of ``Colors``."""
+    after = MIXIN_BEFORE.replace("return text.strip()", "return text")
+    names = lane.affected_names(MIXIN_BEFORE, after)
+    assert names == {"fixup", "_Holds", "Box", "make"}, names
+    tree = _tree(lane, monkeypatch, tmp_path, {
+        "pkg/__init__.py": "",
+        "pkg/box.py": after,
+        "tests/test_sub.py": "from pkg.box import Box\n\ndef test_it():\n    assert Box().fixup(' a ')\n",
+        "tests/test_factory.py": "from pkg import box\n\ndef test_it():\n    assert box.make()\n",
+    }, roster=("test_sub.py", "test_factory.py"))
+    found = lane.reach_all("g", {"pkg/box.py": names}, tree)
+    assert set(found) == {"tests/test_sub.py", "tests/test_factory.py"}, found
+
+
 def test_an_autouse_fixture_or_hook_runs_the_whole_lane(lane, monkeypatch, tmp_path):
     tree = _tree(lane, monkeypatch, tmp_path, {
         "tests/conftest.py": "import pytest\n\n@pytest.fixture(autouse=True)\ndef _guard():\n    yield\n\n"

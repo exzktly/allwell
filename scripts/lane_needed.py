@@ -11,8 +11,10 @@ changed ``.py`` file — application module, test helper or test file alike —
 this compares its syntax tree where the branch left the base with the tree now,
 and names the definitions that changed: top-level functions, classes,
 assignments and imports (an import by the name it binds), and each class's own
-members (``Colors.run_done``), with docstrings and comments ignored. Inside the
-module the set widens to every definition that refers to a changed one. It then
+members (``Colors.run_done``), with docstrings and comments ignored; a changed
+method names its class too, since it is called on an instance of it. Inside the
+module the set widens to every definition that refers to a changed one — so a
+subclass whose bases name that class is affected with it. It then
 follows the change outwards through every first-party module that imports the
 changed one: in each importer, the definitions that refer to an affected name
 are affected in turn, and so on until nothing new is reached. A string constant
@@ -406,7 +408,15 @@ def affected_names(old: str | None, new: str | None) -> set[str] | None:
                if key not in before or key not in after or dump(before[key]) != dump(after[key])}
     if any(key.endswith(f".{_WHOLE}") for key in changed):
         return None
-    return _widen({_leaf(key) for key in changed}, after)
+    seeds = {_leaf(key) for key in changed}
+    # A method is called on an instance of its class, so a changed method changes the class for everything that
+    # names it — a subclass's bases, a factory that builds one — as :func:`_wanted` already says for importers.
+    # A data member stays narrow: changing one colour token does not reach every user of the palette.
+    for key in changed:
+        node = after.get(key, before.get(key))
+        if "." in key and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            seeds.add(key.split(".", 1)[0])
+    return _widen(seeds, after)
 
 
 def _reads_wholesale(tree: ast.AST, scope: set[str]) -> bool:

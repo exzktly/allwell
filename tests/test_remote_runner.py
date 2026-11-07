@@ -1827,6 +1827,8 @@ def test_required_files_list_is_what_we_promised():
         # host and locally.
         "util/settings_digest.py",
         "util/state_dir.py",
+        # The local half of the delete layer; pipeline.io and pipeline.stardist_cache remove through it.
+        "util/safe_delete.py",
         "util/well_token.py",
         # Free-space primitives + the ENOSPC wording the retry shield rewrites
         # through (util.disk_space).

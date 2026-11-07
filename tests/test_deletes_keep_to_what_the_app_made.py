@@ -157,8 +157,11 @@ def test_f4_the_per_well_delete_list_removes_only_the_well_s_files_whatever_the_
     out_dir.mkdir(parents=True)
     for name in ("x_A01.csv", "x_A02.csv"):
         (out_dir / name).write_text("1", encoding="utf-8")
-    (home / "my").mkdir()
-    (home / "my" / "x_A01.csv").write_text("mine", encoding="utf-8")       # what the unquoted form would reach
+    # Unquoted, `~/my stage/runs/run-a/out/*_A01.csv` is two operands, the second relative to the shell's directory
+    # (the home folder): this file is what it reaches.
+    theirs = home / "stage" / "runs" / "run-a" / "out" / "x_A01.csv"
+    theirs.parent.mkdir(parents=True)
+    theirs.write_text("theirs", encoding="utf-8")
     sent = []
 
     def fake_control(host, remote, *, check, timeout_s, stdin=None, what=""):
@@ -169,9 +172,9 @@ def test_f4_the_per_well_delete_list_removes_only_the_well_s_files_whatever_the_
 
     monkeypatch.setattr(rt, "ssh_control", fake_control)
     host = SimpleNamespace(remote_staging_dir="~/my stage")
-    assert rt.delete_remote_paths(host, ["~/my stage/runs/run-a/out/*_A01.csv"], what="A01", log_fn=lambda _m: None)
-    assert not (out_dir / "x_A01.csv").exists() and (out_dir / "x_A02.csv").exists()
-    assert (home / "my" / "x_A01.csv").read_text(encoding="utf-8") == "mine"
+    ok = rt.delete_remote_paths(host, ["~/my stage/runs/run-a/out/*_A01.csv"], what="A01", log_fn=lambda _m: None)
+    assert theirs.read_text(encoding="utf-8") == "theirs"
+    assert ok and not (out_dir / "x_A01.csv").exists() and (out_dir / "x_A02.csv").exists()
 
 
 def test_f5_the_csv_gzip_loop_reaches_only_the_output_directory(tmp_path, monkeypatch):
@@ -181,8 +184,11 @@ def test_f5_the_csv_gzip_loop_reaches_only_the_output_directory(tmp_path, monkey
     out_dir = home / "a b" / "out"
     out_dir.mkdir(parents=True)
     (out_dir / "x_A01.csv").write_text("1,2\n", encoding="utf-8")
-    (home / "a").mkdir()
-    (home / "a" / "x_A01.csv").write_text("mine", encoding="utf-8")
+    # Unquoted, `~/a b/out/*_A01.csv` is `~/a` and `b/out/*_A01.csv`, the second relative to the shell's directory
+    # (the home folder): this file is what it reaches, gzipped and its original removed.
+    theirs = home / "b" / "out" / "x_A01.csv"
+    theirs.parent.mkdir(parents=True)
+    theirs.write_text("theirs", encoding="utf-8")
     captured = {}
 
     def fake_run(argv, *, input, **kw):
@@ -193,8 +199,8 @@ def test_f5_the_csv_gzip_loop_reaches_only_the_output_directory(tmp_path, monkey
     monkeypatch.setattr(remote_csv, "run_bounded", fake_run)
     host = SimpleNamespace(ssh_argv=lambda allocate_tty=False: ["ssh", "h"])
     remote_csv.compress_remote_csvs(host, "~/a b/out", "A01", lambda _m: None)
+    assert theirs.read_text(encoding="utf-8") == "theirs" and not (theirs.parent / "x_A01.csv.gz").exists()
     assert (out_dir / "x_A01.csv.gz").exists() and not (out_dir / "x_A01.csv").exists()
-    assert (home / "a" / "x_A01.csv").read_text(encoding="utf-8") == "mine"
 
 
 # ── F6: Zip Loose Folder keeps the originals unless the archive reads back whole ───────────────────────────────────
@@ -303,9 +309,13 @@ def test_r5_a_stale_reservation_that_is_a_link_is_removed_as_a_link(tmp_path, sh
     root.mkdir(parents=True)
     keep = _personal(home)
     (root / "tok-link").symlink_to(home)
+    # Stale by every reading: the link's own time and, through it, the home folder's (``find`` on `tok-link/` reads
+    # the target), so the sweep reaches its delete.
     os.utime(root / "tok-link", (0, 0), follow_symlinks=False)
+    os.utime(home, (0, 0))
     out = _sh(_stale_reservations_script(str(root)), home, shell)
     assert keep.exists(), out.stderr
+    assert not (root / "tok-link").is_symlink(), "a stale reservation is removed"
     assert AW_RM.splitlines()[0] in _stale_reservations_script(str(root))
 
 

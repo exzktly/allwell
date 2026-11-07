@@ -881,10 +881,11 @@ def force_clean_script() -> str:
     """
     from services.remote_conda import CONDA_ENV_SHELL_HELPERS
 
+    envs = f"{ENV_NAME} {CELLPOSE_ENV_NAME}"
     return (
         CONDA_ENV_SHELL_HELPERS
         + r"""
-for ENV_NAME in __ENVS__; do
+for ENV_NAME in __ENVS__; do""".replace("__ENVS__", envs) + r"""
 AW_PREFIX="$(aw_env_prefix "$ENV_NAME" 2>/dev/null || true)"
 [ -n "$AW_PREFIX" ] || AW_PREFIX="$(aw_env_stale_dir "$ENV_NAME" || true)"
 if [ -n "$AW_PREFIX" ]; then
@@ -908,7 +909,7 @@ if [ -d "$HOME/allwell/code" ] && [ ! -L "$HOME/allwell/code" ]; then
     echo "[bootstrap-remote] --force: removing All-Well's code versions in ~/allwell/code" >&2
     rm -rf --one-file-system -- "$HOME/allwell/code"
 fi
-""".replace("__ENVS__", f"{ENV_NAME} {CELLPOSE_ENV_NAME}")
+"""
     )
 
 

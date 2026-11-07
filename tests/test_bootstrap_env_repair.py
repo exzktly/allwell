@@ -174,7 +174,11 @@ def test_force_removes_the_env_where_it_actually_lives(remote):
     home, _, _ = remote
     prefix = home / ".conda" / "envs" / "allwell"
     _make_env(prefix, valid=True)
+    # One the bootstrap installed, so it carries the marker; a ~/miniforge3 without it is someone's own conda and
+    # --force leaves it (tests/test_deletes_keep_to_what_the_app_made.py, F2).
+    from services.remote_bootstrap import MINIFORGE_MARKER
     (home / "miniforge3").mkdir()
+    (home / "miniforge3" / MINIFORGE_MARKER).write_text("", encoding="utf-8")
 
     r, _ = _run(force_clean_script(), remote, envs={"allwell": str(prefix)})
 

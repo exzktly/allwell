@@ -21478,12 +21478,20 @@ shortfall is reported as a stop rather than shouted at as a fault.
 
 The block also carries `ended_early`: the run did not reach its own end. A
 suspend sets it (so `suspended` implies it, and a record that predates the field
-is read through `suspended`). A remote run sets it from the pipeline's exit
-status: the record there is written on the client after the fetch
-(`remote_fetch.run_client_side_completeness_check`, called from
-`FetchedOutputVerifier.verify` with `ended_early=not ok`), so a Stop, a lost
-node or heartbeat, a driver that went away mid-batch, or a pipeline that exited
-non-zero all record it. It exists because on disk a well the run never got to
+is read through `suspended`). A remote run's record is written on the client
+after the fetch (`remote_fetch.run_client_side_completeness_check`, called from
+`FetchedOutputVerifier.verify`), and sets it when the pipeline exited non-zero
+**and** this run's freshly pulled sidecar carries no `run_check` block
+(`pipeline.completeness.run_reached_its_end`). A run drops that block when it starts
+(`pipeline.sidecar.USER_SIDE_BLOCKS` leaves it out) and writes it — on a remote
+run the `--no_run_check` stub — once it has visited every well, just before it
+picks its exit code; so a Stop, a lost node or heartbeat, a driver that went
+away mid-batch, or a crash record it, while a run that reached its end and
+exited 1 because a well failed does not. A well whose worker died in such a run
+(out of memory, a native crash) is input-only on disk, and calling it *not
+reached* would send the user to finish a run with nothing left to do. A sidecar
+the fetch could not pull is the previous run's, so the exit status alone
+decides there. It exists because on disk a well the run never got to
 and a well it was given and wrote nothing for are identical (input present, no
 output), and only the run knows which it was. Home keeps both in the same
 painted state (`CELL_INPUT_ONLY`, grey) and changes the words: *Not reached —

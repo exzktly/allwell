@@ -3052,7 +3052,8 @@ What is on it:
   flag an odd well), measurements whose output archive is gone (cyan), staged
   but never processed (warm grey). If the run
   ended early — you stopped or suspended it, the remote host lost its node or
-  its connection to the app, or the pipeline exited with an error — the grey
+  its connection to the app, or the pipeline crashed before it had been
+  through every well — the grey
   wells are called *Not reached — run ended early* instead, because the run
   never got to them rather than skipping them; **Finish this run** processes
   them. (After Datasets → Validate rescans the folder, they go back to "staged,

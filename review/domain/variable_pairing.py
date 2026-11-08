@@ -151,24 +151,39 @@ def _condition_text(vset: VariableSet, variable_id: str, value_id: str,
     return " and ".join(parts)
 
 
-def pair_by_variable(vset: VariableSet | None, member_wells, member_controls, *,
-                     variable_id: str, value_id: str,
-                     within=()) -> VariablePairing:
-    """Pair every member of *member_wells* with its control under the rule.
+def _condition_signature(vset: VariableSet, within: tuple[str, ...], key: str,
+                         wells):
+    """``(values, None)`` or ``(None, Unpaired)`` for *key*'s condition."""
+    if not wells:
+        return None, Unpaired(key, NOT_ANNOTATED, "has no loaded wells")
+    values = []
+    for vid in within:
+        value = roll_up(vset, vid, wells)
+        name = vset.by_id(vid).name
+        if value is None:
+            return None, Unpaired(key, NOT_ANNOTATED, f"{name} is not set")
+        if value == MIXED:
+            return None, Unpaired(
+                key, WELLS_DISAGREE, f"its wells disagree on {name}")
+        values.append(value)
+    return tuple(values), None
 
-    *member_wells* is ``member key -> wells``, in draw order
-    (``plot_members.member_wells``). *member_controls* is ``member key ->
-    ControlRef`` addressing **that member**; a member missing from it cannot be
-    used as a control (see :data:`UNADDRESSABLE`). *within* is the "within
-    each" variable ids; the reference variable is dropped from it if present.
 
-    A control candidate pairs with itself, which the outcome vocabulary reports
-    as ``SELF`` — it is drawn at 1.0, the reference every other member of its
-    condition is read against.
+def match_by_variable(vset: VariableSet | None, member_wells, *,
+                      variable_id: str, value_id: str,
+                      within=()) -> VariablePairing:
+    """Match every member with **the member** the rule names, key to key.
+
+    The same rule as :func:`pair_by_variable`, before any reference is built:
+    the mapping is ``member key -> matched member key``. What it is for is a
+    rule that is not about controls at all — the Bar tab's *Then relative to*
+    asks, for each bar, which other bar holds ``Treatment = Vehicle`` and
+    agrees with it on every "within each" variable, and the answer it needs is
+    a bar, not a ``ControlRef``. Four of the five reasons apply;
+    ``UNADDRESSABLE`` is a fact about references and cannot arise here.
     """
     wells_for = dict(member_wells or {})
     keys = list(wells_for)
-    refs = {str(k): ControlRef.coerce(v) for k, v in (member_controls or {}).items()}
     reference = vset.by_id(variable_id) if vset is not None else None
     if reference is None or reference.value_by_id(value_id) is None:
         detail = "the reference variable or value no longer exists"
@@ -179,33 +194,16 @@ def pair_by_variable(vset: VariableSet | None, member_wells, member_controls, *,
         str(v) for v in (within or ())
         if v != variable_id and vset.by_id(v) is not None))
 
-    def signature(key: str):
-        """``(values, None)`` or ``(None, Unpaired)`` for *key*'s condition."""
-        wells = wells_for.get(key) or ()
-        if not wells:
-            return None, Unpaired(key, NOT_ANNOTATED, "has no loaded wells")
-        values = []
-        for vid in within:
-            value = roll_up(vset, vid, wells)
-            name = vset.by_id(vid).name
-            if value is None:
-                return None, Unpaired(key, NOT_ANNOTATED, f"{name} is not set")
-            if value == MIXED:
-                return None, Unpaired(
-                    key, WELLS_DISAGREE, f"its wells disagree on {name}")
-            values.append(value)
-        return tuple(values), None
-
     by_condition: dict[tuple, list[str]] = {}
     for key in control_candidates(vset, wells_for, variable_id, value_id):
-        sig, problem = signature(key)
+        sig, problem = _condition_signature(vset, within, key, wells_for.get(key))
         if problem is None:
             by_condition.setdefault(sig, []).append(key)
 
     mapping: dict = {}
     unpaired: list[Unpaired] = []
     for key in keys:
-        sig, problem = signature(key)
+        sig, problem = _condition_signature(vset, within, key, wells_for.get(key))
         if problem is not None:
             unpaired.append(problem)
             continue
@@ -220,16 +218,51 @@ def pair_by_variable(vset: VariableSet | None, member_wells, member_controls, *,
                 f"{', '.join(matches)} all have {condition} — tick another "
                 f"“within each” variable, or pool them into one group"))
             continue
-        ref = refs.get(matches[0])
+        mapping[key] = matches[0]
+    return VariablePairing(mapping=mapping, unpaired=tuple(unpaired),
+                           total=len(keys))
+
+
+def pair_by_variable(vset: VariableSet | None, member_wells, member_controls, *,
+                     variable_id: str, value_id: str,
+                     within=()) -> VariablePairing:
+    """Pair every member of *member_wells* with its control under the rule.
+
+    *member_wells* is ``member key -> wells``, in draw order
+    (``plot_members.member_wells``). *member_controls* is ``member key ->
+    ControlRef`` addressing **that member**; a member missing from it cannot be
+    used as a control (see :data:`UNADDRESSABLE`). *within* is the "within
+    each" variable ids; the reference variable is dropped from it if present.
+
+    A control candidate pairs with itself, which the outcome vocabulary reports
+    as ``SELF`` — it is drawn at 1.0, the reference every other member of its
+    condition is read against.
+
+    Built on :func:`match_by_variable`. The unaddressable members are inserted
+    **in draw order** among the other unpaired ones, not appended, so the
+    sentence the editor prints lists the members in the order the plot does.
+    """
+    refs = {str(k): ControlRef.coerce(v) for k, v in (member_controls or {}).items()}
+    matched = match_by_variable(vset, member_wells, variable_id=variable_id,
+                                value_id=value_id, within=within)
+    failed = {u.member: u for u in matched.unpaired}
+    mapping: dict = {}
+    unpaired: list[Unpaired] = []
+    for key in dict(member_wells or {}):
+        if key in failed:
+            unpaired.append(failed[key])
+            continue
+        target = matched.mapping[key]
+        ref = refs.get(target)
         if ref is None:
             unpaired.append(Unpaired(
                 key, UNADDRESSABLE,
-                f"its control {matches[0]} is neither a group nor a well, so "
+                f"its control {target} is neither a group nor a well, so "
                 f"it cannot be chosen as a control"))
             continue
         mapping[key] = ref
     return VariablePairing(mapping=mapping, unpaired=tuple(unpaired),
-                           total=len(keys))
+                           total=matched.total)
 
 
 def apply_pairing(current: dict, pairing: VariablePairing) -> dict:

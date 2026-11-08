@@ -112,3 +112,15 @@ def test_without_split_by_a_lone_bar_still_has_no_header():
     fig, ax_mean, _f, _n = _draw(ctx)
     assert "Drug" not in _texts(ax_mean) and "Mut" not in _texts(ax_mean)
     plt.close(fig)
+
+
+def test_the_tick_label_names_both_layers_of_normalisation():
+    """Reported: with two layers the tick named only the first. One bar is left,
+    so one control is in play and the 'name controls only when they differ'
+    rule printed neither layer."""
+    ctx, ids = _app()
+    _on(ctx, ids)
+    fig, ax_mean, _f, _n = _draw(ctx)
+    ticks = [t.get_text() for t in ax_mean.get_xticklabels()]
+    assert ticks == ["Mut-drug\n÷ WT-drug\n÷ (Mut-veh ÷ WT-veh)"], ticks
+    plt.close(fig)

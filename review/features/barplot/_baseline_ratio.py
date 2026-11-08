@@ -119,6 +119,10 @@ def apply_relative_to(ctx, collector, items: list) -> list:
     # so the note says "WT-drug" rather than listing wells.
     cell_names = {frozenset(w): k for k, w in wells_for.items() if w}
 
+    def control_name(key) -> str:
+        ref, _outcome = collector.denoms.control_for(key)
+        return str(getattr(ref, "display_name", "") or "") if ref is not None else ""
+
     def control_wells(key) -> tuple[str, ...] | None:
         ref, _outcome = collector.denoms.control_for(key)
         if ref is None:
@@ -149,6 +153,15 @@ def apply_relative_to(ctx, collector, items: list) -> list:
             out.append(replace(item, stage1=stage1, rel_baseline=base_key,
                                rel_outcome=rr.REFERENCE))
             continue
+        problem = _not_crossed(vset, slice_, wells_for.get(item.key),
+                               control_wells(item.key), control_wells(base_key),
+                               control_name(item.key), base_key, control_name(base_key))
+        if problem:
+            # Without the cross the controls cancel and the "ratio of ratios"
+            # is just this bar over its baseline — a plausible number on the
+            # same axis, and the wrong one. Left blank and named instead.
+            out.append(_blank(item, stage1, rr.NOT_CROSSED, problem, base_key))
+            continue
         base = by_key_tp.get((base_key, float(item.tp)))
         if not item.has_mean:
             out.append(_blank(item, stage1, rr.NO_VALUE, "no value at this timepoint"))
@@ -172,6 +185,7 @@ def apply_relative_to(ctx, collector, items: list) -> list:
             frac=frac, frac_spread=frac_spread, has_frac=math.isfinite(frac),
             n_above=n, n_above_spread=n_spread, stage1=stage1,
             rel_baseline=base_key, rel_outcome=rr.OK, interaction=test,
+            rel_tick=f"{base_key} ÷ {control_name(base_key)}",
             interaction_label=rr.contrast_label(weights, log=log)))
 
     tested = [i for i, it in enumerate(out) if it.interaction is not None and it.interaction.ok]
@@ -182,6 +196,44 @@ def apply_relative_to(ctx, collector, items: list) -> list:
     slice_.rel_notice = _notice(out, name, label, within_names, log=log,
                                 per_fov=bool(req.per_fov_spread))
     return out
+
+
+def _not_crossed(vset, slice_, x_wells, x_ctrl, base_ctrl, x_ctrl_name: str,
+                 base_key: str, base_ctrl_name: str) -> str:
+    """Why stage 1 does not support a ratio of ratios for this bar, or ``""``.
+
+    R is ``(X / control(X)) / (B / control(B))``, and it is the interaction
+    only when the two controls are the same comparison made at the bar's own
+    value and at the baseline value: control(X) holds X's value of the
+    relative-to variable, control(B) holds the baseline value, and the two
+    controls agree on every "within each" variable. Any other pairing makes a
+    number on the same axis that answers a different question — one control
+    shared by every bar cancels out entirely, leaving ``X / B``.
+    """
+    from review.domain.sample_variables import MIXED, roll_up
+
+    if not x_ctrl or not base_ctrl:
+        return "it or its baseline has no per-sample control"
+    rel_id = slice_.rel_variable_id
+    rel_name = vset.by_id(rel_id).name
+    fix = (f"— pair the per-sample controls within each {rel_name} "
+           f"(Control → Per-sample control… → Pair by variable)")
+    if roll_up(vset, rel_id, list(x_ctrl)) != roll_up(vset, rel_id, list(x_wells or ())):
+        return (f"its control {x_ctrl_name} is not at its own {rel_name}, so this "
+                f"would not be a ratio of ratios {fix}")
+    if roll_up(vset, rel_id, list(base_ctrl)) != slice_.rel_value_id:
+        return (f"its baseline {base_key}'s control {base_ctrl_name} is not at the "
+                f"baseline {rel_name}, so this would not be a ratio of ratios {fix}")
+    for vid in slice_.rel_within or ():
+        variable = vset.by_id(vid)
+        if variable is None:
+            continue
+        a, b = roll_up(vset, vid, list(x_ctrl)), roll_up(vset, vid, list(base_ctrl))
+        if a is None or a == MIXED or a != b:
+            return (f"its control {x_ctrl_name} and its baseline's control "
+                    f"{base_ctrl_name} differ on {variable.name}, so this would "
+                    f"not be a ratio of ratios {fix}")
+    return ""
 
 
 def _blank(item, stage1, outcome: str, detail: str, base_key: str = ""):

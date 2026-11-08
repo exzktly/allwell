@@ -73,6 +73,8 @@ from review.features.barplot.collect import (
     clustered_x_positions as _clustered_x_positions,
 )
 from review.features.barplot import _observations as _nw_bars
+from review.features.barplot import _annotations as _rel_annotations
+from review.features.barplot._baseline_ratio import relative_suffix as _rel_suffix
 from review.core.plot_style import forget_renderer_marks, own_xtick_angle
 
 
@@ -1118,6 +1120,9 @@ def draw_grouped_bar_mode(
     """
     fc_misses: set = set()
     use_groups, items, _ = collect_bar_items_for_app(ctx, target_ts, miss_sink=fc_misses)
+    # *Then relative to*: the reference conditions are 1 by construction and are
+    # drawn as the dotted line instead of as bars (``annotate_relative_to``).
+    items = _rel_annotations.visible_bars(ctx, items)
     _render_bar_items(
         ax_mean=ax_mean,
         ax_frac=ax_frac,
@@ -1170,7 +1175,8 @@ def draw_grouped_bar_mode(
     _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
     _metric_key = ctx.state.channel.active_metric
     _thr_q = threshold_qualifier(_metric_key)
-    _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar")
+    _fc_suffix = (_fc.fold_change_suffix_for(ctx, "bar")
+                  + _rel_suffix(ctx))
     _tp_suffix = timepoint_title(target_ts, tp_str)
     # Cluster headers (annotate_cluster_headers) sit at y≈1.02 over every panel;
     # when any survive normalization, push each panel's title up so it clears
@@ -1204,8 +1210,23 @@ def draw_grouped_bar_mode(
     # Significance brackets (N7) — the helper extends the Mean panel's top to fit
     # the brackets. User y-limits (if any) are applied last by
     # ``apply_export_style_to_current`` at the end of ``redraw_bars``.
-    draw_significance_brackets(ctx, items, ax_mean=ax_mean, ax_frac=ax_frac,
-                               target_ts=target_ts)
+    _rel_slice = ctx.state.feature_slice("bar")
+    if getattr(_rel_slice, "rel_applied", False):
+        # The Statistics tab's stored comparisons test raw values; bracketing
+        # ratios of ratios with them would attach a p to a number it is not
+        # about. The interaction p above each bar is this figure's test.
+        if getattr(ctx.state.plot, "show_significance", False):
+            _no_significance(
+                ctx, ax_mean,
+                "brackets withheld — the bars are relative to a baseline, and "
+                "the stored comparisons test raw values. The p above each bar "
+                "is the interaction test.")
+    else:
+        draw_significance_brackets(ctx, items, ax_mean=ax_mean, ax_frac=ax_frac,
+                                   target_ts=target_ts)
+    _rel_annotations.annotate_relative_to(
+        ctx, items, list(getattr(ctx.runtime.barplot, "xs", None) or []),
+        ax_mean, ax_frac, ax_n)
     # Derived from the items' own outcomes rather than from the timepoint set
     # alone: with a control per member, "control missing at t=24" does not say
     # which control or how many bars it cost, and it cannot say anything at all
@@ -1344,6 +1365,7 @@ def redraw_bars(ctx) -> None:
                 ctx, ax_mean,
                 f"{_per_cell_mode_name(ctx)} draws per-cell points rather than "
                 f"bars, and the brackets need bars to sit on.")
+        _decline_relative_for_cells(ctx, ax_mean)
         if cut_not_set:
             blank_for_unset_cut(ax_frac, ax_n)
         from review.core.observation_band import stamp_cells_footer
@@ -1367,6 +1389,23 @@ def redraw_bars(ctx) -> None:
     from review.core.observation_band import stamp_cells_footer
     stamp_cells_footer(ctx, ctx.runtime.barplot.fig)
     apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
+
+
+def _decline_relative_for_cells(ctx, ax_mean) -> None:
+    """Per-cell modes draw points, not the collector's bars: say stage 2 is off.
+
+    ``draw_per_cell_bar_mode`` scales cells by stage 1 only and never reaches
+    ``collect_bar_items``, so a *Then relative to* left on would otherwise
+    read as applied to a figure it did not touch.
+    """
+    slice_ = ctx.state.feature_slice("bar")
+    is_on = getattr(slice_, "relative_to_on", None)
+    if not callable(is_on) or not is_on():
+        return
+    slice_.rel_applied = False
+    slice_.rel_notice = (f"Then relative to: not applied — {_per_cell_mode_name(ctx)} "
+                         f"draws per-cell points. Switch to bars to see it.")
+    _rel_annotations.annotate_relative_to(ctx, [], [], ax_mean)
 
 
 #: Written onto an otherwise-empty figure so an *exported* copy states its own

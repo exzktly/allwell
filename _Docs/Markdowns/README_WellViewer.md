@@ -4877,6 +4877,53 @@ the rule could not pair loses any control it had, so the table matches the
 sentence. Pairing is a one-off fill: if you change the plate's variables
 afterwards, press **Pair** again.
 
+##### Then relative to (Bar Plots)
+
+Per-sample controls answer "how does each sample compare with its own
+control?". **Then relative to** answers the next question: is that comparison
+different under one condition than under another? For example, *how does a
+mutant RNA behave relative to WT under a drug, compared with under vehicle?*
+
+1. Pair each sample with its WT control within its treatment, as above:
+   **Pair by variable** with control *RNA = WT*, within each *Treatment*.
+2. Open **Fold change ▾** on the Bar Plots tab. Under **Then relative to**,
+   choose *Treatment* = *Vehicle*. *RNA* is ticked under "within each" for
+   you, because the vehicle bars differ on it.
+
+Each remaining bar is now
+`(Mut·Drug / WT·Drug) / (Mut·Veh / WT·Veh)` — the mutant's ratio to WT under
+the drug, divided by the same ratio under the vehicle — with an error bar that
+combines all four. With **Subtract** it is the difference of differences. The
+conditions that are 1 by definition (WT under either treatment, and the mutant
+under vehicle) are not drawn as bars; the dotted line at 1 stands for them. The
+axis label ends in `÷ (Treatment = Vehicle)`.
+
+Above each bar is the p-value of the **interaction test**: whether the
+mutant-vs-WT ratio really differs between drug and vehicle. It is a test of
+the RNA × Treatment interaction on the log scale (on raw values for Subtract),
+run on the Mean panel with wells as replicates (fields of view in FOV mode, and
+the note then warns that this over-counts), and adjusted for multiple
+comparisons (`p_BH`) when there are several bars or timepoints. The note on the
+figure names the test and reminds you that the test's estimate is a ratio of
+*geometric* means, while the bar is a ratio of means; the two are usually close
+but are not the same number.
+
+When something cannot be computed, the note says which bar and why: no
+vehicle sample matches it, two do (tick another variable, or pool them), a
+condition has a single well so there is no test, or a value is zero or below so
+there is no logarithm (use Subtract, or check background subtraction). The
+setting is **not applied** — and the note says so — without a per-sample
+control, with a **Baseline** (vs t0) set, or in the violin, beeswarm and
+all-points views. While it is applied, significance brackets from the
+Statistics tab are withheld, because those compare raw values.
+
+**Save plot data…** keeps the `fold_change_*` columns as the per-sample ratio
+and adds `relative_to_baseline_*` (the bar's value, spread, baseline bar and
+outcome) and `interaction_*` (test, scale, estimate with 95% interval, p,
+`p_BH`, df, wells per condition, and the reason when no test ran). The setting
+is saved with the view. It applies to Bar Plots only; Line Graphs, Response
+Curves and Batch Export show the per-sample ratio without it.
+
 A sample that is itself another sample's control draws as a flat 1.0 (0 for
 subtract) with a propagated error bar, which is the ΔΔCt convention; the
 **Controls: hide from plot** toggle leaves it out instead. There is no
@@ -5878,7 +5925,13 @@ t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
   not pair by list order and says so rather than guessing: replicates present in
   only one group are named in the report rather than quietly dropped. The
   two-way ANOVA takes two variables and reports both main effects and their
-  interaction — "does the drug effect depend on the cell line".
+  interaction — "does the drug effect depend on the cell line". **Two-way
+  ANOVA** runs on the raw values, so its interaction asks whether the
+  *difference* between two conditions changes; **Two-way ANOVA (log scale)**
+  runs on their logarithms, so its interaction asks whether the *ratio*
+  changes — the right test for "is Mut/WT different under the drug than under
+  vehicle". Each report says on its second line which question it answers. The
+  log-scale run declines, with a count, if any value is zero or below.
 - **A test that cannot run says why, in the panel.** A confidence interval that
   did not converge, an ANOVA with a combination no well holds, a paired test
   with nothing to pair: each prints its reason where the number would have been,

@@ -22,6 +22,7 @@ from review.core.plot_annotations import (
     LABEL_HEADROOM,
     annotate_value,
 )
+from review.features.barplot._baseline_ratio import p_text
 from review.features.barplot._decorate import bar_legend_entries
 from review.features.barplot.collect import cluster_centers, subcluster_centers
 from core.safe import swallowed
@@ -353,3 +354,67 @@ def annotate_split_notice(ctx, ax) -> None:
     # so it stays on the figure rather than running off its edge.
     note.set_in_layout(False)
     setattr(note, DECORATION_TAG, True)
+
+
+#: Room added above the Mean panel's bars for the p labels and the note.
+_RELATIVE_HEADROOM = 0.35
+
+
+def annotate_relative_to(ctx, items, xs, ax_mean, ax_frac=None, ax_n=None) -> None:
+    """*Then relative to*'s marks: the reference line, the p labels, the note.
+
+    The reference conditions — a bar that is its own control or its own
+    baseline — are 1 (0 for subtract) by construction and are left out of
+    ``items`` by :func:`visible_bars`; this draws the dotted line they stand
+    for on every panel. Each tested bar gets its BH-adjusted p above it on the
+    Mean panel, which is where the test was run; ``p —`` marks a bar the note
+    explains. The note is drawn whether or not the stage applied, because a
+    declined rule must say so on the figure it did not change.
+    """
+    from review.core.plot_style import follows_theme, tokens_for
+
+    slice_ = _bar_slice(ctx)
+    notice = str(getattr(slice_, "rel_notice", "") or "")
+    if ax_mean is None or not notice:
+        return
+    if getattr(slice_, "rel_applied", False):
+        from review.domain.fold_change import parse_fc_op_ctrl
+        reference = 0.0 if parse_fc_op_ctrl(ctx) == "subtract" else 1.0
+        for ax in (ax_mean, ax_frac, ax_n):
+            if ax is None:
+                continue
+            line = ax.axhline(reference, linestyle=":", linewidth=1.0,
+                              color=tokens_for(ax)[2], zorder=2)
+            setattr(line, DECORATION_TAG, True)
+            follows_theme(line, muted=True)
+        lo, hi = ax_mean.get_ylim()
+        ax_mean.set_ylim(lo, hi + (hi - lo) * _RELATIVE_HEADROOM)
+        for item, x in zip(items or (), xs or ()):
+            text = p_text(item)
+            if not text or not is_number(item.mean):
+                continue
+            top = item.mean + (item.spread if is_number(item.spread) else 0.0)
+            label = follows_theme(ax_mean.text(
+                x, max(top, reference), text, ha="center", va="bottom",
+                fontsize=7, color=tokens_for(ax_mean)[1], zorder=6))
+            setattr(label, DECORATION_TAG, True)
+    note = follows_theme(ax_mean.text(
+        0.01, 0.88, notice, transform=ax_mean.transAxes, ha="left", va="top",
+        fontsize=7, color=tokens_for(ax_mean)[2], zorder=6, clip_on=False,
+        wrap=True), muted=True)
+    note.set_in_layout(False)     # see annotate_split_notice
+    setattr(note, DECORATION_TAG, True)
+
+
+def visible_bars(ctx, items) -> list:
+    """*items* without the reference conditions, while the stage is applied."""
+    slice_ = _bar_slice(ctx)
+    if not getattr(slice_, "rel_applied", False):
+        return list(items or ())
+    from review.domain.ratio_of_ratios import REFERENCE
+    return [it for it in items or () if getattr(it, "rel_outcome", "") != REFERENCE]
+
+
+def _bar_slice(ctx):
+    reader = getattr(getattr(ctx, "state", None), "feature_slice", None)
+    return reader("bar") if callable(reader) else None

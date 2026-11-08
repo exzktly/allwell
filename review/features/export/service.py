@@ -454,6 +454,65 @@ def bar_fold_change_fieldnames(band_lbl: str) -> list:
     ]
 
 
+def bar_relative_fieldnames(band_lbl: str) -> list:
+    """The *Then relative to* columns, appended after the fold-change ones.
+
+    ``fold_change_*`` keep meaning stage 1 (each bar over its own control) with
+    the setting on or off, so a script reading them does not change answers
+    under a toggle; the bar's value relative to its baseline goes here, beside
+    the interaction test that belongs to it.
+    """
+    return [
+        "relative_to_baseline_mean",
+        f"relative_to_baseline_{band_lbl.lower()}",
+        "relative_to_baseline_baseline",
+        "relative_to_baseline_outcome",
+        "interaction_test",
+        "interaction_scale",
+        "interaction_estimate",
+        "interaction_ci95_low",
+        "interaction_ci95_high",
+        "interaction_p",
+        "interaction_p_bh",
+        "interaction_df",
+        "interaction_n",
+        "interaction_undefined",
+    ]
+
+
+def attach_bar_relative_columns(row: dict, item, band_lbl: str) -> None:
+    """Fill :func:`bar_relative_fieldnames` for one bar, blanks where undefined.
+
+    A reference condition has no relative value of its own — it is the line the
+    others are read against — so its value cells are blank and its outcome says
+    ``reference``. A test that did not run leaves every number blank and puts
+    its reason in ``interaction_undefined``: an empty p beside a reason is
+    honest, a ``0`` or ``nan`` is not.
+    """
+    def num(value) -> str:
+        return f"{float(value):.6g}" if is_number(value) else ""
+
+    applied = getattr(item, "rel_outcome", "") == "ok"
+    row["relative_to_baseline_mean"] = num(item.mean) if applied and item.has_mean else ""
+    row[f"relative_to_baseline_{band_lbl.lower()}"] = (
+        spread_cell(item.spread) if applied and item.has_mean else "")
+    row["relative_to_baseline_baseline"] = str(getattr(item, "rel_baseline", "") or "")
+    row["relative_to_baseline_outcome"] = str(getattr(item, "rel_outcome", "") or "")
+    test = getattr(item, "interaction", None)
+    row["interaction_test"] = str(getattr(item, "interaction_label", "") or "")
+    row["interaction_scale"] = str(getattr(test, "scale", "") or "") if test else ""
+    row["interaction_estimate"] = num(getattr(test, "estimate", None))
+    row["interaction_ci95_low"] = num(getattr(test, "ci_low", None))
+    row["interaction_ci95_high"] = num(getattr(test, "ci_high", None))
+    row["interaction_p"] = num(getattr(test, "p", None))
+    row["interaction_p_bh"] = num(getattr(item, "interaction_p_bh", None))
+    df = getattr(test, "df", None)
+    row["interaction_df"] = str(df) if test is not None and test.ok and df is not None else ""
+    row["interaction_n"] = ("/".join(str(n) for _c, n in test.n)
+                            if test is not None and test.ok else "")
+    row["interaction_undefined"] = str(getattr(test, "undefined", "") or "") if test else ""
+
+
 def attach_bar_fold_change_columns(
     row: dict,
     *,
@@ -680,6 +739,9 @@ def export_bar_plot_data(ctx) -> None:
         fc_by_key_tp = {(it.key, float(it.tp)): it for it in items_fc}
     else:
         fc_by_key_tp = {}
+    # Whether *Then relative to* ran on this export's live pass — read off the
+    # bars it produced, the one record that cannot disagree with them.
+    rel_active = any(getattr(it, "rel_outcome", "") for it in fc_by_key_tp.values())
     ch = ctx.state.channel.active_channel
     metric = ctx.state.channel.active_metric
     threshold = on_cutoff_for_column(
@@ -719,13 +781,20 @@ def export_bar_plot_data(ctx) -> None:
         if fc_active:
             fc_item = fc_by_key_tp.get((item.key, float(item.tp)))
             if fc_item is not None:
+                # Stage 1's numbers even when *Then relative to* replaced the
+                # drawn value: ``fold_change_*`` never change meaning.
+                s1_mean, s1_spread, s1_has = (
+                    fc_item.stage1 if getattr(fc_item, "stage1", None) is not None
+                    else (fc_item.mean, fc_item.spread, fc_item.has_mean))
                 attach_bar_fold_change_columns(
-                    row, fc_mean=fc_item.mean, fc_spread=fc_item.spread,
-                    fc_has=fc_item.has_mean, band_lbl=band_lbl,
+                    row, fc_mean=s1_mean, fc_spread=s1_spread,
+                    fc_has=s1_has, band_lbl=band_lbl,
                     vs_control=fc_vs_ctrl, vs_t0=fc_vs_t0,
                     control_label=_control_cell(fc_item.fc_control),
                     outcome=fc_item.fc_outcome,
                 )
+                if rel_active:
+                    attach_bar_relative_columns(row, fc_item, band_lbl)
         rows_out.append(row)
     if not rows_out:
         _warn(ctx.window, "Export", "No data to export.")
@@ -743,6 +812,8 @@ def export_bar_plot_data(ctx) -> None:
     fieldnames = id_cols + bar_metric_fieldnames(ch, metric, band_lbl)
     if fc_active:
         fieldnames += bar_fold_change_fieldnames(band_lbl)
+    if rel_active:
+        fieldnames += bar_relative_fieldnames(band_lbl)
     try:
         with open(out_path, "w", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)

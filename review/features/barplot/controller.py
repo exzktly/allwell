@@ -136,7 +136,11 @@ def render_bar_items(
         + repr([(it.key, round(it.spread, 4), round(it.frac_spread, 4),
                  round(it.n_above_spread, 4)) for it in items])
     )
-    has_clusters = bool(xs and any(_ != i for i, _ in enumerate(xs)))
+    # Headers when the layout clustered the bars — or when *Split by* banded
+    # them, gaps or not: one band holding one bar (what *Then relative to*
+    # leaves on a 2×2) has no gap to detect, and its headers are the only thing
+    # on the figure saying which condition the bar is.
+    has_clusters = _draws_headers(ctx, items, xs)
     for i, item in enumerate(items):
         x = xs[i] if i < len(xs) else i
         # The placeholder / undefined-spread marks below deliberately keep
@@ -524,3 +528,13 @@ def refresh_bar_layout_btn_state(ctx) -> None:
             else "Define replicate groups (Home → Sample Map → Replicates) to "
             "pool them.")
 
+
+def _draws_headers(ctx, items, xs) -> bool:
+    """Whether the band headers go on: the layout clustered the bars, or
+    *Split by* banded them — a band of one bar has no gap to detect."""
+    if not xs:
+        return False
+    if any(x != i for i, x in enumerate(xs)) or any(it.subgroup_key for it in items):
+        return True
+    plot = getattr(getattr(ctx, "state", None), "plot", None)
+    return bool(getattr(plot, "split_by_variable", "") or "")

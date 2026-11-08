@@ -164,3 +164,20 @@ def test_the_summary_names_a_few_and_counts_the_rest(n, expected_tail):
     text = vp.summary_text(vp.VariablePairing(unpaired=items, total=n))
     assert text.startswith(f"Paired 0 of {n}. Not paired: M0 — x; M1 — x")
     assert text.endswith(expected_tail)
+
+
+def test_matching_names_the_member_not_a_reference():
+    """``match_by_variable`` is the same rule keyed member to member — what the
+    Bar tab's *Then relative to* needs, where the answer is a bar."""
+    vset, wells, refs, ids = _plate()
+    matched = vp.match_by_variable(vset, wells, variable_id=ids["compound"],
+                                   value_id=ids["dmso"], within=[ids["line"]])
+    assert matched.mapping == {
+        "HeLa-A1": "HeLa-veh", "U2OS-veh": "U2OS-veh", "HeLa-veh": "HeLa-veh",
+        "U2OS-A1": "U2OS-veh", "HeLa-A10": "HeLa-veh", "U2OS-A10": "U2OS-veh",
+    }
+    del refs["HeLa-veh"]
+    paired = vp.pair_by_variable(vset, wells, refs, variable_id=ids["compound"],
+                                 value_id=ids["dmso"], within=[ids["line"]])
+    # Unaddressable members keep their draw-order place among the unpaired.
+    assert [u.member for u in paired.unpaired] == ["HeLa-A1", "HeLa-veh", "HeLa-A10"]

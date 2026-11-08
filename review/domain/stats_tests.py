@@ -572,3 +572,117 @@ def two_way_anova(rows, *, factor_a: str = "A", factor_b: str = "B") -> TwoWayRe
     return TwoWayResult(factor_a=factor_a, factor_b=factor_b,
                         terms=tuple(terms), residual_ss=sse_full,
                         residual_df=df_resid, empty_cells=tuple(empty))
+
+
+# ── a contrast between condition means (the interaction of a 2×2) ───────────
+
+@dataclass(frozen=True)
+class ContrastResult:
+    """One linear contrast of condition means, tested, or why it was not.
+
+    ``estimate`` and the interval are on the **original** scale: on the log
+    scale they are ``exp`` of the contrast, which for the interaction weights
+    ``{X: +1, C: −1, B: −1, CB: +1}`` is a ratio of *geometric* means — not
+    the same number as a ratio of the arithmetic means a bar draws, and
+    reported as its own estimate for that reason. On the raw scale they are the
+    contrast itself (a difference of differences).
+    """
+
+    scale: str = "log"
+    estimate: float | None = None
+    ci_low: float | None = None
+    ci_high: float | None = None
+    se: float | None = None
+    t: float | None = None
+    df: int | None = None
+    p: float | None = None
+    n: tuple[tuple[str, int], ...] = ()
+    undefined: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return not self.undefined
+
+
+def contrast_t_test(cells, weights, *, log: bool) -> ContrastResult:
+    """Test ``Σ wᵢ·meanᵢ = 0`` across the cells *weights* names.
+
+    *cells* is ``{cell id: [replicate values]}``; *weights* ``{cell id: w}``
+    (a zero weight is dropped). The variance is pooled **over the contrast's
+    own cells only**, ``df = N − k`` — pooling over every bar on a figure would
+    let unrelated conditions set this test's error. Under that rule a 2×2
+    interaction contrast is exactly the interaction term of a two-way ANOVA
+    (``F = t²``), balanced or not, because it is the design's only 1-df
+    hypothesis; ``tests/test_stats_tests.py`` holds the two equal.
+
+    *log* tests on ``ln(value)``, which is what a ratio question is: the
+    interaction of ratios is additive on the log scale. A value ≤ 0 has no
+    logarithm, so the test is refused and the cell named, rather than the
+    value dropped and the remaining replicates tested as if complete.
+    """
+    used = {str(k): float(w) for k, w in (weights or {}).items() if float(w) != 0.0}
+    scale = "log" if log else "raw"
+    if not used:
+        return ContrastResult(scale=scale, undefined=(
+            "nothing to test — the comparison cancels to the reference itself"))
+    samples: dict[str, np.ndarray] = {}
+    for cell in used:
+        values = _clean((cells or {}).get(cell, ()))
+        if values.size == 0:
+            return ContrastResult(scale=scale, undefined=f"{cell} has no replicate values")
+        if log:
+            bad = int(np.sum(values <= 0))
+            if bad:
+                return ContrastResult(scale=scale, undefined=(
+                    f"{cell}: {bad} of {values.size} values ≤ 0, so a log-scale "
+                    f"test is impossible — use Subtract, or check the background"))
+            values = np.log(values)
+        samples[cell] = values
+    counts = tuple((cell, int(v.size)) for cell, v in samples.items())
+    n_total = sum(n for _c, n in counts)
+    df = n_total - len(samples)
+    if df <= 0:
+        return ContrastResult(scale=scale, n=counts, undefined=(
+            "no replicate spread — every condition has one replicate, so there "
+            "is nothing to test against"))
+    sse = sum(float(np.sum((v - v.mean()) ** 2)) for v in samples.values())
+    s2 = sse / df
+    if not math.isfinite(s2) or s2 <= 0.0:
+        return ContrastResult(scale=scale, n=counts, df=df, undefined=(
+            "the replicates agree exactly, so no test is defined"))
+    contrast = sum(used[c] * float(samples[c].mean()) for c in samples)
+    se = math.sqrt(s2 * sum(used[c] ** 2 / samples[c].size for c in samples))
+    import scipy.stats as _st
+    t = contrast / se
+    p = float(2.0 * _st.t.sf(abs(t), df))
+    half = float(_st.t.ppf(0.975, df)) * se
+    lo, hi = contrast - half, contrast + half
+    if log:
+        estimate, lo, hi = math.exp(contrast), math.exp(lo), math.exp(hi)
+    else:
+        estimate = contrast
+    return ContrastResult(scale=scale, estimate=float(estimate), ci_low=float(lo),
+                          ci_high=float(hi), se=float(se), t=float(t), df=int(df),
+                          p=p, n=counts)
+
+
+def bh_adjust(ps) -> list[float | None]:
+    """Benjamini–Hochberg adjusted p-values, in the order given.
+
+    ``None`` (a test that did not run) stays ``None`` and is not counted in
+    the family: adjusting a p for a test nobody could compute would charge the
+    rest for a comparison that does not exist.
+    """
+    present = [(i, float(p)) for i, p in enumerate(ps or ())
+               if p is not None and math.isfinite(float(p))]
+    out: list[float | None] = [None] * len(list(ps or ()))
+    m = len(present)
+    if not m:
+        return out
+    ranked = sorted(present, key=lambda pair: pair[1])
+    running = 1.0
+    for rank in range(m, 0, -1):
+        i, p = ranked[rank - 1]
+        running = min(running, p * m / rank)
+        out[i] = min(1.0, running)
+    return out

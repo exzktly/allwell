@@ -573,3 +573,86 @@ def test_an_interval_asked_for_one_resample_says_one_not_zero():
     result = st.effect_size([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], resamples=1)
 
     assert "2 or more resamples, not 1" in result.undefined
+
+
+# ── the interaction contrast ────────────────────────────────────────────────
+
+import math as _math  # noqa: E402
+
+from review.domain import stats_tests as _stt  # noqa: E402
+
+#: WT-veh 100, WT-drug 200, Mut-veh 50, Mut-drug 150, with **unequal** n.
+#: The raw difference of differences is exactly 0 — (150 − 50) − (200 − 100) —
+#: while the ratio of ratios is 1.5, so a test run on raw values reports no
+#: interaction at all on a plate whose ratio question has a clear answer.
+_FACTORS = {3: (0.9, 1.0, 1.1), 4: (0.9, 1.0, 1.1, 1.0),
+            5: (0.9, 1.0, 1.1, 0.95, 1.05)}
+_CELLS = {
+    "WT-veh": [100 * f for f in _FACTORS[3]],
+    "WT-drug": [200 * f for f in _FACTORS[4]],
+    "Mut-veh": [50 * f for f in _FACTORS[3]],
+    "Mut-drug": [150 * f for f in _FACTORS[5]],
+}
+_WEIGHTS = {"Mut-drug": 1, "WT-drug": -1, "Mut-veh": -1, "WT-veh": 1}
+
+
+def test_the_log_contrast_is_the_two_way_interaction_on_log_values():
+    """An independent derivation: on a 2×2 the interaction is the only 1-df
+    hypothesis, so ``t² = F`` holds unbalanced — but only when the variance is
+    pooled over the contrast's own cells, which is what this pins."""
+    result = _stt.contrast_t_test(_CELLS, _WEIGHTS, log=True)
+    rows = [(cell.split("-")[0], cell.split("-")[1], _math.log(v))
+            for cell, vals in _CELLS.items() for v in vals]
+    anova = _stt.two_way_anova(rows, factor_a="RNA", factor_b="Treatment")
+    interaction = anova.terms[-1]
+    assert result.df == anova.residual_df == 15 - 4
+    assert result.t ** 2 == pytest.approx(interaction.f, rel=1e-9)
+    assert result.p == pytest.approx(interaction.p, rel=1e-9)
+
+
+def test_the_estimate_is_the_ratio_of_geometric_means():
+    result = _stt.contrast_t_test(_CELLS, _WEIGHTS, log=True)
+    gmean = {c: _math.exp(sum(_math.log(v) for v in vals) / len(vals))
+             for c, vals in _CELLS.items()}
+    expected = (gmean["Mut-drug"] / gmean["WT-drug"]) / (gmean["Mut-veh"] / gmean["WT-veh"])
+    assert result.estimate == pytest.approx(expected)
+    assert result.estimate == pytest.approx(1.5, rel=0.01)
+    assert result.ci_low < result.estimate < result.ci_high
+    assert result.p < 0.01
+
+
+def test_on_the_raw_scale_the_same_plate_shows_no_interaction():
+    result = _stt.contrast_t_test(_CELLS, _WEIGHTS, log=False)
+    assert result.estimate == pytest.approx(0.0, abs=1e-9)
+    assert result.p == pytest.approx(1.0)
+
+
+def test_variance_is_pooled_over_the_contrast_s_own_cells_only():
+    """A noisy unrelated condition must not change this test."""
+    noisy = dict(_CELLS, other=[1.0, 500.0, 2.0, 900.0])
+    a = _stt.contrast_t_test(_CELLS, _WEIGHTS, log=True)
+    b = _stt.contrast_t_test(noisy, _WEIGHTS, log=True)
+    assert (a.p, a.df) == (b.p, b.df)
+
+
+def test_weights_that_cancel_are_refused_as_nothing_to_test():
+    result = _stt.contrast_t_test(_CELLS, {"WT-veh": 0}, log=True)
+    assert result.undefined.startswith("nothing to test")
+
+
+@pytest.mark.parametrize("cells,needle", [
+    ({**_CELLS, "Mut-drug": [150, -3, 140]}, "Mut-drug: 1 of 3 values ≤ 0"),
+    ({**_CELLS, "Mut-drug": []}, "Mut-drug has no replicate values"),
+    ({c: [v[0]] for c, v in _CELLS.items()}, "no replicate spread"),
+    ({c: [v[0]] * 2 for c, v in _CELLS.items()}, "agree exactly"),
+])
+def test_each_refusal_names_its_reason(cells, needle):
+    result = _stt.contrast_t_test(cells, _WEIGHTS, log=True)
+    assert not result.ok and needle in result.undefined, result.undefined
+
+
+def test_bh_matches_the_textbook_values_and_skips_tests_that_did_not_run():
+    # p = 0.01, 0.04, 0.03 → sorted 0.01, 0.03, 0.04 → 0.03, 0.04, 0.04.
+    assert _stt.bh_adjust([0.01, None, 0.04, 0.03]) == pytest.approx(
+        [0.03, None, 0.04, 0.04])
+    assert _stt.bh_adjust([]) == []

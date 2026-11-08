@@ -36,6 +36,7 @@ from review.features.barplot._drag_reorder import (
     on_bar_drag_release,
 )
 from review.features.barplot.renderer import redraw_bars
+from review.features.barplot.ratio_baseline_view import build_relative_to_row
 from functools import partial
 from review.features.export.service import (
     export_bar_plot_data, export_cell_data_from)
@@ -104,6 +105,10 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", bar_ctrl)
     _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
     install_fold_change_controls(ctx, _fc_panel, _fc_lay, scope="bar")
+    # The Bar tab's own second stage, below the shared controls; refreshed
+    # each time the popover opens so a variable defined since is offered.
+    _rel_row = build_relative_to_row(ctx, _fc_panel, _fc_lay)
+    _fc_btn.menu().aboutToShow.connect(_rel_row._aw_refresh)
     bar_ctrl.add_action(_fc_btn)
 
     # Multi-timepoint picker — mirrors the scatter plot's

@@ -877,8 +877,7 @@ QWidget#ControlBand {{
    colour, painting a lighter rectangle over the band; naming them lets that be
    undone here without the rule also reaching the controls they contain. */
 QWidget#ControlBandScope, QWidget#ControlBandGroup,
-QWidget#ControlBandForm, QWidget#ControlSheetSection, QWidget#ControlSheetRow,
-QWidget#HeatmapLayoutPanel {{
+QWidget#ControlBandForm, QWidget#ControlSheetSection, QWidget#ControlSheetRow {{
     background-color: transparent;
 }}
 /* Divider hairlines. Every divider in the app funnels through this rule so a
@@ -1739,11 +1738,21 @@ QTableView, QTableWidget {{
 QTableView::item, QTableWidget::item {{
     padding: 4px 8px;
 }}
-/* The Heat Map's layout grid sits in the control band at one-well cells,
-   in caption-sized type; review/features/heatmap/layout_view.py measures
-   each cell from this font, so the cells follow it at every UI scale. The
-   table's default padding would leave a row-number header no room for its
-   digits, and a cell none for its well token. */
+/* The Heat Map's Layout panel (review/features/heatmap/layout_view.py) is a
+   right-dock panel on the rail's ground, like Properties beside it. Its
+   scrolling body and the rows inside it are containers, so they take the
+   panel's ground rather than the blanket QWidget rule's app canvas. */
+QWidget#HeatmapLayoutPanel,
+QScrollArea#HeatmapLayoutScroll, QScrollArea#HeatmapLayoutScroll > QWidget > QWidget {{
+    background-color: {c.rail};
+}}
+QWidget#HeatmapLayoutHeader, QWidget#HeatmapLayoutRow {{
+    background-color: transparent;
+}}
+/* Its grid holds one-well cells in caption-sized type; layout_view.py
+   measures each cell from this font, so the cells follow it at every UI
+   scale. The table's default padding would leave a row-number header no room
+   for its digits, and a cell none for its well token. */
 QTableWidget#HeatmapLayoutTable, QTableWidget#HeatmapLayoutTable QHeaderView {{
     font-size: {t.caption_size}px;
 }}

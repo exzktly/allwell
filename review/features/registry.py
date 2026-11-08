@@ -446,12 +446,14 @@ def _activate_heatmap(ctx) -> None:
     # The timepoint menu is a plate scan (remembered per well); filled when the
     # tab is shown rather than on every channel change while it is hidden.
     _refresh_heatmap_timepoints(ctx, redraw=False)     # drawn below
-    # The configurator's own refresh no-ops until it is built.
+    # The configurator's own refresh no-ops until it is built. An empty grid
+    # leaves the page nothing to draw, so the editor is put in front of it.
     try:
         from review.features.heatmap.layout_view import (
-            refresh_heatmap_layout_panel,
+            open_layout_panel_if_empty, refresh_heatmap_layout_panel,
         )
         refresh_heatmap_layout_panel(ctx)
+        open_layout_panel_if_empty(ctx)
     except Exception:
         _logger.exception("Heatmap layout editor refresh failed")
     redraw_app(ctx)

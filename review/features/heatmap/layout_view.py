@@ -1,12 +1,23 @@
-"""Heat-map layout editor — the grid at the right of the Heat Map's control band.
+"""Heat-map layout editor — the **Layout** panel in the Heat Map's right dock.
 
-The Heat Map tab adds this panel to its band's action zone, so it sits at the
-right-hand end of the controls row. The user picks an R×C grid size, drags
-wells from the *rail plate map* (the sidebar's well picker) into table cells,
-moves wells between cells by dragging, and clears a cell by double-clicking it
-(or by dragging the well back onto the plate map). The rail plate is the
-canonical drag source while the Heat Map tab is focused — the descriptor's
-``plate_drag_source``, applied by ``core/tab_controller.sync_rail_plate_drag_mode``.
+The Heat Map's control band carries one **Layout** toggle; it opens this panel
+in the plot's right dock (``ui_helpers.make_plot_with_right_dock``), the same
+slide-out the Properties panel uses, so the two share one place and one look
+and only one is open at a time. The panel holds the grid size (rows ×
+columns), **Auto-populate from selection**, **Clear**, and the grid itself.
+The user drags wells from the *rail plate map* (the sidebar's well picker)
+into cells, moves wells between cells by dragging, and clears a cell by
+double-clicking it (or by dragging the well back onto the plate map). The rail
+plate is the canonical drag source while the Heat Map tab is focused — the
+descriptor's ``plate_drag_source``, applied by
+``core/tab_controller.sync_rail_plate_drag_mode`` — and the dock sits on the
+far side of the figure from it, so a drag crosses the page it is building.
+
+At the desk the panel opens with the page when the layout is still empty,
+because the page has nothing to draw until the grid holds a well; once the grid
+is filled it stays out of the figure's way until the toggle opens it. In phone
+layout it never opens by itself (``_phone.layout_opens_with_page``): the dock
+is a full-width sheet there and would cover the page the user just opened.
 
 State of truth: ``ctx.runtime.heatmap.layouts``. The editor maintains exactly
 one layout named ``SIDEBAR_LAYOUT_NAME`` and synchronises the table widget to
@@ -25,18 +36,18 @@ move as a unit; the well token behind a cell is carried in
 from __future__ import annotations
 
 
-from PySide6.QtCore import QMimeData, QSize, Qt
-from PySide6.QtGui import QDrag, QPalette
+from PySide6.QtCore import QEvent, QMimeData, QObject, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QDrag, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QAbstractScrollArea,
     QApplication,
-    QGridLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLayout,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QStyle,
@@ -57,17 +68,20 @@ from ui import theme
 from widgets.spin_box import SpinBox
 
 #: The one layout this editor owns. Persisted under this name, so it stays
-#: ``"Sidebar"`` although the editor now sits in the control band.
+#: ``"Sidebar"`` although the editor is drawn in the plot's right dock.
 SIDEBAR_LAYOUT_NAME = "Sidebar"
 
+#: The band toggle's label, and the panel's title: one word for one thing.
+LAYOUT_BUTTON_TEXT = "Layout"
+
 #: The grid shows at most this many rows and columns before it scrolls: a whole
-#: 8×12 plate fits, and a 32×32 grid does not push the plot off the page.
+#: 8×12 plate fits, and a 32×32 grid does not run the panel off the screen.
 _MAX_SHOWN_ROWS = 8
 _MAX_SHOWN_COLS = 12
 #: The grid-size spin boxes' limit (and Auto-populate's growth cap).
 _MAX_GRID = 32
-#: Fewest columns the grid shrinks to in a narrow host (phone layout's Controls
-#: sheet) before it scrolls sideways instead.
+#: Fewest columns the grid shrinks to in a narrow host before it scrolls
+#: sideways instead.
 _MIN_VISIBLE_COLS = 4
 #: The widest single-well token a cell is sized for at the least, so an empty
 #: or half-filled grid is drawn at the width a full 96-well plate needs.
@@ -76,15 +90,18 @@ _WIDEST_TOKEN = "H12"
 #: (scaled with the UI): the cell's text is centred, so this is the gap that
 #: keeps neighbouring tokens from reading as one word.
 _CELL_PAD_W = 3
-_CELL_PAD_H = 2
+_CELL_PAD_H = 4
 #: The least room a cell keeps either side of its text in a host too narrow
 #: for the comfortable padding: the cells give up their padding down to this
 #: before the grid starts to scroll.
 _CELL_PAD_MIN = 1
-#: The panel's ``bandRole``: in phone layout's Controls sheet it is a row of its
-#: own in the Data section, spanning the sheet, rather than a cell of the
-#: Actions button grid (``widgets/control_band_form.py``).
-_BAND_ROLE = "data"
+#: How much wider than its comfortable width a cell may grow to fill a wide
+#: host (phone layout's full-width sheet held sideways). Past this a short
+#: grid would stretch into bars, so it stops and leaves the rest of the row.
+_ROOMY_CELL_FACTOR = 2
+#: Inset of the tinted tile an occupied cell is drawn as, in pixels at the
+#: desk, so neighbouring tiles read as separate wells rather than one bar.
+_TILE_INSET = 1
 
 
 # ── Drag-aware widgets ───────────────────────────────────────────────────────
@@ -119,7 +136,7 @@ def _cell_token(item) -> str:
 
 
 class _TokenDelegate(QStyledItemDelegate):
-    """Draws a cell's token centred in the whole cell, never elided.
+    """Draws an occupied cell as a tinted tile with its token centred, never elided.
 
     Qt's own item painting keeps a focus-frame margin either side of the text
     and elides whatever does not fit inside it, which in a grid of one-token
@@ -127,6 +144,12 @@ class _TokenDelegate(QStyledItemDelegate):
     are measured to hold their widest text (``_fit_table``), so here the
     background, selection and hover come from the style as usual and the text
     is drawn over the full cell.
+
+    An occupied cell is filled with the accent's low-emphasis tint, inset a
+    pixel, so the wells already placed read at a glance against the empty
+    cells around them — the grid is a map of what is placed where, and plain
+    text on an even ground made it a page of labels. The tint is read from the
+    theme at paint time, so it follows a theme switch without a rebuild.
     """
 
     def paint(self, painter, option, index) -> None:  # Qt naming
@@ -137,12 +160,22 @@ class _TokenDelegate(QStyledItemDelegate):
         style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
         if not text:
             return
-        role = (QPalette.HighlightedText if opt.state & QStyle.State_Selected
-                else QPalette.Text)
+        selected = bool(opt.state & QStyle.State_Selected)
         painter.save()
         try:
+            if not selected:
+                inset = max(1, round(_TILE_INSET * theme.ui_scale()))
+                tile = QRectF(opt.rect).adjusted(inset, inset, -inset, -inset)
+                radius = min(theme.Radii.sm, tile.height() / 3)
+                painter.setRenderHint(painter.RenderHint.Antialiasing, True)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(theme.Colors.accent_dim))
+                painter.drawRoundedRect(tile, radius, radius)
             painter.setFont(opt.font)
-            painter.setPen(opt.palette.color(role))
+            if selected:
+                painter.setPen(opt.palette.color(QPalette.HighlightedText))
+            else:
+                painter.setPen(QColor(theme.Colors.text_primary))
             painter.drawText(opt.rect, Qt.AlignCenter, text)
         finally:
             painter.restore()
@@ -184,38 +217,47 @@ class _LayoutTable(QTableWidget):
         #: Height the horizontal scrollbar takes when the host is narrower than
         #: the grid and the columns scroll (0 when the grid already reserves it).
         self._hbar_room = 0
-        #: Column widths with the comfortable and the least padding, and the
-        #: width the row header, frame and any vertical bar take beside them.
-        self._cell_w = (0, 0)
+        #: Column widths with the least, the comfortable and the roomiest
+        #: padding, and the width the row header, frame and any vertical bar
+        #: take beside them.
+        self._cell_w = (0, 0, 0)
         self._chrome_w = 0
-        #: The column width last applied (``None``: apply in full next time).
-        self._applied_w: int | None = None
+        #: The column width and spare pixels last applied (``None``: apply in
+        #: full next time).
+        self._applied_w: tuple[int, int] | None = None
 
     def _fit_to_width(self) -> None:
         """Share the width the table was given among the shown columns.
 
-        At its natural width every column has its comfortable padding. A host
-        narrower than that (phone layout's Controls sheet) first takes the
-        padding back, down to ``_CELL_PAD_MIN``, so a whole plate still shows
-        without scrolling; past that the columns scroll, and the horizontal bar
-        is given room of its own below the rows rather than covering the last.
+        A host wider than the grid's comfortable width (phone layout's sheet,
+        held sideways) widens the cells, up to ``_ROOMY_CELL_FACTOR`` times
+        their comfortable width — the table's maximum width stops it there. A
+        narrower host first takes the padding back, down to ``_CELL_PAD_MIN``,
+        so a whole plate still shows without scrolling; past that the columns
+        scroll, and the horizontal bar is given room of its own below the rows
+        rather than covering the last.
         """
         if self._natural.isEmpty():
             return
-        comfy, tight = self._cell_w
+        tight, _comfy, roomy = self._cell_w
         shown = min(self.columnCount(), _MAX_SHOWN_COLS)
         width = self.width() if self.width() > 0 else self._natural.width()
-        per = (width - self._chrome_w) // max(1, shown)
-        per = max(tight, min(comfy, per))
+        avail = width - self._chrome_w
+        per = max(tight, min(roomy, avail // max(1, shown)))
+        # The pixels an even share leaves over go one each to the first
+        # columns, so the grid meets the frame instead of ending a strip of
+        # bare header short of it. Not when scrolling: the share is the floor.
+        spare = max(0, avail - per * shown) if per < roomy else 0
+        spare = min(spare, shown - 1)
         hh = self.horizontalHeader()
-        if self._applied_w != per:
-            self._applied_w = per
+        if self._applied_w != (per, spare):
+            self._applied_w = (per, spare)
             hh.setMinimumSectionSize(per)
             hh.setDefaultSectionSize(per)
             for c in range(self.columnCount()):
-                hh.resizeSection(c, per)
+                hh.resizeSection(c, per + (1 if c < spare else 0))
         h = self._natural.height()
-        if self.columnCount() <= _MAX_SHOWN_COLS and per * shown > width - self._chrome_w:
+        if self.columnCount() <= _MAX_SHOWN_COLS and per * shown > avail:
             h += self._hbar_room
         if self.minimumHeight() != h or self.maximumHeight() != h:
             self.setFixedHeight(h)
@@ -233,10 +275,9 @@ class _LayoutTable(QTableWidget):
         """
         _fit_table(self, self.rowCount(), self.columnCount())
 
-    # The band's action zone and the phone sheet both size the grid from its
-    # hints: wide enough for every column up to the cap, never narrower than a
-    # few columns, scrolling for the rest. Qt's own hint for a table is a fixed
-    # 256x192 whatever it holds.
+    # The panel sizes the grid from its hints: wide enough for every column up
+    # to the cap, never narrower than a few columns, scrolling for the rest.
+    # Qt's own hint for a table is a fixed 256x192 whatever it holds.
     def sizeHint(self) -> QSize:  # Qt naming
         return QSize(self._natural) if not self._natural.isEmpty() else super().sizeHint()
 
@@ -316,161 +357,270 @@ class _LayoutTable(QTableWidget):
 
 # ── Builder ──────────────────────────────────────────────────────────────────
 
-def build_heatmap_layout_panel(ctx, parent: QWidget) -> QWidget:
-    """Build the compact layout editor the Heat Map's control band carries.
+def build_heatmap_layout_editor(ctx, band_parent: QWidget, dock: QWidget | None) -> QWidget:
+    """Build the Layout panel into the plot's right *dock*; return its band toggle.
 
-    Returns the panel; the caller adds it to the band's action zone, so it sits
-    at the right of the row beside Display / Save / Properties and is shown and
-    hidden with the rest of the Heat Map's slot. Nothing here adds it to a
-    layout. The panel is taller than one band row, so the band grows to hold it
-    while the Heat Map is the leaf on screen (the action zone is top-aligned,
-    which keeps the buttons beside it on the first line). In phone layout's
-    Controls sheet its ``bandRole`` makes it a full-width row of the Data
-    section rather than a cell of the Actions button grid.
+    The panel goes into *dock* hidden — the dock is the slide-out the
+    Properties panel shares, and ``mount_widget_in_plot_dock`` shows one of
+    them at a time. The returned **Layout** toggle (parented to *band_parent*,
+    added by the caller with ``band.add_action``) opens and closes it, and its
+    checked state follows whether the panel is on screen, so it also unchecks
+    when Properties takes the dock or the panel's own ✕ closes it.
     """
-    panel = _LayoutPanel(parent)
-    panel.setObjectName("HeatmapLayoutPanel")
-    panel.setProperty("bandRole", _BAND_ROLE)
-    # Never wider than the grid and its header line want, and never squeezed
-    # vertically: the band reads the action zone's height hint, and a panel
-    # given less would clip grid rows.
-    panel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-    lay = QVBoxLayout(panel)
-    lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(theme.Spacing.xs)
-    # The panel answers its own minimum size (``_LayoutPanel``); the layout's
-    # default constraint would pin it at the one-line header's width.
-    lay.setSizeConstraint(QLayout.SetNoConstraint)
+    panel = _LayoutPanel(ctx, dock)
+    if dock is not None and dock.layout() is not None:
+        dock.layout().addWidget(panel)
+    panel.hide()
 
-    # The header: what the grid is, its size, and the one-click fill — one
-    # line where the host has the width, the button under the size controls
-    # where it has not (``_LayoutPanel.resizeEvent``).
-    head = QWidget(panel)
-    head.setObjectName("ControlBandGroup")      # the band's transparent ground reaches it
-    head_l = QGridLayout(head)
-    head_l.setContentsMargins(0, 0, 0, 0)
-    head_l.setSpacing(theme.Spacing.xs)
-    size_group = QWidget(head)
-    size_group.setObjectName("ControlBandGroup")
-    size_l = QHBoxLayout(size_group)
-    size_l.setContentsMargins(0, 0, 0, 0)
-    size_l.setSpacing(theme.Spacing.xs)
-    # Captioned like the band's own scope labels ("Aggregation", "ON threshold").
-    # In phone layout's Controls sheet it reads like the form's own row labels
-    # (``sheetLabel``, a rule scoped to the sheet, so the band is unaffected).
-    cap = QLabel("Layout", size_group)
-    cap.setObjectName("Muted")
-    cap.setProperty("sheetLabel", True)
-    size_l.addWidget(cap)
-    rows_spin = SpinBox(size_group)
-    rows_spin.setRange(1, _MAX_GRID)
-    rows_spin.setValue(8)
-    rows_spin.setToolTip("Rows in the heat-map grid")
-    size_l.addWidget(rows_spin)
-    size_l.addWidget(QLabel("×", size_group))
-    cols_spin = SpinBox(size_group)
-    cols_spin.setRange(1, _MAX_GRID)
-    cols_spin.setValue(12)
-    cols_spin.setToolTip("Columns in the heat-map grid")
-    size_l.addWidget(cols_spin)
-    autopop_btn = QPushButton("Auto-populate from selection", head)
-    autopop_btn.setProperty("variant", "secondary")
-    autopop_btn.setToolTip(
-        "Place the currently selected wells into this grid in plate order. "
-        "Grid will grow if needed to fit all selected wells."
-    )
-    autopop_btn.clicked.connect(lambda _=False: _on_autopopulate(ctx))
-    lay.addWidget(head, 0, Qt.AlignLeft)
-    panel._set_header(head_l, size_group, autopop_btn)
-
-    # The grid itself. Its instructions live in the tooltip: a band row has no
-    # room for a paragraph, and the grid is self-evident once a well is in it.
-    table = _LayoutTable(
-        on_drop=lambda kind, rc, tok: _on_drop_event(ctx, kind, rc, tok),
-        on_clear_cell=lambda r, c: _clear_cell(ctx, r, c),
-        parent=panel,
-    )
-    table.setToolTip(
-        "Drag wells from the plate map in the sidebar into cells. Drag "
-        "between cells to move. Double-click a cell — or drop it back on "
-        "the plate map — to remove its well."
-    )
-    # Left-aligned under the header: a host wider than the grid (the phone's
-    # sheet) leaves the slack on the right rather than stretching the cells.
-    lay.addWidget(table, 0, Qt.AlignLeft)
+    # A text toggle beside Display ▾ and Save ▾, filled like them; the theme's
+    # ``toggle`` variant rings it in the accent while the panel is open.
+    button = QPushButton(LAYOUT_BUTTON_TEXT, band_parent)
+    button.setCheckable(True)
+    button.setProperty("variant", "toggle")
+    button.setToolTip(
+        "Show / hide the layout editor — the grid of wells this heat map draws")
+    # Click-and-act, like Properties beside it: phone layout's Controls sheet
+    # puts it in the Actions grid.
+    button.setProperty("bandRole", "action")
+    button.clicked.connect(lambda _=False: toggle_layout_panel(ctx))
+    panel.installEventFilter(_ButtonFollowsPanel(panel, button))
 
     reg = ctx.widgets
-    reg.register("_heatmap_layout_panel", panel)
-    reg.register("_heatmap_layout_table", table)
-    reg.register("_heatmap_layout_rows_spin", rows_spin)
-    reg.register("_heatmap_layout_cols_spin", cols_spin)
-
-    rows_spin.valueChanged.connect(lambda _v: _on_size_changed(ctx))
-    cols_spin.valueChanged.connect(lambda _v: _on_size_changed(ctx))
-
+    reg.register("_heatmap_layout_button", button)
     refresh_heatmap_layout_panel(ctx)
-    return panel
+    return button
+
+
+class _ButtonFollowsPanel(QObject):
+    """Keeps the band's Layout toggle checked exactly while the panel shows.
+
+    The panel is hidden by more than the toggle: the ✕ in its header hides the
+    dock, Properties opening hides it as a dock sibling, and in phone layout
+    the sheet it is lent to closes from its dimmed strip. Each of those reaches
+    the panel as a hide event (a hidden parent hides its children), so the
+    toggle reads the panel's own visibility rather than tracking its clicks.
+    """
+
+    def __init__(self, panel: QWidget, button) -> None:
+        super().__init__(panel)
+        self._panel = panel
+        self._button = button
+
+    def eventFilter(self, obj, ev) -> bool:  # Qt naming
+        if ev.type() in (QEvent.Show, QEvent.Hide):
+            _sync_button(self._button, self._panel)
+        return False
+
+
+def _panel_shown(panel: QWidget) -> bool:
+    """Whether *panel* is open: visible as far as its window is concerned.
+
+    Relative to the window rather than ``isVisible()``, so the answer does not
+    depend on whether the window itself is on screen yet (a page built and
+    opened before the first show, or a window that is minimised).
+    """
+    return panel.isVisibleTo(panel.window())
+
+
+def _sync_button(button, panel: QWidget) -> None:
+    try:
+        on = _panel_shown(panel)
+        if button.isChecked() != on:
+            blocked = button.blockSignals(True)
+            try:
+                button.setChecked(on)
+            finally:
+                button.blockSignals(blocked)
+    except RuntimeError:
+        swallowed("heatmap: the Layout toggle outlived its panel")
+
+
+def open_layout_panel(ctx) -> None:
+    """Show the Layout panel in the plot's right dock (a sheet in phone layout)."""
+    from review.core.ui_helpers import mount_widget_in_plot_dock
+    panel = ctx.widgets.get_or_none("_heatmap_layout_panel")
+    dock = ctx.widgets.get_or_none("_heatmap_export_dock")
+    if panel is None or dock is None:
+        return
+    mount_widget_in_plot_dock(dock, panel, theme.Metrics.dock_w)
+    button = ctx.widgets.get_or_none("_heatmap_layout_button")
+    if button is not None:
+        _sync_button(button, panel)
+
+
+def toggle_layout_panel(ctx) -> None:
+    """The band toggle's action: close the panel when it shows, else open it."""
+    from review.core.ui_helpers import hide_plot_dock
+    panel = ctx.widgets.get_or_none("_heatmap_layout_panel")
+    if panel is None:
+        return
+    if _panel_shown(panel):
+        hide_plot_dock(ctx.widgets.get_or_none("_heatmap_export_dock"))
+        button = ctx.widgets.get_or_none("_heatmap_layout_button")
+        if button is not None:
+            _sync_button(button, panel)
+    else:
+        open_layout_panel(ctx)
+
+
+def open_layout_panel_if_empty(ctx) -> None:
+    """Open the panel with the page when its grid is still empty, at the desk.
+
+    An empty grid is the one state in which the page has nothing to draw and
+    the panel is the only way forward, so it is put in front of the user
+    rather than behind a toggle. A filled grid leaves the figure its full
+    width. In phone layout nothing opens: the dock is a full-width sheet there
+    and would cover the page just opened (``_phone.layout_opens_with_page``).
+    """
+    from review.features.heatmap._phone import layout_opens_with_page
+    if not layout_opens_with_page():
+        return
+    if not ctx.state.dataset.well_paths:
+        return
+    if _ensure_sidebar_layout(ctx).cells:
+        return
+    open_layout_panel(ctx)
 
 
 class _LayoutPanel(QWidget):
-    """The editor: its header over the grid, the header on one line where it fits.
+    """The Layout panel: a titled dock panel in the Properties panel's chrome.
 
-    The header's button goes beside the size controls when the panel has the
-    width for both, and under them when it has not (phone layout's Controls
-    sheet). The choice is made here, from the width the panel was given, rather
-    than by a flow layout, so the panel's height is an ordinary size hint: a
-    height-for-width answer is not reliably honoured by the layouts above it —
-    the Controls sheet kept a stale one and drew the grid over the wrapped
-    button. The size hint is always the one-line width, so a band row gives the
-    panel room for one line; the minimum is the two-line width, so a narrower
-    host can still take it.
+    Header (title and ✕) over a scrolling body: the grid size, the two bulk
+    actions, the grid, and one line saying how to use it. The body scrolls so
+    the panel fits a phone held sideways, where the sheet it is lent to is
+    shorter than the grid and its controls.
     """
 
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._head_l: QGridLayout | None = None
-        self._size_group: QWidget | None = None
-        self._button: QWidget | None = None
-        self._one_line: bool | None = None
+    def __init__(self, ctx, dock: QWidget | None) -> None:
+        super().__init__(dock)
+        self.setObjectName("HeatmapLayoutPanel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        # The same width as every other right-hand dock panel (Properties,
+        # the Scatter cell viewer), so opening one after the other does not
+        # move the figure's edge. Phone layout's sheet lifts it while lent.
+        self.setFixedWidth(theme.Metrics.dock_w)
+        sp = theme.Spacing
+        root = QVBoxLayout(self)
+        root.setContentsMargins(sp.sm, sp.sm, sp.sm, sp.sm)
+        root.setSpacing(sp.sm)
+        root.addWidget(self._build_header(ctx, dock))
 
-    def _set_header(self, grid: QGridLayout, size_group: QWidget, button: QWidget) -> None:
-        self._head_l, self._size_group, self._button = grid, size_group, button
-        self._arrange(one_line=True)
+        scroll = QScrollArea(self)
+        scroll.setObjectName("HeatmapLayoutScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        body_l = QVBoxLayout(body)
+        body_l.setContentsMargins(sp.xs, 0, sp.xs, 0)
+        body_l.setSpacing(sp.md)
+        scroll.setWidget(body)
+        root.addWidget(scroll, 1)
 
-    def _one_line_width(self) -> int:
-        if self._size_group is None or self._button is None:
-            return 0
-        return (self._size_group.sizeHint().width() + self._head_l.horizontalSpacing()
-                + self._button.sizeHint().width())
+        body_l.addWidget(self._build_size_row(ctx, body))
 
-    def _arrange(self, *, one_line: bool) -> None:
-        if one_line == self._one_line or self._head_l is None:
-            return
-        self._one_line = one_line
-        grid = self._head_l
-        grid.removeWidget(self._size_group)
-        grid.removeWidget(self._button)
-        grid.addWidget(self._size_group, 0, 0, Qt.AlignLeft | Qt.AlignVCenter)
-        grid.addWidget(self._button, *((0, 1) if one_line else (1, 0)),
-                       Qt.AlignLeft | Qt.AlignVCenter)
-        self.updateGeometry()
+        actions = QWidget(body)
+        actions.setObjectName("HeatmapLayoutRow")
+        actions_l = QHBoxLayout(actions)
+        actions_l.setContentsMargins(0, 0, 0, 0)
+        actions_l.setSpacing(sp.sm)
+        autopop_btn = QPushButton("Auto-populate from selection", actions)
+        autopop_btn.setProperty("variant", "primary")
+        autopop_btn.setToolTip(
+            "Place the wells the plate shows as selected into this grid in plate "
+            "order. The grid grows if it needs more cells to hold them."
+        )
+        autopop_btn.clicked.connect(lambda _=False: _on_autopopulate(ctx))
+        actions_l.addWidget(autopop_btn, 1)
+        clear_btn = QPushButton("Clear", actions)
+        clear_btn.setProperty("variant", "secondary")
+        clear_btn.setToolTip("Empty every cell of the grid; its size and labels stay")
+        clear_btn.clicked.connect(lambda _=False: _on_clear_all(ctx))
+        actions_l.addWidget(clear_btn, 0)
+        body_l.addWidget(actions)
 
-    def sizeHint(self) -> QSize:  # Qt naming
-        hint = super().sizeHint()
-        return QSize(max(hint.width(), self._one_line_width()), hint.height())
+        table = _LayoutTable(
+            on_drop=lambda kind, rc, tok: _on_drop_event(ctx, kind, rc, tok),
+            on_clear_cell=lambda r, c: _clear_cell(ctx, r, c),
+            parent=body,
+        )
+        table.setToolTip(
+            "Drag wells from the plate map into cells. Drag between cells to "
+            "move. Double-click a cell — or drop it back on the plate map — to "
+            "remove its well."
+        )
+        body_l.addWidget(table)
 
-    def minimumSizeHint(self) -> QSize:  # Qt naming
-        hint = super().minimumSizeHint()
-        parts = [w for w in (self._size_group, self._button) if w is not None]
-        narrowest = max((w.minimumSizeHint().width() for w in parts), default=0)
-        table = self.findChild(_LayoutTable)
-        if table is not None:
-            narrowest = max(narrowest, table.minimumSizeHint().width())
-        return QSize(narrowest, hint.height())
+        # Auto-populate first: it is the one way in that works by touch too.
+        hint = QLabel(
+            "Select wells on the plate and press Auto-populate, or drag wells "
+            "from the plate map into a cell. Drag a cell to move it; "
+            "double-click it, or drag it back onto the plate, to empty it. "
+            "Double-click a row or column label on the heat map to rename it.",
+            body,
+        )
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        body_l.addWidget(hint)
+        body_l.addStretch(1)
 
-    def resizeEvent(self, event) -> None:  # Qt naming
-        super().resizeEvent(event)
-        self._arrange(one_line=self.width() >= self._one_line_width())
+        reg = ctx.widgets
+        reg.register("_heatmap_layout_panel", self)
+        reg.register("_heatmap_layout_table", table)
+        reg.register("_heatmap_layout_autopop_btn", autopop_btn)
+        reg.register("_heatmap_layout_clear_btn", clear_btn)
+
+    def _build_header(self, ctx, dock: QWidget | None) -> QWidget:
+        """The title row and its close button, as the Properties panel has."""
+        from review.core.ui_helpers import hide_plot_dock
+        from widgets.icon_button import IconButton
+        hdr = QWidget(self)
+        hdr.setObjectName("HeatmapLayoutHeader")
+        hl = QHBoxLayout(hdr)
+        hl.setContentsMargins(theme.Spacing.xs, 0, 0, 0)
+        title = QLabel(LAYOUT_BUTTON_TEXT, hdr)
+        title.setObjectName("Heading")
+        hl.addWidget(title)
+        hl.addStretch(1)
+        close_btn = IconButton("x", hdr)
+        close_btn.setToolTip("Hide this panel")
+        close_btn.clicked.connect(lambda _=False: hide_plot_dock(dock))
+        hl.addWidget(close_btn)
+        return hdr
+
+    def _build_size_row(self, ctx, body: QWidget) -> QWidget:
+        """``Grid  [rows] × [columns]`` — the grid's size, on one line."""
+        row = QWidget(body)
+        row.setObjectName("HeatmapLayoutRow")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(theme.Spacing.sm)
+        cap = QLabel("Grid", row)
+        cap.setObjectName("Secondary")
+        lay.addWidget(cap)
+        rows_spin = SpinBox(row)
+        rows_spin.setRange(1, _MAX_GRID)
+        rows_spin.setValue(8)
+        rows_spin.setToolTip("Rows in the heat-map grid")
+        lay.addWidget(rows_spin)
+        times = QLabel("×", row)
+        times.setObjectName("Secondary")
+        lay.addWidget(times)
+        cols_spin = SpinBox(row)
+        cols_spin.setRange(1, _MAX_GRID)
+        cols_spin.setValue(12)
+        cols_spin.setToolTip("Columns in the heat-map grid")
+        lay.addWidget(cols_spin)
+        unit = QLabel("rows × columns", row)
+        unit.setObjectName("Muted")
+        lay.addWidget(unit)
+        lay.addStretch(1)
+        reg = ctx.widgets
+        reg.register("_heatmap_layout_rows_spin", rows_spin)
+        reg.register("_heatmap_layout_cols_spin", cols_spin)
+        rows_spin.valueChanged.connect(lambda _v: _on_size_changed(ctx))
+        cols_spin.valueChanged.connect(lambda _v: _on_size_changed(ctx))
+        return row
 
 
 def _fit_table(table: QTableWidget, rows: int, cols: int) -> None:
@@ -483,10 +633,10 @@ def _fit_table(table: QTableWidget, rows: int, cols: int) -> None:
     "…". A cell is as wide as the widest text in the grid, and never narrower
     than a 96-well token, so a set summarised as ``A01+3`` is not cut either.
 
-    The panel lives in a row of controls, so it is sized to what it holds
-    rather than stretched: an 8×12 plate shows whole, and a larger grid scrolls
-    inside a box of at most ``_MAX_SHOWN_ROWS`` × ``_MAX_SHOWN_COLS`` cells
-    instead of pushing the plot off the page.
+    The grid is sized to what it holds rather than stretched without limit: an
+    8×12 plate shows whole in the dock, a wider host widens the cells up to
+    ``_ROOMY_CELL_FACTOR`` times, and a larger grid scrolls inside a box of at
+    most ``_MAX_SHOWN_ROWS`` × ``_MAX_SHOWN_COLS`` cells.
     """
     table.ensurePolished()
     scale = theme.ui_scale()
@@ -500,6 +650,7 @@ def _fit_table(table: QTableWidget, rows: int, cols: int) -> None:
     text_w = max(fm.horizontalAdvance(t) for t in texts)
     cell_w = text_w + round(2 * _CELL_PAD_W * scale)
     tight_w = text_w + round(2 * _CELL_PAD_MIN * scale)
+    roomy_w = cell_w * _ROOMY_CELL_FACTOR
     cell_h = fm.height() + round(2 * _CELL_PAD_H * scale)
     vh, hh = table.verticalHeader(), table.horizontalHeader()
     vh.ensurePolished()
@@ -516,7 +667,8 @@ def _fit_table(table: QTableWidget, rows: int, cols: int) -> None:
     vh.setFixedWidth(row_hdr_w)
     hh.setFixedHeight(col_hdr_h)
     frame = 2 * table.frameWidth()
-    grid_w = min(cols, _MAX_SHOWN_COLS) * cell_w
+    shown_cols = min(cols, _MAX_SHOWN_COLS)
+    grid_w = shown_cols * cell_w
     grid_h = min(rows, _MAX_SHOWN_ROWS) * cell_h
     # Room for the scrollbar a capped axis brings with it, so the last column
     # or row is not drawn under it. The bar's own hint, not the style's metric:
@@ -528,14 +680,14 @@ def _fit_table(table: QTableWidget, rows: int, cols: int) -> None:
     chrome_w = row_hdr_w + frame + extra_w
     table._natural = QSize(chrome_w + grid_w, col_hdr_h + grid_h + frame + extra_h)
     table._narrowest = chrome_w + min(cols, _MIN_VISIBLE_COLS) * tight_w
-    table._cell_w = (cell_w, tight_w)
+    table._cell_w = (tight_w, cell_w, roomy_w)
     table._chrome_w = chrome_w
     table._hbar_room = 0 if extra_h else bar_h
     # Forget the last width share so the new cell sizes are applied in full.
     table._applied_w = None
     table._fit_to_width()
-    table.setMaximumWidth(table._natural.width())
-    table.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    table.setMaximumWidth(chrome_w + shown_cols * roomy_w)
+    table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     table.updateGeometry()
 
 
@@ -675,6 +827,16 @@ def _clear_cell(ctx, r: int, c: int) -> None:
         layout.assign(r, c, [])
         _persist_and_redraw(ctx)
         refresh_heatmap_layout_panel(ctx)
+
+
+def _on_clear_all(ctx) -> None:
+    """Empty every cell; the grid's size and its row / column names stay."""
+    layout = _ensure_sidebar_layout(ctx)
+    if not layout.cells:
+        return
+    layout.cells.clear()
+    _persist_and_redraw(ctx)
+    refresh_heatmap_layout_panel(ctx)
 
 
 def _sorted_by_plate(ctx, wells) -> list[str]:

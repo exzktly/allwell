@@ -26,7 +26,7 @@ from review.core.channel_state_controller import refresh_metric_combo_for_channe
 from review.features.export.service import (
     export_cell_data_from, export_heatmap_data)
 from review.features.heatmap.cell_scope_compute import cell_scope
-from review.features.heatmap.layout_view import build_heatmap_layout_panel
+from review.features.heatmap.layout_view import build_heatmap_layout_editor
 from review.core.channel_state_controller import refresh_heatmap_aggregation_options
 from core.safe import swallowed
 from ui import theme
@@ -73,9 +73,9 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # colour-map/scale/vmin/vmax/transpose/rep-set/log, then a full-width
     # timepoint slider. The colouring controls are appearance, not scope, so
     # they moved into a Display popover, and what is left fits one row at every
-    # width — except for the grid-layout editor, which is the one tall item
-    # and sits at the row's right end (``layout_view.py``); the band grows to
-    # hold it while this leaf is on screen.
+    # width. The grid-layout editor is a panel in the plot's right dock, opened
+    # by the band's Layout toggle (``layout_view.py``), so the band stays the
+    # one row every other tab has.
     band = plotting_band_slot(ctx, "Heat Map")
 
     # Channel combo hidden — the Plotting band's channel combo is the only
@@ -197,9 +197,9 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     sample_labels_cb.toggled.connect(lambda _v: _on_sample_labels_changed(ctx))
     disp_l.addWidget(sample_labels_cb)
 
-    # The layout editor first in the action zone, so Display / Save /
+    # The Layout toggle first in the action zone, so Display / Save /
     # Properties stay flush to the right edge where every other tab has them.
-    band.add_action(build_heatmap_layout_panel(ctx, band))
+    band.add_action(build_heatmap_layout_editor(ctx, band, export_dock))
     band.add_action(display_btn)
 
     export_btn, export_menu, _export_data_act = build_plot_save_menu(

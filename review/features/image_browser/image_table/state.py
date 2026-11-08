@@ -390,6 +390,9 @@ class TableSpec:
     # ``spec_to_state_fields`` overrides the axes with the virtual well_row/well_col
     # dims regardless of what roots/channels sit in the zones.
     plate: bool = False
+    # Plate mode turned on its side (Table ▾ → Transpose): plate columns (1–12) down
+    # the rows and plate rows (A–H) across. Only read in Plate mode.
+    plate_transposed: bool = False
     filters: dict[str, set] = field(default_factory=dict)
 
     def channel_axis(self) -> str | None:
@@ -417,11 +420,13 @@ def transpose_spec(spec: TableSpec) -> bool:
     shows the same images, each in the cell its row and column now name. The Fixed values and filters belong to
     neither axis and stay. Wrap stays as set: it bands whichever axis is now the columns.
 
-    Returns ``False``, changing nothing, in Plate mode, whose rows and columns are the plate's own (A–H by 1–12)
-    whatever the axes hold, so there is nothing to swap.
+    In Plate mode the rows and columns are the plate's own whatever the shelf's axes hold, so it is the plate that
+    turns: plate columns (1–12) run down the rows and plate rows (A–H) across, and back again on a second transpose
+    (``plate_transposed``). The shelf's axes are left as they are. Always returns ``True``.
     """
     if getattr(spec, "plate", False):
-        return False
+        spec.plate_transposed = not getattr(spec, "plate_transposed", False)
+        return True
     spec.rows, spec.cols = spec.cols, spec.rows
     return True
 
@@ -451,8 +456,8 @@ def spec_to_state_fields(spec: TableSpec) -> dict:
         if tokens:
             fixed_vals["channel"] = OVERLAY_CHAN if overlay else tokens[0]
         return {
-            "row_dims": ["well_row"],
-            "col_dims": ["well_col"],
+            "row_dims": ["well_col"] if getattr(spec, "plate_transposed", False) else ["well_row"],
+            "col_dims": ["well_row"] if getattr(spec, "plate_transposed", False) else ["well_col"],
             "active_channels": set(tokens),
             "active_timepoints": set(filt.get("timepoint", set()) or set()),
             "active_fovs": set(filt.get("fov", set()) or set()),
@@ -487,7 +492,8 @@ def spec_from_state(state: ImageTableState) -> TableSpec:
     }
     fixed = dict(getattr(state, "fixed_vals", None) or {})
 
-    if row_dims == ["well_row"] and col_dims == ["well_col"]:
+    plate_dims = {(("well_row",), ("well_col",)): False, (("well_col",), ("well_row",)): True}
+    if (tuple(row_dims), tuple(col_dims)) in plate_dims:
         # Plate mode — carry the fixed channel back onto the rows axis so the shelf's
         # channel picker (and the next apply) stay consistent.
         channels = [ChannelSpec.from_dict(opts[tok]) for tok in opts]
@@ -496,6 +502,7 @@ def spec_from_state(state: ImageTableState) -> TableSpec:
             cols=Axis(root=None, channels=[], overlay=False),
             fixed=fixed,
             plate=True,
+            plate_transposed=plate_dims[(tuple(row_dims), tuple(col_dims))],
             filters=filters,
         )
 

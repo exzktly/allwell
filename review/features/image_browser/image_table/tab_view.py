@@ -58,7 +58,7 @@ from review.features.image_browser.image_table.build_layout import (
 )
 from review.features.image_browser.image_table.builder_view import (
     build_shelf, builder_mark_inclusion_stale, builder_notify_rendered,
-    builder_flush_pending, builder_set_stacked, builder_spec, builder_transpose,
+    builder_flush_pending, builder_set_stacked, builder_transpose,
 )
 from review.features.image_browser.image_table.export import (
     GALLERY_QUALITY_LABELS,
@@ -434,16 +434,13 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     owned_action(tmenu, "Clear rendered images").triggered.connect(
         lambda _=False: image_table_clear_render(ctx))
     # Swap rows and columns — the shelf's two axes, and the table on screen with
-    # them. Not offered in Plate mode, whose rows and columns are the plate's.
+    # them; in Plate mode the plate turns on its side. Never disabled: a greyed
+    # menu entry gives no reason (a QMenu shows no tooltips), and it read as an
+    # entry that did nothing when clicked.
     tmenu.addSeparator()
     transpose_act = owned_action(tmenu, "Transpose rows and columns")
-    transpose_act.setToolTip("Swap what runs down the rows with what runs across the columns")
     transpose_act.triggered.connect(lambda _=False: builder_transpose(ctx))
     reg.register("_image_table_transpose_act", transpose_act)
-
-    def _sync_table_menu() -> None:
-        transpose_act.setEnabled(not bool(getattr(builder_spec(ctx), "plate", False)))
-    tmenu.aboutToShow.connect(_sync_table_menu)
     tr.addWidget(table_btn)
 
     # Dataset-wide *display* crop (per-channel display options live on the

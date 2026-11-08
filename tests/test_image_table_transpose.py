@@ -1,12 +1,14 @@
 """Image Table → Table ▾ → Transpose rows and columns.
 
 Two halves. The swap itself (``state.transpose_spec``) is pure and runs in the fast lane: each axis moves whole, the
-Fixed values and filters stay, Plate mode is refused, and doing it twice is no change. The menu action is driven
+Fixed values and filters stay, Plate mode turns the plate on its side, and doing it twice is no change. The menu action is driven
 through the real Image Table tab (``image_table_app``, slow lane): a generated table is drawn again with every cell at
-its transposed position, and in Plate mode the entry is not offered.
+its transposed position, and in Plate mode the plate turns — the entry is never disabled.
 """
 
 from __future__ import annotations
+
+import types
 
 import pytest
 
@@ -42,11 +44,21 @@ def test_transposing_twice_is_no_change():
     assert spec == _spec()
 
 
-def test_plate_mode_has_nothing_to_transpose():
+def test_plate_mode_turns_the_plate_and_leaves_the_axes():
+    """Reported: the entry did nothing in Plate mode (it was disabled, with no reason a menu can show)."""
+    from review.features.image_browser.image_table.state import spec_from_state, spec_to_state_fields
+
     spec = _spec()
     spec.plate = True
-    assert transpose_spec(spec) is False
+    assert transpose_spec(spec) is True
     assert spec.rows.root == "well" and spec.cols.root == "timepoint"
+    fields = spec_to_state_fields(spec)
+    assert (fields["row_dims"], fields["col_dims"]) == (["well_col"], ["well_row"])
+    st = types.SimpleNamespace(**fields)
+    assert spec_from_state(st).plate_transposed is True, "a saved turned plate comes back turned"
+    transpose_spec(spec)
+    fields = spec_to_state_fields(spec)
+    assert (fields["row_dims"], fields["col_dims"]) == (["well_row"], ["well_col"])
 
 
 def _cells(ctx) -> list[list[dict]]:
@@ -115,15 +127,24 @@ def test_the_menu_action_redraws_the_generated_table_transposed(image_table_app,
 
 
 @pytest.mark.qt
-def test_the_entry_is_not_offered_in_plate_mode(image_table_app):
-    from review.features.image_browser.image_table.builder_view import builder_spec
+def test_the_menu_action_turns_a_generated_plate(image_table_app):
+    """Through the real menu in Plate mode: the entry is enabled, and plate cell [r][c] lands at [c][r]."""
+    from review.features.image_browser.image_table import builder_view as BV
+    from review.features.image_browser.image_table.controller import image_table_generate
 
     ctx = image_table_app._ctx
+    BV._set_plate(ctx, True)
+    BV.builder_flush_pending(ctx)
+    BV._apply_now(ctx)
+    image_table_generate(ctx)
+    before = _cells(ctx)
+    assert len(before) > 1 and len(before[0]) > 1, "the fixture's plate must have two rows and two columns"
     act = ctx.widgets.get("_image_table_transpose_act")
-    menu = act.parent()
-    builder_spec(ctx).plate = True
-    menu.aboutToShow.emit()
-    assert not act.isEnabled()
-    builder_spec(ctx).plate = False
-    menu.aboutToShow.emit()
     assert act.isEnabled()
+    act.trigger()
+    after = _cells(ctx)
+    assert len(after) == len(before[0]) and len(after[0]) == len(before)
+    for r, row in enumerate(before):
+        for c, cell in enumerate(row):
+            assert after[c][r]["well"] == cell["well"]
+    BV._set_plate(ctx, False)

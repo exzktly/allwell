@@ -19707,7 +19707,12 @@ quietly wrong.
   the darkest ink in the set — so the overlay could not distinguish two of the
   answers its own button promises. `accent2` is excluded because the plate's
   colour vocabulary reserves it, and `success` because every cell this marks has
-  been removed and green is the app's "good" token.
+  been removed and green is the app's "good" token. Every ink is also held ΔE
+  ≥ 31 from the two outlines drawn round cells that are not layers — the red
+  round each kept cell (`ReviewImageState.boundary_color`) and the yellow round
+  the focused cell (`selected_color`, `Colors.focused_cell`): "deleted here",
+  "out of focus" and the FOV-selection ink once sat ΔE 28, 21 and 5 from them,
+  and are now `exclusion_deleted`, `exclusion_focus` and `exclusion_fov`.
 * **The painter runs outside the draw-mode branch.** It was once inside the
   `else` of the binary split, so Binary mode computed every reason — a row fetch
   and verdict walk per refresh — and discarded them while the button read "Why

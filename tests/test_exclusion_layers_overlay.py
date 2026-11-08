@@ -521,3 +521,25 @@ def test_an_unreadable_included_is_out_in_the_overlay_and_the_table_as_in_the_an
     assert df_included_mask(df).tolist() == [True, False]
     assert review_build_include_map(ctx, _mask(2), WELL, FOV, TP) == {1: True, 2: False}
     assert [review_effective_included(ctx, WELL, row) for row in df.to_dict("records")] == ["1", "0"]
+
+
+def test_every_layer_ink_stands_apart_from_the_kept_and_focused_outlines():
+    """**The defect (tracker C5).** The overlay draws two outlines that are not
+    layers: red round every kept cell and yellow round the focused cell. The
+    "deleted here" ink sat ΔE 28 from that red, "out of focus" ΔE 21, and the
+    FOV-selection yellow ΔE 5 from the focused yellow — so a deleted cell was
+    hard to find among kept ones, and a cell left out by the FOV selection
+    looked like the focused cell. Measured against the default outlines a user
+    sees before choosing their own."""
+    import review.features.image_browser.review_image.state as st
+    from review.features.image_browser.review_image.renderer import _layer_inks, _rgb_of
+    from ui import theme
+
+    defaults = st.ReviewImageState()
+    outlines = {"kept-cell outline": tuple(defaults.boundary_color),
+                "focused-cell outline": tuple(defaults.selected_color),
+                "focused-cell ring": _rgb_of(theme.Colors.focused_cell)}
+    close = [(label, name, round(_delta_e(_rgb_of(ink), rgb), 1))
+             for label, ink in _layer_inks().items() for name, rgb in outlines.items()
+             if _delta_e(_rgb_of(ink), rgb) < _MIN_LAYER_DE]
+    assert close == [], close

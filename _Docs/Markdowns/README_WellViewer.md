@@ -3488,7 +3488,7 @@ choice applies once, when the menu closes.
   dataset does not have is kept when you edit the others. A well whose FOV labels cannot be trusted (see *Exclude fields the run
   flagged*, above) is not filtered — every field there still counts — and the
   line names it. In the Segmentation view's **Why removed** overlay these cells
-  are outlined in yellow and labelled *field not in the FOV selection*.
+  are outlined in pale lime and labelled *field not in the FOV selection*.
 
   The counts under the checkbox are about the cells that would otherwise be in
   your analysis — a cell the debris gate, the crop, your gates or your own
@@ -7151,7 +7151,9 @@ screen, and the Scatter plot rings its point. Opening another dataset clears it.
   cell in the colour of the layer that removed it: you deleted it, the
   intensity gate (lavender), the debris gate, the crop, the scatter gates, the run's field verdict, the focus cut,
   the image border, a field you excluded in **Home → QC Triage** (white), or a
-  field left out of the Cell Gating **Fields of view** selection (yellow).
+  field left out of the Cell Gating **Fields of view** selection (pale lime).
+  Every one of these colours is clearly different from the red outline round
+  the cells that are kept and the yellow outline round the focused cell.
   A colour key appears under the picture, listing only the layers this field
   actually has cells for, and if the toggle is on and nothing here is excluded
   the line says that rather than leaving you with an unchanged picture and no

@@ -198,9 +198,21 @@ class Colors:
     # the overlay's other eight inks (``review_image.renderer._layer_inks``).
     exclusion_border  = "#E879F9"
     # Segmentation overlay: a cell in a field the Cell Gating FOV selection
-    # leaves out (FOV_Pass). Yellow, not green, for the reason above; measured
-    # ΔE ≥ 33 (CIE76) to the overlay's other eight inks.
-    exclusion_fov     = "#FDE047"
+    # leaves out (FOV_Pass). Pale lime: the yellow it was (#FDE047) sat ΔE 5
+    # from the focused-cell outline (``focused_cell``), the same yellow to the
+    # eye. Measured ΔE ≥ 39 (CIE76) to every other overlay ink and to the kept
+    # and focused outlines; relative luminance 0.90.
+    exclusion_fov     = "#DDFFAA"
+    # Segmentation overlay: a cell you deleted (Curation_Pass). Salmon, not
+    # ``danger`` (#F87171), which sat ΔE 28 from the red outline drawn round
+    # every kept cell, so a deletion was hard to pick out. Measured ΔE ≥ 42 to
+    # every other overlay ink and to both outlines; luminance 0.46.
+    exclusion_deleted = "#FF9988"
+    # Segmentation overlay: a cell the focus cut removed (Focus_Pass). Magenta,
+    # not the borrowed ``heatmap_selection`` (#FF6B35), which sat ΔE 21 from the
+    # kept-cell outline. Measured ΔE ≥ 40 to every other ink and both outlines;
+    # luminance 0.29.
+    exclusion_focus   = "#FF00FF"
     # Segmentation overlay: a cell of a nanowell whose rim was out of focus at its timepoint (NW_Focus_Pass).
     # Pink, the most separated hue left: measured ΔE ≥ 34 (CIE76) to the overlay's other nine inks, relative
     # luminance 0.35.

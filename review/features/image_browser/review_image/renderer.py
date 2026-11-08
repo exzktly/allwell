@@ -1224,10 +1224,18 @@ def toggle_review_image_binary_mask(ctx) -> None:
 #: for a failure state reads as the opposite of what happened, and on a
 #: green-tinted channel it is close to invisible besides.
 #:
-#: ``text_secondary`` and ``heatmap_selection`` are borrowed from elsewhere in
-#: the palette, which is stated here so the borrowing is visible: the first is
-#: a neutral grey for the one verdict neither the user nor a threshold on this
-#: panel made, and the second is the most separated remaining hue.
+#: ``text_secondary`` is borrowed from elsewhere in the palette, which is stated
+#: here so the borrowing is visible: a neutral grey for the one verdict neither
+#: the user nor a threshold on this panel made.
+#:
+#: **Every ink is also measured against the two outlines the overlay draws that
+#: are not layers**: the red round every kept cell (``boundary_color``) and the
+#: yellow round the focused cell (``selected_color`` / ``Colors.focused_cell``).
+#: Three inks failed that: "deleted here" (``danger``, ΔE 28 from the kept-cell
+#: red), "out of focus" (the borrowed ``heatmap_selection``, ΔE 21 from it) and
+#: the FOV yellow (ΔE 5 from the focused outline). They are
+#: ``exclusion_deleted``, ``exclusion_focus`` and the new ``exclusion_fov``,
+#: each chosen as the candidate furthest from everything else drawn.
 #:
 #: The seventh, a field excluded by hand in QC triage, is ``ink_light`` (white),
 #: and it was chosen the same way: of every theme token not already used and
@@ -1240,14 +1248,14 @@ def toggle_review_image_binary_mask(ctx) -> None:
 def _layer_inks():
     from ui import theme
     return {
-        "deleted here": theme.Colors.danger,
+        "deleted here": theme.Colors.exclusion_deleted,
         "below the intensity gate": theme.Colors.exclusion_intensity,
         "in the excluded saved cells": theme.Colors.exclusion_saved_cells,
         "debris gate": theme.Colors.warn,
         "outside the crop": theme.Colors.stale,
         "outside the scatter gates": theme.Colors.accent,
         "field flagged by the run": theme.Colors.text_secondary,
-        "out of focus": theme.Colors.heatmap_selection,
+        "out of focus": theme.Colors.exclusion_focus,
         "nanowell rim out of focus": theme.Colors.exclusion_nanowell_focus,
         "touches the image border": theme.Colors.exclusion_border,
         "field excluded in QC triage": theme.Colors.ink_light,

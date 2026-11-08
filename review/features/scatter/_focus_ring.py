@@ -13,10 +13,9 @@ gets no ring; the status-bar chip still names it.
 from __future__ import annotations
 
 from core.safe import swallowed
-from ui import theme
+from review.core.cell_picking import RING_GID, clear_rings, draw_ring
 
-#: The ring's artist id, so a repaint removes exactly the rings it drew.
-RING_GID = "focused_cell_ring"
+__all__ = ["RING_GID", "focused_points", "paint_focus_ring", "store_interaction_points"]
 
 
 def focused_points(ctx, axes_points) -> list[tuple[object, float, float]]:
@@ -53,18 +52,14 @@ def paint_focus_ring(ctx, *, draw: bool = True) -> int:
     cache = ctx.runtime.scatter.interaction_cache or {}
     axes_points = cache.get("axes_points") or []
     for ax, _pts in axes_points:
-        for artist in list(ax.lines):
-            if artist.get_gid() == RING_GID:
-                artist.remove()
+        clear_rings(ax)
     try:
         hits = focused_points(ctx, axes_points)
     except Exception:
         swallowed("scatter: locating the focused cell")
         hits = []
     for ax, x, y in hits:
-        ax.plot([x], [y], marker="o", markersize=14, markerfacecolor="none",
-                markeredgecolor=theme.Colors.focused_cell, markeredgewidth=2.0,
-                linestyle="none", gid=RING_GID, zorder=10)
+        draw_ring(ax, x, y)
     if draw:
         canvas = ctx.widgets.get_or_none("_scatter_canvas")
         if canvas is not None:

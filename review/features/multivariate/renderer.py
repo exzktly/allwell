@@ -12,6 +12,7 @@ import logging
 
 import numpy as np
 
+from review.core.cell_picking import PlottedCells, attach_cells, ring_focused
 from ui import theme
 from review.core.plot_style import (
     apply_ax_style, follows_theme, style_legend, tokens_for,
@@ -69,6 +70,7 @@ def render_multivariate(ctx) -> None:
     # loses every one of them on its next recompute. This was the only plot
     # feature that did.
     apply_export_style_to_current(ctx, fig, canvas)
+    ring_focused(ctx, fig)
     if canvas is not None:
         canvas.draw_idle()
 
@@ -293,6 +295,7 @@ def _render_dimred(fig, res) -> None:
     _bg, _t, muted_fg, _g, _s = tokens_for(ax)
     ax.scatter(coords[:, 0], coords[:, 1], s=8, c=colors, alpha=0.6,
                edgecolors="none", rasterized=True)
+    _attach_cells(ax, coords, res)
     _legend(ax, legend, muted_fg,
             title={"group": "Group", "well": "Well", "timepoint": "Time",
                    "cluster": "Cluster"}.get(res.get("color_by", "group"), ""))
@@ -304,6 +307,24 @@ def _render_dimred(fig, res) -> None:
     note = res.get("sampled_note")
     if note:
         _footnote(fig, note)
+
+
+def _attach_cells(ax, coords, res) -> None:
+    """Tell the shared picker which cell each drawn point is (``core/cell_picking``)."""
+    data = res["data"]
+    n = coords.shape[0]
+
+    def _arr(key, fill):
+        a = data.get(key)
+        return np.asarray(a) if a is not None and len(a) == n else np.full(n, fill)
+
+    total = res.get("n_total")
+    attach_cells(ax, PlottedCells(
+        xs=np.asarray(coords[:, 0], float), ys=np.asarray(coords[:, 1], float),
+        wells=_arr("well", ""), fovs=_arr("fov", ""), tps=_arr("tp_token", ""),
+        nids=_arr("nucleus_id", -1).astype(np.int64),
+        sampled=(n, int(total)) if total else None,
+        scope_wells=frozenset(str(w) for w in res.get("scope_wells", ()))))
 
 
 def _draw_loadings(fig, ax, loadings) -> None:
@@ -349,6 +370,7 @@ def _render_clustering(fig, res) -> None:
     _bg, _t, muted_fg, _g, _s = tokens_for(ax1)
     ax1.scatter(coords[:, 0], coords[:, 1], s=8, c=colors, alpha=0.6,
                 edgecolors="none", rasterized=True)
+    _attach_cells(ax1, coords, res)
     _legend(ax1, legend, muted_fg, title="Cluster")
 
     # Right: stacked bar of cluster fractions per group.

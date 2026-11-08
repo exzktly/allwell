@@ -7287,6 +7287,21 @@ Review's status row and adopted into the shell's status bar by `allwell.py`, as
 the status label is) names the cell; its text opens it through the
 `image_browser.show_cell` service and its ✕ clears the focus.
 
+**Cells on Multivariate's projections and Spatial's maps
+(`core/cell_picking.py`).** A renderer that draws one point per cell attaches
+a `PlottedCells` to the axes (`attach_cells`): positions, and each point's
+well, field, timepoint token and nucleus id. The collectors carry those beside
+the matrix (`multivariate/collect` → `fov` / `tp_token` / `nucleus_id`, built
+by `identity_arrays`, which `controller._subsample_for_projection` slices with
+the rest; `spatial/collect.collect_spatial_frame` likewise). `wire_cell_picking`,
+called where each tab builds its canvas, focuses the nearest drawn cell within
+`PICK_RADIUS_PX` of a left click (not while the toolbar's zoom or pan is armed)
+and re-rings on every focus change; each renderer calls `ring_focused` after
+its export-style pass. A sampled projection records `(drawn, total)` and the
+plotted wells, and when the focused cell is in one of those wells but not in
+the sample the axes say so in text. The Scatter's ring uses the same
+`clear_rings` / `draw_ring`.
+
 The emit *is* the trigger (no paired direct call alongside it). Two refreshes
 deliberately stay off the bus: `_toggle_sem` (the SEM/SD toggle — its redraw
 covers Distribution / Heat Map, which the coalescer does not) and the smFISH tab

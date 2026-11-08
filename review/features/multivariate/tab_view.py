@@ -281,6 +281,9 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     reg.register("_mv_card", card)
     reg.register("_mv_fig", card.figure)
     reg.register("_mv_canvas", card.canvas)
+    # A click on a projected cell focuses it; the focused cell is ringed.
+    from review.core.cell_picking import wire_cell_picking
+    wire_cell_picking(ctx, card.canvas, lambda: card.figure)
     from review.core.ui_helpers import apply_plot_card_decorators
     apply_plot_card_decorators(ctx, card, "Multivariate")
     card.plotThemeChanged.connect(lambda _m: mv_ctrl.mv_recompute(ctx))

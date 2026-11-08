@@ -6108,6 +6108,12 @@ high GFP" has no meaning. You read them a different way:
   UMAP subsample) — so the map is quantifiable downstream.
 - **Colour by cluster** and read the **phenotype-composition** bars to see what
   fraction of each condition falls in each region.
+- **Click a point to see that cell.** On the projection (and on Clustering's
+  left panel) a click makes the nearest cell the *focused cell* — the status
+  bar names it, and clicking its name opens it in Segmentation. The focused
+  cell is ringed in yellow wherever it was drawn. t-SNE and UMAP draw a sample
+  of at most 2,500 cells; when the focused cell is in one of the plotted wells
+  but not in that sample, the plot says so instead of showing no ring.
 
 #### Which cluster each cell belongs to
 
@@ -6130,6 +6136,9 @@ answer questions the plotting and multivariate tabs can't: *"Do my cells
 form colonies, and are they growing or sparse?"*, *"Do edge cells behave
 differently from interior cells?"*, *"How much of the GFP variability is
 between colonies versus inside each one?"*.
+
+Every cell on a **Spatial map** can be clicked: it becomes the focused cell,
+named in the status bar, ringed on the map and outlined in Segmentation.
 
 Everything runs on the **currently selected well and one timepoint** at a
 time (spatial statistics are per-frame). Pick a well in the plate map, open

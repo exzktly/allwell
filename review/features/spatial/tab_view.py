@@ -420,6 +420,9 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_card", card)
     reg.register("_sp_fig", card.figure)
     reg.register("_sp_canvas", card.canvas)
+    # A click on a cell in a well map focuses it; the focused cell is ringed.
+    from review.core.cell_picking import wire_cell_picking
+    wire_cell_picking(ctx, card.canvas, lambda: card.figure)
     from review.core.ui_helpers import apply_plot_card_decorators
     apply_plot_card_decorators(ctx, card, "Spatial")
     card.plotThemeChanged.connect(lambda _m: sp_ctrl.sp_recompute(ctx))

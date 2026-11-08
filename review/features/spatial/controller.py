@@ -343,6 +343,7 @@ def _compute_frame_payload(ctx, st, well: str) -> dict:
         "metric_col": st.metric_col,
         "n_cells": n_cells,
         "unit": frame.get("unit") or "px",
+        **{key: frame.get(key) for key in ("fov", "tp_token", "nucleus_id")},
     }
     if n_cells == 0:
         payload["error"] = "No cells at the selected timepoint."

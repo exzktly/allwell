@@ -183,10 +183,6 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
         splitter.setStretchFactor(0, 0)
 
         self._build_form(form_host)
-        # The wheel scrolls the form rather than changing the field under the pointer — a filter on each of this
-        # form's dropdowns and number boxes, never one on the application (core/wheel_guard.py says why).
-        from core import wheel_guard
-        wheel_guard.keep_guarding(form_host)
         self._mount_run_footer(scroll)
 
         # Right — log panel

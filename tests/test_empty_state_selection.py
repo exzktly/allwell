@@ -97,7 +97,7 @@ def test_a_background_page_is_updated_too(loaded_app):
 def test_heat_map_is_not_gated_on_the_selection(loaded_app):
     """A *populated* Heat Map must keep drawing when the plate is cleared.
 
-    The fixture's active layout is the empty ``Sidebar`` one the sidebar seeds,
+    The fixture's active layout is the empty ``Sidebar`` one the layout editor seeds,
     so this seeds a real layout first. Branching on whether the layout happened
     to have cells — which the first version of this test did — meant the case it
     is named for never ran.
@@ -135,7 +135,7 @@ def test_heat_map_placeholder_retracts_when_its_layout_is_filled(loaded_app):
     from PySide6.QtWidgets import QStackedWidget
 
     from review.features.heatmap.controller import active_layout
-    from review.features.heatmap.sidebar_view import _on_autopopulate
+    from review.features.heatmap.layout_view import _on_autopopulate
     from tests.fixtures.mini_dataset import WELLS
 
     app = loaded_app
@@ -176,7 +176,7 @@ def test_heat_map_placeholder_retracts_on_a_dataset_with_no_timepoints(loaded_ap
     from PySide6.QtWidgets import QStackedWidget
 
     from review.features.heatmap.controller import active_layout
-    from review.features.heatmap.sidebar_view import _on_autopopulate
+    from review.features.heatmap.layout_view import _on_autopopulate
     from tests.fixtures.mini_dataset import WELLS
 
     app = loaded_app
@@ -193,7 +193,7 @@ def test_heat_map_placeholder_retracts_on_a_dataset_with_no_timepoints(loaded_ap
     assert stack is not None, "the heat map canvas is not inside an empty-state stack"
 
     from review.core.ui_helpers import refresh_empty_state_pages
-    from review.features.heatmap.sidebar_view import _ensure_sidebar_layout
+    from review.features.heatmap.layout_view import _ensure_sidebar_layout
 
     ctx.runtime.heatmap.layouts = []
     _ensure_sidebar_layout(ctx).cells.clear()          # the empty layout the sidebar seeds

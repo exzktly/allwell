@@ -130,12 +130,12 @@ def load_from_data_dir(ctx) -> None:
         # Deposit onto the typed slice; ``apply_persisted_settings`` reads it back
         # via ``ctx.state`` (was the loose ``app._heatmap_persisted_settings``).
         hm.persisted_settings = settings
-    if hasattr(app, "_heatmap_sidebar_table"):
+    if hasattr(app, "_heatmap_layout_table"):
         try:
-            from review.features.heatmap.sidebar_view import (
-                refresh_heatmap_layout_sidebar,
+            from review.features.heatmap.layout_view import (
+                refresh_heatmap_layout_panel,
             )
-            refresh_heatmap_layout_sidebar(ctx)
+            refresh_heatmap_layout_panel(ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     apply_persisted_settings(ctx)

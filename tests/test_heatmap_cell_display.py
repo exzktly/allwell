@@ -1,6 +1,6 @@
 """A Heat Map grid cell that holds a replicate set shows the whole set.
 
-The sidebar grid renders one line of text per cell, and it used to render
+The layout grid renders one line of text per cell, and it used to render
 ``wells[0]`` — so a cell auto-populated from a four-well replicate set read as
 plain ``A01`` and the other three members looked dropped. The cell now shows the
 same ``A01+3`` summary the heat map draws on the figure, with the members in the
@@ -17,7 +17,7 @@ from __future__ import annotations
 import types
 
 from review.features.heatmap.models import HeatmapLayout
-from review.features.heatmap.sidebar_view import (
+from review.features.heatmap.layout_view import (
     _CELL_TOKEN_ROLE, _cell_display, _cell_token, _on_drop_event,
 )
 
@@ -73,13 +73,13 @@ def _drop_ctx(layout):
 
 
 def test_moving_a_replicate_set_cell_carries_every_member(monkeypatch):
-    from review.features.heatmap import sidebar_view as SV
+    from review.features.heatmap import layout_view as SV
 
     layout = HeatmapLayout(name="Sidebar", rows=2, cols=2)
     layout.assign(0, 0, ["A01", "B01", "C01"])
     monkeypatch.setattr(SV, "_ensure_sidebar_layout", lambda _c: layout)
     monkeypatch.setattr(SV, "_persist_and_redraw", lambda _c: None)
-    monkeypatch.setattr(SV, "refresh_heatmap_layout_sidebar", lambda _c: None)
+    monkeypatch.setattr(SV, "refresh_heatmap_layout_panel", lambda _c: None)
 
     # The drag carries the cell's first well; the whole cell has to move.
     _on_drop_event(_drop_ctx(layout), "cell", (1, 1), "A01")
@@ -89,12 +89,12 @@ def test_moving_a_replicate_set_cell_carries_every_member(monkeypatch):
 
 
 def test_a_well_dragged_from_the_plate_lands_alone(monkeypatch):
-    from review.features.heatmap import sidebar_view as SV
+    from review.features.heatmap import layout_view as SV
 
     layout = HeatmapLayout(name="Sidebar", rows=2, cols=2)
     monkeypatch.setattr(SV, "_ensure_sidebar_layout", lambda _c: layout)
     monkeypatch.setattr(SV, "_persist_and_redraw", lambda _c: None)
-    monkeypatch.setattr(SV, "refresh_heatmap_layout_sidebar", lambda _c: None)
+    monkeypatch.setattr(SV, "refresh_heatmap_layout_panel", lambda _c: None)
 
     _on_drop_event(_drop_ctx(layout), "cell", (0, 1), "H12")
 

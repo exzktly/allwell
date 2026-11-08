@@ -5782,11 +5782,16 @@ This is the first Plotting sub-tab, and the one Plotting opens on.
     decimals, `%.1e` for scientific notation, `%d` for a whole number. Leave it
     blank to let the tab choose per metric — counts as whole numbers, fractions to
     two places, intensities scaled to their size.
-  - The layout editor: drag wells into the grid and **Edit label** on any row /
-    column header.
+  - The layout editor sits at the right end of the tab's control bar: the
+    **Layout** rows × columns boxes, **Auto-populate from selection**, and the
+    grid itself. Drag wells into the grid; drag between cells to move; double-
+    click a cell (or drag it back onto the plate map) to empty it. **Edit
+    label** on any row / column header of the heat map. On a phone it is in the
+    **Controls** sheet, under the other data controls.
 - **Selecting wells.** The sidebar plate map does double duty on this tab: a
   *click* on a well selects or deselects it exactly as on every other tab, while
-  a *press-and-drag* off a well carries it into the layout grid below. The one
+  a *press-and-drag* off a well carries it into the layout grid in the control
+  bar. The one
   gesture the drag source takes over is press-and-drag selection across several
   wells — use the row / column headers, the corner all/none toggle, or
   **Auto-populate from selection** for bulk work. You can also click a heatmap

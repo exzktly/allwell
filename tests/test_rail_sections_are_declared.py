@@ -82,7 +82,6 @@ def test_the_rail_frames_are_the_declared_ones_main_first(features):
     keys = [s.key for s in features.rail_sections()]
     assert keys == [
         "_sidebar_main_frame",
-        "_heatmap_sidebar_frame",
         "_sidebar_preview_frame",
         "_sidebar_image_table_frame",
         "_sidebar_cell_browser_frame",
@@ -131,7 +130,7 @@ def _ctx(features):
     # The reported defect behind the old per-hook copies: Nanowells' hook was a
     # bare ``nw_on_activate`` and the page opened with no plate.
     ("Nanowells", {"_sidebar_main_frame"}, 1),
-    ("Heat Map", {"_sidebar_main_frame", "_heatmap_sidebar_frame"}, 1),
+    ("Heat Map", {"_sidebar_main_frame"}, 1),
     ("Cell Browser", {"_sidebar_main_frame", "_sidebar_cell_browser_frame"}, 1),
     ("Segmentation", {"_sidebar_preview_frame"}, 0),
     ("Image Table", {"_sidebar_image_table_frame"}, 0),
@@ -218,11 +217,13 @@ def test_core_rail_code_names_no_page():
     assert not offenders, f"core rail code names pages: {offenders}"
 
 
-def test_heat_map_declares_its_configurator_and_its_drag_source(features):
+def test_heat_map_declares_its_drag_source_and_no_rail_frame_of_its_own(features):
+    """The layout editor is part of the Heat Map page (the right end of its
+    control band), not a rail frame: the page declares only the main frame,
+    whose plate is the editor's drag source."""
     hm = features.get("Heat Map")
     assert hm.plate_drag_source is True
-    built = [s for s in hm.rail_sections if s.build is not None]
-    assert [s.key for s in built] == ["_heatmap_sidebar_frame"]
+    assert [s.key for s in hm.rail_sections] == ["_sidebar_main_frame"]
     others = [d.name for d in features.all() if d.plate_drag_source]
     assert others == ["Heat Map"]
 

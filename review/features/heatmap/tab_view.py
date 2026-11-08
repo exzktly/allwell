@@ -26,6 +26,7 @@ from review.core.channel_state_controller import refresh_metric_combo_for_channe
 from review.features.export.service import (
     export_cell_data_from, export_heatmap_data)
 from review.features.heatmap.cell_scope_compute import cell_scope
+from review.features.heatmap.layout_view import build_heatmap_layout_panel
 from review.core.channel_state_controller import refresh_heatmap_aggregation_options
 from core.safe import swallowed
 from ui import theme
@@ -72,8 +73,9 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # colour-map/scale/vmin/vmax/transpose/rep-set/log, then a full-width
     # timepoint slider. The colouring controls are appearance, not scope, so
     # they moved into a Display popover, and what is left fits one row at every
-    # width. The grid layout itself is still edited from the sidebar
-    # configurator on the left (``views/heatmap_layout_sidebar_view.py``).
+    # width — except for the grid-layout editor, which is the one tall item
+    # and sits at the row's right end (``layout_view.py``); the band grows to
+    # hold it while this leaf is on screen.
     band = plotting_band_slot(ctx, "Heat Map")
 
     # Channel combo hidden — the Plotting band's channel combo is the only
@@ -195,6 +197,9 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     sample_labels_cb.toggled.connect(lambda _v: _on_sample_labels_changed(ctx))
     disp_l.addWidget(sample_labels_cb)
 
+    # The layout editor first in the action zone, so Display / Save /
+    # Properties stay flush to the right edge where every other tab has them.
+    band.add_action(build_heatmap_layout_panel(ctx, band))
     band.add_action(display_btn)
 
     export_btn, export_menu, _export_data_act = build_plot_save_menu(
@@ -412,13 +417,13 @@ def _on_vminmax_changed(ctx) -> None:
 
 
 def _on_transpose(ctx) -> None:
-    from review.features.heatmap.sidebar_view import (
-        _ensure_sidebar_layout, _persist_and_redraw, refresh_heatmap_layout_sidebar,
+    from review.features.heatmap.layout_view import (
+        _ensure_sidebar_layout, _persist_and_redraw, refresh_heatmap_layout_panel,
     )
     layout = _ensure_sidebar_layout(ctx)
     layout.transpose()
     _persist_and_redraw(ctx)
-    refresh_heatmap_layout_sidebar(ctx)
+    refresh_heatmap_layout_panel(ctx)
 
 
 def _on_repset_avg_changed(ctx) -> None:
@@ -509,7 +514,7 @@ def _on_label_double_click(ctx, evt) -> None:
                 break
     if target is None:
         return
-    from review.features.heatmap.sidebar_view import (
+    from review.features.heatmap.layout_view import (
         _ensure_sidebar_layout, _persist_and_redraw,
     )
     layout = _ensure_sidebar_layout(ctx)

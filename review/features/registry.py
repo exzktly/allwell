@@ -448,12 +448,12 @@ def _activate_heatmap(ctx) -> None:
     _refresh_heatmap_timepoints(ctx, redraw=False)     # drawn below
     # The configurator's own refresh no-ops until it is built.
     try:
-        from review.features.heatmap.sidebar_view import (
-            refresh_heatmap_layout_sidebar,
+        from review.features.heatmap.layout_view import (
+            refresh_heatmap_layout_panel,
         )
-        refresh_heatmap_layout_sidebar(ctx)
+        refresh_heatmap_layout_panel(ctx)
     except Exception:
-        _logger.exception("Heatmap sidebar refresh failed")
+        _logger.exception("Heatmap layout editor refresh failed")
     redraw_app(ctx)
 
 
@@ -520,22 +520,15 @@ def _build_playground_subtab(ctx, frame) -> None:
     build_playground_tab(ctx, frame)
 
 
-def _svc_heatmap_build_layout_sidebar():
-    from review.features.heatmap.sidebar_view import (
-        build_heatmap_layout_sidebar,
+def _svc_heatmap_refresh_layout_panel():
+    from review.features.heatmap.layout_view import (
+        refresh_heatmap_layout_panel,
     )
-    return build_heatmap_layout_sidebar
-
-
-def _svc_heatmap_refresh_layout_sidebar():
-    from review.features.heatmap.sidebar_view import (
-        refresh_heatmap_layout_sidebar,
-    )
-    return refresh_heatmap_layout_sidebar
+    return refresh_heatmap_layout_panel
 
 
 def _svc_heatmap_well_dropped():
-    from review.features.heatmap.sidebar_view import _on_drop_event
+    from review.features.heatmap.layout_view import _on_drop_event
     return _on_drop_event
 
 
@@ -1251,11 +1244,10 @@ def _features() -> list[FeatureDescriptor]:
         FeatureDescriptor(
             name="Heat Map", parent="Plotting", build=_build_heatmap,
             style_facets=_lazy_state("review.features.heatmap._style_facets", "style_facets"),
-            # The layout configurator sits in the main frame under the plate,
-            # which is its drag source while the page is focused.
-            rail_sections=(MAIN_RAIL_SECTION,
-                           RailSection("_heatmap_sidebar_frame",
-                                       build=_svc_heatmap_build_layout_sidebar)),
+            # The layout editor is part of the page (the right end of its
+            # control band); the rail plate is its drag source while the page
+            # is focused.
+            rail_sections=_MAIN,
             plate_drag_source=True,
             on_activate=_activate_heatmap,
             on_channel_changed=_channel_heatmap,
@@ -1263,8 +1255,8 @@ def _features() -> list[FeatureDescriptor]:
             view_state_io=_heatmap_view_state_io,
             states=(StateSpec("heatmap", _state_heatmap),),
             services={
-                "heatmap.refresh_layout_sidebar":
-                    _svc_heatmap_refresh_layout_sidebar,
+                "heatmap.refresh_layout_panel":
+                    _svc_heatmap_refresh_layout_panel,
                 "heatmap.well_dropped": _svc_heatmap_well_dropped,
             },
             # Well medians over nanowells under Observations: Nanowells (<feature>/_observations.py).

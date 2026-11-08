@@ -21,7 +21,7 @@ In replicate mode the layout follows the **Rep-set avg** toggle, since that is
 what decides whether a cell stands for a set or for a well: checked gives one
 multi-well cell per set (the map averages it), unchecked gives one cell per
 well. Grouping regardless of the toggle put a whole set in a single cell that
-the sidebar grid could only render as its first well, so the other members
+the layout grid could only render as its first well, so the other members
 looked dropped and the toggle looked inert.
 
 These exercise the pure cell-planner, so they need no application fixture.
@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import types
 
-from review.features.heatmap.sidebar_view import _autopopulate_cells
+from review.features.heatmap.layout_view import _autopopulate_cells
 
 
 def _ctx(*, selections, selected_wells, well_paths, repset_avg=True,
@@ -85,7 +85,7 @@ def test_replicate_sets_become_one_cell_each_when_averaging():
 def test_without_averaging_every_member_well_gets_its_own_cell():
     """Regression: with Rep-set avg off a set is not collapsed into one cell.
 
-    Grouping anyway left a cell holding four wells that the sidebar grid drew as
+    Grouping anyway left a cell holding four wells that the layout grid drew as
     a single ``A01`` — every other member of the set looked ignored — while the
     map pooled all four despite the toggle being off.
     """

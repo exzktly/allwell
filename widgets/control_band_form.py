@@ -25,6 +25,11 @@ in view when the sheet opens, then Data, which scrolls.
 * **Actions** — everything else the action zone holds: commands (Save ▾, Reset
   Order, Run test), the Properties toggle, a checkbox.
 
+An action whose builder sets ``bandRole`` to ``"data"`` is not a button at all
+but a panel the row only carries at its right end (the Heat Map's layout
+editor): it joins Data as a row of its own spanning the sheet, after the scope
+rows, because a grid cell sized like its neighbouring buttons cannot hold it.
+
 Display and Actions are grids of equal-width buttons, enabled ones first. Which
 of the two an action joins is read off the ``bandRole`` property its builder
 sets (``"display"`` or ``"action"``); with none, a button that drops a menu or
@@ -59,7 +64,7 @@ from PySide6.QtWidgets import (
 SECTIONS = ("Display", "Actions", "Data")
 #: Property a builder sets on an action to say which section it joins.
 ROLE_PROPERTY = "bandRole"
-ROLE_SECTION = {"display": "Display", "action": "Actions"}
+ROLE_SECTION = {"display": "Display", "action": "Actions", "data": "Data"}
 #: Property naming the text an icon-only button shows in the form.
 SHEET_TEXT_PROPERTY = "sheetText"
 #: Most buttons in one grid row.
@@ -80,7 +85,8 @@ def split_labelled_text(text: str) -> tuple[str, str] | None:
 
 
 def section_of_action(w: QWidget) -> str:
-    """Display or Actions, for a widget from the band's action zone."""
+    """Display, Actions or (declared only) Data, for a widget from the band's
+    action zone."""
     role = w.property(ROLE_PROPERTY)
     if role in ROLE_SECTION:
         return ROLE_SECTION[role]
@@ -169,7 +175,11 @@ class BandForm:
         for item in scope:
             self._add_scope(item)
         for item in actions:
-            self._sections[section_of_action(item)]["buttons"].append(item)
+            section = section_of_action(item)
+            if section == "Data":           # a panel, not a button: a row of its own
+                self._add_scope(item)
+                continue
+            self._sections[section]["buttons"].append(item)
             self._adopt_button(item)
         self._watch(host)               # a new width may want fewer columns
         for name in ("Display", "Actions"):

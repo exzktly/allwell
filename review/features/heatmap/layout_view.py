@@ -26,16 +26,22 @@ from __future__ import annotations
 
 
 from PySide6.QtCore import QMimeData, QSize, Qt
-from PySide6.QtGui import QDrag
+from PySide6.QtGui import QDrag, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QAbstractScrollArea,
+    QApplication,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLayout,
     QPushButton,
     QSizePolicy,
     QSpinBox,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -48,28 +54,37 @@ from core.safe import swallowed
 
 from review.core.dnd import WELL_MIME  # shared drag/drop token
 from ui import theme
-from widgets.flow_layout import FlowLayout, sync_flow_height
 from widgets.spin_box import SpinBox
 
 #: The one layout this editor owns. Persisted under this name, so it stays
 #: ``"Sidebar"`` although the editor now sits in the control band.
 SIDEBAR_LAYOUT_NAME = "Sidebar"
 
-# Pixel geometry for this module's controls. Named rather than written
-# inline so the number is stated once and a reader can see what it sizes
-# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
-#: One grid cell. Wide enough for a well token (``H12``) at the cell font.
-_CELL_W = 26
-_CELL_H = 18
-#: The largest the grid is drawn before it scrolls: a whole 8×12 plate fits,
-#: and a 32×32 grid does not push the plot off the page.
-_GRID_MAX_W = 12 * _CELL_W
-_GRID_MAX_H = 8 * _CELL_H
+#: The grid shows at most this many rows and columns before it scrolls: a whole
+#: 8×12 plate fits, and a 32×32 grid does not push the plot off the page.
+_MAX_SHOWN_ROWS = 8
+_MAX_SHOWN_COLS = 12
 #: The grid-size spin boxes' limit (and Auto-populate's growth cap).
 _MAX_GRID = 32
 #: Fewest columns the grid shrinks to in a narrow host (phone layout's Controls
 #: sheet) before it scrolls sideways instead.
 _MIN_VISIBLE_COLS = 4
+#: The widest single-well token a cell is sized for at the least, so an empty
+#: or half-filled grid is drawn at the width a full 96-well plate needs.
+_WIDEST_TOKEN = "H12"
+#: Room around a cell's text, and around a row number, in pixels at the desk
+#: (scaled with the UI): the cell's text is centred, so this is the gap that
+#: keeps neighbouring tokens from reading as one word.
+_CELL_PAD_W = 3
+_CELL_PAD_H = 2
+#: The least room a cell keeps either side of its text in a host too narrow
+#: for the comfortable padding: the cells give up their padding down to this
+#: before the grid starts to scroll.
+_CELL_PAD_MIN = 1
+#: The panel's ``bandRole``: in phone layout's Controls sheet it is a row of its
+#: own in the Data section, spanning the sheet, rather than a cell of the
+#: Actions button grid (``widgets/control_band_form.py``).
+_BAND_ROLE = "data"
 
 
 # ── Drag-aware widgets ───────────────────────────────────────────────────────
@@ -103,6 +118,36 @@ def _cell_token(item) -> str:
     return (item.text() or "").strip()
 
 
+class _TokenDelegate(QStyledItemDelegate):
+    """Draws a cell's token centred in the whole cell, never elided.
+
+    Qt's own item painting keeps a focus-frame margin either side of the text
+    and elides whatever does not fit inside it, which in a grid of one-token
+    cells costs a third of the room and turned ``A02`` into ``A…``. The cells
+    are measured to hold their widest text (``_fit_table``), so here the
+    background, selection and hover come from the style as usual and the text
+    is drawn over the full cell.
+    """
+
+    def paint(self, painter, option, index) -> None:  # Qt naming
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        text, opt.text = opt.text, ""
+        style = opt.widget.style() if opt.widget is not None else QApplication.style()
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+        if not text:
+            return
+        role = (QPalette.HighlightedText if opt.state & QStyle.State_Selected
+                else QPalette.Text)
+        painter.save()
+        try:
+            painter.setFont(opt.font)
+            painter.setPen(opt.palette.color(role))
+            painter.drawText(opt.rect, Qt.AlignCenter, text)
+        finally:
+            painter.restore()
+
+
 class _LayoutTable(QTableWidget):
     """The R×C grid. Drag source AND drop sink for well tokens."""
 
@@ -110,6 +155,7 @@ class _LayoutTable(QTableWidget):
         super().__init__(parent)
         # Named for the compact header / cell padding ``ui/theme.py`` gives it.
         self.setObjectName("HeatmapLayoutTable")
+        self.setItemDelegate(_TokenDelegate(self))
         self._on_drop = on_drop
         self._on_clear_cell = on_clear_cell
         self.setDragEnabled(True)
@@ -135,6 +181,57 @@ class _LayoutTable(QTableWidget):
         #: The size that shows the whole grid up to the caps (``_fit_table``).
         self._natural = QSize(0, 0)
         self._narrowest = 0
+        #: Height the horizontal scrollbar takes when the host is narrower than
+        #: the grid and the columns scroll (0 when the grid already reserves it).
+        self._hbar_room = 0
+        #: Column widths with the comfortable and the least padding, and the
+        #: width the row header, frame and any vertical bar take beside them.
+        self._cell_w = (0, 0)
+        self._chrome_w = 0
+        #: The column width last applied (``None``: apply in full next time).
+        self._applied_w: int | None = None
+
+    def _fit_to_width(self) -> None:
+        """Share the width the table was given among the shown columns.
+
+        At its natural width every column has its comfortable padding. A host
+        narrower than that (phone layout's Controls sheet) first takes the
+        padding back, down to ``_CELL_PAD_MIN``, so a whole plate still shows
+        without scrolling; past that the columns scroll, and the horizontal bar
+        is given room of its own below the rows rather than covering the last.
+        """
+        if self._natural.isEmpty():
+            return
+        comfy, tight = self._cell_w
+        shown = min(self.columnCount(), _MAX_SHOWN_COLS)
+        width = self.width() if self.width() > 0 else self._natural.width()
+        per = (width - self._chrome_w) // max(1, shown)
+        per = max(tight, min(comfy, per))
+        hh = self.horizontalHeader()
+        if self._applied_w != per:
+            self._applied_w = per
+            hh.setMinimumSectionSize(per)
+            hh.setDefaultSectionSize(per)
+            for c in range(self.columnCount()):
+                hh.resizeSection(c, per)
+        h = self._natural.height()
+        if self.columnCount() <= _MAX_SHOWN_COLS and per * shown > width - self._chrome_w:
+            h += self._hbar_room
+        if self.minimumHeight() != h or self.maximumHeight() != h:
+            self.setFixedHeight(h)
+
+    def resizeEvent(self, event) -> None:  # Qt naming
+        super().resizeEvent(event)
+        self._fit_to_width()
+
+    def _aw_rescale(self) -> None:
+        """Re-measure the cells after a UI scale (``ui.phone_shell.rescale_widgets``).
+
+        The cell font comes from the application stylesheet, which a scale
+        change rewrites; the cell sizes were measured from the old font and
+        would elide every token at a larger one.
+        """
+        _fit_table(self, self.rowCount(), self.columnCount())
 
     # The band's action zone and the phone sheet both size the grid from its
     # hints: wide enough for every column up to the cap, never narrower than a
@@ -227,10 +324,13 @@ def build_heatmap_layout_panel(ctx, parent: QWidget) -> QWidget:
     hidden with the rest of the Heat Map's slot. Nothing here adds it to a
     layout. The panel is taller than one band row, so the band grows to hold it
     while the Heat Map is the leaf on screen (the action zone is top-aligned,
-    which keeps the buttons beside it on the first line).
+    which keeps the buttons beside it on the first line). In phone layout's
+    Controls sheet its ``bandRole`` makes it a full-width row of the Data
+    section rather than a cell of the Actions button grid.
     """
-    panel = QWidget(parent)
+    panel = _LayoutPanel(parent)
     panel.setObjectName("HeatmapLayoutPanel")
+    panel.setProperty("bandRole", _BAND_ROLE)
     # Never wider than the grid and its header line want, and never squeezed
     # vertically: the band reads the action zone's height hint, and a panel
     # given less would clip grid rows.
@@ -238,21 +338,29 @@ def build_heatmap_layout_panel(ctx, parent: QWidget) -> QWidget:
     lay = QVBoxLayout(panel)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(theme.Spacing.xs)
+    # The panel answers its own minimum size (``_LayoutPanel``); the layout's
+    # default constraint would pin it at the one-line header's width.
+    lay.setSizeConstraint(QLayout.SetNoConstraint)
 
-    # One header line: what the grid is, its size, and the one-click fill. It
-    # is a flow, so a host narrower than the line (phone layout's Controls
-    # sheet) wraps the button under the size controls instead of clipping it.
-    head = _HeaderLine(panel)
-    head_l = FlowLayout(head)
+    # The header: what the grid is, its size, and the one-click fill — one
+    # line where the host has the width, the button under the size controls
+    # where it has not (``_LayoutPanel.resizeEvent``).
+    head = QWidget(panel)
+    head.setObjectName("ControlBandGroup")      # the band's transparent ground reaches it
+    head_l = QGridLayout(head)
     head_l.setContentsMargins(0, 0, 0, 0)
     head_l.setSpacing(theme.Spacing.xs)
-    sync_flow_height(head)
     size_group = QWidget(head)
+    size_group.setObjectName("ControlBandGroup")
     size_l = QHBoxLayout(size_group)
     size_l.setContentsMargins(0, 0, 0, 0)
     size_l.setSpacing(theme.Spacing.xs)
+    # Captioned like the band's own scope labels ("Aggregation", "ON threshold").
+    # In phone layout's Controls sheet it reads like the form's own row labels
+    # (``sheetLabel``, a rule scoped to the sheet, so the band is unaffected).
     cap = QLabel("Layout", size_group)
     cap.setObjectName("Muted")
+    cap.setProperty("sheetLabel", True)
     size_l.addWidget(cap)
     rows_spin = SpinBox(size_group)
     rows_spin.setRange(1, _MAX_GRID)
@@ -265,7 +373,6 @@ def build_heatmap_layout_panel(ctx, parent: QWidget) -> QWidget:
     cols_spin.setValue(12)
     cols_spin.setToolTip("Columns in the heat-map grid")
     size_l.addWidget(cols_spin)
-    head_l.addWidget(size_group)
     autopop_btn = QPushButton("Auto-populate from selection", head)
     autopop_btn.setProperty("variant", "secondary")
     autopop_btn.setToolTip(
@@ -273,8 +380,8 @@ def build_heatmap_layout_panel(ctx, parent: QWidget) -> QWidget:
         "Grid will grow if needed to fit all selected wells."
     )
     autopop_btn.clicked.connect(lambda _=False: _on_autopopulate(ctx))
-    head_l.addWidget(autopop_btn)
-    lay.addWidget(head)
+    lay.addWidget(head, 0, Qt.AlignLeft)
+    panel._set_header(head_l, size_group, autopop_btn)
 
     # The grid itself. Its instructions live in the tooltip: a band row has no
     # room for a paragraph, and the grid is self-evident once a well is in it.
@@ -288,7 +395,9 @@ def build_heatmap_layout_panel(ctx, parent: QWidget) -> QWidget:
         "between cells to move. Double-click a cell — or drop it back on "
         "the plate map — to remove its well."
     )
-    lay.addWidget(table)
+    # Left-aligned under the header: a host wider than the grid (the phone's
+    # sheet) leaves the slack on the right rather than stretching the cells.
+    lay.addWidget(table, 0, Qt.AlignLeft)
 
     reg = ctx.widgets
     reg.register("_heatmap_layout_panel", panel)
@@ -303,64 +412,129 @@ def build_heatmap_layout_panel(ctx, parent: QWidget) -> QWidget:
     return panel
 
 
-class _HeaderLine(QWidget):
-    """The editor's header line: hinted at its one-line width, wrapping below it.
+class _LayoutPanel(QWidget):
+    """The editor: its header over the grid, the header on one line where it fits.
 
-    A ``FlowLayout`` hints only its widest item, so a panel sized from its
-    children would always be given too little width for one line and wrap at
-    the desk too. This hints the line laid end to end; a narrower host still
-    gets the wrap.
+    The header's button goes beside the size controls when the panel has the
+    width for both, and under them when it has not (phone layout's Controls
+    sheet). The choice is made here, from the width the panel was given, rather
+    than by a flow layout, so the panel's height is an ordinary size hint: a
+    height-for-width answer is not reliably honoured by the layouts above it —
+    the Controls sheet kept a stale one and drew the grid over the wrapped
+    button. The size hint is always the one-line width, so a band row gives the
+    panel room for one line; the minimum is the two-line width, so a narrower
+    host can still take it.
     """
 
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._head_l: QGridLayout | None = None
+        self._size_group: QWidget | None = None
+        self._button: QWidget | None = None
+        self._one_line: bool | None = None
+
+    def _set_header(self, grid: QGridLayout, size_group: QWidget, button: QWidget) -> None:
+        self._head_l, self._size_group, self._button = grid, size_group, button
+        self._arrange(one_line=True)
+
+    def _one_line_width(self) -> int:
+        if self._size_group is None or self._button is None:
+            return 0
+        return (self._size_group.sizeHint().width() + self._head_l.horizontalSpacing()
+                + self._button.sizeHint().width())
+
+    def _arrange(self, *, one_line: bool) -> None:
+        if one_line == self._one_line or self._head_l is None:
+            return
+        self._one_line = one_line
+        grid = self._head_l
+        grid.removeWidget(self._size_group)
+        grid.removeWidget(self._button)
+        grid.addWidget(self._size_group, 0, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        grid.addWidget(self._button, *((0, 1) if one_line else (1, 0)),
+                       Qt.AlignLeft | Qt.AlignVCenter)
+        self.updateGeometry()
+
     def sizeHint(self) -> QSize:  # Qt naming
-        lay = self.layout()
-        if lay is None:
-            return super().sizeHint()
-        items = [lay.itemAt(i) for i in range(lay.count())]
-        shown = [it for it in items if it.widget() is None or not it.widget().isHidden()]
-        w = sum(it.sizeHint().width() for it in shown)
-        w += max(0, len(shown) - 1) * lay.horizontalSpacing()
-        h = max((it.sizeHint().height() for it in shown), default=0)
-        return QSize(w, h)
+        hint = super().sizeHint()
+        return QSize(max(hint.width(), self._one_line_width()), hint.height())
+
+    def minimumSizeHint(self) -> QSize:  # Qt naming
+        hint = super().minimumSizeHint()
+        parts = [w for w in (self._size_group, self._button) if w is not None]
+        narrowest = max((w.minimumSizeHint().width() for w in parts), default=0)
+        table = self.findChild(_LayoutTable)
+        if table is not None:
+            narrowest = max(narrowest, table.minimumSizeHint().width())
+        return QSize(narrowest, hint.height())
+
+    def resizeEvent(self, event) -> None:  # Qt naming
+        super().resizeEvent(event)
+        self._arrange(one_line=self.width() >= self._one_line_width())
 
 
 def _fit_table(table: QTableWidget, rows: int, cols: int) -> None:
-    """Size the grid to its cells, up to the caps; scroll past them.
+    """Size the cells to the tokens they show and the grid to its cells.
+
+    The cell font is the application stylesheet's (``ui/theme.py``,
+    ``QTableWidget#HeatmapLayoutTable``), which follows the UI scale, so the
+    cells are measured from that font rather than from fixed pixels: a phone's
+    larger text then widens the cells with it instead of eliding every token to
+    "…". A cell is as wide as the widest text in the grid, and never narrower
+    than a 96-well token, so a set summarised as ``A01+3`` is not cut either.
 
     The panel lives in a row of controls, so it is sized to what it holds
-    rather than stretched: an 8x12 plate shows whole, and a 32x32 grid scrolls
-    inside a box no larger than the caps instead of pushing the plot off the
-    page. Cell sizes follow the UI scale (1.0 at the desk), like the cell font
-    ``refresh_heatmap_layout_panel`` sets, so phone layout's larger text still
-    fits its cells.
+    rather than stretched: an 8×12 plate shows whole, and a larger grid scrolls
+    inside a box of at most ``_MAX_SHOWN_ROWS`` × ``_MAX_SHOWN_COLS`` cells
+    instead of pushing the plot off the page.
     """
+    table.ensurePolished()
     scale = theme.ui_scale()
-    cell_w, cell_h = round(_CELL_W * scale), round(_CELL_H * scale)
-    max_w, max_h = round(_GRID_MAX_W * scale), round(_GRID_MAX_H * scale)
+    fm = table.fontMetrics()
+    texts = [_WIDEST_TOKEN]
+    for r in range(rows):
+        for c in range(cols):
+            item = table.item(r, c)
+            if item is not None and item.text():
+                texts.append(item.text())
+    text_w = max(fm.horizontalAdvance(t) for t in texts)
+    cell_w = text_w + round(2 * _CELL_PAD_W * scale)
+    tight_w = text_w + round(2 * _CELL_PAD_MIN * scale)
+    cell_h = fm.height() + round(2 * _CELL_PAD_H * scale)
     vh, hh = table.verticalHeader(), table.horizontalHeader()
+    vh.ensurePolished()
+    hh.ensurePolished()
     vh.setMinimumSectionSize(cell_h)
-    hh.setMinimumSectionSize(cell_w)
     vh.setDefaultSectionSize(cell_h)
-    hh.setDefaultSectionSize(cell_w)
-    frame = 2 * table.frameWidth()
-    grid_w = min(cols * cell_w, max_w)
-    grid_h = min(rows * cell_h, max_h)
-    # Room for the scrollbar the capped axis brings with it, so the last
-    # column / row is not hidden under it.
-    bar = table.style().pixelMetric(table.style().PixelMetric.PM_ScrollBarExtent)
-    extra_w = bar if rows * cell_h > max_h else 0
-    extra_h = bar if cols * cell_w > max_w else 0
-    # The row header holds at most two digits ("32"); its size hint can be
-    # taken before the header has polished its font, so floor it to that.
-    row_hdr_w = max(vh.sizeHint().width(),
-                    vh.fontMetrics().horizontalAdvance("88") + 2 * theme.Spacing.xs)
+    for r in range(rows):
+        vh.resizeSection(r, cell_h)
+    hdr_fm = hh.fontMetrics()
+    # Row numbers run to two digits ("32"); the header's own size hint can be
+    # taken before it has polished its font, so it is measured here instead.
+    row_hdr_w = hdr_fm.horizontalAdvance("88") + round(2 * _CELL_PAD_W * scale)
+    col_hdr_h = hdr_fm.height() + round(2 * _CELL_PAD_H * scale)
     vh.setFixedWidth(row_hdr_w)
+    hh.setFixedHeight(col_hdr_h)
+    frame = 2 * table.frameWidth()
+    grid_w = min(cols, _MAX_SHOWN_COLS) * cell_w
+    grid_h = min(rows, _MAX_SHOWN_ROWS) * cell_h
+    # Room for the scrollbar a capped axis brings with it, so the last column
+    # or row is not drawn under it. The bar's own hint, not the style's metric:
+    # phone layout's stylesheet widens the bars to a thumb's width.
+    bar_w = table.verticalScrollBar().sizeHint().width()
+    bar_h = table.horizontalScrollBar().sizeHint().height()
+    extra_w = bar_w if rows > _MAX_SHOWN_ROWS else 0
+    extra_h = bar_h if cols > _MAX_SHOWN_COLS else 0
     chrome_w = row_hdr_w + frame + extra_w
-    natural = QSize(chrome_w + grid_w, hh.sizeHint().height() + grid_h + frame + extra_h)
-    table._natural = natural
-    table._narrowest = chrome_w + min(cols, _MIN_VISIBLE_COLS) * cell_w + bar
-    table.setFixedHeight(natural.height())
-    table.setMaximumWidth(natural.width())
+    table._natural = QSize(chrome_w + grid_w, col_hdr_h + grid_h + frame + extra_h)
+    table._narrowest = chrome_w + min(cols, _MIN_VISIBLE_COLS) * tight_w
+    table._cell_w = (cell_w, tight_w)
+    table._chrome_w = chrome_w
+    table._hbar_room = 0 if extra_h else bar_h
+    # Forget the last width share so the new cell sizes are applied in full.
+    table._applied_w = None
+    table._fit_to_width()
+    table.setMaximumWidth(table._natural.width())
     table.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
     table.updateGeometry()
 
@@ -415,23 +589,6 @@ def refresh_heatmap_layout_panel(ctx) -> None:
             cols_spin.setValue(layout.cols)
         finally:
             cols_spin.blockSignals(False)
-
-    # Shrink the cell font as the grid gains columns — keeps wells like
-    # ``H12`` inside their cell at 12+ cols.
-    # The sizes are the desk's, times the UI scale (1.0 at the desk): phone
-    # layout scales a font a widget set on itself, and reads one set while its
-    # larger text is on as already scaled — an unscaled 8 pt set there would be
-    # divided down to about 3 pt on the way back to the desk.
-    cell_pt = 8 if layout.cols <= 8 else 7 if layout.cols <= 12 else (
-        6 if layout.cols <= 16 else 5)
-    scale = theme.ui_scale()
-    cell_font = table.font()
-    cell_font.setPointSizeF(cell_pt * scale)
-    table.setFont(cell_font)
-    hdr_font = table.horizontalHeader().font()
-    hdr_font.setPointSizeF(max(6, cell_pt - 1) * scale)
-    table.horizontalHeader().setFont(hdr_font)
-    table.verticalHeader().setFont(hdr_font)
 
     table.blockSignals(True)
     try:

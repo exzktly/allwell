@@ -877,7 +877,8 @@ QWidget#ControlBand {{
    colour, painting a lighter rectangle over the band; naming them lets that be
    undone here without the rule also reaching the controls they contain. */
 QWidget#ControlBandScope, QWidget#ControlBandGroup,
-QWidget#ControlBandForm, QWidget#ControlSheetSection, QWidget#ControlSheetRow {{
+QWidget#ControlBandForm, QWidget#ControlSheetSection, QWidget#ControlSheetRow,
+QWidget#HeatmapLayoutPanel {{
     background-color: transparent;
 }}
 /* Divider hairlines. Every divider in the app funnels through this rule so a
@@ -1738,9 +1739,14 @@ QTableView, QTableWidget {{
 QTableView::item, QTableWidget::item {{
     padding: 4px 8px;
 }}
-/* The Heat Map's layout grid sits in the control band at one-well cells; the
+/* The Heat Map's layout grid sits in the control band at one-well cells,
+   in caption-sized type; review/features/heatmap/layout_view.py measures
+   each cell from this font, so the cells follow it at every UI scale. The
    table's default padding would leave a row-number header no room for its
-   digit, and a cell none for its well token. */
+   digits, and a cell none for its well token. */
+QTableWidget#HeatmapLayoutTable, QTableWidget#HeatmapLayoutTable QHeaderView {{
+    font-size: {t.caption_size}px;
+}}
 QTableWidget#HeatmapLayoutTable QHeaderView::section {{
     padding: 0px 2px;
 }}

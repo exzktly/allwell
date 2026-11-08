@@ -345,8 +345,7 @@ def _rescale_font(w: QWidget, font: QFont, prev: float, new: float) -> None:
         # desk size is that divided by the scale, to the half point or whole
         # pixel. The stylesheet's ``*`` rule gives every widget a size at its
         # polish, so a font that is still there to be read is the
-        # stylesheet's or one set later from a token (the one literal site,
-        # the heat map's layout grid, scales its sizes). A run log built in
+        # stylesheet's or one set later from a token. A run log built in
         # phone layout carries the stylesheet's 31 px; read as a literal, it
         # stayed 31 px at the desk.
         kind, value = size

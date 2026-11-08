@@ -4377,8 +4377,16 @@ row, holding five actions:
   the powers — the Response Curves dose axis, which ticks the concentrations
   you gave — because a subdivision belongs to the power beneath it, so under
   ticks that are something else the marks fall unevenly between one label and
-  the next and say nothing about either. **Every setting applies only to the
-  plot you edit it on** — sizes, fonts, grid, legend, ticks, limits, log scale,
+  the next and say nothing about either. **The panel shows only the settings the
+  plot can use.** A per-cell scatter has no Error bars or Time section, a heat map
+  has no Legend or Lines & Markers, and *Statistics → Show* and *Group label
+  size* appear on Bar Plots alone, since no other plot reads them. On the
+  Nanowells page the Beeswarm section appears on the Distribution view only; a
+  spacing you set there is kept while you look at the other views. A line at the
+  foot of the panel counts the settings this plot is not offered — hover it to
+  see each one and why. Statistics, Overlays, Time, Colours, Bars and Beeswarm
+  are shared: a change there reaches every plot that uses it. **Every other
+  setting applies only to the plot you edit it on** — sizes, fonts, grid, legend, ticks, limits, log scale,
   line and marker styling, layout and the export profile. Raising the axis-label
   size on Line Graphs leaves Bar Plots as it was; the Scatter tab's Cells and
   Wells views are separate plots here, so sizing markers for five aggregate

@@ -1134,6 +1134,7 @@ def _features() -> list[FeatureDescriptor]:
         ),
         FeatureDescriptor(
             name="Multivariate", group="Analysis", on_phone=True, icon="scatter-chart",
+            style_facets=_lazy_state("review.features.multivariate._style_facets", "style_facets"),
             rail_sections=_MAIN, build=_build_multivariate,
             lazy_only=True,
             states=(StateSpec("multivariate", _state_multivariate),),
@@ -1145,6 +1146,7 @@ def _features() -> list[FeatureDescriptor]:
         ),
         FeatureDescriptor(
             name="Spatial", group="Analysis", on_phone=True, icon="waypoints",
+            style_facets=_lazy_state("review.features.spatial._style_facets", "style_facets"),
             rail_sections=_MAIN, build=_build_spatial,
             lazy_only=True,
             states=(StateSpec("spatial", _state_spatial),),
@@ -1158,6 +1160,7 @@ def _features() -> list[FeatureDescriptor]:
         # kind of input (nanowell-array plates; smFISH channels) ───────────
         FeatureDescriptor(
             name="Nanowells", group="Assays", on_phone=True, icon="hexagon",
+            style_facets=_lazy_state("review.features.nanowell._style_facets", "style_facets"),
             rail_sections=_MAIN, build=_build_nanowell,
             lazy_only=True,
             states=(StateSpec("nanowell", _state_nanowell),),
@@ -1247,6 +1250,7 @@ def _features() -> list[FeatureDescriptor]:
         # ── Plotting sub-leaves (no rail entry; dispatch hooks only) ───────
         FeatureDescriptor(
             name="Heat Map", parent="Plotting", build=_build_heatmap,
+            style_facets=_lazy_state("review.features.heatmap._style_facets", "style_facets"),
             # The layout configurator sits in the main frame under the plate,
             # which is its drag source while the page is focused.
             rail_sections=(MAIN_RAIL_SECTION,
@@ -1268,6 +1272,7 @@ def _features() -> list[FeatureDescriptor]:
         ),
         FeatureDescriptor(
             name="Bar Plots", parent="Plotting", build=_build_barplot,
+            style_facets=_lazy_state("review.features.barplot._style_facets", "style_facets"),
             rail_sections=_MAIN,
             states=(StateSpec("bar", _state_bar),),
             on_activate=_activate_bar_plots,
@@ -1279,12 +1284,14 @@ def _features() -> list[FeatureDescriptor]:
             observations=("cells", "nanowells"),
         ),
         FeatureDescriptor(name="Line Graphs", parent="Plotting", build=_build_lineplot,
+                          style_facets=_lazy_state("review.features.lineplot._style_facets", "style_facets"),
                           rail_sections=_MAIN,
                           on_activate=_activate_default_plot,
                           redraw=_redraw_line_graphs,
                           # Well medians over time under Observations: Nanowells (lineplot/_observations.py).
                           observations=("cells", "nanowells")),
         FeatureDescriptor(name="Response Curves", parent="Plotting",
+                          style_facets=_lazy_state("review.features.response._style_facets", "style_facets"),
                           rail_sections=_MAIN,
                           build=_build_response, redraw=_redraw_response,
                           on_activate=_activate_response,
@@ -1295,6 +1302,7 @@ def _features() -> list[FeatureDescriptor]:
                           view_state_io=_response_view_state_io),
         FeatureDescriptor(
             name="Scatter Plot", parent="Plotting", build=_build_scatter,
+            style_facets=_lazy_state("review.features.scatter._style_facets", "style_facets"),
             rail_sections=_MAIN,
             on_activate=_activate_scatter,
             on_selection_changed=_sel_scatter,
@@ -1306,6 +1314,7 @@ def _features() -> list[FeatureDescriptor]:
         ),
         FeatureDescriptor(
             name="Distribution", parent="Plotting", build=_build_distribution,
+            style_facets=_lazy_state("review.features.distribution._style_facets", "style_facets"),
             rail_sections=_MAIN,
             on_activate=_activate_distribution,
             on_channel_changed=_channel_distribution,

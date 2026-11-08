@@ -915,6 +915,30 @@ def set_pref_scope(ctx, fig, scope: str) -> None:
                 panel._resync_pref_fields()
 
 
+def mark_style_view(ctx, fig, view: str) -> None:
+    """Stamp on *fig* the view it shows now, *view*, for the Properties controls offered on it.
+
+    A figure that draws several views on one canvas declares which Properties facets each view lacks
+    (``review/domain/style_facets.FigureFacets.views``). Its renderer calls this whenever it draws, and an open
+    Properties panel on the figure re-gates when the view changes: the controls of a facet the new view does not draw
+    are hidden — kept, with their values, for when a view that draws it returns.
+
+    Separate from :func:`set_pref_scope`, which keys the settings to the view: "which settings this view keeps" and
+    "which controls this view offers" are different claims, and a figure may make one without the other."""
+    if fig is None:
+        return
+    view = view or ""
+    if getattr(fig, "_aw_style_view", "") == view:
+        return
+    fig._aw_style_view = view
+    from core.safe import swallow
+
+    for panel in list((ctx.widgets.get_or_none("_export_style_sidebars") or {}).values()):
+        if getattr(panel, "_fig", None) is fig and hasattr(panel, "_apply_facets"):
+            with swallow("show the Properties controls of the view now shown"):
+                panel._apply_facets()
+
+
 def _with_scope(key: str, fig) -> str:
     """*key* for the view *fig* shows now: ``<key>:<scope>`` when the figure carries a non-empty ``_aw_pref_scope``."""
     scope = getattr(fig, "_aw_pref_scope", "") if fig is not None else ""

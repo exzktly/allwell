@@ -6702,19 +6702,48 @@ control-that-does-nothing shape, arriving from the opposite direction to the
 roster failures below: not a tab a list forgot, but a section no list ever
 limited.
 
-`_STYLE_FACETS_A_FIGURE_LACKS` in `features/export/properties_view.py` states the
-exceptions, keyed by the `app` attribute naming the figure, and `_supports(facet)`
-reads it. **Only exceptions**: a figure with no row supports everything and a
-facet absent from a figure's row is supported by it, so forgetting a figure
-leaves a dead control rather than taking a working one away — the safe direction
-for a table whose entries can only be established by measuring. Each entry
-carries its reason, at the site and in the roster, because a bare facet name is
-indistinguishable six months later from one added to make a failure go away.
-The Heat Map is the figure measured so far, and it lacks `legend`, `marks`,
-`plot_overlays`, `bar_show_mode`, `group_labels` and `log_axes`.
+Every figure the panel opens on declares which **style facets** it has. The
+vocabulary is `review/domain/style_facets.FACETS` — about twenty words, each
+naming the rows it gates (`legend`, `bar_show_mode`, `time_axis`, `line_marks`,
+`point_marks`, `colour_limits`, `draw_order`, …). Each feature that draws a panel
+figure declares it in `review/features/<feature>/_style_facets.py`, reached
+through `FeatureDescriptor.style_facets` (a lazy factory, so a build profile
+that drops the feature drops its declaration), and `FeatureRegistry.style_facets()`
+merges them, refusing a figure declared twice. A declaration is a
+`FigureFacets`, and it is **total**: every facet is in `has` or in `lacks`, and
+every absence carries its reason. `UNIVERSAL` holds the five facets every figure
+has (profile, typography, grid, axis limits, layout engine); a facet added to
+the vocabulary is in no declaration until each figure has answered for it.
 
-Two rules make this hold up. A gated section is **not built**, rather than built
-and hidden: an unbuilt section registers no getter and no setter, so `_persist`
+The panel resolves its figure's declaration once, in `_declared_facets`, and
+`_supports(facet)` reads it. Every section names its facet when it is built
+(`_SectionGrid.section(name, facet=…)`, refusing a word outside the
+vocabulary), a row may name another (`add_row(…, facet=…)`), and the kit
+records each row's facet and each bound key's facet. A figure with no
+declaration — only a bare test double — is offered every control, with a
+warning in the log.
+
+A figure that draws several views on one canvas may withhold facets view by
+view (`FigureFacets.views`). The Nanowells page does: only its Distribution view
+draws a beeswarm. Its redraw stamps the view on the figure on every path
+(`plot_style.mark_style_view`, beside `set_pref_scope` — one keys the settings
+to the view, the other says which controls the view offers), and the stamp
+re-gates any panel bound to the figure; `launch_export_editor` re-gates on open
+too. Those controls are **built and hidden**, not left unbuilt, so a value set
+in one view is still there when a view that draws it returns. While hidden, a
+key is skipped by `_persist` (`_hidden_keys`) — it shows the value it was seeded
+with, which the user cannot see to have meant — while `_resync_pref_fields`
+still re-seeds it. Only rows of a facet some view withholds are ever shown or
+hidden by this, so a control another part of the panel shows and hides for its
+own reason (the two draw-order lists) is left to it. A section with no visible
+row is hidden.
+
+The footer says how many settings the figure's current view is not offered
+(`_refresh_not_offered_note`), and its tooltip names each with its reason, so a
+missing control has an answer that does not need the source.
+
+Three rules make this hold up. A facet the figure never has is **not built**,
+rather than built and hidden: an unbuilt section registers no getter and no setter, so `_persist`
 does not write its keys and `_resync_pref_fields` does not re-seed them, and a
 widget like the Statistics *Show* segment cannot be re-seeded into writing
 `bar_show_mode` from a tab that has no bars. And the claims are **re-measured**
@@ -6722,7 +6751,26 @@ rather than trusted — `tests/test_properties_hides_what_it_cannot_do.py` rende
 the heat map twice per hidden pref and compares the PNGs, so a pref that starts
 mattering fails there instead of staying hidden after becoming useful. The same
 file pins what is *kept*, which is what separates a correct gate from one that
-emptied the panel.
+emptied the panel. And the declarations are **held to the renderers**:
+`tests/test_every_properties_figure_declares_its_facets.py` holds every panel
+figure to exactly one total declaration, every section to a facet in the
+vocabulary and every facet to a control, and — for the facets whose controls
+write a `PlotState` field (`bar_show_mode`, `group_labels`, `threshold_line`,
+`value_labels`, `time_axis`, `error_bars`, `beeswarm`, `bar_geometry`,
+`colour_mode`) — the packages that declare the facet to exactly the packages
+whose code names the field or the helper that reads it. It checks per package,
+so the Scatter package's two figures are checked as one and the per-cell
+scatter's absences there rest on their written reasons.
+`tests/test_properties_follow_the_plot.py` holds the panel to the declarations:
+each figure's built and shown sections, written out per figure; the Nanowells
+beeswarm following the view through the page's real redraw; and a hidden key
+left unwritten.
+
+The declarations hide a control only where changing it cannot change the
+figure. A control the style pass *does* act on stays visible where the result is
+unwanted — a reference line restyled as data, a grid forced over a matrix —
+because hiding it would remove the only way to undo what the default does; those
+are style-pass defects, tracked in `PROPERTIES_RELEVANCE_TRACKER.md`.
 
 The **Axis #** picker lists the figure's plot panels and leaves out its colour
 bars. `fig.axes` includes a colour bar, and every per-axis pass in
@@ -6856,6 +6904,7 @@ What a new leaf still has to join, and what each costs when it is missed:
 | `app_state._FEATURE_STATE_OWNERS` | a disabled feature's slice raises a bare `AttributeError` | `test_feature_slice_names` |
 | `ui_helpers.OWN_CHANNEL_LEAVES` — only if the leaf scopes its own Channel/Property | two Channel dropdowns, and an ON-cutoff box editing a channel the tab is not drawing | `test_band_globals_follow_the_leaf` |
 | `plot_style.FIGURE_PLOT_KEYS` | the figure's per-figure prefs fall back to a diagnostic key | — |
+| `style_facets=` on that descriptor, from `<leaf>/_style_facets.py` (also for any non-leaf feature whose figure the Properties panel opens on — Spatial, Nanowells, Multivariate) | the panel offers the figure every control, including the ones that change nothing there | `test_every_properties_figure_declares_its_facets` |
 
 Everything else — the restore router, the rep-mirror set, the band's slot
 switching, the repaint fan-outs — reads the registry and needs no edit at all.
@@ -6944,8 +6993,9 @@ Statistics report carries its `_STATS_NOTES` prefixes from alerts and notes both
 `::test_a_short_figure_with_a_long_footer_still_draws`; the page tests read the footer through
 `test_nanowell_page._texts`, which reads the field.
 
-The two figures that draw a beeswarm — the Bar figure and the Nanowells figure
-(`_draws_beeswarm`) — get a **Beeswarm** section (`_build_beeswarm_section`)
+The two figures that draw a beeswarm — the Bar figure and the Nanowells figure,
+the two declaring the `beeswarm` facet, Nanowells on its Distribution view only —
+get a **Beeswarm** section (`_build_beeswarm_section`)
 with one *Point spacing* row in the same Auto-switch-plus-stepper shape. It
 writes `PlotState.swarm_spacing`, a multiple of one dot's width (0.0 = Auto),
 and redraws, since where a dot goes is decided by the layout rather than by a
@@ -20572,14 +20622,14 @@ or a non-positive low end on a `LogNorm` leaves the plot's own. The keys are in
 `AXIS_LIMIT_PREF_KEYS`, so they are per figure, cleared by **Auto scale** and
 dropped on a dataset switch with the X and Y limits, but they are not in the
 per-panel buckets: a colour scale belongs to the figure, not to a subplot. The
-row is offered only on the figures in `properties_view._COLOUR_SCALE_FIGURES`
-(Nanowells, Spatial, Multivariate), each with what it colours: a bar, line or
-scatter plot keys its colours with a legend, so the row would move nothing
-there. The roster is held against what it lists — the feature packages whose
-code makes a colour bar — so a new one fails rather than going without the row.
-The Heat Map, the one exemption, marks its image `_aw_owns_clim`, because Display
-▾ owns its range (Auto / Global / typed, and the log norm), and carries a
-`colour_limits` facet in `_STYLE_FACETS_A_FIGURE_LACKS`
+row is offered only on the figures whose style facets include `colour_limits`
+(Nanowells, Spatial, Multivariate): a bar, line or scatter plot keys its colours
+with a legend, so the row would move nothing there. The declarations are held
+against what they claim — the feature packages whose code makes a colour bar —
+so a new one fails rather than going without the row. The Heat Map, the one
+exemption, marks its image `_aw_owns_clim`, because Display ▾ owns its range
+(Auto / Global / typed, and the log norm), and lacks `colour_limits` with that
+reason in `heatmap/_style_facets.py`
 (`tests/test_properties_hides_what_it_cannot_do.py` re-measures that the keys
 change nothing there). `tests/test_colour_limits.py` covers the pass, the Array
 view's filled nanowells through `render_array`, the real sidebar's two fields

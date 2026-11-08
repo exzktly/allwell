@@ -37,6 +37,7 @@ from dataclasses import dataclass
 # Module scope, not function-local: ``_decorate`` imports nothing from here,
 # so there is no cycle to work around — and a deferred feature import that is
 # not breaking a cycle is one the budget guard counts for nothing.
+from review.features.barplot._baseline_ratio import apply_relative_to
 from review.features.barplot._decorate import decorate_bar_items
 from review.domain.batch_models import BarGroup, ReplicateSet
 from review.domain import fold_change as _fc
@@ -144,6 +145,18 @@ class BarItem:
     # it are drawn :attr:`BarGeometry.group_spacing` apart rather than a full
     # slot, so the group reads as one.
     run_key: str = ""
+    # *Then relative to* (``_baseline_ratio``). Empty unless that stage ran on
+    # this redraw; when it did, ``mean`` / ``frac`` / ``n_above`` carry R and
+    # ``stage1`` keeps the stage-1 ``(mean, spread, has_mean)`` the CSV's
+    # ``fold_change_*`` columns go on reporting, so those columns never change
+    # meaning under a setting.
+    rel_baseline: str = ""
+    rel_outcome: str = ""
+    rel_detail: str = ""
+    stage1: tuple | None = None
+    interaction: object | None = None
+    interaction_label: str = ""
+    interaction_p_bh: float | None = None
 
 
 #: The gap between the bars of one timepoint group, as a fraction of the bar
@@ -948,6 +961,11 @@ def collect_bar_items(
     collector = _BarCollector(ctx, req, miss_sink)
     items = _in_emission_order(collector.items_for_tp, req.target_ts,
                                req.group_mode)
+    # *Then relative to*, on the live pass only: the CSV's raw pass asks for
+    # ``FC_STATE_OFF`` and must stay raw, and it must not overwrite the notice
+    # the drawn figure reads. Before decoration, which never touches values.
+    if fc_state is None:
+        items = apply_relative_to(ctx, collector, items)
     # Colour by / Split by, once over the finished list rather than in each
     # construction branch. A sweep that edited the branches would be a sweep
     # with a branch left out, and a figure where some bars honour the control

@@ -66,6 +66,9 @@ class BarPlotState:
     #: could not compute and why. Written by ``_baseline_ratio`` and drawn on the
     #: figure, never the status line (see ``split_notice``).
     rel_notice: str = ""
+    #: Whether the last live pass applied the stage. The axis suffix reads it
+    #: so a declined rule (no per-sample control, vs t0 on) adds no label.
+    rel_applied: bool = False
 
     def relative_to_on(self) -> bool:
         return bool(self.rel_variable_id and self.rel_value_id)

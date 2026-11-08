@@ -244,6 +244,8 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_export_btn", export_btn)
     reg.register("_sp_export_csv_act", export_csv_act)
     band.add_action(export_btn)
+    from review.core.cell_lasso_view import make_lasso_button
+    band.add_action(make_lasso_button(ctx, band, "_sp_canvas", source="lasso · Spatial map"))
     band.add_action(make_properties_button(ctx, band, "spatial"))
 
     # ── parameters: colony detection, boundary, summary display ─────────────

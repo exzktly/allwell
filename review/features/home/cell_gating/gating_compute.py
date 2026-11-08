@@ -89,6 +89,7 @@ _FUNNEL_LAYERS: tuple[tuple[str, str], ...] = (
     ("Nanowell out of focus", "NW_Focus_Pass"),
     ("Touching image border", "Border_Pass"),
     ("FOV selection", "FOV_Pass"),
+    ("Excluded saved cells", "Saved_Cells_Pass"),
 )
 
 

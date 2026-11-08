@@ -687,6 +687,10 @@ def _load_directory_held(ctx, d: Path, label=None) -> None:
     try:
         app._persistence.load("cell_overrides")
         apply_curation_to_cache(ctx)
+        # Saved cells, and the set excluded from analysis, before any row is read.
+        app._persistence.load("cell_sets")
+        from review.data.saved_cells_gate import apply_saved_cells_gate_to_cache
+        apply_saved_cells_gate_to_cache(ctx)
         # Fields excluded by hand from QC triage are curation too, and are
         # hydrated with it for the same reason: before any controller reads a
         # row. The projector re-runs on every frame ``get_rows`` loads later.

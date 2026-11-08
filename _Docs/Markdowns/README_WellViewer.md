@@ -3249,6 +3249,21 @@ hand.
 
 #### Cell Gating
 
+**Saved cells.** Below *Cell inclusion*, the **Saved cells** list holds every
+set saved with **Lasso cells** — on a Spatial map or a Multivariate projection,
+press Lasso cells and draw round the cells you want; they are saved as
+"Cells 1", "Cells 2", …. Each entry says how many cells it holds and where it
+was drawn; one drawn on a UMAP or t-SNE sample says so ("drawn on 2,500
+sampled cells of 61,000"), because cells the sample did not draw cannot be in
+it. Select a set to rename it in the box below the list, or **Delete** it.
+Saving a set changes no number anywhere. **Exclude from analysis** picks the one
+set whose cells are left out of every plot, statistic and export; it shows in
+the inclusion funnel as "Excluded saved cells" and in Segmentation's *Why
+removed* in khaki. If a well is segmented again after a set was saved, the
+set's cells in that well may now be other cells: the entry says "stale" and how
+many cells it leaves out, and neither the Cell Browser nor the exclusion uses
+them. Reset → *Saved cells* deletes every set.
+
 **What it is.** The single place that decides which cells are *included* and
 which count as *on* for fraction-on statistics — the gating layer every plot,
 statistic, and export consumes.
@@ -7516,11 +7531,12 @@ actually looks like at the single-cell level.
 - **Controls** — the sidebar **criteria** filter (per-metric ranges) plus
   timepoint / FOV pickers; centre-row **channel toggles**, a **boundary**
   toggle, a **page size**, and **Load next** (the gallery fills incrementally).
-- **From scatter gate.** Ticking this sources the gallery from the gate(s) drawn
-  on the Scatter Plot instead of the criteria — so the criteria rows and
-  **+ Add criterion** grey out, with a line saying why. The setting sticks until
-  you untick it, which is worth knowing if you come back later and find the
-  criteria editor inert.
+- **Source.** The menu at the top of the sidebar chooses which cells the gallery
+  shows: **Criteria** (the filter rows below), **Scatter gates** (exactly the
+  cells inside the gate(s) drawn on the Scatter Plot), or **Saved cells: …** (a
+  set you saved with **Lasso cells** on Spatial or Multivariate — those cells
+  exactly, from whichever wells hold them). Only Criteria uses the filter rows;
+  with another source they grey out and a line says so.
 - **Optimal use** — pair it with the Scatter Plot in Split View: gate a
   population on the scatter and watch the matching cells populate the gallery.
 

@@ -45,6 +45,8 @@ class CellBrowserState:
     # When True, collect_cells uses the scatter gate inclusion mask and the
     # criteria editor is disabled (the gate is the numeric filter).
     scatter_gate_mode: bool = False
+    #: The saved-cell set the gallery shows instead (``core/cell_sets``), or None.
+    saved_cells: str | None = None
     page_size: int = DEFAULT_PAGE_SIZE
     cells: list[CellDescriptor] = field(default_factory=list)
     loaded: int = 0

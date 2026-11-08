@@ -61,6 +61,7 @@ DOMAIN_LABELS: dict[str, str] = {
     "field_exclusions": "field exclusions",
     "triage_decisions": "QC triage decisions",
     "cell_overrides": "per-cell curation",
+    "cell_sets": "saved cells",
 }
 
 #: How many history rows the PDF prints before saying how many it left out.

@@ -82,6 +82,9 @@ DECLINED: dict[str, str] = {
         "per-cell overrides are keyed by the source's nucleus ids, a crop by "
         "its pixel geometry, and a field exclusion by a field the source run "
         "measured; none of them identifies anything on another plate"),
+    "saved_cells": (
+        "a saved set names cells by the source's well, field, timepoint and "
+        "nucleus id; on another plate those ids belong to other cells"),
     "smfish": (
         "a saved smFISH threshold is the one the per-well spot counts were "
         "baked with by Apply Global Threshold; copied alone it would describe "

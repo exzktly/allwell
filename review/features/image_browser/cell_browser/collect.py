@@ -325,6 +325,11 @@ def collect_cells(
     # default. With the mode on but no gate drawn, no cells match (the caller
     # shows a "draw a gate" hint).
     gate_mode = bool(getattr(st, "scatter_gate_mode", False))
+    # Saved cells as the source: exactly the set's usable cells (those in
+    # wells re-segmented since it was saved are left out — they may be other
+    # cells now), from the wells that hold them, with no criteria and no
+    # inclusion layer: the set is the user's own list.
+    set_cells = None if gate_mode else _saved_set_cells(ctx, getattr(st, "saved_cells", None))
     gates = []
     if gate_mode:
         all_gates = list(ctx.state.cell_gating.scatter_gates or [])
@@ -356,7 +361,7 @@ def collect_cells(
                 target = np.asarray([float(t) for t in scatter_tps], dtype=float)
         if fov_set is not None and not fov_set:
             fov_set = None
-    elif live_sync:
+    elif _relaxes_empty_pickers(live_sync, set_cells):
         if target is not None and target.size == 0:
             target = None
         if fov_set is not None and not fov_set:
@@ -372,27 +377,16 @@ def collect_cells(
     # drives both. (An earlier attempt froze the gallery to the wells stamped on
     # the gate at draw time; that decoupled the panes, which is the opposite of
     # what's wanted.)
-    selected = cell_browser_source_wells(ctx)
+    selected = _source_wells(ctx, set_cells)
     # A gate drawn on a nanowell metric reads each cell's own nanowell's value, as Cell Gating applies it.
     nanowell_values = _gate_nanowell_values(ctx, gate_mode, gates)
     for well in selected:
         df = get_rows(ctx, well)
         if df is None or df.empty:
             continue
-        if gate_mode:
-            mask = (compute_gate_inclusion(df, gates, ratios, nanowell_values=nanowell_values) if gates
-                    else np.zeros(len(df), dtype=bool))
-            # Mirror the scatter cloud exactly: the per-cell scatter pre-filters
-            # by df_included_mask (QC / crop / cell-gating "Included") before
-            # drawing the gate, so a cell that fails those layers is invisible on
-            # the plot even when it sits inside the rectangle. The gate gallery
-            # must apply the same base inclusion or it shows cells the user can't
-            # see on the scatter they gated from (include_gate=False: we apply our
-            # own gate above, so don't also require Gate_Pass).
-            if gates:
-                mask &= df_included_mask(df, include_gate=False).to_numpy()
-        else:
-            mask = _passes_criteria(df, criteria, ratios)
+        mask = _source_mask(df, well, gate_mode=gate_mode, gates=gates, ratios=ratios,
+                            nanowell_values=nanowell_values, set_cells=set_cells,
+                            criteria=criteria)
         if target is not None and "timepoint_hours" in df.columns:
             if target.size == 0:
                 mask &= False  # options exist, none selected → no cells
@@ -461,6 +455,55 @@ def collect_cells(
     if keys and out:
         out = _apply_sort(ctx, out, keys, sort_cols)
     return out
+
+
+def _relaxes_empty_pickers(live_sync: bool, set_cells) -> bool:
+    """Whether an empty timepoint / FOV picker means "all" rather than "none":
+    on the live auto-sync path, and for a saved set, which is its own list."""
+    return bool(live_sync) or set_cells is not None
+
+
+def _source_wells(ctx, set_cells) -> list:
+    """The selected wells, or for a saved set the loaded wells that hold its cells."""
+    if set_cells is None:
+        return cell_browser_source_wells(ctx)
+    return sorted({c[0] for c in set_cells} & set(ctx.state.dataset.well_paths or ()), key=parse_rc)
+
+
+def _saved_set_cells(ctx, name) -> frozenset | None:
+    """The usable cells of the saved set *name* (``None`` when no set is the source).
+
+    Cells in wells segmented again since the set was saved are left out — they
+    may be other cells now (``core/cell_sets.usable_cells``)."""
+    if not name:
+        return None
+    from review.core.cell_sets import find, usable_cells
+    found = find(ctx, name)
+    return usable_cells(ctx, found) if found is not None else frozenset()
+
+
+def _source_mask(df, well, *, gate_mode, gates, ratios, nanowell_values, set_cells, criteria):
+    """Which of a well's rows the chosen source admits, before timepoint / FOV narrowing."""
+    if gate_mode:
+        if not gates:
+            return np.zeros(len(df), dtype=bool)
+        mask = compute_gate_inclusion(df, gates, ratios, nanowell_values=nanowell_values)
+        # Mirror the scatter cloud exactly: the per-cell scatter pre-filters
+        # by df_included_mask (QC / crop / cell-gating "Included") before
+        # drawing the gate, so a cell that fails those layers is invisible on
+        # the plot even when it sits inside the rectangle. The gate gallery
+        # must apply the same base inclusion or it shows cells the user can't
+        # see on the scatter they gated from (include_gate=False: we apply our
+        # own gate above, so don't also require Gate_Pass).
+        return mask & df_included_mask(df, include_gate=False).to_numpy()
+    if set_cells is not None:
+        # The set is the user's own list: no criteria and no inclusion layer.
+        from domain.image_identity import cell_key_tuples_for_dataframe
+        keys_of = cell_key_tuples_for_dataframe(df)
+        if keys_of is None:
+            return np.zeros(len(df), dtype=bool)
+        return keys_of.map(lambda k: (well, *k) in set_cells).to_numpy(dtype=bool)
+    return _passes_criteria(df, criteria, ratios)
 
 
 def _apply_sort(ctx, out, keys: list[SortKey], sort_cols: list[list]):

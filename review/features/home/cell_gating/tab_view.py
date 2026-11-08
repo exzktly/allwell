@@ -47,6 +47,7 @@ from widgets.flow_layout import FlowLayout
 from widgets.separator import build_hline_separator
 from widgets.wrap_radio import WrapRadioRow
 from review.features.qc.tab_view import build_qc_gate_controls
+from review.features.home.cell_gating.saved_cells_view import build_saved_cells_section
 from review.features.home.cell_gating.controller import (
     _GATE_BUTTON_ATTR,
     _GATE_CHOICES_ATTR,
@@ -171,6 +172,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     cf_layout.setContentsMargins(6, 6, 6, 6)
 
     _build_inclusion_section(ctx, control_frame, cf_layout)
+    build_saved_cells_section(ctx, control_frame, cf_layout)
     _build_fraction_on_section(ctx, control_frame, cf_layout)
     _build_readout_section(ctx, control_frame, cf_layout)
     root.addWidget(_jump_row(ctx, parent, outer_scroll))

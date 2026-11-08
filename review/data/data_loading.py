@@ -562,7 +562,7 @@ def _warn_no_area_column(where: str) -> None:
 #: Segmentation (``review/data/curation.py``), first because it is the one layer
 #: a person decided cell by cell.
 VERDICT_LAYERS = ("Curation_Pass", "QC_Pass", "Crop_Pass", "Gate_Pass", "Field_Pass", "Focus_Pass", "NW_Focus_Pass",
-                  "Border_Pass", "Excluded_Field_Pass", "FOV_Pass")
+                  "Border_Pass", "Excluded_Field_Pass", "FOV_Pass", "Saved_Cells_Pass")
 
 
 def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,

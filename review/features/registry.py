@@ -1650,6 +1650,10 @@ def _register_cache_projectors() -> None:
     register_cache_projector(_lazy_projector(
         "review.data.fov_selection", "apply_fov_selection_to_cache"),
         columns=_lazy_projector("review.data.fov_selection", "fov_selection_input_columns"))
+    # The one saved-cell set excluded from analysis (Cell Gating → Saved cells).
+    register_cache_projector(_lazy_projector(
+        "review.data.saved_cells_gate", "apply_saved_cells_gate_to_cache"),
+        columns=_lazy_projector("review.data.saved_cells_gate", "saved_cells_input_columns"))
 
 
 def attach_feature_state(state, registry: FeatureRegistry | None = None) -> None:

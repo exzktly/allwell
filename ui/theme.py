@@ -210,6 +210,10 @@ class Colors:
     # column. Lavender, not green; measured ΔE ≥ 32 (CIE76) to the overlay's
     # other ten inks, relative luminance 0.52.
     exclusion_intensity = "#C4B5FD"
+    # Segmentation overlay: a cell in the saved-cell set excluded from analysis
+    # (Saved_Cells_Pass). Khaki; measured ΔE ≥ 44 (CIE76) to the overlay's
+    # other eleven inks, relative luminance 0.32.
+    exclusion_saved_cells = "#AA9955"
     # One cell shown on its own (the Scatter cell popup): its boundary, the
     # Segmentation overlay's default boundary ink so a cell reads the same in
     # both. And the focused cell — the one the status-bar chip names — ringed

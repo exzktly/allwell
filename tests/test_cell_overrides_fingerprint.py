@@ -1,4 +1,4 @@
-"""Regression test: `_well_zip_fingerprints` must canonicalise well tokens.
+"""Regression test: `well_zip_fingerprints` must canonicalise well tokens.
 
 Before this fix, an unpadded on-disk out-zip (``A1_out.zip``) left the
 fingerprint dict keyed by the raw stem (``"A1"``) while every override's
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from review.persistence.cell_overrides import _well_zip_fingerprints
+from review.persistence.cell_overrides import well_zip_fingerprints
 
 
 def test_fingerprints_keyed_by_canonical_well(tmp_path):
@@ -20,11 +20,11 @@ def test_fingerprints_keyed_by_canonical_well(tmp_path):
     (tmp_path / "B02_out.zip").write_bytes(b"x")
     ctx = SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(data_dir=tmp_path)))
 
-    fingerprints = _well_zip_fingerprints(ctx)
+    fingerprints = well_zip_fingerprints(ctx)
 
     assert set(fingerprints) == {"A01", "B02"}
 
 
 def test_fingerprints_empty_without_data_dir():
     ctx = SimpleNamespace(state=SimpleNamespace(dataset=SimpleNamespace(data_dir=None)))
-    assert _well_zip_fingerprints(ctx) == {}
+    assert well_zip_fingerprints(ctx) == {}

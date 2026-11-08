@@ -1242,6 +1242,7 @@ def _layer_inks():
     return {
         "deleted here": theme.Colors.danger,
         "below the intensity gate": theme.Colors.exclusion_intensity,
+        "in the excluded saved cells": theme.Colors.exclusion_saved_cells,
         "debris gate": theme.Colors.warn,
         "outside the crop": theme.Colors.stale,
         "outside the scatter gates": theme.Colors.accent,

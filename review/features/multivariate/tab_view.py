@@ -135,6 +135,8 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
             unavailable="Tick at least one feature column first."),
     )
     band.add_action(export_btn)
+    from review.core.cell_lasso_view import make_lasso_button
+    band.add_action(make_lasso_button(ctx, band, "_mv_canvas", source="lasso · Multivariate"))
     band.add_action(make_properties_button(ctx, band, "multivariate"))
 
     # ── per-mode option groups + the timepoint filter ───────────────────────

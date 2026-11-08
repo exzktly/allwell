@@ -158,5 +158,8 @@ def fit_tick_labels(fig) -> None:
     """
     renderer = fig.canvas.get_renderer()
     for ax in fig.axes:
-        _fit_axis(ax, ax.xaxis, ax.get_xlim(), renderer, can_turn=True)
+        # An x axis whose angle the user typed in Properties keeps it: shrunk to
+        # fit if it must be, never turned (``plot_style._style_x_tick_angle``).
+        typed = bool(getattr(ax.xaxis, "_aw_angle_typed", False))
+        _fit_axis(ax, ax.xaxis, ax.get_xlim(), renderer, can_turn=not typed)
         _fit_axis(ax, ax.yaxis, ax.get_ylim(), renderer, can_turn=False)

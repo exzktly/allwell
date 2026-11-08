@@ -23,7 +23,7 @@ from functools import partial
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-    QMenu, QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
+    QMenu, QProgressBar, QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
 
@@ -58,7 +58,7 @@ from review.features.image_browser.image_table.build_layout import (
 )
 from review.features.image_browser.image_table.builder_view import (
     build_shelf, builder_mark_inclusion_stale, builder_notify_rendered,
-    builder_flush_pending, builder_set_stacked,
+    builder_flush_pending, builder_set_stacked, builder_spec, builder_transpose,
 )
 from review.features.image_browser.image_table.export import (
     GALLERY_QUALITY_LABELS,
@@ -427,12 +427,23 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # leaves the rendered images. "Clear images" wipes only the rendered grid,
     # keeping the layout so a re-Generate is one click away.
     table_btn = _menu_button(action_row, "Table",
-                             tooltip="Reset the layout, or clear the images")
+                             tooltip="Reset the layout, clear the images, or transpose the table")
     tmenu = table_btn.menu()
     owned_action(tmenu, "Reset table layout").triggered.connect(
         lambda _=False: image_table_reset_layout(ctx))
     owned_action(tmenu, "Clear rendered images").triggered.connect(
         lambda _=False: image_table_clear_render(ctx))
+    # Swap rows and columns — the shelf's two axes, and the table on screen with
+    # them. Not offered in Plate mode, whose rows and columns are the plate's.
+    tmenu.addSeparator()
+    transpose_act = owned_action(tmenu, "Transpose rows and columns")
+    transpose_act.setToolTip("Swap what runs down the rows with what runs across the columns")
+    transpose_act.triggered.connect(lambda _=False: builder_transpose(ctx))
+    reg.register("_image_table_transpose_act", transpose_act)
+
+    def _sync_table_menu() -> None:
+        transpose_act.setEnabled(not bool(getattr(builder_spec(ctx), "plate", False)))
+    tmenu.aboutToShow.connect(_sync_table_menu)
     tr.addWidget(table_btn)
 
     # Dataset-wide *display* crop (per-channel display options live on the
@@ -619,6 +630,17 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # the app is actually in, so the first open of an un-loaded app does not ask
     # the user to choose wells from a picker that has none.
     image_table_refresh_empty_state(ctx)
+
+    # Progress of a Generate that takes a while: the images being read, then
+    # drawn. Hidden until a Generate has run for a moment (``_load_progress``).
+    load_label = reg.register("_image_table_load_label", QLabel("", inner))
+    load_label.setObjectName("Muted")
+    load_label.setVisible(False)
+    il.addWidget(load_label)
+    load_bar = reg.register("_image_table_load_bar", QProgressBar(inner))
+    load_bar.setTextVisible(False)
+    load_bar.setVisible(False)
+    il.addWidget(load_bar)
 
     render_host = QWidget(inner)
     render_grid = QGridLayout(render_host)

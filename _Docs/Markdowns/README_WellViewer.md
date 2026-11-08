@@ -4402,7 +4402,8 @@ row, holding five actions:
   meaning keep it — the bar plot's *n/a* cap stays a cap, and hollow markers for
   doses off the axis stay hollow. **X tick angle** at 0 keeps the angle each plot
   picks for its own labels (slanted bar labels past eight bars, the heat map's
-  column labels); any other angle applies as typed. A plot whose cells are the
+  column labels); any other angle applies as typed, also on a crowded axis, where
+  the labels shrink to fit rather than being turned on end. A plot whose cells are the
   data — the Multivariate matrices — keeps its grid off. **Every other
   setting applies only to the plot you edit it on** — sizes, fonts, grid, legend, ticks, limits, log scale,
   line and marker styling, layout and the export profile. Raising the axis-label
@@ -7228,7 +7229,9 @@ channel for every well).
   zone; drag a **root** dimension (Well / Timepoint / FOV) onto a zone to make that
   axis vary by it, with its channels nested underneath (*root ↓ channels* for Rows,
   *root → channels* for Columns). Then press **Generate** to render. Editing the
-  shelf only stages the layout — **Generate** draws the images. More than two
+  shelf only stages the layout — **Generate** draws the images. A Generate that
+  takes more than a moment shows a progress bar above the table: *Loading
+  images* as each image is read, then *Drawing images* as the cells are placed. More than two
   dimensions can vary at once (e.g. Rows = *Well › Channels*, Columns = *Timepoint*).
 - **Reorder the nested channels** — the order of the channel chips under a root is
   the order their rows or columns appear in, and you set it by dragging a chip
@@ -7327,7 +7330,12 @@ channel for every well).
   about the other would read as a full account of what is wrong with the file.
 - **Action strip** — **Generate** · **Table ▾** (*Reset table layout*, back to
   defaults; *Clear rendered images*, which keeps the layout so Generate re-renders
-  in one click) · **Crop view ▾** (drag a region on any image — the button reads
+  in one click; *Transpose rows and columns*, which swaps what runs down the rows
+  with what runs across — each axis moves whole, with its channels and its
+  Overlay switch — and redraws a table already on screen. The grid holds at most
+  12 columns, so a tall table turned on its side can leave images off the end;
+  the status line says how many, and **Wrap** bands the columns to show them
+  all. Not offered in Plate mode, whose rows and columns are the plate's) · **Crop view ▾** (drag a region on any image — the button reads
   the current crop, `Crop view · (full FOV)` when there is none). This crops what
   the images *show*; it is not the Segmentation tab's **Crop cells**, which
   excludes cells from every plot, statistic and export. · an **ON threshold** value

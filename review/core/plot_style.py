@@ -1424,6 +1424,10 @@ def _style_x_tick_angle(ax, angle: int) -> None:
     # way: their left edge is anchored at the tick, so a right-anchored slant
     # would run down into the plot it labels.
     own = getattr(ax, "_aw_own_xtick_angle", None)
+    # A typed angle is the user's: ``tick_fit`` may shrink labels that collide
+    # at it, but must not stand them on end, which overrode every typed angle
+    # on a crowded axis with 90°.
+    ax.xaxis._aw_angle_typed = angle != 0
     if angle == 0 and own is not None:
         rotation, ha, mode = own
     else:

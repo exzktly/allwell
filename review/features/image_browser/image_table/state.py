@@ -151,7 +151,7 @@ class ImageTableState:
     # (comparable) instead of each cell auto-fitting independently. Not persisted.
     auto_lut_by_channel: dict = field(default_factory=dict)
     # Set of (well, chan_lower, variant, tp, fov) tuples the parallel prefetch
-    # (controller._prefetch_cell_arrays) has already warmed, across Generates —
+    # (_prefetch._prefetch_cell_arrays) has already warmed, across Generates —
     # separate from image_cache (which holds ref-dicts, not a per-image marker)
     # so a second Generate on an unchanged grid skips re-submitting work to the
     # thread pool instead of just cheaply re-hitting _load_array's own caches.
@@ -394,6 +394,22 @@ class TableSpec:
         if self.cols.channels:
             return "cols"
         return None
+
+
+def transpose_spec(spec: TableSpec) -> bool:
+    """Swap the table's rows and columns in place: whatever ran down the rows runs across, and the reverse.
+
+    Each axis moves whole — its root, the channels nested under it and its Overlay switch — so a transposed table
+    shows the same images, each in the cell its row and column now name. The Fixed values and filters belong to
+    neither axis and stay. Wrap stays as set: it bands whichever axis is now the columns.
+
+    Returns ``False``, changing nothing, in Plate mode, whose rows and columns are the plate's own (A–H by 1–12)
+    whatever the axes hold, so there is nothing to swap.
+    """
+    if getattr(spec, "plate", False):
+        return False
+    spec.rows, spec.cols = spec.cols, spec.rows
+    return True
 
 
 def spec_to_state_fields(spec: TableSpec) -> dict:

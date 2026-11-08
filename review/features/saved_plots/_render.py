@@ -61,8 +61,8 @@ def render_saved_plot(ctx, rec) -> RenderedPlot:
         return RenderedPlot(reason=f"the {rec.tab or 'originating'} tab draws no "
                                    f"chart that can be redrawn")
     if not _redraw_keeps_the_scope(ctx, store, rec, card):
-        return RenderedPlot(reason="saved as one panel of a multi-panel figure; "
-                                   "a redraw would draw every panel")
+        return RenderedPlot(reason="saved as one panel or a side figure of its "
+                                   "tab; a redraw would draw the tab's whole figure")
     try:
         restore_saved_plot(ctx, rec.id, adopt_groups=True)
         if _gating_recompute_now(ctx):

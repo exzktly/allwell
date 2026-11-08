@@ -518,6 +518,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_detail_card", detail_card)
     reg.register("_nw_detail_fig", detail_card.figure)
     reg.register("_nw_detail_canvas", detail_card.canvas)
+    apply_plot_card_decorators(ctx, detail_card, "Nanowells", part="nanowell over time")
     detail_layout.addLayout(_detail_header(ctx, detail))
     detail_layout.addWidget(detail_card, 3)
     detail_layout.addWidget(_crops_header(ctx, detail))
@@ -526,6 +527,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_strip_card", strip_card)
     reg.register("_nw_strip_fig", strip_card.figure)
     reg.register("_nw_strip_canvas", strip_card.canvas)
+    apply_plot_card_decorators(ctx, strip_card, "Nanowells", part="crops")
     detail_layout.addWidget(strip_card, 1)
     detail.hide()
     reg.register("_nw_detail_pane", detail)
@@ -957,6 +959,9 @@ def _popout_window(ctx):
     ctx.widgets.register("_nw_popout_card", card)
     ctx.widgets.register("_nw_popout_fig", card.figure)
     ctx.widgets.register("_nw_popout_canvas", card.canvas)
+    # Without this the Save menu's *Save to Saved Plots* reached a card with no save handler and did nothing.
+    from review.core.ui_helpers import apply_plot_card_decorators
+    apply_plot_card_decorators(ctx, card, "Nanowells", part="crops pop-out")
     card.plotThemeChanged.connect(lambda _m: nwc.draw_popout(ctx))
     card.canvas.mpl_connect("button_press_event", lambda event: wnc.on_popout_press(ctx, event))
     card.canvas.mpl_connect("button_release_event", lambda event: wnc.on_popout_release(ctx, event))

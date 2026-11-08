@@ -207,5 +207,10 @@ def save_card_to_gallery(ctx, card_attr: str) -> None:
     card = ctx.widgets.get_or_none(card_attr)
     if card is None or not hasattr(card, "saveFigureToGallery"):
         return
+    if getattr(card, "_save_handler", None) is None:
+        # A card no Saved Plots decorator reached — a build without the gallery,
+        # or a card nobody wired. The menu item used to do nothing at all here.
+        ctx.notify.set_status("Saving to Saved Plots is not available for this figure.")
+        return
     with _captured_at_full_fidelity(ctx, card_attr):
         card.saveFigureToGallery()

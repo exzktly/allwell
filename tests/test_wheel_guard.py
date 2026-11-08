@@ -2,6 +2,9 @@
 
 Reported on the Analyze tab: the form is long and has to be scrolled, and every dropdown the pointer crossed changed
 its value. Driven as the wheel reaches a widget: a ``QWheelEvent`` sent to the field.
+
+The guard is on the form's own fields (``keep_guarding``), never on the application: an application filter in Python
+crashed a Windows session twice, inside the filter, just after Review loaded a dataset, and not once with it off.
 """
 
 from __future__ import annotations
@@ -25,7 +28,6 @@ def _wheel(widget, delta: int = -120) -> None:
 
 @pytest.fixture
 def form(qtbot):
-    wheel_guard.install(QApplication.instance())
     page = QWidget()
     lay = QVBoxLayout(page)
     first = QLineEdit()                           # the window's first field takes the focus when it opens
@@ -40,6 +42,7 @@ def form(qtbot):
     tail = QWidget()
     tail.setMinimumHeight(2000)                   # a long form: the area has room to scroll
     lay.addWidget(tail)
+    wheel_guard.keep_guarding(page)
     area = QScrollArea()
     area.setWidgetResizable(True)
     area.setWidget(page)
@@ -97,36 +100,55 @@ def test_a_guarded_field_takes_no_focus_from_the_wheel(form):
     assert combo.focusPolicy() == Qt.StrongFocus and spin.focusPolicy() == Qt.StrongFocus   # click and tab, no wheel
 
 
-def test_a_field_built_later_gets_the_same_policy(form, qtbot):
+def test_a_field_added_to_the_form_later_is_guarded_too(form, qtbot):
+    """Fields the form builds after it was guarded — a row added inside a nested section — are walked in when the
+    form's layout changes."""
     area, _combo, _spin = form
-    late = QComboBox(area.widget())
-    assert late.focusPolicy() == Qt.WheelFocus           # Qt's default, until it is shown
-    late.show()
-    qtbot.waitExposed(late)
-    assert late.focusPolicy() == Qt.StrongFocus
+    page = area.widget()
+    section = QWidget()
+    inner = QVBoxLayout(section)
+    page.layout().insertWidget(1, section)
+    qtbot.wait(50)
+    late = QComboBox()
+    late.addItems(["one", "two"])
+    inner.addWidget(late)
+    qtbot.waitUntil(lambda: late.focusPolicy() == Qt.StrongFocus, timeout=2000)
+    _wheel(late)
+    assert late.currentIndex() == 0, "a field added later took the wheel"
 
 
-def test_the_app_installs_the_guard_at_startup():
-    """A guard nothing installs guards nothing: ``allwell.main`` is where the one application-wide filter is put on."""
+def test_a_dropdown_outside_a_guarded_form_is_left_alone(qtbot):
+    """The guard is the form's, not the application's: a dropdown elsewhere (a Review page) keeps Qt's own wheel, and
+    nothing of the guard runs for it."""
+    page = QWidget()
+    lay = QVBoxLayout(page)
+    combo = QComboBox()
+    combo.addItems(["one", "two", "three"])
+    lay.addWidget(combo)
+    qtbot.addWidget(page)
+    page.show()
+    qtbot.waitExposed(page)
+    assert combo.focusPolicy() == Qt.WheelFocus and not combo.property("_aw_wheel_guarded")
+    _wheel(combo)
+    assert combo.currentIndex() == 1
+
+
+def test_no_filter_is_put_on_the_application():
+    """The crash this rules out was inside a filter on the whole application: nothing may install one again."""
     from tests._repo_scan import REPO_ROOT
 
+    assert not hasattr(wheel_guard, "install")
     main_source = (REPO_ROOT / "allwell.py").read_text(encoding="utf-8").split("def main()", 1)[1]
-    assert "wheel_guard.install(app)" in main_source
+    assert "wheel_guard" not in main_source
 
 
-@pytest.mark.parametrize(("value", "wanted"), [(None, True), ("", True), ("1", True), ("0", False), (" 0 ", False)])
-def test_the_guard_can_be_left_out_for_a_diagnosis(value, wanted):
-    """``ALLWELL_WHEEL_GUARD=0`` starts the app without the guard, to learn whether a reported crash inside its filter
-    needs it; anything else, or nothing, installs it."""
-    env = {} if value is None else {wheel_guard.SWITCH_ENV: value}
-    assert wheel_guard.wanted(env) is wanted
+def test_the_analyze_form_is_guarded(qtbot):
+    """The form the behaviour was asked for: the real Analyze tab guards its dropdowns and number boxes."""
+    from analyze.tab import AnalyzeTab
 
-
-def test_the_app_records_whether_the_guard_is_on_in_the_boot_log():
-    """The switch is a diagnosis, so the crash log it is read beside must say which way the session ran."""
-    from tests._repo_scan import REPO_ROOT
-
-    main_source = (REPO_ROOT / "allwell.py").read_text(encoding="utf-8").split("def main()", 1)[1]
-    assert "if wheel_guard.wanted():" in main_source
-    assert '_boot_diag.boot("wheel guard: on")' in main_source
-    assert '_boot_diag.boot(f"wheel guard: off ({wheel_guard.SWITCH_ENV}=0)")' in main_source
+    tab = AnalyzeTab()
+    qtbot.addWidget(tab)
+    fields = [*tab._left_sidebar.widget().findChildren(QComboBox), *tab._left_sidebar.widget().findChildren(QSpinBox)]
+    assert len(fields) > 5
+    assert all(f.property("_aw_wheel_guarded") for f in fields), [f.objectName() for f in fields
+                                                                   if not f.property("_aw_wheel_guarded")]

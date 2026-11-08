@@ -42,3 +42,9 @@ class CellSetsState:
     stale: dict = field(default_factory=dict)
     #: The one set whose cells are left out of every analysis, or ``None``.
     exclude: str | None = None
+    #: The one set highlighted on the per-cell Scatter, or ``None``. Beside
+    #: ``exclude`` so a rename or delete follows it the same way.
+    highlight: str | None = None
+    #: A highlight a restored saved plot asked for whose set no longer exists:
+    #: the plot says so in its title rather than drawing nothing silently.
+    missing_highlight: str | None = None

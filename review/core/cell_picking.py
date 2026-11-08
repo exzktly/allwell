@@ -92,9 +92,12 @@ def clear_rings(ax) -> None:
 
 def draw_ring(ax, x: float, y: float) -> None:
     from ui import theme
-    ax.plot([x], [y], marker="o", markersize=14, markerfacecolor="none",
-            markeredgecolor=theme.Colors.focused_cell, markeredgewidth=2.0,
-            linestyle="none", gid=RING_GID, zorder=10)
+    (ring,) = ax.plot([x], [y], marker="o", markersize=14, markerfacecolor="none",
+                      markeredgecolor=theme.Colors.focused_cell, markeredgewidth=2.0,
+                      linestyle="none", gid=RING_GID, zorder=10)
+    # The Properties pass restyles every marker line to the plot's point size
+    # and fill; the ring is a mark about one cell, not a data point.
+    ring._aw_no_style_override = True
 
 
 def focused_indices(ctx, cells: PlottedCells) -> np.ndarray:

@@ -35,6 +35,7 @@ def to_payload(state) -> dict:
     return {
         "version": _SCHEMA_VERSION,
         "exclude": state.exclude,
+        "highlight": state.highlight,
         "sets": [{"name": s.name, "created": s.created, "source": s.source, "note": s.note,
                   "fingerprints": dict(s.fingerprints),
                   "cells": [list(c) for c in sorted(s.cells)]} for s in state.sets],
@@ -79,6 +80,7 @@ def save_to_data_dir(ctx) -> None:
 def load_from_data_dir(ctx) -> None:
     state = ctx.state.cell_sets
     state.sets, state.stale, state.exclude = [], {}, None
+    state.highlight = state.missing_highlight = None
     path = path_for(ctx)
     if path is None or not path.exists():
         return
@@ -89,3 +91,5 @@ def load_from_data_dir(ctx) -> None:
         return
     state.sets, state.stale, state.exclude = from_payload(
         payload, fingerprints_for_data_dir(ctx.state.dataset.data_dir))
+    highlight = payload.get("highlight") if isinstance(payload, dict) else None
+    state.highlight = highlight if highlight in {s.name for s in state.sets} else None

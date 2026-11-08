@@ -25,7 +25,7 @@ import pandas as pd
 from review.data.data_loading import resolve_value_series
 from review.data.metric_labels import SYNTHETIC_METRIC_KEYS
 from review.domain.metric_registry import column_gating_exempt
-from review.features.export.cell_scope_compute import CellScope, plotted_wells, scope_from_ctx
+from review.features.export.cell_scope_compute import CellScope, MarkerFn, plotted_wells, scope_from_ctx
 from review.features.scatter.collect import gates_for_axes
 from review.features.scatter.controller import (
     col_for_scatter_axis, scatter_axis_metric_key,
@@ -55,6 +55,37 @@ def _gate_marker(gates, ratios):
         return np.asarray(compute_gate_inclusion(df, gates, ratios, nanowell_values=None),
                           dtype=bool)
     return _marker
+
+
+def saved_cells_marker(ctx) -> tuple[str, MarkerFn] | None:
+    """``(column, marker)`` for the highlighted saved set, or ``None`` with no highlight.
+
+    The column is named for the set, so a pasted CSV still says which set it
+    was. 1 / 0 per row, and **blank** (NA) for a row in a well segmented again
+    since the set was saved: membership there was not computed, which is not
+    the same as "not in the set". A marker, never a filter.
+    """
+    import pandas as pd
+
+    from domain.image_identity import cell_key_tuples_for_dataframe
+    from review.core.cell_sets import highlighted_set, usable_cells
+
+    cell_set = highlighted_set(ctx)
+    if cell_set is None:
+        return None
+    usable = usable_cells(ctx, cell_set)
+    stale_wells = set(ctx.state.cell_sets.stale.get(cell_set.name) or {})
+
+    def _marker(df, _scope):
+        well = str(df.attrs.get("well_label", ""))
+        if well in stale_wells:
+            return pd.array([pd.NA] * len(df), dtype="Int8")
+        keys = cell_key_tuples_for_dataframe(df)
+        if keys is None:
+            return pd.array([pd.NA] * len(df), dtype="Int8")
+        return pd.array([int((well, *k) in usable) for k in keys], dtype="Int8")
+
+    return f"in_saved_cells[{cell_set.name}]", _marker
 
 
 def _selected_timepoints(ctx) -> tuple[float, ...]:
@@ -147,6 +178,7 @@ def cell_scope(ctx, *, entry_x: str | None = None, entry_y: str | None = None,
             ("plot_y_above_floor", _axis_marker(col_y, gate_y)),
             ("plot_axes_finite", _finite_axes),
             ("plot_in_gate", _gate_marker(gates, ratios)),
+            *((saved,) if (saved := saved_cells_marker(ctx)) else ()),
         ),
         drawn_subset="plot_x_above_floor=1 AND plot_y_above_floor=1 AND "
                      "plot_axes_finite=1 (AND plot_in_gate=1 with Apply gates on)",

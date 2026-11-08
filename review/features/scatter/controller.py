@@ -22,7 +22,7 @@ from review.domain.ratio_models import is_ratio_key
 from pipeline.shape_features import is_shape_column
 from core.safe import swallowed
 from review.core.plot_style import apply_export_style_to_current, figure_prefs, style_legend
-from review.features.scatter._focus_ring import store_interaction_points
+from review.features.scatter._cell_rings import store_interaction_points
 from review.features.scatter.collect import (  # re-export
     collect_scatter_agg_data,
     collect_scatter_data,

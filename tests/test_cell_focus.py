@@ -78,7 +78,7 @@ def test_clicking_the_chip_opens_the_cell_in_segmentation(ctx, monkeypatch):
 
 
 def _ring_points(ax):
-    from review.features.scatter._focus_ring import RING_GID
+    from review.features.scatter._cell_rings import RING_GID
     return [tuple(map(float, (ln.get_xdata()[0], ln.get_ydata()[0])))
             for ln in ax.lines if ln.get_gid() == RING_GID]
 

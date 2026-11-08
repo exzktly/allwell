@@ -14,7 +14,7 @@ from core.safe import swallowed
 from review.core.plot_annotations import value_label_settings
 from review.core.plot_style import apply_export_style_to_current, figure_prefs
 from review.features.scatter._annotations import note_sampled, note_value_labels_unavailable
-from review.features.scatter._focus_ring import store_interaction_points
+from review.features.scatter._cell_rings import store_interaction_points
 from review.features.scatter.collect import gate_filter_title_suffix
 from review.features.scatter.gating import (
     paint_gates, refresh_gate_selector, render_scatter_points,

@@ -7263,7 +7263,7 @@ from `ReviewApp.__init__`:
   `selection_changed` and runs `apply_selection_refresh` — sidebar refresh
   plus a per-tab view refresh.
 - `focused_cell_changed` is heard by the status-bar chip (`core/focus_view.py`)
-  and by the per-cell Scatter's ring (`features/scatter/_focus_ring.py`,
+  and by the per-cell Scatter's ring (`features/scatter/_cell_rings.py`,
   connected where that tab is built).
 
 **The focused cell (`core/focus_state.py`, `core/cell_focus.py`,
@@ -7279,9 +7279,11 @@ its own: `review_image/renderer._focused_nucleus_here` asks
 through the shared normalisers (`same_frame`), so the outline appears exactly
 when the focused cell's field is on screen and a number from another field never
 lands on this field's cell of the same id. The per-cell Scatter files each
-redraw's points through `_focus_ring.store_interaction_points`, which rings the
-focused cell (`theme.Colors.focused_cell`) by well, nucleus id and its row's field
-and timepoint, and repaints the ring alone on a focus change. The status-bar chip
+redraw's points through `_cell_rings.store_interaction_points`, which resolves
+every drawn point to its cell in one narrow read per well (`plotted_cells_for`;
+points carry the row's index *label*, so rows are looked up by label), rings the
+focused cell (`theme.Colors.focused_cell`, `cell_picking.focused_indices`), and
+repaints the ring alone on a focus change. The status-bar chip
 (`widgets/focus_chip.FocusChip`, built by `focus_view.build_focus_chip` into
 Review's status row and adopted into the shell's status bar by `allwell.py`, as
 the status label is) names the cell; its text opens it through the
@@ -7325,6 +7327,27 @@ exclusion; the funnel row is "Excluded saved cells", the overlay ink
 `theme.Colors.exclusion_saved_cells`. The domain is `cell_sets` in
 `provenance.STORED_AT`, its own reset scope `saved_cells`, and a recipe declines
 it (the ids belong to the source plate's segmentation).
+
+**A highlighted set on the per-cell Scatter.** `CellSetsState.highlight` (beside
+`exclude`, so rename and delete follow it; saved in `cell_sets.json` and in the
+Scatter's view_state snapshot) is chosen from Display ▾ → *Highlight saved
+cells* (`core/saved_set_combo.SavedSetHighlightCombo`) or the Saved cells panel's
+*Highlight on Scatter*; `set_highlighted` emits `plot_options_changed`, so the
+plot redraws. `_cell_rings.paint_saved_cells` does not ring the set — a 14-px
+ring per cell merges at a few hundred and hides the focused one — it fades every
+cloud artist to `FADE` of its own opacity (colour kept) and redraws the set's
+points solid in `Colors.saved_cells_highlight` as one `Line2D` (`SET_GID`,
+`_aw_no_style_override`, at the plot's point size; a point-sized outline on a
+density cloud), under the focused ring. Membership is by normalised `CellKey`
+over the resolved identity, so a nucleus id repeated at other fields or
+timepoints is not lit. A note on the figure names how many are shown, how many
+are not on this plot and why (wells not plotted; filtered out here), how many
+were lost to re-segmentation, and when the set is excluded from analysis; the
+title gains `· highlighting <set>` through `collect.gate_filter_title_suffix`, or
+says a restored plot's set no longer exists. The per-cell export carries an
+`in_saved_cells[<set>]` marker (nullable, blank in a well re-segmented since the
+set was saved; `export.cell_scope_compute.build_chunk` hands markers the well in
+`frame.attrs["well_label"]`).
 
 The emit *is* the trigger (no paired direct call alongside it). Two refreshes
 deliberately stay off the bus: `_toggle_sem` (the SEM/SD toggle — its redraw

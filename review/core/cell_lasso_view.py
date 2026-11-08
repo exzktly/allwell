@@ -74,7 +74,9 @@ def make_lasso_button(ctx, parent, canvas_key: str, *, source: str) -> QPushButt
         else:
             ctx.notify.set_status(f"Saved {len(saved.cells):,} cells as “{saved.name}”"
                                   + (f" ({saved.note})" if saved.note else "")
-                                  + ". Rename or use it under Cell Gating → Saved cells.")
+                                  + ". Highlight it on the Scatter (Display ▾, or Cell Gating → "
+                                    "Saved cells → Highlight on Scatter), use it as the Cell Browser's "
+                                    "source, or rename it under Cell Gating → Saved cells.")
 
     def _toggled(on: bool) -> None:
         if not on:

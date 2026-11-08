@@ -69,15 +69,20 @@ def describe(ctx, cell_set: CellSet) -> str:
     return " · ".join(parts)
 
 
+#: Widgets that list the sets and refresh when they change.
+REFRESH_KEYS = ("_saved_cells_panel", "_scatter_highlight_cb")
+
+
 def _changed(ctx) -> None:
     """Save, and refresh the Saved cells panel when this build has one."""
     persistence = getattr(ctx, "persistence", None)
     if persistence is not None:
         persistence.schedule_save("cell_sets")
-    panel = ctx.widgets.get_or_none("_saved_cells_panel") if getattr(ctx, "widgets", None) else None
-    refresh = getattr(panel, "refresh", None)
-    if callable(refresh):
-        refresh()
+    widgets = getattr(ctx, "widgets", None)
+    for key in REFRESH_KEYS:
+        refresh = getattr(widgets.get_or_none(key) if widgets is not None else None, "refresh", None)
+        if callable(refresh):
+            refresh()
 
 
 def add_set(ctx, cells, *, source: str = "", note: str = "", name: str = "") -> CellSet | None:
@@ -116,6 +121,8 @@ def rename_set(ctx, old: str, new: str) -> bool:
         st.stale[new] = st.stale.pop(old)
     if st.exclude == old:
         st.exclude = new
+    if st.highlight == old:
+        st.highlight = new
     _changed(ctx)
     return True
 
@@ -126,6 +133,8 @@ def delete_set(ctx, name: str) -> None:
     st.stale.pop(name, None)
     if st.exclude == name:
         set_excluded(ctx, None)
+    if st.highlight == name:
+        set_highlighted(ctx, None)
     _changed(ctx)
 
 
@@ -142,6 +151,26 @@ def set_excluded(ctx, name: str | None) -> None:
     invalidate_stats_cache(ctx)
     _changed(ctx)
     ctx.bus.plot_options_changed.emit(ctx.state.plot)
+
+
+def set_highlighted(ctx, name: str | None) -> None:
+    """Highlight *name*'s cells on the per-cell Scatter (``None`` for none). Changes no number."""
+    st = _state(ctx)
+    name = name if name and find(ctx, name) is not None else None
+    st.missing_highlight = None
+    if st.highlight == name:
+        return
+    st.highlight = name
+    _changed(ctx)
+    ctx.bus.plot_options_changed.emit(ctx.state.plot)
+    notify = getattr(ctx, "notify", None)
+    if name and notify is not None:
+        notify.set_status(f"Highlighting “{name}” on the per-cell Scatter.")
+
+
+def highlighted_set(ctx) -> CellSet | None:
+    st = getattr(ctx.state, "cell_sets", None)
+    return find(ctx, st.highlight) if st is not None and st.highlight else None
 
 
 def excluded_cells(ctx) -> frozenset:

@@ -5693,6 +5693,16 @@ cells it kept.
   one you are looking at. A cell that cannot be shown says why where the image
   would be (no segmentation mask for the field, the nucleus is not in it, or
   the plot is out of date and needs redrawing).
+- **Highlight saved cells** (under **Display ▾**, or **Highlight on Scatter** in
+  Cell Gating → Saved cells). Draws one saved set's cells solid in cyan over the
+  rest of the cloud, which fades but keeps its colours. A line under the plot
+  says how many of the set are shown and why the others are not (in wells you
+  have not plotted, or filtered out here by timepoints, an axis floor, inclusion,
+  gates or sampling), how many were lost to re-segmentation, and when the set is
+  also excluded from analysis; the title says which set is highlighted. It
+  changes no number. A saved plot remembers it, and says so if the set has been
+  deleted since. The per-cell export gains an `in_saved_cells[<set>]` column (1 /
+  0, blank for a well segmented again since the set was saved).
 - **Apply gates** (under **Display ▾**). This plot is the one place that shows the *whole* cloud even
   when your gates are filtering everything else — that is deliberate, because
   you draw the gates here and need to see what falls outside them to judge or

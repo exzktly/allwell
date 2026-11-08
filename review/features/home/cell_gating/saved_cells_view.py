@@ -47,6 +47,12 @@ class SavedCellsPanel(QWidget):
         self.delete.setProperty("variant", "secondary")
         self.delete.clicked.connect(self._delete)
         row.addWidget(self.delete)
+        self.highlight = QPushButton("Highlight on Scatter", self)
+        self.highlight.setProperty("variant", "secondary")
+        self.highlight.setToolTip("Draw this set's cells solid over the faded cloud on the per-cell "
+                                  "Scatter (also under the Scatter's Display ▾). Changes no number.")
+        self.highlight.clicked.connect(self._highlight)
+        row.addWidget(self.highlight)
         lay.addLayout(row)
         ex = QHBoxLayout()
         ex_lbl = QLabel("Exclude from analysis", self)
@@ -89,7 +95,7 @@ class SavedCellsPanel(QWidget):
             self.exclude.blockSignals(False)
         has = bool(all_sets)
         self.empty.setVisible(not has)
-        for w in (self.list, self.name, self.delete, self.exclude):
+        for w in (self.list, self.name, self.delete, self.highlight, self.exclude):
             w.setEnabled(has)
         self._on_pick()
 
@@ -108,6 +114,11 @@ class SavedCellsPanel(QWidget):
         if name:
             cs.delete_set(self.ctx, name)
             self.refresh()
+
+    def _highlight(self) -> None:
+        name = self._selected()
+        if name:
+            cs.set_highlighted(self.ctx, name)
 
     def _on_exclude(self) -> None:
         cs.set_excluded(self.ctx, self.exclude.currentData())

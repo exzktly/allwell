@@ -233,6 +233,10 @@ class Colors:
     # default "selected" ink.
     cell_outline      = "#FF4040"
     focused_cell      = "#FFE640"
+    # The highlighted saved cells on the per-cell Scatter: solid points over a
+    # faded cloud. Cyan, apart from the focused yellow and the khaki the same
+    # set takes in Segmentation when it is excluded from analysis.
+    saved_cells_highlight = "#00E5FF"
     spatial_observed  = "#4AA3FF"   # observed curve on the Spatial tab
     spatial_reference = "#FF9C4A"   # its random-reference curve
     gate_curve_a      = "#4FC3F7"   # Cell Gating optimizer, control well A

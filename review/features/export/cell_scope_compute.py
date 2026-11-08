@@ -326,6 +326,10 @@ def build_chunk(df: pd.DataFrame, scope: CellScope, *,
             out[col] = _marker_series(np.ones(len(out), dtype=bool), out.index)
 
     sub = df.loc[mask]
+    # A marker that needs to know which well its rows are (a saved set is keyed
+    # by well) reads it here; the frame's own ``well`` column is parsed from the
+    # image filename and need not equal the app's well key.
+    sub.attrs["well_label"] = well_label
     out[MARKER_IN_POPULATION] = _marker_series(in_population(sub, scope), out.index)
     out[MARKER_ABOVE_THRESHOLD] = _marker_series(above_threshold(sub, scope), out.index)
     for name, fn in scope.markers:

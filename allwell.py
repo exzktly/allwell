@@ -2001,6 +2001,10 @@ class AllWellApp(QMainWindow):
         review = self._review
         if review is None:
             return
+        # The load itself runs from a timer, so its own "asked by" line could name only the timer: who asked is
+        # written here, when it is asked.
+        _boot_diag.boot(f"dataset load: {dataset_path} asked for (by {_boot_diag.caller_chain()}); "
+                        f"opens in {delay_ms} ms")
 
         def _load() -> None:
             try:
@@ -2506,7 +2510,12 @@ def main() -> None:
     _boot_diag.install_hang_recorder(app)
     _install_combobox_popup_widener()
     from core import wheel_guard
-    wheel_guard.install(app)
+    # Recorded either way, so a crash log says which way its session ran (core/wheel_guard.SWITCH_ENV).
+    if wheel_guard.wanted():
+        wheel_guard.install(app)
+        _boot_diag.boot("wheel guard: on")
+    else:
+        _boot_diag.boot(f"wheel guard: off ({wheel_guard.SWITCH_ENV}=0)")
     use_bundled_fonts(app)
     # Select the UI theme (dev-facing ALLWELL_THEME env var) BEFORE building any
     # widgets, so qss() and every widget's cached inline QSS pick up its tokens.

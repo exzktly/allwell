@@ -488,6 +488,9 @@ def load_directory(ctx, d: Path, label=None) -> None:
     here in any case if the load ends some other way (an early return, a raise).
     """
     from review.core import plot_hold
+    # Who asked, on disk before anything is read: a Windows session crashed just after a 38-well load that nobody at
+    # the window had started, and the log named the wells it read but not what opened the dataset.
+    boot_diag.boot(f"dataset load: opening {d} (asked by {boot_diag.caller_chain(skip_files=(Path(__file__).name, 'runtime_app.py', 'lazy.py'))})")
     plot_hold.hold(ctx, plot_hold.HOLD_LOADING)
     try:
         with _announce_opening(ctx, d):

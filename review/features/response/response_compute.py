@@ -152,6 +152,13 @@ class FitResult:
     ci_reason: str = ""
     n_points: int = 0
     n_distinct_x: int = 0
+    #: The standard error of :attr:`log_ec50` and the residual degrees of
+    #: freedom it was estimated with — what :attr:`ec50_ci` was built from.
+    #: Kept so a comparison of two EC50s (:func:`ec50_shift`) can propagate
+    #: both errors itself rather than reverse-engineering them from two
+    #: intervals. ``None`` exactly when :attr:`ec50_ci` is.
+    log_ec50_se: float | None = None
+    dof: int = 0
 
 
 def _four_pl(log_x, bottom, top, log_ec50, hill):
@@ -298,11 +305,16 @@ def fit_response(xs, ys, *, model: str, fixed_top: float | None = None,
 
     interval, ci_reason = _ec50_interval(log_ec50, pcov, free, len(pairs),
                                          x_name)
+    se = None
+    if interval is not None:
+        se = float(np.sqrt(float(np.asarray(pcov)[free.index("log_ec50")]
+                                 [free.index("log_ec50")])))
     return _replace(
         base, ok=True, bottom=bottom, top=top,
         log_ec50=log_ec50, hill=values["hill"],
         ec50=float(10.0 ** log_ec50),
-        ec50_ci=interval, ci_reason=ci_reason)
+        ec50_ci=interval, ci_reason=ci_reason,
+        log_ec50_se=se, dof=len(pairs) - len(free))
 
 
 def _ec50_interval(log_ec50: float, pcov, free, n_points: int,
@@ -352,4 +364,107 @@ def ec50_text(fit: FitResult, unit: str = "") -> str:
     if fit.ec50_ci is None:
         return f"{head} ({fit.ci_reason})" if fit.ci_reason else head
     low, high = fit.ec50_ci
+    return f"{head} ({low:.3g}–{high:.3g})"
+
+
+# ── comparing curves: the EC50 shift ─────────────────────────────────────────
+
+@dataclass(frozen=True)
+class EC50Shift:
+    """One curve's EC50 relative to a reference curve's, or why there is none.
+
+    ``ratio`` is ``EC50 / EC50_reference``: above 1 the curve needs more of the
+    variable for the same half-maximal effect (it is less potent), below 1
+    less. The interval is computed in log space, where both EC50s were fitted,
+    and is asymmetric in linear space for the same reason
+    :attr:`FitResult.ec50_ci` is.
+    """
+
+    ok: bool = False
+    reason: str = ""
+    ratio: float | None = None
+    ci: tuple[float, float] | None = None
+    ci_reason: str = ""
+    is_reference: bool = False
+
+
+def ec50_shift(fit: FitResult, reference: FitResult) -> EC50Shift:
+    """*fit*'s EC50 over *reference*'s, with the two errors propagated.
+
+    The two fits are independent (different wells), so the variance of the
+    log ratio is the sum of the two variances: ``se² = se₁² + se₂²``. The
+    interval uses Student's t on the **smaller** of the two residual degrees
+    of freedom — a conservative choice that never claims more certainty than
+    the less well-determined of the two fits supports.
+
+    Comparing EC50s is only meaningful when both curves were fitted on the same
+    terms — the same model and the same pinned plateaus — which this tab
+    guarantees by fitting every curve with one shared setting. It also reads
+    most cleanly when the curves are roughly parallel (similar Hill slopes); a
+    ratio of EC50s between curves of very different steepness is still a
+    correct number, but it no longer summarises the whole curve.
+    """
+    import numpy as np
+
+    if not reference.ok or reference.log_ec50 is None:
+        return EC50Shift(reason="the reference curve has no fit")
+    if not fit.ok or fit.log_ec50 is None:
+        return EC50Shift(reason="this curve has no fit")
+    diff = float(fit.log_ec50) - float(reference.log_ec50)
+    ratio = float(10.0 ** diff)
+    if fit.log_ec50_se is None or reference.log_ec50_se is None:
+        which = fit if fit.log_ec50_se is None else reference
+        why = which.ci_reason or "no CI: an EC50 has no error estimate"
+        return EC50Shift(ok=True, ratio=ratio, ci_reason=why)
+    dof = min(int(fit.dof), int(reference.dof))
+    if dof <= 0:
+        return EC50Shift(ok=True, ratio=ratio,
+                         ci_reason="no CI: as many points as parameters")
+    from scipy.stats import t as t_dist
+    se = float(np.hypot(fit.log_ec50_se, reference.log_ec50_se))
+    half = float(t_dist.ppf(0.975, dof)) * se
+    return EC50Shift(ok=True, ratio=ratio,
+                     ci=(float(10.0 ** (diff - half)), float(10.0 ** (diff + half))))
+
+
+def ec50_shifts(fits: dict, reference_series_id: str) -> dict:
+    """``{curve key: EC50Shift}`` against the reference series at each timepoint.
+
+    *fits* is keyed by ``(timepoint, series id)`` (``collect.fit_curves``).
+    Each curve is compared with the reference series **at its own timepoint**:
+    a drug's shift between two cell lines is a statement about one time, and
+    comparing a 24 h curve with a 48 h reference would mix the effect of the
+    condition with the effect of time. A curve whose timepoint has no
+    reference curve gets a named refusal rather than no entry.
+
+    Empty when no reference is chosen.
+    """
+    if not reference_series_id or not fits:
+        return {}
+    out: dict = {}
+    for key, fit in fits.items():
+        timepoint, series_id = key
+        if series_id == reference_series_id:
+            out[key] = EC50Shift(ok=bool(fit.ok), ratio=1.0 if fit.ok else None,
+                                 is_reference=True,
+                                 reason="" if fit.ok else "the reference curve has no fit")
+            continue
+        reference = fits.get((timepoint, reference_series_id))
+        if reference is None:
+            out[key] = EC50Shift(reason="no reference curve at this timepoint")
+            continue
+        out[key] = ec50_shift(fit, reference)
+    return out
+
+
+def shift_text(shift: EC50Shift) -> str:
+    """``EC50 ×3.2 (1.9–5.4)``, ``reference``, or ``EC50 shift —`` with no fit."""
+    if shift.is_reference and shift.ok:
+        return "reference"
+    if not shift.ok or shift.ratio is None:
+        return "EC50 shift —"
+    head = f"EC50 ×{shift.ratio:.3g}"
+    if shift.ci is None:
+        return f"{head} ({shift.ci_reason})" if shift.ci_reason else head
+    low, high = shift.ci
     return f"{head} ({low:.3g}–{high:.3g})"

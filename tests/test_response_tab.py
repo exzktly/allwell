@@ -2126,3 +2126,112 @@ def test_the_cell_export_notes_name_the_quantity_the_curve_draws(tab, label,
     # And the batch override wins over the tab's own combo.
     assert "count of the cells" in rcs.cell_scope(
         tab.ctx, metric_key="events_above_threshold")["drawn statistic"]
+
+
+# ── comparing curves: the EC50 shift, through the popover ───────────────────
+
+def _two_line_dose_plate(tab, *, ec50s=(("hela", 1.0), ("u2os", 4.0))):
+    """Eight doses on each of two cell lines, each on a known 4PL curve."""
+    import math
+
+    doses = [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0]
+    dose = _variable(pairs=tuple((f"{d:g}", d) for d in doses))
+    line = sv.Variable(
+        id="cl", name="Cell line", kind=sv.TEXT, unit="",
+        values=(sv.VariableValue("hela", "HeLa", None),
+                sv.VariableValue("u2os", "U2OS", None)))
+    groups, dose_of, line_of, y_of = [], {}, {}, {}
+    for row, (line_id, ec50) in zip("AB", ec50s):
+        for i, d in enumerate(doses):
+            well = f"{row}{i + 1:02d}"
+            name = f"{line_id}-{d:g}"
+            groups.append((name, [well]))
+            dose_of[well], line_of[well] = f"v{i}", line_id
+            # Alternating noise, so each fit has a residual and an interval.
+            y_of[name] = 5.0 + 90.0 / (1 + 10 ** (math.log10(ec50) - math.log10(d))) \
+                + (0.5 if i % 2 else -0.5)
+    tab.ctx.state.dataset.all_timepoints_cache = [24.0]
+    tab.ctx.state.dataset.well_paths = {w: f"/{w}.csv" for _n, ws in groups for w in ws}
+    tab.ctx.state.selection.variables = sv.VariableSet(
+        variables=(dose, line), assignments={"dose": dose_of, "cl": line_of})
+    tab.ctx.state.selection.selections = [
+        {"id": f"g{i}", "name": n, "wells": w} for i, (n, w) in enumerate(groups)]
+    tab.ctx.runtime.barplot.current_keys = lambda: [g[0] for g in groups]
+    import review.domain.stats_compute as sc
+    tab.monkeypatch.setattr(
+        sc, "compute_rep_stats",
+        lambda ctx, rset, t, thr, sem, **kw: (y_of[rset.name], 1.0, 0.5, 0.1))
+
+
+def _caption(ax):
+    return " ".join(t.get_text() for t in ax.texts)
+
+
+def test_choosing_a_reference_series_puts_the_shift_on_the_figure(tab, fit_ui):
+    """U2OS is the reference — the *second* series — so a rule that always
+    compared with the first curve would print 4, not 0.25."""
+    _two_line_dose_plate(tab)
+    _pick_series(tab, "cl")
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+    compare = tab.w("_response_compare_cb")
+    assert compare.isEnabled()
+    assert [compare.itemText(i) for i in range(compare.count())] == [
+        "None", "HeLa", "U2OS"]
+
+    compare.setCurrentIndex(compare.findText("U2OS"))
+
+    assert tab.ctx.state.feature_slice("response").compare_series_id == "u2os"
+    import re
+
+    caption = _caption(tab.ax)
+    match = re.search(r"EC50 vs U2OS: HeLa t=24 EC50 ×([0-9.]+) \(([0-9.]+)–([0-9.]+)\)",
+                      caption)
+    assert match, caption
+    ratio, low, high = (float(g) for g in match.groups())
+    assert ratio == pytest.approx(0.25, rel=0.1)
+    assert low < ratio < high
+
+
+def test_the_csv_carries_a_shift_row_per_curve(tab, fit_ui, monkeypatch):
+    written = {}
+    monkeypatch.setattr(rctl, "write_csv_rows",
+                        lambda ctx, name, header, rows: written.update(rows=rows))
+    _two_line_dose_plate(tab)
+    _pick_series(tab, "cl")
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+    compare = tab.w("_response_compare_cb")
+    compare.setCurrentIndex(compare.findText("HeLa"))
+
+    rctl.export_response_csv(tab.ctx)
+
+    shifts = {r[1]: r for r in written["rows"] if r[0] == "ec50 shift"}
+    assert set(shifts) == {"HeLa", "U2OS"}
+    assert shifts["HeLa"][4] == "reference" and float(shifts["HeLa"][5]) == 1.0
+    assert float(shifts["U2OS"][5]) == pytest.approx(4.0, rel=0.1)
+    assert shifts["U2OS"][4].startswith("EC50 ×")
+
+
+def test_with_no_fit_the_comparison_is_offered_but_disabled(tab, fit_ui):
+    _two_line_dose_plate(tab)
+    _pick_series(tab, "cl")
+    rctl.redraw_response(tab.ctx)
+    assert tab.w("_response_compare_cb").isEnabled() is False
+    assert "EC50 vs" not in _caption(tab.ax)
+
+
+def test_the_reference_survives_a_save_and_restore(tab, fit_ui):
+    from review.features.response import view_state_io as vio
+
+    _two_line_dose_plate(tab)
+    _pick_series(tab, "cl")
+    fit_ui.combo.setCurrentIndex(fit_ui.combo.findData("4pl"))
+    compare = tab.w("_response_compare_cb")
+    compare.setCurrentIndex(compare.findText("U2OS"))
+    saved = vio.snapshot_response(tab.ctx)
+    assert saved["compare_series_id"] == "u2os"
+
+    tab.ctx.state.feature_slice("response").compare_series_id = ""
+    vio.apply_response(tab.ctx, saved)
+    rctl.redraw_response(tab.ctx)
+    assert compare.currentText() == "U2OS"
+    assert "EC50 vs U2OS" in _caption(tab.ax)

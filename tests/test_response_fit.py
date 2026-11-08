@@ -321,3 +321,96 @@ def test_the_default_is_neutral_rather_than_a_dose():
     """A caller with no name says ``x``, not ``dose``."""
     reason = rc.fit_response([1.0, 10.0], [1.0, 9.0], model=rc.FIT_4PL).reason
     assert "dose" not in reason.lower(), reason
+
+
+# ── comparing two curves: the EC50 shift ─────────────────────────────────────
+
+def _fit(ec50, *, noise=0.0, model=rc.FIT_4PL):
+    """A fit to a 4PL with *ec50*, with alternating noise so there is a CI."""
+    ys = [_truth(x, ec50=ec50) + (noise if i % 2 else -noise)
+          for i, x in enumerate(DOSES)]
+    return rc.fit_response(DOSES, ys, model=model)
+
+
+def test_the_shift_is_the_ratio_of_the_two_ec50s():
+    fit, ref = _fit(4.0, noise=1.0), _fit(1.0, noise=1.0)
+    shift = rc.ec50_shift(fit, ref)
+    assert shift.ok
+    assert shift.ratio == pytest.approx(fit.ec50 / ref.ec50)
+    assert shift.ratio == pytest.approx(4.0, rel=0.1)
+    low, high = shift.ci
+    assert low < shift.ratio < high
+    # Symmetric about the ratio in log space, as both EC50s were fitted there.
+    assert math.log10(shift.ratio) - math.log10(low) == pytest.approx(
+        math.log10(high) - math.log10(shift.ratio))
+
+
+def test_the_interval_adds_both_variances_and_uses_the_smaller_dof():
+    """Built from known numbers, so a rule that used one error, or the larger
+    degrees of freedom, or averaged the two intervals, gives a different answer."""
+    from scipy.stats import t as t_dist
+
+    fit = rc.FitResult(model=rc.FIT_4PL, ok=True, log_ec50=0.6, ec50=10 ** 0.6,
+                       log_ec50_se=0.10, dof=4)
+    ref = rc.FitResult(model=rc.FIT_4PL, ok=True, log_ec50=0.0, ec50=1.0,
+                       log_ec50_se=0.20, dof=9)
+    shift = rc.ec50_shift(fit, ref)
+    half = t_dist.ppf(0.975, 4) * math.hypot(0.10, 0.20)
+    assert shift.ratio == pytest.approx(10 ** 0.6)
+    assert shift.ci == pytest.approx((10 ** (0.6 - half), 10 ** (0.6 + half)))
+
+
+def test_the_fit_carries_the_standard_error_its_interval_was_built_from():
+    from scipy.stats import t as t_dist
+
+    fit = _fit(2.0, noise=1.0)
+    half = t_dist.ppf(0.975, fit.dof) * fit.log_ec50_se
+    assert fit.dof == len(DOSES) - 4
+    assert fit.ec50_ci == pytest.approx((10 ** (fit.log_ec50 - half),
+                                         10 ** (fit.log_ec50 + half)))
+
+
+def test_a_shift_against_a_refused_fit_is_refused_and_says_which():
+    flat = rc.fit_response(DOSES, [50.0] * len(DOSES), model=rc.FIT_4PL)
+    good = _fit(1.0, noise=1.0)
+    assert rc.ec50_shift(good, flat).reason == "the reference curve has no fit"
+    assert rc.ec50_shift(flat, good).reason == "this curve has no fit"
+    assert rc.shift_text(rc.ec50_shift(flat, good)) == "EC50 shift —"
+
+
+def test_a_shift_without_an_error_estimate_has_a_ratio_and_no_interval():
+    exact = rc.FitResult(model=rc.FIT_4PL, ok=True, log_ec50=0.3, ec50=10 ** 0.3,
+                         ci_reason="no CI: as many points as parameters")
+    ref = rc.FitResult(model=rc.FIT_4PL, ok=True, log_ec50=0.0, ec50=1.0,
+                       log_ec50_se=0.1, dof=5)
+    shift = rc.ec50_shift(exact, ref)
+    assert shift.ok and shift.ci is None
+    assert rc.shift_text(shift) == (
+        f"EC50 ×{10 ** 0.3:.3g} (no CI: as many points as parameters)")
+
+
+def test_each_curve_is_compared_with_the_reference_at_its_own_timepoint():
+    """The reference moves between timepoints here, so comparing every curve
+    with one reference curve gives a different ratio from the right rule."""
+    fits = {(24.0, "hela"): _fit(1.0, noise=1.0), (24.0, "u2os"): _fit(4.0, noise=1.0),
+            (48.0, "hela"): _fit(2.0, noise=1.0), (48.0, "u2os"): _fit(4.0, noise=1.0)}
+    shifts = rc.ec50_shifts(fits, "hela")
+    ec50 = {k: f.ec50 for k, f in fits.items()}
+    assert shifts[(24.0, "u2os")].ratio == pytest.approx(
+        ec50[(24.0, "u2os")] / ec50[(24.0, "hela")])
+    assert shifts[(48.0, "u2os")].ratio == pytest.approx(
+        ec50[(48.0, "u2os")] / ec50[(48.0, "hela")])
+    # Against the 24 h reference instead, the 48 h ratio would be about 4.
+    assert shifts[(48.0, "u2os")].ratio == pytest.approx(2.0, rel=0.1)
+    assert shifts[(24.0, "hela")].is_reference
+    assert rc.shift_text(shifts[(48.0, "hela")]) == "reference"
+
+
+def test_a_timepoint_without_the_reference_curve_is_named():
+    fits = {(24.0, "hela"): _fit(1.0, noise=1.0), (48.0, "u2os"): _fit(4.0, noise=1.0)}
+    shift = rc.ec50_shifts(fits, "hela")[(48.0, "u2os")]
+    assert (shift.ok, shift.reason) == (False, "no reference curve at this timepoint")
+
+
+def test_no_reference_compares_nothing():
+    assert rc.ec50_shifts({(24.0, "hela"): _fit(1.0)}, "") == {}

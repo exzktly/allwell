@@ -13,4 +13,4 @@ inside a frozen PyInstaller bundle, where package metadata is not available.
 from __future__ import annotations
 
 
-__version__ = "10.14.32"
+__version__ = "10.14.33"

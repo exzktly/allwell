@@ -79,30 +79,6 @@ _FIGURE_OWNING_FEATURES = (
     ("_response_fig", "Response Curves"),
 )
 
-def _declared_facets(app, fig):
-    """``(figure attribute, FigureFacets)`` for *fig*, read from the feature registry's declarations.
-
-    Each figure the panel opens on is declared by the feature that draws it (``<feature>/_style_facets.py``, through
-    ``FeatureDescriptor.style_facets``). A figure with no declaration — a bare test double, or a figure added to the
-    panel's roster without one, which ``tests/test_every_properties_figure_declares_its_facets.py`` fails on — is
-    offered every control, with a warning in the log: a control that does nothing is a lesser defect than a working
-    one taken away.
-    """
-    features = getattr(getattr(app, "_ctx", None), "features", None)
-    declared = {}
-    if features is not None and hasattr(features, "style_facets"):
-        try:
-            declared = features.style_facets()
-        except Exception:
-            swallowed()
-            declared = {}
-    for attr, facets in declared.items():
-        if getattr(app, attr, None) is fig:
-            return attr, facets
-    if declared:
-        logging.getLogger(__name__).warning(
-            "Properties: no style-facet declaration for this figure; offering every control")
-    return "", FigureFacets(has=frozenset(FACETS))
 
 
 #: The same features, named by *tab* rather than by figure, for the reset path
@@ -311,7 +287,7 @@ class ExportStyleSidebar(QWidget):
         # feature that draws it (``review/domain/style_facets.py``). A facet the
         # figure never has is not built; one it has only in some views is built
         # and hidden while another view is shown (``_apply_facets``).
-        self._fig_attr, self._facets = _declared_facets(app, fig)
+        self._fig_attr, self._facets = self._declared_facets()
         self._kit: _SectionGrid | None = None
 
         self.setFixedWidth(EXPORT_STYLE_PANEL_WIDTH)
@@ -2002,6 +1978,31 @@ class ExportStyleSidebar(QWidget):
     def _is_scatter_cells_fig(self) -> bool:
         """True only for the per-cell scatter figure (density + gates apply there)."""
         return getattr(self._app, "_scatter_fig", None) is self._fig
+
+    def _declared_facets(self) -> tuple[str, FigureFacets]:
+        """``(figure attribute, FigureFacets)`` for the bound figure, read from the feature registry's declarations.
+
+        Each figure the panel opens on is declared by the feature that draws it (``<feature>/_style_facets.py``, through
+        ``FeatureDescriptor.style_facets``). A figure with no declaration — a bare test double, or a figure added to the
+        panel's roster without one, which ``tests/test_every_properties_figure_declares_its_facets.py`` fails on — is
+        offered every control, with a warning in the log: a control that does nothing is a lesser defect than a working
+        one taken away.
+        """
+        features = getattr(getattr(self._app, "_ctx", None), "features", None)
+        declared = {}
+        if features is not None and hasattr(features, "style_facets"):
+            try:
+                declared = features.style_facets()
+            except Exception:
+                swallowed()
+                declared = {}
+        for attr, facets in declared.items():
+            if getattr(self._app, attr, None) is self._fig:
+                return attr, facets
+        if declared:
+            logging.getLogger(__name__).warning(
+                "Properties: no style-facet declaration for this figure; offering every control")
+        return "", FigureFacets(has=frozenset(FACETS))
 
     def _supports(self, facet: str) -> bool:
         """Whether this figure has the thing *facet* names in any of its views.

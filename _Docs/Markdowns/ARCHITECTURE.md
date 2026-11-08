@@ -976,11 +976,19 @@ on, since the engine widens the left margin for phone-sized tick labels. A page
 that is not taken through the style pass fits its titles itself with the same
 rule, at any layout (`plot_style.fit_titles_to_axes`): Home's Cell Gating calls it
 between two `tight_layout`s, since its 2 × 2 grid of CDFs leaves each panel
-narrower than its title on a phone. A figure's
+narrower than its title on a phone. **At the desk** only a title the figure
+cannot hold is fitted (`plot_style.fit_clipped_titles`, the last step of
+`_apply_layout_engine`'s desk branch, after the layout engine has run once): the
+room is twice the distance from the title's centre (its axes') to the nearer
+figure edge, so a title wider than its own axes but inside the figure keeps its
+one line, and one that would be cut off — the per-cell Scatter's "… (t=0h–24h,
+2 tps) · highlighting <set>" lost its end at a desk width — gets the same
+two-line fit. A figure's
 canvas re-fits on every `resize_event` (`_refit_on_resize`, attached by
 `apply_export_style_to_current`) — which is how a plot drawn at the desk gets the
 phone fit when phone layout raises its DPI, and gets its own titles back when
-phone layout ends. A y-label too tall for its axes is broken onto more lines. Constrained layout measures
+phone layout ends; at the desk the same handler re-runs `fit_clipped_titles`, so
+a dock opening beside a plot cannot leave its title cut off. A y-label too tall for its axes is broken onto more lines. Constrained layout measures
 every text an axes holds, so a note drawn *inside* the axes — the bar Split-by
 notice (`barplot/_annotations.annotate_split_notice`), the "drawn from a sample"
 notes on Bar Plots and Distribution, Spatial's ICC line — is taken out of layout

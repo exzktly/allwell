@@ -164,3 +164,18 @@ def test_on_a_density_coloured_cloud_the_set_is_outlined_not_filled(ctx):
     ax = _redraw(ctx)
     marks = [ln for ln in ax.lines if ln.get_gid() == SET_GID]
     assert len(marks) == 1 and marks[0].get_markerfacecolor() == "none"
+
+
+def test_the_scatter_title_naming_a_long_set_stays_inside_the_figure(ctx):
+    """Through the real redraw and style pass: a set named at length must not
+    push the title's end — the set's name — off the figure."""
+    from review.core.cell_sets import add_set, set_highlighted
+
+    s = add_set(ctx, SET_CELLS, source="test", name="Rounded mitotic cells from the 24 h lasso")
+    set_highlighted(ctx, s.name)
+    ax = _redraw(ctx)
+    fig = ax.figure
+    fig.canvas.draw()
+    box = ax.title.get_window_extent(fig.canvas.get_renderer())
+    assert 0 <= box.x0 and box.x1 <= fig.bbox.width, (box, fig.bbox.width, ax.get_title())
+    assert ax.get_title().replace("\n", " ").endswith("· highlighting " + s.name)

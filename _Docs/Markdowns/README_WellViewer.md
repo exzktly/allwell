@@ -1116,7 +1116,7 @@ red, and says what is missing, while the method cannot run); the
 quantified like any other. It is a dropdown of the channels listed under Channels above that can also be typed in: pick a listed channel, or type one the list does not hold (usually a nuclear stain), and a line under the field says which of the two it is. The **Cytoplasm channel** of StarDist + watershed works the same way. The field is hidden for **Label-free**, since that
 segments the channel marked Phase; then only the chosen method's own settings.
 
-Scrolling the mouse wheel over a dropdown or number box scrolls the page, not the value (a dropdown never takes the wheel while closed; a number box takes it once you have clicked into it) — so a long form such as this one can be scrolled with the pointer anywhere on it. To start the app without this (to check whether a crash needs it), set `ALLWELL_WHEEL_GUARD=0` before launching — `set ALLWELL_WHEEL_GUARD=0` in the Windows prompt you start it from — and the startup log then says `wheel guard: off`.
+Scrolling the mouse wheel over a dropdown or number box scrolls the page, not the value (a dropdown never takes the wheel while closed; a number box takes it once you have clicked into it) — so a long form such as this one can be scrolled with the pointer anywhere on it.
 
 - **Segmentation** — five methods (the pipeline's name in brackets):
   **StarDist — nuclei** (`stardist_nuclei`, the default), **StarDist +

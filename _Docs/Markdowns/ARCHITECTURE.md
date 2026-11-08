@@ -7302,7 +7302,18 @@ its own: `review_image/renderer._focused_nucleus_here` asks
 `focused_nucleus_in(ctx, *frame_scope.current_frame(ctx))`, which compares tokens
 through the shared normalisers (`same_frame`), so the outline appears exactly
 when the focused cell's field is on screen and a number from another field never
-lands on this field's cell of the same id. The per-cell Scatter files each
+lands on this field's cell of the same id. The outline is
+`renderer.focused_outline`: the cell's own boundary pixels plus the ring just
+outside them, twice the width of the red round every other cell, so it reads as
+a different mark at any zoom. A jump to a cell (`show_in_segmentation`) zooms
+with `zoom_review_image_to_selected_nucleus`, which sizes the zoom to the cell
+(`cell_zoom`: the cell spans 40% of the canvas's shorter side, between the fit
+view and 40×) rather than a fixed multiple of the fit view — 3× of a 2048 px
+field in a 1000 px canvas is about one screen pixel per image pixel — and
+returns whether it found the cell; when it did not, the jump says so on the
+status line instead of showing an unmarked field. The zoom buttons step from
+whatever zoom is shown to the next stop in their direction (`next_zoom_step`),
+going up by half again past the last stop. The per-cell Scatter files each
 redraw's points through `_cell_rings.store_interaction_points`, which resolves
 every drawn point to its cell in one narrow read per well (`plotted_cells_for`;
 points carry the row's index *label*, so rows are looked up by label), rings the

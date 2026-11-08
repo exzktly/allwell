@@ -698,8 +698,7 @@ def draw_review_image(
     # in either mode, which the branched version also had to get right twice.
     if sel_nid is not None:
         sel_color = _np.asarray(state.review_image.selected_color, dtype=_np.uint8)
-        sel_boundary = boundary & (center == int(sel_nid))
-        rgb[sel_boundary] = sel_color
+        rgb[focused_outline(boundary, center, int(sel_nid))] = sel_color
 
     _draw_crop_outline(ctx, rgb)
     ctx.runtime.review_image.base_rgb = _np.ascontiguousarray(rgb)
@@ -1390,6 +1389,23 @@ def reset_review_image_colors(ctx) -> None:
 
 
 
+def focused_outline(boundary, center, nid: int):
+    """The focused cell's outline: its own boundary pixels and the ring just outside them.
+
+    Twice the width of every other cell's outline, so the yellow reads as a
+    different mark from the red round the cell's neighbours at any zoom — at
+    the fit view a one-pixel yellow line beside one-pixel red ones was easy to
+    miss. The outer ring takes no pixel of the cell itself.
+    """
+    cell = center == nid
+    grown = cell.copy()
+    grown[1:, :] |= cell[:-1, :]
+    grown[:-1, :] |= cell[1:, :]
+    grown[:, 1:] |= cell[:, :-1]
+    grown[:, :-1] |= cell[:, 1:]
+    return (boundary & cell) | (grown & ~cell)
+
+
 def _focused_nucleus_here(ctx) -> int | None:
     """The focused cell's nucleus id when it lies in the field on screen, else ``None``.
 
@@ -1406,12 +1422,35 @@ def _focused_nucleus_here(ctx) -> int | None:
     return focused_nucleus_in(ctx, *current_frame(ctx))
 
 
-def zoom_review_image_to_selected_nucleus_ctx(ctx, zoom: float = 3.0) -> None:
+#: How much of the canvas's shorter side the focused cell spans after a jump to it.
+_CELL_VIEW_SHARE = 0.4
+#: The furthest a jump zooms in, as a multiple of the fit-to-window view: a
+#: cell a few pixels across is not blown up to fill the screen.
+_MAX_CELL_ZOOM = 40.0
+
+
+def zoom_review_image_to_selected_nucleus_ctx(ctx, zoom: float | None = None) -> bool:
     """ctx-native entry point (kept for the cell-browser caller)."""
-    zoom_review_image_to_selected_nucleus(ctx, zoom)
+    return zoom_review_image_to_selected_nucleus(ctx, zoom)
 
 
-def zoom_review_image_to_selected_nucleus(ctx, zoom: float = 3.0) -> None:
+def cell_zoom(extent_px: float, fit: float, view_px: float) -> float:
+    """The zoom (a multiple of the fit-to-window scale) at which a cell *extent_px*
+    image pixels across spans :data:`_CELL_VIEW_SHARE` of *view_px* screen pixels.
+
+    A fixed zoom does not zoom in on a cell: 3x the fit view of a 2048 px field
+    in a 1000 px canvas is about one screen pixel per image pixel, which left a
+    30 px nucleus 30 px on screen — where it already was, near enough.
+    """
+    want = _CELL_VIEW_SHARE * max(1.0, float(view_px)) / max(1.0, float(extent_px))
+    return float(min(_MAX_CELL_ZOOM, max(1.0, want / max(fit, 1e-9))))
+
+
+def zoom_review_image_to_selected_nucleus(ctx, zoom: float | None = None) -> bool:
+    """Zoom in on the focused cell and centre it; ``False`` when it is not in the field shown.
+
+    With no *zoom* the cell is sized to the canvas (:func:`cell_zoom`).
+    """
     # A8 E4-review: ctx-native pixmap-service leaf. The QLabel host + QScrollArea
     # canvas + decoded RGB buffer are live objects on ``ctx.runtime.review_image``;
     # zoom/pan/base_pil are typed state on ``ctx.state.review_image``.
@@ -1419,30 +1458,33 @@ def zoom_review_image_to_selected_nucleus(ctx, zoom: float = 3.0) -> None:
     label = rt.label
     canvas = rt.canvas
     if label is None or canvas is None:
-        return
+        return False
     ri = ctx.state.review_image
     nid = _focused_nucleus_here(ctx)
     mask_arr = getattr(label, "_mask_arr", None)
     if nid is None or mask_arr is None:
-        return
+        return False
     ys, xs = _np.where(mask_arr == int(nid))
     if len(xs) == 0 or len(ys) == 0:
-        return
+        return False
     cx = float(xs.mean())
     cy = float(ys.mean())
-    ri.zoom = float(max(1.0, zoom))
     rgb = rt.base_rgb
     if rgb is not None:
         ih, iw = rgb.shape[:2]
     else:
         img = ri.base_pil
         if img is None:
-            return
+            return False
         iw, ih = img.size
     vp = canvas.viewport()
     cw = max(1, vp.width())
     ch = max(1, vp.height())
     fit = min(cw / max(iw, 1), ch / max(ih, 1))
+    if zoom is None:
+        extent = max(int(xs.max() - xs.min()) + 1, int(ys.max() - ys.min()) + 1)
+        zoom = cell_zoom(extent, fit, min(cw, ch))
+    ri.zoom = float(max(1.0, zoom))
     scale = max(0.05, fit * max(0.1, float(ri.zoom)))
     nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
     # The renderer derives the scrollbar value as
@@ -1456,13 +1498,31 @@ def zoom_review_image_to_selected_nucleus(ctx, zoom: float = 3.0) -> None:
     ri.pan_x = (nw / 2.0) - (cx * scale)
     ri.pan_y = (nh / 2.0) - (cy * scale)
     render_review_image_display(ctx)
+    return True
 
 
 def review_image_zoom_step(ctx, direction: int) -> None:
-    steps = [0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
-    cur = ctx.state.review_image.zoom
-    idx = min(range(len(steps)), key=lambda i: abs(steps[i] - cur))
-    idx = max(0, min(len(steps) - 1, idx + direction))
-    ctx.state.review_image.zoom = steps[idx]
+    ctx.state.review_image.zoom = next_zoom_step(float(ctx.state.review_image.zoom), direction)
     render_review_image_display(ctx)
+
+
+#: The zoom buttons' stops, as multiples of the fit-to-window view.
+_ZOOM_STEPS = (0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0)
+
+
+def next_zoom_step(cur: float, direction: int) -> float:
+    """The zoom one button press from *cur*: the next stop in *direction*.
+
+    A jump to a cell zooms past the last stop (:func:`cell_zoom`), so a press
+    from there goes to the next stop the right way — snapping to the nearest
+    stop first made "zoom in" from 12x land on 4x — and zooming further in
+    past the stops goes up by half again, to :data:`_MAX_CELL_ZOOM`.
+    """
+    if direction > 0:
+        above = [z for z in _ZOOM_STEPS if z > cur + 1e-9]
+        return above[0] if above else min(_MAX_CELL_ZOOM, cur * 1.5)
+    if direction < 0:
+        below = [z for z in _ZOOM_STEPS if z < cur - 1e-9]
+        return below[-1] if below else _ZOOM_STEPS[0]
+    return cur
 

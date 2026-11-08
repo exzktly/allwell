@@ -26,6 +26,7 @@ from review.core.channel_state_controller import refresh_metric_combo_for_channe
 from review.features.export.service import (
     export_cell_data_from, export_heatmap_data)
 from review.features.heatmap.cell_scope_compute import cell_scope
+from review.features.heatmap.layout_view import build_heatmap_layout_panel
 from review.core.channel_state_controller import refresh_heatmap_aggregation_options
 from core.safe import swallowed
 from ui import theme
@@ -198,7 +199,6 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 
     # The layout editor first in the action zone, so Display / Save /
     # Properties stay flush to the right edge where every other tab has them.
-    from review.features.heatmap.layout_view import build_heatmap_layout_panel
     band.add_action(build_heatmap_layout_panel(ctx, band))
     band.add_action(display_btn)
 

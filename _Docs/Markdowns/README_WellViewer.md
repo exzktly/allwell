@@ -4394,7 +4394,9 @@ row, holding five actions:
   limit set on the Fraction or Events panel sticks instead of that panel
   auto-scaling. **Auto scale**, in the same Limits & Scale section, gives the
   limits back to the plot: it clears what you typed on *every* panel of that
-  figure and redraws it, so the axes fit their data again. Clearing the four
+  figure and redraws it, so the axes fit their data again. The Heat Map has no
+  Limits & Scale section: its axes are the plate's rows and columns, which a
+  typed limit could only crop, and its colour range is set under Display ▾. Clearing the four
   boxes by hand does not do this — an axis keeps the bounds it was last given
   until the plot is drawn again — which is what the button is for. It leaves
   the log scaling and the log base alone: an axis you set to logarithmic stays

@@ -909,6 +909,8 @@ def _draw_heatmap(ctx) -> None:
     ax.set_yticklabels(row_labels, fontsize=row_fs)
     setattr(ax, "_categorical_xaxis", True)
     setattr(ax, "_categorical_yaxis", True)
+    # Rows and columns of a plate: a typed X/Y limit would only crop it (properties_view's ``axis_limits`` facet).
+    setattr(ax, "_aw_no_typed_limits", True)
     for spine in ax.spines.values():
         spine.set_visible(False)
     ax.tick_params(length=0)

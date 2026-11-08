@@ -123,6 +123,13 @@ _STYLE_FACETS_A_FIGURE_LACKS: dict[str, dict[str, str]] = {
             "norm — and the image is marked ``_aw_owns_clim``, so the style "
             "pass's Colour limits leave it alone rather than fight that control."
         ),
+        "axis_limits": (
+            "X and Y limits on a heat map are ranges of row and column *positions*: a typed limit only crops the "
+            "plate or pads it with empty space, which no one asks a plate map for. The axes are marked "
+            "``_aw_no_typed_limits``, so the style pass applies none — a limit typed before this row was hidden "
+            "cannot go on cropping the grid with nothing left to clear it. With Colour limits Display ▾'s and no "
+            "log axes, Limits & Scale has nothing left and is not built."
+        ),
         "log_axes": (
             "Both axes are marked ``_categorical_xaxis`` / "
             "``_categorical_yaxis``: they carry row and column positions, not "
@@ -1250,9 +1257,12 @@ class ExportStyleSidebar(QWidget):
     def _build_limits_section(self, kit: _SectionGrid) -> None:
         """Properties → Limits & Scale: typed limits, Auto scale, and the log axes."""
         sp = theme.Spacing
+        typed_limits = self._supports("axis_limits")
+        if not (typed_limits or self._offers_colour_limits() or self._supports("log_axes")):
+            return                          # nothing here would move this figure — see the facet table
         # ── Limits & Scale ──────────────────────────────────────────────────
         s_lim = kit.section("Limits & Scale", expanded=False)
-        for lim_key, label in [("x_lim", "X limits"), ("y_lim", "Y limits")]:
+        for lim_key, label in ([("x_lim", "X limits"), ("y_lim", "Y limits")] if typed_limits else []):
             lo_edit = QLineEdit(str(self._prefs[f"{lim_key}_min"]))
             lo_edit.setMaximumWidth(_LO_EDIT_MAX_W)
             hi_edit = QLineEdit(str(self._prefs[f"{lim_key}_max"]))

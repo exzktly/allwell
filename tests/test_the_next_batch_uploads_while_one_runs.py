@@ -99,7 +99,7 @@ def test_each_well_that_leaves_the_remote_makes_room_for_one_of_the_next_batch(t
     assert "batch 2/2: 3 well-zip(s) to upload while batch 1 runs, one as each of its wells leaves the remote" in log
     # Batch 1's upload is the run's; the ones sent ahead are marked so the progress view leaves the headline alone.
     assert "[remote] ↑ (1) A01.zip" in log
-    assert "[remote] ⇡ (1) A04.zip" in log and "[remote] ⇡ (1) A06.zip" in log
+    assert "[remote] sent ahead ↑ (1) A04.zip" in log and "[remote] sent ahead ↑ (1) A06.zip" in log
 
 
 def test_the_batched_constructor_wires_the_fetcher_s_removals_to_the_next_batch(tmp_path, monkeypatch):
@@ -370,3 +370,14 @@ def test_the_runner_hands_the_form_s_choice_to_the_remote_run():
     spawn_into_batched = [n for n in ast.walk(parse_source(Path("services/remote_runner.py")))
                           if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_BatchedRemoteProcess"]
     assert spawn_into_batched and all(any(k.arg == "upload_ahead" for k in c.keywords) for c in spawn_into_batched)
+
+
+def test_the_mark_for_an_upload_sent_ahead_is_drawable_on_windows():
+    """Reported: the run log showed an unreadable glyph where the dashed up arrow (U+21E1) stood, on a Windows machine.
+    The mark is plain text and the one arrow the run's own uploads already show (``↑``, U+2191, in Segoe UI), and it
+    is not ``[remote] ↑`` itself, which the progress view tests for first."""
+    from services.remote_batch_step import AHEAD_UP_MARK
+
+    assert AHEAD_UP_MARK == "[remote] sent ahead ↑"
+    assert all(ch.isascii() or ch == "↑" for ch in AHEAD_UP_MARK)
+    assert "[remote] ↑" not in AHEAD_UP_MARK

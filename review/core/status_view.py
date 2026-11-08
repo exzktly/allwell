@@ -133,6 +133,9 @@ def build_bottom(win) -> None:
     win._status_lbl = QLabel("Ready.", status_row)
     win._status_lbl.setObjectName("Muted")
     sr_l.addWidget(win._status_lbl, 1)
+    # The focused cell, named wherever the user is (focus_view).
+    from review.core.focus_view import build_focus_chip
+    sr_l.addWidget(build_focus_chip(win, status_row))
 
     # (The bottom-bar Threshold / Error-band chips were removed — those controls
     # now live in their own tab contexts, so the footer keeps only the status

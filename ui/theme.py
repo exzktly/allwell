@@ -211,7 +211,7 @@ class Colors:
     # on every plot that draws it and outlined in Segmentation, the overlay's
     # default "selected" ink.
     cell_outline      = "#FF4040"
-    focus_ring        = "#FFE640"
+    focused_cell      = "#FFE640"
     spatial_observed  = "#4AA3FF"   # observed curve on the Spatial tab
     spatial_reference = "#FF9C4A"   # its random-reference curve
     gate_curve_a      = "#4FC3F7"   # Cell Gating optimizer, control well A

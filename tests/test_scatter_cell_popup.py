@@ -120,3 +120,16 @@ def test_the_popup_has_no_diagnostics_box():
 
     assert not hasattr(mod.ScatterCellViewer, "_debug")
     assert "QTextEdit" not in vars(mod) and QTextEdit is not None
+
+
+def test_opening_a_cell_focuses_it_and_the_button_shows_it_in_segmentation(qtbot, plate_ctx, monkeypatch):
+    from review.core.cell_focus import focused_cell
+
+    calls = []
+    monkeypatch.setattr(plate_ctx.features, "query",
+                        lambda key, *a, default=None, **k: calls.append((key, a[1:])) or True)
+    viewer = _open(qtbot, plate_ctx, "A02", 1)
+    cell = focused_cell(plate_ctx)
+    assert (cell.well, cell.fov, cell.tp, cell.nucleus_id) == ("A02", "F001", "0h", 1)
+    viewer._show_in_seg_btn.click()
+    assert calls == [("image_browser.show_cell", ("A02", "F001", "0h", "1"))]

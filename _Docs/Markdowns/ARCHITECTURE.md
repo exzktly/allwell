@@ -7240,8 +7240,9 @@ feature's local state lives next to its controller / renderer in the same
 feature package.
 
 **`EventBus` (`core/event_bus.py`).** A `QObject` carrying a small, capped
-catalogue of exactly four cross-cutting signals — `channel_changed`,
-`selection_changed`, `dataset_loaded` and `plot_options_changed`. Signal
+catalogue of exactly five cross-cutting signals — `channel_changed`,
+`selection_changed`, `dataset_loaded`, `plot_options_changed` and
+`focused_cell_changed`. Signal
 payloads are the relevant *state object*, never `app`. The catalogue and its
 contract are documented in the module docstring. The bus is **load-bearing**:
 every signal has a real emitter and a real subscriber.
@@ -7261,6 +7262,30 @@ from `ReviewApp.__init__`:
 - `SelectionRefreshCoordinator` (`core/selection_controller.py`) subscribes
   `selection_changed` and runs `apply_selection_refresh` — sidebar refresh
   plus a per-tab view refresh.
+- `focused_cell_changed` is heard by the status-bar chip (`core/focus_view.py`)
+  and by the per-cell Scatter's ring (`features/scatter/_focus_ring.py`,
+  connected where that tab is built).
+
+**The focused cell (`core/focus_state.py`, `core/cell_focus.py`,
+`core/focus_view.py`).** `FocusState.cell` is a `FocusedCell` — well, field,
+timepoint as the rows spell them, and nucleus id — or `None`. It is set by every
+surface that names one cell: a Scatter point (the cell popup's `show_cell`), a
+Cell Browser tile and the Review CSV's double-click (both through
+`image_browser/review_image/_navigate.show_in_segmentation`), and a nucleus
+clicked in Segmentation. `set_focused_cell` emits `focused_cell_changed` only on
+a change; opening a dataset clears it. Segmentation keeps no selected nucleus of
+its own: `review_image/renderer._focused_nucleus_here` asks
+`focused_nucleus_in(ctx, *frame_scope.current_frame(ctx))`, which compares tokens
+through the shared normalisers (`same_frame`), so the outline appears exactly
+when the focused cell's field is on screen and a number from another field never
+lands on this field's cell of the same id. The per-cell Scatter files each
+redraw's points through `_focus_ring.store_interaction_points`, which rings the
+focused cell (`theme.Colors.focused_cell`) by well, nucleus id and its row's field
+and timepoint, and repaints the ring alone on a focus change. The status-bar chip
+(`widgets/focus_chip.FocusChip`, built by `focus_view.build_focus_chip` into
+Review's status row and adopted into the shell's status bar by `allwell.py`, as
+the status label is) names the cell; its text opens it through the
+`image_browser.show_cell` service and its ✕ clears the focus.
 
 The emit *is* the trigger (no paired direct call alongside it). Two refreshes
 deliberately stay off the bus: `_toggle_sem` (the SEM/SD toggle — its redraw

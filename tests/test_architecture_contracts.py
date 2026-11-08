@@ -493,7 +493,7 @@ def test_disabling_a_leaf_feature_drops_it_everywhere():
 # ── EventBus signal catalogue is capped ───────────────────────────────────────
 
 def test_event_bus_signal_catalogue_is_capped():
-    """ARCHITECTURE §9 (EventBus): a small, capped catalogue of exactly four
+    """ARCHITECTURE §9 (EventBus): a small, capped catalogue of exactly five
     cross-cutting signals. Adding one is a real architectural decision — update
     the docstring + this guard deliberately, don't let it creep.
 
@@ -504,7 +504,7 @@ def test_event_bus_signal_catalogue_is_capped():
     other half: every name in this set has to be reachable from somewhere."""
     expected = {
         "channel_changed", "selection_changed", "dataset_loaded",
-        "plot_options_changed",
+        "plot_options_changed", "focused_cell_changed",
     }
     tree = _parse(REVIEW / "core" / "event_bus.py")
     signals = set()
@@ -518,7 +518,7 @@ def test_event_bus_signal_catalogue_is_capped():
                         signals.add(t.id)
     assert signals == expected, (
         f"EventBus signal catalogue changed: {sorted(signals)} != "
-        f"{sorted(expected)}. The bus is intentionally capped at 4 — if this is "
+        f"{sorted(expected)}. The bus is intentionally capped at 5 — if this is "
         "deliberate, update ARCHITECTURE.md §9 and this guard together."
     )
 

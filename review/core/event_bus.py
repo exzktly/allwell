@@ -30,8 +30,12 @@ class EventBus(QObject):
     - ``dataset_loaded`` — a dataset finished loading; payload ``DatasetState``.
     - ``plot_options_changed`` — a plot option (fold-change mode, error bars,
       ordering, …) changed; payload ``PlotState``.
+    - ``focused_cell_changed`` — the focused cell changed (``cell_focus``);
+      payload ``FocusState``. Emitted by the four surfaces that name a cell
+      and heard by the ones that draw it and by the status-bar chip, which no
+      one of them owns — the cross-cutting case the bus exists for.
 
-    The catalogue is deliberately capped at these four: an event bus that
+    The catalogue is deliberately capped at these five: an event bus that
     accumulates dozens of signals has just become a new god-object. It is also
     load-bearing — every signal here has a real emitter and a real subscriber.
     A fifth, ``redraw_requested``, had neither: it was documented, frozen in
@@ -45,3 +49,4 @@ class EventBus(QObject):
     selection_changed = Signal(object)     # SelectionState
     dataset_loaded = Signal(object)        # DatasetState
     plot_options_changed = Signal(object)  # PlotState
+    focused_cell_changed = Signal(object)  # FocusState

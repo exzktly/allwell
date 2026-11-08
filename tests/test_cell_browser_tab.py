@@ -103,7 +103,12 @@ def test_cell_browser_click_navigates_to_segmentation(loaded_app):
     # the navigation path must not raise even when image arrays are absent.
     ctl.on_cell_clicked(app._ctx, cells[0])
     assert app._current_centre_tab() == "Segmentation"
-    assert app._app_state.review_image.selected_nucleus == int(float(cells[0].nucleus_id))
+    focused = app._app_state.focus.cell
+    assert focused is not None and focused.well == cells[0].well
+    assert focused.nucleus_id == int(float(cells[0].nucleus_id))
+    # The focused cell is named in the shell's status bar.
+    chip = app._ctx.widgets.get_or_none("_focus_chip")
+    assert chip is not None and chip.text() == focused.caption
     assert app._app_state.preview.selected_well == cells[0].well
 
 

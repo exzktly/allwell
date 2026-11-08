@@ -76,7 +76,7 @@ def _render_ctx(*, fluor=None, binary=False):
             selected_well="A01",
         ),
         review_image=SimpleNamespace(
-            binary_mask=binary, selected_nucleus=None, tint_color=(255, 255, 255),
+            binary_mask=binary, tint_color=(255, 255, 255),
             show_outline=False, boundary_color=(0, 255, 0),
             selected_color=(255, 0, 0), zoom=1.0, pan_x=0.0, pan_y=0.0,
             base_pil=None, last_fluor_arr=None, include_edit_mode=False,

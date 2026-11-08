@@ -240,6 +240,9 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ), 1)
 
     canvas.mpl_connect("button_press_event", partial(on_scatter_click, ctx))
+    # The focused cell's ring follows the focus without a redraw of the cloud.
+    from review.features.scatter._focus_ring import paint_focus_ring
+    ctx.bus.focused_cell_changed.connect(lambda *_a: paint_focus_ring(ctx))
     canvas.mpl_connect("motion_notify_event", partial(on_scatter_motion, ctx))
     # Gate edge/corner editing: drag handles of existing gates to resize them.
     canvas.mpl_connect("button_press_event", partial(on_gate_edit_press, ctx))

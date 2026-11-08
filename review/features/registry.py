@@ -561,6 +561,11 @@ def _svc_image_browser_show_field():
     return show_field
 
 
+def _svc_image_browser_show_cell():
+    from review.features.image_browser.review_image._navigate import show_cell
+    return show_cell
+
+
 def _svc_preview_build_picker():
     from review.features.preview.preview_view import build_preview_picker
     return build_preview_picker
@@ -1219,7 +1224,8 @@ def _features() -> list[FeatureDescriptor]:
                       # QC triage's *Open in Segmentation*: Segmentation is the
                       # sub-tab no profile removes, so the service survives
                       # every build that ships Image Browser at all.
-                      "image_browser.show_field": _svc_image_browser_show_field},
+                      "image_browser.show_field": _svc_image_browser_show_field,
+                      "image_browser.show_cell": _svc_image_browser_show_cell},
         ),
         FeatureDescriptor(
             name="Review CSV", group="Inspect", on_phone=False, icon="file-spreadsheet",

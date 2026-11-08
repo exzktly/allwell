@@ -7095,6 +7095,13 @@ holds `<well>_out.zip` files.
 **What it shows.** A per-FOV overlay of the segmentation on the raw image, for
 reviewing and curating individual cells.
 
+**The focused cell.** Clicking a nucleus here, a point on the per-cell Scatter
+plot, a cell in the Cell Browser or a row in Review CSV makes that cell the
+*focused cell*. The status bar names it — `● A02 · F001 · 24h · #28 ✕` — on
+every page: click the name to come back to it here, outlined and centred, or ✕
+to let it go. Segmentation outlines it in yellow whenever its field is on
+screen, and the Scatter plot rings its point. Opening another dataset clears it.
+
 - **Needs** — a loaded well with image ZIPs; pick the FOV / timepoint / channel
   from the in-tab pickers.
 - **Navigational controls** — click a nucleus to **flag / unflag** it for

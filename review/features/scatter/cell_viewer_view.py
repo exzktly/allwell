@@ -202,6 +202,26 @@ class ScatterCellViewer(QWidget):
         lut.addStretch(1)
         layout.addLayout(lut)
 
+        jump = QHBoxLayout()
+        self._show_in_seg_btn = QPushButton("Show in Segmentation")
+        self._show_in_seg_btn.setProperty("variant", "secondary")
+        self._show_in_seg_btn.setToolTip("Open this cell's field in Image Browser → Segmentation, "
+                                         "with the cell outlined")
+        self._show_in_seg_btn.clicked.connect(self._show_in_segmentation)
+        self._show_in_seg_btn.setEnabled(False)
+        jump.addWidget(self._show_in_seg_btn)
+        jump.addStretch(1)
+        layout.addLayout(jump)
+
+    def _show_in_segmentation(self) -> None:
+        a = self.address
+        if a is None:
+            return
+        shown = self.ctx.features.query("image_browser.show_cell", self.ctx, a.well, a.fov, a.tp,
+                                        str(a.nucleus_id), default=False)
+        if not shown:
+            self.ctx.notify.set_status("This build has no Segmentation page to open the cell in.")
+
     def _close_dock(self) -> None:
         from review.core.ui_helpers import hide_plot_dock
         hide_plot_dock(self.parentWidget())
@@ -217,10 +237,13 @@ class ScatterCellViewer(QWidget):
         """Show the cell behind a clicked point (well, row position, nucleus id)."""
         address, problem = address_from_row(self.ctx, well, row_idx, nuclear_id)
         self.address = address
+        self._show_in_seg_btn.setEnabled(address is not None)
         self._title_label.setText(f"Cell · {address.caption}" if address else f"Cell · {well}")
         if address is None:
             self._show_problem(problem)
             return
+        from review.core.cell_focus import focus_cell
+        focus_cell(self.ctx, address.well, address.fov, address.tp, address.nucleus_id)
         self.reload()
 
     def reload(self) -> None:

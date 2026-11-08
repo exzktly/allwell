@@ -23,7 +23,6 @@ def test_review_image_defaults():
     assert ris.selected_color == (255, 230, 64)
     assert ris.tint_color == (255, 255, 255)
     assert ris.frame_cache is None
-    assert ris.selected_nucleus is None
 
 
 def test_review_image_mutable_defaults_are_per_instance():

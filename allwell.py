@@ -635,6 +635,10 @@ class AllWellApp(QMainWindow):
             f"font-size: {theme_v2.Typography.caption_size}px;"
         )
         sb_layout.addWidget(self._status_lbl_app)
+        # The focused cell's chip, adopted for the same reason as the label.
+        _focus_chip = getattr(self._review, "_focus_chip", None)
+        if _focus_chip is not None:
+            sb_layout.addWidget(_focus_chip)
         sb_layout.addStretch(1)
         _review_progress = getattr(self._review, "_progress_bar", None)
         if _review_progress is not None:

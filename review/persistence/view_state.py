@@ -353,6 +353,15 @@ def _snapshot_bar(ctx) -> dict:
     if _bar is not None:
         out["swarm"] = bool(_bar.swarm)
         out["violin"] = bool(_bar.violin)
+        # *Then relative to*, by variable and value **id** — a renamed value
+        # restored by label would silently point at a different condition.
+        # Written only when on, so an older reader finds nothing it misreads.
+        if _bar.relative_to_on():
+            out["relative_to"] = {
+                "variable_id": str(_bar.rel_variable_id),
+                "value_id": str(_bar.rel_value_id),
+                "within": [str(v) for v in (_bar.rel_within or [])],
+            }
     slider = ctx.widgets.get_or_none("_violin_slider")
     if slider is not None:
         try:
@@ -1084,6 +1093,15 @@ def _apply_bar(ctx, state: dict) -> None:
             _bar.swarm = bool(state["swarm"])
         if "violin" in state:
             _bar.violin = bool(state["violin"])
+        # Absent means off: a saved view written before the setting existed,
+        # or with it off, restores as stage 1 alone.
+        rel = state.get("relative_to")
+        rel = rel if isinstance(rel, dict) else {}
+        _bar.rel_variable_id = str(rel.get("variable_id", "") or "")
+        _bar.rel_value_id = str(rel.get("value_id", "") or "")
+        within = rel.get("within")
+        _bar.rel_within = ([str(v) for v in within if v]
+                           if isinstance(within, (list, tuple)) else [])
     slider = ctx.widgets.get_or_none("_violin_slider")
     if slider is not None and "violin_smooth" in state:
         try:
@@ -1403,6 +1421,9 @@ def _reset_bar(app) -> None:
     if _bar is not None:
         _bar.swarm = False
         _bar.violin = False
+        _bar.rel_variable_id = ""
+        _bar.rel_value_id = ""
+        _bar.rel_within = []
     slider = getattr(app, "_violin_slider", None)
     if slider is not None:
         try:

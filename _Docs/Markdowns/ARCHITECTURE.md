@@ -5903,6 +5903,14 @@ artists instead, the way `_apply_rcparams` beside it already did —
 properties with no visibility argument as "style the grid, and switch it on".
 Whether a grid is drawn, and in what dash and opacity, is
 `apply_export_style_prefs`'s to say.
+The same goes for **type size**: `apply_axes_style(ax, mode, sizes=False)` is
+what `setPlotTheme` calls, recolouring the tick labels without resizing them.
+Its default, `sizes=True`, sets the theme's caption size for an axes being drawn
+fresh; on a switch the size is the user's (Properties → Axes, applied by the
+style pass after the draw), and resetting it put the caption size into every
+saved figure and left it on screen after the save until the tab redrew — which
+the Line tab hid, because its capture redraws around the save, and the Bar tab
+did not (`tests/test_a_capture_keeps_the_font_sizes.py`).
 
 `plot_style.follows_theme(artist, muted=…)` is the tag (`_aw_theme_ink`, defined
 in `widgets/plot_card.py` because the repaint that honours it is

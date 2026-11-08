@@ -183,9 +183,17 @@ def _make_segmented(items, parent=None, *, current=None) -> SegmentedControl | N
     return sc
 
 
-def apply_axes_style(ax, mode: str = "screen") -> None:
+def apply_axes_style(ax, mode: str = "screen", *, sizes: bool = True) -> None:
     """Apply the screen token look (``"screen"``) or the publication look
-    (``"publication"`` — white bg, ``theme.CPub`` ink) to a matplotlib Axes."""
+    (``"publication"`` — white bg, ``theme.CPub`` ink) to a matplotlib Axes.
+
+    *sizes* also sets the tick labels to the theme's caption size, the default a
+    freshly drawn axes starts from. A theme **switch** passes ``False``: it is a
+    change of ink, and the tick size by then is the user's (Properties → Axes),
+    set by the app's style pass after the draw. Resetting it there meant every
+    capture — which flips the card to publication and back around its
+    ``savefig`` — saved, and then left on screen, the caption size in place of
+    the one the user chose, until the tab next redrew."""
     bg, fg, muted, grid, spine = _plot_tokens(mode)
     sec = fg if mode == "publication" else theme.Colors.text_secondary
     ax.set_facecolor(bg)
@@ -198,7 +206,10 @@ def apply_axes_style(ax, mode: str = "screen") -> None:
         else:
             sp.set_color(spine)
             sp.set_linewidth(0.8)
-    ax.tick_params(colors=muted, labelsize=theme.Typography.caption_size)
+    if sizes:
+        ax.tick_params(colors=muted, labelsize=theme.Typography.caption_size)
+    else:
+        ax.tick_params(colors=muted)
     ax.xaxis.label.set_color(sec)
     ax.yaxis.label.set_color(sec)
     if ax.get_title():
@@ -922,7 +933,7 @@ if _HAVE_MPL:
             bg = _plot_tokens(mode)[0]
             self.figure.set_facecolor(bg)
             for ax in self.figure.axes:
-                apply_axes_style(ax, mode)
+                apply_axes_style(ax, mode, sizes=False)     # ink only: the sizes are the user's
                 # Don't recolour lines by their iteration order — the
                 # controllers assign rank-based colours (so "well A01"
                 # → palette[0] *everywhere*); recolouring by enumeration

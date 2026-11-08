@@ -4402,7 +4402,8 @@ row, holding five actions:
   meaning keep it — the bar plot's *n/a* cap stays a cap, and hollow markers for
   doses off the axis stay hollow. **X tick angle** at 0 keeps the angle each plot
   picks for its own labels (slanted bar labels past eight bars, the heat map's
-  column labels); any other angle applies as typed. A plot whose cells are the
+  column labels); any other angle applies as typed, also on a crowded axis, where
+  the labels shrink to fit rather than being turned on end. A plot whose cells are the
   data — the Multivariate matrices — keeps its grid off. **Every other
   setting applies only to the plot you edit it on** — sizes, fonts, grid, legend, ticks, limits, log scale,
   line and marker styling, layout and the export profile. Raising the axis-label

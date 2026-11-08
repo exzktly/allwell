@@ -140,3 +140,26 @@ def test_a_reused_axes_forgets_the_last_draw_s_claims():
     assert again is ax
     for name in ("_aw_no_grid", "_categorical_xaxis", "_categorical_yaxis", "_aw_own_xtick_angle"):
         assert not hasattr(again, name), name
+
+
+def test_a_typed_tick_angle_survives_crowded_labels():
+    """``tick_fit`` stands colliding labels on end; it used to do that over a typed angle too, so on a crowded axis
+    every X tick angle the user typed ended at 90°. A typed angle is kept (the labels may shrink); 0 — the plot's
+    own choice — still lets the fit turn them."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    def crowded():
+        fig = Figure(figsize=(4, 3))
+        FigureCanvasAgg(fig)
+        ax = fig.add_subplot(1, 1, 1)
+        ax.plot(range(12), range(12))
+        ax.set_xticks(range(12))
+        ax.set_xticklabels([f"a long well label {i}" for i in range(12)])
+        return fig, ax
+
+    fig, ax = crowded()
+    apply_export_style_prefs(fig, dict(_PREFS, x_log=False, y_log=False, x_tick_angle=45))
+    assert {t.get_rotation() for t in ax.get_xticklabels()} == {45.0}
+    fig, ax = crowded()
+    apply_export_style_prefs(fig, dict(_PREFS, x_log=False, y_log=False, x_tick_angle=0))
+    assert {t.get_rotation() for t in ax.get_xticklabels()} == {90.0}

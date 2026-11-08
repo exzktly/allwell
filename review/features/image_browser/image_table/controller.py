@@ -50,6 +50,8 @@ from review.core.channel_state_controller import (
 # ``image_compose``. Re-exported so call sites + external importers
 # (playground, grid_view) are unchanged.
 from review.features.image_browser.image_table._auto_lut import _compute_auto_luts  # noqa: F401
+from review.features.image_browser.image_table._prefetch import _prefetch_cell_arrays  # noqa: F401
+from review.features.image_browser.image_table import _load_progress
 from review.features.image_browser.image_table.colour_key_view import add_colour_key
 from review.features.image_browser.image_table.image_compose import (  # noqa: F401
     LUT_COLORS,
@@ -661,81 +663,6 @@ def _install_cell_events(
 # ── Generate (render image table below the selector) ─────────────────────────
 
 
-def _prefetch_cell_arrays(ctx, cells, cache) -> None:
-    """Decode every distinct (well, channel, timepoint, fov) image in parallel.
-
-    The first Generate after a dataset load (or after the cache is invalidated)
-    has to read every cell's image off disk; doing that sequentially on the GUI
-    thread is the slow part. Threads help because ``zipfile``/``tifffile``/``PIL``
-    release the GIL for the C-level inflate+decode, and the per-zip-handle
-    serialization in ``data/zipfile_cache.py`` keeps concurrent reads safe (same
-    well → one handle, serialized; different wells → parallel).
-
-    Warms every distinct cell's own (timepoint, fov) — not just one
-    representative per well+channel — because a grid that varies timepoint or
-    FOV per cell (the Image Table's core purpose: a facet per timepoint, a
-    facet per FOV, a full-plate walk, …) otherwise leaves most cells' actual
-    pixel decode to happen later, sequentially, on the GUI thread inside
-    ``_compute_auto_luts`` and the render loop — exactly the two passes this
-    prefetch exists to make unnecessary. Dedupes against
-    ``ctx.state.image_table.prefetched_cells`` (not ``cache``, which holds
-    per-well+channel ref-dicts, not a per-image marker), so a second Generate
-    on an unchanged grid submits nothing to the thread pool at all rather than
-    just cheaply re-hitting ``_load_array``'s own caches. Ratio channels are
-    skipped (they compose from per-channel arrays, which this still warms).
-    Best-effort: any failure leaves the sequential in-loop load as the
-    fallback.
-    """
-    warmed = ctx.state.image_table.prefetched_cells
-    todo: dict = {}
-    for r, row in enumerate(cells):
-        for cell in row:
-            well = cell["well"]
-            chan = cell["chan"]
-            tp = cell["tp"]
-            fov = cell["fov"]
-            if not (well and chan and tp):
-                continue
-            if _find_ratio_for_channel(ctx, chan) is not None:
-                continue
-            # raw vs corrected is a per-channel render option (channel_opts).
-            use_tophat = _row_display_opts(ctx, r, chan)[0]
-            th = bool(use_tophat) and not _is_nuc_seg(chan)
-            variant = "tophat" if th else "raw"
-            key = (well, chan.lower(), variant, str(tp), str(fov))
-            if key in warmed or key in todo:
-                continue
-            todo[key] = (well, chan, tp, fov, th)
-    if len(todo) < 2:
-        return  # nothing to gain from a pool for 0–1 reads
-    import os
-    from concurrent.futures import ThreadPoolExecutor
-
-    def _warm(spec) -> bool:
-        well, chan, tp, fov, th = spec
-        try:
-            return _load_array(ctx, cache, well, chan, tp, fov, use_tophat=th) is not None
-        except Exception:
-            swallowed()  # in-loop load (with its own handling) is the fallback
-            return False
-
-    keys = list(todo)
-    ok: list = []
-    try:
-        with ThreadPoolExecutor(max_workers=min(8, (os.cpu_count() or 4))) as ex:
-            ok = list(ex.map(_warm, [todo[k] for k in keys]))
-    except Exception:
-        import logging as _logging
-        _logging.getLogger("review.image_table").debug(
-            "image_table: parallel prefetch failed", exc_info=True)
-    # Mark only the keys that actually decoded. Marking a failure would skip it
-    # on every later Generate too, which is wrong for the failures that are not
-    # permanent -- a drive that stalled mid-pass, a file still being written.
-    # The cost of retrying a genuinely missing image is one more scan per
-    # Generate; the cost of not retrying is a cell that never comes back.
-    warmed.update(k for k, good in zip(keys, ok) if good)
-
-
 def _cell_override_menu(ctx, r: int, c: int, global_pos) -> None:
     """Per-cell override popover (delegates to grid_ops; lazy to avoid a cycle)."""
     from review.features.image_browser.image_table.grid_ops import (
@@ -953,8 +880,9 @@ def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
     # so an exception escaping any of them leaves the user staring at an empty
     # pane with the previous table gone. Each one degrades to a usable default
     # instead — a lost brightness pooling or a lost scale bar beats no images.
+    progress = _load_progress.begin(ctx)                # the bar above the table (``_load_progress``)
     with swallow("image table: parallel prefetch"):
-        _prefetch_cell_arrays(ctx, cells, cache)
+        _prefetch_cell_arrays(ctx, cells, cache, progress)
 
     # Pool one Auto-LUT window per channel across the grid so Auto cells of the same
     # channel are brightness-comparable (must run before any cell renders, since
@@ -986,9 +914,10 @@ def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
     # sentinel and each cell blends the whole selected-channel set (resolved once,
     # off the collapse). Empty until a channel-overlay cell is actually hit.
     overlay_chans: list[str] = []
-
+    progress.phase("Drawing images", sum(len(row) for row in cells))
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
+            progress.tick()
             is_overlay = cell["chan"] == OVERLAY_CHAN
             # Overlay collapses the channel axis to a single sentinel cell that
             # blends the whole selected-channel set; resolve it once (off the
@@ -1079,6 +1008,7 @@ def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
 
             gr, gc = _pos(r, c)
             grid.addWidget(cell_widget, gr, gc)
+    progress.finish()
 
     # Axis labels + inter-group spacing that mirror the builder's nesting.
     if plan is not None:

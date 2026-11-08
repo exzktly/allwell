@@ -16,6 +16,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from review.features.image_browser.image_table import _prefetch as PF
 from review.features.image_browser.image_table import controller as C
 
 
@@ -24,10 +25,13 @@ def _cell(well, chan, tp="0", fov="1"):
 
 
 def _patch(monkeypatch, loaded):
-    """Stub the per-row helpers + the array loader; record decoded keys."""
-    monkeypatch.setattr(C, "_row_display_opts", lambda app, r, chan=None: (False, False, ""))
-    monkeypatch.setattr(C, "_find_ratio_for_channel", lambda app, chan: None)
-    monkeypatch.setattr(C, "_is_nuc_seg", lambda chan: False)
+    """Stub the per-row helpers + the array loader; record decoded keys.
+
+    On ``_prefetch``, where the decode looks them up (``controller`` re-exports the
+    function, so it is still called as ``C._prefetch_cell_arrays``)."""
+    monkeypatch.setattr(PF, "_row_display_opts", lambda app, r, chan=None: (False, False, ""))
+    monkeypatch.setattr(PF, "_find_ratio_for_channel", lambda app, chan: None)
+    monkeypatch.setattr(PF, "_is_nuc_seg", lambda chan: False)
 
     def _fake_load(app, cache, well, chan, tp, fov, *, use_tophat=False):
         key = (well, chan.lower(), "tophat" if use_tophat else "raw")
@@ -35,7 +39,7 @@ def _patch(monkeypatch, loaded):
         cache[key] = object()  # populate so a later prefetch skips it
         return cache[key]
 
-    monkeypatch.setattr(C, "_load_array", _fake_load)
+    monkeypatch.setattr(PF, "_load_array", _fake_load)
 
 
 def _make_ctx(app):
@@ -74,7 +78,7 @@ def test_prefetch_skips_ratio_channels(monkeypatch):
     _patch(monkeypatch, loaded)
     # Treat "RATIO" as a ratio channel → must not be prefetched as a raw image.
     monkeypatch.setattr(
-        C, "_find_ratio_for_channel",
+        PF, "_find_ratio_for_channel",
         lambda app, chan: object() if chan == "RATIO" else None,
     )
     app = SimpleNamespace(_app_state=SimpleNamespace(

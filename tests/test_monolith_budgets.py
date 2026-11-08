@@ -212,7 +212,9 @@ REMOTE_STAGING_BUDGET = 1348
 # 1230 -> 1163: the pooled Auto window pass moved into ``image_table/_auto_lut.py``
 # and the colour key's label into ``colour_key_view.py`` (nanowell frames, §6.2l);
 # the controller re-exports ``_compute_auto_luts``.
-IMAGE_TABLE_CONTROLLER_BUDGET = 1163
+# 1163 -> 1086: the parallel decode (``_prefetch_cell_arrays``) moved into ``image_table/_prefetch.py`` when it
+# began reporting progress for the Generate bar (``_load_progress.py``); the controller re-exports it.
+IMAGE_TABLE_CONTROLLER_BUDGET = 1086
 # 875 -> 831: the aggregate figure's two compact legend keys moved into
 # ``scatter/_annotations.py`` beside the value-label overlay — both are text
 # written over the points rather than anything deciding what a point is, the

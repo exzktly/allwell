@@ -23,7 +23,7 @@ from functools import partial
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-    QMenu, QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
+    QMenu, QProgressBar, QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
 
@@ -619,6 +619,17 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # the app is actually in, so the first open of an un-loaded app does not ask
     # the user to choose wells from a picker that has none.
     image_table_refresh_empty_state(ctx)
+
+    # Progress of a Generate that takes a while: the images being read, then
+    # drawn. Hidden until a Generate has run for a moment (``_load_progress``).
+    load_label = reg.register("_image_table_load_label", QLabel("", inner))
+    load_label.setObjectName("Muted")
+    load_label.setVisible(False)
+    il.addWidget(load_label)
+    load_bar = reg.register("_image_table_load_bar", QProgressBar(inner))
+    load_bar.setTextVisible(False)
+    load_bar.setVisible(False)
+    il.addWidget(load_bar)
 
     render_host = QWidget(inner)
     render_grid = QGridLayout(render_host)

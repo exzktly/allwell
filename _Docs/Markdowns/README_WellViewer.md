@@ -7211,7 +7211,9 @@ channel for every well).
   zone; drag a **root** dimension (Well / Timepoint / FOV) onto a zone to make that
   axis vary by it, with its channels nested underneath (*root ↓ channels* for Rows,
   *root → channels* for Columns). Then press **Generate** to render. Editing the
-  shelf only stages the layout — **Generate** draws the images. More than two
+  shelf only stages the layout — **Generate** draws the images. A Generate that
+  takes more than a moment shows a progress bar above the table: *Loading
+  images* as each image is read, then *Drawing images* as the cells are placed. More than two
   dimensions can vary at once (e.g. Rows = *Well › Channels*, Columns = *Timepoint*).
 - **Reorder the nested channels** — the order of the channel chips under a root is
   the order their rows or columns appear in, and you set it by dragging a chip

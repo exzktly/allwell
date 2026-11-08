@@ -151,7 +151,7 @@ class ImageTableState:
     # (comparable) instead of each cell auto-fitting independently. Not persisted.
     auto_lut_by_channel: dict = field(default_factory=dict)
     # Set of (well, chan_lower, variant, tp, fov) tuples the parallel prefetch
-    # (controller._prefetch_cell_arrays) has already warmed, across Generates —
+    # (_prefetch._prefetch_cell_arrays) has already warmed, across Generates —
     # separate from image_cache (which holds ref-dicts, not a per-image marker)
     # so a second Generate on an unchanged grid skips re-submitting work to the
     # thread pool instead of just cheaply re-hitting _load_array's own caches.

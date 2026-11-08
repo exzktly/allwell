@@ -90,6 +90,10 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         parent.layout().addStretch(1)
         self._normalise_field_widths(parent)
         self._snapshot_form_defaults()
+        # The wheel scrolls the form rather than changing the field under the pointer — a filter on each of this
+        # form's dropdowns and number boxes, never one on the application (core/wheel_guard.py says why).
+        from core import wheel_guard
+        wheel_guard.keep_guarding(parent)
 
     def _build_data_section(self, parent: QWidget) -> None:
         """The input folder, what it resolves to, and the one shortcut that

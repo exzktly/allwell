@@ -65,6 +65,7 @@ from review.domain.heatmap_metrics import (  # noqa: F401
     METRIC_RATIO,
 )
 from review.features.heatmap._observations import nanowell_grid
+from review.core.plot_style import forget_renderer_marks, own_xtick_angle
 
 # Selection-rectangle outline. Deliberately its own colour, not
 # ``theme.Colors.danger`` — ``danger`` already marks the drag-reorder
@@ -732,6 +733,7 @@ def _draw_heatmap(ctx) -> None:
     if tp is None:
         # Try to derive from the data; if still none, leave the canvas blank.
         ax.clear()
+        forget_renderer_marks(ax)
         # Themed muted token, not a hard-coded "gray" — see the same sweep in
         # distribution/controller._empty_msg.
         from review.core.plot_style import tokens_for as _tf
@@ -902,8 +904,10 @@ def _draw_heatmap(ctx) -> None:
         # rotation would walk the text into the cells it labels.
         ax.set_xticklabels(col_labels, fontsize=col_fs, rotation=30, ha="left",
                            rotation_mode="anchor")
+        own_xtick_angle(ax, 30, "left", "anchor")
     else:
         ax.set_xticklabels(col_labels, fontsize=col_fs)
+        own_xtick_angle(ax, 0, "center")
     ax.xaxis.tick_top()
     ax.set_yticks(range(layout.rows))
     ax.set_yticklabels(row_labels, fontsize=row_fs)

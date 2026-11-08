@@ -1116,7 +1116,7 @@ red, and says what is missing, while the method cannot run); the
 quantified like any other. It is a dropdown of the channels listed under Channels above that can also be typed in: pick a listed channel, or type one the list does not hold (usually a nuclear stain), and a line under the field says which of the two it is. The **Cytoplasm channel** of StarDist + watershed works the same way. The field is hidden for **Label-free**, since that
 segments the channel marked Phase; then only the chosen method's own settings.
 
-Scrolling the mouse wheel over a dropdown or number box scrolls the page, not the value (a dropdown never takes the wheel while closed; a number box takes it once you have clicked into it) — so a long form such as this one can be scrolled with the pointer anywhere on it. To start the app without this (to check whether a crash needs it), set `ALLWELL_WHEEL_GUARD=0` before launching — `set ALLWELL_WHEEL_GUARD=0` in the Windows prompt you start it from — and the startup log then says `wheel guard: off`.
+Scrolling the mouse wheel over a dropdown or number box scrolls the page, not the value (a dropdown never takes the wheel while closed; a number box takes it once you have clicked into it) — so a long form such as this one can be scrolled with the pointer anywhere on it.
 
 - **Segmentation** — five methods (the pipeline's name in brackets):
   **StarDist — nuclei** (`stardist_nuclei`, the default), **StarDist +
@@ -4377,8 +4377,34 @@ row, holding five actions:
   the powers — the Response Curves dose axis, which ticks the concentrations
   you gave — because a subdivision belongs to the power beneath it, so under
   ticks that are something else the marks fall unevenly between one label and
-  the next and say nothing about either. **Every setting applies only to the
-  plot you edit it on** — sizes, fonts, grid, legend, ticks, limits, log scale,
+  the next and say nothing about either. **The panel shows only the settings the
+  plot can use.** A per-cell scatter has no Error bars or Time section, a heat map
+  has no Legend or Lines & Markers, and *Statistics → Show* and *Group label
+  size* appear on Bar Plots alone, since no other plot reads them. On the
+  Nanowells page the Beeswarm section appears on the Distribution view only; a
+  spacing you set there is kept while you look at the other views. A line at the
+  foot of the panel counts the settings this plot is not offered — hover it to
+  see each one and why. Some of this follows the plot as it is drawn: the Legend
+  section appears while the plot has a legend (Multivariate draws one only for
+  dimensionality reduction, Spatial not on its maps, Bar Plots only in Plate
+  colours), **Axis #** appears only when there is more than one panel to choose
+  from, and **X log** is not offered on an axis of categories or positions (Bar
+  Plots' bars, a correlation matrix, the Distribution violins), where it would
+  move nothing. **Error bars** offers *None* and *95% CI* on Bar Plots and the
+  Heat Map, which draw them; the other plots draw SEM or SD and are offered
+  those two. **Tight** and **Constrained** are one choice — turning one on turns
+  the other off — and in phone layout, which fits each plot itself, both are
+  greyed with a note saying so. Statistics, Overlays, Time, Colours, Bars and
+  Beeswarm are shared, and each says so at its top: a change there reaches every
+  plot that uses it. **Lines & Markers** styles the data: a threshold or
+  reference line keeps its own dash, a curve drawn without points (a density
+  curve, a CDF, a fitted response) gets no markers, and marks that carry a
+  meaning keep it — the bar plot's *n/a* cap stays a cap, and hollow markers for
+  doses off the axis stay hollow. **X tick angle** at 0 keeps the angle each plot
+  picks for its own labels (slanted bar labels past eight bars, the heat map's
+  column labels); any other angle applies as typed. A plot whose cells are the
+  data — the Multivariate matrices — keeps its grid off. **Every other
+  setting applies only to the plot you edit it on** — sizes, fonts, grid, legend, ticks, limits, log scale,
   line and marker styling, layout and the export profile. Raising the axis-label
   size on Line Graphs leaves Bar Plots as it was; the Scatter tab's Cells and
   Wells views are separate plots here, so sizing markers for five aggregate
@@ -4830,6 +4856,26 @@ single-control behaviour, and the axis title says so), and **Auto-pair ▾**
 walks the samples in blocks of 2, 3, 4 or 6 and makes the first or last of
 each block that block's control — the layout a plate of "control then
 treatments" repeats.
+
+**Pair by variable** pairs samples by what the plate says they are rather than
+where they sit, so it keeps working when groups are reordered, hidden or
+un-pooled. It needs sample variables (Home → Variables). Pick the variable and
+value that mark a control — say *Compound* = *DMSO* — and tick the variables
+the control is matched *within*, such as *Cell line*; then press **Pair**. Each
+sample is paired with the one sample that has DMSO and the same cell line, so
+HeLa wells are normalised to the HeLa vehicle and U2OS wells to the U2OS
+vehicle. The boxes start ticked for the variables your controls differ on;
+a variable all your controls share (the vehicles are all at Dose 0) is left
+unticked, because matching on it would demand a vehicle at every dose.
+
+Under the row, a sentence says how many samples were paired and names every
+sample that was not, with the reason: a variable is not set on it, its wells
+disagree, no sample matches, or more than one does. When more than one
+matches, nothing is picked for you — tick another variable that tells them
+apart (a replicate number, for instance) or put them in one group. A sample
+the rule could not pair loses any control it had, so the table matches the
+sentence. Pairing is a one-off fill: if you change the plate's variables
+afterwards, press **Pair** again.
 
 A sample that is itself another sample's control draws as a flat 1.0 (0 for
 subtract) with a propagated error bar, which is the ΔΔCt convention; the
@@ -5437,6 +5483,19 @@ is **asymmetric**: it is symmetric about log₁₀(EC50), so the upper arm is lo
 which is the truth about a dose estimated on a log axis. A single ± would claim
 a lower bound the fit does not support. The same numbers go into **Save plot
 data…**.
+
+**Comparing conditions.** With a fit on and the curves split into series (for
+example one per cell line), **Compare EC50 to** in the Fit popover picks a
+reference series. Every other curve's EC50 is then reported as a multiple of
+the reference's EC50 *at the same timepoint* — `EC50 ×4 (2.6–6.1)` means that
+curve needs about four times as much to reach its half-maximal effect, with a
+95% interval. The comparisons go under the axes and into **Save plot data…** as
+`ec50 shift` rows, with the reference's own row reading `reference`. A
+comparison that cannot be made — either curve has no fit, or the reference has
+no curve at that timepoint — is listed with its reason. The comparison is most
+meaningful when the curves have similar slopes, and the fit settings are shared
+by every curve, so all EC50s are fitted on the same terms. Batch Export does
+not include the comparison.
 
 **When the data will not support a fit, you get an em dash and a reason** —
 never a number. `EC50 — (no fit)` appears in the legend and the reason under the

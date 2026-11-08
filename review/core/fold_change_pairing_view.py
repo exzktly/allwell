@@ -208,6 +208,12 @@ def build_pairing_window(ctx, scope: str) -> QDialog | None:
     unused_label.setWordWrap(True)
     root.addWidget(unused_label)
 
+    from review.core.fold_change_variable_pairing_view import (
+        build_variable_pairing_row,
+    )
+    variable_row = build_variable_pairing_row(ctx, scope, win)
+    root.addWidget(variable_row)
+
     footer = QWidget(win)
     frow = QHBoxLayout(footer)
     frow.setContentsMargins(0, 0, 0, 0)
@@ -278,6 +284,7 @@ def build_pairing_window(ctx, scope: str) -> QDialog | None:
             if unused else ""
         )
         unused_label.setVisible(bool(unused))
+        variable_row._aw_refresh()
         win.setWindowTitle(f"Per-sample control — {summary_text(_controls(ctx, scope))}")
 
     def _on_set_all() -> None:

@@ -124,8 +124,12 @@ def mark_undefined_spread(ax, x: float, y: float, color: str) -> None:
     """
     if y is None or not math.isfinite(float(y)):
         return
-    ax.plot([x], [y], marker="_", markersize=9, markeredgewidth=1.4,
-            color=color, alpha=0.7, linestyle="none", zorder=4)
+    (cap,) = ax.plot([x], [y], marker="_", markersize=9, markeredgewidth=1.4,
+                     color=color, alpha=0.7, linestyle="none", zorder=4)
+    # The cap is the "not computed" mark, not a data point: the style pass
+    # would otherwise stamp the data marker on it and draw a filled dot where
+    # the spread is missing, indistinguishable from a measured one.
+    cap._aw_no_style_override = True
     ax.annotate("n/a", (x, y), textcoords="offset points", xytext=(0, 7),
                 ha="center", va="bottom", fontsize=7, color=color, alpha=0.85,
                 zorder=5, annotation_clip=False)

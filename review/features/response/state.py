@@ -88,3 +88,11 @@ class ResponseState:
     #: both.
     fit_top: float | None = None
     fit_bottom: float | None = None
+
+    #: The series value id every other curve's EC50 is compared with, or
+    #: ``""`` for no comparison. Each curve is compared with this series **at
+    #: its own timepoint** (``response_compute.ec50_shifts``). A series id
+    #: rather than a label for the reason ``series_variable_ids`` records: a
+    #: label is renamed, and a comparison restored against a different curve
+    #: would look exactly like the one that was saved.
+    compare_series_id: str = ""

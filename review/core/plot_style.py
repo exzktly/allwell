@@ -103,6 +103,19 @@ from widgets.plot_card import follows_theme  # noqa: E402, F401
 _tokens_for = tokens_for
 
 
+#: What a renderer records on an axes for the style pass (``own_xtick_angle``, ``keep_grid_off``,
+#: ``mark_position_axes``). ``ax.clear()`` keeps Python attributes, so an axes reused for the next draw would carry
+#: the last draw's claims — a violin's position axis would refuse X log in the histogram drawn on it next.
+_RENDERER_MARKS = ("_aw_own_xtick_angle", "_aw_no_grid", "_categorical_xaxis", "_categorical_yaxis")
+
+
+def forget_renderer_marks(ax) -> None:
+    """Drop what the last draw recorded on *ax* for the style pass, for an axes cleared to be drawn again."""
+    for name in _RENDERER_MARKS:
+        if name in vars(ax):
+            delattr(ax, name)
+
+
 def reconfigure_stacked_axes(fig, n_axes: int, build):
     """Reuse *fig*'s existing axes when their count matches *n_axes* (clearing
     them in place — avoids the costly ``fig.clear()`` + canvas resize on every
@@ -117,6 +130,7 @@ def reconfigure_stacked_axes(fig, n_axes: int, build):
     if len(existing) == n_axes:
         for ax in existing:
             ax.clear()
+            forget_renderer_marks(ax)
         return existing
     # ``fig.clear()`` resets figure-level attributes, which can wipe the
     # ``_plot_card`` back-ref that ``tokens_for`` consults — re-attach it after
@@ -915,6 +929,44 @@ def set_pref_scope(ctx, fig, scope: str) -> None:
                 panel._resync_pref_fields()
 
 
+def mark_style_view(ctx, fig, view: str) -> None:
+    """Stamp on *fig* the view it shows now, *view*, for the Properties controls offered on it.
+
+    A figure that draws several views on one canvas declares which Properties facets each view lacks
+    (``review/domain/style_facets.FigureFacets.views``). Its renderer calls this whenever it draws, and an open
+    Properties panel on the figure re-gates when the view changes: the controls of a facet the new view does not draw
+    are hidden — kept, with their values, for when a view that draws it returns.
+
+    Separate from :func:`set_pref_scope`, which keys the settings to the view: "which settings this view keeps" and
+    "which controls this view offers" are different claims, and a figure may make one without the other."""
+    if fig is None:
+        return
+    view = view or ""
+    if getattr(fig, "_aw_style_view", "") == view:
+        return
+    fig._aw_style_view = view
+    regate_properties(ctx, fig)
+
+
+def regate_properties(ctx, fig) -> None:
+    """Have every Properties panel bound to *fig* re-decide which of its controls the figure, as drawn now, can use.
+
+    Called when the view changes (:func:`mark_style_view`) and at the end of
+    every restyle (:func:`apply_export_style_to_current`), because some of what
+    decides it is only known once the figure is drawn — whether it carries a
+    legend at all, which panels it has to target. Visibility only, and cheap.
+    """
+    from core.safe import swallow
+
+    widgets = getattr(ctx, "widgets", None)
+    if widgets is None:
+        return
+    for panel in list((widgets.get_or_none("_export_style_sidebars") or {}).values()):
+        if getattr(panel, "_fig", None) is fig and hasattr(panel, "_apply_facets"):
+            with swallow("show the Properties controls the figure can use"):
+                panel._apply_facets()
+
+
 def _with_scope(key: str, fig) -> str:
     """*key* for the view *fig* shows now: ``<key>:<scope>`` when the figure carries a non-empty ``_aw_pref_scope``."""
     scope = getattr(fig, "_aw_pref_scope", "") if fig is not None else ""
@@ -1220,9 +1272,37 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
 
         _hold_typed_limits(ax, *typed_limits)
 
+    _apply_figure_legend_prefs(fig, prefs)
     _apply_colour_limits(fig, prefs)
     _apply_layout_engine(fig, prefs)
     _fit_ticks(fig)
+
+
+def figure_draws_a_legend(fig) -> bool:
+    """Whether *fig* carries any legend — on an axes, added as an artist, or on the figure — shown or not.
+
+    "Shown or not" is the point: Show legend off hides the legend but leaves the
+    artist, so the Legend controls stay reachable to turn it back on.
+    """
+    if list(getattr(fig, "legends", ()) or ()):
+        return True
+    return any(legends_on(ax) for ax in getattr(fig, "axes", ()))
+
+
+def _apply_figure_legend_prefs(fig, prefs: dict) -> None:
+    """Show legend and Font size for the keys drawn on the figure itself (``fig.legend``), as for an axes legend.
+
+    The Nanowells page draws its Distribution, QC and composite keys that way,
+    and ``legends_on`` reads an axes' children only, so the Legend controls did
+    nothing to them. Position and colour stay the renderer's: a figure key is
+    placed against the whole page, and its ink follows the card theme.
+    """
+    show_leg = bool(prefs.get("legend_show", True))
+    font_size = float(prefs.get("legend_font_size", 9))
+    for leg in list(getattr(fig, "legends", ()) or ()):
+        leg.set_visible(show_leg)
+        for txt in leg.get_texts():
+            txt.set_fontsize(font_size)
 
 
 def colour_mapped(fig) -> list:
@@ -1319,6 +1399,20 @@ def _style_axis_typography(ax, idx: int, axis_prefs: _AxisPrefs) -> str:
     return title_fg
 
 
+def own_xtick_angle(ax, rotation: float, ha: str = "right", rotation_mode: str = "default") -> None:
+    """Record on *ax* the x tick-label angle its renderer chose, so the style pass keeps it while X tick angle is 0.
+
+    A renderer that angles its labels for a reason — the bar plot past eight
+    bars, the heat map's column labels above the grid, a violin's long group
+    names, a correlation matrix — calls this beside ``set_xticklabels``, on
+    every draw, with what it drew. The style pass's X tick angle then means
+    "the plot's own angle" at its default of 0 and the typed angle otherwise;
+    without the record, the default flattened every one of them on every
+    redraw, and the heat map's labels were re-anchored into the cells.
+    """
+    ax._aw_own_xtick_angle = (float(rotation), str(ha), str(rotation_mode))
+
+
 def _style_x_tick_angle(ax, angle: int) -> None:
     # Keep horizontal alignment in step with the applied angle: a
     # horizontal label (0°) reads centered under its bar/tick, while an
@@ -1326,10 +1420,21 @@ def _style_x_tick_angle(ax, angle: int) -> None:
     # slanted look). Without this the bar renderer's ``ha="right"`` (drawn
     # alongside its own 45° rotation) survives even after this pass flattens
     # the rotation back to 0°, leaving labels right-aligned under their bar.
-    ha = "center" if angle == 0 else "right"
+    # Labels drawn *above* the axes (the heat map's columns) slant the other
+    # way: their left edge is anchored at the tick, so a right-anchored slant
+    # would run down into the plot it labels.
+    own = getattr(ax, "_aw_own_xtick_angle", None)
+    if angle == 0 and own is not None:
+        rotation, ha, mode = own
+    else:
+        on_top = angle != 0 and ax.xaxis.get_ticks_position() == "top"
+        rotation = angle
+        ha = "center" if angle == 0 else ("left" if on_top else "right")
+        mode = "default" if angle == 0 else "anchor" if on_top else "default"
     for tick in ax.get_xticklabels():
-        tick.set_rotation(angle)
+        tick.set_rotation(rotation)
         tick.set_horizontalalignment(ha)
+        tick.set_rotation_mode(mode)
 
 
 def _error_bar_cap_ids(ax) -> set:
@@ -1349,13 +1454,28 @@ def _error_bar_cap_ids(ax) -> set:
     return cap_ids
 
 
+def is_annotation_line(ax, ln) -> bool:
+    """Whether *ln* is drawn on *ax* as an annotation rather than as data.
+
+    Two kinds. A line the renderer tagged ``_aw_no_style_override`` — a
+    significance bracket, a mean tick, the bar plot's "not computed" cap. And
+    any line not drawn in data coordinates: ``axhline`` / ``axvline`` and
+    lines placed in axes coordinates are reference marks by construction (a
+    threshold, a no-change level, a band divider, an axis break), and the
+    transform says so without a tag, so a reference line added later is
+    covered by being drawn the way reference lines are drawn. Neither takes
+    the Lines & Markers prefs: a dashed threshold restyled solid with a dot at
+    each end reads as a data series, and Line style "None" erased them all.
+    """
+    if getattr(ln, "_aw_no_style_override", False):
+        return True
+    return ln.get_transform() is not ax.transData
+
+
 def _style_lines(ax, marks: _MarkPrefs) -> None:
     cap_ids = _error_bar_cap_ids(ax)
     for ln in ax.lines:
-        if getattr(ln, "_aw_no_style_override", False):
-            # Decorative annotation lines (e.g. significance brackets) opt
-            # out entirely — stamping the data marker/linestyle on them turns
-            # a flat bracket into a row of circles.
+        if is_annotation_line(ax, ln):
             continue
         if id(ln) in cap_ids:
             # Error-bar cap markers have their own intrinsic capsize-
@@ -1368,7 +1488,26 @@ def _style_lines(ax, marks: _MarkPrefs) -> None:
         _style_one_line(ln, marks)
 
 
+def _drawn_without_marker(ln) -> bool:
+    """Whether the renderer drew *ln* with no marker — read once, the first time the style pass meets the line.
+
+    A curve drawn without markers (a KDE over 200 grid points, a CDF step over
+    every cell, a fitted dose-response, a violin outline) is a curve: stamping
+    the Marker style on it put a dot on every point and turned it into a bead
+    chain. Recorded on the line rather than re-read each pass, because the pass
+    itself changes the marker: after Marker style "None" every line reads as
+    marker-less, and re-reading would leave a later "Circle" unable to bring the
+    markers of a real series back without a redraw.
+    """
+    seen = getattr(ln, "_aw_drawn_without_marker", None)
+    if seen is None:
+        seen = ln.get_marker() in (None, "None", "none", "", " ")
+        ln._aw_drawn_without_marker = seen
+    return bool(seen)
+
+
 def _style_one_line(ln, marks: _MarkPrefs) -> None:
+    curve = _drawn_without_marker(ln)
     ln.set_linewidth(marks.line_width)
     ln.set_markersize(marks.marker_size)
     ln.set_markeredgewidth(marks.marker_edge_width)
@@ -1396,7 +1535,7 @@ def _style_one_line(ln, marks: _MarkPrefs) -> None:
     if (line_style and line_style != "keep" and not scatter_only
             and not getattr(ln, "_aw_linestyle_is_data", False)):
         ln.set_linestyle(line_style if line_style != "none" else "None")
-    if not marks.restyles_markers:
+    if not marks.restyles_markers or curve:
         return
     # ``_aw_marker_is_data``: renderers that encode a variable in the
     # marker *shape* opt out of the shape override while still
@@ -1533,7 +1672,34 @@ def _set_collection_marker_shape(coll, marker_style: str) -> None:
         swallowed()  # was: pass (silent except)
 
 
+def keep_grid_off(ax) -> None:
+    """Turn *ax*'s grid off and keep the style pass's Show grid from turning it back on.
+
+    For an axes whose cells are the data — a correlation or loading matrix, a
+    cluster profile — where a grid drawn through the cell centres reads as a
+    second, finer set of cells. Show grid on (the default) re-enabled every one
+    of them on each redraw, against the renderer's own ``grid(False)``.
+    """
+    ax.grid(False)
+    ax._aw_no_grid = True
+
+
+def mark_position_axes(ax, *, x: bool = True, y: bool = True) -> None:
+    """Mark *ax*'s x and / or y axis as carrying positions (rows, columns, groups), not values.
+
+    The log-scale pass skips such an axis, as it skips the heat map's and the
+    bar plot's: X log on a matrix put its row and column indices on a log scale.
+    """
+    if x:
+        ax._categorical_xaxis = True
+    if y:
+        ax._categorical_yaxis = True
+
+
 def _apply_grid(ax, prefs: dict) -> None:
+    if getattr(ax, "_aw_no_grid", False):
+        ax.grid(False)
+        return
     # **Off means off.** ``ax.grid(False, alpha=…, linestyle=…)`` does not
     # hide the grid: matplotlib reads line properties beside a false first
     # argument as "style the grid", turns it back **on**, and says so in a
@@ -2078,9 +2244,20 @@ def _refit_footer_room_on_resize(fig) -> None:
     canvas._aw_text_band_cid = canvas.mpl_connect("resize_event", _on_resize)
 
 
-def _apply_layout_engine(fig, prefs: dict) -> None:
+def layout_engine_is_the_phone_s() -> bool:
+    """Whether the Properties Layout prefs are set aside because phone layout fits every plot itself.
+
+    :func:`_apply_layout_engine` answers this before it reads ``layout_tight`` /
+    ``layout_constrained``; the Properties panel asks the same question to say so
+    beside the two switches rather than offer controls that move nothing.
+    """
     from core import phone_layout
-    if phone_layout.is_on():
+
+    return bool(phone_layout.is_on())
+
+
+def _apply_layout_engine(fig, prefs: dict) -> None:
+    if layout_engine_is_the_phone_s():
         # Phone layout draws plot text at true phone sizes (a larger DPI,
         # ``ui/phone_shell.scale_canvas``), which the renderers' fixed margins
         # cannot hold: titles ran off the figure and y-labels into the ticks.
@@ -2180,6 +2357,7 @@ def apply_export_style_to_current(ctx, fig, canvas=None) -> None:
     prefs = figure_prefs(ctx, fig)
     apply_export_style_prefs(fig, prefs)
     _apply_grouping_notice(ctx, fig)
+    regate_properties(ctx, fig)
     from core import phone_layout
     fig._aw_phone_fitted = phone_layout.is_on()
     target = canvas if canvas is not None else getattr(fig, "canvas", None)

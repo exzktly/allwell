@@ -55,8 +55,12 @@ _BOUND_EVERYWHERE = frozenset({
     "y_lim_max", "y_lim_min",
 })
 _BOUND_ROSTER: dict[str, frozenset[str]] = {
+    # ``group_label_size`` is the bar plot's alone, and the per-cell scatter's
+    # points are markers-only lines with no line style or width to set: each is
+    # a facet those figures lack (``<feature>/_style_facets.py``), so its key is
+    # not bound there.
     "_line_fig": _BOUND_EVERYWHERE | {
-        "group_label_size", "legend_font_size", "legend_loc", "legend_show",
+        "legend_font_size", "legend_loc", "legend_show",
         "line_style", "line_width", "marker_edge_width", "marker_size",
         "marker_style", "x_log", "x_log_base", "y_log", "y_log_base",
     },
@@ -70,8 +74,8 @@ _BOUND_ROSTER: dict[str, frozenset[str]] = {
         "heatmap_value_format",
     },
     "_scatter_fig": _BOUND_EVERYWHERE | {
-        "group_label_size", "legend_font_size", "legend_loc", "legend_show",
-        "line_style", "line_width", "marker_edge_width", "marker_size",
+        "legend_font_size", "legend_loc", "legend_show",
+        "marker_edge_width", "marker_size",
         "marker_style", "scatter_density", "scatter_x_log", "scatter_y_log",
         "x_log_base", "y_log_base",
     },
@@ -81,6 +85,10 @@ _BOUND_ROSTER: dict[str, frozenset[str]] = {
 _WRITES_OTHER_KEYS: dict[str, str] = {
     # A profile is a preset: choosing one applies its whole bundle of keys.
     "export_profile": "a preset of other keys",
+    # One layout engine at a time: turning either on turns the other off,
+    # because both on drew Constrained while Tight still read as on.
+    "layout_tight": "turns layout_constrained off",
+    "layout_constrained": "turns layout_tight off",
 }
 
 #: Keys the panel binds but deliberately does not seed from the flat pref

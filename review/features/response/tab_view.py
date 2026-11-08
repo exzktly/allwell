@@ -32,7 +32,7 @@ from review.features.response.controller import (
     on_response_channel_changed, on_response_metric_changed,
     on_x_variable_changed, open_series_selector, open_timepoint_selector,
     redraw_response, refresh_response_metric_combo, response_channel,
-    set_fit_bound, set_fit_model, update_timepoint_button,
+    set_compare_series, set_fit_bound, set_fit_model, update_timepoint_button,
 )
 
 #: The figure. One axes, wide rather than tall — a dose–response is read across.
@@ -223,6 +223,16 @@ def _build_fit_popover(ctx, band):
         edit.editingFinished.connect(
             lambda w=which, e=edit: set_fit_bound(ctx, w, e.text()))
         layout.addWidget(edit)
+
+    # Which series every other curve's EC50 is compared with. Filled on each
+    # redraw from the curves actually drawn (``refresh_compare_combo``).
+    compare = ctx.widgets.register("_response_compare_cb",
+                                   LabeledComboBox("Compare EC50 to"))
+    compare.setToolTip("Report each curve's EC50 as a ratio of this series' "
+                       "EC50 at the same timepoint, with a 95% interval")
+    compare.currentIndexChanged.connect(
+        lambda *_: set_compare_series(ctx, compare.currentData() or ""))
+    layout.addWidget(compare)
 
     return button
 

@@ -25,6 +25,7 @@ from review.core.channel_state_controller import (
 )
 from review.core.observation_band import stamp_cells_footer
 from review.features.distribution import _observations as _nw_dist
+from review.core.plot_style import forget_renderer_marks, mark_position_axes, own_xtick_angle
 
 
 # Reached when the selection *is* non-empty and still produced no values — a
@@ -156,6 +157,7 @@ def _empty_msg(ax, message: str = "") -> None:
     # apply_axes_style; matplotlib's ax.clear() resets it otherwise.
     fc = ax.get_facecolor()
     ax.clear()
+    forget_renderer_marks(ax)
     ax.set_facecolor(fc)
     fig = ax.figure
     if fig is not None:
@@ -638,6 +640,8 @@ def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False, ex
             body.set_alpha(0.55)
         ax.set_xticks(range(1, len(labels) + 1))
         ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
+        own_xtick_angle(ax, 30, "right")
+        mark_position_axes(ax, y=False)                  # violin positions 1…n, one per group: no X log
         ax.set_ylabel("Value")
     elif mode == "CDF":
         for i, (name, color, vals) in enumerate(groups):

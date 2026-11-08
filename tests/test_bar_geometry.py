@@ -251,8 +251,9 @@ def _build_sidebar(qtbot, monkeypatch, *, bar_fig=True):
     fig = Figure(figsize=(4, 3))
     fig.add_subplot(1, 1, 1)
     app = _stub_app()
-    if bar_fig:
-        app._bar_fig = fig
+    # Not the bar plot means another plot the panel opens on, so its declared
+    # style facets decide — a figure no feature declares is offered everything.
+    setattr(app, "_bar_fig" if bar_fig else "_line_fig", fig)
     redraws: list[int] = []
     monkeypatch.setattr(ExportStyleSidebar, "_redraw_active_plot",
                         lambda self: redraws.append(1), raising=False)

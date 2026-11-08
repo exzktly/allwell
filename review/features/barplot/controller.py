@@ -36,6 +36,7 @@ from review.features.barplot.collect import (
     bar_err_settings, bar_geometry_settings, bar_layout,
     drop_redundant_cluster_keys,
 )
+from review.core.plot_style import own_xtick_angle
 
 
 def ordered_bar_keys(ctx) -> list:
@@ -222,6 +223,7 @@ def render_bar_items(
     for ax in axes_to_label:
         ax.set_xticks(xs)
         ax.set_xticklabels(xlabels, rotation=rot, ha=ha, fontsize=7)
+        own_xtick_angle(ax, rot, ha)
         ax.set_xlim(xlim_lo, xlim_hi)
         # Mark categorical x-axis so downstream styling does not reset tick formatters.
         setattr(ax, "_categorical_xaxis", True)

@@ -111,9 +111,10 @@ MODE_READ_ROSTER: dict[tuple[str, str], str] = {
         "figure's own DPI state (_aw_dpi_factor) instead of the flag; not done, because the "
         "layout snapshot records no layout engine or title wrapping, so such a change could "
         "not be shown to leave plots as they were.",
-    ("review/core/plot_style.py", "_apply_layout_engine"):
-        "chooses constrained layout for phone-sized plot text; same candidate and same "
-        "reason as _on_resize above.",
+    ("review/core/plot_style.py", "layout_engine_is_the_phone_s"):
+        "whether phone layout sets the Properties layout prefs aside: _apply_layout_engine "
+        "chooses constrained layout for phone-sized plot text on it, and the Properties panel "
+        "says so beside Tight / Constrained. Same candidate and same reason as _on_resize above.",
     ("review/core/plot_style.py", "apply_export_style_to_current"):
         "stamps whether the figure was fitted for the phone (_aw_phone_fitted); same "
         "candidate and same reason as _on_resize above.",

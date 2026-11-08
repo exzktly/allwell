@@ -24,6 +24,7 @@ from review.core.export_prefs_state import ExportPrefsState
 from review.core.plot_state import PlotState
 from review.features.scatter.state import ScatterState
 from widgets.toggle_switch import ToggleSwitch
+from review.features.registry import build_feature_registry
 
 pytestmark = pytest.mark.qt
 
@@ -32,6 +33,8 @@ def _mk_ctx(app):
     from review.core.app_runtime import AppRuntime
     return SimpleNamespace(
         app=app,
+        # The real declarations, so the panel offers each figure what the app would.
+        features=build_feature_registry(),
         state=app._app_state,
         runtime=AppRuntime(app),
         widgets=SimpleNamespace(

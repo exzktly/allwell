@@ -140,10 +140,12 @@ def _boxes(ax, result, ink, muted) -> None:
         mean = s.mean()
         if result.unit == sc.WELLS and s.n >= 2:
             lo, hi = s.ci95()
-            _ink(ax.errorbar([i + 0.3], [mean], yerr=[[mean - lo], [hi - mean]], fmt="D", color=ink, markersize=4,
-                             capsize=3, linewidth=1.1, zorder=4)[0])
+            mean_mark = ax.errorbar([i + 0.3], [mean], yerr=[[mean - lo], [hi - mean]], fmt="D", color=ink,
+                                    markersize=4, capsize=3, linewidth=1.1, zorder=4)[0]
         else:
-            _ink(ax.plot([i], [mean], marker="D", color=ink, markersize=4, linestyle="none", zorder=4)[0])
+            mean_mark = ax.plot([i], [mean], marker="D", color=ink, markersize=4, linestyle="none", zorder=4)[0]
+        mean_mark._aw_marker_is_data = True              # the diamond marks the mean: Marker style keeps off its shape
+        _ink(mean_mark)
     ax.set_xticks(range(len(result.samples)))
     ax.set_xticklabels([f"{s.label or s.name}\nn = {s.n:,}" for s in result.samples])
     ax.set_xlim(-0.6, len(result.samples) - 0.4)
@@ -165,8 +167,10 @@ def _brackets(ax, result, positions, ink) -> None:
     for c in hits:
         x0, x1 = sorted((positions[c.a], positions[c.b]))
         level += 0.08 * span
-        _ink(ax.plot([x0, x0, x1, x1], [level - 0.025 * span, level, level, level - 0.025 * span], color=ink,
-                     linewidth=0.9)[0])
+        bracket = ax.plot([x0, x0, x1, x1], [level - 0.025 * span, level, level, level - 0.025 * span], color=ink,
+                          linewidth=0.9)[0]
+        bracket._aw_no_style_override = True             # a bracket, not a series: as the bar plot's (renderer.py)
+        _ink(bracket)
         _ink(ax.text((x0 + x1) / 2, level, significance_stars(c.p_used), ha="center", va="bottom", fontsize=8,
                      color=ink, gid="nw-stats-bracket"))
     ax.set_ylim(low, level + 0.1 * span if math.isfinite(level) else high)

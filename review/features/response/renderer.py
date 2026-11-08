@@ -15,7 +15,7 @@ from review.domain.response_colors import (
 )
 from review.features.response.collect import empty_reason, omission_caption
 from review.features.response.response_compute import (
-    curve_y, ec50_text, spans_enough_decades, zero_position,
+    curve_y, ec50_text, shift_text, spans_enough_decades, zero_position,
 )
 
 _logger = logging.getLogger("review")
@@ -25,7 +25,8 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
                   title: str = "", ylabel: str = "",
                   variable_chosen: bool = True,
                   timepoints_chosen: bool = True,
-                  fits: dict | None = None) -> None:
+                  fits: dict | None = None,
+                  shifts: dict | None = None) -> None:
     """Paint *data* onto *ax*.
 
     *log_x* ``None`` asks the data — on once the positive values span two
@@ -54,6 +55,11 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
     line through the points, or the optimiser's last iterate printed as a
     number, would both assert a shape the data did not support. Why each one
     was refused goes under the axes, where it travels with a saved figure.
+
+    *shifts* is ``{curve key: EC50Shift}`` against a reference series
+    (``response_compute.ec50_shifts``). Each comparison is written into the
+    caption, with its interval or the reason there is none, so a saved figure
+    carries the numbers the comparison produced.
     """
     ax.clear()
     # The time correction, resolved once and threaded down. Every hour this
@@ -123,7 +129,8 @@ def draw_response(ctx, ax, data, *, log_x: bool | None = None,
 
     caption = " · ".join(
         part for part in (omission_caption(data, rescale=_rescale),
-                          _fit_caption(fits, data, rescale=_rescale))
+                          _fit_caption(fits, data, rescale=_rescale),
+                          _shift_caption(shifts, data, rescale=_rescale))
         if part)
     if caption:
         # Under the axes rather than in the title: it is a note about the
@@ -234,6 +241,31 @@ def _fit_caption(fits: dict | None, data=None, *, rescale) -> str:
         return ""
     return " ".join(f"No fit at {_curve_name(key, labels, rescale=rescale)}: {reason}"
                     for key, reason in refused)
+
+
+def _shift_caption(shifts: dict | None, data=None, *, rescale) -> str:
+    """``EC50 vs HeLa: U2OS t=24 ×3.2 (1.9–5.4); …`` — every comparison drawn.
+
+    Refused comparisons are listed with their reason in the same sentence, so
+    a curve missing from the comparison cannot be mistaken for one that was
+    never asked about.
+    """
+    if not shifts:
+        return ""
+    labels = {c.key: c.series_label for c in getattr(data, "curves", ())}
+    reference = next((labels.get(k) for k, s in shifts.items() if s.is_reference),
+                     None)
+    parts = []
+    for key, shift in sorted(shifts.items()):
+        if shift.is_reference:
+            continue
+        name = _curve_name(key, labels, rescale=rescale)
+        text = shift_text(shift) if shift.ok else f"— ({shift.reason})"
+        parts.append(f"{name} {text}")
+    if not parts:
+        return ""
+    head = f"EC50 vs {reference}" if reference else "EC50 vs the reference"
+    return f"{head}: " + "; ".join(parts)
 
 
 def _curve_name(key, labels: dict, *, rescale) -> str:
@@ -586,9 +618,12 @@ def _draw_one_curve(ax, data, curve, fits, marks: _CurveStyles, *,
         # figure the user had just asked to be drawn in greys, which is the one
         # mode where a reader cannot tell decoration from data.
         off_colour = marks.for_curve(curve).get("color")
-        ax.errorbar([off_scale_x] * len(off), [p.y for p in off],
-                    yerr=[p.err for p in off], fmt="o", capsize=3,
-                    markerfacecolor="none",
-                    **({} if off_colour is None else {"color": off_colour}))
+        off_marks = ax.errorbar([off_scale_x] * len(off), [p.y for p in off],
+                                yerr=[p.err for p in off], fmt="o", capsize=3,
+                                markerfacecolor="none",
+                                **({} if off_colour is None else {"color": off_colour}))
+        # Hollow *is* the message — "not on the dose axis" — so the style pass
+        # keeps off the face (it re-filled them on every redraw).
+        off_marks[0]._aw_marker_face_is_data = True
         return True
     return False

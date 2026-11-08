@@ -53,7 +53,7 @@ DOMAIN_LABELS: dict[str, str] = {
     "sample_variables": "sample variables",
     "cell_gating": "cell gating",
     "smfish": "smFISH thresholds",
-    "plot_groups": "plot groups",
+    "plot_groups": "saved selections",
     "qc_params": "QC thresholds",
     "crop_region": "crop region",
     "ratios": "ratios",
@@ -572,7 +572,7 @@ def build_cover(*, info: dict, read, records, outcomes: dict[str, tuple[str, str
     )
 
 
-def cover_for(ctx, records, outcomes, *, dataset_name: str = "",
+def cover_for(ctx, records, outcomes, *,
               app_version: str | None = None) -> ReportCover:
     """The ``saved_plots.report_cover`` service: :func:`build_cover` for the open dataset."""
     from review.domain.viewer_state import resolve_pipeline_info_path
@@ -588,9 +588,12 @@ def cover_for(ctx, records, outcomes, *, dataset_name: str = "",
         logging.getLogger("review").warning(
             "report cover: could not count cells", exc_info=True)
         n_cells = None
-    root = data_dir.parent if data_dir.name == "out" else data_dir
+    from review.domain.dataset_name import dataset_display_name
     return build_cover(
         info=dict(dataset.pipeline_info or {}), read=read, records=records,
-        outcomes=outcomes, dataset_name=dataset_name or root.name,
-        dataset_path=str(root), n_wells=len(dataset.well_paths or ()),
+        outcomes=outcomes, dataset_name=dataset_display_name(data_dir),
+        # Where the sidecar and the history live: the dataset root for the
+        # in/out layout, the loaded folder itself for a flat one.
+        dataset_path=str(resolve_pipeline_info_path(data_dir).parent),
+        n_wells=len(dataset.well_paths or ()),
         n_cells=n_cells, app_version=app_version)

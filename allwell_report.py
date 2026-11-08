@@ -239,7 +239,6 @@ def _cover(ctx, records, manifest: Manifest) -> object | None:
     try:
         cover = ctx.features.query(
             "saved_plots.report_cover", ctx, records, outcomes,
-            dataset_name=Path(manifest.dataset).name,
             app_version=manifest.app_version, default=None)
     except Exception:
         _logger.exception("the report cover could not be assembled; "

@@ -5667,6 +5667,16 @@ cells it kept.
   overlap) and **Apply gates** (below) together under **Display ▾**. **Show
   gates** is in the Properties sidebar; **draw rectangular gates** by dragging
   on the canvas.
+- **Click a point to see that cell.** The cell opens in a panel on the right:
+  one channel at a time, with the cell's boundary drawn in red, its well,
+  field, timepoint and nucleus number in the title, and **Source** to switch
+  between the raw and the corrected image. Its brightness is the same as in the
+  [Cell Browser](#cell-browser) and the Image Table — typing a **Brightness
+  min / max** sets that channel's brightness in all three, and **Auto** goes
+  back to stretching each cell to itself; the line under the image says which
+  one you are looking at. A cell that cannot be shown says why where the image
+  would be (no segmentation mask for the field, the nucleus is not in it, or
+  the plot is out of date and needs redrawing).
 - **Apply gates** (under **Display ▾**). This plot is the one place that shows the *whole* cloud even
   when your gates are filtering everything else — that is deliberate, because
   you draw the gates here and need to see what falls outside them to judge or

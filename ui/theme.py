@@ -205,6 +205,13 @@ class Colors:
     # Pink, the most separated hue left: measured ΔE ≥ 34 (CIE76) to the overlay's other nine inks, relative
     # luminance 0.35.
     exclusion_nanowell_focus = "#F472B6"
+    # One cell shown on its own (the Scatter cell popup): its boundary, the
+    # Segmentation overlay's default boundary ink so a cell reads the same in
+    # both. And the focused cell — the one the status-bar chip names — ringed
+    # on every plot that draws it and outlined in Segmentation, the overlay's
+    # default "selected" ink.
+    cell_outline      = "#FF4040"
+    focus_ring        = "#FFE640"
     spatial_observed  = "#4AA3FF"   # observed curve on the Spatial tab
     spatial_reference = "#FF9C4A"   # its random-reference curve
     gate_curve_a      = "#4FC3F7"   # Cell Gating optimizer, control well A

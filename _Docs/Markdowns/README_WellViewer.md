@@ -5725,7 +5725,25 @@ place cells in a grid that mirrors your plate or your experimental design.
 This is the first Plotting sub-tab, and the one Plotting opens on.
 
 - **Needs** — a well selection and a channel; a **Timepoint** chosen from the
-  dropdown.
+  dropdown; and wells placed in the grid, from the **Layout** panel.
+- **The Layout panel** — where you say which well goes in which cell. The
+  **Layout** button on the controls row opens it at the right of the figure,
+  in the same place the **Properties** panel opens (one of the two at a time),
+  and closes it again; its **✕** closes it too. While the grid is still empty
+  the panel opens by itself when you come to the page, since the map has
+  nothing to draw until a cell holds a well; once the grid is filled it stays
+  out of the figure's way until you press **Layout**. In it:
+  - **Grid** — the number of rows × columns.
+  - **Auto-populate from selection** — fills the grid with the wells the plate
+    shows as selected (more below). **Clear** empties every cell and keeps the
+    grid's size and any row / column names you typed.
+  - **The grid itself.** Drag wells from the plate map at the left into its
+    cells; drag a cell to another cell to move it (onto an occupied cell, the
+    two swap); double-click a cell, or drag it back onto the plate map, to
+    empty it. Wells already placed are drawn as tinted tiles. A grid bigger
+    than a whole 96-well plate scrolls.
+
+  To rename a row or column, double-click its label on the heat map itself.
 - **Controls** — on the controls row:
   - **Aggregation** — how multiple cells/wells in a grid cell combine (e.g.
     *Rep-set avg*). **Events above threshold** colours each cell by how many
@@ -5829,16 +5847,15 @@ This is the first Plotting sub-tab, and the one Plotting opens on.
     decimals, `%.1e` for scientific notation, `%d` for a whole number. Leave it
     blank to let the tab choose per metric — counts as whole numbers, fractions to
     two places, intensities scaled to their size.
-  - The layout editor sits at the right end of the tab's control bar: the
-    **Layout** rows × columns boxes, **Auto-populate from selection**, and the
-    grid itself. Drag wells into the grid; drag between cells to move; double-
-    click a cell (or drag it back onto the plate map) to empty it. **Edit
-    label** on any row / column header of the heat map. On a phone it is in the
-    **Controls** sheet, under the other data controls.
+  - **On a phone** the **Layout** button is in the **⚙ Controls** sheet,
+    beside **Save** and **Properties**, and opens the Layout panel across the
+    whole screen; its **✕** returns you to the map. It does not open by itself
+    there. Dragging by touch is not dependable, so choose wells under
+    **Wells** and use **Auto-populate from selection**.
 - **Selecting wells.** The sidebar plate map does double duty on this tab: a
   *click* on a well selects or deselects it exactly as on every other tab, while
-  a *press-and-drag* off a well carries it into the layout grid in the control
-  bar. The one
+  a *press-and-drag* off a well carries it into the grid in the **Layout**
+  panel. The one
   gesture the drag source takes over is press-and-drag selection across several
   wells — use the row / column headers, the corner all/none toggle, or
   **Auto-populate from selection** for bulk work. You can also click a heatmap
@@ -5854,8 +5871,8 @@ This is the first Plotting sub-tab, and the one Plotting opens on.
     loaded wells so the heat map shows one averaged value per group, and **one
     cell per solo well** beside them. That is the same mixture of group
     averages and single wells the Bar Plots tab draws for the same plate. A
-    multi-well cell shows as `A01+3` in the layout editor (hover for the full
-    membership) and moves as a unit when dragged.
+    multi-well cell shows as `A01+3` in the Layout panel's grid (hover for the
+    full membership) and moves as a unit when dragged.
   - *Rep-set avg off* — **one cell per well**, in plate order, across every
     visible group and every solo well. The map is per-well, so the grid is too.
 
@@ -10070,8 +10087,9 @@ holds:
 
 **Wells** and **⚙ Controls** both rise from just above the bar, so **Done ✕** is
 where you tapped to open them; opening one puts the other away. Saved
-selections, and the extra panels some pages add under the plate (Heat Map's
-layout, for instance), stay in **☰**.
+selections, and the extra panels some pages add under the plate, stay in
+**☰**. The Heat Map's **Layout** panel is not one of those: it opens from the
+**Layout** button in **⚙ Controls**.
 
 The **Properties** button among those controls (the sliders icon) puts the
 controls away and opens the figure's Properties panel across the whole screen.

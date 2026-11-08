@@ -6711,7 +6711,11 @@ for a table whose entries can only be established by measuring. Each entry
 carries its reason, at the site and in the roster, because a bare facet name is
 indistinguishable six months later from one added to make a failure go away.
 The Heat Map is the figure measured so far, and it lacks `legend`, `marks`,
-`plot_overlays`, `bar_show_mode`, `group_labels` and `log_axes`.
+`plot_overlays`, `bar_show_mode`, `group_labels`, `colour_limits`, `axis_limits`
+and `log_axes`. Without typed X/Y limits (its axes are row and column positions,
+which a limit can only crop), colour limits or log axes, its Limits & Scale has
+nothing left and is not built; its axes also carry `_aw_no_typed_limits`, so the
+style pass applies no limit typed before that section was hidden.
 
 Two rules make this hold up. A gated section is **not built**, rather than built
 and hidden: an unbuilt section registers no getter and no setter, so `_persist`

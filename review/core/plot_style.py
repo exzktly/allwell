@@ -2331,8 +2331,40 @@ def _apply_layout_engine(fig, prefs: dict) -> None:
                 fig.tight_layout()
             except Exception:
                 swallowed()  # was: pass (silent except)
+    # A divider-placed figure (the Heat Map's grid and colour bar) keeps the
+    # renderer's fixed margins at the desk, and those hold its colour bar's
+    # label only while the figure is wide. A right dock open beside it — the
+    # Layout or Properties panel — takes ``Metrics.dock_w`` from the figure,
+    # and the label then ran off its right edge. So the figure is inset from
+    # whatever text hangs off it, as phone layout does, and again whenever the
+    # canvas changes size, since opening a dock resizes it without a restyle.
+    fitted = False
+    if not use_constrained and not use_tight:
+        with swallow("ask whether a divider places a plot's axes"):
+            fitted = margin_fit.divider_placed(fig)
+    fig._aw_margin_fitted = fitted
+    if fitted:
+        with swallow("keep a divider-placed plot's text inside its figure"):
+            margin_fit.inset_for_overhang(fig)
+        _refit_margins_on_resize(fig)
     with swallow("keep a plot's panels clear of its figure text"):
         keep_panels_clear_of_footer(fig)
+
+
+def _refit_margins_on_resize(fig) -> None:
+    """Inset a margin-fitted figure again when its canvas changes size (once per canvas)."""
+    canvas = getattr(fig, "canvas", None)
+    if canvas is None or not hasattr(canvas, "mpl_connect") or getattr(canvas, "_aw_margin_fit_cid", None) is not None:
+        return
+
+    def _on_resize(_event) -> None:
+        if not getattr(fig, "_aw_margin_fitted", False) or layout_engine_is_the_phone_s():
+            return
+        with swallow("keep a resized divider-placed plot's text inside its figure"):
+            margin_fit.inset_for_overhang(fig)
+            canvas.draw_idle()
+
+    canvas._aw_margin_fit_cid = canvas.mpl_connect("resize_event", _on_resize)
 
 
 def relayout(ctx, fig) -> None:

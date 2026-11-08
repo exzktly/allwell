@@ -206,8 +206,8 @@ def heatmap_empty_reason(ctx) -> EmptyReason | None:
         return None
     return EmptyReason(
         "No wells on this heat map.",
-        "Drag wells from the plate into the grid, "
-        "or click Auto-populate from selection.",
+        "Open Layout and press Auto-populate from selection, "
+        "or drag wells from the plate into its grid.",
     )
 
 

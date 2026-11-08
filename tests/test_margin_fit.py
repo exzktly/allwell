@@ -132,3 +132,38 @@ def test_tick_labels_are_fitted_again_after_the_inset_narrows_the_grid():
     renderer = fig.canvas.get_renderer()
     assert not _collide(_drawn(ax.xaxis, renderer, ax.get_xlim()), renderer, fig), (
         "the column numbers overlap once the grid is inset: they were fitted to the grid before the inset")
+
+
+def test_the_desk_style_pass_keeps_a_narrowed_heat_map_s_colour_bar_inside(monkeypatch):
+    """Reported by the page-render sweep at the desk: with a right dock open
+    beside it (the Heat Map's Layout panel, or Properties) the figure is about
+    900 px wide, and the colour bar's label ran off its right edge — the margin
+    fit ran only in phone layout. The desk's layout pass fits it too, and does
+    again when the canvas is resized, since a dock opening resizes it without a
+    restyle."""
+    from core import phone_layout
+
+    monkeypatch.setattr(phone_layout, "is_on", lambda: False)
+    fig, _ax, _cax = _heat_figure()
+    assert _overhang(fig) > 0, "the fixture must overhang to prove anything"
+    plot_style._apply_layout_engine(fig, {})
+    assert _overhang(fig) <= 0.5
+
+    # Narrower still, as when a dock opens: the resize alone refits it.
+    fig.set_size_inches(3.2, 7.96)
+    margin_fit.restore(fig)
+    assert _overhang(fig) > 0
+    from matplotlib.backend_bases import ResizeEvent
+    fig.canvas.callbacks.process("resize_event", ResizeEvent("resize_event", fig.canvas))
+    assert _overhang(fig) <= 0.5
+
+
+def test_the_desk_style_pass_leaves_an_engine_laid_figure_to_its_engine(monkeypatch):
+    from core import phone_layout
+
+    monkeypatch.setattr(phone_layout, "is_on", lambda: False)
+    fig, ax, _cax = _heat_figure()
+    before = ax.get_position(original=True).bounds
+    plot_style._apply_layout_engine(fig, {"layout_tight": True})
+    assert not getattr(fig, "_aw_margin_fitted", False)
+    assert ax.get_position(original=True).bounds == before

@@ -27,8 +27,10 @@ from util.well_token import canonical_well_label
 
 #: What an upload sent ahead logs in place of the ``[remote] ↑`` of an upload the run is waiting for. The Analyze
 #: progress view (``pipeline_runner.ProgressTracker``) reads ``↑`` as "the run is uploading" and puts the headline and
-#: the transfer label on it; while a batch computes, that is not what is happening. ``⇡`` moves only the well's own dial.
-AHEAD_UP_MARK = "[remote] ⇡"
+#: the transfer label on it; while a batch computes, that is not what is happening. This mark moves only the well's own
+#: dial. In words and a plain ``↑``: the dashed arrow it used to be (U+21E1) is in few Windows fonts, and the run log
+#: showed an unreadable glyph in its place. It must not contain ``[remote] ↑``, which the progress view tests for first.
+AHEAD_UP_MARK = "[remote] sent ahead ↑"
 
 
 def _ahead_log(log: Callable[[str], None]) -> Callable[[str], None]:

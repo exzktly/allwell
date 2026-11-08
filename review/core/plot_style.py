@@ -1406,7 +1406,7 @@ def group_header_pad(rows: int, size: float = 8.0) -> float:
 
 def _style_group_labels(ax, idx: int, axis_prefs: _AxisPrefs, scale: float) -> None:
     """Size *ax*'s marked group labels from its Group label size, and clear their rows."""
-    marked = [t for t in ax.texts if getattr(t, GROUP_LABEL_ATTR, None) is not None]
+    marked = [t for t in getattr(ax, "texts", ()) if getattr(t, GROUP_LABEL_ATTR, None) is not None]
     rows = int(getattr(ax, GROUP_HEADER_ROWS_ATTR, 0) or 0)
     if not marked and not rows:
         return

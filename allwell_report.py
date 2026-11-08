@@ -7,6 +7,14 @@
 saved plot it can draw, ``report.pdf``, and ``manifest.json`` listing every
 saved plot with what became of it, and exits with a code a script can branch on.
 
+The PDF opens with the dataset's provenance: the run that produced the data
+and its settings, whether the plate was complete, the last change to each piece
+of analysis state, the history from ``provenance.jsonl``, the plots that could
+not be drawn, and anything that needs attention. Each plot page says what
+changed in the dataset after that plot was saved, since it was redrawn from the
+dataset as it is now. The manifest carries the same under ``cover``
+(``review/features/saved_plots/_cover.py``).
+
 It is an entry point beside ``allwell.py`` rather than a module inside
 ``review/`` because it does what only the shell does: it constructs the Review
 pane. A module inside ``review/`` may not import ``ReviewApp``
@@ -54,7 +62,7 @@ from pathlib import Path
 
 from util.json_write import write_json_atomic
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MANIFEST_FILENAME = "manifest.json"
 
 #: Exit codes, one per outcome a script or scheduler needs to branch on.
@@ -96,6 +104,11 @@ class Manifest:
     pdf: str = ""
     message: str = ""
     writes_suppressed: int = 0
+    #: What the PDF's cover states about the dataset — settings, completeness,
+    #: analysis edits, the provenance history, and per plot what changed after
+    #: it was saved (``saved_plots._cover.ReportCover.to_json``). ``None`` when
+    #: the run never reached the plots.
+    cover: dict | None = None
     #: ``None`` until decided. The runner sets it outright for a run that never
     #: reached the plots (invalid input, a crash); otherwise :meth:`finish`
     #: derives it from the entries.
@@ -186,12 +199,12 @@ def _write(manifest: Manifest, out_dir: Path) -> None:
     write_json_atomic(out_dir / MANIFEST_FILENAME, manifest.to_json())
 
 
-def _draw_all(ctx, manifest: Manifest, out_dir: Path) -> list:
-    """Draw every saved plot into *out_dir*; return the records drawn."""
-    records = ctx.features.query("saved_plots.gallery", ctx, default=None)
+def _draw_all(ctx, manifest: Manifest, out_dir: Path) -> tuple[list, list]:
+    """Draw every saved plot into *out_dir*; return every record, and those drawn."""
+    records = list(ctx.features.query("saved_plots.gallery", ctx, default=None) or [])
     drawn = []
     figures = out_dir / "figures"
-    for n, rec in enumerate(records or [], start=1):
+    for n, rec in enumerate(records, start=1):
         entry = PlotEntry(id=rec.id, title=rec.title or rec.tab, tab=rec.tab,
                           status="not_drawn",
                           copied_from=getattr(rec, "copied_from", "") or "")
@@ -211,10 +224,33 @@ def _draw_all(ctx, manifest: Manifest, out_dir: Path) -> list:
             entry.note = getattr(result, "note", "") or ""
             drawn.append((rec, out_dir / entry.png))
         manifest.plots.append(entry)
-    return drawn
+    return records, drawn
 
 
-def _write_pdf(ctx, drawn, manifest: Manifest, out_dir: Path) -> None:
+def _cover(ctx, records, manifest: Manifest) -> object | None:
+    """The report's cover, or ``None`` when this build cannot assemble one.
+
+    Built from the dataset's history and records after every plot has been
+    attempted, because the cover lists the plots that were not drawn. Its
+    failure costs the cover, never the report: the plots are already drawn,
+    and the PDF falls back to the plain title page.
+    """
+    outcomes = {p.id: (p.status, p.reason) for p in manifest.plots}
+    try:
+        cover = ctx.features.query(
+            "saved_plots.report_cover", ctx, records, outcomes,
+            dataset_name=Path(manifest.dataset).name,
+            app_version=manifest.app_version, default=None)
+    except Exception:
+        _logger.exception("the report cover could not be assembled; "
+                          "the PDF opens with the plain title page")
+        return None
+    if cover is not None:
+        manifest.cover = cover.to_json()
+    return cover
+
+
+def _write_pdf(ctx, drawn, manifest: Manifest, out_dir: Path, cover=None) -> None:
     if not drawn:
         return
     paths = {id(rec): path for rec, path in drawn}
@@ -222,7 +258,7 @@ def _write_pdf(ctx, drawn, manifest: Manifest, out_dir: Path) -> None:
         "saved_plots.report_pdf", [rec for rec, _p in drawn],
         lambda r: paths.get(id(r)), out_dir / "report.pdf",
         dataset_name=Path(manifest.dataset).name,
-        summary_for=lambda r: r.summary, default=None)
+        summary_for=lambda r: r.summary, cover=cover, default=None)
     if built is not None:
         manifest.pdf = "report.pdf"
 
@@ -261,9 +297,10 @@ def run_report(dataset: Path | str, out_dir: Path | str, *, pdf: bool = True) ->
                     manifest.exit_code = EXIT_INVALID_INPUT
                     manifest.message = "Saved Plots is not part of this build"
                 else:
-                    drawn = _draw_all(ctx, manifest, out_dir)
+                    records, drawn = _draw_all(ctx, manifest, out_dir)
+                    cover = _cover(ctx, records, manifest)
                     if pdf:
-                        _write_pdf(ctx, drawn, manifest, out_dir)
+                        _write_pdf(ctx, drawn, manifest, out_dir, cover)
             finally:
                 # Inside the suspension whatever happened above: a save still
                 # queued on the background writer must meet the suspension,

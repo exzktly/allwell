@@ -546,6 +546,11 @@ def _svc_saved_plots_report_pdf():
     return build_saved_plots_report
 
 
+def _svc_saved_plots_report_cover():
+    from review.features.saved_plots._cover import cover_for
+    return cover_for
+
+
 def _svc_saved_plots_render():
     from review.features.saved_plots._render import render_saved_plot
     return render_saved_plot
@@ -1234,7 +1239,8 @@ def _features() -> list[FeatureDescriptor]:
             # through these, so the report names no feature.
             services={"saved_plots.gallery": _svc_saved_plots_gallery,
                       "saved_plots.render": _svc_saved_plots_render,
-                      "saved_plots.report_pdf": _svc_saved_plots_report_pdf},
+                      "saved_plots.report_pdf": _svc_saved_plots_report_pdf,
+                      "saved_plots.report_cover": _svc_saved_plots_report_cover},
         ),
         FeatureDescriptor(
             name="Batch Export", group="Output", on_phone=False, icon="boxes",

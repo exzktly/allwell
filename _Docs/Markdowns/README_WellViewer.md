@@ -7846,9 +7846,28 @@ pressing Restore on each — without opening a window, and writes:
 └── manifest.json                      ← every saved plot, drawn or not, and why
 ```
 
+`report.pdf` opens with a cover that says where the numbers came from:
+
+- **Needs attention** — anything that makes the figures less than they look:
+  wells the last run did not finish, error records it left, a missing or
+  damaged history, plots that could not be redrawn, and plots saved before the
+  dataset last changed.
+- **Dataset, Pipeline settings, Last run** — channels, timepoints, fields and
+  cell count; the segmentation and correction settings the run used; when and
+  where it ran and how many wells came out complete.
+- **Analysis state** — when the gates, groups, QC thresholds and other analysis
+  settings were last changed.
+- **History** — every run, edit, reset, copy, repair and earlier report recorded
+  in the dataset's `provenance.jsonl`, newest first.
+
+Because each plot is redrawn from the dataset **as it is now**, a plot saved
+before a re-run or a gate change carries a line under its title naming what
+changed since it was saved — so a figure that no longer matches the one you
+saved says so. `manifest.json` carries the same information under `cover`.
+
 A plot that cannot be redrawn — an Image Table grid, or one panel of a
-multi-panel figure — is listed in `manifest.json` with the reason rather than
-left out, and one drawn from fewer wells than it names (a plot copied from
+multi-panel figure — is listed in `manifest.json` (and on the cover) with the
+reason rather than left out, and one drawn from fewer wells than it names (a plot copied from
 another plate, say) carries a note naming them. The command's exit code says how it went: `0` everything drawn, `3`
 some drawn (the manifest names the rest), `1` nothing drawn, `2` the folder is
 not a dataset (or this build has no Saved Plots), `4` the dataset has no saved

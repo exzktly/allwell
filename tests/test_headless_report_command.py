@@ -80,6 +80,15 @@ def test_the_command_draws_the_gallery_and_changes_nothing(loaded_app, mini_data
     assert (out / "report.pdf").stat().st_size > 1000
     assert isinstance(manifest["writes_suppressed"], int)
 
+    # The cover: the provenance reached the manifest, and the plot saved before
+    # the reset says on its page that its groups changed after it was saved.
+    cover = manifest["cover"]
+    assert cover["dataset_name"] == mini_dataset.name
+    assert any("Reset: sample definitions" == row["what"] for row in cover["history"])
+    assert "sample definitions" in cover["since_saved"][rec.id]
+    assert any(label == "  Grid" and "Image Table tab draws no chart" in reason
+               for label, reason in cover["report"])
+
     assert _snapshot(mini_dataset) == before, "the report changed the dataset"
     from util.provenance_log import read_events
     events = [e for e in read_events(mini_dataset).events

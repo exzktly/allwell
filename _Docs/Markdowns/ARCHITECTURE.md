@@ -1735,7 +1735,9 @@ review/
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
 │   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
 │   │                 + _svg_shapes.py (the PowerPoint export),
-│   │                 _render.py (draw one record for the headless report)
+│   │                 _render.py (draw one record for the headless report),
+│   │                 _cover.py (the headless report's cover: provenance,
+│   │                 settings, completeness, what changed since each save)
 │   ├── crop/         controller.py, region.py        ← support lib (always present)
 │   ├── qc/           controller.py, params.py, tab_view.py   ← support lib
 │   ├── export/       service.py, style.py, properties_view.py (the right-hand Properties panel)
@@ -3778,6 +3780,43 @@ loaded under it. Each run first removes the figures, PDF and manifest an earlier
 run left in `--output` (`clear_previous_output`), so a run that draws fewer
 plots cannot leave an old report beside a new manifest. The one write to the
 dataset is a `report_generated` line in its provenance log (§5.7).
+
+**The PDF opens with the dataset's provenance** (`features/saved_plots/_cover.py`,
+reached as the `saved_plots.report_cover` service once every plot has been
+attempted, because the cover lists the ones that were not drawn). `build_cover`
+is pure — `pipeline_info.json`, a `ProvenanceRead`, the records and each one's
+outcome in, a frozen `ReportCover` of already-worded `(label, value)` rows out —
+and `cover_for` is the ctx wrapper. The cover prints, in order: **Needs
+attention** (every degraded input as a sentence: no completeness record or a
+check turned off, an incomplete plate counted through
+`pipeline.completeness.plate_total` / `unreadable_note`, a run that ended early,
+error records, no `provenance.jsonl` or unreadable / newer-build lines in it,
+plots not drawn, plots saved before the dataset last changed); **Dataset** (wells
+loaded, rows in the per-well tables before any gate, channels, timepoints, fields,
+filename schema); **Pipeline settings** (the rows of `SETTING_LABELS` read from
+`execution_options`, with a method's own options left out under another method);
+**Last run** (`run_check`: finished, mode, host, duration, wells complete, error
+records by type, and `field_quality_record.summarize`); **Analysis state** (the
+last `analysis_changed` per domain, worded by `DOMAIN_LABELS`, which
+`tests/test_report_cover.py` holds to every domain `persistence/provenance.STORED_AT`
+records); **Report** (saved, drawn, and each plot not drawn with its reason); and
+**History**, the log newest first, at most `MAX_HISTORY_ROWS_PRINTED` rows with
+the rest counted. `history_rows` pairs a `run_started` with its `run_finished`
+(one row carrying the run's well scope; a start with no finish is its own row
+saying so) and collapses consecutive `analysis_changed` lines into one row with a
+count per domain, so a gate dragged across a hundred saves reads as one edit.
+Each plot page then carries `since_saved_sentence`: the reruns, edited domains,
+resets, recipes, repairs and rewrites recorded at or after that plot's
+`created_at` — the report's own `report_generated` lines excepted — because the
+page was redrawn from the dataset as it is now, which a later gate change makes
+different from what was saved. A history whose first line is later than the save
+says so rather than reading as "nothing changed". Times print in local time with
+the zone on the cover; `created_at` is written naive and read as this machine's
+local time, so a report run in another zone than the save shifts by the
+difference. The manifest carries the same object under `cover` (schema 2). A
+cover that cannot be assembled is logged and costs only the cover: the PDF falls
+back to the plain title page the gallery's own Export menu still uses
+(`build_saved_plots_report(..., cover=None)`).
 
 Batch Export groups are not drawn by the report yet: their orchestration lives
 in the panels. Nor does the report apply a recipe first — that would change the
@@ -6342,6 +6381,10 @@ an event-specific `detail`.
   `tests/test_review_provenance.py::test_every_analysis_domain_reaches_the_log`
   holds every `ANALYSIS_SCOPES` domain to a row of `STORED_AT` or
   `RECORDED_UNDER`, so a new analysis domain cannot be silently left out.
+- **The one reader** is the headless report's cover
+  (`features/saved_plots/_cover.py`, §5.2 *The headless report*), which prints
+  the history and, per saved plot, what changed after it was saved. It reports
+  and decides nothing, so the "never authority" rule above holds.
 - **The other writers.** Analyze runs are recorded by the runner
   (`services/run_provenance.py`, §6.4); Datasets derivations and repairs by
   `datasets/core/provenance.py` and `datasets/validate/apply.py` (§6b).

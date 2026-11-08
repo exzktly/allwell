@@ -7348,7 +7348,8 @@ channel for every well).
   Overlay switch — and redraws a table already on screen. The grid holds at most
   12 columns, so a tall table turned on its side can leave images off the end;
   the status line says how many, and **Wrap** bands the columns to show them
-  all. Not offered in Plate mode, whose rows and columns are the plate's) · **Crop view ▾** (drag a region on any image — the button reads
+  all. In Plate mode it turns the plate on its side — columns 1–12 down the rows,
+  rows A–H across — and a second Transpose turns it back) · **Crop view ▾** (drag a region on any image — the button reads
   the current crop, `Crop view · (full FOV)` when there is none). This crops what
   the images *show*; it is not the Segmentation tab's **Crop cells**, which
   excludes cells from every plot, statistic and export. · an **ON threshold** value

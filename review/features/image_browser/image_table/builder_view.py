@@ -511,12 +511,11 @@ def builder_transpose(ctx) -> bool:
     again transposed, since transposing what is shown is the point; a table not
     yet generated is left for Generate, with the "edited" cue, like any shelf
     edit. Per-cell right-click overrides go with the old layout, as they do on
-    every shelf edit. Refused, with a status line, in Plate mode.
+    every shelf edit. In Plate mode the plate itself turns (columns down the
+    rows), since its rows and columns are the plate's whatever the axes hold.
     """
     spec = builder_spec(ctx)
-    if not transpose_spec(spec):
-        ctx.notify.set_status("Image Table: Plate mode lays wells out in plate positions — nothing to transpose.")
-        return False
+    transpose_spec(spec)
     rt = _rt(ctx)
     t = getattr(rt, "builder_timer", None)
     if t is not None:

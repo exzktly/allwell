@@ -2344,8 +2344,10 @@ crop and ON-threshold controls act on the images below them and belong beside
 them. The strip is consolidated *in place* to one row — `Reset table`,
 `Clear images` and *Transpose rows and columns* are one `Table ▾` menu (the
 transpose is `builder_view.builder_transpose` over the Qt-free
-`state.transpose_spec`, which swaps the builder spec's two `Axis` objects whole
-and refuses Plate mode; the layout is rebuilt at once rather than on the
+`state.transpose_spec`, which swaps the builder spec's two `Axis` objects whole,
+or in Plate mode flips `TableSpec.plate_transposed` so the plate's columns run
+down the rows — `spec_to_state_fields` and `spec_from_state` read both orders;
+the entry is never disabled, since a greyed QMenu entry shows no reason; the layout is rebuilt at once rather than on the
 shelf's debounce, a table on screen is drawn again, and the status line counts
 any images the 12-column limit then leaves out), the loose `(full FOV)` caption folded
 into the Crop button through `CropTool.set_status_widget`, and the `Zoom:`

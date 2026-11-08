@@ -2001,6 +2001,10 @@ class AllWellApp(QMainWindow):
         review = self._review
         if review is None:
             return
+        # The load itself runs from a timer, so its own "asked by" line could name only the timer: who asked is
+        # written here, when it is asked.
+        _boot_diag.boot(f"dataset load: {dataset_path} asked for (by {_boot_diag.caller_chain()}); "
+                        f"opens in {delay_ms} ms")
 
         def _load() -> None:
             try:

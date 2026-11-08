@@ -22884,7 +22884,13 @@ hard native crash dumps a
 C/Python stack there even from a windowed build with no console, and a *hang*
 leaves its last-reached milestone as the log's final line — a dataset load writes
 `dataset load: reading <file> (i/n)` before each well (`load_controller._open_wells`),
-so a load that never comes back names the file. **A window that stops responding
+so a load that never comes back names the file. Before that it writes who asked for it:
+`dataset load: opening <folder> (asked by …)` in `load_controller.load_directory`, the
+calls that led there as `file:line function` (`boot_diag.caller_chain`, with the load's
+own forwarding through `runtime_app` left out), and `AllWellApp._load_in_review_later`,
+which opens the dataset from a timer, writes `dataset load: <folder> asked for (by …)`
+when it is asked — the end of an Analyze run, Datasets' hand-off, the startup folder
+or Open — so a load nobody at the window started is still named. **A window that stops responding
 writes every thread's stack there too** (`install_hang_recorder`, called by
 `allwell.main` once the `QApplication` exists): a `QTimer` re-arms
 `faulthandler.dump_traceback_later` every quarter of `ALLWELL_HANG_DUMP_S`

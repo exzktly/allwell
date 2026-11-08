@@ -69,6 +69,17 @@ def user_state_dir() -> Path:
     return gui_state_dir()
 
 
+def caller_chain(*, skip_files: tuple[str, ...] = (), depth: int = 6) -> str:
+    """The calls that led here, outermost first, as ``file:line function`` -- frames in *skip_files* (a caller's own
+    forwarding) and this function's left out, so what remains is what started it: a button's slot, a timer, the end
+    of a run. For a boot-log line that has to say who asked for something (``dataset load: opening``)."""
+    import traceback
+
+    skip = {os.path.basename(__file__), *skip_files}
+    frames = [f for f in traceback.extract_stack()[:-1] if os.path.basename(f.filename) not in skip]
+    return " → ".join(f"{os.path.basename(f.filename)}:{f.lineno} {f.name}" for f in frames[-depth:]) or "unknown"
+
+
 def log_path() -> Path:
     """Absolute path to the boot log (stable for the process lifetime)."""
     global _LOG_PATH

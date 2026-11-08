@@ -11,9 +11,24 @@ One filter on the application, so a field built tomorrow is covered without anyo
 
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QAbstractScrollArea, QAbstractSpinBox, QApplication, QComboBox, QWidget
+
+#: Set to ``0`` to start the app without the guard. A diagnosis switch: an access violation in a Windows session was
+#: reported twice inside :meth:`_WheelGuard.eventFilter`, each time just after Review finished loading a dataset during
+#: a remote run, and it does not reproduce on Linux. Whether the crash needs the guard is answered by running the same
+#: steps with it off; ``allwell.main`` writes which way each session ran into the boot log, beside any crash.
+SWITCH_ENV = "ALLWELL_WHEEL_GUARD"
+
+
+def wanted(environ=None) -> bool:
+    """Whether the guard is to be installed: always, unless :data:`SWITCH_ENV` is ``0``."""
+    env = os.environ if environ is None else environ
+    return env.get(SWITCH_ENV, "").strip() != "0"
+
 
 #: The widgets that change a value when the wheel turns over them.
 _GUARDED = (QComboBox, QAbstractSpinBox)

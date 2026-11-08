@@ -112,3 +112,21 @@ def test_the_app_installs_the_guard_at_startup():
 
     main_source = (REPO_ROOT / "allwell.py").read_text(encoding="utf-8").split("def main()", 1)[1]
     assert "wheel_guard.install(app)" in main_source
+
+
+@pytest.mark.parametrize(("value", "wanted"), [(None, True), ("", True), ("1", True), ("0", False), (" 0 ", False)])
+def test_the_guard_can_be_left_out_for_a_diagnosis(value, wanted):
+    """``ALLWELL_WHEEL_GUARD=0`` starts the app without the guard, to learn whether a reported crash inside its filter
+    needs it; anything else, or nothing, installs it."""
+    env = {} if value is None else {wheel_guard.SWITCH_ENV: value}
+    assert wheel_guard.wanted(env) is wanted
+
+
+def test_the_app_records_whether_the_guard_is_on_in_the_boot_log():
+    """The switch is a diagnosis, so the crash log it is read beside must say which way the session ran."""
+    from tests._repo_scan import REPO_ROOT
+
+    main_source = (REPO_ROOT / "allwell.py").read_text(encoding="utf-8").split("def main()", 1)[1]
+    assert "if wheel_guard.wanted():" in main_source
+    assert '_boot_diag.boot("wheel guard: on")' in main_source
+    assert '_boot_diag.boot(f"wheel guard: off ({wheel_guard.SWITCH_ENV}=0)")' in main_source

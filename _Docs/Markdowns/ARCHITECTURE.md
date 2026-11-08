@@ -20114,7 +20114,7 @@ The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which u
 | `CurrentPageStack` (`widgets/page_stack.py`) | A `NamedPageStack` exactly as tall as its current page, for a block of form rows that changes with a choice above it. The Analyze form's per-method segmentation settings. |
 | `FooterScrollArea` (`widgets/footer_scroll_area.py`) | A `QScrollArea` with a pinned footer under the viewport; the viewport is shortened by the footer's height, which follows the footer's contents. The Analyze run footer. |
 | `TextCombo` (`widgets/text_combo.py`) | An editable combo with a line edit's text API (`text()`, `setText()`, `clear()`, `textChanged`, `textEdited`) whose list is only suggestions; `set_options` replaces them silently. The Analyze form's Segmentation and Cytoplasm channels, offering the channels in the Channels rows (`seg_params._refresh_seg_channel_options`, which also writes the line saying whether the typed name is one of them). |
-| `wheel_guard` (`core/wheel_guard.py`) | One application-wide event filter, installed in `allwell.main`: a wheel over a `QComboBox` (whatever its focus, since it keeps focus after a choice) or over a `QAbstractSpinBox` that has no keyboard focus is forwarded to the scroll area it sits in, so a long form scrolls without changing the fields under the pointer. |
+| `wheel_guard` (`core/wheel_guard.py`) | One application-wide event filter, installed in `allwell.main`: a wheel over a `QComboBox` (whatever its focus, since it keeps focus after a choice) or over a `QAbstractSpinBox` that has no keyboard focus is forwarded to the scroll area it sits in, so a long form scrolls without changing the fields under the pointer. `ALLWELL_WHEEL_GUARD=0` starts the app without it (`wanted`), and `allwell.main` writes `wheel guard: on` or `off` into the boot log either way: a Windows session crashed twice with an access violation inside `eventFilter`, each time just after Review finished loading a dataset during a remote run, every other thread idle, and it does not reproduce on Linux, so the switch is how a run on that machine shows whether the crash needs the filter. |
 | `ValueCombo` (`widgets/value_combo.py`) | A combo of `(value, label)` items, read and written by `value()` / `setValue()`, so the label can be copy while the value stays an argument. The Analyze correction and Cellpose-model combos. |
 | `RailNav` | The left-rail section navigator. |
 | `form_registry` (`widgets/form_registry.py`) | Which widgets have an alternate form, and of what kind: `declare(widget, kind)` from a constructor, `register(widget, apply)` for a view's own form, `declared(kind)` for the live ones, `add_listener` for whoever applies them (phone layout's shell). Kinds, not layouts — it imports nothing from the application. Held weakly; liveness is `shiboken6.isValid`, because a wrapper outlives its C++ widget. §2 *Phone layout*. |
@@ -22884,7 +22884,13 @@ hard native crash dumps a
 C/Python stack there even from a windowed build with no console, and a *hang*
 leaves its last-reached milestone as the log's final line — a dataset load writes
 `dataset load: reading <file> (i/n)` before each well (`load_controller._open_wells`),
-so a load that never comes back names the file. **A window that stops responding
+so a load that never comes back names the file. Before that it writes who asked for it:
+`dataset load: opening <folder> (asked by …)` in `load_controller.load_directory`, the
+calls that led there as `file:line function` (`boot_diag.caller_chain`, with the load's
+own forwarding through `runtime_app` left out), and `AllWellApp._load_in_review_later`,
+which opens the dataset from a timer, writes `dataset load: <folder> asked for (by …)`
+when it is asked — the end of an Analyze run, Datasets' hand-off, the startup folder
+or Open — so a load nobody at the window started is still named. **A window that stops responding
 writes every thread's stack there too** (`install_hang_recorder`, called by
 `allwell.main` once the `QApplication` exists): a `QTimer` re-arms
 `faulthandler.dump_traceback_later` every quarter of `ALLWELL_HANG_DUMP_S`

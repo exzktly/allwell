@@ -230,18 +230,19 @@ def test_binary_cell_with_a_mask_still_renders(monkeypatch):
 
 def test_prefetch_marks_only_the_keys_that_decoded(monkeypatch):
     """A failed warm stays unmarked so the next Generate tries it again."""
+    from review.features.image_browser.image_table import _prefetch as PF
     from review.features.image_browser.image_table import controller as C
 
-    monkeypatch.setattr(C, "_row_display_opts", lambda ctx, r, chan=None: (False, False, ""))
-    monkeypatch.setattr(C, "_find_ratio_for_channel", lambda ctx, chan: None)
-    monkeypatch.setattr(C, "_is_nuc_seg", lambda chan: False)
+    monkeypatch.setattr(PF, "_row_display_opts", lambda ctx, r, chan=None: (False, False, ""))
+    monkeypatch.setattr(PF, "_find_ratio_for_channel", lambda ctx, chan: None)
+    monkeypatch.setattr(PF, "_is_nuc_seg", lambda chan: False)
 
     def _load(ctx, cache, well, chan, tp, fov, *, use_tophat=False):
         if well == "A02":
             raise OSError("drive stalled")
         return np.zeros((2, 2), dtype=np.float32)
 
-    monkeypatch.setattr(C, "_load_array", _load)
+    monkeypatch.setattr(PF, "_load_array", _load)
 
     warmed: set = set()
     ctx = SimpleNamespace(state=SimpleNamespace(

@@ -4489,6 +4489,12 @@ The **Axis #** picker opens on **All**, on every plot: a change applies to every
 panel of the figure until you pick one axis from the list or click a subplot.
 Limits you set earlier on one axis stay on that axis.
 
+On Bar Plots, **Group label size** sizes every label that names a group of bars:
+the sample under each block of timepoint bars, and the *Split by* / *Then by*
+band labels above each panel (the inner, *Then by* row one point smaller). The
+plot changes as you type, and the rows above a panel and its title move up to
+make room for a larger size.
+
 #### Bar colours — Plate or Grey
 
 The Bar Plots tab's Properties sidebar carries a **Colours** section with two

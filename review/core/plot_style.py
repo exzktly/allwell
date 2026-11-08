@@ -1007,7 +1007,7 @@ def figure_pref_is_set(ctx, fig, key: str) -> bool:
 
 def axis_scoped_value(prefs, idx, key, default=None):
     """Per-axis value for a Properties "Axis #" style key, for callers *outside*
-    :func:`apply_export_style_prefs` (the bar renderer's group-label footers).
+    :func:`apply_export_style_prefs` (the bar plot's y-limit read).
 
     *prefs* is a :func:`figure_prefs` view — it carries the per-figure
     ``axis_buckets`` — so the panel's own bucket entry (axis ``idx``, 1-based)
@@ -1362,6 +1362,68 @@ def _type_scale(ax) -> float:
     return scale if math.isfinite(scale) and scale > 0 else 1.0
 
 
+#: Attribute a group label carries (:func:`mark_group_label`): its size relative
+#: to the Properties "Group label size", in points.
+GROUP_LABEL_ATTR = "_aw_group_label_offset"
+#: Attribute an axes carries when group-label rows sit above it (:func:`mark_group_header_rows`).
+GROUP_HEADER_ROWS_ATTR = "_aw_group_header_rows"
+#: Attribute a header label carries when it sits a row above another (:func:`mark_group_label`).
+GROUP_LABEL_LIFT_ATTR = "_aw_group_label_lifted"
+#: The air under each row of group labels, in points: a row is its text's size plus this.
+GROUP_ROW_GAP_PT = 4
+#: A title's pad with nothing between it and its axes (``apply_ax_style``'s).
+_PLAIN_TITLE_PAD_PT = 6
+
+
+def mark_group_label(text, *, offset: float = 0.0, lifted: bool = False):
+    """Have the style pass size *text* as a group label: Group label size plus *offset* points.
+
+    The bar plot's group labels — the sample under each block of timepoint
+    bars, the bands and sub-bands above each panel — were sized once by their
+    renderer (or not read the setting at all), and a Properties edit only
+    re-runs the style pass, so changing Group label size changed nothing on
+    screen. Marked, they are sized wherever the pass runs: on every edit, at
+    the end of every redraw, and on export. *lifted* says the label sits one
+    sub-band row above its panel's other headers, so its offset follows that
+    row's height.
+    """
+    setattr(text, GROUP_LABEL_ATTR, float(offset))
+    if lifted:
+        setattr(text, GROUP_LABEL_LIFT_ATTR, True)
+    return text
+
+
+def mark_group_header_rows(ax, rows: int) -> None:
+    """Record that *rows* rows of group labels sit between *ax* and its title,
+    so the style pass pads the title by their height at the size it gives them."""
+    setattr(ax, GROUP_HEADER_ROWS_ATTR, int(rows))
+
+
+def group_header_pad(rows: int, size: float = 8.0) -> float:
+    """A panel title's pad, in points, clearing *rows* rows of group labels at *size*."""
+    return _PLAIN_TITLE_PAD_PT + int(rows) * (float(size) + GROUP_ROW_GAP_PT) if rows else _PLAIN_TITLE_PAD_PT
+
+
+def _style_group_labels(ax, idx: int, axis_prefs: _AxisPrefs, scale: float) -> None:
+    """Size *ax*'s marked group labels from its Group label size, and clear their rows."""
+    marked = [t for t in ax.texts if getattr(t, GROUP_LABEL_ATTR, None) is not None]
+    rows = int(getattr(ax, GROUP_HEADER_ROWS_ATTR, 0) or 0)
+    if not marked and not rows:
+        return
+    size = float(axis_prefs.style(idx, "group_label_size", 8)) * scale
+    sub_row = None
+    for text in marked:
+        drawn = max(1.0, size + getattr(text, GROUP_LABEL_ATTR))
+        text.set_fontsize(drawn)
+        if not getattr(text, GROUP_LABEL_LIFT_ATTR, False):
+            sub_row = drawn if sub_row is None else max(sub_row, drawn)
+    for text in marked:
+        if getattr(text, GROUP_LABEL_LIFT_ATTR, False) and sub_row is not None:
+            text.xyann = (text.xyann[0], sub_row + GROUP_ROW_GAP_PT)
+    if rows:
+        ax._set_title_offset_trans(group_header_pad(rows, size))
+
+
 def _style_axis_typography(ax, idx: int, axis_prefs: _AxisPrefs) -> str:
     """Sizes, colours and font family of the axis text; returns the title ink,
     which the legend pass uses for its own text."""
@@ -1396,6 +1458,7 @@ def _style_axis_typography(ax, idx: int, axis_prefs: _AxisPrefs) -> str:
     ax.xaxis.label.set_fontfamily(fam)
     ax.yaxis.label.set_fontfamily(fam)
     ax.title.set_fontfamily(fam)
+    _style_group_labels(ax, idx, axis_prefs, scale)
     return title_fg
 
 

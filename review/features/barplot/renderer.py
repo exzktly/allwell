@@ -75,7 +75,9 @@ from review.features.barplot.collect import (
 from review.features.barplot import _observations as _nw_bars
 from review.features.barplot import _annotations as _rel_annotations
 from review.features.barplot._baseline_ratio import relative_suffix as _rel_suffix
-from review.core.plot_style import forget_renderer_marks, own_xtick_angle
+from review.core.plot_style import (
+    forget_renderer_marks, mark_group_header_rows, mark_group_label, own_xtick_angle,
+)
 
 
 def _annotate_group_key_headers(axes, xs, group_keys) -> int:
@@ -95,10 +97,11 @@ def _annotate_group_key_headers(axes, xs, group_keys) -> int:
         if ax is None:
             continue
         for gk, positions in cluster_x.items():
-            follows_theme(ax.text(sum(positions) / len(positions), 1.02, gk,
-                                  transform=ax.get_xaxis_transform(),
-                                  ha="center", va="bottom", fontsize=8,
-                                  fontweight="bold", color=tokens_for(ax)[1]))
+            mark_group_label(follows_theme(ax.text(sum(positions) / len(positions), 1.02, gk,
+                                                   transform=ax.get_xaxis_transform(),
+                                                   ha="center", va="bottom", fontsize=8,
+                                                   fontweight="bold", color=tokens_for(ax)[1])))
+        mark_group_header_rows(ax, 1 if cluster_x else 0)
     return _TITLE_PAD_PT[1] if cluster_x else _TITLE_PAD_PT[0]
 
 
@@ -110,9 +113,10 @@ def _annotate_cluster_footers(items, axes, fontsize=8, xs=None) -> None:
     cluster's identity gets a footer on EACH axis below its tick row.
     Text uses the same muted_fg the ticks themselves are drawn with.
 
-    ``fontsize`` may be a number (same size on every panel) or a
-    ``callable(ax) -> float`` so the caller can honour a per-axis "Group label
-    size" set via the Properties "Axis #" selector.
+    Each footer is marked as a group label, so the style pass sizes it from
+    the panel's own Properties "Group label size" (per "Axis #") on every
+    edit as well as every redraw; *fontsize* is only what it is drawn at
+    before that pass runs.
 
     *xs* are the positions the bars were drawn at, which the caller passes from
     the renderer's stash: they depend on the Properties → Bars width and
@@ -126,14 +130,13 @@ def _annotate_cluster_footers(items, axes, fontsize=8, xs=None) -> None:
         xs = _clustered_x_positions(items)
     for ax in axes:
         _muted_fg = tokens_for(ax)[2]
-        _fs = fontsize(ax) if callable(fontsize) else fontsize
         for gk, cx in _cluster_centers(items, xs):
-            follows_theme(
+            mark_group_label(follows_theme(
                 ax.annotate(gk, xy=(cx, 0), xycoords=("data", "axes fraction"),
                             xytext=(0, -32), textcoords="offset points",
-                            ha="center", va="top", fontsize=_fs,
+                            ha="center", va="top", fontsize=fontsize,
                             fontweight="bold", color=_muted_fg,
-                            annotation_clip=False), muted=True)
+                            annotation_clip=False), muted=True))
 
 
 def _set_frac_ylim(ctx, ax_frac, *, normalised: bool = True) -> None:
@@ -1150,19 +1153,10 @@ def draw_grouped_bar_mode(
     if (str(getattr(ctx.state.plot, "bar_group_mode", "well") or "well") == "well"
             and len(target_ts) > 1
             and not str(getattr(_slice, "split_notice", "") or "")):
-        # Group-label size is scoped per-axis by the Properties "Axis #" selector
-        # (like the other Axes-section controls), so resolve it per panel from the
-        # figure's buckets rather than one flat global size for every panel.
-        from review.core.plot_style import axis_scoped_value, figure_prefs
-        _fig = ctx.runtime.barplot.fig
-        _prefs = figure_prefs(ctx, _fig)
-        _axes_order = list(_fig.axes)
-
-        def _grp_size(ax):
-            idx = (_axes_order.index(ax) + 1) if ax in _axes_order else 1
-            return float(axis_scoped_value(_prefs, idx, "group_label_size", 8))
+        # Sized per panel by the style pass that ends every redraw (and runs on
+        # every Properties edit), from that panel's "Group label size".
         _xtick_axes = [ax_mean, ax_frac] + ([ax_n] if ax_n is not None else [])
-        _annotate_cluster_footers(items, _xtick_axes, fontsize=_grp_size,
+        _annotate_cluster_footers(items, _xtick_axes,
                                   xs=list(getattr(ctx.runtime.barplot, "xs", None) or []))
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     _ch = ctx.state.channel.active_channel.upper()

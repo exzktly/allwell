@@ -801,9 +801,9 @@ def _load_directory_held(ctx, d: Path, label=None) -> None:
         app._persistence.load("view_state")
     except Exception:
         logging.getLogger("review").exception("view_state load failed")
-    if hasattr(app, "_heatmap_sidebar_table"):
+    if hasattr(app, "_heatmap_layout_table"):
         try:
-            ctx.features.call("heatmap.refresh_layout_sidebar", ctx)
+            ctx.features.call("heatmap.refresh_layout_panel", ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     display = label or str(d)

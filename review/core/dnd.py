@@ -2,7 +2,7 @@
 
 Neutral home for the MIME token exchanged between the drag *source* (the
 well-plate widget, armed from ``core/tab_controller``) and the drop *sink* (the
-Heat-Map layout sidebar, ``features/heatmap/sidebar_view``). Living here — below
+Heat-Map layout editor, ``features/heatmap/layout_view``). Living here — below
 both — lets each side reference the token without ``core`` importing a feature
 or the feature importing a controller.
 """

@@ -80,13 +80,6 @@ class RailSection:
 
     key: str
     stretch: int = 1
-    #: For a frame the page builds *inside the main frame*, under Saved
-    #: selections, rather than one the shell builds on the rail: a lazy factory
-    #: ``() -> ((ctx, parent) -> QWidget)``. ``core/sidebar_view.build_sidebar``
-    #: calls it, registers the widget under ``key`` and hides it; from then on
-    #: it is hidden and shown with every other rail frame. Heat Map's layout
-    #: configurator is one — it sits under the plate it takes wells from.
-    build: Callable | None = field(default=None, compare=False)
 
 
 #: The rail frame every plate-reading page shares: under the rail plate, it

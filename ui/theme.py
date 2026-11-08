@@ -1738,6 +1738,15 @@ QTableView, QTableWidget {{
 QTableView::item, QTableWidget::item {{
     padding: 4px 8px;
 }}
+/* The Heat Map's layout grid sits in the control band at one-well cells; the
+   table's default padding would leave a row-number header no room for its
+   digit, and a cell none for its well token. */
+QTableWidget#HeatmapLayoutTable QHeaderView::section {{
+    padding: 0px 2px;
+}}
+QTableWidget#HeatmapLayoutTable::item {{
+    padding: 0px;
+}}
 
 /* ── Job Queue rows ──────────────────────────────────────────────────── */
 /* Selector-scoped on purpose. A bare `border-bottom` set on the row widget

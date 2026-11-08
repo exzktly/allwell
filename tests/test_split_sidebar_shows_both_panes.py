@@ -145,11 +145,7 @@ def test_the_unfocused_pane_does_not_take_the_plate_s_drag_mode(loaded_app):
     tabs = _split(app, "Statistics", "Plotting")
     assert "Heat Map" in tabs
 
-    # The configurator frame belongs to a visible pane, so it shows...
-    hm = app._ctx.widgets.get_or_none("_heatmap_sidebar_frame")
-    if hm is not None:
-        assert not hm.isHidden()
-    # ...while the plate stays in the focused pane's mode.
+    # The plate stays in the focused pane's mode.
     plate = app._ctx.widgets.get_or_none("_sidebar_plate")
     if plate is not None and hasattr(plate, "dragMime"):
         assert not plate.dragMime(), (

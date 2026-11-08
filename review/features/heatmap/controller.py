@@ -194,7 +194,7 @@ def heatmap_empty_reason(ctx) -> EmptyReason | None:
 
     The empty layout is reached more often than "the user has not filled one in"
     suggests: ``_ensure_sidebar_layout`` creates an empty ``Sidebar`` layout while
-    the sidebar is being built and leaves ``active_layout_name`` unset, so the
+    the layout editor is being built and leaves ``active_layout_name`` unset, so the
     branch above returns it and the populated ``make_plate_layout`` default is
     never reached. Whether that seeding should change is a separate question
     about this tab's default; either way the placeholder states the truth.
@@ -1499,10 +1499,10 @@ def on_heatmap_label_drag_release(ctx, event) -> None:
 
 
 def _apply_label_reorder(ctx, kind: str, src: int, dst: int) -> None:
-    from review.features.heatmap.sidebar_view import (
+    from review.features.heatmap.layout_view import (
         _ensure_sidebar_layout,
         _persist_and_redraw,
-        refresh_heatmap_layout_sidebar,
+        refresh_heatmap_layout_panel,
     )
     layout = _ensure_sidebar_layout(ctx)
     if kind == "row":
@@ -1510,4 +1510,4 @@ def _apply_label_reorder(ctx, kind: str, src: int, dst: int) -> None:
     else:
         layout.reorder_cols(src, dst)
     _persist_and_redraw(ctx)
-    refresh_heatmap_layout_sidebar(ctx)
+    refresh_heatmap_layout_panel(ctx)

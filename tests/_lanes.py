@@ -49,6 +49,7 @@ from __future__ import annotations
 
 #: Test files run by the local fast lane and left out of CI (``scripts/test.sh --no-ui``).
 UI_LANE_FILES: dict[str, str] = {
+    "test_bar_relative_to_popover_fit.py": "the Fold change popover grows with the Then relative to row",
     # ── reusable widgets (widgets/), no app knowledge ──────────────────────
     "test_a_plate_keeps_its_size.py": "plate height-for-width beside a growing sibling",
     "test_button_row.py": "a button row wraps instead of widening its host",

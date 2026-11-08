@@ -160,15 +160,29 @@ def paired_lines(name_a: str, name_b: str, result) -> list[str]:
     return lines
 
 
-def two_way_lines(result) -> list[str]:
-    """The two-way table, one row per term, with its residual line."""
+def two_way_lines(result, *, log: bool = False) -> list[str]:
+    """The two-way table, one row per term, with its residual line.
+
+    The scale goes on the second line, because the interaction row means
+    different things on each: on raw values it tests a **difference of
+    differences**, on log values a **ratio of ratios**. A user asking whether a
+    mutant's ratio to WT changes under a drug who reads the raw table's
+    interaction p has the answer to another question, and nothing on the
+    table said so.
+    """
     if result is None:
         return []
+    name = "Two-way ANOVA (log scale)" if log else "Two-way ANOVA"
     if not result.ok:
-        return [f"Two-way ANOVA: not run — {result.undefined}", ""]
+        return [f"{name}: not run — {result.undefined}", ""]
+    scale = ("Log scale: the interaction tests a ratio of ratios."
+             if log else
+             "Raw scale: the interaction tests a difference of differences. "
+             "For a ratio of ratios, run Two-way ANOVA (log scale).")
     lines = [
-        f"Two-way ANOVA — {result.factor_a} x {result.factor_b}, "
+        f"{name} — {result.factor_a} x {result.factor_b}, "
         "Type II sums of squares.",
+        scale,
         "",
         f"{'Term':<28}{'SS':>12}{'df':>5}{'F':>12}   p",
     ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import statistics as _pystats
 
 import numpy as np
@@ -50,6 +51,12 @@ TESTS: tuple[dict, ...] = (
      "parametric": False, "needs": ("pairing",)},
     {"label": "Two-way ANOVA", "kind": "two_way",
      "parametric": True, "needs": ("factor_a", "factor_b")},
+    # The same table on ln(value). The interaction then tests a ratio of
+    # ratios — "is Mut/WT different under the drug from under the vehicle?" —
+    # where on raw values it tests a difference of differences, which is a
+    # different question with a different answer on the same plate.
+    {"label": "Two-way ANOVA (log scale)", "kind": "two_way",
+     "parametric": True, "needs": ("factor_a", "factor_b"), "log": True},
 )
 
 TEST_LABELS: tuple[str, ...] = tuple(t["label"] for t in TESTS)
@@ -648,8 +655,19 @@ def _alternative_test_lines(ctx, *, kind, spec, groups, group_vals, target_t,
         rows += _two_way_rows(ctx, _BG(grp.name, solo_wells=fresh), target_t,
                               id_a, id_b, val_col=val_col, threshold=threshold,
                               statistic=statistic, use_fov=use_fov)
+    log = bool(spec.get("log"))
+    if log:
+        # A value ≤ 0 has no logarithm. Dropping it would test the remaining
+        # replicates as if the design were complete, so the run is declined
+        # and the count named instead.
+        bad = sum(1 for _a, _b, v in rows if not v > 0)
+        if bad:
+            return [f"Two-way ANOVA (log scale): not run — {bad} of {len(rows)} "
+                    f"replicate values are ≤ 0, so they have no logarithm. Use "
+                    f"Two-way ANOVA on raw values, or check the background.", ""]
+        rows = [(a, b, math.log(v)) for a, b, v in rows]
     lines = two_way_lines(_st.two_way_anova(rows, factor_a=label_a,
-                                            factor_b=label_b))
+                                            factor_b=label_b), log=log)
     if use_fov and lines:
         # The same warning the pairwise header carries, on the table whose
         # residual df a reader will quote. With FOV mode on each field of view

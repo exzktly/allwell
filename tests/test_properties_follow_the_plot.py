@@ -227,7 +227,7 @@ def test_the_footer_names_what_is_not_offered_and_why(qtbot, monkeypatch):
     _a, _f, sb = _sidebar(qtbot, monkeypatch, "_line_fig")
     note = sb._not_offered_label
     assert note.isVisibleTo(sb)
-    assert note.text() == "7 settings not offered for this plot"
+    assert note.text() == "8 settings not offered for this plot"
     assert "• Statistics → Show: ``bar_show_mode`` is read by the bar renderer alone" in note.toolTip()
 
 
@@ -237,6 +237,125 @@ def test_the_footer_count_follows_the_view(qtbot, monkeypatch):
     app, fig, sb = _sidebar(qtbot, monkeypatch, "_nw_fig")
     before = sb._not_offered_label.text()
     mark_style_view(app._ctx, fig, "array")
-    assert before == "11 settings not offered for this plot"
-    assert sb._not_offered_label.text() == "12 settings not offered for this plot"
+    assert before == "12 settings not offered for this plot"
+    assert sb._not_offered_label.text() == "13 settings not offered for this plot"
     assert "Beeswarm: Only the Distribution view draws a beeswarm" in sb._not_offered_label.toolTip()
+
+
+# ── what the panel reads off the figure as drawn ───────────────────────────
+
+
+def _segment_texts(sb, title: str, row: str) -> list[str]:
+    from widgets.segmented_control import SegmentedControl
+
+    for sec, _facet, widgets in sb._kit.rows:
+        if sec.titleText() == title and widgets[0].text() == row:
+            seg = widgets[-1]
+            assert isinstance(seg, SegmentedControl)
+            return [seg.segmentText(i) for i in range(seg.count())]
+    raise AssertionError(f"no {title} → {row} row")
+
+
+def test_error_bars_offer_none_and_ci_only_where_they_are_drawn(qtbot, monkeypatch):
+    """Line reads ``use_sem`` alone: offered None or 95% CI it drew SEM under the other label."""
+    _a, _f, line = _sidebar(qtbot, monkeypatch, "_line_fig")
+    _a, _f, bar = _sidebar(qtbot, monkeypatch, "_bar_fig")
+    assert _segment_texts(line, "Statistics", "Error bars") == ["SEM", "SD"]
+    assert _segment_texts(bar, "Statistics", "Error bars") == ["None", "SEM", "SD", "95% CI"]
+
+
+def _axis_row_shown(sb) -> bool:
+    return not any(w.isHidden() for w in sb._axis_row)
+
+
+def test_the_axis_target_follows_the_panels_the_figure_has(qtbot, monkeypatch):
+    """One panel: no choice, no row. A second panel drawn later is offered on the next re-gate, and an image
+    panel, which the style pass skips, never is."""
+    from review.core.plot_style import regate_properties
+
+    app, fig, sb = _sidebar(qtbot, monkeypatch, "_line_fig")
+    assert not _axis_row_shown(sb)
+    fig.add_subplot(2, 1, 2)
+    crop = fig.add_subplot(2, 2, 1)
+    crop._aw_image_panel = True
+    regate_properties(app._ctx, fig)
+    assert _axis_row_shown(sb)
+    assert [sb._axis_cb.itemText(i) for i in range(sb._axis_cb.count())] == ["All", "1", "2"]
+
+
+def test_the_legend_section_follows_whether_the_plot_draws_a_legend(qtbot, monkeypatch):
+    """Read off the figure: a plot drawn with no legend hides the section; a legend switched off is still a
+    legend, so the section stays to switch it back on."""
+    from review.core.plot_style import regate_properties
+
+    app, fig, sb = _sidebar(qtbot, monkeypatch, "_mv_fig")
+    ax = fig.axes[0]
+    ax.imshow([[0.0, 1.0], [1.0, 0.0]])
+    regate_properties(app._ctx, fig)
+    assert "Legend" not in _shown_sections(sb)
+    ax.plot([0, 1], [0, 1], label="cluster 1")
+    ax.legend().set_visible(False)
+    regate_properties(app._ctx, fig)
+    assert "Legend" in _shown_sections(sb)
+
+
+def test_the_style_pass_reaches_a_legend_drawn_on_the_figure():
+    """The Nanowells page keys its Distribution, QC and composite views with ``fig.legend``."""
+    from matplotlib.figure import Figure
+    from matplotlib.lines import Line2D
+
+    from review.core.plot_style import apply_export_style_prefs, figure_draws_a_legend
+
+    fig = Figure()
+    fig.add_subplot(1, 1, 1).plot([0, 1], [0, 1])
+    key = fig.legend(handles=[Line2D([], [], label="responding")], fontsize=7)
+    assert figure_draws_a_legend(fig)
+    apply_export_style_prefs(fig, {"legend_show": True, "legend_font_size": 13})
+    assert key.get_texts()[0].get_fontsize() == 13
+    apply_export_style_prefs(fig, {"legend_show": False, "legend_font_size": 13})
+    assert not key.get_visible()
+
+
+def test_x_log_is_not_offered_on_an_axis_of_positions(qtbot, monkeypatch):
+    from review.core.plot_style import mark_position_axes, regate_properties
+
+    app, fig, sb = _sidebar(qtbot, monkeypatch, "_bar_fig")
+    ax = fig.axes[0]
+    ax.bar([0, 1, 2], [3, 4, 5])
+    mark_position_axes(ax, y=False)
+    regate_properties(app._ctx, fig)
+    xlog, _xl, _xb = sb._log_axis_widgets["x"]
+    ylog, _yl, _yb = sb._log_axis_widgets["y"]
+    assert xlog.isHidden() and not ylog.isHidden()
+
+
+def test_one_layout_engine_at_a_time(qtbot, monkeypatch):
+    _a, _f, sb = _sidebar(qtbot, monkeypatch, "_line_fig")
+    tight, constrained = sb._layout_engine_toggles
+    constrained.setChecked(True)
+    tight.setChecked(True)
+    assert tight.isChecked() and not constrained.isChecked()
+    assert sb._prefs["layout_constrained"] is False
+
+
+def test_phone_layout_says_the_layout_switches_do_nothing_there(qtbot, monkeypatch):
+    from core import phone_layout
+    from review.core.plot_style import regate_properties
+
+    app, fig, sb = _sidebar(qtbot, monkeypatch, "_line_fig")
+    assert sb._layout_phone_note.isHidden() and all(t.isEnabled() for t in sb._layout_engine_toggles)
+    monkeypatch.setattr(phone_layout, "is_on", lambda: True)
+    regate_properties(app._ctx, fig)
+    assert not sb._layout_phone_note.isHidden()
+    assert not any(t.isEnabled() for t in sb._layout_engine_toggles)
+
+
+def test_a_shared_section_says_it_is_shared_and_a_per_plot_one_does_not(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QLabel
+    from widgets.collapsible_section import CollapsibleSection
+
+    _a, _f, sb = _sidebar(qtbot, monkeypatch, "_bar_fig")
+    notes = {sec.titleText(): any(lbl.text().startswith("Shared —") for lbl in sec.findChildren(QLabel))
+             for sec in sb.findChildren(CollapsibleSection)}
+    assert {t for t, shared in notes.items() if shared} == {
+        "Colours", "Bars", "Beeswarm", "Statistics", "Overlays", "Time"}

@@ -26,6 +26,9 @@ def style_facets() -> dict[str, FigureFacets]:
         "_nw_fig": FigureFacets(
             has=UNIVERSAL | {"legend", "beeswarm", "line_marks", "point_marks", "colour_limits", "log_axes"},
             lacks={
+                "error_kinds": (
+                    "No Error bars row here: nothing on this figure draws a spread."
+                ),
                 "bar_geometry": (
                     "Bar width and group spacing are read by the bar renderer alone (``barplot/collect.py``)."
                 ),

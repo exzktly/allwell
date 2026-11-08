@@ -15,7 +15,7 @@ def style_facets() -> dict[str, FigureFacets]:
     """``{figure attribute: what it has}`` for every figure this feature draws that Properties opens on."""
     return {
         "_heatmap_fig": FigureFacets(
-            has=UNIVERSAL | {"cell_values", "error_bars", "time_axis"},
+            has=UNIVERSAL | {"error_kinds", "cell_values", "error_bars", "time_axis"},
             lacks={
                 "bar_geometry": (
                     "Bar width and group spacing are read by the bar renderer alone (``barplot/collect.py``)."

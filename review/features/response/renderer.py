@@ -586,9 +586,12 @@ def _draw_one_curve(ax, data, curve, fits, marks: _CurveStyles, *,
         # figure the user had just asked to be drawn in greys, which is the one
         # mode where a reader cannot tell decoration from data.
         off_colour = marks.for_curve(curve).get("color")
-        ax.errorbar([off_scale_x] * len(off), [p.y for p in off],
-                    yerr=[p.err for p in off], fmt="o", capsize=3,
-                    markerfacecolor="none",
-                    **({} if off_colour is None else {"color": off_colour}))
+        off_marks = ax.errorbar([off_scale_x] * len(off), [p.y for p in off],
+                                yerr=[p.err for p in off], fmt="o", capsize=3,
+                                markerfacecolor="none",
+                                **({} if off_colour is None else {"color": off_colour}))
+        # Hollow *is* the message — "not on the dose axis" — so the style pass
+        # keeps off the face (it re-filled them on every redraw).
+        off_marks[0]._aw_marker_face_is_data = True
         return True
     return False

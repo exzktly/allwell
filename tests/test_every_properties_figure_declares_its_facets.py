@@ -42,6 +42,8 @@ _READ_BY = {
     "value_labels": {"show_value_labels", "value_label_settings"},
     "time_axis": {"time_scale", "time_offset", "rescale_for", "apply_time_rescale"},
     "error_bars": {"use_sem", "bar_err_kind", "error_bar_settings"},
+    # None and 95% CI are read only through ``error_bar_settings``; ``use_sem`` alone draws SEM or SD.
+    "error_kinds": {"error_bar_settings"},
     "beeswarm": {"swarm_spacing", "swarm_spacing_of"},
     "bar_geometry": {"bar_width", "bar_group_spacing"},
     "colour_mode": {"bar_color_mode", "line_color_mode", "response_color_mode"},

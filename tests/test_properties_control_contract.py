@@ -84,6 +84,10 @@ _BOUND_ROSTER: dict[str, frozenset[str]] = {
 _WRITES_OTHER_KEYS: dict[str, str] = {
     # A profile is a preset: choosing one applies its whole bundle of keys.
     "export_profile": "a preset of other keys",
+    # One layout engine at a time: turning either on turns the other off,
+    # because both on drew Constrained while Tight still read as on.
+    "layout_tight": "turns layout_constrained off",
+    "layout_constrained": "turns layout_tight off",
 }
 
 #: Keys the panel binds but deliberately does not seed from the flat pref

@@ -17,6 +17,9 @@ def style_facets() -> dict[str, FigureFacets]:
         "_scatter_fig": FigureFacets(
             has=UNIVERSAL | {"scatter_density", "legend", "value_labels", "point_marks", "log_axes", "draw_order"},
             lacks={
+                "error_kinds": (
+                    "No Error bars row here: nothing on this figure draws a spread."
+                ),
                 "bar_geometry": (
                     "Bar width and group spacing are read by the bar renderer alone (``barplot/collect.py``)."
                 ),
@@ -62,6 +65,10 @@ def style_facets() -> dict[str, FigureFacets]:
         "_scatter_agg_fig": FigureFacets(
             has=UNIVERSAL | {"legend", "error_bars", "value_labels", "point_marks", "log_axes", "draw_order"},
             lacks={
+                "error_kinds": (
+                    "This figure's spread is read off ``use_sem`` alone, so it draws SEM or SD: offered None or 95% CI "
+                    "it would draw SEM under a label saying otherwise."
+                ),
                 "bar_geometry": (
                     "Bar width and group spacing are read by the bar renderer alone (``barplot/collect.py``)."
                 ),

@@ -58,6 +58,11 @@ class _FakeCollection:
         self._paths = list(paths)
 
 
+#: The data transform every fake line is drawn in, and every fake axes owns:
+#: a line in any other transform is a reference line the pass leaves alone.
+_DATA = object()
+
+
 class _FakeLine:
     """Stand-in for matplotlib Line2D so the existing line loop in
     ``apply_export_style_prefs`` doesn't blow up. Returns sensible
@@ -65,6 +70,9 @@ class _FakeLine:
 
     def __init__(self):
         self._color = "blue"
+
+    def get_transform(self):
+        return _DATA
 
     def get_linestyle(self):
         return "-"
@@ -122,6 +130,7 @@ class _FakeAx:
     def __init__(self, lines, collections):
         self.lines = lines
         self.collections = collections
+        self.transData = _DATA
         self.containers: list = []
         self.xaxis = _FakeAxis()
         self.yaxis = _FakeAxis()

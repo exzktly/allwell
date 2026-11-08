@@ -17,6 +17,10 @@ def style_facets() -> dict[str, FigureFacets]:
         "_response_fig": FigureFacets(
             has=UNIVERSAL | {"colour_mode", "error_bars", "legend", "time_axis", "line_marks", "point_marks", "log_axes"},
             lacks={
+                "error_kinds": (
+                    "This figure's spread is read off ``use_sem`` alone, so it draws SEM or SD: offered None or 95% CI "
+                    "it would draw SEM under a label saying otherwise."
+                ),
                 "bar_geometry": (
                     "Bar width and group spacing are read by the bar renderer alone (``barplot/collect.py``)."
                 ),

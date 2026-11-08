@@ -15,8 +15,16 @@ def style_facets() -> dict[str, FigureFacets]:
     """``{figure attribute: what it has}`` for every figure this feature draws that Properties opens on."""
     return {
         "_distribution_fig": FigureFacets(
-            has=UNIVERSAL | {"legend", "threshold_line", "time_axis", "line_marks", "point_marks", "log_axes"},
+            has=UNIVERSAL | {"legend", "threshold_line", "time_axis", "line_marks", "log_axes"},
             lacks={
+                "error_kinds": (
+                    "No Error bars row here: nothing on this figure draws a spread."
+                ),
+                "point_marks": (
+                    "No line carries a marker: the histogram is patches, the violins are collections, and the KDE "
+                    "and CDF curves are drawn without markers, which the style pass keeps off a curve "
+                    "(``plot_style._drawn_without_marker``)."
+                ),
                 "bar_geometry": (
                     "Bar width and group spacing are read by the bar renderer alone (``barplot/collect.py``)."
                 ),

@@ -36,6 +36,7 @@ FACETS: dict[str, str] = {
     "beeswarm": "Beeswarm — the point spacing of a beeswarm (PlotState)",
     "group_labels": "Axes → Group label size — the bar plot's timepoint group labels",
     "error_bars": "Statistics → Error bars and Across — the spread drawn and what it is taken over (PlotState)",
+    "error_kinds": "Statistics → Error bars' None and 95% CI choices, read through ``error_bar_settings`` (PlotState)",
     "bar_show_mode": "Statistics → Show — Mean / Mean+spread / All points, read by the bar renderer (PlotState)",
     "legend": "Legend — show, font size, location of an axes legend",
     "threshold_line": "Overlays → Show threshold line (PlotState)",
@@ -50,6 +51,14 @@ FACETS: dict[str, str] = {
     "layout_engine": "Layout → Tight / Constrained",
     "draw_order": "Layout → the replicate-set and well draw-order lists",
 }
+
+#: The facets whose controls write ``PlotState`` rather than this figure's own preferences: one value for the whole
+#: app, read by every plot that reads the field. A section built for one of them says so in the panel, because a
+#: change there reaches other plots than the one the panel is open on.
+SHARED: frozenset[str] = frozenset({
+    "colour_mode", "bar_geometry", "beeswarm", "error_bars", "error_kinds", "bar_show_mode",
+    "threshold_line", "value_labels", "time_axis",
+})
 
 #: The facets every figure the panel opens on has: they style the axes themselves, which every figure draws. A
 #: declaration writes ``UNIVERSAL | {...}`` rather than repeating them, and a facet added to :data:`FACETS` is not

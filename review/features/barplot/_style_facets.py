@@ -15,7 +15,7 @@ def style_facets() -> dict[str, FigureFacets]:
     """``{figure attribute: what it has}`` for every figure this feature draws that Properties opens on."""
     return {
         "_bar_fig": FigureFacets(
-            has=UNIVERSAL | {"colour_mode", "bar_geometry", "beeswarm", "group_labels", "error_bars", "bar_show_mode", "legend", "threshold_line", "value_labels", "time_axis", "line_marks", "point_marks", "log_axes", "draw_order"},
+            has=UNIVERSAL | {"error_kinds", "colour_mode", "bar_geometry", "beeswarm", "group_labels", "error_bars", "bar_show_mode", "legend", "threshold_line", "value_labels", "time_axis", "line_marks", "point_marks", "log_axes", "draw_order"},
             lacks={
                 "cell_values": (
                     "The cell number format is the heat map's; this figure prints no cell values."

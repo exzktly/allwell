@@ -253,15 +253,18 @@ def test_export_style_skips_tagged_bracket_lines():
     from review.core.plot_style import apply_export_style_prefs
 
     fig, ax = plt.subplots()
-    (data_line,) = ax.plot([0, 1], [0, 1], marker="None", linestyle="-")
+    # A series drawn with markers — a curve drawn without them keeps none
+    # (``plot_style._drawn_without_marker``), so it could not tell a tagged
+    # bracket from an untagged one here.
+    (data_line,) = ax.plot([0, 1], [0, 1], marker="s", linestyle="-")
     (bracket,) = ax.plot([0, 0, 1, 1], [2, 2.1, 2.1, 2],
-                         marker="None", linestyle="-")
+                         marker="s", linestyle="-")
     bracket._aw_no_style_override = True
 
     apply_export_style_prefs(fig, {"marker_style": "o", "line_style": "-"})
 
     # The ordinary data line picks up the chosen data marker...
     assert data_line.get_marker() == "o"
-    # ...but the tagged bracket keeps its flat, marker-free shape.
-    assert bracket.get_marker() == "None"
+    # ...but the tagged bracket keeps the shape it was drawn with.
+    assert bracket.get_marker() == "s"
     plt.close(fig)

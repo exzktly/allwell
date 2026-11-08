@@ -125,6 +125,13 @@ def _limits(ax, xs, ys, pad: float) -> None:
     ax.set_ylim(float(ys[keep].max()) + pad, float(ys[keep].min()) - pad)       # y down, as the montage is
 
 
+def _own_style(line):
+    """Keep the Properties style pass off *line*: a glyph of the identity check (a tile corner, a predicted or
+    focused position), whose shape is what the key and the reader go by, not a data series to restyle."""
+    line._aw_no_style_override = True
+    return line
+
+
 def _discs(ax, x, y, radius: float, **kw):
     from matplotlib.collections import EllipseCollection
 
@@ -227,7 +234,8 @@ def _draw_tiles(ax, dmap, muted) -> tuple[list, list]:
             xs += list(tile.corners[:, 0])
             ys += list(tile.corners[:, 1])
         else:
-            ax.plot([tile.corner[0]], [tile.corner[1]], marker="+", markersize=9, color=colour, zorder=2, gid=gid)
+            _own_style(ax.plot([tile.corner[0]], [tile.corner[1]], marker="+", markersize=9, color=colour, zorder=2,
+                               gid=gid)[0])
             xs.append(tile.corner[0])
             ys.append(tile.corner[1])
         text = ax.text(tile.corner[0], tile.corner[1], " " + tile.tile + label, fontsize=6.5, color=colour, va="top",
@@ -409,8 +417,8 @@ def render_sides(fig, pair, ref_montage, other_montage, lines: list[str]) -> Ide
         "compared": right.add_patch(Circle((0, 0), _HOVER_RING * pitch, fill=False,
                                            edgecolor=Colors.heatmap_selection, linewidth=1.8, zorder=5,
                                            visible=False, gid="nw-identity-hover-cmp")),
-        "predicted": right.plot([0], [0], marker="x", markersize=10, mew=2.0, color=Colors.accent, zorder=6,
-                                visible=False, gid="nw-identity-predicted")[0],
+        "predicted": _own_style(right.plot([0], [0], marker="x", markersize=10, mew=2.0, color=Colors.accent,
+                                           zorder=6, visible=False, gid="nw-identity-predicted")[0]),
         "label": _ink(fig.text(0.97, 0.955, "", fontsize=8.5, ha="right", color=ink, gid="nw-identity-hover")),
     }
     return drawn
@@ -487,8 +495,8 @@ def draw_focus(fig, drawn: IdentityDrawn, marks, centres: dict) -> None:
     for name, xy in crosses:
         ax = drawn.axes.get(name)
         if ax is not None and xy is not None:
-            ax.plot([xy[0]], [xy[1]], marker="x", markersize=12, mew=2.2, color=Colors.accent, zorder=8,
-                    gid="nw-identity-focus-cross")
+            _own_style(ax.plot([xy[0]], [xy[1]], marker="x", markersize=12, mew=2.2, color=Colors.accent, zorder=8,
+                               gid="nw-identity-focus-cross")[0])
 
 
 def attach_hover_labels(drawn: IdentityDrawn) -> None:

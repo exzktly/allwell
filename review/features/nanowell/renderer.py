@@ -435,6 +435,9 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None, spacing:
              muted=True)
     ax.set_xticks([t[0] for t in panel.ticks])
     ax.set_xticklabels([t[1] for t in panel.ticks])
+    from review.core.plot_style import mark_position_axes
+
+    mark_position_axes(ax, y=False)                     # one slot per well or timepoint, not a value: no X log
     dot_w, dot_h = _dot_units(ax, fig)
     k = _members_per_tick(model, panel)
     half = (0.9 if model.axis == TIME else 0.7) / (2 * k)
@@ -550,6 +553,7 @@ def _draw_centres(ax, model, panel, ink) -> None:
         unverified = {s.x for s in panel.swarms if s.well == well and (s.well, s.label) in marks}
         xs, ys = zip(*pts)
         for line_ in ax.plot(xs, ys, linestyle="none", color=ink, marker="D", markersize=3.5, zorder=4):
+            line_._aw_marker_is_data = True              # the diamond is the page's mark for this; Marker style keeps off it
             _ink(line_)
         for pieces, style in zip(split_segments(xs, ys, unverified), ("-", "--")):
             for (x0, y0), (x1, y1) in pieces:
@@ -633,8 +637,10 @@ def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:
             body.set_edgecolor("none")
             body.set_gid("nw-density")
     if len(swarm.values):
-        _ink(ax.plot([swarm.x - half, swarm.x + half], [np.median(swarm.values)] * 2, color=ink, linewidth=1.2,
-                     zorder=4)[0])
+        median_tick = ax.plot([swarm.x - half, swarm.x + half], [np.median(swarm.values)] * 2, color=ink,
+                              linewidth=1.2, zorder=4)[0]
+        median_tick._aw_no_style_override = True         # a mark of the median, not a series
+        _ink(median_tick)
 
 
 @dataclass

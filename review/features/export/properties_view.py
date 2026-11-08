@@ -51,7 +51,7 @@ clear_gates = _lazy("review.features.scatter.gating", "clear_gates")
 rename_gate = _lazy("review.features.scatter.gating", "rename_gate")
 set_gate_draw_mode = _lazy("review.features.scatter.gating", "set_gate_draw_mode")
 from review.data.metric_labels import gate_axes_label
-from review.domain.style_facets import FACETS, FigureFacets
+from review.domain.style_facets import FACETS, SHARED, FigureFacets
 from core.safe import swallow, swallowed
 from review.domain.time_rescale import (
     displayed_interval as _displayed_interval,
@@ -208,6 +208,15 @@ class _SectionGrid:
         self._grids[sec] = [grid, 0]
         self.section_facets[sec] = facet
         self._body_layout.addWidget(sec)
+        if facet in SHARED:
+            # A section whose controls write PlotState changes every plot that
+            # reads the field, not only this one — the rest of the panel is per
+            # plot, so this one says so (``style_facets.SHARED``).
+            note = QLabel("Shared — a change here reaches every plot that uses it.")
+            note.setObjectName("Muted")
+            note.setWordWrap(True)
+            grid.addWidget(note, 0, 0, 1, 2)
+            self._grids[sec][1] = 1
         return sec
 
     def _record(self, sec: CollapsibleSection, facet: str | None, widgets: tuple,
@@ -656,6 +665,7 @@ class ExportStyleSidebar(QWidget):
         # Getter/setter only (no auto-apply): switching the target axis must
         # not push the currently displayed limits onto the new one.
         kit.add_row(s_axes, "Axis #", axis_cb)
+        self._axis_row = kit.rows[-1][2]
         self._axis_cb = axis_cb
         self._getters["axis_target"] = axis_cb.currentText
         self._setters["axis_target"] = lambda v, w=axis_cb: w.setCurrentText(str(v))
@@ -740,10 +750,15 @@ class ExportStyleSidebar(QWidget):
         # computed at draw time.
         _err_init = str(getattr(self._app._app_state.plot, "bar_err_kind", "")
                         or ("sem" if bool(self._app._app_state.plot.use_sem) else "sd"))
-        err_sc = _seg(
-            [("None", "none"), ("SEM", "sem"), ("SD", "sd"), ("95% CI", "ci95")],
-            current=_err_init,
-        ) if self._supports("error_bars") else None
+        # None and 95% CI only where the figure reads them (``error_bar_settings``:
+        # the bar plot and the heat map). A figure that reads ``use_sem`` alone
+        # draws SEM or SD whatever is picked, so it is offered those two, opened
+        # on the one it draws.
+        _err_options = [("None", "none"), ("SEM", "sem"), ("SD", "sd"), ("95% CI", "ci95")]
+        if not self._supports("error_kinds"):
+            _err_options = [("SEM", "sem"), ("SD", "sd")]
+            _err_init = "sem" if bool(self._app._app_state.plot.use_sem) else "sd"
+        err_sc = _seg(_err_options, current=_err_init) if self._supports("error_bars") else None
         if err_sc is not None:
             _stats_state["err"] = err_sc.currentData()
 
@@ -1321,6 +1336,7 @@ class ExportStyleSidebar(QWidget):
             xlog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
             ylog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
             kit.add_stacked(s_lim, "Log scale", kit.hrow(xlog_cb, ylog_cb), facet="log_axes")
+            _log_rows = [kit.rows[-1][2]]
 
             # The base each log axis is drawn in. Editable rather than a fixed list:
             # ``LOG_BASE_CHOICES`` are what almost everyone wants and are one click
@@ -1350,10 +1366,17 @@ class ExportStyleSidebar(QWidget):
                 lambda _t: self._redraw_for_a_user_edit())
             _ybase_cb.currentTextChanged.connect(
                 lambda _t: self._redraw_for_a_user_edit())
-            kit.add_stacked(s_lim, "Log base", kit.hrow(QLabel("X"), _xbase_cb,
-                                                QLabel("Y"), _ybase_cb,
+            _xbase_lbl, _ybase_lbl = QLabel("X"), QLabel("Y")
+            kit.add_stacked(s_lim, "Log base", kit.hrow(_xbase_lbl, _xbase_cb,
+                                                _ybase_lbl, _ybase_cb,
                                                 spacing=sp.xs),
                               facet="log_axes")
+            _log_rows.append(kit.rows[-1][2])
+            # Which of the two a figure is offered is read off it as drawn
+            # (``_refresh_log_axes``): an axis of positions takes no log scale.
+            self._log_axis_widgets = {"x": (xlog_cb, _xbase_lbl, _xbase_cb),
+                                      "y": (ylog_cb, _ybase_lbl, _ybase_cb)}
+            self._log_rows = _log_rows
 
             def _lim_preview_text() -> str:
                 tags = []
@@ -1388,6 +1411,19 @@ class ExportStyleSidebar(QWidget):
         # the panel width as a single row, so the trailing "ed" of Constrained
         # was getting clipped. Label-above-widgets layout matches Stats rows.
         kit.add_stacked(s_layout, "Figure layout", kit.hrow(tight_cb, cons_cb))
+        # One engine at a time. Both on drew Constrained (``_apply_layout_engine``
+        # checks it first), so Tight looked on and did nothing; turning one on
+        # now turns the other off. Both off is the renderer's own layout.
+        tight_cb.toggled.connect(lambda on: on and cons_cb.isChecked() and cons_cb.setChecked(False))
+        cons_cb.toggled.connect(lambda on: on and tight_cb.isChecked() and tight_cb.setChecked(False))
+        # Phone layout fits every plot to the phone itself and ignores both
+        # (``plot_style._apply_layout_engine``): say so rather than offer two
+        # switches that move nothing there (``_refresh_layout_engine``).
+        self._layout_engine_toggles = (tight_cb, cons_cb)
+        self._layout_phone_note = QLabel("Phone layout fits each plot itself; these apply on the desktop layout.")
+        self._layout_phone_note.setObjectName("Muted")
+        self._layout_phone_note.setWordWrap(True)
+        kit.add_full(s_layout, self._layout_phone_note)
 
         # Replicate-set OR well draw-order lists (only one shows at a time,
         # exactly as before). Behaviour lives in _move_list_item /
@@ -1552,12 +1588,85 @@ class ExportStyleSidebar(QWidget):
         deliberately leaves alone (their scale, ticks and limits belong to the
         mappable that made them). Numbering stays positional so a number means
         the same axes here, in ``axis_buckets`` and in the style pass.
+
+        An image panel (``_aw_image_panel``, the Nanowells page's crops) is left
+        out for the same reason: the style pass skips it, so choosing it moved
+        nothing.
         """
         return [
             str(i)
             for i, ax in enumerate(getattr(self._fig, "axes", ()) or (), start=1)
             if not bool(getattr(ax, "_aw_colorbar", False))
+            and not bool(getattr(ax, "_aw_image_panel", False))
         ]
+
+    def _refresh_log_axes(self) -> None:
+        """Offer X log and Y log only for an axis some panel draws values on, not positions.
+
+        The bar plot's x carries one slot per bar, a matrix's rows and columns
+        are indices, a violin's x is its group's position: each is marked
+        ``_categorical_*axis`` by its renderer, and the log pass skips it, so its
+        toggle moved nothing. Read off the figure as drawn because one figure can
+        be either (Multivariate's matrices against its scatter views); an empty
+        figure, which says nothing yet, keeps both. Visibility only — a value
+        set where the axis takes a log scale is kept.
+        """
+        widgets = getattr(self, "_log_axis_widgets", None)
+        if not widgets:
+            return
+        axes = [self._fig.axes[int(n) - 1] for n in self._targetable_axis_numbers()]
+        drawn = any(ax.lines or ax.collections or ax.patches or ax.images for ax in axes)
+        offered = {}
+        for which in ("x", "y"):
+            offered[which] = not drawn or any(
+                not getattr(ax, f"_categorical_{which}axis", False) for ax in axes)
+            for widget in widgets[which]:
+                widget.setVisible(offered[which])
+        for row in getattr(self, "_log_rows", ()):
+            for widget in row:
+                widget.setVisible(offered["x"] or offered["y"])
+
+    def _refresh_layout_engine(self) -> None:
+        """Disable Tight / Constrained, and show why, while phone layout is on."""
+        toggles = getattr(self, "_layout_engine_toggles", ())
+        note = getattr(self, "_layout_phone_note", None)
+        if not toggles or note is None:
+            return
+        from core import phone_layout
+
+        phone = bool(phone_layout.is_on())
+        for toggle in toggles:
+            toggle.setEnabled(not phone)
+        note.setVisible(phone)
+
+    def _refresh_axis_targets(self) -> None:
+        """Re-list the Axis # targets for the axes the figure has now, and show the row only when there is a choice.
+
+        The figure's panels change with its view or split (a Scatter split, a
+        Distribution facet, a Nanowells view), and a list filled once at build
+        kept the old numbers: a click on a subplot whose number was missing did
+        nothing. A target that no longer exists falls back to All through the
+        ordinary change handler, so the fields show what All holds. With one
+        targetable axes there is nothing to choose, and the row is hidden.
+        """
+        cb = getattr(self, "_axis_cb", None)
+        if cb is None:
+            return
+        targets = self._targetable_axis_numbers()
+        wanted = ["All", *targets]
+        current = cb.currentText()
+        if [cb.itemText(i) for i in range(cb.count())] != wanted:
+            cb.blockSignals(True)
+            try:
+                cb.clear()
+                cb.addItems(wanted)
+                cb.setCurrentText(current if current in wanted else "All")
+            finally:
+                cb.blockSignals(False)
+            if current not in wanted:
+                self._on_axis_target_changed("All")
+        for widget in getattr(self, "_axis_row", ()):
+            widget.setVisible(len(targets) > 1)
 
     def _open_on_all_axes(self) -> str:
         """Target "All" when the panel opens, and make the stored prefs agree.
@@ -1608,7 +1717,11 @@ class ExportStyleSidebar(QWidget):
         except ValueError:
             return
         target = str(idx + 1)
+        if target not in self._targetable_axis_numbers():
+            return                                       # a colour bar or an image panel: nothing to target
         cb = getattr(self, "_axis_cb", None)
+        if cb is not None and cb.findText(target) < 0:
+            self._refresh_axis_targets()
         if cb is not None and cb.currentText() != target:
             cb.setCurrentText(target)  # drives _on_axis_target_changed
         self._flash_axis(ax)
@@ -2020,9 +2133,35 @@ class ExportStyleSidebar(QWidget):
         """The view the figure shows now, as its renderer stamped it (``plot_style.mark_style_view``)."""
         return str(getattr(self._fig, "_aw_style_view", "") or "")
 
+    #: Facets the panel also reads off the figure as drawn, because no declaration can say them in advance: whether
+    #: the view on screen carries a legend at all depends on the view (Multivariate draws one in Dimensionality
+    #: reduction alone, Spatial not on its maps) and on the plot's own state (the Bar plot's key exists only in plate
+    #: colours). A legend switched off is still drawn, hidden, so these controls stay reachable to switch it back on.
+    _READ_OFF_THE_FIGURE = ("legend",)
+
+    def _figure_lacks(self) -> dict[str, str]:
+        """``{facet: reason}`` for the declared facets the figure, as drawn now, turns out not to have.
+
+        Asked only of a figure with something drawn on it: an empty figure (no
+        selection yet, still loading) says nothing about what it will hold, and
+        reading it as "no legend" would hide the section on every load.
+        """
+        from review.core.plot_style import figure_draws_a_legend
+
+        fig = self._fig
+        axes = list(getattr(fig, "axes", ()) or ())
+        drawn = any(getattr(ax, "lines", None) or getattr(ax, "collections", None)
+                    or getattr(ax, "patches", None) or getattr(ax, "images", None) for ax in axes)
+        if not drawn or "legend" not in self._facets.has:
+            return {}
+        if figure_draws_a_legend(fig):
+            return {}
+        return {"legend": "The plot as drawn now has no legend — this view, or this colour mode, keys its marks "
+                          "another way."}
+
     def _live_facets(self) -> frozenset[str]:
-        """The facets the figure draws in the view on screen."""
-        return self._facets.live(self._style_view())
+        """The facets the figure draws in the view on screen, less those the figure as drawn turns out to lack."""
+        return self._facets.live(self._style_view()) - set(self._figure_lacks())
 
     def _apply_facets(self) -> None:
         """Show the rows of the facets the current view draws, hide the rest, and hide a section left with none.
@@ -2037,8 +2176,11 @@ class ExportStyleSidebar(QWidget):
         kit = self._kit
         if kit is None:
             return
+        self._refresh_axis_targets()
+        self._refresh_log_axes()
+        self._refresh_layout_engine()
         live = self._live_facets()
-        varying = set().union(*(set(v) for v in self._facets.views.values()))
+        varying = set().union(*(set(v) for v in self._facets.views.values()), self._READ_OFF_THE_FIGURE)
         shown = dict.fromkeys(kit.section_facets, False)
         for sec, facet, widgets in kit.rows:
             visible = facet in live
@@ -2054,6 +2196,7 @@ class ExportStyleSidebar(QWidget):
         """``{what the control is: why it is not here}`` for every facet this figure's current view does not draw."""
         absent = dict(self._facets.lacks)
         absent.update(self._facets.views.get(self._style_view() or self._facets.default_view, {}))
+        absent.update(self._figure_lacks())
         return {FACETS[f].split(" — ")[0]: reason for f, reason in sorted(absent.items()) if f in FACETS}
 
     def _refresh_not_offered_note(self) -> None:

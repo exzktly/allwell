@@ -339,8 +339,9 @@ def _surface_panel(pen: _Pen, ts, lay, text, pair, diag):
     halo = _halo()
     for at, swatch, colour, _words, gid in _surface_marks(pair, diag):
         marker, size = shapes[swatch]
-        ax.plot([at[0]], [at[1]], marker=marker, markersize=size, mew=1.4, linestyle="none", markerfacecolor="none",
-                color=colour, zorder=3, path_effects=halo, gid=gid)
+        mark = ax.plot([at[0]], [at[1]], marker=marker, markersize=size, mew=1.4, linestyle="none",
+                       markerfacecolor="none", color=colour, zorder=3, path_effects=halo, gid=gid)[0]
+        mark._aw_no_style_override = True                # a glyph of the diagnosis: its shape is the key's
     left, right, bottom, top = diag.extent
     ax.set_xlim(left, right)
     ax.set_ylim(bottom, top)

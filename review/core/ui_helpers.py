@@ -1065,7 +1065,7 @@ def multiselect_button_text(prefix: str, selections: dict) -> str:
     return f"{prefix}: {count}/{total} selected"
 
 
-def apply_plot_card_decorators(ctx, card, tab_name: str) -> None:
+def apply_plot_card_decorators(ctx, card, tab_name: str, *, part: str = "") -> None:
     """Apply every feature-registered plot-card decorator to *card*.
 
     Decouples plot tabs from feature-specific card add-ons (e.g. Saved Plots'
@@ -1073,10 +1073,16 @@ def apply_plot_card_decorators(ctx, card, tab_name: str) -> None:
     on its ``FeatureDescriptor`` and this fans it out. A profiled-out feature
     isn't in the registry, so its decorator never runs — and its module is never
     imported here, which is what lets a subset binary omit it entirely.
+
+    *part* names a **secondary** card of *tab_name* — a figure beside or apart
+    from the tab's main card, such as the Nanowells page's site detail, crop
+    strip and crops pop-out. It is passed on only when given, so a decorator
+    that knows nothing of parts is called exactly as before.
     """
+    extra = {"part": part} if part else {}
     for descriptor in ctx.features.with_hook("plot_card_decorator"):
         try:
-            descriptor.plot_card_decorator()(ctx, card, tab_name)
+            descriptor.plot_card_decorator()(ctx, card, tab_name, **extra)
         except Exception:
             import logging
             logging.getLogger("review").exception(

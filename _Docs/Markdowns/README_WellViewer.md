@@ -6872,7 +6872,12 @@ a near-square grid; several take a row each, the timepoints across), *One row*, 
 column per channel) or *N across* (the timepoints wrap every N panels, each wrapped line keeping its channels
 together). **Save ▾** saves the figure exactly as drawn — *Save figure…* names the file after the nanowell and its
 channels (`A01_q3_r-2_phase_EGFP_over_time.png`) — copies it as SVG, or files it in Saved Plots. These choices are
-kept with the page's settings. **Cells**, beside *Pop out*, draws the outline of each cell the run counted in the
+kept with the page's settings. The plot of the selected nanowell over time and the strip of crops under it carry the
+same hover **save** button as every other plot, so each of the page's figures — the main plot on any view, the detail,
+the strip and the pop-out — can be filed in Saved Plots. A figure saved from the detail, the strip or the pop-out is
+named after it (*Nanowells · crops*), and **Restore settings** returns the page to the settings it was drawn with; the
+PowerPoint export and the headless report keep the picture you saved rather than redrawing it, since a redraw would
+draw the page's main plot instead. **Cells**, beside *Pop out*, draws the outline of each cell the run counted in the
 crop's own nanowell — the pixels the run counted it on — on every crop: the strip, the pop-out and the Extremes
 montage. A cell the run kept no outline of (a plate analysed before outlines were kept, or one whose
 `nanowells/<well>_outlines.npz` is missing) is a dot at its centre instead, and the caption says how many are dots

@@ -51,7 +51,7 @@ _scroll_to_saved_plot = lazy("review.features.saved_plots.tab_view",
                              "scroll_to_saved_plot")
 
 
-def wire_save_to_gallery(ctx, card, tab_name: str) -> None:
+def wire_save_to_gallery(ctx, card, tab_name: str, *, part: str = "") -> None:
     """Enable *card*'s hover "save to Saved Plots" button for *tab_name*.
 
     Also records the card against its tab. That map is what lets the PowerPoint
@@ -59,8 +59,26 @@ def wire_save_to_gallery(ctx, card, tab_name: str) -> None:
     name on the record and needs the live figure for it, and this hook is the one
     place in the app where those two facts meet. Built here rather than from a
     roster of card names so a tab added tomorrow is covered by wiring itself up.
+
+    *part* marks a **secondary** card of the tab (the Nanowells page's site
+    detail, crop strip and crops pop-out). Such a card saves like any other, with
+    two differences. It is not recorded against the tab, because the map names
+    the one card a redraw replays onto and a secondary card registered last
+    would displace the tab's main figure. And every save from it is filed as
+    ``panel_only``: replaying the record redraws the tab's *main* card, which is
+    a different figure from the one saved, so the export and the headless report
+    must keep the captured picture rather than redraw it. An untitled save is
+    named after the part, so the gallery does not show three figures all called
+    by the tab's name.
     """
     if card is None or not hasattr(card, "set_save_handler"):
+        return
+    if part:
+        card.set_save_handler(
+            lambda png, label, svg=b"", panel=False: save_plot_from_card(
+                ctx, tab_name, png, (label or "").strip() or f"{tab_name} · {part}",
+                svg, panel_only=True)
+        )
         return
     card.set_save_handler(
         lambda png, label, svg=b"", panel=False: save_plot_from_card(

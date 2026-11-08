@@ -16,6 +16,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+#: The channel token of a cell that blends every selected channel (the shelf's Overlay switch): never a real
+#: channel. ``image_compose`` re-exports it, where the renderers that detect it import it from.
+OVERLAY_CHAN = "⊕ OVERLAY"
+
 
 @dataclass
 class ImageTableState:
@@ -396,6 +400,16 @@ class TableSpec:
         return None
 
 
+def plate_overlays(spec: TableSpec) -> bool:
+    """Whether a Plate-mode table blends its channels: the axis carrying them has Overlay on, and there is more
+    than one to blend. Outside Plate mode the same switch reaches ``composite`` directly."""
+    ax = spec.channel_axis()
+    if ax is None:
+        return False
+    axis = spec.rows if ax == "rows" else spec.cols
+    return bool(axis.overlay) and len(axis.channels) > 1
+
+
 def spec_to_state_fields(spec: TableSpec) -> dict:
     """Flatten a ``TableSpec`` onto the existing ImageTableState fields the layout
     math + render seam consume. Pure — no Qt, no ctx."""
@@ -411,17 +425,22 @@ def spec_to_state_fields(spec: TableSpec) -> dict:
     filt = spec.filters or {}
     fixed_vals = dict(spec.fixed or {})
     if getattr(spec, "plate", False):
-        # Plate mode: force the well_row × well_col axes and hold the (first) channel
-        # fixed, so each cell is that channel's image for the well at (row, col).
+        # Plate mode: force the well_row × well_col axes and hold the channel fixed,
+        # so each cell is that well's image at (row, col). With Overlay on and more
+        # than one channel, the fixed "channel" is the blend of all of them, as it
+        # is on any other layout; otherwise it is the first. Pinning the first
+        # regardless used to show GFP alone on a GFP + NIR overlay, with the
+        # Overlay switch on and the LUT panel listing GFP only.
+        overlay = plate_overlays(spec)
         if tokens:
-            fixed_vals["channel"] = tokens[0]
+            fixed_vals["channel"] = OVERLAY_CHAN if overlay else tokens[0]
         return {
             "row_dims": ["well_row"],
             "col_dims": ["well_col"],
             "active_channels": set(tokens),
             "active_timepoints": set(filt.get("timepoint", set()) or set()),
             "active_fovs": set(filt.get("fov", set()) or set()),
-            "composite": False,
+            "composite": overlay,
             "group_size": 0,
             "channel_opts": channel_opts,
             "fixed_vals": fixed_vals,
@@ -457,7 +476,7 @@ def spec_from_state(state: ImageTableState) -> TableSpec:
         # channel picker (and the next apply) stay consistent.
         channels = [ChannelSpec.from_dict(opts[tok]) for tok in opts]
         return TableSpec(
-            rows=Axis(root=None, channels=channels, overlay=False),
+            rows=Axis(root=None, channels=channels, overlay=overlay),
             cols=Axis(root=None, channels=[], overlay=False),
             fixed=fixed,
             plate=True,

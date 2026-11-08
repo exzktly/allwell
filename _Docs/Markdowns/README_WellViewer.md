@@ -7279,9 +7279,12 @@ channel for every well).
   Columns switches Plate mode back off. Prefer this over well-on-columns + Wrap when
   you want a plate view: a wrapped grid loses its column headers entirely (see
   above), whereas Plate labels every row and column correctly. Because both axes are the plate, Plate mode shows **one
-  channel** — the first in the builder. The LUT panel offers a row for that channel
-  only and names the others as not shown, so you are never editing a brightness
-  nothing on screen reads.
+  channel** — the first in the builder — unless **Overlay** is on, when every
+  well blends all of the builder's channels (GFP and NIR together, say), as an
+  overlaid table does on any other layout, and the LUT panel offers a row for each.
+  Without Overlay the LUT panel offers a row for the one channel shown and names
+  the others as not shown, so you are never editing a brightness nothing on screen
+  reads.
 - **Cells marked `raw`** have no corrected image for that field, so the table is
   showing you the uncorrected frame instead. It still carries the camera offset and
   the background that correction removes, which puts it on a different brightness

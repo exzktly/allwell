@@ -47,10 +47,13 @@ def _cg_ctx(app):
     app._ctx = SimpleNamespace(app=app, state=app._app_state, runtime=AppRuntime(app))
     return app._ctx
 
-from review.features.scatter.gating import (
-    _on_gate_drawn,
-    compute_gate_inclusion,
-)
+from review.domain.gates import compute_gate_inclusion as _gate_inclusion
+from review.features.scatter.gating import _on_gate_drawn
+
+
+def compute_gate_inclusion(df, gates, ratios=None):
+    """These rows carry every column their gates name, so no nanowell join."""
+    return _gate_inclusion(df, gates, ratios, nanowell_values=None)
 
 
 def _mk_ctx(app):

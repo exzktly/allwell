@@ -30,15 +30,9 @@ from review.data.data_loading import (
 from review.data.metric_labels import split_metric_col
 from review.data.observations import nanowell_gate_values
 from review.domain.metric_registry import intensity_keys
-from review.core.lazy import lazy as _lazy
 from domain.tp_match import tp_close_mask
-
-# Scatter is a removable feature, so reach its gate-inclusion helper through the
-# lazy proxy (a call, not a module-scope import) — keeps cell_browser importable
-# when scatter is disabled, satisfying the removability contract. Resolves on
-# first use (N1's gate-source mode, which needs scatter anyway).
-compute_gate_inclusion = _lazy(
-    "review.features.scatter.gating", "compute_gate_inclusion")
+# The one gate predicate (below the features, so no reach into Scatter).
+from review.domain.gates import compute_gate_inclusion
 
 
 def _scatter_selected_timepoints(ctx) -> list[float] | None:
@@ -386,7 +380,7 @@ def collect_cells(
         if df is None or df.empty:
             continue
         if gate_mode:
-            mask = (compute_gate_inclusion(df, gates, ratios, nanowell_values) if gates
+            mask = (compute_gate_inclusion(df, gates, ratios, nanowell_values=nanowell_values) if gates
                     else np.zeros(len(df), dtype=bool))
             # Mirror the scatter cloud exactly: the per-cell scatter pre-filters
             # by df_included_mask (QC / crop / cell-gating "Included") before

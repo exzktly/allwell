@@ -30,7 +30,7 @@ from review.features.scatter.collect import gates_for_axes
 from review.features.scatter.controller import (
     col_for_scatter_axis, scatter_axis_metric_key,
 )
-from review.features.scatter.gating import compute_gate_inclusion
+from review.domain.gates import compute_gate_inclusion
 
 
 def _axis_marker(col: str, gate: float):
@@ -50,7 +50,10 @@ def _gate_marker(gates, ratios):
     def _marker(df, _scope):
         if not gates:
             return np.ones(len(df), dtype=bool)
-        return np.asarray(compute_gate_inclusion(df, gates, ratios), dtype=bool)
+        # The export reads its rows without the nanowell join the plot makes, so
+        # a gate on an ``nw::`` axis finds no column here (tracker G3).
+        return np.asarray(compute_gate_inclusion(df, gates, ratios, nanowell_values=None),
+                          dtype=bool)
     return _marker
 
 

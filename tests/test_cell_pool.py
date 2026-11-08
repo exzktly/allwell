@@ -199,7 +199,7 @@ def test_the_numpy_backend_can_be_forced(monkeypatch):
 def test_box_counts_are_the_scatter_gates_own_comparisons(backend):
     """The gate share a figure prints, counted in the pool, equals counting the
     same cells with the scatter's ``_in_gate`` — edges inclusive, per timepoint."""
-    from review.features.scatter.gating import _in_gate
+    from review.domain.gates import in_gate as _in_gate
 
     pool, truth = _fill(backend)
     with pool:

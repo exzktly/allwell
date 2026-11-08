@@ -39,14 +39,10 @@ from pipeline.threshold_optimize import (  # noqa: F401 (re-export)
 )
 from review.data.data_loading import resolve_value_series
 from domain.text_columns import fov_text, timepoint_text
-from review.core.lazy import lazy as _lazy
 from review.domain.gating_state import active_fluor_gates
-
-# Lazy so this pure-compute module imports without eagerly pulling the scatter
-# feature (keeps both deletable and avoids a features import cycle); resolves on
-# first call — a module-level _lazy assignment, not a function-local feature
-# import.
-compute_gate_inclusion = _lazy("review.features.scatter.gating", "compute_gate_inclusion")
+# The one gate predicate, below the features: the Scatter tab and the Cell
+# Browser ask the same function, so a cell is inside a gate everywhere or nowhere.
+from review.domain.gates import compute_gate_inclusion
 
 
 # ── Inclusion counts (the Cell Gating tab's readout) ─────────────────────────
@@ -222,7 +218,7 @@ def apply_fluor_gating(
         # via df_included_mask. Mode on + no selected gates ⇒ no restriction.
         if gating_gates:
             gate_mask = pd.Series(
-                compute_gate_inclusion(df, gating_gates, ratios, nanowell_values),
+                compute_gate_inclusion(df, gating_gates, ratios, nanowell_values=nanowell_values),
                 index=df.index,
             )
         else:
@@ -250,7 +246,7 @@ def apply_fluor_gating(
     # stats_compute._thresh_on_col); neutral (1) otherwise so a stale membership
     # can't leak in.
     if use_thresh and thresh_gates:
-        df["Gate_On"] = compute_gate_inclusion(df, thresh_gates, ratios, nanowell_values).astype(int)
+        df["Gate_On"] = compute_gate_inclusion(df, thresh_gates, ratios, nanowell_values=nanowell_values).astype(int)
     else:
         df["Gate_On"] = 1
     return well_included

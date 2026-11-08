@@ -171,8 +171,10 @@ def _tint_from_colormap(name: str) -> tuple[float, float, float] | None:
 # cell additively blends *every* selected channel (``overlay_cell_rgb``) instead of
 # showing one channel. It is a sentinel — never a real channel — so the layout
 # (``grid_layout._axis_dim_values``) emits it as the sole channel value and the
-# renderers (live grid + export) detect it to switch to the blend path.
-OVERLAY_CHAN = "⊕ OVERLAY"
+# renderers (live grid + export) detect it to switch to the blend path. Defined in
+# ``state`` (which Plate mode's flattening needs it in, and which imports nothing
+# from here) and re-exported under this name.
+from review.features.image_browser.image_table.state import OVERLAY_CHAN  # noqa: E402,F401
 
 
 def _is_binary_variant(chan: str) -> bool:

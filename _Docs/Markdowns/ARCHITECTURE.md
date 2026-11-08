@@ -1676,7 +1676,10 @@ review/
 │   │   │                  colour. A sidebar well-selection change / Select
 │   │   │                  All / Clear reruns the layout via builder_view.schedule_
 │   │   │                  selection_rebuild, and dropping a root/channel on Rows/Columns
-│   │   │                  exits Plate mode)
+│   │   │                  exits Plate mode. Plate mode pins the first channel, or,
+│   │   │                  with Overlay on and >1 channel (state.plate_overlays),
+│   │   │                  the OVERLAY_CHAN blend of all of them — the constant
+│   │   │                  lives in state.py, image_compose re-exports it)
 │   │   ├── cell_browser/ controller.py, collect.py, state.py, tab_view.py,
 │   │   │                 criteria_view.py, sort_view.py, worker.py
 │   │   └── playground/   controller.py, renderer.py, state.py, tab_view.py,

@@ -44,7 +44,7 @@ from widgets.flow_layout import FlowLayout
 from widgets.stepper import Stepper
 from widgets.lut_cmaps import resolve_channel_tint
 from review.features.image_browser.image_table.state import (
-    Axis, ChannelSpec, spec_from_state, transpose_spec,
+    Axis, ChannelSpec, plate_overlays, spec_from_state, transpose_spec,
 )
 from review.features.image_browser.image_table.build_layout import (
     _ctrl, image_table_apply_spec,
@@ -1396,10 +1396,11 @@ def _plate_shown_token(spec) -> str | None:
     (``state.spec_to_state_fields``), so there is nowhere left for a channel axis
     to tile: it pins ``fixed_vals["channel"]`` to the FIRST channel in the shelf
     and every cell shows that one. ``None`` outside plate mode, where all of them
-    are on the grid.
+    are on the grid, and in plate mode with Overlay on, where every cell blends
+    all of them (``state.plate_overlays``).
     """
-    if not getattr(spec, "plate", False):
-        return None
+    if not getattr(spec, "plate", False) or plate_overlays(spec):
+        return None             # with Overlay on, every well blends all of them
     channels = _axis_channels(spec)
     return channels[0].axis_token() if channels else None
 

@@ -2240,9 +2240,20 @@ def _refit_footer_room_on_resize(fig) -> None:
     canvas._aw_text_band_cid = canvas.mpl_connect("resize_event", _on_resize)
 
 
-def _apply_layout_engine(fig, prefs: dict) -> None:
+def layout_engine_is_the_phone_s() -> bool:
+    """Whether the Properties Layout prefs are set aside because phone layout fits every plot itself.
+
+    :func:`_apply_layout_engine` answers this before it reads ``layout_tight`` /
+    ``layout_constrained``; the Properties panel asks the same question to say so
+    beside the two switches rather than offer controls that move nothing.
+    """
     from core import phone_layout
-    if phone_layout.is_on():
+
+    return bool(phone_layout.is_on())
+
+
+def _apply_layout_engine(fig, prefs: dict) -> None:
+    if layout_engine_is_the_phone_s():
         # Phone layout draws plot text at true phone sizes (a larger DPI,
         # ``ui/phone_shell.scale_canvas``), which the renderers' fixed margins
         # cannot hold: titles ran off the figure and y-labels into the ticks.

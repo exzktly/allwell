@@ -1632,9 +1632,9 @@ class ExportStyleSidebar(QWidget):
         note = getattr(self, "_layout_phone_note", None)
         if not toggles or note is None:
             return
-        from core import phone_layout
+        from review.core.plot_style import layout_engine_is_the_phone_s
 
-        phone = bool(phone_layout.is_on())
+        phone = layout_engine_is_the_phone_s()
         for toggle in toggles:
             toggle.setEnabled(not phone)
         note.setVisible(phone)

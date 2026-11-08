@@ -70,7 +70,7 @@ def describe(ctx, cell_set: CellSet) -> str:
 
 
 #: Widgets that list the sets and refresh when they change.
-REFRESH_KEYS = ("_saved_cells_panel", "_scatter_highlight_cb")
+REFRESH_KEYS = ("_saved_cells_panel", "_scatter_highlight_cb", "_saved_cells_page")
 
 
 def _changed(ctx) -> None:

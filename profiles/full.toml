@@ -64,6 +64,11 @@ paths = ["review/features/review_csv"]
 tests = ["tests/test_review_csv_*.py"]
 
 [[feature]]
+name = "Saved Cells"
+paths = ["review/features/saved_cells"]
+tests = ["tests/test_saved_cells_page.py"]
+
+[[feature]]
 name = "Saved Plots"
 paths = ["review/features/saved_plots"]
 tests = ["tests/test_saved_plot*.py"]

@@ -7756,6 +7756,32 @@ per-nucleus rows behind every plot.
 - **Optimal use** — sanity-check outliers: filter to a suspicious metric range,
   then double-click into Segmentation to see the actual cell.
 
+### Saved Cells
+
+**What it shows.** Every population of cells you have saved, in one place, and
+the way to look at each. Two lists, because they are two kinds of thing:
+
+- **Saved cell sets** — cells saved by name with **Lasso cells** on a Spatial
+  map or a Multivariate projection. A set is a fixed list of cells. Each row
+  gives its size and wells, where it was drawn, and what it is doing now
+  (*Saved only*, *Highlighted on Scatter*, *Excluded from analysis*). Under the
+  list, for the selected set: **View in Cell Browser** (Image Browser → Cell
+  Browser with the set as its Source), **Highlight on Scatter** and **Exclude
+  from analysis** (click again to undo; one set at a time can be highlighted and
+  one excluded), a box to rename it, and **Delete**. A set saved before some of
+  its wells were segmented again says how many of its cells it leaves out.
+- **Gates** — rectangles drawn on the per-cell Scatter Plot. A gate is a rule
+  over two measurements, so it takes whatever cells are loaded. Each row gives
+  its axes, the wells it was drawn on, and whether it is in force: *Defines the
+  Included cells* or *Defines the ON cells* when Cell Gating applies it, *Not
+  applied* otherwise. **View in Cell Browser** shows the cells inside that gate
+  alone; **Manage on Cell Gating** takes you to Home → Cell Gating, where gates
+  are applied. Under the list, the per-channel intensity gates in force.
+
+- **Optimal use** — before reading a plot, check here what is excluded and what
+  is gating the cells; to look at a population, select it and click **View in
+  Cell Browser**.
+
 ### Saved Plots
 
 **What it is.** A per-dataset gallery of plots you have captured. Hover any plot

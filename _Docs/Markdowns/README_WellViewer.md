@@ -6075,7 +6075,11 @@ divide-by-zero.
 
 - **Correlation** — a feature×feature Pearson correlation heatmap (scale
   invariant, so unaffected by Standardize), or a scatter-plot matrix (SPLOM)
-  via the view toggle.
+  via the view toggle. Up to twelve features each cell prints its r value;
+  when a cell is too narrow to hold it (a phone held upright, a small window)
+  the value is left out and the colour bar reads it instead. Long feature
+  names break onto two lines beside and below the matrix, in every heatmap of
+  this tab.
 - **Dim-reduction** — project every cell to 2-D. **PCA** (default, always
   available), or **UMAP** / **t-SNE** if `umap-learn` / `scikit-learn` are
   installed. Colour the points **by group / well / timepoint / cluster**. For

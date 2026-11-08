@@ -129,3 +129,41 @@ def test_a_colour_bar_survives_constrained_layout_being_switched_on_afterwards()
     fig.set_layout_engine("constrained")
     fig.canvas.draw()          # raised ZeroDivisionError before the bar was shrunk
     plt.close(fig)
+
+
+_FEATURES = ["GFP Mean Intensity", "MCHERRY Mean Intensity", "Area"]
+
+
+def _drawn_values(fig):
+    fig.canvas.draw()
+    return sorted(t.get_text() for t in fig.axes[0].texts if t.get_visible())
+
+
+def test_a_long_feature_name_breaks_onto_lines_and_a_short_one_does_not():
+    """A feature name on one line took a third of a phone's width beside the rows."""
+    fig = plt.figure()
+    res = _corr_res(3)
+    res["data"]["feature_labels"] = _FEATURES
+    R._render_correlation(fig, res)
+    ax = fig.axes[0]
+    want = ["GFP Mean\nIntensity", "MCHERRY Mean\nIntensity", "Area"]
+    assert [t.get_text() for t in ax.get_yticklabels()] == want
+    assert [t.get_text() for t in ax.get_xticklabels()] == want
+    plt.close(fig)
+
+
+def test_a_value_is_drawn_only_while_its_cell_can_hold_it():
+    """On a phone the matrix was ~15 px a column and the 6 pt values ran into each
+    other. The cell's width is known only at draw time, so it is decided there —
+    and a figure widened again prints them again."""
+    res = _corr_res(3)
+    res["data"]["feature_labels"] = _FEATURES
+    fig = plt.figure(figsize=(6, 4), dpi=100)
+    R._render_correlation(fig, res)
+    wide = _drawn_values(fig)
+    assert len(wide) == 9 and wide.count("1.00") == 3
+    fig.set_size_inches(0.7, 4)          # ~12 px a column
+    assert _drawn_values(fig) == []
+    fig.set_size_inches(6, 4)
+    assert _drawn_values(fig) == wide
+    plt.close(fig)

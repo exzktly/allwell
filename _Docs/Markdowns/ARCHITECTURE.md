@@ -994,7 +994,14 @@ notice (`barplot/_annotations.annotate_split_notice`), the "drawn from a sample"
 notes on Bar Plots and Distribution, Spatial's ICC line — is taken out of layout
 (`set_in_layout(False)`) and wrapped; left in, a one-line sentence made the engine
 shrink the axes until it fitted beside them (491 px to 298 px for the Split-by
-notice on a phone-width figure). The figure keeps its pixel
+notice on a phone-width figure). A value printed in each cell of a heatmap has
+the opposite problem — the engine narrows the cells after the renderer has run —
+so Multivariate's matrices (`multivariate/renderer._annotated_matrix`) draw each
+value as a `_CellValue`, a `Text` that measures its cell at every draw and hides
+itself while the cell is narrower than the value, and break feature names longer
+than 14 characters onto lines (`_wrap_label`): on a phone held upright the
+correlation matrix's one-line row labels left it ~15 px a column, and its 6 pt
+values and slanted column labels ran into each other. The figure keeps its pixel
 size and loses inches, so a figure saved *from the screen* while phone layout is
 on is laid out as the phone shows it; the raster exports pass `dpi=300` and keep
 their resolution. The scale also sets matplotlib's private

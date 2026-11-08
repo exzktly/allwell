@@ -173,9 +173,15 @@ def test_the_scatter_title_naming_a_long_set_stays_inside_the_figure(ctx):
 
     s = add_set(ctx, SET_CELLS, source="test", name="Rounded mitotic cells from the 24 h lasso")
     set_highlighted(ctx, s.name)
+    # The width the Scatter has at the desk beside the rail (Qt's offscreen
+    # default of 800 px is no desk): the title is fitted at the user's size,
+    # broken onto two lines, never shrunk.
+    ctx.widgets.get("_scatter_fig").set_size_inches(12.9, 6)
     ax = _redraw(ctx)
     fig = ax.figure
+    assert fig.bbox.width > 1200
     fig.canvas.draw()
     box = ax.title.get_window_extent(fig.canvas.get_renderer())
     assert 0 <= box.x0 and box.x1 <= fig.bbox.width, (box, fig.bbox.width, ax.get_title())
+    assert ax.get_title().count("\n") == 1
     assert ax.get_title().replace("\n", " ").endswith("· highlighting " + s.name)

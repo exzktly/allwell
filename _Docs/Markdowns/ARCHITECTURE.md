@@ -978,12 +978,17 @@ rule, at any layout (`plot_style.fit_titles_to_axes`): Home's Cell Gating calls 
 between two `tight_layout`s, since its 2 × 2 grid of CDFs leaves each panel
 narrower than its title on a phone. **At the desk** only a title the figure
 cannot hold is fitted (`plot_style.fit_clipped_titles`, the last step of
-`_apply_layout_engine`'s desk branch, after the layout engine has run once): the
-room is twice the distance from the title's centre (its axes') to the nearer
-figure edge, so a title wider than its own axes but inside the figure keeps its
-one line, and one that would be cut off — the per-cell Scatter's "… (t=0h–24h,
-2 tps) · highlighting <set>" lost its end at a desk width — gets the same
-two-line fit. A figure's
+`_apply_layout_engine`'s desk branch, which does not run the layout engine for
+it, so the axes stay where the desk's layout puts them): a title is cut off when
+it is wider than twice the distance from its centre (its axes') to the nearer
+figure edge, so one wider than its own axes but inside the figure keeps its one
+line, and one that would be cut off — the per-cell Scatter's "… (t=0h–24h,
+2 tps) · highlighting <set>" lost its end at a desk width — is broken onto two
+lines like the phone's fit, but **never made smaller** (`_fit_title(…,
+shrink=False)`): at the desk the title's size is the user's Properties setting,
+and shrinking to fit made every title size look the same on a figure too narrow
+for its title. A fitted title's line break is not part of its name: the plot
+card names a saved panel from its title with whitespace collapsed. A figure's
 canvas re-fits on every `resize_event` (`_refit_on_resize`, attached by
 `apply_export_style_to_current`) — which is how a plot drawn at the desk gets the
 phone fit when phone layout raises its DPI, and gets its own titles back when

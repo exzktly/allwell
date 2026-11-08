@@ -543,7 +543,7 @@ if _HAVE_MPL:
                 png_bytes = buf.getvalue()
             label = ""
             try:
-                label = (ax.get_title() or "").strip()
+                label = " ".join((ax.get_title() or "").split())   # a fitted title's line break is not part of its name
             except Exception:
                 label = ""
             self._dispatch_saved_png(

@@ -1911,9 +1911,10 @@ def _two_lines(text: str, width_of) -> list[str]:
     return min(splits, key=lambda lines: max(width_of(line) for line in lines))
 
 
-def _fit_title(title, room: float, renderer) -> None:
+def _fit_title(title, room: float, renderer, *, shrink: bool = True) -> None:
     """Fit *title* into *room* pixels: one line if it fits, else two lines,
     and if two lines still do not fit, the two lines at the size that does.
+    With ``shrink=False`` the title keeps its size and only breaks.
 
     Never clipped, never more than two lines: a title broken onto five short
     lines took the height its plot needed, and one cut at the figure's edge
@@ -1938,12 +1939,12 @@ def _fit_title(title, room: float, renderer) -> None:
     else:
         lines = _two_lines(" ".join(line.strip() for line in given), width_of)
         widest = max(width_of(line) for line in lines)
-        fitted = size if widest <= room else size * room / widest
+        fitted = size if widest <= room or not shrink else size * room / widest
         # Text does not scale exactly with its size — hinting rounds glyph
         # advances, by different amounts on different FreeType builds — so
         # the proportional size can still overrun by a pixel or two (CI's
         # did, where this machine's did not). Measure again and step down.
-        for _ in range(12):
+        for _ in range(12 if shrink else 0):
             if max(width_of(line, fitted) for line in lines) <= room:
                 break
             fitted *= 0.97
@@ -2007,9 +2008,12 @@ def fit_clipped_titles(fig) -> None:
     leaves either side of that centre is cut off at the edge: the per-cell
     Scatter's "Scatter: GFP Mean Intensity vs MCHERRY Mean Intensity (t=0h–24h,
     2 tps) · highlighting …" lost its end — the timepoints, then the set it
-    names. Only such a title is changed (two lines, then smaller); one that fits
-    the figure is left exactly as its renderer wrote it, even when it is wider
-    than its own axes, so plots whose titles already fit read as before.
+    names. Only such a title is changed, and only broken onto two lines: its
+    size is the user's (Properties' title size) and is kept, and the layout
+    engine is not run for it, so the axes stay where the desk's layout puts
+    them. A title that reaches the figure's edge without crossing it, or is
+    wider than its own axes but inside the figure, is left exactly as its
+    renderer wrote it.
     """
     renderer = _renderer_of(fig)
     width = fig.bbox.width
@@ -2023,12 +2027,12 @@ def fit_clipped_titles(fig) -> None:
             title.set_fontsize(size)
             setattr(title, _FITTED, None)
         centre = (ax.bbox.x0 + ax.bbox.x1) / 2
-        room = 2 * min(centre, width - centre) * _LABEL_FILL
+        room = 2 * min(centre, width - centre)
         lines = title.get_text().split("\n")
         measured = max(renderer.get_text_width_height_descent(
             line, title.get_fontproperties(), ismath=False)[0] for line in lines)
         if measured > room:
-            _fit_title(title, room, renderer)
+            _fit_title(title, room * _LABEL_FILL, renderer, shrink=False)
 
 
 def _fit_labels_to_phone(fig) -> None:
@@ -2386,9 +2390,6 @@ def _apply_layout_engine(fig, prefs: dict) -> None:
     with swallow("keep a plot's panels clear of its figure text"):
         keep_panels_clear_of_footer(fig)
     with swallow("fit a desk plot's titles that run past its figure"):
-        engine = fig.get_layout_engine()
-        if engine is not None:
-            engine.execute(fig)     # fit against the axes the layout will settle on
         fit_clipped_titles(fig)
 
 

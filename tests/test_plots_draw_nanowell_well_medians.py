@@ -68,7 +68,7 @@ def test_bars_are_well_medians_and_a_lone_well_has_no_error_bar(qtbot, tmp_path)
     occupied = [p.get_height() for p in ctx.widgets.get("_ax_bar_frac").patches]
     # The share of each well's nanowells holding a cell: 4 of 5 and 3 of 5 — not the median of the 0/1 flags (1, 1).
     assert np.allclose(occupied, [0.8, 0.6])
-    assert ax.get_title().startswith("Cell count — well median over nanowells, mean ± SEM over wells")
+    assert " ".join(ax.get_title().split()).startswith("Cell count — well median over nanowells, mean ± SEM over wells")
     assert _footer(ctx.runtime.barplot.fig).startswith("Observations: nanowells · 10 of 10 used")
 
 
@@ -80,7 +80,7 @@ def test_lines_follow_each_well_s_median_over_time(qtbot, tmp_path):
     ax = ctx.widgets.get("_line_ax_mean")
     by_label = {ln.get_label(): ln.get_ydata().tolist() for ln in ax.lines}
     assert by_label == {"A01": [1.0, 3.0], "B01": [1.0, 1.0]}
-    assert ax.get_title().startswith("Cell count — well median over nanowells")
+    assert " ".join(ax.get_title().split()).startswith("Cell count — well median over nanowells")
     assert _footer(ctx.widgets.get("_line_fig")).startswith("Observations: nanowells · 20 of 20 used")
 
 

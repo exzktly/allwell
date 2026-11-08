@@ -410,6 +410,22 @@ def plate_overlays(spec: TableSpec) -> bool:
     return bool(axis.overlay) and len(axis.channels) > 1
 
 
+def transpose_spec(spec: TableSpec) -> bool:
+    """Swap the table's rows and columns in place: whatever ran down the rows runs across, and the reverse.
+
+    Each axis moves whole — its root, the channels nested under it and its Overlay switch — so a transposed table
+    shows the same images, each in the cell its row and column now name. The Fixed values and filters belong to
+    neither axis and stay. Wrap stays as set: it bands whichever axis is now the columns.
+
+    Returns ``False``, changing nothing, in Plate mode, whose rows and columns are the plate's own (A–H by 1–12)
+    whatever the axes hold, so there is nothing to swap.
+    """
+    if getattr(spec, "plate", False):
+        return False
+    spec.rows, spec.cols = spec.cols, spec.rows
+    return True
+
+
 def spec_to_state_fields(spec: TableSpec) -> dict:
     """Flatten a ``TableSpec`` onto the existing ImageTableState fields the layout
     math + render seam consume. Pure — no Qt, no ctx."""

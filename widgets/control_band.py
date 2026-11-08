@@ -261,16 +261,10 @@ class ControlBand(QWidget):
             self._scope.move_to_end(item)
 
     def add_action(self, widget: QWidget) -> QWidget:
-        """Add an action to the right zone, in call order, flush to the edge.
-
-        Each action is top-aligned in the zone, not just the zone in the band:
-        an action taller than one row (Heat Map's layout grid) makes the zone
-        tall, and a box layout centres the shorter buttons beside it, which
-        drops them half the panel's height below the scope row they belong to.
-        """
+        """Add an action to the right zone, in call order, flush to the edge."""
         _fit_checkboxes((widget,))
         widget.setParent(self)
-        self._actions.addWidget(widget, 0, Qt.AlignTop)
+        self._actions.addWidget(widget)
         return widget
 
     def setStacked(self, on: bool) -> None:
@@ -306,7 +300,7 @@ class ControlBand(QWidget):
                         self._scope.takeAt(i)
                         break
                 w.setParent(self)
-                self._actions.addWidget(w, 0, Qt.AlignTop)
+                self._actions.addWidget(w)
                 w.setHidden(hidden)
             self._moved_actions = []
         self.updateGeometry()
@@ -362,7 +356,7 @@ class ControlBand(QWidget):
             for w in actions:
                 hidden = w.isHidden()
                 w.setParent(self)
-                self._actions.addWidget(w, 0, Qt.AlignTop)
+                self._actions.addWidget(w)
                 w.setHidden(hidden)
             root.removeWidget(form.host)
             form.host.deleteLater()

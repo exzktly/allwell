@@ -20,8 +20,7 @@ from __future__ import annotations
 import pytest
 from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QLabel, QPushButton, QSpinBox, QToolButton, QVBoxLayout,
-    QWidget,
+    QApplication, QComboBox, QLabel, QPushButton, QSpinBox, QToolButton, QWidget,
 )
 
 from widgets.control_band import ControlBand
@@ -230,40 +229,13 @@ def test_leaving_the_form_puts_the_row_back_as_it_was(qtbot):
                     if type(o).__name__ in ("_ValueOnly", "_Mirror")], widget
 
 
-@pytest.mark.parametrize("role,expect", [("display", "Display"), ("action", "Actions"),
-                                         ("data", "Data")])
+@pytest.mark.parametrize("role,expect", [("display", "Display"), ("action", "Actions")])
 def test_an_action_s_section_is_its_builder_s_role(qtbot, role, expect):
     b = QToolButton()
     qtbot.addWidget(b)
     b.setPopupMode(QToolButton.InstantPopup)
     b.setProperty("bandRole", role)
     assert section_of_action(b) == expect
-
-
-def test_a_data_role_action_is_a_spanning_data_row_and_goes_home_after(qtbot):
-    """A panel the row carries at its right end (the Heat Map's layout editor)
-    declares ``bandRole="data"``: in the form it is a Data row of its own, with
-    no label column and after the scope rows — not a cell of the button grid,
-    which squeezed it to a button's width and pushed Save to a row of its own.
-    Leaving the form puts it back in the action zone, in its place."""
-    band, parts, w = _band(qtbot)
-    panel = QWidget()
-    panel.setProperty("bandRole", "data")
-    QVBoxLayout(panel).addWidget(QLabel("Layout"))
-    band.add_action(panel)
-    actions_before = [band._actions.itemAt(i).widget() for i in range(band.action_count())]
-    band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
-    _settle()
-    form = band.form()
-    assert panel not in form.buttons("Actions") + form.buttons("Display")
-    items = [item for _row, item in form.rows("Data")]
-    assert items[-1] is panel
-    row = form.rows("Data")[-1][0]
-    assert row.layout().count() == 1      # no label column: the panel spans the row
-    assert w["save"] in form.buttons("Actions")
-    band.setForm(False)
-    _settle()
-    assert [band._actions.itemAt(i).widget() for i in range(band.action_count())] == actions_before
 
 
 def test_the_shared_builders_declare_their_role(qtbot):

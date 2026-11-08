@@ -90,3 +90,25 @@ def test_a_per_cell_mode_says_it_is_not_applied():
     assert bar.rel_applied is False
     assert any("not applied" in t and "per-cell points" in t for t in _texts(ax))
     plt.close(fig)
+
+
+def test_split_and_then_by_headers_survive_a_single_remaining_bar():
+    """The reported failure: on a 2×2, *Then relative to* leaves one bar, the
+    layout inserts no gap, and both header rows used to vanish with it."""
+    ctx, ids = _app()
+    _on(ctx, ids)
+    ctx.state.plot.split_by_variable = ids["treat"]
+    ctx.state.plot.sub_split_by_variable = ids["rna"]
+    fig, ax_mean, _f, _n = _draw(ctx)
+    texts = _texts(ax_mean)
+    assert "Drug" in texts and "Mut" in texts, texts
+    plt.close(fig)
+
+
+def test_without_split_by_a_lone_bar_still_has_no_header():
+    """The rule the gap test existed for: no band, no redundant bold label."""
+    ctx, ids = _app()
+    _on(ctx, ids)
+    fig, ax_mean, _f, _n = _draw(ctx)
+    assert "Drug" not in _texts(ax_mean) and "Mut" not in _texts(ax_mean)
+    plt.close(fig)

@@ -1263,9 +1263,15 @@ class ExportStyleSidebar(QWidget):
     def _build_limits_section(self, kit: _SectionGrid) -> None:
         """Properties → Limits & Scale: typed limits, Auto scale, and the log axes."""
         sp = theme.Spacing
+        typed_limits = self._supports("axis_limits")
+        if not (typed_limits or self._supports("colour_limits") or self._supports("log_axes")):
+            return                          # nothing here would move this figure — see its style facets
         # ── Limits & Scale ──────────────────────────────────────────────────
-        s_lim = kit.section("Limits & Scale", facet="axis_limits", expanded=False)
-        for lim_key, label in [("x_lim", "X limits"), ("y_lim", "Y limits")]:
+        s_lim = kit.section("Limits & Scale",
+                            facet="axis_limits" if typed_limits else
+                            "colour_limits" if self._supports("colour_limits") else "log_axes",
+                            expanded=False)
+        for lim_key, label in ([("x_lim", "X limits"), ("y_lim", "Y limits")] if typed_limits else []):
             lo_edit = QLineEdit(str(self._prefs[f"{lim_key}_min"]))
             lo_edit.setMaximumWidth(_LO_EDIT_MAX_W)
             hi_edit = QLineEdit(str(self._prefs[f"{lim_key}_max"]))

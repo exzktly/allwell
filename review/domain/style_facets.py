@@ -60,11 +60,12 @@ SHARED: frozenset[str] = frozenset({
     "threshold_line", "value_labels", "time_axis",
 })
 
-#: The facets every figure the panel opens on has: they style the axes themselves, which every figure draws. A
+#: The facets every figure the panel opens on has (typed axis limits are not among them: the Heat Map's axes are
+#: row and column positions, which a limit can only crop): they style the axes themselves, which every figure draws. A
 #: declaration writes ``UNIVERSAL | {...}`` rather than repeating them, and a facet added to :data:`FACETS` is not
 #: in here unless somebody decided it is — so it still has to be answered for on every figure.
 UNIVERSAL: frozenset[str] = frozenset({
-    "profile", "typography", "grid", "axis_limits", "layout_engine",
+    "profile", "typography", "grid", "layout_engine",
 })
 
 

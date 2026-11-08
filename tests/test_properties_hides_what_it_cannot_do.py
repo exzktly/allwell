@@ -54,6 +54,10 @@ _HIDDEN_SECTIONS = [
     ("Legend", "legend"),
     ("Lines & Markers", "marks"),
     ("Overlays", "plot_overlays"),
+    # Reported: "why does heat map offer controls for x-axis and y-axis; that doesn't make any sense". Its axes are
+    # row and column positions; with no typed limits, no Colour limits (Display ▾'s) and no log axes, the section
+    # holds nothing that would move the figure.
+    ("Limits & Scale", "axis_limits"),
 ]
 
 #: Sections that must survive. Without these the file cannot tell a correct gate
@@ -64,7 +68,6 @@ _KEPT_SECTIONS = [
     "Axes",
     "Statistics",
     "Grid",
-    "Limits & Scale",
     "Time",
     "Layout",
 ]
@@ -199,13 +202,16 @@ def test_the_group_label_size_row_is_still_offered_on_a_bar_plot(
     assert "Group label size" in _row_labels(sb, "Axes")
 
 
-def test_the_log_scale_rows_are_not_offered(qtbot, monkeypatch):
+def test_no_axis_limits_or_log_rows_are_offered(qtbot, monkeypatch):
     _app, sb = _sidebar(qtbot, monkeypatch, kind="_heatmap_fig")
+    assert _row_labels(sb, "Limits & Scale") == []
+    assert not {"x_lim_min", "x_lim_max", "y_lim_min", "y_lim_max", "x_log", "y_log"} & set(sb._getters), sb._getters
+
+
+def test_the_axis_limit_rows_are_still_offered_on_a_line_plot(qtbot, monkeypatch):
+    _app, sb = _sidebar(qtbot, monkeypatch, kind="_line_fig")
     labels = _row_labels(sb, "Limits & Scale")
-    assert "Log scale" not in labels, labels
-    assert "Log base" not in labels, labels
-    # The typed limits and the button that clears them do work here.
-    assert "X limits" in labels, labels
+    assert "X limits" in labels and "Y limits" in labels, labels
 
 
 def test_the_colour_limits_row_is_offered_on_the_nanowells_figure(qtbot, monkeypatch):
@@ -385,6 +391,10 @@ _PREFS_THAT_SHOULD_DO_NOTHING = [
     ("log_axes", "y_log", True),
     ("log_axes", "x_log_base", "2"),
     ("log_axes", "y_log_base", "2"),
+    # A limit typed before the rows were hidden: the 2x2 grid spans -0.5 to 1.5 on both axes, so either of these
+    # would crop it to one row or column if the pass applied it.
+    ("axis_limits", "x_lim_min", "0.5"),
+    ("axis_limits", "y_lim_max", "0.5"),
     # The cells hold 5 to 500: either end moved inside that range would recolour the grid if the pass reached it.
     ("colour_limits", "c_lim_min", "200"),
     ("colour_limits", "c_lim_max", "50"),

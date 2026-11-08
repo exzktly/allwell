@@ -15,7 +15,7 @@ def style_facets() -> dict[str, FigureFacets]:
     """``{figure attribute: what it has}`` for every figure this feature draws that Properties opens on."""
     return {
         "_scatter_fig": FigureFacets(
-            has=UNIVERSAL | {"scatter_density", "legend", "value_labels", "point_marks", "log_axes", "draw_order"},
+            has=UNIVERSAL | {"axis_limits", "scatter_density", "legend", "value_labels", "point_marks", "log_axes", "draw_order"},
             lacks={
                 "error_kinds": (
                     "No Error bars row here: nothing on this figure draws a spread."
@@ -63,7 +63,7 @@ def style_facets() -> dict[str, FigureFacets]:
             },
         ),
         "_scatter_agg_fig": FigureFacets(
-            has=UNIVERSAL | {"legend", "error_bars", "value_labels", "point_marks", "log_axes", "draw_order"},
+            has=UNIVERSAL | {"axis_limits", "legend", "error_bars", "value_labels", "point_marks", "log_axes", "draw_order"},
             lacks={
                 "error_kinds": (
                     "This figure's spread is read off ``use_sem`` alone, so it draws SEM or SD: offered None or 95% CI "

@@ -1770,6 +1770,10 @@ def _apply_scales_and_limits(ax, idx: int, axis_prefs: _AxisPrefs) -> tuple:
     # fraction axis typed as 0 to 1 drew every point in the top thousandth
     # of the figure, and re-typing the same two numbers fixed it because
     # that path met an axis that was already log and had the bound refused.
+    if getattr(ax, "_aw_no_typed_limits", False):
+        # An axis of positions (the Heat Map's rows and columns): a typed limit would only crop it, and Properties
+        # offers none there. One typed before that row was hidden is not applied, or held, either.
+        return (None, None, None, None)
     _apply_limits_for_scale(ax, "x", xlo, xhi)
     _apply_limits_for_scale(ax, "y", ylo, yhi)
     return (xlo, xhi, ylo, yhi)

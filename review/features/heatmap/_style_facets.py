@@ -17,6 +17,13 @@ def style_facets() -> dict[str, FigureFacets]:
         "_heatmap_fig": FigureFacets(
             has=UNIVERSAL | {"error_kinds", "cell_values", "error_bars", "time_axis"},
             lacks={
+                "axis_limits": (
+                    "X and Y limits on a heat map are ranges of row and column *positions*: a typed limit only crops "
+                    "the plate or pads it with empty space, which no one asks a plate map for. The axes are marked "
+                    "``_aw_no_typed_limits``, so the style pass applies none — a limit typed before this row was hidden "
+                    "cannot go on cropping the grid with nothing left to clear it. With Colour limits Display ▾'s and "
+                    "no log axes, Limits & Scale has nothing left and is not built."
+                ),
                 "bar_geometry": (
                     "Bar width and group spacing are read by the bar renderer alone (``barplot/collect.py``)."
                 ),

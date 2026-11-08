@@ -15,7 +15,7 @@ def style_facets() -> dict[str, FigureFacets]:
     """``{figure attribute: what it has}`` for every figure this feature draws that Properties opens on."""
     return {
         "_distribution_fig": FigureFacets(
-            has=UNIVERSAL | {"legend", "threshold_line", "time_axis", "line_marks", "log_axes"},
+            has=UNIVERSAL | {"axis_limits", "legend", "threshold_line", "time_axis", "line_marks", "log_axes"},
             lacks={
                 "error_kinds": (
                     "No Error bars row here: nothing on this figure draws a spread."

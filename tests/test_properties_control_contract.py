@@ -69,7 +69,8 @@ _BOUND_ROSTER: dict[str, frozenset[str]] = {
         "line_style", "line_width", "marker_edge_width", "marker_size",
         "marker_style", "x_log", "x_log_base", "y_log", "y_log_base",
     },
-    "_heatmap_fig": _BOUND_EVERYWHERE | {
+    # Its axes are row and column positions: no typed X/Y limits (properties_view's ``axis_limits`` facet).
+    "_heatmap_fig": (_BOUND_EVERYWHERE - {"x_lim_min", "x_lim_max", "y_lim_min", "y_lim_max"}) | {
         "heatmap_value_format",
     },
     "_scatter_fig": _BOUND_EVERYWHERE | {
@@ -123,9 +124,16 @@ def _different_value(sidebar, key):
     if candidates is None:
         combos = [w for w in sidebar.findChildren(QComboBox)
                   if sidebar._getters.get(key) == w.currentText]
+        # A combo that shows a label and stores a code (Line style "Solid" → "-"): its getter reads ``currentData``,
+        # so it is found by the data it holds. Without this, line_style and marker_style were never exercised.
+        coded = [w for w in sidebar.findChildren(QComboBox)
+                 if w.currentData() is not None and w.currentData() == current
+                 and current in [w.itemData(i) for i in range(w.count())]]
         if combos:
             items = [combos[0].itemText(i) for i in range(combos[0].count())]
             candidates = [t for t in items if t != current]
+        elif coded:
+            candidates = [d for d in (coded[0].itemData(i) for i in range(coded[0].count())) if d != current]
         else:
             candidates = ["7", "3"] if current != "7" else ["3"]
     sidebar._updating = True
@@ -179,7 +187,8 @@ def test_a_rebuilt_panel_shows_every_stored_value(qtbot, monkeypatch, kind):
         if alt is None:
             continue
         stored[key] = alt
-    assert len(stored) > 15, f"too few controls exercised on {kind}: {sorted(stored)}"
+    unexercised = _BOUND_ROSTER[kind] - {"axis_target"} - set(_NOT_SEEDED_FROM_STORE) - set(stored)
+    assert not unexercised, f"controls on {kind} this test did not exercise: {sorted(unexercised)}"
     prefs.update(stored)
 
     second = ExportStyleSidebar(app, None, fig, None, default_name=kind)
@@ -222,7 +231,7 @@ def test_moving_a_control_writes_its_own_key_only(qtbot, monkeypatch, kind):
             wrong.append(f"{key}: set {alt!r}, store holds {after.get(key)!r}")
         elif changed - {key} and key not in _WRITES_OTHER_KEYS:
             wrong.append(f"{key}: also changed {sorted(changed - {key})}")
-    assert exercised > 15, f"too few controls exercised on {kind}"
+    assert exercised == len(_BOUND_ROSTER[kind] - {"axis_target"}), f"controls on {kind} not exercised"
     assert not wrong, "\n".join(wrong)
 
 

@@ -94,7 +94,7 @@ def _shown_labels(sb, title: str) -> list[str]:
     return out
 
 
-_ALWAYS = ["Profile & Format", "Axes", "Grid", "Limits & Scale", "Layout"]
+_ALWAYS = ["Profile & Format", "Axes", "Grid", "Layout"]
 
 #: What each figure shows, in panel order — written out, not derived, so the panel is measured against a claim.
 _EXPECTED_SECTIONS = {
@@ -106,8 +106,7 @@ _EXPECTED_SECTIONS = {
                      "Grid", "Limits & Scale", "Layout"],
     "_scatter_agg_fig": ["Profile & Format", "Axes", "Statistics", "Legend", "Overlays", "Lines & Markers",
                          "Grid", "Limits & Scale", "Layout"],
-    "_heatmap_fig": ["Profile & Format", "Cell values", "Axes", "Statistics", "Time", "Grid", "Limits & Scale",
-                     "Layout"],
+    "_heatmap_fig": ["Profile & Format", "Cell values", "Axes", "Statistics", "Time", "Grid", "Layout"],
     "_distribution_fig": ["Profile & Format", "Axes", "Legend", "Overlays", "Time", "Lines & Markers", "Grid",
                           "Limits & Scale", "Layout"],
     "_response_fig": ["Profile & Format", "Colours", "Axes", "Statistics", "Legend", "Time", "Lines & Markers",

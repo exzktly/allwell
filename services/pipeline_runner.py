@@ -402,7 +402,7 @@ _RE_JOB_UNKNOWN = re.compile(re.escape(JOB_UNKNOWN_PREFIX.strip()))
 # is only "downloaded" once BOTH have landed; the ``✓ materialised`` line fires
 # even when the CSV pull failed (it's retried later), so it must NOT be the
 # download trigger on its own.
-_RE_REMOTE_UP_WELL = re.compile(r"\[remote\] [↑⇡].*?([A-Ha-h]\d{1,2})\.zip")
+_RE_REMOTE_UP_WELL = re.compile(r"\[remote\] (?:sent ahead )?↑.*?([A-Ha-h]\d{1,2})\.zip")
 _RE_FETCH_ZIP = re.compile(r"\[remote\] ↓ ([A-Ha-h]\d{1,2}): [\d.]+ MB zip")
 _RE_FETCH_CSV = re.compile(r"\[remote\] ↓ ([A-Ha-h]\d{1,2}): \d+ CSV file")
 # Auto-threshold pass completes each well: "completed well 3/12 (A01_out.zip)".

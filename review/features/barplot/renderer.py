@@ -73,6 +73,7 @@ from review.features.barplot.collect import (
     clustered_x_positions as _clustered_x_positions,
 )
 from review.features.barplot import _observations as _nw_bars
+from review.core.plot_style import forget_renderer_marks, own_xtick_angle
 
 
 def _annotate_group_key_headers(axes, xs, group_keys) -> int:
@@ -313,6 +314,7 @@ def draw_violin(
                            rotation=45 if n > 8 else 0,
                            ha="right" if n > 8 else "center",
                            fontsize=7)
+        own_xtick_angle(ax, 45 if n > 8 else 0, "right" if n > 8 else "center")
         ax.set_xlim(xlim_lo, xlim_hi)
     _hdr_pad = _annotate_group_key_headers((ax_mean, ax_frac), xs, group_keys)
     # The per-cell fraction is raw whatever the fold-change state
@@ -498,8 +500,10 @@ def draw_beeswarm(
                 swarms.append((sc, float(xi)))
                 # Every cell's mean when the points are a sample of them.
                 m = cells.mean(spec) if cells.sampled else float(cell_vals.mean())
-                ax_mean.plot([xi - bar_w * 0.6, xi + bar_w * 0.6],
-                             [m, m], color=color, lw=1.5, zorder=4)
+                (mean_tick,) = ax_mean.plot([xi - bar_w * 0.6, xi + bar_w * 0.6],
+                                            [m, m], color=color, lw=1.5, zorder=4)
+                # A mark of the mean, not a series: no line style or marker pref.
+                mean_tick._aw_no_style_override = True
             else:
                 ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
                                 marker="x", zorder=3, linewidths=1)
@@ -521,6 +525,7 @@ def draw_beeswarm(
                            rotation=45 if n > 8 else 0,
                            ha="right" if n > 8 else "center",
                            fontsize=7)
+        own_xtick_angle(ax, 45 if n > 8 else 0, "right" if n > 8 else "center")
         ax.set_xlim(xlim_lo, xlim_hi)
     _pack_on_page(ctx, ax_mean, swarms, pitch, bar_w)
     _hdr_pad = _annotate_group_key_headers((ax_mean, ax_frac), xs, group_keys)
@@ -1220,10 +1225,10 @@ def redraw_bars(ctx) -> None:
     ax_mean = ctx.widgets.get_or_none("_ax_bar_mean")
     ax_frac = ctx.widgets.get_or_none("_ax_bar_frac")
     ax_n = ctx.widgets.get_or_none("_ax_bar_n")
-    ax_mean.cla()
-    ax_frac.cla()
-    if ax_n is not None:
-        ax_n.cla()
+    for _ax in (ax_mean, ax_frac, ax_n):
+        if _ax is not None:
+            _ax.cla()
+            forget_renderer_marks(_ax)
 
     use_sem = ctx.state.plot.use_sem
     band_lbl = spread_label(use_sem)
@@ -1785,6 +1790,7 @@ def draw_per_well_n_bars(
             ax_n.bar(xi, 0, width=bar_w, color=theme.Colors.placeholder, linewidth=1, edgecolor=theme.Colors.plot_undefined_ink, linestyle="--", zorder=3)
     ax_n.set_xticks(xs)
     ax_n.set_xticklabels(xlabels, rotation=45 if n > 8 else 0, ha="right" if n > 8 else "center", fontsize=7)
+    own_xtick_angle(ax_n, 45 if n > 8 else 0, "right" if n > 8 else "center")
     xlim_lo = (min(xs) - 0.6) if xs else -0.6
     xlim_hi = (max(xs) + 0.6) if xs else 0.4
     ax_n.set_xlim(xlim_lo, xlim_hi)

@@ -51,6 +51,7 @@ clear_gates = _lazy("review.features.scatter.gating", "clear_gates")
 rename_gate = _lazy("review.features.scatter.gating", "rename_gate")
 set_gate_draw_mode = _lazy("review.features.scatter.gating", "set_gate_draw_mode")
 from review.data.metric_labels import gate_axes_label
+from review.domain.style_facets import FACETS, SHARED, FigureFacets
 from core.safe import swallow, swallowed
 from review.domain.time_rescale import (
     displayed_interval as _displayed_interval,
@@ -78,79 +79,6 @@ _FIGURE_OWNING_FEATURES = (
     ("_response_fig", "Response Curves"),
 )
 
-#: Style facets a figure does not have, keyed by the ``app`` attribute that
-#: names that figure. A figure with no row here supports everything, and a facet
-#: absent from a figure's row is supported by it — so the panel goes on showing
-#: every section to every plot except where somebody has *measured* that it does
-#: nothing, and the cost of forgetting a figure is a dead control rather than a
-#: working one taken away.
-#:
-#: Each entry carries its reason, because a bare facet name in a roster is
-#: indistinguishable six months later from one added to make something go away.
-#: The reasons here were established by drawing the figure, changing the pref,
-#: re-applying ``apply_export_style_prefs`` and comparing the rendered PNG —
-#: ``tests/test_properties_hides_what_it_cannot_do.py`` re-measures them, so a
-#: row that stops being true fails rather than quietly misleading.
-_STYLE_FACETS_A_FIGURE_LACKS: dict[str, dict[str, str]] = {
-    "_heatmap_fig": {
-        "legend": (
-            "A heat map draws no legend. Its colour bar is the key, and that is "
-            "the mappable's, not an ``ax.legend()`` this section can reach."
-        ),
-        "marks": (
-            "There are no lines or markers in the grid — ``ax.lines`` is empty "
-            "and no collection is tagged ``_aw_marker_collection``, so every "
-            "control in Lines & Markers styles artists that do not exist."
-        ),
-        "plot_overlays": (
-            "The renderer reads neither ``show_threshold_line`` nor "
-            "``show_value_labels``. The number in a cell is drawn by the heat "
-            "map itself and formatted by Cell values, one section above."
-        ),
-        "bar_show_mode": (
-            "``bar_show_mode`` is read by the bar renderer alone. A cell is one "
-            "value; there is no Mean / Mean+spread / All points to choose "
-            "between. The Error bars and Across rows beside it *are* live — "
-            "they pick the interval the per-cell ``±`` prints."
-        ),
-        "group_labels": (
-            "``group_label_size`` sizes the bar plot's group labels. A heat map "
-            "names its rows and columns with ordinary ticks, which Tick label "
-            "size already governs."
-        ),
-        "colour_limits": (
-            "Its colour range is Display ▾'s — Auto, Global or typed, and the log "
-            "norm — and the image is marked ``_aw_owns_clim``, so the style "
-            "pass's Colour limits leave it alone rather than fight that control."
-        ),
-        "axis_limits": (
-            "X and Y limits on a heat map are ranges of row and column *positions*: a typed limit only crops the "
-            "plate or pads it with empty space, which no one asks a plate map for. The axes are marked "
-            "``_aw_no_typed_limits``, so the style pass applies none — a limit typed before this row was hidden "
-            "cannot go on cropping the grid with nothing left to clear it. With Colour limits Display ▾'s and no "
-            "log axes, Limits & Scale has nothing left and is not built."
-        ),
-        "log_axes": (
-            "Both axes are marked ``_categorical_xaxis`` / "
-            "``_categorical_yaxis``: they carry row and column positions, not "
-            "values, so the log pass skips them and always did. Colouring on a "
-            "log scale is Display ▾ → Log scale, which acts on the norm."
-        ),
-    },
-}
-
-
-#: The figures that draw a colour scale with a colour bar, so Limits & Scale offers them **Colour limits**
-#: (``plot_style._apply_colour_limits``), each with what it colours. A positive roster rather than a facet the
-#: others lack: a bar, line or scatter plot keys its colours with a legend, never a colour bar, and offering the row
-#: there would be a control that moves nothing. The Heat Map draws one but its range is Display ▾'s (the
-#: ``colour_limits`` facet above). ``tests/test_colour_limits.py`` holds the roster to the renderers: each listed
-#: figure's renderer makes a colour bar, and the bar, line and scatter renderers make none.
-_COLOUR_SCALE_FIGURES: dict[str, str] = {
-    "_nw_fig": "the Array view's nanowells filled by the metric, the Identity view's distance map",
-    "_sp_fig": "the Spatial map's points coloured by a measurement",
-    "_mv_fig": "the Multivariate correlation and loading matrices",
-}
 
 
 #: The same features, named by *tab* rather than by figure, for the reset path
@@ -242,6 +170,13 @@ class _SectionGrid:
     dictates the width and pushes controls past the panel's fixed width.
     ``bind`` is the panel's getter/setter registrar, applied when a row names
     the pref key its control writes.
+
+    Every section names the style facet its rows change
+    (``review/domain/style_facets.FACETS``), and a row may name another. The
+    kit records each row's facet and widgets, and each bound key's facet, so the
+    panel can hide the rows of a facet the figure's current view does not draw
+    (:meth:`ExportStyleSidebar._apply_facets`) and keep their keys out of
+    ``_persist`` while hidden.
     """
 
     def __init__(self, body_layout: QVBoxLayout,
@@ -250,8 +185,16 @@ class _SectionGrid:
         self._bind = bind
         # Per-section grid bookkeeping: {section: [grid, next_row]}.
         self._grids: dict[CollapsibleSection, list] = {}
+        #: Each section's own facet, in build order.
+        self.section_facets: dict[CollapsibleSection, str] = {}
+        #: ``(section, facet, widgets)`` per row, in build order.
+        self.rows: list[tuple[CollapsibleSection, str, tuple[QWidget, ...]]] = []
+        #: The facet of every key a row bound.
+        self.key_facets: dict[str, str] = {}
 
-    def section(self, name: str, *, expanded: bool = True) -> CollapsibleSection:
+    def section(self, name: str, *, facet: str, expanded: bool = True) -> CollapsibleSection:
+        if facet not in FACETS:
+            raise ValueError(f"Properties section {name!r} names an unknown style facet {facet!r}")
         sp = theme.Spacing
         sec = CollapsibleSection(name, expanded=expanded)
         grid = QGridLayout()
@@ -263,28 +206,52 @@ class _SectionGrid:
         grid.setColumnStretch(1, 1)
         sec.addLayout(grid)
         self._grids[sec] = [grid, 0]
+        self.section_facets[sec] = facet
         self._body_layout.addWidget(sec)
+        if facet in SHARED:
+            # A section whose controls write PlotState changes every plot that
+            # reads the field, not only this one — the rest of the panel is per
+            # plot, so this one says so (``style_facets.SHARED``).
+            note = QLabel("Shared — a change here reaches every plot that uses it.")
+            note.setObjectName("Muted")
+            note.setWordWrap(True)
+            grid.addWidget(note, 0, 0, 1, 2)
+            self._grids[sec][1] = 1
         return sec
 
+    def _record(self, sec: CollapsibleSection, facet: str | None, widgets: tuple,
+                key: str | None) -> None:
+        facet = facet or self.section_facets[sec]
+        if facet not in FACETS:
+            raise ValueError(f"Properties row names an unknown style facet {facet!r}")
+        self.rows.append((sec, facet, widgets))
+        if key is not None:
+            self.key_facets[key] = facet
+            self._bind(key, widgets[-1])
+
     def add_row(self, sec: CollapsibleSection, label: str, widget: QWidget,
-                key: str | None = None) -> None:
+                key: str | None = None, *, facet: str | None = None) -> None:
         grid, r = self._grids[sec]
         if label:
-            grid.addWidget(QLabel(label), r, 0)
+            lbl = QLabel(label)
+            grid.addWidget(lbl, r, 0)
             grid.addWidget(widget, r, 1)
+            widgets = (lbl, widget)
         else:
             grid.addWidget(widget, r, 0, 1, 2)
-        if key is not None:
-            self._bind(key, widget)
+            widgets = (widget,)
         self._grids[sec][1] = r + 1
+        self._record(sec, facet, widgets, key)
 
-    def add_full(self, sec: CollapsibleSection, widget: QWidget) -> None:
+    def add_full(self, sec: CollapsibleSection, widget: QWidget, *,
+                 facet: str | None = None) -> None:
         grid, r = self._grids[sec]
         grid.addWidget(widget, r, 0, 1, 2)
         self._grids[sec][1] = r + 1
+        self._record(sec, facet, (widget,), None)
 
     def add_stacked(self, sec: CollapsibleSection, label: str, widget: QWidget,
-                    key: str | None = None) -> None:
+                    key: str | None = None, *, facet: str | None = None) -> None:
         """Label on its own row above the widget — for wide controls (e.g.
         three-segment SegmentedControls) that overflow the 2-column grid."""
         grid, r = self._grids[sec]
@@ -292,9 +259,8 @@ class _SectionGrid:
         lbl.setProperty("variant", "muted")
         grid.addWidget(lbl, r, 0, 1, 2)
         grid.addWidget(widget, r + 1, 0, 1, 2)
-        if key is not None:
-            self._bind(key, widget)
         self._grids[sec][1] = r + 2
+        self._record(sec, facet, (lbl, widget), key)
 
     @staticmethod
     def hrow(*items, spacing: int | None = None) -> QWidget:
@@ -326,10 +292,17 @@ class ExportStyleSidebar(QWidget):
         self._updating = False
         self._getters: dict[str, Callable[[], object]] = {}
         self._setters: dict[str, Callable[[object], None]] = {}
+        # Which controls this figure can honour, from the declaration of the
+        # feature that draws it (``review/domain/style_facets.py``). A facet the
+        # figure never has is not built; one it has only in some views is built
+        # and hidden while another view is shown (``_apply_facets``).
+        self._fig_attr, self._facets = self._declared_facets()
+        self._kit: _SectionGrid | None = None
 
         self.setFixedWidth(EXPORT_STYLE_PANEL_WIDTH)
         self.setMinimumWidth(EXPORT_STYLE_PANEL_WIDTH)
         self._build_ui()
+        self._apply_facets()
 
     def _bind_getter_setter(self, key: str, widget) -> None:
         """Register read/write hooks and wire a change signal to auto-apply.
@@ -398,6 +371,7 @@ class ExportStyleSidebar(QWidget):
         root.addWidget(scroll, 1)
 
         kit = _SectionGrid(body_layout, self._bind_getter_setter)
+        self._kit = kit
 
         self._build_profile_section(kit)
         self._build_scatter_sections(kit)
@@ -409,13 +383,13 @@ class ExportStyleSidebar(QWidget):
         # fields like the colour mode above, so the Batch Export bar figures
         # draw at the same geometry. Only on the Bar plot: no other figure
         # reads them.
-        if self._is_bar_fig():
+        if self._supports("bar_geometry"):
             self._build_bars_section(kit.section, kit.add_row, kit.hrow)
         # ── Beeswarm ───────────────────────────────────────────────────────
         # Point spacing, on the two figures that draw a beeswarm: the Bar
         # plot (Beeswarm and All points modes) and the Nanowells page
         # (Distribution view). Global PlotState, like Bars above.
-        if self._draws_beeswarm():
+        if self._supports("beeswarm"):
             self._build_beeswarm_section(kit.section, kit.add_row, kit.hrow)
 
         # File format selector intentionally omitted — the Save As… dialog
@@ -460,7 +434,7 @@ class ExportStyleSidebar(QWidget):
     def _build_profile_section(self, kit: _SectionGrid) -> None:
         """Properties → Profile & Format."""
         # ── Profile & Format ────────────────────────────────────────────────
-        s_profile = kit.section("Profile & Format", expanded=True)
+        s_profile = kit.section("Profile & Format", facet="profile", expanded=True)
         self._profile_combo = QComboBox()
         self._profile_combo.addItems(_get_all_profile_names(self._app))
         self._profile_combo.setCurrentText(str(self._prefs.get("export_profile", "Custom")))
@@ -470,8 +444,8 @@ class ExportStyleSidebar(QWidget):
     def _build_scatter_sections(self, kit: _SectionGrid) -> None:
         """Properties → Density and Gates, on the per-cell scatter only."""
         # ── Scatter: Density + Gates (per-cell scatter only) ─────────────────
-        if self._is_scatter_cells_fig():
-            s_density = kit.section("Density", expanded=True)
+        if self._supports("scatter_density"):
+            s_density = kit.section("Density", facet="scatter_density", expanded=True)
             dens_tog = ToggleSwitch("Color by density")
             dens_tog.setChecked(bool(self._prefs.get("scatter_density", False)))
             kit.add_row(s_density, "", dens_tog)
@@ -490,7 +464,7 @@ class ExportStyleSidebar(QWidget):
                 lambda on, _l=_dens_preview: _l.setText("On" if on else "Off")
             )
 
-            s_gates = kit.section("Gates", expanded=True)
+            s_gates = kit.section("Gates", facet="scatter_density", expanded=True)
             show_tog = ToggleSwitch("Show gates")
             show_tog.setChecked(not bool(self._app._app_state.scatter.gates_hidden))
             show_tog.toggled.connect(lambda on: self._on_show_gates_toggled(on))
@@ -533,8 +507,8 @@ class ExportStyleSidebar(QWidget):
     def _build_cell_values_section(self, kit: _SectionGrid) -> None:
         """Properties → Cell values, on the Heat Map only."""
         # ── Heat Map: the number drawn in each cell ─────────────────────────
-        if self._is_heatmap_fig():
-            s_cells = kit.section("Cell values", expanded=True)
+        if self._supports("cell_values"):
+            s_cells = kit.section("Cell values", facet="cell_values", expanded=True)
             fmt_edit = QLineEdit(str(self._prefs.get("heatmap_value_format", "")))
             fmt_edit.setPlaceholderText("%.2f")
             fmt_edit.setToolTip(
@@ -582,13 +556,14 @@ class ExportStyleSidebar(QWidget):
         # take; calling its mode "Plate" would name a thing the figure does
         # not do.
         _color_target = None
-        if self._is_bar_fig():
+        _offers_colours = self._supports("colour_mode")
+        if _offers_colours and self._is_bar_fig():
             from review.domain.bar_colors import bar_color_mode as _mode_of
             _color_target = ("bar_color_mode", "Bar colours", _mode_of, "plate")
-        elif self._is_line_fig():
+        elif _offers_colours and self._is_line_fig():
             from review.domain.line_colors import line_color_mode as _mode_of
             _color_target = ("line_color_mode", "Line colours", _mode_of, "plate")
-        elif self._is_response_fig():
+        elif _offers_colours and self._is_response_fig():
             from review.domain.response_colors import (
                 response_color_mode as _mode_of,
             )
@@ -598,7 +573,7 @@ class ExportStyleSidebar(QWidget):
             from widgets.plot_card import _make_segmented as _seg_color
             (_color_field, _color_label, _color_resolver,
              _color_default) = _color_target
-            s_colors = kit.section("Colours", expanded=True)
+            s_colors = kit.section("Colours", facet="colour_mode", expanded=True)
             _color_init = _color_resolver(self._app._app_state.plot)
             color_sc = _seg_color(
                 [(_SEGMENT_LABELS[_color_default], _color_default),
@@ -676,7 +651,7 @@ class ExportStyleSidebar(QWidget):
     def _build_axes_section(self, kit: _SectionGrid) -> None:
         """Properties → Axes: the Axis # target, sizes, tick angle and ticks."""
         # ── Axes (incl. ticks) ──────────────────────────────────────────────
-        s_axes = kit.section("Axes", expanded=True)
+        s_axes = kit.section("Axes", facet="typography", expanded=True)
         axis_cb = QComboBox()
         # **The colour bar is not a panel to target.** ``fig.axes`` includes it,
         # so the Heat Map offered an "Axis 2" that selected the bar — and every
@@ -690,6 +665,7 @@ class ExportStyleSidebar(QWidget):
         # Getter/setter only (no auto-apply): switching the target axis must
         # not push the currently displayed limits onto the new one.
         kit.add_row(s_axes, "Axis #", axis_cb)
+        self._axis_row = kit.rows[-1][2]
         self._axis_cb = axis_cb
         self._getters["axis_target"] = axis_cb.currentText
         self._setters["axis_target"] = lambda v, w=axis_cb: w.setCurrentText(str(v))
@@ -713,13 +689,14 @@ class ExportStyleSidebar(QWidget):
             ("x_tick_angle", "X tick angle°", 0, 90),
         ]
         # Group labels are the bar plot's second tier of x ticks. A figure that
-        # draws none has nothing for this to size — see the facet table.
+        # draws none has nothing for this to size — see its style facets.
         if self._supports("group_labels"):
             _axis_size_rows.append(("group_label_size", "Group label size", 1, 96))
         for key, label, lo, hi in _axis_size_rows:
             spin = _Stepper(minimum=lo, maximum=hi, single_step=1,
                             value=float(self._prefs[key]), decimals=0)
-            kit.add_row(s_axes, label, spin, key)
+            kit.add_row(s_axes, label, spin, key,
+                        facet="group_labels" if key == "group_label_size" else None)
         maj_cb = ToggleSwitch("Major")
         maj_cb.setChecked(bool(self._prefs["tick_major"]))
         min_cb = ToggleSwitch("Minor")
@@ -750,7 +727,12 @@ class ExportStyleSidebar(QWidget):
         # there don't auto-refresh this section's segments until the sidebar
         # is reopened — sync is one-way (sidebar → app).
         from widgets.plot_card import _make_segmented as _seg
-        s_stats = kit.section("Statistics", expanded=False)
+        # Error bars and Across only where the figure draws a spread they choose,
+        # Show only on the bar plot — see each figure's style facets. A figure
+        # with none of the three gets no section at all.
+        if not (self._supports("error_bars") or self._supports("bar_show_mode")):
+            return
+        s_stats = kit.section("Statistics", facet="error_bars", expanded=False)
         self._stats_preview = QLabel("")
         self._stats_preview.setObjectName("Muted")
         s_stats.setValueWidget(self._stats_preview)
@@ -768,10 +750,15 @@ class ExportStyleSidebar(QWidget):
         # computed at draw time.
         _err_init = str(getattr(self._app._app_state.plot, "bar_err_kind", "")
                         or ("sem" if bool(self._app._app_state.plot.use_sem) else "sd"))
-        err_sc = _seg(
-            [("None", "none"), ("SEM", "sem"), ("SD", "sd"), ("95% CI", "ci95")],
-            current=_err_init,
-        )
+        # None and 95% CI only where the figure reads them (``error_bar_settings``:
+        # the bar plot and the heat map). A figure that reads ``use_sem`` alone
+        # draws SEM or SD whatever is picked, so it is offered those two, opened
+        # on the one it draws.
+        _err_options = [("None", "none"), ("SEM", "sem"), ("SD", "sd"), ("95% CI", "ci95")]
+        if not self._supports("error_kinds"):
+            _err_options = [("SEM", "sem"), ("SD", "sd")]
+            _err_init = "sem" if bool(self._app._app_state.plot.use_sem) else "sd"
+        err_sc = _seg(_err_options, current=_err_init) if self._supports("error_bars") else None
         if err_sc is not None:
             _stats_state["err"] = err_sc.currentData()
 
@@ -836,7 +823,7 @@ class ExportStyleSidebar(QWidget):
         across_sc = _seg(
             [("Replicates", "rep"), ("FOV", "fov")],
             current=_across_init,
-        )
+        ) if self._supports("error_bars") else None
         if across_sc is not None:
             _stats_state["across"] = "FOV" if _across_init == "fov" else "Replicates"
 
@@ -878,7 +865,7 @@ class ExportStyleSidebar(QWidget):
         _show_init = str(getattr(self._app._app_state.plot, "bar_show_mode", "mean_spread")
                          or "mean_spread")
         # Only where there is a bar to draw one of the three ways — see the
-        # facet table. Skipping the build rather than hiding the widget is what
+        # figure's style facets. Skipping the build rather than hiding the widget is what
         # keeps ``_show_seg`` unset, so the re-seed in
         # ``_resync_plot_state_segments`` steps over it too.
         show_sc = _seg(
@@ -897,7 +884,7 @@ class ExportStyleSidebar(QWidget):
                 except Exception:
                     swallowed()
             show_sc.currentChanged.connect(_on_show_change)
-            kit.add_stacked(s_stats, "Show", show_sc)
+            kit.add_stacked(s_stats, "Show", show_sc, facet="bar_show_mode")
             self._show_seg = show_sc
 
         _update_stats_preview()
@@ -907,9 +894,9 @@ class ExportStyleSidebar(QWidget):
         from widgets.stepper import Stepper as _Stepper
         # ── Legend ──────────────────────────────────────────────────────────
         # Only where the figure draws a legend this section can reach —
-        # see the facet table.
+        # see the figure's style facets.
         if self._supports("legend"):
-            s_leg = kit.section("Legend", expanded=False)
+            s_leg = kit.section("Legend", facet="legend", expanded=False)
             leg_show = ToggleSwitch("Show legend")
             leg_show.setChecked(bool(self._prefs["legend_show"]))
             kit.add_row(s_leg, "", leg_show, "legend_show")
@@ -932,10 +919,16 @@ class ExportStyleSidebar(QWidget):
         # PlotState.show_threshold_line, read by the Distribution / line-CDF /
         # smFISH / bar-Fraction renderers.
         # Both overlays are drawn by renderers that read them off
-        # ``PlotState``; a figure whose renderer reads neither shows
-        # neither — see the facet table.
-        if self._supports("plot_overlays"):
-            s_over = kit.section("Overlays", expanded=False)
+        # ``PlotState``; each is offered where the figure's renderer reads it,
+        # and a figure whose renderer reads neither shows neither — see the
+        # figure's style facets.
+        offers_threshold = self._supports("threshold_line")
+        offers_values = self._supports("value_labels")
+        if offers_threshold or offers_values:
+            s_over = kit.section("Overlays",
+                                 facet="threshold_line" if offers_threshold else "value_labels",
+                                 expanded=False)
+        if offers_threshold:
             thr_tog = ToggleSwitch("Show threshold line")
             thr_tog.setChecked(bool(getattr(
                 self._app._app_state.plot, "show_threshold_line", False)))
@@ -952,8 +945,9 @@ class ExportStyleSidebar(QWidget):
                 except Exception:
                     swallowed()
             thr_tog.toggled.connect(_on_threshold_line_toggle)
-            kit.add_row(s_over, "", thr_tog)
+            kit.add_row(s_over, "", thr_tog, facet="threshold_line")
 
+        if offers_values:
             # Value labels: the "12.34 ± 1.20" text above each bar / marker. Drives
             # PlotState.show_value_labels + .value_label_format, read by the Bar,
             # Line and Scatter-aggregate renderers (and their Batch Export twins)
@@ -981,7 +975,7 @@ class ExportStyleSidebar(QWidget):
                 except Exception:
                     swallowed()
             val_tog.toggled.connect(_on_value_labels_toggle)
-            kit.add_row(s_over, "", val_tog)
+            kit.add_row(s_over, "", val_tog, facet="value_labels")
 
             val_fmt = QLineEdit(str(getattr(
                 self._app._app_state.plot, "value_label_format", "") or ""))
@@ -1004,7 +998,7 @@ class ExportStyleSidebar(QWidget):
                 except Exception:
                     swallowed()
             val_fmt.editingFinished.connect(_on_value_label_format)
-            kit.add_row(s_over, "Value format", val_fmt)
+            kit.add_row(s_over, "Value format", val_fmt, facet="value_labels")
 
     def _build_time_section(self, kit: _SectionGrid) -> None:
         """Properties → Time: the time-axis label correction."""
@@ -1023,7 +1017,12 @@ class ExportStyleSidebar(QWidget):
         # Two controls rather than one because they answer two independent
         # questions about the plate — how far apart the images are, and where
         # the first one sits — and a plate can need either without the other.
-        s_time = kit.section("Time", expanded=False)
+        # Only where the figure's renderer reads the rescale — see its style
+        # facets. ``_time_scale_stepper`` stays unset elsewhere, which is what
+        # ``_resync_time_interval`` already steps over.
+        if not self._supports("time_axis"):
+            return
+        s_time = kit.section("Time", facet="time_axis", expanded=False)
         _time_preview = QLabel("")
         _time_preview.setObjectName("Muted")
         s_time.setValueWidget(_time_preview)
@@ -1160,10 +1159,16 @@ class ExportStyleSidebar(QWidget):
         from widgets.stepper import Stepper as _Stepper
         # ── Lines & Markers ─────────────────────────────────────────────────
         # Everything here styles ``ax.lines`` and the marker collections
-        # tagged for it; a figure holding neither shows none of it —
-        # see the facet table.
-        if self._supports("marks"):
-            s_lm = kit.section("Lines & Markers", expanded=False)
+        # tagged for it. Line style / width are offered where the figure draws
+        # a line they reach, the marker rows where it draws a marker they reach,
+        # and a figure with neither shows none of it — see its style facets.
+        offers_lines = self._supports("line_marks")
+        offers_points = self._supports("point_marks")
+        if offers_lines or offers_points:
+            s_lm = kit.section("Lines & Markers",
+                               facet="line_marks" if offers_lines else "point_marks",
+                               expanded=False)
+        if offers_lines:
             ls_cb = QComboBox()
             # Pair each matplotlib value with a glyphic preview so the combo
             # doesn't show bare punctuation. Items carry the mpl token in
@@ -1182,7 +1187,7 @@ class ExportStyleSidebar(QWidget):
                 (i for i, (_, v) in enumerate(_LINE_STYLES) if v == _ls_cur), 0,
             )
             ls_cb.setCurrentIndex(_ls_idx)
-            kit.add_row(s_lm, "Line style", ls_cb)
+            kit.add_row(s_lm, "Line style", ls_cb, facet="line_marks")
             self._getters["line_style"] = lambda cb=ls_cb: cb.currentData() or "-"
             self._setters["line_style"] = lambda v, cb=ls_cb: cb.setCurrentIndex(
                 next((i for i in range(cb.count()) if cb.itemData(i) == v), 0)
@@ -1194,8 +1199,9 @@ class ExportStyleSidebar(QWidget):
             ]:
                 dsp = _Stepper(minimum=lo, maximum=hi, single_step=step,
                                value=float(self._prefs[key]), decimals=1)
-                kit.add_row(s_lm, label, dsp, key)
+                kit.add_row(s_lm, label, dsp, key, facet="line_marks")
 
+        if offers_points:
             ms_cb = QComboBox()
             _MARKER_STYLES = [
                 ("Circle (●)",        "o"),
@@ -1219,7 +1225,7 @@ class ExportStyleSidebar(QWidget):
                 (i for i, (_, v) in enumerate(_MARKER_STYLES) if v == _ms_cur), 0,
             )
             ms_cb.setCurrentIndex(_ms_idx)
-            kit.add_row(s_lm, "Marker style", ms_cb)
+            kit.add_row(s_lm, "Marker style", ms_cb, facet="point_marks")
             self._getters["marker_style"] = lambda cb=ms_cb: cb.currentData() or "o"
             self._setters["marker_style"] = lambda v, cb=ms_cb: cb.setCurrentIndex(
                 next((i for i in range(cb.count()) if cb.itemData(i) == v), 0)
@@ -1232,13 +1238,13 @@ class ExportStyleSidebar(QWidget):
             ]:
                 dsp = _Stepper(minimum=lo, maximum=hi, single_step=step,
                                value=float(self._prefs[key]), decimals=1)
-                kit.add_row(s_lm, label, dsp, key)
+                kit.add_row(s_lm, label, dsp, key, facet="point_marks")
 
     def _build_grid_section(self, kit: _SectionGrid) -> None:
         """Properties → Grid."""
         from widgets.stepper import Stepper as _Stepper
         # ── Grid ────────────────────────────────────────────────────────────
-        s_grid = kit.section("Grid", expanded=False)
+        s_grid = kit.section("Grid", facet="grid", expanded=False)
         g_show = ToggleSwitch("Show grid")
         g_show.setChecked(bool(self._prefs["grid_show"]))
         kit.add_row(s_grid, "", g_show, "grid_show")
@@ -1258,10 +1264,13 @@ class ExportStyleSidebar(QWidget):
         """Properties → Limits & Scale: typed limits, Auto scale, and the log axes."""
         sp = theme.Spacing
         typed_limits = self._supports("axis_limits")
-        if not (typed_limits or self._offers_colour_limits() or self._supports("log_axes")):
-            return                          # nothing here would move this figure — see the facet table
+        if not (typed_limits or self._supports("colour_limits") or self._supports("log_axes")):
+            return                          # nothing here would move this figure — see its style facets
         # ── Limits & Scale ──────────────────────────────────────────────────
-        s_lim = kit.section("Limits & Scale", expanded=False)
+        s_lim = kit.section("Limits & Scale",
+                            facet="axis_limits" if typed_limits else
+                            "colour_limits" if self._supports("colour_limits") else "log_axes",
+                            expanded=False)
         for lim_key, label in ([("x_lim", "X limits"), ("y_lim", "Y limits")] if typed_limits else []):
             lo_edit = QLineEdit(str(self._prefs[f"{lim_key}_min"]))
             lo_edit.setMaximumWidth(_LO_EDIT_MAX_W)
@@ -1270,7 +1279,7 @@ class ExportStyleSidebar(QWidget):
             self._bind_getter_setter(f"{lim_key}_min", lo_edit)
             self._bind_getter_setter(f"{lim_key}_max", hi_edit)
             kit.add_row(s_lim, label, kit.hrow(lo_edit, QLabel("…"), hi_edit, spacing=sp.xs))
-        if self._offers_colour_limits():
+        if self._supports("colour_limits"):
             # MATLAB's ``clim``: the range of the figure's colour scale — the Array view's filled nanowells, the
             # Spatial and Multivariate maps — wherever a colour bar keys it (``plot_style._apply_colour_limits``).
             # A restyle, not a redraw: ``set_clim`` recolours the drawn artists and their colour bar follows.
@@ -1287,7 +1296,8 @@ class ExportStyleSidebar(QWidget):
                                 "Applies to every plot on this figure with a colour bar.")
             self._bind_getter_setter("c_lim_min", c_lo)
             self._bind_getter_setter("c_lim_max", c_hi)
-            kit.add_row(s_lim, "Colour limits", kit.hrow(c_lo, QLabel("…"), c_hi, spacing=sp.xs))
+            kit.add_row(s_lim, "Colour limits", kit.hrow(c_lo, QLabel("…"), c_hi, spacing=sp.xs),
+                        facet="colour_limits")
         # Give the limits back to the plot. Typing a limit is easy and undoing
         # it was not: blanking the four fields by hand leaves the axes exactly
         # where they were, because the style pass only ever *sets* limits and
@@ -1331,7 +1341,8 @@ class ExportStyleSidebar(QWidget):
             # lost — it is merely no longer the only thing that runs.
             xlog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
             ylog_cb.toggled.connect(lambda _=False: self._redraw_for_a_user_edit())
-            kit.add_stacked(s_lim, "Log scale", kit.hrow(xlog_cb, ylog_cb))
+            kit.add_stacked(s_lim, "Log scale", kit.hrow(xlog_cb, ylog_cb), facet="log_axes")
+            _log_rows = [kit.rows[-1][2]]
 
             # The base each log axis is drawn in. Editable rather than a fixed list:
             # ``LOG_BASE_CHOICES`` are what almost everyone wants and are one click
@@ -1361,9 +1372,17 @@ class ExportStyleSidebar(QWidget):
                 lambda _t: self._redraw_for_a_user_edit())
             _ybase_cb.currentTextChanged.connect(
                 lambda _t: self._redraw_for_a_user_edit())
-            kit.add_stacked(s_lim, "Log base", kit.hrow(QLabel("X"), _xbase_cb,
-                                                QLabel("Y"), _ybase_cb,
-                                                spacing=sp.xs))
+            _xbase_lbl, _ybase_lbl = QLabel("X"), QLabel("Y")
+            kit.add_stacked(s_lim, "Log base", kit.hrow(_xbase_lbl, _xbase_cb,
+                                                _ybase_lbl, _ybase_cb,
+                                                spacing=sp.xs),
+                              facet="log_axes")
+            _log_rows.append(kit.rows[-1][2])
+            # Which of the two a figure is offered is read off it as drawn
+            # (``_refresh_log_axes``): an axis of positions takes no log scale.
+            self._log_axis_widgets = {"x": (xlog_cb, _xbase_lbl, _xbase_cb),
+                                      "y": (ylog_cb, _ybase_lbl, _ybase_cb)}
+            self._log_rows = _log_rows
 
             def _lim_preview_text() -> str:
                 tags = []
@@ -1387,7 +1406,7 @@ class ExportStyleSidebar(QWidget):
         """Properties → Layout: the layout engine and the draw-order lists."""
         sp = theme.Spacing
         # ── Layout (+ draw order) ───────────────────────────────────────────
-        s_layout = kit.section("Layout", expanded=False)
+        s_layout = kit.section("Layout", facet="layout_engine", expanded=False)
         tight_cb = ToggleSwitch("Tight")
         tight_cb.setChecked(bool(self._prefs["layout_tight"]))
         cons_cb = ToggleSwitch("Constrained")
@@ -1398,6 +1417,19 @@ class ExportStyleSidebar(QWidget):
         # the panel width as a single row, so the trailing "ed" of Constrained
         # was getting clipped. Label-above-widgets layout matches Stats rows.
         kit.add_stacked(s_layout, "Figure layout", kit.hrow(tight_cb, cons_cb))
+        # One engine at a time. Both on drew Constrained (``_apply_layout_engine``
+        # checks it first), so Tight looked on and did nothing; turning one on
+        # now turns the other off. Both off is the renderer's own layout.
+        tight_cb.toggled.connect(lambda on: on and cons_cb.isChecked() and cons_cb.setChecked(False))
+        cons_cb.toggled.connect(lambda on: on and tight_cb.isChecked() and tight_cb.setChecked(False))
+        # Phone layout fits every plot to the phone itself and ignores both
+        # (``plot_style._apply_layout_engine``): say so rather than offer two
+        # switches that move nothing there (``_refresh_layout_engine``).
+        self._layout_engine_toggles = (tight_cb, cons_cb)
+        self._layout_phone_note = QLabel("Phone layout fits each plot itself; these apply on the desktop layout.")
+        self._layout_phone_note.setObjectName("Muted")
+        self._layout_phone_note.setWordWrap(True)
+        kit.add_full(s_layout, self._layout_phone_note)
 
         # Replicate-set OR well draw-order lists (only one shows at a time,
         # exactly as before). Behaviour lives in _move_list_item /
@@ -1408,7 +1440,7 @@ class ExportStyleSidebar(QWidget):
         self._line_order_wells_list: QListWidget | None = None
         self._line_order_rsets_section: QWidget | None = None
         self._line_order_wells_section: QWidget | None = None
-        if self._supports_well_order():
+        if self._supports("draw_order"):
             def _order_block(heading: str, list_widget: QListWidget) -> QWidget:
                 block = QWidget()
                 bl = QVBoxLayout(block)
@@ -1442,13 +1474,13 @@ class ExportStyleSidebar(QWidget):
 
             rs_list = QListWidget()
             rs_block = _order_block("Replicate set order", rs_list)
-            kit.add_full(s_layout, rs_block)
+            kit.add_full(s_layout, rs_block, facet="draw_order")
             self._line_order_rsets_list = rs_list
             self._line_order_rsets_section = rs_block
 
             w_list = QListWidget()
             w_block = _order_block("Well order", w_list)
-            kit.add_full(s_layout, w_block)
+            kit.add_full(s_layout, w_block, facet="draw_order")
             self._line_order_wells_list = w_list
             self._line_order_wells_section = w_block
             self._refresh_line_order_lists()
@@ -1465,6 +1497,13 @@ class ExportStyleSidebar(QWidget):
         fl = QVBoxLayout(footer)
         fl.setContentsMargins(0, sp.sm, 0, 0)
         fl.setSpacing(sp.xs)
+        # How many settings this plot is not offered, each named with its
+        # reason on hover (``_refresh_not_offered_note``).
+        self._not_offered_label = QLabel("", footer)
+        self._not_offered_label.setObjectName("Muted")
+        self._not_offered_label.setWordWrap(True)
+        self._not_offered_label.setVisible(False)
+        fl.addWidget(self._not_offered_label)
         act_row = QHBoxLayout()
         act_row.setContentsMargins(0, 0, 0, 0)
         act_row.setSpacing(sp.xs)
@@ -1508,7 +1547,13 @@ class ExportStyleSidebar(QWidget):
     def _persist(self) -> None:
         _t_getter = self._getters.get("axis_target")
         target = str(_t_getter()) if _t_getter is not None else "All"
+        # A control hidden because the view on screen does not draw its facet
+        # writes nothing: it is showing the value it was seeded with, and the
+        # user cannot see it to have meant that value for this view.
+        hidden = self._hidden_keys()
         for k, getter in self._getters.items():
+            if k in hidden:
+                continue
             # Per-axis Axes-section controls (font sizes, tick rotation / length /
             # direction / visibility, group-label size) must not leak into the
             # shared global style when a single axis is targeted — they live only
@@ -1522,7 +1567,7 @@ class ExportStyleSidebar(QWidget):
         self._current_axis = target
         bucket = self._axis_buckets.setdefault(self._current_axis, {})
         for k in self._axis_keys:
-            g = self._getters.get(k)
+            g = None if k in hidden else self._getters.get(k)
             bucket[k] = g() if g is not None else self._prefs.get(k)
         # An "All" edit resets every panel: drop the per-axis overrides for the
         # Axes-section style keys so they fall back to the freshly-set global value.
@@ -1534,6 +1579,14 @@ class ExportStyleSidebar(QWidget):
                         b.pop(k, None)
         self._prefs["axis_buckets"] = self._axis_buckets
 
+    def _hidden_keys(self) -> frozenset[str]:
+        """The pref keys of the controls hidden because the view on screen does not draw their facet."""
+        kit = self._kit
+        if kit is None:
+            return frozenset()
+        live = self._live_facets()
+        return frozenset(k for k, facet in kit.key_facets.items() if facet not in live)
+
     def _targetable_axis_numbers(self) -> list[str]:
         """The 1-based numbers of the axes an "Axis #" edit can actually reach.
 
@@ -1541,12 +1594,85 @@ class ExportStyleSidebar(QWidget):
         deliberately leaves alone (their scale, ticks and limits belong to the
         mappable that made them). Numbering stays positional so a number means
         the same axes here, in ``axis_buckets`` and in the style pass.
+
+        An image panel (``_aw_image_panel``, the Nanowells page's crops) is left
+        out for the same reason: the style pass skips it, so choosing it moved
+        nothing.
         """
         return [
             str(i)
             for i, ax in enumerate(getattr(self._fig, "axes", ()) or (), start=1)
             if not bool(getattr(ax, "_aw_colorbar", False))
+            and not bool(getattr(ax, "_aw_image_panel", False))
         ]
+
+    def _refresh_log_axes(self) -> None:
+        """Offer X log and Y log only for an axis some panel draws values on, not positions.
+
+        The bar plot's x carries one slot per bar, a matrix's rows and columns
+        are indices, a violin's x is its group's position: each is marked
+        ``_categorical_*axis`` by its renderer, and the log pass skips it, so its
+        toggle moved nothing. Read off the figure as drawn because one figure can
+        be either (Multivariate's matrices against its scatter views); an empty
+        figure, which says nothing yet, keeps both. Visibility only — a value
+        set where the axis takes a log scale is kept.
+        """
+        widgets = getattr(self, "_log_axis_widgets", None)
+        if not widgets:
+            return
+        axes = [self._fig.axes[int(n) - 1] for n in self._targetable_axis_numbers()]
+        drawn = any(ax.lines or ax.collections or ax.patches or ax.images for ax in axes)
+        offered = {}
+        for which in ("x", "y"):
+            offered[which] = not drawn or any(
+                not getattr(ax, f"_categorical_{which}axis", False) for ax in axes)
+            for widget in widgets[which]:
+                widget.setVisible(offered[which])
+        for row in getattr(self, "_log_rows", ()):
+            for widget in row:
+                widget.setVisible(offered["x"] or offered["y"])
+
+    def _refresh_layout_engine(self) -> None:
+        """Disable Tight / Constrained, and show why, while phone layout is on."""
+        toggles = getattr(self, "_layout_engine_toggles", ())
+        note = getattr(self, "_layout_phone_note", None)
+        if not toggles or note is None:
+            return
+        from review.core.plot_style import layout_engine_is_the_phone_s
+
+        phone = layout_engine_is_the_phone_s()
+        for toggle in toggles:
+            toggle.setEnabled(not phone)
+        note.setVisible(phone)
+
+    def _refresh_axis_targets(self) -> None:
+        """Re-list the Axis # targets for the axes the figure has now, and show the row only when there is a choice.
+
+        The figure's panels change with its view or split (a Scatter split, a
+        Distribution facet, a Nanowells view), and a list filled once at build
+        kept the old numbers: a click on a subplot whose number was missing did
+        nothing. A target that no longer exists falls back to All through the
+        ordinary change handler, so the fields show what All holds. With one
+        targetable axes there is nothing to choose, and the row is hidden.
+        """
+        cb = getattr(self, "_axis_cb", None)
+        if cb is None:
+            return
+        targets = self._targetable_axis_numbers()
+        wanted = ["All", *targets]
+        current = cb.currentText()
+        if [cb.itemText(i) for i in range(cb.count())] != wanted:
+            cb.blockSignals(True)
+            try:
+                cb.clear()
+                cb.addItems(wanted)
+                cb.setCurrentText(current if current in wanted else "All")
+            finally:
+                cb.blockSignals(False)
+            if current not in wanted:
+                self._on_axis_target_changed("All")
+        for widget in getattr(self, "_axis_row", ()):
+            widget.setVisible(len(targets) > 1)
 
     def _open_on_all_axes(self) -> str:
         """Target "All" when the panel opens, and make the stored prefs agree.
@@ -1597,7 +1723,11 @@ class ExportStyleSidebar(QWidget):
         except ValueError:
             return
         target = str(idx + 1)
+        if target not in self._targetable_axis_numbers():
+            return                                       # a colour bar or an image panel: nothing to target
         cb = getattr(self, "_axis_cb", None)
+        if cb is not None and cb.findText(target) < 0:
+            self._refresh_axis_targets()
         if cb is not None and cb.currentText() != target:
             cb.setCurrentText(target)  # drives _on_axis_target_changed
         self._flash_axis(ax)
@@ -1968,28 +2098,130 @@ class ExportStyleSidebar(QWidget):
         """True only for the per-cell scatter figure (density + gates apply there)."""
         return getattr(self._app, "_scatter_fig", None) is self._fig
 
-    def _is_heatmap_fig(self) -> bool:
-        """True only for the Heat Map figure (the cell-value format applies there)."""
-        return getattr(self._app, "_heatmap_fig", None) is self._fig
+    def _declared_facets(self) -> tuple[str, FigureFacets]:
+        """``(figure attribute, FigureFacets)`` for the bound figure, read from the feature registry's declarations.
 
-    def _offers_colour_limits(self) -> bool:
-        """Whether this figure draws a colour scale the Colour limits row can set (:data:`_COLOUR_SCALE_FIGURES`)."""
-        return self._supports("colour_limits") and any(
-            getattr(self._app, attr, None) is self._fig for attr in _COLOUR_SCALE_FIGURES)
+        Each figure the panel opens on is declared by the feature that draws it (``<feature>/_style_facets.py``, through
+        ``FeatureDescriptor.style_facets``). A figure with no declaration — a bare test double, or a figure added to the
+        panel's roster without one, which ``tests/test_every_properties_figure_declares_its_facets.py`` fails on — is
+        offered every control, with a warning in the log: a control that does nothing is a lesser defect than a working
+        one taken away.
+        """
+        features = getattr(getattr(self._app, "_ctx", None), "features", None)
+        declared = {}
+        if features is not None and hasattr(features, "style_facets"):
+            try:
+                declared = features.style_facets()
+            except Exception:
+                swallowed()
+                declared = {}
+        for attr, facets in declared.items():
+            if getattr(self._app, attr, None) is self._fig:
+                return attr, facets
+        if declared:
+            logging.getLogger(__name__).warning(
+                "Properties: no style-facet declaration for this figure; offering every control")
+        return "", FigureFacets(has=frozenset(FACETS))
 
     def _supports(self, facet: str) -> bool:
-        """Whether this figure has the thing *facet* names.
+        """Whether this figure has the thing *facet* names in any of its views.
 
-        Reads ``_STYLE_FACETS_A_FIGURE_LACKS``, which lists only the exceptions,
-        so an unlisted figure supports everything. A section built behind this
-        registers no getters and no setters, which is what the rest of the panel
-        needs: ``_persist`` writes the keys it holds, ``_resync_pref_fields``
-        re-seeds the setters it holds, and both iterate rather than assume.
+        Reads the figure's declaration (``_declared_facets``). A section or row
+        built behind this registers no getters and no setters where the figure
+        lacks the facet, which is what the rest of the panel needs: ``_persist``
+        writes the keys it holds, ``_resync_pref_fields`` re-seeds the setters it
+        holds, and both iterate rather than assume. A facet the figure has in
+        some views only is built, and hidden by ``_apply_facets`` in the others.
         """
-        for attr, missing in _STYLE_FACETS_A_FIGURE_LACKS.items():
-            if getattr(self._app, attr, None) is self._fig:
-                return facet not in missing
-        return True
+        return facet in self._facets.has
+
+    def _style_view(self) -> str:
+        """The view the figure shows now, as its renderer stamped it (``plot_style.mark_style_view``)."""
+        return str(getattr(self._fig, "_aw_style_view", "") or "")
+
+    #: Facets the panel also reads off the figure as drawn, because no declaration can say them in advance: whether
+    #: the view on screen carries a legend at all depends on the view (Multivariate draws one in Dimensionality
+    #: reduction alone, Spatial not on its maps) and on the plot's own state (the Bar plot's key exists only in plate
+    #: colours). A legend switched off is still drawn, hidden, so these controls stay reachable to switch it back on.
+    _READ_OFF_THE_FIGURE = ("legend",)
+
+    def _figure_lacks(self) -> dict[str, str]:
+        """``{facet: reason}`` for the declared facets the figure, as drawn now, turns out not to have.
+
+        Asked only of a figure with something drawn on it: an empty figure (no
+        selection yet, still loading) says nothing about what it will hold, and
+        reading it as "no legend" would hide the section on every load.
+        """
+        from review.core.plot_style import figure_draws_a_legend
+
+        fig = self._fig
+        axes = list(getattr(fig, "axes", ()) or ())
+        drawn = any(getattr(ax, "lines", None) or getattr(ax, "collections", None)
+                    or getattr(ax, "patches", None) or getattr(ax, "images", None) for ax in axes)
+        if not drawn or "legend" not in self._facets.has:
+            return {}
+        if figure_draws_a_legend(fig):
+            return {}
+        return {"legend": "The plot as drawn now has no legend — this view, or this colour mode, keys its marks "
+                          "another way."}
+
+    def _live_facets(self) -> frozenset[str]:
+        """The facets the figure draws in the view on screen, less those the figure as drawn turns out to lack."""
+        return self._facets.live(self._style_view()) - set(self._figure_lacks())
+
+    def _apply_facets(self) -> None:
+        """Show the rows of the facets the current view draws, hide the rest, and hide a section left with none.
+
+        Only the rows of a facet some view withholds are ever touched, so a
+        control another part of the panel shows and hides for its own reason
+        (the two draw-order lists) is left to it. Visibility only: a hidden
+        control keeps its value, ``_resync_pref_fields`` still re-seeds it, and
+        ``_persist`` skips its key while it is hidden, so a setting made in one
+        view survives a visit to another.
+        """
+        kit = self._kit
+        if kit is None:
+            return
+        self._refresh_axis_targets()
+        self._refresh_log_axes()
+        self._refresh_layout_engine()
+        live = self._live_facets()
+        varying = set().union(*(set(v) for v in self._facets.views.values()), self._READ_OFF_THE_FIGURE)
+        shown = dict.fromkeys(kit.section_facets, False)
+        for sec, facet, widgets in kit.rows:
+            visible = facet in live
+            if facet in varying:
+                for widget in widgets:
+                    widget.setVisible(visible)
+            shown[sec] = shown[sec] or visible
+        for sec, any_row in shown.items():
+            sec.setVisible(any_row)
+        self._refresh_not_offered_note()
+
+    def _not_offered(self) -> dict[str, str]:
+        """``{what the control is: why it is not here}`` for every facet this figure's current view does not draw."""
+        absent = dict(self._facets.lacks)
+        absent.update(self._facets.views.get(self._style_view() or self._facets.default_view, {}))
+        absent.update(self._figure_lacks())
+        return {FACETS[f].split(" — ")[0]: reason for f, reason in sorted(absent.items()) if f in FACETS}
+
+    def _refresh_not_offered_note(self) -> None:
+        """The footer's count of the settings left out here, with each one and its reason on hover.
+
+        A control that is not offered must still be explicable: without this the
+        only answer to "where did Error bars go?" is to read the source.
+        """
+        note = getattr(self, "_not_offered_label", None)
+        if note is None:
+            return
+        absent = self._not_offered()
+        if not absent:
+            note.setVisible(False)
+            return
+        n = len(absent)
+        note.setText(f"{n} setting{'s' if n != 1 else ''} not offered for this plot")
+        note.setToolTip("\n".join(f"• {name}: {reason}" for name, reason in absent.items()))
+        note.setVisible(True)
 
     def _build_bars_section(self, section, add_row, hrow) -> None:
         """Properties → Bars: the bar width and the timepoint-group spacing.
@@ -2006,7 +2238,7 @@ class ExportStyleSidebar(QWidget):
         from widgets.stepper import Stepper as _Stepper
 
         plot = self._app._app_state.plot
-        s_bars = section("Bars", expanded=False)
+        s_bars = section("Bars", facet="bar_geometry", expanded=False)
         preview = QLabel("")
         preview.setObjectName("Muted")
         s_bars.setValueWidget(preview)
@@ -2084,7 +2316,7 @@ class ExportStyleSidebar(QWidget):
         from widgets.stepper import Stepper as _Stepper
 
         plot = self._app._app_state.plot
-        s_swarm = section("Beeswarm", expanded=False)
+        s_swarm = section("Beeswarm", facet="beeswarm", expanded=False)
         preview = QLabel("")
         preview.setObjectName("Muted")
         s_swarm.setValueWidget(preview)
@@ -2153,10 +2385,6 @@ class ExportStyleSidebar(QWidget):
                 widget.blockSignals(False)
         self._swarm_spacing_step.setEnabled(spacing > 0)
         self._swarm_refresh_preview()
-
-    def _draws_beeswarm(self) -> bool:
-        """True on the figures that draw a beeswarm: the Bar plot and the Nanowells page."""
-        return any(getattr(self._app, attr, None) is self._fig for attr in ("_bar_fig", "_nw_fig"))
 
     def _resync_bar_geometry(self) -> None:
         """Re-seed the Bars controls from ``PlotState`` on a panel open.
@@ -2303,14 +2531,6 @@ class ExportStyleSidebar(QWidget):
     def _on_clear_gates(self) -> None:
         clear_gates(self._app._ctx)
         self._refresh_gate_count()
-
-    def _supports_well_order(self) -> bool:
-        """Return True for plot figs whose color order can be reorderable."""
-        app = self._app
-        for attr in ("_line_fig", "_bar_fig", "_scatter_fig", "_scatter_agg_fig"):
-            if getattr(app, attr, None) is self._fig:
-                return True
-        return False
 
     def _move_list_item(self, list_widget: QListWidget, delta: int) -> None:
         """Shift the selected row up (delta=-1) or down (delta=+1)."""

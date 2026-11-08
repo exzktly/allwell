@@ -26,8 +26,16 @@ pytest.importorskip("PySide6.QtWidgets")   # the cell-gating controller imports 
 
 # ── 1. marker shape is data on the aggregate scatter ────────────────────────
 
+#: The data transform the fake lines are drawn in and the fake axes owns (a line
+#: in any other transform is a reference line, which the style pass skips).
+_DATA = object()
+
+
 class _RecordingLine:
     """Line2D stand-in that records the marker the style pass stamps on it."""
+
+    def get_transform(self):
+        return _DATA
 
     def __init__(self, *, marker: str, marker_is_data: bool):
         self._marker = marker
@@ -172,6 +180,7 @@ class _FakeAx:
 
 def _fake_fig(lines):
     ax = _FakeAx(lines)
+    ax.transData = _DATA
     fig = SimpleNamespace(
         axes=[ax],
         patch=SimpleNamespace(set_alpha=lambda _a: None),

@@ -199,6 +199,13 @@ def launch_export_editor(win, fig, default_name: str, *, plot_bg: str = "",
             sb._resync_pref_fields()
         except Exception:
             swallowed()  # was: pass (silent except)
+        # And the controls offered, for a figure whose view changed while the
+        # panel was closed (``plot_style.mark_style_view`` re-gates only the
+        # panels open at the time).
+        try:
+            sb._apply_facets()
+        except Exception:
+            swallowed()
         return _ExportEditorSession(sb)
     except Exception as exc:
         QMessageBox.warning(win if isinstance(win, QWidget) else None,

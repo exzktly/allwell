@@ -4377,8 +4377,34 @@ row, holding five actions:
   the powers — the Response Curves dose axis, which ticks the concentrations
   you gave — because a subdivision belongs to the power beneath it, so under
   ticks that are something else the marks fall unevenly between one label and
-  the next and say nothing about either. **Every setting applies only to the
-  plot you edit it on** — sizes, fonts, grid, legend, ticks, limits, log scale,
+  the next and say nothing about either. **The panel shows only the settings the
+  plot can use.** A per-cell scatter has no Error bars or Time section, a heat map
+  has no Legend or Lines & Markers, and *Statistics → Show* and *Group label
+  size* appear on Bar Plots alone, since no other plot reads them. On the
+  Nanowells page the Beeswarm section appears on the Distribution view only; a
+  spacing you set there is kept while you look at the other views. A line at the
+  foot of the panel counts the settings this plot is not offered — hover it to
+  see each one and why. Some of this follows the plot as it is drawn: the Legend
+  section appears while the plot has a legend (Multivariate draws one only for
+  dimensionality reduction, Spatial not on its maps, Bar Plots only in Plate
+  colours), **Axis #** appears only when there is more than one panel to choose
+  from, and **X log** is not offered on an axis of categories or positions (Bar
+  Plots' bars, a correlation matrix, the Distribution violins), where it would
+  move nothing. **Error bars** offers *None* and *95% CI* on Bar Plots and the
+  Heat Map, which draw them; the other plots draw SEM or SD and are offered
+  those two. **Tight** and **Constrained** are one choice — turning one on turns
+  the other off — and in phone layout, which fits each plot itself, both are
+  greyed with a note saying so. Statistics, Overlays, Time, Colours, Bars and
+  Beeswarm are shared, and each says so at its top: a change there reaches every
+  plot that uses it. **Lines & Markers** styles the data: a threshold or
+  reference line keeps its own dash, a curve drawn without points (a density
+  curve, a CDF, a fitted response) gets no markers, and marks that carry a
+  meaning keep it — the bar plot's *n/a* cap stays a cap, and hollow markers for
+  doses off the axis stay hollow. **X tick angle** at 0 keeps the angle each plot
+  picks for its own labels (slanted bar labels past eight bars, the heat map's
+  column labels); any other angle applies as typed. A plot whose cells are the
+  data — the Multivariate matrices — keeps its grid off. **Every other
+  setting applies only to the plot you edit it on** — sizes, fonts, grid, legend, ticks, limits, log scale,
   line and marker styling, layout and the export profile. Raising the axis-label
   size on Line Graphs leaves Bar Plots as it was; the Scatter tab's Cells and
   Wells views are separate plots here, so sizing markers for five aggregate

@@ -145,17 +145,20 @@ _FEATURE_OF = {"_nw_fig": "nanowell", "_sp_fig": "spatial", "_mv_fig": "multivar
 
 
 def test_the_row_is_offered_exactly_where_a_colour_bar_is_drawn():
-    """``_COLOUR_SCALE_FIGURES`` held against what it is a list of: the features whose code makes a colour bar. A
-    new feature that draws one, and is not in the roster, fails here rather than going without the row; the Heat
-    Map is the one exemption, its range being Display ▾'s (``_aw_owns_clim``)."""
+    """The figures declaring the ``colour_limits`` style facet, held against what they claim: the features whose code
+    makes a colour bar. A new feature that draws one, and does not declare the facet, fails here rather than going
+    without the row; the Heat Map is the one exemption, its range being Display ▾'s (``_aw_owns_clim``)."""
     from pathlib import Path
 
-    from review.features.export.properties_view import _COLOUR_SCALE_FIGURES
+    from review.features.registry import build_feature_registry
+
+    offered = {attr for attr, facets in build_feature_registry().style_facets().items()
+               if "colour_limits" in facets.has}
 
     root = Path(__file__).resolve().parents[1] / "review" / "features"
     drawing = {pkg.name for pkg in root.iterdir() if pkg.is_dir()
                and any("colorbar(" in f.read_text(encoding="utf-8") for f in pkg.rglob("*.py"))}
-    assert drawing - {"heatmap"} == {_FEATURE_OF[attr] for attr in _COLOUR_SCALE_FIGURES}
+    assert drawing - {"heatmap"} == {_FEATURE_OF[attr] for attr in offered}
 
 
 @pytest.mark.parametrize("kind", ["_line_fig", "_bar_fig", "_scatter_fig", "_heatmap_fig"])

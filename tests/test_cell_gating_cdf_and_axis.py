@@ -93,6 +93,8 @@ def test_export_click_selects_axis():
             return self._t
         def setCurrentText(self, t):
             self._t = str(t)
+        def findText(self, t):
+            return 0 if t in ("All", "1", "2") else -1
 
     ax0, ax1, ax2 = object(), object(), object()
     flashed = []
@@ -101,7 +103,12 @@ def test_export_click_selects_axis():
         _axis_cb=FakeCombo(),
         isVisible=lambda: True,
         _flash_axis=lambda ax: flashed.append(ax),
+        # Axis 3 stands for a colour bar or an image panel: not a target.
+        _targetable_axis_numbers=lambda: ["1", "2"],
+        _refresh_axis_targets=lambda: None,
     )
+    fn(s, SimpleNamespace(inaxes=ax2))           # not targetable → no change
+    assert s._axis_cb.currentText() == "1" and flashed == []
     fn(s, SimpleNamespace(inaxes=ax1))
     assert s._axis_cb.currentText() == "2"
     assert flashed == [ax1]

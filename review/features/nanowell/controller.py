@@ -677,6 +677,11 @@ def redraw(ctx) -> None:
     _call(ctx, "_nw_refresh_controls")
     _call(ctx, "_nw_show_computing")
     _refresh_empty(ctx)
+    # Which Properties controls the view offers (``plot_style.mark_style_view``, ``_style_facets.py``) — stamped on
+    # every path below, the QC view's and an empty page's included, so an open panel follows the view chosen.
+    from review.core.plot_style import mark_style_view
+
+    mark_style_view(ctx, fig, st.view)
     card = ctx.widgets.get_or_none("_nw_card")
     if card is not None and card.isHidden():
         # Phone layout gives the site detail the page while a nanowell is selected (``tab_view.show_detail``), and the

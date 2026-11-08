@@ -186,6 +186,12 @@ class FeatureDescriptor:
     # offered on a leaf that declares nanowells, on a nanowell dataset, in a build with the Nanowells feature;
     # ``tests/test_observations_band.py`` holds every Plotting leaf to a declaration with a reason.
     observations: tuple[str, ...] = ("cells",)
+    # Which Properties controls each figure this feature draws can honour (``review/domain/style_facets.py``): a
+    # no-arg factory returning ``{figure attribute: FigureFacets}``, imported only when the Properties panel first
+    # opens on one of them, from ``<feature>/_style_facets.py``. Every figure the panel opens on is declared by exactly
+    # one descriptor (``tests/test_every_properties_figure_declares_its_facets.py``), so a build profile that drops
+    # the feature drops its declaration with it.
+    style_facets: Callable[[], Mapping] | None = field(default=None, compare=False)
     # Selection-behaviour flags (replace the hard-coded tab-name string sets).
     per_well_selection: bool = False     # was membership in _PER_WELL_TABS
     single_well_selection: bool = False  # was the smFISH single-well check
@@ -368,6 +374,26 @@ class FeatureRegistry:
                     )
                 out.setdefault(sec.key, sec)
         return list(out.values())
+
+    def style_facets(self) -> dict:
+        """``{figure attribute: FigureFacets}`` over every descriptor that declares its figures' Properties facets.
+
+        Raises ``ValueError`` when two descriptors declare the same figure: which declaration the panel read would
+        then depend on registration order, and the two would disagree silently.
+        """
+        out: dict = {}
+        owner: dict[str, str] = {}
+        for desc in self._by_name.values():
+            factory = desc.style_facets
+            if factory is None:
+                continue
+            for attr, facets in dict(factory()).items():
+                if attr in out:
+                    raise ValueError(
+                        f"{attr!r} has Properties facets declared by both {owner[attr]!r} and {desc.name!r}")
+                out[attr] = facets
+                owner[attr] = desc.name
+        return out
 
     def sub_leaves(self, parent: str) -> list[str]:
         """Names of the sub-leaf descriptors under composite *parent*

@@ -17,6 +17,7 @@ from review.core.plot_style import (
     apply_ax_style, follows_theme, style_legend, tokens_for,
 )
 from review.core.plot_style import apply_export_style_to_current
+from review.core.plot_style import keep_grid_off, mark_position_axes, own_xtick_angle
 
 #: How much of its panel's height a colour bar spans. Not 1.0: ``fig.colorbar``
 #: at full height lays the bar out in a three-row grid whose outer rows have a
@@ -175,6 +176,8 @@ def _annotated_matrix(
     if x_rotation:
         xkw.update(rotation=x_rotation, ha="right")
     ax.set_xticklabels(col_labels, **xkw)
+    own_xtick_angle(ax, x_rotation or 0, "right" if x_rotation else "center")
+    mark_position_axes(ax)                               # row and column indices: no log scale means anything here
     ax.set_yticklabels(row_labels, fontsize=7, color=muted_fg)
     if annotate:
         for i in range(mat.shape[0]):
@@ -196,7 +199,7 @@ def _render_correlation(fig, res) -> None:
         return
     ax = fig.add_subplot(111)
     apply_ax_style(ax, "Feature correlation", "")
-    ax.grid(False)
+    keep_grid_off(ax)
     _bg, _t, muted_fg, _g, _s = tokens_for(ax)
     # Annotate r values when the matrix is small enough to stay legible.
     im = _annotated_matrix(
@@ -313,7 +316,7 @@ def _draw_loadings(fig, ax, loadings) -> None:
     mat = comps.T                                            # n_feat x n_comp
     n_pc = mat.shape[1]
     apply_ax_style(ax, "PCA loadings", "")
-    ax.grid(False)
+    keep_grid_off(ax)
     _bg, _t, muted_fg, _g, _s = tokens_for(ax)
     vmax = float(np.nanmax(np.abs(mat))) if mat.size else 1.0
     vmax = vmax if vmax > 0 else 1.0
@@ -350,7 +353,7 @@ def _render_clustering(fig, res) -> None:
 
     # Right: stacked bar of cluster fractions per group.
     apply_ax_style(ax2, "Phenotype composition", "Fraction of cells")
-    ax2.grid(False)
+    keep_grid_off(ax2)
     import matplotlib
     cmap = matplotlib.colormaps[_CLUSTER_CMAP]
     names = res["group_names"]
@@ -365,6 +368,8 @@ def _render_clustering(fig, res) -> None:
         bottom += vals
     ax2.set_xticks(x)
     ax2.set_xticklabels(names, rotation=45, ha="right", fontsize=7, color=muted_fg)
+    own_xtick_angle(ax2, 45, "right")
+    mark_position_axes(ax2, y=False)                     # one bar per cluster member along x
     ax2.set_ylim(0, 1)
 
     # Far right (optional): cluster feature-profile heatmap — what each cluster
@@ -385,7 +390,7 @@ def _draw_cluster_profile(ax, profile) -> None:
     cids = list(profile["cluster_ids"])
     labels = list(profile["feature_labels"])
     apply_ax_style(ax, "Cluster feature profile", "")
-    ax.grid(False)
+    keep_grid_off(ax)
     _bg, _t, muted_fg, _g, _s = tokens_for(ax)
     vmax = float(np.nanmax(np.abs(mat))) if mat.size else 1.0
     vmax = vmax if vmax > 0 else 1.0
@@ -405,7 +410,7 @@ def _render_facet(fig, res) -> None:
     ax = fig.add_subplot(111)
     apply_ax_style(ax, f"{res['value_label']} — {res['agg']} "
                        f"by {res['row_factor']} x {res['col_factor']}", "")
-    ax.grid(False)
+    keep_grid_off(ax)
     _bg, _t, muted_fg, _g, _s = tokens_for(ax)
     im = _annotated_matrix(
         ax, values, cmap="viridis", vmin=None, vmax=None,

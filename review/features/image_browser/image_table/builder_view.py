@@ -47,7 +47,7 @@ from review.features.image_browser.image_table.state import (
     Axis, ChannelSpec, spec_from_state, transpose_spec,
 )
 from review.features.image_browser.image_table.build_layout import (
-    image_table_apply_spec,
+    _ctrl, image_table_apply_spec,
 )
 from review.features.image_browser.image_table.grid_layout import (
     _channel_options, _fov_options, _timepoint_options, _well_options,
@@ -527,9 +527,7 @@ def builder_transpose(ctx) -> bool:
     image_table_apply_spec(ctx, spec, render=False)
     lost = before - _filled_cells(ctx)
     if shown:
-        from review.features.image_browser.image_table.controller import image_table_generate
-
-        image_table_generate(ctx)
+        _ctrl().image_table_generate(ctx)               # build_layout's cycle-break, not a new deferred import
         builder_notify_rendered(ctx)
     else:
         rt.builder_dirty = True

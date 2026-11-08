@@ -2341,8 +2341,13 @@ than on the page.
 **Image Table** is the deliberate exception: its controls stay split between the
 builder shelf and an action strip directly above the images, because the strip's
 crop and ON-threshold controls act on the images below them and belong beside
-them. The strip is consolidated *in place* to one row — `Reset table` and
-`Clear images` became one `Table ▾` menu, the loose `(full FOV)` caption folded
+them. The strip is consolidated *in place* to one row — `Reset table`,
+`Clear images` and *Transpose rows and columns* are one `Table ▾` menu (the
+transpose is `builder_view.builder_transpose` over the Qt-free
+`state.transpose_spec`, which swaps the builder spec's two `Axis` objects whole
+and refuses Plate mode; the layout is rebuilt at once rather than on the
+shelf's debounce, a table on screen is drawn again, and the status line counts
+any images the 12-column limit then leaves out), the loose `(full FOV)` caption folded
 into the Crop button through `CropTool.set_status_widget`, and the `Zoom:`
 caption went, since the `100%` readout between the − and + buttons already says
 what they do.

@@ -44,10 +44,10 @@ from widgets.flow_layout import FlowLayout
 from widgets.stepper import Stepper
 from widgets.lut_cmaps import resolve_channel_tint
 from review.features.image_browser.image_table.state import (
-    Axis, ChannelSpec, spec_from_state,
+    Axis, ChannelSpec, spec_from_state, transpose_spec,
 )
 from review.features.image_browser.image_table.build_layout import (
-    image_table_apply_spec,
+    _ctrl, image_table_apply_spec,
 )
 from review.features.image_browser.image_table.grid_layout import (
     _channel_options, _fov_options, _timepoint_options, _well_options,
@@ -501,6 +501,50 @@ def builder_clear(ctx) -> None:
     for dim in _ROOT_DIMS:
         spec.fixed.setdefault(dim, _default_value(ctx, dim))
     _edit(ctx)
+
+
+def builder_transpose(ctx) -> bool:
+    """Table → Transpose: swap the table's rows and columns (``state.transpose_spec``).
+
+    The shelf is redrawn with the two axes exchanged and the layout rebuilt at
+    once rather than on the shelf's debounce. A table already on screen is drawn
+    again transposed, since transposing what is shown is the point; a table not
+    yet generated is left for Generate, with the "edited" cue, like any shelf
+    edit. Per-cell right-click overrides go with the old layout, as they do on
+    every shelf edit. Refused, with a status line, in Plate mode.
+    """
+    spec = builder_spec(ctx)
+    if not transpose_spec(spec):
+        ctx.notify.set_status("Image Table: Plate mode lays wells out in plate positions — nothing to transpose.")
+        return False
+    rt = _rt(ctx)
+    t = getattr(rt, "builder_timer", None)
+    if t is not None:
+        t.stop()                                         # the swap supersedes any pending shelf edit
+    builder_refresh(ctx)
+    shown = bool(getattr(ctx.state.image_table, "last_render", None))
+    before = _filled_cells(ctx)
+    image_table_apply_spec(ctx, spec, render=False)
+    lost = before - _filled_cells(ctx)
+    if shown:
+        _ctrl().image_table_generate(ctx)               # build_layout's cycle-break, not a new deferred import
+        builder_notify_rendered(ctx)
+    else:
+        rt.builder_dirty = True
+        _refresh_shape(ctx, spec)
+    # The grid holds at most 12 columns (and 60 rows), so a tall table turned on
+    # its side can lose images off the end. Say how many, rather than letting a
+    # "transposed" message stand over a table that is quietly shorter.
+    note = (f" {lost} image(s) did not fit the column limit — set Wrap to band the columns and show them all."
+            if lost > 0 else "")
+    ctx.notify.set_status(f"Image Table: rows and columns transposed.{note}")
+    return True
+
+
+def _filled_cells(ctx) -> int:
+    """How many cells of the layout name an image (a channel), for the transpose's before-and-after count."""
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
+    return sum(1 for row in cells for cell in row if cell.get("chan"))
 
 
 # ── drag-and-drop primitives ────────────────────────────────────────────────

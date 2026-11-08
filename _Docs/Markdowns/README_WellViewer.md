@@ -7311,7 +7311,12 @@ channel for every well).
   about the other would read as a full account of what is wrong with the file.
 - **Action strip** — **Generate** · **Table ▾** (*Reset table layout*, back to
   defaults; *Clear rendered images*, which keeps the layout so Generate re-renders
-  in one click) · **Crop view ▾** (drag a region on any image — the button reads
+  in one click; *Transpose rows and columns*, which swaps what runs down the rows
+  with what runs across — each axis moves whole, with its channels and its
+  Overlay switch — and redraws a table already on screen. The grid holds at most
+  12 columns, so a tall table turned on its side can leave images off the end;
+  the status line says how many, and **Wrap** bands the columns to show them
+  all. Not offered in Plate mode, whose rows and columns are the plate's) · **Crop view ▾** (drag a region on any image — the button reads
   the current crop, `Crop view · (full FOV)` when there is none). This crops what
   the images *show*; it is not the Segmentation tab's **Crop cells**, which
   excludes cells from every plot, statistic and export. · an **ON threshold** value

@@ -12,6 +12,7 @@ from review.core.ui_helpers import (
     make_plot_with_right_dock,
     build_plot_save_menu, make_popover_button, make_properties_button,
     plotting_band_slot)
+from review.features.scatter._focus_ring import paint_focus_ring
 from review.features.scatter.controller import redraw_scatter_orchestrate
 from review.features.scatter.tp_selector_view import open_timepoint_selector
 from review.features.scatter.controller import on_scatter_axis_change
@@ -241,7 +242,6 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
 
     canvas.mpl_connect("button_press_event", partial(on_scatter_click, ctx))
     # The focused cell's ring follows the focus without a redraw of the cloud.
-    from review.features.scatter._focus_ring import paint_focus_ring
     ctx.bus.focused_cell_changed.connect(lambda *_a: paint_focus_ring(ctx))
     canvas.mpl_connect("motion_notify_event", partial(on_scatter_motion, ctx))
     # Gate edge/corner editing: drag handles of existing gates to resize them.

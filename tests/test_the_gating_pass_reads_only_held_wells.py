@@ -89,10 +89,10 @@ def test_curation_is_reasserted_on_held_wells_and_left_to_the_projector_for_the_
     assert seen == [], "an unheld curated well was read"
     assert ctx.state.dataset.rows_version > before, "the unheld well's remembered answers were not invalidated"
     monkeypatch.undo()
-    assert int(dl.get_rows(ctx, WELL)["Included"].iloc[CURATED_CELL]) == 0, (
+    assert int(dl.get_rows(ctx, WELL)["Curation_Pass"].iloc[CURATED_CELL]) == 0, (
         "the next read did not carry the override")
 
     held = dl.get_rows(ctx, WELL)
-    held.loc[held.index[CURATED_CELL], "Included"] = 1   # a pass rewrote it from thresholds
+    held.loc[held.index[CURATED_CELL], "Curation_Pass"] = 1   # the projection lost
     apply_curation_to_cache(ctx)
-    assert int(held["Included"].iloc[CURATED_CELL]) == 0, "a held well was not re-asserted"
+    assert int(held["Curation_Pass"].iloc[CURATED_CELL]) == 0, "a held well was not re-asserted"

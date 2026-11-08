@@ -25,7 +25,7 @@ import pandas as pd
 from review.data.data_loading import resolve_value_series
 from review.data.metric_labels import SYNTHETIC_METRIC_KEYS
 from review.domain.metric_registry import column_gating_exempt
-from review.features.export.cell_scope_compute import CellScope, scope_from_ctx
+from review.features.export.cell_scope_compute import CellScope, plotted_wells, scope_from_ctx
 from review.features.scatter.collect import gates_for_axes
 from review.features.scatter.controller import (
     col_for_scatter_axis, scatter_axis_metric_key,
@@ -123,7 +123,6 @@ def cell_scope(ctx, *, entry_x: str | None = None, entry_y: str | None = None,
                               dtype=bool)
 
     from review.data.observations import is_nanowell_cell_column, nanowell_observations
-    from review.features.export.cell_scope_compute import plotted_wells
 
     wells = plotted_wells(ctx)
     nw_cols = tuple(dict.fromkeys(

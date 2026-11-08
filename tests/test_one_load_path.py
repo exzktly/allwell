@@ -70,10 +70,14 @@ def ctx(tmp_path):
 
 
 def _included(frame_or_ctx, label="A01"):
-    """The ``Included`` column, from a frame or from a ctx's cached well."""
-    if hasattr(frame_or_ctx, "state"):
-        return list(frame_or_ctx.state.dataset.cache[label]["Included"])
-    return list(frame_or_ctx["Included"])
+    """Each row's inclusion as the analysis reads it (``df_included_mask``), from a
+    frame or from a ctx's cached well. Curation is its own verdict column
+    (``Curation_Pass``), so the composed inclusion is what a curated cell changes."""
+    from review.data.data_loading import df_included_mask
+
+    frame = (frame_or_ctx.state.dataset.cache[label] if hasattr(frame_or_ctx, "state")
+             else frame_or_ctx)
+    return [int(v) for v in df_included_mask(frame)]
 
 
 # ── the defect this phase closes ──────────────────────────────────────────
@@ -118,7 +122,7 @@ def test_the_eager_and_lazy_loads_apply_the_same_layers(ctx):
     eager = ctx.state.repo.load_well("A01").copy()
 
     pd.testing.assert_frame_equal(lazy, eager)
-    assert list(eager["Included"]) == [1, 1, 0]
+    assert _included(eager) == [1, 1, 0]
     for column in ("QC_Pass", "Crop_Pass"):
         assert column in eager.columns, f"{column} missing from the eager load"
 

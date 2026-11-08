@@ -13,8 +13,8 @@ Two halves, and the second is the one that keeps the first honest:
   implementation that empties the whole panel, so every section that *is* live
   on the Heat Map is named here too — the ones a user would lose if the gate
   went one facet too far.
-* **The reasons stay true.** ``_STYLE_FACETS_A_FIGURE_LACKS`` claims each hidden
-  facet does nothing, and the claim was established by measurement, not by
+* **The reasons stay true.** ``heatmap/_style_facets.py`` claims each facet the
+  heat map lacks does nothing, and the claim was established by measurement, not by
   reading: draw the heat map, change the pref, re-apply
   ``apply_export_style_prefs``, render to PNG, compare. Those measurements are
   re-run below, so a change that makes one of these prefs matter to the heat map
@@ -43,6 +43,7 @@ from review.core.plot_style import (
 from review.features.heatmap import controller as HM
 from review.features.heatmap.models import HeatmapLayout
 from review.features.scatter.state import ScatterState
+from review.features.registry import build_feature_registry
 
 pytestmark = pytest.mark.qt
 
@@ -88,6 +89,8 @@ def _stub_app():
     from review.core.app_runtime import AppRuntime
     app._ctx = types.SimpleNamespace(
         app=app,
+        # The real declarations, so the panel offers each figure what the app would.
+        features=build_feature_registry(),
         state=app._app_state,
         runtime=AppRuntime(app),
         widgets=types.SimpleNamespace(
@@ -395,7 +398,7 @@ def test_a_hidden_pref_really_changes_nothing_on_the_heat_map(
 
     A pref that starts mattering to the heat map fails here, which is the point:
     the row would then be hiding a control that had become useful, and the
-    reason written beside it in ``_STYLE_FACETS_A_FIGURE_LACKS`` would be false.
+    reason written beside it in ``heatmap/_style_facets.py`` would be false.
     """
     assert _rendered_with(monkeypatch) == _rendered_with(monkeypatch, **{key: value}), (
         f"{key} changes the Heat Map, so the {facet!r} facet is wrongly listed"

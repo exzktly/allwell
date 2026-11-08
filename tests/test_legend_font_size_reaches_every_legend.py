@@ -42,6 +42,7 @@ from review.core.plot_style import (  # noqa: E402
 from review.features.scatter._annotations import (  # noqa: E402
     draw_scatter_agg_legends,
 )
+from review.features.registry import build_feature_registry  # noqa: E402
 
 #: Neither the 8 the aggregate keys are built at, nor the 12 the app defaults
 #: to, nor the 9 the style pass falls back to when the key is missing.
@@ -182,6 +183,7 @@ def _stub_app():
     app._app_state.cell_gating.scatter_gates = []
     app._ctx = SimpleNamespace(
         app=app, state=app._app_state, runtime=AppRuntime(app),
+        features=build_feature_registry(),
         widgets=SimpleNamespace(
             get_or_none=lambda n: getattr(app, n, None),
             register=lambda n, w: (setattr(app, n, w), w)[1]),

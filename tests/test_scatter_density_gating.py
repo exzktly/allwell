@@ -11,6 +11,7 @@ from review.features.scatter.gating import (
 from review.features.scatter.state import ScatterState
 from review.core.export_prefs_state import ExportPrefsState
 from review.core.cell_gating_state import CellGatingState
+from review.features.registry import build_feature_registry
 
 
 def _mk_ctx(app):
@@ -32,6 +33,8 @@ def _mk_ctx(app):
             scatter_gates=list(getattr(app, "_scatter_gates", []) or []))
     return SimpleNamespace(
         app=app,
+        # The real declarations, so the panel offers each figure what the app would.
+        features=build_feature_registry(),
         state=app._app_state,
         runtime=AppRuntime(app),
         widgets=SimpleNamespace(
@@ -448,7 +451,7 @@ def _sidebar_stub_app(fig):
         cell_gating=CellGatingState(),
     )
     app._ctx = _mk_ctx(app)
-    app._scatter_fig = fig  # makes _is_scatter_cells_fig / _supports_well_order true
+    app._scatter_fig = fig  # binds the per-cell scatter: its declared facets include the draw order
     app._rep_sets_active = lambda: []
     app._parse_rc = lambda lbl: (lbl, 0, 0)
     app._well_display_label = lambda w: w

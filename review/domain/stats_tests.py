@@ -664,3 +664,25 @@ def contrast_t_test(cells, weights, *, log: bool) -> ContrastResult:
     return ContrastResult(scale=scale, estimate=float(estimate), ci_low=float(lo),
                           ci_high=float(hi), se=float(se), t=float(t), df=int(df),
                           p=p, n=counts)
+
+
+def bh_adjust(ps) -> list[float | None]:
+    """Benjamini–Hochberg adjusted p-values, in the order given.
+
+    ``None`` (a test that did not run) stays ``None`` and is not counted in
+    the family: adjusting a p for a test nobody could compute would charge the
+    rest for a comparison that does not exist.
+    """
+    present = [(i, float(p)) for i, p in enumerate(ps or ())
+               if p is not None and math.isfinite(float(p))]
+    out: list[float | None] = [None] * len(list(ps or ()))
+    m = len(present)
+    if not m:
+        return out
+    ranked = sorted(present, key=lambda pair: pair[1])
+    running = 1.0
+    for rank in range(m, 0, -1):
+        i, p = ranked[rank - 1]
+        running = min(running, p * m / rank)
+        out[i] = min(1.0, running)
+    return out

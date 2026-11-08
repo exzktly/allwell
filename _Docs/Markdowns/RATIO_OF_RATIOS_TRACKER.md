@@ -14,7 +14,7 @@ interaction on the log scale; on the raw scale for the subtract operator).
 |---|------|-------|-------|----------|
 | 1 | `match_by_variable` (member → member) under `pair_by_variable`, existing tests untouched | done | `review/domain/variable_pairing.py` | `tests/test_variable_pairing.py::test_matching_names_the_member_not_a_reference`; the 15 pre-existing pairing tests pass unchanged |
 | 2 | `contrast_t_test` (pooled within the contrast's own cells, log / raw), cross-checked against `two_way_anova` | done | `review/domain/stats_tests.py` | `tests/test_stats_tests.py::test_the_log_contrast_is_the_two_way_interaction_on_log_values` (t² = F, unbalanced n); mutations pooling over every cell and dropping the log each turn a test red |
-| 3 | Pure stage-2 rules: outcome vocabulary, combine, coefficient merge by resolved wells, label of what the test is | todo | `review/domain/ratio_of_ratios.py` | |
+| 3 | Pure stage-2 rules: outcome vocabulary, combine, coefficient merge by resolved wells, label of what the test is | done | `review/domain/ratio_of_ratios.py` (+ `stats_tests.bh_adjust`) | `tests/test_ratio_of_ratios.py` (ratio 4 vs difference 1.5 vs swapped 0.25; references cancel by wells); `tests/test_stats_tests.py::test_bh_matches_the_textbook_values_and_skips_tests_that_did_not_run` |
 | 4 | Bar-only setting on `BarPlotState`, saved / restored / reset with the view state | todo | `review/features/barplot/state.py`, `review/persistence/view_state.py` | |
 | 5 | Gate in the bar request; stage 2 applied after emission, before decoration; raw CSV pass and Batch Export untouched | todo | `review/features/barplot/collect.py`, `_baseline_ratio.py` | |
 | 6 | Reference conditions hidden, dotted line at 1 (0 for subtract) | todo | `review/features/barplot/renderer.py` | |
@@ -26,4 +26,4 @@ interaction on the log scale; on the raw scale for the subtract operator).
 | 12 | Statistics tab: two-way ANOVA Scale (Raw / Log); raw report names itself a difference of differences | todo | `review/features/stats/controller.py` | |
 | 13 | ARCHITECTURE.md and README_WellViewer.md | todo | `_Docs/Markdowns/` | |
 
-Outstanding: 11 · done: 2 · declined: 0
+Outstanding: 10 · done: 3 · declined: 0

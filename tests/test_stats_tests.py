@@ -649,3 +649,10 @@ def test_weights_that_cancel_are_refused_as_nothing_to_test():
 def test_each_refusal_names_its_reason(cells, needle):
     result = _stt.contrast_t_test(cells, _WEIGHTS, log=True)
     assert not result.ok and needle in result.undefined, result.undefined
+
+
+def test_bh_matches_the_textbook_values_and_skips_tests_that_did_not_run():
+    # p = 0.01, 0.04, 0.03 → sorted 0.01, 0.03, 0.04 → 0.03, 0.04, 0.04.
+    assert _stt.bh_adjust([0.01, None, 0.04, 0.03]) == pytest.approx(
+        [0.03, None, 0.04, 0.04])
+    assert _stt.bh_adjust([]) == []

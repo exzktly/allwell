@@ -15,7 +15,7 @@ from review.domain.response_colors import (
 )
 from review.features.response.collect import empty_reason, omission_caption
 from review.features.response.response_compute import (
-    curve_y, ec50_text, spans_enough_decades, zero_position,
+    curve_y, ec50_text, shift_text, spans_enough_decades, zero_position,
 )
 
 _logger = logging.getLogger("review")
@@ -250,8 +250,6 @@ def _shift_caption(shifts: dict | None, data=None, *, rescale) -> str:
     a curve missing from the comparison cannot be mistaken for one that was
     never asked about.
     """
-    from review.features.response.response_compute import shift_text
-
     if not shifts:
         return ""
     labels = {c.key: c.series_label for c in getattr(data, "curves", ())}

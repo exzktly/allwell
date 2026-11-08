@@ -59,6 +59,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from review.features.heatmap._phone import layout_opens_with_page
 from review.features.heatmap.models import HeatmapLayout
 from core.safe import swallowed
 
@@ -472,7 +473,6 @@ def open_layout_panel_if_empty(ctx) -> None:
     width. In phone layout nothing opens: the dock is a full-width sheet there
     and would cover the page just opened (``_phone.layout_opens_with_page``).
     """
-    from review.features.heatmap._phone import layout_opens_with_page
     if not layout_opens_with_page():
         return
     if not ctx.state.dataset.well_paths:

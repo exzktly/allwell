@@ -22,7 +22,8 @@ from review.features.response.collect import (
 )
 from review.features.response.renderer import draw_response
 from review.features.response.response_compute import (
-    FIT_LABELS, FIT_MODELS, FIT_NONE, ec50_text, spans_enough_decades,
+    FIT_LABELS, FIT_MODELS, FIT_NONE, ec50_shifts, ec50_text, shift_text,
+    spans_enough_decades,
 )
 
 _logger = logging.getLogger("review")
@@ -623,6 +624,8 @@ def redraw_response(ctx) -> None:
             f"{data.variable_name or 'x'} drawn logarithmic from the values "
             f"in use — set it in Properties to override")
 
+    fits = response_fits(ctx, data)
+    refresh_compare_combo(ctx, data)
     draw_response(ctx, ax, data,
                   log_x=log_x,
                   log_base=resolved_log_base(ctx, ax.figure),
@@ -630,7 +633,8 @@ def redraw_response(ctx) -> None:
                   ylabel=_y_label(ctx, data),
                   variable_chosen=bool(selected_variable_id(ctx)),
                   timepoints_chosen=bool(timepoints_for(ctx)),
-                  fits=response_fits(ctx, data))
+                  fits=fits,
+                  shifts=response_shifts(ctx, data, fits))
 
     from review.core.observation_band import stamp_cells_footer
     from review.core.plot_style import apply_export_style_to_current
@@ -716,8 +720,100 @@ def export_response_csv(ctx) -> None:
 
 
 def _fit_rows(ctx, data) -> list[list[str]]:
-    """This tab's fit rows, from the fit settings in its own popover."""
-    return response_fit_rows(data, response_fits(ctx, data))
+    """This tab's fit rows and EC50-shift rows, from its own popover's settings."""
+    fits = response_fits(ctx, data)
+    return (response_fit_rows(data, fits)
+            + response_shift_rows(data, response_shifts(ctx, data, fits)))
+
+
+def response_shift_rows(data, shifts: dict) -> list[list[str]]:
+    """One row per compared curve: the EC50 ratio against the reference series.
+
+    The ratio goes in ``y`` — it is a derived value, not a dose, so it does not
+    belong among the doses in ``x`` the way an EC50 does — and the readable
+    form with its interval in ``x_label``. A comparison that could not be made
+    still gets its row, carrying the reason. The reference curve's own row
+    reads ``reference`` with a ratio of 1, so a reader can see which curve
+    every other ratio is over.
+    """
+    labels = {c.key: c.series_label for c in data.curves}
+    rows = []
+    for key, shift in sorted((shifts or {}).items()):
+        timepoint, _series_id = key
+        ratio = f"{shift.ratio:g}" if shift.ok and shift.ratio is not None else ""
+        rows.append(["ec50 shift", labels.get(key) or "", f"{timepoint:g}", "",
+                     shift_text(shift), ratio, "", "", "",
+                     "" if shift.ok else shift.reason])
+    return rows
+
+
+# ── comparing curves ─────────────────────────────────────────────────────────
+
+#: What the comparison combo says when nothing is compared.
+NO_COMPARE_LABEL = "None"
+
+
+def compare_series_id(ctx) -> str:
+    """The reference series id from this tab's slice, or ``""``."""
+    slice_ = ctx.state.feature_slice("response")
+    return str(getattr(slice_, "compare_series_id", "") or "") if slice_ else ""
+
+
+def response_shifts(ctx, data, fits: dict) -> dict:
+    """``{curve key: EC50Shift}`` against the chosen reference, or ``{}``.
+
+    Empty when the reference series is not among the curves drawn: a saved
+    reference whose value has since been hidden or unassigned compares nothing,
+    and the combo then reads ``None`` (``refresh_compare_combo``) so the
+    control and the figure agree.
+    """
+    reference = compare_series_id(ctx)
+    if not reference or reference not in {c.series_id for c in data.curves}:
+        return {}
+    return ec50_shifts(fits, reference)
+
+
+def compare_choices(data) -> list[tuple[str, str]]:
+    """``(label, series id)`` for every series drawn, in legend order."""
+    seen: dict[str, str] = {}
+    for curve in data.curves:
+        if curve.series_id and curve.series_id not in seen:
+            seen[curve.series_id] = curve.series_label or curve.series_id
+    return [(label, sid) for sid, label in seen.items()]
+
+
+def set_compare_series(ctx, series_id: str) -> None:
+    slice_ = ctx.state.feature_slice("response")
+    if slice_ is None:
+        return
+    slice_.compare_series_id = str(series_id or "")
+    redraw_response(ctx)
+
+
+def refresh_compare_combo(ctx, data) -> None:
+    """Offer the series being drawn; disable the combo when there is no fit.
+
+    Enabled only with a fit model and at least two series, because an EC50
+    shift needs two fitted curves. The stored choice is left alone when it is
+    not on offer (the series may come back on the next redraw); the combo shows
+    ``None`` meanwhile, which is what :func:`response_shifts` draws.
+    """
+    combo = _widget(ctx, "_response_compare_cb")
+    if combo is None:
+        return
+    choices = compare_choices(data)
+    model, _top, _bottom = fit_settings(ctx)
+    combo.blockSignals(True)
+    try:
+        combo.clear()
+        combo.addItem(NO_COMPARE_LABEL, "")
+        for label, sid in choices:
+            combo.addItem(label, sid)
+        index = combo.findData(compare_series_id(ctx))
+        combo.setCurrentIndex(index if index >= 0 else 0)
+    finally:
+        combo.blockSignals(False)
+    combo.setEnabled(model != FIT_NONE and len(choices) >= 2)
 
 
 def response_fit_rows(data, fits: dict) -> list[list[str]]:

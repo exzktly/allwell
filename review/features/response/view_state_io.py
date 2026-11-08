@@ -59,6 +59,9 @@ def snapshot_response(ctx) -> dict:
     # the user's own pick order, which is the order the curves are labelled in.
     if slice_.series_variable_ids:
         out["series_variable_ids"] = [str(v) for v in slice_.series_variable_ids]
+    # The EC50 comparison's reference series, by value id; absent for none.
+    if getattr(slice_, "compare_series_id", ""):
+        out["compare_series_id"] = str(slice_.compare_series_id)
     # The tab's own Channel and Property, by their combo labels — the same
     # strings ``populate_metric_combo`` produces, so a restore needs no second
     # vocabulary. Empty means "was following the shared choice", which restores
@@ -111,6 +114,9 @@ def apply_response(ctx, state: dict) -> None:
         # complete restore.
         one = str(state.get("series_variable_id", "") or "")
         slice_.series_variable_ids = [one] if one else []
+    # The combo is filled from the drawn curves on the next redraw
+    # (``controller.refresh_compare_combo``), which is what pushes this onto it.
+    slice_.compare_series_id = str(state.get("compare_series_id", "") or "")
     slice_.channel = str(state.get("channel", "") or "")
     metric_label = str(state.get("metric_label", "") or "")
     if not metric_label and str(state.get("y_metric", "") or "") == "fraction":

@@ -4857,6 +4857,26 @@ walks the samples in blocks of 2, 3, 4 or 6 and makes the first or last of
 each block that block's control — the layout a plate of "control then
 treatments" repeats.
 
+**Pair by variable** pairs samples by what the plate says they are rather than
+where they sit, so it keeps working when groups are reordered, hidden or
+un-pooled. It needs sample variables (Home → Variables). Pick the variable and
+value that mark a control — say *Compound* = *DMSO* — and tick the variables
+the control is matched *within*, such as *Cell line*; then press **Pair**. Each
+sample is paired with the one sample that has DMSO and the same cell line, so
+HeLa wells are normalised to the HeLa vehicle and U2OS wells to the U2OS
+vehicle. The boxes start ticked for the variables your controls differ on;
+a variable all your controls share (the vehicles are all at Dose 0) is left
+unticked, because matching on it would demand a vehicle at every dose.
+
+Under the row, a sentence says how many samples were paired and names every
+sample that was not, with the reason: a variable is not set on it, its wells
+disagree, no sample matches, or more than one does. When more than one
+matches, nothing is picked for you — tick another variable that tells them
+apart (a replicate number, for instance) or put them in one group. A sample
+the rule could not pair loses any control it had, so the table matches the
+sentence. Pairing is a one-off fill: if you change the plate's variables
+afterwards, press **Pair** again.
+
 A sample that is itself another sample's control draws as a flat 1.0 (0 for
 subtract) with a propagated error bar, which is the ΔΔCt convention; the
 **Controls: hide from plot** toggle leaves it out instead. There is no
@@ -5463,6 +5483,19 @@ is **asymmetric**: it is symmetric about log₁₀(EC50), so the upper arm is lo
 which is the truth about a dose estimated on a log axis. A single ± would claim
 a lower bound the fit does not support. The same numbers go into **Save plot
 data…**.
+
+**Comparing conditions.** With a fit on and the curves split into series (for
+example one per cell line), **Compare EC50 to** in the Fit popover picks a
+reference series. Every other curve's EC50 is then reported as a multiple of
+the reference's EC50 *at the same timepoint* — `EC50 ×4 (2.6–6.1)` means that
+curve needs about four times as much to reach its half-maximal effect, with a
+95% interval. The comparisons go under the axes and into **Save plot data…** as
+`ec50 shift` rows, with the reference's own row reading `reference`. A
+comparison that cannot be made — either curve has no fit, or the reference has
+no curve at that timepoint — is listed with its reason. The comparison is most
+meaningful when the curves have similar slopes, and the fit settings are shared
+by every curve, so all EC50s are fitted on the same terms. Batch Export does
+not include the comparison.
 
 **When the data will not support a fit, you get an em dash and a reason** —
 never a number. `EC50 — (no fit)` appears in the legend and the reason under the

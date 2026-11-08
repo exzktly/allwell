@@ -205,6 +205,11 @@ class Colors:
     # Pink, the most separated hue left: measured ΔE ≥ 34 (CIE76) to the overlay's other nine inks, relative
     # luminance 0.35.
     exclusion_nanowell_focus = "#F472B6"
+    # Segmentation overlay: a cell below the intensity gate (Included). It
+    # shared "deleted here" with hand curation until curation got its own
+    # column. Lavender, not green; measured ΔE ≥ 32 (CIE76) to the overlay's
+    # other ten inks, relative luminance 0.52.
+    exclusion_intensity = "#C4B5FD"
     # One cell shown on its own (the Scatter cell popup): its boundary, the
     # Segmentation overlay's default boundary ink so a cell reads the same in
     # both. And the focused cell — the one the status-bar chip names — ringed

@@ -78,12 +78,11 @@ def inclusion_counts(frames) -> tuple[int, int, int]:
 
 
 # The inclusion layers, in the order ``df_included_mask`` composes them, with
-# the column each one owns. ``Included`` is listed first because it is the
-# column the manual curation *and* the FluorGating pass both write — they cannot
-# be separated from the frame, and the label says so rather than implying a
-# split the data does not support.
+# the column each one owns. ``Included`` is the intensity gate's; the cells the
+# user deleted by hand are their own step (``Curation_Pass``).
 _FUNNEL_LAYERS: tuple[tuple[str, str], ...] = (
-    ("Curation + intensity gate", "Included"),
+    ("Intensity gate", "Included"),
+    ("Deleted by hand", "Curation_Pass"),
     ("QC debris gate", "QC_Pass"),
     ("Crop region", "Crop_Pass"),
     ("Scatter gates", "Gate_Pass"),

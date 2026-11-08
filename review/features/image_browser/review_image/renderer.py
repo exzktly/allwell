@@ -1241,6 +1241,7 @@ def _layer_inks():
     from ui import theme
     return {
         "deleted here": theme.Colors.danger,
+        "below the intensity gate": theme.Colors.exclusion_intensity,
         "debris gate": theme.Colors.warn,
         "outside the crop": theme.Colors.stale,
         "outside the scatter gates": theme.Colors.accent,

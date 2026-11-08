@@ -136,9 +136,20 @@ def test_a_cell_that_fails_several_layers_names_all_of_them():
 
 def test_manual_deletion_is_named_first():
     """It is the one the user did and the only one a click here undoes."""
-    df = _frame(Included=[0], QC_Pass=[0])
+    df = _frame(Included=[1], Curation_Pass=[0], QC_Pass=[0])
     why = review_build_exclusion_reasons(_ctx(df), _mask(1), WELL, FOV, TP)
     assert why[1][0] == "deleted here"
+
+
+def test_a_cell_below_the_intensity_gate_is_not_called_deleted():
+    """**The defect this split fixed.** Hand curation and the intensity gate
+    both wrote ``Included``, so a cell the gate dropped was outlined and listed
+    as "deleted here" — a deletion the user never made, and one a click here
+    could not undo. Each now names its own layer."""
+    df = _frame(Included=[0, 1], Curation_Pass=[1, 0])
+    why = review_build_exclusion_reasons(_ctx(df), _mask(2), WELL, FOV, TP)
+    assert why[1] == ("below the intensity gate",)
+    assert why[2] == ("deleted here",)
 
 
 def test_a_live_override_beats_the_cached_column():

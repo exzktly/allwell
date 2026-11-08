@@ -3634,8 +3634,9 @@ Below the table is the readout:
 
   ```
   20,000 segmented cells
-     Curation + intensity gate: −1,240  →  18,760
-     QC debris gate: −1,204  →  17,556
+     Intensity gate: −1,240  →  18,760
+     Deleted by hand: −35  →  18,725
+     QC debris gate: −1,169  →  17,556
      Crop region: not applied
      Scatter gates: not applied
      Touching image border: not applied
@@ -7123,8 +7124,8 @@ screen, and the Scatter plot rings its point. Opening another dataset clears it.
   read its pixel value, cell id, and **mean fluorescence (MFI)** for the current
   channel (the same per-cell readout the Image Table shows).
 - **Why removed** — a toggle on the control row that outlines every *excluded*
-  cell in the colour of the layer that removed it: you deleted it, the debris
-  gate, the crop, the scatter gates, the run's field verdict, the focus cut,
+  cell in the colour of the layer that removed it: you deleted it, the
+  intensity gate (lavender), the debris gate, the crop, the scatter gates, the run's field verdict, the focus cut,
   the image border, a field you excluded in **Home → QC Triage** (white), or a
   field left out of the Cell Gating **Fields of view** selection (yellow).
   A colour key appears under the picture, listing only the layers this field
@@ -7134,9 +7135,11 @@ screen, and the Scatter plot rings its point. Opening another dataset clears it.
 
   Being *included* is the AND of all of these layers, so a cell can fail more than
   one and an outline can only be one colour — it shows the first, and hovering
-  the cell names every layer that dropped it. That is also why clicking a cell
-  back in cannot restore one a verdict column removed: raise that threshold, or
-  switch that layer off, instead. The overlay works in the binary (≥ threshold)
+  the cell names every layer that dropped it. A cell you deleted and a cell below
+  the intensity gate are told apart — the first is "deleted here", the second
+  "below the intensity gate" — so a deletion you never made is never shown as
+  yours. To bring back a cell another layer removed, raise that threshold or
+  switch that layer off. The overlay works in the binary (≥ threshold)
   view too, which is usually where the question comes up, since a binary mask is
   already a picture of which cells counted.
 - **The status line says when it is showing you less than it was asked for.**

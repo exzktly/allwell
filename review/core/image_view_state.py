@@ -4,9 +4,11 @@ Shared by the image viewers (Segmentation Review Image, Image Table) so a
 channel's display brightness is tuned once and reused as the default
 everywhere it's shown — instead of each view keeping its own copy (S4).
 
-Currently this holds only the per-channel display LUT. The Image Table's
-*per-row* LUT edits remain an explicit override layered on top of these
-defaults; the Cell Browser auto-normalizes each crop and doesn't participate.
+It holds the per-channel display LUT and tint. The Image Table's *per-row*
+LUT edits remain an explicit override layered on top of these defaults. The
+Cell Browser and the Scatter cell popup read the window through
+``review/data/cell_crop.display_window`` and fall back to each crop's own
+1st–99th percentile when a channel has none.
 
 Qt-free: imports only stdlib (state-package import contract, ARCHITECTURE §5.9).
 """

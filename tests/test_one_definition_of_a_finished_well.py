@@ -132,9 +132,9 @@ NOT_A_COMPLETION_DECISION = {
         "verify's backstop: every well the remote holds an archive for is one verification must find here — sealed "
         "or not, since an unsealed archive is still output this run may have produced. It decides what to check "
         "locally, not what is finished (fetch slice, A1/A3)"),
-    "review/persistence/cell_overrides.py::_fingerprints_for_data_dir": (
+    "review/persistence/cell_overrides.py::fingerprints_for_data_dir": (
         "fingerprints a dataset's archives so saved per-cell overrides are dropped when the images change"),
-    "review/persistence/cell_overrides.py::_well_zip_fingerprints": "the same fingerprint, per well",
+    "review/persistence/cell_overrides.py::well_zip_fingerprints": "the same fingerprint, per well",
     "review/features/smfish/tab_view.py::smfish_sync_from_app": "the smFISH tab lists the archives it can count "
                                                                 "spots in",
     "review/features/smfish/worker.py::_write_counts_to_csvs": "message text naming the files, not a listing",

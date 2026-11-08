@@ -25,19 +25,22 @@ def _frame(**cols):
 
 def test_funnel_reports_each_layer_on_top_of_the_previous():
     df = _frame(
-        Included=[1, 1, 1, 1, 0],       # curation/intensity drops one
-        QC_Pass=[1, 1, 1, 0, 1],        # QC drops one more of the survivors
-        Crop_Pass=[1, 1, 0, 1, 1],      # crop drops one more
+        Included=[1, 1, 1, 1, 1, 0],       # the intensity gate drops one
+        Curation_Pass=[1, 1, 1, 1, 0, 1],  # the user deleted one more
+        QC_Pass=[1, 1, 1, 0, 1, 1],        # QC drops one more of the survivors
+        Crop_Pass=[1, 1, 0, 1, 1, 1],      # crop drops one more
     )
     stages = inclusion_funnel([df])
 
-    assert stages[0] == ("Segmented cells", None, 5)
-    assert stages[1] == ("Curation + intensity gate", 1, 4)
-    assert stages[2] == ("QC debris gate", 1, 3)
-    assert stages[3] == ("Crop region", 1, 2)
+    assert stages[0] == ("Segmented cells", None, 6)
+    # Two steps, not one "Curation + intensity gate": they write different columns.
+    assert stages[1] == ("Intensity gate", 1, 5)
+    assert stages[2] == ("Deleted by hand", 1, 4)
+    assert stages[3] == ("QC debris gate", 1, 3)
+    assert stages[4] == ("Crop region", 1, 2)
     # No Gate_Pass column at all — never applied, which is not the same as
     # applied and removing nothing.
-    assert stages[4] == ("Scatter gates", None, 2)
+    assert stages[5] == ("Scatter gates", None, 2)
 
 
 def test_a_layer_that_removed_nothing_is_not_a_layer_that_never_ran():

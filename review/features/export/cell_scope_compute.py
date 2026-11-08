@@ -136,6 +136,13 @@ class CellScope:
     notes: tuple[tuple[str, str], ...] = ()
     #: Columns the tab needs present; a well lacking one contributes no rows.
     required_columns: tuple[str, ...] = ()
+    #: ``nw::`` columns the plot reads (a Nanowell ▸ axis, or a gate drawn on
+    #: one) and the nanowell rows to fill them from, taken on the GUI thread
+    #: when the scope is built (``observations.nanowell_observations``). The
+    #: plot joins them onto each well's rows before it draws; a scope that did
+    #: not would resolve those axes to NaN and export no rows at all.
+    nanowell_columns: tuple[str, ...] = ()
+    nanowell_rows: Any = None
     extras: dict = field(default_factory=dict)
 
 
@@ -291,6 +298,10 @@ def build_chunk(df: pd.DataFrame, scope: CellScope, *,
     thread rewrites columns on, so the copy is what makes the hand-off to the
     writer thread safe.
     """
+    if scope.nanowell_columns:
+        from review.data.observations import join_nanowell_columns
+        df = join_nanowell_columns(df, scope.nanowell_rows, scope.nanowell_columns,
+                                   well=well_label)
     mask = population_mask(df, scope)
     if not mask.any():
         return df.iloc[:0].copy()
@@ -315,6 +326,10 @@ def build_chunk(df: pd.DataFrame, scope: CellScope, *,
             out[col] = _marker_series(np.ones(len(out), dtype=bool), out.index)
 
     sub = df.loc[mask]
+    # A marker that needs to know which well its rows are (a saved set is keyed
+    # by well) reads it here; the frame's own ``well`` column is parsed from the
+    # image filename and need not equal the app's well key.
+    sub.attrs["well_label"] = well_label
     out[MARKER_IN_POPULATION] = _marker_series(in_population(sub, scope), out.index)
     out[MARKER_ABOVE_THRESHOLD] = _marker_series(above_threshold(sub, scope), out.index)
     for name, fn in scope.markers:
@@ -362,6 +377,7 @@ def header_for(frames_columns: Sequence[Sequence[str]], scope: CellScope) -> lis
     body = union_header(frames_columns)
     out = list(IDENTITY_COLUMNS)
     out += [c for c in body if c not in IDENTITY_COLUMNS]
+    out += [c for c in scope.nanowell_columns if c not in out]
     out += [c for c in VERDICT_COLUMNS if c not in out]
     out += [MARKER_IN_POPULATION, MARKER_ABOVE_THRESHOLD]
     out += [name for name, _fn in scope.markers if name not in out]

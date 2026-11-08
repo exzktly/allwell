@@ -48,7 +48,7 @@ def _subsample_for_projection(X, data, method: str):
     idx = np.sort(rng.choice(n, size=_MAX_PROJECTION_CELLS, replace=False))
     sub = dict(data)
     sub["X"] = X[idx]
-    for key in ("group", "well", "timepoint"):
+    for key in ("group", "well", "timepoint", "fov", "tp_token", "nucleus_id"):
         arr = data.get(key)
         if arr is not None:
             sub[key] = np.asarray(arr)[idx]
@@ -237,6 +237,8 @@ def _compute_for_mode(ctx, st, data) -> dict:
             result["axis_labels"] = axis_labels
             result["data"] = data_p
             if n_total:
+                result["n_total"] = n_total
+                result["scope_wells"] = sorted({str(w) for w in data.get("well", ())})
                 result["sampled_note"] = (
                     f"{st.dimred_method.upper()} on {Xp.shape[0]:,} sampled "
                     f"cells (of {n_total:,})")

@@ -556,11 +556,13 @@ def _warn_no_area_column(where: str) -> None:
 #: counts over the cells that would otherwise be analysed, which is neither
 #: every row in the frame nor the rows its own cut has already judged.
 #:
-#: ``Included`` is not in it: it is the only one whose absence means all-pass
-#: for a different reason (no curation has happened) and whose blanks mean
-#: dropped rather than kept.
-VERDICT_LAYERS = ("QC_Pass", "Crop_Pass", "Gate_Pass", "Field_Pass", "Focus_Pass", "NW_Focus_Pass",
-                  "Border_Pass", "Excluded_Field_Pass", "FOV_Pass")
+#: ``Included`` is not in it: the intensity gate writes it, it is read
+#: fail-closed (its blanks mean dropped rather than kept), and its absence means
+#: no gating pass has run. ``Curation_Pass`` is the user's own deletions from
+#: Segmentation (``review/data/curation.py``), first because it is the one layer
+#: a person decided cell by cell.
+VERDICT_LAYERS = ("Curation_Pass", "QC_Pass", "Crop_Pass", "Gate_Pass", "Field_Pass", "Focus_Pass", "NW_Focus_Pass",
+                  "Border_Pass", "Excluded_Field_Pass", "FOV_Pass", "Saved_Cells_Pass")
 
 
 def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
@@ -568,7 +570,8 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
     """Rows that count toward analysis: ``Included == 1`` composed with the QC,
     crop, scatter-gate and field-quality layers.
 
-    Manual curation / cell-gating own the ``Included`` column; the QC layer owns
+    Cell gating owns the ``Included`` column; manual curation owns
+    ``Curation_Pass`` (0 = deleted by hand in Segmentation); the QC layer owns
     a separate ``QC_Pass`` column (1 = passes debris gating); the crop layer owns
     a ``Crop_Pass`` column (1 = centroid inside the crop region); the scatter-gate
     inclusion mode owns ``Gate_Pass`` (1 = inside the drawn scatter gates). The

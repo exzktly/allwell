@@ -30,7 +30,6 @@ class ReviewImageState:
     """
 
     # selection / include-edit
-    selected_nucleus: int | None = None
     include_edit_mode: bool = False
     crop_edit_mode: bool = False
     box_anchor: tuple[float, float] | None = None

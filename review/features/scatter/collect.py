@@ -120,13 +120,21 @@ def gates_for_axes(ctx, col_x: str, col_y: str) -> list:
 
 
 def gate_filter_title_suffix(ctx) -> str:
-    """Axes-title tag marking a gate-filtered cloud, else ``""``.
+    """Axes-title tags for what the plot does beyond its axes, else ``""``.
 
-    The toggle changes *which cells are plotted*, so a figure copied or saved
-    out of this tab has to carry that fact with it — the on-screen toggle does
-    not travel into an SVG.
+    ``· gate-filtered`` when *Apply gates* changes which cells are plotted, and
+    ``· highlighting <set>`` when a saved set is highlighted — or that a saved
+    plot's highlighted set no longer exists. A figure copied or saved out of
+    this tab has to carry those facts: the on-screen controls do not travel
+    into an SVG.
     """
-    return " · gate-filtered" if scatter_points_gated(ctx) else ""
+    tags = " · gate-filtered" if scatter_points_gated(ctx) else ""
+    sets = getattr(ctx.state, "cell_sets", None)
+    if sets is not None and sets.highlight:
+        tags += f" · highlighting {sets.highlight}"
+    elif sets is not None and sets.missing_highlight:
+        tags += f" · highlighted set ‘{sets.missing_highlight}’ no longer exists"
+    return tags
 
 
 @dataclass(frozen=True)

@@ -641,7 +641,7 @@ def draw_review_image(
     # unmeasured, which nothing can mistake for a plate of negative cells.
     threshold_unmeasured = bool(state.review_image.binary_mask) and above_by_nid is None
     binary_mask_mode = bool(state.review_image.binary_mask) and not threshold_unmeasured
-    sel_nid = state.review_image.selected_nucleus
+    sel_nid = _focused_nucleus_here(ctx)
 
     if binary_mask_mode:
         rgb = _np.zeros((h, w, 3), dtype=_np.uint8)
@@ -1224,10 +1224,18 @@ def toggle_review_image_binary_mask(ctx) -> None:
 #: for a failure state reads as the opposite of what happened, and on a
 #: green-tinted channel it is close to invisible besides.
 #:
-#: ``text_secondary`` and ``heatmap_selection`` are borrowed from elsewhere in
-#: the palette, which is stated here so the borrowing is visible: the first is
-#: a neutral grey for the one verdict neither the user nor a threshold on this
-#: panel made, and the second is the most separated remaining hue.
+#: ``text_secondary`` is borrowed from elsewhere in the palette, which is stated
+#: here so the borrowing is visible: a neutral grey for the one verdict neither
+#: the user nor a threshold on this panel made.
+#:
+#: **Every ink is also measured against the two outlines the overlay draws that
+#: are not layers**: the red round every kept cell (``boundary_color``) and the
+#: yellow round the focused cell (``selected_color`` / ``Colors.focused_cell``).
+#: Three inks failed that: "deleted here" (``danger``, ΔE 28 from the kept-cell
+#: red), "out of focus" (the borrowed ``heatmap_selection``, ΔE 21 from it) and
+#: the FOV yellow (ΔE 5 from the focused outline). They are
+#: ``exclusion_deleted``, ``exclusion_focus`` and the new ``exclusion_fov``,
+#: each chosen as the candidate furthest from everything else drawn.
 #:
 #: The seventh, a field excluded by hand in QC triage, is ``ink_light`` (white),
 #: and it was chosen the same way: of every theme token not already used and
@@ -1240,12 +1248,14 @@ def toggle_review_image_binary_mask(ctx) -> None:
 def _layer_inks():
     from ui import theme
     return {
-        "deleted here": theme.Colors.danger,
+        "deleted here": theme.Colors.exclusion_deleted,
+        "below the intensity gate": theme.Colors.exclusion_intensity,
+        "in the excluded saved cells": theme.Colors.exclusion_saved_cells,
         "debris gate": theme.Colors.warn,
         "outside the crop": theme.Colors.stale,
         "outside the scatter gates": theme.Colors.accent,
         "field flagged by the run": theme.Colors.text_secondary,
-        "out of focus": theme.Colors.heatmap_selection,
+        "out of focus": theme.Colors.exclusion_focus,
         "nanowell rim out of focus": theme.Colors.exclusion_nanowell_focus,
         "touches the image border": theme.Colors.exclusion_border,
         "field excluded in QC triage": theme.Colors.ink_light,
@@ -1380,6 +1390,22 @@ def reset_review_image_colors(ctx) -> None:
 
 
 
+def _focused_nucleus_here(ctx) -> int | None:
+    """The focused cell's nucleus id when it lies in the field on screen, else ``None``.
+
+    Segmentation keeps no "selected nucleus" of its own: it outlines the app's
+    focused cell (``review/core/cell_focus.py``) whenever that cell is in the
+    field shown, so a cell focused on any page is outlined here, and a number
+    left over from another field can never land on this field's cell of the
+    same id.
+    """
+    from review.core.cell_focus import focused_cell, focused_nucleus_in
+    if focused_cell(ctx) is None:
+        return None
+    from review.core.frame_scope import current_frame
+    return focused_nucleus_in(ctx, *current_frame(ctx))
+
+
 def zoom_review_image_to_selected_nucleus_ctx(ctx, zoom: float = 3.0) -> None:
     """ctx-native entry point (kept for the cell-browser caller)."""
     zoom_review_image_to_selected_nucleus(ctx, zoom)
@@ -1395,7 +1421,7 @@ def zoom_review_image_to_selected_nucleus(ctx, zoom: float = 3.0) -> None:
     if label is None or canvas is None:
         return
     ri = ctx.state.review_image
-    nid = ri.selected_nucleus
+    nid = _focused_nucleus_here(ctx)
     mask_arr = getattr(label, "_mask_arr", None)
     if nid is None or mask_arr is None:
         return

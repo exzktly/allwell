@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 
 from review.core.channel_state import ChannelState
 from review.core.dataset_state import DatasetState
+from review.core.cell_sets_state import CellSetsState
+from review.core.focus_state import FocusState
 from review.core.image_view_state import ImageViewState
 from review.core.cell_gating_state import CellGatingState
 from review.core.export_prefs_state import ExportPrefsState
@@ -68,6 +70,11 @@ class AppState:
     dataset: DatasetState = field(default_factory=DatasetState)
     plot: PlotState = field(default_factory=PlotState)
     image_view: ImageViewState = field(default_factory=ImageViewState)
+    # The focused cell — the one cell every surface marks (cell_focus.py).
+    focus: FocusState = field(default_factory=FocusState)
+    # Saved cells (lasso on Spatial / Multivariate) and the one set excluded
+    # from analysis (core/cell_sets.py).
+    cell_sets: CellSetsState = field(default_factory=CellSetsState)
     # Group-statistics memoization cache — core, not the Statistics feature's
     # slice (it backs every plot's aggregation; see StatsCacheState).
     stats_cache: StatsCacheState = field(default_factory=StatsCacheState)

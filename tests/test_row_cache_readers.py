@@ -91,6 +91,8 @@ _HELD_ONLY_READERS: dict[str, str] = {
         "Checks the first held frame for the new metric's column and clears the cache when it is missing (a "
         "stale cache). Any held well answers that; with none held there is nothing stale to clear."),
     "review/persistence/reset_scopes.py::clear_curation": "Clears the cache so frames reload without overrides.",
+    "review/persistence/reset_scopes.py::_clear_saved_cells": (
+        "Clears the cache so frames reload without the excluded set's Saved_Cells_Pass."),
     "review/persistence/reset_scopes.py::_clear_gating": (
         "Clears the cache so frames reload ungated; restore_gating_block forgets the applied gating first, so a "
         "well read before the restarted pass runs is not re-gated with the cleared configuration."),

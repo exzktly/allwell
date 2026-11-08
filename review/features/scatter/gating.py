@@ -25,6 +25,7 @@ import numpy as np
 from ui import theme
 from core.safe import swallowed
 from domain.tp_match import tp_close_mask
+from review.domain.gates import in_gate as _in_gate, norm_gate as _norm_gate
 from review.features.scatter.collect import timepoint_color_map
 
 
@@ -319,20 +320,6 @@ def _gate_on_current_axes(ctx, gate) -> bool:
     return gx == cols[0] and gy == cols[1]
 
 
-def _norm_gate(g: dict[str, float]) -> dict[str, float]:
-    """Return a copy of *g* with ``x0<=x1`` and ``y0<=y1`` (drag may flip them)."""
-    x0, x1 = sorted((g["x0"], g["x1"]))
-    y0, y1 = sorted((g["y0"], g["y1"]))
-    return {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
-
-
-def _in_gate(xs: np.ndarray, ys: np.ndarray, gate: dict[str, float]) -> np.ndarray:
-    return (
-        (xs >= gate["x0"]) & (xs <= gate["x1"])
-        & (ys >= gate["y0"]) & (ys <= gate["y1"])
-    )
-
-
 def _pct(xs: np.ndarray, ys: np.ndarray, gate: dict[str, float]):
     """Return ``(pct, n_inside, total)`` or ``(None, 0, 0)`` when empty."""
     tot = int(xs.size)
@@ -340,48 +327,6 @@ def _pct(xs: np.ndarray, ys: np.ndarray, gate: dict[str, float]):
         return None, 0, 0
     nin = int(_in_gate(xs, ys, gate).sum())
     return 100.0 * nin / tot, nin, tot
-
-
-def compute_gate_inclusion(df, gates, ratios=None, nanowell_values=None) -> np.ndarray:
-    """Boolean array over *df*'s rows: ``True`` for any cell inside ANY gate.
-
-    The Cell Gating tab uses this to turn the interactive scatter gates into the
-    ``Included`` mask (the union — a cell in *any* gated population is kept).
-    Each gate carries the metric columns it was drawn on (``x_col`` / ``y_col``,
-    stamped in :func:`_on_gate_drawn`); values are resolved through
-    :func:`resolve_value_series` so ratio / shape columns work exactly as on the
-    plot. A gate missing its columns, or whose columns are absent from *df*,
-    resolves to all-NaN and so contributes nothing (NaN comparisons are False).
-
-    With no usable gates the mask is all-``False`` — the caller decides what an
-    empty gate set means (the worker treats "mode on, no gates" as no
-    restriction before reaching here).
-
-    A gate drawn on a nanowell metric names ``nw::<key>`` columns, which no cell
-    table holds. *nanowell_values* (``observations.nanowell_gate_values``) are
-    the nanowell rows to read them from: each cell takes its own nanowell's value
-    at its timepoint, joined onto a copy of *df* (``join_nanowell_columns``).
-    Without them such a gate contributes nothing, as any gate on a column the
-    rows lack does.
-    """
-    from review.data.data_loading import resolve_value_series
-    from review.data.observations import join_nanowell_columns
-
-    n = len(df)
-    inside = np.zeros(n, dtype=bool)
-    if nanowell_values is not None:
-        wanted = [c for g in gates or [] for c in (g.get("x_col"), g.get("y_col"))
-                  if c and c not in df.columns]
-        df = join_nanowell_columns(df, nanowell_values, wanted)
-    for gate in gates or []:
-        x_col = gate.get("x_col")
-        y_col = gate.get("y_col")
-        if not x_col or not y_col:
-            continue
-        xs = resolve_value_series(df, x_col, ratios).to_numpy()
-        ys = resolve_value_series(df, y_col, ratios).to_numpy()
-        inside |= _in_gate(xs, ys, _norm_gate(gate))
-    return inside
 
 
 def compute_gate_stats(

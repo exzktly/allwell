@@ -12,6 +12,7 @@ from __future__ import annotations
 # Names used only in annotations. Under ``from __future__ import
 # annotations`` these are never evaluated, so importing them for real would
 # add startup cost and, for several of these, an import cycle.
+from review.core.cell_picking import identity_arrays
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -132,6 +133,7 @@ def collect_spatial_frame(
 
     idx = np.flatnonzero(mask)
     points = np.column_stack([col[idx], row[idx]])
+    ident = identity_arrays(df, idx)
     metric_out: np.ndarray | None = None
     if metric_vals is not None:
         metric_out = metric_vals[idx]
@@ -144,6 +146,9 @@ def collect_spatial_frame(
         "well": well_label,
         "n_cells": int(points.shape[0]),
         "unit": unit,
+        # Each drawn cell's field, timepoint token and nucleus id, so a click
+        # on the map can open it (``core/cell_picking``).
+        **ident,
     }
 
 

@@ -3249,6 +3249,21 @@ hand.
 
 #### Cell Gating
 
+**Saved cells.** Below *Cell inclusion*, the **Saved cells** list holds every
+set saved with **Lasso cells** — on a Spatial map or a Multivariate projection,
+press Lasso cells and draw round the cells you want; they are saved as
+"Cells 1", "Cells 2", …. Each entry says how many cells it holds and where it
+was drawn; one drawn on a UMAP or t-SNE sample says so ("drawn on 2,500
+sampled cells of 61,000"), because cells the sample did not draw cannot be in
+it. Select a set to rename it in the box below the list, or **Delete** it.
+Saving a set changes no number anywhere. **Exclude from analysis** picks the one
+set whose cells are left out of every plot, statistic and export; it shows in
+the inclusion funnel as "Excluded saved cells" and in Segmentation's *Why
+removed* in khaki. If a well is segmented again after a set was saved, the
+set's cells in that well may now be other cells: the entry says "stale" and how
+many cells it leaves out, and neither the Cell Browser nor the exclusion uses
+them. Reset → *Saved cells* deletes every set.
+
 **What it is.** The single place that decides which cells are *included* and
 which count as *on* for fraction-on statistics — the gating layer every plot,
 statistic, and export consumes.
@@ -3473,7 +3488,7 @@ choice applies once, when the menu closes.
   dataset does not have is kept when you edit the others. A well whose FOV labels cannot be trusted (see *Exclude fields the run
   flagged*, above) is not filtered — every field there still counts — and the
   line names it. In the Segmentation view's **Why removed** overlay these cells
-  are outlined in yellow and labelled *field not in the FOV selection*.
+  are outlined in pale lime and labelled *field not in the FOV selection*.
 
   The counts under the checkbox are about the cells that would otherwise be in
   your analysis — a cell the debris gate, the crop, your gates or your own
@@ -3634,8 +3649,9 @@ Below the table is the readout:
 
   ```
   20,000 segmented cells
-     Curation + intensity gate: −1,240  →  18,760
-     QC debris gate: −1,204  →  17,556
+     Intensity gate: −1,240  →  18,760
+     Deleted by hand: −35  →  18,725
+     QC debris gate: −1,169  →  17,556
      Crop region: not applied
      Scatter gates: not applied
      Touching image border: not applied
@@ -5667,6 +5683,26 @@ cells it kept.
   overlap) and **Apply gates** (below) together under **Display ▾**. **Show
   gates** is in the Properties sidebar; **draw rectangular gates** by dragging
   on the canvas.
+- **Click a point to see that cell.** The cell opens in a panel on the right:
+  one channel at a time, with the cell's boundary drawn in red, its well,
+  field, timepoint and nucleus number in the title, and **Source** to switch
+  between the raw and the corrected image. Its brightness is the same as in the
+  [Cell Browser](#cell-browser) and the Image Table — typing a **Brightness
+  min / max** sets that channel's brightness in all three, and **Auto** goes
+  back to stretching each cell to itself; the line under the image says which
+  one you are looking at. A cell that cannot be shown says why where the image
+  would be (no segmentation mask for the field, the nucleus is not in it, or
+  the plot is out of date and needs redrawing).
+- **Highlight saved cells** (under **Display ▾**, or **Highlight on Scatter** in
+  Cell Gating → Saved cells). Draws one saved set's cells solid in cyan over the
+  rest of the cloud, which fades but keeps its colours. A line under the plot
+  says how many of the set are shown and why the others are not (in wells you
+  have not plotted, or filtered out here by timepoints, an axis floor, inclusion,
+  gates or sampling), how many were lost to re-segmentation, and when the set is
+  also excluded from analysis; the title says which set is highlighted. It
+  changes no number. A saved plot remembers it, and says so if the set has been
+  deleted since. The per-cell export gains an `in_saved_cells[<set>]` column (1 /
+  0, blank for a well segmented again since the set was saved).
 - **Apply gates** (under **Display ▾**). This plot is the one place that shows the *whole* cloud even
   when your gates are filtering everything else — that is deliberate, because
   you draw the gates here and need to see what falls outside them to judge or
@@ -6039,7 +6075,11 @@ divide-by-zero.
 
 - **Correlation** — a feature×feature Pearson correlation heatmap (scale
   invariant, so unaffected by Standardize), or a scatter-plot matrix (SPLOM)
-  via the view toggle.
+  via the view toggle. Up to twelve features each cell prints its r value;
+  when a cell is too narrow to hold it (a phone held upright, a small window)
+  the value is left out and the colour bar reads it instead. Long feature
+  names break onto two lines beside and below the matrix, in every heatmap of
+  this tab.
 - **Dim-reduction** — project every cell to 2-D. **PCA** (default, always
   available), or **UMAP** / **t-SNE** if `umap-learn` / `scikit-learn` are
   installed. Colour the points **by group / well / timepoint / cluster**. For
@@ -6097,6 +6137,12 @@ high GFP" has no meaning. You read them a different way:
   UMAP subsample) — so the map is quantifiable downstream.
 - **Colour by cluster** and read the **phenotype-composition** bars to see what
   fraction of each condition falls in each region.
+- **Click a point to see that cell.** On the projection (and on Clustering's
+  left panel) a click makes the nearest cell the *focused cell* — the status
+  bar names it, and clicking its name opens it in Segmentation. The focused
+  cell is ringed in yellow wherever it was drawn. t-SNE and UMAP draw a sample
+  of at most 2,500 cells; when the focused cell is in one of the plotted wells
+  but not in that sample, the plot says so instead of showing no ring.
 
 #### Which cluster each cell belongs to
 
@@ -6119,6 +6165,9 @@ answer questions the plotting and multivariate tabs can't: *"Do my cells
 form colonies, and are they growing or sparse?"*, *"Do edge cells behave
 differently from interior cells?"*, *"How much of the GFP variability is
 between colonies versus inside each one?"*.
+
+Every cell on a **Spatial map** can be clicked: it becomes the focused cell,
+named in the status bar, ringed on the map and outlined in Segmentation.
 
 Everything runs on the **currently selected well and one timepoint** at a
 time (spatial statistics are per-frame). Pick a well in the plate map, open
@@ -7085,6 +7134,13 @@ holds `<well>_out.zip` files.
 **What it shows.** A per-FOV overlay of the segmentation on the raw image, for
 reviewing and curating individual cells.
 
+**The focused cell.** Clicking a nucleus here, a point on the per-cell Scatter
+plot, a cell in the Cell Browser or a row in Review CSV makes that cell the
+*focused cell*. The status bar names it — `● A02 · F001 · 24h · #28 ✕` — on
+every page: click the name to come back to it here, outlined and centred, or ✕
+to let it go. Segmentation outlines it in yellow whenever its field is on
+screen, and the Scatter plot rings its point. Opening another dataset clears it.
+
 - **Needs** — a loaded well with image ZIPs; pick the FOV / timepoint / channel
   from the in-tab pickers.
 - **Navigational controls** — click a nucleus to **flag / unflag** it for
@@ -7106,10 +7162,12 @@ reviewing and curating individual cells.
   read its pixel value, cell id, and **mean fluorescence (MFI)** for the current
   channel (the same per-cell readout the Image Table shows).
 - **Why removed** — a toggle on the control row that outlines every *excluded*
-  cell in the colour of the layer that removed it: you deleted it, the debris
-  gate, the crop, the scatter gates, the run's field verdict, the focus cut,
+  cell in the colour of the layer that removed it: you deleted it, the
+  intensity gate (lavender), the debris gate, the crop, the scatter gates, the run's field verdict, the focus cut,
   the image border, a field you excluded in **Home → QC Triage** (white), or a
-  field left out of the Cell Gating **Fields of view** selection (yellow).
+  field left out of the Cell Gating **Fields of view** selection (pale lime).
+  Every one of these colours is clearly different from the red outline round
+  the cells that are kept and the yellow outline round the focused cell.
   A colour key appears under the picture, listing only the layers this field
   actually has cells for, and if the toggle is on and nothing here is excluded
   the line says that rather than leaving you with an unchanged picture and no
@@ -7117,9 +7175,11 @@ reviewing and curating individual cells.
 
   Being *included* is the AND of all of these layers, so a cell can fail more than
   one and an outline can only be one colour — it shows the first, and hovering
-  the cell names every layer that dropped it. That is also why clicking a cell
-  back in cannot restore one a verdict column removed: raise that threshold, or
-  switch that layer off, instead. The overlay works in the binary (≥ threshold)
+  the cell names every layer that dropped it. A cell you deleted and a cell below
+  the intensity gate are told apart — the first is "deleted here", the second
+  "below the intensity gate" — so a deletion you never made is never shown as
+  yours. To bring back a cell another layer removed, raise that threshold or
+  switch that layer off. The overlay works in the binary (≥ threshold)
   view too, which is usually where the question comes up, since a binary mask is
   already a picture of which cells counted.
 - **The status line says when it is showing you less than it was asked for.**
@@ -7487,11 +7547,12 @@ actually looks like at the single-cell level.
 - **Controls** — the sidebar **criteria** filter (per-metric ranges) plus
   timepoint / FOV pickers; centre-row **channel toggles**, a **boundary**
   toggle, a **page size**, and **Load next** (the gallery fills incrementally).
-- **From scatter gate.** Ticking this sources the gallery from the gate(s) drawn
-  on the Scatter Plot instead of the criteria — so the criteria rows and
-  **+ Add criterion** grey out, with a line saying why. The setting sticks until
-  you untick it, which is worth knowing if you come back later and find the
-  criteria editor inert.
+- **Source.** The menu at the top of the sidebar chooses which cells the gallery
+  shows: **Criteria** (the filter rows below), **Scatter gates** (exactly the
+  cells inside the gate(s) drawn on the Scatter Plot), or **Saved cells: …** (a
+  set you saved with **Lasso cells** on Spatial or Multivariate — those cells
+  exactly, from whichever wells hold them). Only Criteria uses the filter rows;
+  with another source they grey out and a line says so.
 - **Optimal use** — pair it with the Scatter Plot in Split View: gate a
   population on the scatter and watch the matching cells populate the gallery.
 
@@ -7846,9 +7907,28 @@ pressing Restore on each — without opening a window, and writes:
 └── manifest.json                      ← every saved plot, drawn or not, and why
 ```
 
+`report.pdf` opens with a cover that says where the numbers came from:
+
+- **Needs attention** — anything that makes the figures less than they look:
+  wells the last run did not finish, error records it left, a missing or
+  damaged history, plots that could not be redrawn, and plots saved before the
+  dataset last changed.
+- **Dataset, Pipeline settings, Last run** — channels, timepoints, fields and
+  cell count; the segmentation and correction settings the run used; when and
+  where it ran and how many wells came out complete.
+- **Analysis state** — when the gates, groups, QC thresholds and other analysis
+  settings were last changed.
+- **History** — every run, edit, reset, copy, repair and earlier report recorded
+  in the dataset's `provenance.jsonl`, newest first.
+
+Because each plot is redrawn from the dataset **as it is now**, a plot saved
+before a re-run or a gate change carries a line under its title naming what
+changed since it was saved — so a figure that no longer matches the one you
+saved says so. `manifest.json` carries the same information under `cover`.
+
 A plot that cannot be redrawn — an Image Table grid, or one panel of a
-multi-panel figure — is listed in `manifest.json` with the reason rather than
-left out, and one drawn from fewer wells than it names (a plot copied from
+multi-panel figure — is listed in `manifest.json` (and on the cover) with the
+reason rather than left out, and one drawn from fewer wells than it names (a plot copied from
 another plate, say) carries a note naming them. The command's exit code says how it went: `0` everything drawn, `3`
 some drawn (the manifest names the rest), `1` nothing drawn, `2` the folder is
 not a dataset (or this build has no Saved Plots), `4` the dataset has no saved

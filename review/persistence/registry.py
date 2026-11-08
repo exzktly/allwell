@@ -210,7 +210,7 @@ class PersistenceRegistry:
 def build_persistence_registry(ctx) -> PersistenceRegistry:
     """Create the registry and register every data-dir persistence domain."""
     from review.persistence import (
-        cell_overrides, crop_region, field_exclusions, heatmap_layouts,
+        cell_overrides, cell_sets, crop_region, field_exclusions, heatmap_layouts,
         line_order, qc_params, plot_groups, ratios, sample_definitions,
         sample_variables, triage_decisions, view_state,
     )
@@ -225,6 +225,9 @@ def build_persistence_registry(ctx) -> PersistenceRegistry:
     registry.register("cell_overrides",
                       save=cell_overrides.save_to_data_dir,
                       load=cell_overrides.load_from_data_dir)
+    registry.register("cell_sets",
+                      save=cell_sets.save_to_data_dir,
+                      load=cell_sets.load_from_data_dir)
     registry.register("line_order",
                       save=line_order.save_to_data_dir,
                       load=line_order.load_from_data_dir)

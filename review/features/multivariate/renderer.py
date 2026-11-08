@@ -11,7 +11,9 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from matplotlib.text import Text
 
+from review.core.cell_picking import PlottedCells, attach_cells, ring_focused
 from ui import theme
 from review.core.plot_style import (
     apply_ax_style, follows_theme, style_legend, tokens_for,
@@ -69,6 +71,7 @@ def render_multivariate(ctx) -> None:
     # loses every one of them on its next recompute. This was the only plot
     # feature that did.
     apply_export_style_to_current(ctx, fig, canvas)
+    ring_focused(ctx, fig)
     if canvas is not None:
         canvas.draw_idle()
 
@@ -175,18 +178,53 @@ def _annotated_matrix(
     xkw = dict(fontsize=7, color=muted_fg)
     if x_rotation:
         xkw.update(rotation=x_rotation, ha="right")
-    ax.set_xticklabels(col_labels, **xkw)
+    ax.set_xticklabels([_wrap_label(t) for t in col_labels], **xkw)
     own_xtick_angle(ax, x_rotation or 0, "right" if x_rotation else "center")
     mark_position_axes(ax)                               # row and column indices: no log scale means anything here
-    ax.set_yticklabels(row_labels, fontsize=7, color=muted_fg)
+    ax.set_yticklabels([_wrap_label(t) for t in row_labels], fontsize=7, color=muted_fg)
     if annotate:
         for i in range(mat.shape[0]):
             for j in range(mat.shape[1]):
                 v = mat[i, j]
                 if np.isfinite(v):
-                    ax.text(j, i, fmt.format(v), ha="center", va="center",
-                            fontsize=6, color=annot_color(v))
+                    ax.add_artist(_CellValue(j, i, fmt.format(v), ha="center", va="center",
+                                             fontsize=6, color=annot_color(v)))
     return im
+
+
+#: Longest line a heatmap's tick label keeps before it breaks at a space. A
+#: feature name such as "MCHERRY Mean Intensity" on one line took a third of a
+#: phone's width beside the rows and left the matrix too narrow to read.
+_LABEL_LINE = 14
+
+
+def _wrap_label(text) -> str:
+    """*text* broken at spaces into lines of about :data:`_LABEL_LINE` characters."""
+    import textwrap
+    text = str(text)
+    if len(text) <= _LABEL_LINE:
+        return text
+    return "\n".join(textwrap.wrap(text, _LABEL_LINE, break_long_words=False)) or text
+
+
+class _CellValue(Text):
+    """A heatmap cell's printed value, drawn only while its cell is wide enough to hold it.
+
+    The cell's width is known only once the figure is laid out — on a phone,
+    constrained layout narrows the matrix after the renderer has run — so the
+    decision is taken at every draw. A value wider than its cell is hidden
+    rather than printed across its neighbours; the colour bar still reads it.
+    """
+
+    def draw(self, renderer):
+        ax = self.axes
+        if ax is not None and renderer is not None:
+            x0, _ = ax.transData.transform((0.0, 0.0))
+            x1, _ = ax.transData.transform((1.0, 0.0))
+            width = renderer.get_text_width_height_descent(
+                self.get_text(), self.get_fontproperties(), ismath=False)[0]
+            self.set_visible(bool(width <= abs(x1 - x0) * 0.9))
+        super().draw(renderer)
 
 
 # ── correlation / pair-matrix ────────────────────────────────────────────────
@@ -293,6 +331,7 @@ def _render_dimred(fig, res) -> None:
     _bg, _t, muted_fg, _g, _s = tokens_for(ax)
     ax.scatter(coords[:, 0], coords[:, 1], s=8, c=colors, alpha=0.6,
                edgecolors="none", rasterized=True)
+    _attach_cells(ax, coords, res)
     _legend(ax, legend, muted_fg,
             title={"group": "Group", "well": "Well", "timepoint": "Time",
                    "cluster": "Cluster"}.get(res.get("color_by", "group"), ""))
@@ -304,6 +343,24 @@ def _render_dimred(fig, res) -> None:
     note = res.get("sampled_note")
     if note:
         _footnote(fig, note)
+
+
+def _attach_cells(ax, coords, res) -> None:
+    """Tell the shared picker which cell each drawn point is (``core/cell_picking``)."""
+    data = res["data"]
+    n = coords.shape[0]
+
+    def _arr(key, fill):
+        a = data.get(key)
+        return np.asarray(a) if a is not None and len(a) == n else np.full(n, fill)
+
+    total = res.get("n_total")
+    attach_cells(ax, PlottedCells(
+        xs=np.asarray(coords[:, 0], float), ys=np.asarray(coords[:, 1], float),
+        wells=_arr("well", ""), fovs=_arr("fov", ""), tps=_arr("tp_token", ""),
+        nids=_arr("nucleus_id", -1).astype(np.int64),
+        sampled=(n, int(total)) if total else None,
+        scope_wells=frozenset(str(w) for w in res.get("scope_wells", ()))))
 
 
 def _draw_loadings(fig, ax, loadings) -> None:
@@ -349,6 +406,7 @@ def _render_clustering(fig, res) -> None:
     _bg, _t, muted_fg, _g, _s = tokens_for(ax1)
     ax1.scatter(coords[:, 0], coords[:, 1], s=8, c=colors, alpha=0.6,
                 edgecolors="none", rasterized=True)
+    _attach_cells(ax1, coords, res)
     _legend(ax1, legend, muted_fg, title="Cluster")
 
     # Right: stacked bar of cluster fractions per group.

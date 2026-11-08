@@ -18,6 +18,7 @@ import textwrap
 
 import numpy as np
 
+from review.core.cell_picking import PlottedCells, attach_cells, ring_focused
 from ui import theme
 from review.core.plot_style import apply_time_rescale, style_legend, tokens_for
 from review.domain.time_rescale import axis_label as time_axis_label
@@ -83,6 +84,7 @@ def render_spatial(ctx) -> None:
     except Exception:  # pragma: no cover - defensive
         from core.safe import swallowed
         swallowed()
+    ring_focused(ctx, fig)
     if canvas is not None:
         canvas.draw_idle()
 
@@ -276,6 +278,16 @@ def _render_spatial_map(ax, payload, st) -> None:
 
     ax.invert_yaxis()  # image-space y grows downward
     ax.set_aspect("equal", adjustable="datalim")
+    n = pts.shape[0]
+
+    def _arr(key, fill):
+        a = payload.get(key)
+        return np.asarray(a) if a is not None and len(a) == n else np.full(n, fill)
+
+    attach_cells(ax, PlottedCells(
+        xs=pts[:, 0].astype(float), ys=pts[:, 1].astype(float),
+        wells=np.full(n, payload.get("well", ""), dtype=object), fovs=_arr("fov", ""),
+        tps=_arr("tp_token", ""), nids=_arr("nucleus_id", -1).astype(np.int64)))
 
 
 def _scatter_by_colony(ax, pts, labels) -> None:

@@ -98,7 +98,6 @@ UI_LANE_FILES: dict[str, str] = {
     "test_nanowell_array_band_layout.py": "the Array view's band rows at 1500 px, frozen positions, greyed secondary",
     "test_home_plate_colors.py": "Home's plate paints one shared colour per state",
     "test_home_plate_render.py": "what Home's plate paints, sampled from pixels",
-    "test_cell_viewer_outline.py": "the cell viewer paints the red outline",
     # ── page layout: widths, fit, alignment, placement ─────────────────────
     "test_analyze_banners_are_readable.py": "Analyze's banners have a rule and room",
     "test_analyze_narrow_sidebar_fit.py": "the Analyze form fits the rail width",

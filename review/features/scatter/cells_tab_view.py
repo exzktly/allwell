@@ -12,6 +12,8 @@ from review.core.ui_helpers import (
     make_plot_with_right_dock,
     build_plot_save_menu, make_popover_button, make_properties_button,
     plotting_band_slot)
+from review.core.saved_set_combo import SavedSetHighlightCombo
+from review.features.scatter._cell_rings import paint_focus_ring
 from review.features.scatter.controller import redraw_scatter_orchestrate
 from review.features.scatter.tp_selector_view import open_timepoint_selector
 from review.features.scatter.controller import on_scatter_axis_change
@@ -104,7 +106,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # the X/Y Channel & Property selectors are the controls that matter inline.
     _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", ctrl)
     _disp_btn.setToolTip(
-        "Scatter display options: layout, colour-by-time, and the gate filter")
+        "Scatter display options: layout, colour-by-time, the gate filter and a highlighted set of saved cells")
     ctrl.add_action(_disp_btn)
 
     # Layout: overlay every group on one axis (default, interactive) or stack
@@ -166,6 +168,10 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
 
     apply_gates_btn.clicked.connect(_toggle_apply_gates)
     _disp_lay.addWidget(apply_gates_btn)
+
+    # One saved set drawn solid over the faded cloud (``_cell_rings``).
+    _disp_lay.addWidget(QLabel("Highlight saved cells:", _disp_panel))
+    _disp_lay.addWidget(reg.register("_scatter_highlight_cb", SavedSetHighlightCombo(ctx, _disp_panel)))
     # Rectangular-gate state (drawn via the Properties sidebar's Gates section):
     # a list of {x0,y0,x1,y1} data-space boxes, the arm flag, and the live
     # matplotlib RectangleSelector (rebuilt after each redraw).
@@ -240,6 +246,8 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ), 1)
 
     canvas.mpl_connect("button_press_event", partial(on_scatter_click, ctx))
+    # The focused cell's ring follows the focus without a redraw of the cloud.
+    ctx.bus.focused_cell_changed.connect(lambda *_a: paint_focus_ring(ctx))
     canvas.mpl_connect("motion_notify_event", partial(on_scatter_motion, ctx))
     # Gate edge/corner editing: drag handles of existing gates to resize them.
     canvas.mpl_connect("button_press_event", partial(on_gate_edit_press, ctx))

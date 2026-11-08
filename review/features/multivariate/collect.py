@@ -19,6 +19,8 @@ from typing import Any
 
 import numpy as np
 
+from review.core.cell_picking import identity_arrays
+
 from review.data.observations import is_nanowell_cell_column, with_nanowell_columns
 from review.data.data_loading import df_included_mask, resolve_value_series, get_rows
 from review.data.narrow_rows import narrow_rows, value_inputs
@@ -30,6 +32,9 @@ from domain.tp_match import tp_close_mask
 
 _logger = logging.getLogger(__name__)
 
+
+#: The per-cell identity arrays the matrix carries beside ``well``.
+IDENTITY_KEYS = ("fov", "tp_token", "nucleus_id")
 
 def column_display_label(ctx, col: str) -> str:
     """Human-readable label for a feature column (drives picker + axis text).
@@ -95,6 +100,9 @@ def collect_feature_matrix(
     grp_blocks: list[np.ndarray] = []
     well_blocks: list[np.ndarray] = []
     tp_blocks: list[np.ndarray] = []
+    # Each cell's field, timepoint token and nucleus id, so a drawn point can be
+    # opened and the focused cell found (``core/cell_picking``).
+    id_blocks: dict[str, list[np.ndarray]] = {key: [] for key in IDENTITY_KEYS}
     # Narrow reads (``review/data/narrow_rows.py``): the features, the timepoint
     # and what the verdicts read — not whole frames through the row cache.
     want: set[str] | None = {"timepoint_hours"}
@@ -153,6 +161,9 @@ def collect_feature_matrix(
         grp_blocks.append(np.full(sel.size, group_name, dtype=object))
         well_blocks.append(np.full(sel.size, well_label, dtype=object))
         tp_blocks.append(tp[sel].astype(float))
+        ident = identity_arrays(df, sel)
+        for key in IDENTITY_KEYS:
+            id_blocks[key].append(ident[key])
 
     active_rsets = plot_replicate_sets(ctx)
     if active_rsets:
@@ -187,6 +198,9 @@ def collect_feature_matrix(
         "group": np.concatenate(grp_blocks) if grp_blocks else np.asarray([], dtype=object),
         "well": np.concatenate(well_blocks) if well_blocks else np.asarray([], dtype=object),
         "timepoint": np.concatenate(tp_blocks) if tp_blocks else np.asarray([], dtype=float),
+        **{key: (np.concatenate(id_blocks[key]) if id_blocks[key]
+                 else np.asarray([], dtype=np.int64 if key == "nucleus_id" else object))
+           for key in IDENTITY_KEYS},
         "group_colors": group_colors,
         "well_colors": well_colors,
         "n_cells": int(X.shape[0]),

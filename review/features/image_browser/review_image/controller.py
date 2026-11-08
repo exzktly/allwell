@@ -145,7 +145,8 @@ def on_review_image_click(ctx, event, logger) -> None:
         set_review_cell_included(ctx, fov, tp, str(nid), "0")
         ctx.notify.set_status(f"Set Included=0 for nucleus {nid} at FOV {fov}, TP {tp}.")
         return
-    ctx.state.review_image.selected_nucleus = nid
+    from review.core.cell_focus import focus_cell
+    focus_cell(ctx, ctx.state.preview.selected_well, fov, tp, nid)
     ctx.state.review_image.preserve_view_on_refresh = True
     refresh_review_image_ctx(ctx)
     select_review_csv_row_for_cell(ctx, fov, tp, str(nid), logger)
@@ -326,13 +327,12 @@ def _on_review_csv_row_double_click_impl(ctx, item) -> None:
         from review.features.image_browser.controller import show_image_browser_subtab
         show_image_browser_subtab(ctx, "Segmentation")
 
-    # Set the target nucleus before any refresh so intermediate renders can
-    # already draw the yellow highlight.
+    # Focus the row's cell before any refresh so intermediate renders can
+    # already draw its highlight. The row's own tokens, not the normalised
+    # ones, because the focused cell is handed to the frame loader as written.
     if nid:
-        try:
-            ctx.state.review_image.selected_nucleus = int(float(nid))
-        except Exception:
-            ctx.state.review_image.selected_nucleus = None
+        from review.core.cell_focus import focus_cell
+        focus_cell(ctx, key, row.get("fov", fov), row.get("timepoint", tp), nid)
 
     ctx.state.preview.selected_well = key
     update_preview_ctx(ctx, key)

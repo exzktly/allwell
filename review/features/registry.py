@@ -546,6 +546,11 @@ def _svc_saved_plots_report_pdf():
     return build_saved_plots_report
 
 
+def _svc_saved_plots_report_cover():
+    from review.features.saved_plots._cover import cover_for
+    return cover_for
+
+
 def _svc_saved_plots_render():
     from review.features.saved_plots._render import render_saved_plot
     return render_saved_plot
@@ -554,6 +559,11 @@ def _svc_saved_plots_render():
 def _svc_image_browser_show_field():
     from review.features.image_browser.review_image._navigate import show_field
     return show_field
+
+
+def _svc_image_browser_show_cell():
+    from review.features.image_browser.review_image._navigate import show_cell
+    return show_cell
 
 
 def _svc_preview_build_picker():
@@ -1214,7 +1224,8 @@ def _features() -> list[FeatureDescriptor]:
                       # QC triage's *Open in Segmentation*: Segmentation is the
                       # sub-tab no profile removes, so the service survives
                       # every build that ships Image Browser at all.
-                      "image_browser.show_field": _svc_image_browser_show_field},
+                      "image_browser.show_field": _svc_image_browser_show_field,
+                      "image_browser.show_cell": _svc_image_browser_show_cell},
         ),
         FeatureDescriptor(
             name="Review CSV", group="Inspect", on_phone=False, icon="file-spreadsheet",
@@ -1234,7 +1245,8 @@ def _features() -> list[FeatureDescriptor]:
             # through these, so the report names no feature.
             services={"saved_plots.gallery": _svc_saved_plots_gallery,
                       "saved_plots.render": _svc_saved_plots_render,
-                      "saved_plots.report_pdf": _svc_saved_plots_report_pdf},
+                      "saved_plots.report_pdf": _svc_saved_plots_report_pdf,
+                      "saved_plots.report_cover": _svc_saved_plots_report_cover},
         ),
         FeatureDescriptor(
             name="Batch Export", group="Output", on_phone=False, icon="boxes",
@@ -1638,6 +1650,10 @@ def _register_cache_projectors() -> None:
     register_cache_projector(_lazy_projector(
         "review.data.fov_selection", "apply_fov_selection_to_cache"),
         columns=_lazy_projector("review.data.fov_selection", "fov_selection_input_columns"))
+    # The one saved-cell set excluded from analysis (Cell Gating → Saved cells).
+    register_cache_projector(_lazy_projector(
+        "review.data.saved_cells_gate", "apply_saved_cells_gate_to_cache"),
+        columns=_lazy_projector("review.data.saved_cells_gate", "saved_cells_input_columns"))
 
 
 def attach_feature_state(state, registry: FeatureRegistry | None = None) -> None:

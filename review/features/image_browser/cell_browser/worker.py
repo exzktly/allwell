@@ -19,6 +19,7 @@ from PySide6.QtCore import QObject, Signal
 
 from review.features.image_browser.cell_browser.collect import CellDescriptor
 from widgets.lut_cmaps import resolve_channel_tint
+from review.data.cell_crop import bbox_for, display_window, normalise, outline
 from review.data.frame_load import load_frame_array, load_mask_array
 
 _logger = logging.getLogger("review")
@@ -28,38 +29,14 @@ _CROP_PAD_PX = 18
 
 def _bbox_for(mask_arr, nucleus_id: int, pad: int) -> tuple | None:
     """Padded (r0, c0, r1, c1) bounding box of ``mask == nucleus_id``; None if absent."""
-    ys, xs = np.where(mask_arr == nucleus_id)
-    if ys.size == 0:
-        return None
-    r0, r1 = int(ys.min()), int(ys.max()) + 1
-    c0, c1 = int(xs.min()), int(xs.max()) + 1
-    r0 = max(0, r0 - pad); c0 = max(0, c0 - pad)
-    r1 = min(mask_arr.shape[0], r1 + pad); c1 = min(mask_arr.shape[1], c1 + pad)
-    return r0, c0, r1, c1
+    return bbox_for(mask_arr, nucleus_id, pad)
 
 
 def _norm01(crop, bounds: tuple | None = None) -> np.ndarray:
-    """Scale a 2-D float crop to 0..1.
-
-    With *bounds* ``(lo, hi)`` — the shared per-channel display LUT (S4) — clip
-    to that fixed window so the Cell Browser matches the brightness tuned in the
-    other image viewers. Without it, fall back to a robust 1–99 percentile of
-    the crop (auto).
-    """
-    a = np.asarray(crop, dtype=np.float32)
-    if bounds is not None:
-        lo, hi = float(bounds[0]), float(bounds[1])
-        if hi <= lo:
-            hi = lo + 1.0
-        return np.clip((a - lo) / (hi - lo), 0.0, 1.0)
-    finite = a[np.isfinite(a)]
-    if finite.size == 0:
-        return np.zeros(a.shape, dtype=np.float32)
-    lo = float(np.percentile(finite, 1.0))
-    hi = float(np.percentile(finite, 99.0))
-    if hi <= lo:
-        hi = lo + 1.0
-    return np.clip((a - lo) / (hi - lo), 0.0, 1.0)
+    """Scale a 2-D float crop to 0..1 by the shared window, else the crop's 1–99th percentile
+    (``review/data/cell_crop.display_window`` — the rule the Scatter cell popup uses too)."""
+    window, _rule = display_window(crop, bounds)
+    return normalise(crop, window)
 
 
 def compose_cell_rgb(ctx, desc: CellDescriptor, channels: list[str],
@@ -128,14 +105,7 @@ def compose_cell_rgb(ctx, desc: CellDescriptor, channels: list[str],
 
     out = (np.clip(rgb, 0.0, 1.0) * 255.0).astype(np.uint8)
     if show_boundaries:
-        m = mask_crop.astype(np.int32)
-        padded = np.pad(m, 1, mode="constant", constant_values=0)
-        center = padded[1:-1, 1:-1]
-        boundary = (center == nid) & (
-            (center != padded[:-2, 1:-1]) | (center != padded[2:, 1:-1]) |
-            (center != padded[1:-1, :-2]) | (center != padded[1:-1, 2:])
-        )
-        out[boundary] = (255, 255, 0)
+        out[outline(mask_crop, nid)] = (255, 255, 0)
     return out
 
 

@@ -12,16 +12,11 @@ import numpy as np
 import pandas as pd
 
 from domain.tp_match import tp_close_mask
-from review.core.lazy import lazy as _lazy
 from review.data.data_loading import df_included_mask, resolve_value_series
 from review.domain.metric_registry import column_gating_exempt
-
-# Lazy: ``gating`` imports ``timepoint_color_map`` from ``collect``, which
-# imports this module, so a module-scope import of ``gating`` would cycle. Same
-# binding style the Cell Gating compute layer uses for this very function —
-# both sides run the one shared membership test, so "inside a gate" means the
-# same thing everywhere.
-compute_gate_inclusion = _lazy("review.features.scatter.gating", "compute_gate_inclusion")
+# The one gate predicate every surface uses, so "inside a gate" means the
+# same thing here, in Cell Gating and in the Cell Browser.
+from review.domain.gates import compute_gate_inclusion
 
 
 def well_cloud(df, *, col_x: str, col_y: str, target_tps, fluor_gate_x: float, fluor_gate_y: float,
@@ -50,7 +45,10 @@ def well_cloud(df, *, col_x: str, col_y: str, target_tps, fluor_gate_x: float, f
     # well A fell in this gate" is a statement about the cloud the gate was
     # drawn over — filter first and every gate reads 100.0%, which is what
     # "Apply gates" used to do to its own labels.
-    gate_mask = compute_gate_inclusion(df, gates, ratios) if gates else None
+    # ``nanowell_values=None``: both callers hand this function rows already
+    # joined with the plotted axes' nanowell columns (``with_nanowell_columns``),
+    # and the gates it is given are those same axes' (``gates_for_axes``).
+    gate_mask = compute_gate_inclusion(df, gates, ratios, nanowell_values=None) if gates else None
     target_arr = np.asarray(target_tps, dtype=float)
     tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
     with np.errstate(invalid="ignore"):

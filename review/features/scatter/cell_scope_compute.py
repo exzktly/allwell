@@ -25,12 +25,12 @@ import pandas as pd
 from review.data.data_loading import resolve_value_series
 from review.data.metric_labels import SYNTHETIC_METRIC_KEYS
 from review.domain.metric_registry import column_gating_exempt
-from review.features.export.cell_scope_compute import CellScope, scope_from_ctx
+from review.features.export.cell_scope_compute import CellScope, MarkerFn, plotted_wells, scope_from_ctx
 from review.features.scatter.collect import gates_for_axes
 from review.features.scatter.controller import (
     col_for_scatter_axis, scatter_axis_metric_key,
 )
-from review.features.scatter.gating import compute_gate_inclusion
+from review.domain.gates import compute_gate_inclusion
 
 
 def _axis_marker(col: str, gate: float):
@@ -50,8 +50,42 @@ def _gate_marker(gates, ratios):
     def _marker(df, _scope):
         if not gates:
             return np.ones(len(df), dtype=bool)
-        return np.asarray(compute_gate_inclusion(df, gates, ratios), dtype=bool)
+        # ``None``: ``build_chunk`` has already joined every ``nw::`` column the
+        # axes and these gates name (``CellScope.nanowell_columns``).
+        return np.asarray(compute_gate_inclusion(df, gates, ratios, nanowell_values=None),
+                          dtype=bool)
     return _marker
+
+
+def saved_cells_marker(ctx) -> tuple[str, MarkerFn] | None:
+    """``(column, marker)`` for the highlighted saved set, or ``None`` with no highlight.
+
+    The column is named for the set, so a pasted CSV still says which set it
+    was. 1 / 0 per row, and **blank** (NA) for a row in a well segmented again
+    since the set was saved: membership there was not computed, which is not
+    the same as "not in the set". A marker, never a filter.
+    """
+    import pandas as pd
+
+    from domain.image_identity import cell_key_tuples_for_dataframe
+    from review.core.cell_sets import highlighted_set, usable_cells
+
+    cell_set = highlighted_set(ctx)
+    if cell_set is None:
+        return None
+    usable = usable_cells(ctx, cell_set)
+    stale_wells = set(ctx.state.cell_sets.stale.get(cell_set.name) or {})
+
+    def _marker(df, _scope):
+        well = str(df.attrs.get("well_label", ""))
+        if well in stale_wells:
+            return pd.array([pd.NA] * len(df), dtype="Int8")
+        keys = cell_key_tuples_for_dataframe(df)
+        if keys is None:
+            return pd.array([pd.NA] * len(df), dtype="Int8")
+        return pd.array([int((well, *k) in usable) for k in keys], dtype="Int8")
+
+    return f"in_saved_cells[{cell_set.name}]", _marker
 
 
 def _selected_timepoints(ctx) -> tuple[float, ...]:
@@ -119,9 +153,20 @@ def cell_scope(ctx, *, entry_x: str | None = None, entry_y: str | None = None,
             return np.asarray(np.isfinite(x) & np.isfinite(y) & np.isfinite(area),
                               dtype=bool)
 
+    from review.data.observations import is_nanowell_cell_column, nanowell_observations
+
+    wells = plotted_wells(ctx)
+    nw_cols = tuple(dict.fromkeys(
+        c for c in (col_x, col_y, *(g.get(k) for g in gates for k in ("x_col", "y_col")))
+        if c and is_nanowell_cell_column(c)))
+    table = nanowell_observations(ctx, sorted({w for _g, w in wells})) if nw_cols else None
+
     return scope_from_ctx(
         ctx,
         plot="scatter_cells",
+        wells=wells,
+        nanowell_columns=nw_cols,
+        nanowell_rows=table.frame if table is not None else None,
         val_col=col_x,
         timepoints=(_selected_timepoints(ctx) if timepoints is None
                     else tuple(float(t) for t in timepoints)),
@@ -133,6 +178,7 @@ def cell_scope(ctx, *, entry_x: str | None = None, entry_y: str | None = None,
             ("plot_y_above_floor", _axis_marker(col_y, gate_y)),
             ("plot_axes_finite", _finite_axes),
             ("plot_in_gate", _gate_marker(gates, ratios)),
+            *((saved,) if (saved := saved_cells_marker(ctx)) else ()),
         ),
         drawn_subset="plot_x_above_floor=1 AND plot_y_above_floor=1 AND "
                      "plot_axes_finite=1 (AND plot_in_gate=1 with Apply gates on)",

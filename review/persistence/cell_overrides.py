@@ -42,7 +42,7 @@ def path_for(ctx) -> Path | None:
     return None
 
 
-def _well_zip_fingerprints(ctx) -> dict[str, str]:
+def well_zip_fingerprints(ctx) -> dict[str, str]:
     """Snapshot the ``<well>_out.zip`` mtimes for every loaded well.
 
     Used both at save time (stored alongside each override) and at load
@@ -79,7 +79,7 @@ def save_to_data_dir(ctx) -> None:
     path = path_for(ctx)
     if path is None:
         return
-    fingerprints = _well_zip_fingerprints(ctx)
+    fingerprints = well_zip_fingerprints(ctx)
     overrides = []
     for (well, fov, tp, nid), val in ctx.runtime.review.included_overrides.items():
         overrides.append({
@@ -107,8 +107,8 @@ def save_to_data_dir(ctx) -> None:
         _logger.warning("Failed to save cell overrides to %s: %s", path, exc)
 
 
-def _fingerprints_for_data_dir(data_dir: Path) -> dict[str, str]:
-    """Qt-free twin of ``_well_zip_fingerprints`` taking a plain path — lets
+def fingerprints_for_data_dir(data_dir: Path) -> dict[str, str]:
+    """Qt-free twin of ``well_zip_fingerprints`` taking a plain path — lets
     :func:`load_overrides` (and its tests) work from a data dir alone rather
     than from a context."""
     out: dict[str, str] = {}
@@ -153,7 +153,7 @@ def load_overrides(data_dir: Path) -> dict[tuple[str, str, str, str], str]:
     except (TypeError, ValueError):
         pass
 
-    fingerprints = _fingerprints_for_data_dir(data_dir)
+    fingerprints = fingerprints_for_data_dir(data_dir)
     new_map: dict = {}
     dropped_stale = 0
     legacy_unfingerprinted = 0

@@ -48,16 +48,28 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     from review.core.ui_helpers import build_section_header
     lay.addWidget(build_section_header(parent, "Cell filters"))
 
-    # ── source: scatter gate vs criteria (N1) ────────────────────────────────
-    gate_cb = QCheckBox("From scatter gate", parent)
-    gate_cb.setToolTip(
-        "Show exactly the cells inside the gate(s) drawn on the Scatter Plot.\n"
-        "Best with Scatter + Cell Browser in Split View — drawing or resizing a "
-        "gate updates this gallery live. Disables the criteria filter while on "
-        "(the gate is the numeric filter).")
-    gate_cb.toggled.connect(lambda on: _on_gate_mode_toggled(ctx, bool(on)))
-    lay.addWidget(gate_cb)
-    ctx.runtime.cell_browser.gate_mode_cb = gate_cb
+    # ── source: criteria, the scatter gates, or a set of saved cells ─────────
+    # A menu rather than the "From scatter gate" checkbox it replaces: a ticked
+    # box greyed the criteria out and stayed ticked across tabs and datasets,
+    # so the editor below it looked broken. A chosen source reads as one.
+    src_row = QWidget(parent)
+    srl = QHBoxLayout(src_row)
+    srl.setContentsMargins(0, 0, 0, 0)
+    src_lbl = QLabel("Source", src_row)
+    src_lbl.setObjectName("Muted")
+    srl.addWidget(src_lbl)
+    source_cb = QComboBox(src_row)
+    source_cb.setToolTip(
+        "Criteria: the cells matching the filters below.\n"
+        "Scatter gates: exactly the cells inside the gate(s) drawn on the Scatter "
+        "Plot — best with Scatter + Cell Browser in Split View, where resizing a gate "
+        "updates this gallery live.\n"
+        "Saved cells: the cells of a set saved with a lasso on Spatial or Multivariate.")
+    srl.addWidget(source_cb, 1)
+    lay.addWidget(src_row)
+    ctx.runtime.cell_browser.source_cb = source_cb
+    _refresh_source_items(ctx)
+    source_cb.currentIndexChanged.connect(lambda _i: _on_source_changed(ctx))
 
     # Which gate(s) to source from — several may be drawn. ``None`` ⇒ all.
     ctx.runtime.cell_browser.gate_choices = None
@@ -117,7 +129,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     # this line a user who ticked it earlier meets a permanently dead
     # "+ Add criterion" button with nothing on screen explaining it.
     criteria_off_hint = QLabel(
-        "Criteria are ignored while “From scatter gate” is on.", parent)
+        "Criteria apply only when Source is Criteria.", parent)
     criteria_off_hint.setObjectName("Muted")
     criteria_off_hint.setWordWrap(True)
     criteria_off_hint.setVisible(False)
@@ -182,18 +194,53 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     cell_browser_sidebar_refresh(ctx)
 
 
-def _on_gate_mode_toggled(ctx, on: bool) -> None:
-    """Switch the gallery source between the scatter gate and the criteria (N1).
-    Disables the criteria editor in gate mode, reveals the gate picker + hint,
-    and re-collects immediately."""
-    _set_criteria_enabled(ctx, not on)
+def _refresh_source_items(ctx) -> None:
+    """Rebuild the Source menu: Criteria, Scatter gates, then each saved set.
+
+    Keeps the current choice; a chosen set that no longer exists falls back to
+    Criteria, which re-collects.
+    """
+    from review.core.cell_sets import sets
+
+    cb = getattr(ctx.runtime.cell_browser, "source_cb", None)
+    if cb is None:
+        return
+    current = cb.currentData() or "criteria"
+    blocked = cb.blockSignals(True)
+    try:
+        cb.clear()
+        cb.addItem("Criteria", "criteria")
+        cb.addItem("Scatter gates", "gates")
+        for s in sets(ctx):
+            cb.addItem(f"Saved cells: {s.name}", f"set:{s.name}")
+        idx = cb.findData(current)
+        cb.setCurrentIndex(idx if idx >= 0 else 0)
+    finally:
+        cb.blockSignals(blocked)
+    if cb.findData(current) < 0:
+        _on_source_changed(ctx)
+
+
+def _on_source_changed(ctx) -> None:
+    """Switch the gallery's source. Criteria keeps the editor; the scatter gates
+    reveal the gate picker; a saved set needs neither. Re-collects immediately."""
     cb = ctx.runtime.cell_browser
+    data = str(cb.source_cb.currentData() or "criteria") if cb.source_cb is not None else "criteria"
+    gates = data == "gates"
+    _set_criteria_enabled(ctx, data == "criteria")
     for w in (cb.gate_pick_row, cb.gate_hint):
         if w is not None:
-            w.setVisible(on)
-    if on:
+            w.setVisible(gates)
+    if gates:
         _refresh_gate_choices(ctx)
     ctl.apply_filters(ctx)
+
+
+def _on_gate_mode_toggled(ctx, on: bool) -> None:
+    """Choose the scatter gates (``on``) or Criteria as the source."""
+    cb = getattr(ctx.runtime.cell_browser, "source_cb", None)
+    if cb is not None:
+        cb.setCurrentIndex(max(0, cb.findData("gates" if on else "criteria")))
 
 
 def _set_criteria_enabled(ctx, on: bool) -> None:
@@ -363,6 +410,7 @@ def _sort_key(s: str):
 def cell_browser_sidebar_refresh(ctx) -> None:
     """Repopulate criteria property combos + timepoint/FOV options from the
     current dataset + selection (called on tab show / dataset load)."""
+    _refresh_source_items(ctx)
     # property combos
     props = enumerate_properties(ctx)
     for combo, _lo, _hi in (ctx.runtime.cell_browser.criteria_rows or []):

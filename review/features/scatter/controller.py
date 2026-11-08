@@ -22,6 +22,7 @@ from review.domain.ratio_models import is_ratio_key
 from pipeline.shape_features import is_shape_column
 from core.safe import swallowed
 from review.core.plot_style import apply_export_style_to_current, figure_prefs, style_legend
+from review.features.scatter._cell_rings import store_interaction_points
 from review.features.scatter.collect import (  # re-export
     collect_scatter_agg_data,
     collect_scatter_data,
@@ -103,7 +104,6 @@ def redraw_scatter(
     if len(getattr(scatter_fig, "axes", []) or []) > 1:
         _setup_scatter_axes(ctx, 1)
         ax_scatter = ctx.widgets.get_or_none("_ax_scatter")
-
 
     # Clear existing plot
     ax_scatter.clear()
@@ -211,7 +211,7 @@ def redraw_scatter(
     note_sampled(scatter_data, ax_scatter)
 
     # Redraw canvas
-    ctx.runtime.scatter.interaction_cache = {
+    store_interaction_points(ctx, {
         "points": interaction_points,
         # Overlay is a single panel: pair the points with the one axis so the
         # click/hover handlers share one panel-resolution path with the
@@ -224,7 +224,7 @@ def redraw_scatter(
         "timepoints_h": tps_list,
         "col_x": col_x,
         "col_y": col_y,
-    }
+    })
     # Re-apply Export Style sidebar prefs so axis limits / log scale /
     # font sizes survive a redraw — matches bar/heatmap/distribution.
     try:

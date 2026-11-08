@@ -41,6 +41,19 @@ SCHEMA_VERSION = 1
 _MIGRATIONS: dict = {}
 
 
+def _restore_highlight(ctx, name) -> None:
+    """Restore the highlighted saved-cell set; a set deleted since is named, not dropped."""
+    from review.core.cell_sets import find, set_highlighted
+    sets = getattr(ctx.state, "cell_sets", None)
+    if sets is None:
+        return
+    if name and find(ctx, str(name)) is None:
+        set_highlighted(ctx, None)
+        sets.missing_highlight = str(name)
+    else:
+        set_highlighted(ctx, str(name) if name else None)
+
+
 def _migrate(state: dict, from_version) -> dict | None:
     """Upgrade a saved ``view_state`` dict to :data:`SCHEMA_VERSION`.
 
@@ -449,6 +462,8 @@ def _snapshot_scatter(ctx) -> dict:
         out["color_by_tp"] = bool(_sc.color_by_tp)
         out["gates_hidden"] = bool(_sc.gates_hidden)
         out["apply_gates_to_points"] = bool(_sc.apply_gates_to_points)
+        _sets = getattr(ctx.state, "cell_sets", None)
+        out["highlight_saved_cells"] = _sets.highlight if _sets is not None else None
     # Per-timepoint multi-select checkboxes for each sub-tab (the dataset-wide
     # timepoint filter the user can toggle). Mirrors the Bar tab's
     # ``timepoint_selections`` round-trip.
@@ -1243,6 +1258,8 @@ def _apply_scatter(ctx, state: dict) -> None:
                     swallowed()
         if "gates_hidden" in state:
             _sc.gates_hidden = bool(state["gates_hidden"])
+        if "highlight_saved_cells" in state:
+            _restore_highlight(ctx, state["highlight_saved_cells"])
         if "apply_gates_to_points" in state:
             _sc.apply_gates_to_points = bool(state["apply_gates_to_points"])
             btn = ctx.widgets.get_or_none("_scatter_apply_gates_btn")

@@ -224,6 +224,17 @@ def clear_curation(ctx) -> None:
     _save(ctx, "triage_decisions")
 
 
+def _clear_saved_cells(ctx) -> None:
+    """Every saved-cell set, and with them the set excluded from analysis."""
+    state = ctx.state.cell_sets
+    state.sets.clear()
+    state.stale.clear()
+    state.exclude = None
+    # The excluded set's verdict is in the cached rows; reloading them drops it.
+    ctx.state.dataset.cache.clear()
+    _save(ctx, "cell_sets")
+
+
 def _clear_ratios(ctx) -> None:
     """User-defined ratio metrics."""
     from review.core.channel_state_controller import set_ratio_metrics
@@ -322,6 +333,14 @@ ANALYSIS_SCOPES: tuple[ResetScope, ...] = (
         domains=("crop_region", "cell_overrides", "field_exclusions",
                  "triage_decisions"),
         clear=clear_curation,
+    ),
+    ResetScope(
+        key="saved_cells",
+        title="Saved cells",
+        detail="Every set of cells saved with a lasso, and the set excluded "
+               "from analysis.",
+        domains=("cell_sets",),
+        clear=_clear_saved_cells,
     ),
     ResetScope(
         key="ratios",

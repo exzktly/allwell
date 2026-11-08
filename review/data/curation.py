@@ -18,10 +18,19 @@ where the feature happened to be called — the dataset load, a toggle, and the
 end of a gating pass — so a well the row cache dropped and reloaded came back
 with the curation silently missing and the override map still holding it.
 
-Unlike QC and crop this writes ``Included`` itself rather than its own verdict
-column, because the override *is* the inclusion decision for that cell. The
-three layers never collide: QC and crop own ``QC_Pass``/``Crop_Pass`` and
-document that they never touch ``Included``.
+It writes a verdict column of its own, ``Curation_Pass`` (0 = deleted by hand),
+beside QC's ``QC_Pass`` and the crop's ``Crop_Pass``. It used to write
+``Included``, the column the intensity gate writes too, so a cell the user
+deleted and a cell below the gate were the same 0: no surface could say which
+had happened, the inclusion funnel could only report "Curation + intensity
+gate" as one step, and curation survived a reloaded well only because its
+projector was registered after the gate's. The column is written only for a
+well that has overrides; absent means nothing was curated there, which every
+reader treats as all-pass.
+
+An override of ``"1"`` — which no surface writes any more, but an older
+``cell_overrides.json`` can hold — still forces ``Included = 1`` as it always
+did, so such a file keeps the meaning it was saved with.
 """
 
 from __future__ import annotations
@@ -31,6 +40,10 @@ import pandas as pd
 from core.safe import swallowed
 from review.data.data_loading import get_rows
 from domain.image_identity import cell_key_tuples_for_dataframe
+
+
+#: The verdict column hand curation writes (``data_loading.VERDICT_LAYERS``).
+CURATION_COLUMN = "Curation_Pass"
 
 
 def _coerce_included(val: object) -> int:
@@ -49,7 +62,7 @@ def curation_input_columns(ctx, label: str | None = None) -> tuple[str, ...]:
 
 def apply_curation_to_cache(ctx, label: str | None = None, *,
                             note_change: bool = True) -> None:
-    """Project the override map onto cached ``row["Included"]``.
+    """Project the override map onto the cached rows' ``Curation_Pass``.
 
     With *label* given, only that well — the form the projector registry calls
     on a freshly-loaded frame; it is fetched through :func:`data_loading.get_rows`,
@@ -116,8 +129,13 @@ def apply_curation_to_cache(ctx, label: str | None = None, *,
         mask = override_for_row.notna()
         if not mask.any():
             continue
-        df.loc[mask, "Included"] = override_for_row[mask].map(
-            _coerce_included).astype(int)
+        verdict = override_for_row[mask].map(_coerce_included).astype(int)
+        if CURATION_COLUMN not in df.columns:
+            df[CURATION_COLUMN] = 1
+        df.loc[mask, CURATION_COLUMN] = verdict
+        kept = verdict.eq(1)
+        if kept.any():
+            df.loc[kept.index[kept], "Included"] = 1
         # Manual curation just changed which cells this well contributes, so a
         # memoized aggregation of it is stale. The bump lives here rather than
         # in the callers because there are several of them and one — the dataset

@@ -253,7 +253,8 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None,
 #: tooltip and had never been built, so every layer past the first was
 #: unreachable from any surface in the app.
 EXCLUSION_LAYERS = (
-    ("Included", "deleted here"),
+    ("Curation_Pass", "deleted here"),
+    ("Included", "below the intensity gate"),
     ("QC_Pass", "debris gate"),
     ("Crop_Pass", "outside the crop"),
     ("Gate_Pass", "outside the scatter gates"),
@@ -263,6 +264,7 @@ EXCLUSION_LAYERS = (
     ("Border_Pass", "touches the image border"),
     ("Excluded_Field_Pass", "field excluded in QC triage"),
     ("FOV_Pass", "field not in the FOV selection"),
+    ("Saved_Cells_Pass", "in the excluded saved cells"),
 )
 
 
@@ -407,7 +409,7 @@ def review_build_exclusion_reasons(
         failed = []
         for col, label in EXCLUSION_LAYERS:
             value = columns[col][row]
-            if col == "Included":
+            if col == "Curation_Pass":
                 # The live override wins over the cached column, which is what
                 # makes a click take effect before the next projection.
                 ovr = overrides.get((well, fov, tp, str(nid)))

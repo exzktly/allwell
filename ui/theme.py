@@ -198,13 +198,45 @@ class Colors:
     # the overlay's other eight inks (``review_image.renderer._layer_inks``).
     exclusion_border  = "#E879F9"
     # Segmentation overlay: a cell in a field the Cell Gating FOV selection
-    # leaves out (FOV_Pass). Yellow, not green, for the reason above; measured
-    # ΔE ≥ 33 (CIE76) to the overlay's other eight inks.
-    exclusion_fov     = "#FDE047"
+    # leaves out (FOV_Pass). Pale lime: the yellow it was (#FDE047) sat ΔE 5
+    # from the focused-cell outline (``focused_cell``), the same yellow to the
+    # eye. Measured ΔE ≥ 39 (CIE76) to every other overlay ink and to the kept
+    # and focused outlines; relative luminance 0.90.
+    exclusion_fov     = "#DDFFAA"
+    # Segmentation overlay: a cell you deleted (Curation_Pass). Salmon, not
+    # ``danger`` (#F87171), which sat ΔE 28 from the red outline drawn round
+    # every kept cell, so a deletion was hard to pick out. Measured ΔE ≥ 42 to
+    # every other overlay ink and to both outlines; luminance 0.46.
+    exclusion_deleted = "#FF9988"
+    # Segmentation overlay: a cell the focus cut removed (Focus_Pass). Magenta,
+    # not the borrowed ``heatmap_selection`` (#FF6B35), which sat ΔE 21 from the
+    # kept-cell outline. Measured ΔE ≥ 40 to every other ink and both outlines;
+    # luminance 0.29.
+    exclusion_focus   = "#FF00FF"
     # Segmentation overlay: a cell of a nanowell whose rim was out of focus at its timepoint (NW_Focus_Pass).
     # Pink, the most separated hue left: measured ΔE ≥ 34 (CIE76) to the overlay's other nine inks, relative
     # luminance 0.35.
     exclusion_nanowell_focus = "#F472B6"
+    # Segmentation overlay: a cell below the intensity gate (Included). It
+    # shared "deleted here" with hand curation until curation got its own
+    # column. Lavender, not green; measured ΔE ≥ 32 (CIE76) to the overlay's
+    # other ten inks, relative luminance 0.52.
+    exclusion_intensity = "#C4B5FD"
+    # Segmentation overlay: a cell in the saved-cell set excluded from analysis
+    # (Saved_Cells_Pass). Khaki; measured ΔE ≥ 44 (CIE76) to the overlay's
+    # other eleven inks, relative luminance 0.32.
+    exclusion_saved_cells = "#AA9955"
+    # One cell shown on its own (the Scatter cell popup): its boundary, the
+    # Segmentation overlay's default boundary ink so a cell reads the same in
+    # both. And the focused cell — the one the status-bar chip names — ringed
+    # on every plot that draws it and outlined in Segmentation, the overlay's
+    # default "selected" ink.
+    cell_outline      = "#FF4040"
+    focused_cell      = "#FFE640"
+    # The highlighted saved cells on the per-cell Scatter: solid points over a
+    # faded cloud. Cyan, apart from the focused yellow and the khaki the same
+    # set takes in Segmentation when it is excluded from analysis.
+    saved_cells_highlight = "#00E5FF"
     spatial_observed  = "#4AA3FF"   # observed curve on the Spatial tab
     spatial_reference = "#FF9C4A"   # its random-reference curve
     gate_curve_a      = "#4FC3F7"   # Cell Gating optimizer, control well A

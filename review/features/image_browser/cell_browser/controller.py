@@ -166,8 +166,10 @@ def apply_filters(ctx, *, live_sync: bool = False) -> None:
     st.use_tophat = (src.currentData() == "corrected") if src is not None else False
     lcb = getattr(ctx.runtime.cell_browser, "label_spot_cb", None)
     st.label_spot_count = bool(lcb.isChecked()) if lcb is not None else False
-    gcb = getattr(ctx.runtime.cell_browser, "gate_mode_cb", None)
-    st.scatter_gate_mode = bool(gcb.isChecked()) if gcb is not None else False
+    source = getattr(ctx.runtime.cell_browser, "source_cb", None)
+    data = str(source.currentData() or "criteria") if source is not None else "criteria"
+    st.scatter_gate_mode = data == "gates"
+    st.saved_cells = data[len("set:"):] if data.startswith("set:") else None
     st.page_size = _page_size(ctx)
 
     # Sort happens inside collect_cells (before the MAX_TOTAL cap, so the cap
@@ -252,7 +254,11 @@ def _empty_gallery_hint(st) -> str:
     """Name the most likely reason the filtered set is empty (and the fix)."""
     if getattr(st, "scatter_gate_mode", False):
         return ("No cells in the scatter gate — draw or adjust a gate on the "
-                "Scatter Plot, or turn off “From scatter gate”.")
+                "Scatter Plot, or set Source back to Criteria.")
+    if getattr(st, "saved_cells", None):
+        return (f"None of the cells saved as “{st.saved_cells}” are in the loaded wells at "
+                "the chosen timepoints and fields — or all of them are in wells segmented "
+                "again since the set was saved.")
     if st.timepoints == []:
         return "No timepoints selected — click Timepoints to choose which to show."
     if st.fovs == []:

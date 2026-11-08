@@ -289,7 +289,8 @@ def crop_effect_for_df(df, region, scope: FrameScope | None = None,
 
     Returns ``(removed, otherwise_included, has_centroids)``:
     - ``otherwise_included`` — cells that would count toward analysis ignoring
-      the crop (``Included==1`` AND ``QC_Pass==1`` when those columns exist).
+      the crop (``Included==1`` AND ``Curation_Pass==1`` AND ``QC_Pass==1``
+      when those columns exist).
     - ``removed`` — of those, how many the crop now drops (centroid outside the
       box, in a frame the scope names). This is the crop's marginal effect on
       every plot/stat.
@@ -306,8 +307,9 @@ def crop_effect_for_df(df, region, scope: FrameScope | None = None,
     incl = pd.Series(True, index=df.index)
     if "Included" in df.columns:
         incl &= pd.to_numeric(df["Included"], errors="coerce").fillna(0).eq(1)
-    if "QC_Pass" in df.columns:
-        incl &= pd.to_numeric(df["QC_Pass"], errors="coerce").fillna(1).eq(1)
+    for verdict in ("Curation_Pass", "QC_Pass"):
+        if verdict in df.columns:
+            incl &= pd.to_numeric(df[verdict], errors="coerce").fillna(1).eq(1)
     otherwise_included = int(incl.sum())
     crop = compute_crop_pass(df, region, scope, well).eq(1)
     removed = int((incl & ~crop).sum())

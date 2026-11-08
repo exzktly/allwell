@@ -35,7 +35,7 @@ def test_cell_browser_tab_builds_and_registers(loaded_app):
 
 
 def test_gate_mode_toggle_reveals_gate_picker(loaded_app):
-    """Regression: turning on 'From scatter gate' must reveal the gate picker +
+    """Regression: choosing Source → Scatter gates must reveal the gate picker +
     hint. The reveal previously read stale ``ctx._cell_browser_*`` attrs (never
     set) instead of ``ctx.runtime.cell_browser.gate_pick_row``/``.gate_hint``, so
     nothing appeared."""
@@ -45,11 +45,11 @@ def test_gate_mode_toggle_reveals_gate_picker(loaded_app):
     assert cb.gate_pick_row is not None and cb.gate_hint is not None
     assert not cb.gate_pick_row.isVisible()
 
-    cb.gate_mode_cb.setChecked(True)   # fires _on_gate_mode_toggled
+    cb.source_cb.setCurrentIndex(cb.source_cb.findData("gates"))   # fires _on_source_changed
     assert cb.gate_pick_row.isVisibleTo(cb.gate_pick_row.parentWidget())
     assert cb.gate_hint.isVisibleTo(cb.gate_hint.parentWidget())
 
-    cb.gate_mode_cb.setChecked(False)
+    cb.source_cb.setCurrentIndex(cb.source_cb.findData("criteria"))
     assert not cb.gate_pick_row.isVisibleTo(cb.gate_pick_row.parentWidget())
 
 
@@ -103,7 +103,12 @@ def test_cell_browser_click_navigates_to_segmentation(loaded_app):
     # the navigation path must not raise even when image arrays are absent.
     ctl.on_cell_clicked(app._ctx, cells[0])
     assert app._current_centre_tab() == "Segmentation"
-    assert app._app_state.review_image.selected_nucleus == int(float(cells[0].nucleus_id))
+    focused = app._app_state.focus.cell
+    assert focused is not None and focused.well == cells[0].well
+    assert focused.nucleus_id == int(float(cells[0].nucleus_id))
+    # The focused cell is named in the shell's status bar.
+    chip = app._ctx.widgets.get_or_none("_focus_chip")
+    assert chip is not None and chip.text() == focused.caption
     assert app._app_state.preview.selected_well == cells[0].well
 
 

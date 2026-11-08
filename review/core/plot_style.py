@@ -2334,8 +2334,10 @@ def _apply_layout_engine(fig, prefs: dict) -> None:
     # and the label then ran off its right edge. So the figure is inset from
     # whatever text hangs off it, as phone layout does, and again whenever the
     # canvas changes size, since opening a dock resizes it without a restyle.
-    fitted = (not use_constrained and not use_tight
-              and margin_fit.divider_placed(fig))
+    fitted = False
+    if not use_constrained and not use_tight:
+        with swallow("ask whether a divider places a plot's axes"):
+            fitted = margin_fit.divider_placed(fig)
     fig._aw_margin_fitted = fitted
     if fitted:
         with swallow("keep a divider-placed plot's text inside its figure"):

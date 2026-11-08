@@ -50,8 +50,8 @@ def _gate_marker(gates, ratios):
     def _marker(df, _scope):
         if not gates:
             return np.ones(len(df), dtype=bool)
-        # The export reads its rows without the nanowell join the plot makes, so
-        # a gate on an ``nw::`` axis finds no column here (tracker G3).
+        # ``None``: ``build_chunk`` has already joined every ``nw::`` column the
+        # axes and these gates name (``CellScope.nanowell_columns``).
         return np.asarray(compute_gate_inclusion(df, gates, ratios, nanowell_values=None),
                           dtype=bool)
     return _marker
@@ -122,9 +122,21 @@ def cell_scope(ctx, *, entry_x: str | None = None, entry_y: str | None = None,
             return np.asarray(np.isfinite(x) & np.isfinite(y) & np.isfinite(area),
                               dtype=bool)
 
+    from review.data.observations import is_nanowell_cell_column, nanowell_observations
+    from review.features.export.cell_scope_compute import plotted_wells
+
+    wells = plotted_wells(ctx)
+    nw_cols = tuple(dict.fromkeys(
+        c for c in (col_x, col_y, *(g.get(k) for g in gates for k in ("x_col", "y_col")))
+        if c and is_nanowell_cell_column(c)))
+    table = nanowell_observations(ctx, sorted({w for _g, w in wells})) if nw_cols else None
+
     return scope_from_ctx(
         ctx,
         plot="scatter_cells",
+        wells=wells,
+        nanowell_columns=nw_cols,
+        nanowell_rows=table.frame if table is not None else None,
         val_col=col_x,
         timepoints=(_selected_timepoints(ctx) if timepoints is None
                     else tuple(float(t) for t in timepoints)),

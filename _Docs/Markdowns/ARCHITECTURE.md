@@ -1805,7 +1805,13 @@ string timepoints the way their aggregation does and Distribution and Scatter
 do not; Multivariate reads its projection subsample off the last draw, a seeded
 choice over a collector's row order being unreproducible from a file. Heat Map,
 Spatial and Multivariate refuse before a first draw rather than writing an
-empty file.
+empty file. A scope whose plot reads `nw::` columns (a Scatter axis set to a
+Nanowell ▸ metric, or a gate drawn on one) carries them in
+`CellScope.nanowell_columns` with the nanowell rows taken on the GUI thread
+(`nanowell_rows`), and `build_chunk` joins them onto each well's rows before
+anything else, as the plot's own collectors do; without the join those axes
+resolve to NaN and the file holds no rows. The joined values are written as
+columns of their own.
 
 Three properties of the file are load-bearing. An **absent verdict column is
 written as `1`**, because `data/cache_projectors.project_verdict_column` drops a

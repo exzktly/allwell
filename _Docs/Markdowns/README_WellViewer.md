@@ -4909,10 +4909,20 @@ figure names the test and reminds you that the test's estimate is a ratio of
 *geometric* means, while the bar is a ratio of means; the two are usually close
 but are not the same number.
 
+Each bar's label names both layers: `Mut-drug ÷ WT-drug ÷ (Mut-veh ÷ WT-veh)`.
+
 When something cannot be computed, the note says which bar and why: no
 vehicle sample matches it, two do (tick another variable, or pool them), a
 condition has a single well so there is no test, or a value is zero or below so
-there is no logarithm (use Subtract, or check background subtraction). The
+there is no logarithm (use Subtract, or check background subtraction).
+
+**Step 1 has to pair within each treatment.** The ratio of ratios needs each
+sample divided by the control *at its own treatment* — Mut·Drug by WT·Drug,
+Mut·Vehicle by WT·Vehicle. If every sample shares one control (for example
+after **Set all to** WT·Vehicle), that control cancels out and the result would
+just be Mut·Drug ÷ Mut·Vehicle — a drug effect, not a ratio of ratios — so the
+bar is left empty and the note says which controls are the problem. Re-pair
+with **Pair by variable**, control *RNA = WT*, within each *Treatment*. The
 setting is **not applied** — and the note says so — without a per-sample
 control, with a **Baseline** (vs t0) set, or in the violin, beeswarm and
 all-points views. While it is applied, significance brackets from the

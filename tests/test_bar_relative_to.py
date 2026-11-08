@@ -166,3 +166,33 @@ def test_the_csv_s_raw_pass_does_not_overwrite_the_figure_s_note():
     notice = bar.rel_notice
     _items(ctx, fc_state=FC_STATE_OFF)
     assert bar.rel_applied is True and bar.rel_notice == notice
+
+
+def test_one_shared_stage_one_control_is_refused_not_drawn_as_a_ratio_of_ratios():
+    """The reported wrong number. With every bar divided by WT-veh, the control
+    cancels and R would be Mut-drug / Mut-veh — 3.0 on this plate, against a
+    true ratio of ratios of 1.5 — drawn on the same axis under the same label."""
+    from review.domain.control_ref import ControlRef
+
+    ctx, ids = _app()
+    bar = _on(ctx, ids)
+    ctx.state.plot.fc_control_map = {n: ControlRef.for_replicate_set("WT-veh") for n in _GROUPS}
+    drug = _items(ctx)["Mut-drug"]
+    assert drug.rel_outcome == rr.NOT_CROSSED and not drug.has_mean
+    assert math.isnan(drug.mean)
+    assert "WT-veh is not at its own Treatment" in bar.rel_notice
+
+
+def test_swapped_stage_one_controls_are_refused():
+    """Four distinct conditions, the wrong four: Mut-drug over WT-veh and Mut-veh
+    over WT-drug is a valid-looking contrast that is not the interaction."""
+    from review.domain.control_ref import ControlRef
+
+    ctx, ids = _app()
+    bar = _on(ctx, ids)
+    S = ControlRef.for_replicate_set
+    ctx.state.plot.fc_control_map = {
+        "WT-veh": S("WT-veh"), "WT-drug": S("WT-drug"),
+        "Mut-drug": S("WT-veh"), "Mut-veh": S("WT-drug")}
+    assert _items(ctx)["Mut-drug"].rel_outcome == rr.NOT_CROSSED
+    assert "would not be a ratio of ratios" in bar.rel_notice

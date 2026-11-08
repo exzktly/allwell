@@ -157,6 +157,8 @@ class BarItem:
     interaction: object | None = None
     interaction_label: str = ""
     interaction_p_bh: float | None = None
+    #: The second stage's denominator for the tick label — ``Mut-veh ÷ WT-veh``.
+    rel_tick: str = ""
 
 
 #: The gap between the bars of one timepoint group, as a fraction of the bar

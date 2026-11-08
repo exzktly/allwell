@@ -47,9 +47,12 @@ WELLS_DISAGREE = "wells_disagree"
 BASELINE_NO_VALUE = "baseline_no_value"
 #: The bar's own stage-1 value is missing, so there is nothing to divide.
 NO_VALUE = "no_value"
+#: Stage 1 does not pair the bar and its baseline with the matching controls
+#: (``_baseline_ratio._not_crossed``), so R would not be a ratio of ratios.
+NOT_CROSSED = "not_crossed"
 
 OUTCOMES = (OK, REFERENCE, NO_BASELINE, AMBIGUOUS, NOT_ANNOTATED,
-            WELLS_DISAGREE, BASELINE_NO_VALUE, NO_VALUE)
+            WELLS_DISAGREE, BASELINE_NO_VALUE, NO_VALUE, NOT_CROSSED)
 
 #: ``variable_pairing`` reasons → this vocabulary.
 FROM_PAIRING = {"no_match": NO_BASELINE, "ambiguous": AMBIGUOUS,

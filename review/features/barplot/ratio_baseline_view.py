@@ -100,7 +100,12 @@ def build_relative_to_row(ctx, parent: QWidget, layout) -> QWidget:
     built: dict = {"signature": None}
 
     def _wells():
-        return _members.member_wells(ctx, "bar")
+        # The row is built with the tab, which can be before the bar runtime's
+        # key source is wired; until it is there are no members to offer, and
+        # the popover's ``aboutToShow`` refresh fills the row once there are.
+        keys = getattr(getattr(getattr(ctx, "runtime", None), "barplot", None),
+                       "current_keys", None)
+        return _members.member_wells(ctx, "bar") if callable(keys) else {}
 
     def _signature():
         variables = _vp.annotating_variables(_vset(ctx), _wells())

@@ -18,14 +18,16 @@ from review.features.nanowell import _window_controller as wnc
 from review.features.nanowell.state import POPOUT_LAYOUTS
 from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 
-_RANGE_TIP = "The window's range of the metric, both ends inclusive. Type a number and press Enter."
+_RANGE_TIP = ("The window's range of the metric, both ends inclusive. Type a number and press Enter. A window of "
+              "several boxes (drawn with Shift held) edits its newest box here.")
 _RULE_TIP = ("Over several timepoints: keep a nanowell only if it is inside the range at every covered timepoint, or "
              "if it is inside at any one of them. Both counts are in the sentence.")
 _PANEL_TIP = "Cover only the panel the window was drawn in, rather than every panel."
 _POPOUT_TIP = "Show the nanowells inside the window in the pop-out, as rows of crops over time."
 _SUBSET_TIP = ("Keep only the nanowells inside the window: they are added to the Subset, applied at once, and the "
                "others leave the Distribution (and every view the Subset governs). The Subset holds one window at a "
-               "time: drawing another box takes this one out first, so the new box selects from every nanowell. The "
+               "time: drawing another box takes this one out first, so the new box selects from every nanowell. Hold "
+               "Shift while dragging to add the new box to it instead, so the Subset keeps both regions. The "
                "Subset's editor lists it and removes it.")
 _CLEAR_TIP = "Clear the window"
 #: The widest the strip's Low and High fields grow, in pixels: a number of a few digits.
@@ -98,7 +100,7 @@ def build_window_strip(ctx, parent) -> QWidget:
             low.setText(f"{window.lo:.6g}")
             high.setText(f"{window.hi:.6g}")
             rule.setCurrentIndex(rule.findData(window.rule))
-            rule.setVisible(window.axis == "time" and len(window.keys) > 1)
+            rule.setVisible(window.axis == "time" and len(window.all_keys()) > 1)
             panel_only.setChecked(window.panel_only)
         finally:
             for widget, was in zip(controls, blocked):

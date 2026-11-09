@@ -13111,17 +13111,28 @@ at every covered column would keep no nanowell at all from a window across two g
 It ranks the chosen rule's members by the value at
 the latest covered column (a member with none there last, ties by well, `q`, `r`) into `WindowRow`s — the fields of
 `extremes_compute.ExtremeRow`, a class of their own because `extremes_compute` imports `state`, which imports this
-module — and reports `covered` columns and `spans` (each covered slot's x extent) per panel; `_window_render` draws
-one band per run of touching spans (`merged_spans`) and rings dots inside them. `not_drawn` counts members with no dot in a covered slot by
+module — and reports `covered` columns, `spans` (each covered slot's x extent) and `bands` (`(x0, x1, lo, hi)`: each
+box's run of touching spans, `merged_spans`, at that box's range) per panel; `_window_render` draws one band per entry
+of `bands` and rings each member's dot inside one of them. **A window can be several boxes.** `more` holds the earlier
+boxes of a window drawn with Shift held (each a `DistributionWindow`, newest first) and the window's own fields are the
+newest box, which the strip's Low and High edit; `carried` holds the `(well, q, r)` kept from a window gate the box was
+Shift-drawn on. `boxes()` is every box under the window's one rule and `panel_only`, `all_keys()` their columns, and
+`added(box)` the window with *box* drawn on it. `members` is the union of each box's members (`_box_members`, each
+judged on its own columns and range) with the carried nanowells, which are members whatever the boxes hold (ringed
+wherever their dot is, ranked by their value at the ranking column, `NaN` when the model has none). `to_config` writes
+`more` and `carried` only when present, so a one-box window saves as it did; `from_config` drops the whole window when
+one box or carried site does not read. `not_drawn` counts members with no dot in a covered slot by
 reason from the figure's `HitMap` (`panels`: which axes drew which panel; `values`: the values of each entry's dots).
 `NanowellState.windows` (`window_key(column, axis)` → window, persisted; `_windows_from` drops a damaged block) holds one
 window per metric and axis; `window_model` is the `DistributionModel` last drawn, which `_window_controller.current`
 reads membership against, and `controller.redraw` hands it over through `_window_controller.after_draw`, which also
 draws the band and rings (`_window_render.draw_window`, gids `nw-window-band` / `nw-window-ring`, `Colors.accent`).
 **A press on the Distribution figure selects on release.** `controller.on_click` / `on_motion` / `on_release` delegate
-to `_window_controller` on this view: the press is kept in `NanowellState.window_press`; a release within
-`CLICK_SLOP_PX` is the click it always was (`_select`), and a longer drag becomes a window, drawn dashed while it is
-dragged and stored through `_store`, which saves and redraws. Hand-rolled rather than matplotlib's selectors, which
+to `_window_controller` on this view: the press is kept in `NanowellState.window_press` (axes, pixel x and y, and
+whether Shift was held); a release within `CLICK_SLOP_PX` is the click it always was (`_select`), and a longer drag
+becomes a window, drawn dashed while it is dragged and stored through `_store`, which saves and redraws. Shift held at
+the press or the release (`_window_controller.extends`, reading matplotlib's `MouseEvent.modifiers`) makes the drag
+*add* its box — `DistributionWindow.added` onto the window drawn for the metric and axis — instead of replacing it. Hand-rolled rather than matplotlib's selectors, which
 the figure's clearing on every redraw would destroy. `window_view.build_window_strip` is the strip (`NanowellWindowStrip`)
 above the figure and `_nw_window_refresh` keeps it on the window; the pop-out's **Show** / **Layout** / pager row is
 `window_view.build_popout_window_controls` (`_nw_popout_window_refresh`). In the pop-out's Window mode
@@ -13142,7 +13153,11 @@ against, never "no value" — and `to_config` / `from_config` carry the name and
 the whole block, as a bad condition does). **The Subset holds one window gate at a time.** `on_release` takes any
 window condition out of `st.subset` (`_drop_window_gate`, through `controller.set_subset`, whose redraw is synchronous)
 before it builds the new window, so the box's members — and its `n_at_drawing` and `drawn_under` — are read off the
-figure drawn without the old gate, and the status bar says the earlier window was taken out. `use_window_as_subset`
+figure drawn without the old gate, and the status bar says the earlier window was taken out (and that Shift adds
+instead). With Shift held, `on_release` first reads the gate's nanowells (`_window_gate_sites`, *inside* conditions
+only) and puts them in the new window's `carried` before dropping the gate, so *Use as Subset* then freezes the old
+region and the new box together: a Subset of separate regions is built one Shift-drag at a time, still as one window
+condition. `use_window_as_subset`
 likewise drops a window condition still in the Subset (a window kept for another metric can come back under one)
 before reading the members, putting the Subset back if it then refuses; otherwise replacing the gate would keep only
 what both hold. It appends the condition to the remaining conditions under *all* and sets it through
@@ -13157,7 +13172,9 @@ a column: the sentence on a line of its own the strip's width, and under it a `F
 controls wrap onto as many lines as they need instead of one row cutting each to a few letters
 (`test_nanowell_window_page.py::test_the_window_strip_fits_a_phone_width_every_control_whole_and_the_sentence_unclipped`). Tests: `test_nanowell_window_subset.py` (pure) and the
 *Use as Subset* cases of `test_nanowell_window_page.py` (a real drag and button press; one gate at a time, a second
-box selecting from every nanowell; replacing a gate already there; the refusal; the editor).
+box selecting from every nanowell; a Shift-drag adding a box, and carrying a gate's nanowells; replacing a gate
+already there; the refusal; the editor). The union, the carried nanowells and the saved form of a several-box window
+are pinned from hand-built models in `test_nanowell_window_members.py`.
 
 **The hex composite** (`composite_compute`, `_composite_render`) is the pop-out's second layout of the window's
 nanowells (`NanowellState.popout_layout` ∈ `POPOUT_LAYOUTS`, `"hex"`). `composite_compute.composite(rows, values=…, descending=…)`

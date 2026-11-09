@@ -19,8 +19,9 @@ from review.features.nanowell import _window_controller as wnc  # noqa: E402
 from tests.test_nanowell_page import COUNTS, _click_dot, _loaded, page  # noqa: E402,F401
 
 
-def _drag(ctx, ax, data_from, data_to):
-    """Press at *data_from*, move, release at *data_to* (data units of *ax*), as a person drags."""
+def _drag(ctx, ax, data_from, data_to, modifier=Qt.NoModifier):
+    """Press at *data_from*, move, release at *data_to* (data units of *ax*), as a person drags — holding *modifier*
+    (Shift, to add the box to the window) throughout."""
     canvas = ctx.widgets.get("_nw_canvas")
     ratio = canvas.devicePixelRatioF()
 
@@ -29,10 +30,10 @@ def _drag(ctx, ax, data_from, data_to):
         return QPoint(int(round(px / ratio)), int(round(canvas.height() - py / ratio)))
 
     middle = ((data_from[0] + data_to[0]) / 2, (data_from[1] + data_to[1]) / 2)
-    QTest.mousePress(canvas, Qt.LeftButton, Qt.NoModifier, at(data_from))
+    QTest.mousePress(canvas, Qt.LeftButton, modifier, at(data_from))
     QTest.mouseMove(canvas, at(middle))
     QTest.mouseMove(canvas, at(data_to))
-    QTest.mouseRelease(canvas, Qt.LeftButton, Qt.NoModifier, at(data_to))
+    QTest.mouseRelease(canvas, Qt.LeftButton, modifier, at(data_to))
 
 
 def _first_panel(ctx):
@@ -213,6 +214,40 @@ def test_one_window_gate_at_a_time_a_second_box_selects_from_every_nanowell(page
     (only,) = _subset_windows(st)
     assert only.values == ("Window 1",) and set(only.sites) == {("A01", 0, 0), ("B01", 3, 0)}
     assert _drawn_sites(st) == {("A01", 0, 0), ("B01", 3, 0)}
+
+
+def test_a_shift_drag_adds_its_box_to_the_window_drawn(page, qtbot):
+    """The first window keeps A01 (1,0) and B01 (0,0); a box over t_a at 1.5-2.5 cells keeps A01 (0,0) and B01 (3,0).
+    Without Shift the second box would replace the first, so the window would hold only its two."""
+    st = _drawn(page, qtbot)
+    _drag(page, _first_panel(page), (0.6, 1.5), (1.4, 2.5), Qt.ShiftModifier)
+    (window,) = st.windows.values()
+    assert len(window.more) == 1 and (window.lo, window.hi) == pytest.approx((1.5, 2.5), abs=0.05)
+    members = {("A01", 1, 0), ("B01", 0, 0), ("A01", 0, 0), ("B01", 3, 0)}
+    assert set(wnc.current(st)[1].sites()) == members and window.n_at_drawing == 4
+    assert all(len(patches) == 2 for patches in _bands(page).values())     # each box draws its own band
+    assert "+ 1 more box" in page.widgets.get("_nw_window_label").text()
+    qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
+    (only,) = _subset_windows(st)
+    assert set(only.sites) == members and _drawn_sites(st) == members
+
+
+def test_a_shift_drag_on_a_window_in_the_subset_carries_its_nanowells_into_the_new_one(page, qtbot, monkeypatch):
+    """After *Use as Subset* a second box with Shift held keeps the first window's nanowells as well as its own, so
+    the Subset is built up region by region — where a plain drag would start over (the test above this one)."""
+    st = _drawn(page, qtbot)
+    qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
+    said = []
+    monkeypatch.setattr(page.notify, "set_status", said.append)
+    _drag(page, _first_panel(page), (0.6, 1.5), (1.4, 2.5), Qt.ShiftModifier)
+    assert _subset_windows(st) == [] and said[-1].startswith("The earlier window's nanowells were carried")
+    (window,) = st.windows.values()
+    assert set(window.carried) == {("A01", 1, 0), ("B01", 0, 0)} and window.more == ()
+    members = {("A01", 1, 0), ("B01", 0, 0), ("A01", 0, 0), ("B01", 3, 0)}
+    assert set(wnc.current(st)[1].sites()) == members
+    qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)
+    (only,) = _subset_windows(st)
+    assert set(only.sites) == members and _drawn_sites(st) == members
 
 
 def test_use_as_subset_replaces_a_window_gate_already_in_the_subset_and_keeps_the_rest(page, qtbot, monkeypatch):

@@ -1,7 +1,10 @@
 """The Distribution window's controller: the drag that draws it, the controls that edit it, and what it shows.
 
 A press on the Distribution figure starts either a click (select one nanowell, as it always did) or a window; the
-release tells them apart by how far the pointer moved (``controller.CLICK_SLOP_PX``). A window is kept per metric
+release tells them apart by how far the pointer moved (``controller.CLICK_SLOP_PX``). A drag with **Shift** held, at
+the press or at the release, adds its box to the window rather than replacing it — or, with a window already in the
+Subset, carries that window's nanowells into the new one — so separate regions can be gathered into one Subset
+(:func:`extends`). A window is kept per metric
 and axis on ``NanowellState.windows`` and read against the model the figure was last drawn from
 (``NanowellState.window_model``), so its members are the model's, not the drawing's (``window_compute``).
 
@@ -65,11 +68,19 @@ def after_draw(ctx, st, model) -> None:
     _nwc()._call(ctx, "_nw_popout_window_refresh")
 
 
+def extends(event) -> bool:
+    """Whether *event* was made with Shift held: matplotlib's ``modifiers`` on a mouse event (``key`` is the fallback,
+    for a backend that reports a held modifier there instead)."""
+    modifiers = getattr(event, "modifiers", None) or ()
+    return "shift" in modifiers or "shift" in str(getattr(event, "key", None) or "")
+
+
 def on_press(ctx, st, event) -> None:
-    """A press on a Distribution panel: remember where, until the release says whether it was a click or a drag."""
+    """A press on a Distribution panel: remember where, and whether Shift was held, until the release says whether it
+    was a click or a drag."""
     if event.inaxes is None or event.button != 1:
         return
-    st.window_press = (event.inaxes, float(event.x), float(event.y))
+    st.window_press = (event.inaxes, float(event.x), float(event.y), extends(event))
 
 
 def on_motion(ctx, st, event) -> None:
@@ -77,7 +88,7 @@ def on_motion(ctx, st, event) -> None:
     press = st.window_press
     if press is None or event.x is None:
         return
-    ax, x, y = press
+    ax, x, y = press[:3]
     if abs(event.x - x) + abs(event.y - y) <= _nwc().CLICK_SLOP_PX:
         return
     _remove_drag(ax)
@@ -91,11 +102,17 @@ def on_motion(ctx, st, event) -> None:
 
 def on_release(ctx, st, event) -> None:
     """The end of a press: within the slop it is a click and selects the nanowell under it (or clears the selection on
-    empty space); beyond it the drag is a window, its columns snapped to the ones it overlaps."""
+    empty space); beyond it the drag is a window, its columns snapped to the ones it overlaps.
+
+    Without Shift the box replaces the window drawn for this metric and axis, and takes a window gate out of the
+    Subset first so it selects from every nanowell. With Shift held (:func:`extends`) the box is *added*: to the
+    window drawn, as another of its boxes, and — when a window gate is in the Subset — that gate's nanowells are
+    carried into the window before the gate is taken out, so *Use as Subset* then keeps both regions."""
     press, st.window_press = st.window_press, None
     if press is None:
         return
-    ax, x, y = press
+    ax, x, y = press[:3]
+    extend = (len(press) > 3 and bool(press[3])) or extends(event)
     _remove_drag(ax)
     ex, ey = (x, y) if event.x is None else (float(event.x), float(event.y))
     nwc = _nwc()
@@ -116,15 +133,24 @@ def on_release(ctx, st, event) -> None:
         nwc.redraw(ctx)
         return
     panel = model.panels[index].title
+    previous = current(st)[0] if extend else None
+    gate_sites = _window_gate_sites(st.subset) if extend else ()
     if _drop_window_gate(ctx, st):
         # One window gate at a time: the new box selects from every nanowell, not from what the last one kept.
-        # Dropping the gate redraws, so the members are read off the model drawn without it.
-        ctx.notify.set_status("The earlier window was taken out of the Subset: this one selects from every "
-                              "nanowell.")
+        # Dropping the gate redraws, so the members are read off the model drawn without it. With Shift the gate's
+        # nanowells are carried into the window, so they are kept as well as the new box's.
+        ctx.notify.set_status(
+            "The earlier window's nanowells were carried into this one: Use as Subset keeps both." if gate_sites else
+            "The earlier window was taken out of the Subset: this one selects from every nanowell. Hold Shift while "
+            "dragging to add to it instead.")
         model = st.window_model
     draft = wc.DistributionWindow(model.column, model.axis, keys, float(min(y0, y1)), float(max(y0, y1)),
                                   panel=panel, drawn_under=wc.settings_key(st),
                                   slots=wc.partial_slots(model, index, slots))
+    if previous is not None:
+        draft = previous.added(draft)
+    if gate_sites:
+        draft = replace(draft, carried=tuple(dict.fromkeys(draft.carried + gate_sites)))
     _store(ctx, st, replace(draft, n_at_drawing=len(wc.members(model, draft).rows)))
 
 
@@ -203,6 +229,12 @@ def strip_text(st) -> str:
 def _without_window_gate(subset):
     """*subset* with its window conditions taken out: the Subset holds one window gate at a time."""
     return ss.Subset(tuple(c for c in subset.conditions if not ss.is_window(c.field)), subset.match)
+
+
+def _window_gate_sites(subset) -> tuple:
+    """The nanowells the window conditions of *subset* keep, ``(well, q, r)`` each, in order and without repeats."""
+    return tuple(dict.fromkeys(tuple(site) for c in subset.conditions if ss.is_window(c.field) and c.op == "in"
+                               for site in c.sites))
 
 
 def _drop_window_gate(ctx, st) -> bool:

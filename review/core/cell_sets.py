@@ -191,9 +191,10 @@ def set_browsing(ctx, name: str | None) -> None:
     """Record that the Cell Browser's gallery shows set *name* (``None``: no set).
 
     Called by the Cell Browser each time it collects. Not saved: it describes
-    what is on a page now, not a choice the dataset keeps.
+    what is on a page now, not a choice the dataset keeps. A context with no
+    saved-cell store (a build or a stub without one) records nothing.
     """
-    st = getattr(ctx.state, "cell_sets", None)
+    st = getattr(getattr(ctx, "state", None), "cell_sets", None)
     if st is None:
         return
     name = name if name and find(ctx, name) is not None else None

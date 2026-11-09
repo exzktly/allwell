@@ -151,7 +151,9 @@ def redraw(ctx, page: str) -> None:
     ax.set_facecolor(bg)
     ctx.runtime.scatter.interaction_cache = {"points": []}
     groups = scatter_groups(ctx)
-    table = nanowell_observations(ctx, [w for g in groups for w in g.wells]) if groups else None
+    # The Nanowells page's scope: its excluded wells, its Subset and its Fixed cohort decide which nanowells are
+    # drawn here too, so the scatter and the page's views are about the same nanowells.
+    table = nanowell_observations(ctx, [w for g in groups for w in g.wells], page_scope=True) if groups else None
     if table is None or not groups:
         if page == "cells":
             ctx.runtime.scatter.gate_render = []
@@ -183,7 +185,10 @@ def redraw(ctx, page: str) -> None:
         ax.legend(loc="best", fontsize=8, framealpha=0.0, facecolor="none")
     if page == "cells":
         _paint_nanowell_gates(ctx, ax, drawn, x_key, y_key, muted)
-    footer = "\n".join([drawn.footer, *drawn.notes])
+    lines = [drawn.footer, *drawn.notes]
+    if page == "cells" and table.subset and ctx.state.cell_gating.scatter_gates:
+        lines.append(f"Gate percentages are of the nanowells drawn: those in the Subset ({table.subset}).")
+    footer = "\n".join(lines)
     from review.core.observation_band import write_footer
 
     write_footer(fig, footer, muted)
@@ -204,7 +209,9 @@ def _paint_nanowell_gates(ctx, ax, drawn, x_key: str, y_key: str, ink) -> None:
     plot of "Nanowell ▸ count" × "Nanowell ▸ brightness", and on no other axis pair. Without this the redraw
     that follows a drawn gate cleared it from the screen, and stamped it with no columns at all.
 
-    Each label's percentage is of the group's plotted nanowells, the population the box was drawn over.
+    Each label's percentage is of the group's plotted nanowells, the population the box was drawn over — the
+    nanowells inside the Nanowells page's Subset when it has one, which the footer says. A Subset condition that
+    names one of these gates therefore leaves its own gate reading near 100 %: the points outside it are not drawn.
     """
     from review.data.observations import nanowell_cell_column
     from review.features.scatter.gating import paint_gates

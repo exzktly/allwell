@@ -6297,10 +6297,14 @@ A nanowell dataset also opens in every other Review tab, which read it like this
   cell count, confluence, cell fluorescence, nanowell fluorescence, their fold changes, growth rate and **Occupied** (holds
   at least one cell) — computed exactly as this page computes them, with this page's Baseline and Rim focus:
   - **Scatter** sets any nanowell metric against any other, one point per nanowell and timepoint, or per well (the
-    median over its nanowells) with *Points: Per well*. Its Properties panel works as on the cell scatter:
-    **X log** / **Y log** (on by default for each nanowell, as for each cell, drawn as log(value + 1) so an empty
-    nanowell's zero stays on the axis), the **Log base**, and the marker size and shape. Density shading and
-    error bars are not offered, because nanowell points are drawn solid and a per-well median draws no spread;
+    median over its nanowells) with *Points: Per well*. It draws the nanowells this page draws: wells left out with
+    **Exclude well** are not plotted, only the nanowells in this page's **Subset** are, and with **Fixed cohort** on
+    only the nanowells with both plotted values at every timepoint. The footer says each, names the Baseline when an
+    axis is a fold change, and — with a Subset — says that gate percentages are of the subset's nanowells. Its
+    Properties panel works as on the cell scatter: **X log** / **Y log** (on by default for each nanowell, as for
+    each cell, drawn as log(value + 1) so an empty nanowell's zero stays on the axis), the **Log base**, and the
+    marker size and shape. Density shading and error bars are not offered, because nanowell points are drawn solid
+    and a per-well median draws no spread. The other plots below draw every nanowell of the selected wells;
   - **Bar Plots**, **Line Graphs** and **Heat Map** draw each well's median over its nanowells, and a replicate set
     as the mean of its wells' medians with error bars over **wells** — nanowells are never treated as replicates.
     Bar and Line add the **occupied share** and how many nanowells had a value;

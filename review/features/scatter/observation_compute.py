@@ -9,6 +9,13 @@ and the footer says so (``observation.footer_line``). Wells stay the replicates:
 median, and a replicate set is drawn as its wells' points in one colour — nanowells are never pooled across
 wells into one statistic here.
 
+**Which nanowells.** The table is the Nanowells page's scope (``nanowell_observations(page_scope=True)``): its
+excluded wells and its Subset are already applied, and the sentences saying so are the table's notes. The page's
+Fixed cohort is applied here, because which values must be complete depends on the two metrics drawn: a nanowell
+is kept only when both are defined at every timepoint of its well (a metric with one value per nanowell is not
+judged), and the rest are counted in the footer as outside the fixed cohort — as the page counts them. A fold
+change is measured from the page's Baseline, and a figure with one on an axis says which.
+
 Qt-free.
 """
 
@@ -20,7 +27,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from review.domain.observation import NANOWELLS, SHARE_METRICS, ObservationTable, footer_line
+from review.domain.observation import (COHORT_REASON, NANOWELLS, PER_NANOWELL_KINDS, SHARE_METRICS, ObservationTable,
+                                       cohort_complete, footer_line)
 
 
 @dataclass
@@ -65,6 +73,7 @@ def nanowell_scatter(table: ObservationTable, x_key: str, y_key: str, groups, *,
     x_label = x_metric.label if x_metric else x_key
     y_label = y_metric.label if y_metric else y_key
     wells = {w for g in groups for w in g.wells}
+    outside_cohort = _outside_cohort(table, (x_metric, y_metric), (x_key, y_key))
     scope = frame["well"].isin(wells) & _in_timepoints(frame, timepoints_h) if len(frame) else pd.Series(dtype=bool)
     rows = frame[scope]
     x, y = table.values(x_key)[scope], table.values(y_key)[scope]
@@ -72,6 +81,10 @@ def nanowell_scatter(table: ObservationTable, x_key: str, y_key: str, groups, *,
     sub = ObservationTable(table.observations, rows, table.metrics, table.why_missing and (
         lambda key: table.why_missing(key)[scope]), table.notes)
     excluded = sub.exclusions(x_key, y_key)
+    cut = outside_cohort[scope] & both
+    if cut.any():
+        excluded[COHORT_REASON] = excluded.get(COHORT_REASON, 0) + int(cut.sum())
+        both = both & ~cut
     series = []
     for group in groups:
         mine = rows["well"].isin(group.wells) & both
@@ -91,7 +104,23 @@ def nanowell_scatter(table: ObservationTable, x_key: str, y_key: str, groups, *,
     footer = footer_line(NANOWELLS, used, int(len(rows)), excluded)
     if per_well:
         footer += " · one point per well and timepoint: the median over its nanowells"
-    return NanowellScatter(series, x_label, y_label, footer, table.notes)
+    notes = list(table.notes)
+    if table.baseline and any(m is not None and m.kind == "fc" for m in (x_metric, y_metric)):
+        notes.append(f"Fold changes are over the Nanowells page's Baseline: {table.baseline}.")
+    return NanowellScatter(series, x_label, y_label, footer, tuple(notes))
+
+
+def _outside_cohort(table: ObservationTable, metrics, keys) -> pd.Series:
+    """Per row of *table*, whether the page's Fixed cohort leaves it out of a plot of *keys*: its nanowell lacks one
+    of the per-timepoint metrics among them at some timepoint of its well. All ``False`` with the cohort off."""
+    frame = table.frame
+    judged = [k for k, m in zip(keys, metrics) if m is None or m.kind not in PER_NANOWELL_KINDS]
+    if not table.fixed_cohort or not judged or not len(frame):
+        return pd.Series(False, index=frame.index)
+    defined = pd.Series(True, index=frame.index)
+    for key in dict.fromkeys(judged):
+        defined &= table.values(key).notna()
+    return ~cohort_complete(frame, defined)
 
 
 def default_axes(table: ObservationTable) -> tuple[str, str]:

@@ -15056,8 +15056,25 @@ the app already uses it for the replicate unit and for the Nanowells page's samp
 Baseline, rim-focus rule and Cell Gating tally — so a fold change on a plot and on the page are one number — plus an
 `occupied` flag and `timepoint_hours` read the way the cell rows read it, so a plot's timepoint choices select the same
 rows. Wells are read once into the page's `well_parts`; the table is memoised on `(folder, wells, baseline, focus rule,
-gating version)`, every input that changes a row. The page's Fixed cohort and Moving average are figure transforms,
-not row properties, and are not applied. A second service, `observations.nanowell_metrics`
+gating version, page scope)`, every input that changes a row. The page's Moving average is a figure transform, not a
+row property, and is never applied. **The page's scope** is applied only when asked for (`page_scope=True`, through
+`data/observations.nanowell_observations(ctx, wells, page_scope=True)`): `_apply_page_scope` drops the wells left out
+with **Exclude well**, then keeps the nanowells inside the page's **Subset** with `subset_compute.apply` over
+`controller.page_subset` (its scatter-gate conditions bound to the gates as they stand), and appends the page's own
+sentences (`subset_compute.note`, `empty_text`) to `ObservationTable.notes`; the memo key carries the bound subset's
+`repr`, the excluded wells and the cohort flag (`_page_scope_key`). The page's **Fixed cohort** cannot be applied to
+rows without knowing which metrics are drawn, so the table carries it (`ObservationTable.fixed_cohort`) and the plot
+applies it — `domain/observation.cohort_complete` is the page's rule (`distribution_compute.fixed_cohort`) asked of
+several metrics' joint definedness, metrics of kind `site`/`base` not judged (`PER_NANOWELL_KINDS`), the rows it
+removes counted as `COHORT_REASON`. The table also carries the Baseline in words (`ObservationTable.baseline`) and
+the Subset's label (`ObservationTable.subset`). The Scatter Plot's nanowell scatter is the one asker of the scope, so
+one Subset built on the page decides the nanowells of the page's views and of that scatter; the footer adds
+"Fold changes are over the Nanowells page's Baseline: …" when an axis is a fold change, and on the per-nanowell page
+"Gate percentages are of the nanowells drawn: those in the Subset (…)" — a Subset condition naming a gate on that
+scatter leaves its own gate's percentage near 100 %, because the points outside it are not drawn. The default stays
+unscoped: Cell Gating evaluates a nanowell-metric gate against these rows (`scatter_gates=False`), and a Subset naming
+that gate would otherwise decide its own inputs; the other plot tools' nanowell modes are unscoped too.
+`tests/test_scatter_nanowells_follow_the_page_scope.py` drives the real Scatter builder for each. A second service, `observations.nanowell_metrics`
 (`nanowell_metric_specs`), names the same metrics with no rows read: the channels come from the site tables' header
 rows (`collect.site_channels`, the same derivation `load_nanowell_data` applies to the columns it reads). The
 per-cell Scatter's "Nanowell ▸" picker entries (`scatter/_observations.cell_nanowell_entries`) use it, because they

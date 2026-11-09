@@ -59,22 +59,23 @@ def build_axis_controls(ctx, slot, page: str) -> None:
         ctx.widgets.register(name + "_grp", group)
     tips = ("Which nanowells are drawn: the Nanowells page's Subset. Choosing one here makes it that page's Subset.",
             "What every fold change is measured from: the Nanowells page's Baseline. Choosing one here sets it there.")
-    services = ("nanowell.set_subset_by_name", "nanowell.set_baseline")
-    for name, caption, tip, service in zip(_scope_names(page), ("Subset", "Baseline"), tips, services):
+    for name, caption, tip in zip(_scope_names(page), ("Subset", "Baseline"), tips):
         combo = ctx.widgets.register(name, LabeledComboBox(caption))
         combo.setToolTip(tip)
         combo.currentIndexChanged.connect(
-            lambda _i, _c=combo, _s=service, _p=page: _choose(ctx, _s, _c.currentData(), _p))
+            lambda _i, _c=combo, _k=caption, _p=page: _choose(ctx, _k, _c.currentData(), _p))
         group = slot.add_scope("", combo)
         group.setVisible(False)
         ctx.widgets.register(name + "_grp", group)
 
 
-def _choose(ctx, service: str, value, page: str) -> None:
-    """Set the Nanowells page's Subset or Baseline to *value*, then redraw *page* from the page's new scope."""
+def _choose(ctx, setting: str, value, page: str) -> None:
+    """Set the Nanowells page's *setting* (``"Subset"`` or ``"Baseline"``) to *value*, then redraw *page* from the
+    page's new scope."""
     if value is None:
         return
-    ctx.features.query(service, ctx, value, default=None)
+    ctx.features.query("nanowell.set_subset_by_name" if setting == "Subset" else "nanowell.set_baseline",
+                       ctx, value, default=None)
     _redraw_page(ctx, page)
 
 

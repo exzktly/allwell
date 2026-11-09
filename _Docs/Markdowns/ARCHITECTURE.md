@@ -12909,6 +12909,24 @@ samples from that same `distribution_model(moving=…)`, so it tests the average
 report carries the window's sentence. Per-nanowell metrics have no values over time and ignore it; Array, Position,
 Extremes and Identity draw one timepoint and do not use it.
 
+*Trailing or centred* (`NanowellState.moving_centred`, the menu that stands in place of the *Moving average*
+label — *Moving average* or *Centred average*; Batch Export's panel has the same choice). A trailing window keeps
+any later timepoint, which may already show a treatment, out of a timepoint's value, at the cost of drawing every
+change about *(N − 1) / 2* timepoints late; a centred one puts the timepoint in the middle — it, the *h = (N − 1) / 2*
+before it and the *h* after it — so the line does not lag. Only an odd window has a middle:
+`clamp_window(window, centred=True)` gives 3, 5, 7 or 9 (an even window one down), the window box steps by 2 while
+centred, and turning centring on with an even window takes it one down and says so on the status line
+(`controller.set_moving_centred`). The centred value at *t* is the trailing window that ends at *t + h*, taken from
+that row of the same nanowell (`moving_compute._centred`), so both kinds follow one set of rules — complete or
+nothing, joinable, a fold change's window starting after its baseline — and the only new exclusion is "after the
+last full window" (`LATE_REASON`), for a timepoint with no *t + h* in its well. The baseline's own window
+(`rebase`) is always trailing. The flag is a keyword beside `moving` everywhere the window goes
+(`moving_compute.apply` / `averaged` / `describe` / `nothing_left_text`, `distribution_model`, `wells_summary`,
+`trajectory_panels`, `draw_view`), part of `window_compute.settings_key`, saved in the page's view state, and
+written to Batch Export's summary CSV as `moving_average_window` (`trailing` / `centred`). On the band the choice is
+part of the moving average's own group: on a 1500 px window the filter row already ended 2 px from the edge, so
+there it wraps *Responding above* onto a second line of that row; it fits on one from about 1600 px.
+
 *A fold change and its baseline.* `site_metrics` divides each timepoint's measured value by the single measured
 value at the nanowell's baseline row, so the moving average is taken over fold changes and, by default, only the
 endpoint side is smoothed — the figure says "the baseline is its one measured value, not averaged". Two rules sit

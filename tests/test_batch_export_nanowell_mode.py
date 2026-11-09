@@ -50,7 +50,8 @@ def _drawn(monkeypatch):
 
     def spy(fig, view, *args, **kwargs):
         calls.append({"view": view, **{k: kwargs[k] for k in ("metric", "groups", "well", "tableless", "cohort",
-                                                                  "moving")}})
+                                                                  "moving")},
+                      "moving_centred": kwargs.get("moving_centred", False)})
         return real(fig, view, *args, **kwargs)
 
     monkeypatch.setattr(nanowell_panel, "_draw_view", spy)     # the panel's own handle on it
@@ -288,6 +289,29 @@ def test_the_moving_average_reaches_the_figure_and_the_csv_says_which_window_eac
     assert list(expected["n_used"]) != list(measured["n_used"])          # the fixture can tell the two apart
     assert [(r["timepoint"], int(r["n_used"]), r["moving_average"]) for r in rows] == [
         (t, int(u), "2") for t, u in zip(expected["timepoint"], expected["n_used"])]
+
+
+def test_a_centred_window_reaches_the_figure_and_the_csv(panel, tmp_path, monkeypatch):
+    """The panel's Centred choice is passed to the page's composition with the odd window it allows, and the
+    summary is the page's centred summary, its rows saying which kind of window they used."""
+    from review.features.nanowell.collect import load_nanowell_data
+    from review.features.nanowell.distribution_compute import wells_summary
+    from review.features.nanowell.series_compute import site_metrics
+
+    p, ctx = panel
+    calls = _drawn(monkeypatch)
+    p._moving_kind_cb.setCurrentIndex(p._moving_kind_cb.findData(True))
+    p._moving_spin.setValue(4)
+    assert (p._run_settings()["moving"], p._run_settings()["moving_centred"]) == (3, True)
+    p._run_batch()
+    assert [(c["moving"], c["moving_centred"]) for c in calls] == [(3, True), (3, True)]
+    rows = [r for r in csv.DictReader((tmp_path / "export" / "nanowell_Drug_A_summary.csv").open())
+            if r["metric"] == "n" and r["well"] == "A01"]
+    data = load_nanowell_data(ctx.state.dataset.data_dir)
+    expected = wells_summary(site_metrics(data, "earliest"), ["A01"], "n", channels=data.channels, moving=3,
+                             moving_centred=True)
+    assert [(r["timepoint"], int(r["n_used"]), r["moving_average"], r["moving_average_window"]) for r in rows] == [
+        (t, int(u), "3", "centred") for t, u in zip(expected["timepoint"], expected["n_used"])]
 
 
 def test_a_well_excluded_on_the_page_is_still_drawn_by_its_batch_group(panel, tmp_path, monkeypatch):

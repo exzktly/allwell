@@ -1,5 +1,5 @@
 """The moving average over time on the Nanowells page (``moving_compute``): Distribution and Trajectories can draw
-each nanowell's metric as its mean over a trailing window of timepoints.
+each nanowell's metric as its mean over a trailing window of timepoints, or one centred on each timepoint.
 
 The pure tests use a hand-built frame whose numbers make each plausible wrong implementation give a different
 answer: a partial window at the start (a value at the first timepoint), a centred window (the next timepoint's
@@ -128,12 +128,12 @@ def _close(got, want):
                for g, w in zip(got, want, strict=True))
 
 
-def _pipeline(metrics, data, column, *, moving=2, baseline_window=0):
+def _pipeline(metrics, data, column, *, moving=2, baseline_window=0, centred=False):
     from review.features.nanowell.series_compute import exclusion_reason
 
     reasons = exclusion_reason(metrics, column, data.channels)
     frame, reasons = mvc.rebase(metrics, column, reasons, baseline_window)
-    return mvc.apply(frame, column, reasons, moving)
+    return mvc.apply(frame, column, reasons, moving, centred)
 
 
 def test_a_fold_change_s_window_never_reaches_its_baseline(tmp_path):
@@ -330,6 +330,57 @@ def test_trajectories_say_why_when_the_average_leaves_no_line(tmp_path):
                                 vc.trajectory_panels(metrics, ["A01"], "count_fc", moving=3)) == ""
 
 
+# ── centred ─────────────────────────────────────────────────────────────────
+
+def test_a_centred_window_is_the_mean_around_the_timepoint_and_says_why_it_left_a_value_out():
+    """Window 3, centred: t's value is the mean of t − 1, t and t + 1. Site 0 counts 1, 2, 4, 8, 16 with t4 not
+    joinable; site 1 has no value at t2; site 2 has no row at t2. A trailing window gives t2 the mean of t0..t2
+    (7/3) where a centred one gives t1..t3 (14/3), and a partial window at either end would give t0 or t4 a value."""
+    frame = _frame()
+    averaged, why = mvc.moving_mean(frame, frame["n"], 3, centred=True)
+    got, reasons = _by_site(frame, averaged), _by_site(frame, why)
+    nan = math.nan
+    assert _close(got[0], [nan, 7 / 3, 14 / 3, nan, nan])
+    assert reasons[0] == [mvc.EARLY_REASON, "", "", mvc.IDENTITY_REASON, mvc.LATE_REASON]
+    assert _close(got[1], [nan] * 5)
+    assert reasons[1] == [mvc.EARLY_REASON, mvc.GAP_REASON, "", mvc.GAP_REASON, mvc.LATE_REASON]
+    assert reasons[2] == [mvc.EARLY_REASON, mvc.GAP_REASON, mvc.GAP_REASON, mvc.LATE_REASON]
+
+
+def test_a_centred_window_is_odd():
+    assert [mvc.clamp_window(w, centred=True) for w in (0, 1, 2, 3, 4, 5, 8, 9, 50)] == [0, 0, 0, 3, 3, 5, 7, 9, 9]
+    assert [mvc.clamp_window(w) for w in (2, 4, 8)] == [2, 4, 8]                        # trailing keeps evens
+    frame = _frame()
+    four, _w = mvc.moving_mean(frame, frame["n"], 4, centred=True)
+    three, _w = mvc.moving_mean(frame, frame["n"], 3, centred=True)
+    assert four.equals(three)
+
+
+def test_a_centred_fold_change_window_starts_after_the_baseline(tmp_path):
+    """Site 0's fold changes from t2 are 1/3, 2/3, 1, 4/3, 5/3, 2. Centred over 3, t's window is t − 1..t + 1 and
+    must start after t2, so t4 is the first with a value: (4/3 + 5/3 + 2) / 3 = 5/3; t5 has no t6 after it."""
+    metrics, data = _fold_change_plate(tmp_path)
+    frame, why = _pipeline(metrics, data, "count_fc", moving=3, centred=True)
+    nan = math.nan
+    assert _close(_grid(frame, frame["count_fc"])[0], [nan, nan, nan, nan, 5 / 3, nan])
+    assert _grid(frame, why)[0] == [mvc.BASELINE_REASON] * 4 + ["", mvc.LATE_REASON]
+
+
+def test_the_figure_says_the_window_is_centred_and_names_the_late_exclusion():
+    assert mvc.describe(5, centred=True).startswith(
+        "Moving average over 5 timepoints, centred: each value is the mean of the nanowell's values at that "
+        "timepoint, the 2 before it and the 2 after it")
+    assert mvc.describe(4, centred=True).startswith("Moving average over 3 timepoints, centred:")
+    assert reason_label(mvc.LATE_REASON) == "after the last full moving window"
+
+
+def test_a_centred_window_too_long_for_the_series_says_so(tmp_path):
+    metrics, data = _fold_change_plate(tmp_path)
+    text = mvc.nothing_left_text(metrics, "n", 9, centred=True)
+    assert text.startswith("Moving average over 9 timepoints, centred: no value is left to draw")
+    assert "A window of 5 leaves" in text                     # the next shorter centred window, not 8
+
+
 # ── on the page ─────────────────────────────────────────────────────────────
 pytest.importorskip("PySide6")
 
@@ -429,6 +480,30 @@ def test_the_window_is_saved_and_restored(page, qtbot):  # noqa: F811
         assert st.moving == 0
     st.apply_config({"moving": 99})
     assert st.moving == mvc.MAX_WINDOW
+
+
+def test_the_centred_choice_reaches_the_state_takes_an_odd_window_and_is_saved(page, qtbot):  # noqa: F811
+    """Through the band's own menu: a window of 4 becomes 3 when centred, the user is told, the window box then
+    steps through odd numbers, the figure says the window is centred, and the choice is saved and restored."""
+    st = _loaded(qtbot, page)
+    page.state.selection.selected_wells = {"A01"}
+    nwc.nw_on_selection_changed(page)
+    said = []
+    page.notify.set_status = said.append
+    nwc.set_moving(page, 4)
+    kind = page.widgets.get("_nw_moving_kind_cb")
+    spin = page.widgets.get("_nw_moving_spin")
+    assert kind.currentText() == "Moving average" and not st.moving_centred and spin.singleStep() == 1
+    kind.setCurrentIndex(kind.findData(True))
+    assert st.moving_centred and st.moving == 3 and spin.value() == 3 and spin.singleStep() == 2
+    assert said[-1] == ("A centred window needs an odd number of timepoints: the moving average is now over 3 "
+                        "timepoints.")
+    assert any("Moving average over 3 timepoints, centred" in t for t in _texts(page))
+    assert st.to_config()["moving_centred"] is True
+    st.apply_config({"moving": 4, "moving_centred": True})
+    assert (st.moving, st.moving_centred) == (3, True)
+    st.apply_config({"moving": 4, "moving_centred": "yes"})
+    assert (st.moving, st.moving_centred) == (4, False)
 
 
 def test_the_page_s_trajectories_are_drawn_from_the_averages(page, qtbot, monkeypatch):  # noqa: F811

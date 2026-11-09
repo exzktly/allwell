@@ -163,6 +163,7 @@ def window_key(column: str, axis: str) -> str:
 def settings_key(st) -> tuple:
     """What the values a window reads were computed under: when it differs from ``drawn_under`` the figure says so."""
     return (("baseline", str(st.baseline)), ("moving average", str(st.moving)),
+            ("moving window", "centred" if getattr(st, "moving_centred", False) else "trailing"),
             ("baseline window", str(st.baseline_moving)), ("fixed cohort", "on" if st.cohort else "off"),
             ("subset", repr(st.subset.to_config())))
 

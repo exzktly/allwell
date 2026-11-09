@@ -142,6 +142,9 @@ class NanowellState:
     cohort: bool = False                    # only nanowells with a value at every timepoint (tracker I8)
     #: The moving average's window in timepoints on Distribution and Trajectories; 0 is off (``moving_compute``).
     moving: int = 0
+    #: The moving average's window centred on each timepoint (an odd window: the timepoint, the ones before it and
+    #: as many after) rather than ending at it (``moving_compute``'s *Trailing or centred*).
+    moving_centred: bool = False
     #: The baseline's own window in timepoints for a fold change, used only while :attr:`moving` is on and never
     #: with the Earliest baseline (``moving_compute.baseline_window_for``); 0 keeps the baseline one measured value.
     baseline_moving: int = 0
@@ -391,6 +394,7 @@ class NanowellState:
         return {"view": self.view, "metric": self.metric, "baseline": self.baseline, "axis": self.axis,
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
                 "moving": self.moving, "baseline_moving": self.baseline_moving,
+                "moving_centred": self.moving_centred,
                 "extremes_n": self.extremes_n, "extremes_tps": list(self.extremes_tps), "crop_cells": self.crop_cells,
                 "channel": self.channel, "image_channel": self.image_channel,
                 "crop_metrics": self.crop_metrics, "popout_labels": self.popout_labels,
@@ -423,7 +427,8 @@ class NanowellState:
             value = config.get(name)
             setattr(self, name, value if isinstance(value, str) else getattr(fresh, name))
         self.cohort = config.get("cohort") is True
-        self.moving = clamp_window(config.get("moving"))
+        self.moving_centred = config.get("moving_centred") is True
+        self.moving = clamp_window(config.get("moving"), self.moving_centred)
         self.baseline_moving = clamp_window(config.get("baseline_moving"))
         mode = config.get("identity_mode")
         self.identity_mode = mode if mode in IDENTITY_MODES else fresh.identity_mode

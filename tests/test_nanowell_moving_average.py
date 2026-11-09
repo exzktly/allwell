@@ -381,6 +381,33 @@ def test_a_centred_window_too_long_for_the_series_says_so(tmp_path):
     assert "A window of 5 leaves" in text                     # the next shorter centred window, not 8
 
 
+def test_a_centred_window_along_wells_names_what_a_centred_window_needs(tmp_path):
+    """A centred window of 3 reaches one timepoint each way. At the second timepoint a measured count draws (t0, t1,
+    t2 all have one); a fold change from the Earliest baseline (t0) does not, because its window may not hold the
+    baseline — and the sentence must say that, not the trailing window's "needs 3 timepoints after the baseline" (t1
+    needs only to be 2 after it) or "the 2 before it" at t0 (a centred window needs 1)."""
+    metrics, data = _fold_change_plate(tmp_path, baseline="earliest")
+
+    def first_line(metric, timepoint):
+        return distribution_model(metrics, metric, channels=data.channels, groups={"A01": ["A01"]}, axis="wells",
+                                  timepoint=timepoint, time_source=data.time_source, moving=3, moving_centred=True,
+                                  baseline="earliest").empty.split("\n")[0]
+
+    assert first_line("n", "t1") == ""
+    assert first_line("count_fc", "t1") == (
+        "Moving average over 3 timepoints, centred: no value is left to draw at t1 — a fold change's window must "
+        "start after the baseline, and a centred window reaches back 1 timepoint, so it draws only timepoints at "
+        "least 2 after the baseline, and t1 is not. No shorter window leaves one either; set the window to 1 to "
+        "turn the average off.")
+    assert first_line("count_fc", "t2") == ""
+    assert first_line("n", "t0").startswith(
+        "Moving average over 3 timepoints, centred: no value is left to draw at t0 — each value needs the 1 "
+        "timepoint before it and the 1 timepoint after it, and t0 has fewer than 1 before it in its well.")
+    assert first_line("n", "t5").startswith(
+        "Moving average over 3 timepoints, centred: no value is left to draw at t5 — each value needs the 1 "
+        "timepoint before it and the 1 timepoint after it, and t5 has fewer than 1 after it in its well.")
+
+
 # ── on the page ─────────────────────────────────────────────────────────────
 pytest.importorskip("PySide6")
 

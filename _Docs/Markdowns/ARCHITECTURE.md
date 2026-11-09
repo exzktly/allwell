@@ -12961,7 +12961,10 @@ on top of that, both in `moving_compute`:
 allows leaves every value out: *N* timepoints need at least *N* in the well for a measured value and *N* after the
 baseline for a fold change (so a two-timepoint plate with the *Earliest* baseline has no fold-change window at
 all), and *Along x: Wells* or Statistics at a timepoint with fewer than *N − 1* before it — the first, say, which
-the Array view's choice of the seeding timepoint carries over — has none either. An empty plot over such data read
+the Array view's choice of the seeding timepoint carries over — has none either. A centred window reaches
+*h = (N − 1) / 2* each way instead, so at one timepoint it needs *h* before it and *h* after it, and a fold change's
+value needs to be at least *h + 1* after the baseline; `nothing_left_text` words those cases from
+`_WHY_NOTHING_CENTRED` rather than the trailing window's sentences, which would name the wrong count. An empty plot over such data read
 as a dataset with no values, so `moving_compute.nothing_left_text` names it instead: the reason most values went
 under, the longest shorter window that would leave something (and how many values), then `describe`'s sentence.
 `distribution_model` sets it as `DistributionModel.empty` (and in its notes, which the Statistics report carries)

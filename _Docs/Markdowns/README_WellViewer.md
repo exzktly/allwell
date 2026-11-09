@@ -6598,7 +6598,10 @@ the sentence names it.
   a centred window is 3, 5, 7 or 9 (the box steps by two, and an even window is taken one down, which the status
   line says); the first and last timepoints, without a full window around them, have no value, counted as
   "before the first full moving window" and "after the last full moving window". For a fold change the centred
-  window must also start after the baseline. The *Baseline average* always looks back only. The footer says
+  window must also start after the baseline, so it reaches a timepoint only from half a window plus one after the
+  baseline: a centred window of 3 over fold changes from the *Earliest* baseline has no value at the second
+  timepoint (its window would hold the baseline) and starts at the third, while a measured value such as the count
+  has one at the second. The *Baseline average* always looks back only. The footer says
   which kind of window was used.
 
   A window longer than the series allows leaves nothing to draw — for example a window of 3 on a plate with

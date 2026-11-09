@@ -48,3 +48,8 @@ class CellSetsState:
     #: A highlight a restored saved plot asked for whose set no longer exists:
     #: the plot says so in its title rather than drawing nothing silently.
     missing_highlight: str | None = None
+    #: The set the Cell Browser's gallery was last collected from, or ``None``.
+    #: Changes no number; kept here, beside ``exclude`` and ``highlight``, so the
+    #: Saved Cells page can say every place a set is in force, and so a rename
+    #: or delete follows it the same way (``cell_sets.in_force``).
+    browsing: str | None = None

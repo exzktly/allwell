@@ -603,10 +603,9 @@ def apply_axis_log_scale(ax, which: str, on: bool,
     per-cell scatter) instead use a ``log10(x+1)`` *display* transform via
     matplotlib ``FuncScale``: the data stays in raw units — so gates, clicks and
     exports are unaffected ("display-only, not saved") — while zeros land at the
-    left edge. Ticks sit at real decade values (incl. 0) positioned by the
-    transform, so it still reads like a log axis. That transform is defined in
-    decades, so *base* does not apply to it; the ordinary log path below is
-    where the user's base is honoured.
+    left edge. Ticks sit at 0 and at the powers of *base* (1, 10, 100… in the
+    default base 10; 1, 2, 4, 8… in base 2), positioned by the transform, so it
+    reads like a log axis in the base the user chose.
 
     Setting an axis to the scale it already has is a no-op rather than a rebuild
     — see :func:`_already_scaled` for what the rebuild costs. The *minor* ticks
@@ -623,20 +622,33 @@ def apply_axis_log_scale(ax, which: str, on: bool,
             set_scale("log", base=base)
         apply_log_minor_ticks(ax, which, base)
         return
+    import math
+
     import numpy as _np
 
+    log_base = math.log(base)
+
     def _fwd(v):
-        return _np.log10(_np.clip(_np.asarray(v, dtype=float), 0.0, None) + 1.0)
+        return _np.log1p(_np.clip(_np.asarray(v, dtype=float), 0.0, None)) / log_base
 
     def _inv(u):
-        return _np.power(10.0, _np.asarray(u, dtype=float)) - 1.0
+        return _np.expm1(_np.asarray(u, dtype=float) * log_base)
 
     set_scale("function", functions=(_fwd, _inv))
     from matplotlib.ticker import FixedLocator, FuncFormatter
     mpl_axis = ax.xaxis if which == "x" else ax.yaxis
-    decades = [0, 1, 10, 100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000]
-    mpl_axis.set_major_locator(FixedLocator(decades))
-    mpl_axis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:g}"))
+    # 0, then every power of the base up to ten million — the reach the decade
+    # ticks always had; matplotlib draws only the ones inside the view.
+    steps = int(math.floor(math.log(10_000_000) / log_base + 1e-9))
+    powers = [0.0] + [base ** k for k in range(steps + 1)]
+    mpl_axis.set_major_locator(FixedLocator(powers))
+    mpl_axis.set_major_formatter(FuncFormatter(_log_tick_text))
+
+
+def _log_tick_text(value, _pos=None) -> str:
+    """A log(x+1) axis tick: whole numbers as they are, a power of *e* to three figures."""
+    v = float(value)
+    return f"{v:g}" if v.is_integer() else f"{v:.3g}"
 
 
 def _ensure_export_style_prefs(ctx) -> dict:

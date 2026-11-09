@@ -4,7 +4,9 @@ Two lists, because they are two kinds of thing (``collect.py`` says why). Each
 row says what the population is and what it does to the analysis now; the
 buttons under a list act on its selected row:
 
-* **Saved cell sets** — *View in Cell Browser*, *Highlight on Scatter*,
+* **Saved cell sets** — a line naming every set in force and where (excluded
+  from analysis, highlighted on Scatter, shown in Cell Browser), then
+  *View in Cell Browser*, *Highlight on Scatter*,
   *Exclude from analysis* (each a toggle; one set at a time can be highlighted
   and one excluded), rename and delete.
 * **Gates** — *View in Cell Browser* (the cells inside that gate alone) and
@@ -164,6 +166,9 @@ class SavedCellsPage(QWidget):
             self, "Saved cell sets",
             hint="Cells saved by name with Lasso cells on Spatial or Multivariate. A set is a "
                  "fixed list of cells: saving one changes no number."))
+        self.in_force = QLabel("", self)
+        self.in_force.setWordWrap(True)
+        lay.addWidget(self.in_force)
         self.sets_empty = QLabel(
             "No saved cells yet. Draw round cells with Lasso cells on a Spatial map or a "
             "Multivariate projection to save them here.", self)
@@ -336,6 +341,8 @@ class SavedCellsPage(QWidget):
                           for r in self._set_rows],
               [r.name for r in self._set_rows], keep)
         has_sets = bool(self._set_rows)
+        self.in_force.setText(collect.in_force_text(self.ctx))
+        self.in_force.setVisible(has_sets or bool(self.ctx.state.cell_sets.missing_highlight))
         self.sets_empty.setVisible(not has_sets)
         self.sets.setVisible(has_sets)
         if has_sets and _selected(self.sets) is None:

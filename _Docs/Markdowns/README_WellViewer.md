@@ -5632,7 +5632,10 @@ the spacing you read the gaps against, and on a response curve it also decides
 where a zero dose sits: one step of your base below the lowest real dose, behind
 the dotted break, rather than always a factor of ten. The field applies to any
 figure's log axes, not only this tab's; on a plot ticked at decades (most of
-them) picking base 2 re-ticks it at the powers of two.
+them) picking base 2 re-ticks it at the powers of two. That includes the
+Scatter Plot's log axes, which are drawn as log(value + 1) so a zero stays on
+the axis: the label names the base (`(log₂, +1)`, `(ln, +1)`), and the ticks
+sit at 0 and the powers of that base.
 
 #### Fold change on a response curve
 
@@ -6300,8 +6303,11 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     axis is a fold change, and — with a Subset — says that gate percentages are of the subset's nanowells. Its
     **Subset** and **Baseline** pickers are this page's own two settings: pick a saved subset (or *All
     nanowells*) or the timepoint fold changes are measured from, and this page changes with it. Click a nanowell's
-    point to open it here, selected, at that point's timepoint; hovering names it. The other
-    plots below draw every nanowell of the selected wells;
+    point to open it here, selected, at that point's timepoint; hovering names it. Its
+    Properties panel works as on the cell scatter: **X log** / **Y log** (on by default for each nanowell, as for
+    each cell, drawn as log(value + 1) so an empty nanowell's zero stays on the axis), the **Log base**, and the
+    marker size and shape. Density shading and error bars are not offered, because nanowell points are drawn solid
+    and a per-well median draws no spread. The other plots below draw every nanowell of the selected wells;
   - **Bar Plots**, **Line Graphs** and **Heat Map** draw each well's median over its nanowells, and a replicate set
     as the mean of its wells' medians with error bars over **wells** — nanowells are never treated as replicates.
     Bar and Line add the **occupied share** and how many nanowells had a value;
@@ -7808,8 +7814,13 @@ on a nanowell plate a third, the subsets saved on the Nanowells page:
 
 - **Saved cell sets** — cells saved by name with **Lasso cells** on a Spatial
   map or a Multivariate projection. A set is a fixed list of cells. Each row
-  gives its size and wells, where it was drawn, and what it is doing now
-  (*Saved only*, *Highlighted on Scatter*, *Excluded from analysis*). Under the
+  gives its size and wells, where it was drawn, and every place it is in force
+  now (*Excluded from analysis*, *Highlighted on Scatter*, *Shown in Cell
+  Browser*, or *Saved only*). A line above the list names every set in force and
+  where, so you need not select each row to find the one leaving cells out; it
+  also names a set a restored saved plot asked to highlight that has since been
+  deleted. Renaming a set keeps it highlighted, excluded and as the Cell
+  Browser's Source under its new name; deleting one ends all three. Under the
   list, for the selected set: **View in Cell Browser** (Image Browser → Cell
   Browser with the set as its Source), **Highlight on Scatter** and **Exclude
   from analysis** (click again to undo; one set at a time can be highlighted and

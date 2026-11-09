@@ -53,7 +53,7 @@ from review.features.scatter._annotations import (
 )
 from review.features.scatter._pooled import SCATTER_MAX_POINTS
 from review.features.scatter._layout import (
-    _render_scatter_faceted, _scatter_col_label, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix,
+    _render_scatter_faceted, _scatter_col_label, _setup_scatter_axes, _style_scatter_ax, scatter_log_suffix,
 )
 from review.features.scatter import _observations
 
@@ -172,8 +172,8 @@ def redraw_scatter(
     # Format axes — the same readable label the faceted layout uses.
     _col_label = _scatter_col_label
 
-    ax_scatter.set_xlabel(_col_label(col_x) + log1p_axis_suffix(bool(prefs.get("scatter_x_log", True))))
-    ax_scatter.set_ylabel(_col_label(col_y) + log1p_axis_suffix(bool(prefs.get("scatter_y_log", True))))
+    ax_scatter.set_xlabel(_col_label(col_x) + scatter_log_suffix(prefs, "x"))
+    ax_scatter.set_ylabel(_col_label(col_y) + scatter_log_suffix(prefs, "y"))
     if not tps_list:
         tp_tag = ""
     elif len(tps_list) == 1:

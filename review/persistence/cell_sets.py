@@ -80,7 +80,7 @@ def save_to_data_dir(ctx) -> None:
 def load_from_data_dir(ctx) -> None:
     state = ctx.state.cell_sets
     state.sets, state.stale, state.exclude = [], {}, None
-    state.highlight = state.missing_highlight = None
+    state.highlight = state.missing_highlight = state.browsing = None
     path = path_for(ctx)
     if path is None or not path.exists():
         return

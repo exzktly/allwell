@@ -170,6 +170,9 @@ def apply_filters(ctx, *, live_sync: bool = False) -> None:
     data = str(source.currentData() or "criteria") if source is not None else "criteria"
     st.scatter_gate_mode = data == "gates"
     st.saved_cells = data[len("set:"):] if data.startswith("set:") else None
+    # Tell the saved-cell store, so Saved Cells can say the set is shown here.
+    from review.core.cell_sets import set_browsing
+    set_browsing(ctx, st.saved_cells)
     st.page_size = _page_size(ctx)
 
     # Sort happens inside collect_cells (before the MAX_TOTAL cap, so the cap

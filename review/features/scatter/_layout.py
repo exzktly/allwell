@@ -26,9 +26,29 @@ from review.features.scatter.gating import (
 SCATTER_PANEL_MIN_PX = 260
 
 
-def log1p_axis_suffix(on: bool) -> str:
-    """Axis-label suffix noting the log10(value+1) display transform."""
-    return "  (log₁₀, +1)" if on else ""
+_SUBSCRIPT = str.maketrans("0123456789.", "₀₁₂₃₄₅₆₇₈₉.")
+
+
+def log1p_axis_suffix(on: bool, base="10") -> str:
+    """Axis-label suffix noting the log(value+1) display transform, in the axis's *base*
+    (the ``x_log_base`` / ``y_log_base`` text: ``"10"``, ``"2"``, ``"e"`` …)."""
+    if not on:
+        return ""
+    from review.core.plot_style import log_base_value
+    import math
+
+    value = log_base_value(base)
+    if math.isclose(value, math.e):
+        name = "ln"
+    else:
+        name = "log" + f"{value:g}".translate(_SUBSCRIPT)
+    return f"  ({name}, +1)"
+
+
+def scatter_log_suffix(prefs, which: str) -> str:
+    """:func:`log1p_axis_suffix` for a scatter axis (``"x"`` / ``"y"``) from the figure's own *prefs*: on unless
+    ``scatter_<which>_log`` turns it off, in the base ``<which>_log_base`` names."""
+    return log1p_axis_suffix(bool(prefs.get(f"scatter_{which}_log", True)), prefs.get(f"{which}_log_base", "10"))
 
 
 def _scatter_col_label(col: str) -> str:
@@ -117,8 +137,8 @@ def _render_scatter_faceted(ctx, scatter_data, col_x, col_y, tps_list) -> None:
     # "Color by time" colours each panel's points by timepoint (see
     # render_scatter_points); each panel then legends the timepoints it shows.
     color_by_tp = bool(ctx.state.scatter.color_by_tp)
-    xlabel = _scatter_col_label(col_x) + log1p_axis_suffix(x_log)
-    ylabel = _scatter_col_label(col_y) + log1p_axis_suffix(y_log)
+    xlabel = _scatter_col_label(col_x) + scatter_log_suffix(prefs, "x")
+    ylabel = _scatter_col_label(col_y) + scatter_log_suffix(prefs, "y")
 
     gate_entries = []
     axes_points = []

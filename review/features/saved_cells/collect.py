@@ -31,6 +31,8 @@ class SetRow:
     stale: str
     highlighted: bool
     excluded: bool
+    #: Every place the set is in force now, in ``cell_sets.in_force``'s words.
+    places: tuple = ()
 
     @property
     def size_text(self) -> str:
@@ -42,13 +44,9 @@ class SetRow:
 
     @property
     def status_text(self) -> str:
-        """What this set does to the analysis now, in words."""
-        parts = []
-        if self.excluded:
-            parts.append("Excluded from analysis")
-        if self.highlighted:
-            parts.append("Highlighted on Scatter")
-        return " · ".join(parts) or "Saved only — changes no number"
+        """Where this set is in force now, in words."""
+        return " · ".join(p[:1].upper() + p[1:] for p in self.places) or \
+            "Saved only — changes no number"
 
 
 @dataclass(frozen=True)
@@ -123,6 +121,7 @@ def set_rows(ctx) -> list[SetRow]:
     state = getattr(ctx.state, "cell_sets", None)
     exclude = getattr(state, "exclude", None)
     highlight = getattr(state, "highlight", None)
+    places = cs.in_force(ctx)
     rows = []
     for s in cs.sets(ctx):
         rows.append(SetRow(
@@ -130,8 +129,28 @@ def set_rows(ctx) -> list[SetRow]:
             wells=tuple(sorted({str(c[0]) for c in s.cells})),
             source=s.source, note=s.note, created=s.created,
             stale=cs.stale_summary(ctx, s),
-            highlighted=s.name == highlight, excluded=s.name == exclude))
+            highlighted=s.name == highlight, excluded=s.name == exclude,
+            places=places.get(s.name, ())))
     return rows
+
+
+def in_force_text(ctx) -> str:
+    """One sentence for the top of the list: whether any set is in force, and where.
+
+    Answered for every set at once, so the user need not select each row to find
+    the one that is quietly leaving cells out. A highlight a restored saved plot
+    asked for, whose set no longer exists, is named rather than dropped.
+    """
+    from review.core import cell_sets as cs
+
+    forced = cs.in_force(ctx)
+    text = ("In force: " + "; ".join(f"“{name}” — {', '.join(places)}"
+                                     for name, places in forced.items()) + "."
+            if forced else "No saved set is in force: none is excluded, highlighted or shown.")
+    missing = getattr(getattr(ctx.state, "cell_sets", None), "missing_highlight", None)
+    if missing:
+        text += f" A restored plot asked to highlight “{missing}”, which no longer exists."
+    return text
 
 
 def _chosen(choices, name: str) -> bool:

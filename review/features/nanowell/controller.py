@@ -971,13 +971,12 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
     wells = [w for members in groups.values() for w in members]
-    sizes = getattr(gate, "sizes", None) if sizes is None else sizes
-    if metric in scc.COLUMNS and metrics is not None and "well" in metrics.columns:
-        note = " ".join(filter(None, [note, scc.note(metrics[metrics["well"].isin(wells)], sizes, metric)]))
+    sizes = _sizes_of(gate, sizes)
+    note = _with_size_note(note, metrics, wells, metric, sizes)
     all_metrics = metrics
     metrics, filtered = ss.apply(metrics, subset, baseline, [well] if view == "array" else wells, data)
     if view != "array" and filtered is not None and filtered.kept == 0:
-        render_message(fig, ss.empty_text(filtered), gid="nw-start-empty")
+        render_message(fig, _named(ss.empty_text(filtered), sizes), gid="nw-start-empty")
         return None, None
     # Wells whose rosters two versions decided differently count their rim differently; the figure says so (X35a-R4).
     mixed = mixed_rules_note({w: data.roster_rules.get(w) for w in wells if w in getattr(data, "roster_rules", {})})
@@ -1001,7 +1000,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                            sizes=sizes)
         return (drawn.hits if drawn is not None else None), drawn
     if filtered is not None:
-        note = " ".join(filter(None, [ss.note(filtered), note]))
+        note = " ".join(filter(None, [_named(ss.note(filtered), sizes), note]))
     baseline_moving = mvc.baseline_window_for(moving, baseline_moving, baseline)
     if view == "trajectories":
         marks = {w: timepoint_marks(data, w) for w in wells}
@@ -1117,6 +1116,26 @@ def _stats_cache(st) -> dict:
     if not isinstance(st.stats_cache, dict):
         st.stats_cache = {}
     return st.stats_cache
+
+
+def _sizes_of(gate, sizes):
+    """The size-class rule a figure names its classes by: *sizes* when given (Batch Export, which holds no tally),
+    else the one *gate* (the ``GateTally`` the metrics came from) was counted under."""
+    return sizes if sizes is not None else getattr(gate, "sizes", None)
+
+
+def _with_size_note(note: str, metrics, wells, metric: str, sizes) -> str:
+    """*note* with, for a size metric, the sentence on the ranges and the cells in neither
+    (``size_class_compute.note``) over the drawn wells."""
+    if metric not in scc.COLUMNS or metrics is None or "well" not in metrics.columns:
+        return note
+    return " ".join(filter(None, [note, scc.note(metrics[metrics["well"].isin(wells)], sizes, metric)]))
+
+
+def _named(text: str, sizes) -> str:
+    """*text* with the size classes' placeholder names replaced by the user's labels (``SizeClassRule.name``): a
+    Subset condition on a size metric writes its field's generic name, and a figure must say "T cells count"."""
+    return sizes.name(text) if sizes is not None and text else text
 
 
 def _label(metric: str, channel: str | None, data=None, sizes=None) -> str:
@@ -1882,14 +1901,15 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
     timepoint = shown_timepoint(ctx)[1]
     column = metric_column(metric, channel)
     metrics, filtered = ss.apply(st.metrics, page_subset(ctx, st), st.baseline, [well], st.data)
+    sizes = getattr(st.gate, "sizes", None)
     if filtered is not None and filtered.kept == 0:
-        render_message(fig, ss.empty_text(filtered), gid="nw-start-empty")
+        render_message(fig, _named(ss.empty_text(filtered), sizes), gid="nw-start-empty")
         apply_export_style_to_current(ctx, fig, canvas)
         canvas.draw_idle()
         redraw_detail(ctx)
         return
     if filtered is not None:
-        note = " ".join(filter(None, [ss.note(filtered), note]))
+        note = " ".join(filter(None, [_named(ss.note(filtered), sizes), note]))
     model = ec.extremes(metrics, well, timepoint, column, st.extremes_n, st.data.channels)
     model.name = well_caption(ctx, well)
     missing = tuple(sorted(site for site in model.sites() if site not in st.crops))

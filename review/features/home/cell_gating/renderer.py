@@ -158,6 +158,7 @@ def _cell_gating_plot_cdf(ctx) -> None:
                                 linestyle="--", linewidth=2, alpha=0.7)
         except Exception:
             swallowed()  # was: pass (silent except)
+        _draw_size_classes(ctx, axes[0])
         _focus_cdf_xaxis(axes[0], areas)
 
     colors = theme.WELL_COLORS_TUPLE
@@ -244,3 +245,24 @@ def _cell_gating_plot_cdf(ctx) -> None:
     dpi = fig.get_dpi()
     fig_h_px = max(1, int(fig_height * dpi))
     ctx.runtime.cell_gating.canvas.setMinimumHeight(fig_h_px)
+
+
+def _draw_size_classes(ctx, ax) -> None:
+    """Shade each size class's area range on the cell-area curve, labelled with the user's name for it
+    (``QCParams.size_classes``): the curve is where a bimodal size distribution shows as a knee, so it is where a
+    range is checked against the cells. Nothing is drawn until the rule is complete. A class open at one end is
+    shaded to the edge of the axis."""
+    from review.features.qc.controller import get_qc_params
+
+    rule = getattr(get_qc_params(ctx), "size_classes", None)
+    if rule is None or not rule.active():
+        return
+    inks = (theme.Colors.gate_curve_a, theme.Colors.gate_curve_b)
+    for k, c in enumerate(rule.classes):
+        ink = inks[k % len(inks)]
+        low = c.min_area if c.min_area is not None else 0.0
+        high = c.max_area if c.max_area is not None else ax.get_xlim()[1]
+        ax.axvspan(low, high, color=ink, alpha=0.15, zorder=0, gid=f"cg-size-class-{k}")
+        ax.text((low + high) / 2 if c.max_area is not None else low, 0.98, c.label, color=ink, fontsize=8,
+                ha="center" if c.max_area is not None else "left", va="top",
+                transform=ax.get_xaxis_transform(), gid=f"cg-size-class-label-{k}")

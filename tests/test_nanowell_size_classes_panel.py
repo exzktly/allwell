@@ -100,6 +100,10 @@ def test_ranges_typed_on_cell_gating_are_counted_on_the_nanowells_page_under_the
     assert w["size_classes_row"].isVisible()                       # a nanowell dataset
     reprojected = []
     monkeypatch.setattr(qcc, "reproject_verdicts", lambda *a, **k: reprojected.append(1) or [])
+    import review.features.home.cell_gating.controller as cgc
+
+    replotted = []
+    monkeypatch.setattr(cgc, "cell_gating_replot_cdfs", lambda _ctx: replotted.append(1))
 
     for key, text in (("size_label_0", "T cells"), ("size_min_0", "80"), ("size_max_0", "250"),
                       ("size_label_1", "DCs"), ("size_min_1", "350"), ("size_max_1", "1200")):
@@ -107,6 +111,7 @@ def test_ranges_typed_on_cell_gating_are_counted_on_the_nanowells_page_under_the
 
     assert get_qc_params(ctx).size_classes == SizeClassRule.of(("T cells", 80, 250), ("DCs", 350, 1200))
     assert reprojected == []                                       # not a gate: no verdict was recomputed
+    assert replotted                                               # the area curve shades the new ranges
     _wait_current(qtbot, ctx, st)
     here = _site(st, "t_c", 0)
     assert (here["size_1"], here["size_2"], here["size_unclassified"], here["size_ratio"]) == (1.0, 1.0, 1.0, 1.0)
@@ -135,6 +140,14 @@ def test_ranges_typed_on_cell_gating_are_counted_on_the_nanowells_page_under_the
     assert "Size classes (Cell Gating, cells it keeps): T cells 80–250 px, DCs 350–1200 px." in said
     assert "fall in neither class" in said
     assert "The line joins each well's mean" in said
+
+    # A Subset condition on a size metric is written on the figure with the user's label too.
+    from review.features.nanowell import subset_compute as ss
+
+    st.subset = ss.Subset((ss.Condition("size_1", "ge", 2.0, at="t_c"),))
+    nwc.redraw(ctx)
+    said = re.sub(r"\s+", " ", " ".join(_texts(ctx)))
+    assert "T cells count" in said and "Size class 1" not in said
 
 
 def test_an_incomplete_rule_says_what_is_missing_and_leaves_the_metrics_undefined(qtbot, tmp_path):

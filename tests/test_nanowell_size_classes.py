@@ -266,3 +266,49 @@ def test_the_statistics_view_compares_groups_on_each_well_s_mean():
     sample = stc.samples_from_model(model, {"g": ["A01"]}, stc.WELLS)[0]
     assert sample.values.tolist() == [1.0]
     assert stc.unit_sentence(stc.WELLS, "mean").startswith("Values: one mean per well")
+
+
+def test_a_subset_condition_on_a_size_metric_is_written_with_the_user_s_label():
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell import subset_compute as ss
+
+    condition = ss.Condition("size_1", "ge", 2.0)
+    assert "Size class 1 count" in condition.text()                    # the condition itself is generic
+    assert nwc._named(ss.Subset((condition,)).label(), RULE).startswith("Subset: T cells count")
+    assert nwc._named("", RULE) == "" and nwc._named("Size class 1", None) == "Size class 1"
+
+
+# ── shaded on Cell Gating's cell-area curve ───────────────────────────────────
+
+def _cell_gating_ctx(rule):
+    from types import SimpleNamespace
+
+    from matplotlib.figure import Figure
+
+    runtime = SimpleNamespace(cell_gating=SimpleNamespace(
+        figure=Figure(), canvas=SimpleNamespace(draw_idle=lambda: None, setMinimumHeight=lambda _h: None), axes_stack=[], cell_areas=[60.0, 100.0, 200.0, 400.0, 900.0],
+        fluor_data={}, ratio_data={}))
+    state = SimpleNamespace(qc=SimpleNamespace(params=QCParams(size_classes=rule)),
+                            cell_gating=SimpleNamespace(fluor_gates={}, thresh_frac_on={}),
+                            channel=SimpleNamespace(seg_channel_token=""), dataset=SimpleNamespace(pipeline_info={}))
+    return SimpleNamespace(runtime=runtime, state=state)
+
+
+def test_each_class_is_shaded_and_labelled_on_the_cell_area_curve():
+    pytest.importorskip("matplotlib")
+    from review.features.home.cell_gating.controller import cell_gating_replot_cdfs
+
+    ctx = _cell_gating_ctx(RULE)
+    cell_gating_replot_cdfs(ctx)
+    ax = ctx.runtime.cell_gating.figure.axes[0]
+    spans = {p.get_gid(): p for p in ax.patches if str(p.get_gid()).startswith("cg-size-class-")}
+    assert set(spans) == {"cg-size-class-0", "cg-size-class-1"}
+    first = spans["cg-size-class-0"].get_window_extent().transformed(ax.transData.inverted())
+    assert (round(first.x0, 6), round(first.x1, 6)) == (80.0, 250.0)
+    labels = [t.get_text() for t in ax.texts if str(t.get_gid()).startswith("cg-size-class-label-")]
+    assert labels == ["T cells", "DCs"]
+
+    blank = _cell_gating_ctx(SizeClassRule())
+    cell_gating_replot_cdfs(blank)
+    assert not [p for p in blank.runtime.cell_gating.figure.axes[0].patches
+                if str(p.get_gid()).startswith("cg-size-class-")]

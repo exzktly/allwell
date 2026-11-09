@@ -1627,6 +1627,8 @@ review/
 │   ├── gating_state.py, sample_definitions.py, viewer_state.py, stats_compute.py
 │   ├── well_population.py   ← a well's threshold-free cells, for threshold edits without a read
 │   ├── metric_registry.py, qc_params.py
+│   ├── size_classes.py               ← two labelled cell-size classes (Cell Gating's rule, counted per
+│   │                                    nanowell, §6.2j)
 │   ├── channel_roles.py              ← which channel is phase: listed last, never the default plot channel
 │   ├── observation.py                ← cells | nanowells, the observation-table contract, well medians,
 │   │                                    the "Observations: …" footer line (§6.2l)
@@ -12748,10 +12750,68 @@ with no cell in it is included, and `cell_gate_compute.exclude_fields` gives eac
 `collect.FIELD_EXCLUDED` before `site_metrics` reads any value: no count, confluence, brightness or signal, and the
 reason `field_excluded` on every metric. `cell_gate_compute.note` is the figure's sentence while anything is left
 out — the cells, the excluded fields, and the wells whose rows could not be read (they keep the run's counts). The tally runs on the page's load worker with the metrics; `NanowellState.gated_for` records the
-`StatsCacheState.population_version` it was taken at, which every invalidation that drops the populations raises,
-so `ensure_loaded` and `redraw` recompute when Cell Gating changes. Batch Export's Nanowells panel calls the same
+`controller.gate_version` it was taken at — the `StatsCacheState.population_version`, which every invalidation that
+drops the populations raises, and the size-class rule's key (below) — so `ensure_loaded` and `redraw` recompute when
+Cell Gating changes, and the plot tools' observation memo, keyed on the same version, does too. Batch Export's Nanowells panel calls the same
 `gate_tally` in `_load`, so an export never disagrees with the page. `tests/test_nanowell_counts_follow_cell_gating.py`
 drives the real QC gate through the page and through the panel.
+
+**Size classes** (`review/domain/size_classes.py`, `review/features/nanowell/size_class_compute.py`,
+`review/features/qc/size_class_view.py`). Two classes of cell size the user defines on Cell Gating
+(`QCParams.size_classes`, a `SizeClassRule`), for telling two cell types apart by size when no marker separates
+them: each class is a label the user types and an area range in pixels, **inclusive at both ends**, read from the
+same area column as the debris gate (`qc_params.AREA_COLS`, `size_class_compute.area_column`) and compared at six
+decimals, because a nanowell run writes `area_px` as `area_um2 / pixel_um**2` and an exact bound would otherwise
+fall to float noise. A bound left blank is open. The ranges may leave a gap and may not overlap
+(`SizeClassRule.problem`, which also refuses a missing or repeated label, a class with no bound, and an inverted
+range); a cell in neither is **unclassified**, counted and never forced into a class. Nothing is classified until
+the rule is complete (`active`), and an incomplete rule is kept as typed so the panel can say what is missing. The
+rule is not an inclusion layer — it leaves every cell in — but it is stored with the QC parameters so it is saved
+(`to_dict`'s `size_classes` list), restored, and carried by the dataset tools with the rest of Cell Gating.
+
+The counting rides on the gate tally: `controller.gate_tally(…, sizes=…)` passes the rule to
+`cell_gate_compute.tally`, which calls `size_class_compute.well_counts` on the same rows with the same inclusion it
+subtracts gated cells by, so a class counts exactly the cells the page's `n` counts. `GateTally.sizes` and
+`GateTally.classes` carry the rule and the per-site counts, and `site_metrics` adds five columns after Cell Gating
+has taken its cells off `n` (`size_class_compute.apply`): `size_1`, `size_2` (the counts), `size_unclassified`
+(`n` less both), `size_ratio` (`size_1 / size_2`) and `size_1_share` (`size_1 / (size_1 + size_2)`). Each is a
+`value` metric in `metric_kinds`, undefined wherever the count is, and for reasons of its own beyond it
+(`size_class_compute.exclusion_reason`, labelled in `distribution_compute._REASON_LABELS`): no complete rule, the
+well's cells not read, an empty second class (the ratio), no classified cell (the share), or classes adding up to
+more than the count — which leaves every size metric undefined there rather than writing a negative unclassified
+count. A nanowell with a count and no cells counts 0 in each class. The rule's key is part of `gate_version`, so
+the page, its observations memo and every staleness check recompute when only the rule changes, whatever route
+changed it.
+
+The columns are named by position and the user's labels are applied wherever a metric is named:
+`SizeClassRule.name` replaces the placeholders "Size class 1" / "Size class 2" (`size_class_compute.LABELS`, entered
+in `METRICS` like any page metric) — in the page's Metric menu (`tab_view.name_size_metrics`, on every control
+refresh), every figure label (`controller._label(…, sizes)`, the rule taken from the tally the metrics came from or,
+for Batch Export, passed as `draw_view(sizes=…)`), a Subset condition's sentence on a figure (`controller._named`),
+the Subset editor's field menu, the plot tools' metric list (`observation_compute._metric_specs(…, sizes)`) and
+Batch Export's metric list. A figure of a size metric adds `size_class_compute.note`: the ranges, and how many of the
+counted cells fell in neither class. The long CSV carries a `size_classes` column naming the ranges, since its
+columns are `size_1` and `size_2`.
+
+**Each well's value of a size metric is the mean over its nanowells, not the median**
+(`summary_compute.MEAN_METRICS`, `well_statistic`, `well_value`): the user asked for the average, and a median of
+small whole-number counts jumps between integers. `well_summary`'s `median` column holds that mean — one shape for
+every caller — and its `statistic` column names it; the Distribution view's per-well line and its note, the group
+centre's note, the Statistics view's group values and its "one mean per well" sentence, and a density's tick all
+follow it. The plot tools get the same answer through `ObservationMetric.well_statistic` (below).
+
+The Cell Gating panel's block (`size_class_view.build_row`, under the debris bounds, shown on a nanowell dataset only)
+is two rows of label, min and max, with each range's equivalent-circle diameter in µm at the run's pixel size (read
+from `pipeline_info.json`'s `acquisition` block, which `viewer_state.read_pipeline_info` carries for it) and a
+sentence: what an incomplete rule lacks, as a notice; otherwise what the classes feed, whether the debris gate's own
+bounds cut into a range (`size_classes.clipped_by_gate`), and whether the timepoints were imaged at different pixel
+sizes, when a pixel range is a different cell size at each and no single diameter is shown. The boxes apply like the
+debris bounds (Enter, leaving the box, or a pause in typing). An edit that changes only the classes goes through
+`qc.controller.set_size_classes` rather than `set_qc_params_with_progress`: no verdict column moves, so nothing is
+re-projected; the parameters are saved, the plots and the page are redrawn, and Cell Gating's cell-area curve is drawn
+again (`cell_gating.replot_cdfs`) with each class shaded and labelled on it (`renderer._draw_size_classes`).
+`tests/test_nanowell_size_classes.py` pins the rule, the counts and the reasons; `tests/test_nanowell_size_classes_panel.py`
+types into the real boxes and reads the page's metrics, Metric menu, footer and CSV.
 
 **The fixed cohort** (`distribution_compute.fixed_cohort`, `NanowellState.cohort`, the *Fixed cohort* box on
 *Distribution* and *Trajectories*). Off, the median at each timepoint is over whichever nanowells could be
@@ -12930,7 +12990,8 @@ Saved Plots (`Subset.to_config`); a saved block with one condition that is not a
 rather than as part of one (`restore`), and a page saved before there was a Subset restores its `start_min` /
 `start_max` as the one-condition subset they were.
 
-**Summaries** (`summary_compute`). `well_summary` describes one well per timepoint: median, interquartile
+**Summaries** (`summary_compute`). `well_summary` describes one well per timepoint: median (the mean for a size
+metric, `MEAN_METRICS`, named in its `statistic` column), interquartile
 range, fraction responding — the share of the nanowells used whose value is strictly above
 `responding_above`, the cut the user set for that metric, and undefined when none is set (there is no default:
 a fold change of 1 is "any growth at all", and a count, a confluence or an intensity has no natural cut; a
@@ -12963,7 +13024,8 @@ baseline, one row per nanowell and timepoint, through a temporary file. Its `n_c
 page's, after Cell Gating, so the file records the gate beside them: `n_cells_run` (the run's own count),
 `cells_left_out` (`cell_gate_compute.left_out_counts`: what the gate took from that count, empty where there is no
 count) and `cell_gating` (`cell_gate_compute.note`, the figure's sentence, as Batch Export's summary `note` carries
-it).
+it). `size_classes` names what the `size_1` / `size_2` columns counted (`SizeClassRule.text`, "not set" without a
+complete rule).
 
 **Persistence** (`review/persistence/nanowell.py`). The page's choices (`state.NanowellState.to_config`) are
 the `nanowell` section of `persistence.json`; a dataset without one lands on the defaults, and
@@ -15023,7 +15085,9 @@ tools as a cell's, while the Nanowells feature stays removable.
 `ObservationTable` is a frame of rows of one kind, the `ObservationMetric`s that may be plotted from it (key, label,
 kind, channel), a `why_missing(metric)` that names each undefined value's reason, and the notes every figure from it
 carries (the rim-focus rule). `well_medians` reduces a metric to each well's median over its nanowells per timepoint
-(the mean for a 0/1 flag such as `occupied`, `SHARE_METRICS` — the median of 0/1 flags is not a share), and
+(the mean for a 0/1 flag such as `occupied`, `SHARE_METRICS` — the median of 0/1 flags is not a share — and for a
+metric whose `ObservationMetric.well_statistic` says `mean`, as the Nanowells page's size classes do; `well_statistic`
+is the one answer, which the Scatter's per-well points read too), and
 `group_points` reduces those to a member's mean ± SEM **over wells**: wells are the replicates; nanowells are never
 pooled across wells into one sample. `footer_line` writes the first footer line of every figure drawn from
 observations — it begins "Observations: cells" or "Observations: nanowells" and counts what was used and left out by
@@ -15083,7 +15147,7 @@ every Plotting leaf to a declaration and a cells-only leaf to a written reason.
 | Leaf | Draws | Module |
 |---|---|---|
 | Scatter (Points: each observation) | one point per nanowell × timepoint, any metric on each axis (own X / Y pickers) | `scatter/_observations.py`, `observation_compute.py` |
-| Scatter (Points: per well) | each well's median over its nanowells per timepoint | same |
+| Scatter (Points: per well) | each well's median over its nanowells per timepoint (the mean for a share or a size class, `well_statistic`) | same |
 | Bar Plots | per member: mean over wells of each well's median ± SEM over wells, wells as dots; occupied share; N nanowells | `barplot/_observations.py` |
 | Line Graphs | the same over time; occupied share; N nanowells; the CDF over nanowells | `lineplot/_observations.py` |
 | Heat Map | the plate grid, a cell the mean over its wells of their medians, `±` the SEM over wells | `heatmap/_observations.py` |

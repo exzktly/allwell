@@ -2391,3 +2391,12 @@ def apply_fov_selection_with_progress(ctx, selection) -> None:
         text="Re-applying the inclusion layers to every loaded well…",
         work=_work, on_done=_done, on_failed=_failed, key="cell_gating.fov",
     )
+
+
+def cell_gating_replot_cdfs(ctx) -> None:
+    """Draw this tab's CDFs again from what it holds — after an edit that changes only what is marked on them (the
+    size classes shaded on the cell-area curve), never what they plot. A tab never built has nothing to draw."""
+    if ctx.runtime.cell_gating.figure is None:
+        return
+    ctx.runtime.cell_gating.axes_stack = []
+    _cell_gating_plot_cdf(ctx)

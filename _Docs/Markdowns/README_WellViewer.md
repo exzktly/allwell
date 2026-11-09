@@ -3310,6 +3310,27 @@ choice applies once, when the menu closes.
   is judging. A plot of the gated data therefore shows the left-out nanowells
   with fewer cells than the gate saw.
 
+  **Size classes, counted per nanowell** sits under the debris gate on a
+  nanowell dataset. It sorts each nanowell's cells into two size ranges you
+  name — for example *T cells* and *DCs*, when no marker you imaged tells them
+  apart — and counts each. Each row is a **label** you type and a **min** and
+  **max** cell area in pixels, the same area the debris gate's Area row uses.
+  Both ends count as inside the range, and a box left blank means no limit on
+  that side. Beside each range is its size as a circle's diameter in µm at the
+  run's pixel size, so you can check it against what you expect your cells to
+  measure. Leave a gap between the ranges for sizes that could be either: a
+  cell in neither range is counted as *unclassified*, never forced into one.
+  The ranges may not overlap, both labels are needed, and the line under the
+  rows says what is missing until the rule is complete. Only the cells this tab
+  keeps are classified, so the debris gate and every other filter apply first;
+  the line says when the debris gate's own Area bounds cut into a range, and
+  when the run imaged its timepoints at different pixel sizes, since a pixel
+  range is then a different cell size at each. The ranges are drawn as shaded,
+  labelled bands on the cell-area curve below. Changing them re-runs nothing
+  and shows no progress window: no cell is included or left out by them. The
+  [Nanowells page](#nanowells) then offers each class's count, the cells in
+  neither, their ratio and the first class's share, each named with your labels.
+
   **Exclude fields the run flagged** sits under the debris gate and works on
   whole fields of view rather than on single cells. While a run processes a
   plate it measures six things about every field it looks at — how sharply
@@ -6366,6 +6387,17 @@ use them.
   log₂ count fold change (with +1 on both counts, so an empty nanowell has one), growth rate (the slope of
   ln count against time, per hour, over at least three timepoints with cells) and occupancy at baseline.
   Cell fluorescence and nanowell fluorescence, and their fold changes, are of the fluorescence channel chosen in **Channel**.
+  With **size classes** set on Home ▸ Cell Gating, five more, each named with your labels: the count of each
+  class (*T cells count*, *DCs count*), *Cells in no size class*, the ratio of the first class to the second
+  (*T cells : DCs ratio*, put the class you want on top in the first row) and the first class's share of the
+  classified cells (*T cells share of classified cells*, between 0 and 1). A nanowell with no cells counts 0 in
+  each class and has no ratio or share; a nanowell with no cell of the second class has no ratio — never 0 or
+  infinity — and the footer counts it with its reason. **Each well's value of these five is the mean over its
+  nanowells**, not the median the other metrics use, and the figure's note says so; the dots of the
+  *Distribution* view show how they spread across the nanowells. The footer states the ranges and how many of
+  the counted cells fell in neither class, and *Save nanowell data…* writes the columns `size_1`, `size_2`,
+  `size_unclassified`, `size_ratio` and `size_1_share` with a `size_classes` column naming the ranges. Until
+  the classes are set, these metrics are empty and say so.
 
 **Cell fluorescence and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
 but they answer different questions. Both are measured above the same background, the one the run was set up

@@ -201,9 +201,12 @@ def set_size_classes(ctx, params: QCParams) -> None:
     progress popup would recompute every held well for nothing. The parameters go into state and are saved, and the
     surfaces that count by class are redrawn: the Nanowells page (``nanowell.follow_qc_params``) and the plots
     (``redraw_app``), whose nanowell rows are keyed on the rule (``nanowell.controller.gate_version``) and so are
-    counted again."""
+    counted again. Cell Gating's cell-area curve, which shades the classes, is drawn again too
+    (``cell_gating.replot_cdfs``)."""
     ctx.state.qc.params = params
     _after_qc_params_applied(ctx)
+    with swallow("Cell Gating: shade the size classes"):
+        ctx.features.call("cell_gating.replot_cdfs", ctx)
 
 
 def set_qc_params_with_progress(ctx, params: QCParams, *, on_done=None) -> None:

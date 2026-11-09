@@ -176,6 +176,8 @@ def nanowell_observations(ctx, wells, baseline: str | None = None, *,
         subset_label = ""
         if page_scope:
             metrics, scope_notes, subset_label = _apply_page_scope(ctx, st, metrics, data, baseline, wells)
+            # A condition on a size metric names its field generically ("Size class 1 count"); say the user's label.
+            scope_notes, subset_label = tuple(sizes.name(n) for n in scope_notes), sizes.name(subset_label)
         frame = _frame(metrics)
         channels = list(data.channels)
 

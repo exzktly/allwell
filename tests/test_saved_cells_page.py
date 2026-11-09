@@ -95,6 +95,70 @@ def test_the_set_buttons_change_the_store_and_undo_on_a_second_press(ctx):
     assert _rows(page.sets)[0][3] == "Saved only — changes no number"
 
 
+def test_the_page_says_which_sets_are_in_force_and_where_without_selecting_them(ctx):
+    """Three sets, each in force somewhere different, one of them in two places;
+    the selected row is one that is in force nowhere, so only the line above the
+    list can tell the user about the others."""
+    from review.core.cell_sets import add_set, set_browsing, set_excluded, set_highlighted
+
+    add_set(ctx, _CELLS, source="lasso", name="Quiet")
+    add_set(ctx, _CELLS[:1], source="lasso", name="Dropped")
+    add_set(ctx, _CELLS[1:], source="lasso", name="Looked at")
+    page = _page(ctx)
+    assert page.in_force.text() == \
+        "No saved set is in force: none is excluded, highlighted or shown."
+    set_excluded(ctx, "Dropped")
+    set_highlighted(ctx, "Looked at")
+    set_browsing(ctx, "Looked at")
+    assert page.in_force.text() == (
+        "In force: “Dropped” — excluded from analysis; "
+        "“Looked at” — highlighted on Scatter, shown in Cell Browser.")
+    assert [r[3] for r in _rows(page.sets)] == [
+        "Saved only — changes no number", "Excluded from analysis",
+        "Highlighted on Scatter · Shown in Cell Browser"]
+    assert _rows(page.sets)[0][0] == "Quiet" and page.sets.currentRow() == 0
+
+
+def test_where_a_set_is_in_force_follows_a_rename_and_ends_with_a_delete(ctx):
+    from review.core import cell_sets as cs
+
+    cs.add_set(ctx, _CELLS, source="lasso", name="Old")
+    cs.set_excluded(ctx, "Old")
+    cs.set_highlighted(ctx, "Old")
+    cs.set_browsing(ctx, "Old")
+    page = _page(ctx)
+    assert cs.rename_set(ctx, "Old", "New")
+    assert cs.in_force(ctx) == {"New": (cs.EXCLUDED, cs.HIGHLIGHTED, cs.BROWSED)}
+    assert page.in_force.text() == \
+        "In force: “New” — excluded from analysis, highlighted on Scatter, shown in Cell Browser."
+    cs.delete_set(ctx, "New")
+    st = ctx.state.cell_sets
+    assert (st.exclude, st.highlight, st.browsing) == (None, None, None)
+    assert cs.in_force(ctx) == {}
+    assert not page.in_force.isVisibleTo(page)
+
+
+def test_the_cell_browser_showing_no_set_or_a_missing_one_is_in_force_nowhere(ctx):
+    from review.core import cell_sets as cs
+
+    cs.add_set(ctx, _CELLS, source="lasso", name="Kept")
+    cs.set_browsing(ctx, "Kept")
+    assert cs.in_force(ctx) == {"Kept": (cs.BROWSED,)}
+    cs.set_browsing(ctx, "Never saved")
+    assert ctx.state.cell_sets.browsing is None and cs.in_force(ctx) == {}
+
+
+def test_a_highlight_a_restored_plot_asked_for_is_named_when_its_set_is_gone(ctx):
+    from review.core.cell_sets import add_set
+
+    add_set(ctx, _CELLS, source="lasso")
+    ctx.state.cell_sets.missing_highlight = "Deleted since"
+    page = _page(ctx)
+    assert page.in_force.text() == (
+        "No saved set is in force: none is excluded, highlighted or shown. "
+        "A restored plot asked to highlight “Deleted since”, which no longer exists.")
+
+
 def test_rename_and_delete_act_on_the_selected_set(ctx):
     from review.core.cell_sets import add_set
 
@@ -329,6 +393,24 @@ def test_the_page_opens_from_the_rail_and_its_buttons_reach_the_real_pages(viewe
     page.view_set.click()
     assert app._current_centre_tab() == "Cell Browser"
     assert ctx.runtime.cell_browser.source_cb.currentData() == "set:Cells 1"
+    assert gallery() == [("A02", "F001", "2")]
+    # The page now says where the set is in force: the real Cell Browser told it.
+    assert ctx.state.cell_sets.browsing == "Cells 1"
+    assert page.sets.item(0, 3).text() == "Shown in Cell Browser"
+    # Renamed from the page, the gallery's source follows the set rather than
+    # dropping to Criteria; deleted, it drops to Criteria and stops claiming it.
+    from review.core.cell_sets import delete_set, rename_set
+    assert rename_set(ctx, "Cells 1", "Renamed")
+    assert ctx.runtime.cell_browser.source_cb.currentData() == "set:Renamed"
+    assert page.in_force.text() == "In force: “Renamed” — shown in Cell Browser."
+    assert gallery() == [("A02", "F001", "2")]
+    delete_set(ctx, "Renamed")
+    assert ctx.runtime.cell_browser.source_cb.currentData() == "criteria"
+    assert ctx.state.cell_sets.browsing is None
+    add_set(ctx, [("A02", "F001", "0h", 2)], source="lasso")
+    nb.setCurrentByName("Saved Cells")
+    page.sets.selectRow(0)
+    page.view_set.click()
     assert gallery() == [("A02", "F001", "2")]
 
     nb.setCurrentByName("Saved Cells")

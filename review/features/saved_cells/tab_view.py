@@ -35,7 +35,7 @@ from widgets.page_body import build_page_body
 _SET_COLUMNS = ("Name", "Cells", "From", "In use")
 #: A frame or a padding is drawn on both sides of what it surrounds.
 _BOTH_SIDES = 2
-_GATE_COLUMNS = ("Name", "Axes", "Wells", "In use")
+_GATE_COLUMNS = ("Name", "Axes", "Wells", "Cells inside", "In use")
 
 
 class _FittedTable(QTableWidget):
@@ -98,6 +98,15 @@ def _fill(table: QTableWidget, rows: list[tuple], keys: list[str], keep: str | N
     finally:
         table.blockSignals(False)
     _fit_height(table)
+
+
+def _count_text(count) -> str:
+    """``"412 of 3,020 (13.6%)"``, or a dash for a gate that was not counted."""
+    if count is None:
+        return "—"
+    inside, of = count
+    share = f" ({100.0 * inside / of:.1f}%)" if of else ""
+    return f"{inside:,} of {of:,}{share}"
 
 
 def _selected(table: QTableWidget) -> str | None:
@@ -225,7 +234,8 @@ class SavedCellsPage(QWidget):
             self, "Gates",
             hint="Rectangles drawn on the per-cell Scatter. A gate is a rule over two "
                  "measurements, so it takes whatever cells are loaded; it changes the analysis "
-                 "only where Cell Gating applies it."))
+                 "only where Cell Gating applies it. Cells inside: at every timepoint in the "
+                 "wells it was drawn on, of the cells every other layer keeps."))
         self.gates_empty = QLabel(
             "No gates yet. Draw one on the Scatter Plot's per-cell view with Draw gate.", self)
         self.gates_empty.setObjectName("Muted")
@@ -275,7 +285,9 @@ class SavedCellsPage(QWidget):
 
         keep_gate = _selected(self.gates)
         gate_rows = collect.gate_rows(self.ctx)
-        _fill(self.gates, [(g.name, g.axes_text, ", ".join(g.wells) or "all", g.status_text)
+        counts = collect.gate_counts(self.ctx)
+        _fill(self.gates, [(g.name, g.axes_text, ", ".join(g.wells) or "all",
+                            _count_text(counts.get(g.name)), g.status_text)
                            for g in gate_rows],
               [g.name for g in gate_rows], keep_gate)
         has_gates = bool(gate_rows)

@@ -7379,7 +7379,15 @@ analysis* / *Highlighted on Scatter* / *Saved only*; a gate *Defines the
 Included cells* only while Cell Gating's inclusion layer uses scatter gates and
 its selection takes that gate, *Defines the ON cells* likewise for the
 thresholding layer, else *Not applied*; the intensity floors only while scatter
-gates do not replace them. Every action is one the stores already had: set
+gates do not replace them. Each gate also shows **Cells inside** —
+`collect.gate_counts`, ``(inside, of)`` — counted the way the per-cell Scatter
+draws the cloud the gate was drawn on and the Cell Browser shows a gate's cells:
+among the cells every other layer keeps (`df_included_mask(include_gate=False)`,
+so an excluded saved set leaves the count), over the wells the gate recorded
+(every loaded well when none), at every timepoint. Each well is read narrowly
+(`narrow_rows` over the gates' own columns), on the GUI thread because a gate on
+a nanowell axis reads the Nanowells memo; 576,000 cells and three gates took
+about 0.13 s, so a plate of millions of cells takes seconds when the page opens. Every action is one the stores already had: set
 actions are `cell_sets` calls; *View in Cell Browser* is the Cell Browser
 sub-leaf's `cell_browser.browse` service (`cell_browser/_browse.py`, which sets
 the gallery's Source menu the way the user would — `set:<name>`, or `gates`

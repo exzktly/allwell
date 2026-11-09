@@ -7782,7 +7782,10 @@ the way to look at each. Two lists, because they are two kinds of thing:
   its wells were segmented again says how many of its cells it leaves out.
 - **Gates** — rectangles drawn on the per-cell Scatter Plot. A gate is a rule
   over two measurements, so it takes whatever cells are loaded. Each row gives
-  its axes, the wells it was drawn on, and whether it is in force: *Defines the
+  its axes, the wells it was drawn on, **Cells inside** — how many cells it
+  holds, of how many, counted at every timepoint in those wells among the cells
+  every other layer keeps (so excluding a saved set lowers it) — and whether it
+  is in force: *Defines the
   Included cells* or *Defines the ON cells* when Cell Gating applies it, *Not
   applied* otherwise. **View in Cell Browser** shows the cells inside that gate
   alone; **Manage on Cell Gating** takes you to Home → Cell Gating, where gates

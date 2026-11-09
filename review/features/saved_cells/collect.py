@@ -59,7 +59,6 @@ class GateRow:
     wells: tuple
     includes: bool
     thresholds: bool
-
     @property
     def axes_text(self) -> str:
         return f"{self.x} × {self.y}"
@@ -134,3 +133,59 @@ def intensity_gates(ctx) -> list[tuple[str, float]]:
         return []
     return sorted((str(ch).upper(), float(v)) for ch, v in (cg.fluor_gates or {}).items()
                   if v and float(v) > 0)
+
+
+def gate_counts(ctx, gates=None) -> dict[str, tuple[int, int]]:
+    """Each gate's ``(inside, of)``: its cells, and the cells it was counted over.
+
+    Counted the way the per-cell Scatter draws the cloud the gate was drawn on,
+    and the way the Cell Browser shows a gate's cells: among the cells every
+    other inclusion layer keeps (QC, curation, crop, the intensity gate, an
+    excluded saved set — ``df_included_mask(include_gate=False)``, since the
+    gate layer is the one being counted), over the wells the gate was drawn on
+    (every loaded well when it recorded none), at every timepoint. A gate whose
+    columns a well lacks counts none of that well's cells inside, as on the
+    plot.
+
+    Reads each well narrowly — the gate's own columns and the verdicts — so it
+    neither loads whole frames nor evicts the wells other pages hold. Must run
+    on the GUI thread: a gate on a nanowell axis reads the Nanowells memo.
+    """
+    from review.data.data_loading import df_included_mask
+    from review.data.narrow_rows import narrow_rows, value_inputs
+    from review.data.observations import nanowell_gate_values
+    from review.domain.gates import compute_gate_inclusion
+
+    gates = [g for g in (ctx.state.cell_gating.scatter_gates if gates is None else gates) or ()
+             if str(g.get("name") or "").strip()]
+    if not gates:
+        return {}
+    ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
+    loaded = list(getattr(ctx.state.dataset, "well_paths", None) or ())
+    nanowell_values = nanowell_gate_values(ctx, gates)
+    want: set[str] | None = set()
+    for g in gates:
+        for key in (g.get("x_col"), g.get("y_col")):
+            cols = value_inputs(str(key or ""), ratios)
+            want = None if cols is None or want is None else want | cols
+    frames: dict = {}
+
+    def rows(well):
+        if well not in frames:
+            frames[well] = narrow_rows(ctx, well, None if want is None else want | {"well", "nucleus_id"})
+        return frames[well]
+
+    out = {}
+    for g in gates:
+        wells = [w for w in (g.get("wells") or loaded) if w in loaded]
+        inside = of = 0
+        for well in wells:
+            df = rows(well)
+            if df is None or df.empty:
+                continue
+            base = df_included_mask(df, include_gate=False).to_numpy()
+            hit = compute_gate_inclusion(df, [g], ratios, nanowell_values=nanowell_values)
+            inside += int((hit & base).sum())
+            of += int(base.sum())
+        out[str(g["name"]).strip()] = (inside, of)
+    return out

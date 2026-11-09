@@ -2301,6 +2301,24 @@ def _move_selection_rings(ctx) -> bool:
     return True
 
 
+#: The Saved Cells page's handle in the widget registry (``saved_cells/controller.PAGE_KEY``), refreshed by name so
+#: this feature needs nothing of that one's.
+SAVED_CELLS_PAGE_KEY = "_saved_cells_page"
+
+
+def _saved_cells_changed(ctx) -> None:
+    """The Saved Cells page lists the saved subsets and which is in use (``_saved_subsets``); re-read it while it is
+    on screen. A hidden page is re-read when it is next shown (its ``on_activate``), so a Subset edited condition by
+    condition does not recount every gate that page lists on each edit."""
+    from core.safe import swallow
+
+    with swallow("refresh the Saved Cells page's subsets"):
+        page = ctx.widgets.get_or_none(SAVED_CELLS_PAGE_KEY)
+        refresh = getattr(page, "refresh", None)
+        if callable(refresh) and page.isVisible():
+            refresh()
+
+
 def _save_soon(ctx) -> None:
     from core.safe import swallow
 
@@ -2458,6 +2476,7 @@ def set_subset(ctx, subset) -> bool:
     st.subset = subset
     _save_soon(ctx)
     _call(ctx, "_nw_refresh_controls")
+    _saved_cells_changed(ctx)
     redraw(ctx)
     return True
 
@@ -2474,6 +2493,7 @@ def save_subset(ctx, name: str) -> str:
         return f"Not saved: {exc}."
     _save_soon(ctx)
     _call(ctx, "_nw_refresh_controls")
+    _saved_cells_changed(ctx)
     return ""
 
 
@@ -2498,6 +2518,7 @@ def rename_saved_subset(ctx, old: str, new: str) -> str:
         return f"Not renamed: {exc}."
     _save_soon(ctx)
     _call(ctx, "_nw_refresh_controls")
+    _saved_cells_changed(ctx)
     return ""
 
 
@@ -2510,6 +2531,7 @@ def delete_saved_subset(ctx, name: str) -> None:
     st.saved_subsets = {k: v for k, v in st.saved_subsets.items() if k != name}
     _save_soon(ctx)
     _call(ctx, "_nw_refresh_controls")
+    _saved_cells_changed(ctx)
 
 
 def page_subset(ctx, st) -> ss.Subset:

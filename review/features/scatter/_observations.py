@@ -15,7 +15,7 @@ from widgets.plot_card import follows_theme
 
 from review.domain.observation import NANOWELLS
 from review.features.scatter.collect import scatter_groups
-from review.features.scatter.observation_compute import default_axes, nanowell_scatter
+from review.features.scatter.observation_compute import click_points, default_axes, nanowell_scatter
 
 #: The leaf this module serves (its registry name).
 LEAF = "Scatter Plot"
@@ -36,8 +36,18 @@ def _combo_names(page: str) -> tuple[str, str]:
     return f"_scatter_{page}_nw_x_cb", f"_scatter_{page}_nw_y_cb"
 
 
+def _scope_names(page: str) -> tuple[str, str]:
+    """The page's Subset and Baseline pickers: the Nanowells page's own two settings, offered here."""
+    return f"_scatter_{page}_nw_subset_cb", f"_scatter_{page}_nw_baseline_cb"
+
+
 def build_axis_controls(ctx, slot, page: str) -> None:
-    """Add the page's nanowell X / Y metric pickers to its band *slot*, hidden; :func:`sync_controls` shows them."""
+    """Add the page's nanowell X / Y metric pickers, and its Subset and Baseline pickers, to its band *slot*, hidden;
+    :func:`sync_controls` shows them.
+
+    **Subset** and **Baseline** are the Nanowells page's settings, not copies of them: choosing one here sets the
+    page's (``nanowell.set_subset_by_name`` / ``nanowell.set_baseline``), so the page's views and this scatter stay
+    about the same nanowells and the same fold changes, whichever of the two the choice was made on."""
     from widgets.labeled_combo import LabeledComboBox
 
     for name, caption in zip(_combo_names(page), ("X", "Y")):
@@ -47,6 +57,51 @@ def build_axis_controls(ctx, slot, page: str) -> None:
         group = slot.add_scope("", combo)
         group.setVisible(False)
         ctx.widgets.register(name + "_grp", group)
+    tips = ("Which nanowells are drawn: the Nanowells page's Subset. Choosing one here makes it that page's Subset.",
+            "What every fold change is measured from: the Nanowells page's Baseline. Choosing one here sets it there.")
+    for name, caption, tip in zip(_scope_names(page), ("Subset", "Baseline"), tips):
+        combo = ctx.widgets.register(name, LabeledComboBox(caption))
+        combo.setToolTip(tip)
+        combo.currentIndexChanged.connect(
+            lambda _i, _c=combo, _k=caption, _p=page: _choose(ctx, _k, _c.currentData(), _p))
+        group = slot.add_scope("", combo)
+        group.setVisible(False)
+        ctx.widgets.register(name + "_grp", group)
+
+
+def _choose(ctx, setting: str, value, page: str) -> None:
+    """Set the Nanowells page's *setting* (``"Subset"`` or ``"Baseline"``) to *value*, then redraw *page* from the
+    page's new scope."""
+    if value is None:
+        return
+    ctx.features.query("nanowell.set_subset_by_name" if setting == "Subset" else "nanowell.set_baseline",
+                       ctx, value, default=None)
+    _redraw_page(ctx, page)
+
+
+def _populate_scope(ctx, page: str, table) -> None:
+    """Fill the page's Subset and Baseline pickers with the Nanowells page's choices and select the page's own; hide
+    them in a build without that page. The Baseline lists the timepoints of *table*'s rows in time order."""
+    order = (table.frame.drop_duplicates("timepoint").sort_values("timepoint_hours")["timepoint"].tolist()
+             if "timepoint_hours" in table.frame.columns and len(table.frame) else [])
+    choices = ctx.features.query("nanowell.scope_choices", ctx, [t for t in order if t != ""], default=None)
+    for name, items, current in zip(_scope_names(page), ("subsets", "baselines"), ("subset", "baseline")):
+        combo = ctx.widgets.get_or_none(name)
+        group = ctx.widgets.get_or_none(name + "_grp")
+        if group is not None:
+            group.setVisible(choices is not None)
+        if combo is None or choices is None:
+            continue
+        blocked = combo.blockSignals(True)
+        try:
+            combo.clear()
+            for key, text in choices[items]:
+                combo.addItem(text, key)
+            keys = [key for key, _text in choices[items]]
+            if choices[current] in keys:
+                combo.setCurrentIndex(keys.index(choices[current]))
+        finally:
+            combo.blockSignals(blocked)
 
 
 def _redraw_page(ctx, page: str) -> None:
@@ -67,7 +122,7 @@ def sync_controls(ctx) -> str:
             group = combo.parentWidget() if combo is not None else None
             if group is not None:
                 group.setVisible(not nanowells)
-        for name in _combo_names(page):
+        for name in _combo_names(page) + _scope_names(page):
             group = ctx.widgets.get_or_none(name + "_grp")
             if group is not None:
                 group.setVisible(nanowells)
@@ -164,6 +219,7 @@ def redraw(ctx, page: str) -> None:
         canvas.draw_idle()
         return
     x_key, y_key = _populate(ctx, page, table)
+    _populate_scope(ctx, page, table)
     drawn = nanowell_scatter(table, x_key, y_key, groups, timepoints_h=_selected_hours(ctx, page),
                              per_well=page == "aggregate")
     prefs = figure_prefs(ctx, fig)
@@ -185,6 +241,8 @@ def redraw(ctx, page: str) -> None:
         ax.legend(loc="best", fontsize=8, framealpha=0.0, facecolor="none")
     if page == "cells":
         _paint_nanowell_gates(ctx, ax, drawn, x_key, y_key, muted)
+        # Each point names its nanowell, so a click shows it on the Nanowells page (``callbacks``).
+        ctx.runtime.scatter.interaction_cache["points"] = click_points(drawn)
     lines = [drawn.footer, *drawn.notes]
     if page == "cells" and table.subset and ctx.state.cell_gating.scatter_gates:
         lines.append(f"Gate percentages are of the nanowells drawn: those in the Subset ({table.subset}).")

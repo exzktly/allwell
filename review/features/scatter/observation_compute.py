@@ -31,6 +31,34 @@ from review.domain.observation import (COHORT_REASON, NANOWELLS, PER_NANOWELL_KI
                                        cohort_complete, footer_line)
 
 
+@dataclass(frozen=True)
+class NanowellPoint:
+    """What a click or a hover on one point of the per-nanowell scatter names: the nanowell ``(q, r)`` of *well* at
+    *timepoint*. The click shows it on the Nanowells page (``callbacks.on_scatter_click``)."""
+    well: str
+    timepoint: str
+    q: int
+    r: int
+
+    def text(self) -> str:
+        when = f" at {self.timepoint}" if self.timepoint else ""
+        return f"{self.well} · nanowell ({self.q}, {self.r}){when} — click to show it on the Nanowells page"
+
+
+def click_points(drawn) -> list:
+    """``(x, y, NanowellPoint)`` for every per-nanowell point of *drawn* (a :class:`NanowellScatter`), the scatter's
+    interaction points; a per-well median (``q`` ``None``) names no one nanowell and is left out."""
+    out = []
+    for series in drawn.series:
+        for x, y, key in zip(series.x, series.y, series.keys):
+            well, timepoint, q, r = key
+            if q is None or r is None:
+                continue
+            out.append((float(x), float(y), NanowellPoint(str(well), "" if timepoint != timepoint else str(timepoint),
+                                                          int(q), int(r))))
+    return out
+
+
 @dataclass
 class NanowellSeries:
     label: str

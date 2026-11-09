@@ -1,13 +1,15 @@
 """What the Saved Cells page lists: every saved cell set and every gate, as rows.
 
-Qt-free. Two kinds of saved population, read from the two stores that own them
+Qt-free. Two kinds of saved cell population, read from the two stores that own them
 and kept apart on purpose: a **saved set** is a fixed list of cell identities
 (``review/core/cell_sets.py``) and goes stale when a well is segmented again; a
 **gate** is a rule over two measurements (``ctx.state.cell_gating``,
 ``review/domain/gates.py``) and re-evaluates on whatever cells are loaded. The
 page shows both in one place without pretending they are one thing, so each row
 says what it is, what it currently does to the analysis, and how to look at its
-cells.
+cells. On a nanowell plate a third list follows: the **subsets** saved on the
+Nanowells page (rules over nanowells, read through the ``nanowell.saved_subsets``
+service), shown as soon as they are saved there.
 """
 
 from __future__ import annotations
@@ -69,6 +71,47 @@ class GateRow:
         if self.thresholds:
             parts.append("Defines the ON cells")
         return " · ".join(parts) or "Not applied — a view only"
+
+
+@dataclass(frozen=True)
+class SubsetRow:
+    """One subset saved on the Nanowells page: a rule over nanowells, not a list of cells."""
+
+    name: str
+    text: str
+    kept: int | None
+    total: int | None
+    in_use: bool
+
+    @property
+    def size_text(self) -> str:
+        """How many nanowells it keeps, or that they are not counted yet — never a guessed number."""
+        if self.kept is None or self.total is None:
+            return "Not counted until Nanowells has read its wells"
+        return f"{self.kept:,} of {self.total:,} nanowells"
+
+    @property
+    def status_text(self) -> str:
+        if self.in_use:
+            return "The Nanowells page's Subset — drawn there and on the nanowell Scatter"
+        return "Saved only — changes no number"
+
+
+def subset_rows(ctx) -> list[SubsetRow] | None:
+    """Every subset saved on the Nanowells page, in the order saved; ``None`` when there is no such page to have
+    saved one — a standard plate, or a build without Nanowells — so the section is not shown at all.
+
+    Read through the ``nanowell.saved_subsets`` service, so this page imports nothing of that removable feature.
+    """
+    from review.data.observations import is_nanowell_dataset
+
+    if not is_nanowell_dataset(ctx):
+        return None
+    rows = ctx.features.query("nanowell.saved_subsets", ctx, default=None)
+    if rows is None:
+        return None
+    return [SubsetRow(name=str(r["name"]), text=str(r["text"]), kept=r.get("kept"), total=r.get("total"),
+                      in_use=bool(r.get("in_use"))) for r in rows]
 
 
 def set_rows(ctx) -> list[SetRow]:

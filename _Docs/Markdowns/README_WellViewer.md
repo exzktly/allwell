@@ -6301,6 +6301,9 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     **Exclude well** are not plotted, only the nanowells in this page's **Subset** are, and with **Fixed cohort** on
     only the nanowells with both plotted values at every timepoint. The footer says each, names the Baseline when an
     axis is a fold change, and — with a Subset — says that gate percentages are of the subset's nanowells. Its
+    **Subset** and **Baseline** pickers are this page's own two settings: pick a saved subset (or *All
+    nanowells*) or the timepoint fold changes are measured from, and this page changes with it. Click a nanowell's
+    point to open it here, selected, at that point's timepoint; hovering names it. Its
     Properties panel works as on the cell scatter: **X log** / **Y log** (on by default for each nanowell, as for
     each cell, drawn as log(value + 1) so an empty nanowell's zero stays on the axis), the **Log base**, and the
     marker size and shape. Density shading and error bars are not offered, because nanowell points are drawn solid
@@ -7806,7 +7809,8 @@ per-nucleus rows behind every plot.
 ### Saved Cells
 
 **What it shows.** Every population of cells you have saved, in one place, and
-the way to look at each. Two lists, because they are two kinds of thing:
+the way to look at each. Two lists, because they are two kinds of thing — and
+on a nanowell plate a third, the subsets saved on the Nanowells page:
 
 - **Saved cell sets** — cells saved by name with **Lasso cells** on a Spatial
   map or a Multivariate projection. A set is a fixed list of cells. Each row
@@ -7832,6 +7836,15 @@ the way to look at each. Two lists, because they are two kinds of thing:
   applied* otherwise. **View in Cell Browser** shows the cells inside that gate
   alone; **Manage on Cell Gating** takes you to Home → Cell Gating, where gates
   are applied. Under the list, the per-channel intensity gates in force.
+- **Nanowell subsets** (nanowell plates only) — every subset you save with
+  **Subset** on the Nanowells page appears here as soon as you save it; there is
+  nothing to do to add it. A subset is a rule over nanowells (their starting
+  cells, a metric, their place in the array). Each row gives its conditions,
+  how many nanowells it keeps once Nanowells has read the wells, and whether it
+  is the page's Subset now — the one the Nanowells page and the Scatter Plot's
+  nanowell scatter draw. **Use on Nanowells page** makes the selected subset the
+  page's Subset and takes you there. Renaming or deleting a subset on the
+  Nanowells page updates the list.
 
 - **Optimal use** — before reading a plot, check here what is excluded and what
   is gating the cells; to look at a population, select it and click **View in

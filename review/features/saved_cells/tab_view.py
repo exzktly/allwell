@@ -13,6 +13,10 @@ buttons under a list act on its selected row:
   *Manage on Cell Gating*, where a gate is applied to the Included or ON cells.
   Below them, the per-channel intensity floors in force, the other way a cell
   leaves the Included population.
+* **Nanowell subsets** (nanowell plates only) — every subset saved on the
+  Nanowells page, listed as soon as it is saved there, with how many nanowells
+  it keeps and whether it is the page's Subset now; *Use on Nanowells page*
+  makes it so.
 
 The page is rebuilt from the stores whenever it is shown and whenever a set
 changes (``core/cell_sets.REFRESH_KEYS``), so it never holds a copy that can
@@ -38,6 +42,7 @@ _SET_COLUMNS = ("Name", "Cells", "From", "In use")
 #: A frame or a padding is drawn on both sides of what it surrounds.
 _BOTH_SIDES = 2
 _GATE_COLUMNS = ("Name", "Axes", "Wells", "Cells inside", "In use")
+_SUBSET_COLUMNS = ("Name", "Conditions", "Nanowells", "In use")
 
 
 class _FittedTable(QTableWidget):
@@ -151,6 +156,7 @@ class SavedCellsPage(QWidget):
         lay.setSpacing(theme.Spacing.md)
         self._build_sets(lay)
         self._build_gates(lay)
+        self._build_subsets(lay)
         lay.addStretch(1)
         self.refresh()
 
@@ -281,7 +287,52 @@ class SavedCellsPage(QWidget):
     def _sync_gate_buttons(self) -> None:
         self.view_gate.setEnabled(_selected(self.gates) is not None)
 
-    # ── both ────────────────────────────────────────────────────────────────
+    # ── nanowell subsets ────────────────────────────────────────────────────
+    def _build_subsets(self, lay: QVBoxLayout) -> None:
+        self.subsets_header = build_section_header(
+            self, "Nanowell subsets",
+            hint="Subsets saved on the Nanowells page. A subset is a rule over nanowells — their starting "
+                 "cells, a metric, their place in the array — so it takes whatever nanowells are read. The "
+                 "page's Subset decides which nanowells its views and the Scatter Plot's nanowell scatter draw.")
+        lay.addWidget(self.subsets_header)
+        self.subsets_empty = QLabel(
+            "No saved subsets yet. Build one with Subset on the Nanowells page and save it there.", self)
+        self.subsets_empty.setObjectName("Muted")
+        self.subsets_empty.setWordWrap(True)
+        lay.addWidget(self.subsets_empty)
+        self.subsets = _table(self, _SUBSET_COLUMNS)
+        self.subsets.itemSelectionChanged.connect(self._sync_subset_buttons)
+        lay.addWidget(self.subsets)
+        self.subset_row = _button_row(self, lay)
+        self.use_subset = _button(self, "Use on Nanowells page",
+                                  "Make this the Nanowells page's Subset and go to that page.")
+        self.use_subset.clicked.connect(self._on_use_subset)
+        self.subset_row.addWidget(self.use_subset)
+
+    def _on_use_subset(self) -> None:
+        name = _selected(self.subsets)
+        if name:
+            ctl.use_subset(self.ctx, name)
+
+    def _sync_subset_buttons(self) -> None:
+        self.use_subset.setEnabled(_selected(self.subsets) is not None)
+
+    def _refresh_subsets(self) -> None:
+        rows = collect.subset_rows(self.ctx)
+        shown = rows is not None
+        for widget in (self.subsets_header, self.use_subset):
+            widget.setVisible(shown)
+        keep = _selected(self.subsets)
+        rows = rows or []
+        _fill(self.subsets, [(r.name, r.text, r.size_text, r.status_text) for r in rows],
+              [r.name for r in rows], keep)
+        self.subsets_empty.setVisible(shown and not rows)
+        self.subsets.setVisible(shown and bool(rows))
+        if rows and _selected(self.subsets) is None:
+            self.subsets.selectRow(0)
+        self._sync_subset_buttons()
+
+    # ── all three ───────────────────────────────────────────────────────────
     def refresh(self) -> None:
         keep = getattr(self, "_keep_set", None) or _selected(self.sets)
         self._keep_set = None
@@ -315,6 +366,7 @@ class SavedCellsPage(QWidget):
         self.intensity.setText(
             "Intensity gates in force: " + ", ".join(f"{ch} ≥ {v:g}" for ch, v in floors)
             if floors else "No intensity gate is in force.")
+        self._refresh_subsets()
 
 
 def build_saved_cells_tab(ctx, parent: QWidget) -> None:

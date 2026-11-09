@@ -1709,8 +1709,8 @@ review/
 │   │                      no in-tab plate of its own)
 │   ├── review_csv/   tab_view.py   ← Data-tab CSV inspector (was review_image/csv_tab_view.py)
 │   ├── saved_cells/  collect.py, controller.py, tab_view.py
-│   │                 ← Inspect → Saved Cells: every saved cell set and every gate,
-│   │                   and the way to view each
+│   │                 ← Inspect → Saved Cells: every saved cell set, every gate and
+│   │                   (nanowell plates) every saved nanowell subset, and the way to view each
 │   ├── preview/      controller.py, preview_view.py, panel_view.py,
 │   │                 frame_scope_view.py, delete_scope_view.py,
 │   │                 crop_scope_view.py
@@ -7435,6 +7435,31 @@ is shown, polished or restyled: fitted only when the page was built, before the
 table was shown or styled, a desk row kept the height it had at the builder's
 narrow width, and a theme switch or phone layout's rescale left every row at
 the old style's height).
+
+**Nanowell subsets on Saved Cells.** On a nanowell plate the page has a third
+list, *Nanowell subsets*: every subset saved on the Nanowells page
+(`NanowellState.saved_subsets`), listed the moment it is saved there, with no
+step of the user's. Saved Cells imports nothing of that removable feature: it
+asks the `nanowell.saved_subsets` service (`nanowell/_saved_subsets.
+saved_subset_rows`, plain dicts) through `collect.subset_rows`, which answers
+`None` on a standard plate or in a build without Nanowells, and the section is
+then not shown. Each row gives the subset's name, its conditions as the page's
+figures write them (`Subset.label`), **Nanowells** — `subset_compute.apply` over
+the page's own metrics (`st.metrics`, with its Baseline and the scatter gates
+bound), *N of M nanowells* over the wells the page has read, and "Not counted
+until Nanowells has read its wells" rather than a guessed number before then —
+and whether it is the page's Subset now, which is what the page's views and the
+Scatter Plot's nanowell scatter draw. *Use on Nanowells page* calls the
+`nanowell.use_saved_subset` service (`apply_saved_subset`, then the notebook
+shows *Nanowells*). The Nanowells controller's save, rename, delete and
+`set_subset` call `_saved_cells_changed`, which refreshes `_saved_cells_page`
+by its registry key while the page is on screen; a hidden page is re-read on
+activation, so a subset edited condition by condition does not recount every
+gate the page lists on each edit. The saved subsets are restored with the rest
+of the `nanowell` persistence block when the dataset loads, so they are listed
+before the Nanowells page has ever been opened.
+`tests/test_saved_cells_lists_nanowell_subsets.py` saves, renames, deletes and
+applies through the Nanowells controller and reads the page's rows.
 
 **A highlighted set on the per-cell Scatter.** `CellSetsState.highlight` (beside
 `exclude`, so rename and delete follow it; saved in `cell_sets.json` and in the
@@ -15088,7 +15113,22 @@ one Subset built on the page decides the nanowells of the page's views and of th
 scatter leaves its own gate's percentage near 100 %, because the points outside it are not drawn. The default stays
 unscoped: Cell Gating evaluates a nanowell-metric gate against these rows (`scatter_gates=False`), and a Subset naming
 that gate would otherwise decide its own inputs; the other plot tools' nanowell modes are unscoped too.
-`tests/test_scatter_nanowells_follow_the_page_scope.py` drives the real Scatter builder for each. A second service, `observations.nanowell_metrics`
+`tests/test_scatter_nanowells_follow_the_page_scope.py` drives the real Scatter builder for each. **The scatter
+sets the page's scope, too.** Beside its X / Y metric pickers, each page of the Scatter Plot carries a **Subset** and
+a **Baseline** picker under Observations: Nanowells (`scatter/_observations._scope_names`, shown and hidden with
+the metric pickers by `sync_controls`). They are the Nanowells page's two settings, not copies:
+`_populate_scope` fills them from the `nanowell.scope_choices` service (`nanowell/_plot_links.scope_choices`: every
+nanowell, each saved subset, and the page's Subset named "(not saved)" when it was built there and never saved; the
+two baseline rules and each timepoint of the drawn rows in time order), and a choice calls
+`nanowell.set_subset_by_name` (`set_subset` / `apply_saved_subset`) or `nanowell.set_baseline`
+(`set_page_baseline`), then redraws. **A click names a nanowell.** The per-nanowell page's interaction points are
+`observation_compute.click_points` — `(x, y, NanowellPoint(well, timepoint, q, r))`, per-well medians left out —
+so `callbacks.on_scatter_click` answers a nanowell point with the `nanowell.show_nanowell` service
+(`_plot_links.show_nanowell`: the well joins the plate selection when it is not in it, as `open_for_anchor` does;
+the nanowell becomes `selected_sites`, the page's timepoint the point's; the notebook shows *Nanowells*; then
+`selection_changed`) and a hover writes `NanowellPoint.text()` on the status line. The cell scatter's points
+remain cell tuples and still open the cell viewer. `tests/test_scatter_nanowells_subset_baseline_and_click.py`
+drives the pickers and the click handler through the real builder. A second service, `observations.nanowell_metrics`
 (`nanowell_metric_specs`), names the same metrics with no rows read: the channels come from the site tables' header
 rows (`collect.site_channels`, the same derivation `load_nanowell_data` applies to the columns it reads). The
 per-cell Scatter's "Nanowell ▸" picker entries (`scatter/_observations.cell_nanowell_entries`) use it, because they

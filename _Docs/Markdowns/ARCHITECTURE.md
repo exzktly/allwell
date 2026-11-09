@@ -6963,6 +6963,23 @@ cannot vouch for a missing row; and it refuses a key it cannot read as a
 literal rather than skipping it. Adding a plotting leaf means a row in each
 roster and a `make_plot_with_right_dock` call in its `tab_view`.
 
+**A Properties click is never silent.** The button's `clicked` slot is the only
+caller, and an exception raised in a slot reaches stderr alone, which a
+double-clicked app does not have; `core.safe.swallow` logs at DEBUG, which the
+log drawer does not show. So `open_export_style_panel` runs its body under
+`swallow(..., level=WARNING)`, every early return (unknown key, figure not built)
+logs a WARNING beside its status line, and once the layout has placed an opened
+panel `_report_placement` logs where it landed — INFO when it has pixels on the
+monitor, WARNING with its geometry, the window's and the screen's when it does
+not. The toggle closes a panel only when it is on screen (`_is_on_screen`: alive,
+`isVisible()`, and a non-empty `visibleRegion()`); a panel Qt calls visible with
+nothing of it drawn is re-mounted instead, and a panel whose C++ object was
+deleted with its page is rebuilt by `launch_export_editor` rather than raising.
+`tests/test_properties_click_is_never_silent.py` pins each path. It exists
+because a nanowell dataset's Scatter Properties icon was reported doing nothing
+at all with an empty log, and no offscreen run reproduced it — so the next such
+click names its cause in the drawer.
+
 **A roster is how shared chrome finds a tab, and a roster written before the
 tab existed does not.** The Properties-panel pair above is one instance of a
 class that has now bitten five times, always the same way: the control is

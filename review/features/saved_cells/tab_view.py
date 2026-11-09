@@ -4,13 +4,19 @@ Two lists, because they are two kinds of thing (``collect.py`` says why). Each
 row says what the population is and what it does to the analysis now; the
 buttons under a list act on its selected row:
 
-* **Saved cell sets** — *View in Cell Browser*, *Highlight on Scatter*,
+* **Saved cell sets** — a line naming every set in force and where (excluded
+  from analysis, highlighted on Scatter, shown in Cell Browser), then
+  *View in Cell Browser*, *Highlight on Scatter*,
   *Exclude from analysis* (each a toggle; one set at a time can be highlighted
   and one excluded), rename and delete.
 * **Gates** — *View in Cell Browser* (the cells inside that gate alone) and
   *Manage on Cell Gating*, where a gate is applied to the Included or ON cells.
   Below them, the per-channel intensity floors in force, the other way a cell
   leaves the Included population.
+* **Nanowell subsets** (nanowell plates only) — every subset saved on the
+  Nanowells page, listed as soon as it is saved there, with how many nanowells
+  it keeps and whether it is the page's Subset now; *Use on Nanowells page*
+  makes it so.
 
 The page is rebuilt from the stores whenever it is shown and whenever a set
 changes (``core/cell_sets.REFRESH_KEYS``), so it never holds a copy that can
@@ -36,6 +42,7 @@ _SET_COLUMNS = ("Name", "Cells", "From", "In use")
 #: A frame or a padding is drawn on both sides of what it surrounds.
 _BOTH_SIDES = 2
 _GATE_COLUMNS = ("Name", "Axes", "Wells", "Cells inside", "In use")
+_SUBSET_COLUMNS = ("Name", "Conditions", "Nanowells", "In use")
 
 
 class _FittedTable(QTableWidget):
@@ -149,6 +156,7 @@ class SavedCellsPage(QWidget):
         lay.setSpacing(theme.Spacing.md)
         self._build_sets(lay)
         self._build_gates(lay)
+        self._build_subsets(lay)
         lay.addStretch(1)
         self.refresh()
 
@@ -158,6 +166,9 @@ class SavedCellsPage(QWidget):
             self, "Saved cell sets",
             hint="Cells saved by name with Lasso cells on Spatial or Multivariate. A set is a "
                  "fixed list of cells: saving one changes no number."))
+        self.in_force = QLabel("", self)
+        self.in_force.setWordWrap(True)
+        lay.addWidget(self.in_force)
         self.sets_empty = QLabel(
             "No saved cells yet. Draw round cells with Lasso cells on a Spatial map or a "
             "Multivariate projection to save them here.", self)
@@ -276,7 +287,52 @@ class SavedCellsPage(QWidget):
     def _sync_gate_buttons(self) -> None:
         self.view_gate.setEnabled(_selected(self.gates) is not None)
 
-    # ── both ────────────────────────────────────────────────────────────────
+    # ── nanowell subsets ────────────────────────────────────────────────────
+    def _build_subsets(self, lay: QVBoxLayout) -> None:
+        self.subsets_header = build_section_header(
+            self, "Nanowell subsets",
+            hint="Subsets saved on the Nanowells page. A subset is a rule over nanowells — their starting "
+                 "cells, a metric, their place in the array — so it takes whatever nanowells are read. The "
+                 "page's Subset decides which nanowells its views and the Scatter Plot's nanowell scatter draw.")
+        lay.addWidget(self.subsets_header)
+        self.subsets_empty = QLabel(
+            "No saved subsets yet. Build one with Subset on the Nanowells page and save it there.", self)
+        self.subsets_empty.setObjectName("Muted")
+        self.subsets_empty.setWordWrap(True)
+        lay.addWidget(self.subsets_empty)
+        self.subsets = _table(self, _SUBSET_COLUMNS)
+        self.subsets.itemSelectionChanged.connect(self._sync_subset_buttons)
+        lay.addWidget(self.subsets)
+        self.subset_row = _button_row(self, lay)
+        self.use_subset = _button(self, "Use on Nanowells page",
+                                  "Make this the Nanowells page's Subset and go to that page.")
+        self.use_subset.clicked.connect(self._on_use_subset)
+        self.subset_row.addWidget(self.use_subset)
+
+    def _on_use_subset(self) -> None:
+        name = _selected(self.subsets)
+        if name:
+            ctl.use_subset(self.ctx, name)
+
+    def _sync_subset_buttons(self) -> None:
+        self.use_subset.setEnabled(_selected(self.subsets) is not None)
+
+    def _refresh_subsets(self) -> None:
+        rows = collect.subset_rows(self.ctx)
+        shown = rows is not None
+        for widget in (self.subsets_header, self.use_subset):
+            widget.setVisible(shown)
+        keep = _selected(self.subsets)
+        rows = rows or []
+        _fill(self.subsets, [(r.name, r.text, r.size_text, r.status_text) for r in rows],
+              [r.name for r in rows], keep)
+        self.subsets_empty.setVisible(shown and not rows)
+        self.subsets.setVisible(shown and bool(rows))
+        if rows and _selected(self.subsets) is None:
+            self.subsets.selectRow(0)
+        self._sync_subset_buttons()
+
+    # ── all three ───────────────────────────────────────────────────────────
     def refresh(self) -> None:
         keep = getattr(self, "_keep_set", None) or _selected(self.sets)
         self._keep_set = None
@@ -285,6 +341,8 @@ class SavedCellsPage(QWidget):
                           for r in self._set_rows],
               [r.name for r in self._set_rows], keep)
         has_sets = bool(self._set_rows)
+        self.in_force.setText(collect.in_force_text(self.ctx))
+        self.in_force.setVisible(has_sets or bool(self.ctx.state.cell_sets.missing_highlight))
         self.sets_empty.setVisible(not has_sets)
         self.sets.setVisible(has_sets)
         if has_sets and _selected(self.sets) is None:
@@ -308,6 +366,7 @@ class SavedCellsPage(QWidget):
         self.intensity.setText(
             "Intensity gates in force: " + ", ".join(f"{ch} ≥ {v:g}" for ch, v in floors)
             if floors else "No intensity gate is in force.")
+        self._refresh_subsets()
 
 
 def build_saved_cells_tab(ctx, parent: QWidget) -> None:

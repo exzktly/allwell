@@ -66,3 +66,11 @@ def open_cell_gating(ctx) -> None:
     """Take the user to Home → Cell Gating, where gates are applied to the analysis."""
     if not ctx.features.query("cell_gating.show", ctx, default=False):
         ctx.notify.set_status("This build has no Cell Gating page.")
+
+
+def use_subset(ctx, name: str) -> bool:
+    """Make the subset saved as *name* the Nanowells page's Subset and show that page."""
+    shown = ctx.features.query("nanowell.use_saved_subset", ctx, name, default=None)
+    if shown is None:
+        ctx.notify.set_status("This build has no Nanowells page.")
+    return bool(shown)

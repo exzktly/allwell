@@ -1,13 +1,15 @@
 """What the Saved Cells page lists: every saved cell set and every gate, as rows.
 
-Qt-free. Two kinds of saved population, read from the two stores that own them
+Qt-free. Two kinds of saved cell population, read from the two stores that own them
 and kept apart on purpose: a **saved set** is a fixed list of cell identities
 (``review/core/cell_sets.py``) and goes stale when a well is segmented again; a
 **gate** is a rule over two measurements (``ctx.state.cell_gating``,
 ``review/domain/gates.py``) and re-evaluates on whatever cells are loaded. The
 page shows both in one place without pretending they are one thing, so each row
 says what it is, what it currently does to the analysis, and how to look at its
-cells.
+cells. On a nanowell plate a third list follows: the **subsets** saved on the
+Nanowells page (rules over nanowells, read through the ``nanowell.saved_subsets``
+service), shown as soon as they are saved there.
 """
 
 from __future__ import annotations
@@ -29,6 +31,8 @@ class SetRow:
     stale: str
     highlighted: bool
     excluded: bool
+    #: Every place the set is in force now, in ``cell_sets.in_force``'s words.
+    places: tuple = ()
 
     @property
     def size_text(self) -> str:
@@ -40,13 +44,9 @@ class SetRow:
 
     @property
     def status_text(self) -> str:
-        """What this set does to the analysis now, in words."""
-        parts = []
-        if self.excluded:
-            parts.append("Excluded from analysis")
-        if self.highlighted:
-            parts.append("Highlighted on Scatter")
-        return " · ".join(parts) or "Saved only — changes no number"
+        """Where this set is in force now, in words."""
+        return " · ".join(p[:1].upper() + p[1:] for p in self.places) or \
+            "Saved only — changes no number"
 
 
 @dataclass(frozen=True)
@@ -73,6 +73,47 @@ class GateRow:
         return " · ".join(parts) or "Not applied — a view only"
 
 
+@dataclass(frozen=True)
+class SubsetRow:
+    """One subset saved on the Nanowells page: a rule over nanowells, not a list of cells."""
+
+    name: str
+    text: str
+    kept: int | None
+    total: int | None
+    in_use: bool
+
+    @property
+    def size_text(self) -> str:
+        """How many nanowells it keeps, or that they are not counted yet — never a guessed number."""
+        if self.kept is None or self.total is None:
+            return "Not counted until Nanowells has read its wells"
+        return f"{self.kept:,} of {self.total:,} nanowells"
+
+    @property
+    def status_text(self) -> str:
+        if self.in_use:
+            return "The Nanowells page's Subset — drawn there and on the nanowell Scatter"
+        return "Saved only — changes no number"
+
+
+def subset_rows(ctx) -> list[SubsetRow] | None:
+    """Every subset saved on the Nanowells page, in the order saved; ``None`` when there is no such page to have
+    saved one — a standard plate, or a build without Nanowells — so the section is not shown at all.
+
+    Read through the ``nanowell.saved_subsets`` service, so this page imports nothing of that removable feature.
+    """
+    from review.data.observations import is_nanowell_dataset
+
+    if not is_nanowell_dataset(ctx):
+        return None
+    rows = ctx.features.query("nanowell.saved_subsets", ctx, default=None)
+    if rows is None:
+        return None
+    return [SubsetRow(name=str(r["name"]), text=str(r["text"]), kept=r.get("kept"), total=r.get("total"),
+                      in_use=bool(r.get("in_use"))) for r in rows]
+
+
 def set_rows(ctx) -> list[SetRow]:
     """Every saved set, in the order it was saved."""
     from review.core import cell_sets as cs
@@ -80,6 +121,7 @@ def set_rows(ctx) -> list[SetRow]:
     state = getattr(ctx.state, "cell_sets", None)
     exclude = getattr(state, "exclude", None)
     highlight = getattr(state, "highlight", None)
+    places = cs.in_force(ctx)
     rows = []
     for s in cs.sets(ctx):
         rows.append(SetRow(
@@ -87,8 +129,28 @@ def set_rows(ctx) -> list[SetRow]:
             wells=tuple(sorted({str(c[0]) for c in s.cells})),
             source=s.source, note=s.note, created=s.created,
             stale=cs.stale_summary(ctx, s),
-            highlighted=s.name == highlight, excluded=s.name == exclude))
+            highlighted=s.name == highlight, excluded=s.name == exclude,
+            places=places.get(s.name, ())))
     return rows
+
+
+def in_force_text(ctx) -> str:
+    """One sentence for the top of the list: whether any set is in force, and where.
+
+    Answered for every set at once, so the user need not select each row to find
+    the one that is quietly leaving cells out. A highlight a restored saved plot
+    asked for, whose set no longer exists, is named rather than dropped.
+    """
+    from review.core import cell_sets as cs
+
+    forced = cs.in_force(ctx)
+    text = ("In force: " + "; ".join(f"“{name}” — {', '.join(places)}"
+                                     for name, places in forced.items()) + "."
+            if forced else "No saved set is in force: none is excluded, highlighted or shown.")
+    missing = getattr(getattr(ctx.state, "cell_sets", None), "missing_highlight", None)
+    if missing:
+        text += f" A restored plot asked to highlight “{missing}”, which no longer exists."
+    return text
 
 
 def _chosen(choices, name: str) -> bool:

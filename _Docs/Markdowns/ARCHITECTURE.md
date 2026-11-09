@@ -1711,8 +1711,8 @@ review/
 │   │                      no in-tab plate of its own)
 │   ├── review_csv/   tab_view.py   ← Data-tab CSV inspector (was review_image/csv_tab_view.py)
 │   ├── saved_cells/  collect.py, controller.py, tab_view.py
-│   │                 ← Inspect → Saved Cells: every saved cell set and every gate,
-│   │                   and the way to view each
+│   │                 ← Inspect → Saved Cells: every saved cell set, every gate and
+│   │                   (nanowell plates) every saved nanowell subset, and the way to view each
 │   ├── preview/      controller.py, preview_view.py, panel_view.py,
 │   │                 frame_scope_view.py, delete_scope_view.py,
 │   │                 crop_scope_view.py
@@ -6965,6 +6965,23 @@ cannot vouch for a missing row; and it refuses a key it cannot read as a
 literal rather than skipping it. Adding a plotting leaf means a row in each
 roster and a `make_plot_with_right_dock` call in its `tab_view`.
 
+**A Properties click is never silent.** The button's `clicked` slot is the only
+caller, and an exception raised in a slot reaches stderr alone, which a
+double-clicked app does not have; `core.safe.swallow` logs at DEBUG, which the
+log drawer does not show. So `open_export_style_panel` runs its body under
+`swallow(..., level=WARNING)`, every early return (unknown key, figure not built)
+logs a WARNING beside its status line, and once the layout has placed an opened
+panel `_report_placement` logs where it landed — INFO when it has pixels on the
+monitor, WARNING with its geometry, the window's and the screen's when it does
+not. The toggle closes a panel only when it is on screen (`_is_on_screen`: alive,
+`isVisible()`, and a non-empty `visibleRegion()`); a panel Qt calls visible with
+nothing of it drawn is re-mounted instead, and a panel whose C++ object was
+deleted with its page is rebuilt by `launch_export_editor` rather than raising.
+`tests/test_properties_click_is_never_silent.py` pins each path. It exists
+because a nanowell dataset's Scatter Properties icon was reported doing nothing
+at all with an empty log, and no offscreen run reproduced it — so the next such
+click names its cause in the drawer.
+
 **A roster is how shared chrome finds a tab, and a roster written before the
 tab existed does not.** The Properties-panel pair above is one instance of a
 class that has now bitten five times, always the same way: the control is
@@ -7375,9 +7392,23 @@ list of cell identities that goes stale on re-segmentation, a gate a rule over
 two columns that takes whatever cells are loaded (`domain/gates.py`). The page
 reads both stores (`collect.set_rows`, `collect.gate_rows`,
 `collect.intensity_gates`) and keeps no copy: it re-reads on activation and on
-every set change (`_saved_cells_page` is in `cell_sets.REFRESH_KEYS`). Each row
-says what the population does to the analysis now — a set *Excluded from
-analysis* / *Highlighted on Scatter* / *Saved only*; a gate *Defines the
+every set change (`_saved_cells_page` is in `cell_sets.REFRESH_KEYS`). Where a
+set is in force is one answer, `cell_sets.in_force`, read from three slots on
+`CellSetsState` that a rename or delete follows alike: `exclude` (*excluded from
+analysis*, the only one that changes a number), `highlight` (*highlighted on
+Scatter*) and `browsing` (*shown in Cell Browser* — written by the Cell
+Browser's `apply_filters` through `set_browsing` each time it collects, never
+saved, reset on load). A slot naming a set that no longer exists counts for
+nothing. The line above the set list (`collect.in_force_text`) names every set
+in force and where, so a set quietly leaving cells out is visible without
+selecting its row, and names a highlight a restored saved plot asked for whose
+set is gone (`missing_highlight`). The Cell Browser's Source menu
+(`criteria_view._SourceCombo`, `_cell_browser_source_cb` in `REFRESH_KEYS`) is
+rebuilt on every set change: a renamed set stays its source under the new name
+(it follows `browsing`), a deleted one falls back to Criteria and re-collects.
+Each row says what the population does now — a set lists its places from
+`in_force` (*Excluded from analysis* · *Highlighted on Scatter* · *Shown in Cell
+Browser*) or *Saved only*; a gate *Defines the
 Included cells* only while Cell Gating's inclusion layer uses scatter gates and
 its selection takes that gate, *Defines the ON cells* likewise for the
 thresholding layer, else *Not applied*; the intensity floors only while scatter
@@ -7406,6 +7437,31 @@ is shown, polished or restyled: fitted only when the page was built, before the
 table was shown or styled, a desk row kept the height it had at the builder's
 narrow width, and a theme switch or phone layout's rescale left every row at
 the old style's height).
+
+**Nanowell subsets on Saved Cells.** On a nanowell plate the page has a third
+list, *Nanowell subsets*: every subset saved on the Nanowells page
+(`NanowellState.saved_subsets`), listed the moment it is saved there, with no
+step of the user's. Saved Cells imports nothing of that removable feature: it
+asks the `nanowell.saved_subsets` service (`nanowell/_saved_subsets.
+saved_subset_rows`, plain dicts) through `collect.subset_rows`, which answers
+`None` on a standard plate or in a build without Nanowells, and the section is
+then not shown. Each row gives the subset's name, its conditions as the page's
+figures write them (`Subset.label`), **Nanowells** — `subset_compute.apply` over
+the page's own metrics (`st.metrics`, with its Baseline and the scatter gates
+bound), *N of M nanowells* over the wells the page has read, and "Not counted
+until Nanowells has read its wells" rather than a guessed number before then —
+and whether it is the page's Subset now, which is what the page's views and the
+Scatter Plot's nanowell scatter draw. *Use on Nanowells page* calls the
+`nanowell.use_saved_subset` service (`apply_saved_subset`, then the notebook
+shows *Nanowells*). The Nanowells controller's save, rename, delete and
+`set_subset` call `_saved_cells_changed`, which refreshes `_saved_cells_page`
+by its registry key while the page is on screen; a hidden page is re-read on
+activation, so a subset edited condition by condition does not recount every
+gate the page lists on each edit. The saved subsets are restored with the rest
+of the `nanowell` persistence block when the dataset loads, so they are listed
+before the Nanowells page has ever been opened.
+`tests/test_saved_cells_lists_nanowell_subsets.py` saves, renames, deletes and
+applies through the Nanowells controller and reads the page's rows.
 
 **A highlighted set on the per-cell Scatter.** `CellSetsState.highlight` (beside
 `exclude`, so rename and delete follow it; saved in `cell_sets.json` and in the
@@ -15134,7 +15190,22 @@ one Subset built on the page decides the nanowells of the page's views and of th
 scatter leaves its own gate's percentage near 100 %, because the points outside it are not drawn. The default stays
 unscoped: Cell Gating evaluates a nanowell-metric gate against these rows (`scatter_gates=False`), and a Subset naming
 that gate would otherwise decide its own inputs; the other plot tools' nanowell modes are unscoped too.
-`tests/test_scatter_nanowells_follow_the_page_scope.py` drives the real Scatter builder for each. A second service, `observations.nanowell_metrics`
+`tests/test_scatter_nanowells_follow_the_page_scope.py` drives the real Scatter builder for each. **The scatter
+sets the page's scope, too.** Beside its X / Y metric pickers, each page of the Scatter Plot carries a **Subset** and
+a **Baseline** picker under Observations: Nanowells (`scatter/_observations._scope_names`, shown and hidden with
+the metric pickers by `sync_controls`). They are the Nanowells page's two settings, not copies:
+`_populate_scope` fills them from the `nanowell.scope_choices` service (`nanowell/_plot_links.scope_choices`: every
+nanowell, each saved subset, and the page's Subset named "(not saved)" when it was built there and never saved; the
+two baseline rules and each timepoint of the drawn rows in time order), and a choice calls
+`nanowell.set_subset_by_name` (`set_subset` / `apply_saved_subset`) or `nanowell.set_baseline`
+(`set_page_baseline`), then redraws. **A click names a nanowell.** The per-nanowell page's interaction points are
+`observation_compute.click_points` — `(x, y, NanowellPoint(well, timepoint, q, r))`, per-well medians left out —
+so `callbacks.on_scatter_click` answers a nanowell point with the `nanowell.show_nanowell` service
+(`_plot_links.show_nanowell`: the well joins the plate selection when it is not in it, as `open_for_anchor` does;
+the nanowell becomes `selected_sites`, the page's timepoint the point's; the notebook shows *Nanowells*; then
+`selection_changed`) and a hover writes `NanowellPoint.text()` on the status line. The cell scatter's points
+remain cell tuples and still open the cell viewer. `tests/test_scatter_nanowells_subset_baseline_and_click.py`
+drives the pickers and the click handler through the real builder. A second service, `observations.nanowell_metrics`
 (`nanowell_metric_specs`), names the same metrics with no rows read: the channels come from the site tables' header
 rows (`collect.site_channels`, the same derivation `load_nanowell_data` applies to the columns it reads). The
 per-cell Scatter's "Nanowell ▸" picker entries (`scatter/_observations.cell_nanowell_entries`) use it, because they
@@ -15175,6 +15246,18 @@ is therefore the same box on the cell scatter's "Nanowell ▸ count" × "Nanowel
 its label's percentage is of each group's plotted nanowells. The redraw also rebuilds an armed gate selector, as the
 cell redraw does. The **Apply gates** filter does not thin nanowell points. `tests/test_scatter_gates_on_nanowell_observations.py`.
 The Nanowells page's *Subset* can name such a gate (`nanowell/subset_compute`, *The subset*).
+
+**The nanowell scatter obeys the figure's Properties panel.** It is the same figure as the cell scatter on each
+page, so it reads the same preferences: `_observations.redraw` takes them from `plot_style.figure_prefs(ctx, fig)`,
+and on the Cells page `_pin_cells_log_axes` pins `scatter_x_log` / `scatter_y_log` (on unless turned off) on the
+axes as `_aw_force_xlog` / `_aw_force_ylog` with `_aw_log_plus1`, labelling each log axis with the transform and its
+base (`_layout.log1p_axis_suffix`) — the rules `gating.render_scatter_points` draws cells by. The Wells page keeps
+the shared `x_log` / `y_log`, which the style pass applies. Every point collection is tagged
+`_aw_marker_collection`, so marker size, shape and edge apply (`plot_style._style_marker_collections`). The draw
+stamps the `nanowells` style view (`plot_style.mark_style_view`) and `_observations.drew_nanowells` stamps the cell
+view back whenever cells are drawn, so the panel hides what the nanowell points do not draw: density shading on the
+Cells page and the error-bar rows on the Wells page (`scatter/_style_facets`, `views`).
+`tests/test_scatter_nanowells_obeys_properties.py` drives the panel's own toggles and base box on both pages.
 
 **Applying a nanowell gate to cells.** `review/domain/gates.compute_gate_inclusion(df, gates, ratios, *, nanowell_values)` joins
 each `nw::<key>` axis a gate names onto a copy of the cell rows (`observations.join_nanowell_columns`, on

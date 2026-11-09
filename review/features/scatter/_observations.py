@@ -15,7 +15,7 @@ from widgets.plot_card import follows_theme
 
 from review.domain.observation import NANOWELLS
 from review.features.scatter.collect import scatter_groups
-from review.features.scatter.observation_compute import default_axes, nanowell_scatter
+from review.features.scatter.observation_compute import click_points, default_axes, nanowell_scatter
 
 #: The leaf this module serves (its registry name).
 LEAF = "Scatter Plot"
@@ -36,8 +36,18 @@ def _combo_names(page: str) -> tuple[str, str]:
     return f"_scatter_{page}_nw_x_cb", f"_scatter_{page}_nw_y_cb"
 
 
+def _scope_names(page: str) -> tuple[str, str]:
+    """The page's Subset and Baseline pickers: the Nanowells page's own two settings, offered here."""
+    return f"_scatter_{page}_nw_subset_cb", f"_scatter_{page}_nw_baseline_cb"
+
+
 def build_axis_controls(ctx, slot, page: str) -> None:
-    """Add the page's nanowell X / Y metric pickers to its band *slot*, hidden; :func:`sync_controls` shows them."""
+    """Add the page's nanowell X / Y metric pickers, and its Subset and Baseline pickers, to its band *slot*, hidden;
+    :func:`sync_controls` shows them.
+
+    **Subset** and **Baseline** are the Nanowells page's settings, not copies of them: choosing one here sets the
+    page's (``nanowell.set_subset_by_name`` / ``nanowell.set_baseline``), so the page's views and this scatter stay
+    about the same nanowells and the same fold changes, whichever of the two the choice was made on."""
     from widgets.labeled_combo import LabeledComboBox
 
     for name, caption in zip(_combo_names(page), ("X", "Y")):
@@ -47,6 +57,51 @@ def build_axis_controls(ctx, slot, page: str) -> None:
         group = slot.add_scope("", combo)
         group.setVisible(False)
         ctx.widgets.register(name + "_grp", group)
+    tips = ("Which nanowells are drawn: the Nanowells page's Subset. Choosing one here makes it that page's Subset.",
+            "What every fold change is measured from: the Nanowells page's Baseline. Choosing one here sets it there.")
+    for name, caption, tip in zip(_scope_names(page), ("Subset", "Baseline"), tips):
+        combo = ctx.widgets.register(name, LabeledComboBox(caption))
+        combo.setToolTip(tip)
+        combo.currentIndexChanged.connect(
+            lambda _i, _c=combo, _k=caption, _p=page: _choose(ctx, _k, _c.currentData(), _p))
+        group = slot.add_scope("", combo)
+        group.setVisible(False)
+        ctx.widgets.register(name + "_grp", group)
+
+
+def _choose(ctx, setting: str, value, page: str) -> None:
+    """Set the Nanowells page's *setting* (``"Subset"`` or ``"Baseline"``) to *value*, then redraw *page* from the
+    page's new scope."""
+    if value is None:
+        return
+    ctx.features.query("nanowell.set_subset_by_name" if setting == "Subset" else "nanowell.set_baseline",
+                       ctx, value, default=None)
+    _redraw_page(ctx, page)
+
+
+def _populate_scope(ctx, page: str, table) -> None:
+    """Fill the page's Subset and Baseline pickers with the Nanowells page's choices and select the page's own; hide
+    them in a build without that page. The Baseline lists the timepoints of *table*'s rows in time order."""
+    order = (table.frame.drop_duplicates("timepoint").sort_values("timepoint_hours")["timepoint"].tolist()
+             if "timepoint_hours" in table.frame.columns and len(table.frame) else [])
+    choices = ctx.features.query("nanowell.scope_choices", ctx, [t for t in order if t != ""], default=None)
+    for name, items, current in zip(_scope_names(page), ("subsets", "baselines"), ("subset", "baseline")):
+        combo = ctx.widgets.get_or_none(name)
+        group = ctx.widgets.get_or_none(name + "_grp")
+        if group is not None:
+            group.setVisible(choices is not None)
+        if combo is None or choices is None:
+            continue
+        blocked = combo.blockSignals(True)
+        try:
+            combo.clear()
+            for key, text in choices[items]:
+                combo.addItem(text, key)
+            keys = [key for key, _text in choices[items]]
+            if choices[current] in keys:
+                combo.setCurrentIndex(keys.index(choices[current]))
+        finally:
+            combo.blockSignals(blocked)
 
 
 def _redraw_page(ctx, page: str) -> None:
@@ -67,7 +122,7 @@ def sync_controls(ctx) -> str:
             group = combo.parentWidget() if combo is not None else None
             if group is not None:
                 group.setVisible(not nanowells)
-        for name in _combo_names(page):
+        for name in _combo_names(page) + _scope_names(page):
             group = ctx.widgets.get_or_none(name + "_grp")
             if group is not None:
                 group.setVisible(nanowells)
@@ -111,15 +166,37 @@ def _selected_hours(ctx, page: str):
     return hours if selections else None
 
 
+def _pin_cells_log_axes(ax, prefs) -> tuple[str, str]:
+    """Give the Cells page's axes the figure's own log state and return the two axis-label suffixes.
+
+    The same rules as the per-cell scatter draws by (``gating.render_scatter_points``), because it is the same
+    figure and the same Properties toggles: ``scatter_x_log`` / ``scatter_y_log`` (on unless turned off), drawn as
+    log(x+1) so an empty nanowell's zero stays on the axis, in the base the panel names. Pinned on the axes so the
+    style pass applies these rather than the shared ``x_log`` / ``y_log`` other figures use.
+    """
+    from review.core.plot_style import apply_axis_log_scale, log_base_value
+    from review.features.scatter._layout import scatter_log_suffix
+
+    x_log = bool(prefs.get("scatter_x_log", True))
+    y_log = bool(prefs.get("scatter_y_log", True))
+    ax._aw_force_xlog, ax._aw_force_ylog, ax._aw_log_plus1 = x_log, y_log, True
+    apply_axis_log_scale(ax, "x", x_log, log_base_value(prefs.get("x_log_base", "10")))
+    apply_axis_log_scale(ax, "y", y_log, log_base_value(prefs.get("y_log_base", "10")))
+    return scatter_log_suffix(prefs, "x"), scatter_log_suffix(prefs, "y")
+
+
 def redraw(ctx, page: str) -> None:
     """Draw the nanowell scatter on *page* (``"cells"``: one point per nanowell; ``"aggregate"``: per well)."""
-    from review.core.plot_style import apply_export_style_to_current, tokens_for
+    from review.core.plot_style import apply_export_style_to_current, figure_prefs, mark_style_view, tokens_for
     from review.data.observations import nanowell_observations
 
     ax_name, fig_name, canvas_name = _FIGURE[page]
     ax, fig, canvas = (ctx.widgets.get_or_none(n) for n in (ax_name, fig_name, canvas_name))
     if ax is None or fig is None or canvas is None:
         return
+    # Which Properties controls this draw honours: the nanowell points have no density shading (Cells page) and no
+    # spread (Wells page), so the panel hides those rows while nanowells are drawn (``_style_facets``).
+    mark_style_view(ctx, fig, NANOWELLS)
     for extra in list(fig.axes)[1:]:
         fig.delaxes(extra)
     ax.clear()
@@ -142,15 +219,21 @@ def redraw(ctx, page: str) -> None:
         canvas.draw_idle()
         return
     x_key, y_key = _populate(ctx, page, table)
+    _populate_scope(ctx, page, table)
     drawn = nanowell_scatter(table, x_key, y_key, groups, timepoints_h=_selected_hours(ctx, page),
                              per_well=page == "aggregate")
-    size = 30 if page == "aggregate" else 12
+    prefs = figure_prefs(ctx, fig)
     for series in drawn.series:
         if len(series.x):
-            ax.scatter(series.x, series.y, s=size, color=series.color, alpha=0.8, linewidths=0,
-                       label=series.label)
-    ax.set_xlabel(drawn.x_label)
-    ax.set_ylabel(drawn.y_label)
+            coll = ax.scatter(series.x, series.y, color=series.color, alpha=0.8, linewidths=0,
+                              label=series.label)
+            # Marker size, shape and edge are the panel's (``plot_style._style_marker_collections``).
+            coll._aw_marker_collection = True
+    x_suffix = y_suffix = ""
+    if page == "cells":
+        x_suffix, y_suffix = _pin_cells_log_axes(ax, prefs)
+    ax.set_xlabel(drawn.x_label + x_suffix)
+    ax.set_ylabel(drawn.y_label + y_suffix)
     from review.domain.observation import well_statistic
 
     stats = sorted({well_statistic(table, x_key), well_statistic(table, y_key)})
@@ -161,6 +244,8 @@ def redraw(ctx, page: str) -> None:
         ax.legend(loc="best", fontsize=8, framealpha=0.0, facecolor="none")
     if page == "cells":
         _paint_nanowell_gates(ctx, ax, drawn, x_key, y_key, muted)
+        # Each point names its nanowell, so a click shows it on the Nanowells page (``callbacks``).
+        ctx.runtime.scatter.interaction_cache["points"] = click_points(drawn)
     lines = [drawn.footer, *drawn.notes]
     if page == "cells" and table.subset and ctx.state.cell_gating.scatter_gates:
         lines.append(f"Gate percentages are of the nanowells drawn: those in the Subset ({table.subset}).")
@@ -236,6 +321,9 @@ def drew_nanowells(ctx, page: str) -> bool:
     """Under Observations: Nanowells draw *page* from nanowell rows and return ``True``; else sync the pickers
     back to the cell ones and return ``False`` so the caller draws cells."""
     if sync_controls(ctx) != NANOWELLS:
+        from review.core.plot_style import mark_style_view
+
+        mark_style_view(ctx, ctx.widgets.get_or_none(_FIGURE[page][1]), "")   # the cell view: every control again
         return False
     redraw(ctx, page)
     return True

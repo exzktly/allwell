@@ -241,10 +241,15 @@ def test_intensity_floors_are_listed_only_while_they_are_in_force(ctx):
 
 
 @pytest.mark.parametrize("width", [1260, 360])
-def test_each_list_is_as_tall_as_its_rows_at_a_desk_and_a_phone_width(ctx, width):
+def test_each_list_is_as_tall_as_its_rows_at_a_desk_and_a_phone_width(ctx, qtbot, width):
     """A row is as tall as its wrapped text at the width the table ends up with —
-    measured at an earlier, narrower width, a desk row was four lines tall."""
-    from PySide6.QtWidgets import QApplication, QWidget
+    measured at an earlier, narrower width, a desk row was four lines tall.
+
+    Waited for rather than pumped a fixed number of times: fitting a list can
+    bring up the page's scroll bar, which narrows the list and queues another
+    fit, and on a loaded machine five turns of the loop did not always reach
+    the last one. A fit that never comes (the bug) still times out."""
+    from PySide6.QtWidgets import QWidget
 
     from review.core.cell_sets import add_set
     from review.features.saved_cells.tab_view import build_saved_cells_tab
@@ -255,15 +260,20 @@ def test_each_list_is_as_tall_as_its_rows_at_a_desk_and_a_phone_width(ctx, width
     host.resize(width, 900)
     build_saved_cells_tab(ctx, host)
     host.show()
-    for _ in range(5):
-        QApplication.processEvents()
     page = ctx.widgets.get("_saved_cells_page")
-    for table in (page.sets, page.gates):
+
+    def wanted(table):
         floor = table.verticalHeader().minimumSectionSize()
+        return [max(floor, table.sizeHintForRow(r)) for r in range(table.rowCount())]
+
+    def fitted(table):
         rows = [table.rowHeight(r) for r in range(table.rowCount())]
-        assert rows == [max(floor, table.sizeHintForRow(r)) for r in range(table.rowCount())]
-        assert table.height() == (table.horizontalHeader().height() + sum(rows)
-                                  + 2 * table.frameWidth())
+        return rows == wanted(table) and table.height() == (
+            table.horizontalHeader().height() + sum(rows) + 2 * table.frameWidth())
+
+    qtbot.waitUntil(lambda: fitted(page.sets) and fitted(page.gates), timeout=3000)
+    for table in (page.sets, page.gates):
+        assert [table.rowHeight(r) for r in range(table.rowCount())] == wanted(table)
     host.close()
 
 

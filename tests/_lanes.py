@@ -262,6 +262,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_page_on_a_phone.py": "The Nanowells page's site detail, crop strip and footer in phone layout, in a minimal shell",
     "test_phone_nanowell_popout.py": "The nanowell crops pop-out in phone layout covers the phone and closes from its foot",
     "test_nanowell_counts_follow_cell_gating.py": "The Nanowells page counts only the cells Home's Cell Gating includes …",
+    "test_nanowell_size_classes.py": "Two labelled size classes, counted per nanowell over the cells Cell Gating keeps …",
     "test_nanowell_saved_subsets.py": "Subsets are named and saved in the dataset, listed in the Subset box and applied from it",
     "test_nanowell_array_hover.py": "Hovering a nanowell on the Array view shows its address, state, counts, focus and place",
     "test_nanowell_array_key.py": "The Array view keys its nanowell outlines: a ring swatch per state in view, with counts",

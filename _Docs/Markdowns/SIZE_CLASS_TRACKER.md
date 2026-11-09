@@ -30,18 +30,18 @@ States: `todo`, `doing`, `done` (with the test that pins it), `declined` (with t
 
 | Row | Item | Place | State | Evidence |
 |---|---|---|---|---|
-| S1 | Rule model: `SizeClassRule` (labels, ranges, validation, key, text, naming), Qt-free | `review/domain/size_classes.py` | todo | |
-| S2 | `QCParams.size_classes`: field, to/from dict, `with_updates`; persisted with the QC block | `review/domain/qc_params.py` | todo | |
-| S3 | Per-nanowell class counts over kept cells, carried on the gate tally | `review/features/nanowell/size_class_compute.py`, `cell_gate_compute.py`, `controller.gate_tally` | todo | |
-| S4 | Metrics in `site_metrics`, `METRICS`, `metric_kinds`, exclusion reasons and their labels, the long CSV | `series_compute.py`, `distribution_compute.py` | todo | |
-| S5 | Rule key in every staleness/memo key (page load, observations memo) | `controller.ensure_loaded` / `redraw`, `observation_compute` | todo | |
+| S1 | Rule model: `SizeClassRule` (labels, ranges, validation, key, text, naming), Qt-free | `review/domain/size_classes.py` | done | `tests/test_nanowell_size_classes.py` (bounds, gap, overlap refusal, incomplete rules, naming); mutating `>=`/`<=` to strict and the overlap test to strict each fail named tests |
+| S2 | `QCParams.size_classes`: field, to/from dict, `with_updates`; persisted with the QC block | `review/domain/qc_params.py` | done | `test_the_rule_survives_a_save_and_a_reload_with_the_other_qc_parameters` |
+| S3 | Per-nanowell class counts over kept cells, carried on the gate tally | `review/features/nanowell/size_class_compute.py`, `cell_gate_compute.py`, `controller.gate_tally` | done | `test_each_nanowell_counts_its_kept_cells_per_class_and_the_rest_as_unclassified`; counting every row instead of the kept ones, or ignoring the well column, each fail it |
+| S4 | Metrics in `site_metrics`, `METRICS`, `metric_kinds`, exclusion reasons and their labels, the long CSV | `series_compute.py`, `distribution_compute.py` | done | `test_an_empty_second_class_leaves_the_ratio_undefined_never_zero_or_infinite` and siblings; filling the ratio with 0 fails two tests. `METRIC_KEYS` held equal by `test_the_state_s_metric_keys_are_the_page_s_metrics` |
+| S5 | Rule key in every staleness/memo key (page load, observations memo) | `controller.ensure_loaded` / `redraw`, `observation_compute` | done | `gate_version` carries `SizeClassRule.key()`, so the page's load, redraw and the observations memo all key on it; `test_changing_only_the_size_classes_makes_the_page_s_counts_stale` |
 | S6 | Well mean for size metrics: well summary, group summary, Distribution line and notes, plot-tool well values | `summary_compute.py`, `distribution_compute.py`, `review/domain/observation.py`, scatter | todo | |
 | S7 | User labels in metric names: page combo, figure label, plot tools, Subset fields | `tab_view.py`, `controller.py`, `observation_compute.py`, `subset_compute.py` | todo | |
 | S8 | Cell Gating panel row: two label + min + max rows, µm readout, validation message, status line; nanowell datasets only | `review/features/qc/size_class_view.py`, `qc/tab_view.py` | todo | |
 | S9 | Cell Gating area curve shows each class's range as a labelled band | `review/features/home/cell_gating/renderer.py` | todo | |
 | S10 | Figure footer names the classes and counts the unclassified cells | `size_class_compute.note`, Distribution model | todo | |
 | S11 | One test through the real control (type ranges on the panel → metrics on the page) | tests | todo | |
-| S12 | New test files on the nanowell-features roster | `tests/_lanes.py` | todo | |
+| S12 | New test files on the nanowell-features roster | `tests/_lanes.py` | done | `test_nanowell_size_classes.py` on `NANOWELL_FEATURE_FILES`; `test_the_fast_lane_stays_fast.py` green |
 | S13 | Docs: ARCHITECTURE §6.2j, README Cell Gating and Nanowells | `_Docs/Markdowns/` | todo | |
 
-**Counts** (derived from the rows above when updated): 13 rows — todo 13, doing 0, done 0, declined 0.
+**Counts** (derived from the rows above when updated): 13 rows — todo 7, doing 0, done 6, declined 0.

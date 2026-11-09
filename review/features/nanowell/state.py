@@ -38,7 +38,9 @@ IDENTITY_COLOURS = ("auto", "status", "distance")
 _RENAMED_VIEWS = {"array_map": "array", "array_qc": "array"}
 #: The page's metrics (``distribution_compute.METRICS`` holds their labels; a test holds the two equal).
 METRIC_KEYS = ("n", "c", "brightness", "signal", "count_fc", "log2_count_fc", "confluence_fc", "brightness_fc",
-               "signal_fc", "growth_rate", "occupancy_class")
+               "signal_fc", "growth_rate", "occupancy_class",
+               # Cell Gating's size classes (``size_class_compute.COLUMNS``).
+               "size_1", "size_2", "size_unclassified", "size_ratio", "size_1_share")
 
 #: How many nanowells each of the Extremes view's blocks shows by default, and the most it can show: a figure of two
 #: dozen rows of crops is already small on a laptop screen.

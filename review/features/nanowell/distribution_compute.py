@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from review.features.nanowell import background_compute, moving_compute
+from review.features.nanowell import background_compute, moving_compute, size_class_compute
 from review.features.nanowell.decorate_compute import Decoration, band_spans, order_groups, sub_band_spans
 from review.features.nanowell.series_compute import NO_BASELINE_TIMEPOINT, exclusion_reason
 from review.features.nanowell.summary_compute import LOG_METRICS, group_summary, well_summary
@@ -45,22 +45,30 @@ METRICS = {
     "signal_fc": ("Nanowell fluorescence fold change", True),
     "growth_rate": ("Growth rate (per hour, from ln n)", False),
     "occupancy_class": ("Occupancy at baseline (cells)", False),
+    # The size classes Cell Gating defines (``size_class_compute``), named "Size class 1/2" until the user's labels
+    # replace them (:func:`metric_label`'s *sizes*).
+    **{key: (label, False) for key, label in size_class_compute.LABELS.items()},
 }
-def metric_label(metric: str, channel: str | None = None, modes=()) -> str:
+
+
+def metric_label(metric: str, channel: str | None = None, modes=(), sizes=None) -> str:
     """*metric*'s axis label for wells whose fluorescence was measured under *modes* (``background_compute``, one per
     well): a fluorescence metric names what its background was — "Cell fluorescence (mean per cell, empty-well
-    background subtracted) · GFP" — and a channel metric names its channel."""
+    background subtracted) · GFP" — and a channel metric names its channel. *sizes* (Cell Gating's
+    ``SizeClassRule``) puts the user's class labels in a size metric's name."""
     label, needs = METRICS[metric]
+    if sizes is not None:
+        label = sizes.name(label)
     words = background_compute.clause(metric, modes)
     if words:
         label = f"{label[:-1]}, {words})" if label.endswith(")") else f"{label} ({words})"
     return label + (f" · {channel}" if needs and channel else "")
 
 
-def metric_labels() -> dict:
+def metric_labels(sizes=None) -> dict:
     """``metric -> label``, in the page's order — for a caller outside this feature (Batch Export) that reaches
-    it through a lazy proxy, which can only call."""
-    return {key: label for key, (label, _needs) in METRICS.items()}
+    it through a lazy proxy, which can only call. *sizes* names the size classes (:func:`metric_label`)."""
+    return {key: (label if sizes is None else sizes.name(label)) for key, (label, _needs) in METRICS.items()}
 
 
 #: Metrics with one value per nanowell, not per timepoint: drawn across wells only (interface plan §6.2 #4).
@@ -71,7 +79,7 @@ BASELINE_METRICS = frozenset({"count_fc", "log2_count_fc", "confluence_fc", "bri
 _OCCUPANCY_VALUE = {"0": 0.0, "1": 1.0, "2": 2.0, "3+": 3.0}
 #: Metrics whose values are whole numbers by definition, packed into bands (U1). Decided by the metric, not by
 #: the values: a fold change on one timepoint is all 1.0 and is still a continuous quantity.
-INTEGER_METRICS = frozenset({"n", "occupancy_class"})
+INTEGER_METRICS = frozenset({"n", "occupancy_class", *size_class_compute.INTEGER_COLUMNS})
 #: The timepoint label the per-nanowell metrics are summarised under (each well's own first timepoint).
 PER_NANOWELL_LABEL = "per nanowell"
 
@@ -101,6 +109,11 @@ _REASON_LABELS = {
     moving_compute.BASE_EARLY_REASON: "baseline window before the first timepoint",
     moving_compute.BASE_GAP_REASON: "baseline window has a gap",
     moving_compute.BASE_IDENTITY_REASON: "baseline window not joinable",
+    size_class_compute.NOT_SET: "size classes not set",
+    size_class_compute.NOT_READ: "cells not read",
+    size_class_compute.MISMATCH: "classes exceed the count",
+    size_class_compute.SECOND_EMPTY: "second class empty",
+    size_class_compute.NONE_CLASSIFIED: "no classified cells",
 }
 
 

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 from domain.nanowell_roster import mixed_rules_note
 from review.features.nanowell import cell_gate_compute as cg
 from review.domain import nanowell_rim_focus as rfc
+from review.domain.size_classes import SizeClassRule
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
@@ -455,13 +456,26 @@ def _metrics_of(data, baseline: str, gate=None, focus=None, ungated=None) -> pd.
     return metrics
 
 
-def gate_version(ctx) -> int:
-    """The version of which cells the analysis includes (``StatsCacheState.population_version``): every gating,
-    curation or QC edit moves it. So do group and well-label edits, which go through the same
+def gate_version(ctx) -> tuple:
+    """What the tally (:func:`gate_tally`) was counted for: the version of which cells the analysis includes
+    (``StatsCacheState.population_version``), and the size-class rule its kept cells are counted by
+    (``SizeClassRule.key``).
+
+    Every gating, curation or QC edit moves the version. So do group and well-label edits, which go through the same
     ``invalidate_stats_cache``; that costs the page one re-tally from the row cache, no table read (measured, tracker
     L14). Kept rather than narrowed: telling the edits apart means classifying every caller of that shared
-    invalidation, and one gating edit misfiled would leave the page's counts stale and drawn as current."""
-    return int(getattr(ctx.state.stats_cache, "population_version", 0))
+    invalidation, and one gating edit misfiled would leave the page's counts stale and drawn as current.
+
+    The rule is part of the key in its own right, not only through the version its QC edit moves: the per-class
+    counts are an output of the tally, so equal keys must mean equal classes whatever route changed the rule."""
+    return int(getattr(ctx.state.stats_cache, "population_version", 0)), size_rule(ctx).key()
+
+
+def size_rule(ctx) -> SizeClassRule:
+    """Cell Gating's size classes (``QCParams.size_classes``), or a blank rule in a build without the QC layer."""
+    params = _qc_params(ctx)
+    rule = getattr(params, "size_classes", None)
+    return rule if isinstance(rule, SizeClassRule) else SizeClassRule()
 
 
 def _cell_label(ctx, well: str, data) -> str | None:
@@ -477,7 +491,8 @@ def _cell_label(ctx, well: str, data) -> str | None:
     return next((label for label, path in paths.items() if Path(path).resolve() == wanted), None)
 
 
-def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True) -> cg.GateTally | None:
+def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True,
+               sizes: SizeClassRule | None = None) -> cg.GateTally | None:
     """The cells Home's Cell Gating leaves out of *data*'s wells (``cell_gate_compute``), read from the row
     cache with the inclusion every other figure uses. Safe on a worker: the row cache is read there by the
     gating pass too. ``None`` with no data. *on_well(done, total)*, when given, is called before the first well
@@ -486,8 +501,14 @@ def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True) -> cg.Gat
     ``scatter_gates=False`` leaves the scatter-gate layer (``Gate_Pass``) out as well: the counts the scatter
     gates themselves are evaluated against when a gate is drawn on a nanowell metric. Counting them after that
     layer would make a cell's inclusion depend on a count its own inclusion changes
-    (``review/data/observations.nanowell_gate_values``)."""
+    (``review/data/observations.nanowell_gate_values``).
+
+    *sizes* is the size-class rule each nanowell's kept cells are counted by (``size_class_compute``); ``None`` reads
+    the one in force (:func:`size_rule`). A caller on a worker passes the rule it read on the GUI thread, with the
+    version it stamps."""
     from review.data.data_loading import df_included_mask, get_rows
+
+    sizes = size_rule(ctx) if sizes is None else sizes
 
     if data is None or not len(data.sites):
         return None
@@ -521,7 +542,7 @@ def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True) -> cg.Gat
             per_well.append((well, frame, df_included_mask(frame, except_layers=skipped).to_numpy()))
     if on_well is not None:
         on_well(total, total)
-    return cg.tally(per_well, unread, fields)
+    return cg.tally(per_well, unread, fields, sizes)
 
 
 def _excluded_fields(ctx, data) -> frozenset:
@@ -569,7 +590,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
             _call(ctx, "_nw_show_computing")
         return
     st.request += 1
-    request, baseline, focus = st.request, st.baseline, st.rim_focus_rule()
+    request, baseline, focus, sizes = st.request, st.baseline, st.rim_focus_rule(), size_rule(ctx)
     # A gate drawn on nanowell metrics is judged on counts without the scatter-gate layer; the subset's gate
     # conditions read the same (``_metrics_of``). Decided here, on the GUI thread, from the gates as they are now.
     nanowell_gated = bool(ss.nanowell_gates(getattr(ctx.state.cell_gating, "scatter_gates", None) or []))
@@ -591,16 +612,16 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         # The cells Home's Cell Gating leaves out are tallied here too, at the version asked for: an edit made
         # while this runs moves the version, and the next draw asks again (``redraw``).
         if previous is not None:
-            gate = gate_tally(ctx, previous, on_well=counter("gating"))
-            ungated = gate_tally(ctx, previous, scatter_gates=False) if nanowell_gated else None
+            gate = gate_tally(ctx, previous, on_well=counter("gating"), sizes=sizes)
+            ungated = gate_tally(ctx, previous, scatter_gates=False, sizes=sizes) if nanowell_gated else None
             return previous, _metrics_of(previous, baseline, gate, focus, ungated), "", parts, gate
         try:
             data = (load_nanowell_data(Path(data_dir), wells=sorted(wells), parts=parts, on_well=counter("tables"))
                     if data_dir else None)
         except NanowellSchemeError as exc:
             return None, None, str(exc), parts, None
-        gate = gate_tally(ctx, data, on_well=counter("gating"))
-        ungated = gate_tally(ctx, data, scatter_gates=False) if nanowell_gated else None
+        gate = gate_tally(ctx, data, on_well=counter("gating"), sizes=sizes)
+        ungated = gate_tally(ctx, data, scatter_gates=False, sizes=sizes) if nanowell_gated else None
         return data, _metrics_of(data, baseline, gate, focus, ungated), "", parts, gate
 
     stage_now = ["tables"]

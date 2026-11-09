@@ -122,5 +122,5 @@ def test_the_tick_label_names_both_layers_of_normalisation():
     _on(ctx, ids)
     fig, ax_mean, _f, _n = _draw(ctx)
     ticks = [t.get_text() for t in ax_mean.get_xticklabels()]
-    assert ticks == ["Mut-drug\n÷ WT-drug\n÷ (Mut-veh ÷ WT-veh)"], ticks
+    assert [t.replace("\u00a0", " ") for t in ticks] == ["Mut-drug\n÷ WT-drug ÷ Vehicle"], ticks
     plt.close(fig)

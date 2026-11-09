@@ -513,6 +513,11 @@ def summary_text(controls: PerMemberControls) -> str:
     return f"Per-sample control ({resolved}/{len(visible)})"
 
 
+def _term(name: str) -> str:
+    """``÷ name`` as one unbreakable piece of text (non-breaking spaces)."""
+    return "\u00f7\u00a0" + str(name).replace(" ", "\u00a0")
+
+
 def tick_labels(items) -> list[str]:
     """The x-tick text for each bar, naming its control when they differ.
 
@@ -561,8 +566,16 @@ def tick_labels(items) -> list[str]:
             # Two layers: both denominators, always. With the reference bars
             # left out a figure often holds one control, and the "name them
             # only when they differ" rule below would then print neither layer.
+            # On one line under the name, the second as its baseline value
+            # alone (``÷ Vehicle``, spelled out in the figure note): written in
+            # full on a third line the label was as wide as two bars, so even
+            # four bars could not lie flat and the labels were stood on end
+            # into the panel below.
+            # Each denominator is held together by non-breaking spaces, so a
+            # tick fit that must wrap the label breaks between the two terms
+            # (``÷ WT Erlotinib`` / ``÷ Vehicle``), never inside a name.
             name = getattr(item.fc_control, "display_name", "")
-            out.append(f"{item.display}\n\u00f7 {name}\n\u00f7 ({rel_tick})")
+            out.append(f"{item.display}\n{_term(name)} {_term(rel_tick)}")
             continue
         if not outcome:
             out.append(item.display)

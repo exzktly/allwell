@@ -35,7 +35,7 @@ from review.features.barplot._drag_reorder import (
     on_bar_drag_press,
     on_bar_drag_release,
 )
-from review.features.barplot.renderer import redraw_bars
+from review.features.barplot.renderer import BAR_FIGURE_MARGINS, redraw_bars
 from review.features.barplot.ratio_baseline_view import build_relative_to_row
 from functools import partial
 from review.features.export.service import (
@@ -304,9 +304,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     reg.register("_ax_bar_mean", fig.add_subplot(3, 1, 1))
     reg.register("_ax_bar_frac", fig.add_subplot(3, 1, 2))
     reg.register("_ax_bar_n", fig.add_subplot(3, 1, 3))
-    fig.subplots_adjust(
-        hspace=0.65, top=0.96, bottom=0.10, left=0.15, right=0.97,
-    )
+    fig.subplots_adjust(**BAR_FIGURE_MARGINS)
     canvas = reg.register("_bar_canvas", card.canvas)
     canvas.setMinimumHeight(int(_FIG_H * _DPI))
     # The canvas' pin plus the card's own chrome, measured rather than a

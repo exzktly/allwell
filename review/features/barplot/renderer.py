@@ -1231,6 +1231,38 @@ def draw_grouped_bar_mode(
     ctx.runtime.barplot.canvas.draw_idle()
 
 
+#: The bar figure's fixed margins: three stacked panels with room between them
+#: for one line of tick labels and the next panel's title.
+BAR_FIGURE_MARGINS = dict(hspace=0.65, top=0.96, bottom=0.10, left=0.15, right=0.97)
+
+
+def _multiline_ticks(fig) -> bool:
+    """Whether any panel's x tick labels run to more than one line."""
+    return any("\n" in label.get_text() for ax in fig.axes for label in ax.get_xticklabels())
+
+
+def _style_bar_figure(ctx) -> None:
+    """The style pass, with the layout the ticks need.
+
+    The fixed margins leave room for one line of tick labels between a panel
+    and the title of the panel below it. A tick naming its control runs to two
+    lines (``A01`` / ``÷ B01``), and with both fold-change stages more, so its
+    labels were drawn over the next panel's title — and when they were too wide
+    to lie flat and were stood on end, down through the panel itself. A figure
+    with multi-line ticks is laid out by the tight engine, which makes the room
+    from the text as drawn; one without keeps the fixed margins, set again
+    because switching the engine off leaves the axes where it last put them.
+    """
+    fig = ctx.runtime.barplot.fig
+    if fig is not None:
+        tight = _multiline_ticks(fig)
+        if getattr(fig, "_aw_tight_layout", False) and not tight:
+            fig.set_layout_engine(None)
+            fig.subplots_adjust(**BAR_FIGURE_MARGINS)
+        fig._aw_tight_layout = tight
+    apply_export_style_to_current(ctx, fig, getattr(ctx.runtime.barplot, "canvas", None))
+
+
 def redraw_bars(ctx) -> None:
     """Top-level bar plot redraw (drives the Bar Plots tab)."""
     if plots_held(ctx):  # a load draws the visible tab once, at its end (core/plot_hold.py)
@@ -1329,7 +1361,7 @@ def redraw_bars(ctx) -> None:
     tp_str_combined = ", ".join(tp_strs)
 
     if _nw_bars.draw(ctx, ax_mean, ax_frac, ax_n, target_ts, timepoint_title(target_ts, tp_str_combined)):
-        apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
+        _style_bar_figure(ctx)
         return
     if draw_per_cell_bar_mode(
         ctx,
@@ -1364,7 +1396,7 @@ def redraw_bars(ctx) -> None:
             blank_for_unset_cut(ax_frac, ax_n)
         from review.core.observation_band import stamp_cells_footer
         stamp_cells_footer(ctx, ctx.runtime.barplot.fig)
-        apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
+        _style_bar_figure(ctx)
         return
     draw_grouped_bar_mode(
         ctx,
@@ -1382,7 +1414,7 @@ def redraw_bars(ctx) -> None:
         blank_for_unset_cut(ax_frac, ax_n)
     from review.core.observation_band import stamp_cells_footer
     stamp_cells_footer(ctx, ctx.runtime.barplot.fig)
-    apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
+    _style_bar_figure(ctx)
 
 
 def _decline_relative_for_cells(ctx, ax_mean) -> None:

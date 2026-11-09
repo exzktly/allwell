@@ -52,6 +52,25 @@ def population_line(ctx) -> str:
     return line
 
 
+def stamp_population_footer(ctx, fig) -> str:
+    """Write :func:`population_line` as *fig*'s footer (``observation_band.write_footer``) and return it; ``""``, and
+    nothing written, while every cell counts. For the cell views outside the Plotting stack — Spatial, Multivariate —
+    whose numbers follow the Population layer through the chokepoint like every other view's, so their figures say so
+    the same way. The Plotting leaves get the line through ``observation_band.stamp_cells_footer`` instead."""
+    from review.core.observation_band import FOOTER_GID, write_footer
+    from review.core.plot_style import tokens_for
+
+    if fig is None:
+        return ""
+    for text in [t for t in getattr(fig, "texts", []) if t.get_gid() == FOOTER_GID]:
+        text.remove()
+    line = population_line(ctx)
+    if line:
+        axes = getattr(fig, "axes", [])
+        write_footer(fig, line, tokens_for(axes[0])[2] if axes else None)
+    return line
+
+
 def build_population_controls(ctx, band) -> None:
     """Add the Population picker to *band*'s scope zone, hidden until :func:`refresh` shows it."""
     from widgets.labeled_combo import LabeledComboBox

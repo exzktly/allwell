@@ -64,6 +64,11 @@ def render_multivariate(ctx) -> None:
     except Exception as exc:  # pragma: no cover - defensive
         _logger.exception("Multivariate render failed")
         _draw_message(fig, f"Render failed: {exc}")
+    # Its cells are those the Population layer keeps, like every view's, so the figure names the population
+    # (bottom-left; the view's own note sits bottom-right, :func:`_footnote`).
+    from review.core.population_band import stamp_population_footer
+
+    stamp_population_footer(ctx, fig)
     canvas = ctx.runtime.multivariate.canvas
     # Every redraw in the app ends here (ARCHITECTURE §5.8). The Properties
     # sidebar's settings — axis limits, log scales, fonts, mark styling — are
@@ -92,7 +97,8 @@ def _draw_message(fig, text: str) -> None:
 def _footnote(fig, text: str) -> None:
     ax = fig.axes[0] if fig.axes else None
     _bg, _t, muted_fg, _g, _s = tokens_for(ax) if ax is not None else (None,) * 5
-    fig.text(0.5, 0.005, text, ha="center", va="bottom", fontsize=7,
+    # Bottom-right, so it never lies across the population footer bottom-left (``population_band``).
+    fig.text(0.99, 0.005, text, ha="right", va="bottom", fontsize=7,
              color=muted_fg or "#888")
 
 

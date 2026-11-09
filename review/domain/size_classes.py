@@ -202,6 +202,41 @@ def classify_rows(rows, rule: SizeClassRule) -> np.ndarray | None:
     return classify(rows[col], rule)
 
 
+#: The per-cell column a class's share is plotted from: ``shape_class_share::<label>``, 1 for a cell in the class, 0 for
+#: a cell outside it, blank for a cell with no area. Its mean over a well's kept cells is the class's share of them,
+#: so every plot that takes a per-cell value — and its fold change — offers the share. Named with the ``shape_``
+#: prefix because it *is* a morphology-derived per-cell value, which is what puts it beside the shape features in
+#: the channel list and exempts it from the fluorescence gate and the ON cutoff everywhere those are decided
+#: (``pipeline.shape_features.is_shape_column``); named after the label so the column says which class it is.
+#: Written by the Population layer's projector (``review.data.population_gate``) while the rule is complete.
+SHARE_PREFIX = "shape_class_share::"
+
+
+def share_column(label: str) -> str:
+    """The share column of the class labelled *label*."""
+    return f"{SHARE_PREFIX}{label}"
+
+
+def share_columns(rule: SizeClassRule) -> list[str]:
+    """The share columns a complete *rule* puts in the rows, in class order; ``[]`` for an incomplete one."""
+    return [share_column(label) for label in rule.labels] if rule.active() else []
+
+
+def is_share_column(col) -> bool:
+    return isinstance(col, str) and col.startswith(SHARE_PREFIX)
+
+
+def shape_column_label(col: str) -> str:
+    """A readable name for a ``shape_*`` per-cell column: ``T cells share`` for a class's share column, else the
+    shape catalogue's label, else the column itself. Every place that names a shape column goes through here, so a
+    class's share is never shown as its raw column name."""
+    if is_share_column(col):
+        return f"{col[len(SHARE_PREFIX):]} share"
+    from pipeline.shape_features import label_for
+
+    return label_for(col) or col
+
+
 def diameter_um(area_px: float, pixel_um: float) -> float:
     """The diameter in µm of a circle of *area_px* pixels at *pixel_um* µm per pixel."""
     return 2.0 * math.sqrt(float(area_px) / math.pi) * float(pixel_um)

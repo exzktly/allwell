@@ -1448,9 +1448,9 @@ def stats_update_tp_menu(ctx) -> None:
     # col_for_scatter_entry, and the Property combo collapses to a single
     # Calculated Val for them (see populate_metric_combo).
     ch_options.extend(ratio_label_for(ctx, r) for r in ctx.state.channel.ratio_metrics)
-    from pipeline.shape_features import label_for as _shape_label_for
+    from review.domain.size_classes import shape_column_label
     for _col in (ctx.state.channel.shape_features or []):
-        ch_options.append(_shape_label_for(_col) or _col)
+        ch_options.append(shape_column_label(_col))
     if not ch_options:
         ch_options = ["—"]
     channel_cb = ctx.widgets.get_or_none("_stats_channel_cb")
@@ -1581,11 +1581,14 @@ def stats_refresh_fov_indicator(ctx) -> None:
         on = bool(ctx.state.plot.use_fov_replicates)
     except Exception:
         return
-    lbl.setText(
-        "Replicates: per-FOV — FOVs pooled across each group's wells (FOV mode ON)"
-        if on else
-        "Replicates: per-well (enable FOV mode to use FOVs as replicates)"
-    )
+    text = ("Replicates: per-FOV — FOVs pooled across each group's wells (FOV mode ON)"
+            if on else
+            "Replicates: per-well (enable FOV mode to use FOVs as replicates)")
+    # The tests are of the cells the Population layer keeps, like every number in the app, so the line names it.
+    from review.core.population_band import population_line
+
+    population = population_line(ctx)
+    lbl.setText(f"{text}\n{population}" if population else text)
 
 
 def stats_collect_group_values_shim(

@@ -178,9 +178,10 @@ def value_column_label(col: str) -> str:
     from review.domain.ratio_models import is_ratio_key, ratio_name_from_key
     if is_ratio_key(text):
         return ratio_name_from_key(text)
-    from pipeline.shape_features import is_shape_column, label_for as _shape_label_for
+    from pipeline.shape_features import is_shape_column
     if is_shape_column(text):
-        return _shape_label_for(text) or text
+        from review.domain.size_classes import shape_column_label
+        return shape_column_label(text)
     parts = split_metric_col(text)
     return parts[2] if parts else text
 
@@ -213,8 +214,8 @@ def column_label(col: str) -> str:
     if is_nanowell_cell_column(col):
         return nanowell_cell_label(col)
     if is_shape_column(col):
-        from pipeline.shape_features import label_for as _shape_label_for
-        return _shape_label_for(col) or col
+        from review.domain.size_classes import shape_column_label
+        return shape_column_label(col)
     parts = split_metric_col(col)
     if parts is None:
         return col

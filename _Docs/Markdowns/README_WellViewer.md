@@ -4250,12 +4250,27 @@ Every cell figure says which population it was drawn from, in a line at its
 foot, for example *Population: T cells only (80–250 px; DCs and cells in neither
 class left out)*. The line is kept in a saved or exported copy of the figure. If
 a selected well's table has no cell-area column, the line names those wells,
-because none of their cells could be classed. The choice is saved with the
+because none of their cells could be classed. Spatial and Multivariate figures
+carry the same line. On the Statistics page it sits under the *Replicates*
+line, because the tests there are run on the same cells. The choice is saved with the
 dataset. It runs the same way as a Cell Gating edit, behind a progress window.
 Changing a class's range while that class is picked moves cells in or out of
 every number the same way. In the Segmentation view's **Why removed** overlay,
 the cells left out are outlined in turquoise as *not in the chosen size class*.
 The Cell Gating funnel lists them as *Outside the chosen size class*.
+
+**Each class's share.** While both classes are complete, the channel list's
+*Shape Features* section also offers **T cells share** and **DCs share** (named
+after your classes). Each is a cell's membership of the class: 1 in it, 0
+outside it, blank for a cell with no recorded area. A well's mean of it is
+therefore the class's share of the well's kept cells. It can be plotted like
+any other per-cell value, over time, per group, on the heat map and as a fold
+change. Renaming a class renames its share, and clearing the classes removes
+both. A share is of the cells the plot keeps: with **Population** set to one
+class, that class's share is 1 everywhere, so compare shares under *All cells*.
+There is no ratio channel, since a ratio of two classes is not an average of
+any one value per cell. Per well it follows from the two shares. On a nanowell
+dataset, the Nanowells page offers it per nanowell.
 
 The control is shown only while both classes are complete, and only on a plot
 drawing cells. On a nanowell dataset each nanowell's per-class counts still see

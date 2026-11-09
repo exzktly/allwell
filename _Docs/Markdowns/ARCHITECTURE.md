@@ -12932,10 +12932,27 @@ False, so a range edit takes the full re-projection — the layer moves with it 
 `set_size_classes` path.
 
 Every cell figure names the population. `observation_band.stamp_cells_footer`, which all six Plotting leaves call,
-writes `population_band.population_line` on any dataset, above the nanowell line on a nanowell dataset. The line
+writes `population_band.population_line` on any dataset, above the nanowell line on a nanowell dataset. The cell
+views outside the Plotting stack say it too. Spatial and Multivariate call `population_band.stamp_population_footer`
+at the end of their render, and Multivariate's own note moves to the bottom-right so the two never overlap. The
+Statistics page adds it under its replicate line (`stats_refresh_fov_indicator`). The line
 names any selected well whose held rows have no area column (`population_gate.unclassable_wells`). The funnel row is
 "Outside the chosen size class"; the overlay layer is "not in the chosen size class", in
 `Colors.exclusion_population` (turquoise, ΔE ≥ 39 to every other overlay ink and to both class inks).
+
+**Each class's share is a channel.** While the rule is complete, the same projector writes a share column per
+class: `size_classes.share_column(label)`, which is `shape_class_share::<label>`. It holds 1 in the class, 0
+outside it, and NaN for a row with no area. It drops share columns the rule no longer defines, so a renamed class
+takes its column with it. `population_input_columns` declares the area columns while the rule is complete, so a
+narrow read of an unheld well computes the shares too. The `shape_` prefix is what makes them channels:
+`channel_state_controller.sync_share_channels`, called after every QC edit and at load through `_share_channels`,
+lists them after the detected shape features. `is_shape_column` exempts them from the fluorescence gate and the ON
+cutoff, as it does every morphology value. Every place that names a shape column goes through
+`size_classes.shape_column_label`, which reads *T cells share* off the column name. A well's mean of the column is
+the class's share of its kept cells, so Value plots, the heat map's *Mean (all cells)* and fold change all offer
+it. The light `set_size_classes` path re-runs `apply_population_to_cache` and invalidates the stats cache before
+redrawing, because the shares move even though no verdict does. There is deliberately no ratio channel: a ratio of
+two class counts is not a mean of any per-cell value.
 
 **The per-nanowell class counts ignore it.** `nanowell.controller.gate_tally` hands `cell_gate_compute.tally` a
 fourth element per well: the inclusion with `Population_Pass` also left out, which `size_class_compute.well_counts`

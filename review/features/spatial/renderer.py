@@ -75,6 +75,10 @@ def render_spatial(ctx) -> None:
     except Exception as exc:  # pragma: no cover - defensive
         _logger.exception("Spatial render failed")
         _draw_message(fig, f"Render failed: {exc}")
+    # Its numbers are of the cells the Population layer keeps, like every view's, so the figure names the population.
+    from review.core.population_band import stamp_population_footer
+
+    stamp_population_footer(ctx, fig)
     canvas = ctx.widgets.get_or_none("_sp_canvas")
     # Re-apply the Export-Style / Properties sidebar prefs (title, font sizes,
     # grid, legend, …) so toggling them in the panel survives a recompute.

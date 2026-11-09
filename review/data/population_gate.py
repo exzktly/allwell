@@ -13,6 +13,12 @@ missing from the well's table, or the value is blank — cannot be shown to be i
 population that quietly took in cells nobody could class would be a different population from the one named on the
 figure. :func:`unclassable_wells` names the wells that lost every row that way, for the figure footer.
 
+The same projector writes each class's **share column** while the rule is complete, whether or not a class is
+chosen (``size_classes.share_column``: ``shape_class_share::<label>``, 1 in the class, 0 outside it, blank with no
+area). A well's mean of it is that class's share of the well's kept cells, so every plot that takes a per-cell value
+offers each class's share — and its fold change — beside the shape features. A share column of a class since renamed
+or removed is dropped, so the rows never carry a share the rule no longer defines.
+
 Not to be confused with the per-nanowell class *counts*, which must see both classes and so read the inclusion with
 this layer left out (``nanowell.controller.gate_tally``).
 """
@@ -26,23 +32,37 @@ import pandas as pd
 POPULATION_COLUMN = "Population_Pass"
 
 
-def _chosen(ctx):
-    """``(rule, class index)`` in force, or ``None`` (``QCParams.population_rule``), read through the QC layer's own
-    accessor so a dataset whose parameters are not yet seeded reads its saved choice."""
+def _params(ctx):
+    """The QC parameters in force, read through the QC layer's own accessor so a dataset whose parameters are not yet
+    seeded reads its saved choice; the bare state in a build without that service."""
     features = getattr(ctx, "features", None)
     params = features.query("qc.get_params", ctx, default=None) if features is not None else None
     if params is None:
         qc = getattr(getattr(ctx, "state", None), "qc", None)
         params = getattr(qc, "params", None)
-    rule_of = getattr(params, "population_rule", None)
+    return params
+
+
+def _chosen(ctx):
+    """``(rule, class index)`` in force, or ``None`` (``QCParams.population_rule``)."""
+    rule_of = getattr(_params(ctx), "population_rule", None)
     return rule_of() if callable(rule_of) else None
 
 
+def _rule(ctx):
+    """The size-class rule while it is complete, else ``None``."""
+    from review.domain.size_classes import SizeClassRule
+
+    rule = getattr(_params(ctx), "size_classes", None)
+    return rule if isinstance(rule, SizeClassRule) and rule.active() else None
+
+
 def population_input_columns(ctx, label: str | None = None) -> tuple[str, ...]:
-    """The area columns a class is judged on, while a class is chosen."""
+    """The area columns a class is judged on, while the rule is complete (the share columns are written then, and
+    ``Population_Pass`` too when a class is chosen)."""
     from review.domain.qc_params import AREA_COLS
 
-    return tuple(AREA_COLS) if _chosen(ctx) is not None else ()
+    return tuple(AREA_COLS) if _rule(ctx) is not None else ()
 
 
 def population_mask(df: pd.DataFrame, rule, k: int) -> np.ndarray:
@@ -55,20 +75,37 @@ def population_mask(df: pd.DataFrame, rule, k: int) -> np.ndarray:
     return np.asarray(classes) == int(k)
 
 
-def _apply(df: pd.DataFrame, chosen) -> None:
-    if chosen is None:
-        if POPULATION_COLUMN in df.columns:
-            df.drop(columns=[POPULATION_COLUMN], inplace=True)
-        return
-    rule, k = chosen
-    df[POPULATION_COLUMN] = population_mask(df, rule, k).astype(int)
+def _apply(df: pd.DataFrame, chosen, rule=None) -> None:
+    """Write ``Population_Pass`` for *chosen* (``(rule, k)`` or ``None``) and the share columns of *rule* (a complete
+    rule or ``None``) onto *df*, dropping whichever does not apply."""
+    from review.domain.size_classes import area_column, classify_rows, is_share_column, share_columns
+
+    wanted = share_columns(rule) if rule is not None else []
+    stale = [c for c in df.columns if is_share_column(c) and c not in wanted]
+    if chosen is None and POPULATION_COLUMN in df.columns:
+        stale.append(POPULATION_COLUMN)
+    if stale:
+        df.drop(columns=stale, inplace=True)
+    if wanted:
+        classes = classify_rows(df, rule)
+        # A cell with no area is in no class, and cannot be shown to be outside one either: its share value is blank.
+        measured = (np.zeros(len(df), dtype=bool) if classes is None else
+                    np.isfinite(pd.to_numeric(df[area_column(df.columns)], errors="coerce").to_numpy(dtype=float)))
+        for k, col in enumerate(wanted):
+            values = np.full(len(df), np.nan)
+            if classes is not None:
+                values[measured] = (np.asarray(classes)[measured] == k).astype(float)
+            df[col] = values
+    if chosen is not None:
+        k_rule, k = chosen
+        df[POPULATION_COLUMN] = population_mask(df, k_rule, k).astype(int)
 
 
 def apply_population_to_cache(ctx, label: str | None = None) -> None:
     """Project the chosen class onto *label*'s cached rows, or every held well."""
     from review.data.data_loading import get_rows
 
-    chosen = _chosen(ctx)
+    chosen, rule = _chosen(ctx), _rule(ctx)
     wells = [label] if label is not None else list(ctx.state.dataset.well_paths or ())
     for well in wells:
         if label is None:
@@ -78,7 +115,7 @@ def apply_population_to_cache(ctx, label: str | None = None) -> None:
             df = get_rows(ctx, well)
         if df is None or df.empty:
             continue
-        _apply(df, chosen)
+        _apply(df, chosen, rule)
 
 
 def unclassable_wells(ctx, wells) -> list[str]:

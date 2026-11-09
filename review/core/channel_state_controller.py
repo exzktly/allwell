@@ -39,7 +39,8 @@ from review.domain.heatmap_metrics import (
 from review.domain.metric_registry import channel_supports_smfish
 from review.domain.ratio_models import (
     RatioMetric, is_ratio_key, ratio_name_from_key)
-from pipeline.shape_features import is_shape_column, label_for as shape_label_for
+from pipeline.shape_features import is_shape_column
+from review.domain.size_classes import shape_column_label
 from core.safe import swallowed
 from ui import theme
 
@@ -149,7 +150,7 @@ def _recalculate_threshold(ctx) -> None:
     )
     # Populate the available shape-feature columns before the dropdown is built
     # so they appear in the "Shape Features" section.
-    ctx.state.channel.shape_features = detect_shape_features(sample_df)
+    ctx.state.channel.shape_features = detect_shape_features(sample_df) + _share_channels(ctx)
 
     # The smFISH channel set has to be current *before* update_channel_selector
     # runs: that call ends in refresh_metric_combo_for_channel, which greys out
@@ -348,6 +349,29 @@ def refresh_metric_combo_for_channel(ctx) -> None:
 # ── Channel-selector / dropdown sync ────────────────────────────────────────
 
 
+def _share_channels(ctx) -> list[str]:
+    """The size classes' share columns (``size_classes.share_columns``) while Cell Gating's rule is complete."""
+    from review.domain.size_classes import SizeClassRule, share_columns
+
+    features = getattr(ctx, "features", None)
+    params = features.query("qc.get_params", ctx, default=None) if features is not None else None
+    rule = getattr(params, "size_classes", None)
+    return share_columns(rule) if isinstance(rule, SizeClassRule) else []
+
+
+def sync_share_channels(ctx) -> None:
+    """List each size class's share among the shape-feature channels, and only the current rule's — called after
+    a QC edit, since naming, renaming or clearing a class changes the list — and refresh the channel dropdowns when
+    it moved."""
+    from review.domain.size_classes import is_share_column
+
+    current = list(ctx.state.channel.shape_features or [])
+    wanted = [c for c in current if not is_share_column(c)] + _share_channels(ctx)
+    if wanted != current:
+        ctx.state.channel.shape_features = wanted
+        update_channel_selector(ctx)
+
+
 def update_channel_selector(ctx) -> None:
     """Refresh the channel dropdown values and selection to match loaded data.
 
@@ -370,7 +394,7 @@ def update_channel_selector(ctx) -> None:
     # Shape features are channel-independent virtual channels shown under their
     # own dropdown section; their key is the shape_* column itself.
     shape_cols = list(ctx.state.channel.shape_features or [])
-    shape_labels = [shape_label_for(c) or c for c in shape_cols]
+    shape_labels = [shape_column_label(c) for c in shape_cols]
     labels = (real_labels + ratio_labels + shape_labels) or ["—"]
     # Map the dropdown label back to the underlying channel key used by
     # set_active_channel (real token, ratio:<name> key, or shape_* column).
@@ -1396,7 +1420,7 @@ def active_channel_label(ctx) -> str:
                 return ratio_label_for(ctx, r)
         return ratio_name.upper()
     if is_shape_column(active_val_col):
-        return shape_label_for(active_val_col) or active_val_col
+        return shape_column_label(active_val_col)
     return ctx.state.channel.active_channel.upper()
 
 

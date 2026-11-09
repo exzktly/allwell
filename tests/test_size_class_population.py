@@ -186,3 +186,94 @@ def test_the_per_nanowell_class_counts_read_both_classes_whatever_the_population
     tally = cg.tally([("A01", frame, only_small, every)], sizes=RULE)
     row = tally.classes.iloc[0]
     assert (int(row["size_1"]), int(row["size_2"])) == (2, 1)
+
+
+# ── each class's share, as a plottable per-cell value ────────────────────────
+
+
+def _mean(ctx, col) -> list:
+    """Each timepoint's mean of *col* over A01's kept cells, as every Value plot takes it (``AggPoint[1]``)."""
+    from review.domain.stats_compute import aggregate_well
+
+    return [round(float(p[1]), 6) for p in aggregate_well(ctx, "A01", -1.0, False, col)]
+
+
+def test_each_class_s_share_is_a_channel_whose_well_mean_is_the_share(shell, qtbot):
+    from review.data.metric_labels import value_column_label
+    from review.domain.size_classes import share_column
+    from review.features.qc.controller import get_qc_params
+    from tests._panel_jobs import apply_qc_params
+
+    apply_qc_params(qtbot, shell, replace(get_qc_params(shell), size_classes=RULE))
+    large, small = share_column("Large"), share_column("Small")
+    assert shell.state.channel.shape_features[-2:] == [large, small]
+    assert {"Large share", "Small share"} <= set(shell.state.channel.label_to_channel_key)
+    assert value_column_label(small) == "Small share"
+    assert _mean(shell, small) == [round(2 / 6, 6)] * 3          # cells 1–2 of six
+    assert _mean(shell, large) == [round(2 / 6, 6)] * 3          # cells 5–6
+
+
+def test_the_share_follows_a_range_edit_on_the_light_path_and_a_renamed_class_takes_its_column_with_it(shell, qtbot):
+    from review.domain.size_classes import share_column
+    from review.features.qc.controller import get_qc_params, only_size_classes_differ, set_size_classes
+    from tests._panel_jobs import apply_qc_params
+
+    apply_qc_params(qtbot, shell, replace(get_qc_params(shell), size_classes=RULE))
+    wider = replace(get_qc_params(shell), size_classes=SizeClassRule.of(("Large", 245, None), ("Tiny", None, 235)))
+    assert only_size_classes_differ(wider, get_qc_params(shell))      # no class chosen: the light path
+    set_size_classes(shell, wider)
+    assert _mean(shell, share_column("Tiny")) == [0.5] * 3            # cells 1–3 of six
+    assert share_column("Small") not in shell.state.channel.shape_features
+    from review.data.data_loading import get_rows
+
+    assert share_column("Small") not in get_rows(shell, "A01").columns
+
+
+# ── the cell views outside the Plotting stack name it too ────────────────────
+
+
+def _chosen_small(shell, qtbot):
+    from review.features.qc.controller import get_qc_params
+    from tests._panel_jobs import apply_qc_params
+
+    apply_qc_params(qtbot, shell, replace(get_qc_params(shell), size_classes=RULE, population=SMALL))
+
+
+def _footer(fig) -> list:
+    from review.core.observation_band import FOOTER_GID
+
+    return [t.get_text() for t in fig.texts if t.get_gid() == FOOTER_GID]
+
+
+def test_multivariate_and_spatial_figures_name_the_population(shell, qtbot):
+    from matplotlib.figure import Figure
+
+    from review.features.multivariate.renderer import render_multivariate
+    from review.features.spatial.renderer import render_spatial
+
+    _chosen_small(shell, qtbot)
+    mv = Figure()
+    shell.runtime.multivariate.fig = mv
+    shell.state.feature_slice("multivariate").last_error = "nothing computed"
+    render_multivariate(shell)
+    assert [line.split(" (")[0] for line in _footer(mv)] == ["Population: Small only"]
+
+    sp = Figure()
+    shell.widgets.register("_sp_fig", sp)
+    shell.state.feature_slice("spatial").last_error = "nothing computed"
+    render_spatial(shell)
+    assert [line.split(" (")[0] for line in _footer(sp)] == ["Population: Small only"]
+
+
+def test_the_statistics_replicate_line_names_the_population(shell, qtbot):
+    from PySide6.QtWidgets import QLabel
+
+    from review.features.stats.controller import stats_refresh_fov_indicator
+
+    label = shell.widgets.register("_stats_fov_indicator", QLabel())
+    _HELD.append(label)
+    stats_refresh_fov_indicator(shell)
+    assert "Population" not in label.text()
+    _chosen_small(shell, qtbot)
+    stats_refresh_fov_indicator(shell)
+    assert label.text().splitlines()[-1].startswith("Population: Small only")

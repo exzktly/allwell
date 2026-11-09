@@ -35,8 +35,10 @@ from review.data.focus_gate import (
 from review.data.border_gate import border_status
 from review.data.data_loading import held_wells_note
 
-from . import nanowell_focus_view
-from .controller import get_qc_params, qc_excluded_count, set_qc_params_with_progress
+from . import nanowell_focus_view, size_class_view
+from .controller import (
+    get_qc_params, only_size_classes_differ, qc_excluded_count, set_qc_params_with_progress, set_size_classes,
+)
 from .params import QCParams
 from review.domain.qc_params import _pos
 from core.safe import swallowed
@@ -226,6 +228,14 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     _edits = (min_area_edit, max_area_edit, min_sol_edit, max_region_edit,
               min_circ_edit, max_circ_edit)
 
+    # ── size classes: which class a kept cell is counted in, per nanowell ────
+    #
+    # Beside the area bounds because they read the same area in the same pixels, and below them because they act on
+    # what the gate keeps. Not a gate: they leave every cell in, so a change applies without re-projecting a single
+    # verdict (``controller.set_size_classes``). Shown on a nanowell dataset only (``size_class_view.refresh``).
+    sc_row, sc_widgets = size_class_view.build_row(row, params, _GRID_INDENT, _FQ_TEXT_W)
+    outer.addWidget(sc_row)
+
     # ── image quality, as reported by the run that produced this dataset ─────
     #
     # A second, independent gate on the same panel, and deliberately worded so
@@ -399,7 +409,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         "exclude_soft_cells": foc_cb, "focus_min": foc_edit,
         "focus_status": foc_status, "focus_effect": foc_effect,
         "exclude_border_cells": brd_cb, "border_status": brd_status,
-        "focus_row": foc, **nw_widgets,
+        "focus_row": foc, **nw_widgets, **sc_widgets,
     })
 
     def _fields_params() -> QCParams:
@@ -433,6 +443,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
             max_region_area=max_region_edit.text(),
             min_circularity=min_circ_edit.text(),
             max_circularity=max_circ_edit.text(),
+            size_classes=size_class_view.rule_from(sc_widgets),
         )
 
     def _sync_enabled() -> None:
@@ -460,11 +471,17 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
                   "exclude_soft_cells": foc_cb})
         _refresh_border_status(ctx, {"border_status": brd_status})
         nanowell_focus_view.refresh(ctx, {"focus_row": foc, **nw_widgets})
+        size_class_view.refresh(ctx, sc_widgets, get_qc_params(ctx))
 
     def _apply() -> None:
         _sync_enabled()
         params = _fields_params()
-        if params == get_qc_params(ctx):
+        current = get_qc_params(ctx)
+        if only_size_classes_differ(params, current):
+            set_size_classes(ctx, params)
+            size_class_view.refresh(ctx, sc_widgets, params)
+            return
+        if params == current:
             # Enter or a focus change on a box whose value is already in force
             # (or a box edited back to it) changes nothing, so it recomputes
             # nothing: the verdict over every held cell, the save and a redraw
@@ -570,7 +587,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
 
     foc_edit.editingFinished.connect(lambda: _finish(_finish_cut))
     foc_edit.textChanged.connect(lambda _t=None: _arm_pause(foc_edit))
-    for w in _edits:
+    for w in (*_edits, *size_class_view.edits(sc_widgets)):
         w.editingFinished.connect(lambda: _finish(_apply))
         w.textChanged.connect(lambda _t=None, _w=w: _arm_pause(_w))
 
@@ -828,3 +845,6 @@ def qc_gate_refresh_widgets(win) -> None:
     _refresh_focus_status(win._ctx, w)
     _refresh_border_status(win._ctx, w)
     nanowell_focus_view.refresh(win._ctx, w)
+    if "size_classes_row" in w:
+        size_class_view.fill(w, p.size_classes)
+        size_class_view.refresh(win._ctx, w, p)

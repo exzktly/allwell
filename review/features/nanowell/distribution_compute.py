@@ -25,10 +25,10 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from review.features.nanowell import background_compute, moving_compute
+from review.features.nanowell import background_compute, moving_compute, size_class_compute
 from review.features.nanowell.decorate_compute import Decoration, band_spans, order_groups, sub_band_spans
 from review.features.nanowell.series_compute import NO_BASELINE_TIMEPOINT, exclusion_reason
-from review.features.nanowell.summary_compute import LOG_METRICS, group_summary, well_summary
+from review.features.nanowell.summary_compute import LOG_METRICS, group_summary, well_statistic, well_summary
 
 TIME, WELLS = "time", "wells"
 
@@ -45,22 +45,30 @@ METRICS = {
     "signal_fc": ("Nanowell fluorescence fold change", True),
     "growth_rate": ("Growth rate (per hour, from ln n)", False),
     "occupancy_class": ("Occupancy at baseline (cells)", False),
+    # The size classes Cell Gating defines (``size_class_compute``), named "Size class 1/2" until the user's labels
+    # replace them (:func:`metric_label`'s *sizes*).
+    **{key: (label, False) for key, label in size_class_compute.LABELS.items()},
 }
-def metric_label(metric: str, channel: str | None = None, modes=()) -> str:
+
+
+def metric_label(metric: str, channel: str | None = None, modes=(), sizes=None) -> str:
     """*metric*'s axis label for wells whose fluorescence was measured under *modes* (``background_compute``, one per
     well): a fluorescence metric names what its background was — "Cell fluorescence (mean per cell, empty-well
-    background subtracted) · GFP" — and a channel metric names its channel."""
+    background subtracted) · GFP" — and a channel metric names its channel. *sizes* (Cell Gating's
+    ``SizeClassRule``) puts the user's class labels in a size metric's name."""
     label, needs = METRICS[metric]
+    if sizes is not None:
+        label = sizes.name(label)
     words = background_compute.clause(metric, modes)
     if words:
         label = f"{label[:-1]}, {words})" if label.endswith(")") else f"{label} ({words})"
     return label + (f" · {channel}" if needs and channel else "")
 
 
-def metric_labels() -> dict:
+def metric_labels(sizes=None) -> dict:
     """``metric -> label``, in the page's order — for a caller outside this feature (Batch Export) that reaches
-    it through a lazy proxy, which can only call."""
-    return {key: label for key, (label, _needs) in METRICS.items()}
+    it through a lazy proxy, which can only call. *sizes* names the size classes (:func:`metric_label`)."""
+    return {key: (label if sizes is None else sizes.name(label)) for key, (label, _needs) in METRICS.items()}
 
 
 #: Metrics with one value per nanowell, not per timepoint: drawn across wells only (interface plan §6.2 #4).
@@ -71,7 +79,7 @@ BASELINE_METRICS = frozenset({"count_fc", "log2_count_fc", "confluence_fc", "bri
 _OCCUPANCY_VALUE = {"0": 0.0, "1": 1.0, "2": 2.0, "3+": 3.0}
 #: Metrics whose values are whole numbers by definition, packed into bands (U1). Decided by the metric, not by
 #: the values: a fold change on one timepoint is all 1.0 and is still a continuous quantity.
-INTEGER_METRICS = frozenset({"n", "occupancy_class"})
+INTEGER_METRICS = frozenset({"n", "occupancy_class", *size_class_compute.INTEGER_COLUMNS})
 #: The timepoint label the per-nanowell metrics are summarised under (each well's own first timepoint).
 PER_NANOWELL_LABEL = "per nanowell"
 
@@ -101,6 +109,12 @@ _REASON_LABELS = {
     moving_compute.BASE_EARLY_REASON: "baseline window before the first timepoint",
     moving_compute.BASE_GAP_REASON: "baseline window has a gap",
     moving_compute.BASE_IDENTITY_REASON: "baseline window not joinable",
+    size_class_compute.NOT_SET: "size classes not set",
+    size_class_compute.NOT_READ: "cells not read",
+    size_class_compute.NOT_JOINED: "cells not joined",
+    size_class_compute.MISMATCH: "classes exceed the count",
+    size_class_compute.SECOND_EMPTY: "second class empty",
+    size_class_compute.NONE_CLASSIFIED: "no classified cells",
 }
 
 
@@ -316,7 +330,7 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
                        time_source: str | None = None, baseline: str = "earliest",
                        cohort: bool = False, responding_above: float | None = None,
                        moving: int = 0, baseline_moving: int = 0, backgrounds: dict | None = None,
-                       decoration: Decoration | None = None) -> DistributionModel:
+                       decoration: Decoration | None = None, sizes=None) -> DistributionModel:
     """The Distribution view for *groups* (``name -> wells``, as ``controller.replicate_groups`` gives).
 
     A group of one well is that well; a group of several is a replicate set. Only the wells named in
@@ -327,7 +341,7 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
     (``moving_compute.rebase``, as ``moving_compute.baseline_window_for`` allows it), applied first, so the cohort
     is decided on the fold changes from that baseline and the endpoint's average is taken over them.
     *backgrounds* (``well -> background_compute`` mode, ``NanowellData.fluor_backgrounds``) decides what the label says
-    the fluorescence was measured above.
+    the fluorescence was measured above. *sizes* (Cell Gating's ``SizeClassRule``) names the size classes.
 
     *decoration* is the page's *Colour by* / *Split by* / *Then by* (``decorate_compute.decoration_for``). Splitting
     re-orders *groups* so each band is contiguous; along wells each band becomes a labelled span
@@ -338,7 +352,8 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
     groups = order_groups(groups, decoration)
     column = metric_column(metric, channel)
     wells = [w for members in groups.values() for w in members]
-    label = metric_label(metric, channel, [(backgrounds or {}).get(w, background_compute.FLOOR) for w in wells])
+    label = metric_label(metric, channel, [(backgrounds or {}).get(w, background_compute.FLOOR) for w in wells],
+                         sizes)
     frame = metrics[metrics["well"].isin(wells)]
     reasons = exclusion_reason(frame, column, channels)
     if metric in PER_NANOWELL:
@@ -458,7 +473,7 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
                   swarms=[], ticks=[])
     summary = (well_summary(frame, column, channels, reasons=reasons, responding_above=model.responding_above)
                if len(frame) else pd.DataFrame(columns=["well", "timepoint", "median", "n_used", "excluded", "time_h",
-                                                        "tp_order", "fraction_responding"]))
+                                                        "tp_order", "fraction_responding", "statistic"]))
     stats = group_summary(summary, groups, metric=column if column in LOG_METRICS else "",
                           control=control if control in groups else None)
     for i, (name, members) in enumerate(groups.items()):
@@ -488,17 +503,18 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
 
 
 def _notes(model: DistributionModel, metric: str, time_source: str | None) -> None:
+    stat = well_statistic(model.column)                 # how a well's nanowells become its one value
     if model.integer:
         model.notes.append("Whole-number values are packed within ±0.4 of their value.")
     if model.axis == WELLS:
         if any(math.isfinite(s.vs_control) for p in model.panels for s in p.stats):
-            model.notes.append("The comparison with the control is per well (mean of well medians over the "
+            model.notes.append(f"The comparison with the control is per well (mean of well {stat}s over the "
                                "control's); nanowells are not replicates.")
     elif any(n.startswith("Fixed cohort") for n in model.alerts):
-        model.notes.append("The line joins each well's median over its fixed cohort, the same nanowells at every "
+        model.notes.append(f"The line joins each well's {stat} over its fixed cohort, the same nanowells at every "
                            "timepoint.")
     else:
-        model.notes.append("The line joins each well's median over the nanowells with a value at that timepoint.")
+        model.notes.append(f"The line joins each well's {stat} over the nanowells with a value at that timepoint.")
     # A cut set is a result, written whatever the page's Notes switch; "not computed" is only how to get one.
     (model.notes if model.responding_above is None else model.alerts).append(responding_note(model))
     if model.decoration.colours:

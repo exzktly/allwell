@@ -26,7 +26,9 @@ def draw(ctx, ax_mean, ax_frac, ax_n, ax_cdf, legend_kw: dict) -> bool:
     from review.core.plot_style import tokens_for
     from review.data.observations import observation_groups
     from review.domain import fold_change as _fc
-    from review.domain.observation import footer_line, group_points, scoped_counts, well_medians, wells_without_value
+    from review.domain.observation import (
+        footer_line, group_points, scoped_counts, well_medians, well_statistic, wells_without_value,
+    )
 
     if effective_observations(ctx, LEAF) != NANOWELLS:
         return False
@@ -62,7 +64,8 @@ def draw(ctx, ax_mean, ax_frac, ax_n, ax_cdf, legend_kw: dict) -> bool:
         values = table.values(key)[table.frame["well"].isin(ws)].dropna().sort_values().to_numpy(float)
         if len(values):
             ax_cdf.step(values, np.arange(1, len(values) + 1) / len(values), where="post", color=color, label=lbl)
-    ax_mean.set_title(f"{label} — well median over nanowells, mean ± SEM over wells", color=title_fg)
+    ax_mean.set_title(f"{label} — well {well_statistic(table, key)} over nanowells, mean ± SEM over wells",
+                      color=title_fg)
     ax_mean.set_ylabel(label)
     ax_frac.set_title("Occupied share (nanowells holding ≥ 1 cell)", color=title_fg)
     ax_frac.set_ylabel("Share of nanowells")

@@ -19,8 +19,10 @@ unit-tested without the app.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
+
+from review.domain.size_classes import SizeClassRule
 
 # CSV columns the gate reads. ``area`` is always present as the base ``area_px``
 # measurement (``shape_area`` too when shape features are selected); ``solidity``
@@ -178,6 +180,11 @@ class QCParams:
     max_region_area: float | None = None
     min_circularity: float | None = None
     max_circularity: float | None = None
+    #: Two labelled cell-size classes (:mod:`review.domain.size_classes`), counted per nanowell over the cells this
+    #: gate and the other layers keep. Not an inclusion layer: it leaves every cell in, and only decides which class
+    #: a kept cell is counted in. Here because it is edited on the same panel and must be saved, restored and
+    #: carried by the dataset tools with the rest of it; a blank rule (the default) classifies nothing.
+    size_classes: SizeClassRule = field(default_factory=SizeClassRule)
 
     # ── (de)serialization ────────────────────────────────────────────────
     def to_dict(self) -> dict[str, Any]:
@@ -195,6 +202,7 @@ class QCParams:
             "max_region_area": self.max_region_area,
             "min_circularity": self.min_circularity,
             "max_circularity": self.max_circularity,
+            "size_classes": self.size_classes.to_list(),
         }
 
     @classmethod
@@ -214,6 +222,7 @@ class QCParams:
             max_region_area=_pos(d.get("max_region_area")),
             min_circularity=_pos(d.get("min_circularity")),
             max_circularity=_pos(d.get("max_circularity")),
+            size_classes=SizeClassRule.from_list(d.get("size_classes")),
         )
 
     @classmethod
@@ -261,6 +270,8 @@ class QCParams:
             changes["enabled"] = bool(changes["enabled"])
         if "nanowell_focus_fraction" in changes:
             changes["nanowell_focus_fraction"] = _fraction(changes["nanowell_focus_fraction"])
+        if "size_classes" in changes and not isinstance(changes["size_classes"], SizeClassRule):
+            changes["size_classes"] = SizeClassRule.from_list(changes["size_classes"])
         return replace(self, **changes)
 
     def nanowell_focus_rule(self):

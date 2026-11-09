@@ -219,17 +219,18 @@ def field_label(name: str) -> str:
     return METRICS[key][0] + (f" · {channel}" if channel else "")
 
 
-def field_choices(channels=(), *, gates: bool = False) -> list[tuple[str, str, str]]:
+def field_choices(channels=(), *, gates: bool = False, sizes=None) -> list[tuple[str, str, str]]:
     """Every field a condition can test for a dataset with *channels*: ``(field, label, group)`` in the editor's
     order — the cells at the start, the metrics (each channel metric once per channel), the position, the tile and
     seam, the identity verdict and the per-timepoint properties, and the scatter gates when *gates* (some gate is
-    drawn on two nanowell metrics)."""
+    drawn on two nanowell metrics). *sizes* (Cell Gating's ``SizeClassRule``) names the size classes in the menu."""
     out = [(START, field_label(START), "Cells")]
     for key, (_label, needs) in METRICS.items():
         if key == "occupancy_class":
             continue
         for column in ([f"{key}_{ch}" for ch in channels] if needs else [key]):
-            out.append((column, field_label(column), "Metric"))
+            label = field_label(column)
+            out.append((column, sizes.name(label) if sizes is not None else label, "Metric"))
     out += [(name, label, "Position") for name, label in POSITION_FIELDS.items()]
     out.append((TILE, field_label(TILE), "Imaging"))
     out.append((SEAM, field_label(SEAM), "Imaging"))

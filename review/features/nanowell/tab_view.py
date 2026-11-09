@@ -119,7 +119,7 @@ _VIEW_TIPS = {
     "identity": ("Whether one well's addresses name the same nanowells at the Timepoint as at its reference\n"
                  "timepoint — the identity check's distances, the montages blinked or side by side, and its "
                  "registration."),
-    "statistics": ("Test whether wells (their nanowells as values) or groups (their wells' medians) differ at the\n"
+    "statistics": ("Test whether wells (their nanowells as values) or groups (their wells' medians, or means for a size class) differ at the\n"
                    "Timepoint — t-tests, Mann-Whitney, Kolmogorov-Smirnov or Dunnett, with an omnibus, adjusted p "
                    "and effect sizes."),
 }
@@ -564,6 +564,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         channel = nwc.page_channel(ctx)
         blocked = [w.blockSignals(True) for w in controls]
         try:
+            name_size_metrics(metric_cb, nwc.size_rule(ctx))
             _select(metric_cb, st.metric)
             view = st.view if st.view in dict(VIEWS) else VIEWS[0][0]
             view_bar.setCurrentIndex(view_index(view))
@@ -769,6 +770,18 @@ def _refresh_image_channels(ctx, st) -> None:
                              _IMAGE_CHANNEL_TIP + "\n\nThe run read no fluorescence channel: phase is all there is.")
         finally:
             combo.blockSignals(blocked)
+
+
+def name_size_metrics(metric_cb, rule) -> None:
+    """Name the size-class entries of the Metric menu by the labels typed on Cell Gating (*rule*, a
+    ``SizeClassRule``): "T cells count" rather than "Size class 1 count". An incomplete rule leaves the placeholder
+    names, and the figure then says the classes are not set."""
+    for i in range(metric_cb.count()):
+        key = metric_cb.itemData(i)
+        if key in METRICS:
+            text = rule.name(METRICS[key][0])
+            if metric_cb.itemText(i) != text:
+                metric_cb.setItemText(i, text)
 
 
 def _grey_metrics(metric_cb, view: str, channel, active_channel) -> None:

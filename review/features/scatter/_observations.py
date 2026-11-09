@@ -234,7 +234,10 @@ def redraw(ctx, page: str) -> None:
         x_suffix, y_suffix = _pin_cells_log_axes(ax, prefs)
     ax.set_xlabel(drawn.x_label + x_suffix)
     ax.set_ylabel(drawn.y_label + y_suffix)
-    what = "per well (median over nanowells)" if page == "aggregate" else "per nanowell"
+    from review.domain.observation import well_statistic
+
+    stats = sorted({well_statistic(table, x_key), well_statistic(table, y_key)})
+    what = f"per well ({' / '.join(stats)} over nanowells)" if page == "aggregate" else "per nanowell"
     ax.set_title(f"Nanowells: {drawn.x_label} vs {drawn.y_label} — {what}", color=title_fg)
     ax.grid(True, alpha=0.3, color=grid)
     if any(len(s.x) for s in drawn.series):

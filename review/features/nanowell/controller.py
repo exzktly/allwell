@@ -20,7 +20,10 @@ if TYPE_CHECKING:
 
 from domain.nanowell_roster import mixed_rules_note
 from review.features.nanowell import cell_gate_compute as cg
+from review.features.nanowell import size_class_compute as scc
+from review.features.nanowell.summary_compute import well_statistic
 from review.domain import nanowell_rim_focus as rfc
+from review.domain.size_classes import SizeClassRule
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
@@ -212,7 +215,8 @@ def export_long_csv(state, path, wells=None, subset: ss.Subset | None = None) ->
     ``n_cells`` and ``brightness_<channel>`` are the page's, after Home's Cell Gating (``cell_gate_compute``), so the
     file records the gate beside them: ``n_cells_run`` is the run's own count, ``cells_left_out`` how many cells the
     gate took out of it, and ``cell_gating`` the figure's sentence about the gate (``""`` when it left nothing out),
-    as Batch Export's summary carries it in its ``note``.
+    as Batch Export's summary carries it in its ``note``. ``size_classes`` names what the ``size_1`` / ``size_2``
+    columns counted (``SizeClassRule.text``), since those columns are named by position.
 
     Written to a temporary name and moved into place, so a failed write never leaves half a table under the
     name a person will open.
@@ -227,6 +231,10 @@ def export_long_csv(state, path, wells=None, subset: ss.Subset | None = None) ->
     table.insert(at, "n_cells_run", pd.to_numeric(run, errors="coerce").to_numpy())
     table.insert(at + 1, "cells_left_out", cg.left_out_counts(metrics, gate).astype("Int64").to_numpy())
     table["cell_gating"] = cg.note(gate)
+    # Which class ``size_1`` and ``size_2`` are, with their ranges: the columns are named by position, so the file
+    # must say what each position held when it was written ("not set" while the classes are incomplete).
+    sizes = getattr(gate, "sizes", None)
+    table["size_classes"] = sizes.text() if sizes is not None else "not set"
     table.insert(table.columns.get_loc("time_h") + 1, "time_source", state.data.time_source or "")
     table.insert(table.columns.get_loc("baseline_timepoint"), "baseline", state.baseline)
     # Every row is kept, and flagged: a file filtered to the page's Subset would lose rows a reader may want back,
@@ -455,13 +463,26 @@ def _metrics_of(data, baseline: str, gate=None, focus=None, ungated=None) -> pd.
     return metrics
 
 
-def gate_version(ctx) -> int:
-    """The version of which cells the analysis includes (``StatsCacheState.population_version``): every gating,
-    curation or QC edit moves it. So do group and well-label edits, which go through the same
+def gate_version(ctx) -> tuple:
+    """What the tally (:func:`gate_tally`) was counted for: the version of which cells the analysis includes
+    (``StatsCacheState.population_version``), and the size-class rule its kept cells are counted by
+    (``SizeClassRule.key``).
+
+    Every gating, curation or QC edit moves the version. So do group and well-label edits, which go through the same
     ``invalidate_stats_cache``; that costs the page one re-tally from the row cache, no table read (measured, tracker
     L14). Kept rather than narrowed: telling the edits apart means classifying every caller of that shared
-    invalidation, and one gating edit misfiled would leave the page's counts stale and drawn as current."""
-    return int(getattr(ctx.state.stats_cache, "population_version", 0))
+    invalidation, and one gating edit misfiled would leave the page's counts stale and drawn as current.
+
+    The rule is part of the key in its own right, not only through the version its QC edit moves: the per-class
+    counts are an output of the tally, so equal keys must mean equal classes whatever route changed the rule."""
+    return int(getattr(ctx.state.stats_cache, "population_version", 0)), size_rule(ctx).key()
+
+
+def size_rule(ctx) -> SizeClassRule:
+    """Cell Gating's size classes (``QCParams.size_classes``), or a blank rule in a build without the QC layer."""
+    params = _qc_params(ctx)
+    rule = getattr(params, "size_classes", None)
+    return rule if isinstance(rule, SizeClassRule) else SizeClassRule()
 
 
 def _cell_label(ctx, well: str, data) -> str | None:
@@ -477,7 +498,8 @@ def _cell_label(ctx, well: str, data) -> str | None:
     return next((label for label, path in paths.items() if Path(path).resolve() == wanted), None)
 
 
-def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True) -> cg.GateTally | None:
+def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True,
+               sizes: SizeClassRule | None = None) -> cg.GateTally | None:
     """The cells Home's Cell Gating leaves out of *data*'s wells (``cell_gate_compute``), read from the row
     cache with the inclusion every other figure uses. Safe on a worker: the row cache is read there by the
     gating pass too. ``None`` with no data. *on_well(done, total)*, when given, is called before the first well
@@ -486,8 +508,14 @@ def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True) -> cg.Gat
     ``scatter_gates=False`` leaves the scatter-gate layer (``Gate_Pass``) out as well: the counts the scatter
     gates themselves are evaluated against when a gate is drawn on a nanowell metric. Counting them after that
     layer would make a cell's inclusion depend on a count its own inclusion changes
-    (``review/data/observations.nanowell_gate_values``)."""
+    (``review/data/observations.nanowell_gate_values``).
+
+    *sizes* is the size-class rule each nanowell's kept cells are counted by (``size_class_compute``); ``None`` reads
+    the one in force (:func:`size_rule`). A caller on a worker passes the rule it read on the GUI thread, with the
+    version it stamps."""
     from review.data.data_loading import df_included_mask, get_rows
+
+    sizes = size_rule(ctx) if sizes is None else sizes
 
     if data is None or not len(data.sites):
         return None
@@ -521,7 +549,7 @@ def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True) -> cg.Gat
             per_well.append((well, frame, df_included_mask(frame, except_layers=skipped).to_numpy()))
     if on_well is not None:
         on_well(total, total)
-    return cg.tally(per_well, unread, fields)
+    return cg.tally(per_well, unread, fields, sizes)
 
 
 def _excluded_fields(ctx, data) -> frozenset:
@@ -569,7 +597,7 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
             _call(ctx, "_nw_show_computing")
         return
     st.request += 1
-    request, baseline, focus = st.request, st.baseline, st.rim_focus_rule()
+    request, baseline, focus, sizes = st.request, st.baseline, st.rim_focus_rule(), size_rule(ctx)
     # A gate drawn on nanowell metrics is judged on counts without the scatter-gate layer; the subset's gate
     # conditions read the same (``_metrics_of``). Decided here, on the GUI thread, from the gates as they are now.
     nanowell_gated = bool(ss.nanowell_gates(getattr(ctx.state.cell_gating, "scatter_gates", None) or []))
@@ -591,16 +619,16 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
         # The cells Home's Cell Gating leaves out are tallied here too, at the version asked for: an edit made
         # while this runs moves the version, and the next draw asks again (``redraw``).
         if previous is not None:
-            gate = gate_tally(ctx, previous, on_well=counter("gating"))
-            ungated = gate_tally(ctx, previous, scatter_gates=False) if nanowell_gated else None
+            gate = gate_tally(ctx, previous, on_well=counter("gating"), sizes=sizes)
+            ungated = gate_tally(ctx, previous, scatter_gates=False, sizes=sizes) if nanowell_gated else None
             return previous, _metrics_of(previous, baseline, gate, focus, ungated), "", parts, gate
         try:
             data = (load_nanowell_data(Path(data_dir), wells=sorted(wells), parts=parts, on_well=counter("tables"))
                     if data_dir else None)
         except NanowellSchemeError as exc:
             return None, None, str(exc), parts, None
-        gate = gate_tally(ctx, data, on_well=counter("gating"))
-        ungated = gate_tally(ctx, data, scatter_gates=False) if nanowell_gated else None
+        gate = gate_tally(ctx, data, on_well=counter("gating"), sizes=sizes)
+        ungated = gate_tally(ctx, data, scatter_gates=False, sizes=sizes) if nanowell_gated else None
         return data, _metrics_of(data, baseline, gate, focus, ungated), "", parts, gate
 
     stage_now = ["tables"]
@@ -892,7 +920,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
               stats_cache: dict | None = None, gate=None,
               decoration: Decoration | None = None, names: dict | None = None,
-              swarm_spacing: float = 0.0, footer_out: bool = False) -> tuple[object, object]:
+              swarm_spacing: float = 0.0, footer_out: bool = False, sizes=None) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -927,7 +955,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     when nothing they depend on changed.
 
     *gate* (``cell_gate_compute.GateTally``, the one *metrics* were computed with) keeps the Array view's Cells
-    layer to the cells the counts hold.
+    layer to the cells the counts hold. *sizes* is the size-class rule the metrics' classes were counted by — the
+    gate's own when it is given — which names the classes in every label and, for a size metric, the footer's
+    sentence on the ranges and the cells in neither (``size_class_compute.note``).
 
     *decoration* is *Colour by* / *Split by* / *Then by* resolved over *groups* (``decorate_compute.decoration_for``);
     only the Distribution view draws it (:data:`DECORATED_VIEWS`). ``None`` draws the figure undecorated, which is
@@ -942,10 +972,12 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
     wells = [w for members in groups.values() for w in members]
+    sizes = _sizes_of(gate, sizes)
+    note = _with_size_note(note, metrics, wells, metric, sizes)
     all_metrics = metrics
     metrics, filtered = ss.apply(metrics, subset, baseline, [well] if view == "array" else wells, data)
     if view != "array" and filtered is not None and filtered.kept == 0:
-        render_message(fig, ss.empty_text(filtered), gid="nw-start-empty")
+        render_message(fig, _named(ss.empty_text(filtered), sizes), gid="nw-start-empty")
         return None, None
     # Wells whose rosters two versions decided differently count their rim differently; the figure says so (X35a-R4).
     mixed = mixed_rules_note({w: data.roster_rules.get(w) for w in wells if w in getattr(data, "roster_rules", {})})
@@ -965,10 +997,11 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                           "dimmed.", note]))
         drawn = draw_array(fig, all_metrics, data, well=well, timepoint=well_timepoint, metric=metric,
                            channel=channel, layers=layers, image=image, image_note=image_note, region=region,
-                           selected=selected, note=note, dimmed=dimmed, gate=gate, name=names.get(well, ""))
+                           selected=selected, note=note, dimmed=dimmed, gate=gate, name=names.get(well, ""),
+                           sizes=sizes)
         return (drawn.hits if drawn is not None else None), drawn
     if filtered is not None:
-        note = " ".join(filter(None, [ss.note(filtered), note]))
+        note = " ".join(filter(None, [_named(ss.note(filtered), sizes), note]))
     baseline_moving = mvc.baseline_window_for(moving, baseline_moving, baseline)
     if view == "trajectories":
         marks = {w: timepoint_marks(data, w) for w in wells}
@@ -982,7 +1015,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
             render_message(fig, empty, gid="nw-moving-empty")
             return None, None
         render_trajectories(fig, panels,
-                            cohort=cohort, label=_label(metric, channel, data), time_source=data.time_source,
+                            cohort=cohort, label=_label(metric, channel, data, sizes), time_source=data.time_source,
                             note=" ".join(filter(None, [mvc.describe(moving, column, baseline_moving), note])))
         return None, None
     if view == "position":
@@ -995,14 +1028,14 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                                 f"{', '.join(missing)}."]))
         for line in series:
             line.name = names.get(line.well, "")
-        render_position(fig, series, label=_label(metric, channel, data), timepoint=timepoint, note=note)
+        render_position(fig, series, label=_label(metric, channel, data, sizes), timepoint=timepoint, note=note)
         return None, None
     if view == "statistics":
         # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).
         model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=WELLS,
                                    groups=groups, timepoint=timepoint, time_source=data.time_source,
                                    baseline=baseline, cohort=cohort, moving=moving,
-                                   baseline_moving=baseline_moving)
+                                   baseline_moving=baseline_moving, sizes=sizes)
         model.well_names = dict(names)
         result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control,
                                    cache=stats_cache)
@@ -1014,7 +1047,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
-                               moving=moving, baseline_moving=baseline_moving, decoration=decoration)
+                               moving=moving, baseline_moving=baseline_moving, decoration=decoration,
+                               sizes=sizes)
     model.starting = subset.start_bounds()
     if model.axis == TIME:
         model.identity_marks = {(w, tp): v for w in wells for tp, v in timepoint_marks(data, w).items()}
@@ -1068,7 +1102,8 @@ def statistics_result(model, groups: dict, *, unit: str, test: str, control: str
                   s.without_value) for s in samples))
     if cache is not None and cache.get("key") == key:
         return cache["result"]
-    result = sc.compare(samples, test, control=control, unit=unit, label=model.label, timepoint=model.timepoint)
+    result = sc.compare(samples, test, control=control, unit=unit, label=model.label, timepoint=model.timepoint,
+                        statistic=well_statistic(model.column))
     result.notes = notes
     if cache is not None:
         cache.clear()
@@ -1082,9 +1117,30 @@ def _stats_cache(st) -> dict:
     return st.stats_cache
 
 
-def _label(metric: str, channel: str | None, data=None) -> str:
-    """*metric*'s axis label, naming what the shown wells' fluorescence was measured above (``background_compute``)."""
-    return metric_label(metric, channel, list(getattr(data, "fluor_backgrounds", {}).values()))
+def _sizes_of(gate, sizes):
+    """The size-class rule a figure names its classes by: *sizes* when given (Batch Export, which holds no tally),
+    else the one *gate* (the ``GateTally`` the metrics came from) was counted under."""
+    return sizes if sizes is not None else getattr(gate, "sizes", None)
+
+
+def _with_size_note(note: str, metrics, wells, metric: str, sizes) -> str:
+    """*note* with, for a size metric, the sentence on the ranges and the cells in neither
+    (``size_class_compute.note``) over the drawn wells."""
+    if metric not in scc.COLUMNS or metrics is None or "well" not in metrics.columns:
+        return note
+    return " ".join(filter(None, [note, scc.note(metrics[metrics["well"].isin(wells)], sizes, metric)]))
+
+
+def _named(text: str, sizes) -> str:
+    """*text* with the size classes' placeholder names replaced by the user's labels (``SizeClassRule.name``): a
+    Subset condition on a size metric writes its field's generic name, and a figure must say "T cells count"."""
+    return sizes.name(text) if sizes is not None and text else text
+
+
+def _label(metric: str, channel: str | None, data=None, sizes=None) -> str:
+    """*metric*'s axis label, naming what the shown wells' fluorescence was measured above (``background_compute``)
+    and the size classes by the user's labels (*sizes*, a ``SizeClassRule``)."""
+    return metric_label(metric, channel, list(getattr(data, "fluor_backgrounds", {}).values()), sizes)
 
 
 def page_wells(ctx) -> list[str]:
@@ -1195,13 +1251,14 @@ def batch_array_layers() -> ArrayLayers:
 
 def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, channel: str | None,
                layers: ArrayLayers | None = None, image=None, image_note: str = "", region=None, selected=(),
-               note: str = "", dimmed=frozenset(), gate=None, name: str = "") -> ArrayDrawn | None:
+               note: str = "", dimmed=frozenset(), gate=None, name: str = "", sizes=None) -> ArrayDrawn | None:
     """**The one composition of the Array view**, for the page and for Batch Export (through :func:`draw_view`).
 
     *layers* says what is drawn (the lattice map when none are given); *image* is the run montage or the tile
     store the caller holds for the well frame, *image_note* what it says about it (still reading, or why there is
     none). ``None`` when there is nothing at all to draw, and the figure then says why.
     """
+    sizes = getattr(gate, "sizes", None) if sizes is None else sizes      # names the size classes in the label
     layers = layers or batch_array_layers()
     if not well:
         render_message(fig, "Select a well with a nanowell table.", gid="nw-array-missing")
@@ -1224,7 +1281,7 @@ def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, ch
                      "Positions to Measured to draw them.")
         render_message(fig, says, gid="nw-array-missing")
         return None
-    return render_array(fig, scene, layers, label=_label(metric, channel, data), image=image, image_note=image_note,
+    return render_array(fig, scene, layers, label=_label(metric, channel, data, sizes), image=image, image_note=image_note,
                         selected=selected, region=region, note=note, dimmed=dimmed)
 
 
@@ -1843,14 +1900,15 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
     timepoint = shown_timepoint(ctx)[1]
     column = metric_column(metric, channel)
     metrics, filtered = ss.apply(st.metrics, page_subset(ctx, st), st.baseline, [well], st.data)
+    sizes = getattr(st.gate, "sizes", None)
     if filtered is not None and filtered.kept == 0:
-        render_message(fig, ss.empty_text(filtered), gid="nw-start-empty")
+        render_message(fig, _named(ss.empty_text(filtered), sizes), gid="nw-start-empty")
         apply_export_style_to_current(ctx, fig, canvas)
         canvas.draw_idle()
         redraw_detail(ctx)
         return
     if filtered is not None:
-        note = " ".join(filter(None, [ss.note(filtered), note]))
+        note = " ".join(filter(None, [_named(ss.note(filtered), sizes), note]))
     model = ec.extremes(metrics, well, timepoint, column, st.extremes_n, st.data.channels)
     model.name = well_caption(ctx, well)
     missing = tuple(sorted(site for site in model.sites() if site not in st.crops))

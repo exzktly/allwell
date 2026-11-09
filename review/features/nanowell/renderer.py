@@ -40,6 +40,7 @@ from review.features.nanowell.full_montage_compute import CentreZoom, fit_region
 from review.features.nanowell._identity_marks import mark_timepoints, split_segments
 from review.features.nanowell.identity_compute import marks_legend
 from review.features.nanowell.series_compute import baseline_text
+from review.features.nanowell.summary_compute import well_statistic, well_value
 
 #: A dot's diameter, in points.
 DOT_PT = 3.4
@@ -471,7 +472,7 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None, spacing:
     for swarm in panel.swarms:
         rows_here = 0
         if density:
-            _draw_density(ax, swarm, half, ink, fill=model.decoration.inks.get(swarm.group))
+            _draw_density(ax, swarm, half, ink, fill=model.decoration.inks.get(swarm.group), column=model.column)
         else:
             layout = _draw_swarm(ax, model, swarm, half, dot_w * spacing, dot_h * spacing, hits, rings, ink)
             hidden += layout.n_hidden
@@ -626,9 +627,11 @@ def redraw_selection_rings(hits: HitMap, selected=()) -> None:
             _ring_selected(ax, xs, ys, sites, rings)
 
 
-def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:
-    """A set of more than four wells: each well's nanowells as a density with its median, not dots (U2). *fill* is
-    the group's *Colour by* ink, which the density takes in place of the plot's ink."""
+def _draw_density(ax, swarm, half, ink, *, fill: str | None = None, column: str = "") -> None:
+    """A set of more than four wells: each well's nanowells as a density with its value, not dots (U2) — the median,
+    or the mean for a metric whose well value is a mean (``summary_compute.well_value`` of *column*). *fill* is the
+    group's *Colour by* ink, which the density takes in place of the plot's ink."""
+
     if len(swarm.values) >= 2 and np.ptp(swarm.values) > 0:
         parts = ax.violinplot([swarm.values], positions=[swarm.x], widths=[2 * half], showextrema=False)
         for body in parts["bodies"]:
@@ -637,9 +640,9 @@ def _draw_density(ax, swarm, half, ink, *, fill: str | None = None) -> None:
             body.set_edgecolor("none")
             body.set_gid("nw-density")
     if len(swarm.values):
-        median_tick = ax.plot([swarm.x - half, swarm.x + half], [np.median(swarm.values)] * 2, color=ink,
+        median_tick = ax.plot([swarm.x - half, swarm.x + half], [well_value(swarm.values, column)] * 2, color=ink,
                               linewidth=1.2, zorder=4)[0]
-        median_tick._aw_no_style_override = True         # a mark of the median, not a series
+        median_tick._aw_no_style_override = True         # a mark of the well's value, not a series
         _ink(median_tick)
 
 
@@ -696,8 +699,9 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
         alerts.append(f"+N under a swarm: {hidden:,} values in all are used but not drawn as dots, for lack of "
                       "room; widen the window or select fewer wells to see them.")
     if densities:
-        alerts.append("Sets of more than four wells are drawn as densities with each well's median; select fewer "
-                      "wells to see and click single nanowells.")
+        alerts.append(f"Sets of more than four wells are drawn as densities with each well's "
+                      f"{well_statistic(getattr(model, 'column', ''))}; select fewer wells to see and click single "
+                      "nanowells.")
     footer = Footer(line1, list(getattr(model, "alerts", ()) or ()), list(model.notes), alerts)
     if footer_out:
         _figure_key(fig, model, key_at)

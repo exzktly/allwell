@@ -446,7 +446,7 @@ class SubsetEditor(QFrame):
     def fields(self, current: str) -> list:
         """The fields for the loaded dataset's channels, with *current* kept even when it names a channel this
         dataset lacks (a restored subset), so the row still shows what the subset tests."""
-        choices = ss.field_choices(self._channels, gates=bool(self.gates()))
+        choices = ss.field_choices(self._channels, gates=bool(self.gates()), sizes=nwc.size_rule(self._ctx))
         if current not in {name for name, _l, _g in choices}:
             choices.append((current, ss.field_label(current), "Other"))
         return choices

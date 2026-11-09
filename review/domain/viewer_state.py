@@ -153,6 +153,11 @@ def read_pipeline_info(
         # file — is what the app holds as ``dataset.pipeline_info``.
         "nanowell": (dict(data["nanowell"])
                      if isinstance(data.get("nanowell"), dict) else None),
+        # A nanowell run's pixel size and tile size per timepoint (``timepoint -> {"pixel_size_um": {"x", "y"},
+        # "tile_size_px": ...}``), or None for a run that wrote none. Cell Gating's size classes read the pixel size
+        # from it to say what a pixel range is in µm (``review.features.qc.size_class_view.pixel_sizes``).
+        "acquisition": (dict(data["acquisition"])
+                        if isinstance(data.get("acquisition"), dict) else None),
     }
 
     if fov_idx >= 0 and tp_idx >= 0 and fov_idx == tp_idx:

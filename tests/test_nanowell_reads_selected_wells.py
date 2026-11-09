@@ -372,6 +372,7 @@ def test_a_load_from_before_the_dataset_was_loaded_again_never_lands_its_wells(m
         monkeypatch.setattr(nwc, name, lambda *_a, **_k: None)
     monkeypatch.setattr(nwc, "active_wells", lambda _ctx: ["A01"])
     monkeypatch.setattr(nwc, "gate_version", lambda _ctx: 0)
+    monkeypatch.setattr(nwc, "size_rule", lambda _ctx: None)     # the stub has no QC layer to read it from
     st = NanowellState()
     widgets = {"_nw_canvas": object(), "_nw_page_visible": lambda: True}
     ctx = SimpleNamespace(state=SimpleNamespace(feature_slice=lambda _name: st,

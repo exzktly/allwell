@@ -186,6 +186,49 @@ def _after_qc_params_applied(ctx) -> None:
         ctx.features.call("nanowell.follow_qc_params", ctx)
 
 
+def only_size_classes_differ(params: QCParams, current: QCParams) -> bool:
+    """Whether *params* differs from *current* in the size classes alone (``QCParams.size_classes``)."""
+    from dataclasses import replace
+
+    return params != current and replace(params, size_classes=current.size_classes) == current
+
+
+#: The per-cell column prefix a gate drawn on a size-class metric reads (``observation.NANOWELL_CELL_PREFIX`` and
+#: ``size_class_compute``'s ``size_`` columns).
+SIZE_GATE_PREFIX = "nw::size_"
+
+
+def gates_read_size_classes(ctx) -> bool:
+    """Whether a scatter gate is drawn on a size-class metric (a "Nanowell ▸ T cells count" axis): its verdicts
+    depend on the classes, so a change of them alone must re-apply the gates."""
+    gates = getattr(getattr(ctx.state, "cell_gating", None), "scatter_gates", None) or []
+    return any(str((g or {}).get(k) or "").startswith(SIZE_GATE_PREFIX)
+               for g in gates if isinstance(g, dict) for k in ("x_col", "y_col"))
+
+
+def set_size_classes(ctx, params: QCParams) -> None:
+    """Install QC parameters that differ from those in force only in their size classes.
+
+    The size classes are not an inclusion layer — they leave every cell in and only say which class a kept cell is
+    counted in — so no verdict column moves and the re-projection :func:`set_qc_params_with_progress` runs behind a
+    progress popup would recompute every held well for nothing. The parameters go into state and are saved, and the
+    surfaces that count by class are redrawn: the Nanowells page (``nanowell.follow_qc_params``) and the plots
+    (``redraw_app``), whose nanowell rows are keyed on the rule (``nanowell.controller.gate_version``) and so are
+    counted again. Cell Gating's cell-area curve, which shades the classes, is drawn again too
+    (``cell_gating.replot_cdfs``).
+
+    **One exception includes or leaves out cells**: a scatter gate drawn on a size-class metric judges each cell by
+    its nanowell's class counts, so while one is drawn (:func:`gates_read_size_classes`) a gating pass is started
+    (``cell_gating.start_worker``), which re-applies every gate against counts under the new classes."""
+    ctx.state.qc.params = params
+    _after_qc_params_applied(ctx)
+    if gates_read_size_classes(ctx):
+        with swallow("Cell Gating: re-apply the gates drawn on size classes"):
+            ctx.features.call("cell_gating.start_worker", ctx)
+    with swallow("Cell Gating: shade the size classes"):
+        ctx.features.call("cell_gating.replot_cdfs", ctx)
+
+
 def set_qc_params_with_progress(ctx, params: QCParams, *, on_done=None) -> None:
     """Install new QC thresholds from the panel and apply them, the work off the GUI thread.
 

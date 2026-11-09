@@ -1458,6 +1458,10 @@ def _features() -> list[FeatureDescriptor]:
                                   _svc_cell_gating_refresh_included_count,
                               "cell_gating.start_worker":
                                   _svc_cell_gating_start_worker,
+                              # The QC layer's size classes are shaded on the cell-area curve; an edit of them
+                              # alone re-projects nothing, so it asks for the curves to be drawn again.
+                              "cell_gating.replot_cdfs": lambda: _import_attr(
+                                  "review.features.home.cell_gating.controller", "cell_gating_replot_cdfs"),
                           }),
         # **One tab for the three ways of annotating a well.** Groups,
         # Variables and Well Labels were three sibling sub-tabs that all took a

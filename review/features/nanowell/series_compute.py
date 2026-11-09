@@ -64,7 +64,7 @@ import pandas as pd
 
 from pipeline.nanowell_identity import CONTRADICTED, NOT_CHECKED
 from review.domain import nanowell_rim_focus
-from review.features.nanowell import background_compute, cell_gate_compute
+from review.features.nanowell import background_compute, cell_gate_compute, size_class_compute
 from review.features.nanowell.collect import (
     IDENTITY_CONTRADICTED, MEASURABLE, NOT_LOCATED, UNADDRESSED, NanowellData,
 )
@@ -256,6 +256,9 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
     ``n`` and ``brightness_<ch>`` before anything is computed from them, and the nanowells of a field it leaves
     out take the state ``field_excluded``. ``None`` keeps the run's own counts.
 
+    The size-class metrics (``size_class_compute.COLUMNS``) are counted from *gate* too, under the rule it was
+    tallied with; with no *gate*, or no rule, they are undefined ("size classes not set").
+
     *focus* (``review.domain.nanowell_rim_focus.RimFocusRule``) turns each measurable row whose rim was out of focus into an
     ``out_of_focus`` gap before anything is computed (``review.domain.nanowell_rim_focus.flag``); ``None`` flags nothing.
     """
@@ -275,6 +278,7 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
         frame[f"brightness_{ch}"] = frame[f"brightness_{ch}"].where(measurable)
         frame[f"signal_{ch}"] = frame[f"{ch}_integrated"].where(measurable)
     cell_gate_compute.apply(frame, gate, data.channels)
+    size_class_compute.apply(frame, gate)                  # the kept cells per size class, over the gated count
     # Wells whose run wrote no ``<channel>_background`` column. Read beside wells that did (a subset re-run after
     # the column existed, or datasets joined), their rows carry NaN in the column, which is not "no level here"
     # but "no level measured at all": their brightness stays the cells' raw mean, as their label says.
@@ -408,6 +412,9 @@ _NEVER = "never measured"
 def metric_kinds(channels) -> dict:
     kinds = {"n": ("value", "n"), "c": ("value", "c"), "count_fc": ("fc", "n"), "log2_count_fc": ("fc", "n"),
              "confluence_fc": ("fc", "c"), "growth_rate": ("site", "n"), "occupancy_class": ("base", "n")}
+    # The size-class metrics are measurements at a timepoint, undefined wherever the count is and for reasons of
+    # their own beyond it (``size_class_compute.exclusion_reason``).
+    kinds.update({column: ("value", "n") for column in size_class_compute.COLUMNS})
     for ch in channels:
         kinds[f"brightness_{ch}"] = ("value", f"brightness_{ch}")
         kinds[f"signal_{ch}"] = ("value", f"signal_{ch}")
@@ -439,6 +446,11 @@ def exclusion_reason(metrics: pd.DataFrame, metric: str, channels=()) -> pd.Seri
     out = pd.Series("", index=metrics.index, dtype=object)
     state_bad = ~metrics["state"].isin(MEASURABLE)
     value_bad = metrics[value].isna()
+    if metric in size_class_compute.COLUMNS:
+        first = pd.Series("", index=metrics.index, dtype=object)
+        first[state_bad] = metrics["state"].astype(str)[state_bad]
+        first[~state_bad & value_bad] = _value_reason(metrics, value)[~state_bad & value_bad]
+        return size_class_compute.exclusion_reason(metrics, metric, first)
     if kind == "site":
         out[~defined] = "fewer than three timepoints with cells and a time"
         return out
@@ -489,7 +501,7 @@ def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
                + ["baseline_timepoint", "baseline_state", "occupancy_class", "count_fc", "seeded_later",
                   "log2_count_fc", "confluence_fc"]
                + [c for ch in channels for c in (f"brightness_fc_{ch}", f"signal_fc_{ch}")]
-               + ["growth_rate"])
+               + ["growth_rate", *size_class_compute.COLUMNS])
     out = metrics.reindex(columns=columns)
     out["n_cells"] = metrics["n"]
     out["confluence"] = metrics["c"]

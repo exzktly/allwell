@@ -61,6 +61,19 @@ class ObservationMetric:
     kind: str = "value"
     #: The fluorescence channel the metric is of, ``""`` for one of none.
     channel: str = ""
+    #: How a well's observations reduce to the well's one value: ``"mean"`` or ``"median"``; ``""`` leaves it to
+    #: :func:`well_statistic`'s default (the mean for a 0/1 metric, the median otherwise).
+    well_statistic: str = ""
+
+
+def well_statistic(table: ObservationTable | None, key: str) -> str:
+    """``"mean"`` or ``"median"``: how *key*'s observations in a well become the well's one value — the metric's own
+    choice when it states one (the Nanowells page's size classes, whose well value is their mean), else the mean for
+    the 0/1 metrics (:data:`SHARE_METRICS`) and the median for the rest."""
+    spec = table.metric(key) if table is not None else None
+    if spec is not None and spec.well_statistic in ("mean", "median"):
+        return spec.well_statistic
+    return "mean" if key in SHARE_METRICS else "median"
 
 
 @dataclass
@@ -175,10 +188,9 @@ def well_medians(table: ObservationTable, key: str, wells, timepoints_h=None, *,
 
     *how* ``"mean"`` takes the mean instead, and is the only right reduction of a 0/1 metric such as ``occupied``:
     its mean is the share of nanowells, its median merely says whether more than half qualify. The column keeps the
-    name ``median`` so every caller reads one shape. Left unset, *how* is ``"mean"`` for the 0/1 metrics
-    (:data:`SHARE_METRICS`) and ``"median"`` otherwise.
+    name ``median`` so every caller reads one shape. Left unset, *how* is the metric's own (:func:`well_statistic`).
     """
-    how = how or ("mean" if key in SHARE_METRICS else "median")
+    how = how or well_statistic(table, key)
     from domain.tp_match import tp_close
 
     frame = table.frame

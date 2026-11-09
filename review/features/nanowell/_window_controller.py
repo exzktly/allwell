@@ -443,7 +443,7 @@ def metric_values(ctx, st, key: str, sites, timepoint) -> tuple[dict | None, str
         site = (str(well), int(q), int(r))
         if site in wanted and math.isfinite(v):
             values[site] = float(v)
-    return values, nwc._label(metric, channel, st.data), ""
+    return values, nwc._label(metric, channel, st.data, getattr(getattr(st, "gate", None), "sizes", None)), ""
 
 
 def composite_order(ctx, st, sites, timepoint) -> tuple[dict | None, str]:
@@ -567,7 +567,7 @@ def draw_window_popout(ctx, st, fig) -> None:
     image_channel = nwc.page_image_channel(st)
     metric, channel, _note = nwc.resolve_metric("distribution", st.metric, nwc.page_channel_name(ctx),
                                                 st.data.channels)
-    label = nwc._label(metric, channel, st.data)
+    label = nwc._label(metric, channel, st.data, getattr(getattr(st, "gate", None), "sizes", None))
     model = wc.WindowRows(result.rank_key, st.window_model.column, timepoints)
     st.popout_hits = render_site_rows(
         fig, model, [(f"Rows {first + 1}–{first + len(shown)} of {len(rows):,}", shown)],

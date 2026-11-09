@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from review.features.nanowell import size_class_compute
 from review.features.nanowell.collect import FIELD_EXCLUDED
 
 SITE_KEY = ["well", "timepoint", "nw_q", "nw_r"]
@@ -77,13 +78,19 @@ class GateTally:
     rows could not be read, whose counts are the run's own. *fields* holds the ``(well, tile, timepoint)`` the
     field layers leave out (:func:`excluded_fields`), whose nanowells are excluded whole. *left_out* has a row per
     left-out cell with a well-frame position — ``well``, ``timepoint`` and :data:`POSITION` — so the cell dots can
-    leave them out too (:func:`hidden_cells`)."""
+    leave them out too (:func:`hidden_cells`). *sizes* is Cell Gating's size-class rule the tally was counted under
+    (``review.domain.size_classes.SizeClassRule``, ``None``: not asked) and *classes* each nanowell's kept cells per
+    class (``size_class_compute.well_counts``), read in the same pass with the same inclusion."""
     sites: pd.DataFrame
     cells: int = 0
     excluded: int = 0
     unread: tuple = field(default_factory=tuple)
     fields: frozenset = frozenset()
     left_out: pd.DataFrame | None = None
+    sizes: object = None
+    classes: pd.DataFrame | None = None
+    #: The wells whose cells were read and could be classified (``size_class_compute.well_counts`` answered).
+    classed: frozenset = frozenset()
 
 
 def _empty_sites() -> pd.DataFrame:
@@ -183,11 +190,17 @@ def left_out_positions(well: str, cells: pd.DataFrame, included) -> pd.DataFrame
     return frame.dropna(subset=POSITION).reset_index(drop=True)
 
 
-def tally(per_well, unread=(), fields=frozenset()) -> GateTally:
+def tally(per_well, unread=(), fields=frozenset(), sizes=None) -> GateTally:
     """One :class:`GateTally` from *per_well*, an iterable of ``(well, cells, included)``, where *included* leaves
-    out :data:`FIELD_LAYERS`; *fields* is :func:`excluded_fields`'s answer."""
-    found, positions, cells, excluded = [], [], 0, 0
+    out :data:`FIELD_LAYERS`; *fields* is :func:`excluded_fields`'s answer; *sizes* the size-class rule to count each
+    nanowell's kept cells by (``size_class_compute``), ``None`` for none."""
+    found, positions, classes, classed, cells, excluded = [], [], [], set(), 0, 0
     for well, frame, included in per_well:
+        counted = size_class_compute.well_counts(well, frame, included, sizes)
+        if counted is not None:
+            classed.add(str(well))
+            if len(counted):
+                classes.append(counted)
         sites, n, out = well_left_out(well, frame, included)
         cells, excluded = cells + n, excluded + out
         if len(sites):
@@ -198,7 +211,9 @@ def tally(per_well, unread=(), fields=frozenset()) -> GateTally:
     sites = pd.concat(found, ignore_index=True) if found else _empty_sites()
     left_out = pd.concat(positions, ignore_index=True) if positions else None
     return GateTally(sites=sites, cells=cells, excluded=excluded, unread=tuple(sorted(unread)),
-                     fields=frozenset(fields), left_out=left_out)
+                     fields=frozenset(fields), left_out=left_out, sizes=sizes,
+                     classes=pd.concat(classes, ignore_index=True) if classes else None,
+                     classed=frozenset(classed))
 
 
 def hidden_cells(cells: pd.DataFrame | None, gate: GateTally | None, well: str, timepoint: str,

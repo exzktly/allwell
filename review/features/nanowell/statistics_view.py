@@ -19,8 +19,8 @@ _UNIT_TIP = ("What one value of a sample is.\n"
              "differ. The nanowells of one well share its medium and handling, so this says nothing about the\n"
              "conditions behind the wells.\n"
              "Groups: each replicate set (Sample Definitions), or a well standing alone, is a sample and its wells'\n"
-             "medians are the values — wells are the replicate unit, so this compares conditions. A group needs\n"
-             "two wells with a value.")
+             "medians (means, for a size class) are the values — wells are the replicate unit, so this compares\n"
+             "conditions. A group needs two wells with a value.")
 _TEST_TIP = ("The test each comparison is made with.\n"
              "t-tests compare means; Mann-Whitney U compares ranks; Kolmogorov-Smirnov compares whole distributions\n"
              "(the figure draws their cumulative curves); Dunnett compares each sample with the control chosen\n"

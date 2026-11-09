@@ -654,9 +654,9 @@ def on_popout_release(ctx, event) -> None:
         return
     tile = _tile_at(st, event)
     if tile is not None:
-        _nwc()._select(ctx, tile[2])
+        _nwc()._select(ctx, tile[2], in_popout=True)
     elif event.inaxes in st.popout_hits:
-        _nwc()._select(ctx, st.popout_hits[event.inaxes])
+        _nwc()._select(ctx, st.popout_hits[event.inaxes], in_popout=True)
 
 
 def _pan(ctx, st, event) -> bool:

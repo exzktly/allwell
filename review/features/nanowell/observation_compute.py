@@ -24,7 +24,8 @@ import pandas as pd
 
 from review.domain.observation import NANOWELLS, ObservationMetric, ObservationTable
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data, site_backgrounds, site_channels
-from review.features.nanowell.controller import gate_tally, gate_version, sync_focus_rule
+from review.features.nanowell import subset_compute as ss
+from review.features.nanowell.controller import gate_tally, gate_version, page_subset, sync_focus_rule
 from review.features.nanowell.distribution_compute import METRICS, metric_label
 from review.features.nanowell.series_compute import baseline_text, exclusion_reason, metric_kinds, site_metrics
 
@@ -86,8 +87,6 @@ def nanowell_metric_specs(ctx, wells) -> tuple[ObservationMetric, ...] | None:
 def _page_scope_key(ctx, st) -> tuple:
     """Everything of the page's that :func:`_apply_page_scope` reads, as a memo key: the Subset with its gate boxes
     bound (``repr`` of the frozen conditions — a moved gate is a different key), the excluded wells, the cohort."""
-    from review.features.nanowell.controller import page_subset
-
     return (repr(page_subset(ctx, st)), tuple(sorted(st.excluded_wells or ())), bool(st.cohort))
 
 
@@ -99,9 +98,6 @@ def _apply_page_scope(ctx, st, metrics: pd.DataFrame, data, baseline: str,
     Excluded wells go first (the page leaves them out of its groups, ``controller.page_groups``), then the Subset over
     the wells that remain, so its count is of the nanowells the plot could have drawn — the order and the note the
     page's own figures use (``controller.draw_view``)."""
-    from review.features.nanowell import subset_compute as ss
-    from review.features.nanowell.controller import page_subset
-
     notes = []
     excluded = sorted(set(st.excluded_wells or ()) & set(wells))
     if excluded:

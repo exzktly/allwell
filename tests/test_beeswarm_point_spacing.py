@@ -197,8 +197,10 @@ def test_draw_view_hands_the_page_s_spacing_to_the_distribution(monkeypatch):
 
 def test_every_app_call_of_draw_view_passes_the_spacing():
     """The page and Batch Export's Nanowells mode each call ``draw_view``; one that leaves ``swarm_spacing`` out
-    draws at Auto whatever Properties says, and nothing else would notice. The Identity view has no swarm, so its
-    call (view given as the literal ``"identity"``) is exempt."""
+    draws at Auto whatever Properties says, and nothing else would notice. The same holds for the page's **Show** and
+    **Smoothing** (``dist_style`` / ``violin_smooth``): left out, a batch figure draws Auto's dots or violins whatever
+    the page shows. The Identity view has no swarm, so its call (view given as the literal ``"identity"``) is
+    exempt."""
     import ast
 
     from tests._repo_scan import parse_source
@@ -214,10 +216,11 @@ def test_every_app_call_of_draw_view_passes_the_spacing():
             if isinstance(view, ast.Constant) and view.value == "identity":
                 continue
             sites += 1
-            if not any(k.arg == "swarm_spacing" for k in node.keywords):
-                missing.append(f"{rel}:{node.lineno}")
+            given = {k.arg for k in node.keywords}
+            missing += [f"{rel}:{node.lineno} {name}" for name in ("swarm_spacing", "dist_style", "violin_smooth")
+                        if name not in given]
     assert sites == 2, f"expected the page's and Batch Export's calls, found {sites}"
-    assert not missing, f"draw_view called without swarm_spacing at {missing}"
+    assert not missing, f"draw_view called without the Distribution's drawing settings at {missing}"
 
 
 @pytest.mark.parametrize("stored, read", [(0.0, 0.0), (0.7, 0.7), (-1.0, 0.0)])

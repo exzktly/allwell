@@ -34,6 +34,7 @@ from review.features.nanowell.array_compute import array_scene, field_sites, one
 from review.features.nanowell import array_hover_compute as ahc
 from review.features.nanowell import extremes_compute as ec
 from review.features.nanowell import moving_compute as mvc
+from review.features.nanowell import distribution_style_compute as dsc
 from review.features.nanowell.decorate_compute import Decoration, decoration_for
 from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import _phone as nw_phone
@@ -766,7 +767,7 @@ def redraw(ctx) -> None:
         subset=page_subset(ctx, st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
         gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
         names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx),
-        footer_out=True, **array)
+        dist_style=st.dist_style, violin_smooth=st.violin_smooth, footer_out=True, **array)
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
@@ -912,6 +913,26 @@ def swarm_spacing_of(ctx) -> float:
     return value if value > 0 else 0.0
 
 
+def distribution_style_of(ctx) -> tuple[str, int]:
+    """The page's **Show** and **Smoothing** (``NanowellState.dist_style`` / ``violin_smooth``), for Batch Export's
+    Nanowells mode, so a batch Distribution figure draws dots or violins as the page does."""
+    st = _state(ctx)
+    if st is None:
+        return dsc.AUTO, dsc.SMOOTH_DEFAULT
+    return dsc.style_or_default(st.dist_style), dsc.clamp_smooth(st.violin_smooth)
+
+
+def set_dist_style(ctx, style: str) -> None:
+    """The Distribution view's **Show**: Auto, Beeswarm or Violin (``distribution_style_compute.STYLES``)."""
+    if style in dsc.STYLE_KEYS:
+        _set(ctx, "dist_style", style)
+
+
+def set_violin_smooth(ctx, smooth) -> None:
+    """The violins' **Smoothing**, as a percentage of the automatic bandwidth."""
+    _set(ctx, "violin_smooth", dsc.clamp_smooth(smooth))
+
+
 def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
               note: str = "", tableless=(), selected=(), responding_above: float | None = None, moving: int = 0,
@@ -920,7 +941,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
               stats_cache: dict | None = None, gate=None,
               decoration: Decoration | None = None, names: dict | None = None,
-              swarm_spacing: float = 0.0, footer_out: bool = False, sizes=None) -> tuple[object, object]:
+              swarm_spacing: float = 0.0, footer_out: bool = False, sizes=None, dist_style: str = "auto",
+              violin_smooth: int = 100) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -946,7 +968,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
 
     *swarm_spacing* is Properties → Beeswarm → Point spacing (``PlotState.swarm_spacing``, read by
     :func:`swarm_spacing_of`): how far apart the Distribution view's dots are laid out, as a multiple of a dot's
-    size, with 0 meaning Auto — edge to edge, the spacing the view has always used.
+    size, with 0 meaning Auto — edge to edge, the spacing the view has always used. *dist_style* and *violin_smooth*
+    are the page's **Show** and **Smoothing** (``distribution_style_compute``): dots, violins, or Auto (dots up to
+    four wells a column), and the violins' bandwidth as a percentage of the automatic one.
 
     The Statistics view tests the samples the Distribution view draws *Along x: Wells* at *timepoint*
     (:func:`statistics_result`): the wells' nanowells (*stats_unit* ``nanowells``) or the groups' well medians
@@ -1063,7 +1087,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if model.empty:
         render_message(fig, model.empty, gid="nw-moving-empty")
         return None, model
-    return render_distribution(fig, model, selected=selected, spacing=swarm_spacing, footer_out=footer_out), model
+    return render_distribution(fig, model, selected=selected, spacing=swarm_spacing, footer_out=footer_out,
+                               style=dist_style, smooth=violin_smooth), model
 
 
 def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels) -> str:

@@ -4936,7 +4936,9 @@ Vehicle` — its own control, then the baseline value. `÷ Vehicle` stands for t
 bar's own ratio at Treatment = Vehicle (here `Mut-veh ÷ WT-veh`), which the
 note above the bars says once. When the bars are too narrow for the second line,
 it breaks between the two terms rather than inside a name, and the panels move
-apart to make room for the extra lines.
+apart to make room for the extra lines. Each bar's p value sits just above its
+own error bar, and the Mean panel's y axis is raised as far as it takes for the
+bars and p values to stay below the note.
 
 When something cannot be computed, the note says which bar and why: no
 vehicle sample matches it, two do (tick another variable, or pool them), a

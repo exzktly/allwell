@@ -382,8 +382,11 @@ def annotate_relative_to(ctx, items, xs, ax_mean, ax_frac=None, ax_n=None) -> No
 
     slice_ = _bar_slice(ctx)
     notice = str(getattr(slice_, "rel_notice", "") or "")
+    if ax_mean is not None:
+        ax_mean._aw_fit_to_panel = None       # the axes is reused: no fit left from a last draw
     if ax_mean is None or not notice:
         return
+    p_labels = []
     if getattr(slice_, "rel_applied", False):
         from review.domain.fold_change import parse_fc_op_ctrl
         reference = 0.0 if parse_fc_op_ctrl(ctx) == "subtract" else 1.0
@@ -400,17 +403,77 @@ def annotate_relative_to(ctx, items, xs, ax_mean, ax_frac=None, ax_n=None) -> No
             text = p_text(item)
             if not text or not is_number(item.mean):
                 continue
-            top = item.mean + (item.spread if is_number(item.spread) else 0.0)
-            label = follows_theme(ax_mean.text(
-                x, max(top, reference), text, ha="center", va="bottom",
-                fontsize=7, color=tokens_for(ax_mean)[1], zorder=6))
+            # Above the error bar as drawn — its cap is at ``spread × ci_scale``,
+            # which this does not know, so the cap is read off the axes — and
+            # a few points above it rather than on it.
+            top = max([item.mean, *_cap_heights(ax_mean, x)])
+            label = follows_theme(ax_mean.annotate(
+                text, (x, max(top, reference)), xytext=(0, _P_LABEL_GAP_PT),
+                textcoords="offset points", ha="center", va="bottom",
+                fontsize=7, color=tokens_for(ax_mean)[1], zorder=6,
+                annotation_clip=False))
             setattr(label, DECORATION_TAG, True)
+            p_labels.append(label)
     note = follows_theme(ax_mean.text(
         0.01, 0.88, notice, transform=ax_mean.transAxes, ha="left", va="top",
         fontsize=7, color=tokens_for(ax_mean)[2], zorder=6, clip_on=False,
         wrap=True), muted=True)
     note.set_in_layout(False)     # see annotate_split_notice
     setattr(note, DECORATION_TAG, True)
+    ylim = ax_mean.get_ylim()
+    ax_mean._aw_fit_to_panel = (
+        lambda fig, ax, _note=note, _labels=tuple(p_labels), _ylim=ylim:
+        fit_relative_headroom(fig, ax, _note, _labels, _ylim))
+
+
+def _cap_heights(ax, x: float) -> list[float]:
+    """The heights of the error-bar caps drawn at *x* (line markers ``_``)."""
+    out = []
+    for line in ax.lines:
+        if line.get_marker() != "_":
+            continue
+        for lx, ly in zip(line.get_xdata(), line.get_ydata()):
+            if is_number(lx) and is_number(ly) and abs(float(lx) - float(x)) < 1e-9:
+                out.append(float(ly))
+    return out
+
+
+#: Gap between a bar's error-bar cap and its p label, in points.
+_P_LABEL_GAP_PT = 3
+#: Clearance kept between the highest bar, cap or p label and the note, in pixels.
+_NOTE_CLEARANCE_PX = 4
+
+
+def fit_relative_headroom(fig, ax, note, p_labels, drawn_ylim) -> None:
+    """Raise the Mean panel's top until its bars, caps and p labels clear the note.
+
+    The note is pinned near the top of the panel and is as many lines as it has
+    to be, and the room above the bars was a fixed share of the y range: on a
+    short panel, or under a long note, the note and the p labels were written
+    over the bars. Measured in pixels once the panel has its final size (the
+    style pass calls this as ``_aw_fit_to_panel``), starting each time from the
+    limits the renderer drew, so a resize does not ratchet them up. A y range
+    the user typed in Properties is theirs and is left alone.
+    """
+    if ax.get_ylim() != drawn_ylim and getattr(ax, "_aw_rel_fitted", None) != ax.get_ylim():
+        return                                        # someone else set the range since
+    ax.set_ylim(*drawn_ylim)
+    renderer = fig.canvas.get_renderer()
+    lo, hi = drawn_ylim
+    for _ in range(4):
+        floor = note.get_window_extent(renderer).y0 - _NOTE_CLEARANCE_PX
+        # Bars, error bars and their caps (the caps are line markers), and the
+        # p labels; not the reference line, which spans the panel at 1.
+        ink = [a.get_window_extent(renderer).y1
+               for a in (*ax.patches, *ax.collections, *ax.lines, *p_labels)
+               if a.get_visible() and not getattr(a, DECORATION_TAG, False) or a in p_labels]
+        top = max(ink, default=None)
+        bottom = ax.bbox.y0
+        if top is None or top <= floor or floor <= bottom:
+            break
+        hi = lo + (hi - lo) * (top - bottom) / (floor - bottom)
+        ax.set_ylim(lo, hi)
+    ax._aw_rel_fitted = ax.get_ylim()
 
 
 def visible_bars(ctx, items) -> list:

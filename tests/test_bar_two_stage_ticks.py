@@ -64,12 +64,12 @@ def _ctx(*, relative: bool = True):
     return ctx
 
 
-def _drawn(ctx, width_in: float):
+def _drawn(ctx, width_in: float, height_in: float | None = None):
     from review.features.barplot import renderer as R
     from review.features.barplot.tab_view import _FIG_H
 
     ctx.widgets = SimpleNamespace(get_or_none=lambda _name: None)
-    fig = ctx.runtime.barplot.fig or plt.figure(figsize=(width_in, _FIG_H), dpi=100)
+    fig = ctx.runtime.barplot.fig or plt.figure(figsize=(width_in, height_in or _FIG_H), dpi=100)
     if not fig.axes:
         for i in (1, 2, 3):
             fig.add_subplot(3, 1, i)
@@ -127,4 +127,37 @@ def test_one_line_ticks_get_the_fixed_margins_back():
     assert not fig._aw_tight_layout and fig.get_layout_engine() is None
     sp = fig.subplotpars
     assert {k: round(getattr(sp, k), 6) for k in R.BAR_FIGURE_MARGINS} == R.BAR_FIGURE_MARGINS
+    plt.close(fig)
+
+
+@pytest.mark.parametrize("width_in,height_in,err_kind", [(9.0, None, "sem"), (12.3, 7.0, "sem"),
+                                                         (9.0, None, "ci95")])
+def test_nothing_is_written_over_the_bars(width_in, height_in, err_kind):
+    """Reported with the fix above: the note and the p labels were written over
+    the bars. Each p label sits above its own error bar's cap, and the note
+    clears every bar, cap and p label — at the bar canvas's height and on a
+    shorter panel, where a fixed share of headroom left no room for the note."""
+    ctx = _ctx()
+    ctx.state.plot.bar_err_kind = err_kind          # 95% CI: whiskers 1.96 x the spread
+    fig = _drawn(ctx, width_in, height_in)
+    renderer = fig.canvas.get_renderer()
+    mean = fig.axes[0]
+    note = next(t for t in mean.texts if t.get_text().startswith("Relative to"))
+    labels = [t for t in mean.texts if t.get_text().startswith("p_BH")]
+    whiskers = [c.get_window_extent(renderer) for c in mean.collections]
+    cap_lines = [ln for ln in mean.lines if ln.get_marker() == "_"]
+    caps = [ln.get_window_extent(renderer) for ln in cap_lines]
+    assert len(labels) == 4 and len(whiskers) == 4 and len(caps) == 8
+    floor = note.get_window_extent(renderer).y0
+    for box in (*(p.get_window_extent(renderer) for p in mean.patches), *whiskers, *caps,
+                *(t.get_window_extent(renderer) for t in labels)):
+        assert box.y1 <= floor, (box, floor)
+    for label in labels:
+        box = label.get_window_extent(renderer)
+        mid = (box.x0 + box.x1) / 2
+        # The cap as drawn: a line at its y, as thick as its marker edge.
+        own = [mean.transData.transform((ln.get_xdata()[0], ln.get_ydata()[0]))[1]
+               + ln.get_markeredgewidth() * fig.dpi / 72 / 2
+               for ln, c in zip(cap_lines, caps) if c.x0 <= mid <= c.x1]
+        assert own and box.y0 >= max(own), "p label written on its cap"
     plt.close(fig)

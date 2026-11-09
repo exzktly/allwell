@@ -1276,10 +1276,10 @@ def _layer_inks():
 def _size_rule(ctx):
     """Cell Gating's size-class rule (``QCParams.size_classes``), through the QC layer's own accessor so a dataset
     whose parameters are not yet seeded reads its saved rule; ``None`` in a build without the QC layer."""
+    from review.core.population_band import qc_params
     from review.domain.size_classes import SizeClassRule
 
-    features = getattr(ctx, "features", None)
-    params = features.query("qc.get_params", ctx, default=None) if features is not None else None
+    params = qc_params(ctx)
     rule = getattr(params, "size_classes", None)
     return rule if isinstance(rule, SizeClassRule) else None
 

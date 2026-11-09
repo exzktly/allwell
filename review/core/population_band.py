@@ -19,9 +19,18 @@ from __future__ import annotations
 ALL_CELLS = "All cells"
 
 
-def _params(ctx):
+def qc_params(ctx):
+    """The QC parameters in force, through the QC layer's own accessor (``qc.get_params``) so a dataset whose
+    parameters are not yet seeded reads its saved choice; ``None`` in a build without the QC layer or on a context
+    with no QC state — every reader of the size classes then sees no rule, so a footer or a channel list never fails
+    a plot over it."""
+    if getattr(getattr(ctx, "state", None), "qc", None) is None:
+        return None
     features = getattr(ctx, "features", None)
     return features.query("qc.get_params", ctx, default=None) if features is not None else None
+
+
+_params = qc_params
 
 
 def offered_labels(ctx) -> tuple[str, ...]:

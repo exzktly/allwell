@@ -351,10 +351,10 @@ def refresh_metric_combo_for_channel(ctx) -> None:
 
 def _share_channels(ctx) -> list[str]:
     """The size classes' share columns (``size_classes.share_columns``) while Cell Gating's rule is complete."""
+    from review.core.population_band import qc_params
     from review.domain.size_classes import SizeClassRule, share_columns
 
-    features = getattr(ctx, "features", None)
-    params = features.query("qc.get_params", ctx, default=None) if features is not None else None
+    params = qc_params(ctx)
     rule = getattr(params, "size_classes", None)
     return share_columns(rule) if isinstance(rule, SizeClassRule) else []
 

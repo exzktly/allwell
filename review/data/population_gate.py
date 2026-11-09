@@ -35,8 +35,9 @@ POPULATION_COLUMN = "Population_Pass"
 def _params(ctx):
     """The QC parameters in force, read through the QC layer's own accessor so a dataset whose parameters are not yet
     seeded reads its saved choice; the bare state in a build without that service."""
-    features = getattr(ctx, "features", None)
-    params = features.query("qc.get_params", ctx, default=None) if features is not None else None
+    from review.core.population_band import qc_params
+
+    params = qc_params(ctx)
     if params is None:
         qc = getattr(getattr(ctx, "state", None), "qc", None)
         params = getattr(qc, "params", None)

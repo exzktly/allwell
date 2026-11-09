@@ -7780,7 +7780,8 @@ per-nucleus rows behind every plot.
 ### Saved Cells
 
 **What it shows.** Every population of cells you have saved, in one place, and
-the way to look at each. Two lists, because they are two kinds of thing:
+the way to look at each. Two lists, because they are two kinds of thing — and
+on a nanowell plate a third, the subsets saved on the Nanowells page:
 
 - **Saved cell sets** — cells saved by name with **Lasso cells** on a Spatial
   map or a Multivariate projection. A set is a fixed list of cells. Each row
@@ -7801,6 +7802,15 @@ the way to look at each. Two lists, because they are two kinds of thing:
   applied* otherwise. **View in Cell Browser** shows the cells inside that gate
   alone; **Manage on Cell Gating** takes you to Home → Cell Gating, where gates
   are applied. Under the list, the per-channel intensity gates in force.
+- **Nanowell subsets** (nanowell plates only) — every subset you save with
+  **Subset** on the Nanowells page appears here as soon as you save it; there is
+  nothing to do to add it. A subset is a rule over nanowells (their starting
+  cells, a metric, their place in the array). Each row gives its conditions,
+  how many nanowells it keeps once Nanowells has read the wells, and whether it
+  is the page's Subset now — the one the Nanowells page and the Scatter Plot's
+  nanowell scatter draw. **Use on Nanowells page** makes the selected subset the
+  page's Subset and takes you there. Renaming or deleting a subset on the
+  Nanowells page updates the list.
 
 - **Optimal use** — before reading a plot, check here what is excluded and what
   is gating the cells; to look at a population, select it and click **View in

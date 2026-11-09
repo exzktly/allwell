@@ -328,6 +328,18 @@ def _svc_nanowell_observations():
     return nanowell_observations
 
 
+def _svc_nanowell_saved_subsets():
+    # The page's saved subsets, as the Saved Cells page lists them.
+    from review.features.nanowell._saved_subsets import saved_subset_rows
+    return saved_subset_rows
+
+
+def _svc_nanowell_use_saved_subset():
+    # Saved Cells' *Use on Nanowells page*: make a saved subset the page's Subset and show the page.
+    from review.features.nanowell._saved_subsets import use_saved_subset
+    return use_saved_subset
+
+
 def _svc_nanowell_metric_specs():
     # The same observations' metric names alone, read from the tables' header rows (review/domain/observation.py).
     from review.features.nanowell.observation_compute import nanowell_metric_specs
@@ -1208,6 +1220,9 @@ def _features() -> list[FeatureDescriptor]:
                       "nanowell.follow_qc_params": _svc_nanowell_follow_qc_params,
                       "observations.nanowell": _svc_nanowell_observations,
                       "observations.nanowell_metrics": _svc_nanowell_metric_specs,
+                      # Saved Cells lists the page's saved subsets beside its cell sets and gates.
+                      "nanowell.saved_subsets": _svc_nanowell_saved_subsets,
+                      "nanowell.use_saved_subset": _svc_nanowell_use_saved_subset,
                       "segmentation.nanowell_overlay": _svc_nanowell_segmentation_overlay,
                       "image_table.nanowell_frame": _svc_nanowell_table_frame},
         ),

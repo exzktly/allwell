@@ -241,40 +241,55 @@ def test_intensity_floors_are_listed_only_while_they_are_in_force(ctx):
 
 
 @pytest.mark.parametrize("width", [1260, 360])
-def test_each_list_is_as_tall_as_its_rows_at_a_desk_and_a_phone_width(ctx, qtbot, width):
-    """A row is as tall as its wrapped text at the width the table ends up with —
-    measured at an earlier, narrower width, a desk row was four lines tall.
+@pytest.mark.parametrize("restyle", [False, True])
+def test_each_list_is_as_tall_as_its_rows_at_a_desk_and_a_phone_width(ctx, qtbot, width, restyle):
+    """A row is as tall as its wrapped text at the width and style the table ends
+    up with. Measured at an earlier, narrower width, a desk row was four lines
+    tall; and a stylesheet reaching the table after it was fitted (a theme
+    switch, phone layout's rescale) left every row at the old style's height.
 
-    Waited for rather than pumped a fixed number of times: fitting a list can
-    bring up the page's scroll bar, which narrows the list and queues another
-    fit, and on a loaded machine five turns of the loop did not always reach
-    the last one. A fit that never comes (the bug) still times out."""
-    from PySide6.QtWidgets import QWidget
+    Under the app's real stylesheet, whose row padding Qt's own fit includes, so
+    "fitted" is "fitting again changes nothing". Waited for rather than pumped a
+    fixed number of times: fitting a list can bring up the page's scroll bar,
+    which narrows it and queues another fit."""
+    from PySide6.QtWidgets import QApplication, QWidget
 
     from review.core.cell_sets import add_set
     from review.features.saved_cells.tab_view import build_saved_cells_tab
+    from ui import theme
 
-    add_set(ctx, _CELLS, source="lasso · Spatial map")
-    ctx.state.cell_gating.scatter_gates = [dict(_GATE), dict(_GATE, name="Dim", wells=[])]
-    host = QWidget()
-    host.resize(width, 900)
-    build_saved_cells_tab(ctx, host)
-    host.show()
-    page = ctx.widgets.get("_saved_cells_page")
+    app = QApplication.instance()
+    before = app.styleSheet()
+    try:
+        theme.apply_app_stylesheet(app, theme.qss())
+        add_set(ctx, _CELLS, source="lasso · Spatial map")
+        ctx.state.cell_gating.scatter_gates = [dict(_GATE), dict(_GATE, name="Dim", wells=[])]
+        host = QWidget()
+        host.resize(width, 900)
+        build_saved_cells_tab(ctx, host)
+        host.show()
+        page = ctx.widgets.get("_saved_cells_page")
+        if restyle:
+            qtbot.wait(50)
+            theme.apply_ui_scale(1.3)
+            theme.apply_app_stylesheet(app, theme.qss())
 
-    def wanted(table):
-        floor = table.verticalHeader().minimumSectionSize()
-        return [max(floor, table.sizeHintForRow(r)) for r in range(table.rowCount())]
+        def fitted(table):
+            rows = [table.rowHeight(r) for r in range(table.rowCount())]
+            table.resizeRowsToContents()
+            again = [table.rowHeight(r) for r in range(table.rowCount())]
+            for r, h in enumerate(rows):
+                table.setRowHeight(r, h)
+            return rows == again and table.height() == (
+                table.horizontalHeader().height() + sum(rows) + 2 * table.frameWidth())
 
-    def fitted(table):
-        rows = [table.rowHeight(r) for r in range(table.rowCount())]
-        return rows == wanted(table) and table.height() == (
-            table.horizontalHeader().height() + sum(rows) + 2 * table.frameWidth())
-
-    qtbot.waitUntil(lambda: fitted(page.sets) and fitted(page.gates), timeout=3000)
-    for table in (page.sets, page.gates):
-        assert [table.rowHeight(r) for r in range(table.rowCount())] == wanted(table)
-    host.close()
+        qtbot.waitUntil(lambda: fitted(page.sets) and fitted(page.gates), timeout=3000)
+        host.resize(width * 2 // 3, 900)               # the window narrowed while shown
+        qtbot.waitUntil(lambda: fitted(page.sets) and fitted(page.gates), timeout=3000)
+        host.close()
+    finally:
+        theme.apply_ui_scale(1.0)
+        app.setStyleSheet(before)
 
 
 # ── the real app: the page on the rail, and the services it calls ──────────

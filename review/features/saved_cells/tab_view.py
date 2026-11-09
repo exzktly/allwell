@@ -19,7 +19,7 @@ disagree with them.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QFrame, QHeaderView, QLabel, QLineEdit, QPushButton, QScrollArea,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
@@ -39,23 +39,31 @@ _GATE_COLUMNS = ("Name", "Axes", "Wells", "Cells inside", "In use")
 
 
 class _FittedTable(QTableWidget):
-    """A table as tall as its rows, fitted again after every change of width.
+    """A table as tall as its rows, fitted again whenever their heights can change.
 
-    Its cells wrap, so a row's height follows its columns' widths, and a
-    stretched column takes its width only after the table's own resize event
-    has run — without emitting ``sectionResized``. Fitting inside the event, or
-    on that signal, measured the rows at the previous width and left them
-    several lines tall at the desk. The fit is queued to run once the resize
-    is done.
+    Its cells wrap, so a row's height follows its columns' widths; and the app's
+    stylesheet sets the font and padding the rows are measured in. Fitted only
+    when the page was built — before the table was shown or styled — a desk row
+    kept the height it had at the builder's narrow width (76 px for a 19 px
+    row), and a theme switch or phone layout's rescale left every row at the old
+    style's height. So the table is fitted again on every change of width and
+    whenever it is shown, polished or restyled.
     """
+
+    #: Events after which the rows' heights may have changed with no change of width.
+    _REFIT_ON = (QEvent.Type.Show, QEvent.Type.Polish, QEvent.Type.StyleChange,
+                 QEvent.Type.FontChange)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if event.size().width() != event.oldSize().width():
-            QTimer.singleShot(0, self._fit)
+            _fit_height(self)
 
-    def _fit(self) -> None:
-        _fit_height(self)
+    def event(self, event) -> bool:
+        handled = super().event(event)
+        if event.type() in self._REFIT_ON:
+            _fit_height(self)
+        return handled
 
 
 def _table(parent: QWidget, columns: tuple) -> QTableWidget:

@@ -7399,9 +7399,11 @@ holds no second copy of those controls. A gate's axes are named by
 page is on the phone as well: it scrolls, its button rows wrap
 (`widgets/flow_layout.FlowLayout`), and each list's columns share the width
 with wrapped text and the list is exactly as tall as its rows
-(`tab_view._FittedTable`, fitted once a resize has settled, since a stretched
-column takes its width after the table's resize event and without
-`sectionResized`).
+(`tab_view._FittedTable`, fitted again on every change of width and whenever it
+is shown, polished or restyled: fitted only when the page was built, before the
+table was shown or styled, a desk row kept the height it had at the builder's
+narrow width, and a theme switch or phone layout's rescale left every row at
+the old style's height).
 
 **A highlighted set on the per-cell Scatter.** `CellSetsState.highlight` (beside
 `exclude`, so rename and delete follow it; saved in `cell_sets.json` and in the

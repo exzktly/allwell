@@ -136,6 +136,12 @@ _MOVING_TIP = ("Moving average: each nanowell's value at a timepoint becomes the
                "a gap have none; they are counted among the exclusions. For a fold change the window starts after "
                "the baseline, so the baseline's own value of 1 is never averaged in. 1 is off: each timepoint is "
                "drawn as measured.")
+_MOVING_KIND_TIP = (
+    "Moving average: the window trails — a timepoint's value is the mean of it and the ones before it, so no later timepoint — one that may "
+    "already show a treatment — reaches it, but every change is drawn about half a window late. Centred average: the mean "
+    "of it, as many before it and as many after it, so the line does not lag; only an odd window has a middle, so "
+    "the window is 3, 5, 7 or 9, and the last timepoints, without a full window after them, have no value. The "
+    "Baseline average always looks back only.")
 _BASELINE_MOVING_TIP = (
     "Baseline average: a fold change's baseline becomes the mean of the nanowell's measured values at the baseline "
     "timepoint and the ones before it, this many in all — never after it, which may already carry the treatment. "
@@ -238,6 +244,14 @@ def baseline_moving_greyed(st, column: str | None) -> str | None:
     if mvc.baseline_window_for(st.moving, MAX_WINDOW, st.baseline) == 0:
         return "earliest"
     return None
+
+
+def _refresh_moving(spin, kind, st) -> None:
+    """The moving average's window box and its Moving / Centred menu, from the state. Centred, the box steps through
+    the odd windows (1 is off, then 3, 5, 7, 9)."""
+    spin.setSingleStep(2 if st.moving_centred else 1)
+    spin.setValue(max(st.moving, 1))
+    kind.setCurrentIndex(kind.findData(bool(st.moving_centred)))
 
 
 def _refresh_baseline_moving(spin, st, column: str | None) -> None:
@@ -397,7 +411,16 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     moving_spin.setToolTip(_MOVING_TIP)
     moving_spin.valueChanged.connect(lambda value: nwc.set_moving(ctx, value))
     reg.register("_nw_moving_spin", moving_spin)
-    grp_moving = band.add_scope("Moving average", moving_spin)
+    # Trailing or centred, chosen where the group's label would be: the filter row is full at a 1500 px window,
+    # and a control of its own beside the window — a scope, a menu or a box — wrapped it onto a second line.
+    moving_kind_cb = QComboBox()
+    moving_kind_cb.addItem("Moving average", False)
+    moving_kind_cb.addItem("Centred average", True)
+    moving_kind_cb.setToolTip(_MOVING_KIND_TIP)
+    moving_kind_cb.currentIndexChanged.connect(
+        lambda _i: nwc.set_moving_centred(ctx, bool(moving_kind_cb.currentData())))
+    reg.register("_nw_moving_kind_cb", moving_kind_cb)
+    grp_moving = band.add_scope("", moving_kind_cb, moving_spin)
 
     responding_edit = QLineEdit()
     responding_edit.setPlaceholderText("not set")
@@ -556,7 +579,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         return plot_area.isVisible()
 
     controls = (view_bar, metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, moving_spin,
-                baseline_moving_spin,
+                moving_kind_cb, baseline_moving_spin,
                 responding_edit, extremes_spin, extremes_cells, extremes_numbers, *identity.signalling, *start.signalling,
                 *array_controls.signalling, *statistics.signalling, *rim_focus.signalling,
                 *qc_controls.signalling, *dist_style.signalling)
@@ -629,7 +652,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             over_time = (distribution and not per_nanowell) or view == "trajectories"
             over_time_or_tested = over_time or (stats_view and not per_nanowell)
             grp_cohort.setVisible(over_time_or_tested)
-            moving_spin.setValue(max(st.moving, 1))
+            _refresh_moving(moving_spin, moving_kind_cb, st)
             grp_moving.setVisible(over_time_or_tested)
             _refresh_baseline_moving(baseline_moving_spin, st, nwc.drawn_metric_column(ctx))
             grp_baseline_moving.setVisible(over_time_or_tested)

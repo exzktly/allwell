@@ -67,6 +67,7 @@ _metric_column = _lazy("review.features.nanowell.distribution_compute", "metric_
 _match_channel = _lazy("review.features.nanowell.distribution_compute", "match_channel")
 _moving_window_for = _lazy("review.features.nanowell.distribution_compute", "moving_window_for")
 _moving_max = _lazy("review.features.nanowell.moving_compute", "max_window")
+_clamp_window = _lazy("review.features.nanowell.moving_compute", "clamp_window")
 _baseline_window_for = _lazy("review.features.nanowell.moving_compute", "baseline_window_for")
 _base_value = _lazy("review.features.nanowell.moving_compute", "base_value")
 _format_cut = _lazy("review.features.nanowell.distribution_compute", "format_cut")
@@ -162,6 +163,16 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                      "many timepoints ending at it, as the page's Moving average control. The "
                                      "summary CSV's moving_average column says the window each row used.")
         row.addWidget(self._moving_spin)
+        self._moving_kind_cb = QComboBox()
+        self._moving_kind_cb.addItem("Trailing", False)
+        self._moving_kind_cb.addItem("Centred", True)
+        self._moving_kind_cb.setToolTip(
+            "The moving average's window ending at each timepoint (Trailing) or centred on it (Centred: an odd "
+            "window, as many timepoints after it as before), as the page's Window control. The summary CSV's "
+            "moving_average_window column says which each row used.")
+        self._moving_kind_cb.currentIndexChanged.connect(
+            lambda _i: self._moving_spin.setSingleStep(2 if self._moving_kind_cb.currentData() else 1))
+        row.addWidget(self._moving_kind_cb)
         row.addWidget(QLabel("Baseline average (timepoints, 1 = off)"))
         self._baseline_moving_spin = SpinBox()
         self._baseline_moving_spin.setRange(1, _moving_max())
@@ -288,6 +299,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         self._axis_cb.setEnabled(view == "distribution")
         self._cohort_box.setEnabled(view in ("distribution", "trajectories"))
         self._moving_spin.setEnabled(view in ("distribution", "trajectories"))
+        self._moving_kind_cb.setEnabled(view in ("distribution", "trajectories"))
         self._baseline_moving_spin.setEnabled(view in ("distribution", "trajectories"))
         self._tp_cb.setEnabled(view in ("distribution", "array", "position"))
 
@@ -367,7 +379,9 @@ class NanowellBatchExportPanel(BatchExportPanel):
         return {"view": self._view_cb.currentData(), "axis": self._axis_cb.currentData(),
                 "baseline": self._baseline_cb.currentData(), "timepoint": self._tp_cb.currentData(),
                 "cohort": self._cohort_box.isChecked(), "metrics": self._selected_metrics(),
-                "moving": self._moving_spin.value() if self._moving_spin.value() >= 2 else 0,
+                # Centred, an even window has no middle and is taken one down, as on the page.
+                "moving": _clamp_window(self._moving_spin.value(), bool(self._moving_kind_cb.currentData())),
+                "moving_centred": bool(self._moving_kind_cb.currentData()),
                 "baseline_moving": (self._baseline_moving_spin.value()
                                     if self._baseline_moving_spin.value() >= 2 else 0),
                 "fmt": self._fmt_cb.currentText(), "channel": self._ctx.state.channel.active_channel,
@@ -503,6 +517,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                    axis=settings["axis"], timepoint=self._timepoint_for(data, wells, settings),
                                    control="", baseline=settings["baseline"], cohort=settings["cohort"],
                                    moving=settings["moving"], baseline_moving=settings["baseline_moving"],
+                                   moving_centred=settings["moving_centred"],
                                    well=well or "", well_timepoint=shown if well else "",
                                    note=note, tableless=tableless, responding_above=cut,
                                    subset=settings["subset"], names=_well_names(self._ctx, wells),
@@ -511,6 +526,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
                     self._figure_view = {"view": view, "metric": drawn, "axis": settings["axis"],
                                          "baseline": settings["baseline"], "cohort": settings["cohort"],
                                          "moving": settings["moving"],
+                                         "moving_centred": settings["moving_centred"],
                                          "baseline_moving": settings["baseline_moving"],
                                          "well": well or "", "timepoint": shown,
                                          "subset": settings["subset"]}
@@ -530,12 +546,14 @@ class NanowellBatchExportPanel(BatchExportPanel):
                            if _base_value(column) is not None else 0)
             table = (_wells_summary(kept, wells, drawn, channels=data.channels, channel=channel,
                                     cohort=settings["cohort"] and over_time, responding_above=cut, moving=moving,
-                                    baseline_moving=base_moving)
+                                    baseline_moving=base_moving, moving_centred=settings["moving_centred"])
                      if filtered is None or filtered.kept else None)
             if table is not None:
                 tables.append(table.assign(metric=drawn, channel=channel or "", requested_metric=metric,
                                            group=grp.name, note=said, responding_above=cut,
                                            moving_average=moving or None,
+                                           moving_average_window=(("centred" if settings["moving_centred"]
+                                                                   else "trailing") if moving else None),
                                            baseline_moving_average=base_moving or None))
         try:
             self._write_summary(self._out_path(write_dir, f"{safe}_summary.csv"), tables, grp, tableless,

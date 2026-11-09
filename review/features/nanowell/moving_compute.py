@@ -19,6 +19,16 @@ it leaves undefined keeps a reason, so the figures count it among their exclusio
 
 Only the metrics with a value per timepoint have one (``distribution_compute.PER_NANOWELL`` have none).
 
+**Trailing or centred.** The window above is *trailing*: a timepoint's value uses only it and earlier ones, so no
+later value — one that may already show a treatment — reaches it, but every change is drawn about *(N − 1) / 2*
+timepoints late. A *centred* window (``centred=True``) puts the timepoint in the middle: the mean of it, the
+*h = (N − 1) / 2* before it and the *h* after it, so the smoothed line does not lag. Only an odd window has a middle,
+so a centred window is 3, 5, 7 or 9 (:func:`clamp_window`). It is the trailing window that ends *h* timepoints later,
+so it follows the same rules — complete or nothing, every timepoint joinable, a fold change's window starting after
+its baseline — and a timepoint too near the end of its well for a full window is left out with
+:data:`LATE_REASON`, as one too near the start is with :data:`EARLY_REASON`. The baseline's own window
+(:func:`rebase`) is always trailing: a later timepoint may already carry the treatment.
+
 **A fold change's window starts after its baseline.** A fold change is a value over the nanowell's baseline, so a
 window over fold changes may hold only timepoints after the baseline timepoint: one that reaches the baseline would
 average in its fold change of exactly 1 — a number with no noise, which damps the first windows after it towards
@@ -56,6 +66,7 @@ from review.features.nanowell.series_compute import EARLIEST, FIRST_MEASURABLE
 MAX_WINDOW = 9
 
 EARLY_REASON = "moving average: before the first full window"
+LATE_REASON = "moving average: after the last full window"
 GAP_REASON = "moving average: a timepoint in the window has no value"
 IDENTITY_REASON = "moving average: a timepoint in the window is not joinable"
 BASELINE_REASON = "moving average: the window does not start after the baseline"
@@ -68,11 +79,16 @@ _BASE_REASONS = {EARLY_REASON: BASE_EARLY_REASON, GAP_REASON: BASE_GAP_REASON, I
 _SITE = ["well", "nw_q", "nw_r"]
 
 
-def clamp_window(window) -> int:
-    """*window* as the page stores it: 0 (off) or a whole number from 2 to :data:`MAX_WINDOW`."""
+def clamp_window(window, centred: bool = False) -> int:
+    """*window* as the page stores it: 0 (off) or a whole number from 2 to :data:`MAX_WINDOW` — and, *centred*,
+    an odd one from 3, since only an odd window has a middle timepoint: an even one is taken one down (4 is 3, 2
+    is off)."""
     if isinstance(window, bool) or not isinstance(window, int) or window < 2:
         return 0
-    return min(window, MAX_WINDOW)
+    window = min(window, MAX_WINDOW)
+    if centred and window % 2 == 0:
+        window -= 1
+    return window if window >= 2 else 0
 
 
 def max_window() -> int:
@@ -111,15 +127,21 @@ def base_value(column: str) -> str | None:
     return None
 
 
-def describe(window: int, column: str = "", baseline_window: int = 0) -> str:
+def describe(window: int, column: str = "", baseline_window: int = 0, centred: bool = False) -> str:
     """The figure's sentence for a window that is on, or ``""`` for one that is off. For a fold change *column* it
     also says the window starts after the baseline, how the baseline was taken (*baseline_window*, as
-    :func:`baseline_window_for` gives it), and for ``log2_count_fc`` that logs are averaged."""
-    window = clamp_window(window)
+    :func:`baseline_window_for` gives it), and for ``log2_count_fc`` that logs are averaged. *centred* says the
+    window is centred on its timepoint rather than ending at it."""
+    window = clamp_window(window, centred)
     if not window:
         return ""
-    text = (f"Moving average over {window} timepoints: each value is the mean of the nanowell's values at that "
-            f"timepoint and the {window - 1} before it, only where all {window} have one.")
+    if centred:
+        half = (window - 1) // 2
+        text = (f"Moving average over {window} timepoints, centred: each value is the mean of the nanowell's values "
+                f"at that timepoint, the {half} before it and the {half} after it, only where all {window} have one.")
+    else:
+        text = (f"Moving average over {window} timepoints: each value is the mean of the nanowell's values at that "
+                f"timepoint and the {window - 1} before it, only where all {window} have one.")
     if base_value(column) is None:
         return text
     text += " Each window starts after the baseline, so the baseline's own fold change of 1 is never averaged in."
@@ -153,7 +175,7 @@ def baseline_order(frame: pd.DataFrame, column: str) -> pd.Series | None:
 
 
 def moving_mean(frame: pd.DataFrame, values: pd.Series, window: int, *,
-                after: pd.Series | None = None) -> tuple[pd.Series, pd.Series]:
+                after: pd.Series | None = None, centred: bool = False) -> tuple[pd.Series, pd.Series]:
     """``(averaged, why)`` for the rows of *frame*, aligned to its index.
 
     *values* is the metric as numbers on *frame*'s index, NaN where undefined. ``averaged`` is the trailing mean
@@ -165,11 +187,15 @@ def moving_mean(frame: pd.DataFrame, values: pd.Series, window: int, *,
     after; a row whose window would start at or before it has no value, with :data:`BASELINE_REASON` — which wins
     over every other reason, the early one included, since no window there could ever be used. NaN sets no bound
     (a nanowell with no baseline has no fold change to average anyway).
+
+    *centred* takes each row's window centred on it (:func:`_centred`) rather than ending at it.
     """
-    window = clamp_window(window)
+    window = clamp_window(window, centred)
     blank = pd.Series("", index=frame.index, dtype=object)
     if not window or not len(frame):
         return values.astype(float), blank
+    if centred:
+        return _centred(frame, values, window, after)
     ok = (frame["identity_ok"].fillna(True).astype(bool) if "identity_ok" in frame
           else pd.Series(True, index=frame.index))
     bound = (np.full(len(frame), np.nan) if after is None
@@ -208,6 +234,33 @@ def moving_mean(frame: pd.DataFrame, values: pd.Series, window: int, *,
     why[early] = EARLY_REASON
     why[lost & reaches_baseline] = BASELINE_REASON
     return averaged.reindex(frame.index), why.reindex(frame.index)
+
+
+def _centred(frame: pd.DataFrame, values: pd.Series, window: int,
+             after: pd.Series | None) -> tuple[pd.Series, pd.Series]:
+    """:func:`moving_mean` with each row's window centred on it: the trailing window that ends *h = (window − 1) / 2*
+    timepoints after the row, taken from that later row of the same nanowell.
+
+    One set of rules for both kinds: whatever makes the trailing window ending at *t + h* incomplete — an early
+    start, a gap, a timepoint not joinable, a start at or before the baseline — makes the centred window at *t*
+    incomplete for the same reason. What the shift adds is the end of the series: a row with no timepoint *t + h*
+    in its well has no window, with :data:`LATE_REASON`; one whose well has *t + h* but whose nanowell has no row
+    there, a gap."""
+    half = (window - 1) // 2
+    means, why = moving_mean(frame, values, window, after=after)
+    site = {k: frame[k].to_numpy() for k in _SITE}
+    tp = frame["tp_order"].to_numpy(dtype=float)
+    ends = pd.DataFrame({**site, "tp": tp, "mean": means.to_numpy(dtype=float), "why": why.to_numpy(dtype=object)})
+    rows = pd.DataFrame({**site, "tp": tp + half, "_row": np.arange(len(frame))})
+    joined = rows.merge(ends, on=_SITE + ["tp"], how="left").sort_values("_row")
+    has = values.reindex(frame.index).notna().to_numpy()
+    last = pd.Series(tp).groupby(frame["well"].to_numpy()).transform("max").to_numpy()
+    mean = joined["mean"].to_numpy(dtype=float)
+    end_why = joined["why"].fillna("").to_numpy(dtype=object)
+    out_why = np.where(~has | ~np.isnan(mean), "",
+                       np.where(tp + half > last, LATE_REASON,
+                                np.where(end_why != "", end_why, GAP_REASON))).astype(object)
+    return (pd.Series(mean, index=frame.index), pd.Series(out_why, index=frame.index, dtype=object))
 
 
 def rebase(frame: pd.DataFrame, column: str, reasons: pd.Series, baseline_window: int,
@@ -262,20 +315,22 @@ def rebase(frame: pd.DataFrame, column: str, reasons: pd.Series, baseline_window
     return frame, out
 
 
-def averaged(frame: pd.DataFrame, column: str, values: pd.Series, window: int) -> tuple[pd.Series, pd.Series]:
+def averaged(frame: pd.DataFrame, column: str, values: pd.Series, window: int,
+             centred: bool = False) -> tuple[pd.Series, pd.Series]:
     """:func:`moving_mean` of *values* (the metric *column* as numbers), with a fold change's windows starting
-    after its baseline (:func:`baseline_order`)."""
-    return moving_mean(frame, values, window, after=baseline_order(frame, column) if is_on(window) else None)
+    after its baseline (:func:`baseline_order`); *centred* as :func:`moving_mean` takes it."""
+    return moving_mean(frame, values, window, after=baseline_order(frame, column) if is_on(window) else None,
+                       centred=centred)
 
 
-def apply(frame: pd.DataFrame, column: str, reasons: pd.Series, window: int,
+def apply(frame: pd.DataFrame, column: str, reasons: pd.Series, window: int, centred: bool = False,
           ) -> tuple[pd.DataFrame, pd.Series]:
     """*frame* with *column* replaced by its moving average (:func:`averaged`), and *reasons* with a reason for
     each value it left out (an exclusion reason already there is kept). Unchanged when *window* is off."""
-    if not is_on(window):
+    if not clamp_window(window, centred):
         return frame, reasons
     values = pd.to_numeric(frame[column], errors="coerce")
-    means, why = averaged(frame, column, values, window)
+    means, why = averaged(frame, column, values, window, centred)
     frame = frame.copy()
     frame[column] = means
     reasons = reasons.copy()
@@ -286,6 +341,7 @@ def apply(frame: pd.DataFrame, column: str, reasons: pd.Series, window: int,
 #: Why a moving average left nothing, by the reason most of the values went under (:func:`nothing_left_text`).
 _WHY_NOTHING = {
     EARLY_REASON: "each value needs its own timepoint and the {before} before it, and {where_early}",
+    LATE_REASON: "each value needs the {half} timepoints before it and the {half} after it, and {where_late}",
     BASELINE_REASON: "a fold change's window must start after the baseline, so it needs {window} timepoints after "
                      "the baseline, and {where_baseline}",
     GAP_REASON: "every window holds a timepoint with no value",
@@ -300,7 +356,7 @@ def _values_at(frame: pd.DataFrame, values: pd.Series, timepoint: str) -> int:
 
 
 def nothing_left_text(frame: pd.DataFrame, column: str, window: int, *, timepoint: str = "",
-                      baseline_window: int = 0) -> str:
+                      baseline_window: int = 0, centred: bool = False) -> str:
     """The sentence a figure shows instead of an empty plot when the moving average over *window* leaves none of
     the values *frame* holds, or ``""`` when it leaves some (or is off, or there was nothing to average).
 
@@ -311,31 +367,35 @@ def nothing_left_text(frame: pd.DataFrame, column: str, window: int, *, timepoin
     early timepoint along wells. Said in place of the plot, with the reason most values went under and the
     longest window that would leave something, so it is not read as a dataset with no values; then
     :func:`describe`'s sentence without its lead-in (*baseline_window* as it takes it), which the plot's footer would have carried."""
-    window = clamp_window(window)
+    window = clamp_window(window, centred)
     if not window or column not in frame or not len(frame):
         return ""
     values = pd.to_numeric(frame[column], errors="coerce")
     if not _values_at(frame, values, timepoint):
         return ""
-    means, why = averaged(frame, column, values, window)
+    means, why = averaged(frame, column, values, window, centred)
     if _values_at(frame, means, timepoint):
         return ""
     drawn = why if not timepoint else why[frame["timepoint"].astype(str).eq(str(timepoint))]
     counts = drawn[drawn != ""].value_counts()
     reason = str(counts.index[0]) if len(counts) else GAP_REASON
+    half = (window - 1) // 2
     because = _WHY_NOTHING.get(reason, _WHY_NOTHING[GAP_REASON]).format(
-        before=window - 1, window=window,
-        where_early=(f"{timepoint} has fewer than {window - 1} before it in its well" if timepoint
-                     else f"no well has {window} timepoints"),
+        before=window - 1, window=window, half=half,
+        where_early=(f"{timepoint} has fewer than {window - 1 if not centred else half} before it in its well"
+                     if timepoint else f"no well has {window} timepoints"),
+        where_late=(f"{timepoint} has fewer than {half} after it in its well" if timepoint
+                    else f"no well has {window} timepoints"),
         where_baseline=f"{timepoint} has fewer" if timepoint else "no nanowell has that many")
     where = f" at {timepoint}" if timepoint else ""
-    text = f"Moving average over {window} timepoints: no value is left to draw{where} — {because}."
-    for shorter in range(window - 1, 1, -1):
-        kept = _values_at(frame, averaged(frame, column, values, shorter)[0], timepoint)
+    kind = ", centred" if centred else ""
+    text = f"Moving average over {window} timepoints{kind}: no value is left to draw{where} — {because}."
+    for shorter in range(window - (2 if centred else 1), 1, -(2 if centred else 1)):
+        kept = _values_at(frame, averaged(frame, column, values, shorter, centred)[0], timepoint)
         if kept:
             text += f" A window of {shorter} leaves {kept:,} value{'' if kept == 1 else 's'}."
             break
     else:
         text += " No shorter window leaves one either; set the window to 1 to turn the average off."
-    how = describe(window, column, baseline_window).split(": ", 1)[1]    # the window is already named above
+    how = describe(window, column, baseline_window, centred).split(": ", 1)[1]    # the window is named above
     return text + "\n\n" + how[:1].upper() + how[1:]

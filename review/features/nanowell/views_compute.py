@@ -130,7 +130,7 @@ class TrajectoryPanel:
 
 def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool = False,
                       marks: dict | None = None, moving: int = 0,
-                      baseline_moving: int = 0) -> list[TrajectoryPanel]:
+                      baseline_moving: int = 0, moving_centred: bool = False) -> list[TrajectoryPanel]:
     """One panel per well: a line per nanowell over time, and the median of each occupancy class. With *cohort*,
     only the nanowells with a value at every timepoint are drawn and pooled (tracker I8); the rest are counted
     among those not drawn. *marks* is ``well -> {timepoint -> verdict}`` for the timepoints whose nanowell identity
@@ -138,7 +138,8 @@ def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool
     over that many timepoints (``moving_compute``; 0 is off), a fold change's windows starting after its baseline;
     the cohort is still decided on the values before that average, and a nanowell with no complete window anywhere
     is counted among those not drawn. *baseline_moving* (only with *moving* on) measures a fold change from a
-    baseline averaged over that many timepoints (``moving_compute.rebase``) before anything else."""
+    baseline averaged over that many timepoints (``moving_compute.rebase``) before anything else.
+    *moving_centred* centres each window on its timepoint rather than ending it there."""
     out = []
     for well in wells:
         rows = metrics[metrics["well"] == well]
@@ -152,7 +153,7 @@ def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool
             rows, _reasons = moving_compute.rebase(rows, column, pd.Series("", index=rows.index, dtype=object),
                                                    baseline_moving)
         measured = numeric_values(rows, column)
-        values, _why = moving_compute.averaged(rows, column, measured, moving)
+        values, _why = moving_compute.averaged(rows, column, measured, moving, moving_centred)
         complete = (rows.assign(_m=measured.notna().astype(float))
                     .pivot_table(index=["nw_q", "nw_r"], columns="timepoint", values="_m", aggfunc="first",
                                  dropna=False).reindex(columns=tps).fillna(0.0))

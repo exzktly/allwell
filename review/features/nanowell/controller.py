@@ -760,7 +760,7 @@ def redraw(ctx) -> None:
         fig, st.view, st.metrics, st.data, groups=groups, metric=metric, channel=channel,
         axis=st.axis, timepoint=shown_timepoint(ctx)[1] if st.view == "position" else st.timepoint,
         control=st.control, baseline=st.baseline, cohort=st.cohort, moving=st.moving,
-        baseline_moving=st.baseline_moving, well=well,
+        baseline_moving=st.baseline_moving, moving_centred=st.moving_centred, well=well,
         well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
@@ -936,7 +936,7 @@ def set_violin_smooth(ctx, smooth) -> None:
 def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
               timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
               note: str = "", tableless=(), selected=(), responding_above: float | None = None, moving: int = 0,
-              baseline_moving: int = 0, layers: ArrayLayers | None = None, image=None, image_note: str = "",
+              baseline_moving: int = 0, moving_centred: bool = False, layers: ArrayLayers | None = None, image=None, image_note: str = "",
               region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
               stats_cache: dict | None = None, gate=None,
@@ -960,6 +960,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     views, each of one timepoint or one value per nanowell, do not. *baseline_moving* is the baseline's own window
     for a fold change, used only with *moving* on and never with the Earliest baseline
     (``moving_compute.baseline_window_for`` decides, here, so the page and Batch Export cannot differ).
+    *moving_centred* centres the moving average's window on each timepoint instead of ending it there.
 
     The Identity view draws *well* at *well_timepoint* against the well's reference timepoint
     (``_identity_controller.draw_identity``), with *identity* the page's inputs to it — its mode, the sidecar and
@@ -1031,16 +1032,17 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         marks = {w: timepoint_marks(data, w) for w in wells}
         column = metric_column(metric, channel)
         panels = vc.trajectory_panels(metrics, wells, column, cohort=cohort, marks=marks, moving=moving,
-                                      baseline_moving=baseline_moving)
+                                      baseline_moving=baseline_moving, moving_centred=moving_centred)
         for panel in panels:
             panel.name = names.get(panel.well, "")
-        empty = _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels)
+        empty = _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels, moving_centred)
         if empty:
             render_message(fig, empty, gid="nw-moving-empty")
             return None, None
         render_trajectories(fig, panels,
                             cohort=cohort, label=_label(metric, channel, data, sizes), time_source=data.time_source,
-                            note=" ".join(filter(None, [mvc.describe(moving, column, baseline_moving), note])))
+                            note=" ".join(filter(None, [mvc.describe(moving, column, baseline_moving,
+                                                                     moving_centred), note])))
         return None, None
     if view == "position":
         series, missing = vc.position_series(metrics, wells, timepoint, metric_column(metric, channel),
@@ -1059,7 +1061,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=WELLS,
                                    groups=groups, timepoint=timepoint, time_source=data.time_source,
                                    baseline=baseline, cohort=cohort, moving=moving,
-                                   baseline_moving=baseline_moving, sizes=sizes)
+                                   baseline_moving=baseline_moving, moving_centred=moving_centred, sizes=sizes)
         model.well_names = dict(names)
         result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control,
                                    cache=stats_cache)
@@ -1071,7 +1073,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
-                               moving=moving, baseline_moving=baseline_moving, decoration=decoration,
+                               moving=moving, baseline_moving=baseline_moving, moving_centred=moving_centred,
+                               decoration=decoration,
                                sizes=sizes)
     model.starting = subset.start_bounds()
     if model.axis == TIME:
@@ -1091,7 +1094,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                style=dist_style, smooth=violin_smooth), model
 
 
-def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels) -> str:
+def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels, centred=False) -> str:
     """Trajectories' sentence in place of an empty figure when the moving average left no line to draw, or ``""``
     (``moving_compute.nothing_left_text``)."""
     if not mvc.is_on(moving) or any(p.lines for p in panels):
@@ -1100,7 +1103,7 @@ def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels
     if column not in rows:
         return ""
     rows, _reasons = mvc.rebase(rows, column, pd.Series("", index=rows.index, dtype=object), baseline_moving)
-    return mvc.nothing_left_text(rows, column, moving, baseline_window=baseline_moving)
+    return mvc.nothing_left_text(rows, column, moving, baseline_window=baseline_moving, centred=centred)
 
 
 #: The Distribution model's notes the Statistics view carries: what changes which values were compared (the fixed
@@ -2712,8 +2715,26 @@ def set_cohort(ctx, on: bool) -> None:
 
 
 def set_moving(ctx, window: int) -> None:
-    """The moving average's window in timepoints; 0 (or 1) turns it off."""
-    _set(ctx, "moving", mvc.clamp_window(window))
+    """The moving average's window in timepoints; 0 (or 1) turns it off. Centred, an even window is taken one
+    down (``moving_compute.clamp_window``)."""
+    st = _state(ctx)
+    _set(ctx, "moving", mvc.clamp_window(window, bool(getattr(st, "moving_centred", False))))
+
+
+def set_moving_centred(ctx, centred: bool) -> None:
+    """Centre the moving average's window on each timepoint (``True``) or end it there (``False``). An even
+    window has no middle, so turning centring on takes it one down and says so."""
+    st = _state(ctx)
+    if st is None:
+        return
+    centred = bool(centred)
+    window = mvc.clamp_window(st.moving, centred)
+    if window != st.moving:
+        st.moving = window
+        ctx.notify.set_status((f"A centred window needs an odd number of timepoints: the moving average is now over "
+                      f"{window} timepoints." if window else
+                      "A centred window needs at least 3 timepoints: the moving average is off."))
+    _set(ctx, "moving_centred", centred)
 
 
 def set_baseline_moving(ctx, window: int) -> None:

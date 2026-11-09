@@ -6591,6 +6591,16 @@ the sentence names it.
   rather than averaged over fewer timepoints. With *Fixed cohort* ticked too, the cohort is chosen from the
   measured values and then averaged. The footer states the window.
 
+  The menu in place of the label chooses the kind of window. **Moving average** (the default) is the one above:
+  it ends at the timepoint, so no later timepoint — one that may already show a treatment — reaches it, but every
+  change is drawn about half a window late. **Centred average** puts the timepoint in the middle: the mean of it,
+  as many timepoints before it and as many after it, so the line does not lag. Only an odd window has a middle, so
+  a centred window is 3, 5, 7 or 9 (the box steps by two, and an even window is taken one down, which the status
+  line says); the first and last timepoints, without a full window around them, have no value, counted as
+  "before the first full moving window" and "after the last full moving window". For a fold change the centred
+  window must also start after the baseline. The *Baseline average* always looks back only. The footer says
+  which kind of window was used.
+
   A window longer than the series allows leaves nothing to draw — for example a window of 3 on a plate with
   two timepoints, a fold change whose baseline has fewer timepoints after it than the window, or *Along x:
   Wells* at the first timepoint. The figure then says so in place of the plot, with the reason and the longest
@@ -8116,8 +8126,9 @@ figure and an empty file.
 (Distribution, Array map, Trajectories or Position), tick the **Metrics**, and
 set **Along x**, **Baseline** (Earliest, First measurable or one of the dataset's
 timepoints), **Timepoint** (Latest, Earliest or one of the
-dataset's), **Fixed cohort**, **Moving average** and **Baseline average** as on the page — each greyed where
-it does not reach the view; the summary CSV's `moving_average` column gives the window each row used, and its
+dataset's), **Fixed cohort**, **Moving average** (with **Trailing** or **Centred**) and **Baseline average** as
+on the page — each greyed where it does not reach the view; the summary CSV's `moving_average` column gives the
+window each row used, its `moving_average_window` column whether it was trailing or centred, and its
 `baseline_moving_average` column the baseline's window (empty where none was used: the moving average off, a
 metric that is not a fold change, or the *Earliest* baseline). **Responding above** asks for a number for each ticked metric,
 filled in from the page's where you set one there, and the run will not start

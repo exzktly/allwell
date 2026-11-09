@@ -3339,7 +3339,10 @@ choice applies once, when the menu closes.
   neither, their ratio and the first class's share, each named with your labels.
   On any other dataset the title reads **Size classes, outlined in
   Segmentation** and the line under the rows says only that, since there are no
-  nanowells to count in.
+  nanowells to count in. To draw every plot from one class alone, pick it under
+  the Plotting row's **Population** (see *Population — one size class, or every
+  cell*); the line under the rows then says which class every plot is drawn
+  from.
 
   **Exclude fields the run flagged** sits under the debris gate and works on
   whole fields of view rather than on single cells. While a run processes a
@@ -4229,6 +4232,35 @@ across the whole window — picking a different channel re-renders every
 plot, every axis label, every threshold range, and every export against
 the new channel. Ratio channels (e.g. `GFP/MCHERRY`) defined under the
 Home → Ratios editor appear here as virtual channels.
+
+#### Population — one size class, or every cell
+
+Once two size classes are set on [Home → Cell Gating](#cell-gating) (for
+example *T cells* and *DCs*), the Plotting row offers **Population**: *All
+cells*, *T cells only* or *DCs only*. Picking a class restricts the whole
+analysis to it. Every cell plot, every statistic, the cell counts, the Fraction
+and Events above threshold, every fold change, and every export are then of that
+class alone. Comparing a count or a fold change between the classes is a matter
+of switching here. A cell is in a class when its area falls in the class's
+range — the same area the debris gate reads. Cells in neither range belong to
+neither population. A cell with no recorded area cannot be shown to be in a
+class, so it is left out too.
+
+Every cell figure says which population it was drawn from, in a line at its
+foot, for example *Population: T cells only (80–250 px; DCs and cells in neither
+class left out)*. The line is kept in a saved or exported copy of the figure. If
+a selected well's table has no cell-area column, the line names those wells,
+because none of their cells could be classed. The choice is saved with the
+dataset. It runs the same way as a Cell Gating edit, behind a progress window.
+Changing a class's range while that class is picked moves cells in or out of
+every number the same way. In the Segmentation view's **Why removed** overlay,
+the cells left out are outlined in turquoise as *not in the chosen size class*.
+The Cell Gating funnel lists them as *Outside the chosen size class*.
+
+The control is shown only while both classes are complete, and only on a plot
+drawing cells. On a nanowell dataset each nanowell's per-class counts still see
+both classes whichever population is picked. Restricting the plots to T cells
+leaves the DC count intact.
 
 #### Plate-map well picker
 

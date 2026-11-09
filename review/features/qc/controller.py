@@ -184,13 +184,47 @@ def _after_qc_params_applied(ctx) -> None:
     # without it, the page beside Cell Gating in Split View went on drawing under the previous rule.
     with swallow("Nanowells: follow the QC parameters"):
         ctx.features.call("nanowell.follow_qc_params", ctx)
+    # The Plotting band's Population picker lists the size classes' labels and is offered only while the rule is
+    # complete, so any QC edit — a renamed class, a range made incomplete — refreshes it.
+    with swallow("Plotting band: follow the size classes"):
+        from review.core.population_band import refresh as refresh_population
+
+        refresh_population(ctx)
 
 
 def only_size_classes_differ(params: QCParams, current: QCParams) -> bool:
-    """Whether *params* differs from *current* in the size classes alone (``QCParams.size_classes``)."""
+    """Whether *params* differs from *current* in the size classes alone (``QCParams.size_classes``), **and** the
+    analysis is restricted to no class under either: while it is (``QCParams.population_rule``), moving a class's
+    range moves cells in or out of every aggregate (``Population_Pass``), so the edit must take the full
+    re-projection rather than the light path."""
     from dataclasses import replace
 
+    if params.population_rule() is not None or current.population_rule() is not None:
+        return False
     return params != current and replace(params, size_classes=current.size_classes) == current
+
+
+def set_population(ctx, population: int | None) -> None:
+    """Restrict the whole analysis to size class *population* (its index in the rule), or to every cell (``None``).
+
+    The Plotting band's **Population** control calls this (``qc.set_population``). The choice is a QC parameter
+    (``QCParams.population``), so it is saved and restored with the rest of Cell Gating, and it is applied the way
+    every QC edit is: every verdict layer re-projected behind a progress popup — the one it moves is
+    ``Population_Pass`` (``review.data.population_gate``) — then the save and the redraw of every plot. The
+    Segmentation view, the Cell Gating panel and the band are refreshed once the pass is done, from the rows it
+    rewrote; the band itself follows from the redraw (``_after_qc_params_applied``)."""
+    from dataclasses import replace
+
+    current = get_qc_params(ctx)
+    if current.population == population:
+        return
+
+    def _after(_counts) -> None:
+        _redraw_segmentation(ctx, "follow the population")
+        with swallow("Cell Gating: follow the population"):
+            ctx.features.call("qc.refresh_gate_widgets", ctx.window)
+
+    set_qc_params_with_progress(ctx, replace(current, population=population), on_done=_after)
 
 
 #: The per-cell column prefix a gate drawn on a size-class metric reads (``observation.NANOWELL_CELL_PREFIX`` and
@@ -210,7 +244,8 @@ def set_size_classes(ctx, params: QCParams) -> None:
     """Install QC parameters that differ from those in force only in their size classes.
 
     The size classes are not an inclusion layer — they leave every cell in and only say which class a kept cell is
-    counted in — so no verdict column moves and the re-projection :func:`set_qc_params_with_progress` runs behind a
+    counted in — so, while the analysis is restricted to no class (:func:`only_size_classes_differ` sends any other
+    edit down the full path), no verdict column moves and the re-projection :func:`set_qc_params_with_progress` runs behind a
     progress popup would recompute every held well for nothing. The parameters go into state and are saved, and the
     surfaces that count by class are redrawn: the Nanowells page (``nanowell.follow_qc_params``) and the plots
     (``redraw_app``), whose nanowell rows are keyed on the rule (``nanowell.controller.gate_version``) and so are
@@ -230,11 +265,16 @@ def set_size_classes(ctx, params: QCParams) -> None:
         ctx.features.call("cell_gating.replot_cdfs", ctx)
     # The Segmentation view outlines each kept cell in its class's colour, so it is drawn again too — kept at the
     # zoom and pan the user had, since the field itself has not changed.
-    # Only when the view is built: the flag would otherwise outlive this edit and keep the zoom of the next field.
+    _redraw_segmentation(ctx, "outline the size classes")
+
+
+def _redraw_segmentation(ctx, why: str) -> None:
+    """Draw the Segmentation view again at the zoom and pan it had — the field itself has not changed. Only when
+    the view is built: the flag would otherwise outlive this edit and keep the zoom of the next field."""
     built = getattr(getattr(getattr(ctx, "runtime", None), "review_image", None), "label", None) is not None
     review_image = getattr(ctx.state, "review_image", None)
     if built and review_image is not None:
-        with swallow("Segmentation: outline the size classes"):
+        with swallow(f"Segmentation: {why}"):
             review_image.preserve_view_on_refresh = True
             ctx.features.call("review_image.refresh", ctx)
 

@@ -191,12 +191,16 @@ def left_out_positions(well: str, cells: pd.DataFrame, included) -> pd.DataFrame
 
 
 def tally(per_well, unread=(), fields=frozenset(), sizes=None) -> GateTally:
-    """One :class:`GateTally` from *per_well*, an iterable of ``(well, cells, included)``, where *included* leaves
-    out :data:`FIELD_LAYERS`; *fields* is :func:`excluded_fields`'s answer; *sizes* the size-class rule to count each
-    nanowell's kept cells by (``size_class_compute``), ``None`` for none."""
+    """One :class:`GateTally` from *per_well*, an iterable of ``(well, cells, included)`` or ``(well, cells, included,
+    class_included)``, where *included* leaves out :data:`FIELD_LAYERS` and *class_included* — the inclusion the
+    size-class counts read, *included* when not given — leaves out the Population layer too, so restricting the
+    analysis to one class leaves the other class's count intact; *fields* is :func:`excluded_fields`'s answer; *sizes*
+    the size-class rule to count each nanowell's kept cells by (``size_class_compute``), ``None`` for none."""
     found, positions, classes, classed, cells, excluded = [], [], [], set(), 0, 0
-    for well, frame, included in per_well:
-        counted = size_class_compute.well_counts(well, frame, included, sizes)
+    for entry in per_well:
+        well, frame, included = entry[:3]
+        class_included = entry[3] if len(entry) > 3 else included
+        counted = size_class_compute.well_counts(well, frame, class_included, sizes)
         if counted is not None:
             classed.add(str(well))
             if len(counted):

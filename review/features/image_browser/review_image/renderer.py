@@ -1269,6 +1269,7 @@ def _layer_inks():
         "touches the image border": theme.Colors.exclusion_border,
         "field excluded in QC triage": theme.Colors.ink_light,
         "field not in the FOV selection": theme.Colors.exclusion_fov,
+        "not in the chosen size class": theme.Colors.exclusion_population,
     }
 
 

@@ -203,7 +203,8 @@ def test_the_panel_names_the_outlines_and_not_nanowell_counts_on_a_plain_dataset
     plain, problem = status_text(RULE, params, [], nanowell=False)
     assert not problem
     assert plain == ("Each kept cell is classed as Large, Small or neither; the Segmentation view outlines Large in "
-                     "green and Small in blue.")
+                     "green and Small in blue. To draw every plot from Large or Small alone, pick it under "
+                     "Plotting ▸ Population.")
     assert "nanowell" not in status_text(SizeClassRule(), params, [], nanowell=False)[0]
     nanowell, _ = status_text(RULE, params, [], nanowell=True)
     assert nanowell.startswith("Each nanowell's kept cells are counted as Large, Small or neither")

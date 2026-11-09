@@ -1595,6 +1595,8 @@ review/
 │   ├── rail_plate.py                 ← the sidebar's one well-picker slot
 │   ├── observation_band.py           ← the Plotting band's Observations: Cells | Nanowells toggle,
 │   │                                    its nanowell Metric picker and the cell plots' footer (§6.2l)
+│   ├── population_band.py            ← the Plotting band's Population picker (all cells or one Cell
+│   │                                    Gating size class, §6.2j) and the footer line naming it
 │   ├── threshold_note.py             ← the sentence an unset, cut-nothing ON cutoff draws instead of bars
 │   └── ui_helpers.py, notifications.py, dnd.py
 ├── data/                          ← IO + decode
@@ -7377,7 +7379,7 @@ Multivariate's bands) arms a `LassoSelector` on every axes carrying
 `PlottedCells`, saves the cells inside (`save_lassoed`) and disarms. Saving
 changes no number: a set is used as the Cell Browser's source, and **one** set
 at a time may be excluded from analysis (`set_excluded`), projected by the
-registered `saved_cells_gate` projector as `Saved_Cells_Pass` (last in
+registered `saved_cells_gate` projector as `Saved_Cells_Pass` (in
 `VERDICT_LAYERS`; the column is dropped when nothing is excluded). One global
 slot rather than a verdict per set, because a verdict removes cells from every
 aggregate. The Cell Gating panel lists, renames, deletes and chooses the
@@ -12911,6 +12913,37 @@ names it by), so one class cannot take two colours. A cell in neither keeps the 
 types into the real boxes and reads the page's metrics, Metric menu, footer and CSV. `tests/test_size_class_outlines.py`
 sets a rule through `set_size_classes` on a built Segmentation panel and reads the redrawn pixels and key;
 `tests/test_nanowell_crop_size_classes.py` reads the crops' outline and dot colours and caption.
+
+**Restricting the analysis to one class — the Population layer.** `QCParams.population` holds a class index or
+`None`. While it names a class of a complete rule (`QCParams.population_rule`), the registered
+`review/data/population_gate.py` projector writes `Population_Pass` (last in `VERDICT_LAYERS`): 1 for a row in that
+class, judged on `size_classes.area_column`, and 0 for any other. A row with no area also gets 0, because it cannot be
+shown to be in the class. With no class chosen, or an incomplete rule, the column is dropped. Because it is a verdict
+at the chokepoint, every cell aggregate follows it without knowing it exists: means, Fraction and Events above
+threshold, `n_total`, fold change, statistics and exports. The per-cell CSV's `# inclusion:` line names it through
+`cell_scope_compute.OPTIONAL_VERDICT_COLUMNS`. It is chosen in the Plotting band (`review/core/population_band.py`,
+built beside the Observations toggle and refreshed from `observation_band._refresh`, so it follows leaf switches,
+loads and the toggle). That picker lists *All cells* and each label of a complete rule. It is shown only on a leaf
+that draws cells, and it applies through `qc.set_population`. That service sends `QCParams.population` down the
+ordinary QC route (`set_qc_params_with_progress`: every verdict re-projected behind the progress popup), then redraws
+Segmentation at its zoom and refills the Cell Gating panel. `_after_qc_params_applied` refreshes the picker after any
+QC edit, so a renamed or incomplete class updates it. While a class is chosen, `only_size_classes_differ` answers
+False, so a range edit takes the full re-projection — the layer moves with it — rather than the light
+`set_size_classes` path.
+
+Every cell figure names the population. `observation_band.stamp_cells_footer`, which all six Plotting leaves call,
+writes `population_band.population_line` on any dataset, above the nanowell line on a nanowell dataset. The line
+names any selected well whose held rows have no area column (`population_gate.unclassable_wells`). The funnel row is
+"Outside the chosen size class"; the overlay layer is "not in the chosen size class", in
+`Colors.exclusion_population` (turquoise, ΔE ≥ 39 to every other overlay ink and to both class inks).
+
+**The per-nanowell class counts ignore it.** `nanowell.controller.gate_tally` hands `cell_gate_compute.tally` a
+fourth element per well: the inclusion with `Population_Pass` also left out, which `size_class_compute.well_counts`
+reads. Restricting the plots to one class therefore never empties the other class's count. Cell Gating's area and
+fluorescence curves read only `QC_Pass` / `Crop_Pass` / `FOV_Pass` (`cell_gating.controller._VALIDITY_COLUMNS`), so
+they keep showing both classes. `tests/test_size_class_population.py` drives the band's picker in a minimal shell
+and reads the kept nucleus ids, the aggregate's `n_total` and the footer, and pins the full-path rule edit and the
+tally's fourth element.
 
 **The fixed cohort** (`distribution_compute.fixed_cohort`, `NanowellState.cohort`, the *Fixed cohort* box on
 *Distribution* and *Trajectories*). Off, the median at each timepoint is over whichever nanowells could be

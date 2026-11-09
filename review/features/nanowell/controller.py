@@ -515,6 +515,7 @@ def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True,
     the one in force (:func:`size_rule`). A caller on a worker passes the rule it read on the GUI thread, with the
     version it stamps."""
     from review.data.data_loading import df_included_mask, get_rows
+    from review.data.population_gate import POPULATION_COLUMN
 
     sizes = size_rule(ctx) if sizes is None else sizes
 
@@ -547,7 +548,10 @@ def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True,
             # page already draws as an ``out_of_focus`` gap, so counting them again here would only make the note
             # say Cell Gating left them out, which it did not.
             skipped = (*cg.FIELD_LAYERS, rfc.NW_FOCUS_PASS_COLUMN, *(() if scatter_gates else ("Gate_Pass",)))
-            per_well.append((well, frame, df_included_mask(frame, except_layers=skipped).to_numpy()))
+            # The size-class counts read the same inclusion without the Population layer: restricting the analysis
+            # to one class must not empty the other class's count, which is the comparison the classes exist for.
+            per_well.append((well, frame, df_included_mask(frame, except_layers=skipped).to_numpy(),
+                             df_included_mask(frame, except_layers=(*skipped, POPULATION_COLUMN)).to_numpy()))
     if on_well is not None:
         on_well(total, total)
     return cg.tally(per_well, unread, fields, sizes)

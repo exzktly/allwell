@@ -225,6 +225,9 @@ def build_centre(win, parent: QWidget) -> None:
         # First in the row: Observations (cells | nanowells) changes what every other control lists.
         from review.core.observation_band import build_observation_controls
         build_observation_controls(win._ctx, band)
+        # Beside it: Population (all cells, or one Cell Gating size class) — what every cell plot is drawn from.
+        from review.core.population_band import build_population_controls
+        build_population_controls(win._ctx, band)
 
         # The Scatter sub-tab's two modes. It lives in the band's scope zone
         # rather than as a tab bar inside the Scatter page: the page then holds

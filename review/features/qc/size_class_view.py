@@ -168,6 +168,12 @@ def status_text(rule: SizeClassRule, params, pixels: list[float], *, nanowell: b
                 f"offer the counts, the ratio and the share, and {outlined}, as do the nanowell crops.")
     else:
         said = f"Each kept cell is classed as {a}, {b} or neither; {outlined}."
+    population = params.population_label() if callable(getattr(params, "population_label", None)) else ""
+    if population:
+        said += (f" Every plot is drawn from {population} only (Plotting ▸ Population); the other class and the cells "
+                 "in neither are left out of every number.")
+    else:
+        said += f" To draw every plot from {a} or {b} alone, pick it under Plotting ▸ Population."
     clipped = clipped_by_gate(rule, params.min_area if params.enabled else None,
                               params.max_area if params.enabled else None)
     if clipped:

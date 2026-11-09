@@ -265,6 +265,7 @@ EXCLUSION_LAYERS = (
     ("Excluded_Field_Pass", "field excluded in QC triage"),
     ("FOV_Pass", "field not in the FOV selection"),
     ("Saved_Cells_Pass", "in the excluded saved cells"),
+    ("Population_Pass", "not in the chosen size class"),
 )
 
 

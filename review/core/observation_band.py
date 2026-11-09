@@ -150,6 +150,11 @@ def _refresh(ctx, title: str) -> None:
             grp.setVisible(cells_scope)
     if band_metric:
         populate_metric_picker(ctx)
+    # The Population picker follows the same moments (a leaf switch, a load, this toggle): it is offered on a leaf
+    # that draws cells.
+    from review.core.population_band import refresh as refresh_population
+
+    refresh_population(ctx, title)
 
 
 def refresh_current(ctx) -> None:
@@ -182,26 +187,36 @@ def write_footer(fig, text: str, muted) -> None:
 
 
 def stamp_cells_footer(ctx, fig, wells=None) -> str:
-    """On a nanowell dataset, write the cell plot's footer onto *fig* (and return it); ``""`` elsewhere.
+    """Write the cell plot's footer onto *fig* (and return it) when it has something to say; ``""`` otherwise.
 
-    "Observations: cells · pooled from N occupied nanowells per well", plus "· nanowell views are not in this
-    build" when the build has no Nanowells feature — so a cell plot of a nanowell plate never reads as an ordinary
-    one, in any build, on screen or exported. The previous footer is removed first; a redraw writes one line.
+    Two lines can be said. While the analysis is restricted to one Cell Gating size class, on any dataset, the
+    population it is drawn from (``population_band.population_line``) — so a plot of T cells alone never reads as a
+    plot of every cell. On a nanowell dataset, "Observations: cells · pooled from N occupied nanowells per well",
+    plus "· nanowell views are not in this build" when the build has no Nanowells feature — so a cell plot of a
+    nanowell plate never reads as an ordinary one, in any build, on screen or exported. The previous footer is
+    removed first; a redraw writes it once.
     """
     from review.data.observations import is_nanowell_dataset, nanowell_views_available, occupied_nanowells_by_well
     from review.domain.observation import pooled_cells_line
 
+    from review.core.population_band import population_line
+
     for text in [t for t in getattr(fig, "texts", []) if t.get_gid() == FOOTER_GID]:
         text.remove()
-    if fig is None or not is_nanowell_dataset(ctx):
+    population = population_line(ctx) if fig is not None else ""
+    if fig is None or (not is_nanowell_dataset(ctx) and not population):
         if fig is not None:
             from review.core.plot_style import keep_panels_clear_of_footer
 
             keep_panels_clear_of_footer(fig)   # the footer just removed gives its room back
         return ""
-    if wells is None:
-        wells = getattr(getattr(ctx.state, "selection", None), "selected_wells", None) or ()
-    line = pooled_cells_line(occupied_nanowells_by_well(ctx, wells), nanowell_views=nanowell_views_available(ctx))
+    lines = [population] if population else []
+    if is_nanowell_dataset(ctx):
+        if wells is None:
+            wells = getattr(getattr(ctx.state, "selection", None), "selected_wells", None) or ()
+        lines.append(pooled_cells_line(occupied_nanowells_by_well(ctx, wells),
+                                       nanowell_views=nanowell_views_available(ctx)))
+    line = "\n".join(lines)
     from review.core.plot_style import tokens_for
 
     axes = getattr(fig, "axes", [])

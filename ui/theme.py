@@ -233,6 +233,12 @@ class Colors:
     # the focused-cell yellow, ΔE 151 to each other; relative luminance 0.72 and 0.28 (the overlay's floor).
     size_class_1      = "#11FF00"
     size_class_2      = "#1199DD"
+    # Segmentation overlay: a cell outside the size class the analysis is restricted to (Population_Pass, the
+    # Plotting band's Population). Turquoise: of the hues that are not green — green is the first class's own ink,
+    # and a removed cell must not read as one of its members — the one furthest from everything else drawn:
+    # measured CIE76 ΔE ≥ 39 to every other overlay ink, to the kept and focused outlines and to both class inks;
+    # relative luminance 0.77.
+    exclusion_population = "#00FFDD"
     # One cell shown on its own (the Scatter cell popup): its boundary, the
     # Segmentation overlay's default boundary ink so a cell reads the same in
     # both. And the focused cell — the one the status-bar chip names — ringed

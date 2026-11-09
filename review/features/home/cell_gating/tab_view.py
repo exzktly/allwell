@@ -471,9 +471,8 @@ def _build_readout_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
     funnel.setWordWrap(True)
     funnel.setToolTip(
         "Each inclusion layer applied on top of the ones above it, in the order "
-        "the app composes them. Manual curation and the intensity gate share "
-        "one line because they write the same column and cannot be separated "
-        "from the data.")
+        "the app composes them: the intensity gate and cells deleted by hand "
+        "are separate steps, each with what it removed.")
     layout.addWidget(funnel)
 
     count = ctx.widgets.register("_cell_gating_included_count", QLabel("", frame))

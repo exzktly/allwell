@@ -62,9 +62,11 @@ def _give_cells_hours(out: Path) -> None:
         frame.to_csv(path, index=False)
 
 
-def image_plate(root: Path) -> Path:
+def image_plate(root: Path, *, size: int = 64,
+                boxes=((10, 24, 10, 24), (36, 54, 30, 50))) -> Path:
     """Two wells × DAPI/GFP, one field, real TIFFs in the pipeline's in/out layout — enough for the Image
-    Table to draw a grid. Returns *root*; the dataset Review loads is ``root / "out"``."""
+    Table to draw a grid. Returns *root*; the dataset Review loads is ``root / "out"``. *size* is the field's
+    side in pixels and *boxes* the cells' ``(y0, y1, x0, x1)``, nucleus 1 first."""
     import numpy as np
     import pytest
 
@@ -83,9 +85,9 @@ def image_plate(root: Path) -> Path:
             "nuclear_token": "dapi", "fluor_tokens": ["dapi", "gfp"],
             "available_timepoints": ["0h"], "available_fovs": ["F001"]}
     (root / "out" / "pipeline_info.json").write_text(json.dumps(info))
-    lab = np.zeros((64, 64), np.int32)
-    lab[10:24, 10:24] = 1
-    lab[36:54, 30:50] = 2
+    lab = np.zeros((size, size), np.int32)
+    for i, (y0, y1, x0, x1) in enumerate(boxes, start=1):
+        lab[y0:y1, x0:x1] = i
     for well in ("A01", "A02"):
         rows = []
         with zipfile.ZipFile(root / "in" / f"{well}.zip", "w") as zin, \
@@ -96,7 +98,7 @@ def image_plate(root: Path) -> Path:
                 zin.writestr(stem + ".tif", tif(img))
                 zout.writestr(stem + "_tophat.tif", tif(img))
             zout.writestr(f"exp_DAPI_{well}_F001_0h_labels.tif", tif(lab))
-        for i in (1, 2):
+        for i in range(1, len(boxes) + 1):
             rows.append({"filename": f"exp_DAPI_{well}_F001_0h.tif", "experiment": "exp",
                          "channel": "dapi", "well": well, "fov": "F001",
                          "timepoint": "0h", "timepoint_hours": 0.0, "nucleus_id": i,

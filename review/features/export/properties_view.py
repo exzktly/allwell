@@ -130,8 +130,8 @@ _PER_AXIS_FONT_KEYS = ("tick_label_size", "axis_label_size", "title_size")
 # These share the font keys' semantics (per-axis bucket overriding a shared
 # global baseline, "All" resets), so the whole Axes section is scoped by "Axis #"
 # instead of a subset silently applying to every panel. ``apply_export_style_prefs``
-# reads each of these per-axis (via ``_axis_style``); the bar renderer reads
-# ``group_label_size`` per-axis via ``axis_scoped_value``.
+# reads each of these per-axis (via ``_axis_style``), ``group_label_size``
+# included: it sizes the labels the bar renderer marks with ``mark_group_label``.
 _PER_AXIS_STYLE_KEYS = (
     *_PER_AXIS_FONT_KEYS,
     "x_tick_angle", "group_label_size",

@@ -73,7 +73,14 @@ def show_in_segmentation(ctx, well: str, fov: str, timepoint: str,
         # centring reads the canvas viewport's size, and a viewport that has not
         # been laid out yet reports a sliver, which centred the cell for a
         # 100-pixel window and left it off-screen in the real one.
-        zoom_review_image_to_selected_nucleus_ctx(ctx)
+        if not zoom_review_image_to_selected_nucleus_ctx(ctx):
+            # The field opened but the cell is not outlined in it — its tokens
+            # name a field other than the one shown, or the field's label
+            # image has no such nucleus. Said, because a field with no yellow
+            # outline and no zoom looks exactly like a jump that did nothing.
+            ctx.notify.set_status(
+                f"Opened {well} · {fov} · {timepoint}, but cell #{selected.nucleus_id} is not "
+                f"in the segmentation shown, so it is not outlined.")
         from PySide6.QtCore import QTimer
 
         def _recentre(cell=selected):

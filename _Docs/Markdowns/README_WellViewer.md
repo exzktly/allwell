@@ -4489,6 +4489,12 @@ The **Axis #** picker opens on **All**, on every plot: a change applies to every
 panel of the figure until you pick one axis from the list or click a subplot.
 Limits you set earlier on one axis stay on that axis.
 
+On Bar Plots, **Group label size** sizes every label that names a group of bars:
+the sample under each block of timepoint bars, and the *Split by* / *Then by*
+band labels above each panel (the inner, *Then by* row one point smaller). The
+plot changes as you type, and the rows above a panel and its title move up to
+make room for a larger size.
+
 #### Bar colours — Plate or Grey
 
 The Bar Plots tab's Properties sidebar carries a **Colours** section with two
@@ -7142,9 +7148,13 @@ reviewing and curating individual cells.
 **The focused cell.** Clicking a nucleus here, a point on the per-cell Scatter
 plot, a cell in the Cell Browser or a row in Review CSV makes that cell the
 *focused cell*. The status bar names it — `● A02 · F001 · 24h · #28 ✕` — on
-every page: click the name to come back to it here, outlined and centred, or ✕
-to let it go. Segmentation outlines it in yellow whenever its field is on
-screen, and the Scatter plot rings its point. Opening another dataset clears it.
+every page: click the name to come back to it here, or ✕ to let it go.
+**Show in Segmentation** — from the chip, the Scatter cell popup or the Cell
+Browser — opens the cell's field zoomed in so the cell fills about 40% of the
+view, centred. Segmentation outlines the focused cell in yellow, twice as thick
+as the red round the other cells, whenever its field is on screen, and the
+Scatter plot rings its point. If the field opens but the cell is not in its
+segmentation, the status line says so. Opening another dataset clears it.
 
 - **Needs** — a loaded well with image ZIPs; pick the FOV / timepoint / channel
   from the in-tab pickers.

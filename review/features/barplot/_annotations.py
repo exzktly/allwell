@@ -26,6 +26,7 @@ from review.features.barplot._baseline_ratio import p_text
 from review.features.barplot._decorate import bar_legend_entries
 from review.features.barplot.collect import cluster_centers, subcluster_centers
 from core.safe import swallowed
+from review.core.plot_style import GROUP_ROW_GAP_PT, group_header_pad
 from review.domain.numeric import is_number
 
 
@@ -64,12 +65,14 @@ def user_y_ceiling(ctx, ax) -> float | None:
 
 
 #: How far above the sub-band row the band row sits, in points, when a second
-#: split level is on. One 8 pt line plus a little air.
-_BAND_ROW_LIFT_PT = 11
+#: split level is on: one sub-band line (7 pt at the default Group label size)
+#: plus a little air. The style pass recomputes it from the size it gives the
+#: labels (``plot_style._style_group_labels``).
+_BAND_ROW_LIFT_PT = 7 + GROUP_ROW_GAP_PT
 
-#: A bar panel's title pad, in points, for none / one / two header rows.
-#: The standard pad is ``apply_ax_style``'s; each header row adds a line.
-_TITLE_PAD_PT = (6, 18, 30)
+#: A bar panel's title pad, in points, for none / one / two header rows at the
+#: default Group label size; the style pass pads again for the size it applies.
+_TITLE_PAD_PT = tuple(group_header_pad(rows) for rows in range(3))
 
 
 def cluster_header_pad(items) -> int:
@@ -98,20 +101,24 @@ def annotate_cluster_headers(items, xs: list[float], ax) -> None:
     """
     if not items or not xs:
         return
-    from review.core.plot_style import follows_theme, tokens_for
+    from review.core.plot_style import (
+        follows_theme, mark_group_header_rows, mark_group_label, tokens_for,
+    )
     _fg, _muted = tokens_for(ax)[1], tokens_for(ax)[2]
     subs = list(subcluster_centers(items, xs))
     lift = _BAND_ROW_LIFT_PT if subs else 0
-    for gk, cx in cluster_centers(items, xs):
-        follows_theme(ax.annotate(
+    bands = list(cluster_centers(items, xs))
+    for gk, cx in bands:
+        mark_group_label(follows_theme(ax.annotate(
             gk, xy=(cx, 1.02), xycoords=ax.get_xaxis_transform(),
             xytext=(0, lift), textcoords="offset points",
             ha="center", va="bottom", fontsize=8, fontweight="bold",
-            color=_fg, annotation_clip=False))
+            color=_fg, annotation_clip=False)), lifted=bool(subs))
     for sub, cx in subs:
-        follows_theme(ax.text(cx, 1.02, sub, transform=ax.get_xaxis_transform(),
-                              ha="center", va="bottom", fontsize=7,
-                              color=_muted), muted=True)
+        mark_group_label(follows_theme(ax.text(cx, 1.02, sub, transform=ax.get_xaxis_transform(),
+                                               ha="center", va="bottom", fontsize=7,
+                                               color=_muted), muted=True), offset=-1)
+    mark_group_header_rows(ax, (1 if bands else 0) + (1 if subs else 0))
 
 
 def mark_undefined_spread(ax, x: float, y: float, color: str) -> None:

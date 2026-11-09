@@ -37,7 +37,8 @@ _FEATURES = REPO_ROOT / "review/features"
 #: uses to read it — the field itself, or the one helper every reader goes through.
 _READ_BY = {
     "bar_show_mode": {"bar_show_mode"},
-    "group_labels": {"group_label_size"},
+    # The style pass sizes the labels a renderer marks, so marking one is how a package's figure reads the size.
+    "group_labels": {"group_label_size", "mark_group_label"},
     "threshold_line": {"show_threshold_line"},
     "value_labels": {"show_value_labels", "value_label_settings"},
     "time_axis": {"time_scale", "time_offset", "rescale_for", "apply_time_rescale"},

@@ -41,10 +41,17 @@ def available_observations(ctx) -> tuple[str, ...]:
     return (CELLS,)
 
 
-def nanowell_observations(ctx, wells) -> ObservationTable | None:
-    """The nanowell rows of *wells*, or ``None`` when this build or this dataset has none."""
+def nanowell_observations(ctx, wells, *, page_scope: bool = False) -> ObservationTable | None:
+    """The nanowell rows of *wells*, or ``None`` when this build or this dataset has none.
+
+    *page_scope* keeps only the nanowells the Nanowells page itself draws — its excluded wells left out, its Subset
+    applied, its Fixed cohort carried on the table — so a plot and the page agree on which nanowells they are about.
+    The Scatter Plot's nanowell scatter asks for it; the default is every nanowell."""
     if not is_nanowell_dataset(ctx):
         return None
+    if page_scope:
+        return ctx.features.query("observations.nanowell", ctx, list(wells), page_scope=True,  # NANOWELL_SERVICE
+                                  default=None)
     return ctx.features.query("observations.nanowell", ctx, list(wells), default=None)   # NANOWELL_SERVICE
 
 

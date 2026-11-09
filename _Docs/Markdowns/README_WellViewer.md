@@ -6674,8 +6674,17 @@ the sentence names it.
   at no change (1×, or 0 on log₂).
 - Text on this page is drawn at a share of the **Properties** font sizes, scaled to the size of a panel, so a
   grid of wells stays legible; raising a size in Properties still raises it here.
-- A replicate set of more than four wells is drawn as one density per well, with its median, instead of dots;
-  select fewer wells to see (and click) single nanowells — or draw a window (below), which reaches them anyway.
+- **Show** (Auto / Beeswarm / Violin), on the band's third row, chooses how each well's nanowells are drawn.
+  **Auto** draws dots while a column holds four wells or fewer, and past that one violin per well, with its
+  median (or mean, for a metric averaged per well), since a slot shared by many wells is too narrow for readable
+  dots. **Beeswarm** always draws dots — a crowded slot draws what fits and writes "+N" under it for the rest —
+  and **Violin** always draws violins. Single nanowells can be clicked only where dots are drawn; a window (below)
+  reaches them anyway, and the footer says when violins stand in for dots.
+- **Smoothing** sets how smooth the violins are: their kernel bandwidth as a multiple of the automatic one
+  (Scott's rule), from 0.25× to 3.00×. 1.00× is the automatic bandwidth; lower follows the data more closely and
+  shows separate clusters, higher merges them. The figure redraws when the slider is let go, and the footer
+  states any setting other than 1.00×. Greyed under Beeswarm, which draws no violins. Show and Smoothing are kept
+  with the page's settings, and Batch Export's Nanowells mode draws its Distribution figures with them.
 - **Nothing without a number is drawn, and nothing is dropped silently.** Under each swarm, "excl. N" counts
   the nanowells that have no value there, and the footer lists them by reason: occluded, clipped, no address,
   not located, fused (no count), empty at baseline, no cells at baseline (none at the baseline, cells later), and so on.

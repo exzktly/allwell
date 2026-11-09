@@ -266,7 +266,7 @@ def test_a_set_of_more_than_four_wells_is_drawn_as_densities_and_says_so(tmp_pat
     hits = render_distribution(fig, model)
     assert not hits.entries                                      # no dots to click: densities
     assert any(c.get_gid() == "nw-density" for c in fig.axes[0].collections)
-    assert any("drawn as densities" in t.get_text() for t in fig.texts)
+    assert any("drawn as violins" in t.get_text() for t in fig.texts)
 
 
 def test_the_comparison_to_control_keeps_three_significant_figures():

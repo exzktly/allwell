@@ -174,3 +174,41 @@ def test_along_wells_a_window_across_two_neighbouring_groups_keeps_the_nanowells
         result = wc.members(model, window)
         assert sorted(result.sites()) == [("A01", 1, 0), ("A02", 0, 0), ("B01", 0, 0)]
         assert (result.n_every, result.n_any) == (3, 3)
+
+
+# ── a window of several boxes (Shift-drag) ───────────────────────────────────
+def _two_boxes():
+    """A box over T0 at 2.4-3.1 (A01's nanowells 1 and 2, and B01's 0) with, added to it, a box over T2 at 0.9-1.1
+    (A01's nanowell 0 alone): the boxes share no nanowell, so a window that kept only the newest box, or only what
+    both hold, would hold one nanowell or none."""
+    first = _w(keys=("T0",), lo=2.4, hi=3.1, rule="any", panel="A01")
+    return first.added(_w(keys=("T2",), lo=0.9, hi=1.1, panel="A01"))
+
+
+def test_a_window_of_two_boxes_holds_the_union_of_their_members():
+    window = _two_boxes()
+    assert (window.keys, window.lo, window.hi) == (("T2",), 0.9, 1.1)          # the newest box is the window's own
+    assert [b.keys for b in window.boxes()] == [("T2",), ("T0",)] and window.all_keys() == ("T2", "T0")
+    result = wc.members(_time_model(), window)
+    assert set(result.sites()) == {("A01", 0, 0), ("A01", 1, 0), ("A01", 2, 0), ("B01", 0, 0)}
+    assert window.rule == "any"                          # the window's rule and panel choice are kept from the first
+    bands = sorted((round(x0, 3), lo, hi) for x0, _x1, lo, hi in result.bands[0])
+    assert bands == [(-0.5, 2.4, 3.1), (1.5, 0.9, 1.1)]                      # one band per box, its own range
+
+
+def test_a_carried_nanowell_is_a_member_whatever_the_boxes_hold():
+    window = replace(_two_boxes(), carried=(("A02", 5, 0),))
+    result = wc.members(_time_model(), window)
+    assert ("A02", 5, 0) in result.sites() and len(result.rows) == 5          # in no box, and no value on this model
+    assert math.isnan(result.rows[result.sites().index(("A02", 5, 0))].value)
+    assert "+ 1 more box" in wc.label_text(window, result, {}, "time")
+    assert "+ 1 kept from the earlier window" in wc.label_text(window, result, {}, "time")
+
+
+def test_a_window_of_several_boxes_round_trips_and_a_bad_box_drops_it():
+    window = replace(_two_boxes(), carried=(("A02", 5, 0),))
+    assert DistributionWindow.from_config(window.to_config()) == window
+    block = window.to_config()
+    assert DistributionWindow.from_config({**block, "more": [{"lo": 1}]}) is None
+    assert DistributionWindow.from_config({**block, "carried": [["A02", "x", 0]]}) is None
+    assert "more" not in _w().to_config() and "carried" not in _w().to_config()   # a one-box window saves as before

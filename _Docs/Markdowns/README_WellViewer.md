@@ -5673,6 +5673,10 @@ takes its own nanowell's value at its timepoint, so you can plot a cell's GFP
 against how crowded its nanowell is. A cell with no nanowell address has no value
 there and is not drawn.
 
+Each axis dropdown keeps one width whatever is chosen in it — as wide as its
+longest entry — so the row does not shift as you change metrics, and its list
+opens wide enough to read every entry in full.
+
 The Channel, Property and ON cutoff controls that the other plot tabs share
 disappear from the controls row here, and the Points toggle takes their place.
 That is because this tab picks its channels per axis, from the X-axis and
@@ -6450,7 +6454,14 @@ the sentence names it.
     timepoint like a metric: *no* *at every timepoint* leaves out every nanowell that was ever on a seam; *yes*
     *at any timepoint* keeps only those. Datasets analysed before seam nanowells were counted have them with no
     count;
-  - **the nanowell's state at a timepoint** — seven more *yes* / *no* properties, read at a timepoint the same way,
+  - **identity verdict** — the identity check's verdict on the nanowell's timepoint, *is one of* or *is not one of*
+    the verdicts you tick: *confirmed*, *reference* (the timepoint the others are compared with), *partial* (most
+    nanowells confirmed, some left out), *inconclusive* (the check could not decide — for one, the array's fitted
+    rim centre disagreed with where the central square placed it), *contradicted*, or *not checked*. Read at a
+    timepoint like a metric. The verdict belongs to the whole timepoint of the well, so every nanowell there shares
+    it; *Identity contradicted* below is the answer for the nanowell itself. **Identity verdict · at every timepoint
+    · is one of confirmed, reference** keeps only wells whose every timepoint the check confirmed;
+  - **the nanowell's state at a timepoint** — eight more *yes* / *no* properties, read at a timepoint the same way,
     and each independent of the others (a nanowell in a field you left out is still *found by the run* if the run
     found it):
     - *Found by the run* — the run recorded the nanowell at that timepoint. **Found by the run · at every
@@ -6459,6 +6470,9 @@ the sentence names it.
     - *Timepoint not addressed* — the run could not address that timepoint of the well at all, so every nanowell
       in it is unfound. Add *Timepoint not addressed · at every timepoint · no* to tell a single lost nanowell
       apart from a whole timepoint that failed.
+    - *Array rim fitted* — the run fitted a circle to the outer edge of the well's nanowell array at that timepoint
+      (it locates the array's centre from it). *No* when no circle could be fitted, and always for an array whose
+      outline is not a circle; no value for a timepoint the run could not place a lattice in at all.
     - *Identity contradicted* — the identity check found that the nanowell's address at that timepoint may name
       a different nanowell (a contradicted timepoint, or a nanowell a partial check left out).
     - *Occluded or clipped* — found, but its contents could not be measured.
@@ -6659,13 +6673,19 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   already applied. When one of them changes after the window was drawn, the strip says which, and how the count moved.
 - There is one window per metric and axis, kept with the page's settings. Another metric or axis hides it; coming back
   shows it again.
+- **Hold Shift while dragging to add a box to the window** instead of replacing it, so one window can hold separate
+  regions — say the high tail of one well and the low tail of another, or two ranges in one column. Each box draws its
+  own band, a nanowell inside any box is a member, and the strip says how many more boxes the window holds. Low and
+  High edit the newest box; *every | any timepoint* and **This panel only** apply to them all.
 - **Open in pop-out** shows the nanowells inside the window in the pop-out (see *Nanowell crops*).
 - **Use as Subset** keeps only the nanowells inside the window: they are added to the page's **Subset** as a
   condition, *Distribution window: inside “Window 1” (N nanowells)*, applied at once, so the Distribution — and every view
   the Subset governs — loses the others. The window is then cleared. **The Subset holds one window at a time**: drawing
   another box takes the earlier window out of the Subset first (the status bar says so), so the new box selects from
-  every nanowell rather than from what the last one kept, and pressing the button again replaces it. Your other Subset
-  conditions stay. The list of nanowells is frozen when you press the button; it does not follow
+  every nanowell rather than from what the last one kept, and pressing the button again replaces it. **Hold Shift**
+  while drawing that box to keep the earlier window's nanowells as well: they are carried into the new window (the
+  strip counts them as *kept from the earlier window*), so pressing **Use as Subset** again keeps both regions. Repeat
+  to build a Subset from as many separate regions as you need. Your other Subset conditions stay. The list of nanowells is frozen when you press the button; it does not follow
   the window afterwards. It cannot narrow a Subset that keeps nanowells meeting *any* of several conditions — the strip
   says so; set the Subset to *all* first. The Subset's editor lists each window as a row you can switch between
   *inside* and *outside* or remove (**×**, then **Apply**), which brings the other nanowells back.

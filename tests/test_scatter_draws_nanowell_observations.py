@@ -134,3 +134,38 @@ def test_a_cell_can_be_set_against_its_own_nanowell_s_metric(scatter_ctx):
     want = sorted((GFP[w][i], float(n)) for w in COUNTS for i, n in enumerate(COUNTS[w]["24h"]) for _ in range(n))
     assert got == want
     assert scatter_ctx.widgets.get("_ax_scatter").get_ylabel().startswith("Nanowell ▸ Cell count")
+
+
+# Asked for: "Dropdown selectors for metric to show on scatter plots is set at the width of whatever is currently
+# selected, making the text in the dropdown truncated … the width of the dropdown box when not currently clicked
+# should be a fixed width and not change with selection".
+_AXIS_PICKERS = ("_scatter_cells_nw_x_cb", "_scatter_cells_nw_y_cb", "_scatter_aggregate_nw_x_cb",
+                 "_scatter_aggregate_nw_y_cb", "_scatter_ch_x_cb", "_scatter_metric_x_cb", "_scatter_ch_y_cb",
+                 "_scatter_metric_y_cb", "_scatter_agg_ch_x_cb", "_scatter_agg_metric_x_cb", "_scatter_agg_ch_y_cb",
+                 "_scatter_agg_metric_y_cb")
+
+
+def test_every_scatter_axis_picker_keeps_one_width_whatever_is_chosen(scatter_ctx):
+    from review.features.scatter.controller import redraw_scatter_orchestrate
+
+    scatter_ctx.state.plot.observations = NANOWELLS
+    redraw_scatter_orchestrate(scatter_ctx)                 # fills the nanowell pickers from the dataset's metrics
+    from review.features.scatter import _observations
+    _observations.redraw(scatter_ctx, "aggregate")          # … and the Wells page's, on its own redraw
+    for name in _AXIS_PICKERS:
+        combo = scatter_ctx.widgets.get(name)
+        assert combo.count() > 1, name
+        widths = set()
+        for i in range(combo.count()):
+            combo.setCurrentIndex(i)
+            widths.add(combo.sizeHint().width())
+        assert len(widths) == 1, (name, sorted(widths))
+
+
+def test_a_scatter_property_picker_refits_when_its_entries_change(scatter_ctx):
+    """A picker sized once at first show would keep that width when a channel change refills it with longer
+    entries, cutting them off: it is sized to the entries it holds now."""
+    combo = scatter_ctx.widgets.get("_scatter_metric_x_cb")
+    before = combo.sizeHint().width()
+    combo.addItem("A property label far longer than any of the entries it was first given")
+    assert combo.sizeHint().width() > before

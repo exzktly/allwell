@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from matplotlib.patches import Rectangle
 
-from review.features.nanowell import window_compute as wc
 from review.features.nanowell.renderer import DOT_PT
 
 BAND_GID, RING_GID, DRAG_GID = "nw-window-band", "nw-window-ring", "nw-window-drag"
@@ -16,17 +15,21 @@ def draw_window(hits, window, result) -> None:
     from ui.theme import Colors
 
     members = set(result.sites())
+    carried = set(window.carried)
     by_panel = dict(hits.panels)
     for ax, index in hits.panels:
-        # One band per covered slot: the swarms the window was drawn around, not the whole columns they sit in.
-        for lo, hi in wc.merged_spans(result.spans.get(index, [])):
-            ax.add_patch(Rectangle((lo, window.lo), hi - lo, window.hi - window.lo,
+        # One band per run of covered slots of each box: the swarms the box was drawn around, not the whole columns
+        # they sit in. A Shift-drawn window draws a band for every box it holds.
+        for x0, x1, lo, hi in result.bands.get(index, []):
+            ax.add_patch(Rectangle((x0, lo), x1 - x0, hi - lo,
                                    facecolor=Colors.accent, alpha=0.12, edgecolor=Colors.accent, linewidth=1.0,
                                    zorder=1.5, gid=BAND_GID))
     for (ax, xs, ys, sites), values in zip(hits.entries, hits.values):
-        spans = result.spans.get(by_panel.get(ax), [])
+        bands = result.bands.get(by_panel.get(ax), [])
+        # A member's dot is ringed where a box holds it; a carried nanowell is a member wherever its dot is.
         keep = [k for k, (x, s, v) in enumerate(zip(xs, sites, values))
-                if tuple(s) in members and wc.in_spans(float(x), spans) and window.lo <= v <= window.hi]
+                if tuple(s) in members and (tuple(s) in carried
+                                            or any(x0 <= float(x) <= x1 and lo <= v <= hi for x0, x1, lo, hi in bands))]
         if keep:
             ax.scatter([xs[k] for k in keep], [ys[k] for k in keep], s=(DOT_PT * 2.0) ** 2, facecolors="none",
                        edgecolors=Colors.accent, linewidths=1.0, zorder=4).set_gid(RING_GID)

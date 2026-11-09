@@ -117,12 +117,24 @@ def _grid_reason(block) -> str:
     return "the grid record lists this timepoint but the table has no rows for it"
 
 
+def _rim_fitted(block) -> bool | None:
+    """Whether the run fitted a circular rim to the well's array at a timepoint, from its grid record, or ``None``
+    when the record does not say. ``array_boundary`` is ``{"centre_um", "radius_um"}`` when a circle was fitted
+    (``pipeline.nanowell_lattice.fit_array_boundary``, or the inferred circle of a contrast run) and ``null`` when
+    none was — no circle with 120 degrees of arc, or an array whose outline is not a circle. A timepoint refused
+    before its lattice was placed writes no ``array_boundary`` at all, and was never asked: no value, never "no"."""
+    if not isinstance(block, dict) or "array_boundary" not in block:
+        return None
+    boundary = block["array_boundary"]
+    return isinstance(boundary, dict) and boundary.get("radius_um") is not None
+
+
 def _addressed_grid(data: NanowellData) -> pd.DataFrame:
     """Every addressed nanowell of each well at every timepoint of that well, with a state for each row."""
     sites = data.sites
     empty = sites.iloc[0:0].assign(reason=pd.Series(dtype=object), tp_order=pd.Series(dtype=int),
                                    identity=pd.Series(dtype=object), identity_reason=pd.Series(dtype=object),
-                                   identity_ok=pd.Series(dtype=bool))
+                                   identity_ok=pd.Series(dtype=bool), rim_fitted=pd.Series(dtype=object))
     if not len(sites):
         return empty
     located = sites[["well", "timepoint"]].drop_duplicates()
@@ -152,6 +164,8 @@ def _addressed_grid(data: NanowellData) -> pd.DataFrame:
     merged["reason"] = ""
     merged.loc[explained, "reason"] = [reasons.get(k) or _grid_reason(None) for k in here[explained.to_numpy()]]
     _mark_identity(merged, here, data)
+    fitted = {(w, tp): _rim_fitted(block) for w, blocks in data.grids.items() for tp, block in blocks.items()}
+    merged["rim_fitted"] = pd.Series([fitted.get(k) for k in here], index=merged.index, dtype=object)
     merged["time_h"] = merged["timepoint"].map(data.times_h).astype(float)
     return merged.sort_values(SITE_KEY + ["tp_order"], kind="stable").reset_index(drop=True)
 

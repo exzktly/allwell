@@ -24,6 +24,12 @@ q7–11  nothing
 
 B01 has two nanowells and its t_a was never located (a failed grid), so it answers *timepoint not addressed*.
 
+The grid records and the identity verdicts are set so that each reading of them that could be confused picks a
+different set. A circular rim was fitted at every timepoint but A01's t_a, whose record says none was
+(``array_boundary: null``) — and B01's failed t_a, whose record never placed a lattice and so says nothing (no
+``array_boundary`` key): *no* there would be a guess, so it is no value. The verdicts are A01: reference, partial
+(leaving q6 out), confirmed; B01: reference, not checked (its t_a has none), inconclusive.
+
 Each property's expected set is a single nanowell, so a reading that took one property from another's column picks
 a different one (CLAUDE.md §7.8 rule 2): reading *found* from ``state`` instead of the run's own state would drop q4
 (field left out) and q5 (rim out of focus) as well as q1.
@@ -71,10 +77,15 @@ def _a01_rows() -> list:
 @pytest.fixture(scope="module")
 def metrics(tmp_path_factory):
     b01 = [_row(tp, q, 0, n=1, c=0.1, gfp=100.0) for q in range(2) for tp in ("t_c", "t_d")]
-    grids = {"A01": {tp: {"status": "ok"} for tp in TPS},
-             "B01": {"t_c": {"status": "ok"}, "t_a": {"status": "failed"}, "t_d": {"status": "ok"}}}
+    circle = {"centre_um": [0.0, 0.0], "radius_um": 500.0}
+    grids = {"A01": {"t_c": {"status": "ok", "array_boundary": circle}, "t_a": {"status": "ok", "array_boundary": None},
+                     "t_d": {"status": "ok", "array_boundary": circle}},
+             "B01": {"t_c": {"status": "ok", "array_boundary": circle}, "t_a": {"status": "failed"},
+                     "t_d": {"status": "ok", "array_boundary": circle}}}
     out = _dataset(tmp_path_factory.mktemp("flags"), {"A01": _a01_rows(), "B01": b01}, starts=STARTS, grids=grids)
     data = load_nanowell_data(out)
+    data.identity = {"A01": {"t_c": ("reference", ""), "t_a": ("partial", ""), "t_d": ("confirmed", "")},
+                     "B01": {"t_c": ("reference", ""), "t_d": ("inconclusive", "")}}
     data.identity_excluded = {"A01": {"t_a": {(6, 0)}}}
     gate = GateTally(sites=_empty_sites(), fields=frozenset({("A01", "F1", "t_a")}))
     return site_metrics(data, gate=gate, focus=RimFocusRule())
@@ -145,8 +156,9 @@ def test_a_table_without_the_column_a_property_reads_decides_nothing(metrics):
 def test_the_properties_are_offered_written_and_persisted():
     offered = {name: group for name, _label, group in ss.field_choices(("GFP",))}
     assert {n: offered[n] for n in ss.ROW_FLAGS} == {
-        "found": "Tracking", "tp_unaddressed": "Tracking", "identity_out": "Tracking", "occluded": "Quality",
-        "rim_out_of_focus": "Quality", "field_left_out": "Quality", "no_count": "Quality"}
+        "found": "Tracking", "tp_unaddressed": "Tracking", "identity_out": "Tracking", "rim_fitted": "Tracking",
+        "occluded": "Quality", "rim_out_of_focus": "Quality", "field_left_out": "Quality", "no_count": "Quality"}
+    assert offered["identity"] == "Tracking"
     assert C("found", "yes", at="every").validated().text() == "Found by the run at every timepoint: yes"
     for bad in (C("found", "ge", 1), C("occluded", "in", values=("x",))):
         with pytest.raises(ValueError):
@@ -160,3 +172,60 @@ def test_a_nanowell_outside_says_which_property_it_failed(metrics):
     rows = metrics[(metrics["well"] == "A01") & (metrics["nw_q"] == 1)]
     assert ss.site_badge(rows, ss.Subset((C("found", "yes", at="every"),))) == (
         "outside the subset (fails Found by the run at every timepoint: yes)")
+
+
+# ── the array rim fit ────────────────────────────────────────────────────────
+# Asked for: a subset on whether the run fitted the array's rim (``pipeline.nanowell_lattice.fit_array_boundary``).
+def test_rim_fitted_reads_the_grid_record_of_each_timepoint(metrics):
+    at = metrics.set_index(["well", "timepoint"]).sort_index()["rim_fitted"]
+    assert at.loc[("A01", "t_c")].tolist() == [True] * 12 and at.loc[("A01", "t_a")].tolist() == [False] * 12
+    assert at.loc[("B01", "t_a")].isna().all()                         # refused before a lattice: never asked
+
+
+def test_a_timepoint_whose_rim_was_not_fitted_leaves_its_well_out(metrics):
+    kept, done = _kept(metrics, C("rim_fitted", "yes", at="every"))
+    # A01 was not fitted at t_a; B01's t_a says nothing, so it is undecided, not outside.
+    assert kept == [] and (done.outside, done.unknown) == (12, 2)
+    assert _kept(metrics, C("rim_fitted", "no", at="any"))[0] == _in_a01(*range(12))
+    kept, done = _kept(metrics, C("rim_fitted", "yes", at="tp:t_a"))
+    assert kept == [] and (done.outside, done.unknown) == (12, 2)
+    assert len(_kept(metrics, C("rim_fitted", "yes", at="tp:t_c"))[0]) == 14
+
+
+def test_a_table_without_the_rim_column_decides_nothing(metrics):
+    kept, done = _kept(metrics.drop(columns=["rim_fitted"]), C("rim_fitted", "no", at="any"))
+    assert kept == [] and (done.outside, done.unknown) == (0, done.total)
+
+
+# ── the identity verdict ─────────────────────────────────────────────────────
+# Asked for: a subset on the identity check's verdicts, where *Identity contradicted* only says contradicted or not.
+def test_the_identity_verdict_keeps_the_nanowells_of_the_timepoints_named(metrics):
+    everyone = sorted(set(zip(metrics["well"], metrics["nw_q"].astype(int))))
+    b01 = [("B01", 0), ("B01", 1)]
+    assert _kept(metrics, C("identity", "in", values=("inconclusive",), at="any"))[0] == b01
+    assert _kept(metrics, C("identity", "in", values=("not_checked",), at="any"))[0] == b01
+    assert _kept(metrics, C("identity", "in", values=("partial",), at="tp:t_a"))[0] == _in_a01(*range(12))
+    # A partial verdict is the timepoint's: q6, which it left out, is still at a partial timepoint …
+    agreed = C("identity", "in", values=("confirmed", "reference", "partial"), at="every")
+    assert _kept(metrics, agreed)[0] == _in_a01(*range(12))
+    # … and the per-nanowell property is what leaves it out.
+    assert _kept(metrics, agreed, C("identity_out", "no", at="every"))[0] == _in_a01(0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11)
+    assert _kept(metrics, C("identity", "not_in", values=("reference",), at="earliest"))[0] == []
+    assert _kept(metrics, C("identity", "not_in", values=("confirmed",), at="latest"))[0] == b01
+    assert len(everyone) == 14
+
+
+def test_an_identity_condition_is_written_in_words_validated_and_persisted():
+    c = C("identity", "in", values=("not_checked", "inconclusive", "reference"), at="every").validated()
+    assert c.values == ("reference", "inconclusive", "not_checked")    # the verdicts' order, not the spelling's
+    assert c.text() == "Identity verdict at every timepoint is one of reference, inconclusive, not checked"
+    assert ss.Subset.from_config(ss.Subset((c,)).to_config()) == ss.Subset((c,))
+    for bad in (C("identity", "in", values=("maybe",)), C("identity", "in"), C("identity", "ge", 1)):
+        with pytest.raises(ValueError):
+            bad.validated()
+
+
+def test_every_verdict_the_identity_check_gives_can_be_named():
+    from pipeline.nanowell_identity import VERDICTS
+
+    assert set(ss.IDENTITY_VERDICTS) == set(VERDICTS)

@@ -143,3 +143,54 @@ def test_paint_event_draws_the_same_text_size_hint_measured(qapp):
     with patch.object(combo, "_painted_text", wraps=combo._painted_text) as spy:
         combo.repaint()
         assert spy.called
+
+
+# ── a fixed width, and a popup that shows every entry ──────────────────────
+# Asked for: "the width of the dropdown box when not currently clicked should be a fixed width and not change with
+# selection", and "when clicked the dropdown should show the full text regardless of the width of the selected
+# metric" — the Scatter's metric pickers sized to the entry chosen, cutting the longer ones off.
+_METRICS = ["Cell count", "Confluence", "log₂ count fold change, (n + 1) / (n₀ + 1)", "Growth rate"]
+
+
+def test_a_box_that_fits_its_widest_entry_keeps_one_width_whatever_is_chosen(qapp):
+    combo = LabeledComboBox("X")
+    combo.addItems(_METRICS)
+    combo.setFitsWidest(True)
+    widths = set()
+    for i in range(combo.count()):
+        combo.setCurrentIndex(i)
+        widths.add(combo.sizeHint().width())
+    assert len(widths) == 1
+    # As wide as the widest entry would be painted, label and all: chosen, it is not cut off either.
+    widest = LabeledComboBox("X")
+    widest.addItems([_METRICS[2]])
+    assert widths == {widest.sizeHint().width()}
+
+
+def test_a_box_that_fits_its_widest_entry_refits_when_its_entries_change(qapp):
+    combo = LabeledComboBox("X")
+    combo.addItems(_METRICS[:2])
+    combo.setFitsWidest(True)
+    before = combo.sizeHint().width()
+    combo.addItem(_METRICS[2])
+    assert combo.sizeHint().width() > before
+    combo.setFitsWidest(False)              # the default again: fitted to the entry shown ("X: Cell count")
+    assert combo.currentIndex() == 0 and combo.sizeHint().width() < before
+
+
+def test_the_popup_is_as_wide_as_its_widest_row_needs_whatever_the_box_s_width(qapp):
+    from PySide6.QtWidgets import QStyleOptionViewItem
+
+    combo = LabeledComboBox("Y")
+    combo.addItems(_METRICS)
+    combo.setCurrentIndex(0)                # the box fits "Y: Cell count", far narrower than the longest row
+    view = combo.view()
+    option = QStyleOptionViewItem()
+    view.initViewItemOption(option)
+    rows = [view.itemDelegate().sizeHint(option, combo.model().index(i, 0)).width() for i in range(combo.count())]
+    assert combo.popup_width() >= max(rows) > combo.sizeHint().width()
+    combo.showPopup()
+    try:
+        assert view.minimumWidth() == combo.popup_width()
+    finally:
+        combo.hidePopup()

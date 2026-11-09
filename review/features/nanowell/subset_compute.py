@@ -18,11 +18,17 @@ condition here, and its presets are still one click away (:meth:`Subset.starting
 * ``fused`` — whether the nanowell lay on a tile seam at a timepoint (no one tile held it with margin, so it was
   measured from a crop blended from the tiles covering it, ``pipeline.nanowell_seams``), so the nanowells on the
   seams can be kept alone or left out;
+* ``identity`` — the identity check's verdict on the nanowell's timepoint (``pipeline.nanowell_identity``:
+  confirmed, reference, partial, inconclusive, contradicted or not checked), at a timepoint as a metric is, tested
+  with *is one of* / *is not one of*. It is the timepoint's verdict, shared by every nanowell of the well there; the
+  *Identity contradicted* property below is the per-nanowell answer, which a ``partial`` verdict gives only to the
+  nanowells it lists;
 * the nanowell's per-timepoint properties (:data:`ROW_FLAGS`), each a yes/no read from its own column so that no
   one of them stands in for another: whether the run *found* the nanowell, whether the well's timepoint was not
   addressed at all, whether the nanowell was occluded or clipped, whether the identity check contradicted its
-  address, whether the rim-focus rule flagged its rim, whether its field is left out (Cell Gating, QC triage, the
-  chosen FOVs), and whether the run measured it without a count. *Found by the run at every timepoint: yes* keeps
+  address, whether a circular rim was fitted to the well's array at that timepoint (``series_compute``'s
+  ``rim_fitted``), whether the rim-focus rule flagged its rim, whether its field is left out (Cell Gating, QC
+  triage, the chosen FOVs), and whether the run measured it without a count. *Found by the run at every timepoint: yes* keeps
   only the nanowells tracked through the whole dataset; *at any timepoint: no* on a defect keeps those it never
   touched;
 * ``window_sites`` — whether the nanowell is *inside* or *outside* the set of nanowells a Distribution window held
@@ -37,7 +43,8 @@ condition here, and its presets are still one click away (:meth:`Subset.starting
   (:func:`nanowell_gates`): a box over a cell metric does not place a nanowell.
 
 A numeric field is compared with ``≥``, ``≤``, ``=``, *between* two values or *not between* them (both bounds
-inclusive); the imaging field *is one of* or *is not one of* a set of tiles; *on a tile seam* is *yes* or *no*.
+inclusive); the imaging field *is one of* or *is not one of* a set of tiles, and the identity verdict of a set of
+verdicts; *on a tile seam* is *yes* or *no*.
 
 **Every nanowell is in, out, or undecided.** Each condition answers yes, no, or "no value" for a nanowell (a count
 that was occluded at the baseline, a tile with no recorded pitch, a timepoint the nanowell was not seen at). A
@@ -62,6 +69,9 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 import pandas as pd
 
+from pipeline.nanowell_identity import (
+    CONFIRMED, CONTRADICTED, INCONCLUSIVE, NOT_CHECKED, PARTIAL, REFERENCE,
+)
 from review.features.nanowell import starting_cells_compute as sc
 from review.features.nanowell.collect import (
     CLIPPED, EMPTY, FIELD_EXCLUDED, MEASURABLE, MEASURED, NOT_LOCATED, OCCLUDED, UNADDRESSED,
@@ -82,6 +92,11 @@ POSITION_FIELDS = {"ring": "Ring (steps from the centre)", "distance_um": "Dista
 TILE = "owner"
 #: Whether the nanowell lay on a tile seam at a timepoint: the site table's ``fused`` flag.
 SEAM = "fused"
+#: The identity check's verdict on the nanowell's timepoint: ``series_compute``'s ``identity`` column.
+IDENTITY = "identity"
+#: Every verdict an identity condition can name, in the editor's order: verdict -> what the editor and figure write.
+IDENTITY_VERDICTS = {CONFIRMED: "confirmed", REFERENCE: "reference", PARTIAL: "partial",
+                     INCONCLUSIVE: "inconclusive", CONTRADICTED: "contradicted", NOT_CHECKED: "not checked"}
 #: Whether the nanowell's point on the nanowell scatter lies in a gate drawn there, at a timepoint.
 GATE = "gate"
 #: Whether the nanowell is one of the sites a Distribution window held when *Use as Subset* froze it. The sites are
@@ -100,12 +115,14 @@ ROW_FLAGS = {
     "tp_unaddressed": "Timepoint not addressed",
     "occluded": "Occluded or clipped",
     "identity_out": "Identity contradicted",
+    "rim_fitted": "Array rim fitted",
     "rim_out_of_focus": "Rim out of focus",
     "field_left_out": "In a field left out",
     "no_count": "Measured without a count",
 }
 #: Which group of the editor each property is listed under.
-_ROW_FLAG_GROUPS = {"found": "Tracking", "tp_unaddressed": "Tracking", "identity_out": "Tracking"}
+_ROW_FLAG_GROUPS = {"found": "Tracking", "tp_unaddressed": "Tracking", "identity_out": "Tracking",
+                    "rim_fitted": "Tracking"}
 #: The states in which the run recorded a row for the nanowell, i.e. found it (``collect``'s pipeline states).
 _RECORDED = (MEASURED, EMPTY, OCCLUDED, CLIPPED)
 #: The fields whose values are whole numbers: their bounds are typed without decimals.
@@ -140,20 +157,27 @@ def metric_of(column: str) -> tuple[str, str | None] | None:
 
 
 def is_known_field(name) -> bool:
-    return isinstance(name, str) and (name in (START, TILE, SEAM, GATE, WINDOW) or name in POSITION_FIELDS or name in ROW_FLAGS
-                                      or metric_of(name) is not None)
+    return isinstance(name, str) and (name in (START, TILE, SEAM, IDENTITY, GATE, WINDOW) or name in POSITION_FIELDS
+                                      or name in ROW_FLAGS or metric_of(name) is not None)
 
 
 def per_timepoint(name: str) -> bool:
     """Whether *name* has a value per timepoint, and so is tested *at* one."""
-    if name in (TILE, SEAM, GATE) or name in ROW_FLAGS:
+    if name in (TILE, SEAM, IDENTITY, GATE) or name in ROW_FLAGS:
         return True
     metric = metric_of(name)
     return metric is not None and metric[0] not in PER_NANOWELL
 
 
 def is_category(name: str) -> bool:
-    return name == TILE
+    """Whether *name* is tested with *is one of* / *is not one of* a set of values: the imaging field, the
+    identity verdict."""
+    return name in (TILE, IDENTITY)
+
+
+def value_label(name: str, value: str) -> str:
+    """How a category condition writes *value*: an identity verdict in words, a tile as it is named."""
+    return IDENTITY_VERDICTS.get(value, value) if name == IDENTITY else value
 
 
 def is_flag(name: str) -> bool:
@@ -178,6 +202,8 @@ def field_label(name: str) -> str:
         return "Imaging field"
     if name == SEAM:
         return "On a tile seam"
+    if name == IDENTITY:
+        return "Identity verdict"
     if name == GATE:
         return "Scatter gate"
     if name == WINDOW:
@@ -196,8 +222,8 @@ def field_label(name: str) -> str:
 def field_choices(channels=(), *, gates: bool = False) -> list[tuple[str, str, str]]:
     """Every field a condition can test for a dataset with *channels*: ``(field, label, group)`` in the editor's
     order — the cells at the start, the metrics (each channel metric once per channel), the position, the tile and
-    seam, then the per-timepoint properties, and the scatter gates when *gates* (some gate is drawn on two
-    nanowell metrics)."""
+    seam, the identity verdict and the per-timepoint properties, and the scatter gates when *gates* (some gate is
+    drawn on two nanowell metrics)."""
     out = [(START, field_label(START), "Cells")]
     for key, (_label, needs) in METRICS.items():
         if key == "occupancy_class":
@@ -207,6 +233,7 @@ def field_choices(channels=(), *, gates: bool = False) -> list[tuple[str, str, s
     out += [(name, label, "Position") for name, label in POSITION_FIELDS.items()]
     out.append((TILE, field_label(TILE), "Imaging"))
     out.append((SEAM, field_label(SEAM), "Imaging"))
+    out.append((IDENTITY, field_label(IDENTITY), "Tracking"))
     for group in ("Tracking", "Quality"):
         out += [(name, label, group) for name, label in ROW_FLAGS.items()
                 if _ROW_FLAG_GROUPS.get(name, "Quality") == group]
@@ -301,6 +328,13 @@ class Condition:
             values = tuple(dict.fromkeys(str(v) for v in self.values if isinstance(v, str) and v))
             if not values:
                 raise ValueError(f"choose at least one {field_label(self.field).lower()}")
+            if self.field == IDENTITY:
+                unknown = [v for v in values if v not in IDENTITY_VERDICTS]
+                if unknown:
+                    raise ValueError(f"no identity verdict {unknown[0]!r}")
+                # The editor's order, so the condition reads confirmed before contradicted rather than by spelling.
+                return Condition(self.field, self.op, None, None, at,
+                                 tuple(v for v in IDENTITY_VERDICTS if v in values))
             return Condition(self.field, self.op, None, None, at, tuple(sorted(values)))
         if is_flag(self.field):
             return Condition(self.field, self.op, None, None, at, ())
@@ -333,7 +367,7 @@ class Condition:
             missing = " (no nanowell gate by that name)" if self.box == () else ""
             return f"{label}: {GATE_OPS[self.op]} “{self.values[0] if self.values else ''}”{missing}"
         if is_category(self.field):
-            return f"{label} {CATEGORY_OPS[self.op]} {', '.join(self.values)}"
+            return f"{label} {CATEGORY_OPS[self.op]} {', '.join(value_label(self.field, v) for v in self.values)}"
         if is_flag(self.field):
             return f"{label}: {FLAG_OPS[self.op]}"
         if self.field == START and self.op != "outside":
@@ -708,6 +742,9 @@ def _row_flag(metrics: pd.DataFrame, name: str) -> np.ndarray:
     if name == "field_left_out":
         state = column("state")
         return np.full(len(metrics), np.nan) if state is None else (state == FIELD_EXCLUDED).to_numpy(dtype=float)
+    if name == "rim_fitted":
+        fitted = column("rim_fitted")
+        return np.full(len(metrics), np.nan) if fitted is None else fitted.map(_flag_value).to_numpy(dtype=float)
     ok = column({"identity_out": "identity_ok", "rim_out_of_focus": "rim_focus_ok"}[name])
     if ok is None:
         return np.full(len(metrics), np.nan)

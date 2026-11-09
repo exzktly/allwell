@@ -83,6 +83,7 @@ def show_nanowell(ctx, well: str, q: int, r: int, timepoint: str = "") -> bool:
 
         set_selected_wells(ctx, selected | {well})
     st.selected_sites = [[str(well), int(q), int(r)]]
+    nwc.show_selected_in_popout(ctx)                 # the pop-out shows this nanowell, not the window's
     if timepoint:
         st.timepoint = str(timepoint)
     if not notebook.setCurrentByName("Nanowells"):

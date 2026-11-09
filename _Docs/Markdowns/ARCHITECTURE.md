@@ -13310,7 +13310,12 @@ above the figure and `_nw_window_refresh` keeps it on the window; the pop-out's 
 (`NanowellState.popout_source`, `popout_layout`, persisted; `window_page` not) `controller.draw_popout` calls
 `_window_controller.draw_window_popout`: one page of `WINDOW_PAGE` (24) rows through `renderer.render_site_rows`, the
 page's crops cut in one worker fetch (`_fetch` kind `window_crops`, `crops_for_sites`), `popout_hits` mapping each
-crop's axes to its nanowell for `on_popout_click`. `render_site_rows` is the one montage of ranked nanowells over time:
+crop's axes to its nanowell for `on_popout_click`. A nanowell selected anywhere but inside the pop-out — a click on
+the page's figure (`controller._select`), the Scatter Plot's `_plot_links.show_nanowell`, or **Pop out**
+(`pop_out_crops`) — calls `controller.show_selected_in_popout`, which sets `popout_source` back to `"selected"` and
+refreshes the Show control, so the pop-out shows the nanowell just clicked rather than staying on the window's rows or
+hex composite; a click on a row or tile inside the pop-out passes `_select(..., in_popout=True)` and leaves the window
+on screen (`tests/test_nanowell_window_popout.py`). `render_site_rows` is the one montage of ranked nanowells over time:
 Extremes draws its two blocks through it (`render_extremes` supplies the blocks, title and sentences; its figure is pinned
 by `tests/test_nanowell_site_rows.py`), the window draws one, with `with_well` naming each row's well and the model's own
 `format` writing a value (`WindowRows.format`: a fold change with `×`, any other metric as the bare number).

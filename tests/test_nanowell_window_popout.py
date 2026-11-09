@@ -108,6 +108,35 @@ def test_a_click_on_a_row_selects_its_nanowell(page, qtbot, spied):  # noqa: F81
     QTest.mouseClick(canvas, Qt.LeftButton, Qt.NoModifier,
                      QPoint(int(round((x + w / 2) / ratio)), int(round(canvas.height() - (y + h / 2) / ratio))))
     assert st.selected_sites == [[*site]]
+    assert st.popout_source == "window"            # picking out of the window keeps the window on screen
+
+
+@pytest.mark.parametrize("layout", ["rows", "hex"])
+def test_a_click_on_a_plotted_nanowell_turns_the_pop_out_to_it(page, qtbot, layout):  # noqa: F811
+    """Reported: a nanowell clicked on the plot opened in a pop-out still showing the window (rows or hex), and
+    **Show** had to be switched to the selected nanowell by hand."""
+    from tests.test_nanowell_page import _click_dot
+
+    st = _drawn(page, qtbot)
+    wnc.open_window_popout(page)
+    wnc.set_popout_layout(page, layout)
+    assert st.popout_source == "window" and st.popout_layout == layout
+    site = tuple(st.hits.entries[0][3][0])         # a nanowell the figure draws
+    _click_dot(qtbot, page, site)
+    assert st.selected_sites == [[str(site[0]), int(site[1]), int(site[2])]]
+    assert st.popout_source == "selected"
+    assert page.widgets.get("_nw_popout_source_cb").currentData() == "selected"
+    assert st.popout_tiles == [] and not any("Select a nanowell" in t for t in _texts(page))
+
+
+def test_pop_out_opens_on_the_selected_nanowell(page, qtbot):  # noqa: F811
+    st = _drawn(page, qtbot)
+    wnc.open_window_popout(page)
+    nwc._select(page, ("A01", 2, 4))
+    st.popout_source = "window"                    # left on the window, as a restored page can be
+    nwc.pop_out_crops(page)
+    assert st.popout_source == "selected"
+    assert page.widgets.get("_nw_popout_source_cb").currentData() == "selected"
 
 
 def test_the_window_mode_survives_a_restore():

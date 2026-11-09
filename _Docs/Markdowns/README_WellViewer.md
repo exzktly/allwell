@@ -7009,7 +7009,10 @@ Distribution window. In **Window** mode they are drawn as **Rows**: one row per 
 row labelled with its rank, its well and address, and the value it is ranked by (the metric's value at the window's
 latest covered timepoint, largest first; a nanowell with none there last; ties by well, then address). Twenty-four rows
 make a page; ◀ ▶ turn it. Every crop is on one brightness scale, the Timepoints, Channels, Range, Cells, Metrics and
-Save controls apply as they do to one nanowell, and a click on a row selects its nanowell, so the side panel follows.
+Save controls apply as they do to one nanowell, and a click on a row selects its nanowell, so the side panel follows. A
+nanowell clicked anywhere else — on the page's figure, or on a plot that shows single nanowells such as the Scatter
+Plot's nanowell scatter — turns the pop-out back to **This nanowell**, so it shows the nanowell you clicked without
+switching **Show** by hand; **Pop out** does the same. A click inside the pop-out leaves it on the window.
 A row whose crops are not yet cut says so; one that cannot be cut says why.
 
 The pop-out's bar of controls can be folded away: **Hide controls** (top left of the pop-out) gives the figure the whole

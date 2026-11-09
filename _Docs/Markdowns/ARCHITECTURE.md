@@ -7399,9 +7399,11 @@ holds no second copy of those controls. A gate's axes are named by
 page is on the phone as well: it scrolls, its button rows wrap
 (`widgets/flow_layout.FlowLayout`), and each list's columns share the width
 with wrapped text and the list is exactly as tall as its rows
-(`tab_view._FittedTable`, fitted once a resize has settled, since a stretched
-column takes its width after the table's resize event and without
-`sectionResized`).
+(`tab_view._FittedTable`, fitted again on every change of width and whenever it
+is shown, polished or restyled: fitted only when the page was built, before the
+table was shown or styled, a desk row kept the height it had at the builder's
+narrow width, and a theme switch or phone layout's rescale left every row at
+the old style's height).
 
 **A highlighted set on the per-cell Scatter.** `CellSetsState.highlight` (beside
 `exclude`, so rename and delete follow it; saved in `cell_sets.json` and in the
@@ -21815,7 +21817,18 @@ setting `_aw_tight_layout`), since `BAR_FIGURE_MARGINS` leave room for one line
 of ticks above the next panel's title; with one-line ticks it goes back to those
 margins, set again because switching the engine off leaves the axes where it
 last put them. Below about 7.5 in of figure width four such bars still cannot
-lie flat and are stood on end, clear of the next panel but taking its height. It
+lie flat and are stood on end, clear of the next panel but taking its height.
+On the Mean panel (`_annotations.annotate_relative_to`) each p label is placed a
+few points above its own error bar's cap as drawn — read off the axes
+(`_cap_heights`), because the cap sits at `spread × ci_scale` and the annotator
+is not told the scale, so a 95% CI whisker ran up through a label placed at
+`mean + spread` — and the note is pinned near the panel's top. The room above
+the bars is then fitted once the panel has its final size
+(`fit_relative_headroom`, attached as `_aw_fit_to_panel` and called by the
+style pass): the y range is raised from the limits the renderer drew until
+every bar, whisker, cap and p label sits below the note; a fixed share of
+headroom left a short panel's note written over the bars. A y range the user
+typed is left alone. It
 **declines, and says so on the figure**, without a per-sample control (a single control cancels out of
 R altogether), with vs t0 on (the replicate values it reads are not
 time-normalised), and in the per-cell modes, which never reach the collector

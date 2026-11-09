@@ -28,7 +28,7 @@ import pandas as pd
 from review.features.nanowell import background_compute, moving_compute, size_class_compute
 from review.features.nanowell.decorate_compute import Decoration, band_spans, order_groups, sub_band_spans
 from review.features.nanowell.series_compute import NO_BASELINE_TIMEPOINT, exclusion_reason
-from review.features.nanowell.summary_compute import LOG_METRICS, group_summary, well_summary
+from review.features.nanowell.summary_compute import LOG_METRICS, group_summary, well_statistic, well_summary
 
 TIME, WELLS = "time", "wells"
 
@@ -329,7 +329,7 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
                        time_source: str | None = None, baseline: str = "earliest",
                        cohort: bool = False, responding_above: float | None = None,
                        moving: int = 0, baseline_moving: int = 0, backgrounds: dict | None = None,
-                       decoration: Decoration | None = None) -> DistributionModel:
+                       decoration: Decoration | None = None, sizes=None) -> DistributionModel:
     """The Distribution view for *groups* (``name -> wells``, as ``controller.replicate_groups`` gives).
 
     A group of one well is that well; a group of several is a replicate set. Only the wells named in
@@ -340,7 +340,7 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
     (``moving_compute.rebase``, as ``moving_compute.baseline_window_for`` allows it), applied first, so the cohort
     is decided on the fold changes from that baseline and the endpoint's average is taken over them.
     *backgrounds* (``well -> background_compute`` mode, ``NanowellData.fluor_backgrounds``) decides what the label says
-    the fluorescence was measured above.
+    the fluorescence was measured above. *sizes* (Cell Gating's ``SizeClassRule``) names the size classes.
 
     *decoration* is the page's *Colour by* / *Split by* / *Then by* (``decorate_compute.decoration_for``). Splitting
     re-orders *groups* so each band is contiguous; along wells each band becomes a labelled span
@@ -351,7 +351,8 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
     groups = order_groups(groups, decoration)
     column = metric_column(metric, channel)
     wells = [w for members in groups.values() for w in members]
-    label = metric_label(metric, channel, [(backgrounds or {}).get(w, background_compute.FLOOR) for w in wells])
+    label = metric_label(metric, channel, [(backgrounds or {}).get(w, background_compute.FLOOR) for w in wells],
+                         sizes)
     frame = metrics[metrics["well"].isin(wells)]
     reasons = exclusion_reason(frame, column, channels)
     if metric in PER_NANOWELL:
@@ -501,17 +502,18 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
 
 
 def _notes(model: DistributionModel, metric: str, time_source: str | None) -> None:
+    stat = well_statistic(model.column)                 # how a well's nanowells become its one value
     if model.integer:
         model.notes.append("Whole-number values are packed within ±0.4 of their value.")
     if model.axis == WELLS:
         if any(math.isfinite(s.vs_control) for p in model.panels for s in p.stats):
-            model.notes.append("The comparison with the control is per well (mean of well medians over the "
+            model.notes.append(f"The comparison with the control is per well (mean of well {stat}s over the "
                                "control's); nanowells are not replicates.")
     elif any(n.startswith("Fixed cohort") for n in model.alerts):
-        model.notes.append("The line joins each well's median over its fixed cohort, the same nanowells at every "
+        model.notes.append(f"The line joins each well's {stat} over its fixed cohort, the same nanowells at every "
                            "timepoint.")
     else:
-        model.notes.append("The line joins each well's median over the nanowells with a value at that timepoint.")
+        model.notes.append(f"The line joins each well's {stat} over the nanowells with a value at that timepoint.")
     # A cut set is a result, written whatever the page's Notes switch; "not computed" is only how to get one.
     (model.notes if model.responding_above is None else model.alerts).append(responding_note(model))
     if model.decoration.colours:

@@ -26,17 +26,38 @@ import math
 import numpy as np
 import pandas as pd
 
+from review.features.nanowell import size_class_compute
 from review.features.nanowell.series_compute import exclusion_reason
 
 #: Metrics read on a log scale: compared to control by difference.
 LOG_METRICS = frozenset({"log2_count_fc"})
+#: Metrics whose well value is the **mean** over the well's nanowells rather than the median: the size-class counts,
+#: ratio and share, which the user asked to average, and whose small whole-number counts give a median that jumps
+#: between integers. ``well_summary``'s ``median`` column then holds that mean — one shape for every caller, as
+#: ``review.domain.observation.well_medians`` does for a share — and ``statistic`` names which it is.
+MEAN_METRICS = frozenset(size_class_compute.COLUMNS)
+
+
+def well_statistic(column: str) -> str:
+    """``"mean"`` or ``"median"``: how a well's nanowells are reduced to the well's one value for *column*."""
+    return "mean" if column in MEAN_METRICS else "median"
+
+
+def well_value(values, column: str) -> float:
+    """A well's one value of *column* from its nanowells' *values* (:func:`well_statistic`); NaN with none."""
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if not len(values):
+        return math.nan
+    return float(values.mean() if well_statistic(column) == "mean" else np.median(values))
 
 
 def well_summary(metrics: pd.DataFrame, metric: str, channels=(), *,
                  responding_above: float | None = None, reasons: pd.Series | None = None) -> pd.DataFrame:
     """One row per (well, timepoint): the metric's distribution over the well's nanowells.
 
-    ``n_sites`` is the roster; ``n_used`` the nanowells with a value; ``excluded`` maps each reason (from
+    ``median`` is the well's value: the median over its nanowells, or the mean for a metric of
+    :data:`MEAN_METRICS`, as ``statistic`` says. ``n_sites`` is the roster; ``n_used`` the nanowells with a value; ``excluded`` maps each reason (from
     :func:`series_compute.exclusion_reason`) to its count, so ``n_used + sum(excluded) == n_sites``.
     ``fraction_occupied`` is over nanowells with a count at that timepoint, whatever the metric. *reasons*, when
     given, is each row's exclusion reason already worked out (the fixed cohort adds one of its own); otherwise it
@@ -53,7 +74,7 @@ def well_summary(metrics: pd.DataFrame, metric: str, channels=(), *,
               else pd.to_numeric(metrics[metric], errors="coerce"))
     keys = ["well", "timepoint"]
     columns = ["well", "timepoint", "time_h", "tp_order", "n_sites", "n_used", "excluded", "median", "q1", "q3",
-               "fraction_responding", "fraction_occupied"]
+               "fraction_responding", "fraction_occupied", "statistic"]
     if not len(metrics):
         return pd.DataFrame(columns=columns)
     # Vectorised over every (well, timepoint) at once: the page calls this on each redraw, and a Python loop
@@ -61,7 +82,7 @@ def well_summary(metrics: pd.DataFrame, metric: str, channels=(), *,
     frame = metrics[keys + ["time_h", "tp_order", "n"]].assign(_value=values.astype(float))
     grouped = frame.groupby(keys, sort=False)
     out = grouped.agg(time_h=("time_h", "first"), tp_order=("tp_order", "first"), n_sites=("_value", "size"),
-                      n_used=("_value", "count"), median=("_value", "median"))
+                      n_used=("_value", "count"), median=("_value", well_statistic(metric)))
     quantiles = grouped["_value"].quantile([0.25, 0.75]).unstack()
     out["q1"], out["q3"] = quantiles[0.25], quantiles[0.75]
     has = frame["_value"].notna()
@@ -85,6 +106,7 @@ def well_summary(metrics: pd.DataFrame, metric: str, channels=(), *,
     out["excluded"] = [excluded.get((w, t), {}) for w, t in zip(out["well"], out["timepoint"])]
     out["n_sites"] = out["n_sites"].astype(int)
     out["n_used"] = out["n_used"].astype(int)
+    out["statistic"] = well_statistic(metric)
     return out[columns].sort_values(["well", "tp_order"], kind="stable").reset_index(drop=True)
 
 

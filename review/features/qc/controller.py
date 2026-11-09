@@ -186,6 +186,26 @@ def _after_qc_params_applied(ctx) -> None:
         ctx.features.call("nanowell.follow_qc_params", ctx)
 
 
+def only_size_classes_differ(params: QCParams, current: QCParams) -> bool:
+    """Whether *params* differs from *current* in the size classes alone (``QCParams.size_classes``)."""
+    from dataclasses import replace
+
+    return params != current and replace(params, size_classes=current.size_classes) == current
+
+
+def set_size_classes(ctx, params: QCParams) -> None:
+    """Install QC parameters that differ from those in force only in their size classes.
+
+    The size classes are not an inclusion layer — they leave every cell in and only say which class a kept cell is
+    counted in — so no verdict column moves and the re-projection :func:`set_qc_params_with_progress` runs behind a
+    progress popup would recompute every held well for nothing. The parameters go into state and are saved, and the
+    surfaces that count by class are redrawn: the Nanowells page (``nanowell.follow_qc_params``) and the plots
+    (``redraw_app``), whose nanowell rows are keyed on the rule (``nanowell.controller.gate_version``) and so are
+    counted again."""
+    ctx.state.qc.params = params
+    _after_qc_params_applied(ctx)
+
+
 def set_qc_params_with_progress(ctx, params: QCParams, *, on_done=None) -> None:
     """Install new QC thresholds from the panel and apply them, the work off the GUI thread.
 

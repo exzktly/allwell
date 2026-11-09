@@ -25,9 +25,10 @@ import pandas as pd
 from review.domain.observation import NANOWELLS, ObservationMetric, ObservationTable
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data, site_backgrounds, site_channels
 from review.features.nanowell import subset_compute as ss
-from review.features.nanowell.controller import gate_tally, gate_version, page_subset, sync_focus_rule
+from review.features.nanowell.controller import gate_tally, gate_version, page_subset, size_rule, sync_focus_rule
 from review.features.nanowell.distribution_compute import METRICS, metric_label
 from review.features.nanowell.series_compute import baseline_text, exclusion_reason, metric_kinds, site_metrics
+from review.features.nanowell.summary_compute import well_statistic
 
 log = logging.getLogger("review")
 
@@ -35,13 +36,15 @@ log = logging.getLogger("review")
 _MEMO_MAX = 8
 
 
-def _metric_specs(channels, modes=()) -> tuple[ObservationMetric, ...]:
+def _metric_specs(channels, modes=(), sizes=None) -> tuple[ObservationMetric, ...]:
     """Every metric a plot can draw from the nanowell rows; *modes* (one per well, ``background_compute``) decide what
-    a fluorescence metric's label says its background was."""
+    a fluorescence metric's label says its background was, and *sizes* (Cell Gating's ``SizeClassRule``) names the
+    size classes. A size metric's well value is the mean over the well's nanowells, as on the page
+    (``summary_compute.MEAN_METRICS``)."""
     kinds = metric_kinds(channels)
     specs = []
     for key in METRICS:
-        label, needs_channel = metric_label(key, None, modes), METRICS[key][1]
+        label, needs_channel = metric_label(key, None, modes, sizes), METRICS[key][1]
         if key == "occupancy_class":
             continue                              # a category ("0", "1", "2", "3+"), not a number to plot
         if needs_channel:
@@ -49,7 +52,7 @@ def _metric_specs(channels, modes=()) -> tuple[ObservationMetric, ...]:
                 column = f"{key}_{ch}"
                 specs.append(ObservationMetric(column, f"{ch} {label}", kinds[column][0], ch))
         else:
-            specs.append(ObservationMetric(key, label, kinds[key][0]))
+            specs.append(ObservationMetric(key, label, kinds[key][0], well_statistic=well_statistic(key)))
     # Occupied — whether the nanowell holds a cell — as a 0/1 value: its well mean is the share of occupied
     # nanowells, a different number from any "fraction above a threshold".
     specs.append(ObservationMetric("occupied", "Occupied (holds ≥ 1 cell)", "value"))
@@ -81,7 +84,8 @@ def nanowell_metric_specs(ctx, wells) -> tuple[ObservationMetric, ...] | None:
     wells = sorted(set(wells or ()))
     channels = site_channels(Path(data_dir), wells)
     return None if channels is None else _metric_specs(channels,
-                                                        list(site_backgrounds(Path(data_dir), wells).values()))
+                                                        list(site_backgrounds(Path(data_dir), wells).values()),
+                                                        size_rule(ctx))
 
 
 def _page_scope_key(ctx, st) -> tuple:
@@ -164,9 +168,10 @@ def nanowell_observations(ctx, wells, baseline: str | None = None, *,
         return None
     if not len(data.sites):
         table = ObservationTable(NANOWELLS, pd.DataFrame(columns=["well", "timepoint", "nw_q", "nw_r", "state"]),
-                                 _metric_specs(data.channels, list(data.fluor_backgrounds.values())))
+                                 _metric_specs(data.channels, list(data.fluor_backgrounds.values()), size_rule(ctx)))
     else:
-        metrics = site_metrics(data, baseline, gate_tally(ctx, data, scatter_gates=scatter_gates), focus)
+        sizes = size_rule(ctx)
+        metrics = site_metrics(data, baseline, gate_tally(ctx, data, scatter_gates=scatter_gates, sizes=sizes), focus)
         scope_notes: tuple[str, ...] = ()
         subset_label = ""
         if page_scope:
@@ -181,7 +186,8 @@ def nanowell_observations(ctx, wells, baseline: str | None = None, *,
 
         from review.domain.nanowell_rim_focus import note as focus_note
 
-        table = ObservationTable(NANOWELLS, frame, _metric_specs(channels, list(data.fluor_backgrounds.values())),
+        table = ObservationTable(NANOWELLS, frame,
+                                 _metric_specs(channels, list(data.fluor_backgrounds.values()), sizes),
                                  why_missing,
                                  notes=tuple(filter(None, [focus_note(metrics, focus), *scope_notes])),
                                  fixed_cohort=bool(page_scope and st.cohort),

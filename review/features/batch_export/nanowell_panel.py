@@ -76,6 +76,7 @@ _gate_tally = _lazy("review.features.nanowell.controller", "gate_tally")
 _gate_note = _lazy("review.features.nanowell.cell_gate_compute", "note")
 _focus_note = _lazy("review.domain.nanowell_rim_focus", "note")
 _focus_rule = _lazy("review.features.nanowell.controller", "focus_rule")
+_size_rule = _lazy("review.features.nanowell.controller", "size_rule")
 _baseline_at = _lazy("review.features.nanowell.series_compute", "baseline_at")
 _render_message = _lazy("review.features.nanowell.renderer", "render_message")
 _apply_subset = _lazy("review.features.nanowell.subset_compute", "apply")
@@ -195,7 +196,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         self._metric_list.setToolTip("One figure per ticked metric. Cell fluorescence and nanowell fluorescence use the channel "
                                      "chosen in the app's channel selector; each figure's axis names the "
                                      "background they were measured above.")
-        for key, label in _metric_labels().items():
+        for key, label in _metric_labels(_size_rule(self._ctx)).items():
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, key)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
@@ -250,7 +251,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         while self._threshold_form.rowCount():
             self._threshold_form.removeRow(0)
         self._threshold_edits = {}
-        labels = _metric_labels()
+        labels = _metric_labels(_size_rule(self._ctx))
         for key in self._selected_metrics():
             edit = QLineEdit(self._threshold_text.get(key) or self._page_threshold(key))
             edit.setPlaceholderText("required")
@@ -409,7 +410,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
             return
         _cuts, missing = self._thresholds()
         if missing:
-            labels = _metric_labels()
+            labels = _metric_labels(_size_rule(self._ctx))
             QMessageBox.warning(self, "Responding above not set",
                                 "Set a number in Responding above for each ticked metric — the summary's fraction "
                                 "responding is computed at it, and there is no default:\n\n"
@@ -464,7 +465,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         safe = unique_export_stem("nanowell_" + re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name), used_stems)
         view, fmt = settings["view"], settings["fmt"]
         wells = [w for members in groups.values() for w in members]
-        tables, labels = [], _metric_labels()
+        tables, labels = [], _metric_labels(_size_rule(self._ctx))
         for metric in settings["metrics"]:
             drawn, channel, note = _resolve_metric(view, metric, settings["channel"], data.channels)
             note = " ".join(filter(None, [note, settings.get("gate_note", "")]))
@@ -491,7 +492,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                    well=well or "", well_timepoint=shown if well else "",
                                    note=note, tableless=tableless, responding_above=cut,
                                    subset=settings["subset"], names=_well_names(self._ctx, wells),
-                                   swarm_spacing=_swarm_spacing_of(self._ctx))
+                                   swarm_spacing=_swarm_spacing_of(self._ctx), sizes=_size_rule(self._ctx))
                     self._figure_view = {"view": view, "metric": drawn, "axis": settings["axis"],
                                          "baseline": settings["baseline"], "cohort": settings["cohort"],
                                          "moving": settings["moving"],

@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 from domain.nanowell_roster import mixed_rules_note
 from review.features.nanowell import cell_gate_compute as cg
+from review.features.nanowell import size_class_compute as scc
 from review.domain import nanowell_rim_focus as rfc
 from review.domain.size_classes import SizeClassRule
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
@@ -213,7 +214,8 @@ def export_long_csv(state, path, wells=None, subset: ss.Subset | None = None) ->
     ``n_cells`` and ``brightness_<channel>`` are the page's, after Home's Cell Gating (``cell_gate_compute``), so the
     file records the gate beside them: ``n_cells_run`` is the run's own count, ``cells_left_out`` how many cells the
     gate took out of it, and ``cell_gating`` the figure's sentence about the gate (``""`` when it left nothing out),
-    as Batch Export's summary carries it in its ``note``.
+    as Batch Export's summary carries it in its ``note``. ``size_classes`` names what the ``size_1`` / ``size_2``
+    columns counted (``SizeClassRule.text``), since those columns are named by position.
 
     Written to a temporary name and moved into place, so a failed write never leaves half a table under the
     name a person will open.
@@ -228,6 +230,10 @@ def export_long_csv(state, path, wells=None, subset: ss.Subset | None = None) ->
     table.insert(at, "n_cells_run", pd.to_numeric(run, errors="coerce").to_numpy())
     table.insert(at + 1, "cells_left_out", cg.left_out_counts(metrics, gate).astype("Int64").to_numpy())
     table["cell_gating"] = cg.note(gate)
+    # Which class ``size_1`` and ``size_2`` are, with their ranges: the columns are named by position, so the file
+    # must say what each position held when it was written ("not set" while the classes are incomplete).
+    sizes = getattr(gate, "sizes", None)
+    table["size_classes"] = sizes.text() if sizes is not None else "not set"
     table.insert(table.columns.get_loc("time_h") + 1, "time_source", state.data.time_source or "")
     table.insert(table.columns.get_loc("baseline_timepoint"), "baseline", state.baseline)
     # Every row is kept, and flagged: a file filtered to the page's Subset would lose rows a reader may want back,
@@ -913,7 +919,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
               stats_cache: dict | None = None, gate=None,
               decoration: Decoration | None = None, names: dict | None = None,
-              swarm_spacing: float = 0.0, footer_out: bool = False) -> tuple[object, object]:
+              swarm_spacing: float = 0.0, footer_out: bool = False, sizes=None) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -948,7 +954,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     when nothing they depend on changed.
 
     *gate* (``cell_gate_compute.GateTally``, the one *metrics* were computed with) keeps the Array view's Cells
-    layer to the cells the counts hold.
+    layer to the cells the counts hold. *sizes* is the size-class rule the metrics' classes were counted by — the
+    gate's own when it is given — which names the classes in every label and, for a size metric, the footer's
+    sentence on the ranges and the cells in neither (``size_class_compute.note``).
 
     *decoration* is *Colour by* / *Split by* / *Then by* resolved over *groups* (``decorate_compute.decoration_for``);
     only the Distribution view draws it (:data:`DECORATED_VIEWS`). ``None`` draws the figure undecorated, which is
@@ -963,6 +971,9 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
     wells = [w for members in groups.values() for w in members]
+    sizes = getattr(gate, "sizes", None) if sizes is None else sizes
+    if metric in scc.COLUMNS and metrics is not None and "well" in metrics.columns:
+        note = " ".join(filter(None, [note, scc.note(metrics[metrics["well"].isin(wells)], sizes, metric)]))
     all_metrics = metrics
     metrics, filtered = ss.apply(metrics, subset, baseline, [well] if view == "array" else wells, data)
     if view != "array" and filtered is not None and filtered.kept == 0:
@@ -986,7 +997,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                           "dimmed.", note]))
         drawn = draw_array(fig, all_metrics, data, well=well, timepoint=well_timepoint, metric=metric,
                            channel=channel, layers=layers, image=image, image_note=image_note, region=region,
-                           selected=selected, note=note, dimmed=dimmed, gate=gate, name=names.get(well, ""))
+                           selected=selected, note=note, dimmed=dimmed, gate=gate, name=names.get(well, ""),
+                           sizes=sizes)
         return (drawn.hits if drawn is not None else None), drawn
     if filtered is not None:
         note = " ".join(filter(None, [ss.note(filtered), note]))
@@ -1003,7 +1015,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
             render_message(fig, empty, gid="nw-moving-empty")
             return None, None
         render_trajectories(fig, panels,
-                            cohort=cohort, label=_label(metric, channel, data), time_source=data.time_source,
+                            cohort=cohort, label=_label(metric, channel, data, sizes), time_source=data.time_source,
                             note=" ".join(filter(None, [mvc.describe(moving, column, baseline_moving), note])))
         return None, None
     if view == "position":
@@ -1016,14 +1028,14 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
                                                 f"{', '.join(missing)}."]))
         for line in series:
             line.name = names.get(line.well, "")
-        render_position(fig, series, label=_label(metric, channel, data), timepoint=timepoint, note=note)
+        render_position(fig, series, label=_label(metric, channel, data, sizes), timepoint=timepoint, note=note)
         return None, None
     if view == "statistics":
         # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).
         model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=WELLS,
                                    groups=groups, timepoint=timepoint, time_source=data.time_source,
                                    baseline=baseline, cohort=cohort, moving=moving,
-                                   baseline_moving=baseline_moving)
+                                   baseline_moving=baseline_moving, sizes=sizes)
         model.well_names = dict(names)
         result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control,
                                    cache=stats_cache)
@@ -1035,7 +1047,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
-                               moving=moving, baseline_moving=baseline_moving, decoration=decoration)
+                               moving=moving, baseline_moving=baseline_moving, decoration=decoration,
+                               sizes=sizes)
     model.starting = subset.start_bounds()
     if model.axis == TIME:
         model.identity_marks = {(w, tp): v for w in wells for tp, v in timepoint_marks(data, w).items()}
@@ -1089,7 +1102,10 @@ def statistics_result(model, groups: dict, *, unit: str, test: str, control: str
                   s.without_value) for s in samples))
     if cache is not None and cache.get("key") == key:
         return cache["result"]
-    result = sc.compare(samples, test, control=control, unit=unit, label=model.label, timepoint=model.timepoint)
+    from review.features.nanowell.summary_compute import well_statistic
+
+    result = sc.compare(samples, test, control=control, unit=unit, label=model.label, timepoint=model.timepoint,
+                        statistic=well_statistic(model.column))
     result.notes = notes
     if cache is not None:
         cache.clear()
@@ -1103,9 +1119,10 @@ def _stats_cache(st) -> dict:
     return st.stats_cache
 
 
-def _label(metric: str, channel: str | None, data=None) -> str:
-    """*metric*'s axis label, naming what the shown wells' fluorescence was measured above (``background_compute``)."""
-    return metric_label(metric, channel, list(getattr(data, "fluor_backgrounds", {}).values()))
+def _label(metric: str, channel: str | None, data=None, sizes=None) -> str:
+    """*metric*'s axis label, naming what the shown wells' fluorescence was measured above (``background_compute``)
+    and the size classes by the user's labels (*sizes*, a ``SizeClassRule``)."""
+    return metric_label(metric, channel, list(getattr(data, "fluor_backgrounds", {}).values()), sizes)
 
 
 def page_wells(ctx) -> list[str]:
@@ -1216,13 +1233,14 @@ def batch_array_layers() -> ArrayLayers:
 
 def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, channel: str | None,
                layers: ArrayLayers | None = None, image=None, image_note: str = "", region=None, selected=(),
-               note: str = "", dimmed=frozenset(), gate=None, name: str = "") -> ArrayDrawn | None:
+               note: str = "", dimmed=frozenset(), gate=None, name: str = "", sizes=None) -> ArrayDrawn | None:
     """**The one composition of the Array view**, for the page and for Batch Export (through :func:`draw_view`).
 
     *layers* says what is drawn (the lattice map when none are given); *image* is the run montage or the tile
     store the caller holds for the well frame, *image_note* what it says about it (still reading, or why there is
     none). ``None`` when there is nothing at all to draw, and the figure then says why.
     """
+    sizes = getattr(gate, "sizes", None) if sizes is None else sizes      # names the size classes in the label
     layers = layers or batch_array_layers()
     if not well:
         render_message(fig, "Select a well with a nanowell table.", gid="nw-array-missing")
@@ -1245,7 +1263,7 @@ def draw_array(fig, metrics, data, *, well: str, timepoint: str, metric: str, ch
                      "Positions to Measured to draw them.")
         render_message(fig, says, gid="nw-array-missing")
         return None
-    return render_array(fig, scene, layers, label=_label(metric, channel, data), image=image, image_note=image_note,
+    return render_array(fig, scene, layers, label=_label(metric, channel, data, sizes), image=image, image_note=image_note,
                         selected=selected, region=region, note=note, dimmed=dimmed)
 
 

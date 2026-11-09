@@ -48,7 +48,7 @@ from review.domain.stats_tests import (
 NANOWELLS, WELLS = "nanowells", "wells"
 #: What one value of a sample is: a nanowell of one well, or the median of one well of a group.
 UNITS = (NANOWELLS, WELLS)
-UNIT_LABELS = {NANOWELLS: "Wells (nanowells as values)", WELLS: "Groups (well medians as values)"}
+UNIT_LABELS = {NANOWELLS: "Wells (nanowells as values)", WELLS: "Groups (one value per well)"}
 
 #: Every test the view offers, in the order its *Test* control lists them. ``kind`` is what :func:`compare` branches
 #: on; ``parametric`` picks the matching omnibus, so a rank-based run is not gated by an ANOVA.
@@ -171,6 +171,8 @@ class StatisticsResult:
     comparisons: list = field(default_factory=list)
     undefined: str = ""
     notes: list = field(default_factory=list)
+    #: How a well's nanowells became its value in a *Groups* comparison (``summary_compute.well_statistic``).
+    statistic: str = "median"
 
     @property
     def family(self) -> str:
@@ -191,8 +193,11 @@ def samples_from_model(model, groups: dict, unit: str) -> list[Sample]:
 
     ``nanowells``: one sample per well with a swarm, in the groups' order, its values the swarm's — every nanowell
     with a value, the hidden dots included (hiding is a drawing matter). ``wells``: one sample per group, its values
-    its wells' medians, a well whose swarm has no value named in ``without_value``.
+    its wells' own values (the median of each well's nanowells, or the mean for a metric of
+    ``summary_compute.MEAN_METRICS``), a well whose swarm has no value named in ``without_value``.
     """
+    from review.features.nanowell.summary_compute import well_value
+
     swarms = {s.well: s for s in model.swarms()}
     if unit == NANOWELLS:
         out = []
@@ -211,7 +216,7 @@ def samples_from_model(model, groups: dict, unit: str) -> list[Sample]:
             if s is None or not len(s.values):
                 without.append(well)
             else:
-                medians.append(float(np.median(s.values)))
+                medians.append(well_value(s.values, model.column))
                 used.append(well)
             if s is not None:
                 roster += s.n_roster
@@ -290,12 +295,12 @@ def _pairs(samples: list, control: str) -> list[tuple]:
 
 
 def compare(samples: list, test_key: str, *, control: str = "", unit: str = NANOWELLS, label: str = "",
-            timepoint: str = "") -> StatisticsResult:
+            timepoint: str = "", statistic: str = "median") -> StatisticsResult:
     """Run *test_key* over *samples*: the omnibus (three or more samples), then the comparisons of the family —
     every pair, or each against *control* when one is named (Dunnett always needs one)."""
     test = test_spec(test_key)
     control = control if any(s.name == control for s in samples) else ""
-    result = StatisticsResult(unit, test, label, timepoint, list(samples), control=control)
+    result = StatisticsResult(unit, test, label, timepoint, list(samples), control=control, statistic=statistic)
     if len(samples) < 2:
         what = "wells" if unit == NANOWELLS else "groups"
         result.undefined = (f"A test compares two or more {what}; the figure draws {len(samples)}. "
@@ -361,10 +366,11 @@ def _num(value, spec: str = ".4g") -> str:
     return "—" if value is None or not math.isfinite(float(value)) else format(float(value), spec)
 
 
-def unit_sentence(unit: str) -> str:
-    """What one value is, and what the comparison can and cannot claim — on the figure whenever it is drawn."""
+def unit_sentence(unit: str, statistic: str = "median") -> str:
+    """What one value is, and what the comparison can and cannot claim — on the figure whenever it is drawn.
+    *statistic* is how a well's nanowells become its value (``summary_compute.well_statistic``)."""
     if unit == WELLS:
-        return ("Values: one median per well (n = wells); wells are the replicate unit, so this compares the "
+        return (f"Values: one {statistic} per well (n = wells); wells are the replicate unit, so this compares the "
                 "conditions behind the groups.")
     return ("Values: each well's nanowells (n = nanowells). This compares these wells, not the conditions behind "
             "them: the nanowells of one well share its medium and handling and are not independent replicates — "
@@ -449,7 +455,7 @@ def report_lines(result: StatisticsResult) -> list[tuple[str, str]]:
 
     at = f" · at {result.timepoint}" if result.timepoint else " · one value per nanowell"
     lines = [(GID_HEADER, f"{result.test['label']} · {result.label}{at}"),
-             (GID_HEADER, unit_sentence(result.unit))]
+             (GID_HEADER, unit_sentence(result.unit, result.statistic))]
     if result.undefined:
         return lines + [(GID_NOTE, f"Not run: {result.undefined}")]
     om = result.omnibus

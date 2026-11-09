@@ -217,3 +217,52 @@ def test_changing_only_the_size_classes_makes_the_page_s_counts_stale():
     params["now"] = QCParams(size_classes=RULE)
     assert nwc.gate_version(ctx) == before
     assert nwc.size_rule(ctx) == RULE
+
+
+# ── each well's value is the mean over its nanowells ─────────────────────────
+
+def _well_rows():
+    """Three nanowells of A01 at t1 with 0, 0 and 3 cells in the first class: mean 1, median 0."""
+    return pd.DataFrame({"well": ["A01"] * 3, "timepoint": ["t1"] * 3, "time_h": [0.0] * 3, "tp_order": [0] * 3,
+                         "nw_q": [0.0, 1.0, 2.0], "nw_r": [0.0] * 3, "state": ["measured"] * 3, "n": [1.0, 2.0, 3.0],
+                         "size_1": [0.0, 0.0, 3.0], scc.REASON_COLUMN: [""] * 3})
+
+
+def test_a_well_s_size_value_is_the_mean_of_its_nanowells_and_says_so():
+    from review.features.nanowell.summary_compute import well_summary
+
+    size = well_summary(_well_rows(), "size_1").iloc[0]
+    assert (size["median"], size["statistic"]) == (1.0, "mean")          # the median would be 0
+    count = well_summary(_well_rows(), "n").iloc[0]
+    assert (count["median"], count["statistic"]) == (2.0, "median")      # other metrics keep the median
+
+
+def test_the_plot_tools_take_the_mean_for_a_size_metric():
+    from review.domain.observation import NANOWELLS, ObservationMetric, ObservationTable, well_medians
+
+    frame = _well_rows().assign(timepoint_hours=0.0)
+    specs = (ObservationMetric("size_1", "T cells count", "value", well_statistic="mean"),
+             ObservationMetric("n", "Cell count", "value"))
+    table = ObservationTable(NANOWELLS, frame, specs)
+    assert well_medians(table, "size_1", ["A01"])["median"].tolist() == [1.0]
+    assert well_medians(table, "n", ["A01"])["median"].tolist() == [2.0]
+
+
+def test_the_plot_tools_offer_the_size_metrics_by_the_user_s_labels_with_a_mean_per_well():
+    from review.features.nanowell.observation_compute import _metric_specs
+
+    specs = {m.key: m for m in _metric_specs(["GFP"], sizes=RULE)}
+    assert specs["size_ratio"].label == "T cells : DCs ratio"
+    assert specs["size_1"].well_statistic == "mean" and specs["n"].well_statistic == "median"
+
+
+def test_the_statistics_view_compares_groups_on_each_well_s_mean():
+    from types import SimpleNamespace
+
+    from review.features.nanowell import statistics_compute as stc
+
+    swarm = SimpleNamespace(well="A01", values=np.array([0.0, 0.0, 3.0]), n_roster=3, excluded={})
+    model = SimpleNamespace(swarms=lambda: [swarm], column="size_1")
+    sample = stc.samples_from_model(model, {"g": ["A01"]}, stc.WELLS)[0]
+    assert sample.values.tolist() == [1.0]
+    assert stc.unit_sentence(stc.WELLS, "mean").startswith("Values: one mean per well")

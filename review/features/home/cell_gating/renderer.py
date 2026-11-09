@@ -158,8 +158,8 @@ def _cell_gating_plot_cdf(ctx) -> None:
                                 linestyle="--", linewidth=2, alpha=0.7)
         except Exception:
             swallowed()  # was: pass (silent except)
-        _draw_size_classes(ctx, axes[0])
         _focus_cdf_xaxis(axes[0], areas)
+        _draw_size_classes(ctx, axes[0])                 # after the axis is focused: an open class runs to its edge
 
     colors = theme.WELL_COLORS_TUPLE
     next_idx = 1
@@ -252,17 +252,22 @@ def _draw_size_classes(ctx, ax) -> None:
     (``QCParams.size_classes``): the curve is where a bimodal size distribution shows as a knee, so it is where a
     range is checked against the cells. Nothing is drawn until the rule is complete. A class open at one end is
     shaded to the edge of the axis."""
-    from review.features.qc.controller import get_qc_params
-
-    rule = getattr(get_qc_params(ctx), "size_classes", None)
+    # The parameters in force, read from state: an unseeded state has no rule to draw.
+    params = getattr(getattr(ctx.state, "qc", None), "params", None)
+    rule = getattr(params, "size_classes", None)
     if rule is None or not rule.active():
         return
     inks = (theme.Colors.gate_curve_a, theme.Colors.gate_curve_b)
     for k, c in enumerate(rule.classes):
         ink = inks[k % len(inks)]
         low = c.min_area if c.min_area is not None else 0.0
-        high = c.max_area if c.max_area is not None else ax.get_xlim()[1]
+        x_lo, x_hi = ax.get_xlim()
+        high = c.max_area if c.max_area is not None else x_hi
         ax.axvspan(low, high, color=ink, alpha=0.15, zorder=0, gid=f"cg-size-class-{k}")
-        ax.text((low + high) / 2 if c.max_area is not None else low, 0.98, c.label, color=ink, fontsize=8,
-                ha="center" if c.max_area is not None else "left", va="top",
+        ax.set_xlim(x_lo, x_hi)                          # a range past the cells never widens the focused axis
+        # Placed inside what is shown, so a range reaching past the axis still names itself.
+        seen_lo, seen_hi = max(low, x_lo), min(high, x_hi)
+        if seen_lo >= seen_hi:
+            continue
+        ax.text((seen_lo + seen_hi) / 2, 0.98, c.label, color=ink, fontsize=8, ha="center", va="top",
                 transform=ax.get_xaxis_transform(), gid=f"cg-size-class-label-{k}")

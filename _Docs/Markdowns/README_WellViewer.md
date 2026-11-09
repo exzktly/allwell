@@ -3327,7 +3327,9 @@ choice applies once, when the menu closes.
   when the run imaged its timepoints at different pixel sizes, since a pixel
   range is then a different cell size at each. The ranges are drawn as shaded,
   labelled bands on the cell-area curve below. Changing them re-runs nothing
-  and shows no progress window: no cell is included or left out by them. The
+  and shows no progress window: they include or leave out no cell — unless a
+  scatter gate is drawn on one of the size metrics, which is then applied again
+  against the new counts, with its progress on the status bar. The
   [Nanowells page](#nanowells) then offers each class's count, the cells in
   neither, their ratio and the first class's share, each named with your labels.
 
@@ -6395,7 +6397,8 @@ use them.
   infinity — and the footer counts it with its reason. **Each well's value of these five is the mean over its
   nanowells**, not the median the other metrics use, and the figure's note says so; the dots of the
   *Distribution* view show how they spread across the nanowells. The footer states the ranges and how many of
-  the counted cells fell in neither class, and *Save nanowell data…* writes the columns `size_1`, `size_2`,
+  the counted cells fell in neither class. A well whose cells could not be read with an area, or did not match
+  its nanowells, has none of the five, and the footer says why. *Save nanowell data…* writes the columns `size_1`, `size_2`,
   `size_unclassified`, `size_ratio` and `size_1_share` with a `size_classes` column naming the ranges. Until
   the classes are set, these metrics are empty and say so.
 

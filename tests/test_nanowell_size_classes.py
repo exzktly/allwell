@@ -222,9 +222,10 @@ def test_changing_only_the_size_classes_makes_the_page_s_counts_stale():
 # ── each well's value is the mean over its nanowells ─────────────────────────
 
 def _well_rows():
-    """Three nanowells of A01 at t1 with 0, 0 and 3 cells in the first class: mean 1, median 0."""
+    """Three nanowells of A01 at t1 with 0, 0 and 3 cells in the first class (mean 1, median 0) and counts 1, 1
+    and 4 (median 1, mean 2), so a reduction that takes the wrong statistic for either gives a different number."""
     return pd.DataFrame({"well": ["A01"] * 3, "timepoint": ["t1"] * 3, "time_h": [0.0] * 3, "tp_order": [0] * 3,
-                         "nw_q": [0.0, 1.0, 2.0], "nw_r": [0.0] * 3, "state": ["measured"] * 3, "n": [1.0, 2.0, 3.0],
+                         "nw_q": [0.0, 1.0, 2.0], "nw_r": [0.0] * 3, "state": ["measured"] * 3, "n": [1.0, 1.0, 4.0],
                          "size_1": [0.0, 0.0, 3.0], scc.REASON_COLUMN: [""] * 3})
 
 
@@ -234,7 +235,7 @@ def test_a_well_s_size_value_is_the_mean_of_its_nanowells_and_says_so():
     size = well_summary(_well_rows(), "size_1").iloc[0]
     assert (size["median"], size["statistic"]) == (1.0, "mean")          # the median would be 0
     count = well_summary(_well_rows(), "n").iloc[0]
-    assert (count["median"], count["statistic"]) == (2.0, "median")      # other metrics keep the median
+    assert (count["median"], count["statistic"]) == (1.0, "median")      # other metrics keep the median
 
 
 def test_the_plot_tools_take_the_mean_for_a_size_metric():
@@ -245,7 +246,7 @@ def test_the_plot_tools_take_the_mean_for_a_size_metric():
              ObservationMetric("n", "Cell count", "value"))
     table = ObservationTable(NANOWELLS, frame, specs)
     assert well_medians(table, "size_1", ["A01"])["median"].tolist() == [1.0]
-    assert well_medians(table, "n", ["A01"])["median"].tolist() == [2.0]
+    assert well_medians(table, "n", ["A01"])["median"].tolist() == [1.0]
 
 
 def test_the_plot_tools_offer_the_size_metrics_by_the_user_s_labels_with_a_mean_per_well():
@@ -312,3 +313,67 @@ def test_each_class_is_shaded_and_labelled_on_the_cell_area_curve():
     cell_gating_replot_cdfs(blank)
     assert not [p for p in blank.runtime.cell_gating.figure.axes[0].patches
                 if str(p.get_gid()).startswith("cg-size-class-")]
+
+
+# ── a well whose cells cannot be classified is undefined, never "all unclassified" ──
+
+def _undefined_with(frame, reason):
+    why = scc.exclusion_reason(frame, "size_1", pd.Series("", index=frame.index))
+    return frame["size_1"].iloc[:3].isna().all() and set(why.iloc[:3]) == {reason}
+
+
+@pytest.mark.parametrize("cells", [CELLS.drop(columns=["area_px"]), CELLS.drop(columns=["nw_q", "nw_r"]),
+                                   CELLS.iloc[0:0]])
+def test_cells_with_no_area_no_address_or_no_rows_are_not_counted_as_cells_in_neither_class(cells):
+    frame = _sites()
+    gate = cg.tally([("A01", cells, np.ones(len(cells), dtype=bool))], sizes=RULE)
+    scc.apply(frame, gate)
+    assert _undefined_with(frame, scc.NOT_READ)              # not size_1 = size_2 = 0, unclassified = n
+
+
+def test_a_well_never_read_is_undefined_but_one_with_no_cells_counts_zero():
+    frame = _sites()
+    scc.apply(frame, cg.tally([], sizes=RULE))               # A01 not read at all: its counts are 5 and 1
+    assert _undefined_with(frame, scc.NOT_READ)
+    empty = _sites().assign(n=[0.0, 0.0, 0.0, np.nan])
+    scc.apply(empty, cg.tally([], sizes=RULE))               # nothing to classify: 0 is a measurement
+    assert empty["size_1"].iloc[:3].tolist() == [0.0, 0.0, 0.0]
+
+
+def test_cells_whose_timepoint_is_spelled_differently_from_the_sites_are_not_silently_dropped():
+    frame = _sites()
+    cells = CELLS.assign(timepoint=CELLS["timepoint"].replace("t1", "t01"))
+    scc.apply(frame, cg.tally([("A01", cells, KEPT)], sizes=RULE))
+    assert _undefined_with(frame, scc.NOT_JOINED)
+
+
+def test_a_label_containing_the_other_placeholder_is_not_rewritten():
+    swapped = SizeClassRule.of(("Size class 2", 80, 250), ("Size class 1", 350, 1200))
+    assert swapped.name("Size class 1 : Size class 2 ratio") == "Size class 2 : Size class 1 ratio"
+
+
+def test_a_label_that_would_rename_a_size_metric_as_another_metric_keeps_the_placeholder():
+    from review.features.nanowell.observation_compute import _metric_specs
+
+    clash = SizeClassRule.of(("Cell", 80, 250), ("DCs", 350, 1200))
+    labels = [m.label for m in _metric_specs(["GFP"], sizes=clash)]
+    assert labels.count("Cell count") == 1                     # n's, not the size class's
+    assert "Size class 1 count" in labels and "Cell : DCs ratio" in labels
+
+
+def test_the_scatter_says_which_statistic_each_per_well_point_is():
+    from types import SimpleNamespace
+
+    from review.domain.observation import NANOWELLS, ObservationMetric, ObservationTable
+    from review.features.scatter.observation_compute import nanowell_scatter
+
+    frame = _well_rows().assign(timepoint_hours=0.0)
+    specs = (ObservationMetric("size_1", "T cells count", "value", well_statistic="mean"),
+             ObservationMetric("n", "Cell count", "value"))
+    table = ObservationTable(NANOWELLS, frame, specs)
+    group = SimpleNamespace(label="A01", color="#000000", wells=["A01"])
+    both = nanowell_scatter(table, "size_1", "size_1", [group], per_well=True)
+    assert "the mean over its nanowells" in both.footer
+    mixed = nanowell_scatter(table, "size_1", "n", [group], per_well=True)
+    assert "the mean on x and median on y over its nanowells" in mixed.footer
+    assert (mixed.series[0].x.tolist(), mixed.series[0].y.tolist()) == ([1.0], [1.0])

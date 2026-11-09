@@ -19,7 +19,8 @@ column                 value                                     undefined when
 =====================  ========================================  ===============================================
 
 A nanowell with a count and no cells has counts of 0 — zero is a measurement — and no ratio or share. A well whose
-cells could not be read keeps the run's count but has no classes, since nothing here may guess them. Should a
+cells could not be read or classified (no rows, no area column, no address columns), or some of whose classified
+cells joined no nanowell of the table, keeps the run's count but has no classes, since nothing here may guess them. Should a
 nanowell's classes ever add up to more than its count (a cell table that does not match the count the run wrote),
 every size metric there is undefined with that reason rather than a negative unclassified count.
 
@@ -61,10 +62,11 @@ REASON_COLUMN = "_size_reason"
 NOT_SET = "size classes not set"
 NOT_READ = "cells not read for size classes"
 MISMATCH = "size classes exceed the count"
+NOT_JOINED = "cells did not join their nanowells"
 SECOND_EMPTY = "second size class empty"
 NONE_CLASSIFIED = "no cells in either size class"
 #: Every reason this module can give, for ``distribution_compute.reason_label``.
-REASONS = (NOT_SET, NOT_READ, MISMATCH, SECOND_EMPTY, NONE_CLASSIFIED)
+REASONS = (NOT_SET, NOT_READ, NOT_JOINED, MISMATCH, SECOND_EMPTY, NONE_CLASSIFIED)
 
 
 def _empty_counts() -> pd.DataFrame:
@@ -80,17 +82,21 @@ def area_column(cells: pd.DataFrame) -> str | None:
     return next((c for c in AREA_COLS if c in cells.columns), None)
 
 
-def well_counts(well: str, cells: pd.DataFrame, included, rule: SizeClassRule | None) -> pd.DataFrame:
+def well_counts(well: str, cells: pd.DataFrame, included, rule: SizeClassRule | None) -> pd.DataFrame | None:
     """One row per ``(well, timepoint, nw_q, nw_r)`` holding at least one kept, classified cell of *well*:
     ``size_1`` and ``size_2``. *cells* are the per-cell rows (a CSV may hold other wells' rows too) and *included*
     the analysis's inclusion of each row, as ``cell_gate_compute.well_left_out`` takes them. Only cells with a
-    nanowell address and a timepoint are counted, as only those are in a nanowell's count."""
-    if (rule is None or not rule.active() or cells is None or not len(cells)
-            or not {"timepoint", "nw_q", "nw_r"} <= set(cells.columns)):
+    nanowell address and a timepoint are counted, as only those are in a nanowell's count.
+
+    ``None`` when the well's cells **cannot** be classified — no rows, no area column, or no address columns — so
+    :func:`apply` says so rather than counting them as cells in neither class. An empty frame is an answer: the
+    well's cells were read and none fell in a class."""
+    if rule is None or not rule.active():
         return _empty_counts()
+    if (cells is None or not len(cells) or not {"timepoint", "nw_q", "nw_r"} <= set(cells.columns)
+            or area_column(cells) is None):
+        return None
     column = area_column(cells)
-    if column is None:
-        return _empty_counts()
     rows = np.asarray(included, dtype=bool).copy()
     if "well" in cells.columns:
         rows &= cells["well"].astype(str).to_numpy() == str(well)
@@ -117,6 +123,7 @@ def apply(frame: pd.DataFrame, gate) -> None:
     n = pd.to_numeric(frame["n"], errors="coerce") if "n" in frame.columns else pd.Series(np.nan, index=frame.index)
     rule = getattr(gate, "sizes", None)
     reason = pd.Series("", index=frame.index, dtype=object)
+    wells = frame["well"].astype(str) if "well" in frame.columns else pd.Series("", index=frame.index)
     for column in COLUMNS:
         frame[column] = np.nan
     if rule is None or not rule.active():
@@ -129,8 +136,18 @@ def apply(frame: pd.DataFrame, gate) -> None:
                           "nw_q": pd.to_numeric(frame["nw_q"], errors="coerce").astype(float),
                           "nw_r": pd.to_numeric(frame["nw_r"], errors="coerce").astype(float)})
     merged = keyed.merge(counts, on=SITE_KEY, how="left")
-    unread = frame["well"].astype(str).isin([str(w) for w in getattr(gate, "unread", ())])
-    usable = n.notna() & ~unread
+    # A well is unclassified as a whole when its cells could not be read or classified (no area or address column,
+    # no rows), unless it has no cell to classify — and when some of its classified cells joined no nanowell of the
+    # table (a timepoint or an address spelled differently on the two sides), whose nanowells would otherwise read
+    # as holding none of them.
+    classed = {str(w) for w in getattr(gate, "classed", ())}
+    unread = ~wells.isin(classed) & n.gt(0).groupby(wells).transform("any")
+    joined = pd.Series(merged[list(COUNT_COLUMNS)].fillna(0).sum(axis=1).to_numpy(), index=frame.index)
+    counted = counts.assign(_n=counts[list(COUNT_COLUMNS)].sum(axis=1)).groupby(counts["well"].astype(str))["_n"].sum()
+    landed = joined.groupby(wells).sum()
+    lost = {w for w, total in counted.items() if landed.get(w, 0) < total}
+    unjoined = wells.isin(lost)
+    usable = n.notna() & ~unread & ~unjoined
     a = pd.Series(merged[COUNT_COLUMNS[0]].fillna(0).to_numpy(dtype=float), index=frame.index)
     b = pd.Series(merged[COUNT_COLUMNS[1]].fillna(0).to_numpy(dtype=float), index=frame.index)
     rest = n - a - b
@@ -143,6 +160,7 @@ def apply(frame: pd.DataFrame, gate) -> None:
     both = a + b
     frame[SHARE_COLUMN] = (a / both.where(both > 0)).where(usable & both.gt(0))
     reason[n.notna() & unread] = NOT_READ
+    reason[n.notna() & unjoined & ~unread] = NOT_JOINED
     reason[mismatch] = MISMATCH
     frame[REASON_COLUMN] = reason
 

@@ -40,6 +40,7 @@ from review.features.nanowell.full_montage_compute import CentreZoom, fit_region
 from review.features.nanowell._identity_marks import mark_timepoints, split_segments
 from review.features.nanowell.identity_compute import marks_legend
 from review.features.nanowell.series_compute import baseline_text
+from review.features.nanowell.summary_compute import well_statistic, well_value
 
 #: A dot's diameter, in points.
 DOT_PT = 3.4
@@ -630,7 +631,6 @@ def _draw_density(ax, swarm, half, ink, *, fill: str | None = None, column: str 
     """A set of more than four wells: each well's nanowells as a density with its value, not dots (U2) — the median,
     or the mean for a metric whose well value is a mean (``summary_compute.well_value`` of *column*). *fill* is the
     group's *Colour by* ink, which the density takes in place of the plot's ink."""
-    from review.features.nanowell.summary_compute import well_value
 
     if len(swarm.values) >= 2 and np.ptp(swarm.values) > 0:
         parts = ax.violinplot([swarm.values], positions=[swarm.x], widths=[2 * half], showextrema=False)
@@ -699,8 +699,6 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
         alerts.append(f"+N under a swarm: {hidden:,} values in all are used but not drawn as dots, for lack of "
                       "room; widen the window or select fewer wells to see them.")
     if densities:
-        from review.features.nanowell.summary_compute import well_statistic
-
         alerts.append(f"Sets of more than four wells are drawn as densities with each well's "
                       f"{well_statistic(getattr(model, 'column', ''))}; select fewer wells to see and click single "
                       "nanowells.")

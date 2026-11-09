@@ -104,6 +104,8 @@ def test_ranges_typed_on_cell_gating_are_counted_on_the_nanowells_page_under_the
 
     replotted = []
     monkeypatch.setattr(cgc, "cell_gating_replot_cdfs", lambda _ctx: replotted.append(1))
+    regated = []
+    monkeypatch.setattr(cgc, "cell_gating_start_gating_worker", lambda _ctx, **_k: regated.append(1))
 
     for key, text in (("size_label_0", "T cells"), ("size_min_0", "80"), ("size_max_0", "250"),
                       ("size_label_1", "DCs"), ("size_min_1", "350"), ("size_max_1", "1200")):
@@ -112,6 +114,7 @@ def test_ranges_typed_on_cell_gating_are_counted_on_the_nanowells_page_under_the
     assert get_qc_params(ctx).size_classes == SizeClassRule.of(("T cells", 80, 250), ("DCs", 350, 1200))
     assert reprojected == []                                       # not a gate: no verdict was recomputed
     assert replotted                                               # the area curve shades the new ranges
+    assert regated == []                                           # no gate reads the classes: no pass
     _wait_current(qtbot, ctx, st)
     here = _site(st, "t_c", 0)
     assert (here["size_1"], here["size_2"], here["size_unclassified"], here["size_ratio"]) == (1.0, 1.0, 1.0, 1.0)
@@ -182,3 +185,45 @@ def test_a_reload_refills_the_boxes_from_the_saved_rule(qtbot, tmp_path):
     qc_gate_refresh_widgets(ctx.window)
     assert [w[k].text() for k in ("size_label_0", "size_min_0", "size_max_0", "size_label_1", "size_min_1",
                                   "size_max_1")] == ["small", "", "60", "large", "500", ""]
+
+
+def test_a_gate_drawn_on_a_size_metric_is_applied_again_when_the_classes_change(qtbot, tmp_path, monkeypatch):
+    """A scatter gate on "Nanowell ▸ T cells count" includes cells by their nanowell's class count, so the classes
+    changing changes which cells it keeps: the light path must start a gating pass for it."""
+    import review.features.home.cell_gating.controller as cgc
+    from tests.test_nanowell_page import _page
+
+    ctx = _page(qtbot, _dataset(tmp_path))
+    ctx.state.cell_gating.scatter_gates = [{"name": "big wells", "x_col": "nw::size_1", "y_col": "nw::n",
+                                            "x0": 1, "x1": 5, "y0": 0, "y1": 9}]
+    regated = []
+    monkeypatch.setattr(cgc, "cell_gating_start_gating_worker", lambda _ctx, **_k: regated.append(1))
+    w = _panel(qtbot, ctx)
+    for key, text in (("size_label_0", "T cells"), ("size_max_0", "250"), ("size_label_1", "DCs"),
+                      ("size_min_1", "350")):
+        _type(w[key], text)
+    assert regated
+
+
+def test_batch_export_names_the_classes_as_they_stand_when_it_is_shown(qtbot, tmp_path):
+    """Its metric list is built once; classes set or renamed afterwards must reach it the next time it is shown."""
+    from dataclasses import replace
+
+    from review.domain.size_classes import SizeClassRule
+    from review.features.batch_export.nanowell_panel import NanowellBatchExportPanel
+    from review.features.qc.controller import get_qc_params
+    from tests._minimal_shell import load_dataset, minimal_shell
+
+    ctx, window = minimal_shell(qtbot)
+    window._ctx, window._app_state, window._features = ctx, ctx.state, ctx.features
+    load_dataset(ctx, _dataset(tmp_path))
+    panel = NanowellBatchExportPanel(ctx, window)
+    qtbot.addWidget(panel)
+    names = lambda: [panel._metric_list.item(i).text() for i in range(panel._metric_list.count())]  # noqa: E731
+    assert "Size class 1 count" in names()
+    ctx.state.qc.params = replace(get_qc_params(ctx),
+                                  size_classes=SizeClassRule.of(("T cells", 80, 250), ("DCs", 350, 1200)))
+    window.show()
+    panel.show()
+    qtbot.waitUntil(panel.isVisible, timeout=5000)
+    assert "T cells count" in names() and "Size class 1 count" not in names()

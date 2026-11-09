@@ -313,9 +313,20 @@ class NanowellBatchExportPanel(BatchExportPanel):
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
+        self._name_metrics()
         self._refresh_timepoints()
         self._rebuild_thresholds()
         self._seed_subset()
+
+    def _name_metrics(self) -> None:
+        """Name the metric list's size-class entries by the labels in force on Cell Gating: the list is built once,
+        and the classes may have been set or renamed since."""
+        labels = _metric_labels(_size_rule(self._ctx))
+        for i in range(self._metric_list.count()):
+            item = self._metric_list.item(i)
+            text = labels.get(item.data(Qt.UserRole))
+            if text and item.text() != text:
+                item.setText(text)
 
     def _seed_subset(self) -> None:
         """Say which subset a run will use: the page's, read each time the panel is shown and again at the run."""
@@ -333,7 +344,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
     # ── the run summary ──────────────────────────────────────────────────
     _SUMMARY_FIGURE_LEAD = "One figure per ticked metric"
     _SUMMARY_FIGURE_NOTE = "the chosen view, as the Nanowells page draws it (the Array map: one per well)"
-    _SUMMARY_CSV_LINE = ("One CSV of each well's summary per timepoint and metric — median, quartiles, the "
+    _SUMMARY_CSV_LINE = ("One CSV of each well's summary per timepoint and metric — median (the mean for a size "
+                         "class, as its statistic column says), quartiles, the "
                          "fraction responding above each metric's cut, nanowells used and excluded by reason")
 
     def _extra_summary_signals(self) -> list:

@@ -111,6 +111,7 @@ _REASON_LABELS = {
     moving_compute.BASE_IDENTITY_REASON: "baseline window not joinable",
     size_class_compute.NOT_SET: "size classes not set",
     size_class_compute.NOT_READ: "cells not read",
+    size_class_compute.NOT_JOINED: "cells not joined",
     size_class_compute.MISMATCH: "classes exceed the count",
     size_class_compute.SECOND_EMPTY: "second class empty",
     size_class_compute.NONE_CLASSIFIED: "no classified cells",
@@ -472,7 +473,7 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
                   swarms=[], ticks=[])
     summary = (well_summary(frame, column, channels, reasons=reasons, responding_above=model.responding_above)
                if len(frame) else pd.DataFrame(columns=["well", "timepoint", "median", "n_used", "excluded", "time_h",
-                                                        "tp_order", "fraction_responding"]))
+                                                        "tp_order", "fraction_responding", "statistic"]))
     stats = group_summary(summary, groups, metric=column if column in LOG_METRICS else "",
                           control=control if control in groups else None)
     for i, (name, members) in enumerate(groups.items()):

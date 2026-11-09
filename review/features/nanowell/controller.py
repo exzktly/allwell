@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 from domain.nanowell_roster import mixed_rules_note
 from review.features.nanowell import cell_gate_compute as cg
 from review.features.nanowell import size_class_compute as scc
+from review.features.nanowell.summary_compute import well_statistic
 from review.domain import nanowell_rim_focus as rfc
 from review.domain.size_classes import SizeClassRule
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
@@ -1101,8 +1102,6 @@ def statistics_result(model, groups: dict, *, unit: str, test: str, control: str
                   s.without_value) for s in samples))
     if cache is not None and cache.get("key") == key:
         return cache["result"]
-    from review.features.nanowell.summary_compute import well_statistic
-
     result = sc.compare(samples, test, control=control, unit=unit, label=model.label, timepoint=model.timepoint,
                         statistic=well_statistic(model.column))
     result.notes = notes

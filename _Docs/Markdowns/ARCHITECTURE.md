@@ -12771,7 +12771,12 @@ rule is not an inclusion layer — it leaves every cell in — but it is stored 
 
 The counting rides on the gate tally: `controller.gate_tally(…, sizes=…)` passes the rule to
 `cell_gate_compute.tally`, which calls `size_class_compute.well_counts` on the same rows with the same inclusion it
-subtracts gated cells by, so a class counts exactly the cells the page's `n` counts. `GateTally.sizes` and
+subtracts gated cells by, so a class counts from the same kept cells the page's `n` is reduced by. A well whose cells
+could not be classified — no rows read, no area column, no address columns (`well_counts` answers `None`, and
+`GateTally.classed` names the wells that were) — or some of whose classified cells joined no nanowell of the table (a
+timepoint or address spelled differently on the two sides) has every size metric undefined, with "cells not read" or
+"cells not joined", rather than 0 in each class and its whole count unclassified; a well with no cell to classify
+counts 0. `GateTally.sizes` and
 `GateTally.classes` carry the rule and the per-site counts, and `site_metrics` adds five columns after Cell Gating
 has taken its cells off `n` (`size_class_compute.apply`): `size_1`, `size_2` (the counts), `size_unclassified`
 (`n` less both), `size_ratio` (`size_1 / size_2`) and `size_1_share` (`size_1 / (size_1 + size_2)`). Each is a
@@ -12785,11 +12790,15 @@ changed it.
 
 The columns are named by position and the user's labels are applied wherever a metric is named:
 `SizeClassRule.name` replaces the placeholders "Size class 1" / "Size class 2" (`size_class_compute.LABELS`, entered
-in `METRICS` like any page metric) — in the page's Metric menu (`tab_view.name_size_metrics`, on every control
+in `METRICS` like any page metric), both in one pass so a label containing the other placeholder is not rewritten —
+in the page's Metric menu (`tab_view.name_size_metrics`, on every control
 refresh), every figure label (`controller._label(…, sizes)`, the rule taken from the tally the metrics came from or,
 for Batch Export, passed as `draw_view(sizes=…)`), a Subset condition's sentence on a figure (`controller._named`),
-the Subset editor's field menu, the plot tools' metric list (`observation_compute._metric_specs(…, sizes)`) and
-Batch Export's metric list. A figure of a size metric adds `size_class_compute.note`: the ranges, and how many of the
+the Subset editor's field menu, the plot tools' metric list (`observation_compute._metric_specs(…, sizes)`, which
+keeps the placeholder name for a size metric a label would name as another metric — `Cell` would make "Cell count" —
+because the Image Table's `NW: <label>` tokens resolve by name) and Batch Export's metric list (renamed each time the
+panel is shown, `NanowellBatchExportPanel._name_metrics`). An Image Table column saved as `NW: T cells count` names
+that label, so renaming the class leaves it saying no metric of that name exists. A figure of a size metric adds `size_class_compute.note`: the ranges, and how many of the
 counted cells fell in neither class. The long CSV carries a `size_classes` column naming the ranges, since its
 columns are `size_1` and `size_2`.
 
@@ -12807,9 +12816,13 @@ sentence: what an incomplete rule lacks, as a notice; otherwise what the classes
 bounds cut into a range (`size_classes.clipped_by_gate`), and whether the timepoints were imaged at different pixel
 sizes, when a pixel range is a different cell size at each and no single diameter is shown. The boxes apply like the
 debris bounds (Enter, leaving the box, or a pause in typing). An edit that changes only the classes goes through
-`qc.controller.set_size_classes` rather than `set_qc_params_with_progress`: no verdict column moves, so nothing is
+`qc.controller.set_size_classes` rather than `set_qc_params_with_progress`: no QC verdict column moves, so nothing is
 re-projected; the parameters are saved, the plots and the page are redrawn, and Cell Gating's cell-area curve is drawn
-again (`cell_gating.replot_cdfs`) with each class shaded and labelled on it (`renderer._draw_size_classes`).
+again (`cell_gating.replot_cdfs`) with each class shaded and labelled on it (`renderer._draw_size_classes`, after the
+axis is focused, so a range past the cells neither widens it nor loses its label). The one way a class decides
+inclusion is a scatter gate drawn on a size metric (an `nw::size_*` axis, `qc.controller.gates_read_size_classes`):
+while one is drawn the light path also starts a gating pass (`cell_gating.start_worker`), which judges every cell
+against its nanowell's counts under the new classes.
 `tests/test_nanowell_size_classes.py` pins the rule, the counts and the reasons; `tests/test_nanowell_size_classes_panel.py`
 types into the real boxes and reads the page's metrics, Metric menu, footer and CSV.
 

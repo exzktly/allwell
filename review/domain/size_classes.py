@@ -29,6 +29,7 @@ Qt-free.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -36,6 +37,7 @@ import pandas as pd
 
 #: How a metric is named before the user labels the classes; :meth:`SizeClassRule.name` puts the labels in their place.
 PLACEHOLDERS = ("Size class 1", "Size class 2")
+_PLACEHOLDER_RE = re.compile("|".join(re.escape(p) for p in PLACEHOLDERS))
 #: How many classes the rule has. The model is a tuple so it could hold more; the panel offers two.
 N_CLASSES = 2
 #: The decimals an area is compared at (:func:`classify`).
@@ -143,9 +145,10 @@ class SizeClassRule:
         while the rule is incomplete, so a metric still reads "Size class 1 count" until there is a class to name."""
         if not self.active():
             return text
-        for placeholder, label in zip(PLACEHOLDERS, self.labels):
-            text = text.replace(placeholder, label)
-        return text
+        # Both at once: replaced one after the other, a first label containing the second placeholder ("Size class
+        # 2") would be rewritten by the second replacement.
+        labels = dict(zip(PLACEHOLDERS, self.labels))
+        return _PLACEHOLDER_RE.sub(lambda m: labels[m.group(0)], text)
 
     # ── persistence (the ``size_classes`` entry of the QC parameters) ──
     def to_list(self) -> list:

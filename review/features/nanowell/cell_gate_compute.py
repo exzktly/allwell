@@ -89,6 +89,8 @@ class GateTally:
     left_out: pd.DataFrame | None = None
     sizes: object = None
     classes: pd.DataFrame | None = None
+    #: The wells whose cells were read and could be classified (``size_class_compute.well_counts`` answered).
+    classed: frozenset = frozenset()
 
 
 def _empty_sites() -> pd.DataFrame:
@@ -192,11 +194,13 @@ def tally(per_well, unread=(), fields=frozenset(), sizes=None) -> GateTally:
     """One :class:`GateTally` from *per_well*, an iterable of ``(well, cells, included)``, where *included* leaves
     out :data:`FIELD_LAYERS`; *fields* is :func:`excluded_fields`'s answer; *sizes* the size-class rule to count each
     nanowell's kept cells by (``size_class_compute``), ``None`` for none."""
-    found, positions, classes, cells, excluded = [], [], [], 0, 0
+    found, positions, classes, classed, cells, excluded = [], [], [], set(), 0, 0
     for well, frame, included in per_well:
         counted = size_class_compute.well_counts(well, frame, included, sizes)
-        if len(counted):
-            classes.append(counted)
+        if counted is not None:
+            classed.add(str(well))
+            if len(counted):
+                classes.append(counted)
         sites, n, out = well_left_out(well, frame, included)
         cells, excluded = cells + n, excluded + out
         if len(sites):
@@ -208,7 +212,8 @@ def tally(per_well, unread=(), fields=frozenset(), sizes=None) -> GateTally:
     left_out = pd.concat(positions, ignore_index=True) if positions else None
     return GateTally(sites=sites, cells=cells, excluded=excluded, unread=tuple(sorted(unread)),
                      fields=frozenset(fields), left_out=left_out, sizes=sizes,
-                     classes=pd.concat(classes, ignore_index=True) if classes else None)
+                     classes=pd.concat(classes, ignore_index=True) if classes else None,
+                     classed=frozenset(classed))
 
 
 def hidden_cells(cells: pd.DataFrame | None, gate: GateTally | None, well: str, timepoint: str,

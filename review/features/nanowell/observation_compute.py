@@ -27,6 +27,7 @@ from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_
 from review.features.nanowell import subset_compute as ss
 from review.features.nanowell.controller import gate_tally, gate_version, page_subset, size_rule, sync_focus_rule
 from review.features.nanowell.distribution_compute import METRICS, metric_label
+from review.features.nanowell import size_class_compute
 from review.features.nanowell.series_compute import baseline_text, exclusion_reason, metric_kinds, site_metrics
 from review.features.nanowell.summary_compute import well_statistic
 
@@ -43,8 +44,14 @@ def _metric_specs(channels, modes=(), sizes=None) -> tuple[ObservationMetric, ..
     (``summary_compute.MEAN_METRICS``)."""
     kinds = metric_kinds(channels)
     specs = []
+    # A name a user's label would give a size metric that another metric already has ("Cell" → "Cell count") keeps
+    # its placeholder name: the Image Table's ``NW: <label>`` tokens resolve by name, and two metrics of one name
+    # would resolve to whichever came first.
+    taken = {metric_label(k, None, modes).lower() for k in METRICS if k not in size_class_compute.COLUMNS}
     for key in METRICS:
         label, needs_channel = metric_label(key, None, modes, sizes), METRICS[key][1]
+        if key in size_class_compute.COLUMNS and label.lower() in taken:
+            label = metric_label(key, None, modes)
         if key == "occupancy_class":
             continue                              # a category ("0", "1", "2", "3+"), not a number to plot
         if needs_channel:

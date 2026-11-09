@@ -102,7 +102,10 @@ def nanowell_scatter(table: ObservationTable, x_key: str, y_key: str, groups, *,
     used = int(both.sum())
     footer = footer_line(NANOWELLS, used, int(len(rows)), excluded)
     if per_well:
-        footer += " · one point per well and timepoint: the median over its nanowells"
+        stats = {well_statistic(table, x_key), well_statistic(table, y_key)}
+        footer += (" · one point per well and timepoint: the "
+                   + (stats.pop() if len(stats) == 1 else f"{well_statistic(table, x_key)} on x and "
+                      f"{well_statistic(table, y_key)} on y") + " over its nanowells")
     notes = list(table.notes)
     if table.baseline and any(m is not None and m.kind == "fc" for m in (x_metric, y_metric)):
         notes.append(f"Fold changes are over the Nanowells page's Baseline: {table.baseline}.")

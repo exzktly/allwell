@@ -119,7 +119,7 @@ _VIEW_TIPS = {
     "identity": ("Whether one well's addresses name the same nanowells at the Timepoint as at its reference\n"
                  "timepoint — the identity check's distances, the montages blinked or side by side, and its "
                  "registration."),
-    "statistics": ("Test whether wells (their nanowells as values) or groups (their wells' medians) differ at the\n"
+    "statistics": ("Test whether wells (their nanowells as values) or groups (their wells' medians, or means for a size class) differ at the\n"
                    "Timepoint — t-tests, Mann-Whitney, Kolmogorov-Smirnov or Dunnett, with an omnibus, adjusted p "
                    "and effect sizes."),
 }

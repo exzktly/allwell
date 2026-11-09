@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from review.features.nanowell.summary_compute import well_value
 from review.domain.stats_tests import (
     BOOTSTRAP_RESAMPLES, EffectSize, Omnibus, dunnett_vs_control, effect_size, omnibus,
 )
@@ -196,7 +197,6 @@ def samples_from_model(model, groups: dict, unit: str) -> list[Sample]:
     its wells' own values (the median of each well's nanowells, or the mean for a metric of
     ``summary_compute.MEAN_METRICS``), a well whose swarm has no value named in ``without_value``.
     """
-    from review.features.nanowell.summary_compute import well_value
 
     swarms = {s.well: s for s in model.swarms()}
     if unit == NANOWELLS:

@@ -315,6 +315,44 @@ def test_an_imaging_field_condition_is_built_from_the_tiles_the_run_recorded(pag
                             "of F0)") for t in _texts(page))
 
 
+def test_an_identity_verdict_condition_is_built_from_the_verdicts_not_the_tiles(page):
+    """Choosing *Identity verdict* after *Imaging field* swaps the menu's tiles for the verdicts, in words; the ticked
+    verdicts reach the page's subset as the identity check spells them. The fixture has no identity sidecar, so every
+    timepoint is *not checked*: naming it keeps every nanowell, leaving it out keeps none."""
+    editor = _editor(page)
+    editor.add_btn.click()
+    row = editor.rows[0]
+    row.field_cb.setCurrentIndex(row.field_cb.findData("owner"))
+    row.field_cb.setCurrentIndex(row.field_cb.findData("identity"))
+    assert row.tiles_btn.isVisibleTo(page.window) and row.at_cb.isVisibleTo(page.window)
+    verdicts = [a for a in row.tiles_menu.actions() if a.isCheckable()]
+    assert [a.text() for a in verdicts] == ["confirmed", "reference", "partial", "inconclusive", "contradicted",
+                                            "not checked"]
+    verdicts[-1].setChecked(True)
+    verdicts[0].setChecked(True)
+    assert row.tiles_btn.text() == "confirmed, not checked"
+    editor.apply_btn.click()
+    st = page.state.feature_slice("nanowell")
+    assert st.subset == ss.Subset((C("identity", "in", values=("confirmed", "not_checked"), at="baseline"),))
+    assert len(_dots(page)) == 10
+    row.op_cb.setCurrentIndex(row.op_cb.findData("not_in"))
+    editor.apply_btn.click()
+    assert any(t.startswith("No nanowell of the drawn wells is in the subset (Identity verdict at baseline is not one "
+                            "of confirmed, not checked)") for t in _texts(page))
+
+
+def test_a_rim_fitted_condition_is_offered_as_yes_or_no(page):
+    editor = _editor(page)
+    editor.add_btn.click()
+    row = editor.rows[0]
+    row.field_cb.setCurrentIndex(row.field_cb.findData("rim_fitted"))
+    assert [row.op_cb.itemData(i) for i in range(row.op_cb.count())] == ["yes", "no"]
+    assert not row.a_spin.isVisibleTo(page.window) and not row.tiles_btn.isVisibleTo(page.window)
+    row.at_cb.setCurrentIndex(row.at_cb.findData("every"))
+    editor.apply_btn.click()
+    assert page.state.feature_slice("nanowell").subset == ss.Subset((C("rim_fitted", "yes", at="every"),))
+
+
 def test_a_seam_condition_is_built_in_the_editor(page):
     """Choosing *On a tile seam* shows yes / no and no number; *no at every timepoint* reaches the page's subset."""
     editor = _editor(page)

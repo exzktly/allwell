@@ -42,6 +42,7 @@ def build_axis_controls(ctx, slot, page: str) -> None:
 
     for name, caption in zip(_combo_names(page), ("X", "Y")):
         combo = ctx.widgets.register(name, LabeledComboBox(caption))
+        combo.setFitsWidest(True)                        # one width whatever metric is chosen
         combo.currentIndexChanged.connect(lambda _i, _p=page: _redraw_page(ctx, _p))
         group = slot.add_scope("", combo)
         group.setVisible(False)

@@ -5673,6 +5673,10 @@ takes its own nanowell's value at its timepoint, so you can plot a cell's GFP
 against how crowded its nanowell is. A cell with no nanowell address has no value
 there and is not drawn.
 
+Each axis dropdown keeps one width whatever is chosen in it — as wide as its
+longest entry — so the row does not shift as you change metrics, and its list
+opens wide enough to read every entry in full.
+
 The Channel, Property and ON cutoff controls that the other plot tabs share
 disappear from the controls row here, and the Points toggle takes their place.
 That is because this tab picks its channels per axis, from the X-axis and
@@ -6446,7 +6450,14 @@ the sentence names it.
     timepoint like a metric: *no* *at every timepoint* leaves out every nanowell that was ever on a seam; *yes*
     *at any timepoint* keeps only those. Datasets analysed before seam nanowells were counted have them with no
     count;
-  - **the nanowell's state at a timepoint** — seven more *yes* / *no* properties, read at a timepoint the same way,
+  - **identity verdict** — the identity check's verdict on the nanowell's timepoint, *is one of* or *is not one of*
+    the verdicts you tick: *confirmed*, *reference* (the timepoint the others are compared with), *partial* (most
+    nanowells confirmed, some left out), *inconclusive* (the check could not decide — for one, the array's fitted
+    rim centre disagreed with where the central square placed it), *contradicted*, or *not checked*. Read at a
+    timepoint like a metric. The verdict belongs to the whole timepoint of the well, so every nanowell there shares
+    it; *Identity contradicted* below is the answer for the nanowell itself. **Identity verdict · at every timepoint
+    · is one of confirmed, reference** keeps only wells whose every timepoint the check confirmed;
+  - **the nanowell's state at a timepoint** — eight more *yes* / *no* properties, read at a timepoint the same way,
     and each independent of the others (a nanowell in a field you left out is still *found by the run* if the run
     found it):
     - *Found by the run* — the run recorded the nanowell at that timepoint. **Found by the run · at every
@@ -6455,6 +6466,9 @@ the sentence names it.
     - *Timepoint not addressed* — the run could not address that timepoint of the well at all, so every nanowell
       in it is unfound. Add *Timepoint not addressed · at every timepoint · no* to tell a single lost nanowell
       apart from a whole timepoint that failed.
+    - *Array rim fitted* — the run fitted a circle to the outer edge of the well's nanowell array at that timepoint
+      (it locates the array's centre from it). *No* when no circle could be fitted, and always for an array whose
+      outline is not a circle; no value for a timepoint the run could not place a lattice in at all.
     - *Identity contradicted* — the identity check found that the nanowell's address at that timepoint may name
       a different nanowell (a contradicted timepoint, or a nanowell a partial check left out).
     - *Occluded or clipped* — found, but its contents could not be measured.

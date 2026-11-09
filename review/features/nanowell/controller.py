@@ -23,7 +23,7 @@ from review.features.nanowell import cell_gate_compute as cg
 from review.features.nanowell import size_class_compute as scc
 from review.features.nanowell.summary_compute import well_statistic
 from review.domain import nanowell_rim_focus as rfc
-from review.domain.size_classes import SizeClassRule
+from review.domain.size_classes import SizeClassRule, classify_rows
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
@@ -2205,6 +2205,7 @@ def gated_crops(st, site, crops):
 
     well = str(site[0])
     metrics = st.metrics[st.metrics["well"] == well]
+    rule = getattr(st.gate, "sizes", None)
     out = {}
     for tp, crop in crops.items():
         rows = getattr(crop, "cell_rows", None)
@@ -2215,8 +2216,13 @@ def gated_crops(st, site, crops):
                                                  field_sites(metrics[metrics["timepoint"] == tp]))
         outlines = (None if crop.outlines is None
                     else [o for o, hidden in zip(crop.outlines, hide) if not hidden])
-        out[tp] = replace(crop, cells=crop.cells[~hide], cell_rows=rows[~hide].reset_index(drop=True), gated=gated,
-                          in_fields=in_fields, outlines=outlines) if hide.any() else crop
+        kept = rows[~hide].reset_index(drop=True)
+        # The classes the counts were made under (the tally's own rule), so an outline's colour and the nanowell's
+        # class counts beside it cannot disagree.
+        classes = classify_rows(kept, rule) if isinstance(rule, SizeClassRule) else None
+        out[tp] = replace(crop, cells=crop.cells[~hide], cell_rows=kept, gated=gated, in_fields=in_fields,
+                          outlines=outlines, size_class=classes,
+                          size_labels=rule.labels if classes is not None else ())
     return out
 
 

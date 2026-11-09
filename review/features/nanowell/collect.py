@@ -38,6 +38,7 @@ import pandas as pd
 
 from domain.nanowell_roster import roster_rule
 from review.features.nanowell.background_compute import well_mode
+from review.domain.qc_params import AREA_COLS
 # A measurable timepoint at which the nanowell's own rim was out of focus: named by the rule's module, because the
 # app-wide inclusion layer reaches the same verdict and may not import this feature.
 from review.domain.nanowell_rim_focus import OUT_OF_FOCUS  # noqa: F401 — re-exported for the page's modules
@@ -614,6 +615,9 @@ CELL_FOV_COLUMN = "fov"
 #: Read too when the table has it: the cell's label on that tile, which with the timepoint and ``fov`` names the cell's
 #: outline (``cell_outline_compute``).
 CELL_ID_COLUMN = "nucleus_id"
+#: Read too when the table has them: the cell's area, which Cell Gating's size classes are judged on
+#: (``review.domain.size_classes.area_column``), so a crop can outline each cell in its class's colour.
+CELL_AREA_COLUMNS = AREA_COLS
 
 
 def cell_positions(data: NanowellData, well: str, timepoint: str) -> pd.DataFrame | None:
@@ -638,7 +642,7 @@ def cell_positions(data: NanowellData, well: str, timepoint: str) -> pd.DataFram
 def _read_cell_positions(path: str, _mtime_ns: int, _size: int) -> pd.DataFrame | None:
     """One cell table's positions; the modification time and size are the cache key, so an edited file is read
     again."""
-    wanted = {*CELL_POSITION_COLUMNS, CELL_FOV_COLUMN, CELL_ID_COLUMN}
+    wanted = {*CELL_POSITION_COLUMNS, CELL_FOV_COLUMN, CELL_ID_COLUMN, *CELL_AREA_COLUMNS}
     try:
         frame = pd.read_csv(path, usecols=lambda c: c in wanted,
                             dtype={"timepoint": str, "well": str, CELL_FOV_COLUMN: str})

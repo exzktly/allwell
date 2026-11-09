@@ -35,8 +35,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from review.domain.qc_params import AREA_COLS
 from review.domain.size_classes import PLACEHOLDERS, SizeClassRule, classify
+from review.domain.size_classes import area_column as _area_column
 
 SITE_KEY = ["well", "timepoint", "nw_q", "nw_r"]
 #: The per-class count columns, in class order.
@@ -78,8 +78,9 @@ def _empty_counts() -> pd.DataFrame:
 
 
 def area_column(cells: pd.DataFrame) -> str | None:
-    """The area column the debris gate reads (``qc_params.AREA_COLS``), so one number means one thing on the panel."""
-    return next((c for c in AREA_COLS if c in cells.columns), None)
+    """The area column the debris gate reads (``qc_params.AREA_COLS``), so one number means one thing on the panel —
+    ``size_classes.area_column``, the one rule the Segmentation outlines and the crops are coloured by too."""
+    return _area_column(cells.columns)
 
 
 def well_counts(well: str, cells: pd.DataFrame, included, rule: SizeClassRule | None) -> pd.DataFrame | None:

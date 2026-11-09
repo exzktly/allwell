@@ -3310,10 +3310,15 @@ choice applies once, when the menu closes.
   is judging. A plot of the gated data therefore shows the left-out nanowells
   with fewer cells than the gate saw.
 
-  **Size classes, counted per nanowell** sits under the debris gate on a
-  nanowell dataset. It sorts each nanowell's cells into two size ranges you
-  name — for example *T cells* and *DCs*, when no marker you imaged tells them
-  apart — and counts each. Each row is a **label** you type and a **min** and
+  **Size classes** sits under the debris gate on every dataset. It sorts cells
+  into two size ranges you name — for example *T cells* and *DCs*, when no
+  marker you imaged tells them apart. The
+  [Segmentation view](#segmentation) then outlines each kept cell in its class's
+  colour: green for the first class, blue for the second, and the usual
+  kept-cell outline for a cell in neither. On a nanowell dataset the rows are
+  titled **Size classes, counted per nanowell**. There the classes are also
+  counted per nanowell, and the cells on the Nanowells crops are coloured the
+  same way. Each row is a **label** you type and a **min** and
   **max** cell area in pixels, the same area the debris gate's Area row uses.
   Both ends count as inside the range, and a box left blank means no limit on
   that side. Beside each range is its size as a circle's diameter in µm at the
@@ -3332,6 +3337,9 @@ choice applies once, when the menu closes.
   against the new counts, with its progress on the status bar. The
   [Nanowells page](#nanowells) then offers each class's count, the cells in
   neither, their ratio and the first class's share, each named with your labels.
+  On any other dataset the title reads **Size classes, outlined in
+  Segmentation** and the line under the rows says only that, since there are no
+  nanowells to count in.
 
   **Exclude fields the run flagged** sits under the debris gate and works on
   whole fields of view rather than on single cells. While a run processes a
@@ -6985,6 +6993,9 @@ and why. A crop is cut a little wider than its nanowell, so its edges show parts
 not drawn, so every outline is a cell the selected nanowell's count is made of. It is one setting, also offered on the Extremes view, and kept with the page's
 settings. As on the Array view, a cell Cell Gating leaves out, or one in an excluded field, is not drawn. The caption
 counts the cells drawn and those left out, and a well without a cell table is named there rather than shown as empty.
+With size classes set on Home ▸ Cell Gating, each cell is outlined (or dotted) in its class's colour — green for the
+first class, blue for the second, white for a cell in neither — and the caption names each colour with its count:
+*size classes: T cells in green (4), DCs in blue (1), white in neither (2)*.
 The box beside **Cells** chooses what the crops are an image of: *Phase* (the image the run segmented), or any
 fluorescence channel the run read — EGFP, say — cut from that channel's image of the same tile, at the same place.
 It is one setting for every picture on the page: the strip, the pop-out, the Extremes montage and the Array view's
@@ -7281,6 +7292,16 @@ segmentation, the status line says so. Opening another dataset clears it.
   actually has cells for, and if the toggle is on and nothing here is excluded
   the line says that rather than leaving you with an unchanged picture and no
   way to tell whether the control worked.
+- **Size classes** — once two size classes are set on Home ▸ Cell Gating, every
+  kept cell whose area falls in a class is outlined in that class's colour
+  instead of red: green for the first class, blue for the second. A kept cell in
+  neither range keeps the red outline. The area is the one the debris gate reads,
+  from the measurement table, not counted from the picture. A key under the
+  picture names each class with its colour and how many of this field's kept
+  cells it holds, and how many are in neither. If the table has no area column,
+  the key says the outlines could not be coloured by class. Changing the classes
+  redraws the field at the zoom you had. Excluded cells keep their **Why
+  removed** colours, which are all clearly different from the two class colours.
 
   Being *included* is the AND of all of these layers, so a cell can fail more than
   one and an outline can only be one colour — it shows the first, and hovering

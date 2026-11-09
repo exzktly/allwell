@@ -1627,8 +1627,8 @@ review/
 │   ├── gating_state.py, sample_definitions.py, viewer_state.py, stats_compute.py
 │   ├── well_population.py   ← a well's threshold-free cells, for threshold edits without a read
 │   ├── metric_registry.py, qc_params.py
-│   ├── size_classes.py               ← two labelled cell-size classes (Cell Gating's rule, counted per
-│   │                                    nanowell, §6.2j)
+│   ├── size_classes.py               ← two labelled cell-size classes (Cell Gating's rule: outlined in
+│   │                                    Segmentation, counted per nanowell, §6.2j)
 │   ├── channel_roles.py              ← which channel is phase: listed last, never the default plot channel
 │   ├── observation.py                ← cells | nanowells, the observation-table contract, well medians,
 │   │                                    the "Observations: …" footer line (§6.2l)
@@ -12817,7 +12817,8 @@ drives the real QC gate through the page and through the panel.
 `review/features/qc/size_class_view.py`). Two classes of cell size the user defines on Cell Gating
 (`QCParams.size_classes`, a `SizeClassRule`), for telling two cell types apart by size when no marker separates
 them: each class is a label the user types and an area range in pixels, **inclusive at both ends**, read from the
-same area column as the debris gate (`qc_params.AREA_COLS`, `size_class_compute.area_column`) and compared at six
+same area column as the debris gate (`qc_params.AREA_COLS`, `size_classes.area_column`, which
+`size_class_compute.area_column` delegates to) and compared at six
 decimals, because a nanowell run writes `area_px` as `area_um2 / pixel_um**2` and an exact bound would otherwise
 fall to float noise. A bound left blank is open. The ranges may leave a gap and may not overlap
 (`SizeClassRule.problem`, which also refuses a missing or repeated label, a class with no bound, and an inverted
@@ -12866,22 +12867,50 @@ every caller — and its `statistic` column names it; the Distribution view's pe
 centre's note, the Statistics view's group values and its "one mean per well" sentence, and a density's tick all
 follow it. The plot tools get the same answer through `ObservationMetric.well_statistic` (below).
 
-The Cell Gating panel's block (`size_class_view.build_row`, under the debris bounds, shown on a nanowell dataset only)
-is two rows of label, min and max, with each range's equivalent-circle diameter in µm at the run's pixel size (read
+The Cell Gating panel's block (`size_class_view.build_row`, under the debris bounds, shown on every dataset) is
+titled by what the rule does there (`size_class_view.refresh`): *Size classes, counted per nanowell* on a nanowell
+dataset, *Size classes, outlined in Segmentation* on any other, and its sentence (`status_text(…, nanowell=)`)
+promises per-nanowell counts only where there are nanowells. It is two rows of label, min and max, with each range's equivalent-circle diameter in µm at the run's pixel size (read
 from `pipeline_info.json`'s `acquisition` block, which `viewer_state.read_pipeline_info` carries for it) and a
 sentence: what an incomplete rule lacks, as a notice; otherwise what the classes feed, whether the debris gate's own
 bounds cut into a range (`size_classes.clipped_by_gate`), and whether the timepoints were imaged at different pixel
 sizes, when a pixel range is a different cell size at each and no single diameter is shown. The boxes apply like the
 debris bounds (Enter, leaving the box, or a pause in typing). An edit that changes only the classes goes through
 `qc.controller.set_size_classes` rather than `set_qc_params_with_progress`: no QC verdict column moves, so nothing is
-re-projected; the parameters are saved, the plots and the page are redrawn, and Cell Gating's cell-area curve is drawn
+re-projected; the parameters are saved, the plots and the page are redrawn, the Segmentation view is drawn again at the zoom
+it had (`review_image.refresh`, only once its panel is built), and Cell Gating's cell-area curve is drawn
 again (`cell_gating.replot_cdfs`) with each class shaded and labelled on it (`renderer._draw_size_classes`, after the
 axis is focused, so a range past the cells neither widens it nor loses its label). The one way a class decides
 inclusion is a scatter gate drawn on a size metric (an `nw::size_*` axis, `qc.controller.gates_read_size_classes`):
 while one is drawn the light path also starts a gating pass (`cell_gating.start_worker`), which judges every cell
 against its nanowell's counts under the new classes.
+**Drawn as outline colours.** Two image surfaces colour a kept cell by its class, both in the inks
+`ui.theme.size_class_inks()` returns (`Colors.size_class_1` green, `size_class_2` blue, each with the word a caption
+names it by), so one class cannot take two colours. A cell in neither keeps the surface's ordinary colour.
+
+- *Segmentation* (`review_image.renderer`). `_size_classes_here` reads the rule through the `qc.get_params` service
+  and builds `{nid: class}` for the field (`collect.review_build_size_class_map`). The map reads the well's area
+  column through `narrow_rows` with the same id and frame-token normalisation as the MFI readout
+  (`collect._frame_id_values`), and is cached per field, override version and `SizeClassRule.key`
+  (`ReviewImageState.size_class_cache`, cleared with the other caches). `draw_review_image` re-inks the kept
+  cells' outline pixels after painting them in `boundary_color` (`_paint_size_class_outlines`). It runs only
+  where kept cells are outlined: the outline must be on and the view must not be binary. A key under the picture
+  (`_size_class_legend_html`) names each class with its ink and how many of the field's kept cells it holds, plus
+  how many are in neither. A table with no area or nucleus-id column gives a map of `None`, which the key states
+  instead of drawing every cell as "in neither". The two inks are held at the exclusion overlay's own floors
+  (CIE76 ΔE ≥ 31 to every layer ink, to the kept-cell red and to the focused yellow; luminance ≥ 0.28) by
+  `tests/test_size_class_outlines.py`.
+- *Nanowells crops* (`nanowell.renderer._draw_crop_cells`). The cell table read for the crops carries the area
+  columns when present (`collect.CELL_AREA_COLUMNS`). `controller.gated_crops` classes each kept cell under
+  the rule the gate tally was counted with (`GateTally.sizes`, `size_classes.classify_rows`), so an outline's
+  colour and the class counts beside it agree. It stores the result as `Crop.size_class` / `Crop.size_labels`.
+  `_cell_inks` colours each outline and dot, and `_cells_clause` ends the caption with each colour, its label and
+  its count (`_classes_clause`).
+
 `tests/test_nanowell_size_classes.py` pins the rule, the counts and the reasons; `tests/test_nanowell_size_classes_panel.py`
-types into the real boxes and reads the page's metrics, Metric menu, footer and CSV.
+types into the real boxes and reads the page's metrics, Metric menu, footer and CSV. `tests/test_size_class_outlines.py`
+sets a rule through `set_size_classes` on a built Segmentation panel and reads the redrawn pixels and key;
+`tests/test_nanowell_crop_size_classes.py` reads the crops' outline and dot colours and caption.
 
 **The fixed cohort** (`distribution_compute.fixed_cohort`, `NanowellState.cohort`, the *Fixed cohort* box on
 *Distribution* and *Trajectories*). Off, the median at each timepoint is over whichever nanowells could be
@@ -20014,6 +20043,9 @@ their cells is the one place that AND is invisible by construction: an excluded
 cell simply has no outline. The **Why removed** toggle
 (`renderer.toggle_review_image_exclusion_layers`) outlines each excluded cell in
 the ink of the layer that removed it.
+Kept cells are outlined in `boundary_color`, or, once Cell Gating's size classes
+are set, in their class's ink (*Size classes*, under §6.2j). The class inks are held
+at the same distance from every layer ink as the layer inks are from each other.
 
 A frame with **no label map** has no outlines to colour, and Segmentation draws it anyway: the image without
 outlines, the status line saying why (`NO_LABEL_MAP` / `NO_LABEL_MAP_NANOWELL`), and Delete Cell / Crop cells / Edit ▾

@@ -226,6 +226,13 @@ class Colors:
     # (Saved_Cells_Pass). Khaki; measured ΔE ≥ 44 (CIE76) to the overlay's
     # other eleven inks, relative luminance 0.32.
     exclusion_saved_cells = "#AA9955"
+    # Segmentation overlay and nanowell crops: a kept cell's outline in the first and the second of Cell Gating's
+    # size classes (``review.domain.size_classes``); a kept cell in neither keeps the ordinary kept-cell outline.
+    # Green and blue, the two hue families the overlay's other inks leave free — green is fine here because these
+    # are kept cells, not removed ones. Measured CIE76 ΔE ≥ 34.8 to every exclusion ink, to the kept-cell red and to
+    # the focused-cell yellow, ΔE 151 to each other; relative luminance 0.72 and 0.28 (the overlay's floor).
+    size_class_1      = "#11FF00"
+    size_class_2      = "#1199DD"
     # One cell shown on its own (the Scatter cell popup): its boundary, the
     # Segmentation overlay's default boundary ink so a cell reads the same in
     # both. And the focused cell — the one the status-bar chip names — ringed
@@ -598,6 +605,13 @@ def _icon_path(name: str) -> str:
     base = getattr(sys, "_MEIPASS",
                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     return os.path.join(base, "assets", "icons", name).replace(os.sep, "/")
+
+
+def size_class_inks() -> tuple:
+    """``((colour, name), …)``, one per size class in the rule's order (``review.domain.size_classes``): the ink a
+    kept cell of that class is outlined in, and the word a caption names that ink by. One place, so the
+    Segmentation overlay and the nanowell crops cannot give one class two colours."""
+    return ((Colors.size_class_1, "green"), (Colors.size_class_2, "blue"))
 
 
 def row_remove_qss(object_name: str) -> str:

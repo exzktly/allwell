@@ -25,6 +25,7 @@ from review.features.image_browser.review_image.collect import (
     review_build_exclusion_reasons,
     review_build_include_map,
     review_build_mfi_map,
+    review_build_size_class_map,
     review_build_threshold_map,
     review_collect_timepoints,
     review_norm_fov,
@@ -426,6 +427,8 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
                 state.review_image.threshold_map_cache.clear()
             state.review_image.threshold_map_cache[tm_key] = above_by_nid
 
+    size_classes = _size_classes_here(ctx, center, well, fov, tp)
+
     preserve_view = bool(state.review_image.preserve_view_on_refresh)
     state.review_image.preserve_view_on_refresh = False
     if channel_switch_debug:
@@ -435,6 +438,7 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
         fluor_arr, center, include_by_nid,
         fit_lut=False, preserve_view=preserve_view, boundary=boundary,
         above_by_nid=above_by_nid, exclusion_reasons=reasons_by_nid,
+        size_classes=size_classes,
     )
     set_cell_editing(ctx, not no_mask)
     if no_mask:
@@ -573,6 +577,7 @@ def draw_review_image(
     boundary=None,
     above_by_nid: dict[int, bool] | None = None,
     exclusion_reasons: dict[int, tuple] | None = None,
+    size_classes: tuple | None = None,
 ) -> None:
     # A8 D4: ctx-native pixmap compositor. Typed view/colour state lives on
     # ``ctx.state.review_image`` / ``ctx.state.image_view``; the QLabel host +
@@ -675,6 +680,7 @@ def draw_review_image(
             draw_boundary = boundary & include_mask
             boundary_color = _np.asarray(state.review_image.boundary_color, dtype=_np.uint8)
             rgb[draw_boundary] = boundary_color
+            _paint_size_class_outlines(rgb, draw_boundary, center, size_classes)
         # Excluded cells get an outline too, in the ink of the layer that
         # removed them -- the only place in the app that says WHICH one did.
         # Drawn whether or not the kept cells' outline is on, because the
@@ -738,6 +744,10 @@ def draw_review_image(
         legend = _exclusion_legend_html(
             ctx, exclusion_reasons,
             on=bool(getattr(state.review_image, "show_exclusion_layers", False)))
+        sizes_key = _size_class_legend_html(
+            size_classes, include_by_nid,
+            on=bool(state.review_image.show_outline) and not binary_mask_mode)
+        legend = "<br>".join(part for part in (sizes_key, legend) if part)
         if legend:
             # Rich text only when there is a legend to draw, and the plain part
             # is escaped because Qt switches the whole label to HTML the moment
@@ -1260,6 +1270,68 @@ def _layer_inks():
         "field excluded in QC triage": theme.Colors.ink_light,
         "field not in the FOV selection": theme.Colors.exclusion_fov,
     }
+
+
+def _size_rule(ctx):
+    """Cell Gating's size-class rule (``QCParams.size_classes``), through the QC layer's own accessor so a dataset
+    whose parameters are not yet seeded reads its saved rule; ``None`` in a build without the QC layer."""
+    from review.domain.size_classes import SizeClassRule
+
+    features = getattr(ctx, "features", None)
+    params = features.query("qc.get_params", ctx, default=None) if features is not None else None
+    rule = getattr(params, "size_classes", None)
+    return rule if isinstance(rule, SizeClassRule) else None
+
+
+def _size_classes_here(ctx, center, well: str, fov: str, tp: str) -> tuple | None:
+    """``(rule, {nid: class})`` for the displayed field, the map ``None`` when the cells could not be classified
+    (no area column, no rows); ``None`` as a whole when no complete size-class rule is set, so the outlines are
+    drawn as they always were. Cached per field, override version and rule."""
+    rule = _size_rule(ctx)
+    if rule is None or not rule.active():
+        return None
+    cache = ctx.state.review_image.size_class_cache
+    key = (well, fov, tp, ctx.state.review_image.override_version, rule.key())
+    if key not in cache:
+        if len(cache) > 32:
+            cache.clear()
+        cache[key] = review_build_size_class_map(ctx, center, well, fov, tp, rule)
+    return rule, cache[key]
+
+
+def _paint_size_class_outlines(rgb, draw_boundary, center, size_classes) -> None:
+    """Re-ink the kept cells' outline pixels (*draw_boundary*) of each cell in a size class in its class's colour
+    (``theme.size_class_inks``); a kept cell in neither keeps the ordinary outline. A no-op without a rule or
+    without classes."""
+    if not size_classes or not size_classes[1]:
+        return
+    _rule, by_nid = size_classes
+    for k, (ink, _name) in enumerate(theme.size_class_inks()):
+        ids = [nid for nid, cls in by_nid.items() if cls == k]
+        if not ids:
+            continue
+        mask = draw_boundary & _np.isin(center, _np.asarray(ids, dtype=center.dtype))
+        rgb[mask] = _np.asarray(_rgb_of(ink), dtype=_np.uint8)
+
+
+def _size_class_legend_html(size_classes, include_by_nid, *, on: bool) -> str:
+    """The colour key for the size-class outlines, with how many kept cells of this field are in each class and in
+    neither — or why the outlines are not coloured by class although a rule is set. ``""`` with no complete rule,
+    or with the kept cells' outline off (nothing coloured to explain)."""
+    if not on or not size_classes:
+        return ""
+    rule, by_nid = size_classes
+    muted = theme.Colors.text_muted
+    if by_nid is None:
+        return (f'<span style="color:{muted}">Size classes: this well\'s table has no cell area or nucleus id '
+                "column, so the outlines are not coloured by class.</span>")
+    kept = [nid for nid, inc in (include_by_nid or {}).items() if inc]
+    counts = [sum(1 for nid in kept if by_nid.get(nid) == k) for k in range(len(rule.labels))]
+    neither = len(kept) - sum(counts)
+    keys = [f'<span style="color:{ink}">\u25a0</span> {_html.escape(label)} ({n:,})'
+            for (ink, _name), label, n in zip(theme.size_class_inks(), rule.labels, counts)]
+    keys.append(f"in neither, the usual outline ({neither:,})")
+    return f'<span style="color:{muted}">Size classes:</span> ' + " &nbsp; ".join(keys)
 
 
 def _exclusion_legend_html(ctx, exclusion_reasons, *, on: bool) -> str:

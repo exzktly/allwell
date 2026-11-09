@@ -215,7 +215,8 @@ def set_size_classes(ctx, params: QCParams) -> None:
     surfaces that count by class are redrawn: the Nanowells page (``nanowell.follow_qc_params``) and the plots
     (``redraw_app``), whose nanowell rows are keyed on the rule (``nanowell.controller.gate_version``) and so are
     counted again. Cell Gating's cell-area curve, which shades the classes, is drawn again too
-    (``cell_gating.replot_cdfs``).
+    (``cell_gating.replot_cdfs``), and so is the Segmentation view, which outlines each kept cell in its class's
+    colour (``review_image.refresh``).
 
     **One exception includes or leaves out cells**: a scatter gate drawn on a size-class metric judges each cell by
     its nanowell's class counts, so while one is drawn (:func:`gates_read_size_classes`) a gating pass is started
@@ -227,6 +228,15 @@ def set_size_classes(ctx, params: QCParams) -> None:
             ctx.features.call("cell_gating.start_worker", ctx)
     with swallow("Cell Gating: shade the size classes"):
         ctx.features.call("cell_gating.replot_cdfs", ctx)
+    # The Segmentation view outlines each kept cell in its class's colour, so it is drawn again too — kept at the
+    # zoom and pan the user had, since the field itself has not changed.
+    # Only when the view is built: the flag would otherwise outlive this edit and keep the zoom of the next field.
+    built = getattr(getattr(getattr(ctx, "runtime", None), "review_image", None), "label", None) is not None
+    review_image = getattr(ctx.state, "review_image", None)
+    if built and review_image is not None:
+        with swallow("Segmentation: outline the size classes"):
+            review_image.preserve_view_on_refresh = True
+            ctx.features.call("review_image.refresh", ctx)
 
 
 def set_qc_params_with_progress(ctx, params: QCParams, *, on_done=None) -> None:

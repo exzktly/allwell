@@ -1,4 +1,4 @@
-"""The Cell Gating panel's **Size classes** rows: two labelled area ranges, each nanowell's kept cells counted per range.
+"""The Cell Gating panel's **Size classes** rows: two labelled area ranges, each kept cell classed by its area.
 
 The rule is the QC layer's (``QCParams.size_classes``, :mod:`review.domain.size_classes`), edited here beside the
 debris gate's own area bounds because it is read from the same area column and in the same pixels. It is not an
@@ -6,13 +6,16 @@ inclusion layer: it leaves every cell in and only decides which class a kept cel
 through ``controller.set_size_classes`` — saved, and the Nanowells page and the plots redrawn — without the
 re-projection of every verdict layer a gate edit needs.
 
+Shown on every dataset. Every dataset uses it to colour the outlines: the Segmentation view outlines each kept
+cell in its class's colour (``review_image.renderer``). On a nanowell dataset it also counts each nanowell's kept cells
+per class (the Nanowells page's size metrics) and colours the cells on the nanowell crops. The title and the sentence
+under the rows say which of these applies, so a plain dataset is never promised per-nanowell counts.
+
 Each row is a label the user types (the populations are never named by the app) and an inclusive minimum and
 maximum in pixels, with the range's equivalent-circle diameter in µm beside it at the run's pixel size. When the
 run imaged its timepoints at different pixel sizes the readout says so, because a pixel cutoff then means a
 different cell size at each. The sentence under the rows says what is wrong with an incomplete rule, or what the
 classes feed and whether the debris gate's bounds cut into a range.
-
-**Shown only on a dataset with nanowell tables**: the classes are counted per nanowell, and nothing else reads them.
 """
 
 from __future__ import annotations
@@ -28,14 +31,18 @@ from widgets.capped_label import CappedLabel
 from .nanowell_focus_view import is_nanowell_dataset
 
 TOOLTIP = (
-    "Count each nanowell's cells in two size classes you name — for example T cells and dendritic cells, told "
-    "apart by size when no marker separates them.\n"
+    "Sort cells into two size classes you name — for example T cells and dendritic cells, told apart by size "
+    "when no marker separates them. The Segmentation view outlines each kept cell in its class's colour; on a "
+    "nanowell dataset each nanowell's cells are counted per class too.\n"
     "Each class is a cell area range in pixels, inclusive at both ends, read from the same area as the debris "
     "gate above. Leave a gap between the ranges for sizes that could be either: a cell in neither range is counted "
     "as unclassified, never forced into a class. The ranges may not overlap.\n"
-    "Only the cells this panel keeps are classified. The Nanowells page then offers each class's count, the cells "
-    "in neither, the ratio of the first class to the second and the first class's share, each well's value being "
-    "the mean over its nanowells. Nothing is re-run.")
+    "Only the cells this panel keeps are classified. On a nanowell dataset the Nanowells page then offers each "
+    "class's count, the cells in neither, the ratio of the first class to the second and the first class's share, "
+    "each well's value being the mean over its nanowells. Nothing is re-run.")
+#: The rows' title, by whether the dataset counts per nanowell (:func:`refresh`).
+TITLE_NANOWELL = "Size classes, counted per nanowell"
+TITLE_PLAIN = "Size classes, outlined in Segmentation"
 _LABEL_W = 120
 
 
@@ -50,7 +57,7 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
     layout = QVBoxLayout(row)
     layout.setContentsMargins(0, 6, 0, 0)
     layout.setSpacing(2)
-    title = QLabel("Size classes, counted per nanowell", row)
+    title = QLabel(TITLE_NANOWELL, row)
     title.setToolTip(TOOLTIP)
     layout.addWidget(title)
     grid = QWidget(row)
@@ -63,7 +70,7 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
         head = QLabel(cap, grid)
         head.setObjectName("Muted")
         gl.addWidget(head, 0, col)
-    widgets: dict = {"size_classes_row": row}
+    widgets: dict = {"size_classes_row": row, "size_classes_title": title}
     rule = params.size_classes if isinstance(params.size_classes, SizeClassRule) else SizeClassRule()
     for k in range(N_CLASSES):
         c = rule.classes[k]
@@ -140,15 +147,27 @@ def pixel_sizes(ctx) -> list[float]:
     return out
 
 
-def status_text(rule: SizeClassRule, params, pixels: list[float]) -> tuple[str, bool]:
-    """``(sentence, is_problem)`` under the rows."""
+def status_text(rule: SizeClassRule, params, pixels: list[float], *, nanowell: bool = True) -> tuple[str, bool]:
+    """``(sentence, is_problem)`` under the rows. *nanowell*: the dataset counts per nanowell, so the sentence
+    names those counts; otherwise it names only what a plain dataset does with the classes — the outlines."""
     if rule.is_blank():
-        return ("Not set: name two classes and their area ranges to count each nanowell's cells by size.", False)
+        if nanowell:
+            return ("Not set: name two classes and their area ranges to count each nanowell's cells by size.", False)
+        return ("Not set: name two classes and their area ranges to outline each kept cell in the Segmentation "
+                "view by its size.", False)
     problem = rule.problem()
     if problem:
-        return (problem + " Until then the size metrics on the Nanowells page stay empty.", True)
-    said = (f"Each nanowell's kept cells are counted as {rule.labels[0]}, {rule.labels[1]} or neither; the "
-            "Nanowells page and the plots offer the counts, the ratio and the share.")
+        if nanowell:
+            return (problem + " Until then the size metrics on the Nanowells page stay empty.", True)
+        return (problem + " Until then the Segmentation view outlines every kept cell alike.", True)
+    a, b = rule.labels
+    (_ink_a, name_a), (_ink_b, name_b) = theme.size_class_inks()
+    outlined = f"the Segmentation view outlines {a} in {name_a} and {b} in {name_b}"
+    if nanowell:
+        said = (f"Each nanowell's kept cells are counted as {a}, {b} or neither; the Nanowells page and the plots "
+                f"offer the counts, the ratio and the share, and {outlined}, as do the nanowell crops.")
+    else:
+        said = f"Each kept cell is classed as {a}, {b} or neither; {outlined}."
     clipped = clipped_by_gate(rule, params.min_area if params.enabled else None,
                               params.max_area if params.enabled else None)
     if clipped:
@@ -160,13 +179,12 @@ def status_text(rule: SizeClassRule, params, pixels: list[float]) -> tuple[str, 
 
 
 def refresh(ctx, w: dict, params) -> None:
-    """Show the rows on a nanowell dataset only, and re-read the diameters and the sentence from *params*."""
-    row = w.get("size_classes_row")
+    """Title the rows for this dataset (per-nanowell counts or outlines only), and re-read the diameters and the
+    sentence from *params*."""
     nanowell = is_nanowell_dataset(ctx)
-    if row is not None:
-        row.setVisible(nanowell)
-    if not nanowell:
-        return
+    title = w.get("size_classes_title")
+    if title is not None:
+        title.setText(TITLE_NANOWELL if nanowell else TITLE_PLAIN)
     rule = params.size_classes
     pixels = pixel_sizes(ctx)
     pixel = pixels[0] if pixels and len({round(p, 6) for p in pixels}) == 1 else None
@@ -176,7 +194,7 @@ def refresh(ctx, w: dict, params) -> None:
             label.setText(diameter_text(rule.classes[k], pixel))
     status = w.get("size_classes_status")
     if status is not None:
-        text, problem = status_text(rule, params, pixels)
+        text, problem = status_text(rule, params, pixels, nanowell=nanowell)
         status.setText(text)
         status.setObjectName("Notice" if problem else "Muted")
         status.style().unpolish(status)

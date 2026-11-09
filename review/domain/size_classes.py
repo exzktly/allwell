@@ -1,5 +1,6 @@
-"""Two labelled cell-size classes, judged on each cell's area: the rule Home → Cell Gating holds and the Nanowells page
-counts by.
+"""Two labelled cell-size classes, judged on each cell's area: the rule Home → Cell Gating holds, the Nanowells page
+counts by, and the Segmentation view and the nanowell crops colour each kept cell's outline by
+(:func:`classify_rows`, ``ui.theme.size_class_inks``).
 
 A user who has imaged no marker that tells two cell types apart — T cells from dendritic cells, say — can still
 tell them apart by size when their size ranges barely overlap. The rule is two **classes**, each a label the user
@@ -179,6 +180,26 @@ def classify(areas, rule: SizeClassRule) -> np.ndarray:
     for k, c in enumerate(rule.classes):
         out[finite & (values >= c.low) & (values <= c.high) & (out == UNCLASSIFIED)] = k
     return out
+
+
+def area_column(columns) -> str | None:
+    """The area column of a cell table with *columns* that the rule is judged on: the first of the debris gate's
+    own (``qc_params.AREA_COLS``) the table has, so a class means the same pixels as the gate; ``None`` without one."""
+    from review.domain.qc_params import AREA_COLS     # here, not at the top: qc_params imports this module
+
+    present = set(columns)
+    return next((c for c in AREA_COLS if c in present), None)
+
+
+def classify_rows(rows, rule: SizeClassRule) -> np.ndarray | None:
+    """Each row of the cell table *rows* as :func:`classify` places it, by its :func:`area_column`; ``None`` when the
+    rule is inactive or the table has no area column — "not classified" is not "every cell unclassified"."""
+    if rows is None or not rule.active():
+        return None
+    col = area_column(getattr(rows, "columns", ()))
+    if col is None:
+        return None
+    return classify(rows[col], rule)
 
 
 def diameter_um(area_px: float, pixel_um: float) -> float:

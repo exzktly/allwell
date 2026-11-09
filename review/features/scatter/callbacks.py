@@ -11,6 +11,7 @@ from __future__ import annotations
 from core.safe import swallowed
 from review.features.scatter.cell_viewer_view import open_scatter_cell_viewer
 from review.features.scatter.gating import gate_edge_at
+from review.features.scatter.observation_compute import NanowellPoint
 
 
 # ── Canvas pick handlers ─────────────────────────────────────────────────────
@@ -105,6 +106,12 @@ def on_scatter_click(ctx, event) -> None:
         meta, _dist = _nearest_point(event, points)
         if meta is None:
             return
+        if isinstance(meta, NanowellPoint):
+            # Under Observations: Nanowells a point is a nanowell: show it on the Nanowells page.
+            if not ctx.features.query("nanowell.show_nanowell", ctx, meta.well, meta.q, meta.r, meta.timepoint,
+                                      default=False):
+                ctx.notify.set_status("This build has no Nanowells page to show the nanowell on.")
+            return
         nearest_well, nearest_filename, nearest_nuclear_id, nearest_row_idx = meta
 
         if nearest_well is not None:
@@ -151,7 +158,11 @@ def on_scatter_motion(ctx, event) -> None:
         # on a point, which is most of the axis. Clear it only when the thing
         # standing there is a tooltip this handler put there.
         rt = ctx.runtime.scatter
-        if min_dist <= _HOVER_RADIUS_PX and nearest_info:
+        if min_dist <= _HOVER_RADIUS_PX and isinstance(nearest_info, NanowellPoint):
+            tooltip_text = nearest_info.text()
+            ctx.notify.set_status(tooltip_text)
+            rt.hover_status = tooltip_text
+        elif min_dist <= _HOVER_RADIUS_PX and nearest_info:
             well_label, filename, nuclear_id, row_idx = nearest_info
             tooltip_text = f"File: {filename} | Nuclear ID: {nuclear_id}"
             ctx.notify.set_status(tooltip_text)

@@ -6297,7 +6297,10 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     median over its nanowells) with *Points: Per well*. It draws the nanowells this page draws: wells left out with
     **Exclude well** are not plotted, only the nanowells in this page's **Subset** are, and with **Fixed cohort** on
     only the nanowells with both plotted values at every timepoint. The footer says each, names the Baseline when an
-    axis is a fold change, and — with a Subset — says that gate percentages are of the subset's nanowells. The other
+    axis is a fold change, and — with a Subset — says that gate percentages are of the subset's nanowells. Its
+    **Subset** and **Baseline** pickers are this page's own two settings: pick a saved subset (or *All
+    nanowells*) or the timepoint fold changes are measured from, and this page changes with it. Click a nanowell's
+    point to open it here, selected, at that point's timepoint; hovering names it. The other
     plots below draw every nanowell of the selected wells;
   - **Bar Plots**, **Line Graphs** and **Heat Map** draw each well's median over its nanowells, and a replicate set
     as the mean of its wells' medians with error bars over **wells** — nanowells are never treated as replicates.

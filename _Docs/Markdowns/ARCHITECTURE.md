@@ -15082,7 +15082,22 @@ one Subset built on the page decides the nanowells of the page's views and of th
 scatter leaves its own gate's percentage near 100 %, because the points outside it are not drawn. The default stays
 unscoped: Cell Gating evaluates a nanowell-metric gate against these rows (`scatter_gates=False`), and a Subset naming
 that gate would otherwise decide its own inputs; the other plot tools' nanowell modes are unscoped too.
-`tests/test_scatter_nanowells_follow_the_page_scope.py` drives the real Scatter builder for each. A second service, `observations.nanowell_metrics`
+`tests/test_scatter_nanowells_follow_the_page_scope.py` drives the real Scatter builder for each. **The scatter
+sets the page's scope, too.** Beside its X / Y metric pickers, each page of the Scatter Plot carries a **Subset** and
+a **Baseline** picker under Observations: Nanowells (`scatter/_observations._scope_names`, shown and hidden with
+the metric pickers by `sync_controls`). They are the Nanowells page's two settings, not copies:
+`_populate_scope` fills them from the `nanowell.scope_choices` service (`nanowell/_plot_links.scope_choices`: every
+nanowell, each saved subset, and the page's Subset named "(not saved)" when it was built there and never saved; the
+two baseline rules and each timepoint of the drawn rows in time order), and a choice calls
+`nanowell.set_subset_by_name` (`set_subset` / `apply_saved_subset`) or `nanowell.set_baseline`
+(`set_page_baseline`), then redraws. **A click names a nanowell.** The per-nanowell page's interaction points are
+`observation_compute.click_points` — `(x, y, NanowellPoint(well, timepoint, q, r))`, per-well medians left out —
+so `callbacks.on_scatter_click` answers a nanowell point with the `nanowell.show_nanowell` service
+(`_plot_links.show_nanowell`: the well joins the plate selection when it is not in it, as `open_for_anchor` does;
+the nanowell becomes `selected_sites`, the page's timepoint the point's; the notebook shows *Nanowells*; then
+`selection_changed`) and a hover writes `NanowellPoint.text()` on the status line. The cell scatter's points
+remain cell tuples and still open the cell viewer. `tests/test_scatter_nanowells_subset_baseline_and_click.py`
+drives the pickers and the click handler through the real builder. A second service, `observations.nanowell_metrics`
 (`nanowell_metric_specs`), names the same metrics with no rows read: the channels come from the site tables' header
 rows (`collect.site_channels`, the same derivation `load_nanowell_data` applies to the columns it reads). The
 per-cell Scatter's "Nanowell ▸" picker entries (`scatter/_observations.cell_nanowell_entries`) use it, because they

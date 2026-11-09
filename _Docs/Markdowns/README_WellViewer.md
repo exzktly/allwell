@@ -5632,7 +5632,10 @@ the spacing you read the gaps against, and on a response curve it also decides
 where a zero dose sits: one step of your base below the lowest real dose, behind
 the dotted break, rather than always a factor of ten. The field applies to any
 figure's log axes, not only this tab's; on a plot ticked at decades (most of
-them) picking base 2 re-ticks it at the powers of two.
+them) picking base 2 re-ticks it at the powers of two. That includes the
+Scatter Plot's log axes, which are drawn as log(value + 1) so a zero stays on
+the axis: the label names the base (`(log₂, +1)`, `(ln, +1)`), and the ticks
+sit at 0 and the powers of that base.
 
 #### Fold change on a response curve
 
@@ -6297,8 +6300,11 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     median over its nanowells) with *Points: Per well*. It draws the nanowells this page draws: wells left out with
     **Exclude well** are not plotted, only the nanowells in this page's **Subset** are, and with **Fixed cohort** on
     only the nanowells with both plotted values at every timepoint. The footer says each, names the Baseline when an
-    axis is a fold change, and — with a Subset — says that gate percentages are of the subset's nanowells. The other
-    plots below draw every nanowell of the selected wells;
+    axis is a fold change, and — with a Subset — says that gate percentages are of the subset's nanowells. Its
+    Properties panel works as on the cell scatter: **X log** / **Y log** (on by default for each nanowell, as for
+    each cell, drawn as log(value + 1) so an empty nanowell's zero stays on the axis), the **Log base**, and the
+    marker size and shape. Density shading and error bars are not offered, because nanowell points are drawn solid
+    and a per-well median draws no spread. The other plots below draw every nanowell of the selected wells;
   - **Bar Plots**, **Line Graphs** and **Heat Map** draw each well's median over its nanowells, and a replicate set
     as the mean of its wells' medians with error bars over **wells** — nanowells are never treated as replicates.
     Bar and Line add the **occupied share** and how many nanowells had a value;

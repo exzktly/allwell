@@ -6963,6 +6963,23 @@ cannot vouch for a missing row; and it refuses a key it cannot read as a
 literal rather than skipping it. Adding a plotting leaf means a row in each
 roster and a `make_plot_with_right_dock` call in its `tab_view`.
 
+**A Properties click is never silent.** The button's `clicked` slot is the only
+caller, and an exception raised in a slot reaches stderr alone, which a
+double-clicked app does not have; `core.safe.swallow` logs at DEBUG, which the
+log drawer does not show. So `open_export_style_panel` runs its body under
+`swallow(..., level=WARNING)`, every early return (unknown key, figure not built)
+logs a WARNING beside its status line, and once the layout has placed an opened
+panel `_report_placement` logs where it landed — INFO when it has pixels on the
+monitor, WARNING with its geometry, the window's and the screen's when it does
+not. The toggle closes a panel only when it is on screen (`_is_on_screen`: alive,
+`isVisible()`, and a non-empty `visibleRegion()`); a panel Qt calls visible with
+nothing of it drawn is re-mounted instead, and a panel whose C++ object was
+deleted with its page is rebuilt by `launch_export_editor` rather than raising.
+`tests/test_properties_click_is_never_silent.py` pins each path. It exists
+because a nanowell dataset's Scatter Properties icon was reported doing nothing
+at all with an empty log, and no offscreen run reproduced it — so the next such
+click names its cause in the drawer.
+
 **A roster is how shared chrome finds a tab, and a roster written before the
 tab existed does not.** The Properties-panel pair above is one instance of a
 class that has now bitten five times, always the same way: the control is
@@ -15098,6 +15115,18 @@ is therefore the same box on the cell scatter's "Nanowell ▸ count" × "Nanowel
 its label's percentage is of each group's plotted nanowells. The redraw also rebuilds an armed gate selector, as the
 cell redraw does. The **Apply gates** filter does not thin nanowell points. `tests/test_scatter_gates_on_nanowell_observations.py`.
 The Nanowells page's *Subset* can name such a gate (`nanowell/subset_compute`, *The subset*).
+
+**The nanowell scatter obeys the figure's Properties panel.** It is the same figure as the cell scatter on each
+page, so it reads the same preferences: `_observations.redraw` takes them from `plot_style.figure_prefs(ctx, fig)`,
+and on the Cells page `_pin_cells_log_axes` pins `scatter_x_log` / `scatter_y_log` (on unless turned off) on the
+axes as `_aw_force_xlog` / `_aw_force_ylog` with `_aw_log_plus1`, labelling each log axis with the transform and its
+base (`_layout.log1p_axis_suffix`) — the rules `gating.render_scatter_points` draws cells by. The Wells page keeps
+the shared `x_log` / `y_log`, which the style pass applies. Every point collection is tagged
+`_aw_marker_collection`, so marker size, shape and edge apply (`plot_style._style_marker_collections`). The draw
+stamps the `nanowells` style view (`plot_style.mark_style_view`) and `_observations.drew_nanowells` stamps the cell
+view back whenever cells are drawn, so the panel hides what the nanowell points do not draw: density shading on the
+Cells page and the error-bar rows on the Wells page (`scatter/_style_facets`, `views`).
+`tests/test_scatter_nanowells_obeys_properties.py` drives the panel's own toggles and base box on both pages.
 
 **Applying a nanowell gate to cells.** `review/domain/gates.compute_gate_inclusion(df, gates, ratios, *, nanowell_values)` joins
 each `nw::<key>` axis a gate names onto a copy of the cell rows (`observations.join_nanowell_columns`, on

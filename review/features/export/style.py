@@ -19,9 +19,14 @@ keeps it that way.
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtWidgets import QMessageBox, QWidget
-from core.safe import swallowed
+from core.safe import swallow, swallowed
 from review.core.plot_style import apply_export_style_to_current
+
+
+_LOG = logging.getLogger(__name__)
 
 
 EXPORT_PROFILES = {
@@ -73,8 +78,8 @@ def get_all_profile_names_ctx(ctx) -> list[str]:
 class _ExportEditorSession:
     """Handed back to the caller as the open editor's handle.
 
-    ``sidebar`` is written and never read inside this module; it is the
-    session's whole payload, for a caller that wants the widget.
+    ``sidebar`` is the session's whole payload: the panel widget, which the
+    Properties toggle reads to report where the panel landed.
     """
 
     def __init__(self, sidebar) -> None:
@@ -123,6 +128,12 @@ def launch_export_editor(win, fig, default_name: str, *, plot_bg: str = "",
                 win._export_style_sidebars = {}
         key = id(fig)
         sb = win._export_style_sidebars.get(key)
+        from shiboken6 import isValid
+        if sb is not None and not isValid(sb):
+            # Its dock was torn down with the page it lived on; a deleted panel
+            # cannot be shown again, so build a fresh one.
+            _LOG.info("Properties panel for %s was deleted; building a new one", default_name)
+            sb = None
         if sb is None:
             sb = ExportStyleSidebar(win, parent, fig, canvas, default_name=default_name)
             win._export_style_sidebars[key] = sb
@@ -255,26 +266,79 @@ def open_export_style_panel(win, plot_key: str) -> None:
         "multivariate":  ("_mv_fig",           "_mv_canvas",           "multivariate_figure"),
         "response":      ("_response_fig",     "_response_canvas",     "response_figure"),
     }
-    spec = mapping.get(plot_key)
+    # Everything below is reached from a button's ``clicked`` slot, where an
+    # exception reaches only stderr — which a double-clicked app does not have.
+    # A Properties click that does nothing must say why in the log drawer.
+    with swallow(f"open the Properties panel for {plot_key!r}", level=logging.WARNING, logger=_LOG):
+        _toggle_export_style_panel(win, plot_key, mapping.get(plot_key))
+
+
+def _refuse(win, plot_key: str, message: str) -> None:
+    """Say on the status line *and* in the log why the Properties panel did not open."""
+    _LOG.warning("Properties panel for %r not opened: %s", plot_key, message)
+    win._set_status(message)
+
+
+def _is_on_screen(widget) -> bool:
+    """Whether *widget* is alive, shown, and has at least one pixel the user can see.
+
+    ``isVisible`` alone is not that: it is true of a widget whose every ancestor is
+    shown even when a layout has left it zero-sized or clipped outside its parent.
+    """
+    from shiboken6 import isValid
+    if widget is None or not isValid(widget) or not widget.isVisible():
+        return False
+    return not widget.visibleRegion().isEmpty()
+
+
+def _toggle_export_style_panel(win, plot_key: str, spec) -> None:
     if spec is None:
-        win._set_status(f"Unknown export panel: {plot_key}")
+        _refuse(win, plot_key, f"Unknown export panel: {plot_key}")
         return
     fig_attr, canvas_attr, default_name = spec
     fig = getattr(win, fig_attr, None)
     canvas = getattr(win, canvas_attr, None)
     if fig is None:
-        win._set_status("Plot is not ready yet.")
+        _refuse(win, plot_key, "Plot is not ready yet.")
         return
-    # If a sidebar for this figure is already open, toggle it off so
-    # the button behaves as an open/close affordance.
+    # The button is an open/close affordance: a panel the user can see closes.
+    # One that is "visible" to Qt but has no pixel on screen is re-mounted
+    # instead — closing it would make the click do nothing the user can see,
+    # and the next click would only re-open it in the same unseen place.
     existing = (getattr(win, "_export_style_sidebars", {}) or {}).get(id(fig))
-    if existing is not None and existing.isVisible():
+    if _is_on_screen(existing):
         try:
             existing._close_dock()
         except Exception:
             swallowed()  # was: pass (silent except)
         return
     from ui import theme
-    from review.features.export.style import launch_export_editor
-    launch_export_editor(win, fig, default_name, plot_bg=theme.CPub.bg, canvas=canvas)
+    session = launch_export_editor(win, fig, default_name, plot_bg=theme.CPub.bg, canvas=canvas)
+    if session is not None:
+        from PySide6.QtCore import QTimer
+        # After the layout has placed the dock: what the user sees is only known then.
+        QTimer.singleShot(0, lambda: _report_placement(win, plot_key, session.sidebar))
+
+
+def _report_placement(win, plot_key: str, sidebar) -> None:
+    """Log where a just-opened Properties panel landed, and warn when nobody can see it."""
+    from shiboken6 import isValid
+    if sidebar is None or not isValid(sidebar):
+        _LOG.warning("Properties panel for %r was deleted as it opened", plot_key)
+        return
+    top_left = sidebar.mapToGlobal(sidebar.rect().topLeft())
+    where = (f"x={top_left.x()} y={top_left.y()} {sidebar.width()}x{sidebar.height()}, "
+             f"window {win.width()}x{win.height()}")
+    screen = sidebar.screen()
+    screen_rect = screen.availableGeometry() if screen is not None else None
+    on_monitor = screen_rect is None or screen_rect.intersects(
+        sidebar.rect().translated(top_left))
+    if _is_on_screen(sidebar) and on_monitor:
+        _LOG.info("Properties panel for %r opened (%s)", plot_key, where)
+        return
+    dock = sidebar.parentWidget()
+    _LOG.warning("Properties panel for %r opened but is not on screen (%s; screen %s; shown=%s, "
+                 "dock shown=%s)", plot_key, where,
+                 None if screen_rect is None else f"{screen_rect.width()}x{screen_rect.height()}",
+                 sidebar.isVisible(), dock.isVisible() if dock is not None else None)
 

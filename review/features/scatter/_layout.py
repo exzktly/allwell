@@ -32,22 +32,9 @@ def log1p_axis_suffix(on: bool) -> str:
 
 
 def _scatter_col_label(col: str) -> str:
-    """Readable axis label for a metric/shape column."""
-    from pipeline.shape_features import is_shape_column
-    from review.data.metric_labels import split_metric_col
-    from review.data.observations import is_nanowell_cell_column, nanowell_cell_label
-    if is_nanowell_cell_column(col):
-        return nanowell_cell_label(col)
-    if is_shape_column(col):
-        from pipeline.shape_features import label_for as _shape_label_for
-        return _shape_label_for(col) or col
-    parts = split_metric_col(col)
-    if parts is None:
-        return col
-    _ch, metric_key, label = parts
-    if metric_key == "smfish_count":
-        return f"{label.split(' ')[0]} smFISH Count"
-    return label
+    """Readable axis label for a metric/shape column (``metric_labels.column_label``)."""
+    from review.data.metric_labels import column_label
+    return column_label(col)
 
 
 def _style_scatter_ax(ctx, ax, fig=None):

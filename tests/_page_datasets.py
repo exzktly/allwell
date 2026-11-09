@@ -163,6 +163,22 @@ def prepare(win, qapp, kind: str, page: str, wells: set[str]) -> None:
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=100)
         save_figure_to_gallery(ctx, tab="Distribution", title="A saved plot", png_bytes=buf.getvalue())
+    elif page == "Saved Cells":
+        # A set with a long name and source, a gate in force and one not, so the lists are drawn full.
+        from review.core.cell_sets import add_set
+        from review.features.saved_cells.controller import refresh
+
+        well = sorted(wells)[0]
+        add_set(ctx, [(well, "F001", "0h", 1), (well, "F001", "0h", 2)],
+                source="lasso · Spatial map", name="Rounded mitotic cells")
+        cg = ctx.state.cell_gating
+        cg.scatter_gates = [
+            {"x0": 0, "y0": 0, "x1": 1, "y1": 1, "x_col": "gfp_mean_intensity",
+             "y_col": "dapi_mean_intensity", "name": "Gate 1", "wells": [well]},
+            {"x0": 0, "y0": 0, "x1": 1, "y1": 1, "x_col": "gfp_mean_intensity",
+             "y_col": "area", "name": "Gate 2", "wells": []}]
+        cg.use_scatter_gates, cg.gating_choices = True, {"Gate 1"}
+        refresh(ctx)
     elif kind == "images" and page == "Image Browser/Image Table":
         from review.features.image_browser.image_table import controller as table
 

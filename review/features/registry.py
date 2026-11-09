@@ -566,6 +566,31 @@ def _svc_image_browser_show_cell():
     return show_cell
 
 
+def _svc_cell_browser_browse():
+    from review.features.image_browser.cell_browser._browse import browse
+    return browse
+
+
+def _svc_cell_gating_show():
+    def show(ctx) -> bool:
+        from review.features.home.controller import show_home_subtab
+        notebook = getattr(ctx.window, "_notebook", None)
+        if notebook is None:
+            return False
+        notebook.setCurrentByName("Home")
+        show_home_subtab(ctx, "Cell Gating")
+        return True
+    return show
+
+
+def _activate_saved_cells(ctx) -> None:
+    from review.features.saved_cells.controller import refresh
+    refresh(ctx)
+
+
+_build_saved_cells = _lazy_build("review.features.saved_cells.tab_view", "build_saved_cells_tab")
+
+
 def _svc_preview_build_picker():
     from review.features.preview.preview_view import build_preview_picker
     return build_preview_picker
@@ -1234,6 +1259,13 @@ def _features() -> list[FeatureDescriptor]:
             on_selection_changed=_sel_review_csv,
             per_well_selection=True,
         ),
+        # Every saved cell set and every gate in one list, each with the way to
+        # look at its cells; the actions are the ones the stores already had.
+        FeatureDescriptor(
+            name="Saved Cells", group="Inspect", on_phone=True, icon="tag",
+            rail_sections=_MAIN, build=_build_saved_cells,
+            on_activate=_activate_saved_cells,
+        ),
         # ── Output: where work leaves the app ─────────────────────────────
         FeatureDescriptor(
             name="Saved Plots", group="Output", on_phone=True, icon="image",
@@ -1355,7 +1387,9 @@ def _features() -> list[FeatureDescriptor]:
                           rail_sections=_CELL_BROWSER,
                           on_activate=_activate_cell_browser,
                           on_selection_changed=_sel_cell_browser,
-                          per_well_selection=True),
+                          per_well_selection=True,
+                          # Saved Cells' *View in Cell Browser*.
+                          services={"cell_browser.browse": _svc_cell_browser_browse}),
         FeatureDescriptor(name="Playground", parent="Image Browser",
                           build=_build_playground_subtab,
                           rail_sections=_MAIN,
@@ -1375,6 +1409,8 @@ def _features() -> list[FeatureDescriptor]:
         FeatureDescriptor(name="Cell Gating", parent="Home",
                           build=_build_cell_gating, removable=False,
                           services={
+                              # Saved Cells' *Manage on Cell Gating*.
+                              "cell_gating.show": _svc_cell_gating_show,
                               "cell_gating.threshold_count_on_changed":
                                   _svc_cell_gating_threshold_count_on_changed,
                               "cell_gating.threshold_frac_on_changed":

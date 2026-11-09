@@ -1708,6 +1708,9 @@ review/
 │   │                      single_well_selection + an on_selection_changed hook,
 │   │                      no in-tab plate of its own)
 │   ├── review_csv/   tab_view.py   ← Data-tab CSV inspector (was review_image/csv_tab_view.py)
+│   ├── saved_cells/  collect.py, controller.py, tab_view.py
+│   │                 ← Inspect → Saved Cells: every saved cell set and every gate,
+│   │                   and the way to view each
 │   ├── preview/      controller.py, preview_view.py, panel_view.py,
 │   │                 frame_scope_view.py, delete_scope_view.py,
 │   │                 crop_scope_view.py
@@ -7362,6 +7365,35 @@ exclusion; the funnel row is "Excluded saved cells", the overlay ink
 `theme.Colors.exclusion_saved_cells`. The domain is `cell_sets` in
 `provenance.STORED_AT`, its own reset scope `saved_cells`, and a recipe declines
 it (the ids belong to the source plate's segmentation).
+
+**The Saved Cells page (`features/saved_cells/`).** Inspect → *Saved Cells*
+lists every saved set and every scatter gate in one place, as two lists, because
+the two are different kinds of population and stay two stores: a set is a fixed
+list of cell identities that goes stale on re-segmentation, a gate a rule over
+two columns that takes whatever cells are loaded (`domain/gates.py`). The page
+reads both stores (`collect.set_rows`, `collect.gate_rows`,
+`collect.intensity_gates`) and keeps no copy: it re-reads on activation and on
+every set change (`_saved_cells_page` is in `cell_sets.REFRESH_KEYS`). Each row
+says what the population does to the analysis now — a set *Excluded from
+analysis* / *Highlighted on Scatter* / *Saved only*; a gate *Defines the
+Included cells* only while Cell Gating's inclusion layer uses scatter gates and
+its selection takes that gate, *Defines the ON cells* likewise for the
+thresholding layer, else *Not applied*; the intensity floors only while scatter
+gates do not replace them. Every action is one the stores already had: set
+actions are `cell_sets` calls; *View in Cell Browser* is the Cell Browser
+sub-leaf's `cell_browser.browse` service (`cell_browser/_browse.py`, which sets
+the gallery's Source menu the way the user would — `set:<name>`, or `gates`
+narrowed to one gate — so the sidebar says what the gallery holds); *Manage on
+Cell Gating* is Cell Gating's `cell_gating.show` service. Gates are not edited
+here — they are drawn on the Scatter and applied on Cell Gating — so the page
+holds no second copy of those controls. A gate's axes are named by
+`data/metric_labels.column_label`, which the Scatter's axis labels use too. The
+page is on the phone as well: it scrolls, its button rows wrap
+(`widgets/flow_layout.FlowLayout`), and each list's columns share the width
+with wrapped text and the list is exactly as tall as its rows
+(`tab_view._FittedTable`, fitted once a resize has settled, since a stretched
+column takes its width after the table's resize event and without
+`sectionResized`).
 
 **A highlighted set on the per-cell Scatter.** `CellSetsState.highlight` (beside
 `exclude`, so rename and delete follow it; saved in `cell_sets.json` and in the

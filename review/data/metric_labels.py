@@ -200,3 +200,25 @@ def gate_axes_label(x_col: str | None, y_col: str | None) -> str:
     if not x_label and not y_label:
         return ""
     return f"x: {x_label or '—'}  ·  y: {y_label or '—'}"
+
+
+def column_label(col: str) -> str:
+    """A readable name for a per-cell column a plot or gate reads: a metric
+    ("GFP Mean Intensity"), a shape feature, a nanowell column, or the column
+    itself when it is none of those. The Scatter labels its axes with it and the
+    Saved Cells page names each gate's axes with it, so the two agree."""
+    from pipeline.shape_features import is_shape_column
+    from review.data.observations import is_nanowell_cell_column, nanowell_cell_label
+    col = str(col or "")
+    if is_nanowell_cell_column(col):
+        return nanowell_cell_label(col)
+    if is_shape_column(col):
+        from pipeline.shape_features import label_for as _shape_label_for
+        return _shape_label_for(col) or col
+    parts = split_metric_col(col)
+    if parts is None:
+        return col
+    _ch, metric_key, label = parts
+    if metric_key == "smfish_count":
+        return f"{label.split(' ')[0]} smFISH Count"
+    return label

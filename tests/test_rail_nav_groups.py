@@ -59,7 +59,7 @@ def test_each_group_after_home_opens_with_its_caption(qtbot):
         "Home",
         "# Analysis", "Plotting", "Statistics", "Multivariate", "Spatial",
         "# Assays", "Nanowells", "smFISH",
-        "# Inspect", "Image Browser", "Review CSV",
+        "# Inspect", "Image Browser", "Review CSV", "Saved Cells",
         "# Output", "Saved Plots", "Batch Export",
     ]
 

@@ -74,6 +74,16 @@ class ObservationTable:
     why_missing: Callable[[str], pd.Series] | None = None
     #: Sentences every figure drawn from this table carries (a rim-focus rule, an identity verdict).
     notes: tuple[str, ...] = field(default_factory=tuple)
+    #: Whether a plot keeps only the nanowells with its metrics defined at every timepoint of their well (the
+    #: Nanowells page's *Fixed cohort*, carried by a table asked for with the page's scope). The plot applies it,
+    #: because which values must be complete depends on which metrics it draws (:func:`cohort_complete`).
+    fixed_cohort: bool = False
+    #: How a fold change in this table is measured from — the Nanowells page's Baseline in words (``earliest``,
+    #: ``first measurable``, a timepoint's name); ``""`` where the supplier does not say.
+    baseline: str = ""
+    #: The name of the Nanowells page's Subset the rows were narrowed to (``Subset.label()``), ``""`` for none — so a
+    #: plot can say what its percentages are of.
+    subset: str = ""
 
     def metric(self, key: str) -> ObservationMetric | None:
         return next((m for m in self.metrics if m.key == key), None)
@@ -101,6 +111,22 @@ class ObservationTable:
         for text, count in reason[missing].value_counts().items():
             out[str(text)] = int(count)
         return out
+
+
+#: The reason a row is left out of a plot by the fixed cohort, as the Nanowells page counts it.
+COHORT_REASON = "outside the fixed cohort"
+#: Metric kinds with one value per nanowell rather than one per timepoint; the fixed cohort does not judge them.
+PER_NANOWELL_KINDS = frozenset({"site", "base"})
+
+
+def cohort_complete(frame: pd.DataFrame, defined: pd.Series) -> pd.Series:
+    """Per row, whether its nanowell (``well``, ``nw_q``, ``nw_r``) has *defined* true at every one of its rows —
+    every timepoint of its well. The Nanowells page's fixed-cohort rule (``distribution_compute.fixed_cohort``),
+    asked of several metrics at once by passing their joint definedness."""
+    if frame.empty:
+        return pd.Series(True, index=frame.index)
+    key = [frame["well"], frame["nw_q"], frame["nw_r"]]
+    return defined.groupby(key).transform("all").astype(bool)
 
 
 def footer_line(observations: str, used: int, total: int, exclusions: dict[str, int] | None = None) -> str:

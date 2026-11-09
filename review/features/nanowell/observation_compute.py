@@ -24,9 +24,10 @@ import pandas as pd
 
 from review.domain.observation import NANOWELLS, ObservationMetric, ObservationTable
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data, site_backgrounds, site_channels
-from review.features.nanowell.controller import gate_tally, gate_version, sync_focus_rule
+from review.features.nanowell import subset_compute as ss
+from review.features.nanowell.controller import gate_tally, gate_version, page_subset, sync_focus_rule
 from review.features.nanowell.distribution_compute import METRICS, metric_label
-from review.features.nanowell.series_compute import exclusion_reason, metric_kinds, site_metrics
+from review.features.nanowell.series_compute import baseline_text, exclusion_reason, metric_kinds, site_metrics
 
 log = logging.getLogger("review")
 
@@ -83,8 +84,40 @@ def nanowell_metric_specs(ctx, wells) -> tuple[ObservationMetric, ...] | None:
                                                         list(site_backgrounds(Path(data_dir), wells).values()))
 
 
+def _page_scope_key(ctx, st) -> tuple:
+    """Everything of the page's that :func:`_apply_page_scope` reads, as a memo key: the Subset with its gate boxes
+    bound (``repr`` of the frozen conditions — a moved gate is a different key), the excluded wells, the cohort."""
+    return (repr(page_subset(ctx, st)), tuple(sorted(st.excluded_wells or ())), bool(st.cohort))
+
+
+def _apply_page_scope(ctx, st, metrics: pd.DataFrame, data, baseline: str,
+                      wells) -> tuple[pd.DataFrame, tuple, str]:
+    """*metrics* with only the rows the page itself would draw, the sentences saying what was left out, and the
+    Subset's name (``""`` with none active).
+
+    Excluded wells go first (the page leaves them out of its groups, ``controller.page_groups``), then the Subset over
+    the wells that remain, so its count is of the nanowells the plot could have drawn — the order and the note the
+    page's own figures use (``controller.draw_view``)."""
+    notes = []
+    excluded = sorted(set(st.excluded_wells or ()) & set(wells))
+    if excluded:
+        metrics = metrics[~metrics["well"].isin(excluded)]
+        notes.append(f"Left out with Exclude well on the Nanowells page: {', '.join(excluded)}.")
+    kept_wells = [w for w in wells if w not in set(excluded)]
+    subset = page_subset(ctx, st)
+    metrics, done = ss.apply(metrics, subset, baseline, kept_wells, data)
+    if done is not None:
+        notes.append(f"Nanowells page {ss.note(done)}")
+        if not done.kept:
+            notes.append(ss.empty_text(done))
+    if st.cohort:
+        notes.append("Fixed cohort (Nanowells page): only nanowells with both plotted values at every timepoint of "
+                     "their well are drawn.")
+    return metrics, tuple(notes), (subset.label() if done is not None else "")
+
+
 def nanowell_observations(ctx, wells, baseline: str | None = None, *,
-                          scatter_gates: bool = True) -> ObservationTable | None:
+                          scatter_gates: bool = True, page_scope: bool = False) -> ObservationTable | None:
     """The nanowell rows of *wells* (an iterable of well labels), or ``None`` when the dataset holds no nanowell
     tables. Reads on the calling thread; a well already read by the page or an earlier call is not read again.
 
@@ -94,7 +127,17 @@ def nanowell_observations(ctx, wells, baseline: str | None = None, *,
 
     ``scatter_gates=False`` counts every cell the scatter gates leave out too (``controller.gate_tally``): the values
     a gate drawn on a nanowell metric is evaluated against when Cell Gating applies it to cells, so that inclusion
-    never depends on a count it changes. Part of the memo key."""
+    never depends on a count it changes. Part of the memo key.
+
+    ``page_scope=True`` draws the page's own choice of *which* nanowells as well: the wells left out with
+    **Exclude well** are dropped, only the nanowells inside the page's **Subset** are kept (``subset_compute.apply``,
+    the call every view of the page makes, with its scatter-gate conditions bound to the gates as they stand now),
+    and the page's **Fixed cohort** is carried on the table for the plot to apply over its own metrics
+    (:attr:`ObservationTable.fixed_cohort`). Each says what it did in :attr:`ObservationTable.notes`, in the page's
+    own sentences, so a scoped plot never reads as the whole plate. The Scatter Plot's nanowell scatter asks for this:
+    one Subset, built on the page, decides the nanowells of both. The default stays unscoped, because Cell Gating
+    evaluates a gate drawn on a nanowell metric against these rows (``scatter_gates=False``), and a Subset that
+    names that gate would otherwise decide its own inputs."""
     st = ctx.state.feature_slice("nanowell")
     data_dir = getattr(ctx.state.dataset, "data_dir", None)
     if st is None or not data_dir:
@@ -105,7 +148,8 @@ def nanowell_observations(ctx, wells, baseline: str | None = None, *,
     sync_focus_rule(ctx, st)
     focus = st.rim_focus_rule()
     baseline = st.baseline if baseline is None else baseline
-    key = (str(data_dir), wells, baseline, focus.key(), gate_version(ctx), bool(scatter_gates))
+    scope = _page_scope_key(ctx, st) if page_scope else None
+    key = (str(data_dir), wells, baseline, focus.key(), gate_version(ctx), bool(scatter_gates), scope)
     memo = st.observation_memo
     if key in memo:
         return memo[key]
@@ -123,6 +167,10 @@ def nanowell_observations(ctx, wells, baseline: str | None = None, *,
                                  _metric_specs(data.channels, list(data.fluor_backgrounds.values())))
     else:
         metrics = site_metrics(data, baseline, gate_tally(ctx, data, scatter_gates=scatter_gates), focus)
+        scope_notes: tuple[str, ...] = ()
+        subset_label = ""
+        if page_scope:
+            metrics, scope_notes, subset_label = _apply_page_scope(ctx, st, metrics, data, baseline, wells)
         frame = _frame(metrics)
         channels = list(data.channels)
 
@@ -135,7 +183,9 @@ def nanowell_observations(ctx, wells, baseline: str | None = None, *,
 
         table = ObservationTable(NANOWELLS, frame, _metric_specs(channels, list(data.fluor_backgrounds.values())),
                                  why_missing,
-                                 notes=tuple(filter(None, [focus_note(metrics, focus)])))
+                                 notes=tuple(filter(None, [focus_note(metrics, focus), *scope_notes])),
+                                 fixed_cohort=bool(page_scope and st.cohort),
+                                 baseline=baseline_text(baseline), subset=subset_label)
     if len(memo) >= _MEMO_MAX:
         memo.pop(next(iter(memo)))
     memo[key] = table

@@ -59,11 +59,19 @@ _MATCH_TIP = ("All: a nanowell is used only when it meets every condition.\n"
 _FIELD_TIP = ("What the condition tests: the cells at the start (the count at the Baseline), a metric, where the "
               "nanowell sits in its array, the imaging field it was cut from, or whether it lay on a tile seam "
               "(measured from a crop blended from the tiles that cover it). On a tile seam: no at every timepoint "
-              "leaves the seam nanowells out; yes at any timepoint keeps only them.")
+              "leaves the seam nanowells out; yes at any timepoint keeps only them.\n"
+              "Identity verdict: the identity check's verdict on the nanowell's timepoint. Array rim fitted: whether "
+              "a circular rim was fitted to the well's array at that timepoint (no for a fit that failed, and for "
+              "an array whose outline is not a circle).")
 _AT_TIP = ("The timepoint the value is read at: the baseline (the count's), the well's earliest or latest, a named "
            "timepoint, or at any / every timepoint of the well (every: the nanowell needs a passing value at each).")
 _OP_TIP = "How the value is compared. Both bounds of a range are included."
 _TILES_TIP = "The imaging fields (tiles) the condition names."
+_VERDICTS_TIP = ("The identity check's verdicts the condition names. A verdict is the timepoint's, shared by every "
+                 "nanowell of the well there: partial means most nanowells were confirmed and some left out, and "
+                 "inconclusive that the check could not decide (for one, the array's fitted rim centre disagreed "
+                 "with the square's registration by more than the fit can be trusted to). Identity contradicted is "
+                 "the per-nanowell answer.")
 _WINDOW_TIP = ("The nanowells a Distribution window held when it was turned into a subset (Use as Subset). The list is "
                "frozen; choose inside to keep them or outside to keep the rest, and remove the row to bring the others back.")
 _GATE_TIP = ("A gate drawn on the Scatter Plot over two nanowell metrics (Observations: Nanowells, or the "
@@ -124,6 +132,8 @@ class _ConditionRow(QWidget):
         self.tiles_btn.setProperty("hasMenu", True)
         self.tiles_menu = QMenu(self.tiles_btn)
         self.tiles_btn.setMenu(self.tiles_menu)
+        #: The category field the values menu was filled for (:meth:`_fill_tiles`).
+        self._filled_for = ss.TILE
         self.gate_cb = QComboBox()
         self.gate_cb.setToolTip(_GATE_TIP)
         # A window condition is a frozen list of nanowells (``subset_compute.WINDOW``): it cannot be built here, so the
@@ -158,7 +168,7 @@ class _ConditionRow(QWidget):
         if c.b is not None:
             self.b_spin.setValue(float(c.b))
         _select(self.at_cb, c.at or "baseline")
-        self._fill_tiles(c.values if ss.is_category(c.field) else ())
+        self._fill_tiles(c.field, c.values if ss.is_category(c.field) else ())
         self.fill_gates(c.values[0] if ss.is_gate(c.field) and c.values else None)
         if self._frozen is not None:
             self.field_cb.setEnabled(False)
@@ -181,15 +191,23 @@ class _ConditionRow(QWidget):
             spin.setRange(0 if name == ss.START else -_LIMIT, _START_LIMIT if name == ss.START else _LIMIT)
             spin.blockSignals(blocked)
 
-    def _fill_tiles(self, chosen) -> None:
+    def _fill_tiles(self, name, chosen) -> None:
+        """Offer the values a category condition on *name* can name — the identity verdicts, or the imaging fields
+        recorded — each checked when it is in *chosen*, which is kept even when no longer recorded."""
         self.tiles_menu.clear()
-        for tile in sorted(set(self._editor.tiles()) | set(chosen)):
-            act = owned_action(self.tiles_menu, tile)
+        identity = name == ss.IDENTITY
+        values = (list(ss.IDENTITY_VERDICTS) if identity
+                  else sorted(set(self._editor.tiles()) | set(chosen)))
+        self.tiles_btn.setToolTip(_VERDICTS_TIP if identity else _TILES_TIP)
+        for value in values:
+            act = owned_action(self.tiles_menu, ss.value_label(name, value))
+            act.setData(value)
             act.setCheckable(True)
-            act.setChecked(tile in chosen)
+            act.setChecked(value in chosen)
             act.toggled.connect(lambda _on: self._tiles_changed())
         if self.tiles_menu.isEmpty():
             self.tiles_menu.addAction("No imaging fields recorded").setEnabled(False)
+        self._filled_for = name
         self._tiles_text()
 
     def fill_gates(self, chosen: str | None = None) -> None:
@@ -210,12 +228,13 @@ class _ConditionRow(QWidget):
         self.gate_cb.blockSignals(blocked)
 
     def _chosen_tiles(self) -> tuple:
-        return tuple(a.text() for a in self.tiles_menu.actions() if a.isCheckable() and a.isChecked())
+        return tuple(a.data() for a in self.tiles_menu.actions() if a.isCheckable() and a.isChecked())
 
     def _tiles_text(self) -> None:
         chosen = self._chosen_tiles()
-        self.tiles_btn.setText(", ".join(chosen) if 0 < len(chosen) <= 2 else
-                               f"{len(chosen)} fields" if chosen else "choose…")
+        noun = "verdicts" if self._filled_for == ss.IDENTITY else "fields"
+        self.tiles_btn.setText(", ".join(ss.value_label(self._filled_for, v) for v in chosen) if 0 < len(chosen) <= 2
+                               else f"{len(chosen)} {noun}" if chosen else "choose…")
 
     def _visibility(self) -> None:
         name = self.field_cb.currentData()
@@ -237,6 +256,8 @@ class _ConditionRow(QWidget):
         name = self.field_cb.currentData()
         self._fill_ops(name, self.op_cb.currentData())
         self._fit_spins(name)
+        if ss.is_category(name) and name != self._filled_for:
+            self._fill_tiles(name, ())                       # a tile is no verdict, nor a verdict a tile
         self._visibility()
         self._editor.changed()
 

@@ -58,24 +58,28 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     from review.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
     ch_x_cb = reg.register("_scatter_ch_x_cb", QComboBox(ctrl))
     ch_x_cb.addItems(["GFP"])
+    ch_x_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     ch_x_cb.currentIndexChanged.connect(lambda _i: on_scatter_axis_change(ctx, "x"))
     ctrl.add_scope("X-axis · channel", ch_x_cb)
     reg.register("_scatter_ch_x_var", ch_x_cb)
 
     metric_x_cb = reg.register("_scatter_metric_x_cb", QComboBox(ctrl))
     metric_x_cb.addItems(_METRIC_ORDER)
+    metric_x_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     metric_x_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx))
     ctrl.add_scope("property", metric_x_cb)
     reg.register("_scatter_metric_x_var", metric_x_cb)
 
     ch_y_cb = reg.register("_scatter_ch_y_cb", QComboBox(ctrl))
     ch_y_cb.addItems(["GFP"])
+    ch_y_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     ch_y_cb.currentIndexChanged.connect(lambda _i: on_scatter_axis_change(ctx, "y"))
     ctrl.add_scope("Y-axis · channel", ch_y_cb)
     reg.register("_scatter_ch_y_var", ch_y_cb)
 
     metric_y_cb = reg.register("_scatter_metric_y_cb", QComboBox(ctrl))
     metric_y_cb.addItems(_METRIC_ORDER)
+    metric_y_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx))
     ctrl.add_scope("property", metric_y_cb)
     reg.register("_scatter_metric_y_var", metric_y_cb)

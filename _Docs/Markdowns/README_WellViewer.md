@@ -5673,6 +5673,10 @@ takes its own nanowell's value at its timepoint, so you can plot a cell's GFP
 against how crowded its nanowell is. A cell with no nanowell address has no value
 there and is not drawn.
 
+Each axis dropdown keeps one width whatever is chosen in it — as wide as its
+longest entry — so the row does not shift as you change metrics, and its list
+opens wide enough to read every entry in full.
+
 The Channel, Property and ON cutoff controls that the other plot tabs share
 disappear from the controls row here, and the Points toggle takes their place.
 That is because this tab picks its channels per axis, from the X-axis and

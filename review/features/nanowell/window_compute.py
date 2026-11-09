@@ -20,13 +20,22 @@ each covered timepoint its panel has; a nanowell with no value at one of them is
 one such value is inside. Along wells there is one value per nanowell and the two agree. Both counts are always
 computed, so the figure can state both.
 
+**A window can be several boxes.** A drag made with **Shift** held adds its box to the window already drawn rather
+than replacing it, so one window can hold separate, non-adjacent regions of the figure: two value ranges in one
+column, or the high tail of one well and the low tail of another. The newest box is the window's own fields
+(``keys``, ``lo``, ``hi``, ``panel``, ``slots``), which the strip's Low and High fields edit; the earlier ones are
+in ``more``, newest first. Membership is the **union** of the boxes' members, each box judged on its own columns and
+range under the window's one *every | any* rule and *This panel only* choice. A Shift-drag made while a window is
+already in the Subset (after *Use as Subset*) carries that window's nanowells over in ``carried``: they are members
+whatever the boxes hold, so the Subset can be built up one region at a time (``_window_controller.on_release``).
+
 Qt-free.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from review.features.nanowell.distribution_compute import TIME, WELLS
 
@@ -56,6 +65,23 @@ class DistributionWindow:
     drawn_under: tuple = ()   # ``settings_key`` when the window was drawn
     n_at_drawing: int = 0     # the members it had then, for the "changed since" sentence
     slots: tuple = ()         # ((column key, well), ...) for each column covered only in part: just those wells
+    more: tuple = ()          # the earlier boxes of a Shift-drawn window, newest first (each a DistributionWindow)
+    carried: tuple = ()       # ((well, q, r), ...) kept from the Subset's window when this one was Shift-drawn on it
+
+    def boxes(self) -> tuple:
+        """Every box of the window, newest first, each as a window of its own under this window's rule and *This
+        panel only* choice — the controls edit those once, for the whole window."""
+        return (replace(self, more=(), carried=()),) + tuple(
+            replace(box, rule=self.rule, panel_only=self.panel_only, more=(), carried=()) for box in self.more)
+
+    def all_keys(self) -> tuple:
+        """The columns any box covers, the newest box's first, without repeats."""
+        return tuple(dict.fromkeys(key for box in self.boxes() for key in box.keys))
+
+    def added(self, box: DistributionWindow) -> DistributionWindow:
+        """This window with *box* drawn on it with Shift: *box* becomes the newest box, this window's boxes the
+        earlier ones, and its rule, panel choice and carried nanowells are kept."""
+        return replace(box, rule=self.rule, panel_only=self.panel_only, more=self.boxes(), carried=self.carried)
 
     def covers(self, swarm, axis: str) -> bool:
         """Whether *swarm* is one this window was drawn around: its column is covered, and when that column was
@@ -67,10 +93,15 @@ class DistributionWindow:
         return key not in partial or (key, str(swarm.well)) in self.slots
 
     def to_config(self) -> dict:
-        return {"column": self.column, "axis": self.axis, "keys": list(self.keys), "lo": self.lo, "hi": self.hi,
-                "panel": self.panel, "panel_only": self.panel_only, "rule": self.rule,
-                "drawn_under": [list(p) for p in self.drawn_under], "n_at_drawing": self.n_at_drawing,
-                "slots": [list(p) for p in self.slots]}
+        out = {"column": self.column, "axis": self.axis, "keys": list(self.keys), "lo": self.lo, "hi": self.hi,
+               "panel": self.panel, "panel_only": self.panel_only, "rule": self.rule,
+               "drawn_under": [list(p) for p in self.drawn_under], "n_at_drawing": self.n_at_drawing,
+               "slots": [list(p) for p in self.slots]}
+        if self.more:
+            out["more"] = [box.to_config() for box in self.more]
+        if self.carried:
+            out["carried"] = [list(site) for site in self.carried]
+        return out
 
     @classmethod
     def from_config(cls, block) -> DistributionWindow | None:
@@ -85,11 +116,23 @@ class DistributionWindow:
             slots = tuple((str(key), str(well)) for key, well in block.get("slots", ()))
             if any(key not in keys for key, _well in slots):
                 return None
+            more = tuple(cls.from_config(box) for box in block.get("more", ()))
+            if any(box is None or box.column != str(block["column"]) or box.axis != block["axis"] for box in more):
+                return None                              # one box that does not read drops the window, not the box
+            carried = tuple(_carried_site(site) for site in block.get("carried", ()))
             return cls(str(block["column"]), block["axis"], keys, lo, hi, str(block.get("panel", "")),
                        block.get("panel_only") is True, block.get("rule", "every"), under,
-                       int(block.get("n_at_drawing", 0)), slots)
+                       int(block.get("n_at_drawing", 0)), slots, more, carried)
         except (KeyError, TypeError, ValueError):
             return None
+
+
+def _carried_site(site) -> tuple:
+    """A saved carried nanowell as ``(well, q, r)``; ``ValueError`` for anything else."""
+    well, q, r = site
+    if not isinstance(well, str) or isinstance(q, bool) or isinstance(r, bool) or q != int(q) or r != int(r):
+        raise ValueError(f"not a nanowell: {site!r}")
+    return (well, int(q), int(r))
 
 
 @dataclass
@@ -100,6 +143,7 @@ class WindowResult:
     n_any: int = 0
     covered: dict = field(default_factory=dict)    # panel index -> set of covered column indices (round(Swarm.x))
     spans: dict = field(default_factory=dict)      # panel index -> [(lo, hi)] x extent of each covered slot
+    bands: dict = field(default_factory=dict)      # panel index -> [(x0, x1, lo, hi)]: each box's band, per run of slots
     missing_panel: bool = False                    # *This panel only*, and no panel has that title now
 
     def sites(self) -> list:
@@ -184,22 +228,20 @@ def _key_order(model) -> list:
     return out
 
 
-def members(model, window: DistributionWindow) -> WindowResult:
-    """The nanowells inside *window* on *model*, ranked: by their value at the latest covered column, largest
-    first, a nanowell without a value there last, then by well, ``q`` and ``r``."""
-    keys = set(window.keys)
-    order = [k for k in _key_order(model) if k in keys]
+def _box_members(model, box: DistributionWindow, result: WindowResult, series: dict) -> tuple:
+    """``(every, any, panels)`` for one box: the nanowells inside it under each rule, and the ``(index, panel)``
+    pairs it covers. Records the box's covered columns, slot extents and bands on *result*, and every nanowell's
+    value per timepoint in *series*."""
     per_nanowell = model.axis == WELLS and not model.timepoint
-    rank_key = "" if per_nanowell else (order[-1] if model.axis == TIME and order else model.timepoint)
-    result = WindowResult([], rank_key)
-    panels = [(i, p) for i, p in enumerate(model.panels) if not window.panel_only or p.title == window.panel]
-    result.missing_panel = window.panel_only and not panels
-    every, anyof, series = [], [], {}
+    panels = [(i, p) for i, p in enumerate(model.panels) if not box.panel_only or p.title == box.panel]
+    every, anyof = set(), set()
     for i, panel in panels:
-        mine = [s for s in panel.swarms if window.covers(s, model.axis)]
-        result.covered[i] = {round(s.x) for s in mine}
+        mine = [s for s in panel.swarms if box.covers(s, model.axis)]
+        result.covered.setdefault(i, set()).update(round(s.x) for s in mine)
         half = slot_half_widths(panel)
-        result.spans[i] = [slot_extent(s, half) for s in mine]
+        extents = [slot_extent(s, half) for s in mine]
+        result.spans.setdefault(i, []).extend(extents)
+        result.bands.setdefault(i, []).extend((x0, x1, box.lo, box.hi) for x0, x1 in merged_spans(extents))
         # A nanowell has values only in its own well's swarms, so "inside at every covered column" asks about the
         # columns covered *for its well*: a box over well A at one timepoint and well B at the next is not a column
         # A's nanowells could ever be inside at.
@@ -209,28 +251,50 @@ def members(model, window: DistributionWindow) -> WindowResult:
         inside: dict = {}
         for s in panel.swarms:
             key = column_key(s, model.axis)
-            covered = window.covers(s, model.axis)
+            covered = box.covers(s, model.axis)
             for site, value in zip(s.sites, s.values):
                 site = tuple(site)
                 if not per_nanowell:
                     series.setdefault(site, {})[str(s.label) if model.axis == TIME else model.timepoint] = float(value)
-                if covered and window.lo <= value <= window.hi:
+                if covered and box.lo <= value <= box.hi:
                     inside.setdefault(site, set()).add(key)
         for site, hit in inside.items():
-            anyof.append(site)
+            anyof.add(site)
             if hit >= required.get(str(site[0]), set()):
-                every.append(site)
+                every.add(site)
     if model.axis == WELLS:
         # Along wells a nanowell has one value, in its own group's column, so "inside at every covered column" can
         # only hold when the window covers one column: across two neighbouring groups it held for no nanowell at all.
         # Inside the range in its own column is the whole test, and every and any are the same set.
         every = anyof
+    return every, anyof, panels
+
+
+def members(model, window: DistributionWindow) -> WindowResult:
+    """The nanowells inside *window* on *model* — the union over its boxes, with the nanowells it carries — ranked:
+    by their value at the latest covered column, largest first, a nanowell without a value there last, then by
+    well, ``q`` and ``r``."""
+    keys = set(window.all_keys())
+    order = [k for k in _key_order(model) if k in keys]
+    per_nanowell = model.axis == WELLS and not model.timepoint
+    rank_key = "" if per_nanowell else (order[-1] if model.axis == TIME and order else model.timepoint)
+    result = WindowResult([], rank_key)
+    series: dict = {}
+    every, anyof = set(window.carried), set(window.carried)
+    panels: dict = {}
+    for box in window.boxes():
+        box_every, box_any, box_panels = _box_members(model, box, result, series)
+        every |= box_every
+        anyof |= box_any
+        panels.update(box_panels)
+    result.missing_panel = window.panel_only and not panels
     result.n_every, result.n_any = len(every), len(anyof)
     chosen = every if window.rule == "every" else anyof
     rank_values: dict = {}
-    for _i, panel in panels:
+    # Along time, the value at the ranking column; along wells, the one value each nanowell has. A carried
+    # nanowell is ranked by its value in whichever panel holds it, covered or not.
+    for _i, panel in sorted(panels.items()) + [(i, p) for i, p in enumerate(model.panels) if i not in panels]:
         for s in panel.swarms:
-            # Along time, the value at the ranking column; along wells, the one value each nanowell has.
             if model.axis == WELLS or column_key(s, model.axis) == rank_key:
                 for site, value in zip(s.sites, s.values):
                     rank_values.setdefault(tuple(site), float(value))
@@ -273,11 +337,17 @@ def changed_sentence(window: DistributionWindow, now: tuple, n_now: int) -> str:
 
 
 def label_text(window: DistributionWindow, result: WindowResult, not_drawn: dict, axis: str) -> str:
-    """The strip's sentence: the range, the counts, and the members with no dot on the figure, by why."""
+    """The strip's sentence: the range (the newest box's, and how many more boxes and carried nanowells the window
+    holds), the counts, and the members with no dot on the figure, by why."""
     rng = f"{window.lo:.4g}–{window.hi:.4g}"
     if result.missing_panel:
         return f"Window {rng}: the panel it was drawn in ({window.panel}) is not on the figure."
-    if axis == TIME and len(window.keys) > 1:
+    extra = len(window.more)
+    if extra:
+        rng += f" + {extra:,} more box{'es' if extra > 1 else ''}"
+    if window.carried:
+        rng += f" + {len(window.carried):,} kept from the earlier window"
+    if axis == TIME and len(window.all_keys()) > 1:
         counts = (f"{result.n_every:,} inside at every covered timepoint · {result.n_any:,} at any"
                   if window.rule == "every" else
                   f"{result.n_any:,} inside at any covered timepoint · {result.n_every:,} at every")

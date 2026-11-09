@@ -35,6 +35,7 @@ from review.features.nanowell.anchor_queue_view import (
 )
 from review.features.nanowell.resolve_view import build_resolve_guide, refresh_resolve_guide
 from review.features.nanowell.exclude_view import build_exclude_controls
+from review.features.nanowell.distribution_style_view import build_distribution_style_controls
 from review.features.nanowell.rim_focus_view import build_rim_focus_controls
 from review.features.nanowell.details_view import build_details_panel
 from review.features.nanowell.variables_view import build_variable_controls
@@ -467,6 +468,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     control_cb.currentIndexChanged.connect(lambda _i: nwc.set_control(ctx, control_cb.currentData() or ""))
     reg.register("_nw_control_cb", control_cb)
     grp_control = band.add_scope("vs", control_cb)
+    dist_style = build_distribution_style_controls(ctx, band)
 
     variables = build_variable_controls(ctx, band)
 
@@ -580,7 +582,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
                 moving_kind_cb, baseline_moving_spin,
                 responding_edit, extremes_spin, extremes_cells, extremes_numbers, *identity.signalling, *start.signalling,
                 *array_controls.signalling, *statistics.signalling, *rim_focus.signalling,
-                *qc_controls.signalling)
+                *qc_controls.signalling, *dist_style.signalling)
 
     def refresh_controls() -> None:
         nwc._call(ctx, "_nw_details_refresh")            # shown on the Distribution view only
@@ -631,6 +633,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             grp_channel.setVisible(True)          # never hidden: a greyed control says why, an absent one cannot
             grp_baseline.setVisible(True)
             grp_axis.setVisible(distribution)
+            dist_style.refresh(st, distribution)
             cohort_box.setChecked(st.cohort)
             rim_focus.refresh(ctx)
             start.refresh(st)

@@ -1747,7 +1747,8 @@ review/
 │   ├── nanowell/     collect.py, series_compute.py, summary_compute.py,
 │   │                 beeswarm_compute.py, distribution_compute.py, renderer.py,
 │   │                 controller.py, state.py, tab_view.py, view_state_io.py,
-│   │                 cell_scope_compute.py, moving_compute.py, background_compute.py  ← the Nanowells page: nanowell
+│   │                 cell_scope_compute.py, moving_compute.py, background_compute.py,
+│   │                 distribution_style_compute.py, distribution_style_view.py  ← the Nanowells page: nanowell
 │   │                 tables, per-nanowell metrics, the Distribution beeswarm
 │   │                 and site detail [removable]; variables_view.py and
 │   │                 decorate_compute.py ← the page's Group by and Decorate
@@ -13155,7 +13156,17 @@ names are given once in the footer, and an axis with any unknown time is ticked 
 page draws is themed as it is created (`renderer._prepare_axes`: the card's ground, spines and tick ink, and
 `_aw_type_scale` for the Properties pass). The footer sums the
 panels drawn only, names the panels past `MAX_PANELS`, counts the wells, and a key at the top right decodes
-the occupancy colours and names the baseline (`renderer._occupancy_key`, which Trajectories draws too). A set of more than `DENSITY_ABOVE` wells is drawn as densities.
+the occupancy colours and names the baseline (`renderer._occupancy_key`, which Trajectories draws too). Whether a
+column's wells are drawn as dots or as violins is the band's **Show** (`NanowellState.dist_style`, built by
+`distribution_style_view.py`): `distribution_style_compute.density_above(style)` is the well count past which a
+column is drawn as violins — `DENSITY_ABOVE` (4) for Auto, 0 for Violin, never for Beeswarm — and the renderer and
+the window's "members not drawn" count (`window_compute.not_drawn`, given it by `_window_controller.strip_text`)
+both ask it, so they cannot disagree. **Smoothing** (`NanowellState.violin_smooth`, a percentage, 25–300) scales
+Scott's factor through `distribution_style_compute.bandwidth`, passed to `violinplot` as `bw_method`; 100 is
+matplotlib's own default, and the footer states any other value. Both reach `draw_view` as `dist_style` /
+`violin_smooth`, from the page and from Batch Export's Nanowells mode (`controller.distribution_style_of`);
+`tests/test_beeswarm_point_spacing.py::test_every_app_call_of_draw_view_passes_the_spacing` fails a call that
+leaves either out.
 Every text and line is in the plot's ink and tagged `follows_theme`; the dots take `occupancy_ramp` from
 `Colors` or `CPub` by the figure's ground (U7), class 0 hollow, and carry both through
 `widgets.plot_card.theme_paired_colours`, the hook `PlotCard.setPlotTheme` uses to repaint a paired data

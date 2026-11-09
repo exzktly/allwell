@@ -404,7 +404,7 @@ def in_spans(x: float, spans) -> bool:
 
 
 def _members_per_column(model, panel) -> int:
-    """How many wells share a column of *panel*: the renderer draws densities above ``DENSITY_ABOVE``."""
+    """How many wells share a column of *panel*: the renderer draws violins above ``distribution_style_compute.density_above`` of the page's Show."""
     if model.axis == TIME:
         return max(len({s.well for s in panel.swarms}), 1)
     by_col: dict = {}

@@ -27,7 +27,8 @@ from review.features.nanowell._composite_render import render_composite
 from review.features.nanowell._window_render import DRAG_GID, draw_drag, draw_window
 from review.features.nanowell.distribution_compute import METRICS, PER_NANOWELL, metric_column
 from review.features.nanowell.crop_grid_compute import shown_timepoints
-from review.features.nanowell.renderer import DENSITY_ABOVE, MAX_PANELS, render_message, render_site_rows
+from review.features.nanowell.distribution_style_compute import density_above
+from review.features.nanowell.renderer import MAX_PANELS, render_message, render_site_rows
 from review.features.nanowell.state import POPOUT_LAYOUTS, POPOUT_SOURCES
 from review.features.nanowell.views_compute import numeric_values
 from review.features.nanowell.zoom_compute import notches, pan_limits, wheel_limits
@@ -218,7 +219,7 @@ def strip_text(st) -> str:
     if window is None:
         return ""
     model = st.window_model
-    hidden = (wc.not_drawn(result, model, st.hits, max_panels=MAX_PANELS, density_above=DENSITY_ABOVE)
+    hidden = (wc.not_drawn(result, model, st.hits, max_panels=MAX_PANELS, density_above=density_above(st.dist_style))
               if st.hits is not None else {})
     said = wc.label_text(window, result, hidden, model.axis)
     changed = wc.changed_sentence(window, wc.settings_key(st), len(result.rows))

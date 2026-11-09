@@ -34,6 +34,7 @@ from review.features.nanowell.background_compute import short_clause
 from review.features.nanowell.crop_grid_compute import grid_shape, shown_timepoints
 from review.features.nanowell.beeswarm_compute import swarm_layout
 from review.features.nanowell.distribution_compute import TIME, DistributionModel
+from review.features.nanowell import distribution_style_compute as dsc
 from review.features.nanowell.extremes_compute import caption, format_value
 from review.features.nanowell.starting_cells_compute import occupancy_in_filter
 from review.features.nanowell.full_montage_compute import CentreZoom, fit_region
@@ -50,8 +51,6 @@ MAX_COLUMNS = 4
 MAX_PANELS = 12
 #: A slot narrower than this (points) writes its counts rotated and bare.
 _ROOM_FOR_LABEL_PT = 34.0
-#: Wells per set beyond which a set's wells are drawn as densities rather than dots (decision U2).
-DENSITY_ABOVE = 4
 _OCCUPANCY_INDEX = {"0": 0, "1": 1, "2": 2, "3+": 3}
 
 
@@ -311,14 +310,20 @@ def _fit_text(text: str, width_pt: float, size_pt: float, *, em: float = _GLYPH_
 
 
 def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: float = 1.0,
-                        footer_out: bool = False) -> HitMap:
+                        footer_out: bool = False, style: str = dsc.AUTO,
+                        smooth: int = dsc.SMOOTH_DEFAULT) -> HitMap:
     """Draw *model* on *fig* (cleared first) and return where every dot went.
 
     *footer_out* is the page: the footer — the counts, what the figure leaves out or marks, how to read it — is not
     written in the figure but returned as ``HitMap.footer`` (a :class:`Footer`), which the page shows in its **Details**
     field under the figure, and the panels take the room it took. Off (Batch Export, a figure saved on its own), the
     footer is written in the figure, every line of it.
+
+    *style* is the page's **Show** (``distribution_style_compute.STYLES``): Auto draws a column's wells as dots up
+    to ``DENSITY_ABOVE`` wells and as violins past it, Beeswarm and Violin draw every column one way. *smooth* is
+    the violins' bandwidth as a percentage of the automatic one (``distribution_style_compute.bandwidth``).
 """
+    style = dsc.style_or_default(style)
     spacing = spacing if spacing > 0 else 1.0
     fig.clear()
     hits = HitMap()
@@ -342,7 +347,8 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
     for i, (ax, panel) in enumerate(zip(axes, panels)):
         _prepare_axes(ax, scale)
         hits.panels.append((ax, i))
-        d, u = _draw_panel(fig, ax, model, panel, hits, rings, inks, ylim=shared, spacing=spacing)
+        d, u = _draw_panel(fig, ax, model, panel, hits, rings, inks, ylim=shared, spacing=spacing, style=style,
+                           smooth=smooth)
         densities, hidden = densities + d, hidden + u
         if i % cols:
             ax.tick_params(labelleft=False)
@@ -350,7 +356,7 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
             _ink(ax.set_ylabel(_wrap_label(model.label, rows), color=inks[1]))
         if i + cols >= len(panels) and model.x_label:
             _ink(ax.set_xlabel(model.x_label, color=inks[1], labelpad=ax._aw_gutter_pt))
-    footer = _footer(fig, model, inks, panels, densities, hidden,
+    footer = _footer(fig, model, inks, panels, densities, hidden, style=style, smooth=smooth,
             crowded=any(getattr(ax, "_aw_crowded", False) for ax in axes),
             counts_hidden=any(getattr(ax, "_aw_counts_hidden", False) for ax in axes),
             key_at=(key_bottom, key_h), footer_out=footer_out)
@@ -417,7 +423,8 @@ def _members_per_tick(model, panel) -> int:
     return max((len({s.well for s in panel.swarms if round(s.x) == round(t[0])}) for t in panel.ticks), default=1)
 
 
-def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None, spacing: float = 1.0) -> tuple[int, int]:
+def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None, spacing: float = 1.0, style: str = dsc.AUTO,
+                smooth: int = dsc.SMOOTH_DEFAULT) -> tuple[int, int]:
     """Draw one panel; return how many of its sub-swarms were drawn as densities (U2), and how many dots with a
     value did not fit their slot (each swarm's are counted under it; the footer gives the total).
 
@@ -442,7 +449,7 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None, spacing:
     dot_w, dot_h = _dot_units(ax, fig)
     k = _members_per_tick(model, panel)
     half = (0.9 if model.axis == TIME else 0.7) / (2 * k)
-    density = k > DENSITY_ABOVE
+    density = k > dsc.density_above(style)
     # How wide one swarm's slot is on the page decides how its counts are written: each swarm's used, excluded and
     # hidden counts when there is room; when there is not, only the bare number used above it, and the footer says
     # the rest are in its totals — written rotated, they ran into the next row's title and into the footer.
@@ -472,7 +479,8 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None, spacing:
     for swarm in panel.swarms:
         rows_here = 0
         if density:
-            _draw_density(ax, swarm, half, ink, fill=model.decoration.inks.get(swarm.group), column=model.column)
+            _draw_density(ax, swarm, half, ink, fill=model.decoration.inks.get(swarm.group), column=model.column,
+                          smooth=smooth)
         else:
             layout = _draw_swarm(ax, model, swarm, half, dot_w * spacing, dot_h * spacing, hits, rings, ink)
             hidden += layout.n_hidden
@@ -627,13 +635,16 @@ def redraw_selection_rings(hits: HitMap, selected=()) -> None:
             _ring_selected(ax, xs, ys, sites, rings)
 
 
-def _draw_density(ax, swarm, half, ink, *, fill: str | None = None, column: str = "") -> None:
-    """A set of more than four wells: each well's nanowells as a density with its value, not dots (U2) — the median,
-    or the mean for a metric whose well value is a mean (``summary_compute.well_value`` of *column*). *fill* is the
-    group's *Colour by* ink, which the density takes in place of the plot's ink."""
+def _draw_density(ax, swarm, half, ink, *, fill: str | None = None, column: str = "",
+                  smooth: int = dsc.SMOOTH_DEFAULT) -> None:
+    """One well's nanowells as a violin with its value, not dots — under Auto for a set of more than four wells
+    (U2), or every well under Show: Violin. The value is the median, or the mean for a metric whose well value is a
+    mean (``summary_compute.well_value`` of *column*). *fill* is the group's *Colour by* ink, which the density
+    takes in place of the plot's ink; *smooth* is the bandwidth as a percentage of the automatic one."""
 
     if len(swarm.values) >= 2 and np.ptp(swarm.values) > 0:
-        parts = ax.violinplot([swarm.values], positions=[swarm.x], widths=[2 * half], showextrema=False)
+        parts = ax.violinplot([swarm.values], positions=[swarm.x], widths=[2 * half], showextrema=False,
+                              bw_method=dsc.bandwidth(smooth))
         for body in parts["bodies"]:
             body.set_facecolor(fill or ink)
             body.set_alpha(0.35)
@@ -662,7 +673,7 @@ class Footer:
 
 
 def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden: int, *,
-            crowded: bool = False, counts_hidden: bool = False, key_at: tuple[float, float] | None = None,
+            style: str = dsc.AUTO, smooth: int = dsc.SMOOTH_DEFAULT, crowded: bool = False, counts_hidden: bool = False, key_at: tuple[float, float] | None = None,
             footer_out: bool = False) -> Footer:
     """The sums the figure owes the reader, over the panels drawn, with what was left out stated beside them — as a
     :class:`Footer`, written in the figure unless *footer_out*; the figure's key is drawn either way."""
@@ -699,9 +710,15 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
         alerts.append(f"+N under a swarm: {hidden:,} values in all are used but not drawn as dots, for lack of "
                       "room; widen the window or select fewer wells to see them.")
     if densities:
-        alerts.append(f"Sets of more than four wells are drawn as densities with each well's "
-                      f"{well_statistic(getattr(model, 'column', ''))}; select fewer wells to see and click single "
-                      "nanowells.")
+        statistic = well_statistic(getattr(model, "column", ""))
+        if style == dsc.VIOLIN:
+            alerts.append(f"Show: Violin — each well is drawn as a violin with its {statistic}; choose Beeswarm or "
+                          "Auto to see and click single nanowells.")
+        else:
+            alerts.append(f"Sets of more than four wells are drawn as violins with each well's {statistic}; select "
+                          "fewer wells, or choose Show: Beeswarm, to see and click single nanowells.")
+        if dsc.clamp_smooth(smooth) != dsc.SMOOTH_DEFAULT:
+            alerts.append(f"Violin smoothing {dsc.smooth_text(smooth)} the automatic (Scott's rule) bandwidth.")
     footer = Footer(line1, list(getattr(model, "alerts", ()) or ()), list(model.notes), alerts)
     if footer_out:
         _figure_key(fig, model, key_at)

@@ -19,8 +19,9 @@ disagree with them.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton,
+    QAbstractItemView, QFrame, QHeaderView, QLabel, QLineEdit, QPushButton, QScrollArea,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -28,24 +29,54 @@ from review.core.ui_helpers import build_section_header
 from review.features.saved_cells import collect
 from review.features.saved_cells import controller as ctl
 from ui import theme
+from widgets.flow_layout import FlowLayout
 from widgets.page_body import build_page_body
 
 _SET_COLUMNS = ("Name", "Cells", "From", "In use")
 _GATE_COLUMNS = ("Name", "Axes", "Wells", "In use")
 
 
+class _FittedTable(QTableWidget):
+    """A table as tall as its rows, fitted again after every change of width.
+
+    Its cells wrap, so a row's height follows its columns' widths, and a
+    stretched column takes its width only after the table's own resize event
+    has run — without emitting ``sectionResized``. Fitting inside the event, or
+    on that signal, measured the rows at the previous width and left them
+    several lines tall at the desk. The fit is queued to run once the resize
+    is done.
+    """
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if event.size().width() != event.oldSize().width():
+            QTimer.singleShot(0, self._fit)
+
+    def _fit(self) -> None:
+        _fit_height(self)
+
+
 def _table(parent: QWidget, columns: tuple) -> QTableWidget:
-    table = QTableWidget(0, len(columns), parent)
+    table = _FittedTable(0, len(columns), parent)
     table.setHorizontalHeaderLabels(list(columns))
     table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     table.verticalHeader().setVisible(False)
     table.setWordWrap(True)
-    header = table.horizontalHeader()
-    header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-    header.setStretchLastSection(True)
+    # Columns share the width and their text wraps, so on a phone every column
+    # (the "In use" one above all) is on screen rather than scrolled off to the side.
+    table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+    table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     return table
+
+
+def _fit_height(table: QTableWidget) -> None:
+    """Make *table* exactly as tall as its rows: the page scrolls, the list does not."""
+    table.resizeRowsToContents()
+    rows = sum(table.rowHeight(r) for r in range(table.rowCount()))
+    table.setFixedHeight(table.horizontalHeader().height() + rows + 2 * table.frameWidth())
 
 
 def _fill(table: QTableWidget, rows: list[tuple], keys: list[str], keep: str | None) -> None:
@@ -64,12 +95,20 @@ def _fill(table: QTableWidget, rows: list[tuple], keys: list[str], keep: str | N
             table.selectRow(keys.index(keep))
     finally:
         table.blockSignals(False)
-    table.resizeRowsToContents()
+    _fit_height(table)
 
 
 def _selected(table: QTableWidget) -> str | None:
     items = table.selectedItems()
     return items[0].data(256) if items else None
+
+
+def _button_row(parent: QWidget, lay: QVBoxLayout) -> FlowLayout:
+    """A row of buttons that wraps onto more lines where the page is narrow (a phone)."""
+    host = QWidget(parent)
+    row = FlowLayout(host)
+    lay.addWidget(host)
+    return row
 
 
 def _button(parent: QWidget, text: str, tip: str, *, checkable: bool = False) -> QPushButton:
@@ -113,7 +152,7 @@ class SavedCellsPage(QWidget):
         self.set_detail.setObjectName("Muted")
         self.set_detail.setWordWrap(True)
         lay.addWidget(self.set_detail)
-        row = QHBoxLayout()
+        row = _button_row(self, lay)
         self.view_set = _button(self, "View in Cell Browser",
                                 "Open Image Browser → Cell Browser showing this set's cells.")
         self.view_set.clicked.connect(lambda: self._on_set(ctl.view_set))
@@ -129,15 +168,17 @@ class SavedCellsPage(QWidget):
         self.exclude.clicked.connect(lambda: self._on_set(ctl.toggle_exclude, refresh=True))
         for btn in (self.view_set, self.highlight, self.exclude):
             row.addWidget(btn)
-        row.addStretch(1)
+        edit = _button_row(self, lay)
         self.name = QLineEdit(self)
         self.name.setPlaceholderText("Rename the selected set")
+        # Wide enough for its placeholder, so a name is read from its start.
+        self.name.setMinimumWidth(self.name.fontMetrics().horizontalAdvance(
+            self.name.placeholderText()) + 2 * theme.Spacing.md)
         self.name.editingFinished.connect(self._rename)
-        row.addWidget(self.name)
+        edit.addWidget(self.name)
         self.delete = _button(self, "Delete", "Delete the selected set. Its cells are not changed.")
         self.delete.clicked.connect(lambda: self._on_set(ctl.delete, refresh=True))
-        row.addWidget(self.delete)
-        lay.addLayout(row)
+        edit.addWidget(self.delete)
 
     def _on_set(self, action, *, refresh: bool = False) -> None:
         name = _selected(self.sets)
@@ -163,6 +204,7 @@ class SavedCellsPage(QWidget):
         self.highlight.setChecked(bool(row and row.highlighted))
         self.exclude.setChecked(bool(row and row.excluded))
         self.name.setText(row.name if row else "")
+        self.name.setCursorPosition(0)
         detail = []
         if row is not None:
             if row.created:
@@ -190,7 +232,7 @@ class SavedCellsPage(QWidget):
         self.gates = _table(self, _GATE_COLUMNS)
         self.gates.itemSelectionChanged.connect(self._sync_gate_buttons)
         lay.addWidget(self.gates)
-        row = QHBoxLayout()
+        row = _button_row(self, lay)
         self.view_gate = _button(self, "View in Cell Browser",
                                  "Open Image Browser → Cell Browser showing the cells inside "
                                  "this gate alone.")
@@ -201,8 +243,6 @@ class SavedCellsPage(QWidget):
                               "or ON cells.")
         self.manage.clicked.connect(lambda: ctl.open_cell_gating(self.ctx))
         row.addWidget(self.manage)
-        row.addStretch(1)
-        lay.addLayout(row)
         self.intensity = QLabel("", self)
         self.intensity.setObjectName("Muted")
         self.intensity.setWordWrap(True)
@@ -251,6 +291,13 @@ class SavedCellsPage(QWidget):
 def build_saved_cells_tab(ctx, parent: QWidget) -> None:
     """Build the page into *parent* and register it for refreshes."""
     _band, body = build_page_body(parent, content_margins=(theme.Spacing.lg,) * 3)
-    page = SavedCellsPage(ctx, body)
-    body.layout().addWidget(page)
+    # Scrolled, so on a short screen the lists keep their height and the page
+    # scrolls, instead of every label being squeezed to fit.
+    scroll = QScrollArea(body)
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    page = SavedCellsPage(ctx, scroll)
+    scroll.setWidget(page)
+    body.layout().addWidget(scroll)
     ctx.widgets.register(ctl.PAGE_KEY, page)

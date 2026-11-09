@@ -7376,7 +7376,13 @@ narrowed to one gate — so the sidebar says what the gallery holds); *Manage on
 Cell Gating* is Cell Gating's `cell_gating.show` service. Gates are not edited
 here — they are drawn on the Scatter and applied on Cell Gating — so the page
 holds no second copy of those controls. A gate's axes are named by
-`data/metric_labels.column_label`, which the Scatter's axis labels use too.
+`data/metric_labels.column_label`, which the Scatter's axis labels use too. The
+page is on the phone as well: it scrolls, its button rows wrap
+(`widgets/flow_layout.FlowLayout`), and each list's columns share the width
+with wrapped text and the list is exactly as tall as its rows
+(`tab_view._FittedTable`, fitted once a resize has settled, since a stretched
+column takes its width after the table's resize event and without
+`sectionResized`).
 
 **A highlighted set on the per-cell Scatter.** `CellSetsState.highlight` (beside
 `exclude`, so rename and delete follow it; saved in `cell_sets.json` and in the

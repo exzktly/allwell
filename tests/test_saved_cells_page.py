@@ -178,6 +178,33 @@ def test_intensity_floors_are_listed_only_while_they_are_in_force(ctx):
     assert page.intensity.text() == "No intensity gate is in force."
 
 
+@pytest.mark.parametrize("width", [1260, 360])
+def test_each_list_is_as_tall_as_its_rows_at_a_desk_and_a_phone_width(ctx, width):
+    """A row is as tall as its wrapped text at the width the table ends up with —
+    measured at an earlier, narrower width, a desk row was four lines tall."""
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    from review.core.cell_sets import add_set
+    from review.features.saved_cells.tab_view import build_saved_cells_tab
+
+    add_set(ctx, _CELLS, source="lasso · Spatial map")
+    ctx.state.cell_gating.scatter_gates = [dict(_GATE), dict(_GATE, name="Dim", wells=[])]
+    host = QWidget()
+    host.resize(width, 900)
+    build_saved_cells_tab(ctx, host)
+    host.show()
+    for _ in range(5):
+        QApplication.processEvents()
+    page = ctx.widgets.get("_saved_cells_page")
+    for table in (page.sets, page.gates):
+        floor = table.verticalHeader().minimumSectionSize()
+        rows = [table.rowHeight(r) for r in range(table.rowCount())]
+        assert rows == [max(floor, table.sizeHintForRow(r)) for r in range(table.rowCount())]
+        assert table.height() == (table.horizontalHeader().height() + sum(rows)
+                                  + 2 * table.frameWidth())
+    host.close()
+
+
 # ── the real app: the page on the rail, and the services it calls ──────────
 
 @pytest.mark.slow

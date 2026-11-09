@@ -1262,7 +1262,7 @@ def _features() -> list[FeatureDescriptor]:
         # Every saved cell set and every gate in one list, each with the way to
         # look at its cells; the actions are the ones the stores already had.
         FeatureDescriptor(
-            name="Saved Cells", group="Inspect", on_phone=False, icon="tag",
+            name="Saved Cells", group="Inspect", on_phone=True, icon="tag",
             rail_sections=_MAIN, build=_build_saved_cells,
             on_activate=_activate_saved_cells,
         ),

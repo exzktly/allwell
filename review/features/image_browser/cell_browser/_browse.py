@@ -9,6 +9,9 @@ truth about what the gallery holds.
 
 from __future__ import annotations
 
+from review.features.image_browser.cell_browser import criteria_view
+from review.features.image_browser.controller import show_image_browser_subtab
+
 
 def browse(ctx, source: str, *, gate: str | None = None) -> bool:
     """Show *source* (``"set:<name>"`` or ``"gates"``) in the Cell Browser.
@@ -17,9 +20,6 @@ def browse(ctx, source: str, *, gate: str | None = None) -> bool:
     of them). Returns ``False`` when the page or the source cannot be shown —
     the set was deleted, or the gate no longer exists.
     """
-    from review.features.image_browser.cell_browser import criteria_view
-    from review.features.image_browser.controller import show_image_browser_subtab
-
     if not show_image_browser_subtab(ctx, "Cell Browser"):
         return False
     rt = ctx.runtime.cell_browser

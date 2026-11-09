@@ -185,7 +185,7 @@ def apply_relative_to(ctx, collector, items: list) -> list:
             frac=frac, frac_spread=frac_spread, has_frac=math.isfinite(frac),
             n_above=n, n_above_spread=n_spread, stage1=stage1,
             rel_baseline=base_key, rel_outcome=rr.OK, interaction=test,
-            rel_tick=f"{base_key} ÷ {control_name(base_key)}",
+            rel_tick=label,
             interaction_label=rr.contrast_label(weights, log=log)))
 
     tested = [i for i, it in enumerate(out) if it.interaction is not None and it.interaction.ok]
@@ -248,7 +248,10 @@ def _notice(items, name: str, label: str, within: str, *, log: bool,
             per_fov: bool) -> str:
     """The figure's note: the rule, what was tested, and every bar left out."""
     head = f"Relative to {name} = {label}" + (f" within each {within}" if within else "")
-    lines = [head + ". Reference conditions are the dotted line."]
+    # The tick names the second stage by its value alone (``÷ Vehicle``); the
+    # whole ratio it divides by is said once, here.
+    lines = [head + ". Reference conditions are the dotted line. Under each bar, "
+             f"“÷ {label}” is that bar's ratio at {name} = {label}."]
     labels = sorted({it.interaction_label for it in items if it.interaction_label})
     if labels:
         estimate = ("ratio of geometric means" if log else "difference of means")

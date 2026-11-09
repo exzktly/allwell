@@ -157,15 +157,77 @@ def test_a_gate_says_which_layer_applies_it(ctx):
     cg = ctx.state.cell_gating
     cg.scatter_gates = [dict(_GATE), dict(_GATE, name="Dim", wells=[])]
     page = _page(ctx)
-    assert _rows(page.gates) == [
+    assert [r[:3] + r[4:] for r in _rows(page.gates)] == [
         ("Bright", "GFP Mean Intensity × MCHERRY Mean Intensity", "A01", "Not applied — a view only"),
         ("Dim", "GFP Mean Intensity × MCHERRY Mean Intensity", "all", "Not applied — a view only"),
     ]
     cg.use_scatter_gates, cg.gating_choices = True, {"Dim"}
     cg.use_scatter_thresh, cg.thresh_choices = True, None
     page.refresh()
-    assert [r[3] for r in _rows(page.gates)] == [
+    assert [r[4] for r in _rows(page.gates)] == [
         "Defines the ON cells", "Defines the Included cells · Defines the ON cells"]
+
+
+def _inside(ctx, wells, x, y, *, drop=frozenset()):
+    """``(inside, of)`` counted straight off the rows, without the gate code: every
+    cell of *wells* not in *drop*, and those inside the box ``x`` × ``y``."""
+    import pandas as pd
+
+    from review.data.data_loading import get_rows
+    inside = of = 0
+    for well in wells:
+        df = get_rows(ctx, well)
+        keep = ~pd.Series([(well, str(f), str(t), int(n)) in drop for f, t, n in
+                           zip(df["fov"], df["timepoint"], df["nucleus_id"])], index=df.index)
+        gx, gy = df["gfp_mean_intensity"], df["mcherry_mean_intensity"]
+        box = gx.between(*x) & gy.between(*y)
+        inside += int((box & keep).sum())
+        of += int(keep.sum())
+    return inside, of
+
+
+def _count(inside, of):
+    return f"{inside:,} of {of:,} ({100.0 * inside / of:.1f}%)"
+
+
+def test_each_gate_counts_its_cells_in_its_own_wells(ctx):
+    """A01 only for the gate drawn there, every loaded well for one that recorded none;
+    the box splits each well, so neither "all cells" nor "none" passes."""
+    from review.data.data_loading import df_included_mask, get_rows
+
+    wells = sorted(ctx.state.dataset.well_paths)
+    assert len(wells) > 1 and all(df_included_mask(get_rows(ctx, w)).all() for w in wells)
+    box = {"x0": 100, "x1": 160, "y0": 50, "y1": 80}
+    ctx.state.cell_gating.scatter_gates = [dict(_GATE, **box), dict(_GATE, **box, name="Dim", wells=[])]
+    a01 = _inside(ctx, ["A01"], (100, 160), (50, 80))
+    every = _inside(ctx, wells, (100, 160), (50, 80))
+    assert 0 < a01[0] < a01[1] and a01 != every
+    page = _page(ctx)
+    assert [r[3] for r in _rows(page.gates)] == [_count(*a01), _count(*every)]
+
+
+def test_a_gate_counts_only_the_cells_the_other_layers_keep(ctx):
+    """An excluded saved set leaves the count: its cells inside the box and out."""
+    from review.core.cell_sets import add_set, set_excluded
+    from review.data.data_loading import get_rows
+
+    box = {"x0": 100, "x1": 160, "y0": 50, "y1": 80}
+    ctx.state.cell_gating.scatter_gates = [dict(_GATE, **box)]
+    rows = get_rows(ctx, "A01")
+    inside_rows = rows[rows["gfp_mean_intensity"].between(100, 160)
+                       & rows["mcherry_mean_intensity"].between(50, 80)]
+    outside_rows = rows.drop(inside_rows.index)
+    pick = [inside_rows.iloc[0], outside_rows.iloc[0]]
+    cells = [("A01", str(r["fov"]), str(r["timepoint"]), int(r["nucleus_id"])) for r in pick]
+    add_set(ctx, cells, source="test")
+    page = _page(ctx)
+    before = _inside(ctx, ["A01"], (100, 160), (50, 80))
+    assert _rows(page.gates)[0][3] == _count(*before)
+    set_excluded(ctx, "Cells 1")
+    page.refresh()
+    after = _inside(ctx, ["A01"], (100, 160), (50, 80), drop=frozenset(cells))
+    assert after == (before[0] - 1, before[1] - 2)
+    assert _rows(page.gates)[0][3] == _count(*after)
 
 
 def test_intensity_floors_are_listed_only_while_they_are_in_force(ctx):

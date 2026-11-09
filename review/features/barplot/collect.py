@@ -157,7 +157,8 @@ class BarItem:
     interaction: object | None = None
     interaction_label: str = ""
     interaction_p_bh: float | None = None
-    #: The second stage's denominator for the tick label — ``Mut-veh ÷ WT-veh``.
+    #: The second stage's baseline value for the tick label — ``Vehicle``; the
+    #: figure note says it stands for the bar's own ratio at that value.
     rel_tick: str = ""
 
 

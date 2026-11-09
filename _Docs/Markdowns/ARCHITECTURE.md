@@ -7379,7 +7379,15 @@ analysis* / *Highlighted on Scatter* / *Saved only*; a gate *Defines the
 Included cells* only while Cell Gating's inclusion layer uses scatter gates and
 its selection takes that gate, *Defines the ON cells* likewise for the
 thresholding layer, else *Not applied*; the intensity floors only while scatter
-gates do not replace them. Every action is one the stores already had: set
+gates do not replace them. Each gate also shows **Cells inside** —
+`collect.gate_counts`, ``(inside, of)`` — counted the way the per-cell Scatter
+draws the cloud the gate was drawn on and the Cell Browser shows a gate's cells:
+among the cells every other layer keeps (`df_included_mask(include_gate=False)`,
+so an excluded saved set leaves the count), over the wells the gate recorded
+(every loaded well when none), at every timepoint. Each well is read narrowly
+(`narrow_rows` over the gates' own columns), on the GUI thread because a gate on
+a nanowell axis reads the Nanowells memo; 576,000 cells and three gates took
+about 0.13 s, so a plate of millions of cells takes seconds when the page opens. Every action is one the stores already had: set
 actions are `cell_sets` calls; *View in Cell Browser* is the Cell Browser
 sub-leaf's `cell_browser.browse` service (`cell_browser/_browse.py`, which sets
 the gallery's Source menu the way the user would — `set:<name>`, or `gates`
@@ -21790,10 +21798,24 @@ Otherwise the controls do not cancel the way the formula assumes — one control
 shared by every bar cancels entirely and leaves `X / B`, a drug effect drawn on
 the same axis under the same label — so the bar is left blank with outcome
 `not_crossed` and the note names both controls. Each R bar's tick names both
-layers (`fold_change_pairing.tick_labels`, from `BarItem.rel_tick`):
-`Mut-drug ÷ WT-drug ÷ (Mut-veh ÷ WT-veh)`, always, because with the reference
-bars left out a figure often holds a single control, and the stage-1 rule of
-naming controls only when they differ would otherwise print neither layer. It
+layers (`fold_change_pairing.tick_labels`, from `BarItem.rel_tick`), always,
+because with the reference bars left out a figure often holds a single control,
+and the stage-1 rule of naming controls only when they differ would otherwise
+print neither layer. It is two lines — `Mut-drug` / `÷ WT-drug ÷ Vehicle` —
+with the second stage named by its baseline value alone (`rel_tick` is the
+value's label) and spelled out once in the note's first line ("“÷ Vehicle” is
+that bar's ratio at Treatment = Vehicle"): written in full on a third line
+(`÷ (Mut-veh ÷ WT-veh)`) a label was as wide as two bars, so four bars could
+not lie flat at a desk width and the tick fit stood them on end. Each
+denominator is joined by non-breaking spaces (`_term`), so when `tick_fit`
+must wrap it breaks between the two terms, never inside a name. The bar figure
+is laid out by the tight engine while any tick runs to more than one line
+(`renderer._style_bar_figure`, which every exit of `redraw_bars` goes through,
+setting `_aw_tight_layout`), since `BAR_FIGURE_MARGINS` leave room for one line
+of ticks above the next panel's title; with one-line ticks it goes back to those
+margins, set again because switching the engine off leaves the axes where it
+last put them. Below about 7.5 in of figure width four such bars still cannot
+lie flat and are stood on end, clear of the next panel but taking its height. It
 **declines, and says so on the figure**, without a per-sample control (a single control cancels out of
 R altogether), with vs t0 on (the replicate values it reads are not
 time-normalised), and in the per-cell modes, which never reach the collector

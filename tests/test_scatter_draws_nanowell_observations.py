@@ -67,7 +67,9 @@ def test_each_nanowell_is_a_point_with_its_count_against_its_brightness(scatter_
     want = sorted((float(n), GFP[w][i]) for w, by_tp in COUNTS.items() for counts in by_tp.values()
                   for i, n in enumerate(counts) if n)            # an empty nanowell has no brightness
     assert got == want
-    assert ax.get_xlabel() == "Cell count" and ax.get_ylabel() == "GFP Cell fluorescence (mean per cell, own-well background subtracted)"
+    # The figure's own log toggles (on by default, as the Properties panel shows them) say so on each axis.
+    assert ax.get_xlabel() == "Cell count  (log₁₀, +1)"
+    assert ax.get_ylabel() == "GFP Cell fluorescence (mean per cell, own-well background subtracted)  (log₁₀, +1)"
     empty = sum(c == 0 for by in COUNTS.values() for cs in by.values() for c in cs)
     total = len(COUNTS) * len(SITES) * 2
     assert _footer(scatter_ctx.widgets.get("_scatter_fig")).startswith(

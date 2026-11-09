@@ -8,6 +8,7 @@ facets a PlotState field carries, to which feature packages read that field.
 
 from __future__ import annotations
 
+from review.domain.observation import NANOWELLS
 from review.domain.style_facets import UNIVERSAL, FigureFacets
 
 
@@ -61,6 +62,10 @@ def style_facets() -> dict[str, FigureFacets]:
                     "change nothing here."
                 ),
             },
+            # Under Observations: Nanowells (``scatter/_observations``) a point is a nanowell, drawn solid.
+            views={NANOWELLS: {
+                "scatter_density": "Nanowell points are drawn solid; density shading is the per-cell scatter's.",
+            }},
         ),
         "_scatter_agg_fig": FigureFacets(
             has=UNIVERSAL | {"axis_limits", "legend", "error_bars", "value_labels", "point_marks", "log_axes", "draw_order"},
@@ -110,5 +115,9 @@ def style_facets() -> dict[str, FigureFacets]:
                     "change nothing here."
                 ),
             },
+            # Under Observations: Nanowells each well is one point, the median over its nanowells, with no spread.
+            views={NANOWELLS: {
+                "error_bars": "Each well is the median over its nanowells and draws no spread to choose.",
+            }},
         ),
     }

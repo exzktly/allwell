@@ -15099,6 +15099,18 @@ its label's percentage is of each group's plotted nanowells. The redraw also reb
 cell redraw does. The **Apply gates** filter does not thin nanowell points. `tests/test_scatter_gates_on_nanowell_observations.py`.
 The Nanowells page's *Subset* can name such a gate (`nanowell/subset_compute`, *The subset*).
 
+**The nanowell scatter obeys the figure's Properties panel.** It is the same figure as the cell scatter on each
+page, so it reads the same preferences: `_observations.redraw` takes them from `plot_style.figure_prefs(ctx, fig)`,
+and on the Cells page `_pin_cells_log_axes` pins `scatter_x_log` / `scatter_y_log` (on unless turned off) on the
+axes as `_aw_force_xlog` / `_aw_force_ylog` with `_aw_log_plus1`, labelling each log axis with the transform and its
+base (`_layout.log1p_axis_suffix`) — the rules `gating.render_scatter_points` draws cells by. The Wells page keeps
+the shared `x_log` / `y_log`, which the style pass applies. Every point collection is tagged
+`_aw_marker_collection`, so marker size, shape and edge apply (`plot_style._style_marker_collections`). The draw
+stamps the `nanowells` style view (`plot_style.mark_style_view`) and `_observations.drew_nanowells` stamps the cell
+view back whenever cells are drawn, so the panel hides what the nanowell points do not draw: density shading on the
+Cells page and the error-bar rows on the Wells page (`scatter/_style_facets`, `views`).
+`tests/test_scatter_nanowells_obeys_properties.py` drives the panel's own toggles and base box on both pages.
+
 **Applying a nanowell gate to cells.** `review/domain/gates.compute_gate_inclusion(df, gates, ratios, *, nanowell_values)` joins
 each `nw::<key>` axis a gate names onto a copy of the cell rows (`observations.join_nanowell_columns`, on
 `(well, timepoint, nw_q, nw_r)`, the cell's own nanowell at its timepoint; no address or no row is NaN) before

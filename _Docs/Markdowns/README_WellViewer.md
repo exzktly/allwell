@@ -7810,8 +7810,13 @@ the way to look at each. Two lists, because they are two kinds of thing:
 
 - **Saved cell sets** — cells saved by name with **Lasso cells** on a Spatial
   map or a Multivariate projection. A set is a fixed list of cells. Each row
-  gives its size and wells, where it was drawn, and what it is doing now
-  (*Saved only*, *Highlighted on Scatter*, *Excluded from analysis*). Under the
+  gives its size and wells, where it was drawn, and every place it is in force
+  now (*Excluded from analysis*, *Highlighted on Scatter*, *Shown in Cell
+  Browser*, or *Saved only*). A line above the list names every set in force and
+  where, so you need not select each row to find the one leaving cells out; it
+  also names a set a restored saved plot asked to highlight that has since been
+  deleted. Renaming a set keeps it highlighted, excluded and as the Cell
+  Browser's Source under its new name; deleting one ends all three. Under the
   list, for the selected set: **View in Cell Browser** (Image Browser → Cell
   Browser with the set as its Source), **Highlight on Scatter** and **Exclude
   from analysis** (click again to undo; one set at a time can be highlighted and

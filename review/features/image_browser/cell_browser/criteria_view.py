@@ -37,6 +37,23 @@ _LO_W = 56
 _RM_W = 24
 
 
+class _SourceCombo(QComboBox):
+    """The Source menu, rebuilt by ``core/cell_sets`` whenever a set changes.
+
+    Registered under one of ``cell_sets.REFRESH_KEYS``, so a set saved, renamed
+    or deleted elsewhere reaches the menu at once: a renamed set stays chosen
+    under its new name, and a deleted one falls back to Criteria and
+    re-collects, rather than the gallery going on showing a set that is gone.
+    """
+
+    def __init__(self, ctx, parent: QWidget) -> None:
+        super().__init__(parent)
+        self._ctx = ctx
+
+    def refresh(self) -> None:
+        _refresh_source_items(self._ctx)
+
+
 def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     lay = parent.layout()
     if lay is None:
@@ -58,7 +75,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     src_lbl = QLabel("Source", src_row)
     src_lbl.setObjectName("Muted")
     srl.addWidget(src_lbl)
-    source_cb = QComboBox(src_row)
+    source_cb = _SourceCombo(ctx, src_row)
     source_cb.setToolTip(
         "Criteria: the cells matching the filters below.\n"
         "Scatter gates: exactly the cells inside the gate(s) drawn on the Scatter "
@@ -68,6 +85,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     srl.addWidget(source_cb, 1)
     lay.addWidget(src_row)
     ctx.runtime.cell_browser.source_cb = source_cb
+    ctx.widgets.register("_cell_browser_source_cb", source_cb)
     _refresh_source_items(ctx)
     source_cb.currentIndexChanged.connect(lambda _i: _on_source_changed(ctx))
 
@@ -197,15 +215,23 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
 def _refresh_source_items(ctx) -> None:
     """Rebuild the Source menu: Criteria, Scatter gates, then each saved set.
 
-    Keeps the current choice; a chosen set that no longer exists falls back to
-    Criteria, which re-collects.
+    Keeps the current choice. A chosen set renamed since keeps being chosen
+    under its new name (``cell_sets`` renames the set the gallery shows along
+    with it); one that no longer exists falls back to Criteria, which
+    re-collects.
     """
-    from review.core.cell_sets import sets
+    from review.core.cell_sets import find, sets
 
     cb = getattr(ctx.runtime.cell_browser, "source_cb", None)
     if cb is None:
         return
     current = cb.currentData() or "criteria"
+    browsing = getattr(getattr(ctx.state, "cell_sets", None), "browsing", None)
+    if current.startswith("set:") and find(ctx, current[len("set:"):]) is None and browsing:
+        current = f"set:{browsing}"
+        st = getattr(ctx.runtime.cell_browser, "state", None)
+        if st is not None:
+            st.saved_cells = browsing
     blocked = cb.blockSignals(True)
     try:
         cb.clear()

@@ -7390,9 +7390,23 @@ list of cell identities that goes stale on re-segmentation, a gate a rule over
 two columns that takes whatever cells are loaded (`domain/gates.py`). The page
 reads both stores (`collect.set_rows`, `collect.gate_rows`,
 `collect.intensity_gates`) and keeps no copy: it re-reads on activation and on
-every set change (`_saved_cells_page` is in `cell_sets.REFRESH_KEYS`). Each row
-says what the population does to the analysis now — a set *Excluded from
-analysis* / *Highlighted on Scatter* / *Saved only*; a gate *Defines the
+every set change (`_saved_cells_page` is in `cell_sets.REFRESH_KEYS`). Where a
+set is in force is one answer, `cell_sets.in_force`, read from three slots on
+`CellSetsState` that a rename or delete follows alike: `exclude` (*excluded from
+analysis*, the only one that changes a number), `highlight` (*highlighted on
+Scatter*) and `browsing` (*shown in Cell Browser* — written by the Cell
+Browser's `apply_filters` through `set_browsing` each time it collects, never
+saved, reset on load). A slot naming a set that no longer exists counts for
+nothing. The line above the set list (`collect.in_force_text`) names every set
+in force and where, so a set quietly leaving cells out is visible without
+selecting its row, and names a highlight a restored saved plot asked for whose
+set is gone (`missing_highlight`). The Cell Browser's Source menu
+(`criteria_view._SourceCombo`, `_cell_browser_source_cb` in `REFRESH_KEYS`) is
+rebuilt on every set change: a renamed set stays its source under the new name
+(it follows `browsing`), a deleted one falls back to Criteria and re-collects.
+Each row says what the population does now — a set lists its places from
+`in_force` (*Excluded from analysis* · *Highlighted on Scatter* · *Shown in Cell
+Browser*) or *Saved only*; a gate *Defines the
 Included cells* only while Cell Gating's inclusion layer uses scatter gates and
 its selection takes that gate, *Defines the ON cells* likewise for the
 thresholding layer, else *Not applied*; the intensity floors only while scatter

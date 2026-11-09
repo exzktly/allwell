@@ -33,6 +33,8 @@ from widgets.flow_layout import FlowLayout
 from widgets.page_body import build_page_body
 
 _SET_COLUMNS = ("Name", "Cells", "From", "In use")
+#: A frame or a padding is drawn on both sides of what it surrounds.
+_BOTH_SIDES = 2
 _GATE_COLUMNS = ("Name", "Axes", "Wells", "In use")
 
 
@@ -76,7 +78,7 @@ def _fit_height(table: QTableWidget) -> None:
     """Make *table* exactly as tall as its rows: the page scrolls, the list does not."""
     table.resizeRowsToContents()
     rows = sum(table.rowHeight(r) for r in range(table.rowCount()))
-    table.setFixedHeight(table.horizontalHeader().height() + rows + 2 * table.frameWidth())
+    table.setFixedHeight(table.horizontalHeader().height() + rows + _BOTH_SIDES * table.frameWidth())
 
 
 def _fill(table: QTableWidget, rows: list[tuple], keys: list[str], keep: str | None) -> None:
@@ -173,7 +175,7 @@ class SavedCellsPage(QWidget):
         self.name.setPlaceholderText("Rename the selected set")
         # Wide enough for its placeholder, so a name is read from its start.
         self.name.setMinimumWidth(self.name.fontMetrics().horizontalAdvance(
-            self.name.placeholderText()) + 2 * theme.Spacing.md)
+            self.name.placeholderText()) + _BOTH_SIDES * theme.Spacing.md)
         self.name.editingFinished.connect(self._rename)
         edit.addWidget(self.name)
         self.delete = _button(self, "Delete", "Delete the selected set. Its cells are not changed.")

@@ -852,25 +852,49 @@ def _first_col(df: pd.DataFrame, names: tuple[str, ...]) -> str | None:
     return next((c for c in names if c in df.columns), None)
 
 
-def any_review_rows(ctx, labels) -> bool:
+def _note_unreadable(unreadable: list[str] | None, label: str) -> None:
+    """Record *label* among the wells whose rows would not read, once, when the caller asked to hear."""
+    if unreadable is not None and label not in unreadable:
+        unreadable.append(label)
+
+
+def unreadable_note(wells: list[str], rows_shown: bool = True) -> str:
+    """The clause the Review CSV's message ends with when some selected wells' rows would not read; ``""`` when
+    every well read. With *rows_shown* the table's rows and counts are from the other wells, and it says so."""
+    if not wells:
+        return ""
+    names = ", ".join(wells[:5]) + (f" (+{len(wells) - 5} more)" if len(wells) > 5 else "")
+    if not rows_shown:
+        return f" {len(wells)} selected well(s) could not be read ({names}); see the log for why."
+    return (f" Not shown: {len(wells)} selected well(s) whose rows could not be read ({names}); "
+            "the rows and counts above are from the other wells. See the log for why.")
+
+
+def any_review_rows(ctx, labels, *, unreadable: list[str] | None = None) -> bool:
     """Whether any of *labels* has a non-empty cached frame.
 
     The question the Review CSV used to answer with ``if not rows:`` over a
     fully materialised pool. It only ever needed to know whether the pool would
     have been empty.
+
+    *unreadable*, when given, collects the wells whose rows would not read — here
+    and in :func:`review_filter_values` / :func:`review_pooled_rows` — so the table
+    can say that its rows are from fewer wells than are selected, rather than
+    showing them as if they were all of them.
     """
     for label in labels:
         try:
             df = get_rows(ctx, label)
         except Exception:
             swallowed(f"review rows for {label!r}")
+            _note_unreadable(unreadable, label)
             continue
         if df is not None and not df.empty:
             return True
     return False
 
 
-def review_filter_values(ctx, labels) -> tuple[list[str], list[str]]:
+def review_filter_values(ctx, labels, *, unreadable: list[str] | None = None) -> tuple[list[str], list[str]]:
     """The FOV and timepoint values the Review CSV combos offer, for *labels*.
 
     Derived from each frame's **distinct** column values rather than from a
@@ -892,6 +916,7 @@ def review_filter_values(ctx, labels) -> tuple[list[str], list[str]]:
             df = get_rows(ctx, label)
         except Exception:
             swallowed(f"review rows for {label!r}")
+            _note_unreadable(unreadable, label)
             continue
         if df is None or df.empty:
             continue
@@ -935,7 +960,8 @@ def _match_mask(ctx, df: pd.DataFrame, fov_sel: str, tp_sel: str):
 
 
 def review_pooled_rows(ctx, labels, *, fov_sel: str = "", tp_sel: str = "",
-                       limit: int | None = None) -> tuple[list[dict], int]:
+                       limit: int | None = None,
+                       unreadable: list[str] | None = None) -> tuple[list[dict], int]:
     """Matching rows for *labels* as dicts, materialising at most *limit* of them.
 
     Returns ``(rows, n_matched)`` — ``n_matched`` is the true total, counted
@@ -963,6 +989,7 @@ def review_pooled_rows(ctx, labels, *, fov_sel: str = "", tp_sel: str = "",
             df = get_rows(ctx, label)
         except Exception:
             swallowed(f"review rows for {label!r}")
+            _note_unreadable(unreadable, label)
             continue
         if df is None or df.empty:
             continue

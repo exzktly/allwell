@@ -47,6 +47,9 @@ def cell_scope(ctx) -> CellScope | None:
     include_gate = True
 
     notes: list[tuple[str, str]] = [("level", level or "cell")]
+    # Wells whose rows would not read while the position columns and the timepoint were chosen: those choices were
+    # made without them, which the file says rather than presenting them as the whole selection's.
+    unreadable: list[str] = []
 
     if level == LEVEL_SUMMARY:
         wells = plotted_wells(ctx, fallback_to_all=True)
@@ -72,13 +75,17 @@ def cell_scope(ctx) -> CellScope | None:
         # while the scope block claims it holds all of them.
         tp = getattr(st, "timepoint", None)
         if tp is None:
-            tp = _first_timepoint(ctx, [w for _g, w in wells])
+            tp = _first_timepoint(ctx, [w for _g, w in wells], unreadable)
         timepoints = (float(tp),) if tp is not None else ()
 
     if not wells:
         return None
 
-    x_col, y_col, unit = _positions(ctx, [w for _g, w in wells])
+    x_col, y_col, unit = _positions(ctx, [w for _g, w in wells], unreadable)
+    if unreadable:
+        notes.append(("wells not read when this scope was chosen",
+                      f"{', '.join(unreadable)} could not be read, so the position columns and the timepoint were "
+                      "chosen from the other wells"))
     return scope_from_ctx(
         ctx,
         plot=f"spatial_{level or 'cell'}",
@@ -96,7 +103,7 @@ def cell_scope(ctx) -> CellScope | None:
     )
 
 
-def _positions(ctx, wells) -> tuple[str, str, str]:
+def _positions(ctx, wells, unreadable: list[str]) -> tuple[str, str, str]:
     """The position columns the tab placed these wells' cells with (``collect.position_columns``): the well
     frame in µm on a nanowell run, the field centroid in pixels otherwise."""
     from review.data.data_loading import get_rows
@@ -106,6 +113,8 @@ def _positions(ctx, wells) -> tuple[str, str, str]:
             df = get_rows(ctx, well)
         except Exception:
             swallowed(f"spatial scope: rows for {well!r}")
+            if well not in unreadable:
+                unreadable.append(well)
             continue
         found = position_columns(df) if df is not None and not df.empty else None
         if found is not None:
@@ -113,7 +122,7 @@ def _positions(ctx, wells) -> tuple[str, str, str]:
     return CENTROID_COL_COL, CENTROID_ROW_COL, "px"
 
 
-def _first_timepoint(ctx, wells) -> float | None:
+def _first_timepoint(ctx, wells, unreadable: list[str]) -> float | None:
     """The timepoint an unset picker resolves to — the collector's own rule.
 
     ``collect_spatial_frame`` takes the smallest finite hour of the frame it is
@@ -130,6 +139,8 @@ def _first_timepoint(ctx, wells) -> float | None:
             df = get_rows(ctx, well)
         except Exception:
             swallowed(f"spatial scope: rows for {well!r}")
+            if well not in unreadable:
+                unreadable.append(well)
             continue
         if df is None or df.empty:
             continue

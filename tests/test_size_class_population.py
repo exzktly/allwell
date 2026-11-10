@@ -194,7 +194,7 @@ def test_each_class_s_share_is_a_channel_whose_well_mean_is_the_share(shell, qtb
 
     apply_qc_params(qtbot, shell, replace(get_qc_params(shell), size_classes=RULE))
     large, small = share_column("Large"), share_column("Small")
-    assert shell.state.channel.shape_features[-2:] == [large, small]
+    assert shell.state.channel.shape_features[-3:] == [large, small, "shape_class_ratio::Large::Small"]
     assert {"Large share", "Small share"} <= set(shell.state.channel.label_to_channel_key)
     assert value_column_label(small) == "Small share"
     assert _mean(shell, small) == [round(2 / 6, 6)] * 3          # cells 1–2 of six
@@ -265,3 +265,109 @@ def test_the_statistics_replicate_line_names_the_population(shell, qtbot):
     _chosen_small(shell, qtbot)
     stats_refresh_fov_indicator(shell)
     assert label.text().splitlines()[-1].startswith("Population: Small only")
+
+
+# ── the ratio of the two classes, as a plottable value ────────────────────────
+
+#: Large ≥ 235 px, Small ≤ 215 px. At 0h and 48h the cells are 210…260 px: 3 Large, 1 Small, ratio 3 (a mean of the
+#: 1s and 0s would read 0.75). At 24h they are rewritten to 3 Small, 2 Large: ratio 2/3.
+RATIO_RULE = SizeClassRule.of(("Large", 235, None), ("Small", None, 215))
+
+
+def _with_24h_reclassed(shell):
+    from review.data.data_loading import get_rows
+
+    df = get_rows(shell, "A01")
+    rows = df.index[df["timepoint"].astype(str) == "24h"]
+    df.loc[rows, "area_px"] = [210.0, 210.0, 210.0, 230.0, 240.0, 250.0]
+
+
+def test_the_ratio_channel_is_each_timepoint_s_count_of_one_class_over_the_other_and_takes_a_fold_change(shell, qtbot):
+    from review.data.metric_labels import value_column_label
+    from review.domain.fold_change import normalize_pts
+    from review.domain.size_classes import ratio_column
+    from review.domain.stats_compute import aggregate_well
+    from review.features.qc.controller import get_qc_params
+    from tests._panel_jobs import apply_qc_params
+
+    _with_24h_reclassed(shell)
+    apply_qc_params(qtbot, shell, replace(get_qc_params(shell), size_classes=RATIO_RULE))
+    col = ratio_column(RATIO_RULE)
+    assert col in shell.state.channel.shape_features
+    assert value_column_label(col) == "Large : Small ratio"
+    points = aggregate_well(shell, "A01", -1.0, False, col)
+    assert [round(p[1], 6) for p in points] == [3.0, round(2 / 3, 6), 3.0]
+    assert [(p[4], p[5]) for p in points] == [(3, 4), (2, 5), (3, 4)]     # Large, and both classes
+    fc = normalize_pts(points, use_t0=True)
+    assert [round(p[1], 6) for p in fc] == [1.0, round(2 / 9, 6), 1.0]
+
+
+def test_the_ratio_pools_a_group_as_one_count_over_the_other_not_a_mean_of_well_ratios():
+    from review.data.data_loading import _aggregate_arrays
+
+    # Two wells pooled: 3:1 and 1:3 — a mean of the two ratios would be 1.67, the pooled count 4:4 is 1.
+    v = np.array([1, 1, 1, 0, 1, 0, 0, 0], dtype=float)
+    pts = _aggregate_arrays(np.zeros(8), v, None, -1.0, False, False, counts_ratio=True)
+    assert pts[0][1] == 1.0
+
+
+def test_the_ratio_s_spread_is_across_each_field_s_own_ratio():
+    from review.data.data_loading import _ratio_timepoint
+
+    v = np.array([1, 1, 0, 1, 0, 0, np.nan], dtype=float)       # field a: 2:1, field b: 1:2, one cell in neither
+    f = np.array(["a", "a", "a", "b", "b", "b", "b"], dtype=object)
+    point = _ratio_timepoint(0.0, v, f, use_sem=False, per_fov_spread=True, fov_trusted=True)
+    assert point[1] == 1.0                                      # 3 : 3 over the well
+    assert point[2] == pytest.approx(np.std([2.0, 0.5], ddof=1))
+    assert (point[4], point[5]) == (3, 6)                       # the cell in neither class is in neither count
+    alone = _ratio_timepoint(0.0, v, None, use_sem=False, per_fov_spread=False, fov_trusted=True)
+    assert np.isnan(alone[2])                                   # a well's cells are not replicates of its ratio
+
+
+def test_an_empty_second_class_gives_no_ratio_never_infinity():
+    from review.domain.size_classes import ratio_of_counts
+
+    assert np.isnan(ratio_of_counts([1.0, 1.0, np.nan]))
+    assert ratio_of_counts([0.0]) == 0.0
+
+
+def test_the_cached_aggregate_the_plots_read_and_the_statistics_replicates_give_the_same_ratio(shell, qtbot):
+    from review.domain.size_classes import ratio_column
+    from review.domain.stats_compute import aggregate_well_cached, group_replicate_stats
+    from review.features.qc.controller import get_qc_params
+    from tests._panel_jobs import apply_qc_params
+
+    _with_24h_reclassed(shell)
+    apply_qc_params(qtbot, shell, replace(get_qc_params(shell), size_classes=RATIO_RULE))
+    col = ratio_column(RATIO_RULE)
+    for _ in range(2):                                          # the second read is the population store's
+        cached = aggregate_well_cached(shell, "A01", -1.0, False, col)
+        assert [round(p[1], 6) for p in cached] == [3.0, round(2 / 3, 6), 3.0]
+    reps = group_replicate_stats(shell, ["A01", "A02"], 24.0, use_fov=False, val_col=col, threshold=-1.0)
+    assert [round(r.mean, 6) for r in reps] == [round(2 / 3, 6), 3.0]
+    assert round(reps[0].mean_all, 6) == round(2 / 3, 6)        # the "mean of all cells" statistic is the ratio
+    assert np.isnan(reps[0].median)                             # a ratio has no median above a cutoff
+
+
+def test_views_that_draw_each_cell_do_not_draw_the_ratio_and_the_distribution_says_why(shell, qtbot):
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    from review.domain.size_classes import ratio_column, share_column
+    from review.features.distribution.controller import redraw_distribution
+    from review.features.qc.controller import get_qc_params
+    from review.features.spatial.collect import available_metric_columns
+    from tests._panel_jobs import apply_qc_params
+
+    apply_qc_params(qtbot, shell, replace(get_qc_params(shell), size_classes=RATIO_RULE))
+    col = ratio_column(RATIO_RULE)
+    metrics = available_metric_columns(shell)
+    assert col not in metrics and share_column("Large") in metrics       # a share is a cell's 0/1; a ratio is not
+
+    fig = Figure()
+    shell.widgets.register("_distribution_fig", fig)
+    shell.widgets.register("_distribution_canvas", FigureCanvasAgg(fig))
+    shell.state.channel.active_val_col = col
+    redraw_distribution(shell)
+    said = " ".join(t.get_text() for ax in fig.axes for t in ax.texts)
+    assert said.startswith("Large : Small ratio is one number per set of cells")

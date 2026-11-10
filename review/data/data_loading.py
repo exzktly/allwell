@@ -1171,9 +1171,11 @@ def aggregate_with_threshold_df(
     if filtered is None:
         return []
     tp_arr, val_arr, fov_arr, on_arr, fov_trusted = filtered
+    from review.domain.size_classes import is_ratio_column
+
     return _aggregate_arrays(tp_arr, val_arr, fov_arr, threshold, use_sem,
                              per_fov_spread, on_arr=on_arr,
-                             fov_trusted=fov_trusted)
+                             fov_trusted=fov_trusted, counts_ratio=is_ratio_column(val_col))
 
 
 def threshold_free_arrays(
@@ -1296,8 +1298,10 @@ def _aggregate_arrays(
     per_fov_spread: bool,
     on_arr: np.ndarray | None = None,
     fov_trusted: bool = True,
+    counts_ratio: bool = False,
 ) -> list[AggPoint]:
-    """Per-timepoint mean / fraction of the "on" population.
+    """Per-timepoint mean / fraction of the "on" population (or, with *counts_ratio*, a size-class ratio's
+    n(first) / n(second) at each timepoint — :func:`_ratio_timepoint`).
 
     "On" is normally ``value > threshold``; when ``on_arr`` is given (a per-row
     boolean aligned to ``val_arr``) it defines the on-population instead — the
@@ -1326,7 +1330,8 @@ def _aggregate_arrays(
         above_mask = on_arr[idx] if on_arr is not None else (v > threshold)
         result.append(_aggregate_timepoint(
             t, v, above_mask, fov_arr[idx] if per_fov_spread and fov_trusted else None,
-            use_sem=use_sem, per_fov_spread=per_fov_spread, fov_trusted=fov_trusted))
+            use_sem=use_sem, per_fov_spread=per_fov_spread, fov_trusted=fov_trusted,
+            counts_ratio=counts_ratio))
     return result
 
 
@@ -1339,6 +1344,7 @@ def _aggregate_timepoint(
     use_sem: bool,
     per_fov_spread: bool,
     fov_trusted: bool,
+    counts_ratio: bool = False,
 ) -> AggPoint:
     """One timepoint's :data:`AggPoint` from its cells' values *v* (row order).
 
@@ -1346,7 +1352,13 @@ def _aggregate_timepoint(
     when *per_fov_spread* and the labels are trusted. The body of
     :func:`_aggregate_arrays`, and what ``review/domain/well_population.py``
     runs for each timepoint it holds, so the two answer identically.
+
+    *counts_ratio*: *v* is a size-class ratio column's 1s and 0s
+    (``size_classes.is_ratio_column``), and the point is that ratio rather than
+    a mean — :func:`_ratio_timepoint`.
     """
+    if counts_ratio:
+        return _ratio_timepoint(t, v, f, use_sem=use_sem, per_fov_spread=per_fov_spread, fov_trusted=fov_trusted)
     n_total = int(v.size)
     above = v[above_mask]
     n_above = int(above.size)
@@ -1406,6 +1418,43 @@ def _aggregate_timepoint(
             int(n_above), int(n_total), float(frac_spread),
             float(n_above_per_fov_mean),
             float(n_above_per_fov_spread))
+
+
+def _ratio_timepoint(t, v: np.ndarray, f: np.ndarray | None, *, use_sem: bool, per_fov_spread: bool,
+                     fov_trusted: bool) -> AggPoint:
+    """The :data:`AggPoint` of a size-class ratio column at one timepoint: the value is n(first class) / n(second)
+    over the cells held (``size_classes.ratio_of_counts``), never a mean of the 1s and 0s. No ON cutoff applies — a
+    ratio has none — so the "above" population is the first class: ``n_above`` its count, ``n_total`` both classes',
+    and the fraction the first class's share. With per-field spread on (and field labels trusted) the spread is the
+    SD/SEM of each field's own ratio, over the fields whose second class holds a cell; otherwise there is no spread
+    (NaN), since the cells of one well are not replicates of a ratio."""
+    from review.domain.size_classes import ratio_of_counts
+
+    nan = float("nan")
+    first = v == 1
+    n_above, n_total = int(np.count_nonzero(first)), int(np.count_nonzero(first | (v == 0)))
+    mean = ratio_of_counts(v)
+    spread = frac_spread = per_fov_mean = per_fov_spread_n = nan
+    if per_fov_spread and fov_trusted and f is not None and n_total:
+        sub = pd.DataFrame({"fov": f, "v": v})
+        per_field = sub.groupby("fov", sort=False)["v"]
+        ratios = per_field.apply(ratio_of_counts).dropna().to_numpy(dtype=float)
+        if ratios.size > 1:
+            sd = float(ratios.std(ddof=1))
+            spread = sd / math.sqrt(ratios.size) if use_sem else sd
+        firsts = per_field.apply(lambda x: float(np.count_nonzero(x == 1))).to_numpy(dtype=float)
+        totals = per_field.apply(lambda x: float(np.count_nonzero((x == 1) | (x == 0)))).to_numpy(dtype=float)
+        shares = firsts[totals > 0] / totals[totals > 0]
+        if shares.size > 1:
+            fsd = float(shares.std(ddof=1))
+            frac_spread = fsd / math.sqrt(shares.size) if use_sem else fsd
+        if firsts.size >= 1:
+            per_fov_mean = float(firsts.mean())
+        if firsts.size > 1:
+            nsd = float(firsts.std(ddof=1))
+            per_fov_spread_n = nsd / math.sqrt(firsts.size) if use_sem else nsd
+    return (float(t), mean, spread, n_above / n_total if n_total else nan, n_above, n_total, frac_spread,
+            per_fov_mean, per_fov_spread_n)
 
 
 def _all_fluor_values(df: pd.DataFrame, val_col: str = "gfp_mean_intensity") -> np.ndarray:

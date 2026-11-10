@@ -77,12 +77,16 @@ def population_mask(df: pd.DataFrame, rule, k: int) -> np.ndarray:
 
 
 def _apply(df: pd.DataFrame, chosen, rule=None) -> None:
-    """Write ``Population_Pass`` for *chosen* (``(rule, k)`` or ``None``) and the share columns of *rule* (a complete
-    rule or ``None``) onto *df*, dropping whichever does not apply."""
-    from review.domain.size_classes import area_column, classify_rows, is_share_column, share_columns
+    """Write ``Population_Pass`` for *chosen* (``(rule, k)`` or ``None``) and the share and ratio columns of *rule* (a
+    complete rule or ``None``) onto *df*, dropping whichever does not apply."""
+    from review.domain.size_classes import (
+        area_column, class_columns, classify_rows, is_class_column, ratio_column, share_columns,
+    )
 
-    wanted = share_columns(rule) if rule is not None else []
-    stale = [c for c in df.columns if is_share_column(c) and c not in wanted]
+    shares = share_columns(rule) if rule is not None else []
+    ratio = ratio_column(rule) if rule is not None else None
+    wanted = class_columns(rule) if rule is not None else []
+    stale = [c for c in df.columns if is_class_column(c) and c not in wanted]
     if chosen is None and POPULATION_COLUMN in df.columns:
         stale.append(POPULATION_COLUMN)
     if stale:
@@ -92,11 +96,20 @@ def _apply(df: pd.DataFrame, chosen, rule=None) -> None:
         # A cell with no area is in no class, and cannot be shown to be outside one either: its share value is blank.
         measured = (np.zeros(len(df), dtype=bool) if classes is None else
                     np.isfinite(pd.to_numeric(df[area_column(df.columns)], errors="coerce").to_numpy(dtype=float)))
-        for k, col in enumerate(wanted):
+        for k, col in enumerate(shares):
             values = np.full(len(df), np.nan)
             if classes is not None:
                 values[measured] = (np.asarray(classes)[measured] == k).astype(float)
             df[col] = values
+        if ratio:
+            # 1 in the first class, 0 in the second, blank for any other cell: a reduction counts the 1s over the
+            # 0s (``size_classes.ratio_of_counts``), so a cell in neither class is in neither side of the ratio.
+            values = np.full(len(df), np.nan)
+            if classes is not None:
+                kinds = np.asarray(classes)
+                values[kinds == 0] = 1.0
+                values[kinds == 1] = 0.0
+            df[ratio] = values
     if chosen is not None:
         k_rule, k = chosen
         df[POPULATION_COLUMN] = population_mask(df, k_rule, k).astype(int)

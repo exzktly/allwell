@@ -4268,9 +4268,24 @@ any other per-cell value, over time, per group, on the heat map and as a fold
 change. Renaming a class renames its share, and clearing the classes removes
 both. A share is of the cells the plot keeps: with **Population** set to one
 class, that class's share is 1 everywhere, so compare shares under *All cells*.
-There is no ratio channel, since a ratio of two classes is not an average of
-any one value per cell. Per well it follows from the two shares. On a nanowell
-dataset, the Nanowells page offers it per nanowell.
+
+**The ratio of the two classes.** The same section offers **T cells : DCs
+ratio**. It is a count of one class over the other, taken over exactly the cells
+each value stands for. At each timepoint of a well it is that well's T cells over
+its DCs. For a group of wells it is the group's T cells over its DCs together,
+not an average of the wells' ratios. With *Spread* set per field of view, the
+error bar is the spread of each field's own ratio. Without it there is no error
+bar, because one well's cells are not replicates of its ratio. Its fold change
+works like any other: the ratio at each timepoint over the ratio at the baseline
+or the control. Cells in neither class are on neither side. Where a well or field
+has no DC there is no ratio — never zero or infinity — and the point is left out.
+The *Fraction above threshold* of the ratio is the first class's share, and its
+*Events* the first class's count, since a ratio has no cutoff. On the Statistics
+page its *Mean (all cells)* is the ratio and there is no *Median*. Distribution,
+the per-cell Scatter and Spatial draw one value per cell, so they do not offer
+the ratio, and Distribution says so if it is the channel in force. With
+**Population** set to one class, the other class is left out, so the ratio has
+no denominator. Compare ratios under *All cells*.
 
 The control is shown only while both classes are complete, and only on a plot
 drawing cells. It changes cell plots only. On a nanowell dataset the Nanowells

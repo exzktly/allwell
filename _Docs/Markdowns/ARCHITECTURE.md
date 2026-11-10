@@ -12951,8 +12951,24 @@ cutoff, as it does every morphology value. Every place that names a shape column
 `size_classes.shape_column_label`, which reads *T cells share* off the column name. A well's mean of the column is
 the class's share of its kept cells, so Value plots, the heat map's *Mean (all cells)* and fold change all offer
 it. The light `set_size_classes` path re-runs `apply_population_to_cache` and invalidates the stats cache before
-redrawing, because the shares move even though no verdict does. There is deliberately no ratio channel: a ratio of
-two class counts is not a mean of any per-cell value.
+redrawing, because the shares move even though no verdict does.
+
+**The ratio is a channel whose reduction is not a mean.** `size_classes.ratio_column(rule)` is
+`shape_class_ratio::<label 1>::<label 2>`, written by the same projector: 1 in the first class, 0 in the second, NaN
+for any other row. A ratio of two counts is not the mean of any per-cell value, so every reduction of a set of cells
+to one number branches on `size_classes.is_ratio_column` and counts the 1s over the 0s (`ratio_of_counts`, NaN with
+no 0). `data_loading._aggregate_timepoint` takes `counts_ratio` and hands the timepoint to `_ratio_timepoint`. There
+`n_above` is the first class's count and `n_total` both classes', the fraction is the first class's share, and the
+spread is across each field's own ratio under per-field spread (NaN otherwise). The flag reaches it from every caller
+that knows the column: `aggregate_with_threshold_df` (so `aggregate_well`, `aggregate_group`'s pooled wells — one
+count over the other for the whole group — and the per-FOV replicates of `group_replicate_stats`),
+`well_population.build_population` (`WellPopulation.counts_ratio`, read by `aggregate`, `_build_extras` and
+`ExtraTable`), and the Bar plot's pooled path (`barplot/collect`). The stats extras (`stats_compute._extra_at`)
+answer the ratio of all cells as *Mean (all cells)* and no median. Fold change needs nothing: `fold_change` divides
+`AggPoint` means, which are already ratios. Views that draw one value per cell leave it out. The per-cell Scatter's
+axis list and Spatial's metrics (`spatial.collect.available_metric_columns`) drop it. Distribution draws
+`size_classes.ratio_not_per_cell`'s sentence instead when it is the channel in force. Multivariate and the Cell
+Browser list only catalogue shape columns (`detect_shape_features`), so they never see it.
 
 **The nanowell metrics ignore it.** `nanowell.controller.gate_tally` leaves `Population_Pass` out of the inclusion it
 tallies, beside the field and nanowell-focus layers. A nanowell's count, brightness and per-class counts are

@@ -86,6 +86,9 @@ class WellPopulation:
     extras: dict | None = field(default_factory=dict)
     extras_complete: bool = True
     nbytes: int = 0
+    #: The value is a size-class ratio column (``size_classes.is_ratio_column``): every reduction counts its 1s
+    #: over its 0s rather than averaging them (``data_loading._ratio_timepoint``).
+    counts_ratio: bool = False
 
     @property
     def has_fov(self) -> bool:
@@ -142,10 +145,13 @@ def build_population(
             ))
     elif per_fov:
         fov_trusted = True
-    extras, complete = _build_extras(extra_inputs, groups)
+    from review.domain.size_classes import is_ratio_column
+
+    counts_ratio = is_ratio_column(val_col)
+    extras, complete = _build_extras(extra_inputs, groups, counts_ratio=counts_ratio)
     pop = WellPopulation(groups=tuple(groups), fov_labels=fov_labels,
                          fov_trusted=fov_trusted, extras=extras,
-                         extras_complete=complete)
+                         extras_complete=complete, counts_ratio=counts_ratio)
     pop.nbytes = _measure(pop)
     return pop
 
@@ -176,7 +182,8 @@ def _split_by_value(values: np.ndarray) -> tuple[np.ndarray, list[np.ndarray]]:
 _SCAN_MAX_GROUPS = 64
 
 
-def _build_extras(inputs: tuple | None, groups: list[_Group]) -> tuple[dict | None, bool]:
+def _build_extras(inputs: tuple | None, groups: list[_Group], *,
+                  counts_ratio: bool = False) -> tuple[dict | None, bool]:
     if inputs is None:
         return None, True
     base, tp, val, on = inputs
@@ -206,9 +213,18 @@ def _build_extras(inputs: tuple | None, groups: list[_Group]) -> tuple[dict | No
                 (on_sub is None and g.on is None)
                 or (on_sub is not None and g.on is not None and np.array_equal(g.on, on_sub))):
             vals, on_sub = g.vals, g.on
-        out[float(u)] = _Extra(vals=vals, on=on_sub,
-                               mean_all=float(vals.mean()) if vals.size else float("nan"))
+        out[float(u)] = _Extra(vals=vals, on=on_sub, mean_all=_mean_all(vals, counts_ratio))
     return out, True
+
+
+def _mean_all(vals: np.ndarray, counts_ratio: bool) -> float:
+    """The extras' "mean of all cells": for a size-class ratio column, the ratio of all its cells
+    (``size_classes.ratio_of_counts``) — the one value it has — rather than the mean of its 1s and 0s."""
+    if counts_ratio:
+        from review.domain.size_classes import ratio_of_counts
+
+        return ratio_of_counts(vals)
+    return float(vals.mean()) if vals.size else float("nan")
 
 
 def _measure(pop: WellPopulation) -> int:
@@ -253,7 +269,7 @@ def aggregate(pop: WellPopulation, *, threshold: float, use_sem: bool,
             f = pop.fov_labels[g.fov_codes]
         result.append(_aggregate_timepoint(
             g.t, g.vals, above_mask, f, use_sem=use_sem,
-            per_fov_spread=per_fov_spread, fov_trusted=trusted))
+            per_fov_spread=per_fov_spread, fov_trusted=trusted, counts_ratio=pop.counts_ratio))
     return result
 
 
@@ -270,6 +286,7 @@ class ExtraTable:
     def __init__(self, pop: WellPopulation, threshold: float) -> None:
         self._extras = pop.extras or {}
         self._threshold = threshold
+        self._counts_ratio = pop.counts_ratio
         self._done: dict[float, tuple[float, float]] = {}
 
     def get(self, t, default=None):
@@ -279,6 +296,10 @@ class ExtraTable:
         e = self._extras.get(t)
         if e is None:
             return default
+        if self._counts_ratio:
+            hit = (float("nan"), e.mean_all)            # a ratio has no cells above a cutoff to take a median of
+            self._done[t] = hit
+            return hit
         above = e.vals[e.on] if e.on is not None else e.vals[e.vals > self._threshold]
         hit = ((float(np.median(above)) if above.size else float("nan")), e.mean_all)
         self._done[t] = hit

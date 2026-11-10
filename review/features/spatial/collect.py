@@ -203,8 +203,11 @@ def available_metric_columns(ctx) -> list[str]:
             if col in present and col not in out:
                 out.append(col)
 
+    from review.domain.size_classes import is_ratio_column
+
     for name in df.columns:
-        if is_shape_column(name) and name not in out:
+        # A size-class ratio is one number per set of cells, not a cell's value to map in space.
+        if is_shape_column(name) and not is_ratio_column(name) and name not in out:
             out.append(name)
 
     ratio_index = getattr(ctx.state.channel, "ratio_index", None) or {}

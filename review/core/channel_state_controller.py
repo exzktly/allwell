@@ -350,23 +350,24 @@ def refresh_metric_combo_for_channel(ctx) -> None:
 
 
 def _share_channels(ctx) -> list[str]:
-    """The size classes' share columns (``size_classes.share_columns``) while Cell Gating's rule is complete."""
+    """The size classes' share and ratio columns (``size_classes.class_columns``) while Cell Gating's rule is
+    complete."""
     from review.core.population_band import qc_params
-    from review.domain.size_classes import SizeClassRule, share_columns
+    from review.domain.size_classes import SizeClassRule, class_columns
 
     params = qc_params(ctx)
     rule = getattr(params, "size_classes", None)
-    return share_columns(rule) if isinstance(rule, SizeClassRule) else []
+    return class_columns(rule) if isinstance(rule, SizeClassRule) else []
 
 
 def sync_share_channels(ctx) -> None:
     """List each size class's share among the shape-feature channels, and only the current rule's — called after
     a QC edit, since naming, renaming or clearing a class changes the list — and refresh the channel dropdowns when
     it moved."""
-    from review.domain.size_classes import is_share_column
+    from review.domain.size_classes import is_class_column
 
     current = list(ctx.state.channel.shape_features or [])
-    wanted = [c for c in current if not is_share_column(c)] + _share_channels(ctx)
+    wanted = [c for c in current if not is_class_column(c)] + _share_channels(ctx)
     if wanted != current:
         ctx.state.channel.shape_features = wanted
         update_channel_selector(ctx)

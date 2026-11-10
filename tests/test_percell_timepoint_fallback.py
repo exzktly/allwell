@@ -60,7 +60,7 @@ def _mean_panel_artists(monkeypatch, draw_name, *, parsed_column: bool) -> int:
     monkeypatch.setattr(_pooled, "cells_upper_bound", lambda _c, _w: 0)
     fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
     try:
-        kw = {"bw": 0.5} if draw_name == "draw_violin" else {}
+        kw = {"draw_violin": {"bw": 0.5}, "draw_histogram": {"bins": 10}}.get(draw_name, {})
         getattr(renderer, draw_name)(
             _ctx(), ax_mean, ax_frac, wells=["A01"], colors=["#4488cc"],
             xlabels=["A01"], target_t=6.0, tp_str="6", threshold=0.0, **kw)
@@ -69,7 +69,7 @@ def _mean_panel_artists(monkeypatch, draw_name, *, parsed_column: bool) -> int:
         plt.close(fig)
 
 
-@pytest.mark.parametrize("draw_name", ["draw_violin", "draw_beeswarm"])
+@pytest.mark.parametrize("draw_name", ["draw_violin", "draw_beeswarm", "draw_histogram"])
 def test_a_text_only_timepoint_still_draws(monkeypatch, draw_name):
     assert _mean_panel_artists(monkeypatch, draw_name, parsed_column=False) > 0, (
         f"{draw_name} drew nothing for a frame carrying only the text "
@@ -77,7 +77,7 @@ def test_a_text_only_timepoint_still_draws(monkeypatch, draw_name):
     )
 
 
-@pytest.mark.parametrize("draw_name", ["draw_violin", "draw_beeswarm"])
+@pytest.mark.parametrize("draw_name", ["draw_violin", "draw_beeswarm", "draw_histogram"])
 def test_the_parsed_column_is_still_the_one_that_is_read(monkeypatch, draw_name):
     assert _mean_panel_artists(monkeypatch, draw_name, parsed_column=True) > 0
 
@@ -100,7 +100,8 @@ def test_the_two_renderers_share_one_timepoint_reader():
         return [n for n in ast.walk(ast.parse(src))
                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == name]
 
-    for name in ("draw_violin", "draw_beeswarm"):
+    # The violin and the histogram read their cells in one shared pass, ``_draw_column_shapes``.
+    for name in ("_draw_column_shapes", "draw_beeswarm"):
         src = inspect.getsource(getattr(renderer, name))
         assert calls(getattr(renderer, name), "column_cells"), f"{name} filters its cells itself again"
         assert "timepoint_hours" not in src.replace("_timepoint_hours", ""), (

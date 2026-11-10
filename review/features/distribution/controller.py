@@ -628,15 +628,77 @@ def _state_every_value(parts, exact) -> None:
         ax.autoscale_view()
 
 
+#: The mode that draws each group's values as a vertical histogram beside the others (``review.domain.column_histogram``).
+HISTOGRAM_PER_GROUP = "Histogram (per group)"
+#: The modes with one column per group and the value on y — no threshold line on x, no faceting.
+PER_GROUP_MODES = ("Violin (per group)", HISTOGRAM_PER_GROUP)
+#: The gid of the per-group histogram's bars and of its note.
+HISTOGRAM_GID, HISTOGRAM_NOTE_GID = "distribution-histogram", "distribution-histogram-note"
+
+
+def _render_column_histograms(ax, groups, bins: int, log_y: bool, exact, rng) -> None:
+    """Each group's values as a vertical histogram mirrored about its column, beside the others, as the violin is
+    laid out: one set of bin edges for every group (the tab's own, ``_shared_bin_edges``, log-spaced under Y log),
+    every group's bars summing to 1, and one width scale, so widths compare across groups. A sampled group is counted
+    over every value (*exact*), as the tab's other histograms are; its median tick is every value's."""
+    from review.domain.column_histogram import histograms_from_counts
+
+    finite = [np.asarray(vals, dtype=float)[np.isfinite(np.asarray(vals, dtype=float))] for _, _, vals in groups]
+    edges = _shared_bin_edges(finite, bins, log_y, value_range=rng)
+    log = bool(log_y) and edges.size > 1 and edges[0] > 0     # ``_shared_bin_edges`` spaces logarithmically then
+    counts, ns, offs = [], [], []
+    for i, arr in enumerate(finite):
+        e = exact[i] if exact else None
+        if e is not None:
+            counts.append(e.hist(edges))
+            ns.append(int(e.n))
+            offs.append(0)
+        else:
+            counts.append(np.histogram(arr[arr > 0] if log else arr, edges)[0])
+            ns.append(int(arr.size))
+            offs.append(int(np.count_nonzero(arr <= 0)) if log else 0)
+    hist = histograms_from_counts(edges, counts, ns, off_axis=offs, log=log)
+    half = 0.4
+    for i, (name, color, _vals) in enumerate(groups):
+        bottoms, heights, lefts, widths = hist.bars(i, i + 1, half)
+        if len(bottoms):
+            for patch in ax.barh(bottoms, widths, height=heights, left=lefts, align="edge", color=color, alpha=0.55,
+                                 linewidth=0):
+                patch.set_gid(HISTOGRAM_GID)
+        if ns[i]:
+            e = exact[i] if exact else None
+            median = e.median if e is not None else float(np.median(finite[i]))
+            ax.hlines(median, i + 1 - half * 0.6, i + 1 + half * 0.6, colors=color, lw=1.4, zorder=4)
+    labels = [name for name, _, _ in groups]
+    ax.set_xticks(range(1, len(labels) + 1))
+    ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
+    own_xtick_angle(ax, 30, "right")
+    ax.set_xlim(0.4, len(labels) + 0.6)
+    mark_position_axes(ax, y=False)                      # columns 1…n, one per group: no X log
+    if log:
+        ax.set_yscale("log")
+    ax.set_ylabel("Value")
+    note = hist.note("group")
+    if note:
+        from review.core.plot_style import follows_theme, tokens_for
+
+        text = ax.text(0.99, 0.98, note, transform=ax.transAxes, ha="right", va="top", fontsize=7,
+                       color=tokens_for(ax)[2], gid=HISTOGRAM_NOTE_GID)
+        text.set_in_layout(False)
+        follows_theme(text, muted=True)
+
+
 def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False, exact=None) -> None:
-    """Single-axis renderer covering every mode (Hist / Hist+KDE / KDE / CDF / Violin).
+    """Single-axis renderer covering every mode (Hist / Hist+KDE / KDE / CDF / Violin / Histogram per group).
 
     *exact*, when given, is aligned with *groups* (``distribution/_pooled.py``):
     their values are then a sample, and the counts, ranges, bars and medians
     drawn come from it instead.
     """
     rng = exact_range(exact)
-    if mode == "Violin (per group)":
+    if mode == HISTOGRAM_PER_GROUP:
+        _render_column_histograms(ax, groups, bins, log_y, exact, rng)
+    elif mode == "Violin (per group)":
         data = [vals for _, _, vals in groups]
         labels = [name for name, _, _ in groups]
         parts = ax.violinplot(data, showmeans=False, showmedians=True)
@@ -728,7 +790,7 @@ def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False, ex
     # -1.0 would otherwise draw a line off the left edge of every histogram.
     _show_thr = bool(getattr(getattr(ctx.state, "plot", None),
                              "show_threshold_line", False))
-    if (mode != "Violin (per group)" and _show_thr
+    if (mode not in PER_GROUP_MODES and _show_thr
             and _has_on_cutoff(ctx)):
         try:
             threshold = on_cutoff_for_column(

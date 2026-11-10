@@ -11,6 +11,7 @@ from review.domain.fold_change_scopes import plots_held
 from review.data.metric_labels import spread_label, timepoint_title
 
 from review.features.barplot.controller import refresh_bar_layout_btn_state
+from review.features.barplot._per_cell_mode import MODE_NAMES, per_cell_mode
 from review.features.barplot.collect import _bar_debug, bar_err_settings, collect_bar_items_for_app
 
 from review.domain.plot_members import plot_replicate_sets
@@ -38,6 +39,7 @@ from review.core.plot_style import (
     follows_theme,
     mark_time_rescale,
     tokens_for,
+    y_axis_is_log,
 )
 from review.domain.significance import significance_label
 from review.domain.stats_compute import aggregate_well
@@ -209,26 +211,71 @@ def draw_violin(
     the live tab's slider state.
     """
     try:
-        from scipy.stats import gaussian_kde
+        from scipy.stats import gaussian_kde  # noqa: F401 — the violin's one dependency, checked before any read
     except ImportError:
         follows_theme(
             ax_mean.text(0.5, 0.5, "scipy required for violin plot",
                          transform=ax_mean.transAxes, ha="center", va="center",
                          color=tokens_for(ax_mean)[2], fontsize=9), muted=True)
         return
-
-    # Properties → Colours. Resolved here rather than by each caller because
-    # both the tab and the Batch Export panel reach these three renderers with a
-    # real ``ctx``, so one line covers both surfaces.
-    colors = apply_bar_color_mode(ctx.state.plot, colors)
-
-    n = len(wells)
     if bw is None:
         slider = ctx.widgets.get_or_none("_violin_slider")
         bw_raw = float(slider.value()) / 100.0 if slider is not None else 1.0
         bw = max(0.05, bw_raw)
     else:
         bw = max(0.05, float(bw))
+    _draw_column_shapes(ctx, ax_mean, ax_frac, wells, colors, xlabels, target_t, tp_str, threshold,
+                        xs=xs, group_keys=group_keys, cell_scale=cell_scale, pool_groups=pool_groups,
+                        shape="violin", bw=bw)
+
+
+def draw_histogram(
+    ctx,
+    ax_mean,
+    ax_frac,
+    wells: list[str],
+    colors: list[str],
+    xlabels: list[str],
+    target_t,
+    tp_str: str,
+    threshold: float,
+    *,
+    xs: list[float] | None = None,
+    group_keys: list[str] | None = None,
+    cell_scale: dict[str, float] | None = None,
+    bins: int | None = None,
+    log: bool = False,
+    pool_groups: dict[str, list[str]] | None = None,
+) -> None:
+    """Each well/group's cells as a vertical histogram mirrored about its column (``review.domain.column_histogram``).
+
+    Every column's bars sum to probability 1 and every column shares one set of bin edges and one width scale, so
+    widths compare across columns. *bins* is the bin count (``BarPlotState.hist_bins`` when None; Batch Export passes
+    its own); *log* spaces the bins in log space for a log value axis. A count metric bins on whole numbers unless a
+    fold change rescales it. *cell_scale* and *pool_groups* are as for :func:`draw_violin`.
+    """
+    from review.domain.column_histogram import clamp_bins
+
+    bins = clamp_bins(getattr(ctx.state.bar, "hist_bins", None) if bins is None else bins)
+    _draw_column_shapes(ctx, ax_mean, ax_frac, wells, colors, xlabels, target_t, tp_str, threshold,
+                        xs=xs, group_keys=group_keys, cell_scale=cell_scale, pool_groups=pool_groups,
+                        shape="histogram", bins=bins, log=log)
+
+
+def _draw_column_shapes(ctx, ax_mean, ax_frac, wells, colors, xlabels, target_t, tp_str, threshold, *, xs,
+                        group_keys, cell_scale, pool_groups, shape: str, bw: float = 1.0, bins: int = 30,
+                        log: bool = False) -> None:
+    """The violin's and the histogram's one column pass: read each column's cells (one pool open at a time), draw a
+    column too small for a shape as dots, then draw the shapes, the fraction panel and the titles.
+
+    The cells are collected before any shape is drawn because a histogram's bin edges and width scale are the whole
+    figure's; only the sample each column draws is kept (``ColumnCells.vals``), never its pool."""
+    # Properties → Colours. Resolved here rather than by each caller because
+    # both the tab and the Batch Export panel reach these renderers with a
+    # real ``ctx``, so one line covers both surfaces.
+    colors = apply_bar_color_mode(ctx.state.plot, colors)
+
+    n = len(wells)
     bar_w = min(0.4, 3.0 / max(n, 1))
 
     if xs is None:
@@ -238,6 +285,7 @@ def draw_violin(
     else:
         target_ts_per_col = [float(target_t)] * n
     frac_vals: list[float] = []
+    shapes: list[tuple] = []        # (x, colour, values drawn, median of every cell)
 
     columns: list[ColumnCells] = []
     try:
@@ -277,30 +325,23 @@ def draw_violin(
                 if vals.size:
                     ax_mean.scatter([xi], [vals[0]], c=color, s=20, zorder=4)
                 continue
-
-            arr = vals
-            kde = gaussian_kde(arr, bw_method=bw)
-            y_min, y_max = float(arr.min()), float(arr.max())
-            y_pad = (y_max - y_min) * 0.05
-            ys_grid = np.linspace(y_min - y_pad, y_max + y_pad, 200)
-            density = kde(ys_grid)
-            max_d = density.max()
-            if max_d > 0:
-                density = density / max_d * bar_w
-
-            ax_mean.fill_betweenx(ys_grid, xi - density, xi + density,
-                                  color=color, alpha=0.55, zorder=2)
-            ax_mean.plot(xi - density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
-            ax_mean.plot(xi + density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
-
-            # Every cell's median when the body was drawn from a sample.
-            median = cells.median(spec) if cells.sampled else float(np.median(arr))
-            ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
-                           colors="white", lw=2.0, zorder=5)
-            ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
-                           colors=color, lw=1.2, zorder=6)
+            # Every cell's median when the shape is drawn from a sample.
+            median = cells.median(spec) if cells.sampled else float(np.median(vals))
+            shapes.append((xi, color, np.asarray(vals, dtype=float), median))
     finally:
         finish_columns(ax_mean, columns)
+
+    if shape == "histogram":
+        label = _draw_histogram_shapes(ctx, ax_mean, shapes, bar_w, bins=bins, log=log,
+                                       integer=cell_scale is None)
+    else:
+        _draw_violin_shapes(ax_mean, shapes, bar_w, bw)
+        label = f"violin, bw={bw:.2f}"
+    for xi, color, _vals, median in shapes:
+        ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
+                       colors="white", lw=2.0, zorder=5)
+        ax_mean.hlines(median, xi - bar_w * 0.6, xi + bar_w * 0.6,
+                       colors=color, lw=1.2, zorder=6)
     for i, (fv, color) in enumerate(zip(frac_vals, colors)):
         xi = xs[i] if i < len(xs) else i
         if not math.isnan(fv):
@@ -334,7 +375,7 @@ def draw_violin(
     _fc_suffix = _fc.fold_change_suffix_for(ctx, "bar") if cell_scale else ""
     _tp_suffix = timepoint_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
-        f"{ctx.state.channel.active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  {_tp_suffix}",
+        f"{ctx.state.channel.active_channel.upper()} {_metric_label} distribution ({label}){_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=_hdr_pad)
     ax_mean.set_ylabel(f"{ctx.state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     # The fraction panel of the per-cell display modes is NOT normalised: its
@@ -346,6 +387,56 @@ def draw_violin(
     ax_frac.set_title(
         f"{fraction_title(ctx.state.channel.active_metric)}  —  {_tp_suffix}",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=_hdr_pad)
+
+
+def _draw_violin_shapes(ax_mean, shapes, bar_w: float, bw: float) -> None:
+    """Each column's KDE, scaled to its own peak (the violin's convention)."""
+    from scipy.stats import gaussian_kde
+
+    for xi, color, arr, _median in shapes:
+        kde = gaussian_kde(arr, bw_method=bw)
+        y_min, y_max = float(arr.min()), float(arr.max())
+        y_pad = (y_max - y_min) * 0.05
+        ys_grid = np.linspace(y_min - y_pad, y_max + y_pad, 200)
+        density = kde(ys_grid)
+        max_d = density.max()
+        if max_d > 0:
+            density = density / max_d * bar_w
+
+        ax_mean.fill_betweenx(ys_grid, xi - density, xi + density,
+                              color=color, alpha=0.55, zorder=2)
+        ax_mean.plot(xi - density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
+        ax_mean.plot(xi + density, ys_grid, color=color, lw=0.6, alpha=0.7, zorder=3)
+
+
+#: The gid of a Bar histogram's bars and of its width note, for a test (and a capture) to find them.
+HISTOGRAM_GID = "bar-histogram"
+HISTOGRAM_NOTE_GID = "bar-histogram-note"
+
+
+def _draw_histogram_shapes(ctx, ax_mean, shapes, bar_w: float, *, bins: int, log: bool, integer: bool) -> str:
+    """Every column's histogram on the figure's shared edges and width scale; the title's words for it.
+
+    *integer* (no fold change rescales the values) bins a count metric on whole numbers."""
+    from review.domain.column_histogram import column_histograms
+    from review.domain.metric_registry import CUTOFF_COUNT, cutoff_kind_for_column
+
+    count = integer and cutoff_kind_for_column(ctx.state.channel.active_val_col) == CUTOFF_COUNT
+    hist = column_histograms([vals for _x, _c, vals, _m in shapes], bins, integer=count, log=log)
+    for i, (xi, color, _vals, _median) in enumerate(shapes):
+        bottoms, heights, lefts, widths = hist.bars(i, xi, bar_w)
+        if not len(bottoms):
+            continue
+        for patch in ax_mean.barh(bottoms, widths, height=heights, left=lefts, align="edge", color=color,
+                                  alpha=0.55, linewidth=0, zorder=2):
+            patch.set_gid(HISTOGRAM_GID)
+    note = hist.note("column")
+    if note:
+        text = ax_mean.text(0.99, 0.98, note, transform=ax_mean.transAxes, ha="right", va="top", fontsize=7,
+                            color=tokens_for(ax_mean)[2], gid=HISTOGRAM_NOTE_GID)
+        text.set_in_layout(False)
+        follows_theme(text, muted=True)
+    return f"histogram, {hist.bins} bins" if hist.bins else "histogram"
 
 
 def swarm_pitch(ctx, ax, x_span: float) -> float | None:
@@ -676,18 +767,15 @@ def _val_col_label(col: str) -> str:
 
 
 def _per_cell_mode_name(ctx) -> str:
-    """Which of the three per-cell modes is on, named as the control names it.
+    """Which per-cell mode is on, named as the control names it.
 
     The note has to point at a control the user can find. "Per-cell mode" would
-    not: three separate switches reach it, two on the Bar tab's Display popover
-    and one in the Properties sidebar, and the sidebar one is the reason this
-    reads as a bug rather than a mode.
+    not: two separate controls reach it — the Display popover's Show selector
+    (Beeswarm, Violin, Histogram) and the Properties sidebar's "Show: All points" —
+    and the sidebar one is the reason this reads as a bug rather than a mode.
     """
-    if getattr(ctx.state.bar, "violin", False):
-        return "Violin"
-    if getattr(ctx.state.bar, "swarm", False):
-        return "Beeswarm"
-    return "Show: All points"
+    mode = per_cell_mode(ctx.state.bar)
+    return f"Display ▾ Show: {MODE_NAMES[mode]}" if mode else "Show: All points"
 
 
 def _no_significance(ctx, ax, reason: str) -> None:
@@ -1389,8 +1477,8 @@ def redraw_bars(ctx) -> None:
         if getattr(ctx.state.plot, "show_significance", False):
             _no_significance(
                 ctx, ax_mean,
-                f"{_per_cell_mode_name(ctx)} draws per-cell points rather than "
-                f"bars, and the brackets need bars to sit on.")
+                f"{_per_cell_mode_name(ctx)} draws each column's cells rather "
+                f"than one bar, and the brackets need bars to sit on.")
         _decline_relative_for_cells(ctx, ax_mean)
         if cut_not_set:
             blank_for_unset_cut(ax_frac, ax_n)
@@ -1430,7 +1518,7 @@ def _decline_relative_for_cells(ctx, ax_mean) -> None:
         return
     slice_.rel_applied = False
     slice_.rel_notice = (f"Then relative to: not applied — {_per_cell_mode_name(ctx)} "
-                         f"draws per-cell points. Switch to bars to see it.")
+                         f"draws each column's cells. Switch to bars to see it.")
     _rel_annotations.annotate_relative_to(ctx, [], [], ax_mean)
 
 
@@ -1545,7 +1633,7 @@ def _class_ratio_has_no_cells(ctx, ax_mean) -> bool:
     from review.domain.size_classes import class_ratio_not_per_cell, is_class_ratio_column
 
     val_col = ctx.state.channel.active_val_col
-    if not is_class_ratio_column(val_col) or not (ctx.state.bar.violin or ctx.state.bar.swarm):
+    if not is_class_ratio_column(val_col) or not per_cell_mode(ctx.state.bar):
         return False
     follows_theme(ax_mean.text(0.5, 0.5, class_ratio_not_per_cell(val_col), transform=ax_mean.transAxes,
                                ha="center", va="center", wrap=True, color=tokens_for(ax_mean)[2], fontsize=9),
@@ -1570,7 +1658,8 @@ def draw_per_cell_bar_mode(
     # The Properties "Show: All points" option also routes here so per-cell
     # dots overlay the bars, reusing the beeswarm path.
     show_mode = str(getattr(ctx.state.plot, "bar_show_mode", "mean_spread") or "mean_spread")
-    use_per_cell = ctx.state.bar.violin or ctx.state.bar.swarm or show_mode == "all_pts"
+    mode = per_cell_mode(ctx.state.bar)
+    use_per_cell = bool(mode) or show_mode == "all_pts"
     if not use_per_cell:
         return False
     if _class_ratio_has_no_cells(ctx, ax_mean):
@@ -1675,10 +1764,9 @@ def draw_per_cell_bar_mode(
                 group_keys.append(full if multi_tp else "")
 
     if _debug_flags.review_bar_debug_enabled():
-        mode = "violin" if ctx.state.bar.violin else "beeswarm"
         _logger.debug(
             "per-cell mode=%s wells=%r labels=%r tps=%r",
-            mode, plot_wells, plot_labels, plot_tps,
+            mode or "beeswarm (all points)", plot_wells, plot_labels, plot_tps,
         )
     # Build the per-(well, tp) fold-change resolver ONCE and pass it through to
     # violin / beeswarm so the overlay applies the SAME operator / order /
@@ -1730,7 +1818,17 @@ def draw_per_cell_bar_mode(
     # clusters insert gaps. A per-well or multi-tp expansion still mismatches
     # and still falls back — that case is what the guard is for.
     ctx.runtime.barplot.xs_keys = list(base_wells)
-    if ctx.state.bar.violin:
+    if mode == "histogram":
+        draw_histogram(
+            ctx, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,
+            plot_tps, tp_str, threshold,
+            xs=xs, group_keys=group_keys,
+            cell_scale=cell_scale,
+            pool_groups=pool_groups,
+            # The bins follow the value axis the style pass is about to set, asked of its own predicate.
+            log=y_axis_is_log(figure_prefs(ctx, ax_mean.figure), ax_mean.figure.axes.index(ax_mean) + 1, ax_mean),
+        )
+    elif mode == "violin":
         draw_violin(
             ctx, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,
             plot_tps, tp_str, threshold,

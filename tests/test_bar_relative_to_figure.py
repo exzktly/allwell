@@ -88,7 +88,7 @@ def test_a_per_cell_mode_says_it_is_not_applied():
     fig, ax = plt.subplots()
     r._decline_relative_for_cells(ctx, ax)
     assert bar.rel_applied is False
-    assert any("not applied" in t and "per-cell points" in t for t in _texts(ax))
+    assert any("not applied" in t and "draws each column's cells" in t for t in _texts(ax))
     plt.close(fig)
 
 

@@ -2967,10 +2967,10 @@ What this means in use:
   violin's median line still use every value; only the KDE and CDF curves and
   the violin's outline are drawn from the sample, and the figure says so. The
   exported CSV holds every value.
-- **The bar chart's beeswarm and violin draw at most 5,000 cells per column.** A
-  column with more cells draws a sample of 5,000, and the figure says which
-  columns did; the fraction, the mean line and the median line still use every
-  cell.
+- **The bar chart's beeswarm, violin and histogram draw at most 5,000 cells per
+  column.** A column with more cells draws a sample of 5,000 — a histogram's bars
+  are binned from it — and the figure says which columns did; the fraction, the
+  mean line and the median line still use every cell.
 - **Where the cells behind those samples are kept.** The Scatter, Distribution
   and bar-chart views keep a large selection's cells in a compressed file in a
   folder in the app's own folder (`tmp/allwell-cellpool-…`; see
@@ -4613,8 +4613,8 @@ figure whose columns are already named on the axis, where the colours are
 decoration competing with the data — most often a figure headed for a paper, or
 one going next to another plot that uses colour to mean something else.
 
-The setting applies to the whole tab, not just to the bars: switch to **Violin**
-or **Beeswarm** and those follow the same mode, as does the Events-above-threshold
+The setting applies to the whole tab, not just to the bars: switch **Show** to
+**Beeswarm**, **Violin** or **Histogram** and those follow the same mode, as does the Events-above-threshold
 panel beneath them. The **Batch Export** bar figures follow it too, so a plate
 exported in bulk matches the figure you set the mode on.
 
@@ -5185,8 +5185,8 @@ shift slightly after this fix.
 ### Bar Plots
 
 **What it shows.** Per-well summaries of a metric at one or more timepoints, as
-grouped **bars**, a **violin** of the per-cell distribution, or a **beeswarm**
-of individual cells.
+grouped **bars**, a **beeswarm** of individual cells, a **violin** of the
+per-cell distribution, or a **histogram** of it.
 
 - **Needs** — at least one selected well and a channel. The **Timepoints**
   button (reads e.g. `Timepoints: 3/8 selected`) fills from the selected wells'
@@ -5204,11 +5204,24 @@ of individual cells.
     its members).
   - **Pooled** — collapse each replicate set's wells into one column (off = one
     column per well). For **bars** this averages the per-well means; for
-    **violin** / **beeswarm** it pools every cell across the set into a single
-    distribution. Enabled once ≥1 replicate set is active.
-  - **Violin** / **Beeswarm** — swap the bars for a per-cell distribution
-    (violin) or every individual cell (beeswarm). **Smooth** is active only
-    when Violin is on and tunes the KDE bandwidth.
+    **beeswarm** / **violin** / **histogram** it pools every cell across the set
+    into a single distribution. Enabled once ≥1 replicate set is active.
+  - **Show** (Bars / Beeswarm / Violin / Histogram) — how each column is drawn:
+    its mean (or median) with its spread, every cell as a dot, a smoothed
+    density of its cells, or its cells binned into a vertical histogram
+    mirrored about the column. One choice at a time, so the selector always
+    says which is on. **Smooth** is active only under Violin and tunes the KDE
+    bandwidth; **Bins** (2–200, default 30) is active only under Histogram.
+  - **Histogram** is built so its widths compare across columns: every
+    column's bars sum to 1 (a column of 90 cells and one of 2,500 are read on
+    the same scale), every column is binned on one set of edges spanning the
+    figure, and the widest bar in the figure fills its slot with every other
+    bar measured against it. A note at the top right says so — e.g. *30 bins ·
+    widest bar = 23% of a column*. A count metric (smFISH spots) bins on whole
+    numbers, one bin per value when the range fits; with **Properties → Y log**
+    on, the bins are log-spaced and the note counts any values ≤ 0 that a log
+    axis cannot place. A column with fewer than three cells is drawn as its
+    values. Under a fold change the bins are of the scaled values.
   - **Significance** (On / Off) — draw pairwise significance brackets from the
     comparisons the [Statistics](#statistics) tab has run. A bracket appears
     over the two bars its comparison was computed from, whether those bars are
@@ -5868,16 +5881,23 @@ cells it kept.
 ### Distribution
 
 **What it shows.** The distribution of a per-cell metric at **one timepoint**,
-as a histogram, KDE, or violin. Every value on this tab belongs to one cell,
+as a histogram, KDE, CDF, violin, or one histogram per group. Every value on this tab belongs to one cell,
 so there is no *Events above threshold* option here: a count of cells above the
 ON cutoff is one number per well, not a value each cell has. Read it on Bar
 Plots, Line Graphs, Response Curves, the Scatter Wells view or the Heat Map.
 
 - **Needs** — a well selection, a channel, and a timepoint (**t (h)**).
-- **Controls** — **Mode** (*Histogram*, *Histogram + KDE*, or *Violin (per
-  group)*); **Layout** (*Overlay* all wells, or *Faceted (one per group)*);
-  **Bins** count; **log x** / **log y** toggles; the timepoint picker; the
-  channel-wide threshold reference line.
+- **Controls** — **Mode** (*Histogram*, *Histogram + KDE*, *KDE only*, *CDF*,
+  *Violin (per group)*, or *Histogram (per group)*); **Layout** (*Overlay* all
+  wells, or *Faceted (one per group)*); **Bins** count; **log x** / **log y**
+  toggles; the timepoint picker; the channel-wide threshold reference line.
+- **Histogram (per group)** lays the groups out side by side as *Violin (per
+  group)* does, each drawn as a vertical histogram mirrored about its column
+  with a tick at its median. Every group's bars sum to 1, all groups share the
+  tab's bin edges (**Bins**; log-spaced under **log y**) and one width scale, so
+  widths compare across groups; a note at the top right states the bin count and
+  what the widest bar means. A group drawn from a sample is binned over every
+  value, as the tab's other histograms are.
 - **No error band** — this tab draws the whole population per group rather than
   reducing it to a mean, so there is no spread for a band to describe and no
   SEM/SD control on its controls row. The SEM/SD choice itself is app-wide: set
@@ -6779,17 +6799,25 @@ the sentence names it.
   at no change (1×, or 0 on log₂).
 - Text on this page is drawn at a share of the **Properties** font sizes, scaled to the size of a panel, so a
   grid of wells stays legible; raising a size in Properties still raises it here.
-- **Show** (Auto / Beeswarm / Violin), on the band's third row, chooses how each well's nanowells are drawn.
-  **Auto** draws dots while a column holds four wells or fewer, and past that one violin per well, with its
+- **Show** (Auto / Beeswarm / Violin / Histogram), on the band's third row, chooses how each well's nanowells are
+  drawn. **Auto** draws dots while a column holds four wells or fewer, and past that one violin per well, with its
   median (or mean, for a metric averaged per well), since a slot shared by many wells is too narrow for readable
   dots. **Beeswarm** always draws dots — a crowded slot draws what fits and writes "+N" under it for the rest —
-  and **Violin** always draws violins. Single nanowells can be clicked only where dots are drawn; a window (below)
-  reaches them anyway, and the footer says when violins stand in for dots.
+  **Violin** always draws violins, and **Histogram** always draws each well as a vertical histogram mirrored
+  about its slot, with the same median tick. Single nanowells can be clicked only where dots are drawn; a window
+  (below) reaches them anyway, and the footer says when violins or histograms stand in for dots.
+- **Bins** sets the histograms' bin count (2–200, default 30). Every well's bars sum to 1, and every well in the
+  figure — across all its panels, which share one y axis — is binned on one set of edges and measured against one
+  width scale, so widths compare across wells. A cell count bins on whole numbers, one bin per value when the
+  range fits, so a request for 30 bins over counts of 0–4 draws 5; with **Properties → Y log** on, the bins are
+  log-spaced. The footer says how many bins were drawn and what the widest bar means. Greyed unless Show is
+  Histogram.
 - **Smoothing** sets how smooth the violins are: their kernel bandwidth as a multiple of the automatic one
   (Scott's rule), from 0.25× to 3.00×. 1.00× is the automatic bandwidth; lower follows the data more closely and
   shows separate clusters, higher merges them. The figure redraws when the slider is let go, and the footer
-  states any setting other than 1.00×. Greyed under Beeswarm, which draws no violins. Show and Smoothing are kept
-  with the page's settings, and Batch Export's Nanowells mode draws its Distribution figures with them.
+  states any setting other than 1.00×. Greyed under Beeswarm and Histogram, which draw no violins. Show,
+  Smoothing and Bins are kept with the page's settings, and Batch Export's Nanowells mode draws its Distribution
+  figures with them.
 - **Nothing without a number is drawn, and nothing is dropped silently.** Under each swarm, "excl. N" counts
   the nanowells that have no value there, and the footer lists them by reason: occluded, clipped, no address,
   not located, fused (no count), empty at baseline, no cells at baseline (none at the baseline, cells later), and so on.
@@ -8220,6 +8248,15 @@ the plot. (Datasets analysed before this carried a separate set per mode; those
 are merged on first open, with a group appearing in more than one of them kept
 just once.)
 
+**Bar** draws each group's [Bar Plots](#bar-plots) figure. Its **Mean panel
+display** chooses how the top panel draws each column — **Bars**, **Beeswarm**,
+**Violin** (with its own **Violin smoothing**) or **Histogram** (with its own
+**Histogram bins**, 2–200, default 30) — independently of what the tab shows,
+and the whole run uses the choice made when it started. A histogram is the
+tab's: every column's bars sum to 1, on one set of bins and one width scale per
+figure, log-spaced when the run's Value row sets a log scale (or the plot's
+Properties do).
+
 **Response** exports the [Response Curves](#response-curves) figure one group at
 a time: a curve per timepoint (and per series value, if you pick a series
 variable) plotted against a Number sample variable, with the same fit models the
@@ -8435,7 +8472,7 @@ the export group's own settings, so you can browse, rename and reorder them,
 restore one onto its plotting tab, and include them in the gallery's PDF report.
 Restoring one re-applies the group it was exported for — its members, its
 channel, its column — and puts you on the tab the figure came from. It does not
-re-apply Batch Export's own layout options (bars versus beeswarm, one figure per
+re-apply Batch Export's own layout options (bars, beeswarm, violin or histogram, one figure per
 timepoint or one spanning them, the scatter facet mode), which live on the panel
 rather than in the saved view, so the restored figure can be laid out
 differently from the file that was exported; the gallery entry says so, and so

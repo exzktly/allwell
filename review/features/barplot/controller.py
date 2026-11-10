@@ -9,6 +9,7 @@ from review.features.barplot._annotations import (
     annotate_decorations,
 )
 from review.features.barplot._axis_fit import fit_bar_panels
+from review.features.barplot import _per_cell_mode as pcm
 from review.domain.numeric import is_number
 from review.domain.plot_members import plot_replicate_sets
 from review.domain.viewer_state import parse_rc
@@ -330,41 +331,15 @@ def update_bar_tp_menu(ctx) -> None:
 
 
 def toggle_swarm(ctx) -> None:
-    """Toggle beeswarm / bar mode and update the button appearance."""
+    """Beeswarm on, or back to bars when it already is (``_per_cell_mode``: the modes are exclusive)."""
     from review.features.barplot.renderer import redraw_bars
-    bs = ctx.state.bar
-    bs.swarm = not bs.swarm
-    on = bs.swarm
-    ctx.widgets.get_or_none("_swarm_btn").setChecked(on)
-    ctx.widgets.get_or_none("_swarm_btn").setText("Beeswarm: On" if on else "Beeswarm: Off")
-    if on and bs.violin:
-        # Swarm and violin are mutually exclusive
-        bs.violin = False
-        ctx.widgets.get_or_none("_violin_btn").setChecked(False)
-        ctx.widgets.get_or_none("_violin_btn").setText("Violin: Off")
-        ctx.widgets.get_or_none("_violin_slider").setEnabled(False)
-    refresh_bar_layout_btn_state(ctx)
-    redraw_bars(ctx)
-
+    pcm.set_per_cell_mode(ctx, pcm.BARS if ctx.state.bar.swarm else pcm.BEESWARM, redraw_bars)
 
 
 def toggle_violin(ctx) -> None:
-    """Toggle violin / bar mode and update the button appearance."""
+    """Violin on, or back to bars when it already is."""
     from review.features.barplot.renderer import redraw_bars
-    bs = ctx.state.bar
-    bs.violin = not bs.violin
-    on = bs.violin
-    ctx.widgets.get_or_none("_violin_btn").setChecked(on)
-    ctx.widgets.get_or_none("_violin_btn").setText("Violin: On" if on else "Violin: Off")
-    ctx.widgets.get_or_none("_violin_slider").setEnabled(on)
-    if on and bs.swarm:
-        # Mutually exclusive with beeswarm
-        bs.swarm = False
-        ctx.widgets.get_or_none("_swarm_btn").setChecked(False)
-        ctx.widgets.get_or_none("_swarm_btn").setText("Beeswarm: Off")
-    refresh_bar_layout_btn_state(ctx)
-    redraw_bars(ctx)
-
+    pcm.set_per_cell_mode(ctx, pcm.BARS if ctx.state.bar.violin else pcm.VIOLIN, redraw_bars)
 
 
 def rep_sets_active(ctx) -> list[ReplicateSet]:
@@ -503,6 +478,7 @@ def refresh_bar_layout_btn_state(ctx) -> None:
     rather than in the toggle (``group_by_controller._unpooled_clause``)."""
     from review.core.group_by_controller import refresh_grouping_readouts
     refresh_grouping_readouts(ctx)
+    pcm.sync_controls(ctx)                  # Show / Smooth / Bins, so a restored or reset mode is what the popover says
     plot = ctx.state.plot
     group_btn = getattr(ctx.runtime.barplot, "group_mode_btn", None)
     pool_btn = getattr(ctx.runtime.barplot, "pool_reps_btn", None)

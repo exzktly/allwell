@@ -10,7 +10,7 @@ import logging
 import math
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -774,7 +774,8 @@ def redraw(ctx) -> None:
         subset=page_subset(ctx, st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
         gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
         names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx),
-        dist_style=st.dist_style, violin_smooth=st.violin_smooth, footer_out=True, **array)
+        dist_style=st.dist_style, violin_smooth=st.violin_smooth, hist_bins=st.hist_bins,
+        hist_log=_y_log_drawn(ctx, fig), footer_out=True, **array)
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
@@ -920,17 +921,39 @@ def swarm_spacing_of(ctx) -> float:
     return value if value > 0 else 0.0
 
 
-def distribution_style_of(ctx) -> tuple[str, int]:
-    """The page's **Show** and **Smoothing** (``NanowellState.dist_style`` / ``violin_smooth``), for Batch Export's
-    Nanowells mode, so a batch Distribution figure draws dots or violins as the page does."""
+class DistributionDrawing(NamedTuple):
+    """How the Distribution view draws its wells: the page's **Show**, **Smoothing** and **Bins**."""
+    style: str
+    smooth: int
+    bins: int
+
+
+def _y_log_drawn(ctx, fig) -> bool:
+    """Whether the style pass will put this figure's value axis on a log scale, so a histogram's bins can be spaced
+    for it (``plot_style.y_axis_is_log``, the pass's own predicate, on the first panel)."""
+    from review.core.plot_style import figure_prefs, y_axis_is_log
+
+    return y_axis_is_log(figure_prefs(ctx, fig), 1)
+
+
+def distribution_style_of(ctx) -> DistributionDrawing:
+    """The page's **Show**, **Smoothing** and **Bins** (``NanowellState.dist_style`` / ``violin_smooth`` /
+    ``hist_bins``), for Batch Export's Nanowells mode, so a batch Distribution figure draws dots, violins or
+    histograms as the page does."""
     st = _state(ctx)
     if st is None:
-        return dsc.AUTO, dsc.SMOOTH_DEFAULT
-    return dsc.style_or_default(st.dist_style), dsc.clamp_smooth(st.violin_smooth)
+        return DistributionDrawing(dsc.AUTO, dsc.SMOOTH_DEFAULT, dsc.BINS_DEFAULT)
+    return DistributionDrawing(dsc.style_or_default(st.dist_style), dsc.clamp_smooth(st.violin_smooth),
+                               dsc.clamp_bins(st.hist_bins))
+
+
+def set_hist_bins(ctx, bins) -> None:
+    """The histogram's **Bins**."""
+    _set(ctx, "hist_bins", dsc.clamp_bins(bins))
 
 
 def set_dist_style(ctx, style: str) -> None:
-    """The Distribution view's **Show**: Auto, Beeswarm or Violin (``distribution_style_compute.STYLES``)."""
+    """The Distribution view's **Show**: Auto, Beeswarm, Violin or Histogram (``distribution_style_compute.STYLES``)."""
     if style in dsc.STYLE_KEYS:
         _set(ctx, "dist_style", style)
 
@@ -949,7 +972,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
               stats_cache: dict | None = None, gate=None,
               decoration: Decoration | None = None, names: dict | None = None,
               swarm_spacing: float = 0.0, footer_out: bool = False, sizes=None, dist_style: str = "auto",
-              violin_smooth: int = 100) -> tuple[object, object]:
+              violin_smooth: int = 100, hist_bins: int = 30, hist_log: bool = False) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -978,7 +1001,8 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     :func:`swarm_spacing_of`): how far apart the Distribution view's dots are laid out, as a multiple of a dot's
     size, with 0 meaning Auto — edge to edge, the spacing the view has always used. *dist_style* and *violin_smooth*
     are the page's **Show** and **Smoothing** (``distribution_style_compute``): dots, violins, or Auto (dots up to
-    four wells a column), and the violins' bandwidth as a percentage of the automatic one.
+    four wells a column) or histograms, and the violins' bandwidth as a percentage of the automatic one. *hist_bins*
+    is the page's **Bins**, and *hist_log* spaces the bins for a log value axis.
 
     The Statistics view tests the samples the Distribution view draws *Along x: Wells* at *timepoint*
     (:func:`statistics_result`): the wells' nanowells (*stats_unit* ``nanowells``) or the groups' well medians
@@ -1098,7 +1122,7 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
         render_message(fig, model.empty, gid="nw-moving-empty")
         return None, model
     return render_distribution(fig, model, selected=selected, spacing=swarm_spacing, footer_out=footer_out,
-                               style=dist_style, smooth=violin_smooth), model
+                               style=dist_style, smooth=violin_smooth, bins=hist_bins, log=hist_log), model
 
 
 def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels, centred=False) -> str:

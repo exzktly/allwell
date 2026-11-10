@@ -23,6 +23,7 @@ same name is used in every feature package that contributes a scope.
 from __future__ import annotations
 
 from review.core.channel_state_controller import on_cutoff_for_column
+from review.features.barplot._per_cell_mode import per_cell_mode
 from review.features.barplot.renderer import resolve_bar_timepoints
 from review.domain.stats_compute import _thresh_on_col
 from review.features.export.cell_scope_compute import CellScope, scope_from_ctx
@@ -49,9 +50,9 @@ def cell_scope(ctx, *, val_col: str | None = None,
     else:
         timepoints = tuple(float(t) for t in timepoints)
 
-    overlay_on = bool(ctx.state.bar.violin or ctx.state.bar.swarm)
+    overlay_on = bool(per_cell_mode(ctx.state.bar))
     drawn = (
-        "every exported row (the violin/beeswarm overlay is drawing them)"
+        "every exported row (the beeswarm/violin/histogram overlay is drawing them)"
         if overlay_on else "plot_in_population=1"
     )
     return scope_from_ctx(

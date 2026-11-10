@@ -311,7 +311,8 @@ def _fit_text(text: str, width_pt: float, size_pt: float, *, em: float = _GLYPH_
 
 def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: float = 1.0,
                         footer_out: bool = False, style: str = dsc.AUTO,
-                        smooth: int = dsc.SMOOTH_DEFAULT) -> HitMap:
+                        smooth: int = dsc.SMOOTH_DEFAULT, bins: int = dsc.BINS_DEFAULT,
+                        log: bool = False) -> HitMap:
     """Draw *model* on *fig* (cleared first) and return where every dot went.
 
     *footer_out* is the page: the footer — the counts, what the figure leaves out or marks, how to read it — is not
@@ -321,7 +322,9 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
 
     *style* is the page's **Show** (``distribution_style_compute.STYLES``): Auto draws a column's wells as dots up
     to ``DENSITY_ABOVE`` wells and as violins past it, Beeswarm and Violin draw every column one way. *smooth* is
-    the violins' bandwidth as a percentage of the automatic one (``distribution_style_compute.bandwidth``).
+    the violins' bandwidth as a percentage of the automatic one (``distribution_style_compute.bandwidth``). Under
+    Histogram, *bins* is the bin count and *log* spaces the bins for a log value axis; the bins and the width scale
+    are the whole figure's (every panel's wells), since the panels share one y axis.
 """
     style = dsc.style_or_default(style)
     spacing = spacing if spacing > 0 else 1.0
@@ -344,11 +347,12 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
     limits = [_y_limits(model, panel) for panel in panels]
     shared = (min(lo for lo, _hi in limits), max(hi for _lo, hi in limits)) if limits else None
     densities = hidden = 0
+    hist = _figure_histograms(model, panels, bins, log) if style == dsc.HISTOGRAM else None
     for i, (ax, panel) in enumerate(zip(axes, panels)):
         _prepare_axes(ax, scale)
         hits.panels.append((ax, i))
         d, u = _draw_panel(fig, ax, model, panel, hits, rings, inks, ylim=shared, spacing=spacing, style=style,
-                           smooth=smooth)
+                           smooth=smooth, hist=hist)
         densities, hidden = densities + d, hidden + u
         if i % cols:
             ax.tick_params(labelleft=False)
@@ -357,6 +361,7 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
         if i + cols >= len(panels) and model.x_label:
             _ink(ax.set_xlabel(model.x_label, color=inks[1], labelpad=ax._aw_gutter_pt))
     footer = _footer(fig, model, inks, panels, densities, hidden, style=style, smooth=smooth,
+            hist=hist[0] if hist else None,
             crowded=any(getattr(ax, "_aw_crowded", False) for ax in axes),
             counts_hidden=any(getattr(ax, "_aw_counts_hidden", False) for ax in axes),
             key_at=(key_bottom, key_h), footer_out=footer_out)
@@ -424,7 +429,7 @@ def _members_per_tick(model, panel) -> int:
 
 
 def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None, spacing: float = 1.0, style: str = dsc.AUTO,
-                smooth: int = dsc.SMOOTH_DEFAULT) -> tuple[int, int]:
+                smooth: int = dsc.SMOOTH_DEFAULT, hist=None) -> tuple[int, int]:
     """Draw one panel; return how many of its sub-swarms were drawn as densities (U2), and how many dots with a
     value did not fit their slot (each swarm's are counted under it; the footer gives the total).
 
@@ -478,7 +483,9 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None, spacing:
     lines_used = 0
     for swarm in panel.swarms:
         rows_here = 0
-        if density:
+        if density and hist is not None:
+            _draw_histogram(ax, swarm, hist, ink, fill=model.decoration.inks.get(swarm.group), column=model.column)
+        elif density:
             _draw_density(ax, swarm, half, ink, fill=model.decoration.inks.get(swarm.group), column=model.column,
                           smooth=smooth)
         else:
@@ -657,6 +664,65 @@ def _draw_density(ax, swarm, half, ink, *, fill: str | None = None, column: str 
         _ink(median_tick)
 
 
+def _slot_half(model, panel) -> float:
+    """The half-width of one swarm's slot in *panel*, as :func:`_draw_panel` lays it out."""
+    return (0.9 if model.axis == TIME else 0.7) / (2 * _members_per_tick(model, panel))
+
+
+def _figure_histograms(model, panels, bins: int, log: bool) -> tuple:
+    """``(ColumnHistograms, {id(swarm): index}, half)`` over every swarm the figure draws: one set of bins and one
+    width scale for the whole figure, and the narrowest panel's slot half-width, so a bar of the same probability is
+    the same width in every panel."""
+    from review.domain.column_histogram import column_histograms
+
+    swarms = [s for p in panels for s in p.swarms]
+    hist = column_histograms([s.values for s in swarms], bins, integer=bool(model.integer), log=log)
+    half = min((_slot_half(model, p) for p in panels if p.swarms), default=0.35)
+    return hist, {id(s): i for i, s in enumerate(swarms)}, half
+
+
+#: The gid of the Distribution histogram's bars.
+HISTOGRAM_GID = "nw-histogram"
+
+
+def _draw_histogram(ax, swarm, hist, ink, *, fill: str | None = None, column: str = "") -> None:
+    """One well's nanowells as a histogram mirrored about its slot, on the figure's bins and width scale, with its
+    value's tick (the median, or the mean — as :func:`_draw_density`). *hist* is :func:`_figure_histograms`'s."""
+    histograms, index, half = hist
+    i = index.get(id(swarm))
+    if i is not None:
+        bottoms, heights, lefts, widths = histograms.bars(i, swarm.x, half)
+        if len(bottoms):
+            for patch in ax.barh(bottoms, widths, height=heights, left=lefts, align="edge", color=fill or ink,
+                                 alpha=0.35, linewidth=0, zorder=2):
+                patch.set_gid(HISTOGRAM_GID)
+    if len(swarm.values):
+        tick = ax.plot([swarm.x - half, swarm.x + half], [well_value(swarm.values, column)] * 2, color=ink,
+                       linewidth=1.2, zorder=4)[0]
+        tick._aw_no_style_override = True                # a mark of the well's value, not a series
+        _ink(tick)
+
+
+def _shape_alerts(model, style: str, smooth: int, hist) -> list:
+    """What the footer says when wells are drawn as shapes rather than dots: which shape and why, how to get the dots
+    back, and — for a violin smoothed away from the automatic bandwidth, or a histogram — how to read it."""
+    statistic = well_statistic(getattr(model, "column", ""))
+    if style == dsc.HISTOGRAM:
+        note = hist.note("well") if hist is not None else ""
+        return [f"Show: Histogram — each well is drawn as a histogram of its nanowells with its {statistic}"
+                + (f" ({note})" if note else "") + "; every well's bars sum to 1 and share one set of bins and one "
+                "width scale. Choose Beeswarm or Auto to see and click single nanowells."]
+    if style == dsc.VIOLIN:
+        out = [f"Show: Violin — each well is drawn as a violin with its {statistic}; choose Beeswarm or Auto to see "
+               "and click single nanowells."]
+    else:
+        out = [f"Sets of more than four wells are drawn as violins with each well's {statistic}; select fewer wells, "
+               "or choose Show: Beeswarm, to see and click single nanowells."]
+    if dsc.clamp_smooth(smooth) != dsc.SMOOTH_DEFAULT:
+        out.append(f"Violin smoothing {dsc.smooth_text(smooth)} the automatic (Scott's rule) bandwidth.")
+    return out
+
+
 @dataclass
 class Footer:
     """The Distribution footer as data: the counts line, what changes, leaves out or marks what is drawn (``alerts``,
@@ -673,7 +739,7 @@ class Footer:
 
 
 def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden: int, *,
-            style: str = dsc.AUTO, smooth: int = dsc.SMOOTH_DEFAULT, crowded: bool = False, counts_hidden: bool = False, key_at: tuple[float, float] | None = None,
+            style: str = dsc.AUTO, smooth: int = dsc.SMOOTH_DEFAULT, hist=None, crowded: bool = False, counts_hidden: bool = False, key_at: tuple[float, float] | None = None,
             footer_out: bool = False) -> Footer:
     """The sums the figure owes the reader, over the panels drawn, with what was left out stated beside them — as a
     :class:`Footer`, written in the figure unless *footer_out*; the figure's key is drawn either way."""
@@ -710,15 +776,7 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
         alerts.append(f"+N under a swarm: {hidden:,} values in all are used but not drawn as dots, for lack of "
                       "room; widen the window or select fewer wells to see them.")
     if densities:
-        statistic = well_statistic(getattr(model, "column", ""))
-        if style == dsc.VIOLIN:
-            alerts.append(f"Show: Violin — each well is drawn as a violin with its {statistic}; choose Beeswarm or "
-                          "Auto to see and click single nanowells.")
-        else:
-            alerts.append(f"Sets of more than four wells are drawn as violins with each well's {statistic}; select "
-                          "fewer wells, or choose Show: Beeswarm, to see and click single nanowells.")
-        if dsc.clamp_smooth(smooth) != dsc.SMOOTH_DEFAULT:
-            alerts.append(f"Violin smoothing {dsc.smooth_text(smooth)} the automatic (Scott's rule) bandwidth.")
+        alerts += _shape_alerts(model, style, smooth, hist)
     footer = Footer(line1, list(getattr(model, "alerts", ()) or ()), list(model.notes), alerts)
     if footer_out:
         _figure_key(fig, model, key_at)

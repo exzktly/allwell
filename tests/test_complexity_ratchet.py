@@ -37,7 +37,8 @@ THRESHOLD = 40
 # loose-image branches when the pipeline became zips-only.
 # 682 -> 681: one allowlisted function lost a point of complexity in the page-render fixes (the ratchet reports
 # only the total, so no single function is named here).
-TOTAL_ALLOWLISTED_CC_BUDGET = 676
+# 676 -> 674: Batch Export's Bar ``_run_batch`` reads its display mode through ``_display_choice``.
+TOTAL_ALLOWLISTED_CC_BUDGET = 674
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,

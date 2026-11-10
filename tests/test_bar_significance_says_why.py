@@ -216,7 +216,8 @@ def _per_cell_redraw(qtbot, monkeypatch, **bar_flags):
     app._app_state.plot = plot
     plot.show_significance = True
     app._app_state.bar = NS(violin=bar_flags.get("violin", False),
-                            swarm=bar_flags.get("swarm", False))
+                            swarm=bar_flags.get("swarm", False),
+                            histogram=bar_flags.get("histogram", False))
     plot.bar_show_mode = bar_flags.get("show_mode", "mean_spread")
     status: list[str] = []
     app._ctx.notify = NS(set_status=lambda m, *a, **k: status.append(m))
@@ -267,8 +268,9 @@ class _HasW:
 
 
 @pytest.mark.parametrize("flags,expected", [
-    ({"violin": True}, "Violin"),
-    ({"swarm": True}, "Beeswarm"),
+    ({"violin": True}, "Display ▾ Show: Violin"),
+    ({"swarm": True}, "Display ▾ Show: Beeswarm"),
+    ({"histogram": True}, "Display ▾ Show: Histogram"),
     ({"show_mode": "all_pts"}, "Show: All points"),
 ])
 def test_a_per_cell_mode_says_the_brackets_cannot_be_drawn(qtbot, monkeypatch,

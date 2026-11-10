@@ -366,6 +366,8 @@ def _snapshot_bar(ctx) -> dict:
     if _bar is not None:
         out["swarm"] = bool(_bar.swarm)
         out["violin"] = bool(_bar.violin)
+        out["histogram"] = bool(getattr(_bar, "histogram", False))
+        out["hist_bins"] = int(getattr(_bar, "hist_bins", 30))
         # *Then relative to*, by variable and value **id** — a renamed value
         # restored by label would silently point at a different condition.
         # Written only when on, so an older reader finds nothing it misreads.
@@ -1104,10 +1106,7 @@ def _apply_bar(ctx, state: dict) -> None:
             _logger.debug("view_state: bar tp post-restore sync failed", exc_info=True)
     _bar = ctx.state.feature_slice("bar")
     if _bar is not None:
-        if "swarm" in state:
-            _bar.swarm = bool(state["swarm"])
-        if "violin" in state:
-            _bar.violin = bool(state["violin"])
+        _restore_bar_mode(_bar, state)
         # Absent means off: a saved view written before the setting existed,
         # or with it off, restores as stage 1 alone.
         rel = state.get("relative_to")
@@ -1433,11 +1432,32 @@ def reset(ctx) -> None:
         _logger.debug("reset: default redraw failed", exc_info=True)
 
 
+def _restore_bar_mode(bar, state: dict) -> None:
+    """The Bar tab's per-cell mode (``swarm`` / ``violin`` / ``histogram``) and the histogram's bin count.
+
+    The three flags are one choice, so a block that names any of them sets all three, an absent key meaning off: a
+    view saved before the histogram existed says ``violin: true`` and nothing about histograms, and applied over a
+    live histogram it must not leave both on. A damaged block with two on keeps one, histogram before violin before
+    beeswarm — the order ``barplot._per_cell_mode.per_cell_mode`` reads them in. ``hist_bins`` is kept only as a whole
+    number in the Bins box's range (2–200); anything else leaves the current count."""
+    if any(k in state for k in ("swarm", "violin", "histogram")):
+        histogram = state.get("histogram") is True
+        violin = state.get("violin") is True and not histogram
+        bar.histogram = histogram
+        bar.violin = violin
+        bar.swarm = state.get("swarm") is True and not (histogram or violin)
+    bins = state.get("hist_bins")
+    if isinstance(bins, int) and not isinstance(bins, bool) and 2 <= bins <= 200:
+        bar.hist_bins = bins
+
+
 def _reset_bar(app) -> None:
     _bar = app._app_state.feature_slice("bar")
     if _bar is not None:
         _bar.swarm = False
         _bar.violin = False
+        _bar.histogram = False
+        _bar.hist_bins = 30
         _bar.rel_variable_id = ""
         _bar.rel_value_id = ""
         _bar.rel_within = []

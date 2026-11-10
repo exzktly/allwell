@@ -20,6 +20,11 @@ import os
 # this conftest is an initial conftest, loaded before plugin pytest_configure.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLBACKEND", "Agg")
+# The dataset caches give memory back when the machine's free memory falls below a floor
+# (``review/data/memory_budget.py``). How much is free depends on what else the machine is running —
+# here, the other xdist workers — so a test that counts the wells a cache holds would pass or fail by
+# timing. Off for the suite; ``tests/test_memory_budget.py`` turns it on where it is the subject.
+os.environ.setdefault("ALLWELL_MEMORY_FLOOR_MB", "0")
 
 # The offscreen container has no Helvetica; matplotlib logs a findfont warning
 # per text draw, drowning the test output. The Agg fallback is harmless.

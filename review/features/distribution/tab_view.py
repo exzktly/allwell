@@ -23,7 +23,7 @@ from widgets.labeled_combo import LabeledComboBox
 from widgets.spin_box import SpinBox
 
 
-_MODE_OPTIONS = ["Histogram", "Histogram + KDE", "KDE only", "CDF", "Violin (per group)"]
+_MODE_OPTIONS = ["Histogram", "Histogram + KDE", "KDE only", "CDF", "Violin (per group)", "Histogram (per group)"]
 _LAYOUT_OPTIONS = ["Overlay", "Faceted (one per group)"]
 
 

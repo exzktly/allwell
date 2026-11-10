@@ -147,17 +147,25 @@ def column_histograms(samples, bins, *, integer: bool = False, log: bool = False
     samples = [_finite(s) for s in samples]
     integer = bool(integer) and not log
     edges = shared_edges(samples, bins, integer=integer, log=log)
-    probs, ns, offs = [], [], []
-    for s in samples:
-        n = int(s.size)
-        off = int(np.count_nonzero(s <= 0)) if log else 0
-        ns.append(n)
-        offs.append(off)
-        if n < MIN_VALUES or edges.size < 2:
+    counts = [np.histogram(s[s > 0] if log else s, edges)[0] if edges.size >= 2 else None for s in samples]
+    offs = [int(np.count_nonzero(s <= 0)) if log else 0 for s in samples]
+    return histograms_from_counts(edges, counts, [int(s.size) for s in samples], off_axis=offs, integer=integer,
+                                  log=log)
+
+
+def histograms_from_counts(edges, counts, n, *, off_axis=None, integer: bool = False,
+                           log: bool = False) -> ColumnHistograms:
+    """The histograms of columns already counted on *edges*: *counts* per column (bin counts, or ``None``), *n* each
+    column's finite values (the denominator). For a caller that counts every value of a sampled column itself, as
+    the Distribution tab does; :func:`column_histograms` is this over values."""
+    edges = np.asarray(edges, dtype=float)
+    offs = tuple(off_axis) if off_axis is not None else (0,) * len(counts)
+    probs = []
+    for c, k in zip(counts, n):
+        if c is None or k < MIN_VALUES or edges.size < 2:
             probs.append(None)
             continue
-        placed = s[s > 0] if log else s
-        probs.append(np.histogram(placed, edges)[0] / n)
+        probs.append(np.asarray(c, dtype=float) / k)
     drawn = [p for p in probs if p is not None and p.size]
     p_max = float(max(p.max() for p in drawn)) if drawn else float("nan")
-    return ColumnHistograms(edges, tuple(probs), tuple(ns), tuple(offs), p_max, integer, log)
+    return ColumnHistograms(edges, tuple(probs), tuple(int(k) for k in n), offs, p_max, integer, log)

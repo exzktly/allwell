@@ -1028,12 +1028,12 @@ def draw_view(fig, view: str, metrics, data, *, subset_label: str = "", **kwargs
     (:func:`named_groups`).
 
     *subset_label* (``subset_compute.figure_label``) is written at the figure's top left after the view is drawn
-    (``renderer.stamp_subset``), naming the saved subset the figure is of — every view but Identity, which uses no
+    (``renderer.stamp_subset``), its size classes named by the user's labels as the footer's are (:func:`_named`), naming the saved subset the figure is of — every view but Identity, which uses no
     Subset. The rest of the keywords are :func:`_compose_view`'s.
     """
     drawn = _compose_view(fig, view, metrics, data, **kwargs)
     if view != "identity":
-        stamp_subset(fig, subset_label)
+        stamp_subset(fig, _named(subset_label, _sizes_of(kwargs.get("gate"), kwargs.get("sizes"))))
     return drawn
 
 
@@ -1986,7 +1986,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
     sizes = getattr(st.gate, "sizes", None)
     if filtered is not None and filtered.kept == 0:
         render_message(fig, _named(ss.empty_text(filtered), sizes), gid="nw-start-empty")
-        stamp_subset(fig, page_subset_label(st))
+        stamp_subset(fig, _named(page_subset_label(st), sizes))
         apply_export_style_to_current(ctx, fig, canvas)
         canvas.draw_idle()
         redraw_detail(ctx)
@@ -2015,7 +2015,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
                                       display_range=display_range(ctx),
                                       timepoints=extremes_columns(model.timepoints, model.timepoint, st.extremes_tps),
                                       metrics=crop_metrics(st, model.sites(), channel))
-    stamp_subset(fig, page_subset_label(st))
+    stamp_subset(fig, _named(page_subset_label(st), sizes))
     apply_export_style_to_current(ctx, fig, canvas)
     canvas.draw_idle()
     redraw_detail(ctx)

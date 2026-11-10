@@ -112,9 +112,12 @@ def page(qtbot, tmp_path, monkeypatch):
 
 
 def _texts(ctx, fig="_nw_fig"):
-    """The figure's texts — and on the page's figure, the Distribution footer its Details field holds."""
+    """The figure's texts — and on the page's figure, the Distribution footer its Details field holds. The subset's
+    label at the top left (``nw-subset-label``) is left out: it names the subset rather than saying what it kept,
+    and ``test_nanowell_subset`` holds it."""
     figure = ctx.widgets.get(fig)
-    out = [t.get_text() for t in list(figure.texts) + [t for ax in figure.axes for t in ax.texts]]
+    out = [t.get_text() for t in list(figure.texts) + [t for ax in figure.axes for t in ax.texts]
+           if t.get_gid() != "nw-subset-label"]
     details = _details(ctx) if fig == "_nw_fig" else None
     if details is not None:
         out += [details[0], *details[1]]

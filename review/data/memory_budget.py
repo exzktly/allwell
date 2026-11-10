@@ -64,7 +64,7 @@ class _MemoryStatus:
     _type = None
 
     @classmethod
-    def read(cls):
+    def read(cls) -> object | None:
         import ctypes
 
         if cls._type is None:

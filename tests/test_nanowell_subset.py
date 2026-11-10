@@ -465,3 +465,47 @@ def test_restoring_a_saved_plot_leaves_the_saved_subset_library_as_it_is_now(pag
     assert st.saved_subsets == {"Later": later}
     assert st.subset == drawn                       # the figure's own population still comes back
     assert ss.saved_name_of(st.saved_subsets, st.subset) == ""     # shown as unsaved, which it now is
+
+
+# ── the label a figure carries ───────────────────────────────────────────────
+def test_a_figure_label_names_a_saved_subset_and_otherwise_its_conditions():
+    big = ss.Subset((C("n", "ge", 2, at="tp:t_a"), C("ring", "le", 9))).validated()
+    saved = {"Singles": ss.Subset.starting(1, 1), "Big early wells": big}
+    assert ss.figure_label(big, saved) == "Subset: “Big early wells”"
+    # One condition changed after choosing the saved subset: the figure is no longer of it, and does not claim it.
+    edited = ss.Subset((C("n", "ge", 3, at="tp:t_a"), C("ring", "le", 9))).validated()
+    assert ss.figure_label(edited, saved) == "Subset: Cell count at t_a ≥3 and Ring (steps from the centre) ≤9"
+    assert ss.figure_label(ss.Subset.starting(2, None), saved) == "Subset: Starting cells ≥2"
+    assert ss.figure_label(ss.Subset(), saved) == ""
+
+
+def _stamp(ctx):
+    fig = ctx.widgets.get("_nw_canvas").figure
+    return [t.get_text() for t in fig.texts if t.get_gid() == "nw-subset-label"]
+
+
+@pytest.mark.parametrize("view", ["distribution", "trajectories", "position", "statistics", "array", "extremes"])
+def test_every_view_of_a_saved_subset_names_it_on_the_figure(page, view):
+    """Drawn through the page's own redraw, so the label reaches each view's figure the way a saved plot captures
+    it. A different name, renamed after drawing, follows on the next draw, and All nanowells writes none."""
+    st = page.state.feature_slice("nanowell")
+    st.view = view
+    nwc.set_subset(page, ss.Subset((C("n", "ge", 2, at="tp:t_a"), C("ring", "le", 9))).validated())
+    assert nwc.save_subset(page, "Big early wells") == ""
+    nwc.redraw(page)
+    assert _stamp(page) == ["Subset: “Big early wells”"]
+    assert nwc.rename_saved_subset(page, "Big early wells", "Early") == ""
+    nwc.redraw(page)
+    assert _stamp(page) == ["Subset: “Early”"]
+    nwc.set_subset(page, ss.Subset())
+    nwc.redraw(page)
+    assert _stamp(page) == []
+
+
+def test_the_identity_view_uses_no_subset_and_names_none(page):
+    st = page.state.feature_slice("nanowell")
+    nwc.set_subset(page, ss.Subset.starting(1, None))
+    assert nwc.save_subset(page, "Occupied") == ""
+    st.view = "identity"
+    nwc.redraw(page)
+    assert _stamp(page) == []

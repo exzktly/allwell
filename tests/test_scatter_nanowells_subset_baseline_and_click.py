@@ -141,3 +141,23 @@ def test_a_click_adds_the_well_to_the_plate_selection_when_it_is_not_in_it(scatt
     assert _page(ctx).popout_source == "selected"
     assert set(ctx.state.selection.selected_wells) == {"A01", "B01"}
     assert _page(ctx).selected_sites == [["B01", 1, 0]] and _page(ctx).timepoint == "24h"
+
+
+def test_the_scatter_names_the_page_s_saved_subset_on_the_figure(scatter_ctx):
+    """The nanowell scatter is of the page's Subset, so — like the page's own figures — it says which, by name, and
+    the line is replaced rather than piled up on each redraw."""
+    from review.features.nanowell import subset_compute as ss
+
+    ctx = scatter_ctx
+    _save(ctx, "Two+", 2)
+
+    def stamps():
+        fig = ctx.widgets.get("_scatter_canvas").figure
+        return [t.get_text() for t in fig.texts if t.get_gid() == "nw-subset-label"]
+
+    _draw(ctx)
+    _draw(ctx)
+    assert stamps() == ["Subset: “Two+”"]
+    _page(ctx).subset = ss.Subset()
+    _draw(ctx)
+    assert stamps() == []

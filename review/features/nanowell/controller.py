@@ -50,7 +50,7 @@ from review.features.nanowell.crop_cache_compute import CropCache, TimepointCrop
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
     ArrayDrawn, render_array, render_crop_grid, render_crop_strip, render_distribution, render_extremes, render_message,
-    redraw_selection_rings, render_position, render_site_detail, render_trajectories,
+    redraw_selection_rings, render_position, render_site_detail, render_trajectories, stamp_subset,
 )
 from review.features.nanowell.state import (
     IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS,
@@ -783,7 +783,7 @@ def _redraw(ctx) -> None:
         well_timepoint=page_timepoint(ctx, well), note=note, tableless=tableless,
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
-        subset=page_subset(ctx, st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
+        subset=page_subset(ctx, st), subset_label=page_subset_label(st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
         gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
         names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx),
         dist_style=st.dist_style, violin_smooth=st.violin_smooth, hist_bins=st.hist_bins,
@@ -975,16 +975,7 @@ def set_violin_smooth(ctx, smooth) -> None:
     _set(ctx, "violin_smooth", dsc.clamp_smooth(smooth))
 
 
-def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
-              timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
-              note: str = "", tableless=(), selected=(), responding_above: float | None = None, moving: int = 0,
-              baseline_moving: int = 0, moving_centred: bool = False, layers: ArrayLayers | None = None, image=None, image_note: str = "",
-              region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
-              stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
-              stats_cache: dict | None = None, gate=None,
-              decoration: Decoration | None = None, names: dict | None = None,
-              swarm_spacing: float = 0.0, footer_out: bool = False, sizes=None, dist_style: str = "auto",
-              violin_smooth: int = 100, hist_bins: int = 30, hist_log: bool = False) -> tuple[object, object]:
+def draw_view(fig, view: str, metrics, data, *, subset_label: str = "", **kwargs) -> tuple[object, object]:
     """Draw *view* (Distribution, Array, Trajectories, Position, Identity or Statistics) into *fig*: ``(hit map,
     model)``.
 
@@ -1035,7 +1026,28 @@ def draw_view(fig, view: str, metrics, data, *, groups: dict, metric: str, chann
     alone: a Trajectories panel, a Position line, the Array title, a Statistics sample of the ``nanowells`` unit.
     A well missing from it prints itself. The groups are already keyed by their names
     (:func:`named_groups`).
+
+    *subset_label* (``subset_compute.figure_label``) is written at the figure's top left after the view is drawn
+    (``renderer.stamp_subset``), naming the saved subset the figure is of — every view but Identity, which uses no
+    Subset. The rest of the keywords are :func:`_compose_view`'s.
     """
+    drawn = _compose_view(fig, view, metrics, data, **kwargs)
+    if view != "identity":
+        stamp_subset(fig, subset_label)
+    return drawn
+
+
+def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,
+                  timepoint: str, control: str, baseline: str, cohort: bool, well: str, well_timepoint: str,
+                  note: str = "", tableless=(), selected=(), responding_above: float | None = None, moving: int = 0,
+                  baseline_moving: int = 0, moving_centred: bool = False, layers: ArrayLayers | None = None, image=None, image_note: str = "",
+                  region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
+                  stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
+                  stats_cache: dict | None = None, gate=None,
+                  decoration: Decoration | None = None, names: dict | None = None,
+                  swarm_spacing: float = 0.0, footer_out: bool = False, sizes=None, dist_style: str = "auto",
+                  violin_smooth: int = 100, hist_bins: int = 30, hist_log: bool = False) -> tuple[object, object]:
+    """The composition :func:`draw_view` stamps; see it for every keyword."""
     names = names or {}
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
@@ -1974,6 +1986,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
     sizes = getattr(st.gate, "sizes", None)
     if filtered is not None and filtered.kept == 0:
         render_message(fig, _named(ss.empty_text(filtered), sizes), gid="nw-start-empty")
+        stamp_subset(fig, page_subset_label(st))
         apply_export_style_to_current(ctx, fig, canvas)
         canvas.draw_idle()
         redraw_detail(ctx)
@@ -2002,6 +2015,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
                                       display_range=display_range(ctx),
                                       timepoints=extremes_columns(model.timepoints, model.timepoint, st.extremes_tps),
                                       metrics=crop_metrics(st, model.sites(), channel))
+    stamp_subset(fig, page_subset_label(st))
     apply_export_style_to_current(ctx, fig, canvas)
     canvas.draw_idle()
     redraw_detail(ctx)
@@ -2696,6 +2710,13 @@ def page_subset(ctx, st) -> ss.Subset:
     (``subset_compute.bind_gates``): what every figure, badge and saved file evaluates. Read at each use, so a gate
     edited on the Scatter Plot moves the subset at the page's next draw."""
     return ss.bind_gates(st.subset, ctx.state.cell_gating.scatter_gates or [])
+
+
+def page_subset_label(st) -> str:
+    """What the page's figures write at their top left about its *Subset* (``subset_compute.figure_label``): the
+    name it is saved under, else its conditions, else nothing. Read from the page's own Subset rather than
+    :func:`page_subset`'s, because a saved subset is kept with its gate conditions unbound."""
+    return ss.figure_label(st.subset, st.saved_subsets)
 
 
 def subset_gates(ctx) -> list[str]:

@@ -6462,7 +6462,8 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     median over its nanowells) with *Points: Per well*. It draws the nanowells this page draws: wells left out with
     **Exclude well** are not plotted, only the nanowells in this page's **Subset** are, and with **Fixed cohort** on
     only the nanowells with both plotted values at every timepoint. The footer says each, names the Baseline when an
-    axis is a fold change, and — with a Subset — says that gate percentages are of the subset's nanowells. Its
+    axis is a fold change, and — with a Subset — says that gate percentages are of the subset's nanowells; the
+    subset itself is named at the figure's top left, as on this page's own figures. Its
     **Subset** and **Baseline** pickers are this page's own two settings: pick a saved subset (or *All
     nanowells*) or the timepoint fold changes are measured from, and this page changes with it. Click a nanowell's
     point to open it here, selected, at that point's timepoint; hovering names it. Its
@@ -6714,6 +6715,12 @@ the sentence names it.
   subsets. Restoring a Saved Plot keeps them too: the plot comes back with the subset it was drawn with, but your
   list of saved subsets stays as it is now. If that subset has since been deleted or renamed, the box reads
   *Custom subset…*, since it is no longer saved under that name.
+
+  **The figure names its subset.** Every view drawn with a subset (all but Identity) writes it at the figure's top
+  left: **Subset: “name”** for a saved subset, or the conditions themselves for one that is not saved. The line is
+  part of the figure, so a plot sent to Saved Plots, exported or put on a slide still says which nanowells it shows.
+  It names a saved subset only while the conditions drawn are exactly the saved ones, and it follows a rename on the
+  next redraw. Batch Export's Nanowells figures and the Scatter Plot's nanowell scatter carry the same line.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
 - **Names.** Wells and groups are called what every other tab calls them: a replicate group by its name, a well by
   the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two

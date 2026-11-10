@@ -1235,6 +1235,7 @@ def _features() -> list[FeatureDescriptor]:
                       "nanowell.scope_choices": _svc_nanowell_plot_link("scope_choices"),
                       "nanowell.set_subset_by_name": _svc_nanowell_plot_link("set_subset_by_name"),
                       "nanowell.set_baseline": _svc_nanowell_plot_link("set_baseline"),
+                      "nanowell.subset_label": _svc_nanowell_plot_link("subset_label"),
                       "nanowell.show_nanowell": _svc_nanowell_plot_link("show_nanowell"),
                       "segmentation.nanowell_overlay": _svc_nanowell_segmentation_overlay,
                       "image_table.nanowell_frame": _svc_nanowell_table_frame},

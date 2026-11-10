@@ -13205,7 +13205,15 @@ conditions, is dropped rather than restored as a different subset under that nam
 (`reset_scopes.reset_view`) returns the page's choices to their defaults and keeps the saved subsets: they are a
 library the user built in the dataset, not a view setting. The page's *Subset* stays the one
 source of what is drawn: a saved subset is a name for a `Subset` value, and `saved_name_of` names the page's subset
-only while it equals a saved one, so an edited copy is the page's own and the saved one is untouched. The Subset
+only while it equals a saved one, so an edited copy is the page's own and the saved one is untouched. **The figure's
+subset label** (`subset_compute.figure_label`, `controller.page_subset_label`, `renderer.stamp_subset`): every figure
+drawn under a Subset writes `Subset: “name”` at its top left, gid `nw-subset-label`, in the secondary ink — the name
+by `saved_name_of` against the page's unbound `st.subset`, else the conditions (`Subset.label`). It is written on the
+figure rather than only in the page's Details field because a saved, exported or pasted figure leaves Details behind.
+`controller.draw_view` takes it as `subset_label` and stamps after `_compose_view` (the view composition, which clears
+the figure first), for every view but Identity; Extremes, drawn outside `draw_view`, stamps itself. Batch Export's
+Nanowells mode passes `subset_label` from its run settings, and the Scatter Plot's nanowell scatter reads it through
+the `nanowell.subset_label` service (`_plot_links.subset_label`) and replaces its own copy on each redraw. The Subset
 combo (`subset_view._fill_combo`) lists the saved names between the presets and *Custom subset…*, rebuilt only when
 the names change, with data `saved:<name>`; choosing one calls `controller.apply_saved_subset`. The editor's name
 row — a name box, *Save* (`controller.save_subset`), *Rename* (`rename_saved_subset`, enabled for a saved subset in

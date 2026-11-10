@@ -2154,6 +2154,26 @@ def _draw_record(fig, record, left: float, ink, muted) -> None:
             _ink(item, muted=kind != "head")
 
 
+#: The share of the figure's width the subset label may take at its top left, clear of the key at its top right.
+_SUBSET_LABEL_SHARE = 0.5
+
+
+def stamp_subset(fig, text: str) -> None:
+    """Write *text* (``subset_compute.figure_label``) at the figure's top left, in the secondary ink, after the view is
+    drawn: every view clears the figure first, so the label goes on last. Nothing with no subset (``""``).
+
+    It is on the figure rather than only in the page's Details field, because a figure saved, exported or put on a
+    slide leaves Details behind, and a figure of a subset that does not say so reads as one of every nanowell."""
+    if not text:
+        return
+    from types import SimpleNamespace
+
+    _bg, _fg, muted = _inks(SimpleNamespace(figure=fig))     # the tokens are the figure's, read through any axes
+    width_pt = _figure_pt(fig)[0] * _SUBSET_LABEL_SHARE
+    _ink(fig.text(0.01, 0.995, _fit_text(text, width_pt, FOOTER_PT), ha="left", va="top", fontsize=FOOTER_PT,
+                  color=muted, gid="nw-subset-label"), muted=True)
+
+
 def render_message(fig, text: str, *, gid: str) -> None:
     """A figure that says why there is nothing to draw, rather than an empty canvas."""
     fig.clear()

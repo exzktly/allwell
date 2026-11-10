@@ -143,8 +143,10 @@ def redraw(
             ctx.features.redraw(ctx, _tab)
             if _dirty is not None:
                 _dirty.discard(_scope)
-        except Exception:
+        except Exception as exc:
             _logger.exception("%s redraw failed", _tab)
+            from review.core.plot_failure import show_redraw_failed
+            show_redraw_failed(ctx, (_tab,), exc)
 
 
 def save_matplotlib_fig(ctx, fig, default_name: str, *, plot_bg: str) -> None:

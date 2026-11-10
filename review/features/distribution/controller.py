@@ -413,7 +413,8 @@ def redraw_distribution(ctx) -> None:
     from review.core import background_read
     to_read = background_read.wells_not_held(ctx, _member_wells(ctx))
     if to_read and background_read.start(ctx, READ_KEY, compute, on_done=draw, discard=_release,
-                                         on_failed=lambda message: _say_read_failed(ctx, canvas, message)):
+                                         on_failed=lambda message: _say_read_failed(ctx, canvas, message),
+                                         title="Distribution"):
         _say_reading(ctx, canvas, len(to_read))
         return
     background_read.cancel(ctx, READ_KEY)

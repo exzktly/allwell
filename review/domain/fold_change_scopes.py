@@ -178,6 +178,13 @@ def _call_redraw(app, scope: FoldChangeScope) -> None:
         logging.getLogger("review").exception(
             "Fold-change redraw failed for scope %r", scope.name,
         )
+        # The figure still shows the drawing from before; say on it that it is
+        # not current (the status line below is one slot, soon overwritten).
+        try:
+            from review.core.plot_failure import show_redraw_failed
+            show_redraw_failed(getattr(app, "_ctx", None), scope.tab_names, exc)
+        except Exception:
+            swallowed("fold_change_scopes: mark the failed plot")
         setter = getattr(app, "_set_status", None)
         if callable(setter):
             try:

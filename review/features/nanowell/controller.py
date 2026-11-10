@@ -690,7 +690,19 @@ def ensure_loaded(ctx, *, force: bool = False) -> None:
 
 
 def redraw(ctx) -> None:
-    """Draw the current view from the computed metrics; never computes."""
+    """Draw the current view from the computed metrics; never computes.
+
+    A draw that fails marks the page's figure not current (``review.core.plot_failure``) instead of leaving the
+    drawing from before; most callers reach this inside a ``swallow``, which would otherwise log it and nothing more."""
+    try:
+        _redraw(ctx)
+    except Exception as exc:
+        log.exception("Nanowells: the page could not be drawn")
+        from review.core.plot_failure import show_redraw_failed
+        show_redraw_failed(ctx, ("Nanowells",), exc)
+
+
+def _redraw(ctx) -> None:
     st = _state(ctx)
     fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")
     if st is None or fig is None or canvas is None or _page_deleted(ctx):

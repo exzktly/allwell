@@ -15,11 +15,16 @@ class that no longer exists. Core: imports no feature.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from review.domain.qc_params import QCParams
+
 #: What the control reads for every cell.
 ALL_CELLS = "All cells"
 
 
-def qc_params(ctx):
+def qc_params(ctx) -> QCParams | None:
     """The QC parameters in force, through the QC layer's own accessor (``qc.get_params``) so a dataset whose
     parameters are not yet seeded reads its saved choice; ``None`` in a build without the QC layer or on a context
     with no QC state — every reader of the size classes then sees no rule, so a footer or a channel list never fails

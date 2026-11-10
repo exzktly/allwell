@@ -230,7 +230,7 @@ def test_a_failed_draw_releases_every_columns_pool(ctx, monkeypatch):
     assert made and all(p._con is None and not p._parts for p in made)
 
 
-@pytest.mark.parametrize("name", ["draw_beeswarm", "draw_violin"])
+@pytest.mark.parametrize("name", ["draw_beeswarm", "draw_violin", "draw_histogram"])
 def test_one_columns_pool_is_held_at_a_time(ctx, monkeypatch, name):
     """Each column's pool is read only in its own iteration, so the next column's
     is opened with every earlier one already released."""

@@ -140,14 +140,15 @@ def test_the_guard_can_see_both_known_call_sites():
 
 
 # ── the per-cell renderers ──────────────────────────────────────────────────
-#: The Bar tab's other three draw paths. Each takes ``ctx`` and a ``colors``
+#: The Bar tab's other draw paths. Each takes ``ctx`` and a ``colors``
 #: list, so each resolves the mode itself rather than being handed it — but
-#: "each" is the load-bearing word: Violin, Beeswarm and the events panel drawn
-#: beside them are three separate functions, and a mode applied to one leaves a
-#: grey distribution above a plate-coloured count. There is no cheap
+#: "each" is the load-bearing word: the violin and histogram's shared column pass
+#: (``_draw_column_shapes``, behind ``draw_violin`` and ``draw_histogram``), the
+#: beeswarm and the events panel drawn beside them are three separate functions,
+#: and a mode applied to one leaves a grey distribution above a plate-coloured count. There is no cheap
 #: data-driven test for these (every one wants a loaded dataframe per column),
 #: and §7.6 #3 is the answer to that: ask what else the syntax tree can decide.
-_PER_CELL_RENDERERS = ("draw_violin", "draw_beeswarm", "draw_per_well_n_bars")
+_PER_CELL_RENDERERS = ("_draw_column_shapes", "draw_beeswarm", "draw_per_well_n_bars")
 
 _RENDERER_MODULE = "review/features/barplot/renderer.py"
 

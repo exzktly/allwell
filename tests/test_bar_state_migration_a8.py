@@ -34,6 +34,17 @@ def test_toggles_are_mutually_exclusive_on_the_slice(viewer_app):
     assert bar.violin is False
 
 
+def test_the_show_selector_keeps_one_mode_on_and_its_controls_with_it(viewer_app):
+    from review.features.barplot import _per_cell_mode as pcm
+
+    app = viewer_app
+    bar = app._app_state.bar
+    pcm.set_per_cell_mode(app._ctx, pcm.HISTOGRAM)              # no redraw: the flags are the subject
+    assert (bar.swarm, bar.violin, bar.histogram) == (False, False, True)
+    toggle_violin(app._ctx)                 # the old toggle still turns the histogram off
+    assert (bar.swarm, bar.violin, bar.histogram) == (False, True, False)
+
+
 def test_persistence_round_trip_through_slice(viewer_app):
     app = viewer_app
     app._app_state.bar.swarm = True

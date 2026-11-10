@@ -26,9 +26,8 @@ from review.features.barplot.controller import (
     open_bar_timepoint_selector,
     toggle_bar_group_mode,
     toggle_bar_pool_replicates,
-    toggle_swarm,
-    toggle_violin,
 )
+from review.features.barplot import _per_cell_mode as _pcm
 from review.features.barplot._drag_reorder import (
     bar_reset_order,
     on_bar_drag_motion,
@@ -141,7 +140,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # body; the widgets are added there instead of inline (addWidget reparents them).
     from review.core.ui_helpers import make_popover_button as _make_popover_button
     _disp_btn, _disp_panel, _disp_lay = _make_popover_button("Display ▾", bar_ctrl)
-    _disp_btn.setToolTip("Bar/point display options: grouping, pooling, beeswarm, violin, error band")
+    _disp_btn.setToolTip("Bar/point display options: grouping, pooling, how each column is drawn (bars, beeswarm, violin, histogram), significance")
 
     # Layout toggle: cluster bars by well or by timepoint.
     group_mode_btn = reg.register("_bar_group_mode_btn", QPushButton("Grouping: Well", bar_ctrl))
@@ -171,38 +170,57 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # visible and gate usability with setEnabled instead.
     _disp_lay.addWidget(pool_reps_btn)
 
-    swarm_btn = reg.register("_swarm_btn", QPushButton("Beeswarm: Off", bar_ctrl))
-    swarm_btn.setProperty("variant", "toggle")
-    swarm_btn.setCheckable(True)
-    swarm_btn.setToolTip(
-        "Overlay the individual per-cell points on each bar.")
-    swarm_btn.clicked.connect(lambda _=False: toggle_swarm(ctx))
-    _disp_lay.addWidget(swarm_btn)
-    # swarm/violin state lives on the typed BarPlotState slice (defaults False).
-
-    violin_btn = reg.register("_violin_btn", QPushButton("Violin: Off", bar_ctrl))
-    violin_btn.setProperty("variant", "toggle")
-    violin_btn.setCheckable(True)
-    violin_btn.setToolTip(
-        "Draw a violin (kernel-density) shape for each group. "
-        "Enables the Smooth control.")
-    violin_btn.clicked.connect(lambda _=False: toggle_violin(ctx))
-    _disp_lay.addWidget(violin_btn)
-
-    _disp_lay.addWidget(QLabel("Smooth:", bar_ctrl))
+    # Show: how each column's cells are drawn — one selector rather than a toggle per mode, so the modes can never
+    # both be on and the popover says which is (``_per_cell_mode``). Smooth tunes the violin, Bins the histogram;
+    # each is usable only under its own mode, and ``_per_cell_mode.sync_controls`` keeps all three on the state.
+    from widgets.segmented_control import SegmentedControl as _SegmentedControl
+    from widgets.spin_box import SpinBox as _SpinBox
     from widgets.styled_slider import StyledSlider as _StyledSlider
+    from review.domain.column_histogram import BINS_MAX, BINS_MIN
+    def _popover_row(label: str, widget) -> QWidget:
+        row = QWidget(bar_ctrl)
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(QLabel(label, row))
+        lay.addWidget(widget)
+        lay.addStretch(1)
+        return row
+
+    show_seg = reg.register("_bar_show_seg", _SegmentedControl(bar_ctrl))
+    for key, label in _pcm.MODES:
+        show_seg.addSegment(text=label, data=key)
+    show_seg.setToolTip(
+        "How each column is drawn.\n\n"
+        "Bars: the column's mean (or median) with its spread.\n"
+        "Beeswarm: every cell as a dot.\n"
+        "Violin: a smoothed density of the column's cells; Smooth sets how smooth.\n"
+        "Histogram: the column's cells binned, mirrored about the column. Every column's bars sum to 1 and all "
+        "columns share one set of bins and one width scale, so widths compare across columns; Bins sets the count.")
+    show_seg.currentChanged.connect(lambda idx: _pcm.set_per_cell_mode(ctx, _pcm.MODES[idx][0], redraw_bars))
+    _disp_lay.addWidget(_popover_row("Show:", show_seg))
+
     violin_slider = reg.register("_violin_slider", _StyledSlider(Qt.Horizontal, bar_ctrl))
     violin_slider.setRange(5, 200)
     violin_slider.setValue(100)
     violin_slider.setFixedWidth(theme.Metrics.num_field_w_lg)
     violin_slider.setToolTip(
         "Violin kernel bandwidth — higher is smoother. "
-        "Active only when Violin is on.")
+        "Active only when Show is Violin.")
     violin_slider.valueChanged.connect(
         lambda _v: (redraw_bars(ctx) if ctx.state.bar.violin else None)
     )
-    violin_slider.setEnabled(False)
-    _disp_lay.addWidget(violin_slider)
+    _disp_lay.addWidget(_popover_row("Smooth:", violin_slider))
+
+    hist_bins_spin = reg.register("_hist_bins_spin", _SpinBox(bar_ctrl))
+    hist_bins_spin.setRange(BINS_MIN, BINS_MAX)
+    hist_bins_spin.setToolTip(
+        "How many bins the histogram splits the figure's range into. A count metric bins on whole numbers, one bin "
+        "per value when the range fits. Active only when Show is Histogram.")
+    hist_bins_spin.valueChanged.connect(lambda value: _pcm.set_hist_bins(ctx, value, redraw_bars))
+    _disp_lay.addWidget(_popover_row("Bins:", hist_bins_spin))
+    # Seeded from the state, not left at the constructors' defaults: the tab builds lazily, routinely after a
+    # restore has already chosen a mode (the reason the Significance button below is seeded too).
+    _pcm.sync_controls(ctx)
 
     # Significance brackets (N7): draw the Statistics tab's pairwise results onto
     # the Mean panel. Toggle stages PlotState.show_significance and redraws.

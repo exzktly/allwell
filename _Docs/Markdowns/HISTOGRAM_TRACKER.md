@@ -14,13 +14,13 @@ States: `todo`, `doing`, `done` (with the test that pins it), `declined` (with t
 | # | Item | Place | State | Evidence |
 |---|------|-------|-------|----------|
 | 1 | Shared Qt-free core: shared edges (continuous / integer / log), per-sample probabilities, shared width scale, note, edge cases | `review/domain/column_histogram.py` | done | `tests/test_column_histogram.py` (fixture where per-sample bins, per-sample scale and counts each give other numbers) |
-| 2 | Bar state: `histogram`, `hist_bins`, one `per_cell_mode` predicate | `barplot/state.py` | todo | |
-| 3 | Bar controller: one setter, mutually exclusive modes, controls resynced from state on every redraw | `barplot/controller.py` | todo | |
-| 4 | Bar Display popover: Show selector replaces the Beeswarm/Violin toggles; Bins spin box; Smooth greyed unless Violin | `barplot/tab_view.py` | todo | |
-| 5 | Bar renderer: `draw_histogram`, sharing the violin's column pass | `barplot/renderer.py` | todo | |
-| 6 | Bar predicate sweep: mode name, class-ratio decline, `use_per_cell`, debug log, dispatch, cell-scope note | `barplot/renderer.py`, `barplot/cell_scope_compute.py` | todo | |
-| 7 | Bar sampled-note wording covers histogram bars | `barplot/_pooled.py` | todo | |
-| 8 | Bar persistence: snapshot / apply / reset of `histogram`, `hist_bins`; modes set together | `persistence/view_state.py` | todo | |
+| 2 | Bar state: `histogram`, `hist_bins`, one `per_cell_mode` predicate | `barplot/state.py`, `barplot/_per_cell_mode.py` | done | `tests/test_bar_histogram.py::test_every_per_cell_site_names_the_histogram` |
+| 3 | Bar controller: one setter, mutually exclusive modes, controls resynced from state on every redraw | `barplot/controller.py`, `barplot/_per_cell_mode.py` | done | `tests/test_bar_histogram_in_the_tab.py::test_a_restored_view_puts_the_selector_on_its_mode`; `test_bar_state_migration_a8.py` (full-app) |
+| 4 | Bar Display popover: Show selector replaces the Beeswarm/Violin toggles; Bins spin box; Smooth greyed unless Violin | `barplot/tab_view.py` | done | `tests/test_bar_histogram_in_the_tab.py::test_show_histogram_draws_it_and_hands_bins_the_control` (mutations: spin unwired, Smooth greyed only under Beeswarm — both red) |
+| 5 | Bar renderer: `draw_histogram`, sharing the violin's column pass | `barplot/renderer.py` | done | `tests/test_bar_histogram.py` (exact bar geometry; per-sample scale mutation red), `test_bar_cells_draw_a_stated_sample.py` (one pool at a time) |
+| 6 | Bar predicate sweep: mode name, class-ratio decline, `use_per_cell`, debug log, dispatch, cell-scope note | `barplot/renderer.py`, `barplot/cell_scope_compute.py` | done | `test_bar_significance_says_why.py` (histogram case), `test_bar_histogram.py::test_every_per_cell_site_names_the_histogram` |
+| 7 | Bar sampled-note wording covers histogram bars | `barplot/_pooled.py` | declined | The note already says a column over the cap *draws a sample*, which is what its histogram bars are binned from — the same statement it makes of the violin's KDE; adding a clause would repeat it. |
+| 8 | Bar persistence: snapshot / apply / reset of `histogram`, `hist_bins`; modes set together | `persistence/view_state.py` | done | `tests/test_view_state_bar_histogram.py` |
 | 9 | Batch Export bar: Histogram radio, bins spin, passed through to the renderer and title | `batch_export/bar_panel.py` | todo | |
 | 10 | Nanowells compute: `HISTOGRAM` style, `density_above` 0, bins helpers | `nanowell/distribution_style_compute.py` | todo | |
 | 11 | Nanowells state + controller: `hist_bins`, setter, `distribution_style_of`, `draw_view(hist_bins=)` | `nanowell/state.py`, `nanowell/controller.py` | todo | |

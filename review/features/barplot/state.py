@@ -49,6 +49,11 @@ class BarPlotState:
     # PlotState.
     swarm: bool = False
     violin: bool = False
+    #: Each column's cells as a vertical histogram (``review.domain.column_histogram``); exclusive with the two above.
+    #: ``_per_cell_mode.per_cell_mode`` is the one reading of the three.
+    histogram: bool = False
+    #: The histogram's bin count (``column_histogram.BINS_MIN``–``BINS_MAX``).
+    hist_bins: int = 30
 
     # *Then relative to* — the second fold-change stage (``_baseline_ratio``).
     # Each bar is divided by its baseline bar: the bar that agrees with it on

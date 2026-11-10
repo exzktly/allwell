@@ -115,7 +115,7 @@ def test_only_the_panels_that_normalise_the_fraction_say_so():
     that removed it everywhere would be just as wrong in the other direction.
     """
     sites = _fraction_title_sites()
-    for per_cell in ("draw_violin", "draw_beeswarm"):
+    for per_cell in ("_draw_column_shapes", "draw_beeswarm"):
         assert per_cell in sites, f"{per_cell} no longer titles a fraction panel"
         assert sites[per_cell] is False, (
             f"{per_cell} labels a raw fraction as fold-change normalised")

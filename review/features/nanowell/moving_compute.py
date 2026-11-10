@@ -61,6 +61,7 @@ import pandas as pd
 
 from review.features.nanowell.collect import MEASURABLE as _MEASURABLE
 from review.features.nanowell.series_compute import EARLIEST, FIRST_MEASURABLE, zero_baseline_reason
+from review.features.nanowell.size_class_compute import FC_OF
 
 #: The largest window the page offers. The longest series seen so far are about a dozen timepoints.
 MAX_WINDOW = 9
@@ -120,8 +121,6 @@ def base_value(column: str) -> str | None:
         return "n"
     if column == "confluence_fc":
         return "c"
-    from review.features.nanowell.size_class_compute import FC_OF
-
     if column in FC_OF:                                 # a size class's count, or the ratio of the two
         return FC_OF[column]
     for kind in ("brightness", "signal"):

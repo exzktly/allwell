@@ -101,3 +101,16 @@ def test_nothing_to_draw_gives_no_scale_and_no_note():
                                        ("x", 30), (None, 30)])
 def test_the_bin_count_is_clamped(raw, kept):
     assert ch.clamp_bins(raw) == kept
+
+
+def test_the_log_predicate_is_the_style_pass_s_own():
+    from types import SimpleNamespace
+
+    from review.core.plot_style import y_axis_is_log
+
+    assert y_axis_is_log({"y_log": True}, 1) is True
+    assert y_axis_is_log({"y_log": False}, 1) is False
+    assert y_axis_is_log({"y_log": True, "axis_target": "2"}, 1) is False          # another panel is targeted
+    assert y_axis_is_log({"y_log": True, "axis_target": "2"}, 2) is True
+    assert y_axis_is_log({"y_log": False}, 1, SimpleNamespace(_aw_force_ylog=True)) is True
+    assert y_axis_is_log({"y_log": True}, 1, SimpleNamespace(_categorical_yaxis=True)) is False

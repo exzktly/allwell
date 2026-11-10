@@ -83,3 +83,18 @@ def test_a_restored_view_puts_the_selector_on_its_mode(tab):
     assert tab.widgets.get("_hist_bins_spin").value() == 9
     assert tab.widgets.get("_hist_bins_spin").isEnabled()
     assert _histogram_note(tab)[0].startswith("9 bins")
+
+
+def test_a_log_value_axis_gets_log_spaced_bins(tab):
+    """Properties → Y log is applied by the style pass after the bars are drawn; the renderer asks the pass's own
+    predicate, so the bins are log-spaced exactly when the axis ends up logarithmic."""
+    from review.core.plot_style import figure_prefs
+    from review.features.barplot import _per_cell_mode as pcm
+    from review.features.barplot.renderer import redraw_bars
+
+    pcm.set_per_cell_mode(tab, pcm.HISTOGRAM, redraw_bars)
+    assert "(log-spaced)" not in _histogram_note(tab)[0]
+    figure_prefs(tab, tab.widgets.get("_bar_fig"))["y_log"] = True
+    redraw_bars(tab)
+    assert tab.widgets.get("_ax_bar_mean").get_yscale() == "log"
+    assert "(log-spaced)" in _histogram_note(tab)[0]

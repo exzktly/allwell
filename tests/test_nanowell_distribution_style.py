@@ -250,6 +250,14 @@ def test_the_show_control_and_the_smoothing_slider_redraw_the_page(qtbot, tmp_pa
     assert st.hist_bins == 3
     assert any("(3 bins ·" in t for t in _texts(ctx, "nw-footer"))
 
+    from review.core.plot_style import figure_prefs
+
+    figure_prefs(ctx, fig)["y_log"] = True                       # Properties → Y log: the bins follow the axis
+    nwc.redraw(ctx)
+    assert any("(log-spaced) ·" in t for t in _texts(ctx, "nw-footer"))
+    figure_prefs(ctx, fig)["y_log"] = False
+    nwc.redraw(ctx)
+
     seg.setCurrentIndex(dsc.STYLE_KEYS.index("beeswarm"))
     assert st.hits.entries
     assert not any(c.get_gid() == "nw-density" for ax in fig.axes for c in ax.collections)

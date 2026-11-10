@@ -57,6 +57,7 @@ from widgets.spin_box import SpinBox
 _draw_view = _lazy("review.features.nanowell.controller", "draw_view")
 _swarm_spacing_of = _lazy("review.features.nanowell.controller", "swarm_spacing_of")
 _distribution_style_of = _lazy("review.features.nanowell.controller", "distribution_style_of")
+_y_axis_is_log = _lazy("review.core.plot_style", "y_axis_is_log")
 _resolve_metric = _lazy("review.features.nanowell.controller", "resolve_metric")
 _batch_array_layers = _lazy("review.features.nanowell.controller", "batch_array_layers")
 _named_groups = _lazy("review.features.nanowell.controller", "named_groups")
@@ -523,7 +524,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                    subset=settings["subset"], names=_well_names(self._ctx, wells),
                                    swarm_spacing=_swarm_spacing_of(self._ctx), sizes=_size_rule(self._ctx),
                                    dist_style=drawing.style, violin_smooth=drawing.smooth,
-                                   hist_bins=drawing.bins)
+                                   hist_bins=drawing.bins, hist_log=_y_axis_is_log(self._batch_style(), 1))
                     self._figure_view = {"view": view, "metric": drawn, "axis": settings["axis"],
                                          "baseline": settings["baseline"], "cohort": settings["cohort"],
                                          "moving": settings["moving"],

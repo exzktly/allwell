@@ -774,7 +774,8 @@ def redraw(ctx) -> None:
         subset=page_subset(ctx, st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
         gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
         names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx),
-        dist_style=st.dist_style, violin_smooth=st.violin_smooth, hist_bins=st.hist_bins, footer_out=True, **array)
+        dist_style=st.dist_style, violin_smooth=st.violin_smooth, hist_bins=st.hist_bins,
+        hist_log=_y_log_drawn(ctx, fig), footer_out=True, **array)
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
@@ -925,6 +926,14 @@ class DistributionDrawing(NamedTuple):
     style: str
     smooth: int
     bins: int
+
+
+def _y_log_drawn(ctx, fig) -> bool:
+    """Whether the style pass will put this figure's value axis on a log scale, so a histogram's bins can be spaced
+    for it (``plot_style.y_axis_is_log``, the pass's own predicate, on the first panel)."""
+    from review.core.plot_style import figure_prefs, y_axis_is_log
+
+    return y_axis_is_log(figure_prefs(ctx, fig), 1)
 
 
 def distribution_style_of(ctx) -> DistributionDrawing:

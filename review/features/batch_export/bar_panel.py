@@ -766,6 +766,17 @@ class BarBatchExportPanel(BatchExportPanel):
         self._finish_cell_figure(fig, ax_frac, ax_n, grp)
         return fig
 
+    def _mean_axis_is_log(self, fig, ax_mean) -> bool:
+        """Whether this run puts the mean panel's y axis on a log scale: its Axes row's Scale when the run pinned one
+        (``pin_scales`` stamps it after drawing), else what the style pass will make of the batch style."""
+        pinned = self._axes_spec().for_panel("mean").y_log
+        if pinned is not None:
+            return bool(pinned)
+        from review.core.plot_style import y_axis_is_log
+
+        idx = fig.axes.index(ax_mean) + 1 if ax_mean in fig.axes else 1
+        return y_axis_is_log(self._batch_style(), idx)
+
     def _display_choice(self) -> tuple[str, float, int]:
         """The mean panel's display as the panel's controls set it: ``(mode, violin bandwidth, histogram bins)``, the
         mode one of ``bar`` / ``beeswarm`` / ``violin`` / ``histogram``. Read once per run, so every job of it draws
@@ -917,6 +928,7 @@ class BarBatchExportPanel(BatchExportPanel):
                 plot_tps, tp_str_combined, threshold,
                 xs=xs, group_keys=group_keys,
                 bins=hist_bins,
+                log=self._mean_axis_is_log(fig, ax_mean),
                 pool_groups=pool_groups,
             )
         else:

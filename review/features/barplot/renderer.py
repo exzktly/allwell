@@ -39,6 +39,7 @@ from review.core.plot_style import (
     follows_theme,
     mark_time_rescale,
     tokens_for,
+    y_axis_is_log,
 )
 from review.domain.significance import significance_label
 from review.domain.stats_compute import aggregate_well
@@ -1817,8 +1818,18 @@ def draw_per_cell_bar_mode(
     # clusters insert gaps. A per-well or multi-tp expansion still mismatches
     # and still falls back — that case is what the guard is for.
     ctx.runtime.barplot.xs_keys = list(base_wells)
-    if mode in ("violin", "histogram"):
-        (draw_histogram if mode == "histogram" else draw_violin)(
+    if mode == "histogram":
+        draw_histogram(
+            ctx, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,
+            plot_tps, tp_str, threshold,
+            xs=xs, group_keys=group_keys,
+            cell_scale=cell_scale,
+            pool_groups=pool_groups,
+            # The bins follow the value axis the style pass is about to set, asked of its own predicate.
+            log=y_axis_is_log(figure_prefs(ctx, ax_mean.figure), ax_mean.figure.axes.index(ax_mean) + 1, ax_mean),
+        )
+    elif mode == "violin":
+        draw_violin(
             ctx, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,
             plot_tps, tp_str, threshold,
             xs=xs, group_keys=group_keys,

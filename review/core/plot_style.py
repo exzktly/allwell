@@ -1793,6 +1793,24 @@ def _apply_grid(ax, prefs: dict) -> None:
         ax.grid(False)
 
 
+def y_axis_is_log(prefs, idx: int, ax=None) -> bool:
+    """Whether the style pass makes panel *idx*'s y axis logarithmic (*idx* counts ``fig.axes`` from 1, as the pass
+    does): on the targeted panel only (the others are left as drawn, which after a redraw is linear), the axes' own
+    ``_aw_force_ylog`` pin when *ax* carries one, else the figure's ``y_log``.
+
+    The pass's own answer, so a renderer that must know before drawing — a histogram spaces its bins in log space on
+    a log axis — asks the same question and cannot disagree with it. It cannot ask the axes: a redraw's ``cla()``
+    has put the scale back to linear by then."""
+    if not _AxisPrefs(prefs).targets(idx):
+        return False
+    if ax is not None and getattr(ax, "_categorical_yaxis", False):
+        return False
+    forced = getattr(ax, "_aw_force_ylog", None) if ax is not None else None
+    if forced is not None:
+        return bool(forced)
+    return bool(prefs.get("y_log", False))
+
+
 def _apply_scales_and_limits(ax, idx: int, axis_prefs: _AxisPrefs) -> tuple:
     """Log scale (targeted axis only), then this panel's typed limits.
 
@@ -1826,9 +1844,7 @@ def _apply_scales_and_limits(ax, idx: int, axis_prefs: _AxisPrefs) -> tuple:
             apply_axis_log_scale(ax, "x", _xlog,
                                  log_base_value(prefs.get("x_log_base", "10")))
         if not getattr(ax, "_categorical_yaxis", False):
-            _fy = getattr(ax, "_aw_force_ylog", None)
-            _ylog = bool(prefs.get("y_log", False)) if _fy is None else bool(_fy)
-            apply_axis_log_scale(ax, "y", _ylog,
+            apply_axis_log_scale(ax, "y", y_axis_is_log(prefs, idx, ax),
                                  log_base_value(prefs.get("y_log_base", "10")))
         # ``set_xscale`` above resets the axis's locator and formatter, so a
         # time axis that asked to have its ticks rescaled has to say so

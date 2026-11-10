@@ -21,7 +21,7 @@ States: `todo`, `doing`, `done` (with the test that pins it), `declined` (with t
 | 6 | Bar predicate sweep: mode name, class-ratio decline, `use_per_cell`, debug log, dispatch, cell-scope note | `barplot/renderer.py`, `barplot/cell_scope_compute.py` | done | `test_bar_significance_says_why.py` (histogram case), `test_bar_histogram.py::test_every_per_cell_site_names_the_histogram` |
 | 7 | Bar sampled-note wording covers histogram bars | `barplot/_pooled.py` | declined | The note already says a column over the cap *draws a sample*, which is what its histogram bars are binned from — the same statement it makes of the violin's KDE; adding a clause would repeat it. |
 | 8 | Bar persistence: snapshot / apply / reset of `histogram`, `hist_bins`; modes set together | `persistence/view_state.py` | done | `tests/test_view_state_bar_histogram.py` |
-| 9 | Batch Export bar: Histogram radio, bins spin, passed through to the renderer and title | `batch_export/bar_panel.py` | todo | |
+| 9 | Batch Export bar: Histogram radio, bins spin, passed through to the renderer and title | `batch_export/bar_panel.py` | done | `tests/test_batch_export_bar_histogram.py` (real radio + spin, the figure's note, every render call passes `hist_bins`) |
 | 10 | Nanowells compute: `HISTOGRAM` style, `density_above` 0, bins helpers | `nanowell/distribution_style_compute.py` | todo | |
 | 11 | Nanowells state + controller: `hist_bins`, setter, `distribution_style_of`, `draw_view(hist_bins=)` | `nanowell/state.py`, `nanowell/controller.py` | todo | |
 | 12 | Nanowells controls: Bins on the band; Smoothing usable only under Auto / Violin | `nanowell/distribution_style_view.py` | todo | |

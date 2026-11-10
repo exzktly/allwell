@@ -40,6 +40,8 @@ from core.safe import swallow
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from review.core.lazy import lazy as _lazy
 from widgets.separator import build_hline_separator
+from widgets.spin_box import SpinBox
+from review.domain.column_histogram import BINS_DEFAULT, BINS_MAX, BINS_MIN, clamp_bins
 from review.core.plot_annotations import (
     value_label_settings as _value_label_settings,
 )
@@ -158,7 +160,7 @@ class BarBatchExportPanel(BatchExportPanel):
         pool_row.addStretch(1)
         layout.addLayout(pool_row)
 
-        # ── Display mode (bars / beeswarm / violin) ────────────────────
+        # ── Display mode (bars / beeswarm / violin / histogram) ────────
         mode_row = QHBoxLayout()
         mode_row.setContentsMargins(12, 4, 12, 0)
         mode_row.addWidget(QLabel("Mean panel display:"))
@@ -167,7 +169,11 @@ class BarBatchExportPanel(BatchExportPanel):
         self._mode_bar_rb.setChecked(True)
         self._mode_swarm_rb = QRadioButton("Beeswarm")
         self._mode_violin_rb = QRadioButton("Violin")
-        for rb in (self._mode_bar_rb, self._mode_swarm_rb, self._mode_violin_rb):
+        self._mode_hist_rb = QRadioButton("Histogram")
+        self._mode_hist_rb.setToolTip(
+            "Each column's cells binned, mirrored about the column. Every column's bars sum to 1 and all columns share "
+            "one set of bins and one width scale, so widths compare across columns.")
+        for rb in (self._mode_bar_rb, self._mode_swarm_rb, self._mode_violin_rb, self._mode_hist_rb):
             self._display_mode_grp.addButton(rb)
             mode_row.addWidget(rb)
         mode_row.addStretch(1)
@@ -190,6 +196,20 @@ class BarBatchExportPanel(BatchExportPanel):
             lambda v: self._violin_smooth_label.setText(f"{v/100.0:.2f}")
         )
 
+        # ── Histogram bins (the tab's range and default) ───────────────
+        bins_row = QHBoxLayout()
+        bins_row.setContentsMargins(12, 0, 12, 4)
+        bins_row.addWidget(QLabel("Histogram bins:"))
+        self._hist_bins_spin = SpinBox()
+        self._hist_bins_spin.setRange(BINS_MIN, BINS_MAX)
+        self._hist_bins_spin.setValue(BINS_DEFAULT)
+        self._hist_bins_spin.setToolTip(
+            "How many bins each figure's range is split into. A count metric bins on whole numbers, one bin per value "
+            "when the range fits.")
+        bins_row.addWidget(self._hist_bins_spin)
+        bins_row.addStretch(1)
+        layout.addLayout(bins_row)
+
         # Gate the cluster-by combo on multi-tp mode; gate the smoothing
         # slider on whether the violin mode is selected.
         def _refresh_layout_widgets() -> None:
@@ -198,6 +218,7 @@ class BarBatchExportPanel(BatchExportPanel):
             in_violin = self._mode_violin_rb.isChecked()
             self._violin_smooth_slider.setEnabled(in_violin)
             self._violin_smooth_label.setEnabled(in_violin)
+            self._hist_bins_spin.setEnabled(self._mode_hist_rb.isChecked())
         self._multi_tp_cb.toggled.connect(lambda _=False: _refresh_layout_widgets())
         self._display_mode_grp.buttonToggled.connect(lambda *_: _refresh_layout_widgets())
         _refresh_layout_widgets()
@@ -288,14 +309,7 @@ class BarBatchExportPanel(BatchExportPanel):
         multi_tp_figure = bool(self._multi_tp_cb.isChecked())
         group_mode = "well" if self._group_mode_cb.currentText() == "Well" else "timepoint"
         pool_replicates = bool(self._pool_reps_cb.isChecked())
-        # Display mode (bars / beeswarm / violin) + violin bandwidth.
-        if self._mode_violin_rb.isChecked():
-            display_mode = "violin"
-        elif self._mode_swarm_rb.isChecked():
-            display_mode = "beeswarm"
-        else:
-            display_mode = "bar"
-        violin_bw = float(self._violin_smooth_slider.value()) / 100.0
+        display_mode, violin_bw, hist_bins = self._display_choice()
 
         # Each job is either (group, [tp_str]) for a single-tp figure (the
         # legacy path) or (group, [tp1, tp2, ...]) for a multi-tp figure.
@@ -479,6 +493,7 @@ class BarBatchExportPanel(BatchExportPanel):
                         group_mode=group_mode,
                         display_mode=display_mode,
                         violin_bw=violin_bw,
+                        hist_bins=hist_bins,
                     )
                 self._save_figure(
                     fig, fig_path, fmt,
@@ -508,6 +523,7 @@ class BarBatchExportPanel(BatchExportPanel):
         group_mode: str = "well",
         display_mode: str = "bar",
         violin_bw: float = 1.0,
+        hist_bins: int = BINS_DEFAULT,
     ):
         from matplotlib.figure import Figure as _Figure
         from review.domain import fold_change as _fc
@@ -602,6 +618,12 @@ class BarBatchExportPanel(BatchExportPanel):
                 f"{_ch} {_metric_label} distribution (violin, bw={violin_bw:.2f}){_fc_suffix}",
                 f"{_ch} {_metric_label}{_fc_suffix}",
             )
+        elif display_mode == "histogram":
+            apply_ax_style(
+                ax_mean,
+                f"{_ch} {_metric_label} distribution (histogram, {hist_bins} bins){_fc_suffix}",
+                f"{_ch} {_metric_label}{_fc_suffix}",
+            )
         elif display_mode == "beeswarm":
             apply_ax_style(
                 ax_mean,
@@ -641,7 +663,7 @@ class BarBatchExportPanel(BatchExportPanel):
         if not fc_active:
             ax_frac.set_ylim(-0.05, 1.05)
 
-        if display_mode in ("violin", "beeswarm"):
+        if display_mode in ("violin", "beeswarm", "histogram"):
             self._render_per_cell_panels(
                 fig=fig, ax_mean=ax_mean, ax_frac=ax_frac, ax_n=ax_n,
                 grp=grp, target_ts=target_ts, tp_strs=tp_strs,
@@ -651,6 +673,7 @@ class BarBatchExportPanel(BatchExportPanel):
                 group_mode=group_mode,
                 display_mode=display_mode,
                 violin_bw=violin_bw,
+                hist_bins=hist_bins,
             )
             self._finish_cell_figure(fig, ax_frac, ax_n, grp)
             return fig
@@ -743,6 +766,20 @@ class BarBatchExportPanel(BatchExportPanel):
         self._finish_cell_figure(fig, ax_frac, ax_n, grp)
         return fig
 
+    def _display_choice(self) -> tuple[str, float, int]:
+        """The mean panel's display as the panel's controls set it: ``(mode, violin bandwidth, histogram bins)``, the
+        mode one of ``bar`` / ``beeswarm`` / ``violin`` / ``histogram``. Read once per run, so every job of it draws
+        the same way whatever is clicked while it runs."""
+        if self._mode_hist_rb.isChecked():
+            mode = "histogram"
+        elif self._mode_violin_rb.isChecked():
+            mode = "violin"
+        elif self._mode_swarm_rb.isChecked():
+            mode = "beeswarm"
+        else:
+            mode = "bar"
+        return mode, float(self._violin_smooth_slider.value()) / 100.0, clamp_bins(self._hist_bins_spin.value())
+
     def _finish_cell_figure(self, fig, ax_frac, ax_n, grp) -> None:
         """The unset-cutoff sentence and the nanowell plate's cells footer, as the Bar Plots tab draws them."""
         from review.core.observation_band import finish_cell_figure
@@ -757,6 +794,7 @@ class BarBatchExportPanel(BatchExportPanel):
         group_mode: str,
         display_mode: str,
         violin_bw: float,
+        hist_bins: int = BINS_DEFAULT,
     ) -> None:
         """Draw the violin / beeswarm distribution panels for a batch group.
 
@@ -770,6 +808,7 @@ class BarBatchExportPanel(BatchExportPanel):
         from review.features.barplot.collect import cluster_x_for_group_keys
         from review.features.barplot.renderer import (
             draw_beeswarm,
+            draw_histogram,
             draw_per_well_n_bars,
             draw_violin,
         )
@@ -869,6 +908,15 @@ class BarBatchExportPanel(BatchExportPanel):
                 plot_tps, tp_str_combined, threshold,
                 xs=xs, group_keys=group_keys,
                 bw=violin_bw,
+                pool_groups=pool_groups,
+            )
+        elif display_mode == "histogram":
+            draw_histogram(
+                self._ctx, ax_mean, ax_frac,
+                plot_wells, plot_colors, plot_labels,
+                plot_tps, tp_str_combined, threshold,
+                xs=xs, group_keys=group_keys,
+                bins=hist_bins,
                 pool_groups=pool_groups,
             )
         else:

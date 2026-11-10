@@ -57,7 +57,9 @@ from contextlib import contextmanager
 
 import pandas as pd
 
-from review.data.memory_budget import SHARES, note_pressure, physical_memory_bytes, shortfall_bytes
+from review.data.memory_budget import (
+    SHARES, note_pressure, physical_memory_bytes, pressure_keep_bytes, shortfall_bytes,
+)
 
 _logger = logging.getLogger("review")
 
@@ -295,13 +297,15 @@ class RowCache(MutableMapping):
         """Evict beyond the budget while the machine's free memory is below the floor (``memory_budget``).
 
         The budget is a share of physical memory and says nothing about what is free; this is what leaves room for
-        the work no cache counts. The same victims as :meth:`_evict` — oldest first, never the newest, the frame
+        the work no cache counts. Never below ``memory_budget.PRESSURE_KEEP`` of the budget, so a shortage that lasts
+        does not leave one well held. The same victims as :meth:`_evict` — oldest first, never the newest, the frame
         just stored or a pinned one — and counted as evictions, because the plate has stopped fitting in exactly
         the sense the loader and the "counted over N of M wells" readouts mean.
         """
         wanted = shortfall_bytes()
+        keep_bytes = pressure_keep_bytes(self.budget_bytes)
         freed = 0
-        while freed < wanted:
+        while freed < wanted and self._held > keep_bytes:
             newest = next(reversed(self._frames), None)
             victim = next((label for label in self._frames
                            if label not in (keep, newest) and label not in self._pins), None)

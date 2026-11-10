@@ -144,3 +144,39 @@ def test_the_wells_dropped_by_a_re_projection_on_the_worker_are_reported_on_the_
         "back under the size classes now shown when next drawn. Every plot uses those classes; drawing is slower "
         "until the wells are back. Closing other programs leaves more room."]
     assert shell.state.dataset.released_wells == []
+
+
+def test_a_failed_rewrite_moves_the_rows_version_so_no_memo_of_the_old_rows_is_served(shell, qtbot, monkeypatch):
+    """A well read back after the release differs from the one dropped, unlike after an ordinary eviction, so every
+    memo keyed on ``rows_version`` (the per-well aggregates, ``plate_scan``) must decline."""
+    from review.data.population_gate import apply_population_to_cache
+    from review.features.qc.controller import get_qc_params
+
+    _start(shell, qtbot)
+    shell.state.qc.params = replace(get_qc_params(shell), size_classes=NEW)
+    before = shell.state.dataset.rows_version
+    _fail_on_the_second_write(monkeypatch, MemoryError("simulated"))
+    assert apply_population_to_cache(shell) == sorted(shell.state.dataset.well_paths)
+    assert shell.state.dataset.rows_version == before + 1
+
+
+def test_a_well_kept_by_another_thread_is_rewritten_after_the_others_are_dropped(shell, qtbot, monkeypatch):
+    """``RowCache.release`` keeps a pinned frame — one ``load_and_project`` is working on — and the failure may have
+    been part-way through that very frame. The failure here is A02's own write, with A02 pinned."""
+    from review.data.population_gate import apply_population_to_cache
+    from review.features.qc.controller import get_qc_params
+
+    held = _start(shell, qtbot)
+    assert held[1] == "A02"
+    shell.state.qc.params = replace(get_qc_params(shell), size_classes=NEW)
+    cache = shell.state.dataset.cache
+    _fail_on_the_second_write(monkeypatch, MemoryError("simulated"))
+    with cache.pinned("A02"):
+        apply_population_to_cache(shell)
+        assert cache.keys() == ["A02"]                              # every other well dropped
+        df = cache["A02"]
+        from review.data.population_gate import _plan
+
+        _stale, want = _plan(df, None, NEW)
+        assert np.array_equal(np.nan_to_num(df[share_column("Large")].to_numpy(), nan=-1),
+                              np.nan_to_num(want[share_column("Large")], nan=-1))

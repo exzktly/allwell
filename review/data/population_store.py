@@ -19,7 +19,7 @@ import os
 import threading
 from collections import OrderedDict
 
-from review.data.memory_budget import SHARES, note_pressure, shortfall_bytes
+from review.data.memory_budget import SHARES, note_pressure, pressure_keep_bytes, shortfall_bytes
 
 _logger = logging.getLogger("review")
 
@@ -160,10 +160,11 @@ class PopulationStore:
             self._held -= self._sizes.pop(victim, 0)
             self.evictions += 1
         wanted = shortfall_bytes()
+        keep_bytes = pressure_keep_bytes(budget)
         freed = 0
         # The machine is short of free memory (``memory_budget``): give back more, oldest first, still keeping the
-        # entry just stored so the redraw that built it is served.
-        while freed < wanted and len(self._items) > 1:
+        # entry just stored so the redraw that built it is served, and never below a quarter of the budget.
+        while freed < wanted and len(self._items) > 1 and self._held > keep_bytes:
             victim = next((k for k in self._items if k != keep), None)
             if victim is None:
                 break

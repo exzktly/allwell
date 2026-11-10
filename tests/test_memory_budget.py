@@ -109,31 +109,46 @@ def test_free_memory_is_read_on_linux():
 
 
 # ── each cache gives memory back below the floor ─────────────────────────────
+#
+# Budgets here are a few entries' worth, so the quarter of the budget a cache keeps under pressure
+# (``memory_budget.PRESSURE_KEEP``) is one entry for a budget of four and two for a budget of eight.
+
+
+ONE = rc.frame_bytes(_frame(1000))
 
 
 def test_the_row_cache_evicts_beyond_its_budget_while_memory_is_short(machine):
-    cache = rc.RowCache(budget_bytes=100 * GIB)                  # the budget alone would never evict
+    cache = rc.RowCache(budget_bytes=4 * ONE)                     # four frames fit: the budget alone evicts none
     for label in ("A1", "A2", "A3"):
         cache[label] = _frame(1000)
-    one = rc.frame_bytes(_frame(1000))
     # Short by a little more than one frame: the oldest two go — one frame would not cover it — and the frame just
     # stored and the one before it are kept.
-    machine(100 * MIB - (one + 1))
+    machine(100 * MIB - (ONE + 1))
     cache["A4"] = _frame(1000)
     assert cache.keys() == ["A3", "A4"]
     assert cache.evictions == 2
 
 
 def test_the_row_cache_keeps_everything_while_memory_is_not_short(machine):
-    cache = rc.RowCache(budget_bytes=100 * GIB)
+    cache = rc.RowCache(budget_bytes=4 * ONE)
     for label in ("A1", "A2", "A3", "A4"):
         cache[label] = _frame(1000)
     assert cache.keys() == ["A1", "A2", "A3", "A4"]
     assert cache.evictions == 0
 
 
+def test_a_lasting_shortage_leaves_each_cache_a_quarter_of_its_budget(machine):
+    """Another program holding memory all session must not leave one well held and the plate re-read on every
+    redraw: however short the machine, the row cache keeps a quarter of its budget."""
+    machine(0)                                                    # short by the whole floor, on every insert
+    cache = rc.RowCache(budget_bytes=8 * ONE)
+    for i in range(12):
+        cache[f"W{i}"] = _frame(1000)
+    assert cache.keys() == ["W10", "W11"]                         # two frames: a quarter of eight
+
+
 def test_the_row_cache_never_gives_back_a_pinned_frame(machine):
-    cache = rc.RowCache(budget_bytes=100 * GIB)
+    cache = rc.RowCache(budget_bytes=8 * ONE)
     cache["A1"] = _frame(1000)
     cache["A2"] = _frame(1000)
     with cache.pinned("A1"):
@@ -143,7 +158,7 @@ def test_the_row_cache_never_gives_back_a_pinned_frame(machine):
 
 
 def test_the_population_store_evicts_beyond_its_budget_while_memory_is_short(machine):
-    store = ps.PopulationStore(budget_bytes=100 * GIB)
+    store = ps.PopulationStore(budget_bytes=4 * 8000)
     for key in ("p1", "p2", "p3"):
         store[key] = np.zeros(1000)
     machine(100 * MIB - (8000 + 1))
@@ -152,10 +167,26 @@ def test_the_population_store_evicts_beyond_its_budget_while_memory_is_short(mac
     assert store.evictions == 2
 
 
+def test_the_population_store_keeps_a_quarter_of_its_budget_however_short(machine):
+    machine(0)
+    store = ps.PopulationStore(budget_bytes=8 * 8000)
+    for i in range(12):
+        store[f"p{i}"] = np.zeros(1000)
+    assert [f"p{i}" in store for i in range(12)] == [False] * 10 + [True, True]
+
+
 def test_the_pixel_cache_evicts_beyond_its_budget_while_memory_is_short(machine):
-    cache = idisc._DecodedArrayCache(max_entries=100, max_bytes=100 * GIB)
+    cache = idisc._DecodedArrayCache(max_entries=100, max_bytes=4 * 8000)
     for key in ("f1", "f2", "f3"):
         cache.put((key,), np.zeros(1000))
     machine(100 * MIB - (8000 + 1))
     cache.put(("f4",), np.zeros(1000))
     assert [cache.get((k,)) is not None for k in ("f1", "f2", "f3", "f4")] == [False, False, True, True]
+
+
+def test_the_pixel_cache_keeps_a_quarter_of_its_budget_however_short(machine):
+    machine(0)
+    cache = idisc._DecodedArrayCache(max_entries=100, max_bytes=8 * 8000)
+    for i in range(12):
+        cache.put((f"f{i}",), np.zeros(1000))
+    assert [cache.get((f"f{i}",)) is not None for i in range(12)] == [False] * 10 + [True, True]

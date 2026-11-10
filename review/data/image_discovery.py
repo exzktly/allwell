@@ -31,7 +31,7 @@ from pathlib import Path
 
 from core import debug_flags as _debug_flags
 from review.data.data_loading import extract_well_token as _extract_well_token
-from review.data.memory_budget import note_pressure, shortfall_bytes
+from review.data.memory_budget import note_pressure, pressure_keep_bytes, shortfall_bytes
 from review.data.image_resolver import (
     find_well_subfolder_path as _find_well_subfolder_path,
     normalize_well_token as _normalize_well_token,
@@ -235,10 +235,11 @@ class _DecodedArrayCache:
                 _k, (_a, nb) = self._store.popitem(last=False)
                 self._total_bytes -= nb
             # The machine is short of free memory (``memory_budget``): give back more, oldest first, keeping the
-            # frame just decoded for the caller that asked for it.
+            # frame just decoded for the caller that asked for it, and never below a quarter of the budget.
             wanted = shortfall_bytes()
+            keep_bytes = pressure_keep_bytes(self._max_bytes)
             freed = 0
-            while freed < wanted and len(self._store) > 1:
+            while freed < wanted and len(self._store) > 1 and self._total_bytes > keep_bytes:
                 _k, (_a, nb) = self._store.popitem(last=False)
                 self._total_bytes -= nb
                 freed += nb

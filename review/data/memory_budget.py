@@ -19,7 +19,9 @@ through :func:`share_bytes`; the environment overrides each cache already docume
 large figure or an edit's temporary copies can leave the machine short while every cache is inside its budget.
 So each cache, whenever it takes something in, asks :func:`shortfall_bytes` how far the machine's free memory is
 below :func:`free_floor_bytes` (:data:`FLOOR_SHARE` of physical memory, never below :data:`MIN_FLOOR_BYTES`) and
-evicts that much more, least recently used first, beyond its own budget. The work no cache counts — the transient
+evicts that much more, least recently used first, beyond its own budget — but never below :data:`PRESSURE_KEEP` of
+that budget, since a shortage another program causes can last all session and a cache emptied to its last entry
+would then re-read the plate on every redraw. The work no cache counts — the transient
 copies of an edit, a redraw, the window's own painting — therefore always starts with that much room.
 
 Giving memory back costs time and never numbers: an evicted well is read back from its Parquet cache with every
@@ -56,6 +58,16 @@ FLOOR_SHARE = 0.15
 MIN_FLOOR_BYTES = 2**30
 #: Environment override for the floor, in MiB; ``0`` turns the floor off.
 FLOOR_ENV = "ALLWELL_MEMORY_FLOOR_MB"
+#: The share of its own budget a cache keeps however short the machine is. The floor is measured against the whole
+#: machine, and a cache can free only its own entries: with another program holding memory for as long as the app
+#: runs, a floor enforced to the last entry would leave one well held and every redraw re-reading the plate from
+#: disk, for the rest of the session. A quarter of the budget is what the shortage can take.
+PRESSURE_KEEP = 0.25
+
+
+def pressure_keep_bytes(budget: int) -> int:
+    """What a cache with *budget* keeps however short free memory is (:data:`PRESSURE_KEEP` of it)."""
+    return int(budget * PRESSURE_KEEP)
 
 
 class _MemoryStatus:

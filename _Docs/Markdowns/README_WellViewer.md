@@ -3001,24 +3001,29 @@ What this means in use:
   shares of the computer's memory, not of what is free, so whenever Review takes
   in a well, a population or an image while less than about 15% of the
   computer's memory (at least 1 GB) is free — other programs, a large figure, an
-  edit in progress — it lets go of the ones it used least recently until that
-  much is free again. Nothing you see changes except speed: what it let go of is
-  read back, with everything re-applied, when it is next needed. The log says how
+  edit in progress — it also lets go of the ones it used least recently, by as
+  much as the computer is short, though never below a quarter of each memory's
+  budget (so a shortage that lasts all session does not leave it re-reading the
+  whole plate for every plot). No number changes: what it let go of is read back,
+  with everything re-applied, when it is next needed. It is slower, and the live
+  counts may then say *counted over N of M wells in memory*. The log says how
   much it gave back. On a Mac, where free memory cannot be read cheaply, the
   budgets alone apply. Set `ALLWELL_MEMORY_FLOOR_MB` to choose how much to keep
   free (`0` turns this off).
 - **A size-class edit applies to every well or to none.** Changing the size
   classes on Cell Gating rewrites the class of every cell in every well in
-  memory. If the computer runs out of memory part-way, Review does not leave some
-  wells under the old ranges and some under the new: it lets go of the wells in
-  memory, reads each back under the new ranges when a plot next needs it, and
+  memory, one well at a time. If the computer runs out of memory part-way, Review
+  does not leave some wells under the old ranges and some under the new: it lets
+  go of the wells in memory, reads each back under the new ranges when a plot
+  next needs it, and
   says so on the status line and in a notice — *Out of memory while applying the
   size classes…*. Every plot then uses the ranges the panel shows.
 - **A plot that could not be drawn says so.** If drawing a plot fails — most
-  often because the computer ran out of memory — the plot is replaced by a
-  sentence saying it could not be drawn and why, instead of keeping the picture
-  from before, which would no longer match your settings. Change a setting or
-  come back to the tab to try again.
+  often because the computer ran out of memory — the plot is covered by a
+  sentence saying it could not be drawn and why, instead of going on showing the
+  picture from before, which would no longer match your settings. Change a
+  setting or come back to the tab to try again; the sentence goes as soon as the
+  plot is drawn.
 
 To change the budget, set the environment variable `ALLWELL_ROW_CACHE_MB` before
 starting the app, for example `ALLWELL_ROW_CACHE_MB=8192 python allwell.py` for

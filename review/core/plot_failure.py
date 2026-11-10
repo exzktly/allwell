@@ -7,13 +7,15 @@ one slot that the next message overwrites, so within a second nothing on screen 
 silent substitution CLAUDE.md §7 forbids: the software knew the figure did not match and did not say so where the
 figure is read.
 
-:func:`show_redraw_failed` replaces every figure on the failed tab's page with one sentence naming the failure and
-saying the plot is not current. The next redraw that works draws over it, so nothing has to clear it. It is called
+:func:`show_redraw_failed` covers every figure on the failed tab's page with one sentence naming the failure and
+saying the plot is not current, laid over the figure rather than replacing it; the first draw after the figure's own
+artists change lifts it, so the next redraw that works shows through and nothing else has to clear it. It is called
 by the places a redraw failure is caught for a tab it can name:
 
 * ``review.domain.fold_change_scopes._call_redraw`` — every registered redraw scope (each plot leaf, by its
   ``tab_names``);
-* ``review.core.plot_orchestrator.redraw`` — Distribution and Heat Map in the shared fan-out;
+* ``review.core.plot_orchestrator.redraw`` — Line Graphs, Distribution and Heat Map in the shared fan-out;
+* ``review.features.nanowell.controller.redraw`` — the Nanowells page, which most callers reach inside a ``swallow``;
 * ``review.core.selection_controller`` — Scatter Plot after a group edit;
 * ``review.core.background_read`` — a view whose wells were read off the window's thread, when the drawing of the
   result fails (the caller names its tab).
@@ -81,13 +83,62 @@ def _canvases(frame) -> list:
 
 
 def _blank(canvas, sentence: str) -> None:
+    """Cover *canvas*'s figure with *sentence* until the figure is drawn afresh.
+
+    An opaque Axes over the whole figure, not ``fig.clear()``: Heat Map and Response Curves keep the Axes they
+    were built with in the widget registry and draw into it on every redraw, and a cleared figure no longer holds
+    it — every later redraw would then draw into an Axes nothing shows, and the tab would stay on this sentence
+    for the rest of the session. The cover is lifted by the first draw after the figure's own artists change
+    (:func:`_lift_if_redrawn`), which is what any redraw that worked does, whether it clears the figure, clears an
+    Axes or builds new ones.
+    """
     from review.core.plot_style import follows_theme, tokens_for
 
     fig = canvas.figure
-    fig.clear()
-    ax = fig.add_subplot(111)
-    _bg, fg, _muted, _grid, _spine = tokens_for(ax)
-    follows_theme(ax.text(0.5, 0.5, sentence, transform=ax.transAxes, ha="center", va="center",
-                          fontsize="medium", wrap=True, color=fg, gid=FAILED_GID))
-    ax.set_axis_off()
+    _lift(canvas)
+    cover = fig.add_axes((0.0, 0.0, 1.0, 1.0), label=FAILED_GID)
+    cover.set_zorder(1e6)
+    bg, fg, _muted, _grid, _spine = tokens_for(cover)
+    cover.set_facecolor(bg)
+    cover.set_xticks([])
+    cover.set_yticks([])
+    for spine in cover.spines.values():
+        spine.set_visible(False)
+    follows_theme(cover.text(0.5, 0.5, sentence, transform=cover.transAxes, ha="center", va="center",
+                             fontsize="medium", wrap=True, color=fg, gid=FAILED_GID))
+    seen = _signature(fig, cover)
+    cid = canvas.mpl_connect("draw_event", lambda _event: _lift_if_redrawn(canvas, cover, seen))
+    _COVERS[id(fig)] = (cover, cid)
     canvas.draw_idle()
+
+
+#: ``id(figure) -> (cover Axes, draw_event connection)`` for each figure currently covered.
+_COVERS: dict[int, tuple] = {}
+
+
+def _signature(fig, cover) -> tuple:
+    """Which artists the figure holds, the cover aside — what any redraw replaces."""
+    return (tuple((id(ax), tuple(id(c) for c in ax.get_children())) for ax in fig.axes if ax is not cover),
+            tuple(id(t) for t in fig.texts))
+
+
+def _lift_if_redrawn(canvas, cover, seen) -> None:
+    fig = canvas.figure
+    if cover not in fig.axes:                     # cleared by a redraw that rebuilt the figure
+        _lift(canvas)
+        return
+    if _signature(fig, cover) != seen:            # drawn afresh underneath: show it
+        _lift(canvas)
+        canvas.draw_idle()
+
+
+def _lift(canvas) -> None:
+    """Take *canvas*'s cover away, if it has one."""
+    fig = canvas.figure
+    entry = _COVERS.pop(id(fig), None)
+    if entry is None:
+        return
+    cover, cid = entry
+    canvas.mpl_disconnect(cid)
+    if cover in fig.axes:
+        cover.remove()

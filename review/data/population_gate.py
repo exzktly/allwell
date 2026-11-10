@@ -93,8 +93,7 @@ def _plan(df: pd.DataFrame, chosen, rule=None) -> tuple[list[str], dict[str, np.
 
     ``Population_Pass`` for *chosen* (``(rule, k)`` or ``None``) and the share and ratio columns of *rule* (a complete
     rule or ``None``); a class column the rule no longer defines, and ``Population_Pass`` with no class chosen, are
-    dropped. Split from the write so a walk over every held well can compute all of them before changing any
-    (:func:`apply_population_to_cache`)."""
+    dropped. Split from the write (:func:`_commit`) so the write is the one step that changes the frame."""
     from review.domain.size_classes import (
         area_column, class_columns, classify_rows, is_class_column, class_ratio_column, share_columns,
     )
@@ -149,17 +148,16 @@ def _apply(df: pd.DataFrame, chosen, rule=None) -> None:
 def apply_population_to_cache(ctx, label: str | None = None) -> list[str]:
     """Project the chosen class onto *label*'s cached rows, or every held well.
 
-    **Every held well or none.** The class columns are named by the classes' labels, not their bounds, so a well
-    left with the previous rule's values looks exactly like one rewritten under the new rule — and a walk that wrote
-    them one well at a time and then ran out of memory left exactly that: the wells before the failure under the new
-    bounds, the wells after it under the old, the panel showing the new, and nothing on any plot to say so. So the
-    new columns of every held well are computed first (:func:`_plan`, which changes no frame), and only then written.
+    **Every held well ends up under one rule.** The class columns are named by the classes' labels, not their
+    bounds, so a well left with the previous rule's values looks exactly like one rewritten under the new rule — and
+    a walk that ran out of memory part-way used to leave exactly that: the wells before the failure under the new
+    bounds, the wells after it under the old, the panel showing the new, and nothing on any plot to say so.
 
-    If either half fails, the held wells are dropped from the row cache instead (``RowCache.release``; a pinned frame
-    — one being loaded on another thread, whose load runs this projector under the rule now in force — is kept).
-    That frees their memory, and each comes back through ``data_loading.load_and_project``, which runs this projector
-    on that one well under the rule now in force, the next time a view reads it. Every well therefore answers under
-    one rule, at the cost of re-reading those wells. The dropped wells are returned, and left on
+    The walk still goes one well at a time, so it never holds more than one well's new columns (computing every
+    well's first would add the whole plate's to the peak, on the very machines that run short). If it fails, the
+    held wells are dropped from the row cache (:func:`_release`), freeing their memory, and each comes back through
+    ``data_loading.load_and_project``, which runs this projector on that one well under the rule now in force, the
+    next time a view reads it. Every well therefore answers under one rule, at the cost of re-reading those wells. The dropped wells are returned, and left on
     ``DatasetState.released_wells`` for the window's thread to report (``notifications.report_released_wells``) —
     this can run on a worker. Any failure other than running out of memory is raised after the release, so a defect
     is not mistaken for a full machine. Returns ``[]`` when every held well was rewritten."""
@@ -177,24 +175,26 @@ def apply_population_to_cache(ctx, label: str | None = None) -> list[str]:
         df = repo.rows_or_none(well) if repo is not None else None
         if df is not None and not df.empty:
             held.append((well, df))
-    plans = []
     try:
-        plans = [(df, _plan(df, chosen, rule)) for _well, df in held]
-        for df, plan in plans:
-            _commit(df, plan)
+        for _well, df in held:
+            _apply(df, chosen, rule)
     except Exception as exc:
         wells = [well for well, _df in held]
         # This walk's own references would keep every frame alive through the release, freeing nothing.
-        plans = held = df = None
-        _release(ctx, wells, exc)
+        held = df = None
+        _release(ctx, wells, exc, chosen, rule)
         if not isinstance(exc, MemoryError):
             raise
         return wells
     return []
 
 
-def _release(ctx, wells: list[str], exc: BaseException) -> None:
-    """Drop the held frames after a failed rewrite, so each is read back under the rule now in force."""
+def _release(ctx, wells: list[str], exc: BaseException, chosen, rule) -> None:
+    """Drop the held frames after a failed rewrite, so each is read back under the rule now in force.
+
+    ``RowCache.release`` keeps a pinned frame — one ``load_and_project`` is working on, on another thread — and the
+    failure may have been part-way through that very frame. So each frame still held afterwards is written again
+    under the rule in force, one well's columns at a time; if even that fails it is dropped as well."""
     dataset = ctx.state.dataset
     cache = dataset.cache
     release = getattr(cache, "release", None)
@@ -202,6 +202,18 @@ def _release(ctx, wells: list[str], exc: BaseException) -> None:
         release()
     else:
         cache.clear()
+    for well in wells:
+        try:
+            df = cache.get(well)
+        except KeyError:
+            df = None
+        if df is None or df.empty:
+            continue
+        try:
+            _apply(df, chosen, rule)
+        except Exception:
+            _logger.exception("Size classes: could not rewrite well %s, held while the others were dropped", well)
+            cache.pop(well, None)
     # A frame read back differs from the one dropped (the new rule against a half-applied one), so nothing
     # remembered of the old frames may be served — unlike an ordinary eviction, which brings back the same rows.
     note = getattr(dataset, "note_rows_changed", None)

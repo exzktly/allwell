@@ -294,7 +294,8 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
             level = pd.to_numeric(level, errors="coerce").mask(frame["well"].isin(raw_wells), 0.0)
             frame[f"brightness_{ch}"] = frame[f"brightness_{ch}"] - level
     base = {}
-    for value in ["n", "c"] + [f"{kind}_{ch}" for ch in data.channels for kind in ("brightness", "signal")]:
+    for value in (["n", "c"] + [f"{kind}_{ch}" for ch in data.channels for kind in ("brightness", "signal")]
+                  + list(size_class_compute.FC_OF.values())):
         mask = _baseline_rows(frame, baseline, value)
         frame[f"_base_tp_{value}"] = _at_baseline(frame, mask, "timepoint")
         frame[f"_base_state_{value}"] = _at_baseline(frame, mask, "state")
@@ -318,6 +319,11 @@ def site_metrics(data: NanowellData, baseline: str = EARLIEST, gate=None, focus=
     for ch in data.channels:
         frame[f"brightness_fc_{ch}"] = _ratio(frame[f"brightness_{ch}"], base[f"brightness_{ch}"]).where(ok)
         frame[f"signal_fc_{ch}"] = _ratio(frame[f"signal_{ch}"], base[f"signal_{ch}"]).where(ok)
+    # Each size class's count, and their ratio, over the same Baseline as the count's fold change: "T cells grew
+    # threefold" as one number per nanowell. Undefined where either timepoint's value is, or the baseline is zero
+    # (``exclusion_reason`` says which).
+    for fc, value in size_class_compute.FC_OF.items():
+        frame[fc] = _ratio(frame[value], base[value]).where(ok)
     occupancy = pd.Series(pd.NA, index=frame.index, dtype="object")
     occupancy[n0.notna()] = np.where(n0[n0.notna()] >= 3, "3+", n0[n0.notna()].astype(int).astype(str))
     frame["occupancy_class"] = occupancy
@@ -415,6 +421,7 @@ def metric_kinds(channels) -> dict:
     # The size-class metrics are measurements at a timepoint, undefined wherever the count is and for reasons of
     # their own beyond it (``size_class_compute.exclusion_reason``).
     kinds.update({column: ("value", "n") for column in size_class_compute.COLUMNS})
+    kinds.update({fc: ("fc", value) for fc, value in size_class_compute.FC_OF.items()})
     for ch in channels:
         kinds[f"brightness_{ch}"] = ("value", f"brightness_{ch}")
         kinds[f"signal_{ch}"] = ("value", f"signal_{ch}")
@@ -432,6 +439,11 @@ def _value_reason(frame: pd.DataFrame, value: str) -> pd.Series:
         return pd.Series("no confluence", index=frame.index)
     if value.startswith("brightness_"):
         return pd.Series(np.where(frame["n"].eq(0), "no cells", "no fluorescence"), index=frame.index)
+    if value in size_class_compute.COLUMNS:
+        # A size metric's own reason (no rule, cells not read, an empty second class, …), the count's first.
+        state = pd.Series("", index=frame.index, dtype=object)
+        state[frame["n"].isna()] = "no count"
+        return size_class_compute.exclusion_reason(frame, value, state)
     return pd.Series("no fluorescence", index=frame.index)
 
 
@@ -484,11 +496,22 @@ def exclusion_reason(metrics: pd.DataFrame, metric: str, channels=()) -> pd.Seri
         if value == "n":
             out[pending & metrics["n"].gt(0)] = "seeded later"
             out[pending & ~metrics["n"].gt(0)] = "empty at baseline"
-        elif value == "c":
-            out[pending] = "no confluence at baseline"
         else:
-            out[pending] = "no signal above background at baseline"
+            out[pending] = zero_baseline_reason(value)
     return out
+
+
+def zero_baseline_reason(value: str) -> str:
+    """Why a fold change of the measurement *value* is undefined when its baseline is zero (or, for a signal, not
+    above background) — every value but the count, whose two cases (``seeded later`` / ``empty at baseline``) depend
+    on the row. One sentence per value, shared with ``moving_compute``'s averaged baseline."""
+    if value == "c":
+        return "no confluence at baseline"
+    if value == size_class_compute.RATIO_COLUMN:
+        return "size ratio zero at baseline"
+    if value in size_class_compute.COUNT_COLUMNS:
+        return "size class empty at baseline"
+    return "no signal above background at baseline"
 
 
 def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
@@ -501,7 +524,7 @@ def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
                + ["baseline_timepoint", "baseline_state", "occupancy_class", "count_fc", "seeded_later",
                   "log2_count_fc", "confluence_fc"]
                + [c for ch in channels for c in (f"brightness_fc_{ch}", f"signal_fc_{ch}")]
-               + ["growth_rate", *size_class_compute.COLUMNS])
+               + ["growth_rate", *size_class_compute.ALL_COLUMNS])
     out = metrics.reindex(columns=columns)
     out["n_cells"] = metrics["n"]
     out["confluence"] = metrics["c"]

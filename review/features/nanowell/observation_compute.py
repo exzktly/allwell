@@ -47,10 +47,10 @@ def _metric_specs(channels, modes=(), sizes=None) -> tuple[ObservationMetric, ..
     # A name a user's label would give a size metric that another metric already has ("Cell" → "Cell count") keeps
     # its placeholder name: the Image Table's ``NW: <label>`` tokens resolve by name, and two metrics of one name
     # would resolve to whichever came first.
-    taken = {metric_label(k, None, modes).lower() for k in METRICS if k not in size_class_compute.COLUMNS}
+    taken = {metric_label(k, None, modes).lower() for k in METRICS if k not in size_class_compute.ALL_COLUMNS}
     for key in METRICS:
         label, needs_channel = metric_label(key, None, modes, sizes), METRICS[key][1]
-        if key in size_class_compute.COLUMNS and label.lower() in taken:
+        if key in size_class_compute.ALL_COLUMNS and label.lower() in taken:
             label = metric_label(key, None, modes)
         if key == "occupancy_class":
             continue                              # a category ("0", "1", "2", "3+"), not a number to plot

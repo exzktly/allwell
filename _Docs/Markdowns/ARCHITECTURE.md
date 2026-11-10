@@ -12954,13 +12954,19 @@ it. The light `set_size_classes` path re-runs `apply_population_to_cache` and in
 redrawing, because the shares move even though no verdict does. There is deliberately no ratio channel: a ratio of
 two class counts is not a mean of any per-cell value.
 
-**The per-nanowell class counts ignore it.** `nanowell.controller.gate_tally` hands `cell_gate_compute.tally` a
-fourth element per well: the inclusion with `Population_Pass` also left out, which `size_class_compute.well_counts`
-reads. Restricting the plots to one class therefore never empties the other class's count. Cell Gating's area and
-fluorescence curves read only `QC_Pass` / `Crop_Pass` / `FOV_Pass` (`cell_gating.controller._VALIDITY_COLUMNS`), so
-they keep showing both classes. `tests/test_size_class_population.py` drives the band's picker in a minimal shell
-and reads the kept nucleus ids, the aggregate's `n_total` and the footer, and pins the full-path rule edit and the
-tally's fourth element.
+**The nanowell metrics ignore it.** `nanowell.controller.gate_tally` leaves `Population_Pass` out of the inclusion it
+tallies, beside the field and nanowell-focus layers. A nanowell's count, brightness and per-class counts are
+therefore of every kept cell. Each class has metrics of its own on the page: its count, the ratio, the share and
+their fold changes (`size_class_compute.ALL_COLUMNS`). The other design — a count that follows the population while
+the class counts do not — was measured and refused every size metric. The count had lost one class while the class
+counts had not, so the classes "exceeded the count". It would also have made *Cell count* silently mean one class.
+The band hides the picker under *Observations: Nanowells* (`population_band._refresh`), so no nanowell figure shows
+it. Cell Gating's area and fluorescence curves read only `QC_Pass` / `Crop_Pass` / `FOV_Pass`
+(`cell_gating.controller._VALIDITY_COLUMNS`), so they keep showing both classes.
+`tests/test_size_class_population.py` drives the band's picker in a minimal shell and reads the kept nucleus ids,
+the aggregate's `n_total` and the footer, and pins the full-path rule edit.
+`tests/test_nanowell_size_fold_changes.py::test_the_population_switch_leaves_the_nanowell_metrics_…` measures
+the nanowell side on a dataset loaded in a minimal shell.
 
 **The fixed cohort** (`distribution_compute.fixed_cohort`, `NanowellState.cohort`, the *Fixed cohort* box on
 *Distribution* and *Trajectories*). Off, the median at each timepoint is over whichever nanowells could be

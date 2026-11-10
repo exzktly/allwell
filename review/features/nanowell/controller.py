@@ -547,11 +547,14 @@ def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True,
             # nanowell focus layer is left out too: the cells it leaves out are those of a nanowell-timepoint this
             # page already draws as an ``out_of_focus`` gap, so counting them again here would only make the note
             # say Cell Gating left them out, which it did not.
-            skipped = (*cg.FIELD_LAYERS, rfc.NW_FOCUS_PASS_COLUMN, *(() if scatter_gates else ("Gate_Pass",)))
-            # The size-class counts read the same inclusion without the Population layer: restricting the analysis
-            # to one class must not empty the other class's count, which is the comparison the classes exist for.
-            per_well.append((well, frame, df_included_mask(frame, except_layers=skipped).to_numpy(),
-                             df_included_mask(frame, except_layers=(*skipped, POPULATION_COLUMN)).to_numpy()))
+            # The Population layer (one size class, chosen for the cell plots) is left out too: a nanowell's count,
+            # its brightness and its per-class counts are of every kept cell, and the page offers each class's
+            # count, ratio and fold changes as metrics of their own (``size_class_compute``). Counting the classes
+            # over a count that had already lost one class would refuse every size metric as "classes exceed the
+            # count", and a count that silently meant "T cells" would read as every cell's.
+            skipped = (*cg.FIELD_LAYERS, rfc.NW_FOCUS_PASS_COLUMN, POPULATION_COLUMN,
+                       *(() if scatter_gates else ("Gate_Pass",)))
+            per_well.append((well, frame, df_included_mask(frame, except_layers=skipped).to_numpy()))
     if on_well is not None:
         on_well(total, total)
     return cg.tally(per_well, unread, fields, sizes)
@@ -1158,7 +1161,7 @@ def _sizes_of(gate, sizes):
 def _with_size_note(note: str, metrics, wells, metric: str, sizes) -> str:
     """*note* with, for a size metric, the sentence on the ranges and the cells in neither
     (``size_class_compute.note``) over the drawn wells."""
-    if metric not in scc.COLUMNS or metrics is None or "well" not in metrics.columns:
+    if metric not in scc.ALL_COLUMNS or metrics is None or "well" not in metrics.columns:
         return note
     return " ".join(filter(None, [note, scc.note(metrics[metrics["well"].isin(wells)], sizes, metric)]))
 

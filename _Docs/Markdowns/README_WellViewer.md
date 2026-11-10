@@ -4273,9 +4273,12 @@ any one value per cell. Per well it follows from the two shares. On a nanowell
 dataset, the Nanowells page offers it per nanowell.
 
 The control is shown only while both classes are complete, and only on a plot
-drawing cells. On a nanowell dataset each nanowell's per-class counts still see
-both classes whichever population is picked. Restricting the plots to T cells
-leaves the DC count intact.
+drawing cells. It changes cell plots only. On a nanowell dataset the Nanowells
+page and the *Observations: Nanowells* plots are always of every kept cell. There
+each class has metrics of its own: *T cells count*, *DCs count*, the *T cells :
+DCs ratio*, the share, and the fold change of each count and of the ratio over
+the page's Baseline. Under *Observations: Nanowells* the Population control is
+not shown.
 
 #### Plate-map well picker
 
@@ -6465,6 +6468,14 @@ use them.
   its nanowells, has none of the five, and the footer says why. *Save nanowell data…* writes the columns `size_1`, `size_2`,
   `size_unclassified`, `size_ratio` and `size_1_share` with a `size_classes` column naming the ranges. Until
   the classes are set, these metrics are empty and say so.
+
+  Three fold changes follow them, over the same **Baseline** as *Count fold change*: *T cells count fold change*,
+  *DCs count fold change* and *T cells : DCs ratio fold change*. Each is the value at a timepoint divided by the
+  same nanowell's value at the baseline. A class with no cell at baseline has no count fold change, and a ratio
+  of zero at baseline has no ratio fold change. The footer counts each such nanowell with that reason, as it does
+  for *Count fold change*. Like the five above, each well's value is the mean over its nanowells, and the Moving
+  average and its baseline window apply to them as to the other fold changes. The export writes them as
+  `size_1_fc`, `size_2_fc` and `size_ratio_fc`.
 
 **Cell fluorescence and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
 but they answer different questions. Both are measured above the same background, the one the run was set up

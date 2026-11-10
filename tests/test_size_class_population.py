@@ -176,18 +176,6 @@ def test_moving_a_class_s_range_while_it_is_chosen_moves_the_cells_in_every_coun
     assert _kept_ids(shell) == [1, 2, 3]
 
 
-def test_the_per_nanowell_class_counts_read_both_classes_whatever_the_population():
-    from review.features.nanowell import cell_gate_compute as cg
-
-    frame = pd.DataFrame({"well": ["A01"] * 3, "timepoint": ["t0"] * 3, "nw_q": [0, 0, 0], "nw_r": [0, 0, 0],
-                          "area_px": [210.0, 250.0, 260.0]})
-    only_small = np.array([True, False, False])                # the Population layer leaves the Large cells out
-    every = np.array([True, True, True])
-    tally = cg.tally([("A01", frame, only_small, every)], sizes=RULE)
-    row = tally.classes.iloc[0]
-    assert (int(row["size_1"]), int(row["size_2"])) == (2, 1)
-
-
 # ── each class's share, as a plottable per-cell value ────────────────────────
 
 

@@ -60,7 +60,7 @@ import numpy as np
 import pandas as pd
 
 from review.features.nanowell.collect import MEASURABLE as _MEASURABLE
-from review.features.nanowell.series_compute import EARLIEST, FIRST_MEASURABLE
+from review.features.nanowell.series_compute import EARLIEST, FIRST_MEASURABLE, zero_baseline_reason
 
 #: The largest window the page offers. The longest series seen so far are about a dozen timepoints.
 MAX_WINDOW = 9
@@ -120,6 +120,10 @@ def base_value(column: str) -> str | None:
         return "n"
     if column == "confluence_fc":
         return "c"
+    from review.features.nanowell.size_class_compute import FC_OF
+
+    if column in FC_OF:                                 # a size class's count, or the ratio of the two
+        return FC_OF[column]
     for kind in ("brightness", "signal"):
         prefix = f"{kind}_fc_"
         if column.startswith(prefix) and len(column) > len(prefix):
@@ -306,10 +310,8 @@ def rebase(frame: pd.DataFrame, column: str, reasons: pd.Series, baseline_window
     if value == "n":
         out[at_zero & measured.gt(0)] = "seeded later"
         out[at_zero & ~measured.gt(0)] = "empty at baseline"
-    elif value == "c":
-        out[at_zero] = "no confluence at baseline"
     else:
-        out[at_zero] = "no signal above background at baseline"
+        out[at_zero] = zero_baseline_reason(value)
     frame = frame.copy()
     frame[column] = new
     return frame, out

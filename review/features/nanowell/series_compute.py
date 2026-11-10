@@ -489,9 +489,13 @@ def exclusion_reason(metrics: pd.DataFrame, metric: str, channels=()) -> pd.Seri
         base_bad = pending & ~base_state.isin(MEASURABLE)
         out[base_bad] = "baseline " + base_state.fillna(_NEVER).astype(str)[base_bad]
         pending &= ~base_bad
-        base_value = _at_baseline(metrics, metrics["timepoint"] == metrics[f"_base_tp_{value}"], value)
+        at_base = metrics["timepoint"] == metrics[f"_base_tp_{value}"]
+        base_value = _at_baseline(metrics, at_base, value)
         missing = pending & base_value.isna()
-        out[missing] = "baseline: " + _value_reason(metrics, value)[missing]
+        # Why the value is missing *at the baseline row* — the row at t has its value, so its own reason is empty
+        # (a size ratio defined now, undefined at baseline for an empty second class, read "baseline: " before).
+        base_why = _at_baseline(metrics.assign(_why=_value_reason(metrics, value)), at_base, "_why")
+        out[missing] = "baseline: " + base_why.fillna("").replace("", "no value")[missing].astype(str)
         pending &= ~missing
         if value == "n":
             out[pending & metrics["n"].gt(0)] = "seeded later"
@@ -524,8 +528,13 @@ def long_format(metrics: pd.DataFrame, channels) -> pd.DataFrame:
                + ["baseline_timepoint", "baseline_state", "occupancy_class", "count_fc", "seeded_later",
                   "log2_count_fc", "confluence_fc"]
                + [c for ch in channels for c in (f"brightness_fc_{ch}", f"signal_fc_{ch}")]
-               + ["growth_rate", *size_class_compute.ALL_COLUMNS])
+               + ["growth_rate", *size_class_compute.ALL_COLUMNS]
+               + [f"{fc}_baseline_timepoint" for fc in size_class_compute.FC_COLUMNS])
     out = metrics.reindex(columns=columns)
     out["n_cells"] = metrics["n"]
     out["confluence"] = metrics["c"]
+    # Each size fold change's own baseline timepoint: under First measurable a class, or the ratio, can first exist
+    # later than the count, so ``baseline_timepoint`` (the count's) would name the wrong one.
+    for fc, value in size_class_compute.FC_OF.items():
+        out[f"{fc}_baseline_timepoint"] = metrics.get(f"_base_tp_{value}")
     return out

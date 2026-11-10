@@ -3601,6 +3601,8 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
             # Batch has always drawn the CDF threshold line and derives its
             # x-range from the data (cdf_xrange=None).
             show_threshold_line=True, cdf_xrange=None,
+            # A size-class ratio has no CDF; the panel says why rather than staying blank.
+            empty_cdf_msg=_class_ratio_cdf_msg(_val_col),
             draggable_legends=False,
             # Properties → Overlays, the same overlay the on-tab Line figure
             # draws. The batch twin of an on-tab figure is exactly where a
@@ -3618,3 +3620,10 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         finish_cell_figure(self._ctx, fig, ax_frac, ax_n, _val_col, grp.wells)
         return fig
 
+
+def _class_ratio_cdf_msg(val_col) -> str | None:
+    """The batch Line figure's CDF-panel sentence for a size-class ratio (``size_classes.class_ratio_not_per_cell``),
+    which has no per-cell values to draw; ``None`` — the panel's usual nothing — for any other column."""
+    from review.domain.size_classes import class_ratio_not_per_cell, is_class_ratio_column
+
+    return class_ratio_not_per_cell(val_col) if is_class_ratio_column(val_col) else None

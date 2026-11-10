@@ -3325,7 +3325,8 @@ choice applies once, when the menu closes.
   run's pixel size, so you can check it against what you expect your cells to
   measure. Leave a gap between the ranges for sizes that could be either: a
   cell in neither range is counted as *unclassified*, never forced into one.
-  The ranges may not overlap, both labels are needed, and the line under the
+  The ranges may not overlap, both labels are needed (and may not contain
+  `::`, which the ratio's name joins them with), and the line under the
   rows says what is missing until the rule is complete. Only the cells this tab
   keeps are classified, so the debris gate and every other filter apply first;
   the line says when the debris gate's own Area bounds cut into a range, and
@@ -4266,8 +4267,9 @@ outside it, blank for a cell with no recorded area. A well's mean of it is
 therefore the class's share of the well's kept cells. It can be plotted like
 any other per-cell value, over time, per group, on the heat map and as a fold
 change. Renaming a class renames its share, and clearing the classes removes
-both. A share is of the cells the plot keeps: with **Population** set to one
-class, that class's share is 1 everywhere, so compare shares under *All cells*.
+both. A share is of the cells the plot keeps, so it is offered under
+**Population: All cells** only — with one class left out, that class's share
+would be 1 everywhere.
 
 **The ratio of the two classes.** The same section offers **T cells : DCs
 ratio**. It is a count of one class over the other, taken over exactly the cells
@@ -4281,11 +4283,16 @@ or the control. Cells in neither class are on neither side. Where a well or fiel
 has no DC there is no ratio — never zero or infinity — and the point is left out.
 The *Fraction above threshold* of the ratio is the first class's share, and its
 *Events* the first class's count, since a ratio has no cutoff. On the Statistics
-page its *Mean (all cells)* is the ratio and there is no *Median*. Distribution,
-the per-cell Scatter and Spatial draw one value per cell, so they do not offer
-the ratio, and Distribution says so if it is the channel in force. With
-**Population** set to one class, the other class is left out, so the ratio has
-no denominator. Compare ratios under *All cells*.
+page its *Mean (all cells)* is the ratio and there is no *Median*.
+
+Views that draw one value per cell have no ratio to draw, and say so rather than
+plotting its 1s and 0s: Distribution (and its *Export CSV*), Line Graphs'
+cumulative-distribution panel, Bar Plots' *Violin* and *Beeswarm*, and the
+Statistics page's KS test. Bar Plots' *Show: All points* draws the bars without
+dots. The per-cell Scatter and Spatial do not list it. Like the shares, the
+ratio is offered under **Population: All cells** only, because with one class
+left out it has no denominator. Choosing one class while a plot shows a share or
+the ratio moves that plot to the first fluorescence channel.
 
 The control is shown only while both classes are complete, and only on a plot
 drawing cells. It changes cell plots only. On a nanowell dataset the Nanowells
@@ -6490,7 +6497,11 @@ use them.
   of zero at baseline has no ratio fold change. The footer counts each such nanowell with that reason, as it does
   for *Count fold change*. Like the five above, each well's value is the mean over its nanowells, and the Moving
   average and its baseline window apply to them as to the other fold changes. The export writes them as
-  `size_1_fc`, `size_2_fc` and `size_ratio_fc`.
+  `size_1_fc`, `size_2_fc` and `size_ratio_fc`. Each has its own baseline timepoint column
+  (`size_1_fc_baseline_timepoint`, …). Under *First measurable* the ratio's baseline is the first timepoint at
+  which it exists, which can be later than the count's `baseline_timepoint`. When a fold change has no value
+  because its baseline does not, the reason given is the baseline's own, for example *baseline: second class
+  empty*.
 
 **Cell fluorescence and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
 but they answer different questions. Both are measured above the same background, the one the run was set up

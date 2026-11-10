@@ -12945,7 +12945,7 @@ class: `size_classes.share_column(label)`, which is `shape_class_share::<label>`
 outside it, and NaN for a row with no area. It drops share columns the rule no longer defines, so a renamed class
 takes its column with it. `population_input_columns` declares the area columns while the rule is complete, so a
 narrow read of an unheld well computes the shares too. The `shape_` prefix is what makes them channels:
-`channel_state_controller.sync_share_channels`, called after every QC edit and at load through `_share_channels`,
+`channel_state_controller.sync_class_channels`, called after every QC edit and at load through `_class_channels`,
 lists them after the detected shape features. `is_shape_column` exempts them from the fluorescence gate and the ON
 cutoff, as it does every morphology value. Every place that names a shape column goes through
 `size_classes.shape_column_label`, which reads *T cells share* off the column name. A well's mean of the column is
@@ -12953,10 +12953,10 @@ the class's share of its kept cells, so Value plots, the heat map's *Mean (all c
 it. The light `set_size_classes` path re-runs `apply_population_to_cache` and invalidates the stats cache before
 redrawing, because the shares move even though no verdict does.
 
-**The ratio is a channel whose reduction is not a mean.** `size_classes.ratio_column(rule)` is
+**The ratio is a channel whose reduction is not a mean.** `size_classes.class_ratio_column(rule)` is
 `shape_class_ratio::<label 1>::<label 2>`, written by the same projector: 1 in the first class, 0 in the second, NaN
 for any other row. A ratio of two counts is not the mean of any per-cell value, so every reduction of a set of cells
-to one number branches on `size_classes.is_ratio_column` and counts the 1s over the 0s (`ratio_of_counts`, NaN with
+to one number branches on `size_classes.is_class_ratio_column` and counts the 1s over the 0s (`class_ratio_of_counts`, NaN with
 no 0). `data_loading._aggregate_timepoint` takes `counts_ratio` and hands the timepoint to `_ratio_timepoint`. There
 `n_above` is the first class's count and `n_total` both classes', the fraction is the first class's share, and the
 spread is across each field's own ratio under per-field spread (NaN otherwise). The flag reaches it from every caller
@@ -12965,10 +12965,45 @@ count over the other for the whole group — and the per-FOV replicates of `grou
 `well_population.build_population` (`WellPopulation.counts_ratio`, read by `aggregate`, `_build_extras` and
 `ExtraTable`), and the Bar plot's pooled path (`barplot/collect`). The stats extras (`stats_compute._extra_at`)
 answer the ratio of all cells as *Mean (all cells)* and no median. Fold change needs nothing: `fold_change` divides
-`AggPoint` means, which are already ratios. Views that draw one value per cell leave it out. The per-cell Scatter's
-axis list and Spatial's metrics (`spatial.collect.available_metric_columns`) drop it. Distribution draws
-`size_classes.ratio_not_per_cell`'s sentence instead when it is the channel in force. Multivariate and the Cell
-Browser list only catalogue shape columns (`detect_shape_features`), so they never see it.
+`AggPoint` means, which are already ratios. The `class_` in every name keeps it apart from `ratio_models`' channel
+ratios (`ratio:<name>`, `is_ratio_key`), which are a per-cell quotient of two channels and take the ordinary mean.
+`size_classes.LABEL_SEPARATOR` (`::`) joins the two labels in the column. `SizeClassRule.problem` refuses a label
+containing it, so the column always reads back as exactly two labels.
+
+Every view that draws one value per cell declines it and, where the user can reach it, says why in
+`size_classes.class_ratio_not_per_cell`'s words:
+- Distribution draws the sentence in place of the plot, and its CSV export (`export.service.export_distribution_data`)
+  refuses with it.
+- Line Graphs' CDF panel collects no values for it (`lineplot.controller.collect_line_series`; Batch Export's
+  `_line_series_runner`) and shows the sentence (`_empty_cdf_msg`; `batch_export.base_panel._class_ratio_cdf_msg`).
+- Bar Plots' Violin and Beeswarm draw it (`barplot.renderer._class_ratio_has_no_cells`), while *Show: All points*
+  keeps the bars without dots.
+- The Statistics KS test writes it and `compute_pairwise` returns no bracket.
+- The per-cell Scatter's axis list and Spatial's metrics (`spatial.collect.available_metric_columns`) do not list it.
+- Multivariate and the Cell Browser list only catalogue shape columns (`detect_shape_features`), so they never see it.
+
+**The class channels need both classes.** `channel_state_controller._class_channels` offers the shares and the ratio
+only while no one-class population is chosen. With a class left out of every aggregate, a share would read 1 and the
+ratio would have no denominator. `sync_class_channels` moves a plot drawing one of them to the first fluorescence
+channel when a population takes it away, so no plot is left drawing NaN with nothing to say why.
+
+**The size metrics' fold changes.** `size_class_compute.FC_OF` maps `size_1_fc`, `size_2_fc` and `size_ratio_fc` to
+the size metric each is of. `series_compute.site_metrics` adds those values to the baseline loop it runs for `n` and
+`c` (`_baseline_rows`, so *First measurable* gives each value its own first timepoint). It then takes each fold
+change with the `count_fc` rule, `_ratio`, which is NaN unless the baseline is above zero.
+`size_class_compute.ALL_COLUMNS` (the measurements and these) is the roster the page joins them through:
+- the metric menu (`distribution_compute.METRICS` via `LABELS`) and `BASELINE_METRICS`;
+- `state.METRIC_KEYS` and the well statistic (`summary_compute.MEAN_METRICS`: mean over nanowells, like the other
+  size metrics);
+- the plots' Nanowells observations (`observation_compute`) and the size note (`controller._with_size_note`);
+- `moving_compute.base_value`, held to `metric_kinds` by a test;
+- the long export, with one `<fc>_baseline_timepoint` column each, since under *First measurable* the ratio's
+  baseline can be later than the count's.
+
+`exclusion_reason` gives a size value's own reason through `_value_reason` (`size_class_compute.exclusion_reason`).
+A baseline value that is missing is explained by the **baseline row's** reason, not the row's own — the row at t
+has its value, so its reason is empty. `zero_baseline_reason`, shared with `moving_compute`'s averaged baseline,
+names a zero baseline: *size class empty at baseline*, *size ratio zero at baseline*.
 
 **The nanowell metrics ignore it.** `nanowell.controller.gate_tally` leaves `Population_Pass` out of the inclusion it
 tallies, beside the field and nanowell-focus layers. A nanowell's count, brightness and per-class counts are

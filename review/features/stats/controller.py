@@ -20,6 +20,7 @@ from review.features.stats._report import (
     dunnett_lines, effect_size_text, omnibus_lines, paired_lines, two_way_lines,
 )
 from review.domain.stats_compute import group_replicate_stats
+from review.domain.size_classes import class_ratio_not_per_cell, is_class_ratio_column
 from domain.tp_match import tp_close_mask
 
 
@@ -349,6 +350,8 @@ def compute_pairwise(ctx, *, groups, target_t, val_col, statistic, threshold, te
     is_ks = test.startswith("KS")
     if is_ks and (len(groups) != 2 or any(len(g.wells) != 1 for g in groups)):
         return []
+    if is_ks and is_class_ratio_column(val_col):
+        return []                    # no per-cell values to compare (``size_classes.class_ratio_not_per_cell``)
     try:
         import scipy.stats  # noqa: F401  (availability probe)
     except ImportError:
@@ -737,6 +740,10 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     use_fov = bool(app._use_fov_spread_active())
     channel_lbl = _channel_label_for_val_col(val_col)
     stat_lbl = _STAT_LABELS.get(statistic, statistic)
+    if is_ks and is_class_ratio_column(val_col):
+        # A KS test compares two distributions of per-cell values, and a size-class ratio has none.
+        app._stats_write_result(class_ratio_not_per_cell(val_col))
+        return
 
     group_vals: list[tuple[str, list[float]]] = []
     for g in groups:

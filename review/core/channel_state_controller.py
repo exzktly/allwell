@@ -150,7 +150,7 @@ def _recalculate_threshold(ctx) -> None:
     )
     # Populate the available shape-feature columns before the dropdown is built
     # so they appear in the "Shape Features" section.
-    ctx.state.channel.shape_features = detect_shape_features(sample_df) + _share_channels(ctx)
+    ctx.state.channel.shape_features = detect_shape_features(sample_df) + _class_channels(ctx)
 
     # The smFISH channel set has to be current *before* update_channel_selector
     # runs: that call ends in refresh_metric_combo_for_channel, which greys out
@@ -349,28 +349,39 @@ def refresh_metric_combo_for_channel(ctx) -> None:
 # ── Channel-selector / dropdown sync ────────────────────────────────────────
 
 
-def _share_channels(ctx) -> list[str]:
+def _class_channels(ctx) -> list[str]:
     """The size classes' share and ratio columns (``size_classes.class_columns``) while Cell Gating's rule is
-    complete."""
+    complete and the analysis is not restricted to one class. Under a Population of one class the other class is
+    out of every aggregate, so a share would read 1 (or 0) everywhere and the ratio would have nothing to divide
+    by: neither is offered then, and the figure footer says so (``population_band.population_line``)."""
     from review.core.population_band import qc_params
     from review.domain.size_classes import SizeClassRule, class_columns
 
     params = qc_params(ctx)
     rule = getattr(params, "size_classes", None)
-    return class_columns(rule) if isinstance(rule, SizeClassRule) else []
+    if not isinstance(rule, SizeClassRule) or params.population_rule() is not None:
+        return []
+    return class_columns(rule)
 
 
-def sync_share_channels(ctx) -> None:
-    """List each size class's share among the shape-feature channels, and only the current rule's — called after
-    a QC edit, since naming, renaming or clearing a class changes the list — and refresh the channel dropdowns when
-    it moved."""
+def sync_class_channels(ctx) -> None:
+    """List each size class's share and the classes' ratio among the shape-feature channels — the current rule's
+    only, and none under a one-class Population (:func:`_class_channels`) — and refresh the channel dropdowns when
+    the list moved. Called after every QC edit, since naming, renaming or clearing a class, or choosing a population,
+    changes it. A plot channel that left the list is replaced by the first fluorescence channel, so no plot goes on
+    drawing a column the list no longer offers."""
     from review.domain.size_classes import is_class_column
 
     current = list(ctx.state.channel.shape_features or [])
-    wanted = [c for c in current if not is_class_column(c)] + _share_channels(ctx)
-    if wanted != current:
-        ctx.state.channel.shape_features = wanted
-        update_channel_selector(ctx)
+    wanted = [c for c in current if not is_class_column(c)] + _class_channels(ctx)
+    if wanted == current:
+        return
+    ctx.state.channel.shape_features = wanted
+    update_channel_selector(ctx)
+    active = ctx.state.channel.active_channel
+    channels = list(ctx.state.channel.fluor_channels or [])
+    if is_class_column(active) and active not in wanted and channels:
+        set_active_channel(ctx, default_fluor_channel(channels, ctx.state.dataset.pipeline_info))
 
 
 def update_channel_selector(ctx) -> None:

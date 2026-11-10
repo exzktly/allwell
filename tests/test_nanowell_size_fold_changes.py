@@ -26,7 +26,7 @@ T, DC = 50.0, 400.0
 
 #: A01's cells per nanowell, (T cells, DCs) at 0h and 24h — totals match ``nanowell_dataset.COUNTS["A01"]``.
 CLASSES = {
-    (0, 0): {"0h": (1, 0), "24h": (3, 0)},     # T ×3; no DC at either: DC fold change and ratio undefined
+    (0, 0): {"0h": (1, 0), "24h": (2, 1)},     # T ×2; no DC at baseline: the ratio is defined at 24h, not at 0h
     (1, 0): {"0h": (1, 1), "24h": (0, 2)},     # count flat (2 → 2) while T falls to 0 and DC doubles
     (0, 1): {"0h": (0, 0), "24h": (0, 0)},     # empty throughout
     (-1, 1): {"0h": (2, 2), "24h": (3, 1)},    # ratio 1 → 3
@@ -60,7 +60,7 @@ def _at(metrics, column, site):
 
 
 def test_each_class_s_fold_change_is_its_own_count_over_its_baseline_count(metrics):
-    assert _at(metrics, "size_1_fc", (0, 0)) == 3.0
+    assert _at(metrics, "size_1_fc", (0, 0)) == 2.0
     assert _at(metrics, "size_1_fc", (1, 0)) == 0.0               # T fell to none: a measured zero
     assert _at(metrics, "size_2_fc", (1, 0)) == 2.0
     assert _at(metrics, "count_fc", (1, 0)) == 1.0                # while the count itself did not move
@@ -88,8 +88,16 @@ def test_undefined_fold_changes_say_why(metrics):
     assert why("size_2_fc", (0, 0)) == "size class empty at baseline"
     assert np.isnan(_at(metrics, "size_1_fc", (-1, 0)))
     assert why("size_1_fc", (-1, 0)) == "size class empty at baseline"
+    # The ratio is 2 at 24h and undefined at 0h (no DC): the reason is the *baseline* row's, which the row at 24h
+    # does not have — it read a bare "baseline: " once.
+    assert _at(metrics, "size_ratio", (0, 0)) == 2.0
     assert np.isnan(_at(metrics, "size_ratio_fc", (0, 0)))
-    assert why("size_ratio_fc", (0, 0)) == scc.SECOND_EMPTY        # no DC at 24h: the ratio itself is undefined
+    assert why("size_ratio_fc", (0, 0)) == "baseline: " + scc.SECOND_EMPTY
+    assert np.isnan(_at(metrics, "size_ratio_fc", (-1, 0)))
+    assert why("size_ratio_fc", (-1, 0)) == scc.SECOND_EMPTY       # no DC at 24h: the ratio itself is undefined
+    from review.features.nanowell.distribution_compute import reason_label
+
+    assert reason_label(why("size_ratio_fc", (0, 0))) == "baseline: second class empty"
 
 
 def test_the_page_offers_them_by_the_user_s_labels_and_greys_nothing_it_needs():
@@ -156,3 +164,23 @@ def test_the_population_switch_leaves_the_nanowell_metrics_of_every_cell_and_the
     assert (at.loc[(-1, 1), "size_1"], at.loc[(-1, 1), "size_2"]) == (3.0, 1.0)
     assert at.loc[(-1, 1), "size_1_fc"] == 1.5                      # T 2 → 3: the per-class answer
     assert at.loc[(1, 0), "size_1_fc"] == 0.0                       # T 1 → 0
+
+
+def test_the_export_names_each_size_fold_change_s_own_baseline_timepoint(tmp_path):
+    """Under First measurable the ratio's baseline is the first timepoint it exists at, which can be later than the
+    count's; the export names each fold change's own, not only the count's ``baseline_timepoint``."""
+    from review.features.nanowell.collect import load_nanowell_data
+    from review.features.nanowell.series_compute import long_format, site_metrics
+    from tests.fixtures.nanowell_dataset import build_nanowell_dataset
+
+    root = build_nanowell_dataset(tmp_path / "nw")
+    data = load_nanowell_data(root / "out")
+    rows = [("A01", tp, q, r, T) for (q, r), by in CLASSES.items() for tp, (t, dc) in by.items() for _ in range(t)]
+    rows += [("A01", tp, q, r, DC) for (q, r), by in CLASSES.items() for tp, (t, dc) in by.items() for _ in range(dc)]
+    cells = pd.DataFrame(rows, columns=["well", "timepoint", "nw_q", "nw_r", "area_px"])
+    gate = cg.tally([("A01", cells, np.ones(len(cells), dtype=bool))], sizes=RULE)
+    out = long_format(site_metrics(data, "first_measurable", gate=gate), data.channels)
+    site = out[(out["well"] == "A01") & (out["nw_q"] == 0) & (out["nw_r"] == 0) & (out["timepoint"] == "24h")].iloc[0]
+    assert site["baseline_timepoint"] == "0h"                       # the count exists at 0h
+    assert site["size_ratio_fc_baseline_timepoint"] == "24h"        # the ratio first exists at 24h (no DC at 0h)
+    assert site["size_1_fc_baseline_timepoint"] == "0h"

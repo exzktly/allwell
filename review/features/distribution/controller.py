@@ -379,12 +379,12 @@ def redraw_distribution(ctx) -> None:
 
     tp_filter = tp_h if math.isfinite(tp_h) else None
     nanowell = _nw_dist.nanowell_groups(ctx, tp_filter)
-    from review.domain.size_classes import is_ratio_column, ratio_not_per_cell
+    from review.domain.size_classes import is_class_ratio_column, class_ratio_not_per_cell
 
-    if nanowell is None and is_ratio_column(val_col):
+    if nanowell is None and is_class_ratio_column(val_col):
         # A size-class ratio has no value per cell to draw a distribution of: say so, rather than drawing its 1s
         # and 0s as if they were one.
-        _empty_msg(_setup_axes(ctx, 1)[0], ratio_not_per_cell(val_col))
+        _empty_msg(_setup_axes(ctx, 1)[0], class_ratio_not_per_cell(val_col))
         canvas.draw_idle()
         return
     if nanowell is not None:

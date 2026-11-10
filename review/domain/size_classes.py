@@ -41,6 +41,9 @@ PLACEHOLDERS = ("Size class 1", "Size class 2")
 _PLACEHOLDER_RE = re.compile("|".join(re.escape(p) for p in PLACEHOLDERS))
 #: How many classes the rule has. The model is a tuple so it could hold more; the panel offers two.
 N_CLASSES = 2
+#: What the ratio's column joins the two labels with (:func:`class_ratio_column`); a label may not contain it
+#: (:meth:`SizeClassRule.problem`), so the column always reads back as exactly two labels.
+LABEL_SEPARATOR = "::"
 #: The decimals an area is compared at (:func:`classify`).
 AREA_DECIMALS = 6
 #: The class index of a cell in no class (:func:`classify`).
@@ -110,6 +113,10 @@ class SizeClassRule:
         for k, c in enumerate(self.classes, start=1):
             if not c.label:
                 return f"Class {k} needs a label."
+            if LABEL_SEPARATOR in c.label:
+                # The ratio's column holds both labels joined by it (``class_ratio_column``), so a label containing it
+                # could not be read back as two.
+                return f"{c.label} may not contain “{LABEL_SEPARATOR}”."
             if c.min_area is None and c.max_area is None:
                 return f"{c.label} needs a minimum or a maximum area."
             if c.low > c.high:
@@ -229,37 +236,40 @@ def is_share_column(col) -> bool:
 #: The per-cell column the ratio of the two classes is plotted from: ``shape_class_ratio::<label 1>::<label 2>``, 1
 #: for a cell in the first class, 0 for one in the second, blank for any other. Unlike a share, its plotted value is
 #: **not** a mean of it: every reduction of a set of cells to one number — a timepoint of a well, a field, a pooled
-#: group — counts its 1s over its 0s instead (:func:`ratio_of_counts`), so the value is n(first) / n(second) of
+#: group — counts its 1s over its 0s instead (:func:`class_ratio_of_counts`), so the value is n(first) / n(second) of
 #: exactly the cells the reduction holds. ``data_loading._aggregate_timepoint`` and the stats extras branch on
-#: :func:`is_ratio_column`; a view that draws one value per cell has no ratio to draw and says so.
-RATIO_PREFIX = "shape_class_ratio::"
+#: :func:`is_class_ratio_column`; a view that draws one value per cell has no ratio to draw and says so.
+#: Not to be confused with ``review.domain.ratio_models``' channel ratios (``ratio:<name>``, ``is_ratio_key``): those
+#: are one channel over another *within each cell*, a per-cell value like any other; this is one class's count over the
+#: other's, which no single cell has. Hence the ``class_`` in every name here.
+CLASS_RATIO_PREFIX = "shape_class_ratio::"
 
 
-def ratio_column(rule: SizeClassRule) -> str | None:
+def class_ratio_column(rule: SizeClassRule) -> str | None:
     """The ratio column of a complete *rule*, or ``None``."""
     if not rule.active():
         return None
     a, b = rule.labels
-    return f"{RATIO_PREFIX}{a}::{b}"
+    return f"{CLASS_RATIO_PREFIX}{a}{LABEL_SEPARATOR}{b}"
 
 
-def is_ratio_column(col) -> bool:
-    return isinstance(col, str) and col.startswith(RATIO_PREFIX)
+def is_class_ratio_column(col) -> bool:
+    return isinstance(col, str) and col.startswith(CLASS_RATIO_PREFIX)
 
 
 def is_class_column(col) -> bool:
     """A share or ratio column — a per-cell value derived from the size classes rather than measured."""
-    return is_share_column(col) or is_ratio_column(col)
+    return is_share_column(col) or is_class_ratio_column(col)
 
 
-def ratio_not_per_cell(col: str) -> str:
+def class_ratio_not_per_cell(col: str) -> str:
     """What a view that draws one value per cell says when asked for a ratio column."""
     return (f"{shape_column_label(col)} is one number per set of cells — a well, a field or a group at a timepoint "
-            "— not a value of each cell, so this view, which draws each cell, has nothing to draw. Plot it on Line "
-            "Graphs, Bar Plots, the Heat Map or Response Curves.")
+            "— not a value of each cell, so this view, which draws each cell, has nothing to draw. Plot it as the "
+            "line of Line Graphs or the bars of Bar Plots, on the Heat Map or on Response Curves.")
 
 
-def ratio_of_counts(values) -> float:
+def class_ratio_of_counts(values) -> float:
     """n(1) / n(0) over *values* (a ratio column's 1s and 0s; anything else ignored); NaN with no 0 — a ratio over an
     empty second class is undefined, never infinite, as on the Nanowells page."""
     v = np.asarray(values, dtype=float)
@@ -270,7 +280,7 @@ def ratio_of_counts(values) -> float:
 def class_columns(rule: SizeClassRule) -> list[str]:
     """Every per-cell column a complete *rule* puts in the rows — each class's share, then the ratio — in the order
     the channel list shows them; ``[]`` for an incomplete rule."""
-    ratio = ratio_column(rule)
+    ratio = class_ratio_column(rule)
     return [*share_columns(rule), *([ratio] if ratio else [])]
 
 
@@ -280,8 +290,8 @@ def shape_column_label(col: str) -> str:
     through here, so a class column is never shown as its raw name."""
     if is_share_column(col):
         return f"{col[len(SHARE_PREFIX):]} share"
-    if is_ratio_column(col):
-        a, _sep, b = col[len(RATIO_PREFIX):].partition("::")
+    if is_class_ratio_column(col):
+        a, _sep, b = col[len(CLASS_RATIO_PREFIX):].partition(LABEL_SEPARATOR)
         return f"{a} : {b} ratio"
     from pipeline.shape_features import label_for
 

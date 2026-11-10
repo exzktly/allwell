@@ -1538,6 +1538,21 @@ def _hidden_per_cell_members(ctx) -> frozenset:
     return frozenset(controls.hidden_members())
 
 
+def _class_ratio_has_no_cells(ctx, ax_mean) -> bool:
+    """For a size-class ratio channel, which is one number per set of cells: under Violin or Beeswarm say there are no
+    per-cell values to draw and answer True (the per-cell mode drew its figure); under "Show: All points" answer
+    False, so the bars — which carry the ratio — are drawn without the per-cell dots it cannot have."""
+    from review.domain.size_classes import class_ratio_not_per_cell, is_class_ratio_column
+
+    val_col = ctx.state.channel.active_val_col
+    if not is_class_ratio_column(val_col) or not (ctx.state.bar.violin or ctx.state.bar.swarm):
+        return False
+    follows_theme(ax_mean.text(0.5, 0.5, class_ratio_not_per_cell(val_col), transform=ax_mean.transAxes,
+                               ha="center", va="center", wrap=True, color=tokens_for(ax_mean)[2], fontsize=9),
+                  muted=True)
+    return True
+
+
 def draw_per_cell_bar_mode(
     ctx,
     *,
@@ -1558,6 +1573,8 @@ def draw_per_cell_bar_mode(
     use_per_cell = ctx.state.bar.violin or ctx.state.bar.swarm or show_mode == "all_pts"
     if not use_per_cell:
         return False
+    if _class_ratio_has_no_cells(ctx, ax_mean):
+        return True
     ordered_keys = ctx.runtime.barplot.current_keys()
     plot = ctx.state.plot
     group_mode = getattr(plot, "bar_group_mode", "well")

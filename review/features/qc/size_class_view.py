@@ -171,7 +171,8 @@ def status_text(rule: SizeClassRule, params, pixels: list[float], *, nanowell: b
     population = params.population_label() if callable(getattr(params, "population_label", None)) else ""
     if population:
         said += (f" Every plot is drawn from {population} only (Plotting ▸ Population); the other class and the cells "
-                 "in neither are left out of every number.")
+                 "in neither are left out of every number, so the class shares and the ratio, which need both "
+                 "classes, are offered under All cells only.")
     else:
         said += f" To draw every plot from {a} or {b} alone, pick it under Plotting ▸ Population."
     clipped = clipped_by_gate(rule, params.min_area if params.enabled else None,

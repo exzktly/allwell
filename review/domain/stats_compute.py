@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from review.data.population_store import PopulationStore
     from review.domain.well_population import ExtraTable, WellPopulation
 
-from review.domain.size_classes import is_ratio_column, ratio_of_counts
+from review.domain.size_classes import is_class_ratio_column, class_ratio_of_counts
 from review.data.data_loading import (
     aggregate_with_threshold_df,
     df_included_mask,
@@ -129,7 +129,7 @@ def _raw_extra(df, target_t, threshold, val_col, fluor_gates, ratios, on_col):
     Returns ``(nan, nan)`` when raw rows aren't available (e.g. the pure-logic
     MockApp, which only exposes pre-aggregated points)."""
     return _extra_at(_extra_inputs(df, val_col, fluor_gates, ratios, on_col),
-                     target_t, threshold, counts_ratio=is_ratio_column(val_col))
+                     target_t, threshold, counts_ratio=is_class_ratio_column(val_col))
 
 
 def _extra_inputs(df, val_col, fluor_gates, ratios, on_col) -> tuple | None:
@@ -179,7 +179,7 @@ def _extra_at(inputs, target_t, threshold, *, counts_ratio: bool = False) -> tup
         return float("nan"), float("nan")
     all_vals = val[mask]
     if counts_ratio:
-        return float("nan"), ratio_of_counts(all_vals)
+        return float("nan"), class_ratio_of_counts(all_vals)
     if on is not None:
         above = all_vals[on[mask]]
     else:
@@ -244,7 +244,7 @@ def _well_extra(ctx, lbl, target_t, threshold, val_col, fluor_gates, ratios,
         else:
             times = np.unique(inputs[1][inputs[0]])
             if times.size <= _EXTRA_TABLE_MAX_TIMEPOINTS:
-                table = {float(u): _extra_at(inputs, float(u), threshold, counts_ratio=is_ratio_column(val_col))
+                table = {float(u): _extra_at(inputs, float(u), threshold, counts_ratio=is_class_ratio_column(val_col))
                          for u in times}
         store.cache[key] = table
     if table is _EXTRA_UNANSWERABLE:
@@ -258,7 +258,7 @@ def _well_extra(ctx, lbl, target_t, threshold, val_col, fluor_gates, ratios,
     at_key = key + ("at", target_t)
     hit = store.cache.get(at_key)
     if hit is None:
-        hit = _extra_at(_inputs(), target_t, threshold, counts_ratio=is_ratio_column(val_col))
+        hit = _extra_at(_inputs(), target_t, threshold, counts_ratio=is_class_ratio_column(val_col))
         store.cache[at_key] = hit
     return hit
 

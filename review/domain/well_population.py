@@ -86,7 +86,7 @@ class WellPopulation:
     extras: dict | None = field(default_factory=dict)
     extras_complete: bool = True
     nbytes: int = 0
-    #: The value is a size-class ratio column (``size_classes.is_ratio_column``): every reduction counts its 1s
+    #: The value is a size-class ratio column (``size_classes.is_class_ratio_column``): every reduction counts its 1s
     #: over its 0s rather than averaging them (``data_loading._ratio_timepoint``).
     counts_ratio: bool = False
 
@@ -145,9 +145,9 @@ def build_population(
             ))
     elif per_fov:
         fov_trusted = True
-    from review.domain.size_classes import is_ratio_column
+    from review.domain.size_classes import is_class_ratio_column
 
-    counts_ratio = is_ratio_column(val_col)
+    counts_ratio = is_class_ratio_column(val_col)
     extras, complete = _build_extras(extra_inputs, groups, counts_ratio=counts_ratio)
     pop = WellPopulation(groups=tuple(groups), fov_labels=fov_labels,
                          fov_trusted=fov_trusted, extras=extras,
@@ -219,11 +219,11 @@ def _build_extras(inputs: tuple | None, groups: list[_Group], *,
 
 def _mean_all(vals: np.ndarray, counts_ratio: bool) -> float:
     """The extras' "mean of all cells": for a size-class ratio column, the ratio of all its cells
-    (``size_classes.ratio_of_counts``) — the one value it has — rather than the mean of its 1s and 0s."""
+    (``size_classes.class_ratio_of_counts``) — the one value it has — rather than the mean of its 1s and 0s."""
     if counts_ratio:
-        from review.domain.size_classes import ratio_of_counts
+        from review.domain.size_classes import class_ratio_of_counts
 
-        return ratio_of_counts(vals)
+        return class_ratio_of_counts(vals)
     return float(vals.mean()) if vals.size else float("nan")
 
 

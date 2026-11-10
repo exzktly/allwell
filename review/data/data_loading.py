@@ -1171,11 +1171,11 @@ def aggregate_with_threshold_df(
     if filtered is None:
         return []
     tp_arr, val_arr, fov_arr, on_arr, fov_trusted = filtered
-    from review.domain.size_classes import is_ratio_column
+    from review.domain.size_classes import is_class_ratio_column
 
     return _aggregate_arrays(tp_arr, val_arr, fov_arr, threshold, use_sem,
                              per_fov_spread, on_arr=on_arr,
-                             fov_trusted=fov_trusted, counts_ratio=is_ratio_column(val_col))
+                             fov_trusted=fov_trusted, counts_ratio=is_class_ratio_column(val_col))
 
 
 def threshold_free_arrays(
@@ -1354,7 +1354,7 @@ def _aggregate_timepoint(
     runs for each timepoint it holds, so the two answer identically.
 
     *counts_ratio*: *v* is a size-class ratio column's 1s and 0s
-    (``size_classes.is_ratio_column``), and the point is that ratio rather than
+    (``size_classes.is_class_ratio_column``), and the point is that ratio rather than
     a mean — :func:`_ratio_timepoint`.
     """
     if counts_ratio:
@@ -1423,27 +1423,29 @@ def _aggregate_timepoint(
 def _ratio_timepoint(t, v: np.ndarray, f: np.ndarray | None, *, use_sem: bool, per_fov_spread: bool,
                      fov_trusted: bool) -> AggPoint:
     """The :data:`AggPoint` of a size-class ratio column at one timepoint: the value is n(first class) / n(second)
-    over the cells held (``size_classes.ratio_of_counts``), never a mean of the 1s and 0s. No ON cutoff applies — a
+    over the cells held (``size_classes.class_ratio_of_counts``), never a mean of the 1s and 0s. No ON cutoff applies — a
     ratio has none — so the "above" population is the first class: ``n_above`` its count, ``n_total`` both classes',
     and the fraction the first class's share. With per-field spread on (and field labels trusted) the spread is the
     SD/SEM of each field's own ratio, over the fields whose second class holds a cell; otherwise there is no spread
     (NaN), since the cells of one well are not replicates of a ratio."""
-    from review.domain.size_classes import ratio_of_counts
+    from review.domain.size_classes import class_ratio_of_counts
 
     nan = float("nan")
     first = v == 1
     n_above, n_total = int(np.count_nonzero(first)), int(np.count_nonzero(first | (v == 0)))
-    mean = ratio_of_counts(v)
+    mean = class_ratio_of_counts(v)
     spread = frac_spread = per_fov_mean = per_fov_spread_n = nan
     if per_fov_spread and fov_trusted and f is not None and n_total:
-        sub = pd.DataFrame({"fov": f, "v": v})
-        per_field = sub.groupby("fov", sort=False)["v"]
-        ratios = per_field.apply(ratio_of_counts).dropna().to_numpy(dtype=float)
+        # Each field's two counts in one vectorised pass (the mean path's ``groupby().sum()``), then its ratio.
+        counts = pd.DataFrame({"fov": f, "first": first.astype(float), "second": (v == 0).astype(float)}) \
+            .groupby("fov", sort=False)[["first", "second"]].sum()
+        firsts = counts["first"].to_numpy(dtype=float)
+        seconds = counts["second"].to_numpy(dtype=float)
+        ratios = firsts[seconds > 0] / seconds[seconds > 0]        # a field with no second-class cell has no ratio
         if ratios.size > 1:
             sd = float(ratios.std(ddof=1))
             spread = sd / math.sqrt(ratios.size) if use_sem else sd
-        firsts = per_field.apply(lambda x: float(np.count_nonzero(x == 1))).to_numpy(dtype=float)
-        totals = per_field.apply(lambda x: float(np.count_nonzero((x == 1) | (x == 0)))).to_numpy(dtype=float)
+        totals = firsts + seconds
         shares = firsts[totals > 0] / totals[totals > 0]
         if shares.size > 1:
             fsd = float(shares.std(ddof=1))

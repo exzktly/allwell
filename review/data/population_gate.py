@@ -13,11 +13,19 @@ missing from the well's table, or the value is blank — cannot be shown to be i
 population that quietly took in cells nobody could class would be a different population from the one named on the
 figure. :func:`unclassable_wells` names the wells that lost every row that way, for the figure footer.
 
-The same projector writes each class's **share column** while the rule is complete, whether or not a class is
-chosen (``size_classes.share_column``: ``shape_class_share::<label>``, 1 in the class, 0 outside it, blank with no
-area). A well's mean of it is that class's share of the well's kept cells, so every plot that takes a per-cell value
-offers each class's share — and its fold change — beside the shape features. A share column of a class since renamed
-or removed is dropped, so the rows never carry a share the rule no longer defines.
+The same projector writes the **class columns** while the rule is complete, whether or not a class is chosen
+(``size_classes.class_columns``):
+
+* each class's **share column** (``shape_class_share::<label>``: 1 in the class, 0 outside it, blank with no area),
+  whose well mean is that class's share of the well's kept cells;
+* the **class ratio column** (``shape_class_ratio::<label 1>::<label 2>``: 1 in the first class, 0 in the second, blank
+  otherwise), which every reduction counts as n(first) / n(second) rather than averaging
+  (``size_classes.class_ratio_of_counts``, ``data_loading._ratio_timepoint``).
+
+So every plot that takes a per-cell value offers each class's share and the classes' ratio — and their fold changes
+— beside the shape features. A class column of a class since renamed or removed is dropped, so the rows never carry
+one the rule no longer defines. Under a one-class population the columns are still written but not offered
+(``channel_state_controller._class_channels``): with one class out of every aggregate they have nothing to say.
 
 Not to be confused with the per-nanowell class *counts*, which must see both classes and so read the inclusion with
 this layer left out (``nanowell.controller.gate_tally``).
@@ -59,7 +67,7 @@ def _rule(ctx):
 
 
 def population_input_columns(ctx, label: str | None = None) -> tuple[str, ...]:
-    """The area columns a class is judged on, while the rule is complete (the share columns are written then, and
+    """The area columns a class is judged on, while the rule is complete (the class columns are written then, and
     ``Population_Pass`` too when a class is chosen)."""
     from review.domain.qc_params import AREA_COLS
 
@@ -80,11 +88,11 @@ def _apply(df: pd.DataFrame, chosen, rule=None) -> None:
     """Write ``Population_Pass`` for *chosen* (``(rule, k)`` or ``None``) and the share and ratio columns of *rule* (a
     complete rule or ``None``) onto *df*, dropping whichever does not apply."""
     from review.domain.size_classes import (
-        area_column, class_columns, classify_rows, is_class_column, ratio_column, share_columns,
+        area_column, class_columns, classify_rows, is_class_column, class_ratio_column, share_columns,
     )
 
     shares = share_columns(rule) if rule is not None else []
-    ratio = ratio_column(rule) if rule is not None else None
+    ratio = class_ratio_column(rule) if rule is not None else None
     wanted = class_columns(rule) if rule is not None else []
     stale = [c for c in df.columns if is_class_column(c) and c not in wanted]
     if chosen is None and POPULATION_COLUMN in df.columns:
@@ -103,7 +111,7 @@ def _apply(df: pd.DataFrame, chosen, rule=None) -> None:
             df[col] = values
         if ratio:
             # 1 in the first class, 0 in the second, blank for any other cell: a reduction counts the 1s over the
-            # 0s (``size_classes.ratio_of_counts``), so a cell in neither class is in neither side of the ratio.
+            # 0s (``size_classes.class_ratio_of_counts``), so a cell in neither class is in neither side of the ratio.
             values = np.full(len(df), np.nan)
             if classes is not None:
                 kinds = np.asarray(classes)

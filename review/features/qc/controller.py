@@ -190,11 +190,12 @@ def _after_qc_params_applied(ctx) -> None:
         from review.core.population_band import refresh as refresh_population
 
         refresh_population(ctx)
-    # Each class's share is a channel (``size_classes.share_column``): a named, renamed or cleared class moves the list.
+    # Each class's share and the classes' ratio are channels (``size_classes.class_columns``): a named, renamed or
+    # cleared class, or a one-class Population, moves the list.
     with swallow("Channel lists: follow the size classes"):
-        from review.core.channel_state_controller import sync_share_channels
+        from review.core.channel_state_controller import sync_class_channels
 
-        sync_share_channels(ctx)
+        sync_class_channels(ctx)
 
 
 def only_size_classes_differ(params: QCParams, current: QCParams) -> bool:
@@ -262,9 +263,9 @@ def set_size_classes(ctx, params: QCParams) -> None:
     its nanowell's class counts, so while one is drawn (:func:`gates_read_size_classes`) a gating pass is started
     (``cell_gating.start_worker``), which re-applies every gate against counts under the new classes."""
     ctx.state.qc.params = params
-    # Each class's share column (``size_classes.share_column``) is a per-cell value the plots read: rewritten on the
-    # held rows under the new rule (no verdict moves — no class is chosen on this path), and the aggregates that
-    # averaged the old values dropped, before anything is drawn again.
+    # The class columns (each class's share and the classes' ratio, ``size_classes.class_columns``) are per-cell
+    # values the plots read: rewritten on the held rows under the new rule (no verdict moves — no class is chosen on
+    # this path), and the aggregates built on the old values dropped, before anything is drawn again.
     from review.core.selection_controller import invalidate_stats_cache
     from review.data.population_gate import apply_population_to_cache
 

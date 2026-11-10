@@ -568,9 +568,9 @@ def update_scatter_menus(ctx) -> None:
     # shape-feature path. ``_label_to_channel_key`` (built by
     # ``_update_channel_selector``) maps each label back to its ``shape_*``
     # column so ``col_for_scatter_axis`` resolves it like a ratio.
-    from review.domain.size_classes import is_ratio_column, shape_column_label
+    from review.domain.size_classes import is_class_ratio_column, shape_column_label
     from review.core.ui_helpers import set_combo_values_sectioned as _set_combo_values_sectioned
-    shape_cols = [c for c in (ctx.state.channel.shape_features or []) if not is_ratio_column(c)]  # not per cell
+    shape_cols = [c for c in (ctx.state.channel.shape_features or []) if not is_class_ratio_column(c)]  # not per cell
     shape_labels = [shape_column_label(c) for c in shape_cols]
     cells_ch_options = scatter_ch_options + shape_labels
     cells_sections = [("", list(scatter_ch_options))]

@@ -6711,7 +6711,9 @@ the sentence names it.
   keeps its own saved subsets (up to 50, names up to 60 characters), in its `persistence.json` with the page's
   other settings. The same conditions are saved under one name only: saving them again under another says which
   name already has them. **Reset view** puts the page's controls back to their defaults and keeps the saved
-  subsets.
+  subsets. Restoring a Saved Plot keeps them too: the plot comes back with the subset it was drawn with, but your
+  list of saved subsets stays as it is now. If that subset has since been deleted or renamed, the box reads
+  *Custom subset…*, since it is no longer saved under that name.
 - **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
 - **Names.** Wells and groups are called what every other tab calls them: a replicate group by its name, a well by
   the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two

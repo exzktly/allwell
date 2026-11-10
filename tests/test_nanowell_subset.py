@@ -443,3 +443,25 @@ def test_reset_and_apply_sit_beside_add_condition_and_clear(page):  # noqa: F811
     assert [item.widget() for item in items[:4]] == [editor.add_btn, editor.clear_btn, editor.reset_btn,
                                                      editor.apply_btn]
     assert items[4].spacerItem() is not None and len(items) == 5
+
+
+def test_restoring_a_saved_plot_leaves_the_saved_subset_library_as_it_is_now(page):
+    """A Saved Plot restore brings back the Subset that drew the figure, but never the library of named subsets as
+    it stood at save time: that replaced the library wholesale, deleting every subset saved after the plot and
+    bringing back every one deleted since. The fixture differs on both counts — "Later" was saved after the plot,
+    "Deleted" was in the plot's copy and is gone now — so either half of the old behaviour fails it."""
+    from review.features.nanowell.view_state_io import apply_nanowell
+
+    st = page.state.feature_slice("nanowell")
+    drawn = ss.Subset((C("n", "ge", 2, at="tp:t_a"),)).validated()
+    then = NanowellState()
+    then.subset = drawn
+    then.saved_subsets = {"Deleted": drawn}
+    later = ss.Subset((C("ring", "le", 9),)).validated()
+    st.saved_subsets = {"Later": later}
+
+    apply_nanowell(page, then.to_config())
+
+    assert st.saved_subsets == {"Later": later}
+    assert st.subset == drawn                       # the figure's own population still comes back
+    assert ss.saved_name_of(st.saved_subsets, st.subset) == ""     # shown as unsaved, which it now is

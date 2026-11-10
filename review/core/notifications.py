@@ -72,6 +72,39 @@ class NotificationService:
             fn(message, kind=kind, msec=msec)
 
 
+def report_released_wells(ctx) -> str:
+    """Say on screen that the size-class rewrite ran out of memory and dropped wells to stay consistent.
+
+    ``population_gate.apply_population_to_cache`` rewrites the class columns of every held well or of none; when it
+    cannot, it drops the held wells from memory so each is read back under the classes now in force, and leaves their
+    labels on ``DatasetState.released_wells``. Nothing on a plot is wrong afterwards — that is the point of dropping
+    them — but the next drawing reads those wells from disk, and the machine is short of memory, which the user
+    should hear about rather than infer from a slow redraw. Called on the window's thread after every path that runs
+    the rewrite (``qc.controller.finish_qc_recompute``, ``qc.controller.set_size_classes``); returns the message, or
+    ``""`` when nothing was dropped.
+    """
+    dataset = getattr(getattr(ctx, "state", None), "dataset", None)
+    take = getattr(dataset, "take_released_wells", None)
+    wells = take() if callable(take) else []
+    if not wells:
+        return ""
+    msg = (
+        f"Out of memory while applying the size classes, so the {len(wells)} well(s) held in memory were dropped "
+        "and are read back under the size classes now shown when next drawn. Every plot uses those classes; drawing "
+        "is slower until the wells are back. Closing other programs leaves more room."
+    )
+    notify = getattr(ctx, "notify", None)
+    if notify is None:
+        return msg
+    fn = getattr(notify, "set_status", None)
+    if callable(fn):
+        fn(msg)
+    fn = getattr(notify, "toast", None)
+    if callable(fn):
+        fn(msg, kind="warn", msec=10000)
+    return msg
+
+
 def report_verdict_failures(ctx, *, layer: str, column: str,
                             failed: list[str] | None) -> str:
     """Say on screen which wells' inclusion verdict could not be computed.

@@ -149,6 +149,17 @@ class DatasetState:
         """
         self.rows_version += 1
 
+    #: Wells the size-class rewrite dropped from the row cache because it could not rewrite every held well
+    #: (``review/data/population_gate.apply_population_to_cache``). They are read back under the rule in force when
+    #: next drawn; this list is only so the user is told. The rewrite can run on a worker, which may not touch a
+    #: widget, so it leaves the wells here and the window's thread takes them (:meth:`take_released_wells`).
+    released_wells: list[str] = field(default_factory=list)
+
+    def take_released_wells(self) -> list[str]:
+        """The wells :attr:`released_wells` holds, leaving it empty — so each release is reported once."""
+        taken, self.released_wells = self.released_wells, []
+        return taken
+
     # ── status ───────────────────────────────────────────────────────────────
 
     @property
@@ -180,6 +191,7 @@ class DatasetState:
         self.persistence_doc_foreign = False
         self.field_exclusions.clear()
         self.triage_decisions.clear()
+        self.released_wells = []
         # Well labels are per-dataset (persisted in the new dataset's
         # pipeline_info sample_definitions block). The loader merges them in
         # additively and early-returns when the new dataset has no block, so

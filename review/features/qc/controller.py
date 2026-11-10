@@ -142,13 +142,17 @@ def reproject_verdicts(ctx, *, progress=None) -> list[str]:
 
 def finish_qc_recompute(ctx, failed: list[str]) -> None:
     """The GUI half of :func:`recompute_qc_all`, after the frames are rewritten."""
-    from review.core.notifications import report_verdict_failures
+    from review.core.notifications import report_released_wells, report_verdict_failures
     from review.core.selection_controller import invalidate_stats_cache
     # Reported here, at the re-projection, rather than at the per-well load:
     # this is the pass that runs when the user moves a threshold, and it is the
     # only moment at which a well can silently stop being gated by the settings
     # the controls are showing.
     report_verdict_failures(ctx, layer="QC", column="QC_Pass", failed=failed)
+    # The size-class projector among the re-projected layers may have run out of
+    # memory and dropped the held wells to stay on one rule; it ran on the worker,
+    # so it is said here.
+    report_released_wells(ctx)
     try:
         invalidate_stats_cache(ctx)  # clears stats cache + bumps override_version
     except Exception:
@@ -266,11 +270,15 @@ def set_size_classes(ctx, params: QCParams) -> None:
     # The class columns (each class's share and the classes' ratio, ``size_classes.class_columns``) are per-cell
     # values the plots read: rewritten on the held rows under the new rule (no verdict moves — no class is chosen on
     # this path), and the aggregates built on the old values dropped, before anything is drawn again.
+    from review.core.notifications import report_released_wells
     from review.core.selection_controller import invalidate_stats_cache
     from review.data.population_gate import apply_population_to_cache
 
+    # Every held well or none (``apply_population_to_cache``): a rewrite that runs out of memory drops the held
+    # wells, which are read back under the new rule, rather than leaving some under each.
     apply_population_to_cache(ctx)
     invalidate_stats_cache(ctx)
+    report_released_wells(ctx)
     _after_qc_params_applied(ctx)
     if gates_read_size_classes(ctx):
         with swallow("Cell Gating: re-apply the gates drawn on size classes"):

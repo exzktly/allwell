@@ -25,7 +25,13 @@ and two slices at a time, the same bound the tab's export keeps, rather than a
 sliced copy of every well in the scope. The rows are read twice — once for the
 column lists the header needs, once for the chunk — which costs a re-read from
 the Parquet cache for a well the row cache has since evicted. A well that reads
-the first time and fails the second is logged and contributes no rows.
+the first time and fails the second — out of memory part-way through a large
+export, most often — **cancels the file**: the header is already written and
+lists that well among the wells the file holds, so finishing would leave a file
+that silently lacks a well it claims. The temp file is discarded and the failure,
+naming the well, reaches the run's report (``base_panel._write_cell_rows_for``),
+the same outcome the tab's own export gives (``export.service.export_cell_data``
+aborts on it).
 
 A writer on a thread is a writer whose failure can vanish, so two things are
 carried across: a write that fails (the temp file unwritable, the disk full,
@@ -56,6 +62,10 @@ from review.features.export.worker import DONE, CellExportWriter
 _PUT_POLL_S = 0.1
 
 _logger = logging.getLogger("review")
+
+
+class WellReadFailed(RuntimeError):
+    """A well that read for the header and then failed for its rows; the file is not written."""
 
 
 def write_cell_rows(ctx, scope, out_path) -> int:
@@ -160,9 +170,11 @@ def write_cell_rows(ctx, scope, out_path) -> int:
                 continue
             try:
                 frame = get_rows(ctx, well)
-            except Exception:
+            except Exception as exc:
                 _logger.exception("Batch cell export: rows for %r", well)
-                continue
+                raise WellReadFailed(
+                    f"{well} could not be read after the file's header listed it "
+                    f"({type(exc).__name__}: {exc}); the file was not written") from exc
             chunk = csc.build_chunk(frame, scope, group=group, well_label=well,
                                     well_name=labels.get(well, well))
             if not _put(chunk):

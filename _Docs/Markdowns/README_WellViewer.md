@@ -4491,6 +4491,16 @@ row, holding five actions:
   changes underneath it — you move a gating or QC threshold, edit the crop, or
   open another dataset — the export stops and says so rather than writing a
   file that is half one state and half another.
+
+  A well whose rows cannot be read when the export starts is named in the `#`
+  block (*wells that could not be read*) and contributes no rows. A well that
+  reads at the start and then cannot be read for its rows — the computer ran
+  out of memory part-way through, most often — stops the export, which names the
+  well and writes no file, rather than a file missing a well its own `#` block
+  lists. A batch export's per-cell files follow the same rule: such a group's
+  file is not written, and the run's report names the well. On the Spatial tab,
+  a well that could not be read while the export chose its position columns and
+  timepoint is named in the `#` block too.
 - **Save figure…** — saves to disk; the file dialog picks the format from the
   extension (`.svg` / `.pdf` / `.eps` / `.png`).
 - **Copy figure as SVG** — puts a vector copy of the figure on the clipboard
@@ -8027,6 +8037,10 @@ per-nucleus rows behind every plot.
   view opens on that cell's field of view and timepoint, zoomed to the nucleus.
 - **Optimal use** — sanity-check outliers: filter to a suspicious metric range,
   then double-click into Segmentation to see the actual cell.
+- **When a well cannot be read** — out of memory, most often — the table shows
+  the other wells' rows and the line under it ends *Not shown: N selected
+  well(s) whose rows could not be read (…)*, so its rows and counts are never
+  presented as the whole selection's.
 
 ### Saved Cells
 

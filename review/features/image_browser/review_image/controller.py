@@ -55,6 +55,7 @@ from review.features.image_browser.review_image.collect import (  # noqa: F401
     review_load_rows,
     review_norm_fov,
     review_pooled_rows,
+    unreadable_note,
     review_resolve_image_refs,
     review_row_keys,
     review_row_keys_series,
@@ -691,14 +692,15 @@ def _refresh_review_csv_impl(ctx) -> None:
     # timepoints however many cells it holds, so this is a per-well constant
     # where the pooled build scaled with the plate — see
     # ``collect.review_pooled_rows`` for what that cost.
-    fovs, tps = review_filter_values(ctx, sels)
-    if not any_review_rows(ctx, sels):
+    unreadable: list[str] = []
+    fovs, tps = review_filter_values(ctx, sels, unreadable=unreadable)
+    if not any_review_rows(ctx, sels, unreadable=unreadable):
         _set_combo_values(fov_cb, [])
         _set_combo_values(tp_cb, [])
         fov_cb.setCurrentText("")
         tp_cb.setCurrentText("")
         refresh_review_csv_rows(ctx, [])
-        msg_lbl.setText("No CSV rows loaded for selected well(s).")
+        msg_lbl.setText("No CSV rows loaded for selected well(s)." + unreadable_note(unreadable, False))
         return
 
     # Normalize the FOV combo values the SAME way the cell-click navigation and
@@ -747,12 +749,12 @@ def _refresh_review_csv_rows_impl(ctx, rows: list[dict] | None = None) -> None:
     tp_sel = norm_timepoint(ctx, tp_cb.currentText()) if tp_cb is not None else ""
 
     _MAX_TABLE_ROWS = MAX_TABLE_ROWS
-
+    unreadable: list[str] = []      # wells whose rows would not read; every message says so
     if rows is None:
         sels = sorted(ctx.state.selection.selected_wells, key=parse_rc)
         filtered, n_total = review_pooled_rows(
-            ctx, sels, fov_sel=fov_sel, tp_sel=tp_sel, limit=_MAX_TABLE_ROWS)
-        any_rows = bool(filtered) or any_review_rows(ctx, sels)
+            ctx, sels, fov_sel=fov_sel, tp_sel=tp_sel, limit=_MAX_TABLE_ROWS, unreadable=unreadable)
+        any_rows = bool(filtered) or any_review_rows(ctx, sels, unreadable=unreadable)
     else:
         # A caller-supplied list (the empty-selection branches, and tests).
         # Filter it in place; it is already materialised, so there is nothing
@@ -777,7 +779,7 @@ def _refresh_review_csv_rows_impl(ctx, rows: list[dict] | None = None) -> None:
         )
         if not any_rows:
             table.setColumnCount(0)
-            msg_lbl.setText("No rows are available for the selected well(s).")
+            msg_lbl.setText("No rows are available for the selected well(s)." + unreadable_note(unreadable, False))
             return
         # Fallback: if the filters are mismatched for any reason, still show
         # rows from the selected well(s) instead of an empty table — bounded
@@ -785,17 +787,16 @@ def _refresh_review_csv_rows_impl(ctx, rows: list[dict] | None = None) -> None:
         # entire plate.
         if rows is None:
             sels = sorted(ctx.state.selection.selected_wells, key=parse_rc)
-            filtered, n_total = review_pooled_rows(ctx, sels, limit=_MAX_TABLE_ROWS)
+            filtered, n_total = review_pooled_rows(ctx, sels, limit=_MAX_TABLE_ROWS, unreadable=unreadable)
         else:
             n_total = len(rows)
             filtered = list(rows[:_MAX_TABLE_ROWS])
         if not filtered:
             table.setColumnCount(0)
-            msg_lbl.setText("No rows are available for the selected well(s).")
+            msg_lbl.setText("No rows are available for the selected well(s)." + unreadable_note(unreadable, False))
             return
-        msg_lbl.setText(
-            "No exact Well/FOV/Timepoint match. Showing all selected rows instead."
-        )
+        msg_lbl.setText("No exact Well/FOV/Timepoint match. Showing all selected rows instead."
+                        + unreadable_note(unreadable))
         lookup = ctx.runtime.review.csv_lookup_context or {}
         ctx_txt = (
             f" well={lookup.get('well','')} fov={lookup.get('fov','')} tp={lookup.get('tp','')} nucleus_id={lookup.get('nucleus_id','')}"
@@ -860,8 +861,8 @@ def _refresh_review_csv_rows_impl(ctx, rows: list[dict] | None = None) -> None:
     if truncated:
         msg_lbl.setText(
             f"Showing first {len(filtered):,} of {n_total:,} row(s) "
-            "— narrow the FOV / timepoint to see the rest."
+            "— narrow the FOV / timepoint to see the rest." + unreadable_note(unreadable)
         )
     else:
-        msg_lbl.setText(f"Showing {len(filtered):,} row(s).")
+        msg_lbl.setText(f"Showing {len(filtered):,} row(s)." + unreadable_note(unreadable))
 

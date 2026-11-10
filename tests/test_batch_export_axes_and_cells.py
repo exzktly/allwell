@@ -479,6 +479,34 @@ def test_the_per_cell_file_names_the_wells_its_scope_asked_for(tmp_path,
     assert body[0].count(",") >= 5
 
 
+def test_a_well_that_fails_its_second_read_cancels_the_file_and_is_named(tmp_path, monkeypatch):
+    """The rows are read twice: once for the header, which lists every well the file holds, and once per chunk. A
+    well whose second read failed — out of memory part-way through, most often — used to be logged and skipped, so
+    the file was committed missing a well its own header listed, with nothing in it saying so."""
+    import review.features.batch_export._cell_rows as cr
+
+    frames = {"A01": _frame(3, "A01"), "A02": _frame(2, "A02")}
+    reads = {"A02": 0}
+
+    def get_rows(ctx, well):
+        if well == "A02":
+            reads["A02"] += 1
+            if reads["A02"] == 2:
+                raise MemoryError("simulated")
+        return frames[well]
+
+    monkeypatch.setattr("review.data.data_loading.get_rows", get_rows)
+    monkeypatch.setattr(cr, "figure_names_map", lambda ctx: {})
+    monkeypatch.setattr(cr, "_scope_block", lambda ctx, scope, **kw: ["# wells (2): A01, A02"])
+
+    out = tmp_path / "batch_G_cells.csv"
+    with pytest.raises(cr.WellReadFailed, match=r"^A02 could not be read after the file's header listed it "
+                                               r"\(MemoryError: simulated\); the file was not written$"):
+        cr.write_cell_rows(_cell_ctx(frames), _scope([("G", "A01"), ("G", "A02")]), out)
+    assert reads["A02"] == 2, "the second read was never reached: the test measured nothing"
+    assert list(tmp_path.iterdir()) == [], "a file, or its temp, was left behind"
+
+
 def test_a_scope_naming_no_loaded_well_writes_nothing_and_says_so(tmp_path):
     from review.features.batch_export import _cell_rows as cr
 

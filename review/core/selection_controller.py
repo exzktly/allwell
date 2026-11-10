@@ -1485,8 +1485,10 @@ def rebuild_all(ctx, *, invalidate: bool = True) -> None:
     if app._is_tab_visible("Scatter Plot"):
         try:
             ctx.features.redraw(ctx, "Scatter Plot")
-        except Exception:
+        except Exception as exc:
             __import__("logging").getLogger("review.runtime_app").exception("Scatter redraw failed")
+            from review.core.plot_failure import show_redraw_failed
+            show_redraw_failed(ctx, ("Scatter Plot",), exc)
     # Group edits change which wells the plots draw from, and several per-well
     # features follow the same active set (rep_sets_active): the Cell Browser
     # gallery, the Spatial facets, the Multivariate projection and the

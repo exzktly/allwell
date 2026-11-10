@@ -33,11 +33,15 @@ this layer left out (``nanowell.controller.gate_tally``).
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
 #: The verdict column (``data_loading.VERDICT_LAYERS``).
 POPULATION_COLUMN = "Population_Pass"
+
+_logger = logging.getLogger("review")
 
 
 def _params(ctx):
@@ -84,9 +88,12 @@ def population_mask(df: pd.DataFrame, rule, k: int) -> np.ndarray:
     return np.asarray(classes) == int(k)
 
 
-def _apply(df: pd.DataFrame, chosen, rule=None) -> None:
-    """Write ``Population_Pass`` for *chosen* (``(rule, k)`` or ``None``) and the share and ratio columns of *rule* (a
-    complete rule or ``None``) onto *df*, dropping whichever does not apply."""
+def _plan(df: pd.DataFrame, chosen, rule=None) -> tuple[list[str], dict[str, np.ndarray]]:
+    """What :func:`_apply` writes onto *df*, computed without touching it: ``(columns to drop, {column: values})``.
+
+    ``Population_Pass`` for *chosen* (``(rule, k)`` or ``None``) and the share and ratio columns of *rule* (a complete
+    rule or ``None``); a class column the rule no longer defines, and ``Population_Pass`` with no class chosen, are
+    dropped. Split from the write (:func:`_commit`) so the write is the one step that changes the frame."""
     from review.domain.size_classes import (
         area_column, class_columns, classify_rows, is_class_column, class_ratio_column, share_columns,
     )
@@ -97,8 +104,7 @@ def _apply(df: pd.DataFrame, chosen, rule=None) -> None:
     stale = [c for c in df.columns if is_class_column(c) and c not in wanted]
     if chosen is None and POPULATION_COLUMN in df.columns:
         stale.append(POPULATION_COLUMN)
-    if stale:
-        df.drop(columns=stale, inplace=True)
+    columns: dict[str, np.ndarray] = {}
     if wanted:
         classes = classify_rows(df, rule)
         # A cell with no area is in no class, and cannot be shown to be outside one either: its share value is blank.
@@ -108,7 +114,7 @@ def _apply(df: pd.DataFrame, chosen, rule=None) -> None:
             values = np.full(len(df), np.nan)
             if classes is not None:
                 values[measured] = (np.asarray(classes)[measured] == k).astype(float)
-            df[col] = values
+            columns[col] = values
         if ratio:
             # 1 in the first class, 0 in the second, blank for any other cell: a reduction counts the 1s over the
             # 0s (``size_classes.class_ratio_of_counts``), so a cell in neither class is in neither side of the ratio.
@@ -117,27 +123,108 @@ def _apply(df: pd.DataFrame, chosen, rule=None) -> None:
                 kinds = np.asarray(classes)
                 values[kinds == 0] = 1.0
                 values[kinds == 1] = 0.0
-            df[ratio] = values
+            columns[ratio] = values
     if chosen is not None:
         k_rule, k = chosen
-        df[POPULATION_COLUMN] = population_mask(df, k_rule, k).astype(int)
+        columns[POPULATION_COLUMN] = population_mask(df, k_rule, k).astype(int)
+    return stale, columns
 
 
-def apply_population_to_cache(ctx, label: str | None = None) -> None:
-    """Project the chosen class onto *label*'s cached rows, or every held well."""
+def _commit(df: pd.DataFrame, plan: tuple[list[str], dict[str, np.ndarray]]) -> None:
+    """Write a :func:`_plan` onto *df*."""
+    stale, columns = plan
+    if stale:
+        df.drop(columns=stale, inplace=True)
+    for col, values in columns.items():
+        df[col] = values
+
+
+def _apply(df: pd.DataFrame, chosen, rule=None) -> None:
+    """Write ``Population_Pass`` for *chosen* (``(rule, k)`` or ``None``) and the share and ratio columns of *rule* (a
+    complete rule or ``None``) onto *df*, dropping whichever does not apply."""
+    _commit(df, _plan(df, chosen, rule))
+
+
+def apply_population_to_cache(ctx, label: str | None = None) -> list[str]:
+    """Project the chosen class onto *label*'s cached rows, or every held well.
+
+    **Every held well ends up under one rule.** The class columns are named by the classes' labels, not their
+    bounds, so a well left with the previous rule's values looks exactly like one rewritten under the new rule — and
+    a walk that ran out of memory part-way used to leave exactly that: the wells before the failure under the new
+    bounds, the wells after it under the old, the panel showing the new, and nothing on any plot to say so.
+
+    The walk still goes one well at a time, so it never holds more than one well's new columns (computing every
+    well's first would add the whole plate's to the peak, on the very machines that run short). If it fails, the
+    held wells are dropped from the row cache (:func:`_release`), freeing their memory, and each comes back through
+    ``data_loading.load_and_project``, which runs this projector on that one well under the rule now in force, the
+    next time a view reads it. Every well therefore answers under one rule, at the cost of re-reading those wells. The dropped wells are returned, and left on
+    ``DatasetState.released_wells`` for the window's thread to report (``notifications.report_released_wells``) —
+    this can run on a worker. Any failure other than running out of memory is raised after the release, so a defect
+    is not mistaken for a full machine. Returns ``[]`` when every held well was rewritten."""
     from review.data.data_loading import get_rows
 
     chosen, rule = _chosen(ctx), _rule(ctx)
-    wells = [label] if label is not None else list(ctx.state.dataset.well_paths or ())
+    if label is not None:
+        df = get_rows(ctx, label)
+        if df is not None and not df.empty:
+            _apply(df, chosen, rule)
+        return []
+    repo = getattr(ctx.state, "repo", None)
+    held = []
+    for well in list(ctx.state.dataset.well_paths or ()):
+        df = repo.rows_or_none(well) if repo is not None else None
+        if df is not None and not df.empty:
+            held.append((well, df))
+    try:
+        for _well, df in held:
+            _apply(df, chosen, rule)
+    except Exception as exc:
+        wells = [well for well, _df in held]
+        # This walk's own references would keep every frame alive through the release, freeing nothing.
+        held = df = None
+        _release(ctx, wells, exc, chosen, rule)
+        if not isinstance(exc, MemoryError):
+            raise
+        return wells
+    return []
+
+
+def _release(ctx, wells: list[str], exc: BaseException, chosen, rule) -> None:
+    """Drop the held frames after a failed rewrite, so each is read back under the rule now in force.
+
+    ``RowCache.release`` keeps a pinned frame — one ``load_and_project`` is working on, on another thread — and the
+    failure may have been part-way through that very frame. So each frame still held afterwards is written again
+    under the rule in force, one well's columns at a time; if even that fails it is dropped as well."""
+    dataset = ctx.state.dataset
+    cache = dataset.cache
+    release = getattr(cache, "release", None)
+    if release is not None:
+        release()
+    else:
+        cache.clear()
     for well in wells:
-        if label is None:
-            repo = getattr(ctx.state, "repo", None)
-            df = repo.rows_or_none(well) if repo is not None else None
-        else:
-            df = get_rows(ctx, well)
+        try:
+            df = cache.get(well)
+        except KeyError:
+            df = None
         if df is None or df.empty:
             continue
-        _apply(df, chosen, rule)
+        try:
+            _apply(df, chosen, rule)
+        except Exception:
+            _logger.exception("Size classes: could not rewrite well %s, held while the others were dropped", well)
+            cache.pop(well, None)
+    # A frame read back differs from the one dropped (the new rule against a half-applied one), so nothing
+    # remembered of the old frames may be served — unlike an ordinary eviction, which brings back the same rows.
+    note = getattr(dataset, "note_rows_changed", None)
+    if callable(note):
+        note()
+    released = getattr(dataset, "released_wells", None)
+    if isinstance(released, list):
+        released.extend(w for w in wells if w not in released)
+    _logger.warning("Size classes: rewriting the class columns of %d held well(s) failed (%s: %s); they were dropped "
+                    "from memory and are read back under the size classes now in force when next drawn",
+                    len(wells), type(exc).__name__, exc)
 
 
 def unclassable_wells(ctx, wells) -> list[str]:

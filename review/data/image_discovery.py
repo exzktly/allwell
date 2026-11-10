@@ -31,6 +31,7 @@ from pathlib import Path
 
 from core import debug_flags as _debug_flags
 from review.data.data_loading import extract_well_token as _extract_well_token
+from review.data.memory_budget import note_pressure, pressure_keep_bytes, shortfall_bytes
 from review.data.image_resolver import (
     find_well_subfolder_path as _find_well_subfolder_path,
     normalize_well_token as _normalize_well_token,
@@ -162,7 +163,8 @@ DEFAULT_MAX_DECODE_ENTRIES = 2048
 
 
 def _default_max_decode_bytes() -> int:
-    """Byte budget for decoded pixels: ~15% of RAM, within [512 MiB, 2 GiB].
+    """Byte budget for decoded pixels: the ``"pixels"`` share of RAM (``memory_budget.SHARES``), within
+    [512 MiB, 2 GiB].
 
     This cache is the **only** owner of decoded frames — the Image Table's
     render model and its cell widgets keep shapes, not arrays — so this budget
@@ -174,16 +176,18 @@ def _default_max_decode_bytes() -> int:
     dataframes, and possibly a segmentation stack) drives the machine into swap
     and then into failed allocations, which surface as images that decode for
     some cells and not others. Scaling to installed RAM keeps a large grid slow
-    (LRU eviction, so frames re-decode) instead of unstable.
+    (LRU eviction, so frames re-decode) instead of unstable. The share is set
+    beside the row cache's and the population store's so the three together
+    leave the rest of the app room, and physical memory is read the same way on
+    every platform (``os.sysconf`` does not exist on Windows, which used to fall
+    back to a fixed 1 GiB here whatever the machine held).
 
     Entries are capped too, so a dataset of very small frames can't grow the
     bookkeeping without bound.
     """
-    try:
-        total = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
-    except (ValueError, OSError, AttributeError):  # pragma: no cover - platform
-        return 1 << 30
-    return int(max(512 * (1 << 20), min(2 * (1 << 30), total * 0.15)))
+    from review.data.memory_budget import share_bytes
+
+    return share_bytes("pixels", minimum=512 * (1 << 20), maximum=2 * (1 << 30))
 
 
 DEFAULT_MAX_DECODE_BYTES = _default_max_decode_bytes()
@@ -230,6 +234,17 @@ class _DecodedArrayCache:
                                    or self._total_bytes > self._max_bytes):
                 _k, (_a, nb) = self._store.popitem(last=False)
                 self._total_bytes -= nb
+            # The machine is short of free memory (``memory_budget``): give back more, oldest first, keeping the
+            # frame just decoded for the caller that asked for it, and never below a quarter of the budget.
+            wanted = shortfall_bytes()
+            keep_bytes = pressure_keep_bytes(self._max_bytes)
+            freed = 0
+            while freed < wanted and len(self._store) > 1 and self._total_bytes > keep_bytes:
+                _k, (_a, nb) = self._store.popitem(last=False)
+                self._total_bytes -= nb
+                freed += nb
+        if freed:
+            note_pressure("decoded-pixel cache", freed, wanted)
 
     def invalidate(self) -> int:
         """Drop every decoded array; return the bytes they held."""

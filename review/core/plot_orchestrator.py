@@ -78,15 +78,24 @@ def redraw(
     if _known is not None and "line" not in _known:
         ctx.state.plot.fc_dirty_scopes.add("line")
     else:
-        lineplot_redraw(
-            ctx,
-            apply_ax_style=apply_ax_style,
-            all_fluor_values=all_fluor_values,
-            all_fluor_values_filtered=all_fluor_values_filtered,
-            warn=warn,
-            metric_label=metric_label,
-        )
-        ctx.state.plot.fc_dirty_scopes.discard("line")
+        # Guarded like Distribution and the Heat Map below: a line figure that
+        # cannot be drawn (a MemoryError, most often) is marked not current, and
+        # the two figures after it are still drawn — raised from here, it skipped
+        # both and reached a caller that, on a QC edit, only logs it.
+        try:
+            lineplot_redraw(
+                ctx,
+                apply_ax_style=apply_ax_style,
+                all_fluor_values=all_fluor_values,
+                all_fluor_values_filtered=all_fluor_values_filtered,
+                warn=warn,
+                metric_label=metric_label,
+            )
+            ctx.state.plot.fc_dirty_scopes.discard("line")
+        except Exception as exc:
+            _logger.exception("Line Graphs redraw failed")
+            from review.core.plot_failure import show_redraw_failed
+            show_redraw_failed(ctx, ("Line Graphs",), exc)
 
     # 2 and 3. Distribution and Heat Map — lazy-built, so guard on the
     # registered canvas handle (``register`` stamps ``app._distribution_canvas``
@@ -143,8 +152,10 @@ def redraw(
             ctx.features.redraw(ctx, _tab)
             if _dirty is not None:
                 _dirty.discard(_scope)
-        except Exception:
+        except Exception as exc:
             _logger.exception("%s redraw failed", _tab)
+            from review.core.plot_failure import show_redraw_failed
+            show_redraw_failed(ctx, (_tab,), exc)
 
 
 def save_matplotlib_fig(ctx, fig, default_name: str, *, plot_bg: str) -> None:

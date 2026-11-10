@@ -37,6 +37,12 @@ The budget defaults to :data:`DEFAULT_SHARE` of physical memory and is set with
 the ``ALLWELL_ROW_CACHE_MB`` environment variable. At least one frame is always
 held, however small the budget: a well larger than the budget is still
 readable, it is just never kept alongside another.
+
+The budget is a share of physical memory, not of free memory, so the cache also
+gives frames back — beyond its budget, by the same eviction — whenever it takes
+one in while the machine's free memory is below the floor
+``review/data/memory_budget.py`` sets. That is what keeps room for the work no
+cache counts, such as an edit's whole-column copies.
 """
 
 from __future__ import annotations
@@ -51,43 +57,22 @@ from contextlib import contextmanager
 
 import pandas as pd
 
+from review.data.memory_budget import (
+    SHARES, note_pressure, physical_memory_bytes, pressure_keep_bytes, shortfall_bytes,
+)
+
 _logger = logging.getLogger("review")
 
-#: Share of physical memory the row cache may hold by default. The rest of the
-#: app — figures, image tiles, the Qt object graph, a pooled replicate group
-#: being drawn — needs the remainder, and a plate small enough to fit (the
-#: common case) is held whole either way.
-DEFAULT_SHARE = 0.25
+#: Share of physical memory the row cache may hold by default — its row of
+#: ``memory_budget.SHARES``, the one place every cache's share is set so that
+#: together they leave the rest of the app room. A plate small enough to fit
+#: (the common case) is held whole either way.
+DEFAULT_SHARE = SHARES["rows"]
 #: The budget never defaults below this, so a machine whose memory cannot be
 #: read still holds a useful number of ordinary wells.
 MIN_DEFAULT_BYTES = 512 * 2**20
 #: Environment override, in MiB.
 BUDGET_ENV = "ALLWELL_ROW_CACHE_MB"
-
-
-def physical_memory_bytes() -> int | None:
-    """The machine's physical memory, or ``None`` when it cannot be read."""
-    try:
-        if sys.platform == "win32":
-            import ctypes
-
-            class _MemoryStatus(ctypes.Structure):
-                _fields_ = [
-                    ("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
-                    ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
-                    ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
-                    ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
-                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
-                ]
-
-            status = _MemoryStatus()
-            status.dwLength = ctypes.sizeof(_MemoryStatus)
-            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
-                return None
-            return int(status.ullTotalPhys)
-        return int(os.sysconf("SC_PAGE_SIZE")) * int(os.sysconf("SC_PHYS_PAGES"))
-    except (AttributeError, OSError, ValueError):
-        return None
 
 
 def default_budget_bytes() -> int:
@@ -103,6 +88,8 @@ def default_budget_bytes() -> int:
             if mib > 0:
                 return int(mib * 2**20)
             _logger.warning("%s=%r is not positive; using the default row-cache budget", BUDGET_ENV, raw)
+    # Read through this module's name, so the share and the floor are tested against a
+    # machine of a chosen size.
     total = physical_memory_bytes()
     if not total:
         return MIN_DEFAULT_BYTES
@@ -300,7 +287,34 @@ class RowCache(MutableMapping):
             del self._frames[victim]
             self._held -= self._sizes.pop(victim, 0)
             self.evictions += 1
+        self._give_back_to_the_machine(keep)
         if self.evictions and not self._reported_full:
             self._reported_full = True
             _logger.info("The plate does not fit in the row-cache budget; the least recently used "
                          "wells are dropped and re-read from disk when needed — %s", self.describe())
+
+    def _give_back_to_the_machine(self, keep: str | None) -> None:
+        """Evict beyond the budget while the machine's free memory is below the floor (``memory_budget``).
+
+        The budget is a share of physical memory and says nothing about what is free; this is what leaves room for
+        the work no cache counts. Never below ``memory_budget.PRESSURE_KEEP`` of the budget, so a shortage that lasts
+        does not leave one well held. The same victims as :meth:`_evict` — oldest first, never the newest, the frame
+        just stored or a pinned one — and counted as evictions, because the plate has stopped fitting in exactly
+        the sense the loader and the "counted over N of M wells" readouts mean.
+        """
+        wanted = shortfall_bytes()
+        keep_bytes = pressure_keep_bytes(self.budget_bytes)
+        freed = 0
+        while freed < wanted and self._held > keep_bytes:
+            newest = next(reversed(self._frames), None)
+            victim = next((label for label in self._frames
+                           if label not in (keep, newest) and label not in self._pins), None)
+            if victim is None:
+                break
+            del self._frames[victim]
+            size = self._sizes.pop(victim, 0)
+            self._held -= size
+            freed += size
+            self.evictions += 1
+        if freed:
+            note_pressure("row cache", freed, wanted)

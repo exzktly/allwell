@@ -7,7 +7,9 @@ the included, gated cells' values grouped by timepoint
 the per-frame excluded nucleus ids — and building one costs a read of the well,
 so the store keeps as many as its byte budget allows, evicting the least
 recently used. The budget mirrors the row cache's (``review/data/row_cache.py``):
-an environment override in MiB, else a share of physical memory.
+an environment override in MiB, else a share of physical memory — and, like the row
+cache, it evicts beyond that whenever it takes something in while the machine's free
+memory is below the floor ``review/data/memory_budget.py`` sets.
 """
 
 from __future__ import annotations
@@ -17,13 +19,15 @@ import os
 import threading
 from collections import OrderedDict
 
+from review.data.memory_budget import SHARES, note_pressure, pressure_keep_bytes, shortfall_bytes
+
 _logger = logging.getLogger("review")
 
-#: Share of physical memory the population store may hold by default. A
-#: population is about one float per included cell (about a tenth of the well's
-#: parsed frame), so this holds every well of a plate whose frames would need
-#: several times the row cache's share.
-DEFAULT_SHARE = 0.125
+#: Share of physical memory the population store may hold by default — its row of
+#: ``memory_budget.SHARES``. A population is about one float per included cell
+#: (about a tenth of the well's parsed frame), so this holds every well of a plate
+#: whose frames would need several times the row cache's share.
+DEFAULT_SHARE = SHARES["populations"]
 #: The budget never defaults below this.
 MIN_DEFAULT_BYTES = 256 * 2**20
 #: Environment override, in MiB.
@@ -32,7 +36,7 @@ BUDGET_ENV = "ALLWELL_POPULATION_CACHE_MB"
 
 def default_budget_bytes() -> int:
     """The environment override, else :data:`DEFAULT_SHARE` of physical memory."""
-    from review.data.row_cache import physical_memory_bytes
+    from review.data.memory_budget import physical_memory_bytes
 
     raw = os.environ.get(BUDGET_ENV, "").strip()
     if raw:
@@ -155,3 +159,19 @@ class PopulationStore:
             del self._items[victim]
             self._held -= self._sizes.pop(victim, 0)
             self.evictions += 1
+        wanted = shortfall_bytes()
+        keep_bytes = pressure_keep_bytes(budget)
+        freed = 0
+        # The machine is short of free memory (``memory_budget``): give back more, oldest first, still keeping the
+        # entry just stored so the redraw that built it is served, and never below a quarter of the budget.
+        while freed < wanted and len(self._items) > 1 and self._held > keep_bytes:
+            victim = next((k for k in self._items if k != keep), None)
+            if victim is None:
+                break
+            del self._items[victim]
+            size = self._sizes.pop(victim, 0)
+            self._held -= size
+            freed += size
+            self.evictions += 1
+        if freed:
+            note_pressure("population store", freed, wanted)

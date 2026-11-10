@@ -96,3 +96,33 @@ def test_tab_switch_matrix_after_load(loaded_app):
     nb = loaded_app._notebook
     for name in [n for n in nb.pageNames() if n]:
         assert nb.setCurrentByName(name), f"could not switch to tab {name!r}"
+
+
+def test_a_failed_redraw_can_find_every_plot_it_must_mark(viewer_app):
+    """``review/core/plot_failure.py`` finds a failed tab's plots by its title in ``_tab_frames``.
+
+    A title it cannot resolve marks nothing, silently — the failed plot keeps the drawing from before, which is the
+    defect the module exists to remove. So every title a catch site passes must name a page the real app built, and
+    the page must hold the canvas that tab draws on. Only the real constructor can say so: the fast-lane tests of
+    ``plot_failure`` hand it a map of their own.
+    """
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    from review.domain.fold_change_scopes import registered_scopes
+
+    viewer_app._drain_pending_centre_builders()
+    ctx = viewer_app._ctx
+    frames = ctx.widgets.get("_tab_frames")
+    titles = {t for scope in registered_scopes() for t in scope.tab_names}
+    titles |= {"Distribution", "Heat Map", "Scatter Plot", "Nanowells"}      # the sites that name a tab
+    missing = sorted(t for t in titles if t not in frames)
+    assert missing == [], f"titles a failed redraw would pass that name no page: {missing}"
+    found = []
+    for title, canvas_name in (("Line Graphs", "_line_canvas"), ("Distribution", "_distribution_canvas"),
+                               ("Heat Map", "_heatmap_canvas"), ("Nanowells", "_nw_canvas")):
+        canvas = ctx.widgets.get_or_none(canvas_name)
+        if canvas is None:
+            continue                                     # a page built lazily, or profiled out
+        assert canvas in frames[title].findChildren(FigureCanvasQTAgg), f"{canvas_name} is not on the {title} page"
+        found.append(title)
+    assert len(found) >= 3, f"too few canvases were built to check anything: {found}"

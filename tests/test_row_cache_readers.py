@@ -26,6 +26,9 @@ _HELD_ONLY_READERS: dict[str, str] = {
     "review/core/idle_memory.py::release_idle_memory": (
         "Empties the cache when the app goes idle: the held frames are exactly what it gives back."),
     "review/data/data_loading.py::get_rows": "The lazy read itself: a held frame is returned, a missing one loaded.",
+    "review/data/population_gate.py::_release": (
+        "After a size-class rewrite failed part-way, drops the held frames so each is read back under the new rule: "
+        "the held frames are exactly the ones the failed rewrite may have left half-written."),
     "review/data/data_loading.py::load_and_project": "Stores the frame it has just read, pins and re-measures it.",
     "review/data/data_loading.py::_read_making_room": (
         "On a MemoryError, releases the held frames for one retry and names what was held in the error."),

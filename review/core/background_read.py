@@ -66,8 +66,12 @@ def cancel(ctx, key: str) -> None:
 
 def start(ctx, key: str, compute: Callable[[], object], *, on_done: Callable[[object], None],
           discard: Callable[[object], None] | None = None,
-          on_failed: Callable[[str], None] | None = None) -> bool:
+          on_failed: Callable[[str], None] | None = None, title: str | None = None) -> bool:
     """Run *compute()* on a worker and call *on_done(result)* on the window's thread, if still the newest.
+
+    *title* names the tab whose plots *on_done* draws: when drawing the result fails — a ``MemoryError`` most
+    often — those plots are marked not current (``review.core.plot_failure``) rather than left showing the drawing
+    from before.
 
     Returns False (and runs nothing) when this context has no runtime to keep the worker alive on — a bare test
     context — so the caller draws synchronously instead.
@@ -89,10 +93,17 @@ def start(ctx, key: str, compute: Callable[[], object], *, on_done: Callable[[ob
                     discard(result)
             return
         jobs[key] = (generation, None)
-        # The window may have been closed while the read ran: a draw into a deleted widget is the only thing that
-        # can go wrong here, and it must not escape a queued slot.
-        with swallow(f"drawing a background read's result ({key})"):
+        # Nothing may escape a queued slot. The window may have been closed while the read ran (a draw into a
+        # deleted widget), and the drawing itself can fail — for want of memory, after a large read — in which case
+        # the plot must not go on showing the drawing from before as if it were this one.
+        try:
             on_done(result)
+        except Exception as exc:
+            _logger.exception("drawing a background read's result (%s) failed", key)
+            if title:
+                with swallow(f"marking the {title} plot as not drawn"):
+                    from review.core.plot_failure import show_redraw_failed
+                    show_redraw_failed(ctx, (title,), exc)
 
     def failed(message: str) -> None:
         if not current():

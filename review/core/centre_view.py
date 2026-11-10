@@ -156,6 +156,10 @@ def build_centre(win, parent: QWidget) -> None:
     # though those frames end up inside the nested "Plotting" QTabWidget
     # rather than directly in win._notebook.
     tab_frames: dict[str, QWidget] = {}
+    # Also how a failed redraw finds the plots on its tab's page to mark them
+    # not current (``review/core/plot_failure.py``): by where they are shown,
+    # not by a roster of canvas names.
+    win._ctx.widgets.register("_tab_frames", tab_frames)
     for _t in _PLOT_SUBTABS:
         _f = QWidget()
         QVBoxLayout(_f).setContentsMargins(12, 0, 12, 12)

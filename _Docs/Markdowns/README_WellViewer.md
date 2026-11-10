@@ -2884,7 +2884,9 @@ the viewer always tracks the schema + channel tokens the dataset was built with
 ### Opening a plate larger than memory
 
 Review keeps the measurement rows of the wells it is using in memory, up to a
-budget — a quarter of the computer's memory by default. A plate that fits opens
+budget — a quarter of the computer's memory by default. Its other two
+memories, the cells each view counts and decoded images, take a tenth each, so
+the three together plan on under half the computer's memory. A plate that fits opens
 exactly as it always has, every well held. A plate that does not — a full plate
 of 300 MB well CSVs, about a million cells a well, needs around 19 GB — still
 opens: Review reads wells until the budget is full, takes a short summary of
@@ -2936,8 +2938,8 @@ What this means in use:
   moving the ThreshFracOn or count cutoff, or switching SD/SEM or FOV
   replicates, redraws from memory in about a second even on a plate that does
   not fit. A change to a gate, QC, the crop or a cell deletion still re-reads
-  the wells, because it changes which cells count. That memory is capped at an
-  eighth of the computer's RAM; set `ALLWELL_POPULATION_CACHE_MB` to change it.
+  the wells, because it changes which cells count. That memory is capped at a
+  tenth of the computer's RAM; set `ALLWELL_POPULATION_CACHE_MB` to change it.
 - **Image Table and Segmentation read one field at a time.** Outlines, the
   threshold view, the exclusion overlay and the hover value read only the
   columns they need, select the field before doing any work, and remember the
@@ -2995,6 +2997,33 @@ What this means in use:
 - **If one well alone does not fit**, Review first gives back every well it is
   holding and tries again; if that fails too, the error names the well, its size
   on disk and what was held, instead of a bare out-of-memory message.
+- **Review gives memory back when the computer runs short.** Those budgets are
+  shares of the computer's memory, not of what is free, so whenever Review takes
+  in a well, a population or an image while less than about 15% of the
+  computer's memory (at least 1 GB) is free — other programs, a large figure, an
+  edit in progress — it also lets go of the ones it used least recently, by as
+  much as the computer is short, though never below a quarter of each memory's
+  budget (so a shortage that lasts all session does not leave it re-reading the
+  whole plate for every plot). No number changes: what it let go of is read back,
+  with everything re-applied, when it is next needed. It is slower, and the live
+  counts may then say *counted over N of M wells in memory*. The log says how
+  much it gave back. On a Mac, where free memory cannot be read cheaply, the
+  budgets alone apply. Set `ALLWELL_MEMORY_FLOOR_MB` to choose how much to keep
+  free (`0` turns this off).
+- **A size-class edit applies to every well or to none.** Changing the size
+  classes on Cell Gating rewrites the class of every cell in every well in
+  memory, one well at a time. If the computer runs out of memory part-way, Review
+  does not leave some wells under the old ranges and some under the new: it lets
+  go of the wells in memory, reads each back under the new ranges when a plot
+  next needs it, and
+  says so on the status line and in a notice — *Out of memory while applying the
+  size classes…*. Every plot then uses the ranges the panel shows.
+- **A plot that could not be drawn says so.** If drawing a plot fails — most
+  often because the computer ran out of memory — the plot is covered by a
+  sentence saying it could not be drawn and why, instead of going on showing the
+  picture from before, which would no longer match your settings. Change a
+  setting or come back to the tab to try again; the sentence goes as soon as the
+  plot is drawn.
 
 To change the budget, set the environment variable `ALLWELL_ROW_CACHE_MB` before
 starting the app, for example `ALLWELL_ROW_CACHE_MB=8192 python allwell.py` for

@@ -74,6 +74,8 @@ class ReviewImageState:
     frame_cache: dict | None = None
     include_cache: dict = field(default_factory=dict)
     threshold_map_cache: dict = field(default_factory=dict)
+    #: ``{(well, fov, tp, override_version, rule key): {nid: size class}}`` (``collect.review_build_size_class_map``).
+    size_class_cache: dict = field(default_factory=dict)
     override_version: int = 0
     # {nucleus_id: mean fluorescence intensity} for the currently displayed
     # channel / FOV / timepoint — rebuilt each full refresh so the hover tooltip
@@ -136,6 +138,7 @@ class ReviewImageState:
         self.frame_cache = None
         self.include_cache.clear()
         self.threshold_map_cache.clear()
+        self.size_class_cache.clear()
         self.flatfield_field_cache.clear()
 
 

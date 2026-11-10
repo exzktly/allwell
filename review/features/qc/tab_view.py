@@ -228,11 +228,12 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     _edits = (min_area_edit, max_area_edit, min_sol_edit, max_region_edit,
               min_circ_edit, max_circ_edit)
 
-    # ── size classes: which class a kept cell is counted in, per nanowell ────
+    # ── size classes: which class a kept cell is in, outlined and (nanowell) counted ────
     #
     # Beside the area bounds because they read the same area in the same pixels, and below them because they act on
     # what the gate keeps. Not a gate: they leave every cell in, so a change applies without re-projecting a single
-    # verdict (``controller.set_size_classes``). Shown on a nanowell dataset only (``size_class_view.refresh``).
+    # verdict (``controller.set_size_classes``). Shown on every dataset; the title and sentence say whether it also
+    # counts per nanowell (``size_class_view.refresh``).
     sc_row, sc_widgets = size_class_view.build_row(row, params, _GRID_INDENT, _FQ_TEXT_W)
     outer.addWidget(sc_row)
 

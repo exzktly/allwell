@@ -23,7 +23,7 @@ from review.features.nanowell import cell_gate_compute as cg
 from review.features.nanowell import size_class_compute as scc
 from review.features.nanowell.summary_compute import well_statistic
 from review.domain import nanowell_rim_focus as rfc
-from review.domain.size_classes import SizeClassRule
+from review.domain.size_classes import SizeClassRule, classify_rows
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.distribution_compute import (
@@ -515,6 +515,7 @@ def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True,
     the one in force (:func:`size_rule`). A caller on a worker passes the rule it read on the GUI thread, with the
     version it stamps."""
     from review.data.data_loading import df_included_mask, get_rows
+    from review.data.population_gate import POPULATION_COLUMN
 
     sizes = size_rule(ctx) if sizes is None else sizes
 
@@ -546,7 +547,13 @@ def gate_tally(ctx, data, on_well=None, *, scatter_gates: bool = True,
             # nanowell focus layer is left out too: the cells it leaves out are those of a nanowell-timepoint this
             # page already draws as an ``out_of_focus`` gap, so counting them again here would only make the note
             # say Cell Gating left them out, which it did not.
-            skipped = (*cg.FIELD_LAYERS, rfc.NW_FOCUS_PASS_COLUMN, *(() if scatter_gates else ("Gate_Pass",)))
+            # The Population layer (one size class, chosen for the cell plots) is left out too: a nanowell's count,
+            # its brightness and its per-class counts are of every kept cell, and the page offers each class's
+            # count, ratio and fold changes as metrics of their own (``size_class_compute``). Counting the classes
+            # over a count that had already lost one class would refuse every size metric as "classes exceed the
+            # count", and a count that silently meant "T cells" would read as every cell's.
+            skipped = (*cg.FIELD_LAYERS, rfc.NW_FOCUS_PASS_COLUMN, POPULATION_COLUMN,
+                       *(() if scatter_gates else ("Gate_Pass",)))
             per_well.append((well, frame, df_included_mask(frame, except_layers=skipped).to_numpy()))
     if on_well is not None:
         on_well(total, total)
@@ -1154,7 +1161,7 @@ def _sizes_of(gate, sizes):
 def _with_size_note(note: str, metrics, wells, metric: str, sizes) -> str:
     """*note* with, for a size metric, the sentence on the ranges and the cells in neither
     (``size_class_compute.note``) over the drawn wells."""
-    if metric not in scc.COLUMNS or metrics is None or "well" not in metrics.columns:
+    if metric not in scc.ALL_COLUMNS or metrics is None or "well" not in metrics.columns:
         return note
     return " ".join(filter(None, [note, scc.note(metrics[metrics["well"].isin(wells)], sizes, metric)]))
 
@@ -2209,6 +2216,7 @@ def gated_crops(st, site, crops):
 
     well = str(site[0])
     metrics = st.metrics[st.metrics["well"] == well]
+    rule = getattr(st.gate, "sizes", None)
     out = {}
     for tp, crop in crops.items():
         rows = getattr(crop, "cell_rows", None)
@@ -2219,8 +2227,13 @@ def gated_crops(st, site, crops):
                                                  field_sites(metrics[metrics["timepoint"] == tp]))
         outlines = (None if crop.outlines is None
                     else [o for o, hidden in zip(crop.outlines, hide) if not hidden])
-        out[tp] = replace(crop, cells=crop.cells[~hide], cell_rows=rows[~hide].reset_index(drop=True), gated=gated,
-                          in_fields=in_fields, outlines=outlines) if hide.any() else crop
+        kept = rows[~hide].reset_index(drop=True)
+        # The classes the counts were made under (the tally's own rule), so an outline's colour and the nanowell's
+        # class counts beside it cannot disagree.
+        classes = classify_rows(kept, rule) if isinstance(rule, SizeClassRule) else None
+        out[tp] = replace(crop, cells=crop.cells[~hide], cell_rows=kept, gated=gated, in_fields=in_fields,
+                          outlines=outlines, size_class=classes,
+                          size_labels=rule.labels if classes is not None else ())
     return out
 
 

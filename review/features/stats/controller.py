@@ -20,6 +20,7 @@ from review.features.stats._report import (
     dunnett_lines, effect_size_text, omnibus_lines, paired_lines, two_way_lines,
 )
 from review.domain.stats_compute import group_replicate_stats
+from review.domain.size_classes import class_ratio_not_per_cell, is_class_ratio_column
 from domain.tp_match import tp_close_mask
 
 
@@ -349,6 +350,8 @@ def compute_pairwise(ctx, *, groups, target_t, val_col, statistic, threshold, te
     is_ks = test.startswith("KS")
     if is_ks and (len(groups) != 2 or any(len(g.wells) != 1 for g in groups)):
         return []
+    if is_ks and is_class_ratio_column(val_col):
+        return []                    # no per-cell values to compare (``size_classes.class_ratio_not_per_cell``)
     try:
         import scipy.stats  # noqa: F401  (availability probe)
     except ImportError:
@@ -737,6 +740,10 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     use_fov = bool(app._use_fov_spread_active())
     channel_lbl = _channel_label_for_val_col(val_col)
     stat_lbl = _STAT_LABELS.get(statistic, statistic)
+    if is_ks and is_class_ratio_column(val_col):
+        # A KS test compares two distributions of per-cell values, and a size-class ratio has none.
+        app._stats_write_result(class_ratio_not_per_cell(val_col))
+        return
 
     group_vals: list[tuple[str, list[float]]] = []
     for g in groups:
@@ -1448,9 +1455,9 @@ def stats_update_tp_menu(ctx) -> None:
     # col_for_scatter_entry, and the Property combo collapses to a single
     # Calculated Val for them (see populate_metric_combo).
     ch_options.extend(ratio_label_for(ctx, r) for r in ctx.state.channel.ratio_metrics)
-    from pipeline.shape_features import label_for as _shape_label_for
+    from review.domain.size_classes import shape_column_label
     for _col in (ctx.state.channel.shape_features or []):
-        ch_options.append(_shape_label_for(_col) or _col)
+        ch_options.append(shape_column_label(_col))
     if not ch_options:
         ch_options = ["—"]
     channel_cb = ctx.widgets.get_or_none("_stats_channel_cb")
@@ -1581,11 +1588,14 @@ def stats_refresh_fov_indicator(ctx) -> None:
         on = bool(ctx.state.plot.use_fov_replicates)
     except Exception:
         return
-    lbl.setText(
-        "Replicates: per-FOV — FOVs pooled across each group's wells (FOV mode ON)"
-        if on else
-        "Replicates: per-well (enable FOV mode to use FOVs as replicates)"
-    )
+    text = ("Replicates: per-FOV — FOVs pooled across each group's wells (FOV mode ON)"
+            if on else
+            "Replicates: per-well (enable FOV mode to use FOVs as replicates)")
+    # The tests are of the cells the Population layer keeps, like every number in the app, so the line names it.
+    from review.core.population_band import population_line
+
+    population = population_line(ctx)
+    lbl.setText(f"{text}\n{population}" if population else text)
 
 
 def stats_collect_group_values_shim(

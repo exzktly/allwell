@@ -75,7 +75,7 @@ def metric_labels(sizes=None) -> dict:
 PER_NANOWELL = frozenset({"growth_rate", "occupancy_class"})
 #: Metrics that depend on the baseline (the Baseline control is greyed for the others).
 BASELINE_METRICS = frozenset({"count_fc", "log2_count_fc", "confluence_fc", "brightness_fc", "signal_fc",
-                              "occupancy_class"})
+                              "occupancy_class", *size_class_compute.FC_COLUMNS})
 _OCCUPANCY_VALUE = {"0": 0.0, "1": 1.0, "2": 2.0, "3+": 3.0}
 #: Metrics whose values are whole numbers by definition, packed into bands (U1). Decided by the metric, not by
 #: the values: a fold change on one timepoint is all 1.0 and is still a continuous quantity.
@@ -116,6 +116,10 @@ _REASON_LABELS = {
     size_class_compute.MISMATCH: "classes exceed the count",
     size_class_compute.SECOND_EMPTY: "second class empty",
     size_class_compute.NONE_CLASSIFIED: "no classified cells",
+    "size class empty at baseline": "class empty at baseline",
+    # A fold change's baseline value missing for a reason the value's own table did not give ("baseline: no value").
+    "no value": "no value",
+    "size ratio zero at baseline": "ratio zero at baseline",
 }
 
 

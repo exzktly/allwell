@@ -80,6 +80,7 @@ _TAGS = {"no cells at baseline": "0 at base", "empty at baseline": "0 at base", 
          "fused, no count": "fused", "no confluence": "no conf.", "no cells": "no cells",
          "no fluorescence": "no fluor.", "< 3 timepoints with cells": "< 3 tps", "no count at baseline": "base: no n",
          "no confluence at baseline": "base: no conf.", "no signal at baseline": "base: no sig.",
+         "class empty at baseline": "0 at base", "ratio zero at baseline": "base: ratio 0",
          "occluded": "occl.", "clipped": "clipped", "rim out of focus": "soft", "no address": "no addr.",
          "not located": "not found", "not in roster": "absent", "never measured": "never",
          "identity contradicted": "id. wrong", "field excluded": "field excl.", "outside the fixed cohort": "cohort"}

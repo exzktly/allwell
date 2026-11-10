@@ -33,6 +33,7 @@ import math
 import numpy as np
 
 from review.domain import fold_change as _fc
+from review.domain.size_classes import is_class_ratio_column
 from review.domain.batch_models import BarGroup
 from review.domain.fold_change_pairing import (
     control_denominators,
@@ -137,7 +138,8 @@ def collect_line_series_for_group(
         the memory of the array it came from — the same waste the tab's own
         collector carried, and this is its batch twin, so it goes the same way.
         """
-        if not (include_cdf and wells):
+        if not (include_cdf and wells) or is_class_ratio_column(val_col):
+            # A size-class ratio has no per-cell values to draw a CDF of (``size_classes``).
             return np.empty(0, dtype=float)
         from review.data.data_loading import _all_fluor_values_filtered
         parts: list = []

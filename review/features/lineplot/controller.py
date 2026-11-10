@@ -13,6 +13,7 @@ from review.domain import fold_change as _fc
 from review.domain.numeric import is_number, is_numeric
 from review.domain.stats_compute import compute_rep_stats
 from review.domain.stats_compute import compute_rep_per_fov_stats
+from review.domain.size_classes import class_ratio_not_per_cell, is_class_ratio_column
 from review.domain.stats_compute import aggregate_well_cached, cdf_values_cached
 from review.domain.stats_compute import compute_rep_n_above_stats
 from review.domain.stats_compute import compute_rep_n_above_total
@@ -254,6 +255,9 @@ def collect_line_series(
     fc_op_t0 = _fc.parse_fc_op_t0(ctx)
     if val_col is None:
         val_col = ctx.state.channel.active_val_col
+    # A size-class ratio is one number per set of cells: there is no per-cell distribution to draw a CDF of
+    # (``size_classes.class_ratio_not_per_cell``, which the panel shows instead).
+    include_cdf = include_cdf and not is_class_ratio_column(val_col)
 
     fluor_gates = get_all_fluor_gates(ctx)
     active_rsets = plot_replicate_sets(ctx)
@@ -791,6 +795,14 @@ def _finalize_line_axes(
         ax_cdf.text(0.5, 0.5, empty_cdf_msg, transform=ax_cdf.transAxes, ha="center", va="center", color=muted_fg, fontsize=10)
 
 
+def _empty_cdf_msg(ctx) -> str:
+    """What the CDF panel says when it has no curve: why a size-class ratio has none, else that no data was found."""
+    val_col = ctx.state.channel.active_val_col
+    if is_class_ratio_column(val_col):
+        return class_ratio_not_per_cell(val_col)
+    return f"No {ctx.state.channel.active_channel.upper()} data found."
+
+
 def render_line_series(
     axes: LineAxes, series_list, *,
     fov_active: bool, fc_active: bool, threshold: float,
@@ -1124,7 +1136,7 @@ def redraw_line_plots(
         legend_visible=ctx.state.plot.legend_visible,
         show_threshold_line=getattr(ctx.state.plot, "show_threshold_line", False),
         cdf_xrange=_cdf_xrange,
-        empty_cdf_msg=f"No {ctx.state.channel.active_channel.upper()} data found.",
+        empty_cdf_msg=_empty_cdf_msg(ctx),
         draggable_legends=True,
         # Screen budgets — dropped while a capture is in flight. The batch
         # exporter renders onto its own axes and never passes them; the tab's

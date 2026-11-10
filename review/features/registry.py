@@ -1565,6 +1565,9 @@ _SUPPORT_SERVICES = {
         "review.features.qc.controller", "get_qc_params"),
     "qc.set_params_with_progress": lambda: _import_attr(
         "review.features.qc.controller", "set_qc_params_with_progress"),
+    # The Plotting band's Population control: restrict every plot to one size class (``QCParams.population``).
+    "qc.set_population": lambda: _import_attr(
+        "review.features.qc.controller", "set_population"),
     "qc.refresh_gate_widgets": lambda: _import_attr(
         "review.features.qc.tab_view", "qc_gate_refresh_widgets"),
     "crop.project_cache": lambda: _import_attr(
@@ -1722,6 +1725,11 @@ def _register_cache_projectors() -> None:
     register_cache_projector(_lazy_projector(
         "review.data.saved_cells_gate", "apply_saved_cells_gate_to_cache"),
         columns=_lazy_projector("review.data.saved_cells_gate", "saved_cells_input_columns"))
+    # The size class the analysis is restricted to (the Plotting band's Population). Unconditional: a choice saved
+    # with the dataset restricts every build, as the other layers' saved choices do.
+    register_cache_projector(_lazy_projector(
+        "review.data.population_gate", "apply_population_to_cache"),
+        columns=_lazy_projector("review.data.population_gate", "population_input_columns"))
 
 
 def attach_feature_state(state, registry: FeatureRegistry | None = None) -> None:

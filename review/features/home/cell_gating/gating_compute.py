@@ -90,6 +90,7 @@ _FUNNEL_LAYERS: tuple[tuple[str, str], ...] = (
     ("Touching image border", "Border_Pass"),
     ("FOV selection", "FOV_Pass"),
     ("Excluded saved cells", "Saved_Cells_Pass"),
+    ("Outside the chosen size class", "Population_Pass"),
 )
 
 

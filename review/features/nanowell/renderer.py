@@ -884,12 +884,13 @@ def render_site_detail(fig, series: list, *, channel: str | None = None, time_so
 
 def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None) -> None:
     """The counted cells of *crop*'s own nanowell: each cell's outline, traced from the pixels the run counted it on
-    (``Crop.outlines``), in the Array view's Cells colour; a cell the run kept no outline of is a light dot with a
-    dark rim at its centre, as the Cells layer draws it. A neighbour's cells in the crop's margin are not drawn.
+    (``Crop.outlines``), in the Array view's Cells colour — or, when Cell Gating's size classes are set, in its
+    class's colour (:func:`_cell_inks`); a cell the run kept no outline of is a dot with a dark rim at its centre,
+    as the Cells layer draws it, coloured the same way. A neighbour's cells in the crop's margin are not drawn.
     *tally* adds up what was drawn, how many as outlines, and which crops had no cell table or no outlines, for the
     caption."""
     from matplotlib.collections import LineCollection
-    from ui.nanowell_sites import CELL_COLOUR, CELL_EDGE_COLOUR
+    from ui.nanowell_sites import CELL_EDGE_COLOUR
 
     if crop is None or crop.image is None:
         return
@@ -906,22 +907,68 @@ def _draw_crop_cells(ax, crop, tally: dict, size: float | None = None) -> None:
         dotted = np.ones(len(crop.cells), dtype=bool)
     else:
         dotted = np.array([not o for o in outlines], dtype=bool)
+    inks = _cell_inks(crop, tally)
+    if outlines is not None:
         lines = [line for o in outlines if o for line in o]
+        colours = [ink for o, ink in zip(outlines, inks) if o for _line in o]
         tally["outlined"] = tally.get("outlined", 0) + int((~dotted).sum())
         tally["unoutlined"] = tally.get("unoutlined", 0) + int(dotted.sum())
         if lines:
             # The rim colour under the fill colour, so an outline reads on a bright cell and a dark floor alike.
             ax.add_collection(LineCollection(lines, colors=CELL_EDGE_COLOUR, linewidths=1.6, zorder=5,
                                              gid="nw-crop-outlines-rim"))
-            ax.add_collection(LineCollection(lines, colors=CELL_COLOUR, linewidths=0.8, zorder=5,
+            ax.add_collection(LineCollection(lines, colors=colours, linewidths=0.8, zorder=5,
                                              gid="nw-crop-outlines"))
     if len(crop.cells):
         if dotted.any():
-            ax.scatter(crop.cells[dotted, 0], crop.cells[dotted, 1], s=size or CELL_DOT_PT2, c=CELL_COLOUR,
+            ax.scatter(crop.cells[dotted, 0], crop.cells[dotted, 1], s=size or CELL_DOT_PT2,
+                       c=[ink for ink, dot in zip(inks, dotted) if dot],
                        edgecolors=CELL_EDGE_COLOUR, linewidths=0.4, zorder=5, gid="nw-crop-cells")
         h, w = crop.image.shape[:2]
         ax.set_xlim(-0.5, w - 0.5)                      # the dots must not widen the image's own extent
         ax.set_ylim(h - 0.5, -0.5)
+
+
+def _cell_inks(crop, tally: dict) -> list:
+    """Each of *crop*'s cells' colour: its size class's (``theme.size_class_inks``) when the crop carries classes
+    (``Crop.size_class``, from Cell Gating's rule), else — and for a cell in neither class — the Cells colour. Counts
+    each class into *tally* (``"classes"``: label → cells, ``"unclassed"``) for the caption."""
+    from ui import theme
+    from ui.nanowell_sites import CELL_COLOUR
+
+    n = len(crop.cells)
+    classes = getattr(crop, "size_class", None)
+    if classes is None or len(classes) != n or not crop.size_labels:
+        return [CELL_COLOUR] * n
+    inks = theme.size_class_inks()
+    counts = tally.setdefault("classes", {})
+    out = []
+    for k in classes:
+        k = int(k)
+        if 0 <= k < len(inks) and k < len(crop.size_labels):
+            label = crop.size_labels[k]
+            counts[label] = counts.get(label, 0) + 1
+            out.append(inks[k][0])
+        else:
+            tally["unclassed"] = tally.get("unclassed", 0) + 1
+            out.append(CELL_COLOUR)
+    tally["class_labels"] = tuple(crop.size_labels)
+    return out
+
+
+def _classes_clause(tally: dict) -> str:
+    """The size classes' colour key for a caption — ``T cells in green (12), DCs in blue (5), white in neither
+    (3)`` — or ``""`` when the crops were not coloured by class."""
+    labels = tally.get("class_labels")
+    if not labels:
+        return ""
+    from ui import theme
+
+    counts = tally.get("classes", {})
+    parts = [f"{label} in {name} ({counts.get(label, 0):,})"
+             for label, (_ink, name) in zip(labels, theme.size_class_inks())]
+    parts.append(f"white in neither ({tally.get('unclassed', 0):,})")
+    return "size classes: " + ", ".join(parts)
 
 
 def _cells_clause(tally: dict) -> str:
@@ -947,6 +994,9 @@ def _cells_clause(tally: dict) -> str:
         said.append(f"{tally['no_outlines']} crop(s) of a run that kept no cell outlines, so dots there")
     if tally.get("no_table"):
         said.append(f"{tally['no_table']} crop(s) of a well without a cell table, so no cells drawn there")
+    classes = _classes_clause(tally)
+    if classes:
+        said.append(classes)
     return "; ".join(said)
 
 

@@ -37,7 +37,7 @@ THRESHOLD = 40
 # loose-image branches when the pipeline became zips-only.
 # 682 -> 681: one allowlisted function lost a point of complexity in the page-render fixes (the ratchet reports
 # only the total, so no single function is named here).
-TOTAL_ALLOWLISTED_CC_BUDGET = 679
+TOTAL_ALLOWLISTED_CC_BUDGET = 676
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,

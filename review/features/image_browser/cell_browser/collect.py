@@ -158,9 +158,9 @@ def enumerate_properties(ctx) -> list[tuple[str, str]]:
             col = f"{ch}_smfish_count"
             parts = split_metric_col(col)
             out.append((col, parts[2] if parts else f"{ch.upper()} (spots)"))
-        from pipeline.shape_features import label_for as _shape_label_for
+        from review.domain.size_classes import shape_column_label
         for col in detect_shape_features(df):
-            out.append((col, _shape_label_for(col) or col))
+            out.append((col, shape_column_label(col)))
     # Ratios are virtual columns (no df column); offer every defined ratio.
     ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
     for key, ratio in ratios.items():

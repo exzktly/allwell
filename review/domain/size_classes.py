@@ -1,5 +1,6 @@
-"""Two labelled cell-size classes, judged on each cell's area: the rule Home → Cell Gating holds and the Nanowells page
-counts by.
+"""Two labelled cell-size classes, judged on each cell's area: the rule Home → Cell Gating holds, the Nanowells page
+counts by, and the Segmentation view and the nanowell crops colour each kept cell's outline by
+(:func:`classify_rows`, ``ui.theme.size_class_inks``).
 
 A user who has imaged no marker that tells two cell types apart — T cells from dendritic cells, say — can still
 tell them apart by size when their size ranges barely overlap. The rule is two **classes**, each a label the user
@@ -40,6 +41,9 @@ PLACEHOLDERS = ("Size class 1", "Size class 2")
 _PLACEHOLDER_RE = re.compile("|".join(re.escape(p) for p in PLACEHOLDERS))
 #: How many classes the rule has. The model is a tuple so it could hold more; the panel offers two.
 N_CLASSES = 2
+#: What the ratio's column joins the two labels with (:func:`class_ratio_column`); a label may not contain it
+#: (:meth:`SizeClassRule.problem`), so the column always reads back as exactly two labels.
+LABEL_SEPARATOR = "::"
 #: The decimals an area is compared at (:func:`classify`).
 AREA_DECIMALS = 6
 #: The class index of a cell in no class (:func:`classify`).
@@ -109,6 +113,10 @@ class SizeClassRule:
         for k, c in enumerate(self.classes, start=1):
             if not c.label:
                 return f"Class {k} needs a label."
+            if LABEL_SEPARATOR in c.label:
+                # The ratio's column holds both labels joined by it (``class_ratio_column``), so a label containing it
+                # could not be read back as two.
+                return f"{c.label} may not contain “{LABEL_SEPARATOR}”."
             if c.min_area is None and c.max_area is None:
                 return f"{c.label} needs a minimum or a maximum area."
             if c.low > c.high:
@@ -179,6 +187,115 @@ def classify(areas, rule: SizeClassRule) -> np.ndarray:
     for k, c in enumerate(rule.classes):
         out[finite & (values >= c.low) & (values <= c.high) & (out == UNCLASSIFIED)] = k
     return out
+
+
+def area_column(columns) -> str | None:
+    """The area column of a cell table with *columns* that the rule is judged on: the first of the debris gate's
+    own (``qc_params.AREA_COLS``) the table has, so a class means the same pixels as the gate; ``None`` without one."""
+    from review.domain.qc_params import AREA_COLS     # here, not at the top: qc_params imports this module
+
+    present = set(columns)
+    return next((c for c in AREA_COLS if c in present), None)
+
+
+def classify_rows(rows, rule: SizeClassRule) -> np.ndarray | None:
+    """Each row of the cell table *rows* as :func:`classify` places it, by its :func:`area_column`; ``None`` when the
+    rule is inactive or the table has no area column — "not classified" is not "every cell unclassified"."""
+    if rows is None or not rule.active():
+        return None
+    col = area_column(getattr(rows, "columns", ()))
+    if col is None:
+        return None
+    return classify(rows[col], rule)
+
+
+#: The per-cell column a class's share is plotted from: ``shape_class_share::<label>``, 1 for a cell in the class, 0 for
+#: a cell outside it, blank for a cell with no area. Its mean over a well's kept cells is the class's share of them,
+#: so every plot that takes a per-cell value — and its fold change — offers the share. Named with the ``shape_``
+#: prefix because it *is* a morphology-derived per-cell value, which is what puts it beside the shape features in
+#: the channel list and exempts it from the fluorescence gate and the ON cutoff everywhere those are decided
+#: (``pipeline.shape_features.is_shape_column``); named after the label so the column says which class it is.
+#: Written by the Population layer's projector (``review.data.population_gate``) while the rule is complete.
+SHARE_PREFIX = "shape_class_share::"
+
+
+def share_column(label: str) -> str:
+    """The share column of the class labelled *label*."""
+    return f"{SHARE_PREFIX}{label}"
+
+
+def share_columns(rule: SizeClassRule) -> list[str]:
+    """The share columns a complete *rule* puts in the rows, in class order; ``[]`` for an incomplete one."""
+    return [share_column(label) for label in rule.labels] if rule.active() else []
+
+
+def is_share_column(col) -> bool:
+    return isinstance(col, str) and col.startswith(SHARE_PREFIX)
+
+
+#: The per-cell column the ratio of the two classes is plotted from: ``shape_class_ratio::<label 1>::<label 2>``, 1
+#: for a cell in the first class, 0 for one in the second, blank for any other. Unlike a share, its plotted value is
+#: **not** a mean of it: every reduction of a set of cells to one number — a timepoint of a well, a field, a pooled
+#: group — counts its 1s over its 0s instead (:func:`class_ratio_of_counts`), so the value is n(first) / n(second) of
+#: exactly the cells the reduction holds. ``data_loading._aggregate_timepoint`` and the stats extras branch on
+#: :func:`is_class_ratio_column`; a view that draws one value per cell has no ratio to draw and says so.
+#: Not to be confused with ``review.domain.ratio_models``' channel ratios (``ratio:<name>``, ``is_ratio_key``): those
+#: are one channel over another *within each cell*, a per-cell value like any other; this is one class's count over the
+#: other's, which no single cell has. Hence the ``class_`` in every name here.
+CLASS_RATIO_PREFIX = "shape_class_ratio::"
+
+
+def class_ratio_column(rule: SizeClassRule) -> str | None:
+    """The ratio column of a complete *rule*, or ``None``."""
+    if not rule.active():
+        return None
+    a, b = rule.labels
+    return f"{CLASS_RATIO_PREFIX}{a}{LABEL_SEPARATOR}{b}"
+
+
+def is_class_ratio_column(col) -> bool:
+    return isinstance(col, str) and col.startswith(CLASS_RATIO_PREFIX)
+
+
+def is_class_column(col) -> bool:
+    """A share or ratio column — a per-cell value derived from the size classes rather than measured."""
+    return is_share_column(col) or is_class_ratio_column(col)
+
+
+def class_ratio_not_per_cell(col: str) -> str:
+    """What a view that draws one value per cell says when asked for a ratio column."""
+    return (f"{shape_column_label(col)} is one number per set of cells — a well, a field or a group at a timepoint "
+            "— not a value of each cell, so this view, which draws each cell, has nothing to draw. Plot it as the "
+            "line of Line Graphs or the bars of Bar Plots, on the Heat Map or on Response Curves.")
+
+
+def class_ratio_of_counts(values) -> float:
+    """n(1) / n(0) over *values* (a ratio column's 1s and 0s; anything else ignored); NaN with no 0 — a ratio over an
+    empty second class is undefined, never infinite, as on the Nanowells page."""
+    v = np.asarray(values, dtype=float)
+    second = int(np.count_nonzero(v == 0))
+    return float(np.count_nonzero(v == 1)) / second if second else float("nan")
+
+
+def class_columns(rule: SizeClassRule) -> list[str]:
+    """Every per-cell column a complete *rule* puts in the rows — each class's share, then the ratio — in the order
+    the channel list shows them; ``[]`` for an incomplete rule."""
+    ratio = class_ratio_column(rule)
+    return [*share_columns(rule), *([ratio] if ratio else [])]
+
+
+def shape_column_label(col: str) -> str:
+    """A readable name for a ``shape_*`` per-cell column: ``T cells share`` / ``T cells : DCs ratio`` for a class
+    column, else the shape catalogue's label, else the column itself. Every place that names a shape column goes
+    through here, so a class column is never shown as its raw name."""
+    if is_share_column(col):
+        return f"{col[len(SHARE_PREFIX):]} share"
+    if is_class_ratio_column(col):
+        a, _sep, b = col[len(CLASS_RATIO_PREFIX):].partition(LABEL_SEPARATOR)
+        return f"{a} : {b} ratio"
+    from pipeline.shape_features import label_for
+
+    return label_for(col) or col
 
 
 def diameter_um(area_px: float, pixel_um: float) -> float:

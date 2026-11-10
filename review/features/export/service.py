@@ -1156,6 +1156,12 @@ def export_distribution_data(ctx) -> None:
     import numpy as np
 
     val_col = ctx.state.channel.active_val_col
+    from review.domain.size_classes import class_ratio_not_per_cell, is_class_ratio_column
+
+    if is_class_ratio_column(val_col):
+        # The tab draws nothing for a size-class ratio (no per-cell values); its export writes nothing either.
+        _error(ctx.window, "Nothing to export", class_ratio_not_per_cell(val_col))
+        return
     fluor_gates = get_all_fluor_gates(ctx)
     ratios = ctx.state.channel.ratio_index
 

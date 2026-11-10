@@ -35,7 +35,7 @@ LOG_METRICS = frozenset({"log2_count_fc"})
 #: ratio and share, which the user asked to average, and whose small whole-number counts give a median that jumps
 #: between integers. ``well_summary``'s ``median`` column then holds that mean — one shape for every caller, as
 #: ``review.domain.observation.well_medians`` does for a share — and ``statistic`` names which it is.
-MEAN_METRICS = frozenset(size_class_compute.COLUMNS)
+MEAN_METRICS = frozenset(size_class_compute.ALL_COLUMNS)
 
 
 def well_statistic(column: str) -> str:

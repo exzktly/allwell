@@ -44,9 +44,10 @@ def column_display_label(ctx, col: str) -> str:
     ``<channel>_<metric>`` intensity/count columns (channel upper-cased + the
     metric registry's label).
     """
-    from pipeline.shape_features import is_shape_column, label_for as shape_label
+    from pipeline.shape_features import is_shape_column
     if is_shape_column(col):
-        return shape_label(col) or col
+        from review.domain.size_classes import shape_column_label
+        return shape_column_label(col)
     if is_nanowell_cell_column(col):
         from review.data.observations import nanowell_cell_label
         return nanowell_cell_label(col)

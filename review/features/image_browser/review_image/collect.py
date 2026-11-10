@@ -265,6 +265,7 @@ EXCLUSION_LAYERS = (
     ("Excluded_Field_Pass", "field excluded in QC triage"),
     ("FOV_Pass", "field not in the FOV selection"),
     ("Saved_Cells_Pass", "in the excluded saved cells"),
+    ("Population_Pass", "not in the chosen size class"),
 )
 
 
@@ -465,6 +466,14 @@ def _mfi_rows(ctx, well: str, col: str) -> tuple | None:
 
     Returns ``None`` when the well has no rows, no *col*, or no nucleus id column.
     """
+    from review.data.narrow_rows import narrow_rows
+
+    return _frame_id_values(narrow_rows(ctx, well, {col}), col)
+
+
+def _frame_id_values(df, col: str) -> tuple | None:
+    """:func:`_mfi_rows`' arrays from a frame already read: ``(fov, tp, nid, value)`` of *col* for every row that
+    names a cell, or ``None`` without rows, *col* or a nucleus id column."""
     from domain.image_identity import (
         NUCLEUS_ID_COLUMN_NAMES,
         frame_token_series,
@@ -473,9 +482,7 @@ def _mfi_rows(ctx, well: str, col: str) -> tuple | None:
         resolve_identity_column,
     )
     from domain.text_columns import as_text
-    from review.data.narrow_rows import narrow_rows
 
-    df = narrow_rows(ctx, well, {col})
     if df is None or df.empty or col not in df.columns:
         return None
     nid_col = resolve_identity_column(df, *NUCLEUS_ID_COLUMN_NAMES)
@@ -553,6 +560,39 @@ class _FrameMfi(Mapping):
 
     def __len__(self) -> int:
         return len(self._arrays)
+
+
+def review_build_size_class_map(
+    ctx, mask_arr, well: str, fov: str, tp: str, rule,
+) -> dict[int, int] | None:
+    """``{nid: class index}`` for the cells of the displayed field that Cell Gating's size-class rule *rule*
+    (``review.domain.size_classes.SizeClassRule``) places in a class, judged on the same area column as the debris
+    gate (``size_classes.area_column``). A cell in neither class is absent.
+
+    ``None`` — nothing could be classified, as opposed to "no cell is in a class" (``{}``) — when the rule is
+    incomplete, or the well has no rows, no area column or no nucleus id column, so the picture's legend can say
+    which it is. Only nuclei present in *mask_arr* are reported.
+    """
+    from review.data.narrow_rows import narrow_rows
+    from review.domain.qc_params import AREA_COLS
+    from review.domain.size_classes import UNCLASSIFIED, area_column, classify
+
+    if rule is None or not rule.active():
+        return None
+    df = narrow_rows(ctx, well, set(AREA_COLS))
+    col = area_column(df.columns) if df is not None else None
+    rows = _frame_id_values(df, col) if col is not None else None
+    if rows is None:
+        return None
+    fovs, tps, nids, areas = rows
+    sel = (fovs == fov) & (tps == tp)
+    present = {int(nid) for nid in _np.unique(_np.asarray(mask_arr)) if int(nid) > 0}
+    out: dict[int, int] = {}
+    for nid, k in zip(nids[sel], classify(areas[sel], rule)):
+        if nid is None or nid not in present or k == UNCLASSIFIED:
+            continue
+        out[int(nid)] = int(k)
+    return out
 
 
 def review_build_mfi_map(

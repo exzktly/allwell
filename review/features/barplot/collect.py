@@ -1418,7 +1418,9 @@ def collect_bar_items_fov_pooled(
     # _aggregate_arrays groups by exact tp values present in the stream; match
     # against the shared relative tolerance (``tp_match.tp_close``) rather than
     # an absolute one, which a 4-significant-figure combo round-trip defeats.
-    pts = _agg_arrays(tp_all, val_all, fov_all, threshold, use_sem, True)
+    from review.domain.size_classes import is_class_ratio_column
+
+    pts = _agg_arrays(tp_all, val_all, fov_all, threshold, use_sem, True, counts_ratio=is_class_ratio_column(val_col))
     pts_by_t = {float(p[0]): p for p in pts}
 
     for i, t in enumerate(target_ts):

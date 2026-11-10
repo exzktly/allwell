@@ -185,6 +185,12 @@ class QCParams:
     #: a kept cell is counted in. Here because it is edited on the same panel and must be saved, restored and
     #: carried by the dataset tools with the rest of it; a blank rule (the default) classifies nothing.
     size_classes: SizeClassRule = field(default_factory=SizeClassRule)
+    #: The size class the whole analysis is restricted to — its index in :attr:`size_classes` (0 or 1) — or ``None``
+    #: for every cell. Unlike the rule itself this *is* an inclusion layer: while it names a class of a complete rule,
+    #: every cell outside that class is left out of every plot, statistic and export (``Population_Pass``,
+    #: ``review.data.population_gate``). A choice that names no class of a complete rule restricts nothing
+    #: (:meth:`population_rule`), and the Plotting band says so rather than offering it.
+    population: int | None = None
 
     # ── (de)serialization ────────────────────────────────────────────────
     def to_dict(self) -> dict[str, Any]:
@@ -203,6 +209,7 @@ class QCParams:
             "min_circularity": self.min_circularity,
             "max_circularity": self.max_circularity,
             "size_classes": self.size_classes.to_list(),
+            "population": self.population,
         }
 
     @classmethod
@@ -223,6 +230,7 @@ class QCParams:
             min_circularity=_pos(d.get("min_circularity")),
             max_circularity=_pos(d.get("max_circularity")),
             size_classes=SizeClassRule.from_list(d.get("size_classes")),
+            population=_class_index(d.get("population")),
         )
 
     @classmethod
@@ -272,7 +280,22 @@ class QCParams:
             changes["nanowell_focus_fraction"] = _fraction(changes["nanowell_focus_fraction"])
         if "size_classes" in changes and not isinstance(changes["size_classes"], SizeClassRule):
             changes["size_classes"] = SizeClassRule.from_list(changes["size_classes"])
+        if "population" in changes:
+            changes["population"] = _class_index(changes["population"])
         return replace(self, **changes)
+
+    def population_rule(self) -> tuple[SizeClassRule, int] | None:
+        """``(rule, class index)`` while :attr:`population` names a class of a complete size-class rule — the
+        analysis is then restricted to that class — else ``None``: every cell, whatever was chosen."""
+        k = self.population
+        if k is None or not self.size_classes.active() or not 0 <= k < len(self.size_classes.classes):
+            return None
+        return self.size_classes, k
+
+    def population_label(self) -> str:
+        """The chosen class's label while the analysis is restricted to it, else ``""``."""
+        chosen = self.population_rule()
+        return chosen[0].labels[chosen[1]] if chosen is not None else ""
 
     def nanowell_focus_rule(self):
         """The :class:`~review.domain.nanowell_rim_focus.RimFocusRule` these parameters put in force."""
@@ -300,6 +323,17 @@ class QCParams:
             (self.min_area, self.max_area, self.min_solidity, self.max_region_area,
              self.min_circularity, self.max_circularity)
         )
+
+
+def _class_index(value) -> int | None:
+    """A saved :attr:`QCParams.population`: a non-negative whole number, or ``None`` for anything else."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        k = int(value)
+    except (TypeError, ValueError):
+        return None
+    return k if k >= 0 and float(value) == k else None
 
 
 def compute_qc_pass(df, params: QCParams):

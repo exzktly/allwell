@@ -129,6 +129,12 @@ class Crop:
     #: ``None`` for a cell the run kept no outline of. ``None`` as a whole when the well has no outlines file
     #: (``cell_outline_compute``), so the page draws dots and says why.
     outlines: list | None = None
+    #: Each of :attr:`cells`' size class under Cell Gating's rule (``review.domain.size_classes.classify``: 0, 1, …,
+    #: ``UNCLASSIFIED``), in the same order, with the rule's labels in :attr:`size_labels`; ``None`` when no
+    #: complete rule is set or the cell table has no area column, so the cells are drawn as they always were
+    #: (``controller.gated_crops`` fills both).
+    size_class: np.ndarray | None = None
+    size_labels: tuple = ()
 
 
 _IMAGE_SUFFIXES = (".tif", ".tiff")

@@ -16,6 +16,10 @@ column                 value                                     undefined when
                        neither range, or with no area
 ``size_ratio``         ``size_1 / size_2``                       the same, or the second class is empty
 ``size_1_share``       ``size_1 / (size_1 + size_2)``            the same, or neither class holds a cell
+``size_1_fc``,         ``size_1`` (``size_2``) at t over the     either timepoint's count undefined, or the class
+``size_2_fc``          same at the page's Baseline               empty at baseline
+``size_ratio_fc``      ``size_ratio`` at t over the same at the  either ratio undefined, or zero at baseline
+                       page's Baseline
 =====================  ========================================  ===============================================
 
 A nanowell with a count and no cells has counts of 0 — zero is a measurement — and no ratio or share. A well whose
@@ -35,8 +39,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from review.domain.qc_params import AREA_COLS
 from review.domain.size_classes import PLACEHOLDERS, SizeClassRule, classify
+from review.domain.size_classes import area_column as _area_column
 
 SITE_KEY = ["well", "timepoint", "nw_q", "nw_r"]
 #: The per-class count columns, in class order.
@@ -44,8 +48,15 @@ COUNT_COLUMNS = ("size_1", "size_2")
 UNCLASSIFIED_COLUMN = "size_unclassified"
 RATIO_COLUMN = "size_ratio"
 SHARE_COLUMN = "size_1_share"
-#: Every size metric, in the order the page lists them.
+#: Every size metric measured at a timepoint, in the order the page lists them.
 COLUMNS = (*COUNT_COLUMNS, UNCLASSIFIED_COLUMN, RATIO_COLUMN, SHARE_COLUMN)
+#: Each fold change over the page's Baseline -> the size metric it is of (``series_compute.site_metrics`` computes
+#: them beside ``count_fc``, with the same baseline rule; ``series_compute.exclusion_reason`` says why one is
+#: undefined). Not in :data:`COLUMNS`: those are measurements at a timepoint, these are ratios of two timepoints.
+FC_OF = {"size_1_fc": "size_1", "size_2_fc": "size_2", "size_ratio_fc": RATIO_COLUMN}
+FC_COLUMNS = tuple(FC_OF)
+#: Every size metric the page offers: the measurements, then their fold changes.
+ALL_COLUMNS = (*COLUMNS, *FC_COLUMNS)
 #: The whole-number ones (packed into bands on a swarm).
 INTEGER_COLUMNS = frozenset({*COUNT_COLUMNS, UNCLASSIFIED_COLUMN})
 #: The page's metric menu entries: key -> label, the class names as placeholders (``SizeClassRule.name``).
@@ -55,6 +66,9 @@ LABELS = {
     UNCLASSIFIED_COLUMN: "Cells in no size class",
     RATIO_COLUMN: f"{PLACEHOLDERS[0]} : {PLACEHOLDERS[1]} ratio",
     SHARE_COLUMN: f"{PLACEHOLDERS[0]} share of classified cells",
+    "size_1_fc": f"{PLACEHOLDERS[0]} count fold change",
+    "size_2_fc": f"{PLACEHOLDERS[1]} count fold change",
+    "size_ratio_fc": f"{PLACEHOLDERS[0]} : {PLACEHOLDERS[1]} ratio fold change",
 }
 #: The per-row reason column :func:`apply` adds: why every size metric is undefined at a row with a count.
 REASON_COLUMN = "_size_reason"
@@ -78,8 +92,9 @@ def _empty_counts() -> pd.DataFrame:
 
 
 def area_column(cells: pd.DataFrame) -> str | None:
-    """The area column the debris gate reads (``qc_params.AREA_COLS``), so one number means one thing on the panel."""
-    return next((c for c in AREA_COLS if c in cells.columns), None)
+    """The area column the debris gate reads (``qc_params.AREA_COLS``), so one number means one thing on the panel —
+    ``size_classes.area_column``, the one rule the Segmentation outlines and the crops are coloured by too."""
+    return _area_column(cells.columns)
 
 
 def well_counts(well: str, cells: pd.DataFrame, included, rule: SizeClassRule | None) -> pd.DataFrame | None:
@@ -190,7 +205,7 @@ def exclusion_reason(metrics: pd.DataFrame, column: str, state_reason: pd.Series
 def note(metrics: pd.DataFrame, rule: SizeClassRule | None, column: str) -> str:
     """The figure's sentence about the classes when *column* is a size metric: the ranges, and how many of the
     counted cells fell in neither — so a ratio is never read as covering every cell. ``""`` for any other metric."""
-    if column not in COLUMNS:
+    if column not in ALL_COLUMNS:
         return ""
     if rule is None or not rule.active():
         return ("Size classes are not set: set two labelled area ranges on Home → Cell Gating to count each "

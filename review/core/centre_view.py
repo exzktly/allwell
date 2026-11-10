@@ -225,6 +225,9 @@ def build_centre(win, parent: QWidget) -> None:
         # First in the row: Observations (cells | nanowells) changes what every other control lists.
         from review.core.observation_band import build_observation_controls
         build_observation_controls(win._ctx, band)
+        # Beside it: Population (all cells, or one Cell Gating size class) — what every cell plot is drawn from.
+        from review.core.population_band import build_population_controls
+        build_population_controls(win._ctx, band)
 
         # The Scatter sub-tab's two modes. It lives in the band's scope zone
         # rather than as a tab bar inside the Scatter page: the page then holds
@@ -601,13 +604,13 @@ def build_centre(win, parent: QWidget) -> None:
             # fluor+ratio list (as this did before) dropped the section every
             # time the user changed plot sub-tabs, so shape metrics only
             # reappeared after a channel "wiggle" forced ``_update_channel_selector``.
-            from pipeline.shape_features import label_for as _shape_label_for
+            from review.domain.size_classes import shape_column_label
             from review.core.ui_helpers import (
                 set_combo_values as _scv,
                 set_combo_values_sectioned as _scv_sectioned,
             )
             shape_cols = list(win._app_state.channel.shape_features or [])
-            shape_labels = [_shape_label_for(c) or c for c in shape_cols]
+            shape_labels = [shape_column_label(c) for c in shape_cols]
             plot_sections = [("", real_labels + ratio_labels)]
             if shape_labels:
                 plot_sections.append(("Shape Features", shape_labels))

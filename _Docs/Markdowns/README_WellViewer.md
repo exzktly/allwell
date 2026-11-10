@@ -3310,17 +3310,23 @@ choice applies once, when the menu closes.
   is judging. A plot of the gated data therefore shows the left-out nanowells
   with fewer cells than the gate saw.
 
-  **Size classes, counted per nanowell** sits under the debris gate on a
-  nanowell dataset. It sorts each nanowell's cells into two size ranges you
-  name — for example *T cells* and *DCs*, when no marker you imaged tells them
-  apart — and counts each. Each row is a **label** you type and a **min** and
+  **Size classes** sits under the debris gate on every dataset. It sorts cells
+  into two size ranges you name — for example *T cells* and *DCs*, when no
+  marker you imaged tells them apart. The
+  [Segmentation view](#segmentation) then outlines each kept cell in its class's
+  colour: green for the first class, blue for the second, and the usual
+  kept-cell outline for a cell in neither. On a nanowell dataset the rows are
+  titled **Size classes, counted per nanowell**. There the classes are also
+  counted per nanowell, and the cells on the Nanowells crops are coloured the
+  same way. Each row is a **label** you type and a **min** and
   **max** cell area in pixels, the same area the debris gate's Area row uses.
   Both ends count as inside the range, and a box left blank means no limit on
   that side. Beside each range is its size as a circle's diameter in µm at the
   run's pixel size, so you can check it against what you expect your cells to
   measure. Leave a gap between the ranges for sizes that could be either: a
   cell in neither range is counted as *unclassified*, never forced into one.
-  The ranges may not overlap, both labels are needed, and the line under the
+  The ranges may not overlap, both labels are needed (and may not contain
+  `::`, which the ratio's name joins them with), and the line under the
   rows says what is missing until the rule is complete. Only the cells this tab
   keeps are classified, so the debris gate and every other filter apply first;
   the line says when the debris gate's own Area bounds cut into a range, and
@@ -3332,6 +3338,12 @@ choice applies once, when the menu closes.
   against the new counts, with its progress on the status bar. The
   [Nanowells page](#nanowells) then offers each class's count, the cells in
   neither, their ratio and the first class's share, each named with your labels.
+  On any other dataset the title reads **Size classes, outlined in
+  Segmentation** and the line under the rows says only that, since there are no
+  nanowells to count in. To draw every plot from one class alone, pick it under
+  the Plotting row's **Population** (see *Population — one size class, or every
+  cell*); the line under the rows then says which class every plot is drawn
+  from.
 
   **Exclude fields the run flagged** sits under the debris gate and works on
   whole fields of view rather than on single cells. While a run processes a
@@ -4221,6 +4233,74 @@ across the whole window — picking a different channel re-renders every
 plot, every axis label, every threshold range, and every export against
 the new channel. Ratio channels (e.g. `GFP/MCHERRY`) defined under the
 Home → Ratios editor appear here as virtual channels.
+
+#### Population — one size class, or every cell
+
+Once two size classes are set on [Home → Cell Gating](#cell-gating) (for
+example *T cells* and *DCs*), the Plotting row offers **Population**: *All
+cells*, *T cells only* or *DCs only*. Picking a class restricts the whole
+analysis to it. Every cell plot, every statistic, the cell counts, the Fraction
+and Events above threshold, every fold change, and every export are then of that
+class alone. Comparing a count or a fold change between the classes is a matter
+of switching here. A cell is in a class when its area falls in the class's
+range — the same area the debris gate reads. Cells in neither range belong to
+neither population. A cell with no recorded area cannot be shown to be in a
+class, so it is left out too.
+
+Every cell figure says which population it was drawn from, in a line at its
+foot, for example *Population: T cells only (80–250 px; DCs and cells in neither
+class left out)*. The line is kept in a saved or exported copy of the figure. If
+a selected well's table has no cell-area column, the line names those wells,
+because none of their cells could be classed. Spatial and Multivariate figures
+carry the same line. On the Statistics page it sits under the *Replicates*
+line, because the tests there are run on the same cells. The choice is saved with the
+dataset. It runs the same way as a Cell Gating edit, behind a progress window.
+Changing a class's range while that class is picked moves cells in or out of
+every number the same way. In the Segmentation view's **Why removed** overlay,
+the cells left out are outlined in turquoise as *not in the chosen size class*.
+The Cell Gating funnel lists them as *Outside the chosen size class*.
+
+**Each class's share.** While both classes are complete, the channel list's
+*Shape Features* section also offers **T cells share** and **DCs share** (named
+after your classes). Each is a cell's membership of the class: 1 in it, 0
+outside it, blank for a cell with no recorded area. A well's mean of it is
+therefore the class's share of the well's kept cells. It can be plotted like
+any other per-cell value, over time, per group, on the heat map and as a fold
+change. Renaming a class renames its share, and clearing the classes removes
+both. A share is of the cells the plot keeps, so it is offered under
+**Population: All cells** only — with one class left out, that class's share
+would be 1 everywhere.
+
+**The ratio of the two classes.** The same section offers **T cells : DCs
+ratio**. It is a count of one class over the other, taken over exactly the cells
+each value stands for. At each timepoint of a well it is that well's T cells over
+its DCs. For a group of wells it is the group's T cells over its DCs together,
+not an average of the wells' ratios. With *Spread* set per field of view, the
+error bar is the spread of each field's own ratio. Without it there is no error
+bar, because one well's cells are not replicates of its ratio. Its fold change
+works like any other: the ratio at each timepoint over the ratio at the baseline
+or the control. Cells in neither class are on neither side. Where a well or field
+has no DC there is no ratio — never zero or infinity — and the point is left out.
+The *Fraction above threshold* of the ratio is the first class's share, and its
+*Events* the first class's count, since a ratio has no cutoff. On the Statistics
+page its *Mean (all cells)* is the ratio and there is no *Median*.
+
+Views that draw one value per cell have no ratio to draw, and say so rather than
+plotting its 1s and 0s: Distribution (and its *Export CSV*), Line Graphs'
+cumulative-distribution panel, Bar Plots' *Violin* and *Beeswarm*, and the
+Statistics page's KS test. Bar Plots' *Show: All points* draws the bars without
+dots. The per-cell Scatter and Spatial do not list it. Like the shares, the
+ratio is offered under **Population: All cells** only, because with one class
+left out it has no denominator. Choosing one class while a plot shows a share or
+the ratio moves that plot to the first fluorescence channel.
+
+The control is shown only while both classes are complete, and only on a plot
+drawing cells. It changes cell plots only. On a nanowell dataset the Nanowells
+page and the *Observations: Nanowells* plots are always of every kept cell. There
+each class has metrics of its own: *T cells count*, *DCs count*, the *T cells :
+DCs ratio*, the share, and the fold change of each count and of the ratio over
+the page's Baseline. Under *Observations: Nanowells* the Population control is
+not shown.
 
 #### Plate-map well picker
 
@@ -6411,6 +6491,18 @@ use them.
   `size_unclassified`, `size_ratio` and `size_1_share` with a `size_classes` column naming the ranges. Until
   the classes are set, these metrics are empty and say so.
 
+  Three fold changes follow them, over the same **Baseline** as *Count fold change*: *T cells count fold change*,
+  *DCs count fold change* and *T cells : DCs ratio fold change*. Each is the value at a timepoint divided by the
+  same nanowell's value at the baseline. A class with no cell at baseline has no count fold change, and a ratio
+  of zero at baseline has no ratio fold change. The footer counts each such nanowell with that reason, as it does
+  for *Count fold change*. Like the five above, each well's value is the mean over its nanowells, and the Moving
+  average and its baseline window apply to them as to the other fold changes. The export writes them as
+  `size_1_fc`, `size_2_fc` and `size_ratio_fc`. Each has its own baseline timepoint column
+  (`size_1_fc_baseline_timepoint`, …). Under *First measurable* the ratio's baseline is the first timepoint at
+  which it exists, which can be later than the count's `baseline_timepoint`. When a fold change has no value
+  because its baseline does not, the reason given is the baseline's own, for example *baseline: second class
+  empty*.
+
 **Cell fluorescence and nanowell fluorescence.** Both are measured in the channel chosen in **Channel** (for example DAPI),
 but they answer different questions. Both are measured above the same background, the one the run was set up
 with (*Fluorescence background*, in the Analyze section), and every axis says which:
@@ -6988,6 +7080,9 @@ and why. A crop is cut a little wider than its nanowell, so its edges show parts
 not drawn, so every outline is a cell the selected nanowell's count is made of. It is one setting, also offered on the Extremes view, and kept with the page's
 settings. As on the Array view, a cell Cell Gating leaves out, or one in an excluded field, is not drawn. The caption
 counts the cells drawn and those left out, and a well without a cell table is named there rather than shown as empty.
+With size classes set on Home ▸ Cell Gating, each cell is outlined (or dotted) in its class's colour — green for the
+first class, blue for the second, white for a cell in neither — and the caption names each colour with its count:
+*size classes: T cells in green (4), DCs in blue (1), white in neither (2)*.
 The box beside **Cells** chooses what the crops are an image of: *Phase* (the image the run segmented), or any
 fluorescence channel the run read — EGFP, say — cut from that channel's image of the same tile, at the same place.
 It is one setting for every picture on the page: the strip, the pop-out, the Extremes montage and the Array view's
@@ -7287,6 +7382,16 @@ segmentation, the status line says so. Opening another dataset clears it.
   actually has cells for, and if the toggle is on and nothing here is excluded
   the line says that rather than leaving you with an unchanged picture and no
   way to tell whether the control worked.
+- **Size classes** — once two size classes are set on Home ▸ Cell Gating, every
+  kept cell whose area falls in a class is outlined in that class's colour
+  instead of red: green for the first class, blue for the second. A kept cell in
+  neither range keeps the red outline. The area is the one the debris gate reads,
+  from the measurement table, not counted from the picture. A key under the
+  picture names each class with its colour and how many of this field's kept
+  cells it holds, and how many are in neither. If the table has no area column,
+  the key says the outlines could not be coloured by class. Changing the classes
+  redraws the field at the zoom you had. Excluded cells keep their **Why
+  removed** colours, which are all clearly different from the two class colours.
 
   Being *included* is the AND of all of these layers, so a cell can fail more than
   one and an outline can only be one colour — it shows the first, and hovering

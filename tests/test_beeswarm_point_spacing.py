@@ -217,7 +217,8 @@ def test_every_app_call_of_draw_view_passes_the_spacing():
                 continue
             sites += 1
             given = {k.arg for k in node.keywords}
-            missing += [f"{rel}:{node.lineno} {name}" for name in ("swarm_spacing", "dist_style", "violin_smooth")
+            missing += [f"{rel}:{node.lineno} {name}" for name in ("swarm_spacing", "dist_style", "violin_smooth",
+                                                                       "hist_bins")
                         if name not in given]
     assert sites == 2, f"expected the page's and Batch Export's calls, found {sites}"
     assert not missing, f"draw_view called without the Distribution's drawing settings at {missing}"

@@ -12,8 +12,8 @@ from dataclasses import dataclass, field, replace
 
 from review.features.nanowell.crop_grid_compute import POPOUT_GRIDS, POPOUT_MAX_COLS
 from review.features.nanowell.moving_compute import clamp_window
-from review.features.nanowell.distribution_style_compute import (AUTO, SMOOTH_DEFAULT, clamp_smooth,
-                                                                 style_or_default)
+from review.features.nanowell.distribution_style_compute import (AUTO, BINS_DEFAULT, SMOOTH_DEFAULT, clamp_bins,
+                                                                 clamp_smooth, style_or_default)
 from review.domain.nanowell_rim_focus import RimFocusRule
 from review.features.nanowell.series_compute import is_baseline
 from review.features.nanowell.statistics_compute import TEST_KEYS as STATS_TESTS
@@ -158,6 +158,8 @@ class NanowellState:
     dist_style: str = AUTO
     #: The violins' **Smoothing**, as a percentage of the automatic (Scott's rule) bandwidth.
     violin_smooth: int = SMOOTH_DEFAULT
+    #: The histograms' **Bins** (``column_histogram.BINS_MIN``–``BINS_MAX``), read under Show: Histogram.
+    hist_bins: int = BINS_DEFAULT
     #: The user's "responding above" cut per metric column (``brightness_fc_GFP``, ``n``; tracker I9). A metric
     #: with none has no fraction responding: there is no default cut.
     thresholds: dict = field(default_factory=dict)
@@ -404,7 +406,7 @@ class NanowellState:
                 "well": self.well, "timepoint": self.timepoint, "control": self.control, "cohort": self.cohort,
                 "moving": self.moving, "baseline_moving": self.baseline_moving,
                 "moving_centred": self.moving_centred,
-                "dist_style": self.dist_style, "violin_smooth": self.violin_smooth,
+                "dist_style": self.dist_style, "violin_smooth": self.violin_smooth, "hist_bins": self.hist_bins,
                 "extremes_n": self.extremes_n, "extremes_tps": list(self.extremes_tps), "crop_cells": self.crop_cells,
                 "channel": self.channel, "image_channel": self.image_channel,
                 "crop_metrics": self.crop_metrics, "popout_labels": self.popout_labels,
@@ -442,6 +444,7 @@ class NanowellState:
         self.baseline_moving = clamp_window(config.get("baseline_moving"))
         self.dist_style = style_or_default(config.get("dist_style"))
         self.violin_smooth = clamp_smooth(config.get("violin_smooth"))
+        self.hist_bins = clamp_bins(config.get("hist_bins"))
         mode = config.get("identity_mode")
         self.identity_mode = mode if mode in IDENTITY_MODES else fresh.identity_mode
         colour = config.get("identity_colour")

@@ -56,9 +56,25 @@ def test_batch_export_reads_the_page_s_show_and_smoothing():
 
     from review.features.nanowell.controller import distribution_style_of
 
-    st = NanowellState(dist_style="beeswarm", violin_smooth=60)
+    st = NanowellState(dist_style="beeswarm", violin_smooth=60, hist_bins=12)
     ctx = SimpleNamespace(state=SimpleNamespace(feature_slice=lambda name: st if name == "nanowell" else None))
-    assert distribution_style_of(ctx) == ("beeswarm", 60)
+    assert distribution_style_of(ctx) == ("beeswarm", 60, 12)
+    assert distribution_style_of(ctx).bins == 12
+
+
+def test_histogram_draws_no_dots_and_only_it_takes_bins():
+    assert dsc.density_above("histogram") == 0
+    assert [dsc.smooths(s) for s in dsc.STYLE_KEYS] == [True, False, True, False]   # auto, beeswarm, violin, histogram
+
+
+def test_the_page_keeps_its_bin_count_with_its_settings():
+    restored = NanowellState()
+    restored.apply_config(NanowellState(dist_style="histogram", hist_bins=12).to_config())
+    assert (restored.dist_style, restored.hist_bins) == ("histogram", 12)
+    restored.apply_config({"hist_bins": "many"})
+    assert restored.hist_bins == 30
+    restored.apply_config({})                                    # a page saved before the setting existed
+    assert restored.hist_bins == 30
 
 
 # ── the figure ───────────────────────────────────────────────────────────────
@@ -119,6 +135,68 @@ def test_smoothing_changes_the_violin_and_the_figure_says_by_how_much(tmp_path):
     assert "Violin smoothing 3.00× the automatic (Scott's rule) bandwidth." in _footer(fig_3)
 
 
+def _histogram_bars(fig):
+    """Per slot x: the bars' ``[bottom, height, width, …]``, bottom up."""
+    from review.features.nanowell.renderer import HISTOGRAM_GID
+
+    out: dict = {}
+    for ax in fig.axes:
+        for p in ax.patches:
+            if p.get_gid() == HISTOGRAM_GID:
+                out.setdefault(round(p.get_x() + p.get_width() / 2, 9), []).append(
+                    (p.get_y(), p.get_height(), p.get_width()))
+    return {x: [v for bar in sorted(bars) for v in bar] for x, bars in out.items()}
+
+
+def test_histogram_bins_counts_on_whole_numbers_with_one_width_scale(tmp_path):
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.renderer import render_distribution
+
+    metrics, data = _plate(tmp_path, {"A01": {"t_c": [1, 1, 2, 2, 2, 3], "t_a": [3, 4, 4, 5, 8]}})
+    model = dc.distribution_model(metrics, "n", channels=data.channels, groups={"set": ["A01"]})
+    fig = Figure(figsize=(8, 6.4))
+    hits = render_distribution(fig, model, style="histogram", bins=4)
+    # Edges 0.5, 2.5, 4.5, 6.5, 8.5; p = [5/6, 1/6, 0, 0] and [0, 3/5, 1/5, 1/5]; widest 5/6; slot half 0.45 (one
+    # well a tick). Each column scaled to its own peak would make the second's widest bar 0.9, not 0.648.
+    assert _histogram_bars(fig) == {
+        0.0: pytest.approx([0.5, 2.0, 0.9, 2.5, 2.0, 0.18]),
+        1.0: pytest.approx([2.5, 2.0, 0.648, 4.5, 2.0, 0.216, 6.5, 2.0, 0.216]),
+    }
+    assert not hits.entries
+    # The figure breaks its footer to its width and writes it bottom up: read it top down.
+    footer = " ".join(t.get_text() for t in sorted(fig.texts, key=lambda t: -t.get_position()[1]))
+    assert "Show: Histogram — each well is drawn as a histogram of its nanowells" in footer
+    assert "(4 bins · widest bar = 83% of a well)" in footer
+
+
+def test_histogram_says_nothing_of_smoothing(tmp_path):
+    fig, _hits, violins = _draw(tmp_path, 2, style="histogram", smooth=200)
+    assert not violins
+    assert not any("smoothing" in t.lower() for t in _footer(fig))
+
+
+def test_every_panel_shares_the_histogram_s_bins(tmp_path):
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.renderer import HISTOGRAM_GID, render_distribution
+
+    metrics, data = _plate(tmp_path, {"A01": {"t_c": [1, 1, 2, 2, 2, 3], "t_a": [3, 4, 4, 5, 8]},
+                                      "B01": {"t_c": [6, 7, 7, 8], "t_a": [1, 2, 2]}})
+    model = dc.distribution_model(metrics, "n", channels=data.channels, groups={"a": ["A01"], "b": ["B01"]})
+    assert len(model.panels) == 2
+    fig = Figure(figsize=(8, 6.4))
+    render_distribution(fig, model, style="histogram", bins=4)
+    edges = [sorted({round(p.get_y(), 9) for p in ax.patches if p.get_gid() == HISTOGRAM_GID}) for ax in fig.axes
+             if any(p.get_gid() == HISTOGRAM_GID for p in ax.patches)]
+    assert len(edges) == 2
+    assert set(edges[0]) | set(edges[1]) <= {0.5, 2.5, 4.5, 6.5}  # one grid over 1…8, whichever panel drew
+
+
 def test_the_window_counts_members_in_violins_by_the_style_drawn():
     from types import SimpleNamespace
 
@@ -130,7 +208,8 @@ def test_the_window_counts_members_in_violins_by_the_style_drawn():
     hits = SimpleNamespace(panels=[], entries=[])
     as_violin = wc.not_drawn(result, model, hits, max_panels=12, density_above=dsc.density_above("violin"))
     as_auto = wc.not_drawn(result, model, hits, max_panels=12, density_above=dsc.density_above("auto"))
-    assert as_violin["in densities"] == 1 and as_auto["in densities"] == 0
+    as_hist = wc.not_drawn(result, model, hits, max_panels=12, density_above=dsc.density_above("histogram"))
+    assert as_violin["in densities"] == as_hist["in densities"] == 1 and as_auto["in densities"] == 0
 
 
 # ── the controls on the real page ───────────────────────────────────────────
@@ -157,6 +236,19 @@ def test_the_show_control_and_the_smoothing_slider_redraw_the_page(qtbot, tmp_pa
     assert st.violin_smooth == 200
     assert ctx.widgets.get("_nw_violin_smooth_label").text() == "2.00×"
     assert "Violin smoothing 2.00× the automatic (Scott's rule) bandwidth." in _texts(ctx, "nw-footer")
+
+    bins = ctx.widgets.get("_nw_hist_bins_spin")
+    assert bins.isVisible() and not bins.isEnabled()             # Violin: nothing to bin
+    seg.setCurrentIndex(dsc.STYLE_KEYS.index("histogram"))
+    assert st.dist_style == "histogram"
+    assert any(p.get_gid() == "nw-histogram" for ax in fig.axes for p in ax.patches)
+    assert not st.hits.entries
+    assert bins.isEnabled() and not slider.isEnabled()           # Smoothing changes nothing a histogram draws
+    # Cell counts 0…4 here: at 30 bins one per value; at 3, bins two values wide.
+    assert any("(5 bins (one per value) ·" in t for t in _texts(ctx, "nw-footer"))
+    bins.setValue(3)
+    assert st.hist_bins == 3
+    assert any("(3 bins ·" in t for t in _texts(ctx, "nw-footer"))
 
     seg.setCurrentIndex(dsc.STYLE_KEYS.index("beeswarm"))
     assert st.hits.entries

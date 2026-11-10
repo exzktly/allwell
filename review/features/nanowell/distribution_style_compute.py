@@ -1,11 +1,16 @@
-"""How the Distribution view draws each well's nanowells: as dots (a beeswarm) or as a violin, and how smooth the
-violin is.
+"""How the Distribution view draws each well's nanowells: as dots (a beeswarm), as a violin or as a histogram, how
+smooth the violin is and how many bins the histogram has.
 
 Qt-free. The page's **Show** control picks one of :data:`STYLES` and its **Smoothing** slider the violin's bandwidth
 as a percentage of the automatic one (:data:`SMOOTH_MIN` to :data:`SMOOTH_MAX`, :data:`SMOOTH_DEFAULT` = the
 automatic bandwidth itself). Both live on ``NanowellState`` (``dist_style``, ``violin_smooth``) and are read by the
 renderer, by Batch Export's Nanowells mode, and by the Distribution window's "members not drawn" count, which must
 agree with the renderer on which columns hold violins.
+
+**Histogram** draws each well as a vertical histogram mirrored about its slot (``review.domain.column_histogram``):
+every well's bars sum to 1, and every well in the figure shares one set of bins and one width scale, so widths
+compare across wells and panels. Like a violin it draws no dots. **Bins** (:data:`BINS_MIN`–:data:`BINS_MAX`) is its
+count; an integer metric bins on whole numbers.
 
 **Auto** is what the view drew before it had the control: dots while a column holds :data:`DENSITY_ABOVE` wells or
 fewer, violins past that (decision U2), since a slot shared by many wells is too narrow for a readable swarm.
@@ -18,9 +23,11 @@ from __future__ import annotations
 
 import math
 
-AUTO, BEESWARM, VIOLIN = "auto", "beeswarm", "violin"
+from review.domain.column_histogram import BINS_DEFAULT, BINS_MAX, BINS_MIN, clamp_bins  # noqa: F401 — the page's
+
+AUTO, BEESWARM, VIOLIN, HISTOGRAM = "auto", "beeswarm", "violin", "histogram"
 #: The Show control's choices, in its order, with their labels.
-STYLES = ((AUTO, "Auto"), (BEESWARM, "Beeswarm"), (VIOLIN, "Violin"))
+STYLES = ((AUTO, "Auto"), (BEESWARM, "Beeswarm"), (VIOLIN, "Violin"), (HISTOGRAM, "Histogram"))
 STYLE_KEYS = tuple(key for key, _label in STYLES)
 #: Wells sharing a column beyond which Auto draws violins rather than dots (decision U2).
 DENSITY_ABOVE = 4
@@ -44,15 +51,21 @@ def clamp_smooth(value) -> int:
 
 
 def density_above(style: str) -> float:
-    """The number of wells per column beyond which *style* draws violins: :data:`DENSITY_ABOVE` for Auto, none
-    (every column) for Violin, never for Beeswarm. The renderer draws a column as violins when its well count is
-    greater than this, and the window's count of members not drawn asks the same question."""
+    """The number of wells per column beyond which *style* draws shapes rather than dots: :data:`DENSITY_ABOVE` for
+    Auto (violins), none (every column) for Violin and Histogram, never for Beeswarm. The renderer draws a column as
+    shapes when its well count is greater than this, and the window's count of members not drawn asks the same
+    question."""
     style = style_or_default(style)
-    if style == VIOLIN:
+    if style in (VIOLIN, HISTOGRAM):
         return 0
     if style == BEESWARM:
         return math.inf
     return DENSITY_ABOVE
+
+
+def smooths(style: str) -> bool:
+    """Whether *style* can draw a violin, so Smoothing changes something: Auto and Violin."""
+    return style_or_default(style) in (AUTO, VIOLIN)
 
 
 def bandwidth(smooth) -> object:

@@ -512,7 +512,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
                         _render_message(fig, f"{well} has no timepoint {shown}: it was not imaged then, so there "
                                              "is no map to draw.", gid="nw-array-missing")
                     else:
-                        dist_style, violin_smooth = _distribution_style_of(self._ctx)
+                        drawing = _distribution_style_of(self._ctx)
                         _draw_view(fig, view, metrics, data, groups=groups, metric=drawn, channel=channel,
                                    axis=settings["axis"], timepoint=self._timepoint_for(data, wells, settings),
                                    control="", baseline=settings["baseline"], cohort=settings["cohort"],
@@ -522,7 +522,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                    note=note, tableless=tableless, responding_above=cut,
                                    subset=settings["subset"], names=_well_names(self._ctx, wells),
                                    swarm_spacing=_swarm_spacing_of(self._ctx), sizes=_size_rule(self._ctx),
-                                   dist_style=dist_style, violin_smooth=violin_smooth)
+                                   dist_style=drawing.style, violin_smooth=drawing.smooth,
+                                   hist_bins=drawing.bins)
                     self._figure_view = {"view": view, "metric": drawn, "axis": settings["axis"],
                                          "baseline": settings["baseline"], "cohort": settings["cohort"],
                                          "moving": settings["moving"],

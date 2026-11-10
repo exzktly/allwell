@@ -2014,7 +2014,11 @@ def crops_site(st) -> tuple | None:
 
 def pop_out_crops(ctx) -> None:
     """**Pop out**: open (or bring forward) the window that shows the selected nanowell's crops at every timepoint,
-    large, and draw it. The window follows the selection until it is closed; the page's own view is untouched."""
+    large, and draw it. The window follows the selection until it is closed; the page's own view is untouched. The
+    button belongs to the selected nanowell's detail, so the window opens on that nanowell even when it was last left
+    showing the Distribution window."""
+    show_selected_in_popout(ctx)
+    _save_soon(ctx)
     _call(ctx, "_nw_open_popout")
     draw_popout(ctx)
 
@@ -2339,14 +2343,32 @@ def on_click(ctx, event) -> None:
     _select(ctx, site)
 
 
-def _select(ctx, site) -> None:
+def _select(ctx, site, *, in_popout: bool = False) -> None:
     """Select *site* alone (``None``: empty space, which clears the selection).
 
     One nanowell at a time, whatever keys are held: a Shift or ⌘ / Ctrl click used to add a nanowell to the site
-    detail, up to six overlaid in one colour each, and that was never asked for."""
+    detail, up to six overlaid in one colour each, and that was never asked for.
+
+    A nanowell clicked on a plot is the one the person wants to see, so the pop-out turns to it
+    (:func:`show_selected_in_popout`) rather than going on showing the Distribution window's rows or hex composite.
+    A click *inside* the pop-out (*in_popout*) leaves its **Show** alone: that click picks a nanowell out of the
+    window being browsed, which must stay on screen."""
     st = _state(ctx)
     st.selected_sites = [] if site is None else [[str(site[0]), int(site[1]), int(site[2])]]
+    if site is not None and not in_popout:
+        show_selected_in_popout(ctx)
     selection_changed(ctx)
+
+
+def show_selected_in_popout(ctx) -> None:
+    """Point the pop-out's **Show** at the selected nanowell (``popout_source = "selected"``) and bring its controls
+    in line; nothing when it already is. The caller saves and redraws, as a selection change does."""
+    st = _state(ctx)
+    if st is None or st.popout_source == "selected":
+        return
+    st.popout_source = "selected"
+    _call(ctx, "_nw_popout_refresh")
+    _call(ctx, "_nw_popout_window_refresh")
 
 
 def clear_selection(ctx) -> None:

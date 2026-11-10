@@ -136,6 +136,8 @@ def test_a_click_adds_the_well_to_the_plate_selection_when_it_is_not_in_it(scatt
                                "currentName": lambda self: "Scatter Plot"})()
     monkeypatch.setattr(ctx.window, "_notebook", notebook, raising=False)
     ctx.state.selection.selected_wells = {"A01"}
+    _page(ctx).popout_source = "window"            # the pop-out left on the window: it turns to the nanowell clicked
     assert show_nanowell(ctx, "B01", 1, 0, "24h")
+    assert _page(ctx).popout_source == "selected"
     assert set(ctx.state.selection.selected_wells) == {"A01", "B01"}
     assert _page(ctx).selected_sites == [["B01", 1, 0]] and _page(ctx).timepoint == "24h"

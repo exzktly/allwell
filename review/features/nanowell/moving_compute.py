@@ -341,12 +341,25 @@ def apply(frame: pd.DataFrame, column: str, reasons: pd.Series, window: int, cen
 #: Why a moving average left nothing, by the reason most of the values went under (:func:`nothing_left_text`).
 _WHY_NOTHING = {
     EARLY_REASON: "each value needs its own timepoint and the {before} before it, and {where_early}",
-    LATE_REASON: "each value needs the {half} timepoints before it and the {half} after it, and {where_late}",
+    LATE_REASON: "each value needs the {half} before it and the {half} after it, and {where_late}",
     BASELINE_REASON: "a fold change's window must start after the baseline, so it needs {window} timepoints after "
                      "the baseline, and {where_baseline}",
     GAP_REASON: "every window holds a timepoint with no value",
     IDENTITY_REASON: "every window holds a timepoint whose nanowells are not joinable to the others",
 }
+#: The same for a centred window, which reaches *h* timepoints each way: a value too near the start of its well
+#: misses timepoints *before* it, not the *N − 1* a trailing window needs, and a fold change's value is drawn from
+#: the *(h + 1)*-th timepoint after the baseline, not the *N*-th.
+_WHY_NOTHING_CENTRED = {
+    **_WHY_NOTHING,
+    EARLY_REASON: "each value needs the {half} before it and the {half} after it, and {where_early}",
+    BASELINE_REASON: "a fold change's window must start after the baseline, and a centred window reaches back "
+                     "{half}, so {where_baseline_centred}",
+}
+
+
+def _timepoints(n: int) -> str:
+    return f"{n} timepoint{'' if n == 1 else 's'}"
 
 
 def _values_at(frame: pd.DataFrame, values: pd.Series, timepoint: str) -> int:
@@ -380,13 +393,17 @@ def nothing_left_text(frame: pd.DataFrame, column: str, window: int, *, timepoin
     counts = drawn[drawn != ""].value_counts()
     reason = str(counts.index[0]) if len(counts) else GAP_REASON
     half = (window - 1) // 2
-    because = _WHY_NOTHING.get(reason, _WHY_NOTHING[GAP_REASON]).format(
-        before=window - 1, window=window, half=half,
+    why_nothing = _WHY_NOTHING_CENTRED if centred else _WHY_NOTHING
+    because = why_nothing.get(reason, why_nothing[GAP_REASON]).format(
+        before=window - 1, window=window, half=_timepoints(half),
         where_early=(f"{timepoint} has fewer than {window - 1 if not centred else half} before it in its well"
                      if timepoint else f"no well has {window} timepoints"),
         where_late=(f"{timepoint} has fewer than {half} after it in its well" if timepoint
                     else f"no well has {window} timepoints"),
-        where_baseline=f"{timepoint} has fewer" if timepoint else "no nanowell has that many")
+        where_baseline=f"{timepoint} has fewer" if timepoint else "no nanowell has that many",
+        where_baseline_centred=(f"it draws only timepoints at least {half + 1} after the baseline, and {timepoint} "
+                                "is not" if timepoint else
+                                f"it needs {window} timepoints after the baseline, and no nanowell has that many"))
     where = f" at {timepoint}" if timepoint else ""
     kind = ", centred" if centred else ""
     text = f"Moving average over {window} timepoints{kind}: no value is left to draw{where} — {because}."

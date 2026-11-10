@@ -13040,7 +13040,10 @@ on top of that, both in `moving_compute`:
 allows leaves every value out: *N* timepoints need at least *N* in the well for a measured value and *N* after the
 baseline for a fold change (so a two-timepoint plate with the *Earliest* baseline has no fold-change window at
 all), and *Along x: Wells* or Statistics at a timepoint with fewer than *N − 1* before it — the first, say, which
-the Array view's choice of the seeding timepoint carries over — has none either. An empty plot over such data read
+the Array view's choice of the seeding timepoint carries over — has none either. A centred window reaches
+*h = (N − 1) / 2* each way instead, so at one timepoint it needs *h* before it and *h* after it, and a fold change's
+value needs to be at least *h + 1* after the baseline; `nothing_left_text` words those cases from
+`_WHY_NOTHING_CENTRED` rather than the trailing window's sentences, which would name the wrong count. An empty plot over such data read
 as a dataset with no values, so `moving_compute.nothing_left_text` names it instead: the reason most values went
 under, the longest shorter window that would leave something (and how many values), then `describe`'s sentence.
 `distribution_model` sets it as `DistributionModel.empty` (and in its notes, which the Statistics report carries)
@@ -13389,7 +13392,12 @@ above the figure and `_nw_window_refresh` keeps it on the window; the pop-out's 
 (`NanowellState.popout_source`, `popout_layout`, persisted; `window_page` not) `controller.draw_popout` calls
 `_window_controller.draw_window_popout`: one page of `WINDOW_PAGE` (24) rows through `renderer.render_site_rows`, the
 page's crops cut in one worker fetch (`_fetch` kind `window_crops`, `crops_for_sites`), `popout_hits` mapping each
-crop's axes to its nanowell for `on_popout_click`. `render_site_rows` is the one montage of ranked nanowells over time:
+crop's axes to its nanowell for `on_popout_click`. A nanowell selected anywhere but inside the pop-out — a click on
+the page's figure (`controller._select`), the Scatter Plot's `_plot_links.show_nanowell`, or **Pop out**
+(`pop_out_crops`) — calls `controller.show_selected_in_popout`, which sets `popout_source` back to `"selected"` and
+refreshes the Show control, so the pop-out shows the nanowell just clicked rather than staying on the window's rows or
+hex composite; a click on a row or tile inside the pop-out passes `_select(..., in_popout=True)` and leaves the window
+on screen (`tests/test_nanowell_window_popout.py`). `render_site_rows` is the one montage of ranked nanowells over time:
 Extremes draws its two blocks through it (`render_extremes` supplies the blocks, title and sentences; its figure is pinned
 by `tests/test_nanowell_site_rows.py`), the window draws one, with `with_well` naming each row's well and the model's own
 `format` writing a value (`WindowRows.format`: a fold change with `×`, any other metric as the bare number).

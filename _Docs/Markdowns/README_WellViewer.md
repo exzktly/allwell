@@ -6653,7 +6653,10 @@ the sentence names it.
   a centred window is 3, 5, 7 or 9 (the box steps by two, and an even window is taken one down, which the status
   line says); the first and last timepoints, without a full window around them, have no value, counted as
   "before the first full moving window" and "after the last full moving window". For a fold change the centred
-  window must also start after the baseline. The *Baseline average* always looks back only. The footer says
+  window must also start after the baseline, so it reaches a timepoint only from half a window plus one after the
+  baseline: a centred window of 3 over fold changes from the *Earliest* baseline has no value at the second
+  timepoint (its window would hold the baseline) and starts at the third, while a measured value such as the count
+  has one at the second. The *Baseline average* always looks back only. The footer says
   which kind of window was used.
 
   A window longer than the series allows leaves nothing to draw — for example a window of 3 on a plate with
@@ -7067,7 +7070,10 @@ Distribution window. In **Window** mode they are drawn as **Rows**: one row per 
 row labelled with its rank, its well and address, and the value it is ranked by (the metric's value at the window's
 latest covered timepoint, largest first; a nanowell with none there last; ties by well, then address). Twenty-four rows
 make a page; ◀ ▶ turn it. Every crop is on one brightness scale, the Timepoints, Channels, Range, Cells, Metrics and
-Save controls apply as they do to one nanowell, and a click on a row selects its nanowell, so the side panel follows.
+Save controls apply as they do to one nanowell, and a click on a row selects its nanowell, so the side panel follows. A
+nanowell clicked anywhere else — on the page's figure, or on a plot that shows single nanowells such as the Scatter
+Plot's nanowell scatter — turns the pop-out back to **This nanowell**, so it shows the nanowell you clicked without
+switching **Show** by hand; **Pop out** does the same. A click inside the pop-out leaves it on the window.
 A row whose crops are not yet cut says so; one that cannot be cut says why.
 
 The pop-out's bar of controls can be folded away: **Hide controls** (top left of the pop-out) gives the figure the whole

@@ -710,9 +710,9 @@ check runs and merge state before anything else:
 A check-in that finds nothing new re-arms silently. Stop re-arming only when the
 PR is merged or closed, or the user says stop — not because the last few
 check-ins were quiet: a conflict is exactly the thing that arrives after a long
-quiet stretch. When CI fails on a runner problem rather than on the code (the
-runner failing to resolve the Ubuntu mirrors during `apt-get install`, before any
-test ran, is the shape seen here), note it once on the PR and re-run the failed
+quiet stretch. When CI fails on a runner problem rather than on the code (an
+outage before any test ran — Ubuntu's own mirrors being unreachable is the one
+seen here, and `scripts/install_qt_system_libs.sh` now routes around that one), note it once on the PR and re-run the failed
 jobs once; GitHub refuses a re-run while any job in the same run is still in
 progress, so re-run when the last job has finished. Before calling it a runner
 problem, check another open PR's checks from the same window: if it failed the

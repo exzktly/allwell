@@ -23407,14 +23407,27 @@ Without it a fresh remote container has no test stack at all, and every test
 collection dies at `import PySide6` with `libEGL.so.1: cannot open shared object
 file` — Qt needs GL/EGL even under the offscreen QPA platform.
 
-Every workflow that installs those libraries — `ci.yml`, `slow-lane.yml`,
-`coverage.yml`, `coverage-inventory.yml` — lets `apt-get update` report errors
-without failing the step, and gates on the `apt-get install` beneath it instead.
-`update` exits non-zero when *any* configured repository's index fails to fetch,
-including the third-party ones the runner image ships and this project does not
-use, so a stale google-chrome index on `dl.google.com` failed a whole CI run
-before a line of Python was executed. The install is the honest gate: a library
-that genuinely cannot be fetched still fails it, by name.
+Every workflow that installs those libraries — `ci.yml` (all three pytest
+jobs), `slow-lane.yml`, `coverage.yml`, `coverage-inventory.yml` — and
+`session-start.sh` install them through one script,
+`scripts/install_qt_system_libs.sh` (the slow lane passes its two font packages
+as arguments). The script does not use the machine's own apt sources. It writes
+a source list of its own whose packages come through a `mirror+file:` list,
+tried in order: three independent full Ubuntu mirrors (`mirrors.edge.kernel.org`,
+`mirrors.mit.edu`, `ftp.halifax.rwth-aachen.de`), then `archive.ubuntu.com`
+last. apt moves down the list when a mirror fails, so one mirror being down
+costs seconds rather than the job. The mirrors are transport only: every index
+is still verified against Ubuntu's archive signing key
+(`/usr/share/keyrings/ubuntu-archive-keyring.gpg`), so a mirror can make the
+install fail but cannot change what is installed. Two outages shaped this. Ubuntu's own
+servers — the only ones the runner image is configured with — were unreachable
+for well over half an hour, and every pytest job on every open PR failed in this
+step after about five minutes of timeouts. And a stale third-party google-chrome
+index on `dl.google.com`, which the runner image ships and this project does not
+use, once failed a whole run's `apt-get update`; the script's own source list
+keeps every third-party repository out of the update. The install is the honest
+gate: a library that genuinely cannot be fetched from any mirror still fails the
+step, by name.
 
 The hook exits immediately when `CLAUDE_CODE_REMOTE` is not `true`: a developer
 machine has its own environment (`requirements.txt`) and the hook must

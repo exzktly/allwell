@@ -30,13 +30,12 @@ log() { echo "[session-start] $*"; }
 
 # ── Qt system libraries ──────────────────────────────────────────────────────
 # Checked via ldconfig so a cached container skips the apt round-trip entirely.
+# The install is the same script CI uses, which fetches through independent
+# Ubuntu mirrors before Ubuntu's own, so an outage there does not leave a new
+# session without Qt.
 if ! ldconfig -p 2>/dev/null | grep -q "libEGL.so.1"; then
   log "installing Qt system libraries"
-  SUDO=""
-  [ "$(id -u)" -ne 0 ] && SUDO="sudo"
-  DEBIAN_FRONTEND=noninteractive $SUDO apt-get update -qq || true
-  DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq \
-    libegl1 libgl1 libxkbcommon0 libdbus-1-3
+  scripts/install_qt_system_libs.sh
 else
   log "Qt system libraries present"
 fi

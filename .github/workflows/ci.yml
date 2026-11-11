@@ -80,7 +80,10 @@ jobs:
   test:
     name: pytest (fast lane)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # TEMPORARY (2026-11-11): raised from 15 for today's slow runners, which gave PR
+    # jobs two CPUs where main's runs had four and roughly doubled every lane's time.
+    # Put back to 15 once runs are back to their usual speed.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -154,7 +157,10 @@ jobs:
     # at run time) gets caught.
     name: pytest (nanowell lane)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # TEMPORARY (2026-11-11): raised from 20 for today's slow runners, which gave PR
+    # jobs two CPUs where main's runs had four and roughly doubled every lane's time.
+    # Put back to 20 once runs are back to their usual speed.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -212,7 +218,10 @@ jobs:
     # Out of the fast-lane job, they run beside it rather than after it.
     name: pytest (nanowell features + remote)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # TEMPORARY (2026-11-11): raised from 15 for today's slow runners, which gave PR
+    # jobs two CPUs where main's runs had four and roughly doubled every lane's time.
+    # Put back to 15 once runs are back to their usual speed.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:

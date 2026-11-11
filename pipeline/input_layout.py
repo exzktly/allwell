@@ -116,10 +116,29 @@ def _subfolders(input_dir: Path) -> list[Path]:
     return [p for p in entries if not p.name.startswith((".", "_"))]
 
 
-def _images_in(folder: Path, depth: int = NESTED_DEPTH) -> list[str]:
+class _FolderBudget:
+    """How many more folders a walk may list before it stops. Shared by every subfolder of one
+    :func:`non_zip_input` call, so the bound is on the whole walk rather than on each branch of it."""
+
+    def __init__(self, folders: int) -> None:
+        self.left = folders
+        self.spent = False
+
+    def take(self) -> bool:
+        if self.left <= 0:
+            self.spent = True
+            return False
+        self.left -= 1
+        return True
+
+
+def _images_in(folder: Path, depth: int = NESTED_DEPTH, budget: _FolderBudget | None = None) -> list[str]:
     """The run-input images in *folder* and in its subfolders down to *depth* levels, as paths relative to
-    *folder*, sorted. One enumeration per folder (``files_and_subdirs``), no stat per image."""
+    *folder*, sorted. One enumeration per folder (``files_and_subdirs``), no stat per image. With a *budget*,
+    each folder listed spends one, and once it is spent the walk stops and ``budget.spent`` says so."""
     found: list[str] = []
+    if budget is not None and not budget.take():
+        return found
     try:
         files, dirs = files_and_subdirs(folder)
     except OSError:
@@ -127,8 +146,10 @@ def _images_in(folder: Path, depth: int = NESTED_DEPTH) -> list[str]:
     found += [p.name for p in files if is_run_input_member(p.name)]
     if depth > 0:
         for sub in dirs:
+            if budget is not None and budget.spent:
+                break
             if not sub.name.startswith((".", "_")):
-                found += [f"{sub.name}/{name}" for name in _images_in(sub, depth - 1)]
+                found += [f"{sub.name}/{name}" for name in _images_in(sub, depth - 1, budget)]
     return sorted(found)
 
 
@@ -176,14 +197,20 @@ class NonZipInput(NamedTuple):
     stranded: list[tuple[str, int]]
     twins: list[tuple[str, Path, Path]]
     nested: list[tuple[str, int]] = []
+    #: The folder budget :func:`non_zip_input` was given ran out before the walk finished, so the lists above
+    #: describe only the part it reached. No plate's input holds that many folders; a walk that hits the bound
+    #: is a mistaken root (a home folder, a whole volume), and it is refused rather than reported as partial.
+    too_large: bool = False
 
     @property
     def refused(self) -> bool:
-        return bool(self.loose or self.stranded or self.nested)
+        return bool(self.loose or self.stranded or self.nested or self.too_large)
 
     def problems(self) -> list[str]:
         """One line per refused kind, naming the files."""
         out = []
+        if self.too_large:
+            out.append("more folders below it than one plate's input holds, so it was not walked to the end")
         if self.loose:
             out.append(f"{len(self.loose)} loose image(s) at the top level: {_names(self.loose)}")
         if self.stranded:
@@ -195,14 +222,30 @@ class NonZipInput(NamedTuple):
         return out
 
 
-def non_zip_input(input_dir: Path, well_zips) -> NonZipInput:
+#: The most folders the Analyze pane's planner lists below a selected folder before it calls the folder too
+#: large to be one plate's input (:attr:`NonZipInput.too_large`). The planner runs on the GUI thread, after
+#: every settled edit of the input field, and the walk below a mistaken root has no other bound: depth alone
+#: let a pause on ``/`` list 566,000 folders and hold the window for about fifteen seconds. A 384-well plate
+#: exported as one folder per well with ten timepoint folders in each is about 4,200 folders, so this is
+#: more than twice the largest plate layout the walk is for. Measured on a Linux container, ``/`` stops at the
+#: bound in about 2 s; the Analyze pane only asks once the field has settled (``analyze.form``).
+PLANNER_MAX_FOLDERS = 10_000
+
+
+def non_zip_input(input_dir: Path, well_zips, *, max_folders: int | None = None) -> NonZipInput:
     """Classify what *input_dir* holds besides its well archives.
 
     Pure: reads the folder, changes nothing. The pipeline refuses on the answer
     (:func:`refuse_non_zip_input`) and the Analyze pane's planner shows the same
     answer under the input field before Run, so the two cannot disagree about
     which plate is runnable.
+
+    *max_folders* bounds the walk below *input_dir*: once that many folders have
+    been listed it stops, and the answer is ``too_large`` (refused) rather than
+    a partial list presented as whole. The planner passes
+    :data:`PLANNER_MAX_FOLDERS`; the pipeline passes nothing and walks it all.
     """
+    budget = _FolderBudget(max_folders) if max_folders is not None else None
     zip_by_well = {str(w): Path(p) for w, p in well_zips}
     try:
         loose = sorted(p.name for p in files_in(input_dir) if is_run_input_member(p.name))
@@ -212,7 +255,9 @@ def non_zip_input(input_dir: Path, well_zips) -> NonZipInput:
     twins: list[tuple[str, Path, Path]] = []
     nested: list[tuple[str, int]] = []
     for folder in _subfolders(input_dir):
-        images = _images_in(folder)
+        images = _images_in(folder, budget=budget)
+        if budget is not None and budget.spent:
+            break
         if not images:
             continue
         well = _canonical_well_label(folder.name)
@@ -224,7 +269,7 @@ def non_zip_input(input_dir: Path, well_zips) -> NonZipInput:
         else:
             twins.append((well, folder, archive))
     twins.sort(key=lambda t: t[0])
-    return NonZipInput(loose, stranded, twins, nested)
+    return NonZipInput(loose, stranded, twins, nested, too_large=budget is not None and budget.spent)
 
 
 def refuse_non_zip_input(input_dir: Path, well_zips) -> None:

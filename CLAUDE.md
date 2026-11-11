@@ -269,12 +269,20 @@ these, and each is a pattern to look for first:
    running the same subprocess twice for two assertions, redrawing a plot on
    every `setCurrentIndex` of a sweep that only reads a size hint, waiting a
    control case's full 10 s when 2 s settles it.
-5. **A slow test can be an app bug, and then it must stay slow.**
-   `test_analyze_preflight.py::test_typing_a_path_starts_at_most_one_scan` takes
-   32 s because Analyze's input field walks the tree under each typed prefix on
-   every keystroke — `/` walks the whole disk four levels down. Speeding the test
-   up by typing a shorter path would have hidden a GUI freeze. Before changing a
-   slow test, ask whether the slowness is the code under test misbehaving.
+5. **A slow test can be an app bug — but find the user's path to it before
+   naming the bug.** `test_analyze_preflight.py::test_typing_a_path_starts_at_most_one_scan`
+   took 32 s because each value it set the input field to was planned with an
+   unbounded walk, and setting `/` listed 566,000 folders. Speeding the test up
+   by setting a shorter path would have hidden that. But it was first reported
+   as "the window freezes on every keystroke", and the field is read-only: no
+   user types into it, the test only sets it a character at a time. The defect
+   a user reaches is the same walk run once, when Browse or a restored job sets
+   a home folder or a drive's root — fixed by bounding the planner's walk
+   (`pipeline.input_layout.PLANNER_MAX_FOLDERS`), which took the test to 2.9 s
+   with nothing in it changed. A debounce on typing, written for the misread
+   version, would have fixed nothing a user can do. Before changing a slow test,
+   ask whether the code under test is misbehaving, and then which real caller
+   gets there (§7.1 #3).
 6. **The documented figures drift, and nobody notices growth.** The nanowell
    end-to-end lane was documented at ~1,075 s of work and measured 3,619 s. Every
    test added since had looked cheap in its own PR. Re-measure a lane rather than

@@ -52,6 +52,14 @@ def scope_choices(ctx, timepoints=()) -> dict | None:
     return {"subsets": subsets, "subset": current, "baselines": baselines, "baseline": st.baseline}
 
 
+def subset_label(ctx) -> str:
+    """What a plot of the page's nanowells writes at its top left about the page's Subset: its saved name, else its
+    conditions, else ``""`` (``controller.page_subset_label``, the line the page's own figures carry), its size
+    classes named by the user's labels (``SizeClassRule.name``)."""
+    st = ctx.state.feature_slice("nanowell")
+    return "" if st is None else nwc.size_rule(ctx).name(nwc.page_subset_label(st))
+
+
 def set_subset_by_name(ctx, key: str) -> bool:
     """Make the page's Subset every nanowell (:data:`ALL_NANOWELLS`) or the subset saved as *key*; whether it is.
     :data:`UNSAVED` changes nothing: it is the page's Subset already."""

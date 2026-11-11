@@ -512,6 +512,22 @@ def saved_name_of(saved: dict, subset: Subset) -> str:
     return next((name for name, kept in saved.items() if kept == subset), "")
 
 
+def figure_label(subset: Subset, saved: dict | None = None) -> str:
+    """The line a figure drawn under *subset* carries on itself, so a figure read away from the page — a saved plot,
+    an exported file, a slide — says which nanowells it is of: ``Subset: “name”`` while *subset* is saved under a
+    name in *saved* (``name -> Subset``), else its conditions (:meth:`Subset.label`), and ``""`` with no subset.
+
+    The name is looked up by the conditions (:func:`saved_name_of`), so it is the name only while the subset drawn is
+    exactly the one saved: a figure whose conditions were edited after choosing a saved subset does not claim it."""
+    if not subset.is_active():
+        return ""
+    name = saved_name_of(saved or {}, subset)
+    if name:
+        return f"Subset: \u201c{name}\u201d"
+    text = subset.label()
+    return text if text.startswith("Subset: ") else f"Subset: {text}"
+
+
 def saved_to_config(saved: dict) -> dict:
     """``name -> subset block``, in the order the subsets were saved."""
     return {name: subset.to_config() for name, subset in saved.items()}

@@ -79,6 +79,20 @@ def _choose(ctx, setting: str, value, page: str) -> None:
     _redraw_page(ctx, page)
 
 
+#: The gid of the line naming the Nanowells page's Subset, removed with the footer before each draw.
+SUBSET_LABEL_GID = "nw-subset-label"
+
+
+def _stamp_subset(ctx, fig, muted) -> None:
+    """Write which of the Nanowells page's subsets the scatter draws at its top left — the saved name, else the
+    conditions (``nanowell.subset_label``) — as the page's own figures do, so a saved or exported scatter says it is
+    of a subset. Nothing with no Subset, or in a build without the Nanowells page."""
+    text = ctx.features.query("nanowell.subset_label", ctx, default="") or ""
+    if text:
+        follows_theme(fig.text(0.01, 0.995, text, ha="left", va="top", fontsize=8, color=muted,
+                               gid=SUBSET_LABEL_GID), muted=True)
+
+
 def _populate_scope(ctx, page: str, table) -> None:
     """Fill the page's Subset and Baseline pickers with the Nanowells page's choices and select the page's own; hide
     them in a build without that page. The Baseline lists the timepoints of *table*'s rows in time order."""
@@ -200,7 +214,7 @@ def redraw(ctx, page: str) -> None:
     for extra in list(fig.axes)[1:]:
         fig.delaxes(extra)
     ax.clear()
-    for text in [t for t in fig.texts if t.get_gid() == "observations_footer"]:
+    for text in [t for t in fig.texts if t.get_gid() in ("observations_footer", SUBSET_LABEL_GID)]:
         text.remove()
     bg, title_fg, muted, grid, _spine = tokens_for(ax)
     ax.set_facecolor(bg)
@@ -253,6 +267,7 @@ def redraw(ctx, page: str) -> None:
     from review.core.observation_band import write_footer
 
     write_footer(fig, footer, muted)
+    _stamp_subset(ctx, fig, muted)
     apply_export_style_to_current(ctx, fig, canvas)
     if page == "cells":
         # ``ax.clear()`` above voided any armed RectangleSelector; rebuild it on the fresh axes.

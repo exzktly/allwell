@@ -85,6 +85,8 @@ _render_message = _lazy("review.features.nanowell.renderer", "render_message")
 _apply_subset = _lazy("review.features.nanowell.subset_compute", "apply")
 _subset_note = _lazy("review.features.nanowell.subset_compute", "note")
 _no_subset = _lazy("review.features.nanowell.subset_compute", "Subset")
+_saved_name_of = _lazy("review.features.nanowell.subset_compute", "saved_name_of")
+_subset_figure_label = _lazy("review.features.nanowell.subset_compute", "figure_label")
 
 _logger = logging.getLogger("review")
 
@@ -345,7 +347,10 @@ class NanowellBatchExportPanel(BatchExportPanel):
     def _seed_subset(self) -> None:
         """Say which subset a run will use: the page's, read each time the panel is shown and again at the run."""
         subset = self._subset()
-        self._subset_label.setText(subset.label() if subset.is_active() else
+        st = self._ctx.state.feature_slice("nanowell")
+        name = _saved_name_of(getattr(st, "saved_subsets", None) or {}, subset)
+        self._subset_label.setText(f"\u201c{name}\u201d: {subset.label()}" if name else
+                                   subset.label() if subset.is_active() else
                                    "every nanowell" if self._subset_box.isChecked() else
                                    "every nanowell (the page's subset is not used)")
 
@@ -354,6 +359,12 @@ class NanowellBatchExportPanel(BatchExportPanel):
         st = self._ctx.state.feature_slice("nanowell")
         subset = getattr(st, "subset", None)
         return subset if self._subset_box.isChecked() and subset is not None else _no_subset()
+
+    def _subset_name(self, subset) -> str:
+        """What a figure drawn under *subset* writes at its top left: the name the page saved it under, else its
+        conditions (``subset_compute.figure_label``), so a batch figure names the subset as the page's does."""
+        st = self._ctx.state.feature_slice("nanowell")
+        return _subset_figure_label(subset, getattr(st, "saved_subsets", None))
 
     # ── the run summary ──────────────────────────────────────────────────
     _SUMMARY_FIGURE_LEAD = "One figure per ticked metric"
@@ -386,7 +397,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
                 "baseline_moving": (self._baseline_moving_spin.value()
                                     if self._baseline_moving_spin.value() >= 2 else 0),
                 "fmt": self._fmt_cb.currentText(), "channel": self._ctx.state.channel.active_channel,
-                "thresholds": self._thresholds()[0], "subset": self._subset()}
+                "thresholds": self._thresholds()[0], "subset": (subset := self._subset()),
+                "subset_label": self._subset_name(subset)}
 
     def _load(self, baseline: str, wells) -> tuple | None:
         """``(data, metrics, gate_note)`` for the open dataset's *wells* at *baseline*, or ``None`` with the user
@@ -521,7 +533,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                    moving_centred=settings["moving_centred"],
                                    well=well or "", well_timepoint=shown if well else "",
                                    note=note, tableless=tableless, responding_above=cut,
-                                   subset=settings["subset"], names=_well_names(self._ctx, wells),
+                                   subset=settings["subset"], subset_label=settings.get("subset_label", ""),
+                                   names=_well_names(self._ctx, wells),
                                    swarm_spacing=_swarm_spacing_of(self._ctx), sizes=_size_rule(self._ctx),
                                    dist_style=drawing.style, violin_smooth=drawing.smooth,
                                    hist_bins=drawing.bins, hist_log=_y_axis_is_log(self._batch_style(), 1))

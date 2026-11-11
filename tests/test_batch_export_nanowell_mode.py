@@ -398,3 +398,30 @@ def test_a_batch_run_leaves_out_nanowells_under_the_qc_layer_s_rim_focus_rule(pa
     ctx.state.qc.params = base.with_updates(exclude_soft_nanowells=False, nanowell_focus_fraction=0.6)
     p._load("earliest", ["A01"])
     assert seen[-1] == rfc.RimFocusRule(False, 0.6) and not seen[-1].active()
+
+
+def test_a_batch_figure_names_the_page_s_saved_subset_on_itself(panel, tmp_path, monkeypatch):
+    """A batch figure is a file read away from the page, so it says which subset it is of — by the name the page
+    saved it under — and the panel says the same before the run."""
+    from review.features.batch_export import nanowell_panel
+    from review.features.nanowell import controller
+    from review.features.nanowell.subset_compute import Subset
+
+    p, ctx = panel
+    st = ctx.state.feature_slice("nanowell")
+    st.subset = Subset.starting(1, None)
+    st.saved_subsets = {"Occupied": Subset.starting(1, None)}
+    p.window().show()
+    p.show()
+    assert p._subset_label.text() == "“Occupied”: Starting cells ≥1"
+    stamps = []
+    real = controller.draw_view
+
+    def spy(fig, view, *a, **k):
+        drawn = real(fig, view, *a, **k)
+        stamps.append([t.get_text() for t in fig.texts if t.get_gid() == "nw-subset-label"])
+        return drawn
+
+    monkeypatch.setattr(nanowell_panel, "_draw_view", spy)
+    p._run_batch()
+    assert stamps == [["Subset: “Occupied”"]] * 2

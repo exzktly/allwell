@@ -109,5 +109,26 @@ def test_on_a_sideways_phone_the_editor_takes_the_page_and_close_brings_the_figu
 def test_at_a_desk_the_figure_stays_beside_the_editor(qtbot, page):
     editor = _open(qtbot, page, (1500, 900))
     assert page.widgets.get("_nw_card").isVisibleTo(page.window)
-    assert editor.scroll.verticalScrollBar().maximum() == 0, "a desk's three conditions should not scroll"
+    # Waited for, not read at once: under load the scroll area's range can lag the layout by a pass or two.
+    bar = editor.scroll.verticalScrollBar()
+    for _ in range(20):
+        if bar.maximum() == 0:
+            break
+        qtbot.wait(100)
+    assert bar.maximum() == 0, f"a desk's three conditions still scroll ({bar.maximum()} px) after the layout settled"
     assert len(editor.rows) == 3 and editor.written().conditions[0].field == "count_fc"
+
+
+def test_edit_closes_the_controls_sheet_it_was_pressed_in(qtbot, page):
+    """On a phone, Edit… is one of the controls the ⚙ Controls sheet holds, and the sheet is drawn over the page: the
+    editor opened under it, only its heading showing above the sheet (found by pressing every control of every page's
+    sheet at phone size). Pressing Edit… closes the sheet, as opening Properties from it does."""
+    from widgets.drawer import Drawer
+
+    sheet = Drawer(page.window, edge="bottom", scrim=0.0)       # the shell's Controls sheet, as phone_shell builds it
+    sheet.setProperty("phoneSheet", True)
+    sheet.open()
+    qtbot.waitUntil(sheet.isOpen, timeout=2000)
+    page.widgets.get("_nw_subset_edit_btn").click()
+    assert not sheet.isOpen(), "the editor opened under the Controls sheet"
+    assert page.widgets.get("_nw_subset_editor").isVisibleTo(page.window)

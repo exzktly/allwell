@@ -1318,6 +1318,7 @@ def _pack(items, width_pt: float, size_pt: float) -> list[str]:
 
 
 _EXT_TOP_DEFAULT = 0.5
+_EXT_BOTTOM_DEFAULT = 0.45
 
 
 @dataclass
@@ -1329,6 +1330,8 @@ class _ExtremesLayout:
     metrics_shown: bool = True
     #: The room above the montage, in inches: the figure's title, which is as many lines as the figure's width needs.
     top: float = _EXT_TOP_DEFAULT
+    #: The room under the montage, in inches: the caption, which is as many lines as the figure's width needs.
+    bottom: float = _EXT_BOTTOM_DEFAULT
 
 
 #: The smallest crop side (inches) that holds its metrics legibly: below it, only the fold change is written on the
@@ -1338,9 +1341,12 @@ _EXT_MIN_SIDE_WITH_METRICS = 0.6
 #: block's title and timepoint headers, and the gap between two blocks side by side.
 _EXT_LABELS_W, _EXT_GAP, _EXT_TOP, _EXT_BOTTOM, _EXT_HEADER, _EXT_BLOCK_GAP = 0.8, 0.05, 0.5, 0.45, 0.38, 0.25
 _EXT_TITLE_PT = 10.0
+#: The caption under the montage: its type size, its line spacing (in units of that size), and where its last line
+#: sits, as a share of the figure's height from the foot.
+_EXT_CAPTION_PT, _EXT_CAPTION_LEADING, _EXT_CAPTION_Y = 7.0, 1.25, 0.012
 
 
-def _extremes_layout(fig, blocks, cols: int, top: float = _EXT_TOP) -> _ExtremesLayout:
+def _extremes_layout(fig, blocks, cols: int, top: float = _EXT_TOP, bottom: float = _EXT_BOTTOM) -> _ExtremesLayout:
     """The largest square crop the figure holds, with the Largest and Smallest blocks side by side or one above the
     other, whichever gives the larger crops.
 
@@ -1354,10 +1360,10 @@ def _extremes_layout(fig, blocks, cols: int, top: float = _EXT_TOP) -> _Extremes
         n_blocks = len(blocks) if beside else 1
         per_col = (w - 0.2 - n_blocks * _EXT_LABELS_W - (n_blocks - 1) * _EXT_BLOCK_GAP) / (cols * n_blocks)
         n_rows = max(rows) if beside else sum(rows)
-        per_row = (h - top - _EXT_BOTTOM - (1 if beside else len(blocks)) * _EXT_HEADER) / n_rows
+        per_row = (h - top - bottom - (1 if beside else len(blocks)) * _EXT_HEADER) / n_rows
         side = max(min(per_col, per_row) - _EXT_GAP, 0.2)
         if best is None or side > best.side + 1e-6:
-            best = _ExtremesLayout(side, beside, side >= _EXT_MIN_SIDE_WITH_METRICS, top)
+            best = _ExtremesLayout(side, beside, side >= _EXT_MIN_SIDE_WITH_METRICS, top, bottom)
     return best
 
 
@@ -1384,7 +1390,7 @@ def render_extremes(fig, model, crops: dict, *, label: str, note: str = "", cell
 def render_site_rows(fig, model, blocks, crops: dict, *, label: str, empty: str, title: str, head: str,
                      note: str = "", cells: bool = False, timepoints=None, metrics: dict | None = None,
                      numbers: bool = True, image_channel: str = "", display_range=None,
-                     with_well: bool = False) -> dict:
+                     with_well: bool = False, bottom: float = _EXT_BOTTOM) -> dict:
     """Blocks of nanowells, each a row of its crops at the timepoints shown; returns ``{axes: (well, q, r)}`` so a
     click on a row selects its nanowell. Extremes draws two blocks (the largest and the smallest of one well); the
     Distribution window draws one (the nanowells inside it, from any number of wells, *with_well* naming each row's).
@@ -1417,7 +1423,7 @@ def render_site_rows(fig, model, blocks, crops: dict, *, label: str, empty: str,
     # The title is broken to the figure's width, and the montage starts below however many lines that is.
     heading = _fit_text(title, fig.get_size_inches()[0] * 72 * 0.96, _EXT_TITLE_PT)
     heading_h = 0.2 + (heading.count("\n") + 1) * _EXT_TITLE_PT * 1.25 / 72
-    layout = _extremes_layout(fig, blocks, len(columns), max(_EXT_TOP, heading_h + 0.05))
+    layout = _extremes_layout(fig, blocks, len(columns), max(_EXT_TOP, heading_h + 0.05), bottom)
     draw = _ExtremesDrawing(fig, layout, model, metrics, crop_scale(every, display_range), cells, ink, faint)
     draw.numbers, draw.with_well = numbers, with_well
     hits: dict = {}
@@ -1434,10 +1440,23 @@ def render_site_rows(fig, model, blocks, crops: dict, *, label: str, empty: str,
                 hits[ax] = row.site
                 if numbers:
                     draw.crop_text(ax, row, tp)
+    # The caption is written last, since it reports what the crops found, and broken to the figure's width as the
+    # title is. A phone's narrow figure breaks it into five or six lines, and the room under the montage was fixed:
+    # a line more ("Excluded on this page: …") ran the caption over the lowest crops and their metrics. When it needs
+    # more room than the montage left, the montage is laid out again with that room under it.
+    width_pt = draw.w_in * 72 * 0.96
+    text = "\n".join(_fit_text(part, width_pt, _EXT_CAPTION_PT)
+                     for part in draw.caption(head, columns, note, image_channel).split("\n"))
+    need = _EXT_CAPTION_Y * draw.h_in + (text.count("\n") + 1) * _EXT_CAPTION_PT * _EXT_CAPTION_LEADING / 72 + 0.06
+    if need > bottom + 0.01 and bottom == _EXT_BOTTOM:
+        return render_site_rows(fig, model, blocks, crops, label=label, empty=empty, title=title, head=head,
+                                note=note, cells=cells, timepoints=timepoints, metrics=metrics, numbers=numbers,
+                                image_channel=image_channel, display_range=display_range, with_well=with_well,
+                                bottom=need)
     _ink(fig.text(0.02, 1 - 0.2 / draw.h_in, heading, fontsize=_EXT_TITLE_PT, color=ink, va="top",
                   gid="nw-extremes-title"))
-    _ink(fig.text(0.02, 0.012, draw.caption(head, columns, note, image_channel), fontsize=7, color=faint,
-                  gid="nw-extremes-caption", wrap=True), muted=True)
+    _ink(fig.text(0.02, _EXT_CAPTION_Y, text, fontsize=_EXT_CAPTION_PT, color=faint, va="bottom",
+                  linespacing=_EXT_CAPTION_LEADING, gid="nw-extremes-caption"), muted=True)
     return hits
 
 
@@ -1480,7 +1499,7 @@ class _ExtremesDrawing:
                    + (max(rows) if self.layout.beside else sum(rows)) * self.row_h)
         x_start = max((self.w_in - total_w) / 2, 0.1)
         top = self.layout.top
-        y_top = self.h_in - top - max((self.h_in - top - _EXT_BOTTOM - total_h) / 2, 0.0)
+        y_top = self.h_in - top - max((self.h_in - top - self.layout.bottom - total_h) / 2, 0.0)
         if self.layout.beside:
             return x_start + k * (block_w + _EXT_BLOCK_GAP), y_top
         return x_start, y_top - sum(_EXT_HEADER + n * self.row_h for n in rows[:k])

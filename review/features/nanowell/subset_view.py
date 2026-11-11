@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.safe import swallow
+from review.core.phone_panel_sheet import close_controls_sheets
 from review.features.nanowell import controller as nwc
 from review.features.nanowell import starting_cells_compute as sc
 from review.features.nanowell import subset_compute as ss
@@ -806,6 +807,10 @@ def build_subset_control(ctx, band, tp_text) -> SimpleNamespace:
     editor.hide()
 
     def show_editor(on: bool) -> None:
+        if on:
+            # On a phone Edit… is in the ⚙ Controls sheet, which is drawn over the page: the editor opened under it,
+            # all but its heading hidden. The sheet closes so the editor is seen. At a desk there is no such sheet.
+            close_controls_sheets(ctx.window)
         editor.setVisible(on)
         blocked = edit_btn.blockSignals(True)
         edit_btn.setChecked(on)

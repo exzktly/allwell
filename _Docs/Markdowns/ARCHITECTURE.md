@@ -605,7 +605,24 @@ cell and a section follow the show / hide of the widget the page shows and hides
 (`_Mirror`), so `show_slot` reshapes the form. The band's row margins are dropped
 while it is a form, since the sheet pads its content, and `heightForWidth`
 answers from the form. A page's own block of controls (declared `controls`, the
-Image Table's builder) keeps its `setStacked` form. The sheet's buttons, combos
+Image Table's builder) keeps its `setStacked` form. The sheet's scroll area is then
+fitted to its width like a Datasets page (`ui/phone_fit`, through the same
+`_FitOnShow` watcher): a form row keeps its label beside a group of controls on
+one line, and a group of several (Nanowells QC's four *Problem:* filters,
+Multivariate's mode segments, the Image Table's LUT rows) is wider than the
+sheet, so the row is stacked until it fits — refitted when a control shown later
+widens it, undone before the band goes back to its page. What is fitted is the
+form's host, never the `ControlBand` itself (fitting the band gave it a phone
+form of its own on top of the form and turned its row, which it did not survive
+going back), or a page's own block of controls as it stands. `ui/phone_fit`
+never wraps a layout's items for Python (`itemAt`): a `QLayoutItem` is no
+QObject, so a wrapper is never told when Qt frees the item, Qt reuses the freed
+address for the next item it makes, and the binding then hands back the stale
+wrapper — the band's own layout raised "Internal C++ object already deleted" on
+the sheet's second opening. Nested layouts are found as the layout's child
+objects and membership by `indexOf`; `tests/test_phone_fit.py` holds the rule,
+since whether an address is reused is the allocator's choice and no test
+reproduces it on demand. The sheet's buttons, combos
 and fields are 48 pt (`QWidget#Drawer[phoneSheet="true"]` in the touch block). The sheet's height is measured off the controls lent
 into it, and at `open` they still have their page's width, so the estimate is
 wrong (measured: 359 px against the 505 px they need once laid out, the
@@ -13437,7 +13454,11 @@ montage's crops share the Metrics setting but not that line: they have room for 
 each crop took more of the figure than the crops did, and three lines over a crop covered the lower third of the
 nanowell, where the cells are. **The layout is computed in inches** (`_extremes_layout`), the panels placed with
 `fig.add_axes`: the Largest and Smallest blocks side by side or one above the other, whichever gives the larger
-square crops, centred both ways. The view's **Metrics** box (`NanowellState.crop_metrics`, persisted, on by default; `controller.set_crop_metrics`) shows or hides all of that text, leaving the crops bare while the row labels keep the ranking. A crop under `_EXT_MIN_SIDE_WITH_METRICS` (0.6 in) writes its fold change only,
+square crops, centred both ways between the title and the caption. Both are broken to the figure's width, and the
+montage leaves room for as many lines of each as that takes: the caption is written last, since it reports what the
+crops found, so when it needs more room than the montage first left (a phone's narrow figure breaks it into five or
+six lines, one more with a well excluded on the page) the montage is laid out again with that room under it
+(`render_site_rows(bottom=…)`). The view's **Metrics** box (`NanowellState.crop_metrics`, persisted, on by default; `controller.set_crop_metrics`) shows or hides all of that text, leaving the crops bare while the row labels keep the ranking. A crop under `_EXT_MIN_SIDE_WITH_METRICS` (0.6 in) writes its fold change only,
 and the caption says how to read the rest. It returns `{axes: site}`, kept on `st.extreme_axes`, and `on_click` selects the
 row's nanowell, which opens the site detail. The crops of the nanowells not yet in `st.crops` are
 read in one worker fetch (`_fetch(…, deliver=…)` merges the result into `st.crops`, the store the site detail
@@ -14212,7 +14233,9 @@ timepoint and gate combos making room for twelve characters rather than their lo
 `_EditorScroll`, which takes as much of its page's height as it needs up to `_ROWS_SHARE` and scrolls past it, and
 `share_page` lets the editor take the figure's place while it is open on a page too short for both — a phone held
 sideways, where the figure and its footer alone fill the page — decided by the page's height, not by phone layout,
-with the figure redrawn when Close brings it back); an edit changes only the draft the rows
+with the figure redrawn when Close brings it back; opening it closes the ⚙ Controls sheet,
+`phone_panel_sheet.close_controls_sheets`, since on a phone Edit… is in that sheet, which is drawn over the page the
+editor opens in, and at a desk there is no such sheet); an edit changes only the draft the rows
 hold — `SubsetEditor.changed` says in the panel's `Warn` line that it is not applied yet (or why it is not a subset
 yet) — and *Apply* passes the draft through `controller.set_subset` once, so the page redraws once per Apply rather
 than per keystroke; *Reset* rebuilds the rows from the page's subset; Apply and Reset are enabled only while the rows have

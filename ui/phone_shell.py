@@ -717,6 +717,43 @@ class _FitOnShow(QObject):
         # A page shown is a tool picked — from ☰ as well as the page button —
         # so the bar's label follows.
         self._on_show = on_show
+        #: The content widget watched for a panel shown inside it after the fit
+        #: (:meth:`_watch_content`), and the one-shot timer that fits it again.
+        self._content: QWidget | None = None
+        self._again = QTimer(self)
+        self._again.setSingleShot(True)
+        self._again.setInterval(0)
+        self._again.timeout.connect(self._fit_again)
+
+    def _watch_content(self) -> None:
+        """Watch the page's content for a layout change: a panel shown inside a
+        page already fitted — a tool's run dashboard, hidden until a dataset
+        folder is chosen or a run starts — leaves the page's width as it was, so
+        no show or resize of the page says it is there, and unfitted it held
+        Concatenate, Validate & Repair and Zip Loose Folder 413-431 px wider than
+        a 432 px phone."""
+        content = self._area.widget()
+        if content is None or content is self._content:
+            return
+        if self._content is not None and shiboken6.isValid(self._content):
+            self._content.removeEventFilter(self)
+        content.installEventFilter(self)
+        self._content = content
+
+    def _fit_again(self) -> None:
+        """Fit what was shown since the last fit, if the page no longer fits:
+        :func:`ui.phone_fit.fit` acts only on what overflows, so the rows already
+        stacked stay as they are."""
+        from ui import phone_fit
+        content = self._area.widget()
+        if (self._fitted_at is None or content is None or not phone_layout.is_on()
+                or not self._area.isVisible()):
+            return
+        try:
+            if content.minimumSizeHint().width() > self._area.viewport().width():
+                phone_fit.fit(self._area)
+        except RuntimeError:
+            swallowed()  # the page went before the fit ran
 
     def refit(self) -> None:
         from ui import phone_fit
@@ -732,8 +769,15 @@ class _FitOnShow(QObject):
             phone_fit.unfit(self._area)      # wider than before: stack less
         phone_fit.fit(self._area)
         self._fitted_at = width
+        self._watch_content()
 
     def eventFilter(self, obj, ev) -> bool:  # Qt naming
+        if obj is not self._area:
+            # The content: a child shown or resized inside it posts a layout
+            # request. Fitted once the event loop turns, so a burst is one fit.
+            if isinstance(ev, QEvent) and ev.type() == QEvent.LayoutRequest and self._fitted_at is not None:
+                self._again.start()
+            return False
         if isinstance(ev, QEvent) and ev.type() in (QEvent.Show, QEvent.Resize):
             try:
                 self.refit()

@@ -424,8 +424,11 @@ radio buttons whose labels are sentences — and seven of the nine were wider th
 a 432 px screen. Every `QScrollArea` under `PhoneHandles.fit_roots` (the Datasets
 pane) carries a `_FitOnShow` watcher that, in phone layout, fits it to its
 viewport whenever it is shown or its viewport changes width (a tool page is shown
-by the pane's own rail, which the shell does not hear), and gives it its desk form
-back when phone layout ends. The fitting is `ui/phone_fit.py`, Qt-only and
+by the pane's own rail, which the shell does not hear), fits it again when a panel
+shown inside it afterwards leaves it wider than the viewport (it watches the
+content for a layout request — a tool's run dashboard is hidden until a dataset
+folder is chosen or a run starts, which changes neither the page's visibility nor
+its width), and gives it its desk form back when phone layout ends. The fitting is `ui/phone_fit.py`, Qt-only and
 pane-free: a widget with a phone form of its own (`setStacked` — `PlateProgress`
 and the dashboards on it, `ControlBand`) takes it; any other horizontal box row
 wider than its room is turned top-to-bottom, outermost first, re-measuring after

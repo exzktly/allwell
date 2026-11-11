@@ -25,7 +25,6 @@ from analyze.domain.nanowell_fields import (
     SEGMENT_SCOPE_CHOICES, SCAN_CHOICES,
     nanowell_enabled, nanowell_option_errors,
 )
-from analyze.domain.well_list import incremental_is_moot
 
 _FLUOR_BACKGROUND_TIP = (
     "What every fluorescence number of a nanowell is measured above — cell fluorescence (mean per cell) and nanowell fluorescence "
@@ -619,13 +618,10 @@ class AnalyzeNanowellSectionMixin:
         problems = nanowell_option_errors(opts, need_phase=not self._auto_detect_on())
         # Only for a run: Test detection runs on this computer whatever host the run would go to (X30).
         remote = for_run and self._remote_cb.currentData() is not None
-        # Not when every well the run touches is forced: Incremental then changes nothing, and the run drops it
-        # before the remote sees it (``run_spec._nanowell_remote_resume_by_well``).
-        if (remote and self._existing_output_cb.value() == "incremental"
-                and not incremental_is_moot(opts)):
-            from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL
-
-            problems.append(NANOWELL_REMOTE_INCREMENTAL_REFUSAL)
+        # *Fill in what's missing* on a remote nanowell run is not refused here. A remote host cannot add to a
+        # nanowell well part-way, so ``run_spec._nanowell_remote_resume_by_well`` runs it by whole wells instead —
+        # every well finished here is skipped, every other well is sent whole — and logs that it did. Refusing it
+        # left a stopped remote nanowell run with Force, which recomputes the finished wells too, as its only way on.
         if remote and str(opts.get(REGISTRATION_FROM_KEY) or "").strip():
             self._nanowell_log_once("Reuse registration names a folder on this computer: its wells' grid records "
                                     "are sent to the host, which reuses each placement whose images still match.")

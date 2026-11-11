@@ -113,8 +113,14 @@ def test_a_hidden_custom_number_does_not_refuse_a_known_format():
     assert not any("diameter" in e or "pitch" in e for e in errors)
 
 
-def test_an_incremental_nanowell_run_on_a_remote_host_is_refused(tab, refused, tmp_path):  # noqa: F811
-    """Refused in the form, before anything is staged (roll-up review X3); the run record refuses it as well."""
+def test_a_remote_nanowell_run_set_to_fill_in_what_s_missing_is_run_well_by_well(
+        tab, refused, tmp_path, monkeypatch):  # noqa: F811
+    """Reported: a remote nanowell run stopped (its input folder was wrong), the right folder chosen, Run pressed —
+    "cannot start an incremental nanowell remote run". *Fill in what's missing* was refused in the form, so the only
+    way on was Force, which recomputes every finished well too. The run is now let through and reaches the runner
+    not incremental, as the run the app makes incremental already did (X29): a remote host cannot add to a nanowell
+    well part-way, so the remote run skips the wells finished here and sends every other well whole — and says so."""
+    import services.remote_config as remote_config
     from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL
 
     root, _ = _plate(tmp_path)
@@ -122,13 +128,30 @@ def test_an_incremental_nanowell_run_on_a_remote_host_is_refused(tab, refused, t
     tab._input_edit.setText(str(root))
     tab._nanowell_cb.setChecked(True)
     tab._existing_output_cb.setValue("incremental")
-    assert tab._validate_run_request() is not None                   # on this computer: fine
-    tab._remote_cb.addItem("bench-box", userData="bench-box")
-    tab._remote_cb.setCurrentIndex(tab._remote_cb.findData("bench-box"))
-    assert tab._validate_run_request() is None
-    assert NANOWELL_REMOTE_INCREMENTAL_REFUSAL in refused[-1][1]
-    tab._existing_output_cb.setValue("skip")
-    assert tab._validate_run_request() is not None                   # the remote plate in full: fine
+    _remote(tab)
+    assert tab._validate_run_request() is not None, refused[-1:] if refused else None
+    assert not any(NANOWELL_REMOTE_INCREMENTAL_REFUSAL in r[1] for r in refused)
+
+    monkeypatch.setattr(remote_config, "get_remote", lambda name: object())
+    logged: list[str] = []
+    monkeypatch.setattr(tab, "_log_line", lambda text, level=None: logged.append(text))
+    sent: list[dict] = []
+
+    class Launched(Exception):
+        """The run reached the runner: past every refusal."""
+
+    def launch(_pipeline, opts, **_kwargs):
+        sent.append(dict(opts))
+        raise Launched
+
+    monkeypatch.setattr(tab, "_set_running_ui_state", lambda **_k: None)
+    monkeypatch.setattr(tab._runner, "start", launch)
+    with pytest.raises(Launched):
+        tab.start_run(tab._collect_run_spec())
+    assert sent and sent[-1]["incremental"] is False, (
+        "an incremental nanowell argv reached the remote runner, which refuses it outright")
+    assert any("goes well by well" in line for line in logged), (
+        "the run was changed from incremental to by-whole-wells without saying so")
 
 
 def _remote(tab):  # noqa: F811
@@ -173,8 +196,9 @@ def test_a_remote_nanowell_rerun_with_every_well_forced_is_not_refused_for_incre
     assert sent and sent[-1]["incremental"] is False
 
 
-def test_a_remote_nanowell_incremental_run_with_an_unforced_well_is_still_refused(tab, refused, tmp_path):  # noqa: F811
-    """The moot case is only the moot case: one well run and not forced still needs the refusal."""
+def test_a_remote_nanowell_incremental_run_with_an_unforced_well_is_not_refused_either(
+        tab, refused, tmp_path):  # noqa: F811
+    """Not only the moot case: a run with one well forced and one not is let through too, and goes well by well."""
     from services.remote_run_state import NANOWELL_REMOTE_INCREMENTAL_REFUSAL
 
     root, _ = _plate(tmp_path)
@@ -185,8 +209,8 @@ def test_a_remote_nanowell_incremental_run_with_an_unforced_well_is_still_refuse
     _remote(tab)
     tab._only_wells_edit.setText("A01, B02")
     tab._force_wells_edit.setText("A01")
-    assert tab._validate_run_request() is None
-    assert NANOWELL_REMOTE_INCREMENTAL_REFUSAL in refused[-1][1]
+    assert tab._validate_run_request() is not None, refused[-1:] if refused else None
+    assert not any(NANOWELL_REMOTE_INCREMENTAL_REFUSAL in r[1] for r in refused)
 
 
 def test_incremental_is_moot_only_when_every_run_well_is_forced():

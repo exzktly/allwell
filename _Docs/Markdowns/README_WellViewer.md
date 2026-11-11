@@ -653,10 +653,10 @@ whose anchors changed (set, moved or cleared) since its last run, and skips the 
 Concatenate carry the anchors of the wells and timepoints they keep, renamed as they rename them.
 
 `--incremental` adds only new timepoints (onto the same set of nanowells); a changed setting or a changed tile
-record recomputes the timepoint. Choosing **Fill in what's missing** (Run scope) for a nanowell run on a remote host is refused for now —
-the remote would analyse the new timepoints without the earlier ones — so run it on this computer, or run the
-remote plate in full. Resuming one is not refused: when a remote nanowell run stopped part way (or the app finds an
-unfinished earlier run of the plate), pressing Run or Resume goes well by well. Every well whose results here
+record recomputes the timepoint. A remote host cannot add timepoints to a nanowell well part-way — it would
+analyse the new timepoints without the earlier ones — so a remote nanowell run that would be incremental goes well
+by well instead: when you choose **Fill in what's missing** (Run scope), when a remote nanowell run stopped part way,
+or when the app finds an unfinished earlier run of the plate, pressing Run or Resume goes well by well. Every well whose results here
 cover all of its timepoints under the same settings is skipped; every other well — left part way, never finished,
 or given new timepoints since — is uploaded whole and analysed again in full, and its tables replace the partial
 ones when it comes back. The log says so before anything is sent. Test detection is not affected: it runs on this

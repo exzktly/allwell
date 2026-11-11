@@ -12674,15 +12674,15 @@ whole `nanowells/` directory and every re-anchored well not already released hav
 records) with a timepoint anchored `plate_rigid` in their pulled grid records, not the sidecar's summary, which
 each batch of a batched run writes over the last —
 (`pull_nanowell_results`). A well whose sites table or grid record did not arrive fails verification
-(`missing_nanowell_tables`), which keeps the remote copy. An incremental nanowell run is refused on a remote host
-when the user chose Fill in what's missing, in Analyze and as a backstop in the runner and the run record
-(`NANOWELL_REMOTE_INCREMENTAL_REFUSAL`): the remote would analyse only the new timepoints, without the earlier
-ones' roster and template, and its tables would replace the local ones. An Incremental that changes nothing is
-not refused: under Force, or when every well in *Only these wells* is also in *Force these wells*
-(`analyze.domain.well_list.incremental_is_moot`), each well is rebuilt in full anyway, so the form lets the run
-through and `_nanowell_remote_resume_by_well` drops the flag before the argv is built. A run the *app* makes incremental — a
-resume, or a plate with an unfinished run behind it — goes well by well instead
-(`analyze.run_spec._nanowell_remote_resume_by_well` drops the incremental and logs why): the finished-wells step
+(`missing_nanowell_tables`), which keeps the remote copy. A remote host cannot add to a nanowell well part-way:
+it would analyse only the new timepoints, without the earlier ones' roster and template, and its tables would
+replace the local ones. So an incremental nanowell argv is refused by the runner and the run record
+(`NANOWELL_REMOTE_INCREMENTAL_REFUSAL`), and none reaches them from Analyze: every incremental remote nanowell
+run — *Fill in what's missing* chosen on the form, a resume, or a plate with an unfinished run behind it — goes
+well by well instead (`analyze.run_spec._nanowell_remote_resume_by_well` drops the incremental before the argv
+is built and logs why; the form does not refuse it, `tests/test_nanowell_form_grid.py`). Under Force, or when
+every well in *Only these wells* is also in *Force these wells* (`analyze.domain.well_list.incremental_is_moot`),
+each well is rebuilt in full anyway and the flag is dropped with a note of its own. Going well by well: the finished-wells step
 skips every well whose tables here cover all its archive's timepoints (each with a verdict in its grid record —
 reached is enough: an `unaddressed` timepoint is the run's verdict on those images, which sending the well again
 cannot change unless its anchors did — and its completeness record, when the sidecar has one, whole, which for a
@@ -18360,10 +18360,10 @@ otherwise, *Only these wells* and *Force these wells* to the caller's lists
 (blank when it names none), and *Skip these wells* to blank. The sidecar it
 applies first restores what its own run was told (`force`, `incremental`,
 `force_wells`), and whatever was typed on the form earlier is still there;
-either, left alone, would narrow, unforce, re-force or refuse the run being
-handed over — a remote nanowell *Re-run wells*, handed over with Incremental
-off because such a run refuses it, would get it back from a completion run's
-sidecar (`tests/test_only_wells_handoff.py`).
+either, left alone, would narrow, unforce or re-force the run being handed
+over — a remote nanowell *Re-run wells*, handed over with Incremental off,
+would get it back from a completion run's sidecar
+(`tests/test_only_wells_handoff.py`).
 
 **A remote run needs telling twice.** The flag on the remote command line is not
 enough on its own, because the client decides what to upload before the remote

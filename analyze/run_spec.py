@@ -571,23 +571,25 @@ def _earlier_run_still_alive(spec: RunSpec) -> str | None:
 
 
 def _nanowell_remote_resume_by_well(spec, remote) -> tuple:
-    """``(spec, note)``: a remote nanowell run the app made incremental, made a run by whole wells instead.
+    """``(spec, note)``: an incremental remote nanowell run, made a run by whole wells instead.
 
-    ``resume_aware_spec`` (an unfinished run behind the input) and a resume after a suspend turn a run incremental,
-    so that wells left part way recover their missing groups. A nanowell run cannot do that on a remote host — the
+    A run is incremental because the user chose *Fill in what's missing*, or because ``resume_aware_spec`` (an
+    unfinished run behind the input) or a resume after a suspend turned it so, so that wells left part way recover
+    their missing groups. A nanowell run cannot do that on a remote host — the
     host has none of a well's earlier timepoints, roster or template, and its tables would replace the local ones
     (``NANOWELL_REMOTE_INCREMENTAL_REFUSAL``) — and was refused, which left a stopped remote nanowell run with Force
     as its only way forward (roll-up review X29). It does not need to add to a well: the remote run skips every well
     finished here (``services.remote_finished_wells``, whose nanowell rule is that the tables cover every timepoint
     of the well's archive) and sends every other whole, to be analysed again in full and forced over any earlier
     output. So the incremental is dropped and the note says what will happen. ``force`` and a run on this computer
-    are left as they are, and so is an Incremental the user ticked, which the form refuses before this. The key is
-    read directly rather than through the nanowell field rules, which ship with the removable Nanowells feature.
+    are left as they are. The form used to refuse an Incremental the user chose, which left a stopped remote
+    nanowell run with Force — recomputing every finished well too — as its only way on; it now comes here like
+    the rest. The key is read directly rather than through the nanowell field rules, which ship with the removable Nanowells feature.
 
     An Incremental that changes nothing is dropped too, ticked or not: under Force, or when every well the run
     touches is in *Force these wells* (``incremental_is_moot`` — QC triage's *Re-run wells* hands over exactly
     that), each well is rebuilt in full anyway, so the run is the same without it — and with it the remote runner
-    refuses the run (``refuse_remote_nanowell_incremental``). The form lets that case through for this reason.
+    refuses the run (``refuse_remote_nanowell_incremental``).
     """
     import dataclasses
 

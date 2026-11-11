@@ -62,7 +62,8 @@ def _alive(pid: int) -> bool:
         return True
 
 
-def _orphans_after_parent_killed(tmp: Path, patch: str = "") -> list[int]:
+def _orphans_after_parent_killed(tmp: Path, patch: str = "", grace: float = 10.0) -> list[int]:
+    """The pids of the pool's workers still alive *grace* seconds after their parent was killed."""
     (tmp / "_slow_item.py").write_text("import time\ndef slow(x):\n    time.sleep(60)\n    return x\ndef noop():\n    pass\n")
     out = tmp / "pids.txt"
     script = tmp / "run.py"
@@ -73,7 +74,7 @@ def _orphans_after_parent_killed(tmp: Path, patch: str = "") -> list[int]:
         subprocess.run([sys.executable, str(script)], cwd=tmp, env=env, stdout=log, stderr=log, timeout=60)
     pids = [int(p) for p in out.read_text().split()]
     assert len(pids) == 2, (tmp / "log.txt").read_text()
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + grace
     while time.monotonic() < deadline and any(_alive(p) for p in pids):
         time.sleep(0.1)
     survivors = [p for p in pids if _alive(p)]
@@ -87,9 +88,13 @@ def test_scan_workers_end_when_their_parent_is_killed(tmp_path):
 
 
 def test_without_the_watch_they_would_not(tmp_path):
-    """The control: the same pool without the initializer leaves both workers behind."""
+    """The control: the same pool without the initializer leaves both workers behind.
+
+    Watched for 2 s rather than the 10 s the watched pool is given: an orphan here sleeps 60 s in its item, so every
+    second of the window is waited out in full, while the watched case takes
+    about 1 s from start-up to the last worker gone."""
     patch = "scan_pool.pool_worker_initializer = _slow_item.noop"
-    assert len(_orphans_after_parent_killed(tmp_path, patch)) == 2
+    assert len(_orphans_after_parent_killed(tmp_path, patch, grace=2.0)) == 2
 
 
 def test_the_pipeline_s_well_workers_watch_their_parent_first():

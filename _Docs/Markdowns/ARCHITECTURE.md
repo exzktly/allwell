@@ -22712,6 +22712,11 @@ you're in before you type the command.
     default well, and `tests/_nanowell_run_fixture.paint_cell` tests only the
     pixels of the blob's bounding box — painting by a whole-tile grid once
     made up most of this lane's run time.
+    `tests/test_nanowell_test_helpers_stay_cheap.py` holds both, in both
+    directions: the painter against the whole-tile painter as an oracle, byte
+    for byte, and a remembered render against a fresh one, with each caller
+    handed its own arrays; then each against a time bound its slow form
+    overshoots several times over.
   - **Nanowell features** (`NANOWELL_FEATURE_FILES`, ~1,030 tests in sixty-three
     files). Every other nanowell test: the Analyze form's Nanowells section, the
     Nanowells page and its views, the Playground's array search, Review's
@@ -23295,7 +23300,10 @@ help while `qtbot` still holds the app).
    clock whether or not anything waits, so joining it only cost eight tests
    the full bound each. A long-lived worker such as the persistence writer or
    the Image Table's hover-MFI runner never ends, and the six tests that leave
-   one still pay the 2 s once each.
+   one still pay the 2 s once each. `tests/test_the_fast_lane_stays_fast.py`
+   holds both rules with two pairs of tests, each measuring the teardown
+   between its pair: eight blocked threads must cost one bound, not eight, and
+   a pending Timer none.
 
 **The slow lane runs on demand, not on PRs and not on a schedule** —
 `.github/workflows/slow-lane.yml`, six sharded runners, dispatched by hand from

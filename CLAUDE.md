@@ -235,6 +235,56 @@ scripts/test.sh [--no-ui|--nanowell|--nanowell-features|--remote] --collect-only
 | tail -1` prints a lane's split in about ten seconds, with exactly the marker the
 lane runs.
 
+### Finding where a lane's time goes
+
+A sweep of every lane found a quarter of its worker time (6,046 s → 4,492 s)
+in nine places, and none of them was a redundant test: 13 of 14,531 test
+functions had identical bodies, and the ones in different files tested separate
+copies of the app code (the CZI and ND2 importers), so deleting them would have
+dropped coverage. **Duplicated tests are not where the time is.** It was in
+these, and each is a pattern to look for first:
+
+1. **Sum `--durations=0` by file and by phase, then profile the top test on its
+   own.** `ALLWELL_FULL_LANE=1 scripts/test.sh [--lane] --durations=0` and a
+   ten-line script summing the `Ns setup|call|teardown` lines. Then run the
+   worst test under `cProfile`, because a test's time is not its subject's time:
+   in a nanowell end-to-end test, 57 s of 80 were the *fixture* painting
+   synthetic cells by testing every pixel of every tile, and 14 s were the
+   pipeline. Test helpers get no profiling, no review for cost and no budget,
+   and one called a thousand times decides the lane.
+   `tests/test_nanowell_test_helpers_stay_cheap.py` holds that pair now.
+2. **A round number repeated across unrelated tests is the harness.** Seventeen
+   teardowns at 2.00 s, and one at 16.0 s, were the widget reaper's thread join
+   (rule 5's bound, paid once per leftover thread and also on a `threading.Timer`
+   that fires on its own clock). Group setup and teardown durations by value
+   before reading them one at a time.
+3. **Slow in the lane and fast alone means the cost scales with the worker,
+   not the test.** `test_cellpose_load_oom.py` took 24 s in the lane and 1.6 s
+   on its own: each failed load runs `gc.collect()`, and in a worker that has
+   already built a thousand files' objects that is ~1 s a call. Compare the
+   in-lane figure with a solo run before deciding a test is simply slow.
+4. **A cost a test repeats in a loop of its own** — rebuilding a page per
+   parameter (24 builds where 8 do: `test_nanowell_array_band_layout.py`),
+   running the same subprocess twice for two assertions, redrawing a plot on
+   every `setCurrentIndex` of a sweep that only reads a size hint, waiting a
+   control case's full 10 s when 2 s settles it.
+5. **A slow test can be an app bug, and then it must stay slow.**
+   `test_analyze_preflight.py::test_typing_a_path_starts_at_most_one_scan` takes
+   32 s because Analyze's input field walks the tree under each typed prefix on
+   every keystroke — `/` walks the whole disk four levels down. Speeding the test
+   up by typing a shorter path would have hidden a GUI freeze. Before changing a
+   slow test, ask whether the slowness is the code under test misbehaving.
+6. **The documented figures drift, and nobody notices growth.** The nanowell
+   end-to-end lane was documented at ~1,075 s of work and measured 3,619 s. Every
+   test added since had looked cheap in its own PR. Re-measure a lane rather than
+   quoting this file, and update the timing table above when a number moves.
+
+Making a test faster must not make it weaker. Each of those changes kept its
+assertions and was checked by breaking the thing it guards (§7.7 #2), and an
+optimisation of a helper is proven against the old implementation as an oracle,
+byte for byte, not by the suite staying green — a painter that clips one
+pixel short passes every pipeline test while moving the numbers they assert.
+
 Rules: never run a bare `pytest tests/` or `-m slow` across everything here. Run
 full-app tests a file or two per process (budget ≲15–20 app constructions per
 invocation). Prefer writing new behaviour so it's testable **without** the full

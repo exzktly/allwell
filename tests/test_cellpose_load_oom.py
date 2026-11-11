@@ -59,6 +59,11 @@ def gpu(monkeypatch):
     monkeypatch.setattr(mp.current_process(), "_identity", (1,), raising=False)
     monkeypatch.setattr(cp, "_CELLPOSE_MODELS", {})
     monkeypatch.setattr("time.sleep", lambda s: memory["slept"].append(s))
+    # Every failed load frees what it left with a real ``gc.collect()`` (``cp._free_gpu_memory``). In a lane worker
+    # that has already run a thousand test files that is ~1 s a call, which made this file 24 s in the lane and 1.6 s
+    # on its own; counted instead, so the tests can still say each failed load collected.
+    memory["collected"] = 0
+    monkeypatch.setattr("gc.collect", lambda *a: memory.update(collected=memory["collected"] + 1) or 0)
 
     def out_of_memory_now(device) -> bool:
         if device.type == "cuda" and memory["gpu_full_for"] > 0:
@@ -112,6 +117,7 @@ def test_a_load_that_runs_out_of_gpu_memory_waits_longer_each_time_and_never_lea
     assert gpu["built"] == [("cuda:0", None)] * 9
     assert gpu["slept"] == [10.0, 20.0, 40.0, 80.0, 160.0, 300.0, 300.0, 300.0]
     assert gpu["emptied"] == 8
+    assert gpu["collected"] == 8                                  # the half-built model's tensors, each time
     model = cp._CELLPOSE_MODELS["cyto3"]
     assert model.device.spec == "cuda:0" and getattr(model, ON_GPU_ATTR) is True
     warned = _warnings(caplog)
@@ -131,9 +137,8 @@ def test_a_load_that_never_fits_is_given_up_after_a_bounded_wait(gpu, monkeypatc
     The wait was unbounded: the well was held, the run never finished or failed, and a Slurm allocation burned to its
     time limit. It now gives up after ``LOAD_OOM_GIVE_UP_S`` of waiting and the well fails with the reason.
 
-    The bound is lowered here to 700 s (seven tries) from the shipped two hours (27): every try frees GPU memory with
-    a real ``gc.collect()``, which in a CI worker that has run thousands of tests costs seconds, and 27 of them ran
-    past the 90 s test timeout. The rule under test — wait to the bound, then raise — is the same at either."""
+    The bound is lowered here to 700 s (seven tries) from the shipped two hours (27), so the expected waits can be
+    written out. The rule under test — wait to the bound, then raise — is the same at either."""
     monkeypatch.setattr(cp, "LOAD_OOM_GIVE_UP_S", 700.0)
     gpu["gpu_full_for"] = 10_000
     with pytest.raises(cp.CellposeUnavailable, match="still out of memory after .* tries"):

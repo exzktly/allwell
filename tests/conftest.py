@@ -31,6 +31,9 @@ os.environ.setdefault("ALLWELL_MEMORY_FLOOR_MB", "0")
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
 import threading
+# Bound at import: the reaper runs before a test's monkeypatches are undone, and a test that fakes
+# ``time.monotonic`` must not stretch or skip its wait.
+from time import monotonic as _monotonic
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -890,6 +893,13 @@ def _cpp_id(widget) -> int | None:
 _THREAD_JOIN_SECONDS = 2.0
 
 
+def _is_a_pending_timer(thread) -> bool:
+    """A ``threading.Timer`` that has not finished: its function runs at the end
+    of its own interval, so waiting a bounded time here neither stops it nor
+    makes it fire sooner — it only costs the test the bound."""
+    return isinstance(thread, threading.Timer) and not thread.finished.is_set()
+
+
 @pytest.fixture(autouse=True)
 def _reap_widgets_the_test_created(request):
     """Delete the top-level widgets a test leaves behind, when the test ends.
@@ -969,10 +979,23 @@ def _reap_widgets_the_test_created(request):
     # seven tests in the lane each pay the full wait.
     # A QThread shows up here as a `_DummyThread`, which cannot be joined; Qt's
     # own threads are not what this waits for.
+    #
+    # Nor is a `threading.Timer` still counting down. The one the app starts is
+    # `services.subprocess_kill`'s 5 s SIGKILL escalation, which fires on its own
+    # clock whether or not anything waits for it: joining it only made eight
+    # tests in the lane pay the full bound each (16 s of worker time), and it
+    # fired afterwards all the same.
+    #
+    # One deadline for all of them, not the bound per thread: they run side by
+    # side, so each still has the whole window to finish in, and a test that
+    # leaves an idle pool behind (`pipeline.nanowell_parallel`'s eight threads)
+    # pays the bound once rather than eight times over (16 s for one test).
+    deadline = _monotonic() + _THREAD_JOIN_SECONDS
     for thread in threading.enumerate():
         if (thread not in threads_before and thread is not threading.current_thread()
-                and not isinstance(thread, threading._DummyThread)):
-            thread.join(timeout=_THREAD_JOIN_SECONDS)
+                and not isinstance(thread, threading._DummyThread)
+                and not _is_a_pending_timer(thread)):
+            thread.join(timeout=max(0.0, deadline - _monotonic()))
 
     # Re-read the instance: a test may have been the one to create it.
     app = QApplication.instance()

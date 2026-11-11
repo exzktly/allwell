@@ -32,6 +32,8 @@ from __future__ import annotations
 import ast
 import os
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -116,6 +118,57 @@ def test_a_module_scoped_widget_survives_into_the_second(_module_scoped_widget):
     assert _module_scoped_widget.isVisible(), (
         "a module-scoped widget was reaped after the first test that used it")
 
+
+
+# ── The reaper's wait for leftover threads is paid once, and not for a Timer ──
+#
+# The reaper joins the threads a test left running before it deletes widgets
+# (conftest.py::_reap_widgets_the_test_created). It used to give each thread
+# the 2 s bound in turn, so a test that left an idle eight-thread pool behind
+# paid 16 s of teardown, and it waited the bound on `subprocess_kill`'s pending
+# 5 s SIGKILL Timer, which fires on its own clock either way — eight tests paid
+# that. Both are pairs for the same reason as the widget pair above: what is
+# measured is the teardown between them. These are the one place this file reads
+# the clock, and only against bounds the broken reaper overshoots several times
+# over (16 s against 8 s; 2 s against 1 s), never against a tight figure.
+
+
+_LEFT: dict = {}
+
+
+def test_a_test_may_leave_several_blocked_threads_behind():
+    release = threading.Event()
+    threads = [threading.Thread(target=release.wait, daemon=True, name=f"aw-lane-idle-{k}") for k in range(8)]
+    for thread in threads:
+        thread.start()
+    _LEFT.update(release=release, threads=threads, ended=time.monotonic())
+
+
+def test_and_the_reaper_waits_for_them_once_not_once_each():
+    assert _LEFT, "the previous test did not run"
+    waited = time.monotonic() - _LEFT["ended"]
+    _LEFT["release"].set()
+    for thread in _LEFT["threads"]:
+        thread.join(5)
+    assert waited < 8.0, (
+        f"{waited:.1f} s passed between the two tests: the reaper gave each of the eight leftover threads its "
+        "own bound in turn rather than one shared deadline")
+
+
+def test_a_test_may_leave_a_timer_counting_down():
+    timer = threading.Timer(60.0, lambda: None)
+    timer.daemon = True
+    timer.start()
+    _LEFT.update(timer=timer, timer_ended=time.monotonic())
+
+
+def test_and_the_reaper_does_not_wait_on_it():
+    assert "timer" in _LEFT, "the previous test did not run"
+    waited = time.monotonic() - _LEFT["timer_ended"]
+    _LEFT["timer"].cancel()
+    assert waited < 1.0, (
+        f"{waited:.1f} s passed between the two tests: the reaper joined a threading.Timer still counting down, "
+        "which fires on its own clock however long anything waits for it (conftest.py::_is_a_pending_timer)")
 
 # ── The source tree is parsed once ───────────────────────────────────────────
 

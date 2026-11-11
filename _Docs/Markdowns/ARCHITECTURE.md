@@ -22735,13 +22735,24 @@ you're in before you type the command.
   prints the split in a few seconds.
 - **Gated lanes** (`tests/_lanes.py`). Three rosters run outside the fast lane,
   each as a lane of its own, and only when a change can reach them:
-  - **Nanowell end-to-end** (`NANOWELL_E2E_FILES`, ~320 tests in sixteen
-    Qt-free files; `conftest.py` re-exports the roster). Each renders synthetic
-    tiles and runs the real lattice and site detection, so a test body is
-    seconds to a minute; together about 1,075 s of work, with
-    `test_nanowell_run.py` alone at 475 s. Marked `nanowell_e2e`;
-    **`scripts/test.sh --nanowell`** runs them, distributed by test rather than
-    by file so the 475 s file does not set the wall time.
+  - **Nanowell end-to-end** (`NANOWELL_E2E_FILES`, ~410 tests; `conftest.py`
+    re-exports the roster). Each renders synthetic tiles and runs the real
+    lattice and site detection, so a test body is seconds to a minute;
+    together about 2,400 s of work on a 4-CPU container (10 min 22 s wall),
+    with `test_nanowell_run.py` the largest file at about 460 s. Marked
+    `nanowell_e2e`; **`scripts/test.sh --nanowell`** runs them, distributed by
+    test rather than by file so the largest file does not set the wall time.
+    The rendering helpers are part of that cost and are kept cheap on purpose:
+    `tests/_nanowell_synth.render_tiles` (~1 s a well) remembers each worker's
+    renders and hands out deep copies, since most tests render the same
+    default well, and `tests/_nanowell_run_fixture.paint_cell` tests only the
+    pixels of the blob's bounding box — painting by a whole-tile grid once
+    made up most of this lane's run time.
+    `tests/test_nanowell_test_helpers_stay_cheap.py` holds both, in both
+    directions: the painter against the whole-tile painter as an oracle, byte
+    for byte, and a remembered render against a fresh one, with each caller
+    handed its own arrays; then each against a time bound its slow form
+    overshoots several times over.
   - **Nanowell features** (`NANOWELL_FEATURE_FILES`, ~1,030 tests in sixty-three
     files). Every other nanowell test: the Analyze form's Nanowells section, the
     Nanowells page and its views, the Playground's array search, Review's
@@ -23332,11 +23343,21 @@ help while `qtbot` still holds the app).
    the widget reaper (rule 7) deleting the Analyze pane while the pre-run
    coverage scan's daemon thread (`aw-preflight-scan`) was emitting its answer
    to it; the faulthandler stack in the boot log showed both threads. So the
-   reaper first joins every thread the test started, for up to
-   `_THREAD_JOIN_SECONDS` (2 s) each, skipping Qt's own threads, which
-   `threading` sees as unjoinable dummies. A long-lived worker such as the
-   persistence writer never ends, and the sixteen tests that leave one pay the
-   full wait — about 8 s of the lane's wall time.
+   reaper first joins every thread the test started, all of them against one
+   deadline `_THREAD_JOIN_SECONDS` (2 s) away — they run side by side, so each
+   still has the whole window, and an idle pool left behind
+   (`pipeline.nanowell_parallel`'s eight threads) costs the bound once rather
+   than eight times — skipping Qt's own threads, which
+   `threading` sees as unjoinable dummies, and skipping any `threading.Timer`
+   still counting down (`_is_a_pending_timer`) — the app's one Timer is
+   `services.subprocess_kill`'s 5 s SIGKILL escalation, which fires on its own
+   clock whether or not anything waits, so joining it only cost eight tests
+   the full bound each. A long-lived worker such as the persistence writer or
+   the Image Table's hover-MFI runner never ends, and the six tests that leave
+   one still pay the 2 s once each. `tests/test_the_fast_lane_stays_fast.py`
+   holds both rules with two pairs of tests, each measuring the teardown
+   between its pair: eight blocked threads must cost one bound, not eight, and
+   a pending Timer none.
 
 **The slow lane runs on demand, not on PRs and not on a schedule** —
 `.github/workflows/slow-lane.yml`, six sharded runners, dispatched by hand from
